@@ -40,6 +40,11 @@ export interface ExecutionConsoleCardOptions {
   outerExpanded?: boolean
 }
 
+export interface FeishuExecutionStateCardOptions {
+  executionViewUrl: string | null
+  recentOutputVisible: boolean
+}
+
 export interface ExecutionConsoleSnapshot {
   sequence: number
   agentRunId: string
@@ -49,6 +54,93 @@ export interface ExecutionConsoleSnapshot {
   publicOutput: string | null
   startedAt: string | null
   terminalAt: string | null
+}
+
+/**
+ * The Feishu execution card is intentionally only a state entry point. The
+ * immutable Web URL is supplied by Main and is never recomputed while this
+ * card moves from running to terminal.
+ */
+export function feishuExecutionStateCard(
+  snapshot: ExecutionConsoleSnapshot,
+  options: FeishuExecutionStateCardOptions
+): Record<string, unknown> {
+  const terminal = isTerminal(snapshot.run.status)
+  const elements: CardElement[] = []
+  if (options.recentOutputVisible) {
+    const recent = recentOutputItems(snapshot)
+    elements.push(...(recent.length
+      ? recent.map((body) => ({ tag: 'markdown', content: body }))
+      : [{ tag: 'markdown', content: '暂无公开执行记录。' }]))
+    elements.push({ tag: 'hr' })
+  }
+  const buttons: CardElement[] = [{
+    tag: 'button',
+    text: {
+      tag: 'plain_text',
+      content: options.recentOutputVisible ? '收起最近输出' : '显示最近输出'
+    },
+    type: 'default',
+    width: 'fill',
+    behaviors: [{
+      type: 'callback',
+      value: {
+        action: 'execution_recent_output',
+        agentRunId: snapshot.agentRunId,
+        visible: !options.recentOutputVisible
+      }
+    }]
+  }]
+  if (options.executionViewUrl) {
+    buttons.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '打开执行台' },
+      type: 'default',
+      width: 'fill',
+      behaviors: [{ type: 'open_url', default_url: options.executionViewUrl }]
+    })
+  }
+  if (!terminal) {
+    buttons.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '停止执行' },
+      type: 'danger',
+      width: 'fill',
+      behaviors: [{
+        type: 'callback',
+        value: { action: 'execution_stop', agentRunId: snapshot.agentRunId }
+      }]
+    })
+  }
+  elements.push({
+    tag: 'column_set',
+    horizontal_spacing: '8px',
+    columns: buttons.map((button) => ({
+      tag: 'column',
+      width: 'weighted',
+      weight: 1,
+      elements: [button]
+    }))
+  })
+  return baseCard(
+    `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${terminalTitle(snapshot.run)}`,
+    cardTemplate(snapshot.run.status, snapshot.run.waitReason),
+    elements
+  )
+}
+
+function recentOutputItems(snapshot: ExecutionConsoleSnapshot): string[] {
+  const redact = createExecutionPublicTextRedactor(snapshot.evidence, snapshot.agentRunId)
+  const items = progressItems(snapshot, true).flatMap((item): string[] => {
+    if (item.kind !== 'tool' && item.kind !== 'narration') return []
+    const body = item.kind === 'tool'
+      ? commandLine(item.step, snapshot, redact)
+      : redact(item.body)
+    return body.trim() ? [body.trim()] : []
+  })
+  const output = redact(snapshot.publicOutput?.trim() ?? '')
+  if (output && !items.some((item) => item === output)) items.push(output)
+  return items.slice(-30)
 }
 
 export interface ExecutionConsolePublicPage {
@@ -585,6 +677,7 @@ function baseCard(
 
 function terminalTitle(run: ExecutionConsoleSnapshot['run']): string {
   if (run.status === 'failed') return '执行失败'
+  if (run.status === 'cancelled') return '已停止'
   return agentRunPresentation(run).label
 }
 

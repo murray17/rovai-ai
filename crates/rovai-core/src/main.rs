@@ -94,13 +94,15 @@ use rovai_core::{
     camp_open::CampOpenService,
     channel::{
         AdvanceDingTalkPublicationIntentCommand, AdvanceMemberBotPublicationIntentCommand,
-        AuthorizeChannelExecutionConsolePageCommand, ChannelHostTickRequest, ChannelService,
-        CommitDingTalkAccountConnectionCommand, CommitFeishuAccountConnectionCommand,
-        CreateDingTalkPublicationIntentCommand, CreateMemberBotPublicationIntentCommand,
-        DeleteChannelCredentialCommand, DeleteChannelDeveloperSessionCommand,
-        DisconnectDingTalkAccountCommand, DisconnectFeishuAccountCommand,
-        ExpireDingTalkAccountCommand, ExpireFeishuAccountCommand, FinalizeChannelInboundCommand,
-        GetChannelCredentialParams, GetChannelDeveloperSessionParams, ObserveChannelInboundCommand,
+        AuthorizeChannelExecutionConsolePageCommand, AuthorizeChannelExecutionRecentOutputCommand,
+        ChannelAgentRunCancelCommand, ChannelExecutionWebScope, ChannelHostTickRequest,
+        ChannelService, CommitDingTalkAccountConnectionCommand,
+        CommitFeishuAccountConnectionCommand, CreateDingTalkPublicationIntentCommand,
+        CreateMemberBotPublicationIntentCommand, DeleteChannelCredentialCommand,
+        DeleteChannelDeveloperSessionCommand, DisconnectDingTalkAccountCommand,
+        DisconnectFeishuAccountCommand, ExpireDingTalkAccountCommand, ExpireFeishuAccountCommand,
+        FinalizeChannelInboundCommand, GetChannelCredentialParams,
+        GetChannelDeveloperSessionParams, ObserveChannelInboundCommand,
         ReconcileFeishuGroupRosterCommand, ReplaceChannelDeveloperSessionCommand,
         ResolvePendingCampBindingCommand, SettleChannelDeliveryCommand, StartNewFeishuDmCommand,
         StorePublicationCredentialCommand, UpsertDingTalkAccountCommand,
@@ -585,6 +587,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "camp.attachments.desktopOpenTarget"
             | "campTurns.cancel"
             | "agentRuns.cancel"
+            | "channels.executionConsole.agentRun.cancel"
             | "runtime.pendingExecution.cancel"
             | "runtime.subsystems.retry"
     )
@@ -642,6 +645,7 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "userAutomation.camp.send"
             | "campTurns.cancel"
             | "agentRuns.cancel"
+            | "channels.executionConsole.agentRun.cancel"
             | "agentRuns.resolveRecoveryBlocker"
     )
 }
@@ -5557,6 +5561,60 @@ impl Core {
                         params.expected_sequence,
                     )?,
                 )?)
+            }
+            "channels.executionConsole.webSnapshot" => {
+                let scope: ChannelExecutionWebScope =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().execution_web_snapshot(&mut database, &scope)?,
+                )?)
+            }
+            "channels.executionConsole.recentOutput.authorize" => {
+                let params: UserCommandParams<AuthorizeChannelExecutionRecentOutputCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().authorize_execution_recent_output(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.executionConsole.agentRun.cancel" => {
+                let params: UserCommandParams<ChannelAgentRunCancelCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().cancel_channel_agent_run(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                let should_notify = execution.result.status == CommandResultStatus::Applied;
+                let camp_id = execution
+                    .result
+                    .payload
+                    .get("campId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                drop(database);
+                if should_notify {
+                    self.agent_run_cancellation_notify.notify_one();
+                    emit_agent_run_terminal(
+                        &self.output,
+                        camp_id.as_deref(),
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
             }
             "channels.executionConsole.page.authorize" => {
                 let params: UserCommandParams<AuthorizeChannelExecutionConsolePageCommand> =

@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
+    agent_run_file_change::{AgentRunFileChangesView, list_completed_run_file_changes},
     camp_content::{
         ExternalQuoteAttachmentSummary, StructuredCampMessageContent, StructuredCampMessageSegment,
         canonical_content_digest, mentions_current_user, normalize_content,
@@ -31,6 +32,9 @@ use crate::{
     db::Database,
     managed_blob::ManagedBlobStore,
     read_model::{AgentRunExecutionEvidenceView, public_execution_evidence_for_agent_run},
+    runtime::{
+        pump_targets_after_runs_terminal, recompute_camp_turn, settle_abortive_agent_run_in_tx,
+    },
 };
 
 const FEISHU_PROVIDER: &str = "feishu";
@@ -436,6 +440,39 @@ impl DomainCommand for AuthorizeChannelExecutionConsolePageCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuthorizeChannelExecutionRecentOutputCommand {
+    pub agent_run_id: String,
+    pub app_id: String,
+    pub external_message_id: String,
+    pub operator_open_id: Option<String>,
+    pub operator_user_id: Option<String>,
+    pub operator_union_id: Option<String>,
+}
+
+impl sealed::Sealed for AuthorizeChannelExecutionRecentOutputCommand {}
+impl DomainCommand for AuthorizeChannelExecutionRecentOutputCommand {
+    const TYPE: &'static str = "channel_execution_console.recent_output.authorize";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChannelAgentRunCancelCommand {
+    pub callback_event_id: String,
+    pub app_id: String,
+    pub external_message_id: String,
+    pub agent_run_id: String,
+    pub operator_open_id: Option<String>,
+    pub operator_user_id: Option<String>,
+    pub operator_union_id: Option<String>,
+}
+
+impl sealed::Sealed for ChannelAgentRunCancelCommand {}
+impl DomainCommand for ChannelAgentRunCancelCommand {
+    const TYPE: &'static str = "channel_agent_run.cancel";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChannelAttachmentSummaryInput {
     pub name: String,
     pub media_type: Option<String>,
@@ -765,8 +802,13 @@ pub struct ChannelExecutionConsoleRunView {
 pub struct ChannelExecutionConsoleSourceView {
     pub sequence: i64,
     pub agent_run_id: String,
+    pub camp_id: String,
+    pub camp_turn_id: String,
+    pub channel_conversation_id: String,
+    pub agent_id: String,
     pub agent_display_name: String,
     pub run: ChannelExecutionConsoleRunView,
+    pub run_created_at: String,
     pub evidence: Vec<AgentRunExecutionEvidenceView>,
     pub public_output: Option<String>,
     pub started_at: Option<String>,
@@ -774,6 +816,70 @@ pub struct ChannelExecutionConsoleSourceView {
     pub target_app_id: String,
     pub external_message_id: Option<String>,
     pub state: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChannelExecutionWebScope {
+    pub channel_conversation_id: String,
+    pub target_app_id: String,
+    pub camp_id: String,
+    pub agent_id: String,
+    pub focus_run_id: String,
+    pub max_run_created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelExecutionWebTriggerView {
+    pub summary: String,
+    pub author_display_name: String,
+    pub channel_label: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelExecutionWebRunView {
+    pub id: String,
+    pub camp_turn_id: String,
+    pub purpose: String,
+    pub invocation_kind: String,
+    pub status: String,
+    pub wait_reason: Option<String>,
+    pub terminal_reason_code: Option<String>,
+    pub version: i64,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub trigger: ChannelExecutionWebTriggerView,
+    pub evidence: Vec<AgentRunExecutionEvidenceView>,
+    pub public_output: Option<String>,
+    pub file_changes: Option<AgentRunFileChangesView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelExecutionWebSnapshotView {
+    pub schema_version: i64,
+    pub focus_run_id: String,
+    pub camp: ChannelExecutionWebCampView,
+    pub agent: ChannelExecutionWebAgentView,
+    pub runs: Vec<ChannelExecutionWebRunView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelExecutionWebCampView {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelExecutionWebAgentView {
+    pub id: String,
+    pub display_name: String,
 }
 
 /// Content snapshot, not card/view state. Once sealed, even canonical activity
@@ -892,12 +998,17 @@ impl ChannelService {
                 r#"
                 SELECT console.latest_sequence, console.agent_run_id,
                        console.target_app_id, console.external_message_id,
-                       console.state, console.terminal_snapshot_json, conversation.provider
+                       console.state, console.terminal_snapshot_json, conversation.provider,
+                       turn.camp_id, console.camp_turn_id,
+                       console.channel_conversation_id, console.agent_id,
+                       run.created_at
                 FROM channel_execution_console AS console
                 JOIN channel_conversation AS conversation ON conversation.id = console.channel_conversation_id
+                JOIN agent_run AS run ON run.id = console.agent_run_id
+                JOIN camp_turn AS turn ON turn.id = console.camp_turn_id
                 WHERE console.agent_run_id = ?1
                   AND console.latest_sequence = ?2
-                  AND console.state IN ('opening', 'active', 'terminal_sealed')
+                  AND console.state IN ('opening', 'active', 'terminal_pending', 'terminal_sealed')
                 "#,
                 params![agent_run_id, expected_sequence],
                 |row| {
@@ -909,6 +1020,11 @@ impl ChannelService {
                         row.get::<_, String>(4)?,
                         row.get::<_, Option<String>>(5)?,
                         row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
                     ))
                 },
             )
@@ -921,6 +1037,11 @@ impl ChannelService {
             state,
             terminal_snapshot_json,
             provider,
+            camp_id,
+            camp_turn_id,
+            channel_conversation_id,
+            agent_id,
+            run_created_at,
         )) = source
         else {
             transaction.commit()?;
@@ -966,8 +1087,13 @@ impl ChannelService {
         Ok(Some(ChannelExecutionConsoleSourceView {
             sequence,
             agent_run_id,
+            camp_id,
+            camp_turn_id,
+            channel_conversation_id,
+            agent_id,
             agent_display_name: snapshot.agent_display_name,
             run: snapshot.run,
+            run_created_at,
             evidence: snapshot.evidence,
             public_output: snapshot.public_output,
             started_at: snapshot.started_at,
@@ -975,6 +1101,249 @@ impl ChannelService {
             target_app_id,
             external_message_id,
             state,
+        }))
+    }
+
+    pub fn execution_web_snapshot(
+        &self,
+        database: &mut Database,
+        scope: &ChannelExecutionWebScope,
+    ) -> Result<Option<ChannelExecutionWebSnapshotView>> {
+        for (value, field) in [
+            (&scope.channel_conversation_id, "channelConversationId"),
+            (&scope.target_app_id, "targetAppId"),
+            (&scope.camp_id, "campId"),
+            (&scope.agent_id, "agentId"),
+            (&scope.focus_run_id, "focusRunId"),
+            (&scope.max_run_created_at, "maxRunCreatedAt"),
+        ] {
+            validate_nonempty(value, field)?;
+        }
+        chrono::DateTime::parse_from_rfc3339(&scope.max_run_created_at)
+            .context("maxRunCreatedAt must be RFC 3339")?;
+
+        struct WebRunFacts {
+            id: String,
+            camp_turn_id: String,
+            purpose: String,
+            invocation_kind: String,
+            status: String,
+            wait_reason: Option<String>,
+            terminal_reason_code: Option<String>,
+            version: i64,
+            created_at: String,
+            started_at: Option<String>,
+            ended_at: Option<String>,
+            trigger_summary: String,
+            trigger_author: String,
+            trigger_created_at: String,
+            trigger_channel: String,
+            terminal_snapshot_json: Option<String>,
+        }
+
+        let transaction = database.connection_mut().transaction()?;
+        let identity = transaction
+            .query_row(
+                r#"
+                SELECT camp.title, profile.display_name
+                FROM agent_run AS run
+                JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
+                JOIN camp ON camp.id = turn.camp_id
+                JOIN conversation ON conversation.id = run.conversation_id
+                JOIN agent_profile AS profile ON profile.id = conversation.agent_id
+                JOIN camp_member AS member
+                  ON member.camp_id = turn.camp_id AND member.agent_id = conversation.agent_id
+                JOIN channel_execution_console AS console ON console.agent_run_id = run.id
+                JOIN channel_conversation AS channel
+                  ON channel.id = console.channel_conversation_id
+                WHERE run.id = ?1
+                  AND run.created_at = ?2
+                  AND turn.camp_id = ?3
+                  AND conversation.agent_id = ?4
+                  AND console.target_app_id = ?5
+                  AND console.channel_conversation_id = ?6
+                  AND channel.provider = 'feishu'
+                  AND member.status = 'active'
+                  AND member.leave_requested_at IS NULL
+                "#,
+                params![
+                    scope.focus_run_id,
+                    scope.max_run_created_at,
+                    scope.camp_id,
+                    scope.agent_id,
+                    scope.target_app_id,
+                    scope.channel_conversation_id,
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let Some((camp_title, agent_display_name)) = identity else {
+            transaction.commit()?;
+            return Ok(None);
+        };
+
+        let facts = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT run.id, run.camp_turn_id, run.purpose, run.invocation_kind,
+                       run.status, run.wait_reason, run.terminal_reason_code,
+                       run.version, run.created_at, run.started_at, run.ended_at,
+                       COALESCE(trigger_message.body, run.purpose),
+                       COALESCE(
+                           trigger_profile.display_name,
+                           trigger_principal.display_name,
+                           CASE trigger_message.author_type
+                               WHEN 'user' THEN 'Owner'
+                               WHEN 'system' THEN 'Rovai'
+                               ELSE 'Rovai'
+                           END
+                       ),
+                       COALESCE(trigger_message.created_at, run.created_at),
+                       CASE trigger_principal.provider
+                           WHEN 'feishu' THEN '飞书'
+                           WHEN 'dingtalk' THEN '钉钉'
+                           ELSE 'Rovai'
+                       END,
+                       history_console.terminal_snapshot_json
+                FROM agent_run AS run
+                JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
+                JOIN conversation ON conversation.id = run.conversation_id
+                LEFT JOIN channel_execution_console AS history_console
+                  ON history_console.agent_run_id = run.id
+                LEFT JOIN camp_message AS trigger_message
+                  ON trigger_message.id = run.trigger_camp_message_id
+                 AND trigger_message.tombstoned_at IS NULL
+                LEFT JOIN agent_profile AS trigger_profile
+                  ON trigger_profile.id = trigger_message.author_id
+                 AND trigger_message.author_type = 'agent'
+                LEFT JOIN external_principal AS trigger_principal
+                  ON trigger_principal.id = trigger_message.author_id
+                 AND trigger_message.author_type = 'external_principal'
+                WHERE turn.camp_id = ?1
+                  AND conversation.agent_id = ?2
+                  AND (run.created_at < ?3 OR run.id = ?4)
+                ORDER BY run.created_at, run.id
+                "#,
+            )?;
+            statement
+                .query_map(
+                    params![
+                        scope.camp_id,
+                        scope.agent_id,
+                        scope.max_run_created_at,
+                        scope.focus_run_id,
+                    ],
+                    |row| {
+                        Ok(WebRunFacts {
+                            id: row.get(0)?,
+                            camp_turn_id: row.get(1)?,
+                            purpose: row.get(2)?,
+                            invocation_kind: row.get(3)?,
+                            status: row.get(4)?,
+                            wait_reason: row.get(5)?,
+                            terminal_reason_code: row.get(6)?,
+                            version: row.get(7)?,
+                            created_at: row.get(8)?,
+                            started_at: row.get(9)?,
+                            ended_at: row.get(10)?,
+                            trigger_summary: row.get(11)?,
+                            trigger_author: row.get(12)?,
+                            trigger_created_at: row.get(13)?,
+                            trigger_channel: row.get(14)?,
+                            terminal_snapshot_json: row.get(15)?,
+                        })
+                    },
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if !facts.iter().any(|run| run.id == scope.focus_run_id) {
+            transaction.commit()?;
+            return Ok(None);
+        }
+        let file_changes = list_completed_run_file_changes(&transaction, &scope.camp_id)?
+            .into_iter()
+            .map(|view| (view.agent_run_id.clone(), view))
+            .collect::<BTreeMap<_, _>>();
+        let mut runs = Vec::with_capacity(facts.len());
+        for fact in facts {
+            let sealed = fact
+                .terminal_snapshot_json
+                .as_deref()
+                .map(serde_json::from_str::<SealedExecutionConsoleSnapshot>)
+                .transpose()
+                .context("sealed execution console snapshot invalid")?;
+            let (evidence, public_output) = match sealed {
+                Some(snapshot) => (snapshot.evidence, snapshot.public_output),
+                None => {
+                    let evidence = public_execution_evidence_for_agent_run(&transaction, &fact.id)?;
+                    let public_output = transaction
+                        .query_row(
+                            r#"
+                            SELECT body FROM camp_message
+                            WHERE source_agent_run_id = ?1
+                              AND author_type = 'agent' AND tombstoned_at IS NULL
+                            ORDER BY sequence DESC, id DESC LIMIT 1
+                            "#,
+                            [&fact.id],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    (evidence, public_output)
+                }
+            };
+            runs.push(ChannelExecutionWebRunView {
+                id: fact.id.clone(),
+                camp_turn_id: fact.camp_turn_id,
+                purpose: fact.purpose,
+                invocation_kind: fact.invocation_kind,
+                status: fact.status,
+                wait_reason: fact.wait_reason,
+                terminal_reason_code: fact.terminal_reason_code,
+                version: fact.version,
+                created_at: fact.created_at,
+                started_at: fact.started_at,
+                ended_at: fact.ended_at,
+                trigger: ChannelExecutionWebTriggerView {
+                    summary: fact.trigger_summary,
+                    author_display_name: fact.trigger_author,
+                    channel_label: fact.trigger_channel,
+                    created_at: fact.trigger_created_at,
+                },
+                evidence,
+                public_output,
+                file_changes: file_changes.get(&fact.id).cloned(),
+            });
+        }
+        transaction.commit()?;
+
+        let blob_store = ManagedBlobStore::new(
+            database
+                .path()
+                .parent()
+                .context("execution console data directory missing")?,
+        );
+        for run in &mut runs {
+            for evidence in &mut run.evidence {
+                if let Some(blob_id) = &evidence.content_blob_id {
+                    let bytes = blob_store.read_bytes(database, blob_id)?;
+                    evidence.payload = serde_json::from_slice(&bytes)
+                        .context("execution evidence payload invalid")?;
+                    evidence.is_truncated = false;
+                }
+            }
+        }
+        Ok(Some(ChannelExecutionWebSnapshotView {
+            schema_version: 1,
+            focus_run_id: scope.focus_run_id.clone(),
+            camp: ChannelExecutionWebCampView {
+                id: scope.camp_id.clone(),
+                title: camp_title,
+            },
+            agent: ChannelExecutionWebAgentView {
+                id: scope.agent_id.clone(),
+                display_name: agent_display_name,
+            },
+            runs,
         }))
     }
 
@@ -5241,6 +5610,231 @@ impl ChannelService {
         })
     }
 
+    pub fn authorize_execution_recent_output(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<AuthorizeChannelExecutionRecentOutputCommand>,
+    ) -> Result<CommandExecution> {
+        validate_nonempty(&envelope.payload.agent_run_id, "agentRunId")?;
+        validate_nonempty(&envelope.payload.app_id, "appId")?;
+        validate_nonempty(&envelope.payload.external_message_id, "externalMessageId")?;
+        self.gateway.execute(database, envelope, |transaction| {
+            let projection =
+                execution_console_action_projection(transaction, &envelope.payload.agent_run_id)?;
+            let Some(projection) = projection else {
+                return Ok(rejected(
+                    "channel.execution_console.not_found",
+                    "Execution console does not exist",
+                ));
+            };
+            if !is_channel_host_for_provider(&envelope.actor, &projection.provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can authorize this card action",
+                ));
+            }
+            validate_owner_identity_input(
+                &projection.provider,
+                &envelope.payload.app_id,
+                "callback",
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+            )?;
+            if projection.target_app_id != envelope.payload.app_id {
+                return Ok(rejected(
+                    "channel.execution_console.callback_app_mismatch",
+                    "The callback did not arrive through the execution console Bot",
+                ));
+            }
+            if projection.external_message_id.as_deref()
+                != Some(envelope.payload.external_message_id.as_str())
+                || !matches!(
+                    projection.state.as_str(),
+                    "opening" | "active" | "terminal_pending" | "terminal_sealed"
+                )
+            {
+                return Ok(rejected(
+                    "channel.execution_console.stale_card",
+                    "This execution console card is no longer authoritative",
+                ));
+            }
+            let Some(owner_principal_id) = projection.owner_principal_id.as_deref() else {
+                return Ok(rejected(
+                    "channel.execution_console.owner_required",
+                    "Only the verified Rovai Owner can operate this execution console card",
+                ));
+            };
+            let now = Utc::now().to_rfc3339();
+            if !operator_matches_channel_owner(
+                transaction,
+                &projection.provider,
+                &envelope.payload.app_id,
+                owner_principal_id,
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+                &now,
+            )? {
+                return Ok(rejected(
+                    "channel.execution_console.owner_required",
+                    "Only the verified Rovai Owner can operate this execution console card",
+                ));
+            }
+            Ok(CommandHandlerResult::accepted(
+                "channel.execution_console.recent_output_authorized",
+                json!({
+                    "agentRunId": envelope.payload.agent_run_id,
+                    "snapshotSequence": projection.latest_sequence,
+                    "externalMessageId": envelope.payload.external_message_id,
+                }),
+                Some(EntityReference {
+                    entity_type: "channel_execution_console".to_string(),
+                    entity_id: envelope.payload.agent_run_id.clone(),
+                }),
+            ))
+        })
+    }
+
+    pub fn cancel_channel_agent_run(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ChannelAgentRunCancelCommand>,
+    ) -> Result<CommandExecution> {
+        validate_nonempty(&envelope.payload.callback_event_id, "callbackEventId")?;
+        validate_nonempty(&envelope.payload.agent_run_id, "agentRunId")?;
+        validate_nonempty(&envelope.payload.app_id, "appId")?;
+        validate_nonempty(&envelope.payload.external_message_id, "externalMessageId")?;
+        let mut settled_run_id = None;
+        let execution = self.gateway.execute(database, envelope, |transaction| {
+            let projection =
+                execution_console_action_projection(transaction, &envelope.payload.agent_run_id)?;
+            let Some(projection) = projection else {
+                return Ok(rejected(
+                    "channel.execution_console.not_found",
+                    "Execution console does not exist",
+                ));
+            };
+            if projection.provider != FEISHU_PROVIDER
+                || !is_channel_host_for_provider(&envelope.actor, &projection.provider)
+            {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can cancel this AgentRun",
+                ));
+            }
+            validate_owner_identity_input(
+                &projection.provider,
+                &envelope.payload.app_id,
+                "callback",
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+            )?;
+            if projection.target_app_id != envelope.payload.app_id {
+                return Ok(rejected(
+                    "channel.execution_console.callback_app_mismatch",
+                    "The callback did not arrive through the execution console Bot",
+                ));
+            }
+            if projection.external_message_id.as_deref()
+                != Some(envelope.payload.external_message_id.as_str())
+                || !matches!(projection.state.as_str(), "opening" | "active")
+            {
+                return Ok(rejected(
+                    "channel.execution_console.stale_card",
+                    "This execution console card is no longer cancellable",
+                ));
+            }
+            let Some(owner_principal_id) = projection.owner_principal_id.as_deref() else {
+                return Ok(rejected(
+                    "channel.execution_console.owner_required",
+                    "Only the verified Rovai Owner can stop this AgentRun",
+                ));
+            };
+            let now = Utc::now().to_rfc3339();
+            if !operator_matches_channel_owner(
+                transaction,
+                &projection.provider,
+                &envelope.payload.app_id,
+                owner_principal_id,
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+                &now,
+            )? {
+                return Ok(rejected(
+                    "channel.execution_console.owner_required",
+                    "Only the verified Rovai Owner can stop this AgentRun",
+                ));
+            }
+            if matches!(
+                projection.run_status.as_str(),
+                "succeeded" | "failed" | "cancelled"
+            ) {
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.already_terminal",
+                    json!({
+                        "agentRunId": envelope.payload.agent_run_id,
+                        "status": projection.run_status,
+                    }),
+                    Some(EntityReference {
+                        entity_type: "agent_run".to_string(),
+                        entity_id: envelope.payload.agent_run_id.clone(),
+                    }),
+                ));
+            }
+            if projection.run_status == "waiting"
+                && projection.wait_reason.as_deref() == Some("recovery_blocked")
+            {
+                return Ok(rejected(
+                    "agent_run.recovery_blocker_requires_resolution",
+                    "Recovery-blocked AgentRuns require local resolution",
+                ));
+            }
+            if projection.turn_cancel_requested_at.is_some() {
+                return Ok(rejected(
+                    "agent_run.turn_cancellation_in_progress",
+                    "The owning CampTurn is already stopping",
+                ));
+            }
+            let settlement = settle_abortive_agent_run_in_tx(
+                transaction,
+                &envelope.payload.agent_run_id,
+                "user_requested_agent_run_stop",
+                &envelope.actor,
+                &now,
+            )?;
+            settled_run_id = Some(settlement.agent_run_id.clone());
+            let camp_turn_status = recompute_camp_turn(
+                transaction,
+                &projection.camp_id,
+                &projection.camp_turn_id,
+                &envelope.actor,
+                Some(projection.execution_epoch),
+                &now,
+            )?;
+            Ok(CommandHandlerResult::applied(
+                settlement.terminal_code,
+                json!({
+                    "agentRunId": envelope.payload.agent_run_id,
+                    "campId": projection.camp_id,
+                    "campTurnId": projection.camp_turn_id,
+                    "campTurnStatus": camp_turn_status,
+                    "status": settlement.terminal_status,
+                }),
+                Some(EntityReference {
+                    entity_type: "agent_run".to_string(),
+                    entity_id: envelope.payload.agent_run_id.clone(),
+                }),
+            ))
+        })?;
+        if let Some(agent_run_id) = settled_run_id {
+            pump_targets_after_runs_terminal(database, &[agent_run_id])?;
+        }
+        Ok(execution)
+    }
+
     pub fn host_tick(
         &self,
         database: &mut Database,
@@ -5925,6 +6519,77 @@ struct ExecutionConsolePageProjection {
     latest_sequence: i64,
     state: String,
     owner_principal_id: Option<String>,
+}
+
+#[derive(Debug)]
+struct ExecutionConsoleActionProjection {
+    provider: String,
+    target_app_id: String,
+    external_message_id: Option<String>,
+    latest_sequence: i64,
+    state: String,
+    owner_principal_id: Option<String>,
+    camp_id: String,
+    camp_turn_id: String,
+    run_status: String,
+    wait_reason: Option<String>,
+    execution_epoch: i64,
+    turn_cancel_requested_at: Option<String>,
+}
+
+fn execution_console_action_projection(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+) -> Result<Option<ExecutionConsoleActionProjection>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT conversation.provider,
+                   console.target_app_id, console.external_message_id,
+                   console.latest_sequence, console.state,
+                   COALESCE(
+                       feishu_owner.canonical_owner_principal_id,
+                       dingtalk_owner.canonical_owner_principal_id
+                   ),
+                   turn.camp_id, console.camp_turn_id,
+                   run.status, run.wait_reason, run.execution_epoch,
+                   turn.cancel_requested_at
+            FROM channel_execution_console AS console
+            JOIN agent_run AS run ON run.id = console.agent_run_id
+            JOIN camp_turn AS turn ON turn.id = console.camp_turn_id
+            JOIN channel_conversation AS conversation
+              ON conversation.id = console.channel_conversation_id
+            LEFT JOIN channel_member_bot_directory AS bot
+              ON bot.provider = conversation.provider
+             AND bot.app_id = console.target_app_id AND bot.status = 'published'
+            LEFT JOIN feishu_owner_identity AS feishu_owner
+              ON conversation.provider = 'feishu'
+             AND feishu_owner.account_id = bot.account_id
+            LEFT JOIN dingtalk_owner_identity AS dingtalk_owner
+              ON conversation.provider = 'dingtalk'
+             AND dingtalk_owner.account_id = bot.account_id
+            WHERE console.agent_run_id = ?1
+            "#,
+            [agent_run_id],
+            |row| {
+                Ok(ExecutionConsoleActionProjection {
+                    provider: row.get(0)?,
+                    target_app_id: row.get(1)?,
+                    external_message_id: row.get(2)?,
+                    latest_sequence: row.get(3)?,
+                    state: row.get(4)?,
+                    owner_principal_id: row.get(5)?,
+                    camp_id: row.get(6)?,
+                    camp_turn_id: row.get(7)?,
+                    run_status: row.get(8)?,
+                    wait_reason: row.get(9)?,
+                    execution_epoch: row.get(10)?,
+                    turn_cancel_requested_at: row.get(11)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
 }
 
 #[derive(Debug)]
@@ -14653,6 +15318,59 @@ mod tests {
                 .unwrap(),
             "om-console-1"
         );
+        let web_scope = ChannelExecutionWebScope {
+            channel_conversation_id: console_source.channel_conversation_id.clone(),
+            target_app_id: console_source.target_app_id.clone(),
+            camp_id: console_source.camp_id.clone(),
+            agent_id: console_source.agent_id.clone(),
+            focus_run_id: console_source.agent_run_id.clone(),
+            max_run_created_at: console_source.run_created_at.clone(),
+        };
+        let web_snapshot = service
+            .execution_web_snapshot(&mut database, &web_scope)
+            .unwrap()
+            .expect("the fixed Web scope must read its public projection");
+        assert_eq!(web_snapshot.focus_run_id, console_source.agent_run_id);
+        assert!(
+            web_snapshot
+                .runs
+                .iter()
+                .any(|run| run.id == console_source.agent_run_id && run.status == "queued")
+        );
+        assert!(
+            service
+                .execution_web_snapshot(
+                    &mut database,
+                    &ChannelExecutionWebScope {
+                        target_app_id: "cli_other".to_string(),
+                        ..web_scope.clone()
+                    },
+                )
+                .unwrap()
+                .is_none()
+        );
+
+        let recent_output = service
+            .authorize_execution_recent_output(
+                &mut database,
+                &host_envelope(
+                    "execution-console-recent-output",
+                    AuthorizeChannelExecutionRecentOutputCommand {
+                        agent_run_id: console_source.agent_run_id.clone(),
+                        app_id: "cli_app_1".to_string(),
+                        external_message_id: "om-console-1".to_string(),
+                        operator_open_id: Some("ou_user".to_string()),
+                        operator_user_id: Some("user_1".to_string()),
+                        operator_union_id: Some("union_user".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(recent_output.result.status, CommandResultStatus::Accepted);
+        assert_eq!(
+            recent_output.result.payload["snapshotSequence"],
+            console_source.sequence
+        );
         let busy = service
             .start_new_feishu_dm(
                 &mut database,
@@ -15333,6 +16051,160 @@ mod tests {
                 .execution_console_source(&mut upgraded, &agent_run_id, terminal_source.sequence)
                 .is_err(),
             "missing full evidence must fail closed instead of presenting a preview as the true tail"
+        );
+    }
+
+    #[test]
+    fn owner_card_cancels_only_the_exact_channel_agent_run_idempotently() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        service
+            .verify_feishu_owner(
+                &mut database,
+                &host_envelope(
+                    "verify-owner-for-exact-cancel",
+                    VerifyFeishuOwnerCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        sender_open_id: Some("ou_user".to_string()),
+                        sender_user_id: Some("user_1".to_string()),
+                        sender_union_id: Some("union_user".to_string()),
+                        sender_display_name: "Owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let quick_chat_path = quick_chat_path(&database);
+        service
+            .start_new_feishu_dm(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "start-dm-for-exact-cancel",
+                    StartNewFeishuDmCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_exact_cancel".to_string(),
+                        conversation_display_name: "Owner 私聊".to_string(),
+                        target_agent_id: "agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let observed = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope(
+                    "observe-for-exact-cancel",
+                    observation_command(
+                        "cli_app_1",
+                        "om_exact_cancel",
+                        "oc_exact_cancel",
+                        "",
+                        "p2p",
+                        "停止这次执行",
+                        &[("agent_1", "cli_app_1")],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        let finalized = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "finalize-for-exact-cancel",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(finalized.result.code, "channel.turn.admitted");
+        let tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                    },
+                    &ChannelHostTickRequest {
+                        worker_id: "exact-cancel-worker".to_string(),
+                        limit: 20,
+                    },
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let delivery = tick["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|delivery| delivery["deliveryKind"] == "execution_console_upsert")
+            .unwrap();
+        let run_id = delivery["payload"]["agentRunId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        service
+            .settle_delivery(
+                &mut database,
+                &host_envelope(
+                    "settle-console-for-exact-cancel",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: delivery["deliveryId"].as_str().unwrap().to_string(),
+                        worker_id: "exact-cancel-worker".to_string(),
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: Some("om_exact_console".to_string()),
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+
+        let command = ChannelAgentRunCancelCommand {
+            callback_event_id: "event_exact_cancel".to_string(),
+            app_id: "cli_app_1".to_string(),
+            external_message_id: "om_exact_console".to_string(),
+            agent_run_id: run_id.clone(),
+            operator_open_id: Some("ou_user".to_string()),
+            operator_user_id: Some("user_1".to_string()),
+            operator_union_id: Some("union_user".to_string()),
+        };
+        let first = service
+            .cancel_channel_agent_run(
+                &mut database,
+                &host_envelope("cancel-exact-channel-run", command.clone()),
+            )
+            .unwrap();
+        let replay = service
+            .cancel_channel_agent_run(
+                &mut database,
+                &host_envelope("cancel-exact-channel-run", command),
+            )
+            .unwrap();
+        assert_eq!(first.result.status, CommandResultStatus::Applied);
+        assert_eq!(first.result, replay.result);
+        assert_eq!(first.result.payload["status"], "cancelled");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT status FROM agent_run WHERE id = ?1",
+                    [&run_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "cancelled"
         );
     }
 

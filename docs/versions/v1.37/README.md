@@ -9,7 +9,7 @@ model_context_change: true
 last_updated: 2026-09-01
 ---
 
-# Rovai-ai v1.37：Runtime 图片与飞书文件交付
+# Rovai-ai v1.37：Runtime 图片、取消可用性与飞书只读执行台
 
 前置：[v1.36](../v1.36/README.md)。渠道已有代码先保存为 f0e1ce2f、b7316a57、6f9f8bd2；
 钉钉未完成 Owner/Core/群卡片/packaged 验收的 NO-GO 原样保留，本版本不继续实施钉钉。
@@ -43,6 +43,10 @@ last_updated: 2026-09-01
   收口、发送前边界与三秒 Runtime 清理；Migration 134 为 Data Contract `v1.44 / schema 85`。
   当前取消合同见 [Cancellation Settlement v1](../../contracts/cancellation-settlement-v1.md)，理由见
   [V1.37-D02](decisions.md#v1-37-d02)。验收进度记录在实施计划，原图片/钉钉未验收项不因此升级。
+- 飞书执行卡已收敛为纯状态与三个入口；“打开执行台”在卡片创建时冻结 LAN HTTP `open_url`，以 Main 内存
+  Token 限定同 Camp/队员、focus Run 及其之前历史，不做点击鉴权、Owner 私聊、地址刷新或旧卡修复。
+  全局端口设置位于渠道页最底部并默认折叠；桌面/手机 Web 时间线无折叠。当前合同见
+  [Feishu Channel v9](../../contracts/feishu-channel-v9.md)，理由见 [V1.37-D04](decisions.md#v1-37-d04)。
 - 当前仍 in_progress：Antigravity 边界已关闭，但 Cursor 非标准通知、所有 Runtime 原生生图及渠道实发
   并未全部验收；本机已观察到的工具/协议/上游限制保留，不提升任何 Runtime 平台资格。
 
@@ -54,10 +58,10 @@ Applications 安装见[本机交付记录](main-merge-and-daily-app.md)；本轮
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、实施计划、版本索引；v1.36 冻结为 historical，未验收事实保留 |
-| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01) 与 [CURRENT](../../decisions/CURRENT.md) |
-| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)、[Camp Message Send v18](../../contracts/camp-message-send-v18.md) |
-| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)；保留既有双主题 |
+| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D04](decisions.md#v1-37-d04)与 [CURRENT](../../decisions/CURRENT.md) |
+| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)、[Camp Message Send v18](../../contracts/camp-message-send-v18.md)、[Feishu Channel v9](../../contracts/feishu-channel-v9.md) |
+| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[飞书渠道](../../architecture/feishu-channel.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)与[渠道设置](../../ui/components/channel-settings.md)；保留既有双主题 |
 | Runtime Activity | 确认无需更新 | 内部图片观察不进入 Canonical Activity，不修改 classifier/映射或已有公开 Evidence |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md#2026-08-31-runtime-图片观察边界)区分协议 fixture 与真实 Runtime smoke |
 | Documentation routing | 已更新 | [文档导航](../../README.md)、合同与架构索引 |

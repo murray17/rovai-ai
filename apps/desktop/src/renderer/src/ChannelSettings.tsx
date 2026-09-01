@@ -7,6 +7,7 @@ import type {
   ChannelMemberBotView,
   ChannelProviderView,
   ChannelSettingsSnapshot,
+  ExecutionWebSettingsSnapshot,
   MemberBotProvisioningView
 } from '@contracts'
 import {
@@ -342,10 +343,138 @@ export function ChannelSettingsView({
               <p>项目绑定完成后不可换绑；需要另一个项目时，请新建{channel.kind === 'dingtalk' ? '钉钉群' : '飞书群或话题'}。</p>
             </div>
           </section>
+
+          <ExecutionWebSettingsPanel />
         </div>
       )}
+
+      {(!channel || !snapshot) && <ExecutionWebSettingsPanel />}
     </div>
   )
+}
+
+export function ExecutionWebSettingsPanel(): React.JSX.Element {
+  const [snapshot, setSnapshot] = useState<ExecutionWebSettingsSnapshot | null>(null)
+  const [enabled, setEnabled] = useState(false)
+  const [port, setPort] = useState('8765')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const apply = useCallback((next: ExecutionWebSettingsSnapshot): void => {
+    setSnapshot(next)
+    setEnabled(next.enabled)
+    setPort(String(next.port))
+    setError(null)
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    void window.rovai.channels.getExecutionWebSettings().then((next) => {
+      if (alive) apply(next)
+    }).catch(() => {
+      if (alive) setError('暂时无法读取执行台设置。')
+    })
+    const unsubscribe = window.rovai.channels.onExecutionWebSettingsChanged((next) => {
+      if (alive) apply(next)
+    })
+    return () => {
+      alive = false
+      unsubscribe()
+    }
+  }, [apply])
+
+  const parsedPort = Number(port)
+  const portValid = /^\d{4,5}$/u.test(port)
+    && Number.isSafeInteger(parsedPort) && parsedPort >= 1024 && parsedPort <= 65535
+  const dirty = Boolean(snapshot && (snapshot.enabled !== enabled || snapshot.port !== parsedPort))
+  const status = executionWebStatus(snapshot)
+
+  const validatePort = (): boolean => {
+    if (portValid) {
+      setError(null)
+      return true
+    }
+    setError('端口需为 1024～65535 的整数。')
+    return false
+  }
+
+  const save = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault()
+    if (!validatePort() || saving) return
+    setSaving(true)
+    setError(null)
+    try {
+      apply(await window.rovai.channels.setExecutionWebSettings({ enabled, port: parsedPort }))
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : String(nextError)
+      setError(message.includes('port') || message.includes('EADDRINUSE')
+        ? '这个端口暂时不可用，原设置未改变。'
+        : '执行台设置保存失败，请重试。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <details className="channel-settings-section execution-web-settings">
+      <summary>
+        <span>
+          <strong>局域网执行台</strong>
+          <small>在同一网络中查看公开执行记录</small>
+        </span>
+        <span className={`execution-web-status is-${status.tone}`}>{status.label}</span>
+      </summary>
+      <form className="execution-web-form" onSubmit={(event) => void save(event)}>
+        <label className="execution-web-switch-row">
+          <span><strong>允许局域网访问</strong><small>仅提供只读页面</small></span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={enabled}
+            onChange={(event) => setEnabled(event.target.checked)}
+          />
+        </label>
+        <label className="execution-web-port-row">
+          <span>端口</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1024}
+            max={65535}
+            step={1}
+            value={port}
+            aria-invalid={!portValid}
+            onBlur={validatePort}
+            onChange={(event) => setPort(event.target.value)}
+          />
+        </label>
+        {snapshot?.server.address && (
+          <div className="execution-web-address"><span>当前地址</span><code>http://{snapshot.server.address}</code></div>
+        )}
+        <p className="execution-web-warning">修改端口后，此前发送的执行台链接可能失效。</p>
+        {error && <p className="execution-web-error" role="alert">{error}</p>}
+        <div className="execution-web-actions">
+          <button className="primary-button compact" type="submit" disabled={!dirty || !portValid || saving}>
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </form>
+    </details>
+  )
+}
+
+function executionWebStatus(snapshot: ExecutionWebSettingsSnapshot | null): {
+  label: string
+  tone: 'neutral' | 'success' | 'warning'
+} {
+  if (!snapshot || !snapshot.enabled || snapshot.server.state === 'disabled') {
+    return { label: '未开启', tone: 'neutral' }
+  }
+  if (snapshot.server.state === 'ready') return { label: `已开启 · ${snapshot.port}`, tone: 'success' }
+  if (snapshot.server.state === 'port_conflict') return { label: `端口被占用 · ${snapshot.port}`, tone: 'warning' }
+  if (snapshot.server.state === 'no_lan_address') return { label: '未找到局域网', tone: 'warning' }
+  if (snapshot.server.state === 'starting') return { label: '正在启动', tone: 'neutral' }
+  return { label: '暂不可用', tone: 'warning' }
 }
 
 function ChannelSettingsState({

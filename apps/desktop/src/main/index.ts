@@ -7,6 +7,7 @@ import type {
   AppearanceSnapshot,
   ChannelKind,
   CoreMethod,
+  ExecutionWebSettingsSnapshot,
   ExecutionConsolePlacement,
   MonitoringFilter,
   RuntimeUsageSnapshot,
@@ -101,6 +102,7 @@ import {
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
+import { ExecutionViewService } from './execution-view-service'
 import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
 import { ChannelSettingsCoordinator } from './channel-settings-coordinator'
 import { parseChannelLoginViewBounds } from './dingtalk-login-view'
@@ -358,6 +360,10 @@ const memberBotAvatarSource = new ControlledMemberBotAvatarSourceResolver({
 })
 const channelCredentialStore = new SqliteChannelCredentialStore(core)
 const channelDeveloperSessionStore = new SqliteChannelDeveloperSessionStore(core)
+const executionView = new ExecutionViewService({
+  core,
+  settingsFilePath: join(app.getPath('userData'), 'execution-web.json')
+})
 const feishuDeveloperSession = new ElectronFeishuDeveloperSessionService(
   channelDeveloperSessionStore,
   () => mainWindow
@@ -368,7 +374,8 @@ const feishuChannelSettings = new ChannelSettingsService({
   developerSession: feishuDeveloperSession,
   memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
   memberBotAvatarSource,
-  executionPreview: createFeishuExecutionPreviewHost(process.argv, coreDataPath)
+  executionPreview: createFeishuExecutionPreviewHost(process.argv, coreDataPath),
+  executionView
 })
 const dingtalkDeveloperSession = new ElectronDingTalkDeveloperSessionService({
   store: channelDeveloperSessionStore,
@@ -406,6 +413,10 @@ const channelHostLifecycle = new ChannelHostLifecycle({
 channelSettings.onChanged((snapshot) => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
   mainWindow.webContents.send('rovai:channels-changed', snapshot)
+})
+executionView.onChanged((snapshot) => {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
+  mainWindow.webContents.send('rovai:execution-web-settings-changed', snapshot)
 })
 const filePreview = new FilePreviewService(
   new CoreFilePreviewSourceAuthority(core),
@@ -768,6 +779,9 @@ if (primaryInstance) void app.whenReady().then(async () => {
   const onboardingPath = join(userDataPath, 'onboarding.json')
   const restorableLocationPath = join(userDataPath, 'restorable-location.json')
   const navigationPreferencesPath = join(userDataPath, 'navigation.json')
+  await executionView.start().catch((error) => {
+    console.warn('[rovai] Execution Web service did not start; channel execution remains available.', error)
+  })
   generalPreferences = GeneralPreferencesStore.defaults(generalPreferencesPath)
   onboarding = OnboardingStore.defaults(onboardingPath)
   restorableLocations = RestorableLocationStore.defaults(restorableLocationPath)
@@ -1114,6 +1128,24 @@ ipcMain.handle('rovai:general-preferences-invalidate-new-conversation-defaults',
 ipcMain.handle('rovai:channels-get', (event) => {
   requireMainWindow(event.sender)
   return channelSettings.get()
+})
+
+ipcMain.handle('rovai:execution-web-settings-get', (event) => {
+  requireMainWindow(event.sender)
+  return executionView.getSettings()
+})
+
+ipcMain.handle('rovai:execution-web-settings-set', (event, value: unknown) => {
+  requireMainWindow(event.sender)
+  const settings = requireObject(value)
+  if (typeof settings.enabled !== 'boolean' || typeof settings.port !== 'number'
+    || Object.keys(settings).sort().join('\0') !== ['enabled', 'port'].sort().join('\0')) {
+    throw new Error('Invalid Execution Web settings')
+  }
+  return executionView.setSettings({
+    enabled: settings.enabled,
+    port: settings.port
+  } as Pick<ExecutionWebSettingsSnapshot, 'enabled' | 'port'>)
 })
 
 ipcMain.handle('rovai:channels-connect', (event, kind: unknown) => {
@@ -1691,9 +1723,9 @@ const appQuitCoordinator = new AppQuitCoordinator({
     const stopAutomation = userAutomation?.stop() ?? Promise.resolve()
     userAutomation = null
     try {
-      await Promise.all([stopAutomation, channelHostLifecycle.stop()])
+      await Promise.all([stopAutomation, channelHostLifecycle.stop(), executionView.stop()])
     } catch (error) {
-      console.error('Rovai User Automation shutdown failed', error)
+      console.error('Rovai application services shutdown failed', error)
     }
     const result = await core.shutdown()
     console.error(`[rovai-core] controlled shutdown result ${JSON.stringify(result)}`)

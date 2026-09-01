@@ -3,12 +3,12 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 ---
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v8](../contracts/feishu-channel-v8.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v9](../contracts/feishu-channel-v9.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -25,6 +25,7 @@ Renderer 渠道设置
           ├─ SQLite Channel Store Client：Session/credential 批量读取与原子命令
           ├─ 每 App WebSocket
           ├─ 入站规范化、群 Bot roster 观测
+          ├─ ExecutionViewService：全局 LAN HTTP/SSE、内存 Token hash 与只读投影
           └─ 领取并发送 Core ChannelDelivery
                          │
                          ▼
@@ -36,6 +37,7 @@ Renderer 渠道设置
           ├─ ExternalPrincipal
           ├─ multi-Bot aggregate / ChannelTurnRequest
           ├─ Camp、membership 与统一 admission
+          ├─ Execution Web scope 复核与 exact AgentRun cancel
           └─ durable ChannelDelivery outbox
 ```
 
@@ -273,47 +275,35 @@ Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可�
 飞书没有本地 AgentRun retry/decline 操作面，因此 required Run 失败且只剩人工重试决定时，Channel Host 确定性 decline
 该重试并让 Turn/Request 收口，再继续同一 Binding 的 FIFO。
 
-每个 AgentRun 有一个 Core-owned execution console identity。Core 把可公开 Execution Evidence、Run 状态和公开输出
-coalesce 为同一 Card 2.0 snapshot；Main 与 Renderer 共同消费 shared execution presentation 生成的安全 `publicCommand`，
-始终滤掉 reasoning/thought。运行中 Card 2.0 只直接展示当前正文（最多5行）、当前command和真实状态计数；总原生折叠
-仅保留最近10条command、最多20个timeline blocks。实际测量整卡16,000 UTF-8 JSON bytes和30个递归elements预算，
-超限逐个移出最早历史并更新省略提示，不裁剪Core Evidence或永久输出。终态保留真实状态、稳定用时，按原始顺序
-在一个默认收起的“执行过程”原生面板内混排文字与单条 command 的原生折叠面板。TextBlock 最多 10 行，长文为前 9 行
-与截断提示；每条 command 的结果
-只在它自己的中性代码框中显示，不附“指令／状态／输出”等二级标题。相同公开正文去重，不在每页重复。
+每个 AgentRun 有一个 Core-owned execution console identity，但飞书 Card 2.0 只承担状态入口。收起态不再把正文、command、
+结果或进度复制进卡片；只保留 Owner callback“显示最近输出”、直接 `open_url`“打开执行台”和 Owner callback
+“停止执行”。终态移除停止入口。最近输出只在 Main 的 per-message 内存状态中展开最后 30 个公开正文/安全 command，
+不含结果与分页；Main 重启恢复收起。所有 upsert、callback 与 recall 共用 per-card 串行队列。
 
-shared presentation 保留命令的 executable、subcommand、flags、路径和非敏感参数，并统一脱敏自由正文、认证头、Token、
-Cookie 与敏感环境变量值。飞书只消费该安全命令字段与共享 `ExecutionStep.publicResult`，不从 `detail` 二次解析命令或结果。
-结果预览在共享presentation中从完成操作的明确文本字段提取，
-先排除敏感值、stdin、完整 tool input/output JSON、原始 patch 和消息正文回显，再限制为最多 20 行；超过时为前 9 行、
-一行准确截断提示、后 10 行，并另限 4KiB；极长行预算内保留首尾，二进制/base64 结果不公开。实时卡不展示该结果；
-原始本地detail仍保留原查看语义。`apply_patch` 使用明确工具名及 canonical
-结构化文件增删行，不公开 patch body。
+“打开执行台”不进入 Host callback，也不识别飞书操作者。Main 仅在卡片第一次发送且 `ExecutionViewService` ready 时，
+把当时的私有 LAN IPv4、全局用户端口与新随机 Token 拼成固定 URL；卡片后续更新只复用该字符串。IP/端口变化不扫描、
+补发或改写旧卡，服务恢复也不补按钮。能够取得链接、访问该局域网且 Token 仍有效的人均可查看，因此该入口不是
+Owner-only 权限面。
 
-Run 进入终态后，Core 先把控制台置为 `terminal_pending`；公开 evidence/output 连续 900ms 没有变化后才生成最后一次
-`terminal_sealed` snapshot。Migration 125 增加不可变 `terminal_snapshot_json`，同事务固定 Run、canonical Evidence、
-正文、时间和 Blob reference；不能只冻结 sequence 后在翻页时重新读取最新 Evidence。完整 Blob 由 Core 校验后读取，
-再由 Main 脱敏截断；缺失/损坏不得退回残缺 preview。sealed 后 materializer 不再更新该卡，迁移后的读取也不会回写视图状态。
+`ExecutionViewService` 是 Desktop Main 唯一的全局 HTTP/SSE listener，默认关闭、默认端口 8765。它自动选择 RFC1918
+IPv4，只接受设置页显式选择的 1024–65535 端口，不自动漂移。Token 明文只出现在 URL fragment 与页面内存；Main 只保存
+hash 和冻结的 `ChannelConversation/App/Camp/Agent/focusRun/maxRunCreatedAt` scope。服务关闭、卡片 recall 或 Main 重启会
+撤销内存 grant；不建立持久 Capability/撤销领域。
 
-飞书对整条 timeline 分页，每页最多 15 条 command、50 个递归 body elements（包含外层面板、页码和按钮容器），
-整卡 UTF-8 JSON 最多 24,000 bytes。不拆 block；文字和紧接的首条 command 尽量同页。钉钉继续使用原纯文本格式和预算。
+浏览器先取当前 snapshot，再以 Fetch Streaming 建立 SSE。Main 每次都把冻结 scope 交给 Core，Core 复核 focus Run、
+渠道/App、Camp、队员、成员关系和历史上界，并只返回同 Camp/队员且不晚于 focus Run 的公开投影。Main 继续复用 shared
+execution redactor/projector 生成公开正文、安全 command/result 与文件变化；reasoning、完整工具输入、原始 patch、任意文件、
+终端/写入/审批能力、Cookie、Token 和敏感环境变量不跨出进程边界。网页使用当前双主题与连续展开时间线，桌面/手机共享
+同一结构，不提供折叠或分页。
 
-终态分页是无持久视图状态的 Card 2.0 callback。payload 只含 action、AgentRun、sealed snapshot sequence 和目标页；Core
-只授权 callback envelope 中的 Owner、冻结 App、authoritative external message、`terminal_sealed` exact sequence 与合法页码。
-Main 随后把该页作为同步 response card 返回，由飞书更新原卡一次，外层保持展开（包括返回第 1 页）；单条 command 默认关闭并在客户端本地展开，不写 display/page/view state，
-不创建 Outbox，也不触发 pump。Migration 125 物理移除旧 display/page/view 列。展开/收起本身不需要 callback。重复点击同一页
-仍可成功；旧 snapshot、错误 App/message、越界页与 non-owner fail closed。
+“显示最近输出”和“停止执行”仍通过 callback envelope 的 operator、冻结 App 与 authoritative external message 做
+Owner 校验。停止命令还校验 exact AgentRun 仍可取消，Core 只结算这一条 Run；Main 不直接操作 Runtime 或扩大到整轮。
+SDK event ID 继续承担 callback 防重。可响应故障返回安全 Toast；Host 或设备离线时
+不承诺自定义飞书提示。
 
-SDK 用飞书 event ID 去重 callback，不把多次点击同页当成同一次重投。分页成功只返回目标卡，无成功 Toast，
-不在 ACK 前后独立 PATCH，避免预先更新的新页被本次点击的空应答退回旧页。运行中与封存投递仍使用 `updateCard` 并检查远端业务码。
-Main 翻页处理器有 2.5 秒响应预算，超时只返回安全错误，不追加迟到 response card 或补偿更新。
-可响应的故障返回固定安全 Toast；若整个 App/设备/长连接离线，由飞书显示平台错误，本地不能保证自定义文案。
-显式预览复用同一渲染器、同步应答与现有连接，页面只在 Main 内存保存；预览失效不读写假的 Core Run 或日用 SQLite。
-本地 response-ready 日志仅表示应答已准备好，不证明飞书已显示目标页。
-
-控制台只能由该 Agent 的冻结 App 创建、更新和撤回；下一条 root request admission 无论 sealed 卡当前显示哪一页，都召回
-同 ChannelConversation 中更早 Turn 的控制台，recall 等待在途 upsert 并把飞书 target revoked 当作幂等成功。控制台是临时
-execution presentation，不是 CampMessage，也不参与请求业务 settlement。
+Core 既有 `terminal_pending / terminal_sealed` 与不可变 terminal snapshot 继续供安全读取和历史兼容，但 v9 飞书卡不再
+呈现旧双层折叠或终态分页。钉钉仍消费原纯文本执行投影。下一条 root request admission 召回同 ChannelConversation 更早
+Turn 的执行卡，等待在途更新并把 target revoked 当作幂等成功；执行卡不是 CampMessage，也不参与请求业务 settlement。
 
 公开 Agent 正文新建无标题 Card 2.0，不覆盖控制台、queue ack 或其他正文。正文下方的“发送给”行只消费 Core 从公共
 MessageDelivery 提取的有序 A2A 接收对象及 Structured CurrentUserMention；多个原生 @ 用空格分隔。飞书专用正文从
