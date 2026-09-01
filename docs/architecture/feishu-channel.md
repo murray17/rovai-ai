@@ -248,7 +248,7 @@ present/published Rovai Bot 建立 membership，但首条消息仍只为明确 m
 Topic Camp；移出 Bot 后，从下一次 AgentRun 起不得再以它为目标，历史消息、历史 Run、Camp 和冻结项目不变。
 
 Host 在新 Topic 建 Camp、每条 Owner 根消息和项目卡 resolve 前强制重读完整 `isInChat` 快照，并消费 Bot 加入/移出
-事件与周期性全量恢复。A2A、Gather、delivery retry/successor 等内部路径在真正物化 Topic AgentRun 前，由 Core 建立
+事件与按需恢复。A2A、Gather、delivery retry/successor 等内部路径在真正物化 Topic AgentRun 前，由 Core 建立
 所需的下一 roster generation 门闩；Host tick 取得请求、重读父群并提交 generation，Core 完成 membership
 reconciliation 后才恢复物化。若目标已经移出则 fail closed。已经运行的 AgentRun 继续使用创建时冻结的执行上下文；
 为避免 membership remove 取消它，实际离群队员的 membership cutover 可延迟到其非终态 Run 结束，但最新 roster 已立即
@@ -256,9 +256,12 @@ reconciliation 后才恢复物化。若目标已经移出则 fail closed。已�
 
 ## 输出、恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v3](../contracts/channel-host-maintenance-v3.md) 使用直接参数与响应，
-不生成 commandId 或永久 poll 回执；超时、投影、FIFO 提升和 delivery 领取仍原子提交。响应丢失依靠持久 lease 恢复，
-真实入站、绑定、admission 事件与 delivery settlement 的防重不变；历史 tick 回执不清理。
+共享 Host tick 按 [Channel Host Maintenance v4](../contracts/channel-host-maintenance-v4.md) 使用直接参数与响应，
+不生成 commandId 或永久 poll 回执；超时、投影、FIFO 提升和 delivery 领取仍原子提交。Main 不再永久每 750ms
+扫描：入站、状态变更卡片、Bot/roster、AgentRun/Runtime 事件与 settlement 触发合并快路径；Core 返回
+provider-scoped `hasOutstandingWork`，只有为真时才保留十分钟 one-shot watchdog，为假立即休眠。终态另有跨过
+900ms quiet window 的 one-shot，短重试按 `availableAt` 唤醒。事件丢失仍依靠持久领域事实和 watchdog 恢复，
+真实入站、绑定、admission 与 delivery settlement 的防重不变；历史 tick 回执不清理。
 
 `project_selection` 是唯一不依赖 ChannelTurnRequest 的 delivery：它关联 exact PendingCampBinding，使用冻结的
 acknowledgement App 直接发送到原群或原 Topic。payload 只有会话显示名、opaque 项目选项、nonce/version 与

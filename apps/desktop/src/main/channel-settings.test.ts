@@ -230,10 +230,10 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   return { createChannel, handlers, send, updateCard, recallMessage, createMessage, replyMessage, getChatMode, isInChat }
 }
 
-function inertInterval(): Pick<ChannelHostDependencies, 'setInterval' | 'clearInterval'> {
+function inertInterval(): Pick<ChannelHostDependencies, 'setTimeout' | 'clearTimeout'> {
   return {
-    setInterval: vi.fn(() => ({ unref() {} })) as unknown as typeof globalThis.setInterval,
-    clearInterval: vi.fn() as unknown as typeof globalThis.clearInterval
+    setTimeout: vi.fn(() => ({ unref() {} })) as unknown as typeof globalThis.setTimeout,
+    clearTimeout: vi.fn() as unknown as typeof globalThis.clearTimeout
   }
 }
 

@@ -565,6 +565,7 @@ fn default_delivery_claim_limit() -> usize {
 pub struct ChannelHostTickResult {
     pub deliveries: Vec<ClaimedChannelDelivery>,
     pub(crate) roster_refreshes: Vec<crate::message_delivery::TopicRosterRefreshRequest>,
+    pub has_outstanding_work: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5918,9 +5919,12 @@ impl ChannelService {
                 "#,
                 [&retention_boundary],
             )?;
+            let has_outstanding_work = !roster_refreshes.is_empty()
+                || channel_host_has_outstanding_work(&transaction, provider)?;
             ChannelHostTickResult {
                 deliveries: claims,
                 roster_refreshes,
+                has_outstanding_work,
             }
         };
         transaction.commit()?;
@@ -6135,6 +6139,34 @@ impl ChannelService {
                             anyhow::bail!(
                                 "execution console external message identity changed unexpectedly"
                             );
+                        }
+                        let (agent_run_id, latest_sequence, delivered_sequence): (
+                            String,
+                            i64,
+                            i64,
+                        ) = transaction.query_row(
+                            r#"
+                            SELECT agent_run_id, latest_sequence, delivered_sequence
+                            FROM channel_execution_console WHERE id = ?1
+                            "#,
+                            [console_id],
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                        )?;
+                        if delivered_sequence < latest_sequence {
+                            queue_execution_console_upsert(
+                                transaction,
+                                request_id.as_deref().context(
+                                    "execution console upsert has no request identity",
+                                )?,
+                                console_id,
+                                &agent_run_id,
+                                source_agent_id.as_deref().context(
+                                    "execution console upsert has no source agent identity",
+                                )?,
+                                &target_app_id,
+                                latest_sequence,
+                                &now_text,
+                            )?;
                         }
                     }
                 }
@@ -9715,7 +9747,18 @@ fn queue_execution_console_upsert(
         "#,
         params![console_id, serde_json::to_string(&payload)?, now],
     )?;
-    if coalesced == 0 {
+    let attempting_exists: i64 = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM channel_delivery
+            WHERE console_id = ?1 AND delivery_kind = 'execution_console_upsert'
+              AND status = 'attempting'
+        )
+        "#,
+        [console_id],
+        |row| row.get(0),
+    )?;
+    if coalesced == 0 && attempting_exists == 0 {
         insert_console_delivery(
             transaction,
             request_id,
@@ -10218,6 +10261,72 @@ fn claim_deliveries(
         claims.push(claim);
     }
     Ok(claims)
+}
+
+fn channel_host_has_outstanding_work(
+    transaction: &Transaction<'_>,
+    provider: &str,
+) -> Result<bool> {
+    let outstanding: i64 = transaction.query_row(
+        r#"
+        SELECT
+            EXISTS(
+                SELECT 1
+                FROM channel_turn_request AS request
+                JOIN channel_conversation_binding AS binding
+                  ON binding.id = request.binding_id
+                JOIN channel_conversation AS conversation
+                  ON conversation.id = binding.channel_conversation_id
+                WHERE conversation.provider = ?1
+                  AND request.status IN ('queued', 'admitted')
+            )
+            OR EXISTS(
+                SELECT 1
+                FROM channel_delivery AS delivery
+                LEFT JOIN channel_turn_request AS request
+                  ON request.id = delivery.request_id
+                LEFT JOIN channel_conversation_binding AS binding
+                  ON binding.id = request.binding_id
+                LEFT JOIN channel_conversation AS request_conversation
+                  ON request_conversation.id = binding.channel_conversation_id
+                LEFT JOIN pending_camp_binding AS pending
+                  ON pending.id = delivery.pending_binding_id
+                LEFT JOIN channel_conversation AS pending_conversation
+                  ON pending_conversation.id = pending.channel_conversation_id
+                WHERE delivery.status IN ('pending', 'attempting')
+                  AND COALESCE(
+                      request_conversation.provider,
+                      pending_conversation.provider
+                  ) = ?1
+            )
+            OR EXISTS(
+                SELECT 1
+                FROM channel_execution_console AS console
+                JOIN channel_conversation AS conversation
+                  ON conversation.id = console.channel_conversation_id
+                WHERE conversation.provider = ?1
+                  AND console.state IN (
+                      'opening', 'active', 'terminal_pending', 'recall_pending'
+                  )
+            )
+            OR EXISTS(
+                SELECT 1
+                FROM channel_inbound_aggregate AS aggregate
+                WHERE aggregate.provider = ?1 AND aggregate.status = 'collecting'
+            )
+            OR EXISTS(
+                SELECT 1
+                FROM pending_camp_binding AS pending
+                JOIN channel_conversation AS conversation
+                  ON conversation.id = pending.channel_conversation_id
+                WHERE conversation.provider = ?1
+                  AND pending.status IN ('pending', 'resolving')
+            )
+        "#,
+        [provider],
+        |row| row.get(0),
+    )?;
+    Ok(outstanding != 0)
 }
 
 fn missing_active_members(
@@ -11704,6 +11813,7 @@ mod tests {
                     serde_json::to_value(tick).unwrap(),
                     json!({
                         "deliveries": [], "rosterRefreshes": [],
+                        "hasOutstandingWork": false,
                     })
                 );
             }
@@ -14299,6 +14409,18 @@ mod tests {
             .unwrap();
         assert_eq!(observed.result.payload["readyToFinalize"], false);
         let aggregate_id = observed.result.payload["aggregateId"].as_str().unwrap();
+        let actor = ActorRef::System {
+            component_id: DINGTALK_CHANNEL_HOST_COMPONENT.to_string(),
+        };
+        let request = ChannelHostTickRequest {
+            worker_id: "dingtalk-test-worker".to_string(),
+            limit: 10,
+        };
+        let collecting = service.host_tick(&mut database, &actor, &request).unwrap();
+        assert!(
+            collecting.has_outstanding_work,
+            "a future aggregate deadline must keep the provider watchdog armed"
+        );
         database
             .connection()
             .execute(
@@ -14307,21 +14429,8 @@ mod tests {
             )
             .unwrap();
 
-        serde_json::to_value(
-            service
-                .host_tick(
-                    &mut database,
-                    &ActorRef::System {
-                        component_id: (DINGTALK_CHANNEL_HOST_COMPONENT).to_string(),
-                    },
-                    &ChannelHostTickRequest {
-                        worker_id: "dingtalk-test-worker".to_string(),
-                        limit: 10,
-                    },
-                )
-                .unwrap(),
-        )
-        .unwrap();
+        let timed_out = service.host_tick(&mut database, &actor, &request).unwrap();
+        assert!(!timed_out.has_outstanding_work);
         let terminal: (String, Option<String>) = database
             .connection()
             .query_row(
@@ -16390,11 +16499,78 @@ mod tests {
                 },
             )
             .unwrap();
+        assert!(opening_tick.has_outstanding_work);
         let opening_delivery = opening_tick
             .deliveries
             .iter()
             .find(|delivery| delivery.delivery_kind == "execution_console_upsert")
             .expect("the admitted run must open its execution console");
+        let opening_sequence = opening_delivery.payload["expectedSequence"]
+            .as_i64()
+            .unwrap();
+        let live_at = Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO agent_run_execution_evidence(
+                    id, agent_run_id, execution_epoch, sequence, event_type, kind, phase,
+                    payload_preview_json, content_blob_id, content_byte_count,
+                    is_truncated, occurred_at
+                ) VALUES (
+                    'terminal-console-live-evidence', ?1, 1, 1,
+                    'activity.updated', 'narration', 'updated',
+                    '{"text":"live evidence"}', NULL, 0, 0, ?2
+                )
+                "#,
+                params![agent_run_id, live_at],
+            )
+            .unwrap();
+        let live_refresh_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-live-refresh-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(
+            live_refresh_tick
+                .deliveries
+                .iter()
+                .all(|delivery| delivery.delivery_kind != "execution_console_upsert")
+        );
+        let latest_live_sequence: i64 = database
+            .connection()
+            .query_row(
+                "SELECT latest_sequence FROM channel_execution_console WHERE agent_run_id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(latest_live_sequence > opening_sequence);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT COUNT(*) FROM channel_delivery
+                    WHERE console_id = (
+                        SELECT id FROM channel_execution_console WHERE agent_run_id = ?1
+                    ) AND delivery_kind = 'execution_console_upsert'
+                      AND status IN ('pending', 'attempting')
+                    "#,
+                    [&agent_run_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "an attempting execution card must absorb live updates without a second delivery"
+        );
         service
             .settle_delivery(
                 &mut database,
@@ -16403,6 +16579,43 @@ mod tests {
                     SettleChannelDeliveryCommand {
                         delivery_id: opening_delivery.delivery_id.clone(),
                         worker_id: "terminal-console-opening-worker".to_string(),
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: Some("om_terminal_console_card".to_string()),
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let followup_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-live-followup-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let live_followup = followup_tick
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_kind == "execution_console_upsert")
+            .expect("settlement must enqueue one latest-sequence follow-up");
+        assert_eq!(
+            live_followup.payload["expectedSequence"].as_i64(),
+            Some(latest_live_sequence)
+        );
+        service
+            .settle_delivery(
+                &mut database,
+                &host_envelope(
+                    "settle-terminal-console-live-followup",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: live_followup.delivery_id.clone(),
+                        worker_id: "terminal-console-live-followup-worker".to_string(),
                         outcome: "sent".to_string(),
                         external_delivery_message_id: Some("om_terminal_console_card".to_string()),
                         failure_code: None,
@@ -16448,6 +16661,23 @@ mod tests {
                 },
             )
             .unwrap();
+        assert!(terminal_tick.has_outstanding_work);
+        let other_provider_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: DINGTALK_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-other-provider-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(
+            !other_provider_tick.has_outstanding_work,
+            "Feishu work must not arm the DingTalk watchdog"
+        );
         assert!(
             terminal_tick
                 .deliveries
@@ -16490,7 +16720,7 @@ mod tests {
                     payload_preview_json, content_blob_id, content_byte_count,
                     is_truncated, occurred_at
                 ) VALUES (
-                    'terminal-console-late-evidence', ?1, 1, 1,
+                    'terminal-console-late-evidence', ?1, 1, 2,
                     'activity.completed', 'narration', 'completed',
                     '{"text":"late terminal evidence"}', NULL, 0, 0, ?2
                 )
@@ -16510,6 +16740,7 @@ mod tests {
                 },
             )
             .unwrap();
+        assert!(digest_refresh_tick.has_outstanding_work);
         assert!(
             digest_refresh_tick
                 .deliveries
@@ -16552,6 +16783,7 @@ mod tests {
                 },
             )
             .unwrap();
+        assert!(sealed_tick.has_outstanding_work);
         let sealed_delivery = sealed_tick
             .deliveries
             .iter()
@@ -16602,6 +16834,7 @@ mod tests {
                 },
             )
             .unwrap();
+        assert!(repeated_tick.has_outstanding_work);
         assert!(
             repeated_tick
                 .deliveries
@@ -16623,9 +16856,38 @@ mod tests {
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            2,
-            "opening and terminal delivery must each be enqueued exactly once"
+            3,
+            "opening, latest-wins follow-up and terminal delivery must each be enqueued once"
         );
+        service
+            .settle_delivery(
+                &mut restarted,
+                &host_envelope(
+                    "settle-terminal-console-sealed",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: sealed_delivery.delivery_id.clone(),
+                        worker_id: "terminal-console-restart-worker".to_string(),
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: Some("om_terminal_console_card".to_string()),
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let quiescent_tick = service
+            .host_tick(
+                &mut restarted,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-quiescent-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(!quiescent_tick.has_outstanding_work);
     }
 
     #[test]

@@ -40,6 +40,9 @@ last_updated: 2026-09-01
 - [x] 按已确认交互稿把生产 Web 页面替换为 Porcelain Day / Steel Night 连续时间线：外部触发者显示“你”，
   AgentRun、连续操作组和每个 Command 使用与生产执行台一致的嵌套 disclosure。
 - [x] 渠道页底部默认折叠的全局启用/端口设置、真实状态与旧链接警告；无网卡选择、远端探测或旧卡修复入口。
+- [x] 飞书/钉钉永久 750ms/800ms Host interval 改为事件快路径与按需十分钟 one-shot watchdog；Core 从现有
+  provider 领域表返回 `hasOutstandingWork`，终态 quiet window、Delivery settlement 与 retry deadline 独立唤醒，
+  清空后完全休眠；不增加 WorkItem/deadline 镜像表。
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
 ## 验证 owner
@@ -348,3 +351,20 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   文档 9 项、Skill 3 项及普通治理门禁通过。固定 PR base
   `ea0634631697d40f72bac05df19aeeb694d2481d` 的 `docs:check:ci` 通过；本轮未启动日常 App 或真实 Runtime，
   未改写日常数据库，也未向渠道发件。
+
+### 2026-09-01 渠道按需维护
+
+- 扩展既有 `host_ticks_are_ephemeral_and_reject_untrusted_or_invalid_requests` JSON owner，固定新增必填
+  `hasOutstandingWork=false`，继续证明空闲 tick 不产生永久 event/receipt 或数据写入。
+- 扩展既有 `terminal_execution_console_recovers_after_completed_request_and_restart` SQLite owner：修复前无法表达
+  provider 是否仍应被唤醒；现在覆盖 Feishu `terminal_pending` 为 true、同刻 DingTalk 为 false、终态 Delivery
+  settlement 后下一 tick 为 false。它复用原终态/重启 fixture，不新增平行完整数据库测试。
+- `channel-host-pump.test.ts` 拥有 Main 调度 seam：启动 clean 后没有 timer、Runtime burst 500ms 合并、terminal
+  1000ms follow-up、十分钟 watchdog 撤销，以及 pump 执行期间的唤醒不会丢失。Provider 发送与卡片行为继续由既有
+  `channel-settings.test.ts` 和 `dingtalk-channel-settings.test.ts` 拥有。
+- 同一个终态/重启 SQLite owner 先让 opening Delivery 保持 attempting，再写入 live Evidence：Core 只推进 console
+  latest sequence，不创建第二条 Delivery；opening settle 后恰好生成一条 latest follow-up，结算后再进入原终态流程。
+- 最小验证：`cargo test -p rovai-core --lib host_ticks_are_ephemeral_and_reject_untrusted_or_invalid_requests`、
+  `cargo test -p rovai-core --lib terminal_execution_console_recovers_after_completed_request_and_restart`、
+  `pnpm exec vitest run apps/desktop/src/main/channel-host-pump.test.ts apps/desktop/src/main/channel-settings.test.ts
+  apps/desktop/src/main/dingtalk-channel-settings.test.ts apps/desktop/src/main/channel-settings-coordinator.test.ts`。

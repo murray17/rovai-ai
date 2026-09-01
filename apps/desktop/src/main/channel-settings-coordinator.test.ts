@@ -29,23 +29,43 @@ describe('ChannelSettingsCoordinator', () => {
     await expect(coordinator.start()).rejects.toThrow('All Channel Hosts failed to start')
     coordinator.dispose()
   })
+
+  it('forwards Core activity to both provider Hosts', () => {
+    const feishu = host()
+    const dingtalk = host()
+    const coordinator = new ChannelSettingsCoordinator({
+      feishu: feishu.service as ChannelSettingsService,
+      dingtalk: dingtalk.service as DingTalkChannelSettingsService
+    })
+    const event = { method: 'agent_run.terminal', params: { agentRunId: 'run-1' } }
+
+    coordinator.handleCoreEvent(event)
+
+    expect(feishu.handleCoreEvent).toHaveBeenCalledExactlyOnceWith(event)
+    expect(dingtalk.handleCoreEvent).toHaveBeenCalledExactlyOnceWith(event)
+    coordinator.dispose()
+  })
 })
 
 function host(startError?: Error): {
   service: unknown
   start: ReturnType<typeof vi.fn>
   stop: ReturnType<typeof vi.fn>
+  handleCoreEvent: ReturnType<typeof vi.fn>
 } {
   const start = vi.fn(async () => {
     if (startError) throw startError
   })
   const stop = vi.fn(async () => undefined)
+  const handleCoreEvent = vi.fn()
   return {
     start,
     stop,
+    handleCoreEvent,
     service: {
       start,
       stop,
+      handleCoreEvent,
       onChanged: vi.fn(() => () => undefined)
     }
   }
