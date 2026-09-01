@@ -11024,7 +11024,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn execution_budget_closes_recovery_blocker_as_unknown_without_resending_input() {
+    fn execution_budget_cancels_recovery_blocker_without_resending_accepted_input() {
         let mut fixture = fixture();
         bind_fixture_native_session(&mut fixture, "budget-recovery-session");
         let store = ManagedBlobStore::new(&fixture.directory);
@@ -11093,7 +11093,7 @@ mod slow_tests {
             .into_iter()
             .find(|candidate| candidate.agent_run_id == fixture.run_id)
             .unwrap();
-        assert_eq!(candidate.status, "failed");
+        assert_eq!(candidate.status, "cancelled");
         runtime
             .record_runtime_cleanup_completed(
                 &fixture.database,
@@ -11127,9 +11127,9 @@ mod slow_tests {
                 },
             )
             .unwrap();
-        assert_eq!(state.0, "failed");
+        assert_eq!(state.0, "cancelled");
         assert_eq!(state.1, "failed");
-        assert_eq!(state.2.as_deref(), Some("accepted_input_outcome_unknown"));
+        assert!(state.2.is_none());
         assert_eq!(state.3, 0);
         assert_eq!(
             state.4, 1,
@@ -11576,14 +11576,7 @@ mod slow_tests {
                 )
                 .unwrap();
             assert_eq!(result.result.status, CommandResultStatus::Applied);
-            assert_eq!(
-                result.result.payload["status"],
-                if dispatch_first {
-                    "failed"
-                } else {
-                    "cancelled"
-                }
-            );
+            assert_eq!(result.result.payload["status"], "cancelled");
             assert_eq!(
                 ContextService
                     .runtime_input_delivery_status(&fixture.database, &delivery.id)
@@ -11637,21 +11630,7 @@ mod slow_tests {
                  FROM agent_run AS run JOIN conversation ON conversation.id = run.conversation_id WHERE run.id = ?1",
                 [&fixture.run_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
             ).unwrap();
-            assert_eq!(
-                state,
-                (
-                    if dispatch_first {
-                        "failed"
-                    } else {
-                        "cancelled"
-                    }
-                    .into(),
-                    version + 1,
-                    0,
-                    true,
-                    0
-                )
-            );
+            assert_eq!(state, ("cancelled".into(), version + 1, 0, true, 0));
             let runtime = ExecutionRuntimeService::default();
             runtime
                 .record_runtime_cleanup_completed(

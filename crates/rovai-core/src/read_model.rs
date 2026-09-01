@@ -2824,7 +2824,15 @@ fn load_agent_runs(
                agent_run.task_id, agent_run.responsibility_key,
                agent_run.responsibility_generation, agent_run.purpose,
                agent_run.completion_role,
-               agent_run.status, agent_run.wait_reason,
+               CASE
+                 WHEN agent_run.status = 'failed'
+                  AND COALESCE(agent_run.last_error_code, '') = 'accepted_input_outcome_unknown'
+                  AND agent_run.cancel_requested_at IS NOT NULL
+                  AND agent_run.terminal_resolution_source IS NULL
+                 THEN 'cancelled'
+                 ELSE agent_run.status
+               END,
+               agent_run.wait_reason,
                agent_run.cancel_requested_at,
                agent_run.cancel_reason_code,
                agent_run.cancel_acknowledged_at,
@@ -2838,7 +2846,18 @@ fn load_agent_runs(
                (SELECT COUNT(*)
                 FROM agent_run_execution_evidence
                 WHERE agent_run_execution_evidence.agent_run_id = agent_run.id),
-               (
+               CASE
+                 WHEN agent_run.cancel_requested_at IS NOT NULL
+                  AND agent_run.terminal_resolution_source IS NULL
+                  AND (
+                    agent_run.status = 'cancelled'
+                    OR (
+                      agent_run.status = 'failed'
+                      AND COALESCE(agent_run.last_error_code, '') = 'accepted_input_outcome_unknown'
+                    )
+                  )
+                 THEN 0
+                 ELSE (
                  EXISTS(
                    SELECT 1 FROM approval
                    JOIN action_execution
@@ -2880,7 +2899,7 @@ fn load_agent_runs(
                        AND runtime_input_delivery.status = 'accepted'
                    )
                  )
-               ),
+               ) END,
                agent_run.workspace_json,
                agent_run.starting_git_observation_json,
                agent_run.ending_git_observation_json,
@@ -2901,6 +2920,10 @@ fn load_agent_runs(
              AND (agent_run.status IN ('queued', 'running', 'waiting') OR (
                agent_run.status IN ('failed', 'cancelled')
                AND COALESCE(agent_run.last_error_code, '') IN ('planned_shutdown_outcome_unknown', 'accepted_input_outcome_unknown')
+               AND NOT (
+                 agent_run.cancel_requested_at IS NOT NULL
+                 AND agent_run.terminal_resolution_source IS NULL
+               )
              )) THEN 0
             WHEN ?2 IS NOT NULL THEN 1
             ELSE 0

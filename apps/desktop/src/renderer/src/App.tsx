@@ -505,10 +505,18 @@ export function applyCancellationResult(
 ): CampSnapshot {
   if (result.status !== 'applied') return snapshot
   const payload = result.payload
-  const runs = new Map<string, { status: AgentRunView['status']; unknown: boolean }>()
+  const runs = new Map<string, {
+    status: AgentRunView['status']
+    unknown: boolean
+    cancelledByRequest: boolean
+  }>()
   const addRun = (id: unknown, status: unknown, code: unknown): void => {
     if (typeof id === 'string' && (status === 'failed' || status === 'cancelled' || status === 'succeeded')) {
-      runs.set(id, { status, unknown: code === 'agent_run.accepted_input_outcome_unknown' })
+      runs.set(id, {
+        status,
+        unknown: code === 'agent_run.accepted_input_outcome_unknown',
+        cancelledByRequest: status === 'cancelled' && code === 'agent_run.cancelled'
+      })
     }
   }
   addRun(payload.agentRunId, payload.status, result.code)
@@ -528,7 +536,9 @@ export function applyCancellationResult(
         ...run,
         status: settled.status,
         waitReason: null,
-        hasUnsettledExternalEffects: run.hasUnsettledExternalEffects || settled.unknown
+        hasUnsettledExternalEffects: settled.cancelledByRequest
+          ? false
+          : run.hasUnsettledExternalEffects || settled.unknown
       } : run
     }),
     turns: snapshot.turns.map((turn) => turn.id === payload.campTurnId

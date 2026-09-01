@@ -1543,8 +1543,8 @@ The compact conversation-area projection of currently active or attention-releva
 _Avoid_: live log, public status message, automatic Drawer trigger, Scheduler authority, per-Run stop control
 
 **Unsettled External Effect**:
-A Runtime delivery, Action, command, tool, file, or network effect whose occurrence or outcome remains unknown after its AgentRun has reached an abortive failed or cancelled terminal. It remains an independently recoverable authoritative record and produces an explicit user-facing result-unknown warning without blocking Composer reuse or automatically retrying the effect. AgentRun terminal source never proves that this separate effect did or did not occur.
-_Avoid_: running AgentRun, proof of non-execution, forced failure, automatic retry, cancellation blocker
+A public attention state for a Runtime delivery, Action, command, tool, file, or network effect whose occurrence or outcome remains unknown after a non-cancellation abortive failure. It remains an independently recoverable authoritative record and produces an explicit user-facing result-unknown warning without blocking Composer reuse or automatically retrying the effect. A business cancellation may preserve the same underlying Input or Action evidence for audit, but it does not classify the Run as failed or create this public attention state. AgentRun terminal source never proves that the separate effect did or did not occur.
+_Avoid_: running AgentRun, proof of non-execution, forced failure, automatic retry, cancellation audit evidence
 
 **Structured Timeline Event**:
 An immutable Camp system message presentation for a Task state change, carrying closed event-time display fields plus a safe textual fallback. It is ordered by authoritative CampMessage sequence and can navigate to the current Task Inspector without rewriting its historical title, status, assignee, or time.

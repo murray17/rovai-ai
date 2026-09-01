@@ -39,9 +39,9 @@ last_updated: 2026-09-01
   Agent `body` help 只保留 payload 说明，目标 authoring 只推荐 canonical `--to`；Core-only 行首兼容 parser
   连续解析有效队员，未知/歧义 alias 结束 cluster 并保留 Text，不新增严格拒绝。当前合同为
   [Camp Message Send v18](../../contracts/camp-message-send-v18.md)。
-- 取消可用性：以[已确认修订](model-context-change-cancellation.md)实施事务内终态、定向成员 cutover、渠道 FIFO
+- 取消可用性：以[已确认 revision 2](model-context-change-cancellation.md)实施事务内 cancelled 终态、定向成员 cutover、渠道 FIFO
   收口、发送前边界与三秒 Runtime 清理；Migration 134 为 Data Contract `v1.44 / schema 85`。
-  当前取消合同见 [Cancellation Settlement v1](../../contracts/cancellation-settlement-v1.md)，理由见
+  当前取消合同见 [Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)，理由见
   [V1.37-D02](decisions.md#v1-37-d02)。验收进度记录在实施计划，原图片/钉钉未验收项不因此升级。
 - 当前仍 in_progress：Antigravity 边界已关闭，但 Cursor 非标准通知、所有 Runtime 原生生图及渠道实发
   并未全部验收；本机已观察到的工具/协议/上游限制保留，不提升任何 Runtime 平台资格。
@@ -54,8 +54,8 @@ Applications 安装见[本机交付记录](main-merge-and-daily-app.md)；本轮
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、实施计划、版本索引；v1.36 冻结为 historical，未验收事实保留 |
-| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01) 与 [CURRENT](../../decisions/CURRENT.md) |
-| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)、[Camp Message Send v18](../../contracts/camp-message-send-v18.md) |
+| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D02](decisions.md#v1-37-d02) 与 [CURRENT](../../decisions/CURRENT.md) |
+| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)、[Camp Message Send v18](../../contracts/camp-message-send-v18.md) |
 | Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)；保留既有双主题 |
 | Runtime Activity | 确认无需更新 | 内部图片观察不进入 Canonical Activity，不修改 classifier/映射或已有公开 Evidence |
