@@ -2,14 +2,14 @@
 document_type: architecture
 architecture: planned-shutdown
 authority: planned-core-lifecycle-and-cancel-all-settlement
-last_updated: 2026-08-27
+last_updated: 2026-09-01
 ---
 
 # Planned Shutdown
 
 本文组合主动退出、重启和更新时的 Core 生命周期结构。当前产品定义是：退出 Rovai 即取消所有非终态
 AgentRun，完成本地收口，再结束进程。精确 wire、字段、幂等和 deadline 由
-[Planned Shutdown v4](../contracts/planned-shutdown-v4.md)拥有；Runtime terminal 与未知外部效果边界由
+[Planned Shutdown v5](../contracts/planned-shutdown-v5.md)拥有；Runtime terminal 与未知外部效果边界由
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有。没有 durable shutdown
 cycle 的异常崩溃、强杀、断电继续由 [AgentRun Recovery](agent-run-recovery.md)处理。
 
@@ -73,8 +73,9 @@ stop new scheduler / recovery / discovery work
 完成后再结算期间新增的对象并完成 cycle，累加实际新结算计数；没有新对象时不重复计数。barrier 超时保留
 pending cycle，但不撤销已提交业务终态。
 
-未发送 Run 为 cancelled，accepted/unknown 或可能发生外部效果的 Run 为 failed/accepted_input_outcome_unknown。
-原有更具体取消原因保留，否则使用 app_shutdown_cancel_all；历史 protocol 2 cycle 保留其身份和
+退出事务命中的 Run 一律为 cancelled；未发送 Input 关闭为 not_accepted，accepted/delivery_unknown 与可能发生
+外部效果的 Action 证据继续保留且不自动重发。内部 shutdown report 仍统计这些证据，公共 Run 不显示外部效果
+待确认。原有更具体取消原因保留，否则使用 app_shutdown_cancel_all；历史 protocol 2 cycle 保留其身份和
 planned_shutdown_cancelled 原因，不冒充新 protocol 3 request。业务事务不写 cancel_acknowledged_at。
 
 不写 CampTurn Stop intent，因此 required/optional 聚合规则保留；退出可关闭受影响 Turn 的渠道义务。
@@ -86,8 +87,8 @@ Core 在普通 AgentRun recovery 前按 request 顺序处理 pending cycle：v3 
 Run-local 取消审计；历史 protocol 2 身份保留，使用同一当前结算规则。settled cycle 幂等跳过，已终态 Run 不改写，原 input
 不重发、不恢复、不复制。
 
-补偿完成后的 cancelled 或 outcome-unknown failed Run 都是普通 terminal。Read Side 可独立投影 `hasUnsettledExternalEffects`，但不得把它
-重新显示为恢复中、投递待确认或结果待确认，也不得提供自动重试。
+补偿完成后的 cancelled Run 是普通 terminal。Read Side 不因取消保留的 Input/Action 证据投影
+`hasUnsettledExternalEffects`，也不得把它重新显示为恢复中、投递待确认或结果待确认，或提供自动重试。
 
 ## 6. Deadline 与 Runtime reap
 

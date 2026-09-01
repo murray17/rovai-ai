@@ -84,32 +84,41 @@ export async function canonicalizeExistingPath(path: string): Promise<string> {
 export async function inspectPreviewPath(
   rootPath: string,
   candidatePath: string,
-  options: { allowExternalDirectory?: boolean } = {}
+  options: { allowExternalDirectory?: boolean; allowExternalFile?: boolean } = {}
 ): Promise<{
   canonicalRoot: string
   canonicalPath: string
   kind: 'file' | 'directory'
 }> {
-  const canonicalRoot = await canonicalizeExistingPath(rootPath)
+  let canonicalRoot = await canonicalizeExistingPath(rootPath)
   const canonicalPath = await canonicalizeExistingPath(candidatePath)
   const withinRoot = pathIsWithin(canonicalRoot, canonicalPath)
-  const allowExternalDirectory = options.allowExternalDirectory
-    && !pathIsWithin(canonicalRoot, resolve(candidatePath))
-  if (!withinRoot && !allowExternalDirectory) {
-    throw new FilePreviewAccessError('outside_authorized_root', '这个文件不在已授权目录中。')
-  }
   const metadata = await stat(canonicalPath)
-  if (!withinRoot && !metadata.isDirectory()) {
-    throw new FilePreviewAccessError('outside_authorized_root', '这个文件不在已授权目录中。')
-  }
   if (!metadata.isFile() && !metadata.isDirectory()) {
     throw new FilePreviewAccessError('not_regular_file', '这里只能打开普通文件或文件夹。')
+  }
+  if (!withinRoot) {
+    const externalFile = metadata.isFile() && options.allowExternalFile
+    const externalDirectory = metadata.isDirectory()
+      && options.allowExternalDirectory
+      && !pathIsWithin(canonicalRoot, resolve(candidatePath))
+    if (!externalFile && !externalDirectory) {
+      throw new FilePreviewAccessError('outside_authorized_root', '这个文件不在已授权目录中。')
+    }
+    // One exact external file gets a file-scoped capability. Its parent is
+    // retained only as the ephemeral watcher/relative-child boundary; it is
+    // never persisted or returned as a Root Grant.
+    if (externalFile) canonicalRoot = dirname(canonicalPath)
   }
   return { canonicalRoot, canonicalPath, kind: metadata.isDirectory() ? 'directory' : 'file' }
 }
 
-export async function openPreviewFile(rootPath: string, candidatePath: string): Promise<OpenedPreviewFile> {
-  const { canonicalRoot, canonicalPath, kind } = await inspectPreviewPath(rootPath, candidatePath)
+export async function openPreviewFile(
+  rootPath: string,
+  candidatePath: string,
+  options: { allowExternalFile?: boolean } = {}
+): Promise<OpenedPreviewFile> {
+  const { canonicalRoot, canonicalPath, kind } = await inspectPreviewPath(rootPath, candidatePath, options)
   if (kind !== 'file') throw new FilePreviewAccessError('not_regular_file', '这里只能读取普通文件。')
   let file: FileHandle
   try {

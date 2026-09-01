@@ -57,7 +57,6 @@ export type FilePreviewOpenOutcome =
   | { kind: 'preview'; tabId: string }
   | { kind: 'system' }
   | { kind: 'evidence_review'; result: Extract<OpenFilePreviewResult, { kind: 'evidence_review' }> }
-  | { kind: 'cancelled' }
   | { kind: 'error'; error: FilePreviewErrorPayload }
 
 export interface FilePreviewOpenFeedback {
@@ -96,6 +95,17 @@ function errorFromUnknown(): FilePreviewErrorPayload {
   return {
     code: 'read_failed',
     message: '无法打开文件。',
+    retryable: true
+  }
+}
+
+function safeOpenError(error: FilePreviewErrorPayload): FilePreviewErrorPayload {
+  if (!['authorization_required', 'outside_authorized_root', 'source_not_authorized'].includes(error.code)) {
+    return error
+  }
+  return {
+    code: error.code,
+    message: '无法打开文件。文件可能已被移动或删除。',
     retryable: true
   }
 }
@@ -337,17 +347,7 @@ export function FilePreviewProvider({
     try {
       const result = await window.rovai.filePreview.open(request)
       if (result.ok) return install(result.value)
-      const challenge = result.error.authorizationChallenge
-      if (result.error.code !== 'authorization_required' || !challenge) {
-        return { kind: 'error', error: result.error }
-      }
-      const granted = await window.rovai.filePreview.chooseAuthorizedRoot({
-        campId: challenge.campId,
-        pendingOpenId: challenge.pendingOpenId
-      })
-      if (!granted.ok) return { kind: 'error', error: granted.error }
-      if (!granted.value) return { kind: 'cancelled' }
-      return install(granted.value.result)
+      return { kind: 'error', error: safeOpenError(result.error) }
     } catch {
       return { kind: 'error', error: errorFromUnknown() }
     }

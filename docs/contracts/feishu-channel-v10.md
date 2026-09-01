@@ -77,4 +77,4 @@ Web 页面复用当前 Rovai Porcelain Day / Steel Night 的语义 token、品�
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [渠道 UI](../ui/components/channel-settings.md)
 - [v1.37 实施计划](../versions/v1.37/implementation-plan.md)
-- [V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)
+- [V1.37-D05](../versions/v1.37/decisions.md#v1-37-d05)

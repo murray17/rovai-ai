@@ -225,5 +225,15 @@ Transport v21、CLI/capability version、IPC、Envelope、receipt 与 Agent Outp
 
 ## 实际实施
 
-revision 1 已确认，尚未开始实现。治理文档先通过独立 PR 合入 main；编码从该 governance merge commit 建立
-新 worktree 后开始。本节在实现完成时追加实际版本、迁移结论与验证结果，不改写已确认的前后合同。
+revision 1 治理文档先通过独立 PR 合入 main；编码从 governance merge commit
+`db82d229f24cc6c1ffad1c3910d53a82a8f57942` 建立新 worktree 后实施。实际改动逐字采用本文“变更后”七处
+文本：Bootstrap、Send summary/`publicOnly` schema/help 与 Gather schema/help 不再教学 inline fallback，
+`--to` 保持唯一推荐入口。Session Charter revision 升至 5，Camp Message Send v19 与 Gather v5 成为 current；
+其他版本轴、schema shape、数据库和 wire 均未改变，`message_delivery.rs` parser 未修改。
+
+定向 owner 验证完整 Charter、Send/Gather 精确教学、不同/重复 Gather `--to` 校验、多队员 mention、
+`@惠 @Principal` accepted 且只路由惠、以及 PublicOnly 旁路，全部通过。全量验证通过：Rust Library 472、CLI 32、
+slow 297 项；Vitest 133 文件 / 1357 项；Node 220 项通过、1 项既有 Windows 测试按平台跳过；文档 9 项、Skill
+3 项、TypeScript typecheck、Desktop build、fmt、Clippy、普通文档门禁、固定 implementation PR base
+`a6353017ad9b678d112cd2edea9a99a7f6d96716` 的 CI 文档门禁及 `git diff --check` 均通过。未启动真实 Runtime、
+调用模型或发送 Camp/渠道消息；Applications 打包与非终止安装只在 implementation PR 合入 main 后进行。

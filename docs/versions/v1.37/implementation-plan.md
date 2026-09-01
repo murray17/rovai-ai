@@ -22,11 +22,15 @@ last_updated: 2026-09-01
 - [x] 两种图片均去除文件名、来源/数量标题、projection 说明与系统打开/Finder 菜单，只保留大图预览和关闭。
 - [x] Renderer 进程内缓存已解码 Blob payload；附件切回不重读，Runtime 切回先显示再后台刷新，Tile 独立释放 URL。
 - [x] 钉钉完整产品链路未验收，合入 main 前隐藏渠道页整个入口；保留实现、已有数据及独立登录组件回归。
+- [x] 具体文件点击直接创建临时只读 Preview handle；工作区外文件、五类来源与 symlink 不再自动升级 Root Grant；
+  HTML/Markdown 资源限定文档目录并随 Tab 释放，Renderer 删除 `authorization_required → chooseAuthorizedRoot()`。
 - [x] 开发者单独确认 revision 1 后实施精确文件帮助与飞书新 Bootstrap 提示；静态资源与其他上下文轴不变。
 - [x] 开发者单独确认 Principal 寻址教学 revision 1 后，从 Authority boundary 删除正文 `@Principal`
   寻址暗示；仅 Charter revision 3→4，`rovai send --help`、发送效果与 Agent audience 投影不变。
 - [x] 开发者确认多队员 mention cluster revision 3 后，将 Agent `body` help 收敛为 payload 说明；扩展
   Core-only 行首连续有效 alias 解析，未知/歧义/`@Principal` tail 保持 Text，不新增拒绝。
+- [x] 开发者二次确认 Agent 寻址帮助 revision 1 后，从 Bootstrap、Send/Gather schema 与 CLI help 删除
+  inline fallback 机制教学；`--to` 保持唯一推荐入口，Charter revision 4→5，parser 与发送效果不变。
 - [x] Antigravity 真实生成图片终态、TRAE/Copilot 专用图片结果 fixture 与适配；本机队员经过隔离 Core 复测。
 - [x] 飞书执行卡改为纯状态入口；最近输出与 exact-run 停止保留 Owner callback，打开执行台使用首次创建时
   冻结的 Card 2.0 `open_url`，更新、Main 重启及网络变化均不重签旧卡。
@@ -39,6 +43,13 @@ last_updated: 2026-09-01
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
 ## 验证 owner
+
+- `file-preview-access.test.ts` 与 `file-preview-service.test.ts` 拥有具体文件能力边界：默认 containment 仍拒绝越界，
+  只有五类可信文件来源显式启用 exact external file；覆盖绝对/Home/file URI/symlink、Attachment、Run Evidence、
+  child handle、描述符恢复、reload、系统操作、HTML CSS/图片、Markdown 相对链接、目录 Root Grant 保留与资源释放。
+- `pnpm test:file-reference-navigation` 使用生产 `FilePreviewProvider` 的隔离 Electron fixture，强制注入旧
+  `authorization_required`，验证点击不会调用 `chooseAuthorizedRoot`，内部授权原因不会进入用户通知；同时保留
+  文件定位、阅读锚点、键盘与双主题回归。该夹具不启动 Core、Runtime 或访问日常数据。
 
 - `agent_run_image::tests::published_attachment_replaces_matching_runtime_image_presentation` 拥有跨来源展示过滤，
   使用同一个隔离 SQLite fixture；既有混合存储测试没有消息/附件关系，不能覆盖这个组合读取 seam。
@@ -87,10 +98,27 @@ last_updated: 2026-09-01
   `message_delivery::tests::line_leading_display_name_alias_supports_whitespace_separated_clusters`、
   `team_tool::tests::slow_tests::public_send_schema_keeps_inline_fallback_out_of_agent_body_help` 与
   `team_tool::tests::slow_tests::public_send_resolves_line_leading_display_name_cluster_before_delivery`。
+- Agent 寻址帮助 revision 1 继续扩展上述既有 owner：逐字冻结完整 revision 5 Charter、Send summary、
+  `publicOnly` schema/help、Gather `body`/`to` schema 与 CLI `--to` help，并负向断言 Agent-visible teaching
+  不出现 inline fallback。CLI schema 验证不同 canonical `--to` 可重复、同一 ID 重复因 `uniqueItems` 拒绝；
+  原样运行 parser、SQLite multi-recipient、literal invalid-tail 与 PublicOnly owner，禁止新建平行 parser fixture。
 - 核对到既有文档漂移：基础不变量曾把 Bootstrap 第三段写成 COLLABORATION_STATE；按既有实现、
   formatter golden 和 Built-in 架构校正为 MEMORY_ENTRYPOINT。仅校正文档，不改变 Bootstrap 格式。
 
 ## 证据状态
+
+### 2026-09-01 Agent 寻址帮助去机制化
+
+- revision 1 七处精确教学 owner、完整 Session Charter revision 5、catalog compatibility 轴、Gather distinct/
+  duplicate `--to` 校验全部通过；既有 parser、SQLite multi-recipient 与 PublicOnly owner 原样通过。
+  `@惠 @Principal` 保持 accepted，只路由惠并保留 literal tail，没有增加严格拒绝。
+- `cargo fmt --all --check` 与 `cargo clippy --workspace --all-targets --features slow-tests -- -D warnings` 通过；
+  `pnpm test:rust:pr` 的 Library 472、CLI 32、slow 297 项全部通过。
+- `pnpm test` 通过：133 个 Vitest 文件 / 1357 项、220 项 Node tests，1 项既有 Windows 原生测试按平台跳过；
+  文档 9 项、Skill 3 项及对应治理门禁通过。`pnpm typecheck`、`pnpm build:desktop` 和
+  `git diff --check` 通过。
+- 固定 implementation PR base `a6353017ad9b678d112cd2edea9a99a7f6d96716` 的 `docs:check:ci` 通过。
+  本阶段未启动真实 Runtime、调用模型或发送 Camp/渠道消息；Applications 打包与非终止安装在 main 合并后执行。
 
 ### 2026-09-01 Principal 教学与多队员 mention cluster
 
@@ -188,8 +216,10 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   本机只读诊断确认旧卡点是迟到输入观察推进 Run version，使 ACK 被 fence；固定 ACK command ID
   随新版本重试又产生幂等冲突。没有改写日常数据库或借重启掩盖这个问题。
 - 只增加 Input `dispatch_started_at`、Channel `retry_suppression_json` 和窄索引，Migration 134 原子升级至
-  v1.44/schema85。发送准入和取消以数据库提交排序；未知效果保持 failed/accepted_input_outcome_unknown，
-  不自动重发。非终态旧 prepared 保守迁移为 unknown，历史终态不改写。
+  v1.44/schema85。发送准入和取消以数据库提交排序；非终态旧 prepared 保守迁移为 unknown，历史终态不改写。
+  #153 初版曾将取消中的发送/效果不确定性写为 failed/accepted_input_outcome_unknown；真实主动停止验证表明该分类
+  会把用户已经完成的取消永久显示为失败和待确认，现已退役。取消 Run 统一为 cancelled，底层证据保留且不自动
+  重发；旧精确形状仅在 Read Side 兼容为已取消，不改写历史数据库。
 - 成员离队原样复用两个 affected selector，结算自身 lifetime 和已持久化关联工作的 Run，
   原 pending delivery 原因码、Gather/item、Task 解除 assignee 保留。reconciliation 同事务 completed；
   只重算受影响 Turn，同轮无关 Run 和仍 admitted 的渠道请求不受整轮关闭影响。
@@ -285,3 +315,36 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - 文档单测、普通门禁及固定 main base `8988f58d624fea076716f79402888a2e5cb943e3` 的 CI 文档门禁通过。
   新合同使用后继版本并更新 current 路由，原 accepted 历史合同保持不变；通用文档门禁没有增加例外。
   本轮没有安装、重启日常 App，也没有向真实渠道发件。
+
+### 2026-09-01 具体文件直接预览
+
+- Main 只在 Core/Attachment/父 handle 已确认来源并最终定位到普通文件后启用 exact external file；外部文件以
+  canonical parent 作为临时 watcher/child 边界，不创建 Root Grant。Attachment、Run Evidence、Home/file URI、
+  absolute path、symlink、Markdown/HTML child 与不支持格式系统打开的定向回归全部通过。
+- HTML/Markdown token 固定到 `dirname(canonicalFile)`，CSS 相对图片可用，Camp root 中但文档目录外的资源返回
+  404；释放父 handle 后 token 返回未授权，已打开子 handle 独立保留。显式外部目录 Root Grant 回归仍通过。
+- Renderer 删除自动 `chooseAuthorizedRoot` 分支；生产 `FilePreviewProvider` 的隔离 Electron 夹具注入旧授权错误后，
+  目录选择调用为零，只显示通用可恢复文案。文件定位、阅读锚点、键盘、双主题和布局夹具均通过。
+- 定向 File Preview Vitest 11 文件 / 84 项、`pnpm typecheck`、`pnpm build:desktop`、
+  `pnpm test:file-reference-navigation` 与 `pnpm test:file-preview-layout` 通过；Impeccable detector 无命中。
+- `pnpm test` 通过：133 个 Vitest 文件 / 1362 项、221 项 Node tests（1 项既有 Windows 原生跳过），文档 9 项、
+  Skill 3 项及普通治理门禁通过；固定 base `ea0634631697d40f72bac05df19aeeb694d2481d` 的
+  `docs:check:ci` 通过。未启动日常 App、Core、Runtime，未访问或改写真实 Camp 数据。
+### 2026-09-01 主动停止取消分类补正
+
+- 退役 #153 引入的 `failed/accepted_input_outcome_unknown` 取消分类：用户主动停止统一结算为
+  `cancelled`，保留 Input/Action/Runtime Delivery 原始发送与效果证据、cleanup fence、禁止自动重发和
+  terminal delivery pump；运行时自行进入终态且仍有未决外部效果的非取消路径继续显示风险提示。
+- Read Side 只兼容 `cancel_requested_at` 已存在、`terminal_resolution_source` 为空的精确历史形状，
+  不改写数据库，也不覆盖普通 recovery blocker 或 Runtime terminal 证据。Renderer 仅在本次取消事务返回
+  `agent_run.cancelled` 时清除旧提示，`already_terminal` 保留原快照证据。
+- TDD owner 在旧实现上先得到 `agent_run.accepted_input_outcome_unknown` 失败，再通过；
+  `pnpm test:rust:pr` 的 Library 472、CLI 32、slow 297 项全部通过，Core Main 187 项通过、4 项既有真实
+  Runtime 人工 smoke 忽略，Core startup 以 `--test-concurrency=1` 运行 9 项通过。默认并发曾分别在
+  `skills` retry 和 `maintenance` settle 撞到既有十秒夹具上限，失败场景定向复跑通过；未放宽阈值或修改
+  无关启动代码。`cargo clippy --workspace --all-targets -- -D warnings`、
+  `cargo fmt --all --check`、`pnpm typecheck`、`pnpm build:desktop` 与 `git diff --check` 通过。
+- `pnpm test` 通过：133 个 Vitest 文件 / 1357 项、220 项 Node tests，1 项既有 Windows 原生测试按平台跳过；
+  文档 9 项、Skill 3 项及普通治理门禁通过。固定 PR base
+  `ea0634631697d40f72bac05df19aeeb694d2481d` 的 `docs:check:ci` 通过；本轮未启动日常 App 或真实 Runtime，
+  未改写日常数据库，也未向渠道发件。

@@ -13,8 +13,8 @@ last_updated: 2026-09-01
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v18](../contracts/camp-message-send-v18.md)、
-[Gather v4](../contracts/gather-v4.md)、
+[Camp Message Send v19](../contracts/camp-message-send-v19.md)、
+[Gather v5](../contracts/gather-v5.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md) 为准；v19 及更早 Transport 只保留
 historical 语义。决策理由见
@@ -168,17 +168,17 @@ CLI 不根据 `messageId` 或其他 branch 字段猜测 mode。
 文件用途只在 `--file` 的精确帮助中说明：发送收件人需要的交付文件，不把中间产物当成交付。
 Summary 不再说明附件快照、路径优化或纯附件示例；输入 schema、纯附件发送和路径处理均不变。
 精确教学、Principal 寻址去歧义及飞书 Session 的补充提示由
-[Camp Message Send v18](../contracts/camp-message-send-v18.md) 拥有。
+[Camp Message Send v19](../contracts/camp-message-send-v19.md) 拥有。
 
-Send `body` exact help 只说明正文 payload，不公开 canonical inline token、display-name alias 或 cluster grammar；
-`--to` 只接受 canonical ID，并是 Agent 目标 authoring 的唯一推荐入口。Core Domain Service 保留 line-leading
-连续有效 mention 的兼容 parser，未知/歧义 alias 只结束 cluster 并保持 Text；CLI、Runtime Adapter、Bootstrap
-与 Skill 都不重写正文或教学该 grammar。`--public-only` 在任何 alias/member lookup 前绕过正文寻址，并与显式
+Send `body` exact help 只说明正文 payload；Bootstrap、Send summary/schema/CLI help 与 Gather schema/CLI help
+都不公开 inline fallback 机制。`--to` 只接受 canonical ID，并是 Agent 目标 authoring 的唯一推荐入口。Core
+Domain Service 保留 line-leading 连续有效 mention 的兼容 parser，未知/歧义 alias 只结束 cluster 并保持 Text；
+CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 grammar。`--public-only` 在任何 alias/member lookup 前绕过正文寻址，并与显式
 `to/taskId` 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 该 schema 继续进入当前 catalog digest。
 当前 v21 contract/CLI command version、`builtin_cli.transport.v21` capability 与 IPC protocol 2 必须同时进入
 Binding compatibility 和 digest。Camp History 使用 v4；Native Binding context contract 加入内部
-`sessionCharterRevision: 4`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
+`sessionCharterRevision: 5`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
 继续使用 Formatter 22 / ContextManifest 22，不做 endpoint 猜测并 fail closed。
 
 `ROVAI_RUN_TMP` 是 Runtime Host 启动时继承的稳定精确路径，不是 process root、Camp workspace 或附件存储。
@@ -410,7 +410,7 @@ Session Charter 只说明：
 最后一条后、Adapter 指导前追加一条文件交付提示。Quick Chat/Project 共用该 Camp 级判断；普通、钉钉、
 closed 或尚未绑定的会话不追加。已有 Binding 从 Blob 复用冻结 Charter，不重新查询渠道，因此关闭绑定或
 从本地继续聊天不改写提示，也不触发 Session rotation。下一次正常新 Binding 才读取当前关系。
-精确文本见 [Send v18](../contracts/camp-message-send-v18.md#feishu-session-charter)。
+精确文本见 [Send v19](../contracts/camp-message-send-v19.md#session-charter-and-feishu)。
 
 Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local planning/A2A、wake/send、Memory
 治理或 polling 操作指导。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
@@ -492,9 +492,9 @@ AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break �
 v1.23 不修改 Bootstrap wrapper、Formatter 或数据库，而是在 Native Binding context contract 中加入
 `sessionCharterRevision: 2`；该字段只进入每个 Adapter 的 Binding compatibility digest，使新 Run 轮换旧
 Native Session 并投递完整新 Charter，历史 Bootstrap Evidence 保留原 bytes/digest。
-当前 revision 为 4；Principal Authority-boundary 只教学 `--to-principal`，Structured Current User Mention 的
-Agent audience 仍投影为 `@Principal`。本次去歧义与既有飞书文件提示继续复用同一兼容路径，不新增迁移或
-重启机制。
+当前 revision 为 5；Principal Authority-boundary 只教学 `--to-principal`，Agent 目标 authoring 只教学
+canonical `--to`，Structured Current User Mention 的 Agent audience 仍投影为 `@Principal`。本次教学收敛、
+既有去歧义与飞书文件提示继续复用同一兼容路径，不新增迁移或重启机制。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
@@ -539,7 +539,7 @@ Run Camp，origin/reference/recent 三类消息不得跨 Camp。单消息保留 
 不能丢失。截断只投影 `nextBodyOffset`，omitted aggregate 只投影 count 与最小/最大 sequence envelope。
 
 同一 Structured `CurrentUserMention(local_user)` 在 Human/FTS 投影为 `@你`，在 Agent Current Input、Shared
-Conversation、reference closure、Camp History 和 Gather v4 投影为 `@Principal`；content digest 不变，Agent
+Conversation、reference closure、Camp History 和 Gather v5 投影为 `@Principal`；content digest 不变，Agent
 offset/digest 只在 `agent_v1` 空间计算。Recent selector 在 top-15 前排除目标 Agent 自己发布的消息，且
 whole-history omission 使用同一 eligible set；自身消息仍可作为必要 reference ancestor。ContextManifest v20 冻结该 audience、真实 Camp/source refs、完整
 body length、truncation/offset、source/projected digests、A2A guidance closed evidence、attachment identity/digest

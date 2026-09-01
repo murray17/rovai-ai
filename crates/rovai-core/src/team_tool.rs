@@ -598,14 +598,14 @@ impl TeamToolService {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": CAMP_MESSAGE_SEND_MAX_BODY_BYTES,
-                    "description": "One shared public topic for every Gather recipient. Canonical inline addressing follows camp.message.send rules."
+                    "description": "One shared public topic for every Gather recipient."
                 },
                 "to": {
                     "type": "array",
                     "maxItems": 16,
                     "uniqueItems": true,
                     "items": {"type": "string", "minLength": 1},
-                    "description": "Canonical Agent IDs to gather from. Explicit and valid inline recipients are merged, deduplicated and frozen in canonical byte order."
+                    "description": "Canonical Agent IDs to gather from. Effective recipients are frozen in canonical byte order."
                 }
             }
         })
@@ -2916,6 +2916,7 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     fn public_send_schema_keeps_inline_fallback_out_of_agent_body_help() {
         let schema = TeamToolService::camp_message_send_input_schema();
+        let gather_schema = TeamToolService::gather_input_schema();
         let body_description = schema["properties"]["body"]["description"]
             .as_str()
             .unwrap();
@@ -2935,6 +2936,27 @@ mod tests {
         }
         assert!(to_description.contains("canonical Agent ID"));
         assert!(to_description.contains("Display names are not accepted here"));
+        assert_eq!(
+            gather_schema["properties"]["body"]["description"],
+            "One shared public topic for every Gather recipient."
+        );
+        assert_eq!(
+            gather_schema["properties"]["to"]["description"],
+            "Canonical Agent IDs to gather from. Effective recipients are frozen in canonical byte order."
+        );
+        assert_eq!(gather_schema["properties"]["to"]["uniqueItems"], true);
+        assert!(
+            !gather_schema["properties"]["body"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("inline")
+        );
+        assert!(
+            !gather_schema["properties"]["to"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("inline")
+        );
     }
 
     #[test]

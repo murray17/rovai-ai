@@ -135,4 +135,4 @@ v9 不再为飞书执行卡提供旧终态分页 callback。已发送旧卡不�
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [渠道 UI](../ui/components/channel-settings.md)
 - [v1.37 实施计划](../versions/v1.37/implementation-plan.md)
-- [V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)
+- [V1.37-D05](../versions/v1.37/decisions.md#v1-37-d05)

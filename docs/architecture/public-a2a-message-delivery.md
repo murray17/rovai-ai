@@ -9,7 +9,7 @@ last_updated: 2026-09-01
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v18](../contracts/camp-message-send-v18.md)、
+分别见 [Camp Message Send v19](../contracts/camp-message-send-v19.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
 [Message Delivery v8](../contracts/message-delivery-v8.md)、
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md)、
@@ -236,7 +236,7 @@ Agent routing 与 User attention 不能相互推导。exact `camp.read item` 分
 `effectiveAgentRecipients` 与从 Structured Content 派生的 `mentionsCurrentUser`；notification clear、
 retention 或 source unavailable 不改变后者。Renderer 展示名称只是当前 presentation，不能改写
 `local_user` segment、消息 digest 或 Runtime 已冻结的 Context bytes。同一 Structured CurrentUserMention 在
-Human body/FTS/UI 显示 `@你`，在 Agent Context、Camp History 与 Gather v4 输入显示 `@Principal`；Agent
+Human body/FTS/UI 显示 `@你`，在 Agent Context、Camp History 与 Gather v5 输入显示 `@Principal`；Agent
 snippet、Unicode-scalar offset 和 projected digest 均在 `agent_v1` 空间计算，禁止字符串替换 Human cache。
 
 `camp.read item` 对当前 Run 自己已提交的 accepted send 具有一条 command-result-bound 的窄

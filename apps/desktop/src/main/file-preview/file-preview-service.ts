@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, resolve } from 'node:path'
 import type { FileHandle } from 'node:fs/promises'
 import type {
   FileContentVersion,
@@ -157,6 +157,7 @@ interface HtmlPreviewToken {
   webContentsId: number
   campId: string
   generation: string
+  assetRoot: string
   expiresAt: number
 }
 
@@ -428,6 +429,7 @@ export class FilePreviewService {
       webContentsId: record.webContentsId,
       campId: record.campId,
       generation: record.generation,
+      assetRoot: dirname(record.canonicalPath),
       expiresAt: Date.now() + HTML_TOKEN_TTL_MS
     }
     this.#htmlTokens.set(token.token, token)
@@ -435,7 +437,7 @@ export class FilePreviewService {
       html: result.value.text,
       tabToken: token.token,
       bridgeToken: token.bridgeToken,
-      assetBasePath: relative(record.canonicalRoot, dirname(record.canonicalPath)).replace(/\\/gu, '/'),
+      assetBasePath: '',
       contentGeneration: result.value.contentGeneration,
       contentVersion: result.value.contentVersion
     })
@@ -479,7 +481,7 @@ export class FilePreviewService {
       const relativePath = parsed.pathSegments.join('/')
       const mime = htmlAssetMime(relativePath)
       if (!mime) return new Response(null, { status: 415 })
-      opened = await openPreviewFile(record.canonicalRoot, resolve(record.canonicalRoot, ...parsed.pathSegments))
+      opened = await openPreviewFile(token.assetRoot, resolve(token.assetRoot, ...parsed.pathSegments))
       const limit = mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/')
         ? filePreviewLimits.binaryBytes
         : HTML_ASSET_BYTES
@@ -520,7 +522,7 @@ export class FilePreviewService {
       const parsed = this.#parsedReference(target)
       const candidatePath = await this.#candidatePath(target, parsed)
       const beforeSequence = this.#watchers.sequence(record.canonicalRoot)
-      const opened = await openPreviewFile(target.rootPath, candidatePath)
+      const opened = await openPreviewFile(target.rootPath, candidatePath, this.#fileAccessOptions(target))
       const classification = await this.#classify(opened)
       if (classification.kind === 'system') {
         await opened.file.close().catch(() => undefined)
@@ -728,6 +730,7 @@ export class FilePreviewService {
   ): Promise<FilePreviewOperationResult<OpenFilePreviewResult>> {
     const parsed = this.#parsedReference(target)
     const candidatePath = await this.#candidatePath(target, parsed)
+    const fileAccessOptions = this.#fileAccessOptions(target)
     let opened: OpenedPreviewFile
     try {
       // Explicit outside directories only need a native reveal, not a read grant.
@@ -735,7 +738,10 @@ export class FilePreviewService {
       const allowExternalDirectory = (request.kind === 'message_reference' || request.kind === 'camp_workspace')
         && target.allowChildren !== false && parsed.pathKind !== 'relative'
         && isAbsolute(candidatePath) && !pathIsWithin(resolve(target.rootPath), candidatePath)
-      const path = await inspectPreviewPath(target.rootPath, candidatePath, { allowExternalDirectory })
+      const path = await inspectPreviewPath(target.rootPath, candidatePath, {
+        allowExternalDirectory,
+        ...fileAccessOptions
+      })
       if (path.kind === 'directory') {
         if (target.allowChildren === false || request.kind === 'run_evidence') {
           return failed('not_regular_file', '这个来源不支持打开文件夹。')
@@ -752,7 +758,7 @@ export class FilePreviewService {
           return failed('open_failed', '无法在文件管理器中显示这个文件夹。', true)
         }
       }
-      opened = await openPreviewFile(target.rootPath, candidatePath)
+      opened = await openPreviewFile(target.rootPath, candidatePath, fileAccessOptions)
     } catch (error) {
       if (
         permitAuthorizationChallenge
@@ -766,7 +772,7 @@ export class FilePreviewService {
           openRisk: target.openRisk ?? 'normal',
           allowChildren: target.allowChildren ?? true
         }, candidatePath)
-        return failed('authorization_required', '这个文件位于当前项目之外，需要选择其所属目录。', false, {
+        return failed('authorization_required', '这个目录需要通过显式目录操作访问。', false, {
           displayReference: challenge.displayReference,
           authorizationChallenge: challenge
         })
@@ -779,7 +785,7 @@ export class FilePreviewService {
     } catch (error) {
       await opened.file.close().catch(() => undefined)
       if (!(error instanceof FilePreviewAccessError) || error.code !== 'read_failed') throw error
-      opened = await openPreviewFile(target.rootPath, candidatePath)
+      opened = await openPreviewFile(target.rootPath, candidatePath, fileAccessOptions)
       classification = await this.#classify(opened)
     }
     const fileName = target.displayName || opened.fileName
@@ -851,6 +857,10 @@ export class FilePreviewService {
     return target.sourceKind === 'message_reference' || target.sourceKind === 'camp_workspace'
       ? resolveFileReferencePath(parsed, target.rootPath, target.basePath)
       : referenceCandidatePath(parsed, target.rootPath, target.basePath)
+  }
+
+  #fileAccessOptions(target: { sourceKind: OpenFilePreviewRequest['kind'] }): { allowExternalFile: boolean } {
+    return { allowExternalFile: target.sourceKind !== 'authorized_root' }
   }
 
   #parsedReference(target: { rawReference?: string; candidatePath?: string; target?: FileLocationTarget }): ParsedFileReference {
@@ -989,7 +999,7 @@ export class FilePreviewService {
     const target = await this.#resolveReopenTarget(record)
     const parsed = this.#parsedReference(target)
     const candidatePath = await this.#candidatePath(target, parsed)
-    const opened = await openPreviewFile(target.rootPath, candidatePath)
+    const opened = await openPreviewFile(target.rootPath, candidatePath, this.#fileAccessOptions(target))
     if (
       opened.canonicalRoot !== record.canonicalRoot
       || opened.canonicalPath !== record.canonicalPath
@@ -1019,7 +1029,7 @@ export class FilePreviewService {
     const target = await this.#resolveReopenTarget(record)
     const parsed = this.#parsedReference(target)
     const candidatePath = await this.#candidatePath(target, parsed)
-    const opened = await openPreviewFile(target.rootPath, candidatePath)
+    const opened = await openPreviewFile(target.rootPath, candidatePath, this.#fileAccessOptions(target))
     try {
       if (
         opened.canonicalRoot !== record.canonicalRoot
