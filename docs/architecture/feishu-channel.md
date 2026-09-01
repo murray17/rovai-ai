@@ -293,8 +293,8 @@ hash 和冻结的 `ChannelConversation/App/Camp/Agent/focusRun/maxRunCreatedAt` 
 浏览器先取当前 snapshot，再以 Fetch Streaming 建立 SSE。Main 每次都把冻结 scope 交给 Core，Core 复核 focus Run、
 渠道/App、Camp、队员、成员关系和历史上界，并只返回同 Camp/队员且不晚于 focus Run 的公开投影。Main 继续复用 shared
 execution redactor/projector 生成公开正文、安全 command/result 与文件变化；reasoning、完整工具输入、原始 patch、任意文件、
-终端/写入/审批能力、Cookie、Token 和敏感环境变量不跨出进程边界。网页使用当前双主题与连续展开时间线，桌面/手机共享
-同一结构，不提供折叠或分页。
+终端/写入/审批能力、Cookie、Token 和敏感环境变量不跨出进程边界。网页使用当前双主题与连续时间线，桌面/手机共享
+同一结构；AgentRun、连续操作组和有公开 detail 的 command 复用生产执行台的嵌套 disclosure，不提供分页。
 
 “显示最近输出”和“停止执行”仍通过 callback envelope 的 operator、冻结 App 与 authoritative external message 做
 Owner 校验。停止命令还校验 exact AgentRun 仍可取消，Core 只结算这一条 Run；Main 不直接操作 Runtime 或扩大到整轮。

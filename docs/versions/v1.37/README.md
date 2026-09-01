@@ -45,7 +45,8 @@ last_updated: 2026-09-01
   [V1.37-D02](decisions.md#v1-37-d02)。验收进度记录在实施计划，原图片/钉钉未验收项不因此升级。
 - 飞书执行卡已收敛为纯状态与三个入口；“打开执行台”在卡片创建时冻结 LAN HTTP `open_url`，以 Main 内存
   Token 限定同 Camp/队员、focus Run 及其之前历史，不做点击鉴权、Owner 私聊、地址刷新或旧卡修复。
-  全局端口设置位于渠道页最底部并默认折叠；桌面/手机 Web 时间线无折叠。当前合同见
+  全局端口设置位于渠道页最底部并默认折叠；桌面/手机 Web 时间线的目标交互复用生产执行台的 AgentRun、操作组与
+  command 嵌套 disclosure，当前 HTML 稿已完成、生产页替换待确认。当前合同见
   [Feishu Channel v9](../../contracts/feishu-channel-v9.md)，理由见 [V1.37-D04](decisions.md#v1-37-d04)。
 - 当前仍 in_progress：Antigravity 边界已关闭，但 Cursor 非标准通知、所有 Runtime 原生生图及渠道实发
   并未全部验收；本机已观察到的工具/协议/上游限制保留，不提升任何 Runtime 平台资格。

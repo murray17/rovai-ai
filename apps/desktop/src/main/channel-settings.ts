@@ -232,6 +232,7 @@ type ExecutionCardPresentationState = {
   externalMessageId: string | null
   executionViewUrl: string | null
   recentOutputVisible: boolean
+  latestSource: ExecutionConsoleSource
   lastCardDigest: string | null
 }
 
@@ -1687,7 +1688,29 @@ export class ChannelSettingsService {
             checkDeadline()
             if (result.status === 'rejected') return executionConsoleCardActionResponse(result.code)
             void this.#pump()
-            return { toast: { type: 'success', content: '已停止执行' } }
+            const terminalStatus = executionTerminalStatus(result.payload.status)
+            if (!state || !terminalStatus) {
+              return { toast: { type: 'success', content: '停止请求已处理' } }
+            }
+            const source: ExecutionConsoleSource = {
+              ...state.latestSource,
+              run: {
+                ...state.latestSource.run,
+                status: terminalStatus,
+                waitReason: null
+              },
+              state: 'terminal_pending'
+            }
+            state.latestSource = source
+            const card = feishuExecutionStateCard(source, state)
+            state.lastCardDigest = digest(JSON.stringify(card))
+            return {
+              ...feishuPageCardResponse(card),
+              toast: {
+                type: 'success',
+                content: terminalStatus === 'cancelled' ? '已取消执行' : '执行已结束'
+              }
+            }
           }
           const result = await this.#commandWithId(
             'channels.executionConsole.recentOutput.authorize',
@@ -1721,9 +1744,11 @@ export class ChannelSettingsService {
             externalMessageId: current.externalMessageId,
             executionViewUrl: null,
             recentOutputVisible: false,
+            latestSource: current,
             lastCardDigest: null
           }
           this.#executionCardStates.set(action.agentRunId, state)
+          state.latestSource = current
           state.recentOutputVisible = action.visible
           const card = feishuExecutionStateCard(current, state)
           state.lastCardDigest = digest(JSON.stringify(card))
@@ -2105,10 +2130,12 @@ export class ChannelSettingsService {
                   maxRunCreatedAt: source.runCreatedAt
                 }) ?? null,
               recentOutputVisible: false,
+              latestSource: source,
               lastCardDigest: null
             }
             this.#executionCardStates.set(source.agentRunId, state)
           }
+          state.latestSource = source
           const card = feishuExecutionStateCard(source, state)
           const cardDigest = digest(JSON.stringify(card))
           if (messageId) {
@@ -2750,6 +2777,14 @@ function executionConsoleCardActionResponse(
     return { toast: { type: 'info', content: '执行记录状态已更新，请重新操作' } }
   }
   return { toast: { type: 'error', content: '执行记录更新失败，请重试' } }
+}
+
+function executionTerminalStatus(
+  value: unknown
+): 'succeeded' | 'failed' | 'cancelled' | null {
+  return value === 'succeeded' || value === 'failed' || value === 'cancelled'
+    ? value
+    : null
 }
 
 function projectSelectionOperation(payload: Record<string, unknown>): ProjectSelectionOperation {

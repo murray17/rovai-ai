@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Rovai AI · 只读执行台设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-hover: #e8eaea;
+      --conversation-surface: #ffffff;
+      --execution-running-surface: #fafafa;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --rail-logo: #526f88;
+      --ember: #d3a45f;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --neutral-soft: #ecefe9;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, 0.16);
+      --evidence-canvas: #f4f6f3;
+      --evidence-surface: #ffffff;
+      --evidence-ink: #252a36;
+      --evidence-muted: #5f6678;
+      --evidence-line: #d5dad3;
+      --shell-result-canvas: #f3f4f3;
+      --diff-add: #137333;
+      --diff-remove: #b3261e;
+      --identity-user: #405f7e;
+      --identity-agent: #547245;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-hover: #1d252b;
+      --conversation-surface: #181d21;
+      --execution-running-surface: #1b2024;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --rail-logo: #b1c8d8;
+      --ember: #d2aa72;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --neutral-soft: #242d33;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, 0.18);
+      --evidence-canvas: #12191d;
+      --evidence-surface: #171f24;
+      --evidence-ink: #dce4e9;
+      --evidence-muted: #9eabb3;
+      --evidence-line: #35424a;
+      --shell-result-canvas: #373f43;
+      --diff-add: #92c7a5;
+      --diff-remove: #e09a94;
+      --identity-user: #c0d4e1;
+      --identity-agent: #89a878;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-width: 320px; min-height: 100%; margin: 0; }
+    body {
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: var(--sans);
+      font-size: 13px;
+      line-height: 1.6;
+      text-rendering: optimizeLegibility;
+    }
+    button { color: inherit; font: inherit; }
+    button, [role="button"] { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    :where(button, summary, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+    .review-bar {
+      position: sticky;
+      z-index: 30;
+      top: 0;
+      display: flex;
+      min-height: 58px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 9px 16px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+    }
+    .review-title { display: grid; min-width: 0; gap: 1px; }
+    .review-title strong { font-size: 12.5px; }
+    .review-title span { color: var(--faint); font-size: 10px; }
+    .review-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .segmented { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); }
+    .segment {
+      min-height: 30px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+    .segment:hover { color: var(--ink); background: var(--surface-hover); }
+    .segment[aria-pressed="true"] { color: var(--brand-ink); background: var(--surface-raised); box-shadow: 0 1px 2px rgba(22, 30, 38, .08); }
+
+    .review-stage { min-height: calc(100dvh - 58px); padding: 20px; }
+    .device-frame {
+      width: min(1180px, 100%);
+      min-height: calc(100dvh - 98px);
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--conversation-surface);
+      box-shadow: var(--shadow-float);
+      transition: width 180ms ease, border-radius 180ms ease;
+    }
+    .review-stage[data-device="phone"] .device-frame { width: 390px; max-width: 100%; min-height: min(844px, calc(100dvh - 98px)); border-radius: 18px; }
+
+    .execution-page { min-height: inherit; background: var(--conversation-surface); }
+    .app-bar { position: sticky; z-index: 10; top: 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(16px); }
+    .app-bar-inner { display: flex; width: min(960px, 100%); min-height: 50px; align-items: center; gap: 9px; margin: 0 auto; padding: 0 20px; }
+    .brand-mark { width: 22px; height: 22px; flex: 0 0 22px; overflow: visible; color: var(--rail-logo); }
+    .brand-mark .rendezvous { fill: var(--ember); stroke: var(--surface); stroke-width: .65; }
+    .camp-title { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .readonly { display: inline-flex; min-height: 22px; align-items: center; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .04em; }
+
+    .content { width: min(960px, 100%); margin: 0 auto; padding: 26px 20px 60px; }
+    .trigger-message { display: grid; max-width: 760px; grid-template-columns: 32px minmax(0, 1fr); align-items: flex-start; gap: 10px; }
+    .you-avatar { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 36%, var(--line)); border-radius: 50%; color: var(--brand-ink); background: var(--surface-raised); font-size: 10px; font-weight: 700; }
+    .message-body { min-width: 0; max-width: 690px; }
+    .message-meta { display: flex; min-height: 20px; align-items: baseline; gap: 7px; margin-bottom: 3px; }
+    .message-meta strong { color: var(--brand-ink); font-size: 11.5px; font-weight: 700; }
+    .message-meta time { color: var(--faint); font: 500 9.5px/1.3 var(--mono); }
+    .message-copy { max-width: 76ch; margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.68; }
+
+    .execution-console { margin-top: 30px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--conversation-surface); }
+    .execution-header { --faint: var(--muted); display: flex; min-width: 0; min-height: 62px; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--execution-running-surface); }
+    .agent { display: flex; min-width: 0; align-items: center; gap: 9px; }
+    .agent-avatar { width: 34px; height: 34px; flex: 0 0 34px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--identity-agent) 44%, var(--line)); border-radius: 50%; background: var(--surface-raised); }
+    .agent-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .agent-copy { display: grid; min-width: 0; gap: 1px; }
+    .agent-copy h1 { overflow: hidden; margin: 0; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-copy p { overflow: hidden; margin: 0; color: var(--faint); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .live-state { display: inline-flex; min-height: 28px; flex: 0 0 auto; align-items: center; gap: 7px; color: var(--muted); font-size: 9.5px; font-weight: 650; }
+    .live-state::before { width: 7px; height: 7px; border-radius: 50%; background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 10%, transparent); content: ""; }
+    .execution-page[data-run-state="terminal"] .live-state::before { background: var(--success); box-shadow: none; }
+
+    .timeline { position: relative; display: grid; gap: 0; margin: 0; padding: 14px 16px 22px; list-style: none; }
+    .timeline::before { position: absolute; top: 27px; bottom: 37px; left: 22px; width: 1px; background: var(--line-strong); content: ""; }
+    .run { position: relative; display: grid; min-width: 0; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; padding: 0 0 14px; }
+    .run:last-child { padding-bottom: 0; }
+    .run-node { position: relative; z-index: 1; display: inline-grid; width: 13px; height: 13px; margin-top: 15px; place-items: center; border: 2px solid var(--line-strong); border-radius: 50%; background: var(--conversation-surface); }
+    .run-node::after { width: 4px; height: 4px; border-radius: 50%; background: var(--line-strong); content: ""; }
+    .run.is-running .run-node { border-color: var(--info); background: var(--info-soft); }
+    .run.is-running .run-node::after { background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 10%, transparent); }
+    .run.is-complete .run-node { border-color: var(--success); background: var(--success-soft); }
+    .run.is-complete .run-node::after { background: var(--success); }
+    .run-card { min-width: 0; padding: 0 11px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--conversation-surface); }
+    .run.is-running .run-card { background: var(--execution-running-surface); }
+    .run.is-selected .run-card { border-color: color-mix(in srgb, var(--info) 50%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 7%, transparent); }
+    .run-select { display: flex; width: calc(100% + 22px); min-height: 44px; align-items: center; justify-content: space-between; gap: 10px; margin: 0 -11px; padding: 8px 11px 7px; border: 0; border-radius: 8px 8px 5px 5px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+    .run-select:hover { background: var(--surface-hover); }
+    .run-select:active { background: var(--surface-muted); }
+    .run-title { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 5px 7px; }
+    .run-title time { color: var(--ink); font: 700 10px/1.35 var(--mono); }
+    .run-status { font-size: 9px; font-weight: 750; }
+    .run-status.success { color: var(--success); }
+    .run-status.info { color: var(--info); }
+    .current-badge { display: inline-flex; min-height: 18px; align-items: center; padding: 0 6px; border-radius: 999px; color: var(--info); background: var(--info-soft); font-size: 8.5px; font-weight: 800; }
+    .selected-label { color: var(--brand-ink); font-size: 9px; font-weight: 700; }
+    .run-disclosure { min-width: 0; margin: 1px 0 0; }
+    .run-disclosure > summary { display: grid; min-width: 0; min-height: 34px; grid-template-columns: minmax(0, 1fr) 24px; align-items: center; column-gap: 8px; padding: 5px 2px 7px 0; border-bottom: 1px solid var(--line); color: var(--muted); cursor: pointer; list-style: none; user-select: none; font-size: 11.5px; font-weight: 500; }
+    .run-disclosure > summary::-webkit-details-marker { display: none; }
+    .run-disclosure > summary::marker { display: none; content: ""; }
+    .run-disclosure > summary:hover { color: var(--ink); }
+    .run-disclosure-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .disclosure-icon { display: grid; width: 24px; height: 24px; place-items: center; justify-self: end; border-radius: 5px; color: var(--faint); }
+    .disclosure-icon svg { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; transition: transform 150ms ease; }
+    .run-disclosure:not([open]) .disclosure-icon svg { transform: rotate(-90deg); }
+    .run-disclosure > summary:hover .disclosure-icon { color: var(--ink); background: var(--surface-hover); }
+    .run-content { display: grid; gap: 14px; padding: 13px 0 6px; }
+    .narration { max-width: 76ch; margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.68; }
+
+    .tool-group { min-width: 0; }
+    .tool-group > summary { list-style: none; cursor: pointer; user-select: none; }
+    .tool-group > summary::-webkit-details-marker { display: none; }
+    .tool-group > summary::marker { display: none; content: ""; }
+    .tool-group-head { display: grid; min-height: 28px; grid-template-columns: 16px minmax(0, 1fr) 16px 20px; align-items: center; column-gap: 8px; padding: 0 2px; border-radius: 6px; color: var(--muted); }
+    .tool-group-head:hover { color: var(--ink); background: var(--surface-hover); }
+    .group-icon, .tool-icon { display: inline-grid; width: 16px; height: 28px; place-items: center; color: var(--muted); }
+    .group-icon svg, .tool-icon svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
+    .group-copy { min-width: 0; overflow: hidden; color: var(--ink); font-size: 10.5px; font-weight: 670; text-overflow: ellipsis; white-space: nowrap; }
+    .group-copy span { color: var(--evidence-muted); font-weight: 500; }
+    .state-dot { display: grid; width: 16px; height: 28px; place-items: center; color: var(--success); }
+    .state-dot::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
+    .state-dot.running { position: relative; color: var(--info); }
+    .state-dot.running::after { position: absolute; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; content: ""; opacity: .36; }
+    .group-disclosure, .command-disclosure-icon { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 5px; color: var(--faint); }
+    .group-disclosure svg, .command-disclosure-icon svg { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; transition: transform 120ms ease; }
+    .tool-group[open] > summary .group-disclosure svg,
+    .command-disclosure[open] > summary .command-disclosure-icon svg { transform: rotate(180deg); }
+    .tool-group-head:hover .group-disclosure,
+    .command-disclosure > summary:hover .command-disclosure-icon { color: var(--ink); background: var(--surface-muted); }
+    .tool-list { display: grid; gap: 1px; margin: 3px 0 4px; padding: 4px 0; list-style: none; }
+    .tool { min-width: 0; }
+    .command-disclosure > summary { list-style: none; cursor: pointer; }
+    .command-disclosure > summary::-webkit-details-marker { display: none; }
+    .command-disclosure > summary::marker { display: none; content: ""; }
+    .tool-row { display: grid; min-height: 30px; grid-template-columns: 16px minmax(0, 1fr) 16px 20px; align-items: center; column-gap: 8px; padding: 0 2px; border-radius: 5px; color: var(--muted); }
+    .command-disclosure > summary:hover,
+    .command-disclosure[open] > summary { color: var(--ink); background: var(--surface-hover); }
+    .tool-title { min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-result { max-width: 100%; max-height: min(220px, 30vh); margin: 5px 52px 8px 2px; padding: 8px 9px; overflow: auto; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--shell-result-canvas); font: 10px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .file-result { display: grid; min-width: 0; max-height: min(220px, 30vh); margin: 3px 0 8px; overflow: auto; border: 1px solid var(--evidence-line); border-radius: 6px; color: var(--evidence-ink); background: var(--evidence-surface); font: 10px/1.5 var(--mono); }
+    .diff-line { display: grid; min-width: 360px; grid-template-columns: 20px minmax(0, 1fr); }
+    .diff-line span { display: grid; place-items: center; user-select: none; }
+    .diff-line code { min-width: 0; padding: 2px 8px; border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); white-space: pre; }
+    .diff-line.addition { color: var(--diff-add); background: color-mix(in srgb, var(--success-soft) 72%, transparent); }
+    .diff-line.deletion { color: var(--diff-remove); background: color-mix(in srgb, var(--danger-soft) 72%, transparent); }
+    .add { color: var(--diff-add); }
+    .remove { color: var(--diff-remove); }
+    .processing { display: flex; min-height: 28px; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; }
+    .spinner { width: 11px; height: 11px; margin: 1px; border: 1.5px solid var(--line-strong); border-top-color: var(--muted); border-radius: 50%; animation: spin 900ms linear infinite; }
+    .terminal-copy { display: none; }
+    .execution-page[data-run-state="terminal"] .live-copy { display: none; }
+    .execution-page[data-run-state="terminal"] .terminal-copy { display: block; }
+    .execution-page[data-run-state="terminal"] .current-run .run-status { color: var(--success); }
+    .execution-page[data-run-state="terminal"] .current-run .run-node { border-color: var(--success); background: var(--success-soft); }
+    .execution-page[data-run-state="terminal"] .current-run .run-node::after { background: var(--success); box-shadow: none; }
+    .execution-page[data-run-state="terminal"] .current-run .run-card { background: var(--conversation-surface); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 700px) {
+      .review-bar { align-items: flex-start; flex-direction: column; }
+      .review-controls { width: 100%; justify-content: flex-start; }
+      .review-stage { padding: 10px; }
+      .device-frame { min-height: calc(100dvh - 142px); border-radius: 8px; }
+      .app-bar-inner { padding: 0 12px; }
+      .content { padding: 19px 12px 42px; }
+      .execution-console { margin-top: 24px; border-right: 0; border-left: 0; border-radius: 0; }
+      .execution-header { min-height: 58px; padding: 10px 11px; }
+      .agent-avatar { width: 32px; height: 32px; flex-basis: 32px; }
+      .timeline { padding: 12px 9px 18px; }
+      .timeline::before { left: 15px; }
+      .run { grid-template-columns: 14px minmax(0, 1fr); gap: 6px; }
+      .run-card { padding-right: 9px; padding-left: 9px; }
+      .run-select { width: calc(100% + 18px); margin-right: -9px; margin-left: -9px; padding-right: 9px; padding-left: 9px; }
+      .run-disclosure > summary { min-height: 44px; }
+      .narration { font-size: 13px; }
+      .tool-group-head, .tool-row { min-height: 44px; }
+      .tool-title { white-space: normal; overflow-wrap: anywhere; }
+      .tool-result { margin-right: 0; font-size: 9.5px; }
+    }
+
+    @media (max-width: 430px) {
+      .review-stage[data-device="phone"] { padding-right: 0; padding-left: 0; }
+      .review-stage[data-device="phone"] .device-frame { border-right: 0; border-left: 0; border-radius: 0; box-shadow: none; }
+      .trigger-message { grid-template-columns: 32px minmax(0, 1fr); }
+      .live-state { font-size: 9px; }
+      .selected-label { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review-bar" aria-label="设计稿评审控件">
+    <div class="review-title">
+      <strong>Rovai 网页执行台 · 第三版</strong>
+      <span>评审控件不属于产品界面</span>
+    </div>
+    <div class="review-controls">
+      <div class="segmented" aria-label="预览尺寸">
+        <button class="segment" type="button" data-device="desktop" aria-pressed="true">桌面</button>
+        <button class="segment" type="button" data-device="phone" aria-pressed="false">手机</button>
+      </div>
+      <div class="segmented" aria-label="预览主题">
+        <button class="segment" type="button" data-theme="day" aria-pressed="true">日间</button>
+        <button class="segment" type="button" data-theme="night" aria-pressed="false">夜间</button>
+      </div>
+      <div class="segmented" aria-label="执行状态">
+        <button class="segment" type="button" data-state="live" aria-pressed="true">执行中</button>
+        <button class="segment" type="button" data-state="terminal" aria-pressed="false">已完成</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="review-stage" data-device="desktop">
+    <section class="device-frame" aria-label="网页执行台预览">
+      <div class="execution-page" data-run-state="live">
+        <header class="app-bar">
+          <div class="app-bar-inner">
+            <svg class="brand-mark" data-brand-mark="horizon" data-brand-layout="separated" viewBox="0 0 24 24" role="img" aria-label="Rovai AI">
+              <path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor" />
+              <path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" stroke-width="2.08" stroke-linecap="round" />
+              <circle class="rendezvous" cx="12" cy="18.46" r="1.05" />
+            </svg>
+            <strong class="camp-title">飞书渠道接入</strong>
+            <span class="readonly">只读</span>
+          </div>
+        </header>
+
+        <div class="content">
+          <section class="trigger-message" aria-live="polite" aria-label="本次执行的触发消息">
+            <span class="you-avatar" aria-hidden="true">你</span>
+            <div class="message-body">
+              <div class="message-meta"><strong>你</strong><time id="trigger-time">16:18</time></div>
+              <p class="message-copy" id="trigger-copy">检查飞书执行卡停止后的状态，并把网页执行台尽可能还原到 Rovai 当前执行台。</p>
+            </div>
+          </section>
+
+          <section class="execution-console" aria-labelledby="execution-title">
+            <header class="execution-header">
+              <div class="agent">
+                <span class="agent-avatar" aria-hidden="true">
+                  <img src="../../../apps/desktop/src/renderer/src/assets/characters/qilu/icon-192.png" alt="">
+                </span>
+                <div class="agent-copy">
+                  <h1 id="execution-title">栖鹿 Codex CLI</h1>
+                  <p id="execution-summary">共 2 次执行 · 当前正在执行</p>
+                </div>
+              </div>
+              <span class="live-state" role="status" id="live-state">实时更新</span>
+            </header>
+
+            <ol class="timeline">
+              <li class="run is-complete" data-trigger-time="15:42" data-trigger="先核对现有飞书渠道方案，找出真正影响一期交付的核心问题。">
+                <span class="run-node" aria-hidden="true"></span>
+                <article class="run-card">
+                  <button class="run-select" type="button" aria-label="查看 15:42 到 15:43 这次执行的触发消息" aria-current="false">
+                    <span class="run-title"><time>15:42–15:43</time><span class="run-status success">已完成</span></span>
+                    <span class="selected-label">查看消息</span>
+                  </button>
+                  <details class="run-disclosure">
+                    <summary aria-label="15:42 这次 AgentRun 的执行过程">
+                      <span class="run-disclosure-label">用时 1 分钟</span>
+                      <span class="disclosure-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                    </summary>
+                    <div class="run-content">
+                      <p class="narration">我先核对当前合同与实现，只保留会阻断一期的差异。</p>
+                      <details class="tool-group">
+                        <summary class="tool-group-head" aria-label="展开已执行的 2 项操作">
+                          <span class="group-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="2.25" cy="4" r=".65"/><circle cx="2.25" cy="8" r=".65"/><circle cx="2.25" cy="12" r=".65"/><path d="M5 4h8M5 8h8M5 12h8"/></svg></span>
+                          <strong class="group-copy">已执行 2 项操作</strong>
+                          <span class="state-dot" role="img" aria-label="操作已完成"></span>
+                          <span class="group-disclosure" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                        </summary>
+                        <ul class="tool-list">
+                          <li class="tool">
+                            <details class="command-disclosure">
+                              <summary class="tool-row">
+                                <span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2"/><path d="M4.25 6 6.1 7.8 4.25 9.6M8 10h3.2"/></svg></span>
+                                <span class="tool-title">rg -n "execution_stop|open_url" apps/desktop</span>
+                                <span class="state-dot" role="img" aria-label="命令已完成"></span>
+                                <span class="command-disclosure-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                              </summary>
+                              <pre class="tool-result">定位到卡片 callback、只读 URL 与状态渲染入口。</pre>
+                            </details>
+                          </li>
+                          <li class="tool">
+                            <details class="command-disclosure">
+                              <summary class="tool-row">
+                                <span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4 1.75h5.1L12.5 5v9.25H4z"/><path d="M9 1.9V5h3.2M6 8h4.4M6 10.5h3.3"/></svg></span>
+                                <span class="tool-title">修改 feishu-card.test.ts</span>
+                                <span class="state-dot" role="img" aria-label="文件修改已完成"></span>
+                                <span class="command-disclosure-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                              </summary>
+                              <div class="file-result" role="region" aria-label="feishu-card.test.ts 的修改片段">
+                                <div class="diff-line deletion"><span>−</span><code>title: '芝士 · 已停止'</code></div>
+                                <div class="diff-line addition"><span>+</span><code>title: '芝士 · 已取消'</code></div>
+                              </div>
+                            </details>
+                          </li>
+                        </ul>
+                      </details>
+                      <p class="narration">核心边界已经确认：链接固定、页面只读、历史范围不可扩张。</p>
+                    </div>
+                  </details>
+                </article>
+              </li>
+
+              <li class="run is-running is-selected current-run" data-trigger-time="16:18" data-trigger="检查飞书执行卡停止后的状态，并把网页执行台尽可能还原到 Rovai 当前执行台。">
+                <span class="run-node" aria-hidden="true"></span>
+                <article class="run-card">
+                  <button class="run-select" type="button" aria-label="查看 16:18 到现在这次执行的触发消息" aria-current="step">
+                    <span class="run-title">
+                      <time><span class="live-copy">16:18–现在</span><span class="terminal-copy">16:18–16:26</span></time>
+                      <span class="run-status info"><span class="live-copy">执行中</span><span class="terminal-copy">已完成</span></span>
+                      <span class="current-badge live-copy">当前执行</span>
+                    </span>
+                    <span class="selected-label">当前消息</span>
+                  </button>
+                  <details class="run-disclosure" open>
+                    <summary aria-label="16:18 这次 AgentRun 的执行过程">
+                      <span class="run-disclosure-label"><span class="live-copy">已运行 8 分钟</span><span class="terminal-copy">用时 8 分钟</span></span>
+                      <span class="disclosure-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                    </summary>
+                    <div class="run-content">
+                      <p class="narration">我先复现停止卡片没有更新的问题，再对照生产执行台的结构重做网页阅读面。</p>
+                      <details class="tool-group" open>
+                        <summary class="tool-group-head" aria-label="展开或收起当前连续操作">
+                          <span class="group-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="2.25" cy="4" r=".65"/><circle cx="2.25" cy="8" r=".65"/><circle cx="2.25" cy="12" r=".65"/><path d="M5 4h8M5 8h8M5 12h8"/></svg></span>
+                          <strong class="group-copy"><span class="live-copy">执行中 <span>· pnpm exec vitest run channel-settings.test.ts</span></span><span class="terminal-copy">已执行 3 项操作</span></strong>
+                          <span class="state-dot running live-copy" role="img" aria-label="操作执行中"></span>
+                          <span class="state-dot terminal-copy" role="img" aria-label="操作已完成"></span>
+                          <span class="group-disclosure" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                        </summary>
+                        <ul class="tool-list">
+                          <li class="tool">
+                            <details class="command-disclosure" open>
+                              <summary class="tool-row">
+                                <span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2"/><path d="M4.25 6 6.1 7.8 4.25 9.6M8 10h3.2"/></svg></span>
+                                <span class="tool-title">pnpm exec vitest run channel-settings.test.ts -t "已取消"</span>
+                                <span class="state-dot" role="img" aria-label="命令已完成"></span>
+                                <span class="command-disclosure-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                              </summary>
+                              <pre class="tool-result">Test Files  1 passed (1)
+Tests       1 passed (1)</pre>
+                            </details>
+                          </li>
+                          <li class="tool">
+                            <details class="command-disclosure">
+                              <summary class="tool-row">
+                                <span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4 1.75h5.1L12.5 5v9.25H4z"/><path d="M9 1.9V5h3.2M6 8h4.4M6 10.5h3.3"/></svg></span>
+                                <span class="tool-title">修改 execution-view-page.ts</span>
+                                <span class="state-dot" role="img" aria-label="文件修改已完成"></span>
+                                <span class="command-disclosure-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                              </summary>
+                              <div class="file-result" role="region" aria-label="execution-view-page.ts 的修改片段">
+                                <div class="diff-line deletion"><span>−</span><code>成员：飞书成员</code></div>
+                                <div class="diff-line addition"><span>+</span><code>成员：你</code></div>
+                              </div>
+                            </details>
+                          </li>
+                          <li class="tool">
+                            <details class="command-disclosure">
+                              <summary class="tool-row">
+                                <span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2"/><path d="M4.25 6 6.1 7.8 4.25 9.6M8 10h3.2"/></svg></span>
+                                <span class="tool-title">pnpm exec vitest run execution-view-service.test.ts</span>
+                                <span class="state-dot running live-copy" role="img" aria-label="命令执行中"></span>
+                                <span class="state-dot terminal-copy" role="img" aria-label="命令已完成"></span>
+                                <span class="command-disclosure-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                              </summary>
+                              <pre class="tool-result"><span class="live-copy">测试仍在运行，结果会在这里更新。</span><span class="terminal-copy">Test Files  1 passed (1)
+Tests       12 passed (12)</span></pre>
+                            </details>
+                          </li>
+                        </ul>
+                      </details>
+                      <div class="processing live-copy" role="status"><span class="spinner" aria-hidden="true"></span><span>正在处理</span></div>
+                      <p class="narration terminal-copy">停止卡片和网页执行台的定向验证已经完成。</p>
+                    </div>
+                  </details>
+                </article>
+              </li>
+            </ol>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      'use strict'
+      const root = document.documentElement
+      const stage = document.querySelector('.review-stage')
+      const page = document.querySelector('.execution-page')
+      const liveState = document.getElementById('live-state')
+      const summary = document.getElementById('execution-summary')
+      const triggerTime = document.getElementById('trigger-time')
+      const triggerCopy = document.getElementById('trigger-copy')
+
+      document.querySelectorAll('[data-device]').forEach((button) => {
+        button.addEventListener('click', () => {
+          document.querySelectorAll('[data-device]').forEach((peer) => peer.setAttribute('aria-pressed', String(peer === button)))
+          stage.dataset.device = button.dataset.device
+        })
+      })
+      document.querySelectorAll('[data-theme]').forEach((button) => {
+        button.addEventListener('click', () => {
+          document.querySelectorAll('[data-theme]').forEach((peer) => peer.setAttribute('aria-pressed', String(peer === button)))
+          root.dataset.theme = button.dataset.theme
+        })
+      })
+      document.querySelectorAll('[data-state]').forEach((button) => {
+        button.addEventListener('click', () => {
+          document.querySelectorAll('[data-state]').forEach((peer) => peer.setAttribute('aria-pressed', String(peer === button)))
+          const terminal = button.dataset.state === 'terminal'
+          page.dataset.runState = terminal ? 'terminal' : 'live'
+          liveState.textContent = terminal ? '执行已结束' : '实时更新'
+          summary.textContent = terminal ? '共 2 次执行' : '共 2 次执行 · 当前正在执行'
+        })
+      })
+      document.querySelectorAll('.run').forEach((run) => {
+        run.querySelector('.run-select').addEventListener('click', () => {
+          document.querySelectorAll('.run').forEach((candidate) => {
+            const selected = candidate === run
+            candidate.classList.toggle('is-selected', selected)
+            candidate.querySelector('.run-select').setAttribute('aria-current', selected ? 'step' : 'false')
+          })
+          triggerTime.textContent = run.dataset.triggerTime
+          triggerCopy.textContent = run.dataset.trigger
+        })
+      })
+    })()
+  </script>
+</body>
+</html>

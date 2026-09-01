@@ -32,8 +32,9 @@ last_updated: 2026-09-01
   冻结的 Card 2.0 `open_url`，更新、Main 重启及网络变化均不重签旧卡。
 - [x] Main 单例 `ExecutionViewService`、私有原子设置、默认关闭/8765、固定端口无漂移、RFC1918 地址选择、
   内存 Token hash 与 immutable scope；Core 拥有历史 Run 授权、公开投影和 exact-run 取消。
-- [x] Snapshot GET + Fetch Streaming SSE、自包含只读页面、公开 redactor/result/file projection 与安全响应头；
-  Porcelain Day / Steel Night 桌面和手机连续时间线默认全部展开。
+- [x] Snapshot GET + Fetch Streaming SSE、自包含只读页面、公开 redactor/result/file projection 与安全响应头。
+- [ ] 按已确认交互稿把生产 Web 页面替换为 Porcelain Day / Steel Night 连续时间线：外部触发者显示“你”，
+  AgentRun、连续操作组和有公开 detail 的 command 使用与生产执行台一致的嵌套 disclosure。
 - [x] 渠道页底部默认折叠的全局启用/端口设置、真实状态与旧链接警告；无网卡选择、远端探测或旧卡修复入口。
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
@@ -251,7 +252,7 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   fragment Token、不可变 Core scope、安全响应头、页面脚本语法及端口冲突后不漂移；服务不可用时不签发 URL。
 - `feishu-card.test.ts` 覆盖默认卡无正文/command/进度，打开入口只含 `open_url`，最近输出最多 30 条且无结果，
   终态隐藏停止；`channel-settings.test.ts` 覆盖 URL 只在首次 send 签发、后续 update/Main 恢复不重签，以及 callback
-  Owner/exact-message/per-card 串行边界。
+  Owner/exact-message/per-card 串行边界；停止 callback 的 Applied 结果会立即返回“已取消”终态卡，不再只返回 Toast。
 - Core 渠道生命周期 fixture 覆盖 Web scope 的 Camp/Agent/App/历史上界与错误 App 拒绝；独立 exact-run fixture
   验证 Owner 只取消目标 AgentRun，重复动作不扩大到同 Turn 其他 Run。
 - Renderer 静态 owner 覆盖设置位于渠道页底部、原生 `details` 默认关闭、端口范围和固定警告；TypeScript 与聚焦
@@ -265,6 +266,8 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - 固定 PR base `21c954756bd1d21911b0eed609902cd3301ae516` 的 `docs:check:ci` 通过；
   `pnpm package:mac:daily` 产出并验证 arm64 ad-hoc `dist/mac-arm64/Rovai AI.app`，Core 与 CLI 已入包。
   本轮不安装、不启动，也不替换 `/Applications` 中的日常 App；没有调用 Runtime 或向真实飞书发件。
+- 后续产品校正要求 Web 页面复用生产执行台的嵌套 disclosure，并把飞书外部触发者显示为“你”；第三版 HTML 稿已完成
+  375px/桌面、日夜主题与 Run/操作组/Command 独立折叠检查，生产页面尚未按该稿替换。
 
 本轮隔离验证：
 

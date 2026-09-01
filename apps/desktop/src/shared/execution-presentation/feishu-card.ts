@@ -123,7 +123,7 @@ export function feishuExecutionStateCard(
     }))
   })
   return baseCard(
-    `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${terminalTitle(snapshot.run)}`,
+    `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${feishuExecutionStateTitle(snapshot.run)}`,
     cardTemplate(snapshot.run.status, snapshot.run.waitReason),
     elements
   )
@@ -679,6 +679,11 @@ function terminalTitle(run: ExecutionConsoleSnapshot['run']): string {
   if (run.status === 'failed') return '执行失败'
   if (run.status === 'cancelled') return '已停止'
   return agentRunPresentation(run).label
+}
+
+function feishuExecutionStateTitle(run: ExecutionConsoleSnapshot['run']): string {
+  if (run.status === 'cancelled') return '已取消'
+  return terminalTitle(run)
 }
 
 function statusIcon(status: ActivityStatus): string {

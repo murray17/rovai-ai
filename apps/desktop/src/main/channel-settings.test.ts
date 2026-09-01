@@ -2937,6 +2937,134 @@ describe('channel settings service', () => {
     await service.stop()
   })
 
+  it('returns an 已取消 execution card immediately after the Owner stops the exact Run', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
+    const settlements: Array<Record<string, unknown>> = []
+    const commands: Array<{ method: string; command: Record<string, unknown> }> = []
+    let delivered = false
+    let runStatus: 'running' | 'cancelled' = 'running'
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        commands.push({ method, command })
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+            botDisplayName: '芝士', credentialRef: 'feishu-member-a', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }] })
+        }
+        if (method === 'channels.host.tick') {
+          if (delivered) return { deliveries: [] }
+          delivered = true
+          return { deliveries: [{
+            deliveryId: 'delivery-console', requestId: 'request-1',
+            deliveryKind: 'execution_console_upsert', targetAppId: 'cli_a',
+            credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
+            conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+            recipientOpenId: 'ou_owner',
+            payload: {
+              kind: 'execution_console_upsert', executionConsoleId: 'console-1',
+              agentRunId: 'run-1', expectedSequence: 1
+            }
+          }] }
+        }
+        if (method === 'channels.executionConsole.source') {
+          return {
+            sequence: 1,
+            agentRunId: 'run-1',
+            campId: 'camp-1',
+            campTurnId: 'turn-1',
+            channelConversationId: 'channel-1',
+            agentId: 'agent-a',
+            runCreatedAt: '2026-08-28T00:00:00Z',
+            agentDisplayName: '芝士',
+            run: { status: runStatus, waitReason: null, terminalReasonCode: null },
+            evidence: consoleCommandEvidence('run-1'),
+            publicOutput: null,
+            startedAt: '2026-08-28T00:00:00Z',
+            terminalAt: runStatus === 'cancelled' ? '2026-08-28T00:00:05Z' : null,
+            targetAppId: 'cli_a',
+            externalMessageId: runStatus === 'cancelled' ? 'om_sent' : null,
+            state: runStatus === 'cancelled' ? 'terminal_sealed' : 'active'
+          }
+        }
+        if (method === 'channels.executionConsole.agentRun.cancel') {
+          runStatus = 'cancelled'
+          return {
+            status: 'applied',
+            code: 'agent_run.cancelled',
+            payload: {
+              agentRunId: 'run-1',
+              campId: 'camp-1',
+              campTurnId: 'turn-1',
+              campTurnStatus: 'cancelled',
+              status: 'cancelled'
+            }
+          }
+        }
+        if (method === 'channels.deliveries.settle') {
+          settlements.push(command)
+          return { status: 'applied', payload: {} }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+
+    await service.start()
+    await vi.waitFor(() => expect(settlements).toHaveLength(1))
+
+    const response = await harness.handlers.get('cli_a:cardAction')!({
+      messageId: 'om_sent',
+      chatId: 'oc_group',
+      operator: { openId: 'ou_owner', userId: 'owner-user-id' },
+      action: {
+        tag: 'button',
+        value: { action: 'execution_stop', agentRunId: 'run-1' }
+      },
+      raw: {
+        event_id: 'evt-stop-1',
+        operator: {
+          open_id: 'ou_owner',
+          user_id: 'owner-user-id',
+          union_id: 'on_owner'
+        }
+      }
+    })
+
+    expect(commands.find(({ method }) => method === 'channels.executionConsole.agentRun.cancel')?.command)
+      .toMatchObject({
+        callbackEventId: 'evt-stop-1',
+        appId: 'cli_a',
+        externalMessageId: 'om_sent',
+        agentRunId: 'run-1',
+        operatorOpenId: 'ou_owner',
+        operatorUserId: 'owner-user-id',
+        operatorUnionId: 'on_owner'
+      })
+    expect(response).toEqual({
+      card: {
+        type: 'raw',
+        data: expect.objectContaining({
+          header: expect.objectContaining({
+            title: { tag: 'plain_text', content: '芝士 · 已取消' }
+          }),
+          body: expect.objectContaining({
+            elements: [expect.objectContaining({ tag: 'column_set' })]
+          })
+        })
+      },
+      toast: { type: 'success', content: '已取消执行' }
+    })
+    expect(JSON.stringify(response)).not.toContain('停止执行')
+    await service.stop()
+  })
+
   it('treats an already-revoked execution console as a successful recall', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
     harness.recallMessage.mockRejectedValueOnce({ response: { status: 404, data: { code: 230020 } } })
