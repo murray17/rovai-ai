@@ -151,6 +151,9 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   随后创建进程却提前记为已清理。强制删除保留幂等回放和原 bypassedBlockers，退出 wire protocol 仍为 3。
 - 打开 Camp 或渠道准入只补偿该 Camp 的旧半取消对象。Renderer 停止状态只表示请求尚未返回，
   收到 Applied 即应用 Core 终态并刷新；不再等待 Runtime ACK。
+- 后续定向复核补正两个遗漏：Run-local、成员 cutover、成员全局移除与旧半取消修复都把精确 Run ID
+  带到事务提交后，再复用 terminal delivery pump；整轮取消仍不 pump。Runtime cleanup scanner 改为
+  `ActiveExecutionKey` 进程内去重后后台启动，主 scheduler 不等待三秒清理任务，原 Conversation fence 保留。
 
 取消回归 owner 与准入说明：
 
@@ -171,6 +174,16 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   该检查必须经过真实 Core 清理入口、launch registry 与受管子进程，内存 timer 测试不能证明 reap。
   它不调用真实 Provider 或模型；超时允许 Unproven，但禁止进程仍在时宣称已清理。
   最小命令：`cargo test -p rovai-core --bin rovai-core --features slow-tests cancellation_covers_launch`。
+- `tests::runtime_cleanup_dispatch_is_non_blocking_and_deduplicated` 复用隔离 Core 与 launch registry，
+  持有未完成 launch 时验证 scheduler-facing scan 在一秒内返回、重复扫描只有一个 cleanup worker，
+  首次三秒清理为 `Unproven` 后释放去重键并保留候选供下轮扫描；release 后重试才写 cleanup ACK。
+  最小命令：
+  `cargo test -p rovai-core --bin rovai-core --features slow-tests runtime_cleanup_dispatch_is_non_blocking`。
+- `team_tool::tests::slow_tests::user_run_cancellation_releases_the_next_target_busy_delivery`
+  验证 Run cancel 提交后立即物化同收件人的下一条 A2A Delivery；既有
+  `running_outbound_delivery_target_is_reconciled_when_source_membership_ends` 扩展为验证成员 cutover
+  终止其派生目标 Run 后，无关来源的下一条 Delivery 继续运行。最小命令分别使用上述两个完整测试名执行
+  `cargo test -p rovai-core --lib --features slow-tests <test-name>`。
 - `channel::tests::cancellation_preserves_local_output_and_suppresses_only_aborted_turn_retries`
   复用既有渠道 fixture，分别验证单 Run 和整轮边界、pending/attempting/sent、迟到回执与下一请求 FIFO。
   旧发送重试测试没有取消业务事务，纯 outbox reducer 无法证明 Turn/request 的联动。
@@ -188,6 +201,9 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 
 本轮隔离验证：
 
+- 后续 pump/scheduler 补正复跑：Library fast 472 项、slow 297 项、CLI 32 项通过；Core Main
+  194 项通过、4 项既有真实 Runtime 人工 smoke 忽略。Clippy、Rust fmt、文档三道门禁、TypeScript、
+  133 文件/1352 项 Vitest、220 项 Node 测试（1 项既有 Windows 原生跳过）和 Desktop build 通过。
 - Library 全量含 slow 768 项：767 项通过，既有 Runtime 版本探测在并发负载下出现一次超时；
   原条件单独复跑通过，没有放宽 deadline 或跳过该测试。退出/Git 观察/terminal provenance 的后续扩展通过。
 - Core Main 193 项和 CLI 32 项通过，4 项既有真实 Runtime 人工 smoke 仍按原规则忽略；

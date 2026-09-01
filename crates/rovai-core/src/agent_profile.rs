@@ -2642,7 +2642,8 @@ impl AgentProfileService {
         database: &mut Database,
         envelope: &CommandEnvelope<RemoveMemberCommand>,
     ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
+        let mut settled_run_ids = Vec::new();
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, crate::command::ActorRef::User { .. }) {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.remove_user_required",
@@ -2745,7 +2746,7 @@ impl AgentProfileService {
                     .collect::<rusqlite::Result<Vec<_>>>()?
             };
             for camp_id in current_camps {
-                end_camp_membership(
+                let outcome = end_camp_membership(
                     transaction,
                     &camp_id,
                     &envelope.payload.agent_id,
@@ -2756,6 +2757,7 @@ impl AgentProfileService {
                     envelope.execution_epoch,
                     &now,
                 )?;
+                settled_run_ids.extend(outcome.affected_run_ids);
             }
             transaction.execute(
                 r#"
@@ -2775,7 +2777,9 @@ impl AgentProfileService {
                 version + 1,
                 "agent_profile.removed",
             ))
-        })
+        })?;
+        crate::runtime::pump_targets_after_runs_terminal(database, &settled_run_ids)?;
+        Ok(execution)
     }
 
     pub fn create_installation(
@@ -4244,8 +4248,9 @@ fn runtime_blocker(code: &str, payload: Value) -> RuntimeConfigurationBlocker {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn configure_test_runtime(database: &Database, agent_ids: &[&str]) {
+#[cfg(any(test, feature = "slow-tests"))]
+#[doc(hidden)]
+pub fn configure_test_runtime(database: &Database, agent_ids: &[&str]) {
     let now = chrono::Utc::now().to_rfc3339();
     let installation_id = "adapter-test-codex";
     let executable_path = std::env::current_exe()

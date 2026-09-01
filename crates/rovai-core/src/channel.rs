@@ -4264,7 +4264,8 @@ impl ChannelService {
             anyhow::bail!("managed Quick Chat path is unavailable");
         }
         let quick_chat_path = quick_chat_path.to_string_lossy().to_string();
-        self.gateway.execute(database, envelope, |transaction| {
+        let mut settled_run_ids = Vec::new();
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
                     "channel.host_required",
@@ -4552,7 +4553,13 @@ impl ChannelService {
             )?;
             mark_aggregate_finalized(transaction, &aggregate.id, &now_text)?;
             let admission = if queue_position == 1 {
-                try_admit_request(transaction, &request_id, &now_text, &envelope.command_id)?
+                try_admit_request(
+                    transaction,
+                    &request_id,
+                    &now_text,
+                    &envelope.command_id,
+                    &mut settled_run_ids,
+                )?
             } else {
                 AdmissionAttempt::Deferred
             };
@@ -4589,7 +4596,9 @@ impl ChannelService {
                     entity_id: request_id,
                 }),
             ))
-        })
+        })?;
+        crate::runtime::pump_targets_after_runs_terminal(database, &settled_run_ids)?;
+        Ok(execution)
     }
 
     pub fn resolve_pending_camp_binding(
@@ -4636,7 +4645,8 @@ impl ChannelService {
         if !quick_chat {
             refresh_project_catalog(database)?;
         }
-        self.gateway.execute(database, envelope, |transaction| {
+        let mut settled_run_ids = Vec::new();
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
                     "channel.host_required",
@@ -5007,7 +5017,13 @@ impl ChannelService {
             }
             for (index, (request_id, queue_position, ack_app_id)) in queued.iter().enumerate() {
                 let admission = if index == 0 {
-                    try_admit_request(transaction, request_id, &now_text, &envelope.command_id)?
+                    try_admit_request(
+                        transaction,
+                        request_id,
+                        &now_text,
+                        &envelope.command_id,
+                        &mut settled_run_ids,
+                    )?
                 } else {
                     AdmissionAttempt::Deferred
                 };
@@ -5067,7 +5083,9 @@ impl ChannelService {
                     entity_id: binding_id,
                 }),
             ))
-        })
+        })?;
+        crate::runtime::pump_targets_after_runs_terminal(database, &settled_run_ids)?;
+        Ok(execution)
     }
 
     pub fn authorize_execution_console_page(
@@ -5237,6 +5255,7 @@ impl ChannelService {
             .context("Channel Host actor does not identify a supported provider")?;
         // Even an empty response can expire, settle or admit work. Keep all
         // maintenance and delivery claims atomic, but never journal the poll.
+        let mut settled_run_ids = Vec::new();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -5272,7 +5291,7 @@ impl ChannelService {
             decline_unattended_channel_retries(&transaction, actor, &now_text)?;
             project_active_request_deliveries(&transaction, &now_text)?;
             settle_terminal_requests(&transaction, &now_text)?;
-            promote_ready_requests(&transaction, &now_text)?;
+            promote_ready_requests(&transaction, &now_text, &mut settled_run_ids)?;
             let claims = claim_deliveries(
                 &transaction,
                 provider,
@@ -5309,6 +5328,7 @@ impl ChannelService {
             }
         };
         transaction.commit()?;
+        crate::runtime::pump_targets_after_runs_terminal(database, &settled_run_ids)?;
         Ok(result)
     }
 
@@ -7789,6 +7809,7 @@ fn try_admit_request(
     request_id: &str,
     now: &str,
     command_id: &str,
+    settled_run_ids: &mut Vec<String>,
 ) -> Result<AdmissionAttempt> {
     let camp_id: Option<String> = transaction
         .query_row(
@@ -7798,7 +7819,11 @@ fn try_admit_request(
         )
         .optional()?;
     if let Some(camp_id) = camp_id {
-        crate::runtime::settle_pending_camp_cancellations_in_tx(transaction, &camp_id, now)?;
+        settled_run_ids.extend(crate::runtime::settle_pending_camp_cancellations_in_tx(
+            transaction,
+            &camp_id,
+            now,
+        )?);
     }
     let request = transaction
         .query_row(
@@ -9170,7 +9195,11 @@ fn settle_terminal_requests_for_turn(
     Ok(())
 }
 
-fn promote_ready_requests(transaction: &Transaction<'_>, now: &str) -> Result<()> {
+fn promote_ready_requests(
+    transaction: &Transaction<'_>,
+    now: &str,
+    settled_run_ids: &mut Vec<String>,
+) -> Result<()> {
     let candidates = query_rows(
         transaction,
         r#"
@@ -9197,7 +9226,13 @@ fn promote_ready_requests(transaction: &Transaction<'_>, now: &str) -> Result<()
         // Audit causation belongs to the durable request, not a transient poll.
         // try_admit_request appends request_id and admission, while the queued
         // state and the same write transaction prevent a second admission.
-        try_admit_request(transaction, &request_id, now, "channel-host-maintenance")?;
+        try_admit_request(
+            transaction,
+            &request_id,
+            now,
+            "channel-host-maintenance",
+            settled_run_ids,
+        )?;
     }
     Ok(())
 }

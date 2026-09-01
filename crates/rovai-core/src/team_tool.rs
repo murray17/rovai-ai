@@ -2029,7 +2029,7 @@ mod tests {
         memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
         memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
         message_delivery::{RetryMessageDeliveryCommand, dispatch_pending_for_recipient},
-        runtime::FailAgentRunCommand,
+        runtime::{CancelAgentRunCommand, FailAgentRunCommand},
     };
     use crate::{
         camp_attachment::CampAttachmentStore,
@@ -7526,6 +7526,73 @@ Use this exact public input @agent_2";
     }
 
     #[cfg(feature = "slow-tests")]
+    fn user_run_cancellation_releases_the_next_target_busy_delivery() {
+        let mut fixture = Fixture::new();
+        let busy_run_id = fixture.queue_direct_run("queue-run-cancel-recipient", "agent_2");
+        let invocation = fixture.public_send_invocation(
+            "run-cancel-waiting-delivery",
+            "Dispatch after the busy Run is cancelled",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT status || ':' || wait_condition FROM message_delivery WHERE id = ?1",
+                    [&delivery_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "pending:target_busy"
+        );
+
+        let busy_run_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&busy_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let cancelled = ExecutionRuntimeService::default()
+            .request_agent_run_cancellation(
+                &mut fixture.database,
+                &user_envelope(
+                    "cancel-busy-recipient-run",
+                    Some(&fixture.camp_id),
+                    CancelAgentRunCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_run_id: busy_run_id,
+                        expected_version: busy_run_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(cancelled.result.code, "agent_run.cancelled");
+        let delivery: (String, Option<String>, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, wait_condition, target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(delivery.0, "running");
+        assert!(delivery.1.is_none());
+        assert!(delivery.2.is_some());
+    }
+
+    #[cfg(feature = "slow-tests")]
     fn pending_outbound_delivery_is_cancelled_when_source_membership_ends() {
         let mut fixture = Fixture::new();
         let _busy_run_id = fixture.queue_direct_run("queue-pending-outbound-recipient", "agent_2");
@@ -7624,6 +7691,36 @@ Use this exact public input @agent_2";
             )
             .unwrap();
 
+        let unrelated_source_run_id =
+            fixture.queue_direct_run("queue-unrelated-source-before-member-leaves", "agent_3");
+        let (_unrelated_source_epoch, unrelated_source_credential) =
+            fixture.claim_bind_and_issue(&unrelated_source_run_id, "native-unrelated-source");
+        let unrelated_invocation = fixture.public_send_invocation_for(
+            &unrelated_source_credential,
+            "unrelated-delivery-behind-affected-target",
+            "This delivery must advance after the affected target stops",
+            &["agent_2"],
+        );
+        let unrelated = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &unrelated_invocation)
+            .unwrap();
+        let unrelated_delivery_id = unrelated.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT status || ':' || wait_condition FROM message_delivery WHERE id = ?1",
+                    [&unrelated_delivery_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "pending:target_busy"
+        );
+
         let collaboration = CollaborationService::default();
         let preview = collaboration
             .camp_member_removal_preview(&fixture.database, &fixture.camp_id, "agent_1")
@@ -7670,6 +7767,18 @@ Use this exact public input @agent_2";
             .unwrap();
         assert!(target_state.0.is_some());
         assert_eq!(target_state.1, 1);
+        let unrelated_delivery: (String, Option<String>, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, wait_condition, target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [&unrelated_delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(unrelated_delivery.0, "running");
+        assert!(unrelated_delivery.1.is_none());
+        assert!(unrelated_delivery.2.is_some());
     }
 
     #[cfg(feature = "slow-tests")]
@@ -10139,6 +10248,10 @@ Use this exact public input @agent_2";
         #[test]
         fn an_existing_run_can_address_a_member_added_after_its_context_was_frozen() {
             super::an_existing_run_can_address_a_member_added_after_its_context_was_frozen();
+        }
+        #[test]
+        fn user_run_cancellation_releases_the_next_target_busy_delivery() {
+            super::user_run_cancellation_releases_the_next_target_busy_delivery();
         }
         #[test]
         fn pending_outbound_delivery_is_cancelled_when_source_membership_ends() {

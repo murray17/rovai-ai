@@ -26,6 +26,9 @@ last_updated: 2026-09-01
   Turn payload 含 `campTurnId/campTurnStatus/runs`，每个 Run 带实际 `terminalStatus` 和清理目标。
 - 已终态重复取消为 Applied no-op，不改变终态或版本；同 command replay 仍返回原结果。活跃对象的版本冲突仍拒绝。
 - 只有整轮取消、预算终止、Camp 删除或应用退出能抑制整轮渠道投递。单 Run 取消和成员离队只走正常 Turn 聚合。
+- 只结算精确 Run 集合的事务提交后，必须对本次 Run ID 调用既有 terminal delivery pump，推进相同收件人的
+  `target_busy` Delivery 与刚满足条件的 Gather completion。整轮取消已先关闭该 Turn 的 pending Delivery，
+  不调用该 pump；不得在事务提交前派发。
 
 ## Runtime 清理
 
@@ -37,6 +40,8 @@ last_updated: 2026-09-01
 interrupt/flush 不能耗尽强制回收预算。进程回收未确认时保留原 lease/active 关联；后台可继续重试，业务终态不变。
 仅确认清理后按 Run ID + execution epoch 条件写 `cancel_acknowledged_at`，不推进 Run version、聚合 Turn 或创建
 `runtime-cancellation-ack` command receipt。普通 terminal/callback 不得删除仍需清理的 active 记录。
+Scheduler 扫描只按 `ActiveExecutionKey` 进程内去重并启动后台清理，不能等待本批任务完成；任务结束释放去重键，
+确认清理后唤醒 scheduler。`Unproven` 只旋转既有候选并留给后续扫描，不新增持久化清理状态或重试协议。
 
 同一 Conversation 的新 Run 在旧清理未确认时最多等待上述期限，随后终态
 `failed / runtime_cleanup_unconfirmed`，`manual_retry_allowed = true`。不无限 queued、不允许不明旧进程与新 Run

@@ -2108,7 +2108,8 @@ impl ExecutionRuntimeService {
         database: &mut Database,
         envelope: &CommandEnvelope<CancelAgentRunCommand>,
     ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
+        let mut settled_run_id = None;
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "agent_run.cancel_user_required",
@@ -2200,6 +2201,7 @@ impl ExecutionRuntimeService {
                 &envelope.actor,
                 &now,
             )?;
+            settled_run_id = Some(settlement.agent_run_id.clone());
             let camp_turn_status = recompute_camp_turn(
                 transaction,
                 &camp_id,
@@ -2218,7 +2220,11 @@ impl ExecutionRuntimeService {
                 }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
-        })
+        })?;
+        if let Some(agent_run_id) = settled_run_id {
+            pump_target_after_run_terminal(database, &agent_run_id)?;
+        }
+        Ok(execution)
     }
 
     pub fn runtime_cleanup_blocked_since(
@@ -4844,12 +4850,13 @@ pub(crate) fn settle_pending_camp_cancellations(
     )?;
     if pending {
         let transaction = database.connection_mut().transaction()?;
-        settle_pending_camp_cancellations_in_tx(
+        let settled_run_ids = settle_pending_camp_cancellations_in_tx(
             &transaction,
             camp_id,
             &chrono::Utc::now().to_rfc3339(),
         )?;
         transaction.commit()?;
+        pump_targets_after_runs_terminal(database, &settled_run_ids)?;
     }
     Ok(())
 }
@@ -4858,7 +4865,7 @@ pub(crate) fn settle_pending_camp_cancellations_in_tx(
     transaction: &Transaction<'_>,
     camp_id: &str,
     now: &str,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let targets = {
         let mut statement = transaction.prepare(
             "SELECT DISTINCT turn.id, turn.cancel_requested_at, turn.execution_budget_exhausted_at
@@ -4880,6 +4887,7 @@ pub(crate) fn settle_pending_camp_cancellations_in_tx(
     let actor = ActorRef::System {
         component_id: "camp-cancellation-recovery".into(),
     };
+    let mut settled_run_ids = Vec::new();
     for (turn_id, turn_cancelled, exhausted) in targets {
         if turn_cancelled.is_some() || exhausted.is_some() {
             settle_abortive_camp_turn_in_tx(
@@ -4908,11 +4916,14 @@ pub(crate) fn settle_pending_camp_cancellations_in_tx(
                     &actor,
                     now,
                 )?;
+                settled_run_ids.push(id);
             }
             recompute_camp_turn(transaction, camp_id, &turn_id, &actor, None, now)?;
         }
     }
-    Ok(())
+    settled_run_ids.sort();
+    settled_run_ids.dedup();
+    Ok(settled_run_ids)
 }
 
 pub(crate) fn recompute_camp_turn(
@@ -5053,6 +5064,17 @@ pub(crate) fn recompute_camp_turn(
         crate::channel::settle_terminal_request_for_turn_in_tx(transaction, camp_turn_id, now)?;
     }
     Ok(next_status.to_string())
+}
+
+pub(crate) fn pump_targets_after_runs_terminal(
+    database: &mut Database,
+    agent_run_ids: &[String],
+) -> Result<()> {
+    let unique_run_ids = agent_run_ids.iter().collect::<BTreeSet<_>>();
+    for agent_run_id in unique_run_ids {
+        pump_target_after_run_terminal(database, agent_run_id)?;
+    }
+    Ok(())
 }
 
 fn pump_target_after_run_terminal(database: &mut Database, agent_run_id: &str) -> Result<()> {
