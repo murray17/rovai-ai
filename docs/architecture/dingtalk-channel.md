@@ -180,14 +180,17 @@ App 或目标已移出时 fail closed。
 
 ## 恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v3](../contracts/channel-host-maintenance-v3.md) 使用无 commandId 的直接
-维护请求，不写永久 poll 回执。原事务、FIFO、delivery lease/重试及真实结算命令的永久幂等保留，飞书与钉钉复用同一实现。
+共享 Host tick 按 [Channel Host Maintenance v4](../contracts/channel-host-maintenance-v4.md) 使用无 commandId 的直接
+维护请求，不写永久 poll 回执。原事务、FIFO、delivery lease/重试及真实结算命令的永久幂等保留，飞书与钉钉复用
+provider-scoped outstanding 判定和按需调度；钉钉不再永久每 800ms 扫描，事件/入站/settlement 走合并快路径，
+只有 Core 仍报告未收口工作时才保留十分钟 one-shot watchdog。
 
 Core 在同一个 SQLite 保存 account、Developer Session、Bot credential、publication intent、Bot identity、conversation/
 binding、roster、request、console 和 Outbox；Main 只保留运行期 `appKey/appSecret/robotCode` 与 Cookie jar。启动恢复所有
 published Bot Stream，同时独立检查 Developer Session；Bot 不等待开发者页面或网络检查。暂时检查失败保留 Session，明确
-Session 失效只阻止新的发布，不停止已有 Bot。周期 worker 重取已知群
-roster、finalize ready aggregate、领取 delivery 并结算。任何外部失败都不从 Renderer 状态重建业务事实。
+Session 失效只阻止新的发布，不停止已有 Bot。按需 worker 在启动恢复、渠道活动、Core 执行事件和 active watchdog
+唤醒时重取已知群 roster、finalize ready aggregate、领取 delivery 并结算；清空后不再周期运行。任何外部失败都不从
+Renderer 状态重建业务事实。
 
 ## Core authority 与渠道启动
 

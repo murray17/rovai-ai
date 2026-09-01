@@ -5,6 +5,7 @@ import type {
   ChannelProviderView,
   ChannelQrAttemptView,
   ChannelLoginViewBounds,
+  CoreEvent,
   MemberBotProvisioningView,
   StoredCommandResult
 } from '@contracts'
@@ -35,6 +36,7 @@ import {
   executionConsolePublicPage,
   type ExecutionConsoleSnapshot
 } from '../shared/execution-presentation/feishu-card'
+import { AdaptiveChannelHostPump } from './channel-host-pump'
 
 export const DINGTALK_REQUIRED_SCOPE_VALUES = [
   'Card.Instance.Write',
@@ -207,8 +209,8 @@ export type DingTalkChannelHostDependencies = {
   createApiClient?: (credential: { appKey: string; appSecret: string }) => DingTalkOpenApiClient
   requiredScopeValues?: readonly string[]
   requiredEventCodes?: readonly string[]
-  setInterval?: typeof globalThis.setInterval
-  clearInterval?: typeof globalThis.clearInterval
+  setTimeout?: typeof globalThis.setTimeout
+  clearTimeout?: typeof globalThis.clearTimeout
 }
 
 const WORKER_ID = `desktop-dingtalk-${randomUUID()}`
@@ -235,12 +237,11 @@ export class DingTalkChannelSettingsService {
     agentId: string
     observation: Promise<boolean>
   }>>()
+  readonly #hostPump: AdaptiveChannelHostPump
   #activeQrAttempt: ChannelQrAttemptView | null = null
   #activeQrAbort: AbortController | null = null
   #activeProvisioning: MemberBotProvisioningView | null = null
   #activeProvisioningAbort: AbortController | null = null
-  #pumpTimer: ReturnType<typeof globalThis.setInterval> | null = null
-  #pumping = false
   #stopped = false
   #sessionCheckGeneration = 0
   #sessionNeedsReconnect = false
@@ -248,6 +249,14 @@ export class DingTalkChannelSettingsService {
 
   constructor(dependencies: DingTalkChannelHostDependencies) {
     this.#dependencies = dependencies
+    this.#hostPump = new AdaptiveChannelHostPump({
+      run: () => this.#pumpOnce(),
+      onError: (error) => {
+        console.warn(`[rovai] DingTalk outbox pump failed: ${failureCode(error)}`)
+      },
+      setTimeout: dependencies.setTimeout,
+      clearTimeout: dependencies.clearTimeout
+    })
     this.#stream = dependencies.streamRegistry ?? new DingTalkStreamRegistry({
       onMessage: (message) => this.#queueInbound(message),
       onCard: (callback) => this.#handleCard(callback),
@@ -260,6 +269,10 @@ export class DingTalkChannelSettingsService {
   onChanged(listener: () => void): () => void {
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
+  }
+
+  handleCoreEvent(event: CoreEvent): void {
+    this.#hostPump.handleCoreEvent(event)
   }
 
   async start(): Promise<void> {
@@ -278,10 +291,7 @@ export class DingTalkChannelSettingsService {
         this.#failures.set(bot.agentId, failureCode(error))
       })
     }
-    const schedule = this.#dependencies.setInterval ?? globalThis.setInterval
-    this.#pumpTimer = schedule(() => void this.#pump(), 800)
-    this.#pumpTimer.unref?.()
-    void this.#pump()
+    this.#hostPump.start()
     this.#notify()
     // Bot credentials are independent of developer-console SSO. Restore Stream
     // before checking a web session that may need a slow portal navigation.
@@ -295,11 +305,7 @@ export class DingTalkChannelSettingsService {
     this.#sessionCheckGeneration += 1
     this.#activeQrAbort?.abort()
     this.#activeProvisioningAbort?.abort()
-    if (this.#pumpTimer) {
-      const clear = this.#dependencies.clearInterval ?? globalThis.clearInterval
-      clear(this.#pumpTimer)
-      this.#pumpTimer = null
-    }
+    this.#hostPump.stop()
     this.#stream.stopAll()
     this.#apis.clear()
     this.#inboundBatch.clear()
@@ -926,11 +932,13 @@ export class DingTalkChannelSettingsService {
 
   async #queueInbound(message: DingTalkInboundMessage): Promise<void> {
     if (this.#stopped || !hasCanonicalSingleDingTalkBotTarget(message)) return
+    this.#hostPump.wake()
     const snapshot = await this.#snapshot()
     const bot = snapshot.memberBots.find((candidate) => candidate.appKey === message.appId)
     if (!bot || bot.status !== 'published') return
     if (message.conversationKind === 'p2p') {
       await this.#processInbound(message, bot.agentId, true)
+      this.#hostPump.wake()
       return
     }
     const key = `${message.tenantKey}\0${message.externalMessageId}`
@@ -969,6 +977,7 @@ export class DingTalkChannelSettingsService {
     await this.#processInbound(selected.message, selected.agentId, true).catch((error) => {
         console.warn(`[rovai] DingTalk inbound failed: ${failureCode(error)}`)
     })
+    this.#hostPump.wake()
   }
 
   async #processInbound(
@@ -1023,8 +1032,10 @@ export class DingTalkChannelSettingsService {
       expectedAppIds: [message.appId],
       acknowledgementAppId: message.appId
     })
+    this.#hostPump.wake()
     if (canonicalMentionsComplete && observed.payload.readyToFinalize === true) {
       await this.#finalize(String(observed.payload.aggregateId ?? ''))
+      this.#hostPump.wake()
     }
     this.#notify()
     return observed.payload.status === 'collecting'
@@ -1095,6 +1106,7 @@ export class DingTalkChannelSettingsService {
     const outTrackId = recursiveString(callback.payload, 'outTrackId') ?? callback.messageId
     if (!operatorUserId) return
     if (typeof value.pendingBindingId === 'string') {
+      this.#hostPump.wake()
       const result = await this.#command('channels.dingtalk.pendingBinding.resolve', {
         pendingBindingId: value.pendingBindingId,
         appId: callback.appKey,
@@ -1115,7 +1127,7 @@ export class DingTalkChannelSettingsService {
           flowStatus: '3'
         }))
       }
-      void this.#pump()
+      this.#hostPump.wake()
       return
     }
     if (value.action === 'execution_console_page' && typeof value.agentRunId === 'string') {
@@ -1154,39 +1166,34 @@ export class DingTalkChannelSettingsService {
     }
   }
 
-  async #pump(): Promise<void> {
-    if (this.#pumping || this.#stopped) return
-    this.#pumping = true
-    try {
-      const snapshot = await this.#snapshot()
-      if (Date.now() >= this.#nextRosterSweepAt) {
-        this.#nextRosterSweepAt = Date.now() + ROSTER_SWEEP_MS
-        const conversations = new Map(snapshot.transportConversations.map((conversation) => [
-          `${conversation.tenantKey}\0${conversation.chatId}`,
-          conversation
-        ]))
-        await Promise.allSettled([...conversations.values()].map((conversation) => (
-          this.#reconcileKnownGroup(conversation.tenantKey, conversation.chatId, snapshot)
-        )))
-      }
-      for (const aggregate of snapshot.pendingAggregates) {
-        await this.#finalize(aggregate.aggregateId).catch(() => undefined)
-      }
-      const tick = await this.#dependencies.core.request<{
-        deliveries: ClaimedDelivery[]
-      }>('channels.dingtalk.host.tick', {
-        workerId: WORKER_ID,
-        limit: 20
-      })
-      const deliveries = Array.isArray(tick.deliveries)
-        ? tick.deliveries
-        : []
-      for (const delivery of deliveries) await this.#deliver(delivery)
-    } catch (error) {
-      console.warn(`[rovai] DingTalk outbox pump failed: ${failureCode(error)}`)
-    } finally {
-      this.#pumping = false
+  async #pumpOnce(): Promise<boolean> {
+    if (this.#stopped) return false
+    const snapshot = await this.#snapshot()
+    if (Date.now() >= this.#nextRosterSweepAt) {
+      this.#nextRosterSweepAt = Date.now() + ROSTER_SWEEP_MS
+      const conversations = new Map(snapshot.transportConversations.map((conversation) => [
+        `${conversation.tenantKey}\0${conversation.chatId}`,
+        conversation
+      ]))
+      await Promise.allSettled([...conversations.values()].map((conversation) => (
+        this.#reconcileKnownGroup(conversation.tenantKey, conversation.chatId, snapshot)
+      )))
     }
+    for (const aggregate of snapshot.pendingAggregates) {
+      await this.#finalize(aggregate.aggregateId).catch(() => undefined)
+    }
+    const tick = await this.#dependencies.core.request<{
+      deliveries: ClaimedDelivery[]
+      hasOutstandingWork: boolean
+    }>('channels.dingtalk.host.tick', {
+      workerId: WORKER_ID,
+      limit: 20
+    })
+    const deliveries = Array.isArray(tick.deliveries)
+      ? tick.deliveries
+      : []
+    for (const delivery of deliveries) await this.#deliver(delivery)
+    return tick.hasOutstandingWork === true || deliveries.length > 0
   }
 
   async #deliver(delivery: ClaimedDelivery): Promise<void> {
@@ -1351,7 +1358,7 @@ export class DingTalkChannelSettingsService {
   }
 
   async #settle(delivery: ClaimedDelivery, messageId: string | null, error: string | null): Promise<void> {
-    await this.#command('channels.dingtalk.deliveries.settle', {
+    const result = await this.#command('channels.dingtalk.deliveries.settle', {
       deliveryId: delivery.deliveryId,
       workerId: WORKER_ID,
       outcome: error ? 'failed' : 'sent',
@@ -1359,6 +1366,9 @@ export class DingTalkChannelSettingsService {
       failureCode: error,
       retryable: error ? /timeout|rate|connected|network/u.test(error) : false
     }, false)
+    this.#hostPump.wake()
+    const availableAt = result.payload.availableAt
+    if (typeof availableAt === 'string') this.#hostPump.wakeAt(availableAt)
   }
 
   async #snapshot(): Promise<CoreDingTalkSnapshot> {

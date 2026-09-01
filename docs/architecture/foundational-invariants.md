@@ -48,7 +48,8 @@ last_updated: 2026-09-01
 - 领域事件日志用于审计、幂等结果和增量失效，不是 Event Sourcing 状态库、Outbox、Worker 队列或业务对象的替代真源。
 - 渠道 Host 的内部 tick 只推进已提交的 request/Outbox，不是新的业务意图入口，也不为每次唤醒保存永久命令回执。
   维护步骤仍在 Core 单个写事务内调用既有 Handler；真实 admission 的领域事件、FIFO 防重和 delivery lease/结算幂等
-  均保留。精确请求与响应丢失恢复由 [Channel Host Maintenance v3](../contracts/channel-host-maintenance-v3.md) 拥有。
+  均保留。Core event 只负责提早唤醒，provider outstanding、静默判定及请求/响应丢失恢复由
+  [Channel Host Maintenance v4](../contracts/channel-host-maintenance-v4.md) 拥有。
 
 <a id="core-managed-content"></a>
 

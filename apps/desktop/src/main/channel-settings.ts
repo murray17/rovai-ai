@@ -16,6 +16,7 @@ import type {
   ChannelMemberBotView,
   ChannelQrAttemptView,
   ChannelSettingsSnapshot,
+  CoreEvent,
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
@@ -49,6 +50,7 @@ import {
   type ExecutionConsoleSnapshot
 } from '../shared/execution-presentation/feishu-card'
 import type { ExecutionViewScope } from './execution-view-service'
+import { AdaptiveChannelHostPump } from './channel-host-pump'
 
 type CoreChannelSnapshot = {
   schemaVersion: 2
@@ -190,8 +192,8 @@ export interface ChannelHostDependencies {
     revokeExecutionViewUrl(url: string | null): void
   }
   now?: () => number
-  setInterval?: typeof globalThis.setInterval
-  clearInterval?: typeof globalThis.clearInterval
+  setTimeout?: typeof globalThis.setTimeout
+  clearTimeout?: typeof globalThis.clearTimeout
 }
 
 type ManagedChannel = {
@@ -266,12 +268,11 @@ export class ChannelSettingsService {
   readonly #dmHints = new Map<string, number>()
   readonly #executionCardStates = new Map<string, ExecutionCardPresentationState>()
   readonly #executionCardTails = new Map<string, Promise<unknown>>()
+  readonly #hostPump: AdaptiveChannelHostPump | null
   #activeQrAttempt: ChannelQrAttemptView | null = null
   #activeQrAbort: AbortController | null = null
   #activeProvisioning: ChannelSettingsSnapshot['activeProvisioning'] = null
   #activeProvisioningAbort: AbortController | null = null
-  #pumpTimer: ReturnType<typeof globalThis.setInterval> | null = null
-  #pumping = false
   #started = false
   #stopped = false
   #nextRosterSweepAt = 0
@@ -288,6 +289,15 @@ export class ChannelSettingsService {
       ?? unavailableMemberBotAvatarSource
     this.#createChannel = dependencies?.createChannel ?? createLarkChannel
     this.#now = dependencies?.now ?? Date.now
+    this.#hostPump = dependencies ? new AdaptiveChannelHostPump({
+      run: () => this.#pumpOnce(),
+      onError: (error) => {
+        console.warn(`[rovai] Feishu outbox pump failed: ${channelFailureCode(error)}`)
+      },
+      now: this.#now,
+      setTimeout: dependencies.setTimeout,
+      clearTimeout: dependencies.clearTimeout
+    }) : null
   }
 
   async start(): Promise<void> {
@@ -313,11 +323,8 @@ export class ChannelSettingsService {
           this.#publicationFailures.set(bot.agentId, channelFailureCode(error))
         }
       }
-      const schedule = this.#dependencies.setInterval ?? globalThis.setInterval
-      this.#pumpTimer = schedule(() => void this.#pump(), 750)
-      this.#pumpTimer.unref?.()
       await this.#emit()
-      void this.#pump()
+      this.#hostPump?.start()
       if (snapshot.account?.status === 'connected') {
         void this.#checkDeveloperSession(snapshot.account, sessionCheckGeneration)
       }
@@ -335,11 +342,7 @@ export class ChannelSettingsService {
     this.#activeQrAbort = null
     this.#activeProvisioningAbort?.abort()
     this.#activeProvisioningAbort = null
-    if (this.#pumpTimer) {
-      const clear = this.#dependencies?.clearInterval ?? globalThis.clearInterval
-      clear(this.#pumpTimer)
-      this.#pumpTimer = null
-    }
+    this.#hostPump?.stop()
     const channels = [...this.#managedChannels.values()]
     this.#managedChannels.clear()
     this.#rosterReconciledAt.clear()
@@ -359,6 +362,10 @@ export class ChannelSettingsService {
   onChanged(listener: (snapshot: ChannelSettingsSnapshot) => void): () => void {
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
+  }
+
+  handleCoreEvent(event: CoreEvent): void {
+    this.#hostPump?.handleCoreEvent(event)
   }
 
   async connect(): Promise<ChannelSettingsSnapshot> {
@@ -1308,6 +1315,7 @@ export class ChannelSettingsService {
         agentId: managed.agentId
       })
       this.#publicationFailures.delete(agentId)
+      this.#hostPump?.wake()
       void this.#emit()
     }))
     try {
@@ -1349,6 +1357,7 @@ export class ChannelSettingsService {
       reject('host_stopped')
       return
     }
+    this.#hostPump?.wake()
     const raw = (message.raw ?? {}) as RawInboundEvent
     const coreSnapshot = await this.#coreSnapshot()
     const tenantKey = raw.sender?.tenant_key || raw.tenant_key
@@ -1540,6 +1549,7 @@ export class ChannelSettingsService {
       reject(`core_${safeDiagnosticReason(observation.code)}`, conversationKind)
       return
     }
+    this.#hostPump?.wake()
     logFeishuBotDiagnostic('message.accepted', {
       ...messageDiagnostic(managed, message),
       conversationKind
@@ -1554,6 +1564,7 @@ export class ChannelSettingsService {
         conversationKind,
         aggregateId
       )
+      this.#hostPump?.wake()
     }
     await this.#emit()
   }
@@ -1602,6 +1613,7 @@ export class ChannelSettingsService {
       })
       return
     }
+    this.#hostPump?.wake()
     const raw = (event.raw ?? {}) as RawCardActionEvent
     let result: StoredCommandResult
     try {
@@ -1647,7 +1659,7 @@ export class ChannelSettingsService {
       })
     }
     if (result.status !== 'rejected' || result.payload.pickerRefreshQueued === true) {
-      void this.#pump()
+      this.#hostPump?.wake()
     }
     void this.#emit().catch((error) => {
       logFeishuBotDiagnostic('card.snapshot_failed', {
@@ -1679,6 +1691,7 @@ export class ChannelSettingsService {
             operatorUnionId: raw.operator?.union_id ?? null
           }
           if (action.action === 'execution_stop') {
+            this.#hostPump?.wake()
             if (!raw.event_id) return executionConsoleCardActionResponse('stale')
             const result = await this.#commandWithId(
               'channels.executionConsole.agentRun.cancel',
@@ -1694,7 +1707,7 @@ export class ChannelSettingsService {
             )
             checkDeadline()
             if (result.status === 'rejected') return executionConsoleCardActionResponse(result.code)
-            void this.#pump()
+            this.#hostPump?.wake()
             const terminalStatus = executionTerminalStatus(result.payload.status)
             if (!state || !terminalStatus) {
               return { toast: { type: 'success', content: '停止请求已处理' } }
@@ -1832,6 +1845,7 @@ export class ChannelSettingsService {
 
   async #handleBotRosterChanged(event: BotAddedEvent): Promise<void> {
     if (this.#stopped) return
+    this.#hostPump?.wake()
     const snapshot = await this.#coreSnapshot().catch(() => null)
     if (!snapshot) return
     const tenantKeys = new Set(
@@ -1850,6 +1864,7 @@ export class ChannelSettingsService {
         snapshot
       ))
     )
+    this.#hostPump?.wake()
   }
 
   async #reconcileCardActionRoster(chatId: string): Promise<boolean> {
@@ -1991,46 +2006,46 @@ export class ChannelSettingsService {
     return conversationKind === 'topic' ? `${name} · 话题` : name
   }
 
-  async #pump(): Promise<void> {
-    if (!this.#dependencies || this.#pumping || this.#stopped) return
-    this.#pumping = true
-    try {
-      if (this.#now() >= this.#nextAggregateRecoveryAt) {
-        this.#nextAggregateRecoveryAt = this.#now() + 2_000
-        await this.#recoverPendingAggregates()
-      }
-      if (this.#now() >= this.#nextRosterSweepAt) {
-        this.#nextRosterSweepAt = this.#now() + ROSTER_SWEEP_MS
-        await this.#reconcileKnownGroupRosters()
-      }
-      const tick = await this.#dependencies.core.request<{
-        deliveries: ClaimedChannelDelivery[]
-        rosterRefreshes: TopicRosterRefreshRequest[]
-      }>('channels.host.tick', {
-        workerId: HOST_WORKER_ID,
-        limit: 20
-      })
-      const rosterRefreshes = Array.isArray(tick.rosterRefreshes)
-        ? tick.rosterRefreshes
-        : []
-      await Promise.allSettled(rosterRefreshes.map((refresh) => {
-        if (refresh.provider !== 'feishu'
-          || !refresh.tenantKey
-          || !refresh.chatId
-          || !Number.isSafeInteger(refresh.requiredRosterGeneration)) {
-          return Promise.resolve(false)
-        }
-        return this.#reconcileChatRoster(refresh.chatId, refresh.tenantKey, true)
-      }))
-      const deliveries = Array.isArray(tick.deliveries)
-        ? tick.deliveries
-        : []
-      for (const delivery of deliveries) await this.#deliver(delivery)
-    } catch (error) {
-      console.warn(`[rovai] Feishu outbox pump failed: ${channelFailureCode(error)}`)
-    } finally {
-      this.#pumping = false
+  async #pumpOnce(): Promise<boolean> {
+    if (!this.#dependencies || this.#stopped) return false
+    if (this.#now() >= this.#nextAggregateRecoveryAt) {
+      this.#nextAggregateRecoveryAt = this.#now() + 2_000
+      await this.#recoverPendingAggregates()
     }
+    if (this.#now() >= this.#nextRosterSweepAt) {
+      this.#nextRosterSweepAt = this.#now() + ROSTER_SWEEP_MS
+      await this.#reconcileKnownGroupRosters()
+    }
+    const tick = await this.#dependencies.core.request<{
+      deliveries: ClaimedChannelDelivery[]
+      rosterRefreshes: TopicRosterRefreshRequest[]
+      hasOutstandingWork: boolean
+    }>('channels.host.tick', {
+      workerId: HOST_WORKER_ID,
+      limit: 20
+    })
+    const rosterRefreshes = Array.isArray(tick.rosterRefreshes)
+      ? tick.rosterRefreshes
+      : []
+    const rosterResults = await Promise.allSettled(rosterRefreshes.map((refresh) => {
+      if (refresh.provider !== 'feishu'
+        || !refresh.tenantKey
+        || !refresh.chatId
+        || !Number.isSafeInteger(refresh.requiredRosterGeneration)) {
+        return Promise.resolve(false)
+      }
+      return this.#reconcileChatRoster(refresh.chatId, refresh.tenantKey, true)
+    }))
+    if (rosterResults.some((result) => result.status === 'fulfilled' && result.value)) {
+      this.#hostPump?.wake()
+    }
+    const deliveries = Array.isArray(tick.deliveries)
+      ? tick.deliveries
+      : []
+    for (const delivery of deliveries) await this.#deliver(delivery)
+    return tick.hasOutstandingWork === true
+      || rosterRefreshes.length > 0
+      || deliveries.length > 0
   }
 
   async #deliver(delivery: ClaimedChannelDelivery): Promise<void> {
@@ -2229,7 +2244,7 @@ export class ChannelSettingsService {
     const retryable = error instanceof LarkChannelError
       ? ['rate_limited', 'send_timeout', 'not_connected', 'unknown', 'upload_failed'].includes(error.code)
       : ['target_bot_not_connected', 'send_timeout', 'upload_failed'].includes(failureCode ?? '')
-    await this.#commandWithId('channels.deliveries.settle', randomUUID(), {
+    const result = await this.#commandWithId('channels.deliveries.settle', randomUUID(), {
       deliveryId: delivery.deliveryId,
       workerId: HOST_WORKER_ID,
       outcome: error ? 'failed' : 'sent',
@@ -2237,6 +2252,9 @@ export class ChannelSettingsService {
       failureCode,
       retryable
     })
+    this.#hostPump?.wake()
+    const availableAt = result.payload.availableAt
+    if (typeof availableAt === 'string') this.#hostPump?.wakeAt(availableAt)
   }
 
   async #coreSnapshot(): Promise<CoreChannelSnapshot> {

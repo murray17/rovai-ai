@@ -171,3 +171,35 @@ ExternalQuote。
 - 拒绝修补递归 `collectText` 的字段黑名单：Feishu element 与 locale schema 扩展会继续把元数据误当正文。
   拒绝在所有 Topic 中一律丢弃 `parent_id`：会同时删除真实的非 root 直接回复。拒绝回写历史消息：会破坏
   已冻结的 Context/Evidence digest，且无法可靠恢复用户当时的完整 provider 语义。
+
+<a id="v1-37-d07"></a>
+## V1.37-D07：渠道维护采用事件快路径与按需十分钟 watchdog，不建立通用工作日志
+
+### 背景
+
+飞书和钉钉 Main 原先永久每 750ms/800ms 调用一次全量 Host tick，即使当前 App 从未使用渠道或所有渠道工作早已
+收口也持续扫描。完全删除兜底则会让进程内 Core event、WebSocket 或 settlement 唤醒的偶发丢失再次造成执行卡和
+Delivery 永久停留。另一方案是增加 `channel_work_item/deadline journal` 或长期 `waitAndClaim`，但现有 Request、
+Delivery、Console、Aggregate 和 PendingBinding 已分别持久化状态与 deadline，通用表会复制权威并引入双写一致性。
+
+### 决定
+
+保留现有 `channels.host.tick` 作为数据库 level-triggered 恢复真源，并让响应按 provider 返回
+`hasOutstandingWork`。Main 每个 generation 只做一次启动恢复探测；入站、会改变渠道状态的卡片、Bot/roster、
+AgentRun/Runtime event 和 settlement 触发串行合并快路径。只有 Core 仍报告未收口工作时才武装可撤销的十分钟
+one-shot watchdog；清空后完全休眠。终态用独立 one-shot 跨过 900ms quiet window，retry 按 settlement 的
+`availableAt` 唤醒。每张执行卡在 Core 只允许一条 pending/attempting upsert，attempting 期间只推进 latest sequence，
+成功 settlement 落后时再创建一次 follow-up。Core event 只优化延迟，不承担可靠队列语义。
+
+当前 wire、状态集合、竞态与恢复上限由 [Channel Host Maintenance v4](../../contracts/channel-host-maintenance-v4.md)
+拥有；Provider 组成见[飞书](../../architecture/feishu-channel.md)与[钉钉](../../architecture/dingtalk-channel.md)架构。
+
+### 后果与替代方案
+
+- 空闲 App 仅有一次启动探测，没有常驻渠道扫描；活跃期间 live event 最多 500ms 合并一次，终态和短重试不等待
+  十分钟兜底。`deliveries=[]` 不能作为静默依据，停止只相信 Core 的 provider-scoped 领域事实。
+- 完全漏掉快路径时，恢复最多延后约十分钟；已过期 lease 还需等到该次 watchdog。这是用较低空闲写事务换取的明确
+  延迟，不能据此缩短领域 lease 或丢弃 deadline。
+- 拒绝仅把旧 interval 改成永久十分钟：即使无渠道工作仍会扫描，正常状态更新也会延迟。拒绝完全 event-only：
+  进程内通知没有持久 cursor，无法证明不丢。拒绝通用 WorkItem/waiter：当前规模下会增加新调度子系统与权威复制，
+  而不能比现有领域表提供更多恢复事实。

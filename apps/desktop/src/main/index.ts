@@ -791,7 +791,10 @@ if (primaryInstance) void app.whenReady().then(async () => {
   nativeTheme.themeSource = nativeThemeSource(themePreference)
   nativeTheme.on('updated', publishAppearance)
   publishAppearance()
-  core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
+  core.onEvent((event) => {
+    channelSettings.handleCoreEvent(event)
+    mainWindow?.webContents.send('rovai:event', event)
+  })
   core.onSnapshot((snapshot) => {
     mainWindow?.webContents.send('rovai:supervisor-changed', snapshot)
     maybeInitializeOnboarding(snapshot)

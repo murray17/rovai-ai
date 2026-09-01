@@ -1,4 +1,9 @@
-import type { ChannelKind, ChannelLoginViewBounds, ChannelSettingsSnapshot } from '@contracts'
+import type {
+  ChannelKind,
+  ChannelLoginViewBounds,
+  ChannelSettingsSnapshot,
+  CoreEvent
+} from '@contracts'
 import type { ChannelSettingsService } from './channel-settings'
 import type { DingTalkChannelSettingsService } from './dingtalk-channel-settings'
 
@@ -41,6 +46,11 @@ export class ChannelSettingsCoordinator {
 
   async stop(): Promise<void> {
     await Promise.allSettled([this.#feishu.stop(), this.#dingtalk.stop()])
+  }
+
+  handleCoreEvent(event: CoreEvent): void {
+    this.#feishu.handleCoreEvent(event)
+    this.#dingtalk.handleCoreEvent(event)
   }
 
   async get(): Promise<ChannelSettingsSnapshot> {
