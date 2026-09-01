@@ -8,7 +8,7 @@ last_updated: 2026-09-01
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v11](../contracts/feishu-channel-v11.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v12](../contracts/feishu-channel-v12.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -299,8 +299,11 @@ Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可�
 补发或改写旧卡，服务恢复也不补按钮。能够取得链接、访问该局域网且 Token 仍有效的人均可查看，因此该入口不是
 Owner-only 权限面。
 
-`ExecutionViewService` 是 Desktop Main 唯一的全局 HTTP/SSE listener，默认关闭、默认端口 8765。它自动选择 RFC1918
-IPv4，只接受设置页显式选择的 1024–65535 端口，不自动漂移。Token 明文只出现在 URL fragment 与页面内存；Main 只保存
+`ExecutionViewService` 是 Desktop Main 唯一的全局 HTTP/SSE listener。缺少设置文件时默认开启、默认端口 8765；
+有效持久设置始终优先，设置内容无效或不可读取时失败关闭。默认开启只表达配置意图；Main 只有从权威渠道设置快照
+确认至少一个渠道 Bot 当前为 `published` 才允许绑定。没有已发布 Bot 时不解析网卡或创建 server；首个 Bot 发布后自动
+尝试监听，最后一个退出已发布状态时关闭 listener、终止流并撤销内存 Grant。服务自动选择 RFC1918 IPv4，只接受设置页
+显式选择的 1024–65535 端口，不自动漂移。Token 明文只出现在 URL fragment 与页面内存；Main 只保存
 hash 和冻结的 `ChannelConversation/App/Camp/Agent/focusRun/maxRunCreatedAt` scope。服务关闭、卡片 recall 或 Main 重启会
 撤销内存 grant；不建立持久 Capability/撤销领域。
 

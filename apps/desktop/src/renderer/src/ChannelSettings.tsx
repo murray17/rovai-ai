@@ -228,8 +228,6 @@ export function ChannelSettingsView({
   const channel = channels.find((candidate) => candidate.kind === selectedKind)
     ?? channels[0]
     ?? null
-  const pendingBindingCount = channel?.pendingBindingCount ?? snapshot?.pendingBindingCount ?? 0
-  const bindingIssueCount = channel?.bindingIssueCount ?? snapshot?.bindingIssueCount ?? 0
   const providerName = channel?.displayName ?? '渠道'
 
   return (
@@ -326,24 +324,6 @@ export function ChannelSettingsView({
             />
           </section>
 
-          <section className="channel-settings-section" aria-labelledby="channel-binding-diagnostics-heading">
-            <ChannelSectionHeading
-              id="channel-binding-diagnostics-heading"
-              title="会话接入"
-              description={channel.kind === 'dingtalk'
-                ? '私聊自动进入 Quick Chat；群聊首次由 Owner @ 后，在原群项目卡片中选择一次项目。钉钉话题暂不接入。'
-                : '私聊自动进入 Quick Chat；群聊和话题首次由 Owner @ 后，在飞书私密卡片中选择一次项目。'}
-              summary={`${pendingBindingCount} 个待选择`}
-            />
-            <div className="channel-binding-diagnostics" role="status">
-              <span><strong>{pendingBindingCount}</strong><small>待处理绑定</small></span>
-              <span className={bindingIssueCount > 0 ? 'is-warning' : undefined}>
-                <strong>{bindingIssueCount}</strong><small>绑定异常</small>
-              </span>
-              <p>项目绑定完成后不可换绑；需要另一个项目时，请新建{channel.kind === 'dingtalk' ? '钉钉群' : '飞书群或话题'}。</p>
-            </div>
-          </section>
-
           <ExecutionWebSettingsPanel />
         </div>
       )}
@@ -422,7 +402,15 @@ export function ExecutionWebSettingsPanel(): React.JSX.Element {
           <strong>局域网执行台</strong>
           <small>在同一网络中查看公开执行记录</small>
         </span>
-        <span className={`execution-web-status is-${status.tone}`}>{status.label}</span>
+        <span className={`execution-web-status is-${status.tone}`}>
+          <span className="execution-web-status-dot" aria-hidden="true" />
+          <span>{status.label}</span>
+        </span>
+        <span className="execution-web-disclosure" aria-hidden="true">
+          <svg viewBox="0 0 20 20">
+            <path d="m5.5 7.75 4.5 4.5 4.5-4.5" />
+          </svg>
+        </span>
       </summary>
       <form className="execution-web-form" onSubmit={(event) => void save(event)}>
         <label className="execution-web-switch-row">
@@ -463,12 +451,15 @@ export function ExecutionWebSettingsPanel(): React.JSX.Element {
   )
 }
 
-function executionWebStatus(snapshot: ExecutionWebSettingsSnapshot | null): {
+export function executionWebStatus(snapshot: ExecutionWebSettingsSnapshot | null): {
   label: string
   tone: 'neutral' | 'success' | 'warning'
 } {
   if (!snapshot || !snapshot.enabled || snapshot.server.state === 'disabled') {
     return { label: '未开启', tone: 'neutral' }
+  }
+  if (snapshot.server.state === 'no_published_bot') {
+    return { label: `等待 Bot 发布 · ${snapshot.port}`, tone: 'neutral' }
   }
   if (snapshot.server.state === 'ready') return { label: `已开启 · ${snapshot.port}`, tone: 'success' }
   if (snapshot.server.state === 'port_conflict') return { label: `端口被占用 · ${snapshot.port}`, tone: 'warning' }

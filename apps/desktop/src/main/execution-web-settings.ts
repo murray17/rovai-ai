@@ -3,6 +3,11 @@ import type { ExecutionWebSettingsSnapshot, StructuredError } from '@contracts'
 import { writePrivateJson } from './general-preferences'
 
 export const DEFAULT_EXECUTION_WEB_SETTINGS = {
+  enabled: true,
+  port: 8765
+} as const
+
+const FAIL_CLOSED_EXECUTION_WEB_SETTINGS = {
   enabled: false,
   port: 8765
 } as const
@@ -50,17 +55,21 @@ export class ExecutionWebSettingsStore {
     try {
       const parsed = parseExecutionWebSettings(JSON.parse(await readFile(filePath, 'utf8')))
       if (parsed) return new ExecutionWebSettingsStore(filePath, parsed, null)
-      return new ExecutionWebSettingsStore(filePath, defaults(), degradation(
+      return new ExecutionWebSettingsStore(filePath, failClosedDefaults(), degradation(
         'execution_web_settings_invalid',
         'Execution Web settings are invalid; the service remains disabled with in-memory defaults.'
       ))
     } catch (error) {
       const missing = error instanceof Error && 'code' in error
         && (error as NodeJS.ErrnoException).code === 'ENOENT'
-      return new ExecutionWebSettingsStore(filePath, defaults(), missing ? null : degradation(
-        'execution_web_settings_unreadable',
-        'Execution Web settings could not be read; the service remains disabled with in-memory defaults.'
-      ))
+      return new ExecutionWebSettingsStore(
+        filePath,
+        missing ? defaults() : failClosedDefaults(),
+        missing ? null : degradation(
+          'execution_web_settings_unreadable',
+          'Execution Web settings could not be read; the service remains disabled with in-memory defaults.'
+        )
+      )
     }
   }
 
@@ -89,6 +98,10 @@ export class ExecutionWebSettingsStore {
 
 function defaults(): StoredExecutionWebSettings {
   return { schemaVersion: 1, ...DEFAULT_EXECUTION_WEB_SETTINGS }
+}
+
+function failClosedDefaults(): StoredExecutionWebSettings {
+  return { schemaVersion: 1, ...FAIL_CLOSED_EXECUTION_WEB_SETTINGS }
 }
 
 function degradation(code: string, message: string): StructuredError {

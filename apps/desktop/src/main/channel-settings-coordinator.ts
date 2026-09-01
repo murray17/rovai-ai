@@ -7,6 +7,14 @@ import type {
 import type { ChannelSettingsService } from './channel-settings'
 import type { DingTalkChannelSettingsService } from './dingtalk-channel-settings'
 
+export function hasPublishedChannelBot(snapshot: {
+  channels: ReadonlyArray<{ memberBots: ReadonlyArray<{ publicationStatus: string }> }>
+}): boolean {
+  return snapshot.channels.some((channel) => (
+    channel.memberBots.some((bot) => bot.publicationStatus === 'published')
+  ))
+}
+
 export class ChannelSettingsCoordinator {
   readonly #feishu: ChannelSettingsService
   readonly #dingtalk: DingTalkChannelSettingsService

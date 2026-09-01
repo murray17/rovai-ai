@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Rovai AI 局域网执行台摘要行 HTML 设计稿">
+  <title>Rovai AI · 局域网执行台摘要行设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-muted: #e7eaed;
+      --surface-hover: #e8eaea;
+      --surface-sunken: #e4e8eb;
+      --workspace-surface-hover: #e8ebec;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --rail: #f3f4f4;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --ember: #d3a45f;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --focus: #526f88;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-muted: #242d33;
+      --surface-hover: #1d252b;
+      --surface-sunken: #10161a;
+      --workspace-surface-hover: #1d252a;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --rail: #11161a;
+      --rail-line: #313b43;
+      --rail-logo: #b1c8d8;
+      --ember: #d2aa72;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --focus: #8fb3cb;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-width: 320px; min-height: 100%; margin: 0; }
+    body {
+      min-height: 100vh;
+      color: var(--ink);
+      background: var(--canvas);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    button, input { color: inherit; font: inherit; }
+    button, summary, input { -webkit-tap-highlight-color: transparent; }
+    button { cursor: pointer; }
+    :where(button, summary, input):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    svg { display: block; }
+
+    .review-toolbar {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      min-height: 52px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 8px 14px 8px 18px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+    }
+    .review-copy {
+      display: grid;
+      min-width: 0;
+      gap: 1px;
+    }
+    .review-copy strong {
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .review-copy span {
+      color: var(--faint);
+      font-size: 9.5px;
+    }
+    .review-actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 7px;
+    }
+    .review-button {
+      display: inline-flex;
+      min-height: 32px;
+      align-items: center;
+      gap: 6px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface);
+      font-size: 10.5px;
+      font-weight: 600;
+    }
+    .review-button:hover {
+      color: var(--ink);
+      border-color: var(--line-strong);
+      background: var(--surface-hover);
+    }
+    .review-button svg {
+      width: 14px;
+      height: 14px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.6;
+    }
+
+    .app-shell {
+      display: grid;
+      min-height: calc(100vh - 52px);
+      grid-template-columns: 270px minmax(0, 1fr);
+      background: var(--surface-raised);
+    }
+
+    .settings-sidebar {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      padding: 0 10px 10px;
+      border-right: 1px solid var(--rail-line);
+      background: var(--rail);
+    }
+    .drag-space { flex: 0 0 38px; }
+    .brand {
+      display: flex;
+      height: 38px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 8px 14px;
+      color: var(--rail-logo);
+    }
+    .brand-mark {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 22px;
+      overflow: visible;
+    }
+    .brand-mark path {
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.65;
+    }
+    .brand-mark circle {
+      fill: var(--ember);
+      stroke: var(--rail);
+      stroke-width: .65;
+    }
+    .brand strong {
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -.01em;
+    }
+    .settings-title {
+      display: grid;
+      gap: 2px;
+      margin: 2px 4px 15px;
+      padding: 12px 10px;
+      border-top: 1px solid var(--rail-line);
+      border-bottom: 1px solid var(--rail-line);
+    }
+    .settings-title strong {
+      font-size: 12.5px;
+      font-weight: 650;
+    }
+    .settings-title span {
+      color: var(--faint);
+      font-size: 9.5px;
+    }
+    .settings-nav {
+      display: grid;
+      gap: 14px;
+      padding: 0 4px;
+    }
+    .settings-nav section {
+      display: grid;
+      gap: 3px;
+    }
+    .settings-nav h2 {
+      margin: 0;
+      padding: 0 8px 4px;
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .08em;
+    }
+    .settings-nav button {
+      display: grid;
+      min-height: 34px;
+      grid-template-columns: 20px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+    }
+    .settings-nav button:hover {
+      color: var(--ink);
+      background: var(--surface-muted);
+    }
+    .settings-nav button.is-current {
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+    }
+    .settings-nav button svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.5;
+    }
+    .settings-nav button strong {
+      overflow: hidden;
+      font-size: 12px;
+      font-weight: 500;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-content {
+      min-width: 0;
+      overflow: auto;
+      background: var(--surface);
+    }
+    .settings-panel {
+      width: min(1094px, 100%);
+      min-height: 100%;
+      padding: 27px 27px 52px;
+    }
+    .channel-settings {
+      width: min(1040px, 100%);
+    }
+    .page-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 24px;
+    }
+    .page-heading-copy {
+      min-width: 0;
+    }
+    .eyebrow {
+      margin: 0;
+      color: var(--brand-ink);
+      font-size: 9px;
+      font-weight: 750;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    .page-heading h1 {
+      margin: 5px 0 0;
+      font-size: 25px;
+      font-weight: 620;
+      line-height: 1.15;
+      letter-spacing: -.025em;
+    }
+    .page-heading-copy > p:last-child {
+      max-width: 680px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .owner-note {
+      flex: 0 0 auto;
+      padding: 5px 8px;
+      border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--line));
+      border-radius: 999px;
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+      font: 700 9px/1 var(--mono);
+      white-space: nowrap;
+    }
+
+    .context-section {
+      padding-top: 22px;
+    }
+    .context-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 12px;
+    }
+    .context-heading h2 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 620;
+      line-height: 1.3;
+      letter-spacing: -.01em;
+    }
+    .context-heading p {
+      max-width: 72ch;
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 10.5px;
+      line-height: 1.55;
+    }
+    .context-heading > span {
+      flex: 0 0 auto;
+      color: var(--faint);
+      font: 500 10px/1.4 var(--mono);
+      white-space: nowrap;
+    }
+    .provider-strip {
+      display: flex;
+      padding: 7px 2px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .provider-tab {
+      display: grid;
+      width: min(232px, 100%);
+      min-height: 44px;
+      grid-template-columns: 30px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      padding: 6px 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+      text-align: left;
+    }
+    .provider-icon {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 6px;
+      color: #3370ff;
+      background: var(--surface-raised);
+      font-size: 12px;
+      font-weight: 750;
+    }
+    :root[data-theme="night"] .provider-icon { color: #7fa2ff; }
+    .provider-tab > span:last-child {
+      display: grid;
+      min-width: 0;
+      gap: 2px;
+    }
+    .provider-tab strong { font-size: 11.5px; }
+    .provider-tab small { color: var(--muted); font-size: 9px; }
+    .connection-row,
+    .bot-row {
+      display: grid;
+      min-height: 50px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .connection-row:last-child,
+    .bot-row:last-child { border-bottom: 1px solid var(--line); }
+    .row-copy {
+      display: grid;
+      min-width: 0;
+      gap: 2px;
+      padding: 8px;
+    }
+    .row-copy strong { font-size: 11.5px; font-weight: 600; }
+    .row-copy small {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 9.5px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .row-state {
+      padding-right: 8px;
+      color: var(--success);
+      font: 540 9.5px/1.4 var(--mono);
+      white-space: nowrap;
+    }
+
+    .execution-web-settings {
+      margin-top: 30px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .execution-web-summary {
+      display: grid;
+      min-height: 60px;
+      grid-template-columns: minmax(0, 1fr) max-content 28px;
+      align-items: center;
+      column-gap: 12px;
+      padding: 8px;
+      border-radius: 7px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .execution-web-summary::-webkit-details-marker { display: none; }
+    .execution-web-summary::marker { content: ""; }
+    .execution-web-summary:hover {
+      background: color-mix(in srgb, var(--workspace-surface-hover) 62%, transparent);
+    }
+    .execution-web-summary:active {
+      background: var(--surface-muted);
+    }
+    .summary-copy {
+      display: grid;
+      min-width: 0;
+      gap: 3px;
+    }
+    .summary-copy strong {
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 620;
+    }
+    .summary-copy small {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 9.5px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .execution-web-status {
+      display: inline-grid;
+      min-height: 24px;
+      grid-template-columns: 7px auto auto auto;
+      align-items: center;
+      gap: 6px;
+      color: var(--success);
+      font: 540 9.5px/1.4 var(--mono);
+      white-space: nowrap;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent);
+    }
+    .status-separator { color: var(--faint); }
+    .status-port { color: currentColor; }
+    .summary-chevron {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      align-self: center;
+      justify-self: end;
+      border-radius: 6px;
+      color: var(--faint);
+    }
+    .summary-chevron svg {
+      width: 14px;
+      height: 14px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.65;
+      transform-origin: center;
+      transition: transform 140ms ease;
+    }
+    .execution-web-summary:hover .summary-chevron {
+      color: var(--ink);
+      background: var(--surface-muted);
+    }
+    .execution-web-settings[open] .summary-chevron svg {
+      transform: rotate(180deg);
+    }
+    .execution-web-form {
+      display: grid;
+      gap: 0;
+      padding: 4px 8px 14px;
+      border-top: 1px solid var(--line);
+    }
+    .form-row {
+      display: grid;
+      min-height: 52px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .form-row > span:first-child,
+    .form-row > label:first-child {
+      color: var(--ink);
+      font-size: 10.5px;
+      font-weight: 600;
+    }
+    .switch-copy {
+      display: grid;
+      gap: 2px;
+    }
+    .switch-copy small {
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 400;
+    }
+    .switch {
+      position: relative;
+      width: 34px;
+      height: 20px;
+      margin: 0;
+      appearance: none;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--surface-sunken);
+      cursor: pointer;
+      transition: border-color 140ms ease, background 140ms ease;
+    }
+    .switch::after {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--surface-raised);
+      box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 20%, transparent);
+      content: "";
+      transition: transform 140ms ease;
+    }
+    .switch:checked {
+      border-color: var(--brand);
+      background: var(--brand);
+    }
+    .switch:checked::after { transform: translateX(14px); }
+    .port-input {
+      width: 108px;
+      min-height: 34px;
+      padding: 5px 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      font: 500 11px/1.4 var(--mono);
+    }
+    .address {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--muted);
+      font: 10px/1.4 var(--mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .warning {
+      margin: 10px 0 0;
+      color: var(--faint);
+      font-size: 9.5px;
+      line-height: 1.5;
+    }
+    .form-actions {
+      display: flex;
+      justify-content: flex-end;
+      padding-top: 10px;
+    }
+    .save-button {
+      min-height: 30px;
+      padding: 0 11px;
+      border: 1px solid var(--brand);
+      border-radius: 6px;
+      color: #fff;
+      background: var(--brand);
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+    :root[data-theme="night"] .save-button { color: #091116; }
+    .save-button:disabled {
+      cursor: default;
+      opacity: .45;
+    }
+
+    .design-note {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-top: 13px;
+      color: var(--faint);
+      font-size: 9.5px;
+      line-height: 1.55;
+    }
+    .design-note svg {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 14px;
+      margin-top: 1px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.55;
+    }
+
+    @media (max-width: 900px) {
+      .app-shell { grid-template-columns: minmax(0, 1fr); }
+      .settings-sidebar { display: none; }
+      .settings-panel { padding-right: 18px; padding-left: 18px; }
+    }
+    @media (max-width: 560px) {
+      .review-copy span { display: none; }
+      .review-button span { display: none; }
+      .review-button { width: 34px; padding: 0; justify-content: center; }
+      .page-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+      .execution-web-summary {
+        min-height: 64px;
+        grid-template-columns: minmax(0, 1fr) 28px;
+        row-gap: 1px;
+        padding-right: 4px;
+        padding-left: 4px;
+      }
+      .execution-web-status {
+        grid-column: 1;
+        grid-row: 2;
+        justify-self: start;
+      }
+      .summary-chevron {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+      }
+      .execution-web-form { padding-inline: 4px; }
+      .form-row { min-height: 56px; }
+      .address { max-width: 210px; }
+      .design-note { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .summary-chevron svg,
+      .switch,
+      .switch::after { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review-toolbar">
+    <div class="review-copy">
+      <strong>局域网执行台 · 摘要行调整</strong>
+      <span>评审稿 · 只调整状态与展开箭头，不改变设置语义</span>
+    </div>
+    <div class="review-actions">
+      <button class="review-button" id="theme-toggle" type="button" aria-label="切换到夜间主题">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 12.7A8.5 8.5 0 1 1 11.3 3a7 7 0 0 0 9.7 9.7Z"></path>
+        </svg>
+        <span>夜间</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="settings-sidebar" aria-label="设置分类">
+      <div class="drag-space" aria-hidden="true"></div>
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m12 2 1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6Z"></path>
+          <path d="M4.5 21c2.4-1.3 4.9-1.9 7.5-1.9s5.1.6 7.5 1.9"></path>
+          <circle cx="12" cy="19.15" r="1.15"></circle>
+        </svg>
+        <strong>Rovai AI</strong>
+      </div>
+      <div class="settings-title">
+        <strong>设置</strong>
+        <span>应用偏好与本机能力</span>
+      </div>
+      <nav class="settings-nav" aria-label="设置页面">
+        <section>
+          <h2>应用</h2>
+          <button type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10m4 0h2M4 17h2m4 0h10"></path><circle cx="16" cy="7" r="2"></circle><circle cx="8" cy="17" r="2"></circle></svg>
+            <strong>通用</strong>
+          </button>
+          <button type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"></path></svg>
+            <strong>外观</strong>
+          </button>
+          <button type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 10.5a5.5 5.5 0 0 1 11 0c0 5 2 5.2 2 6.5h-15c0-1.3 2-1.5 2-6.5Z"></path><path d="M9.7 19a2.5 2.5 0 0 0 4.6 0"></path></svg>
+            <strong>提醒</strong>
+          </button>
+        </section>
+        <section>
+          <h2>能力</h2>
+          <button type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.4 5.6L19 10l-5.6 1.4L12 17l-1.4-5.6L5 10l5.6-1.4Z"></path></svg>
+            <strong>Skill</strong>
+          </button>
+          <button type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12h8v2a4 4 0 0 1-8 0Zm2-7v7m4-7v7M6 8h12M12 18v3"></path></svg>
+            <strong>MCP</strong>
+          </button>
+          <button type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="m7 9 3 3-3 3m6 0h4"></path></svg>
+            <strong>Agent 运行时</strong>
+          </button>
+          <button class="is-current" type="button" aria-current="page">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z"></path><path d="m8 10 2 2-2 2m5 0h3"></path></svg>
+            <strong>渠道</strong>
+          </button>
+        </section>
+        <section>
+          <h2>支持</h2>
+          <button type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"></path></svg>
+            <strong>诊断与修复</strong>
+          </button>
+          <button type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5m0-8h.01"></path></svg>
+            <strong>关于与更新</strong>
+          </button>
+        </section>
+      </nav>
+    </aside>
+
+    <main class="settings-content">
+      <div class="settings-panel">
+        <div class="channel-settings">
+          <header class="page-heading">
+            <div class="page-heading-copy">
+              <p class="eyebrow">Settings / Channels</p>
+              <h1>渠道</h1>
+              <p>在本机连接协作平台并逐一发布队员 Bot。只有 Rovai Owner 可以从外部渠道触发队员；项目选择与执行管理仍由本机掌控。</p>
+            </div>
+            <span class="owner-note">Owner 本机</span>
+          </header>
+
+          <section class="context-section" aria-labelledby="channel-heading">
+            <div class="context-heading">
+              <div>
+                <h2 id="channel-heading">渠道</h2>
+                <p>选择要连接和管理的平台。账号会话、应用凭据与项目路径都留在这台设备。</p>
+              </div>
+              <span>1 个渠道</span>
+            </div>
+            <div class="provider-strip">
+              <button class="provider-tab" type="button" aria-pressed="true">
+                <span class="provider-icon" aria-hidden="true">飞</span>
+                <span><strong>飞书</strong><small>开发者账号已连接</small></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="context-section" aria-labelledby="connection-heading">
+            <div class="context-heading">
+              <div>
+                <h2 id="connection-heading">飞书连接</h2>
+                <p>连接只决定后续 Bot 的发布目标；切换连接不会迁移或停用已发布 Bot。</p>
+              </div>
+            </div>
+            <div class="connection-row">
+              <span class="row-copy"><strong>Murray · Rovai</strong><small>开发者账号会话 · 保存在 Rovai 本地数据库</small></span>
+              <span class="row-state">已连接</span>
+            </div>
+          </section>
+
+          <section class="context-section" aria-labelledby="bot-heading">
+            <div class="context-heading">
+              <div>
+                <h2 id="bot-heading">队员 Bot</h2>
+                <p>每名队员拥有独立 Bot 身份和隔离的长连接。</p>
+              </div>
+              <span>2 名已发布</span>
+            </div>
+            <div class="bot-row">
+              <span class="row-copy"><strong>沐瓦</strong><small>产品与前端设计</small></span>
+              <span class="row-state">已发布</span>
+            </div>
+          </section>
+
+          <details class="execution-web-settings" id="execution-web-settings">
+            <summary class="execution-web-summary">
+              <span class="summary-copy">
+                <strong>局域网执行台</strong>
+                <small>在同一网络中查看公开执行记录</small>
+              </span>
+              <span class="execution-web-status" aria-label="已开启，端口 8765">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span>已开启</span>
+                <span class="status-separator" aria-hidden="true">·</span>
+                <span class="status-port">8765</span>
+              </span>
+              <span class="summary-chevron" aria-hidden="true">
+                <svg viewBox="0 0 20 20">
+                  <path d="m5.5 7.75 4.5 4.5 4.5-4.5"></path>
+                </svg>
+              </span>
+            </summary>
+
+            <form class="execution-web-form" id="execution-web-form">
+              <label class="form-row">
+                <span class="switch-copy"><strong>允许局域网访问</strong><small>仅提供只读页面</small></span>
+                <input class="switch" id="lan-enabled" type="checkbox" role="switch" checked>
+              </label>
+              <label class="form-row">
+                <span>端口</span>
+                <input class="port-input" id="lan-port" type="number" inputmode="numeric" min="1024" max="65535" step="1" value="8765">
+              </label>
+              <div class="form-row">
+                <span>当前地址</span>
+                <code class="address">http://192.168.1.42:8765</code>
+              </div>
+              <p class="warning">修改端口后，此前发送的执行台链接可能失效。</p>
+              <div class="form-actions">
+                <button class="save-button" id="save-button" type="submit" disabled>保存</button>
+              </div>
+            </form>
+          </details>
+
+          <p class="design-note">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"></circle><path d="M10 9v4m0-7h.01"></path></svg>
+            <span>箭头使用独立 28px 槽位和 14px SVG，视觉中心不再受状态文字或系统字体基线影响。</span>
+          </p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const root = document.documentElement
+    const themeButton = document.querySelector('#theme-toggle')
+    const themeLabel = themeButton.querySelector('span')
+    const themeIcon = themeButton.querySelector('svg')
+    const enabledInput = document.querySelector('#lan-enabled')
+    const portInput = document.querySelector('#lan-port')
+    const saveButton = document.querySelector('#save-button')
+    const form = document.querySelector('#execution-web-form')
+    const status = document.querySelector('.execution-web-status')
+
+    function setTheme(theme) {
+      root.dataset.theme = theme
+      const night = theme === 'night'
+      themeButton.setAttribute('aria-label', night ? '切换到日间主题' : '切换到夜间主题')
+      themeLabel.textContent = night ? '日间' : '夜间'
+      themeIcon.innerHTML = night
+        ? '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"></path>'
+        : '<path d="M21 12.7A8.5 8.5 0 1 1 11.3 3a7 7 0 0 0 9.7 9.7Z"></path>'
+    }
+
+    function updateDirtyState() {
+      const port = Number(portInput.value)
+      const valid = Number.isInteger(port) && port >= 1024 && port <= 65535
+      const dirty = !enabledInput.checked || port !== 8765
+      portInput.setAttribute('aria-invalid', String(!valid))
+      saveButton.disabled = !dirty || !valid
+    }
+
+    themeButton.addEventListener('click', () => {
+      setTheme(root.dataset.theme === 'night' ? 'day' : 'night')
+    })
+    enabledInput.addEventListener('change', updateDirtyState)
+    portInput.addEventListener('input', updateDirtyState)
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const port = Number(portInput.value)
+      const enabled = enabledInput.checked
+      status.innerHTML = enabled
+        ? '<span class="status-dot" aria-hidden="true"></span><span>已开启</span><span class="status-separator" aria-hidden="true">·</span><span class="status-port">' + port + '</span>'
+        : '<span class="status-dot" aria-hidden="true"></span><span>未开启</span>'
+      status.setAttribute('aria-label', enabled ? '已开启，端口 ' + port : '未开启')
+      saveButton.disabled = true
+    })
+  </script>
+</body>
+</html>
