@@ -58,8 +58,14 @@ Main 重启后默认收起，不恢复旧 URL；召回和 Host stop 撤销内存
 
 ## 4. LAN 只读执行台
 
-飞书与钉钉共用 Desktop 唯一 `ExecutionViewService`、全局启用项和端口；默认端口 `8765`，合法范围
-`1024..65535`，端口冲突不漂移。新卡创建且服务 ready 时，Main 生成高熵内存 Token 和固定 URL：
+飞书与钉钉共用 Desktop 唯一 `ExecutionViewService`、全局启用项和端口。缺少设置文件时默认为
+`{ enabled: true, port: 8765 }`，但不自动落盘；有效的已保存选择始终优先，设置无效、无法解析或无法读取时
+失败关闭。端口合法范围为 `1024..65535`，冲突时不漂移。
+
+只有飞书或钉钉当前至少一个 Bot 为 `published` 时才绑定局域网 listener；没有已发布 Bot 时进入
+`no_published_bot`，不解析网卡、不创建 server，也不生成卡片 URL。首个 Bot 发布后自动尝试监听；最后一个
+Bot 退出已发布状态时关闭 listener、终止流并撤销内存 Token。新卡创建且服务 ready 时，Main 生成高熵
+内存 Token 和固定 URL：
 
 ```text
 http://<current-rfc1918-address>:<configured-port>/execution/<focusRunId>#t=<token>
@@ -94,6 +100,6 @@ DingTalk Owner recent/cancel、错误 App/消息拒绝、DingTalk Web scope 和 
 
 - [钉钉渠道架构](../architecture/dingtalk-channel.md)
 - [渠道设置](../ui/components/channel-settings.md)
-- [Feishu Channel v11](feishu-channel-v11.md)
+- [Feishu Channel v12](feishu-channel-v12.md)
 - [Channel Host Maintenance v4](channel-host-maintenance-v4.md)
 - [隔离验收](../development/local-workflow.md#钉钉-web-session-验收前置)

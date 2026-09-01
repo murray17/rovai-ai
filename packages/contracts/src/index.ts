@@ -1247,6 +1247,10 @@ export type FilePreviewCapability =
   | 'open_in_system'
   | 'preview_asset'
 
+export type FilePreviewPathPresentation =
+  | 'project_relative'
+  | 'file_name_only'
+
 export interface FileContentVersion {
   size: number
   mtimeMs: number
@@ -1258,6 +1262,7 @@ export interface ResolvedFilePreview {
   reopenToken: string
   previewKey: string
   displayPath: string
+  pathPresentation: FilePreviewPathPresentation
   fileName: string
   size: number
   mime: string
@@ -2502,6 +2507,7 @@ export interface ChannelSettingsSnapshot {
 
 export type ExecutionWebServerState =
   | 'disabled'
+  | 'no_published_bot'
   | 'starting'
   | 'ready'
   | 'port_conflict'

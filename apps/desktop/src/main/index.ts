@@ -104,7 +104,7 @@ import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
 import { ExecutionViewService } from './execution-view-service'
 import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
-import { ChannelSettingsCoordinator } from './channel-settings-coordinator'
+import { ChannelSettingsCoordinator, hasPublishedChannelBot } from './channel-settings-coordinator'
 import { parseChannelLoginViewBounds } from './dingtalk-login-view'
 import { ChannelHostLifecycle } from './channel-host-lifecycle'
 import {
@@ -403,6 +403,9 @@ const channelSettings = new ChannelSettingsCoordinator({
 const channelHostLifecycle = new ChannelHostLifecycle({
   async start() {
     await channelSettings.start()
+    await executionView.setPublishedChannelBotAvailable(
+      hasPublishedChannelBot(await channelSettings.get())
+    )
     if (coreDataPath !== null) {
       await removeRetiredChannelCredentialFiles(coreDataPath).catch((error) => {
         console.warn('[rovai] Retired channel credential file cleanup failed; Channel Hosts remain available.', error)
@@ -412,6 +415,9 @@ const channelHostLifecycle = new ChannelHostLifecycle({
   stop: () => channelSettings.stop()
 })
 channelSettings.onChanged((snapshot) => {
+  void executionView.setPublishedChannelBotAvailable(hasPublishedChannelBot(snapshot)).catch((error) => {
+    console.warn('[rovai] Execution Web published Bot gate update failed.', error)
+  })
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
   mainWindow.webContents.send('rovai:channels-changed', snapshot)
 })

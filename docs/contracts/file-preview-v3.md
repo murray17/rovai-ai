@@ -71,6 +71,7 @@ interface ResolvedFilePreview {
   reopenToken: string
   previewKey: string
   displayPath: string
+  pathPresentation: 'project_relative' | 'file_name_only'
   fileName: string
   size: number
   mime: string
@@ -84,8 +85,15 @@ interface ResolvedFilePreview {
 }
 ```
 
-`displayPath` 只允许来源/root 相对路径、Attachment 显示名或外部具体文件的安全文件名；响应、错误和 Renderer
-日志不得包含 canonical path、临时资源 root、authorized root、receipt、watcher ID 或来源 token 内容。
+`displayPath` 只允许 Camp 项目相对路径、Attachment 显示名或外部具体文件的安全文件名。
+`pathPresentation:project_relative` 只在 Main 完成 `realpath` 后确认 canonical 文件仍位于当前 Camp 项目根目录、
+且 `displayPath` 确实以该项目根目录为基准时签发；Attachment、项目外具体文件、显式 authorized root 和已经离开
+项目根目录的 `child_of_handle` 均为 `file_name_only`。Renderer 不从字符串形态、文件名或 managed Attachment
+存储位置反推来源。响应、错误和 Renderer 日志不得包含 canonical path、临时资源 root、authorized root、receipt、
+watcher ID 或来源 token 内容。
+
+Renderer 仅在 `project_relative` 且 `displayPath` 含目录层级时常驻显示路径；项目根目录文件、Attachment 和项目外
+文件只在 Tab 显示文件名。外部更新仍可按需显示独立更新操作，不得为了该操作保留空路径占位。
 
 `previewKey` 是窗口与 Camp 内 canonical file 的不可读去重身份。同一文件不因来源、相对写法或行号分裂 Tab；
 每次打开仍独立校验来源并创建来源绑定的 handle，去重不共享或升级权限。

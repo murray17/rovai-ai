@@ -60,7 +60,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | 精确来源与既有 receipt 含义不变；原库事务重映射 main 117/118/119→126/127/130，逐步恢复，128/129 历史合同保留，131 封口 |
 | [Channel/Main Schema Join v1（历史）](channel-main-schema-join-v1.md) | 主线 Pending/Fast 与渠道精确来源准入、126/127 receipt 与 128 封闭；副本执行位置由 v2 替代 |
 | [Channel Storage v1（历史）](channel-storage-v1.md) | 飞书/钉钉 credential 与 Developer Session 的 `rovai.sqlite` 明文存储、Main-only API、批量启动、账号/发布原子提交、CAS refresh 与旧 `.bin` clean break |
-| [Feishu Channel v11（当前）](feishu-channel-v11.md) | v10 执行卡/LAN 只读面不变；当前正文只信 SDK 规范化结果，外部引用使用单 locale schema，并排除 Topic root structural parent 的伪引用 |
+| [Feishu Channel v12（当前）](feishu-channel-v12.md) | v11 入站规范化与此前执行卡/公开投影不变；缺少设置文件时默认开启，仅在存在当前已发布渠道 Bot 时监听，持久选择优先且异常配置失败关闭 |
+| [Feishu Channel v11（历史）](feishu-channel-v11.md) | v10 执行卡/LAN 只读面不变；当前正文只信 SDK 规范化结果，外部引用使用单 locale schema，并排除 Topic root structural parent 的伪引用；执行台默认与监听门禁由 v12 替代 |
 | [Feishu Channel v10（历史）](feishu-channel-v10.md) | v9 执行卡、固定 URL、授权和 callback 不变；Web 公开投影复用生产分组语义，每个 Run、连续操作组与 Command 使用独立 disclosure；入站规范化与 Topic quote gate 由 v11 替代 |
 | [Feishu Channel v9（历史）](feishu-channel-v9.md) | v8 绑定/永久投递不变；飞书执行卡收敛为状态与三个入口，固定 `open_url` 直达全局 LAN HTTP 只读执行台，内存 Token 限定历史 scope，Owner callback 仅保留最近输出与 exact-run 停止 |
 | [Feishu Channel v8（历史）](feishu-channel-v8.md) | v7 执行卡不变；群/话题首次卡支持项目或 Quick Chat，共用 Owner/roster/FIFO 原子绑定；Migration 132 保留旧数据并允许无项目 resolved；执行卡已由 v9 替代 |
@@ -86,7 +87,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v2（历史）](camp-open-projection-v2.md) | v1 methods/window 不变；AgentRun 独立取消请求事实、Camp Open schema 2 与 Read Model schema 31；不含 Runtime 模型观测 |
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
-| [File Preview v3（当前）](file-preview-v3.md) | 具体文件点击直接创建临时只读能力；工作区外文件不再升级目录授权，HTML/Markdown 资源绑定文档目录，Root Grant 仅用于显式目录操作 |
+| [File Preview v3（当前）](file-preview-v3.md) | 具体文件点击直接创建临时只读能力；Main 签发项目相对路径或仅文件名的安全呈现语义，工作区外文件不升级目录授权，HTML/Markdown 资源绑定文档目录 |
 | [File Preview v2（历史）](file-preview-v2.md) | v1 预览读取/授权不变；撤回选区附加，预览不写入 Composer 或模型输入 |
 | [File Preview v1（历史）](file-preview-v1.md) | 封闭文件来源、窗口句柄、读取、Root Grant、更新、HTML 资源与系统动作；选区子项未交付并由 v2 撤回 |
 | [Camp Permanent Deletion v3（当前）](camp-permanent-deletion-v3.md) | 原删除权限/journal 不变；先定向业务终态，再有界 Runtime 清理和物理删除 |

@@ -14,7 +14,7 @@ last_updated: 2026-09-01
 [Camp Membership v2](../contracts/camp-membership-v2.md)和
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)拥有。取舍理由见
 [v1.36 决策记录](../versions/v1.36/decisions.md)和
-[V1.37-D08](../versions/v1.37/decisions.md#v1-37-d08)。
+[V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)。
 
 ## 组件与权威
 
@@ -210,4 +210,4 @@ Renderer 状态重建业务事实。
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)
 - [v1.36 决策记录](../versions/v1.36/decisions.md)
-- [V1.37-D08](../versions/v1.37/decisions.md#v1-37-d08)
+- [V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)

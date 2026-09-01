@@ -37,8 +37,9 @@ last_updated: 2026-09-01
 - [x] Antigravity 真实生成图片终态、TRAE/Copilot 专用图片结果 fixture 与适配；本机队员经过隔离 Core 复测。
 - [x] 飞书执行卡改为纯状态入口；最近输出与 exact-run 停止保留 Owner callback，打开执行台使用首次创建时
   冻结的 Card 2.0 `open_url`，更新、Main 重启及网络变化均不重签旧卡。
-- [x] Main 单例 `ExecutionViewService`、私有原子设置、默认关闭/8765、固定端口无漂移、RFC1918 地址选择、
-  内存 Token hash 与 immutable scope；Core 拥有历史 Run 授权、公开投影和 exact-run 取消。
+- [x] Main 单例 `ExecutionViewService`、私有原子设置、首次缺省开启/8765、持久选择优先、异常配置失败关闭；
+  只有存在当前已发布渠道 Bot 才监听，首个发布自动开启、最后一个退出已发布状态自动关闭；固定端口无漂移、RFC1918
+  地址选择、内存 Token hash 与 immutable scope；Core 拥有历史 Run 授权、公开投影和 exact-run 取消。
 - [x] Snapshot GET + Fetch Streaming SSE、自包含只读页面、公开 redactor/result/file projection 与安全响应头。
 - [x] 按已确认交互稿把生产 Web 页面替换为 Porcelain Day / Steel Night 连续时间线：外部触发者显示“你”，
   AgentRun、连续操作组和每个 Command 使用与生产执行台一致的嵌套 disclosure。
@@ -202,7 +203,7 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 
 ### 2026-09-01 渠道入口发布范围
 
-> 本节记录初始发布收敛，已由下方“钉钉三入口状态卡与公开入口”和 V1.37-D08 取代。
+> 本节记录初始发布收敛，已由下方“钉钉三入口状态卡与公开入口”和 V1.37-D09 取代。
 
 - 按用户要求，渠道页只保留飞书；钉钉 Tab、计数、连接/发布区域与残留登录弹窗均隐藏。
   旧选中值回退到飞书，只有钉钉的 Snapshot 显示正常空态。没有删除钉钉源码、账号、凭据或 Bot，
@@ -292,7 +293,8 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 
 ### 2026-09-01 飞书局域网只读执行台
 
-- `execution-view-service.test.ts` 覆盖精确设置 schema、损坏配置 fail-closed、RFC1918 地址选择、真实本机 HTTP、
+- `execution-view-service.test.ts` 覆盖精确设置 schema、缺失文件默认开启、持久关闭选择优先、损坏/不可读配置
+  fail-closed、无已发布 Bot 不解析网卡/不监听、Bot 发布后自动尝试和退出 published 后撤销、RFC1918 地址选择、真实本机 HTTP、
   fragment Token、不可变 Core scope、安全响应头、页面脚本语法及端口冲突后不漂移；服务不可用时不签发 URL。
 - `feishu-card.test.ts` 覆盖默认卡无正文/command/进度，打开入口只含 `open_url`，最近输出最多 30 条且无结果，
   终态隐藏停止；`channel-settings.test.ts` 覆盖 URL 只在首次 send 签发、后续 update/Main 恢复不重签，以及 callback
@@ -313,6 +315,12 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - 后续产品校正已落到生产 Web 页面：Main 公开投影复用生产 execution grouping/result/redactor，外部触发者固定为“你”；
   真实生产 HTML 已在 1440px 桌面、375×812 手机、812×375 横屏与日夜主题下验证 Run/操作组/Command 独立折叠、
   44px 手机 summary、可见键盘焦点及无页面级横向滚动。定向 Vitest 3 文件 / 103 项与 TypeScript 检查通过。
+- 局域网执行台首次缺省现为 `enabled: true / 8765`，但 `no_published_bot` 门槛在没有当前已发布渠道 Bot 时不解析网卡、
+  不创建 HTTP server；首个发布自动尝试监听，最后一个退出已发布状态时关闭 listener 并撤销 Grant。全新隔离 packaged App
+  在不创建 `execution-web.json` 的情况下显示开关开启和“等待 Bot 发布 · 8765”，进程未监听 8765；Porcelain Day / Steel
+  Night 均无横向溢出。合并最新 main 后完整复验：135 个 Vitest 文件 / 1394 项、220 项 Node 测试通过，
+  1 项既有 Windows 原生检查按平台跳过；类型、文档、Skill、Desktop 构建、arm64 App/内置 Core/CLI 架构与
+  ad-hoc 签名门禁通过。CI 文档门禁固定 base 为 `74cb5ebf9ab4563c11e5d9634b1f3651dd13b63a`。
 
 本轮隔离验证：
 

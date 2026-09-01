@@ -272,6 +272,7 @@ describe('FilePreviewService', () => {
     if (!opened.ok || opened.value.kind !== 'file_preview') return
     expect(opened.value.file).toMatchObject({
       displayPath: 'README.md',
+      pathPresentation: 'project_relative',
       fileName: 'README.md',
       kind: 'markdown'
     })
@@ -305,6 +306,7 @@ describe('FilePreviewService', () => {
       if (!first.ok || first.value.kind !== 'file_preview' || !second.ok || second.value.kind !== 'file_preview') return
       const firstFile = first.value.file
       const secondFile = second.value.file
+      expect(firstFile).toMatchObject({ displayPath: 'src/app.ts', pathPresentation: 'project_relative' })
       expect(secondFile.previewKey).toBe(firstFile.previewKey)
       expect(secondFile.handleId).not.toBe(firstFile.handleId)
       expect(secondFile.reopenToken).not.toBe(firstFile.reopenToken)
@@ -446,7 +448,7 @@ describe('FilePreviewService', () => {
     for (const input of requests) {
       const opened = await service.open(1, input)
       expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
-        displayPath: 'notes.txt', fileName: 'notes.txt', kind: 'text'
+        displayPath: 'notes.txt', pathPresentation: 'file_name_only', fileName: 'notes.txt', kind: 'text'
       } } })
       if (!opened.ok || opened.value.kind !== 'file_preview') continue
       expect(await service.readText(1, {
@@ -475,7 +477,9 @@ describe('FilePreviewService', () => {
       : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
 
     const opened = await service.open(1, input)
-    expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: { fileName: 'notes.txt' } } })
+    expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
+      displayPath: 'notes.txt', pathPresentation: 'file_name_only', fileName: 'notes.txt'
+    } } })
     if (!opened.ok || opened.value.kind !== 'file_preview') return
     expect(await service.readText(1, {
       handleId: opened.value.file.handleId,
@@ -549,7 +553,9 @@ describe('FilePreviewService', () => {
         reopenToken: opened.value.file.reopenToken,
         expectedGeneration: opened.value.file.contentGeneration
       })
-      expect(reloaded).toMatchObject({ ok: true, value: { displayPath: 'notes.txt' } })
+      expect(reloaded).toMatchObject({ ok: true, value: {
+        displayPath: 'notes.txt', pathPresentation: 'file_name_only'
+      } })
       if (!reloaded.ok) return
       expect(await service.readText(1, {
         handleId: reloaded.value.handleId,
@@ -603,8 +609,12 @@ describe('FilePreviewService', () => {
       kind: 'attachment', campId: 'camp-1', attachmentId: 'attachment-1'
     })
     expect(opened.ok && opened.value.kind === 'file_preview'
-      ? opened.value.file.fileName
-      : basename(file)).toBe('Design Notes.md')
+      ? opened.value.file
+      : { fileName: basename(file) }).toMatchObject({
+      displayPath: 'Design Notes.md',
+      pathPresentation: 'file_name_only',
+      fileName: 'Design Notes.md'
+    })
     await service.closeAll()
   })
 
@@ -612,8 +622,9 @@ describe('FilePreviewService', () => {
     const { service, native } = await fixture()
     const outside = await mkdtemp(join(tmpdir(), 'rovai-file-preview-markdown-outside-'))
     directories.push(outside)
-    await writeFile(join(outside, 'README.md'), '[设计说明](design.md)')
-    await writeFile(join(outside, 'design.md'), '# Design')
+    await mkdir(join(outside, 'guides'))
+    await writeFile(join(outside, 'README.md'), '[设计说明](guides/design.md)')
+    await writeFile(join(outside, 'guides', 'design.md'), '# Design')
     const parent = await service.open(1, request(join(outside, 'README.md')))
     expect(parent).toMatchObject({ ok: true, value: { kind: 'file_preview' } })
     if (!parent.ok || parent.value.kind !== 'file_preview') return
@@ -621,10 +632,12 @@ describe('FilePreviewService', () => {
     const child = await service.open(1, {
       kind: 'child_of_handle',
       parentHandleId: parent.value.file.handleId,
-      rawReference: 'design.md',
+      rawReference: 'guides/design.md',
       allowSystemOpen: true
     })
-    expect(child).toMatchObject({ ok: true, value: { kind: 'file_preview', file: { fileName: 'design.md' } } })
+    expect(child).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
+      displayPath: 'design.md', pathPresentation: 'file_name_only', fileName: 'design.md'
+    } } })
     if (!child.ok || child.value.kind !== 'file_preview') return
     expect(await service.readText(1, {
       handleId: child.value.file.handleId,
@@ -677,7 +690,9 @@ describe('FilePreviewService', () => {
       kind: 'child_of_handle', parentHandleId: opened.value.file.handleId,
       rawReference: 'details.html', allowSystemOpen: true
     })
-    expect(child).toMatchObject({ ok: true, value: { kind: 'file_preview', file: { fileName: 'details.html' } } })
+    expect(child).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
+      displayPath: 'details.html', pathPresentation: 'file_name_only', fileName: 'details.html'
+    } } })
     expect(native.selectRoot).not.toHaveBeenCalled()
     await service.release(1, { handleId: opened.value.file.handleId })
     expect(service.authorizeHtmlAsset(1, 'GET', assetUrl)).toBe(false)

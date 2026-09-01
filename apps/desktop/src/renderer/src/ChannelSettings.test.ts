@@ -1,24 +1,52 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import type { AgentProfile, ChannelKind, ChannelsApi, ChannelSettingsSnapshot } from '@contracts'
+import type {
+  AgentProfile,
+  ChannelKind,
+  ChannelsApi,
+  ChannelSettingsSnapshot,
+  ExecutionWebSettingsSnapshot
+} from '@contracts'
 import {
   ChannelSettings,
   ChannelSettingsView,
   ExecutionWebSettingsPanel,
   channelErrorMessage,
+  executionWebStatus,
   visibleChannelMembers
 } from './ChannelSettings'
 
 describe('Channel settings', () => {
-  it('keeps the single global LAN execution setting at the bottom and collapsed by default', () => {
+  it('keeps the single global LAN execution setting collapsed with an explicit SVG disclosure', () => {
     const panel = renderToStaticMarkup(createElement(ExecutionWebSettingsPanel))
     expect(panel).toContain('<details class="channel-settings-section execution-web-settings">')
     expect(panel).not.toContain('<details class="channel-settings-section execution-web-settings" open=""')
     expect(panel).toContain('局域网执行台')
+    expect(panel).toContain('class="execution-web-disclosure"')
+    expect(panel).toContain('<svg viewBox="0 0 20 20"')
+    expect(panel).toContain('class="execution-web-status-dot"')
+    expect(panel).not.toContain('⌄')
     expect(panel).toContain('role="switch"')
     expect(panel).toContain('min="1024" max="65535"')
     expect(panel).toContain('修改端口后，此前发送的执行台链接可能失效。')
+  })
+
+  it('explains that an enabled setting waits for a published Bot before opening the port', () => {
+    const snapshot: ExecutionWebSettingsSnapshot = {
+      schemaVersion: 1,
+      enabled: true,
+      port: 8765,
+      server: {
+        state: 'no_published_bot',
+        address: null,
+        errorCode: 'execution_web_no_published_bot'
+      }
+    }
+    expect(executionWebStatus(snapshot)).toEqual({
+      label: '等待 Bot 发布 · 8765',
+      tone: 'neutral'
+    })
   })
 
   it('exposes only the provider choice on the typed connection boundary', () => {
@@ -213,15 +241,18 @@ describe('Channel settings', () => {
     expect(markup).toContain('>飞书管理</a>')
     expect(markup).toContain('>重新发布</button>')
     expect(markup).not.toContain('Owner 身份待核验')
-    expect(markup).toContain('2 个待选择')
-    expect(markup).toContain('绑定完成后不可换绑')
+    expect(markup).not.toContain('会话接入')
+    expect(markup).not.toContain('2 个待选择')
+    expect(markup).not.toContain('待处理绑定')
+    expect(markup).not.toContain('绑定异常')
+    expect(markup).not.toContain('绑定完成后不可换绑')
     expect(markup).not.toContain('>管理</button>')
     expect(markup).not.toContain('停用 Bot')
     expect(markup).not.toContain('兼容扫码发布')
     expect(markup).not.toMatch(/app secret|cookie|csrf|token/i)
   })
 
-  it('keeps project paths and manual binding controls off the local settings surface', () => {
+  it('keeps project paths, binding diagnostics, and manual binding controls off the local settings surface', () => {
     const snapshot = unavailableSnapshot()
     snapshot.pendingBindingCount = 1
     const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {
@@ -229,8 +260,12 @@ describe('Channel settings', () => {
       snapshot
     }))
 
-    expect(markup).toContain('私聊自动进入 Quick Chat')
-    expect(markup).toContain('1 个待选择')
+    expect(markup).not.toContain('会话接入')
+    expect(markup).not.toContain('私聊自动进入 Quick Chat')
+    expect(markup).not.toContain('1 个待选择')
+    expect(markup).not.toContain('待处理绑定')
+    expect(markup).not.toContain('绑定异常')
+    expect(markup).not.toContain('项目绑定完成后不可换绑')
     expect(markup).not.toContain('/private/quick-chat')
     expect(markup).not.toContain('添加项目')
     expect(markup).not.toContain('绑定会话')

@@ -26,6 +26,7 @@ import {
 import type { CoreClient } from './core-client'
 import { EXECUTION_VIEW_PAGE } from './execution-view-page'
 import {
+  DEFAULT_EXECUTION_WEB_SETTINGS,
   ExecutionWebSettingsStore,
   isExecutionWebPort
 } from './execution-web-settings'
@@ -143,6 +144,7 @@ export class ExecutionViewService {
   readonly #grants = new Map<string, Grant>()
   #store: ExecutionWebSettingsStore | null = null
   #listener: Listener | null = null
+  #hasPublishedChannelBot = false
   #state: ExecutionWebSettingsSnapshot['server'] = {
     state: 'disabled', address: null, errorCode: null
   }
@@ -187,8 +189,31 @@ export class ExecutionViewService {
   }
 
   getSettings(): ExecutionWebSettingsSnapshot {
-    const settings = this.#store?.get() ?? { schemaVersion: 1 as const, enabled: false, port: 8765 }
+    const settings = this.#store?.get() ?? {
+      schemaVersion: 1 as const,
+      ...DEFAULT_EXECUTION_WEB_SETTINGS
+    }
     return { ...settings, server: { ...this.#state } }
+  }
+
+  async setPublishedChannelBotAvailable(available: boolean): Promise<ExecutionWebSettingsSnapshot> {
+    return this.#enqueueMutation(async () => {
+      if (this.#hasPublishedChannelBot === available) return this.getSettings()
+      this.#hasPublishedChannelBot = available
+      const settings = this.#store?.get()
+      if (!settings?.enabled) return this.getSettings()
+      if (available) {
+        await this.#activate(settings.port)
+        return this.getSettings()
+      }
+
+      this.#invalidateAllGrants()
+      const listener = this.#listener
+      this.#listener = null
+      if (listener) await closeServer(listener.server)
+      this.#setState('no_published_bot', null, 'execution_web_no_published_bot')
+      return this.getSettings()
+    })
   }
 
   async setSettings(next: { enabled: boolean; port: number }): Promise<ExecutionWebSettingsSnapshot> {
@@ -219,7 +244,7 @@ export class ExecutionViewService {
   async createExecutionViewUrl(scope: ExecutionViewScope): Promise<string | null> {
     return this.#enqueueMutation(async () => {
       const settings = this.#store?.get()
-      if (!settings?.enabled) return null
+      if (!settings?.enabled || !this.#hasPublishedChannelBot) return null
       let listener = this.#listener
 
       // The URL is frozen once per card, but its address is selected at card
@@ -254,7 +279,12 @@ export class ExecutionViewService {
     } catch { /* A malformed presentation URL has no live grant to revoke. */ }
   }
 
-  async #activate(port: number, address = this.#resolveAddress()): Promise<void> {
+  async #activate(port: number, address?: string | null): Promise<void> {
+    if (!this.#hasPublishedChannelBot) {
+      this.#setState('no_published_bot', null, 'execution_web_no_published_bot')
+      return
+    }
+    const resolvedAddress = address === undefined ? this.#resolveAddress() : address
     const previous = this.#listener
     if (previous) {
       // A configured address/port change intentionally makes every old card
@@ -265,7 +295,7 @@ export class ExecutionViewService {
       await closeServer(previous.server)
     }
     this.#setState('starting')
-    const listener = await this.#openListener(port, address)
+    const listener = await this.#openListener(port, resolvedAddress)
     if (!listener) return
     this.#listener = listener
     this.#setState('ready', `${listener.address}:${listener.port}`)

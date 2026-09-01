@@ -1,9 +1,21 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ChannelSettingsCoordinator } from './channel-settings-coordinator'
+import { ChannelSettingsCoordinator, hasPublishedChannelBot } from './channel-settings-coordinator'
 import type { ChannelSettingsService } from './channel-settings'
 import type { DingTalkChannelSettingsService } from './dingtalk-channel-settings'
 
 describe('ChannelSettingsCoordinator', () => {
+  it('opens the execution gate only for a currently published channel Bot', () => {
+    expect(hasPublishedChannelBot({
+      channels: [{ memberBots: [{ publicationStatus: 'disabled' }] }]
+    })).toBe(false)
+    expect(hasPublishedChannelBot({
+      channels: [
+        { memberBots: [] },
+        { memberBots: [{ publicationStatus: 'published' }] }
+      ]
+    })).toBe(true)
+  })
+
   it('keeps Feishu running when the optional DingTalk Host cannot start', async () => {
     const feishu = host()
     const dingtalk = host(new Error('dingtalk_open_platform_unavailable'))

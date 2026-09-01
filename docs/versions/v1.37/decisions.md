@@ -127,7 +127,9 @@ canonical file 可以位于来源 root 外，不生成 Root Grant，也不触发
 同渠道/App/Camp/队员中 focus Run 及其之前历史。IP 或端口变化不更新旧卡；Main 重启不恢复 Token。链接、局域网可达性和
 有效 Token 共同构成只读查看能力，不把它描述成 Owner-only。
 
-当前字段和错误由 [Feishu Channel v11](../../contracts/feishu-channel-v11.md) 拥有，组件边界与 UX 分别由
+执行卡与只读页面的原决定由 [Feishu Channel v10](../../contracts/feishu-channel-v10.md) 收敛；当前字段、入站规范化、
+设置默认与监听门槛由后继 [Feishu Channel v12](../../contracts/feishu-channel-v12.md) 拥有，并由
+[V1.37-D06](#v1-37-d06)与[V1.37-D08](#v1-37-d08)修订。组件边界与 UX 分别由
 [飞书渠道架构](../../architecture/feishu-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
 
 ### 后果与替代方案
@@ -205,7 +207,37 @@ one-shot watchdog；清空后完全休眠。终态用独立 one-shot 跨过 900m
   而不能比现有领域表提供更多恢复事实。
 
 <a id="v1-37-d08"></a>
-## V1.37-D08：钉钉复用飞书的状态卡与单一 LAN 执行台，不补 Topic 或第二套 Web 服务
+## V1.37-D08：局域网执行台默认开启但由已发布渠道 Bot 门禁监听
+
+### 背景
+
+局域网执行台已是飞书执行卡的直接只读入口，但原先要求用户先进入渠道设置并主动开启；首次安装在没有设置文件时，
+执行卡无法生成打开入口。用户确认希望该能力默认可用，同时已有用户明确保存的关闭选择不能被新默认值覆盖，配置损坏
+也不能因为产品默认开启而意外暴露 listener。没有任何已发布渠道 Bot 时不会产生执行卡链接，提前占用端口没有收益。
+
+### 决定
+
+缺少 `execution-web.json` 时，Main 使用不落盘的 `{ enabled: true, port: 8765 }` 首次默认值。该值只表达设置意图；
+只有权威渠道设置快照中至少一个 Bot 当前为 `published` 时才允许绑定私有 RFC1918 地址。没有已发布 Bot 时使用
+`no_published_bot` 且不解析网卡或创建 server；首个 Bot 发布后自动尝试监听，最后一个退出已发布状态时关闭 listener、
+终止流并撤销 Grant。有效持久设置仍是唯一权威，保存为关闭的用户保持关闭；内容无效、无法解析或无法读取的设置文件
+继续失败关闭为 `{ enabled: false, port: 8765 }` 并暴露降级。端口冲突或没有私有地址时保留 `enabled: true`，
+只把 listener 状态标记为不可用，不漂移端口、不自动关闭。
+
+当前字段、优先级和兼容边界由 [Feishu Channel v12](../../contracts/feishu-channel-v12.md) 拥有；组件状态与 UX 分别由
+[飞书渠道架构](../../architecture/feishu-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
+
+### 后果与替代方案
+
+- 首次启动且没有已发布 Bot 时不会绑定端口；Bot 发布后页面仍须持有卡片 URL 中的内存 Token，保持只读 scope、
+  安全响应头和 Main 重启撤销，不把默认开启描述成公网分享或 Owner 身份认证。
+- 不写入缺省文件使首次默认可以独立演进，也避免伪造一次用户选择；用户保存后，持久值在后续启动中优先。
+- 拒绝把损坏配置也回退为开启：无法区分用户意图与磁盘异常。拒绝迁移所有既有 `false`：会覆盖明确选择。
+  拒绝在没有已发布 Bot 时预热端口：没有可签发的入口却扩大监听面。拒绝端口冲突后自动漂移：会破坏固定 URL 与
+  旧卡可预测性。
+
+<a id="v1-37-d09"></a>
+## V1.37-D09：钉钉复用飞书的状态卡与单一 LAN 执行台，不补 Topic 或第二套 Web 服务
 
 ### 背景
 
