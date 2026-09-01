@@ -92,6 +92,8 @@ describe('ExecutionViewService', () => {
     expect(pageHtml).toContain('run-disclosure')
     expect(pageHtml).toContain('tool-group')
     expect(pageHtml).toContain('command-disclosure')
+    expect(pageHtml).toContain("if (nonTerminal(run)) return '处理过程'")
+    expect(pageHtml).not.toContain('nonTerminal(run) ? Date.now()')
     expect(pageHtml).not.toContain('局域网视图')
     expect(pageHtml).not.toContain('飞书成员')
     const pageScript = pageHtml.match(/<script>([\s\S]*)<\/script>/)?.[1]
