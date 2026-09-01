@@ -20,6 +20,7 @@ last_updated: 2026-09-01
 - [x] Chromium 真实解码、坏图局部降级、单列/双列/窄屏与既有双主题。
 - [x] 同 Run 的已发送同摘要 Blob 图片展示去重，底层数据不删除；统一 Tool/发送图片内容列与原比例图片框。
 - [x] 两种图片均去除文件名、来源/数量标题、projection 说明与系统打开/Finder 菜单，只保留大图预览和关闭。
+- [x] Renderer 进程内缓存已解码 Blob payload；附件切回不重读，Runtime 切回先显示再后台刷新，Tile 独立释放 URL。
 - [x] 钉钉完整产品链路未验收，合入 main 前隐藏渠道页整个入口；保留实现、已有数据及独立登录组件回归。
 - [x] 开发者单独确认 revision 1 后实施精确文件帮助与飞书新 Bootstrap 提示；静态资源与其他上下文轴不变。
 - [x] Antigravity 真实生成图片终态、TRAE/Copilot 专用图片结果 fixture 与适配；本机队员经过隔离 Core 复测。
@@ -48,7 +49,8 @@ last_updated: 2026-09-01
   新表/marker 一起回滚，修复后可继续。current marker 缺 133 必须拒绝，v1.42/schema83 是明确升级源，
   不降低过去的 receipt 判定，不额外创建完整 workspace fixture。
 - `ImageGallery.test.ts` 与既有 `App.test.ts`：连续分组、全部20图、解码失败、锚定顺序、
-  运行中无消息时延迟与终态兜底；
+  运行中无消息时延迟与终态兜底；ImageGallery 另覆盖实际 Blob 预算、FIFO 淘汰、附件已完成缓存、
+  Runtime 强制刷新与进行中读取复用、正常 `null` 和请求异常的区分；
   `channel-settings.test.ts` 沿用飞书附件独立上传失败/正文不重发的测试。
 - `node --test scripts/lib/runtime-image-gallery.test.mjs`：生产组件的隔离 Electron，真实 SVG decode、
   坏图、contain、无附加文字/系统操作、lightbox 与焦点、双主题/窄屏。大图使用可用窗口空间，不得因
@@ -112,6 +114,19 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   旧 bundle 保留为 `/Applications/Rovai AI.backup-before-20260831T163050Z.app`；没有改写或替换日常数据，
   没有 commit、push 或创建 PR。重启后桌面读取仅返回窗口名称、无截图，故最终日常会话的视觉复核未计为通过；
   图片视觉证据来自上述使用实际 PNG 的生产组件/完整 CampWorkspace 隔离验收。
+
+### 2026-09-01 会话切换图片缓存
+
+- 只在 Renderer 内新增 128 MiB Blob payload FIFO，按本次实际 `blob.size` 计量；未增加存储类型、内容版本、
+  引用计数、持久化字段或新 Core 协议。每个 Tile 独立创建 Object URL，提交替换或卸载时自行释放；缓存淘汰
+  不调用 `revokeObjectURL()`。
+- 附件缓存命中后不再读取；任意 Runtime 图片先恢复缓存，再以同一个进行中 Promise 后台调用
+  `agentRunImages.read`。请求抛错保留旧图，正常 `null` 或真实解码失败清除旧图，成功候选解码完成后再替换。
+- 定向 Vitest 8 项、全量 133 文件 / 1356 项 Vitest、TypeScript 类型检查和 Desktop build 通过；文档单测
+  9 项、普通门禁及固定 main base `02d5a3c381ae430cef67cf7ae43045c4301058ad` 的 CI 文档门禁通过。
+  隔离 Electron 生产 Gallery 在 StrictMode 下验证冷读去重、附件切回零读取、Runtime 切回首次可见绘制
+  无 loading、后台内容替换、临时请求失败保留、`null`/坏图失效，以及卸载和替换 URL 的释放；未启动
+  日常 App、Core、Runtime 或渠道连接。
 
 ### 2026-09-01 渠道入口发布范围
 

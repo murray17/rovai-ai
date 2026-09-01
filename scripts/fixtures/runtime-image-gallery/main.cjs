@@ -45,6 +45,11 @@ app.whenReady().then(async () => {
     await waitFor(`document.querySelector('.image-tile-preview')?.getAttribute('aria-label') === ${JSON.stringify(`查看大图 ${results[0].displayName}`)}`)
     await waitFor(`window.imageGalleryTest.state().decoded === ${results.length} && window.imageGalleryTest.state().failed === 0`)
   }
+  const imageResult = (width, height, label) => ({
+    displayName: `${label}.svg`,
+    mediaType: 'image/svg+xml',
+    data: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#7897ae"/><text x="20" y="40">${label}</text></svg>`).toString('base64')
+  })
   try {
     await window.loadFile(renderer)
     await waitFor('window.imageGalleryTest?.state().decoded === 3 && window.imageGalleryTest.state().failed === 2')
@@ -88,6 +93,72 @@ app.whenReady().then(async () => {
     assert.equal((await run('window.imageGalleryTest.state()')).overflow, false)
     await capture('gallery-night-narrow')
     assertFramesFitImages(await run('window.imageGalleryTest.state()'))
+
+    // Renderer-session cache owner: Blob payload is shared, every mounted Tile keeps its own URL.
+    const attachmentResult = imageResult(720, 360, 'attachment-cache')
+    await run(`window.imageGalleryTest.setScenarioResult('attachment', ${JSON.stringify(attachmentResult)})`)
+    await run(`window.imageGalleryTest.showScenario('attachment', 'cache-attachment')`)
+    await waitFor('window.imageGalleryTest.scenarioState().decoded === 1')
+    const attachmentCold = await run('window.imageGalleryTest.scenarioState()')
+    await run('window.imageGalleryTest.hideScenario()')
+    await waitFor(`window.imageGalleryTest.revokedUrls.includes(${JSON.stringify(attachmentCold.src)})`)
+    await run(`window.imageGalleryTest.setScenarioResult('attachment', 'throw')`)
+    const attachmentWarm = await run(`window.imageGalleryTest.showScenario('attachment', 'cache-attachment')`)
+    assert.equal(attachmentWarm.decoded, 1)
+    assert.equal(attachmentWarm.loading, 0)
+    await run('new Promise(resolve => setTimeout(resolve, 50))')
+    assert.equal((await run('window.imageGalleryTest.scenarioState()')).attachmentReads, attachmentCold.attachmentReads)
+
+    const runtimeOld = imageResult(720, 360, 'runtime-old')
+    const runtimeNew = imageResult(360, 720, 'runtime-new')
+    await run(`window.imageGalleryTest.setScenarioResult('runtime', ${JSON.stringify(runtimeOld)})`)
+    await run(`window.imageGalleryTest.showScenario('runtime', 'cache-runtime-success')`)
+    await waitFor('window.imageGalleryTest.scenarioState().naturalWidth === 720')
+    const runtimeCold = await run('window.imageGalleryTest.scenarioState()')
+    await run('window.imageGalleryTest.hideScenario()')
+    await waitFor(`window.imageGalleryTest.revokedUrls.includes(${JSON.stringify(runtimeCold.src)})`)
+    await run(`window.imageGalleryTest.setScenarioResult('runtime', ${JSON.stringify(runtimeNew)})`)
+    const runtimeWarm = await run(`window.imageGalleryTest.showScenario('runtime', 'cache-runtime-success')`)
+    assert.equal(runtimeWarm.decoded, 1)
+    assert.equal(runtimeWarm.loading, 0)
+    await waitFor(`window.imageGalleryTest.scenarioState().naturalWidth === 360
+      && window.imageGalleryTest.scenarioState().src !== ${JSON.stringify(runtimeWarm.src)}`)
+    const runtimeRefreshed = await run('window.imageGalleryTest.scenarioState()')
+    assert.equal(runtimeRefreshed.runtimeReads, runtimeCold.runtimeReads + 1)
+    await waitFor(`window.imageGalleryTest.revokedUrls.includes(${JSON.stringify(runtimeWarm.src)})`)
+
+    await run(`window.imageGalleryTest.setScenarioResult('runtime', ${JSON.stringify(runtimeOld)})`)
+    await run(`window.imageGalleryTest.showScenario('runtime', 'cache-runtime-throw')`)
+    await waitFor('window.imageGalleryTest.scenarioState().naturalWidth === 720')
+    await run('window.imageGalleryTest.hideScenario()')
+    await run(`window.imageGalleryTest.setScenarioResult('runtime', 'throw')`)
+    const runtimeBeforeThrow = await run(`window.imageGalleryTest.showScenario('runtime', 'cache-runtime-throw')`)
+    await run('new Promise(resolve => setTimeout(resolve, 50))')
+    const runtimeAfterThrow = await run('window.imageGalleryTest.scenarioState()')
+    assert.equal(runtimeBeforeThrow.loading, 0)
+    assert.equal(runtimeAfterThrow.decoded, 1)
+    assert.equal(runtimeAfterThrow.failed, 0)
+    assert.equal(runtimeAfterThrow.src, runtimeBeforeThrow.src)
+
+    await run(`window.imageGalleryTest.setScenarioResult('runtime', ${JSON.stringify(runtimeOld)})`)
+    await run(`window.imageGalleryTest.showScenario('runtime', 'cache-runtime-null')`)
+    await waitFor('window.imageGalleryTest.scenarioState().naturalWidth === 720')
+    await run('window.imageGalleryTest.hideScenario()')
+    await run(`window.imageGalleryTest.setScenarioResult('runtime', null)`)
+    const runtimeBeforeNull = await run(`window.imageGalleryTest.showScenario('runtime', 'cache-runtime-null')`)
+    assert.equal(runtimeBeforeNull.loading, 0)
+    await waitFor('window.imageGalleryTest.scenarioState().failed === 1 && window.imageGalleryTest.scenarioState().decoded === 0')
+
+    await run(`window.imageGalleryTest.setScenarioResult('runtime', ${JSON.stringify(runtimeOld)})`)
+    await run(`window.imageGalleryTest.showScenario('runtime', 'cache-runtime-broken')`)
+    await waitFor('window.imageGalleryTest.scenarioState().naturalWidth === 720')
+    await run('window.imageGalleryTest.hideScenario()')
+    const invalidImage = { mediaType: 'image/svg+xml', data: Buffer.from('not an image').toString('base64') }
+    await run(`window.imageGalleryTest.setScenarioResult('runtime', ${JSON.stringify(invalidImage)})`)
+    const runtimeBeforeBroken = await run(`window.imageGalleryTest.showScenario('runtime', 'cache-runtime-broken')`)
+    assert.equal(runtimeBeforeBroken.loading, 0)
+    await waitFor('window.imageGalleryTest.scenarioState().failed === 1 && window.imageGalleryTest.scenarioState().decoded === 0')
+
     // Geometry owner: square / portrait / wide / small media in both layouts and themes.
     for (const [width, theme] of [[1040, 'day'], [480, 'night']]) {
       window.setContentSize(width, 900)

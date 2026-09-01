@@ -26,6 +26,8 @@ last_updated: 2026-09-01
 - 图片展示修正：同 Run 的已发送同摘要 Blob 图片只展示消息附件；Tool/发送图片共用内容列，
   图片框按原比例贴合，不随正文缩小或补黑边；不显示文件名/来源标题或系统打开/Finder 菜单，
   只保留看大图与关闭。不删除数据，不改变稳定路径零拷贝。
+- 会话切换复用当前 Renderer 内已成功解码的 Blob payload；附件命中后不重读，Runtime 命中后先显示再后台
+  刷新当前内容。Tile 独立拥有 Object URL，128 MiB 淘汰只影响缓存 payload，不改变 Core 协议或稳定路径语义。
 - 飞书复用已有显式附件 Outbox，不自动上传 Runtime 图片；钉钉链路保持原样。
 - Migration 133 只新增图片元数据表和索引，Data Contract `v1.43 / schema 84`；旧业务行保持不变。
 - [model-context-change revision 1](model-context-change.md) 已由开发者二次确认并实施：精简文件帮助，
