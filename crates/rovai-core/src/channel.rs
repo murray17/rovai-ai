@@ -41,6 +41,7 @@ const CHANNEL_MEMBERSHIP_SYNC_COMPONENT: &str = "channel-membership-sync";
 const AGGREGATION_WINDOW_SECONDS: i64 = 3;
 const DELIVERY_LEASE_SECONDS: i64 = 30;
 const EXECUTION_CONSOLE_TERMINAL_QUIET_WINDOW_MILLISECONDS: i64 = 900;
+const EXECUTION_CONSOLE_TERMINAL_RECONCILE_LIMIT: i64 = 100;
 const CHANNEL_TRANSPORT_RETENTION_DAYS: i64 = 7;
 const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 const PENDING_BINDING_LIFETIME_HOURS: i64 = 24;
@@ -5290,6 +5291,7 @@ impl ChannelService {
             expire_pending_project_pickers(&transaction, &now_text)?;
             decline_unattended_channel_retries(&transaction, actor, &now_text)?;
             project_active_request_deliveries(&transaction, &now_text)?;
+            reconcile_terminal_pending_execution_consoles(&transaction, &now_text)?;
             settle_terminal_requests(&transaction, &now_text)?;
             promote_ready_requests(&transaction, &now_text, &mut settled_run_ids)?;
             let claims = claim_deliveries(
@@ -8380,6 +8382,84 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
     project_active_request_deliveries_for_turn(transaction, None, now)
 }
 
+/// A terminal console outlives request settlement. This durable recovery pass
+/// therefore reads console authority directly instead of rediscovering it only
+/// through admitted requests.
+fn reconcile_terminal_pending_execution_consoles(
+    transaction: &Transaction<'_>,
+    now: &str,
+) -> Result<()> {
+    let pending = query_rows(
+        transaction,
+        r#"
+        SELECT console.request_id, console.channel_conversation_id,
+               console.camp_turn_id, console.agent_run_id, console.agent_id,
+               console.target_app_id, run.status, run.version,
+               COALESCE((
+                   SELECT MAX(evidence.sequence)
+                   FROM agent_run_execution_evidence AS evidence
+                   WHERE evidence.agent_run_id = run.id
+               ), 0),
+               COALESCE((
+                   SELECT MAX(output.sequence)
+                   FROM camp_message AS output
+                   WHERE output.source_agent_run_id = run.id
+                     AND output.author_type = 'agent'
+                     AND output.tombstoned_at IS NULL
+               ), 0)
+        FROM channel_execution_console AS console
+        JOIN agent_run AS run ON run.id = console.agent_run_id
+        WHERE console.state = 'terminal_pending'
+        ORDER BY console.updated_at, console.id
+        LIMIT ?1
+        "#,
+        [EXECUTION_CONSOLE_TERMINAL_RECONCILE_LIMIT],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
+            ))
+        },
+    )?;
+    for (
+        request_id,
+        channel_conversation_id,
+        camp_turn_id,
+        agent_run_id,
+        agent_id,
+        target_app_id,
+        run_status,
+        run_version,
+        evidence_sequence,
+        output_sequence,
+    ) in pending
+    {
+        materialize_execution_console(
+            transaction,
+            &request_id,
+            &channel_conversation_id,
+            &camp_turn_id,
+            &agent_run_id,
+            &agent_id,
+            &target_app_id,
+            &run_status,
+            run_version,
+            evidence_sequence,
+            output_sequence,
+            now,
+        )?;
+    }
+    Ok(())
+}
+
 fn project_active_request_deliveries_for_turn(
     transaction: &Transaction<'_>,
     camp_turn_id: Option<&str>,
@@ -8853,7 +8933,7 @@ fn materialize_execution_console(
                         agent_run_id,
                         next_sequence,
                     )?;
-                    transaction.execute(
+                    let updated = transaction.execute(
                         r#"
                         UPDATE channel_execution_console
                         SET latest_sequence = ?2, state = 'terminal_sealed',
@@ -8870,6 +8950,9 @@ fn materialize_execution_console(
                             serde_json::to_string(&snapshot)?
                         ],
                     )?;
+                    if updated == 0 {
+                        return Ok(());
+                    }
                     (console_id, next_sequence, true)
                 } else {
                     (console_id, latest_sequence, false)
@@ -15333,6 +15416,343 @@ mod tests {
                 .execution_console_source(&mut upgraded, &agent_run_id, terminal_source.sequence)
                 .is_err(),
             "missing full evidence must fail closed instead of presenting a preview as the true tail"
+        );
+    }
+
+    #[test]
+    fn terminal_execution_console_recovers_after_completed_request_and_restart() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        let quick_chat_path = quick_chat_path(&database);
+        service
+            .verify_feishu_owner(
+                &mut database,
+                &host_envelope(
+                    "verify-terminal-console-owner",
+                    VerifyFeishuOwnerCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        sender_open_id: Some("ou_user".to_string()),
+                        sender_user_id: Some("user_1".to_string()),
+                        sender_union_id: Some("union_user".to_string()),
+                        sender_display_name: "Owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        service
+            .start_new_feishu_dm(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "start-terminal-console-dm",
+                    StartNewFeishuDmCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_terminal_console".to_string(),
+                        conversation_display_name: "Owner 私聊".to_string(),
+                        target_agent_id: "agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let observation = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope(
+                    "observe-terminal-console",
+                    observation_command(
+                        "cli_app_1",
+                        "om_terminal_console",
+                        "oc_terminal_console",
+                        "",
+                        "p2p",
+                        "检查终态卡",
+                        &[("agent_1", "cli_app_1")],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        let aggregate_id = observation.result.payload["aggregateId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "finalize-terminal-console",
+                    FinalizeChannelInboundCommand { aggregate_id },
+                ),
+            )
+            .unwrap();
+
+        let (request_id, camp_turn_id, agent_run_id): (String, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT request.id, request.camp_turn_id, run.id
+                FROM channel_turn_request AS request
+                JOIN agent_run AS run ON run.camp_turn_id = request.camp_turn_id
+                WHERE request.status = 'admitted'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let opening_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-opening-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let opening_delivery = opening_tick
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_kind == "execution_console_upsert")
+            .expect("the admitted run must open its execution console");
+        service
+            .settle_delivery(
+                &mut database,
+                &host_envelope(
+                    "settle-terminal-console-opening",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: opening_delivery.delivery_id.clone(),
+                        worker_id: "terminal-console-opening-worker".to_string(),
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: Some("om_terminal_console_card".to_string()),
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+
+        let terminal_at = Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'succeeded', ended_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![agent_run_id, terminal_at],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'completed', ended_at = ?2, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![camp_turn_id, terminal_at],
+            )
+            .unwrap();
+        let terminal_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-pending-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(
+            terminal_tick
+                .deliveries
+                .iter()
+                .all(|delivery| delivery.delivery_kind != "execution_console_upsert")
+        );
+        let (request_status, console_state, pending_sequence): (String, String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT request.status, console.state, console.latest_sequence
+                FROM channel_turn_request AS request
+                JOIN channel_execution_console AS console
+                  ON console.request_id = request.id
+                WHERE request.id = ?1
+                "#,
+                [&request_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(request_status, "completed");
+        assert_eq!(console_state, "terminal_pending");
+
+        database
+            .connection()
+            .execute(
+                "UPDATE channel_execution_console SET updated_at = ?2 WHERE agent_run_id = ?1",
+                params![
+                    agent_run_id,
+                    (Utc::now() - Duration::seconds(2)).to_rfc3339()
+                ],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO agent_run_execution_evidence(
+                    id, agent_run_id, execution_epoch, sequence, event_type, kind, phase,
+                    payload_preview_json, content_blob_id, content_byte_count,
+                    is_truncated, occurred_at
+                ) VALUES (
+                    'terminal-console-late-evidence', ?1, 1, 1,
+                    'activity.completed', 'narration', 'completed',
+                    '{"text":"late terminal evidence"}', NULL, 0, 0, ?2
+                )
+                "#,
+                params![agent_run_id, terminal_at],
+            )
+            .unwrap();
+        let digest_refresh_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-digest-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(
+            digest_refresh_tick
+                .deliveries
+                .iter()
+                .all(|delivery| delivery.delivery_kind != "execution_console_upsert")
+        );
+        let (refreshed_state, refreshed_sequence): (String, i64) = database
+            .connection()
+            .query_row(
+                "SELECT state, latest_sequence FROM channel_execution_console WHERE agent_run_id = ?1",
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(refreshed_state, "terminal_pending");
+        assert!(refreshed_sequence > pending_sequence);
+
+        database
+            .connection()
+            .execute(
+                "UPDATE channel_execution_console SET updated_at = ?2 WHERE agent_run_id = ?1",
+                params![
+                    agent_run_id,
+                    (Utc::now() - Duration::seconds(2)).to_rfc3339()
+                ],
+            )
+            .unwrap();
+        let data_directory = database.directory().to_path_buf();
+        database.close();
+        let mut restarted = Database::open(&data_directory).unwrap();
+        let sealed_tick = service
+            .host_tick(
+                &mut restarted,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-restart-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let sealed_delivery = sealed_tick
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_kind == "execution_console_upsert")
+            .expect("a restarted host must seal a pending console after its request completed");
+        assert_eq!(
+            sealed_delivery.update_message_id.as_deref(),
+            Some("om_terminal_console_card")
+        );
+        let sealed_source = service
+            .execution_console_source(
+                &mut restarted,
+                &agent_run_id,
+                sealed_delivery.payload["expectedSequence"]
+                    .as_i64()
+                    .unwrap(),
+            )
+            .unwrap()
+            .expect("the recovered terminal snapshot must be readable");
+        assert_eq!(sealed_source.state, "terminal_sealed");
+        assert!(
+            sealed_source
+                .evidence
+                .iter()
+                .any(|item| item.id == "terminal-console-late-evidence")
+        );
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT status FROM channel_turn_request WHERE id = ?1",
+                    [&request_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "completed"
+        );
+
+        let repeated_tick = service
+            .host_tick(
+                &mut restarted,
+                &ActorRef::System {
+                    component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "terminal-console-repeat-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        assert!(
+            repeated_tick
+                .deliveries
+                .iter()
+                .all(|delivery| delivery.delivery_kind != "execution_console_upsert")
+        );
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT COUNT(*)
+                    FROM channel_delivery
+                    WHERE console_id = (
+                        SELECT id FROM channel_execution_console WHERE agent_run_id = ?1
+                    ) AND delivery_kind = 'execution_console_upsert'
+                    "#,
+                    [&agent_run_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2,
+            "opening and terminal delivery must each be enqueued exactly once"
         );
     }
 
