@@ -462,9 +462,10 @@ summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开
 
 ## Runtime 图片与消息图片
 
-公开正文后先显示原有顺序的消息附件，再显示来源 Run 的本地图片，最后显示 `Files Changed`。
-每个 Run/epoch 的图片固定跟随该 Run 最后一条公开消息；没有公开消息时按 Run 图片时间定位，
-且仍在同 Run 文件变化卡之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
+来源 Run 尚未产生公开消息且仍未终态时，Runtime 图片留在该 Run 内等待，不提前进入会话 Timeline。
+公开正文出现后先显示原有顺序的消息附件，再显示来源 Run 的本地图片，最后显示 `Files Changed`；
+每个 Run/epoch 的图片固定跟随该 Run 最后一条公开消息。只有 Run 已终态仍没有公开消息时，才按图片时间
+显示独立兜底，并保持在同 Run 文件变化卡之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
 
 显式图片附件和 Runtime 图片共用 `ImageGallery` / `ImageTile` / Lightbox。一张单列，多张在正常宽度下
 双列、窄容器单列；全部展示，不增加四张上限或“查看全部”。使用 `object-fit: contain`，保留截图、文字和

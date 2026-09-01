@@ -45,3 +45,10 @@ Tool/Runtime 图片与发送图片继续复用同一个 Gallery、Tile、decoder
   读取中显示加载占位，失败显示“图片已不可用”并禁用点击；不影响其他图片和 AgentRun。关闭后恢复焦点。
 
 这只是本地呈现修正，不自动向飞书或钉钉发送 Runtime 图片。
+
+## 与公开消息同步呈现
+
+来源 AgentRun 仍为 `queued`、`running` 或 `waiting` 且尚无公开消息时，Renderer 不得把 Runtime 图片
+作为无作者节点提前插入会话 Timeline。公开消息出现后，图片与该 Run 最后一条公开消息一起进入 Timeline；
+同摘要显式附件仍按前述规则优先。只有来源 Run 已为 `succeeded`、`failed` 或 `cancelled` 且仍无公开消息时，
+才显示按图片时间定位的独立兜底。缺失来源 Run 不能被当作终态证明。

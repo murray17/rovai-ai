@@ -1270,7 +1270,7 @@ describe('task event projections', () => {
     ])
   })
 
-  it('anchors each Files Changed card after the last public message from its source run', () => {
+  it('anchors Run artifacts after public output and withholds active images until then', () => {
     const message = (
       id: string,
       sequence: number,
@@ -1316,6 +1316,45 @@ describe('task event projections', () => {
       deletions: 1,
       completedAt
     })
+    const run = (
+      status: CampSnapshot['agentRuns'][number]['status']
+    ): CampSnapshot['agentRuns'][number] => ({
+      id: 'run-claude',
+      campTurnId: 'turn-multi-agent',
+      conversationId: 'conversation-claude',
+      agentId: 'agent-claude',
+      taskId: null,
+      responsibilityKey: 'root',
+      responsibilityGeneration: 1,
+      purpose: 'generate an image',
+      completionRole: 'required',
+      status,
+      waitReason: null,
+      cancelRequestedAt: null,
+      cancelReasonCode: null,
+      cancelAcknowledgedAt: null,
+      terminalResolutionSource: status === 'succeeded' ? 'runtime_terminal' : null,
+      terminalReasonCode: null,
+      failure: null,
+      runtimeModel: null,
+      executionEpoch: 1,
+      permissionSemantics: 'runtime_managed_v2',
+      invocationKind: 'direct',
+      triggerDeliveryGeneration: 0,
+      a2aParentAgentRunId: null,
+      a2aRootAgentRunId: null,
+      a2aDepth: 0,
+      executionEvidenceCount: 1,
+      hasUnsettledExternalEffects: false,
+      workspace: null,
+      startingGitObservation: null,
+      endingGitObservation: null,
+      version: 1,
+      createdAt: '2026-08-28T06:49:30.000000Z',
+      startedAt: '2026-08-28T06:49:31.000000Z',
+      endedAt: status === 'succeeded' ? '2026-08-28T06:49:56.000000Z' : null,
+      updatedAt: '2026-08-28T06:49:56.000000Z'
+    })
 
     const projected = campConversationTimeline(
       [
@@ -1347,11 +1386,15 @@ describe('task event projections', () => {
     const imageTimeline = campConversationTimeline([
       message('claude-message', 1, 'run-claude', 'agent-claude', '2026-08-28T06:49:36.444822Z'),
       message('kiro-message', 2, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
-    ], [], [], [], [changes('run-claude', '2026-08-28T06:49:40.554605Z')], images)
+    ], [], [run('running')], [], [changes('run-claude', '2026-08-28T06:49:40.554605Z')], images)
     expect(imageTimeline.map((item) => item.id)).toEqual([
       'claude-message', 'run-images:run-claude:1', 'run-file-changes:run-claude:1', 'kiro-message'
     ])
-    expect(campConversationTimeline([], [], [], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images)
+    expect(campConversationTimeline([
+      message('kiro-message', 1, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
+    ], [], [run('running')], [], [], images)
+      .map((item) => item.id)).toEqual(['kiro-message'])
+    expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images)
       .map((item) => item.kind)).toEqual(['run_images', 'run_file_changes'])
   })
 
