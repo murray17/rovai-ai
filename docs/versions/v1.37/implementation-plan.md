@@ -22,6 +22,8 @@ last_updated: 2026-09-01
 - [x] 两种图片均去除文件名、来源/数量标题、projection 说明与系统打开/Finder 菜单，只保留大图预览和关闭。
 - [x] Renderer 进程内缓存已解码 Blob payload；附件切回不重读，Runtime 切回先显示再后台刷新，Tile 独立释放 URL。
 - [x] 钉钉完整产品链路未验收，合入 main 前隐藏渠道页整个入口；保留实现、已有数据及独立登录组件回归。
+- [x] 具体文件点击直接创建临时只读 Preview handle；工作区外文件、五类来源与 symlink 不再自动升级 Root Grant；
+  HTML/Markdown 资源限定文档目录并随 Tab 释放，Renderer 删除 `authorization_required → chooseAuthorizedRoot()`。
 - [x] 开发者单独确认 revision 1 后实施精确文件帮助与飞书新 Bootstrap 提示；静态资源与其他上下文轴不变。
 - [x] 开发者单独确认 Principal 寻址教学 revision 1 后，从 Authority boundary 删除正文 `@Principal`
   寻址暗示；仅 Charter revision 3→4，`rovai send --help`、发送效果与 Agent audience 投影不变。
@@ -33,6 +35,13 @@ last_updated: 2026-09-01
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
 ## 验证 owner
+
+- `file-preview-access.test.ts` 与 `file-preview-service.test.ts` 拥有具体文件能力边界：默认 containment 仍拒绝越界，
+  只有五类可信文件来源显式启用 exact external file；覆盖绝对/Home/file URI/symlink、Attachment、Run Evidence、
+  child handle、描述符恢复、reload、系统操作、HTML CSS/图片、Markdown 相对链接、目录 Root Grant 保留与资源释放。
+- `pnpm test:file-reference-navigation` 使用生产 `FilePreviewProvider` 的隔离 Electron fixture，强制注入旧
+  `authorization_required`，验证点击不会调用 `chooseAuthorizedRoot`，内部授权原因不会进入用户通知；同时保留
+  文件定位、阅读锚点、键盘与双主题回归。该夹具不启动 Core、Runtime 或访问日常数据。
 
 - `agent_run_image::tests::published_attachment_replaces_matching_runtime_image_presentation` 拥有跨来源展示过滤，
   使用同一个隔离 SQLite fixture；既有混合存储测试没有消息/附件关系，不能覆盖这个组合读取 seam。
@@ -275,6 +284,20 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   新合同使用后继版本并更新 current 路由，原 accepted 历史合同保持不变；通用文档门禁没有增加例外。
   本轮没有安装、重启日常 App，也没有向真实渠道发件。
 
+### 2026-09-01 具体文件直接预览
+
+- Main 只在 Core/Attachment/父 handle 已确认来源并最终定位到普通文件后启用 exact external file；外部文件以
+  canonical parent 作为临时 watcher/child 边界，不创建 Root Grant。Attachment、Run Evidence、Home/file URI、
+  absolute path、symlink、Markdown/HTML child 与不支持格式系统打开的定向回归全部通过。
+- HTML/Markdown token 固定到 `dirname(canonicalFile)`，CSS 相对图片可用，Camp root 中但文档目录外的资源返回
+  404；释放父 handle 后 token 返回未授权，已打开子 handle 独立保留。显式外部目录 Root Grant 回归仍通过。
+- Renderer 删除自动 `chooseAuthorizedRoot` 分支；生产 `FilePreviewProvider` 的隔离 Electron 夹具注入旧授权错误后，
+  目录选择调用为零，只显示通用可恢复文案。文件定位、阅读锚点、键盘、双主题和布局夹具均通过。
+- 定向 File Preview Vitest 11 文件 / 84 项、`pnpm typecheck`、`pnpm build:desktop`、
+  `pnpm test:file-reference-navigation` 与 `pnpm test:file-preview-layout` 通过；Impeccable detector 无命中。
+- `pnpm test` 通过：133 个 Vitest 文件 / 1362 项、221 项 Node tests（1 项既有 Windows 原生跳过），文档 9 项、
+  Skill 3 项及普通治理门禁通过；固定 base `ea0634631697d40f72bac05df19aeeb694d2481d` 的
+  `docs:check:ci` 通过。未启动日常 App、Core、Runtime，未访问或改写真实 Camp 数据。
 ### 2026-09-01 主动停止取消分类补正
 
 - 退役 #153 引入的 `failed/accepted_input_outcome_unknown` 取消分类：用户主动停止统一结算为

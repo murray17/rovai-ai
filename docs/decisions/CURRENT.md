@@ -30,8 +30,8 @@ last_updated: 2026-09-01
 
 ## Camp 文件预览
 
-- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v2](../contracts/file-preview-v2.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)。
-- 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)；[D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案本期已撤回。
+- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v3](../contracts/file-preview-v3.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)。
+- 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)、[V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)；[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案已撤回。
 
 ## Channels 与 External Principals
 

@@ -81,3 +81,32 @@ malformed canonical token 与全部 recipient admission 保持不变。
   调度。拒绝 invalid-tail 原子失败：这是旧行为没有的新严格度，无法为兼容兜底带来相称收益。
 - 当前规范由 [Camp Message Send v19](../../contracts/camp-message-send-v19.md)、[Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
   与[确认 revision 3](model-context-change-multi-mention-cluster.md)共同拥有。
+
+<a id="v1-37-d04"></a>
+## V1.37-D04：具体文件点击直接形成临时文件能力，不自动升级目录授权
+
+### 背景
+
+文件引用已经明确表达用户要打开的目标，但旧实现仍以 Camp/project root containment 作为普通文件读取前提。
+工作区外的 `~/.codex/config.toml` 或 sibling worktree HTML 因而返回 `authorization_required`，Renderer 随即弹出
+目录选择器。该流程把一次具体文件意图扩大成目录授权，也让用户必须理解内部 Root Grant；另一方面，完全取消
+路径能力会使 HTML 本地资源和 Markdown 相对链接无法安全延续。
+
+### 决定
+
+Core 继续拥有来源映射，Main 在可信点击最终定位到现存普通文件后签发窗口/Camp 绑定的临时具体文件 handle；
+canonical file 可以位于来源 root 外，不生成 Root Grant，也不触发目录选择。支持格式直接预览，不支持格式交给
+系统默认应用。HTML/Markdown 的自动资源 token 单独绑定当前文档目录并随 Tab 释放；可信子链接点击再获得自己的
+具体文件 handle。Root Grant 只保留给选择目录、打开文件夹、添加外部目录或浏览目录等明确目录操作。
+
+当前规范由 [File Preview v3](../../contracts/file-preview-v3.md)、[File Preview Architecture](../../architecture/file-preview.md)
+与[Camp 文件预览区](../../ui/components/file-preview.md)拥有。
+
+### 后果与替代方案
+
+- 文件是否位于工作区内不再制造交互差异；描述符恢复、刷新和系统动作重新验证同一来源与 canonical identity，
+  失败只反馈无法打开，不把 capability 原因暴露给用户。
+- HTML 自动资源获得文档目录内的临时读取范围，这是支持真实本地交互稿的必要扩大；token、sender、generation、
+  containment、MIME/大小门禁和 Tab 生命周期共同限制该范围，不能转成持久目录授权。
+- 拒绝继续要求 Root Grant：它增加无效 Modal，并把单文件意图扩大成目录能力。拒绝对点击文件永久信任：来源撤销、
+  文件替换或身份变化后仍须失败。拒绝让 HTML 直接使用 `file://`：它绕过受控协议、sender gate 与资源释放边界。
