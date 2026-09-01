@@ -60,7 +60,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | 精确来源与既有 receipt 含义不变；原库事务重映射 main 117/118/119→126/127/130，逐步恢复，128/129 历史合同保留，131 封口 |
 | [Channel/Main Schema Join v1（历史）](channel-main-schema-join-v1.md) | 主线 Pending/Fast 与渠道精确来源准入、126/127 receipt 与 128 封闭；副本执行位置由 v2 替代 |
 | [Channel Storage v1（历史）](channel-storage-v1.md) | 飞书/钉钉 credential 与 Developer Session 的 `rovai.sqlite` 明文存储、Main-only API、批量启动、账号/发布原子提交、CAS refresh 与旧 `.bin` clean break |
-| [Feishu Channel v12（当前）](feishu-channel-v12.md) | v11 入站规范化与此前执行卡/公开投影不变；缺少设置文件时默认开启，仅在存在当前已发布渠道 Bot 时监听，持久选择优先且异常配置失败关闭 |
+| [Feishu Channel v14（当前）](feishu-channel-v14.md) | v13 入站与执行入口不变；新 Bot 首次发布完成后向 exact Owner 发送非阻断、稳定 UUID 的私聊欢迎卡 |
+| [Feishu Channel v13（历史）](feishu-channel-v13.md) | v12 设置、入站与执行入口不变；最近输出的安全 command 原生折叠，结果限两行，长 command 按显示列保留首尾；发布通知由 v14 替代 |
+| [Feishu Channel v12（历史）](feishu-channel-v12.md) | v11 入站规范化与此前执行卡/公开投影不变；缺少设置文件时默认开启，仅在存在当前已发布渠道 Bot 时监听；最近输出呈现由 v13 替代 |
 | [Feishu Channel v11（历史）](feishu-channel-v11.md) | v10 执行卡/LAN 只读面不变；当前正文只信 SDK 规范化结果，外部引用使用单 locale schema，并排除 Topic root structural parent 的伪引用；执行台默认与监听门禁由 v12 替代 |
 | [Feishu Channel v10（历史）](feishu-channel-v10.md) | v9 执行卡、固定 URL、授权和 callback 不变；Web 公开投影复用生产分组语义，每个 Run、连续操作组与 Command 使用独立 disclosure；入站规范化与 Topic quote gate 由 v11 替代 |
 | [Feishu Channel v9（历史）](feishu-channel-v9.md) | v8 绑定/永久投递不变；飞书执行卡收敛为状态与三个入口，固定 `open_url` 直达全局 LAN HTTP 只读执行台，内存 Token 限定历史 scope，Owner callback 仅保留最近输出与 exact-run 停止 |
@@ -72,7 +74,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Feishu Channel v3（历史）](feishu-channel-v3.md) | 飞书终态外层原生折叠、正文直接可见、仅过程分页与翻页保持展开；终态呈现由 v4 替代 |
 | [Feishu Channel v2（历史）](feishu-channel-v2.md) | Owner-only 入站、Quick Chat/PendingCampBinding、统一 admission、每 AgentRun 临时执行控制台、永久 Markdown 与 Managed Attachment 原生投递；终态平铺由 v3 替代，存储条款由 Channel Storage v2 替代 |
 | [Feishu Channel v1（历史）](feishu-channel-v1.md) | Developer Identity/Session、持久 Bot publication intent、owner-only ProjectBinding、ExternalPrincipal、multi-App aggregate、serial ChannelTurnRequest、roster 与 durable ChannelDelivery；不含 template/activation-first 恢复边界 |
-| [DingTalk Channel v6（当前）](dingtalk-channel-v6.md) | v5 登录/发布/准入不变；渠道入口开放，普通群项目或 Quick Chat，三入口状态卡，共用固定 LAN 只读 URL，Owner recent/exact-run cancel 与真实双端验收边界 |
+| [DingTalk Channel v8（当前）](dingtalk-channel-v8.md) | v7 私聊与执行入口不变；普通群以 `chatbotUserId + atUsers` 证明 receiving Bot，并允许同时 @普通成员；新 Bot 首次完成后向 Owner 发非阻断欢迎卡 |
+| [DingTalk Channel v7（历史）](dingtalk-channel-v7.md) | v6 三入口与渠道边界不变；最近输出 command 与飞书共用 `$` 和首尾截断，但继续排除 result；新 Bot 描述统一为 `Rovai AI Teammate`；群目标与发布通知由 v8 替代 |
+| [DingTalk Channel v6（历史）](dingtalk-channel-v6.md) | v5 登录/发布/准入不变；渠道入口开放，普通群项目或 Quick Chat，三入口状态卡，共用固定 LAN 只读 URL；command 呈现与 Bot 描述由 v7 替代 |
 | [DingTalk Channel v5（历史）](dingtalk-channel-v5.md) | v4 身份/存储/发布不变；Rovai 内置官方 QR、Main sandbox 原生交互页、exact-attempt 刷新与静默取消；执行卡与公开入口由 v6 替代 |
 | [DingTalk Channel v4（历史）](dingtalk-channel-v4.md) | Main Web Session/SSO、schema-2 Cookie SQLite、封闭控制台创建/头像/Bot/权限/冻结版本发布、Owner-only 可见范围与中断防重建；独立窗口登录由 v5 内置扫码替代 |
 | [DingTalk Channel v3（历史）](dingtalk-channel-v3.md) | v2 发布/Stream/Owner/项目/投递不变；删除设备授权，仅浏览器 OAuth；其 Client/Profile 登录语义由 v4 Web Session 替代 |

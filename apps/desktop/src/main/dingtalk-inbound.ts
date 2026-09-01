@@ -13,6 +13,7 @@ export type DingTalkInboundMessage = {
   body: string
   attachmentSummaries: Array<{ name: string; mediaType: string | null }>
   explicitlyAtBot: boolean
+  chatbotUserId: string | null
   atUsers: Array<{ staffId: string | null; dingtalkId: string | null }>
   quote: {
     senderDisplayName: string
@@ -56,6 +57,10 @@ export function normalizeDingTalkRobotMessage(
     throw new Error('dingtalk_inbound_robot_identity_mismatch')
   }
   const body = messageText(value) ?? summarizeMessage(value)
+  const chatbotUserId = first(value, 'chatbotUserId')
+  if (chatbotUserId && chatbotUserId.length > 512) {
+    throw new Error('dingtalk_inbound_chatbotUserId_invalid')
+  }
   const atUsers = normalizeAtUsers(value.atUsers)
   return {
     provider: 'dingtalk',
@@ -73,6 +78,7 @@ export function normalizeDingTalkRobotMessage(
     body: body.trim(),
     attachmentSummaries: messageAttachmentSummaries(value),
     explicitlyAtBot: !group || value.isInAtList === true || value.isInAtList === 'true',
+    chatbotUserId,
     atUsers,
     quote: normalizeQuote(value)
   }

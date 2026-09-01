@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { buildLiveExecutionProgress, type ExecutionStep, type LiveRuntimeEvent } from './index'
+import {
+  executionPublicCommandPreview,
+  feishuCardResultPreview,
+  truncateDisplayColumns
+} from './public-result'
 
 function event(payload: unknown, eventType = 'runtime.action', id = 'operation-1'): LiveRuntimeEvent {
   return { id, agentRunId: 'run-1', eventType, payload, createdAt: '2026-08-31T00:00:00Z' }
@@ -77,5 +82,46 @@ describe('ExecutionStep publicResult boundary', () => {
     const projected = step([event({ item: { type: 'commandExecution', command: 'rovai send --public-only --body "private-message"', status: 'completed', aggregatedOutput: 'private-message' } }, 'activity.completed')])
     expect(projected.publicResult).toBe('（消息内容不在执行结果中重复展示）')
     expect(projected.publicCommand).not.toContain('private-message')
+  })
+})
+
+describe('compact channel execution previews', () => {
+  it('keeps the useful head and tail of a long shell command within an approximate card width', () => {
+    const projected = step([event({
+      item: {
+        type: 'commandExecution',
+        command: `pnpm vitest ${'apps/desktop/really-long-directory/'.repeat(4)}final.test.ts`,
+        status: 'completed'
+      }
+    }, 'activity.completed')])
+    const preview = executionPublicCommandPreview(projected, (value) => value)
+
+    expect(preview).toMatch(/^\$ pnpm vitest /u)
+    expect(preview).toContain('…')
+    expect(preview).toMatch(/final\.test\.ts$/u)
+    expect(Array.from(preview)).toHaveLength(72)
+  })
+
+  it('uses display width for Chinese commands and omits the shell prompt for apply_patch', () => {
+    expect(truncateDisplayColumns('检查'.repeat(40), 12)).toBe('检查检查…查')
+    const patchStep: ExecutionStep = {
+      id: 'patch-1', title: 'apply_patch', publicCommand: 'raw patch must not be used',
+      publicResult: null, detail: '', status: 'completed', activityDomain: 'file',
+      iconKind: 'file', toolName: 'apply_patch', credibility: 'runtime_structured'
+    }
+    expect(executionPublicCommandPreview(patchStep, (value) => value)).toBe('apply_patch')
+  })
+
+  it('limits Feishu folded results to two compact logical lines', () => {
+    const preview = feishuCardResultPreview([
+      'first line',
+      `second ${'result '.repeat(20)}tail`,
+      'third line must stay hidden'
+    ].join('\n'))
+
+    expect(preview?.split('\n')).toHaveLength(2)
+    expect(preview).toContain('first line')
+    expect(preview).toContain('…')
+    expect(preview).not.toContain('third line')
   })
 })

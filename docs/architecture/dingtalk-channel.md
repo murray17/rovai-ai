@@ -8,13 +8,15 @@ last_updated: 2026-09-01
 
 # 钉钉渠道架构
 
-字段、状态和恢复合同见 [DingTalk Channel v6](../contracts/dingtalk-channel-v6.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [DingTalk Channel v8](../contracts/dingtalk-channel-v8.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v2](../contracts/camp-membership-v2.md)和
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)拥有。取舍理由见
 [v1.36 决策记录](../versions/v1.36/decisions.md)和
-[V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)。
+[V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)与
+[V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)与
+[V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)。
 
 ## 组件与权威
 
@@ -97,6 +99,9 @@ agentId
   ↔ credentialRef
 ```
 
+新建应用描述使用与飞书一致的 `Rovai AI Teammate · <teamRole>`，无角色时回退为“协作者”；钉钉控制台可按既有
+字符白名单把中点规范化为空格。completed credential 恢复仍是同一 App 的只读恢复，不为了更新描述修改或重建远端应用。
+
 发布前复核 Web Session 与 intent 冻结的 `corpId + userId digest`。只创建普通 `appType:2` 企业内部应用，不套用 AI 模板。
 创建前提交 durable account_verified fence，重启时该状态缺失 App ID 就停止自动创建；取得 `unifiedAppId` 后，必须在读取
 Secret 或任何后续 mutation 前由 Core durable freeze。冻结回执失败仍保留已知 App ID，失败事务携带该 ID，不重新创建。
@@ -119,6 +124,10 @@ Gateway 规范化 console 的数字模式/状态、grouped scopes 和无 data �
 不自动确认敏感权限，不扩大可见范围。只有 create outcome unknown 且没有任何可信 App ID
 进入永久自动重建锁；一旦 identity 已冻结，所有失败都只能恢复原 App。
 
+首次发布在 durable `completed` 之后，用刚建立的 App Open API 向已确认 Owner `userId` 发送一张无操作的私聊欢迎卡；
+`outTrackId` 从 publication intent 稳定派生。该通知失败不改变发布事实，completed credential/Stream 恢复也不补发，
+因此不增加独立 Outbox、receipt 或应用重建路径。
+
 ## Stream、卡片与输出
 
 每个 published App 独立建立一个 `dingtalk-stream` Client，只订阅 SDK 的 Robot/Card topic。callback handler 先以当前
@@ -137,8 +146,9 @@ exact App、Owner userId、outTrackId、nonce/version 或 AgentRun；卡片 payl
 
 执行卡不再复制完整执行台或使用 streaming/page callback。每个 Run 的 Main 内存状态冻结首次创建时的 LAN URL、最近输出
 开关、最新公开 source 和卡片摘要，delivery/callback/终态按 Run 串行。执行中为“最近输出 / 打开执行台 / 停止”三个入口，
-终态移除停止；收起时公开 Evidence 变化不更新卡。打开入口是直接 URL action，不做 Owner callback；最近输出最多 30 条且
-排除 result；停止只调用 DingTalk Host 的 exact-run Core 命令。共享 `ExecutionViewService` 用 immutable scope 向 Core 读取
+终态移除停止；收起时公开 Evidence 变化不更新卡。打开入口是直接 URL action，不做 Owner callback；最近输出最多 30 条，
+安全 shell command 使用状态符号、`$` 与约 72 显示列的首尾截断。内置 AI 模板只提供整个输出区的展开状态，Main 不模拟
+逐 command 折叠，也不投影 command result。停止只调用 DingTalk Host 的 exact-run Core 命令。共享 `ExecutionViewService` 用 immutable scope 向 Core 读取
 同 Camp/队员、不晚于 focus Run 的公开历史并以 SSE 更新，不提供写入口。正式 Agent 输出仍是新的 Markdown 消息，网络失败
 只结算 Outbox，不回滚 Core 消息。
 
@@ -153,7 +163,7 @@ Migration 122 为钉钉增加 account/publication/Bot/Owner identity 表，同�
 ```text
 Stream callback fast ACK
 → normalize exact appKey / robotCode / corpId / senderStaffId / msgId
-→ classify p2p/group, then reject group topic identity and group messages without one canonical atUsers target
+→ classify p2p/group, then reject group topic identity and require chatbotUserId in canonical atUsers
 → Core verify Owner from appKey + userId digest
 → p2p exact /new OR group roster reconcile
 → group first observe as durable incomplete aggregate
@@ -168,6 +178,10 @@ Stream callback fast ACK
 一张项目卡，可选择 opaque project ID 或直接建立 Quick Chat，随后处理原消息；绑定不可换绑。Owner 仍是 ExternalPrincipal，不获得本机
 `local_user` 权限。reply 只冻结为本次消息的 ExternalQuote，入站附件只保留名称/媒体类型摘要。
 
+群 callback 以 `chatbotUserId` 与 `atUsers[].dingtalkId` 的匹配证明 receiving Bot；同一条消息还 @普通成员不再把
+Rovai target 扩成多个，也不再因 `atUsers.length > 1` 被入口静默丢弃。多 Rovai Bot 仍由多个独立 App Stream 的真实接收
+事实证明，并在 3 秒窗口后整条 fail closed。私聊不依赖 `chatbotUserId`，继续直接进入 Quick Chat。
+
 群 roster 以远端当前机器人列表与本机 published DingTalk Bot 的交集为 authority，使用既有 membership
 generation/source binding reconcile。加入/移出从下一次新 Run 生效，已运行 Run 与历史保持冻结。roster 不可读、出现未知
 App 或目标已移出时 fail closed。
@@ -178,7 +192,7 @@ App 或目标已移出时 fail closed。
 | --- | --- | --- |
 | Owner 私聊 | enabled | 真实租户 Web Session、Stream 与回复验收 |
 | Owner 普通群显式 `@` | enabled | 真实群 roster、项目卡和输出验收 |
-| 同消息直接多 Bot | disabled；普通群只有 `isInAtList` 且 canonical `atUsers` 恰好证明一个直接目标才进入 3 秒观察窗；缺失、歧义、多个 `atUsers` 或多个 receiving App 均整条 fail closed，单 Bot 协作扩展只走 Core A2A | 官方 canonical mention mapping + 多 App observation 真实证据 |
+| 同消息直接多 Bot | disabled；普通群须由 `isInAtList + chatbotUserId ∈ atUsers[].dingtalkId` 证明 receiving Bot；其他普通成员 mention 可共存，多个 receiving Rovai App 仍整条 fail closed，单 Bot 协作扩展只走 Core A2A | 官方 canonical mention mapping + 多 App observation 真实证据 |
 | 话题/Thread | disabled；只有规范化为 group 后出现非空 topic/thread identity 才拒绝，p2p 的同名平台路由元数据不视为 Topic | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
 | 入站附件 | summary only | 官方下载、授权和 Managed Attachment ingress 设计 |
 | 出站附件 | disabled，明确 unsupported | 已验证 app-only 原生投递和可恢复 message identity |
@@ -208,9 +222,11 @@ Renderer 状态重建业务事实。
 
 ## References
 
-- [DingTalk Channel v6](../contracts/dingtalk-channel-v6.md)
+- [DingTalk Channel v8](../contracts/dingtalk-channel-v8.md)
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)
 - [v1.36 决策记录](../versions/v1.36/decisions.md)
 - [V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)
+- [V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)
+- [V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)

@@ -41,7 +41,10 @@ import {
 } from './feishu-member-bot-provisioner'
 import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
-import { memberBotAppDescription } from '../shared/channel-member-bot-copy'
+import {
+  memberBotAppDescription,
+  memberBotWelcomeCopy
+} from '../shared/channel-member-bot-copy'
 import type { FeishuExecutionPreviewHost } from './feishu-execution-preview'
 import { sendFeishuAgentOutput } from './feishu-agent-output-card'
 import { feishuPageCardResponse, feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
@@ -202,6 +205,18 @@ type ManagedChannel = {
   credentialRef: string
   channel: LarkChannel
   unsubscribers: Array<() => void>
+}
+
+export function feishuMemberBotWelcomeCard(displayName: string): Record<string, unknown> {
+  const copy = memberBotWelcomeCopy(displayName)
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      template: 'blue',
+      title: { tag: 'plain_text', content: copy.title }
+    },
+    elements: [{ tag: 'div', text: { tag: 'lark_md', content: copy.body } }]
+  }
 }
 
 type RawInboundEvent = {
@@ -792,6 +807,14 @@ export class ChannelSettingsService {
         remoteAppId,
         failureCode: null
       }
+      await this.#sendMemberBotWelcome(
+        remoteAppId,
+        publicationIntentId,
+        provisioned.ownerOpenId,
+        agent.displayName
+      ).catch((error) => {
+        console.warn(`[rovai] Feishu member Bot welcome failed: ${channelFailureCode(error)}`)
+      })
       timing.recordTotal('ok')
       this.#finishQr()
       return this.#emit()
@@ -981,6 +1004,16 @@ export class ChannelSettingsService {
         detail: 'Bot 已发布并建立长连接。',
         remoteAppId,
         failureCode: null
+      }
+      if (!reopeningCompletedBinding) {
+        await this.#sendMemberBotWelcome(
+          remoteAppId,
+          intent.publicationIntentId,
+          provisioned.ownerOpenId,
+          agent.displayName
+        ).catch((error) => {
+          console.warn(`[rovai] Feishu member Bot welcome failed: ${channelFailureCode(error)}`)
+        })
       }
       timing.recordTotal('ok')
       return this.#emit()
@@ -1232,6 +1265,31 @@ export class ChannelSettingsService {
     const previous = this.#managedChannels.get(managed.appId)
     if (previous) await this.#disconnectManaged(previous)
     this.#managedChannels.set(managed.appId, managed)
+  }
+
+  async #sendMemberBotWelcome(
+    appId: string,
+    publicationIntentId: string,
+    ownerOpenId: string,
+    displayName: string
+  ): Promise<void> {
+    const managed = this.#managedChannels.get(appId)
+    if (!managed) throw new Error('feishu_member_bot_not_connected')
+    const response = await managed.channel.rawClient.im.v1.message.create({
+      params: { receive_id_type: 'open_id' },
+      data: {
+        receive_id: ownerOpenId,
+        msg_type: 'interactive',
+        content: JSON.stringify(feishuMemberBotWelcomeCard(displayName)),
+        uuid: createHash('sha256')
+          .update(`feishu-member-bot-welcome-v1\0${publicationIntentId}`)
+          .digest('hex')
+          .slice(0, 50)
+      }
+    })
+    if (response.code !== 0 || !response.data?.message_id) {
+      throw new Error('feishu_member_bot_welcome_failed')
+    }
   }
 
   async #startPublishedBot(

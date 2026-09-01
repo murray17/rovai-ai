@@ -86,20 +86,37 @@ describe('Feishu execution console card', () => {
     expect(JSON.stringify(buttons(card)[2])).not.toContain('snapshotSequence')
   })
 
-  it('shows only the latest thirty ordered public items and never command results', () => {
+  it('renders bounded latest public items as collapsed commands with Feishu-only results', () => {
     const card = feishuExecutionStateCard(snapshot('running', {
       evidence: Array.from({ length: 40 }, (_, index) => command(
         index + 1,
         `public-command-${index + 1}`,
-        `private-result-${index + 1}`
+        `public-result-${index + 1}`
       ))
     }), { executionViewUrl: null, recentOutputVisible: true })
-    const text = bodyText(card)
-    expect(text).not.toContain('public-command-10')
-    expect(text).toContain('public-command-11')
-    expect(text).toContain('public-command-40')
-    expect(text).not.toContain('private-result')
-    expect(elements(card).filter((element) => element.tag === 'markdown')).toHaveLength(30)
+    const commands = panels(card)
+    expect(JSON.stringify(card)).not.toContain('public-command-1"')
+    expect(commands.map(header)).toContain('✓ $ public-command-40')
+    expect(result(commands.at(-1)!)).toBe('public-result-40')
+    expect(commands.length).toBeLessThanOrEqual(30)
+    expect(commands.length).toBeGreaterThan(0)
+    expect(commands.every((panel) => panel.expanded === false)).toBe(true)
+    expect(countElements(elements(card))).toBeLessThanOrEqual(50)
+    expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(24_000)
+  })
+
+  it('truncates long command labels and folds at most two safe result lines', () => {
+    const longCommand = `pnpm vitest ${'apps/desktop/really-long-directory/'.repeat(4)}final.test.ts`
+    const card = feishuExecutionStateCard(snapshot('succeeded', {
+      evidence: [command(1, longCommand, 'first line\nsecond line\nthird line')]
+    }), { executionViewUrl: null, recentOutputVisible: true })
+    const commandPanel = panels(card)[0]
+
+    expect(header(commandPanel)).toMatch(/^✓ \$ pnpm vitest /u)
+    expect(header(commandPanel)).toContain('…')
+    expect(header(commandPanel)).toMatch(/final\.test\.ts$/u)
+    expect(result(commandPanel).split('\n')).toHaveLength(2)
+    expect(result(commandPanel)).not.toContain('third line')
   })
 
   it('keeps the direct URL and removes stop after a terminal transition', () => {

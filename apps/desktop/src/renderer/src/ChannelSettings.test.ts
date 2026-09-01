@@ -103,7 +103,8 @@ describe('Channel settings', () => {
     expect(markup.match(/class="channel-member-bot-grid channel-member-bot-row"/g)).toHaveLength(2)
     expect(markup.indexOf('队员 agent-a')).toBeLessThan(markup.indexOf('队员 agent-b'))
     expect(markup).toContain('0 已发布 · 2 未发布')
-    expect(markup).toContain('名称沿用队员；应用图标由 Rovai 配置')
+    expect(markup).toContain('发布后沿用队员身份')
+    expect(markup).toContain('assets/channel-logos/feishu.svg')
     expect(markup).not.toContain('默认沿用队员名称与头像')
     expect(markup).toContain('disabled="" title="飞书渠道宿主尚未接入"')
     expect(markup).toContain('>等待连接</button>')
@@ -144,6 +145,7 @@ describe('Channel settings', () => {
 
     expect(markup).toContain('<strong>飞书</strong>')
     expect(markup).toContain('<strong>钉钉</strong>')
+    expect(markup).toMatch(/channel-mark-dingtalk[^>]*>\s*<img src=/u)
     expect(markup).toContain('2 个渠道')
     expect(markup.match(/role="tab"/gu)).toHaveLength(2)
     expect(markup).toContain('钉钉连接')

@@ -20,6 +20,8 @@ import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { ChannelLoginViewport } from './ChannelLoginViewport'
 import { memberBotAppDescription } from '../../shared/channel-member-bot-copy'
+import feishuLogo from './assets/channel-logos/feishu.svg'
+import dingtalkLogo from './assets/channel-logos/dingtalk.svg'
 
 export function visibleChannelMembers(agents: readonly AgentProfile[]): AgentProfile[] {
   return agents
@@ -625,7 +627,7 @@ function ChannelMemberBotTable({
               <div className="channel-bot-identity" role="cell">
                 {bot?.botDisplayName
                   ? <><strong>{bot.botDisplayName}</strong><small>独立 Bot 身份</small></>
-                  : <span>名称沿用队员；应用图标由 Rovai 配置</span>}
+                  : <span>发布后沿用队员身份</span>}
               </div>
               <span className={`channel-publication-status is-${status}`} role="cell">
                 <span>{publicationLabel(status)}</span>
@@ -889,7 +891,7 @@ function PublishBotDialog({
 function ChannelMark({ kind }: { kind: ChannelKind }): React.JSX.Element {
   return (
     <span className={`channel-mark channel-mark-${kind}`} aria-hidden="true">
-      {kind === 'dingtalk' ? '钉' : '飞'}
+      <img src={kind === 'dingtalk' ? dingtalkLogo : feishuLogo} alt="" />
     </span>
   )
 }

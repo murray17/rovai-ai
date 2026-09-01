@@ -8,7 +8,7 @@ last_updated: 2026-09-01
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v12](../contracts/feishu-channel-v12.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v14](../contracts/feishu-channel-v14.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -151,6 +151,10 @@ Provisioner 在再次证明同一 Developer Identity 后，用该 App credential
 `(account_id, app_id, owner_open_id digest)`。
 Owner 解析失败时发布不完成；已创建 App 保持冻结，只能原地 reconciliation，不得创建第二个 App。
 
+新 intent 首次 durable `completed` 后，Main 复用刚激活的 Bot SDK client，以该 App 已冻结的 `ownerOpenId` 发送一张
+无操作的私聊欢迎卡；provider `uuid` 从 publication intent 稳定派生。发送失败不回滚 published Bot，completed
+credential/连接恢复不补发，也不新增欢迎消息 Outbox 或 receipt。
+
 稳定入站只以本地 `(app_id, open_id)` 证明 Owner，不依赖每条消息的远程身份请求。事件携带的 `user_id` 与
 `union_id` 只用于补充 identity、跨 App 归并和冲突检查，不得把首个发送者提升为 Owner，也不存在 Owner
 手工核验步骤或 Renderer 状态。Core 无冻结映射或发现冲突时按连接异常 fail closed。
@@ -291,8 +295,11 @@ Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可�
 
 每个 AgentRun 有一个 Core-owned execution console identity，但飞书 Card 2.0 只承担状态入口。收起态不再把正文、command、
 结果或进度复制进卡片；只保留 Owner callback“显示最近输出”、直接 `open_url`“打开执行台”和 Owner callback
-“停止执行”。终态移除停止入口。最近输出只在 Main 的 per-message 内存状态中展开最后 30 个公开正文/安全 command，
-不含结果与分页；Main 重启恢复收起。所有 upsert、callback 与 recall 共用 per-card 串行队列。
+“停止执行”。终态移除停止入口。最近输出只在 Main 的 per-message 内存状态中展开最后 30 个公开正文/安全 command；
+正文直接显示，每条 command 使用默认收起的 Card 2.0 原生面板，标题为状态符号与 `$` 安全 command。command 标题按约
+72 个显示列保留首尾，面板只显示最多两行既有安全 `publicResult`；Main 不从 raw Evidence 或工具输入生成结果。最近输出
+无分页，并继续受 50-element/24 KiB 卡片预算约束，超限从最旧项淘汰。Main 重启恢复收起。所有 upsert、callback 与
+recall 共用 per-card 串行队列。
 
 “打开执行台”不进入 Host callback，也不识别飞书操作者。Main 仅在卡片第一次发送且 `ExecutionViewService` ready 时，
 把当时的私有 LAN IPv4、全局用户端口与新随机 Token 拼成固定 URL；卡片后续更新只复用该字符串。IP/端口变化不扫描、
@@ -319,7 +326,7 @@ SDK event ID 继续承担 callback 防重。可响应故障返回安全 Toast；
 不承诺自定义飞书提示。
 
 Core 既有 `terminal_pending / terminal_sealed` 与不可变 terminal snapshot 继续供安全读取和历史兼容，但 v10 飞书卡不再
-呈现旧双层折叠或终态分页。钉钉仍消费原纯文本执行投影。下一条 root request admission 召回同 ChannelConversation 更早
+呈现旧双层折叠或终态分页。钉钉只消费共享的安全 command 标签，不消费飞书折叠结果。下一条 root request admission 召回同 ChannelConversation 更早
 Turn 的执行卡，等待在途更新并把 target revoked 当作幂等成功；执行卡不是 CampMessage，也不参与请求业务 settlement。
 
 公开 Agent 正文新建无标题 Card 2.0，不覆盖控制台、queue ack 或其他正文。正文下方的“发送给”行只消费 Core 从公共

@@ -38,6 +38,10 @@ import {
 import { DingTalkStreamRegistry, type DingTalkCardCallback } from './dingtalk-stream-registry'
 import type { DingTalkInboundMessage } from './dingtalk-inbound'
 import {
+  memberBotAppDescription,
+  memberBotWelcomeCopy
+} from '../shared/channel-member-bot-copy'
+import {
   executionRecentOutputItems,
   executionStateTitle,
   executionStatusIsTerminal,
@@ -68,7 +72,7 @@ export function presentDingTalkAppIds(
 }
 
 export function dingtalkOutTrackId(
-  kind: 'bind' | 'run' | 'status',
+  kind: 'bind' | 'run' | 'status' | 'welcome',
   deliveryId: string
 ): string {
   const digest = createHash('sha256')
@@ -78,6 +82,15 @@ export function dingtalkOutTrackId(
     .digest('hex')
     .slice(0, 32)
   return `rv-${kind}-${digest}`
+}
+
+export function dingtalkMemberBotWelcomeCardParams(displayName: string): Record<string, string> {
+  const copy = memberBotWelcomeCopy(displayName)
+  return dingtalkCardParams({
+    title: copy.title,
+    content: copy.body,
+    flowStatus: '3'
+  })
 }
 
 export function selectSingleDingTalkInboundObservation<T extends {
@@ -92,10 +105,15 @@ export function selectSingleDingTalkInboundObservation<T extends {
 }
 
 export function hasCanonicalSingleDingTalkBotTarget(
-  message: Pick<DingTalkInboundMessage, 'conversationKind' | 'explicitlyAtBot' | 'atUsers'>
+  message: Pick<
+    DingTalkInboundMessage,
+    'conversationKind' | 'explicitlyAtBot' | 'chatbotUserId' | 'atUsers'
+  >
 ): boolean {
   return message.conversationKind === 'p2p'
-    || (message.explicitlyAtBot && message.atUsers.length === 1)
+    || (message.explicitlyAtBot
+      && message.chatbotUserId !== null
+      && message.atUsers.some((candidate) => candidate.dingtalkId === message.chatbotUserId))
 }
 
 type CoreDingTalkSnapshot = {
@@ -561,7 +579,13 @@ export class DingTalkChannelSettingsService {
           existingBot.credentialRef
         )
         if (!credential) {
-          credential = await this.#recoverCompletedBotCredential(existing, existingBot, identity, abort.signal)
+          credential = await this.#recoverCompletedBotCredential(
+            existing,
+            existingBot,
+            agent,
+            identity,
+            abort.signal
+          )
           this.#stream.stop(existingBot.appKey)
           this.#apis.delete(existingBot.appKey)
         }
@@ -630,7 +654,7 @@ export class DingTalkChannelSettingsService {
       if (!avatar?.pngBytes) throw new Error('dingtalk_member_bot_avatar_unavailable')
       const provisioned = await this.#dependencies.provisioner.create({
         appName: current.requestedAppName,
-        description: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`,
+        description: memberBotAppDescription('dingtalk', agent.teamRole),
         expectedCorpId: identity.corpId,
         expectedUserId: identity.userId,
         frozen: {
@@ -741,6 +765,15 @@ export class DingTalkChannelSettingsService {
         remoteAppId: provisioned.unifiedAppId,
         failureCode: null
       }
+      await this.#sendMemberBotWelcome({
+        publicationIntentId: current.publicationIntentId,
+        appKey: provisioned.appKey,
+        robotCode: provisioned.robotCode,
+        ownerUserId: identity.userId,
+        displayName: agent.displayName
+      }).catch((error) => {
+        console.warn(`[rovai] DingTalk member Bot welcome failed: ${failureCode(error)}`)
+      })
     } catch (error) {
       if (error instanceof DingTalkApproverSelectionRequired) {
         this.#activeProvisioning = {
@@ -802,6 +835,7 @@ export class DingTalkChannelSettingsService {
   async #recoverCompletedBotCredential(
     intent: DingTalkPublicationIntent,
     bot: CoreDingTalkSnapshot['memberBots'][number],
+    agent: AgentProfile,
     identity: DingTalkDeveloperIdentity,
     signal: AbortSignal
   ): Promise<DingTalkAppCredential> {
@@ -812,7 +846,7 @@ export class DingTalkChannelSettingsService {
     this.#notify()
     const recovered = await this.#dependencies.provisioner.create({
       appName: bot.botDisplayName,
-      description: `Rovai AI 队员 · ${bot.botDisplayName}`,
+      description: memberBotAppDescription('dingtalk', agent.teamRole),
       expectedCorpId: identity.corpId,
       expectedUserId: identity.userId,
       frozen: {
@@ -962,6 +996,25 @@ export class DingTalkChannelSettingsService {
       title: 'Rovai 连接验证',
       content: 'Bot 配置已完成。'
     }))
+  }
+
+  async #sendMemberBotWelcome(input: {
+    publicationIntentId: string
+    appKey: string
+    robotCode: string
+    ownerUserId: string
+    displayName: string
+  }): Promise<void> {
+    const api = this.#apis.get(input.appKey)
+    if (!api) throw new Error('dingtalk_bot_not_connected')
+    const outTrackId = dingtalkOutTrackId('welcome', input.publicationIntentId)
+    await api.createAndDeliverCard({
+      outTrackId,
+      openSpaceId: `dtv1.card//IM_ROBOT.${input.ownerUserId}`,
+      robotCode: input.robotCode,
+      space: 'p2p',
+      cardParamMap: dingtalkMemberBotWelcomeCardParams(input.displayName)
+    })
   }
 
   async #queueInbound(message: DingTalkInboundMessage): Promise<void> {
