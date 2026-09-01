@@ -203,3 +203,36 @@ one-shot watchdog；清空后完全休眠。终态用独立 one-shot 跨过 900m
 - 拒绝仅把旧 interval 改成永久十分钟：即使无渠道工作仍会扫描，正常状态更新也会延迟。拒绝完全 event-only：
   进程内通知没有持久 cursor，无法证明不丢。拒绝通用 WorkItem/waiter：当前规模下会增加新调度子系统与权威复制，
   而不能比现有领域表提供更多恢复事实。
+
+<a id="v1-37-d08"></a>
+## V1.37-D08：钉钉复用飞书的状态卡与单一 LAN 执行台，不补 Topic 或第二套 Web 服务
+
+### 背景
+
+钉钉已有账号、独立 Bot、Stream、Owner、普通群 roster、统一 admission、FIFO 和 Outbox，但当前渠道页隐藏入口，
+执行卡仍把 live 正文流入 AI 卡并在终态做 Owner 分页。用户已明确以一个已发布 Bot 重开真实验收，并要求执行中固定为
+“显示最近输出 / 打开执行台 / 停止执行”三个按钮。另起 DingTalk H5、每 Run 端口或点击跳转服务会复制飞书已经收口的
+公开投影、Token、SSE 和生命周期；把 URL 也改成 callback 又会重新引入 Owner 私聊、动态地址和消息幂等。
+
+### 决定
+
+渠道页恢复飞书/钉钉两个真实 Provider Tab。钉钉普通群项目卡增加 Quick Chat；Topic/Thread 继续 fail closed，直接多 Bot
+和附件 gate 不扩大。执行卡采用与飞书相同的状态入口语义：最近输出与 exact-run 停止为 Owner callback，打开执行台为
+卡片创建时冻结的直接 URL action。飞书和钉钉共用 Desktop 唯一 `ExecutionViewService`、全局端口、内存 Token、
+immutable Camp/Agent/focus-history scope 与 SSE；Core Web snapshot 只接受冻结 Channel conversation 所属的 closed provider set。
+
+Main 为每个 DingTalk Run 保存临时 URL、展开状态、最新 source 和摘要，所有 delivery/callback/终态更新按 Run 串行。
+停止使用 callback message identity 的稳定命令 ID，DingTalk Host alias 进入同一个 provider-neutral Core exact-run command；
+成功后立即把当前卡投影为“已取消”，Outbox 仍负责最终恢复。最近输出最多 30 条公开正文和安全 command，不含 result；
+收起状态不因 Evidence 增长更新卡。字段与验证边界由
+[DingTalk Channel v6](../../contracts/dingtalk-channel-v6.md)拥有。
+
+### 后果与替代方案
+
+- 获得固定 URL 且能访问本机局域网的人可以读冻结 scope；它不识别 DingTalk 点击人，IP/端口变化不修旧卡，Main 重启
+  使 Token 失效。这与飞书当前 LAN HTTP 取舍一致，不把 HTTP 描述成主动攻击防护。
+- DingTalk AI 模板负责 URL/Callback 按钮的跨端表现；真实 Mac/手机必须验证 RFC1918 HTTP、fragment、operator userId、
+  SSE 与停止终态。测试未完成前只记录实现就绪，不声称 packaged/真实租户通过。
+- 拒绝保留旧 streaming/终态分页：它与“纯状态入口”冲突且持续制造卡片更新。拒绝 DingTalk 专属 Web 服务或 WebSocket：
+  同一公开 projection 和 SSE 已满足需求。拒绝为了体验表面对齐实现 Topic fallback、附件或同消息多 Bot：这些能力缺少
+  独立身份、下载/投递和 canonical target 证据，风险与三个按钮无关。

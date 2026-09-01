@@ -21,7 +21,10 @@ last_updated: 2026-09-01
 - [x] 同 Run 的已发送同摘要 Blob 图片展示去重，底层数据不删除；统一 Tool/发送图片内容列与原比例图片框。
 - [x] 两种图片均去除文件名、来源/数量标题、projection 说明与系统打开/Finder 菜单，只保留大图预览和关闭。
 - [x] Renderer 进程内缓存已解码 Blob payload；附件切回不重读，Runtime 切回先显示再后台刷新，Tile 独立释放 URL。
-- [x] 钉钉完整产品链路未验收，合入 main 前隐藏渠道页整个入口；保留实现、已有数据及独立登录组件回归。
+- [x] 初始合入时因完整产品链路未验收而隐藏钉钉入口；保留实现、已有数据及独立登录组件回归。
+- [x] 用户后续以已发布的“爱丽丝”Bot 重开钉钉范围：恢复渠道入口，增加普通群 Quick Chat、三入口状态卡、
+  共享 LAN 执行台及 DingTalk Owner recent/exact-run cancel；Topic、直接多 Bot 和附件 gate 不扩大。
+- [ ] 使用“爱丽丝”完成钉钉桌面端/手机端真实租户验收；本项不由本地 fixture 或 Core 测试替代。
 - [x] 具体文件点击直接创建临时只读 Preview handle；工作区外文件、五类来源与 symlink 不再自动升级 Root Grant；
   HTML/Markdown 资源限定文档目录并随 Tab 释放，Renderer 删除 `authorization_required → chooseAuthorizedRoot()`。
 - [x] 开发者单独确认 revision 1 后实施精确文件帮助与飞书新 Bootstrap 提示；静态资源与其他上下文轴不变。
@@ -198,6 +201,8 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   日常 App、Core、Runtime 或渠道连接。
 
 ### 2026-09-01 渠道入口发布范围
+
+> 本节记录初始发布收敛，已由下方“钉钉三入口状态卡与公开入口”和 V1.37-D08 取代。
 
 - 按用户要求，渠道页只保留飞书；钉钉 Tab、计数、连接/发布区域与残留登录弹窗均隐藏。
   旧选中值回退到飞书，只有钉钉的 Snapshot 显示正常空态。没有删除钉钉源码、账号、凭据或 Bot，
@@ -395,3 +400,22 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   全部通过。`pnpm typecheck`、`pnpm build:desktop`、Clippy、Rust fmt、三道文档门禁及 `git diff --check`
   通过，CI 文档门禁固定 base 为 `9ae5e250bdd7e25e601ce89ca9396bced380949c`。未启动日常 App、Core、
   Runtime 或真实渠道连接，未访问日常 SQLite，也未发送渠道消息。
+
+### 2026-09-01 钉钉三入口状态卡与公开入口
+
+- 渠道页恢复钉钉 Provider Tab 与同一 QR Dialog；已有账号、发布 Bot、App ID 和管理链接按真实 snapshot 呈现，
+  不创建第二套设置页。全局局域网执行台仍只在渠道页最底部出现一次并默认折叠。
+- 钉钉项目卡在最多六个最近项目后增加“开始快速对话 / 刷新项目”，Core 只允许普通群 `quick_chat`，创建目录后
+  原子提升原消息；Topic 继续拒绝。既有 roster owner 改为走 Quick Chat，证明成员来源和 FIFO 不因无项目绑定改变。
+- DingTalk Main 删除旧 live streaming/终态分页卡，增加 per-Run 临时状态和串行队列。新卡 ready 时只签发一次
+  `executionViewUrl`；执行中为三个按钮，终态两个，默认无正文和 elapsed 文案；展开只显示最后 30 条公开正文与
+  安全 command。停止使用稳定 callback 命令 ID，成功后即时更新为“已取消”。
+- Core Web scope 接受冻结 conversation 的 Feishu/DingTalk closed set；最近输出与 exact-run cancel 新增
+  `dingtalk-channel-host` typed alias，仍复用同一 Owner/App/message/run 权威。共享 `ExecutionViewService`、端口、
+  Token scope、公开 redactor/result/file projection 与 SSE 均未复制。
+- 本地验证已通过 `pnpm test`（135 个 Vitest 文件 / 1386 项、Node 221 项中 220 通过且 1 项 Windows 条件跳过）、
+  `pnpm test:rust:pr`（Library 474、CLI 32、slow 297 项）、TypeScript、Desktop production build、Rust fmt/check/clippy、
+  三道文档门禁与 `git diff --check`。DingTalk 登录隔离验收与 Desktop bridge 也通过，实图覆盖双主题、QR、原生企业选择页、
+  200% 缩放和 Escape；未访问日常数据或发送真实渠道消息。
+- “爱丽丝”桌面/手机真实投递结果仍待执行。完成前不把 AI 模板 URL action、callback operator
+  `userId`、RFC1918 fragment 或 SSE 跨端行为记为通过。

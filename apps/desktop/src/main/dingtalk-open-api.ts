@@ -213,25 +213,35 @@ function containsBusinessFailure(value: unknown, seen = new Set<unknown>()): boo
   return Object.values(record).some((item) => containsBusinessFailure(item, seen))
 }
 
+export type DingTalkCardButton =
+  | { title: string; value: Record<string, unknown> }
+  | { title: string; url: string }
+
 export function dingtalkCardParams(input: {
   title: string
-  content: string
-  buttons?: Array<{ title: string; value: Record<string, unknown> }>
+  content?: string | null
+  buttons?: DingTalkCardButton[]
   flowStatus?: '1' | '2' | '3' | '5'
   streamingContent?: boolean
 }): Record<string, string> {
   const buttons = input.buttons ?? []
+  const content = input.content ?? ''
   const contentKey = input.streamingContent ? 'msgContent' : 'staticMsgContent'
+  const order = content
+    ? ['msgTitle', contentKey, 'msgButtons']
+    : ['msgTitle', 'msgButtons']
   return {
     flowStatus: input.flowStatus ?? '3',
     msgTitle: input.title,
-    staticMsgContent: input.streamingContent ? '' : input.content,
-    msgContent: input.streamingContent ? input.content : '',
+    staticMsgContent: input.streamingContent ? '' : content,
+    msgContent: input.streamingContent ? content : '',
     sys_full_json_obj: JSON.stringify({
-      order: ['msgTitle', contentKey, 'msgButtons'],
+      order,
       msgButtons: buttons.map((button) => ({
         title: button.title,
-        action: { type: 'callback', value: JSON.stringify(button.value) }
+        action: 'url' in button
+          ? { type: 'url', value: button.url }
+          : { type: 'callback', value: JSON.stringify(button.value) }
       }))
     })
   }

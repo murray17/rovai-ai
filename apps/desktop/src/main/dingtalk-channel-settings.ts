@@ -29,14 +29,21 @@ import {
   type DingTalkProvisioningFacts
 } from './dingtalk-member-bot-provisioner'
 import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
-import { DingTalkOpenApiClient, dingtalkCardParams } from './dingtalk-open-api'
+import {
+  DingTalkOpenApiClient,
+  dingtalkCardParams,
+  type DingTalkCardButton
+} from './dingtalk-open-api'
 import { DingTalkStreamRegistry, type DingTalkCardCallback } from './dingtalk-stream-registry'
 import type { DingTalkInboundMessage } from './dingtalk-inbound'
 import {
-  executionConsolePublicPage,
+  executionRecentOutputItems,
+  executionStateTitle,
+  executionStatusIsTerminal,
   type ExecutionConsoleSnapshot
 } from '../shared/execution-presentation/feishu-card'
 import { AdaptiveChannelHostPump } from './channel-host-pump'
+import type { ExecutionViewScope } from './execution-view-service'
 
 export const DINGTALK_REQUIRED_SCOPE_VALUES = [
   'Card.Instance.Write',
@@ -185,10 +192,25 @@ type ClaimedDelivery = {
   recipientOpenId: string | null
 }
 
-type DingTalkExecutionConsoleSource = ExecutionConsoleSnapshot & {
+export type DingTalkExecutionConsoleSource = ExecutionConsoleSnapshot & {
+  campId: string
+  campTurnId: string
+  channelConversationId: string
+  agentId: string
+  runCreatedAt: string
   targetAppId: string
   externalMessageId: string | null
   state: 'opening' | 'active' | 'terminal_pending' | 'terminal_sealed'
+}
+
+export type DingTalkExecutionCardPresentationState = {
+  agentRunId: string
+  targetAppId: string
+  externalMessageId: string | null
+  executionViewUrl: string | null
+  recentOutputVisible: boolean
+  latestSource: DingTalkExecutionConsoleSource
+  lastCardDigest: string | null
 }
 
 export type DingTalkChannelSettingsState = {
@@ -207,6 +229,10 @@ export type DingTalkChannelHostDependencies = {
   avatarSource: MemberBotAvatarSourceResolver
   streamRegistry?: DingTalkStreamRegistry
   createApiClient?: (credential: { appKey: string; appSecret: string }) => DingTalkOpenApiClient
+  executionView?: {
+    createExecutionViewUrl(scope: ExecutionViewScope): Promise<string | null>
+    revokeExecutionViewUrl(url: string | null): void
+  }
   requiredScopeValues?: readonly string[]
   requiredEventCodes?: readonly string[]
   setTimeout?: typeof globalThis.setTimeout
@@ -237,6 +263,8 @@ export class DingTalkChannelSettingsService {
     agentId: string
     observation: Promise<boolean>
   }>>()
+  readonly #executionCardStates = new Map<string, DingTalkExecutionCardPresentationState>()
+  readonly #executionCardTails = new Map<string, Promise<unknown>>()
   readonly #hostPump: AdaptiveChannelHostPump
   #activeQrAttempt: ChannelQrAttemptView | null = null
   #activeQrAbort: AbortController | null = null
@@ -309,6 +337,11 @@ export class DingTalkChannelSettingsService {
     this.#stream.stopAll()
     this.#apis.clear()
     this.#inboundBatch.clear()
+    for (const state of this.#executionCardStates.values()) {
+      this.#dependencies.executionView?.revokeExecutionViewUrl(state.executionViewUrl)
+    }
+    this.#executionCardStates.clear()
+    this.#executionCardTails.clear()
   }
 
   async get(): Promise<DingTalkChannelSettingsState> {
@@ -1123,47 +1156,97 @@ export class DingTalkChannelSettingsService {
       if (api && result.status !== 'rejected' && value.action !== 'refresh') {
         await api.updateCard(outTrackId, dingtalkCardParams({
           title: 'Rovai 项目',
-          content: value.action === 'cancel' ? '已取消。' : '项目已绑定，消息已进入处理。',
+          content: value.action === 'cancel'
+            ? '已取消。'
+            : value.action === 'quick_chat'
+              ? '已开始快速对话，消息已进入处理。'
+              : '项目已绑定，消息已进入处理。',
           flowStatus: '3'
         }))
       }
       this.#hostPump.wake()
       return
     }
-    if (value.action === 'execution_console_page' && typeof value.agentRunId === 'string') {
-      const source = await this.#dependencies.core.request<DingTalkExecutionConsoleSource | null>(
-        'channels.executionConsole.source',
-        {
-          agentRunId: value.agentRunId,
-          expectedSequence: Number(value.snapshotSequence)
+    const agentRunId = typeof value.agentRunId === 'string' ? value.agentRunId : null
+    if (!agentRunId || !['execution_recent_output', 'execution_stop'].includes(String(value.action))) return
+    await this.#enqueueExecutionCard(agentRunId, async () => {
+      const state = this.#executionCardStates.get(agentRunId)
+      if (state && (state.targetAppId !== callback.appKey
+        || state.externalMessageId !== outTrackId)) return
+      const operator = {
+        operatorOpenId: null,
+        operatorUserId,
+        operatorUnionId: null
+      }
+      if (value.action === 'execution_stop') {
+        this.#hostPump.wake()
+        const result = await this.#commandWithId(
+          'channels.dingtalk.executionConsole.agentRun.cancel',
+          stableCommandId('dingtalk-execution-stop', callback.appKey, callback.messageId),
+          {
+            callbackEventId: callback.messageId,
+            appId: callback.appKey,
+            externalMessageId: outTrackId,
+            agentRunId,
+            ...operator
+          },
+          false
+        )
+        if (result.status === 'rejected') return
+        this.#hostPump.wake()
+        const terminalStatus = executionTerminalStatus(result.payload.status)
+        if (!state || !terminalStatus) return
+        state.latestSource = {
+          ...state.latestSource,
+          run: {
+            ...state.latestSource.run,
+            status: terminalStatus,
+            waitReason: null
+          },
+          state: 'terminal_pending'
         }
-      )
-      if (!source) return
-      const page = executionConsolePublicPage(source, Number(value.pageIndex))
-      const authorized = await this.#command(
-        'channels.dingtalk.executionConsole.page.authorize',
+        const params = executionCardParams(state.latestSource, state)
+        await this.#apis.get(callback.appKey)?.updateCard(outTrackId, params)
+        state.lastCardDigest = digest(JSON.stringify(params))
+        return
+      }
+      if (typeof value.visible !== 'boolean') return
+      const authorized = await this.#commandWithId(
+        'channels.dingtalk.executionConsole.recentOutput.authorize',
+        randomUUID(),
         {
-          agentRunId: value.agentRunId,
+          agentRunId,
           appId: callback.appKey,
           externalMessageId: outTrackId,
-          snapshotSequence: Number(value.snapshotSequence),
-          pageIndex: page.pageIndex,
-          pageCount: page.pageCount,
-          operatorOpenId: null,
-          operatorUserId,
-          operatorUnionId: null
+          ...operator
         },
         false
       )
-      if (authorized.status === 'rejected'
-        || source.targetAppId !== callback.appKey
-        || source.externalMessageId !== outTrackId
-        || source.state !== 'terminal_sealed') return
-      await this.#apis.get(callback.appKey)?.updateCard(
-        outTrackId,
-        executionCardParams(source, page.pageIndex)
+      if (authorized.status === 'rejected') return
+      const sequence = authorized.payload.snapshotSequence
+      if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 1) return
+      const current = await this.#dependencies.core.request<DingTalkExecutionConsoleSource | null>(
+        'channels.executionConsole.source',
+        { agentRunId, expectedSequence: sequence }
       )
-    }
+      if (!current || current.targetAppId !== callback.appKey
+        || current.externalMessageId !== outTrackId) return
+      const nextState = state ?? {
+        agentRunId,
+        targetAppId: current.targetAppId,
+        externalMessageId: current.externalMessageId,
+        executionViewUrl: null,
+        recentOutputVisible: false,
+        latestSource: current,
+        lastCardDigest: null
+      }
+      this.#executionCardStates.set(agentRunId, nextState)
+      nextState.latestSource = current
+      nextState.recentOutputVisible = value.visible
+      const params = executionCardParams(current, nextState)
+      await this.#apis.get(callback.appKey)?.updateCard(outTrackId, params)
+      nextState.lastCardDigest = digest(JSON.stringify(params))
+    })
   }
 
   async #pumpOnce(): Promise<boolean> {
@@ -1197,6 +1280,29 @@ export class DingTalkChannelSettingsService {
   }
 
   async #deliver(delivery: ClaimedDelivery): Promise<void> {
+    if (delivery.deliveryKind === 'execution_console_upsert') {
+      const agentRunId = requiredPayloadString(delivery.payload, 'agentRunId')
+      return this.#enqueueExecutionCard(agentRunId, () => this.#deliverNow(delivery, agentRunId))
+    }
+    if (delivery.deliveryKind === 'execution_console_recall') {
+      const state = this.#executionCardStateForMessage(
+        delivery.targetAppId,
+        delivery.updateMessageId
+      )
+      const queueKey = state?.agentRunId
+        ?? `recall:${delivery.targetAppId}:${delivery.updateMessageId ?? delivery.deliveryId}`
+      return this.#enqueueExecutionCard(queueKey, () => this.#deliverNow(
+        delivery,
+        state?.agentRunId ?? null
+      ))
+    }
+    return this.#deliverNow(delivery, null)
+  }
+
+  async #deliverNow(
+    delivery: ClaimedDelivery,
+    executionAgentRunId: string | null
+  ): Promise<void> {
     const snapshot = await this.#snapshot()
     const bot = snapshot.memberBots.find((candidate) => candidate.appKey === delivery.targetAppId)
     const api = this.#apis.get(delivery.targetAppId)
@@ -1243,6 +1349,19 @@ export class DingTalkChannelSettingsService {
             cardParamMap: params
           })
         }
+      } else if (delivery.deliveryKind === 'execution_console_recall') {
+        if (executionAgentRunId) {
+          const state = this.#executionCardStates.get(executionAgentRunId)
+          this.#dependencies.executionView?.revokeExecutionViewUrl(state?.executionViewUrl ?? null)
+          this.#executionCardStates.delete(executionAgentRunId)
+        }
+        if (externalId) {
+          await api.updateCard(externalId, dingtalkCardParams({
+            title: bot.botDisplayName,
+            content: '此执行记录已结束。',
+            flowStatus: '3'
+          }))
+        }
       } else if (delivery.deliveryKind === 'execution_console_upsert') {
         const source = await this.#dependencies.core.request<DingTalkExecutionConsoleSource | null>(
           'channels.executionConsole.source',
@@ -1254,37 +1373,50 @@ export class DingTalkChannelSettingsService {
         if (source && source.targetAppId !== delivery.targetAppId) {
           throw new Error('execution_console_target_app_mismatch')
         }
-        const page = source ? executionConsolePublicPage(source, 0) : null
-        cardFallback = {
-          title: source ? page!.title : bot.botDisplayName,
-          text: source ? page!.body : '执行状态已更新。'
-        }
-        const params = source
-          ? executionCardParams(source)
-          : dingtalkCardParams({ title: bot.botDisplayName, content: '执行状态已更新。' })
-        if (externalId && source && ['opening', 'active'].includes(source.state)) {
-          await api.streamCard(externalId, page!.body, false)
-        } else if (externalId) {
-          if (source?.state === 'terminal_sealed') {
-            await api.streamCard(externalId, page!.body, true, page!.failed)
+        if (source) {
+          let state = this.#executionCardStates.get(source.agentRunId)
+          if (!state) {
+            state = {
+              agentRunId: source.agentRunId,
+              targetAppId: source.targetAppId,
+              externalMessageId: externalId,
+              executionViewUrl: externalId ? null : await this.#dependencies.executionView
+                ?.createExecutionViewUrl({
+                  channelConversationId: source.channelConversationId,
+                  targetAppId: source.targetAppId,
+                  campId: source.campId,
+                  agentId: source.agentId,
+                  focusRunId: source.agentRunId,
+                  maxRunCreatedAt: source.runCreatedAt
+                }) ?? null,
+              recentOutputVisible: false,
+              latestSource: source,
+              lastCardDigest: null
+            }
+            this.#executionCardStates.set(source.agentRunId, state)
           }
-          await api.updateCard(externalId, params)
-        }
-        else {
-          externalId = dingtalkOutTrackId('run', delivery.deliveryId)
-          await api.createAndDeliverCard({
-            outTrackId: externalId,
-            openSpaceId: delivery.conversationKind === 'group'
-              ? `dtv1.card//IM_GROUP.${delivery.chatId}`
-              : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
-            robotCode: bot.robotCode,
-            space: delivery.conversationKind,
-            cardParamMap: params
-          })
+          state.latestSource = source
+          const params = executionCardParams(source, state)
+          const cardDigest = digest(JSON.stringify(params))
+          if (externalId) {
+            if (state.lastCardDigest !== cardDigest) await api.updateCard(externalId, params)
+          } else {
+            externalId = dingtalkOutTrackId('run', delivery.deliveryId)
+            await api.createAndDeliverCard({
+              outTrackId: externalId,
+              openSpaceId: delivery.conversationKind === 'group'
+                ? `dtv1.card//IM_GROUP.${delivery.chatId}`
+                : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
+              robotCode: bot.robotCode,
+              space: delivery.conversationKind,
+              cardParamMap: params
+            })
+          }
+          state.externalMessageId = externalId
+          state.lastCardDigest = cardDigest
         }
       } else {
-        const closed = delivery.deliveryKind === 'execution_console_recall'
-          || delivery.payload.action === 'recall'
+        const closed = delivery.payload.action === 'recall'
         cardFallback = {
           title: delivery.deliveryKind === 'attention' ? 'Rovai 需要你确认' : 'Rovai',
           text: closed ? '状态已结束。' : String(delivery.payload.text ?? '状态已更新')
@@ -1375,13 +1507,45 @@ export class DingTalkChannelSettingsService {
     return this.#dependencies.core.request('channels.dingtalk.snapshot', {})
   }
 
+  #enqueueExecutionCard<T>(agentRunId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#executionCardTails.get(agentRunId) ?? Promise.resolve()
+    const result = previous.catch(() => undefined).then(operation)
+    const tail = result.then(() => undefined, () => undefined)
+    this.#executionCardTails.set(agentRunId, tail)
+    void tail.finally(() => {
+      if (this.#executionCardTails.get(agentRunId) === tail) {
+        this.#executionCardTails.delete(agentRunId)
+      }
+    })
+    return result
+  }
+
+  #executionCardStateForMessage(
+    targetAppId: string,
+    externalMessageId: string | null | undefined
+  ): DingTalkExecutionCardPresentationState | null {
+    if (!externalMessageId) return null
+    return [...this.#executionCardStates.values()].find((state) => (
+      state.targetAppId === targetAppId && state.externalMessageId === externalMessageId
+    )) ?? null
+  }
+
   async #command(
     method: Parameters<CoreClient['request']>[0],
     command: object,
     throwOnRejected = true
   ): Promise<StoredCommandResult> {
+    return this.#commandWithId(method, randomUUID(), command, throwOnRejected)
+  }
+
+  async #commandWithId(
+    method: Parameters<CoreClient['request']>[0],
+    commandId: string,
+    command: object,
+    throwOnRejected = true
+  ): Promise<StoredCommandResult> {
     const result = await this.#dependencies.core.request<StoredCommandResult>(method, {
-      commandId: randomUUID(),
+      commandId,
       command
     })
     if (throwOnRejected && result.status === 'rejected') throw new Error(result.code)
@@ -1444,7 +1608,10 @@ function provisioningForStep(
   }
 }
 
-function projectCardParams(payload: Record<string, unknown>, closed: boolean): Record<string, string> {
+export function projectCardParams(
+  payload: Record<string, unknown>,
+  closed: boolean
+): Record<string, string> {
   if (closed) return dingtalkCardParams({
     title: '选择 Rovai 项目',
     content: '此项目选择已结束。',
@@ -1454,7 +1621,7 @@ function projectCardParams(payload: Record<string, unknown>, closed: boolean): R
   const expectedVersion = Number(payload.expectedVersion ?? 1)
   const nonce = String(payload.nonce ?? '')
   const projects = Array.isArray(payload.projectOptions) ? payload.projectOptions : []
-  const buttons = projects.slice(0, 8).flatMap((item) => {
+  const buttons: DingTalkCardButton[] = projects.slice(0, 6).flatMap((item) => {
     if (!item || typeof item !== 'object') return []
     const project = item as Record<string, unknown>
     const projectId = String(project.projectId ?? '')
@@ -1466,42 +1633,75 @@ function projectCardParams(payload: Record<string, unknown>, closed: boolean): R
     }]
   })
   buttons.push({
+    title: '开始快速对话',
+    value: { pendingBindingId, expectedVersion, nonce, action: 'quick_chat' }
+  })
+  buttons.push({
     title: '刷新项目',
-    value: { pendingBindingId, expectedVersion, nonce, action: 'refresh', projectId: '' }
+    value: { pendingBindingId, expectedVersion, nonce, action: 'refresh' }
   })
   return dingtalkCardParams({
     title: '选择 Rovai 项目',
-    content: projects.length ? '请选择这次协作使用的项目。' : '当前没有可用项目，请先在 Rovai 打开项目后刷新。',
+    content: projects.length
+      ? projects.length > 6
+        ? '选择最近使用的项目，或直接开始快速对话。更多项目可在 Rovai 打开后刷新。'
+        : '选择一个项目，或直接开始快速对话。'
+      : '当前没有可用项目，可以直接开始快速对话。',
     buttons,
     flowStatus: '2'
   })
 }
 
-function executionCardParams(
+export function executionCardParams(
   source: DingTalkExecutionConsoleSource,
-  requestedPageIndex = 0
+  state: Pick<DingTalkExecutionCardPresentationState,
+    'executionViewUrl' | 'recentOutputVisible'>
 ): Record<string, string> {
-  const page = executionConsolePublicPage(source, requestedPageIndex)
-  const buttons: Array<{ title: string; value: Record<string, unknown> }> = []
-  const action = (pageIndex: number): Record<string, unknown> => ({
-    action: 'execution_console_page',
-    agentRunId: source.agentRunId,
-    snapshotSequence: source.sequence,
-    pageIndex
-  })
-  if (page.pageIndex > 0) buttons.push({ title: '上一页', value: action(page.pageIndex - 1) })
-  if (page.pageIndex + 1 < page.pageCount) {
-    buttons.push({ title: '下一页', value: action(page.pageIndex + 1) })
+  const terminal = executionStatusIsTerminal(source.run.status)
+  const buttons: DingTalkCardButton[] = [{
+    title: state.recentOutputVisible ? '收起最近输出' : '显示最近输出',
+    value: {
+      action: 'execution_recent_output',
+      agentRunId: source.agentRunId,
+      visible: !state.recentOutputVisible
+    }
+  }]
+  if (state.executionViewUrl) {
+    buttons.push({ title: '打开执行台', url: state.executionViewUrl })
   }
+  if (!terminal) {
+    buttons.push({
+      title: '停止执行',
+      value: { action: 'execution_stop', agentRunId: source.agentRunId }
+    })
+  }
+  const recent = state.recentOutputVisible ? executionRecentOutputItems(source) : []
   return dingtalkCardParams({
-    title: page.title,
-    content: page.body,
+    title: `${boundedText(source.agentDisplayName, 80)} · ${executionStateTitle(source.run)}`,
+    content: state.recentOutputVisible
+      ? recent.join('\n\n') || '暂无公开执行记录。'
+      : null,
     buttons,
-    flowStatus: page.failed ? '5'
-      : page.terminal ? '3'
-        : '1',
-    streamingContent: !page.terminal
+    flowStatus: source.run.status === 'failed' ? '5'
+      : terminal ? '3'
+        : source.run.status === 'waiting' || source.run.waitReason ? '2'
+          : '1'
   })
+}
+
+function executionTerminalStatus(
+  value: unknown
+): 'succeeded' | 'failed' | 'cancelled' | null {
+  return value === 'succeeded' || value === 'failed' || value === 'cancelled'
+    ? value
+    : null
+}
+
+function boundedText(value: string, maxCharacters: number): string {
+  const characters = Array.from(value.trim())
+  return characters.length <= maxCharacters
+    ? characters.join('')
+    : `${characters.slice(0, maxCharacters - 1).join('')}…`
 }
 
 function callbackValue(payload: Record<string, unknown>): Record<string, unknown> | null {
@@ -1604,6 +1804,11 @@ async function activatePendingDingTalkLogin(
 
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12)
+}
+
+function stableCommandId(...parts: string[]): string {
+  const hex = createHash('sha256').update(parts.join('\0')).digest('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
 }
 
 function digestNamespaced(namespace: string, value: string): string {

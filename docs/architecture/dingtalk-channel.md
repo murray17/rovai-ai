@@ -8,12 +8,13 @@ last_updated: 2026-09-01
 
 # 钉钉渠道架构
 
-字段、状态和恢复合同见 [DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [DingTalk Channel v6](../contracts/dingtalk-channel-v6.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v2](../contracts/camp-membership-v2.md)和
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)拥有。取舍理由见
-[v1.36 决策记录](../versions/v1.36/decisions.md)。
+[v1.36 决策记录](../versions/v1.36/decisions.md)和
+[V1.37-D08](../versions/v1.37/decisions.md#v1-37-d08)。
 
 ## 组件与权威
 
@@ -30,6 +31,7 @@ Renderer 渠道设置
              ├─ 每 App dingtalk-stream Client
              ├─ App-only Open API：roster、Markdown、AI 卡片
              ├─ inbound/card normalization
+             ├─ 共享 ExecutionViewService：固定 LAN URL / 内存 Token / SSE
              └─ durable ChannelDelivery worker
                               │
                               ▼
@@ -127,12 +129,15 @@ Main 内存，运行期不逐消息读取。
 
 Open API 只接受 `appKey/appSecret` 换取短期 access token。群 roster、群/私聊 Markdown 和卡片操作都使用
 固定 API origin 与有界 timeout。AI 卡固定使用模板 `382e4302-551d-4880-bf29-a30acfab2e71.schema`、
-`callbackType=STREAM`、`supportForward=false`。项目卡和执行卡 callback 仍须由 Core 校验 exact App、Owner userId、
-outTrackId、nonce/version 或 AgentRun snapshot sequence；卡片 payload 不能直接改变项目或执行状态。
+`callbackType=STREAM`、`supportForward=false`。项目卡、“显示最近输出”和“停止执行”的 callback 仍须由 Core 校验
+exact App、Owner userId、outTrackId、nonce/version 或 AgentRun；卡片 payload 不能直接改变项目或执行状态。
 
-执行控制台消费 Core 的公开安全 projection。Main 只发送 narration、safe public command、公开文件变化和已提交输出；
-command stdin/stdout/stderr、工具 input/output JSON、patch body 与推理不进入钉钉。运行态可 streaming update，sealed 终态
-只通过授权的无状态页码更新原卡。正式 Agent 输出是新的 Markdown 消息，网络失败只结算 Outbox，不回滚 Core 消息。
+执行卡不再复制完整执行台或使用 streaming/page callback。每个 Run 的 Main 内存状态冻结首次创建时的 LAN URL、最近输出
+开关、最新公开 source 和卡片摘要，delivery/callback/终态按 Run 串行。执行中为“最近输出 / 打开执行台 / 停止”三个入口，
+终态移除停止；收起时公开 Evidence 变化不更新卡。打开入口是直接 URL action，不做 Owner callback；最近输出最多 30 条且
+排除 result；停止只调用 DingTalk Host 的 exact-run Core 命令。共享 `ExecutionViewService` 用 immutable scope 向 Core 读取
+同 Camp/队员、不晚于 focus Run 的公开历史并以 SSE 更新，不提供写入口。正式 Agent 输出仍是新的 Markdown 消息，网络失败
+只结算 Outbox，不回滚 Core 消息。
 
 ## Core 复用与入站准入
 
@@ -157,7 +162,7 @@ Stream callback fast ACK
 ```
 
 私聊按 receiving App 建 Quick Chat；精确 `/new` 只旋转该私聊 Camp，不创建触发消息或 Run。普通群首次有效消息在原群发送
-一张项目卡，选择 opaque project ID 后冻结项目并处理原消息；绑定不可换绑。Owner 仍是 ExternalPrincipal，不获得本机
+一张项目卡，可选择 opaque project ID 或直接建立 Quick Chat，随后处理原消息；绑定不可换绑。Owner 仍是 ExternalPrincipal，不获得本机
 `local_user` 权限。reply 只冻结为本次消息的 ExternalQuote，入站附件只保留名称/媒体类型摘要。
 
 群 roster 以远端当前机器人列表与本机 published DingTalk Bot 的交集为 authority，使用既有 membership
@@ -174,7 +179,7 @@ App 或目标已移出时 fail closed。
 | 话题/Thread | disabled，出现任一 topic identity 即拒绝 | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
 | 入站附件 | summary only | 官方下载、授权和 Managed Attachment ingress 设计 |
 | 出站附件 | disabled，明确 unsupported | 已验证 app-only 原生投递和可恢复 message identity |
-| AI 卡片 | 模板实例创建已取得隔离实测证据，生产 callback 尚待验收 | 真实投递、callback、streaming、终态翻页矩阵 |
+| AI 状态卡 | enabled；项目/最近输出/停止 callback 与固定 URL 已接入，真实客户端仍需验收 | 桌面/手机真实投递、URL fragment、callback、SSE 与停止终态矩阵 |
 
 不得通过宽松 parser、普通群 fallback、fabricated message success 或 Renderer 开关绕过这些 gate。
 
@@ -200,8 +205,9 @@ Renderer 状态重建业务事实。
 
 ## References
 
-- [DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)
+- [DingTalk Channel v6](../contracts/dingtalk-channel-v6.md)
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)
 - [v1.36 决策记录](../versions/v1.36/decisions.md)
+- [V1.37-D08](../versions/v1.37/decisions.md#v1-37-d08)

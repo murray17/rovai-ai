@@ -134,4 +134,30 @@ describe('DingTalk OpenAPI client', () => {
       flowStatus: '3', msgContent: '', staticMsgContent: '结果'
     })
   })
+
+  it('keeps callback values separate from a direct LAN execution URL', () => {
+    const url = 'http://192.168.1.23:8765/execution/run-1#t=grant-token'
+    const params = dingtalkCardParams({
+      title: '爱丽丝 · 执行中',
+      content: null,
+      buttons: [
+        { title: '显示最近输出', value: { action: 'execution_recent_output', agentRunId: 'run-1' } },
+        { title: '打开执行台', url },
+        { title: '停止执行', value: { action: 'execution_stop', agentRunId: 'run-1' } }
+      ]
+    })
+    const system = JSON.parse(params.sys_full_json_obj) as {
+      order: string[]
+      msgButtons: Array<{ title: string; action: { type: string; value: string } }>
+    }
+
+    expect(system.order).toEqual(['msgTitle', 'msgButtons'])
+    expect(system.msgButtons).toHaveLength(3)
+    expect(system.msgButtons[0].action).toEqual({
+      type: 'callback',
+      value: JSON.stringify({ action: 'execution_recent_output', agentRunId: 'run-1' })
+    })
+    expect(system.msgButtons[1].action).toEqual({ type: 'url', value: url })
+    expect(system.msgButtons[2].action.type).toBe('callback')
+  })
 })

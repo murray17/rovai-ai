@@ -132,13 +132,13 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         )}
       />
 
-      {snapshot?.activeQrAttempt?.kind !== 'dingtalk' && <QrDialog
+      <QrDialog
         snapshot={snapshot}
         kind={selectedKind}
         busy={busy !== null}
         onClose={(attemptId) => void cancelQrAttempt(attemptId)}
         onRefresh={(attemptId) => void refreshLoginQr(attemptId)}
-      />}
+      />
 
       <PublishBotDialog
         agent={agents.find((candidate) => candidate.agentId === publishAgentId) ?? null}
@@ -223,8 +223,7 @@ export function ChannelSettingsView({
   onRetryPublish?(channel: ChannelProviderView, agent: AgentProfile): void
 }): React.JSX.Element {
   const members = useMemo(() => visibleChannelMembers(agents), [agents])
-  // Keep DingTalk implementation and saved state, but do not expose its unfinished entry.
-  const channels = snapshot?.channels.filter((provider) => provider.kind !== 'dingtalk') ?? []
+  const channels = snapshot?.channels ?? []
   const channel = channels.find((candidate) => candidate.kind === selectedKind)
     ?? channels[0]
     ?? null

@@ -3,10 +3,13 @@ import type { CoreClient } from './core-client'
 import {
   DINGTALK_REQUIRED_SCOPE_VALUES,
   DingTalkChannelSettingsService,
+  type DingTalkExecutionConsoleSource,
   type DingTalkChannelHostDependencies,
   dingtalkOutTrackId,
+  executionCardParams,
   hasCanonicalSingleDingTalkBotTarget,
   presentDingTalkAppIds,
+  projectCardParams,
   selectSingleDingTalkInboundObservation,
   shouldAdvanceDingTalkPublicationStep
 } from './dingtalk-channel-settings'
@@ -331,6 +334,58 @@ describe('DingTalk channel account connection', () => {
     )
   })
 
+  it('renders the active execution card as three state actions without elapsed copy', () => {
+    const params = executionCardParams(executionSource('running'), {
+      executionViewUrl: 'http://192.168.1.23:8765/execution/run-1#t=grant',
+      recentOutputVisible: false
+    })
+    const system = JSON.parse(params.sys_full_json_obj) as {
+      msgButtons: Array<{ title: string; action: { type: string } }>
+    }
+
+    expect(params.msgTitle).toBe('爱丽丝 · 执行中')
+    expect(params.staticMsgContent).toBe('')
+    expect(system.msgButtons.map((button) => button.title)).toEqual([
+      '显示最近输出', '打开执行台', '停止执行'
+    ])
+    expect(system.msgButtons.map((button) => button.action.type)).toEqual([
+      'callback', 'url', 'callback'
+    ])
+    expect(JSON.stringify(params)).not.toMatch(/秒|用时/u)
+  })
+
+  it('removes stop from terminal cards and keeps recent output as an Owner callback', () => {
+    const source = executionSource('cancelled')
+    source.publicOutput = '最终公开输出'
+    const params = executionCardParams(source, {
+      executionViewUrl: 'http://192.168.1.23:8765/execution/run-1#t=grant',
+      recentOutputVisible: true
+    })
+    const system = JSON.parse(params.sys_full_json_obj) as {
+      msgButtons: Array<{ title: string }>
+    }
+
+    expect(params.msgTitle).toBe('爱丽丝 · 已取消')
+    expect(params.staticMsgContent).toContain('最终公开输出')
+    expect(system.msgButtons.map((button) => button.title)).toEqual([
+      '收起最近输出', '打开执行台'
+    ])
+  })
+
+  it('offers Quick Chat even when the DingTalk project catalog is empty', () => {
+    const params = projectCardParams({
+      pendingBindingId: 'pending-1', expectedVersion: 1, nonce: 'nonce-1', projectOptions: []
+    }, false)
+    const system = JSON.parse(params.sys_full_json_obj) as {
+      msgButtons: Array<{ title: string; action: { value: string } }>
+    }
+
+    expect(system.msgButtons.map((button) => button.title)).toEqual([
+      '开始快速对话', '刷新项目'
+    ])
+    expect(JSON.parse(system.msgButtons[0].action.value)).toMatchObject({ action: 'quick_chat' })
+  })
+
   it('fails closed when one DingTalk message reaches multiple managed Bots', () => {
     const first = { message: { appId: 'ding-app-a' }, agentId: 'agent-a' }
     const retry = { message: { appId: 'ding-app-a' }, agentId: 'agent-a' }
@@ -638,5 +693,28 @@ function identity(corpId: string, userId: string): DingTalkDeveloperIdentity {
     corpName: corpId,
     oauthProfileRef: `profile-${corpId}`,
     expiresAt: null
+  }
+}
+
+function executionSource(
+  status: DingTalkExecutionConsoleSource['run']['status']
+): DingTalkExecutionConsoleSource {
+  return {
+    sequence: 1,
+    agentRunId: 'run-1',
+    campId: 'camp-1',
+    campTurnId: 'turn-1',
+    channelConversationId: 'channel-conversation-1',
+    agentId: 'agent-alice',
+    agentDisplayName: '爱丽丝',
+    run: { status, waitReason: null, terminalReasonCode: null },
+    runCreatedAt: '2026-09-01T00:00:00Z',
+    evidence: [],
+    publicOutput: null,
+    startedAt: '2026-09-01T00:00:01Z',
+    terminalAt: status === 'running' ? null : '2026-09-01T00:00:02Z',
+    targetAppId: 'ding-app-alice',
+    externalMessageId: 'card-run-1',
+    state: status === 'running' ? 'active' : 'terminal_sealed'
   }
 }

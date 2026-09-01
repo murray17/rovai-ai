@@ -71,7 +71,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Feishu Channel v3（历史）](feishu-channel-v3.md) | 飞书终态外层原生折叠、正文直接可见、仅过程分页与翻页保持展开；终态呈现由 v4 替代 |
 | [Feishu Channel v2（历史）](feishu-channel-v2.md) | Owner-only 入站、Quick Chat/PendingCampBinding、统一 admission、每 AgentRun 临时执行控制台、永久 Markdown 与 Managed Attachment 原生投递；终态平铺由 v3 替代，存储条款由 Channel Storage v2 替代 |
 | [Feishu Channel v1（历史）](feishu-channel-v1.md) | Developer Identity/Session、持久 Bot publication intent、owner-only ProjectBinding、ExternalPrincipal、multi-App aggregate、serial ChannelTurnRequest、roster 与 durable ChannelDelivery；不含 template/activation-first 恢复边界 |
-| [DingTalk Channel v5（当前）](dingtalk-channel-v5.md) | v4 身份/存储/发布不变；Rovai 内置官方 QR、Main sandbox 原生交互页、exact-attempt 刷新与静默取消；不新增 Migration |
+| [DingTalk Channel v6（当前）](dingtalk-channel-v6.md) | v5 登录/发布/准入不变；渠道入口开放，普通群项目或 Quick Chat，三入口状态卡，共用固定 LAN 只读 URL，Owner recent/exact-run cancel 与真实双端验收边界 |
+| [DingTalk Channel v5（历史）](dingtalk-channel-v5.md) | v4 身份/存储/发布不变；Rovai 内置官方 QR、Main sandbox 原生交互页、exact-attempt 刷新与静默取消；执行卡与公开入口由 v6 替代 |
 | [DingTalk Channel v4（历史）](dingtalk-channel-v4.md) | Main Web Session/SSO、schema-2 Cookie SQLite、封闭控制台创建/头像/Bot/权限/冻结版本发布、Owner-only 可见范围与中断防重建；独立窗口登录由 v5 内置扫码替代 |
 | [DingTalk Channel v3（历史）](dingtalk-channel-v3.md) | v2 发布/Stream/Owner/项目/投递不变；删除设备授权，仅浏览器 OAuth；其 Client/Profile 登录语义由 v4 Web Session 替代 |
 | [DingTalk Channel v2（历史）](dingtalk-channel-v2.md) | Main 直接 OAuth/Developer API、每队员 immutable 应用机器人、显式审批、Owner-only 私聊/普通群、统一 admission、群 roster、AI 卡片/Markdown、恢复和保守 feature gate；存储条款由 Channel Storage v2 替代 |

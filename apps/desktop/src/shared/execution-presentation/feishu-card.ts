@@ -65,10 +65,10 @@ export function feishuExecutionStateCard(
   snapshot: ExecutionConsoleSnapshot,
   options: FeishuExecutionStateCardOptions
 ): Record<string, unknown> {
-  const terminal = isTerminal(snapshot.run.status)
+  const terminal = executionStatusIsTerminal(snapshot.run.status)
   const elements: CardElement[] = []
   if (options.recentOutputVisible) {
-    const recent = recentOutputItems(snapshot)
+    const recent = executionRecentOutputItems(snapshot)
     elements.push(...(recent.length
       ? recent.map((body) => ({ tag: 'markdown', content: body }))
       : [{ tag: 'markdown', content: '暂无公开执行记录。' }]))
@@ -123,13 +123,13 @@ export function feishuExecutionStateCard(
     }))
   })
   return baseCard(
-    `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${feishuExecutionStateTitle(snapshot.run)}`,
+    `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${executionStateTitle(snapshot.run)}`,
     cardTemplate(snapshot.run.status, snapshot.run.waitReason),
     elements
   )
 }
 
-function recentOutputItems(snapshot: ExecutionConsoleSnapshot): string[] {
+export function executionRecentOutputItems(snapshot: ExecutionConsoleSnapshot): string[] {
   const redact = createExecutionPublicTextRedactor(snapshot.evidence, snapshot.agentRunId)
   const items = progressItems(snapshot, true).flatMap((item): string[] => {
     if (item.kind !== 'tool' && item.kind !== 'narration') return []
@@ -162,7 +162,7 @@ export function executionConsoleCard(
   snapshot: ExecutionConsoleSnapshot,
   options?: ExecutionConsoleCardOptions
 ): Record<string, unknown> {
-  if (!isTerminal(snapshot.run.status)) return renderCompactLiveExecutionCard(snapshot)
+  if (!executionStatusIsTerminal(snapshot.run.status)) return renderCompactLiveExecutionCard(snapshot)
   return renderTerminalTimelineCard(snapshot, options)
 }
 
@@ -183,14 +183,14 @@ function executionPages(
 }
 
 export function executionConsolePageCount(snapshot: ExecutionConsoleSnapshot): number {
-  return isTerminal(snapshot.run.status) ? paginateTerminalTimeline(snapshot).pages.length : 1
+  return executionStatusIsTerminal(snapshot.run.status) ? paginateTerminalTimeline(snapshot).pages.length : 1
 }
 
 export function executionConsolePublicPage(
   snapshot: ExecutionConsoleSnapshot,
   requestedPageIndex = 0
 ): ExecutionConsolePublicPage {
-  if (!isTerminal(snapshot.run.status)) {
+  if (!executionStatusIsTerminal(snapshot.run.status)) {
     const status = agentRunPresentation(snapshot.run)
     return {
       title: `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${status.label}`,
@@ -681,7 +681,7 @@ function terminalTitle(run: ExecutionConsoleSnapshot['run']): string {
   return agentRunPresentation(run).label
 }
 
-function feishuExecutionStateTitle(run: ExecutionConsoleSnapshot['run']): string {
+export function executionStateTitle(run: ExecutionConsoleSnapshot['run']): string {
   if (run.status === 'cancelled') return '已取消'
   return terminalTitle(run)
 }
@@ -708,7 +708,7 @@ function cardTemplate(
   return 'grey'
 }
 
-function isTerminal(status: AgentRunView['status']): boolean {
+export function executionStatusIsTerminal(status: AgentRunView['status']): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled'
 }
 
