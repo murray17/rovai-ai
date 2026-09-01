@@ -120,15 +120,16 @@ message/callback envelope 会在同一入站流程自动记录 App-scoped identi
 内部 fail closed，不能把用户名、群管理员身份或卡片 payload 当成 Owner 证据。
 
 Renderer 不显示“会话接入”、待处理项目选择、绑定异常或不可换绑提示；这些值即使存在于后台快照，也不形成页面区块或占位。
-正常流程仍是 Owner 私聊自动 Quick Chat，或飞书群/话题、钉钉普通群第一次有效 mention 后在对应卡片中选择项目；钉钉话题
-当前不接入。
+正常流程仍是 Owner 私聊自动 Quick Chat，或飞书群/话题、钉钉同组织内部群第一次有效 mention 后在对应卡片中选择项目；
+钉钉 Bot 必须经群“添加机器人”入口安装，普通成员形态的普通群/外部群不产生 Robot Stream callback，钉钉话题当前不接入。
 
 项目卡沿用 Rovai 克制、信息先行的表达：标题为“选择 Rovai 项目”。飞书正文为“选择一个项目，或直接开始快速对话。”，
 后接“选择项目后，这个话题之后都会使用该项目；快速对话不绑定项目。”；普通群用“群聊”替换“话题”。项目下拉框独占
 一行，仅显示 bounded project display name；下一行依次为“开始快速对话”和“刷新项目”。没有可用项目时不展示空下拉框，
 保留两个按钮及可直接快速对话的说明。两种选择都冻结同一个 Camp 工作区，不提供换绑入口。
-卡片不得显示 canonical path、外部 identity、credential 或内部错误。钉钉固定使用官方 AI Markdown 模板、Stream callback
-且禁止转发；项目以最近使用顺序显示最多六个按钮，随后是“开始快速对话”和“刷新项目”，没有项目时仍能直接 Quick Chat。
+卡片不得显示 canonical path、外部 identity、credential 或内部错误。钉钉固定使用平台内置通用 AI Markdown 模板，
+用户无需创建、选择或发布模板；卡片使用 Stream callback 且禁止转发。项目以最近使用顺序显示最多六个按钮，随后是
+“开始快速对话”和“刷新项目”，没有项目时仍能直接 Quick Chat；不为模拟飞书下拉框增加用户自定义模板前置条件。
 
 只有 Owner 点击会消费卡片；飞书 Non-owner 看到私有无权限 toast，钉钉 Non-owner 的 callback 只完成平台 ACK，公共卡不变化。
 项目失效时显示

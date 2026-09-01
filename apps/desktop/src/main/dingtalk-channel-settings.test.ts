@@ -5,6 +5,7 @@ import {
   DingTalkChannelSettingsService,
   type DingTalkExecutionConsoleSource,
   type DingTalkChannelHostDependencies,
+  dingtalkCardCallbackText,
   dingtalkCardCallbackValue,
   dingtalkMemberBotWelcomeCardParams,
   dingtalkOutTrackId,
@@ -457,6 +458,31 @@ describe('DingTalk channel account connection', () => {
     })).toEqual(value)
   })
 
+  it('reads the selected button text from a real universal AI card callback', () => {
+    expect(dingtalkCardCallbackText({
+      content: JSON.stringify({
+        cardPrivateData: {
+          actionIds: ['node_ocm_callback_action_123'],
+          params: { text: '刷新项目' }
+        }
+      }),
+      outTrackId: 'rv-bind-card-1',
+      userId: 'owner-1',
+      value: '{}'
+    })).toBe('刷新项目')
+
+    expect(dingtalkCardCallbackText({
+      content: {
+        cardPrivateData: { params: { text: ' 显示最近输出 ' } }
+      }
+    })).toBe('显示最近输出')
+    expect(dingtalkCardCallbackText({
+      content: {
+        cardPrivateData: { params: { text: 'x'.repeat(513) } }
+      }
+    })).toBeNull()
+  })
+
   it('offers Quick Chat even when the DingTalk project catalog is empty', () => {
     const params = projectCardParams({
       pendingBindingId: 'pending-1', expectedVersion: 1, nonce: 'nonce-1', projectOptions: []
@@ -485,38 +511,16 @@ describe('DingTalk channel account connection', () => {
     expect(selectSingleDingTalkInboundObservation([])).toBeNull()
   })
 
-  it('requires canonical atUsers proof for a direct group target', () => {
+  it('requires the receiving Stream App and isInAtList for a direct group target', () => {
     expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: 'ding-bot-user-a',
-      atUsers: [{ staffId: null, dingtalkId: 'ding-bot-user-a' }]
+      conversationKind: 'group', explicitlyAtBot: true
     })).toBe(true)
     expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: 'ding-bot-user-a', atUsers: []
-    })).toBe(false)
-    expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: 'ding-bot-user-a',
-      atUsers: [{ staffId: null, dingtalkId: 'ding-other-bot-user' }]
-    })).toBe(false)
-    expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: null,
-      atUsers: [{ staffId: null, dingtalkId: 'ding-bot-user-a' }]
-    })).toBe(false)
-    expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: 'ding-bot-user-a',
-      atUsers: [
-        { staffId: null, dingtalkId: 'ding-bot-user-a' },
-        { staffId: 'colleague-user', dingtalkId: null }
-      ]
+      conversationKind: 'p2p', explicitlyAtBot: true
     })).toBe(true)
     expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'p2p', explicitlyAtBot: true,
-      chatbotUserId: null, atUsers: []
-    })).toBe(true)
+      conversationKind: 'group', explicitlyAtBot: false
+    })).toBe(false)
   })
 
   it('discards staged cookies when the Core account commit fails', async () => {

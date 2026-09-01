@@ -107,13 +107,16 @@ export function selectSingleDingTalkInboundObservation<T extends {
 export function hasCanonicalSingleDingTalkBotTarget(
   message: Pick<
     DingTalkInboundMessage,
-    'conversationKind' | 'explicitlyAtBot' | 'chatbotUserId' | 'atUsers'
+    'conversationKind' | 'explicitlyAtBot'
   >
 ): boolean {
+  // The callback already arrived through this Bot's credential-bound Stream,
+  // and normalization verifies any supplied robotCode against that exact
+  // binding. DingTalk documents chatbotUserId as opaque/ignorable; real
+  // callbacks can encode it
+  // differently from atUsers[].dingtalkId, so equality is not target proof.
   return message.conversationKind === 'p2p'
-    || (message.explicitlyAtBot
-      && message.chatbotUserId !== null
-      && message.atUsers.some((candidate) => candidate.dingtalkId === message.chatbotUserId))
+    || message.explicitlyAtBot
 }
 
 type CoreDingTalkSnapshot = {
@@ -1186,11 +1189,22 @@ export class DingTalkChannelSettingsService {
   }
 
   async #handleCard(callback: DingTalkCardCallback): Promise<void> {
-    const value = dingtalkCardCallbackValue(callback.payload)
+    const outTrackId = recursiveString(callback.payload, 'outTrackId') ?? callback.messageId
+    const encodedValue = dingtalkCardCallbackValue(callback.payload)
+    const buttonText = dingtalkCardCallbackText(callback.payload)
+    const value = encodedValue ?? (buttonText
+      ? await this.#dependencies.core.request<Record<string, unknown> | null>(
+          'channels.dingtalk.cardActionContext',
+          {
+            appId: callback.appKey,
+            externalMessageId: outTrackId,
+            buttonText
+          }
+        )
+      : null)
     if (!value) return
     const operatorUserId = recursiveString(callback.payload, 'userId')
       ?? recursiveString(callback.payload, 'staffId')
-    const outTrackId = recursiveString(callback.payload, 'outTrackId') ?? callback.messageId
     if (!operatorUserId) return
     if (typeof value.pendingBindingId === 'string') {
       this.#hostPump.wake()
@@ -1375,9 +1389,7 @@ export class DingTalkChannelSettingsService {
             openConversationId: delivery.chatId,
             robotCode: bot.robotCode,
             title,
-            text: body,
-            atUserIds: delivery.payload.mentionPrincipal === true && delivery.recipientOpenId
-              ? [delivery.recipientOpenId] : []
+            text: body
           })
           : await api.sendPrivateMarkdown({
             robotCode: bot.robotCode,
@@ -1762,6 +1774,33 @@ export function dingtalkCardCallbackValue(
   payload: Record<string, unknown>
 ): Record<string, unknown> | null {
   return findDingTalkCardCallbackValue(payload, new Set())
+}
+
+export function dingtalkCardCallbackText(payload: Record<string, unknown>): string | null {
+  const content = typeof payload.content === 'string'
+    ? parseDingTalkCardRecord(payload.content)
+    : recordValue(payload.content)
+  const privateData = recordValue(content?.cardPrivateData)
+  const params = recordValue(privateData?.params)
+  const text = params?.text
+  if (typeof text !== 'string') return null
+  const normalized = text.trim()
+  return normalized && normalized.length <= 512 ? normalized : null
+}
+
+function parseDingTalkCardRecord(value: string): Record<string, unknown> | null {
+  if (value.length > 32_768) return null
+  try {
+    return recordValue(JSON.parse(value))
+  } catch {
+    return null
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function findDingTalkCardCallbackValue(

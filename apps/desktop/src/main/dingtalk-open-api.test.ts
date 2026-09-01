@@ -82,9 +82,42 @@ describe('DingTalk OpenAPI client', () => {
     })).rejects.toThrow('dingtalk_open_api_delivery_identity_missing')
   })
 
+  it('sends group Markdown through the official group message endpoint', async () => {
+    const calls: Array<{ url: string; body: any }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return Response.json(url.endsWith('/oauth2/accessToken')
+        ? { accessToken: 'token', expireIn: 7200 }
+        : { processQueryKey: 'delivery-1' })
+    }))
+    const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+
+    await expect(client.sendGroupMarkdown({
+      openConversationId: 'group-1',
+      robotCode: 'ding-app',
+      title: 'Rovai',
+      text: 'hello'
+    })).resolves.toBe('delivery-1')
+
+    expect(calls[1]).toEqual({
+      url: 'https://api.dingtalk.com/v1.0/robot/groupMessages/send',
+      body: {
+        openConversationId: 'group-1',
+        robotCode: 'ding-app',
+        msgKey: 'sampleMarkdown',
+        msgParam: JSON.stringify({ title: 'Rovai', text: 'hello' })
+      }
+    })
+  })
+
   it('reads the official chatbotInstanceVOList roster response', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => Response.json(
-      String(input).endsWith('/oauth2/accessToken')
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input)
+      calls.push(url)
+      return Response.json(
+        url.endsWith('/oauth2/accessToken')
         ? { accessToken: 'token', expireIn: 7200 }
         : {
             chatbotInstanceVOList: [
@@ -93,10 +126,12 @@ describe('DingTalk OpenAPI client', () => {
               { robotCode: 'ding-a' }
             ]
           }
-    )))
+      )
+    }))
     const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
 
     await expect(client.groupRobotCodes('cid-group')).resolves.toEqual(['ding-a', 'ding-b'])
+    expect(calls[1]).toBe('https://api.dingtalk.com/v1.0/robot/groups/robots/query')
   })
 
   it('finalizes failed streaming cards with a unique guid and error marker', async () => {

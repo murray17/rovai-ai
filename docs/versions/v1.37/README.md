@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-09-01
+last_updated: 2026-09-02
 ---
 
 # Rovai-ai v1.37：Runtime 图片、文件预览、取消与渠道只读执行台
@@ -62,12 +62,22 @@ last_updated: 2026-09-01
   最近输出与 exact-run 停止仍由 DingTalk App-scoped Owner `userId` 在 Core 鉴权。Topic/Thread、直接多 Bot 和附件 gate
   不扩大。两端超长 command 共用 `$` 与首尾截断；飞书在逐 command 原生折叠中展示最多两行安全结果，钉钉继续
   不展示 command result。新钉钉 Bot 描述前缀统一为 `Rovai AI Teammate`。当前合同见
-  [DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)，理由见
-  [V1.37-D09](decisions.md#v1-37-d09)、[V1.37-D10](decisions.md#v1-37-d10)与 [V1.37-D11](decisions.md#v1-37-d11)。
-- 钉钉普通群以 callback `chatbotUserId` 在 `atUsers` 中的精确匹配证明 receiving Bot；同消息还 @普通成员不再静默
-  丢弃，多 Rovai App 实际接收仍 fail closed，私聊继续直接 Quick Chat。飞书和钉钉新 Bot 首次发布 completed 后向
+  [DingTalk Channel v9](../../contracts/dingtalk-channel-v9.md)，理由见
+  [V1.37-D09](decisions.md#v1-37-d09)、[V1.37-D10](decisions.md#v1-37-d10)、[V1.37-D11](decisions.md#v1-37-d11)、
+  [V1.37-D12](decisions.md#v1-37-d12)、[V1.37-D13](decisions.md#v1-37-d13)与
+  [V1.37-D14](decisions.md#v1-37-d14)。
+- Applications 真实内部群验收推翻了 `chatbotUserId === atUsers[].dingtalkId` 的合成 fixture 假设：钉钉普通群现在以
+  exact credential-bound Stream App、匹配 `robotCode` 与 `isInAtList=true` 证明 receiving Bot；opaque ID 不做相等
+  判断。后续真实 callback 又证明 `openConvThreadId / openThreadId` 是普通内部群也会携带的路由元数据，不得按 Topic
+  拒绝；只有明确 Topic ID 继续 fail closed。群能力限定为同组织内部群中通过“添加机器人”安装的应用 Bot，普通成员形态的普通群/外部群
+  不会产生 Stream callback。多 Rovai App 实际接收仍 fail closed，私聊继续直接 Quick Chat。飞书和钉钉新 Bot 首次发布 completed 后向
   exact Owner 主动发送私聊欢迎卡，失败不回滚发布，completed 恢复不补发。渠道页使用真实飞书/钉钉品牌图标，未发布
   身份说明改为“发布后沿用队员身份”。
+- 钉钉项目卡使用平台内置通用 AI 卡片，不要求用户创建或选择模板。真实 callback 不回传动态按钮业务 ID，Main 现以
+  exact App/card 与有界按钮文本请求 Core 从当前权威 delivery/console 恢复动作，再由既有 Owner、版本、nonce 和 Run
+  命令授权；真实桌面客户端的项目选择、项目刷新及最近输出展开/收起已通过。Murray 内部群复验中，`doc-cashin`
+  绑定后药师寺惠的 TRAE Run、终态卡与永久正文均成功；群正文 Open API 路径已纠正为
+  `/v1.0/robot/groupMessages/send`，ChannelTurn 完成而非 `channel_delivery_failed`。
 - [飞书入站规范化 revision 1](model-context-change-feishu-ingress-normalization.md) 已由开发者二次确认并实施：
   当前正文只冻结 SDK 单 locale 规范化结果，显式引用复用同一 normalizer；Topic
   `parent_id == canonical root_id` 只表达结构父链，不再伪造 ExternalQuote。历史消息与 Context Evidence
@@ -89,8 +99,8 @@ Applications 安装见[本机交付记录](main-merge-and-daily-app.md)；本轮
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、实施计划、版本索引；v1.36 冻结为 historical，未验收事实保留 |
-| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D02](decisions.md#v1-37-d02)、[V1.37-D03](decisions.md#v1-37-d03)、[V1.37-D04](decisions.md#v1-37-d04)、[V1.37-D05](decisions.md#v1-37-d05)、[V1.37-D06](decisions.md#v1-37-d06)、[V1.37-D07](decisions.md#v1-37-d07)、[V1.37-D08](decisions.md#v1-37-d08)、[V1.37-D09](decisions.md#v1-37-d09)、[V1.37-D10](decisions.md#v1-37-d10)、[V1.37-D11](decisions.md#v1-37-d11)与 [CURRENT](../../decisions/CURRENT.md) |
-| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)、[Camp Message Send v19](../../contracts/camp-message-send-v19.md)、[Gather v5](../../contracts/gather-v5.md)、[File Preview v3](../../contracts/file-preview-v3.md)、[Feishu Channel v14](../../contracts/feishu-channel-v14.md)、[DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)及[Channel Host Maintenance v4](../../contracts/channel-host-maintenance-v4.md) |
+| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D02](decisions.md#v1-37-d02)、[V1.37-D03](decisions.md#v1-37-d03)、[V1.37-D04](decisions.md#v1-37-d04)、[V1.37-D05](decisions.md#v1-37-d05)、[V1.37-D06](decisions.md#v1-37-d06)、[V1.37-D07](decisions.md#v1-37-d07)、[V1.37-D08](decisions.md#v1-37-d08)、[V1.37-D09](decisions.md#v1-37-d09)、[V1.37-D10](decisions.md#v1-37-d10)、[V1.37-D11](decisions.md#v1-37-d11)、[V1.37-D12](decisions.md#v1-37-d12)、[V1.37-D13](decisions.md#v1-37-d13)、[V1.37-D14](decisions.md#v1-37-d14)与 [CURRENT](../../decisions/CURRENT.md) |
+| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)、[Camp Message Send v19](../../contracts/camp-message-send-v19.md)、[Gather v5](../../contracts/gather-v5.md)、[File Preview v3](../../contracts/file-preview-v3.md)、[Feishu Channel v14](../../contracts/feishu-channel-v14.md)、[DingTalk Channel v9](../../contracts/dingtalk-channel-v9.md)及[Channel Host Maintenance v4](../../contracts/channel-host-maintenance-v4.md) |
 | Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[File Preview](../../architecture/file-preview.md)、[飞书渠道](../../architecture/feishu-channel.md)、[钉钉渠道](../../architecture/dingtalk-channel.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)、[文件预览](../../ui/components/file-preview.md)与[渠道设置](../../ui/components/channel-settings.md)；保留既有双主题 |
 | Runtime Activity | 确认无需更新 | 内部图片观察不进入 Canonical Activity，不修改 classifier/映射或已有公开 Evidence |

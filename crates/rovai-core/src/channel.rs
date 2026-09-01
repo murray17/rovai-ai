@@ -744,6 +744,19 @@ pub struct DingTalkChannelSnapshot {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DingTalkCardActionContextView {
+    pub kind: String,
+    pub action: String,
+    pub pending_binding_id: Option<String>,
+    pub expected_version: Option<i64>,
+    pub nonce: Option<String>,
+    pub project_id: Option<String>,
+    pub agent_run_id: Option<String>,
+    pub visible: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChannelCredentialView {
     pub credential_ref: String,
     pub provider: String,
@@ -984,6 +997,134 @@ pub struct ChannelService {
 }
 
 impl ChannelService {
+    pub fn dingtalk_card_action_context(
+        &self,
+        database: &mut Database,
+        app_id: &str,
+        external_message_id: &str,
+        button_text: &str,
+    ) -> Result<Option<DingTalkCardActionContextView>> {
+        validate_nonempty(app_id, "appId")?;
+        validate_nonempty(external_message_id, "externalMessageId")?;
+        validate_nonempty(button_text, "buttonText")?;
+        let button_text = button_text.trim();
+        let connection = database.connection();
+        let picker = connection
+            .query_row(
+                r#"
+                SELECT pending.id, delivery.payload_json
+                FROM pending_camp_binding AS pending
+                JOIN channel_conversation AS conversation
+                  ON conversation.id = pending.channel_conversation_id
+                JOIN channel_delivery AS delivery
+                  ON delivery.pending_binding_id = pending.id
+                WHERE conversation.provider = 'dingtalk'
+                  AND pending.status = 'pending'
+                  AND pending.acknowledgement_app_id = ?1
+                  AND delivery.target_app_id = ?1
+                  AND delivery.external_delivery_message_id = ?2
+                  AND delivery.delivery_kind = 'project_selection'
+                  AND delivery.status = 'sent'
+                  AND json_extract(delivery.payload_json, '$.placement') = 'conversation'
+                  AND COALESCE(
+                      json_extract(delivery.payload_json, '$.operation'), 'send'
+                  ) IN ('send', 'update')
+                  AND CAST(
+                      json_extract(delivery.payload_json, '$.expectedVersion') AS INTEGER
+                  ) = pending.version
+                ORDER BY delivery.ended_at DESC, delivery.id DESC
+                LIMIT 1
+                "#,
+                params![app_id, external_message_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        if let Some((pending_binding_id, payload_json)) = picker {
+            let payload: Value = serde_json::from_str(&payload_json)?;
+            let expected_version = payload["expectedVersion"]
+                .as_i64()
+                .context("DingTalk project card omitted expectedVersion")?;
+            let nonce = payload["nonce"]
+                .as_str()
+                .context("DingTalk project card omitted nonce")?
+                .to_string();
+            let mut matches = Vec::new();
+            if button_text == "开始快速对话" {
+                matches.push(("quick_chat", None));
+            }
+            if button_text == "刷新项目" {
+                matches.push(("refresh", None));
+            }
+            matches.extend(
+                payload["projectOptions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .take(6)
+                    .filter(|project| {
+                        project["displayName"]
+                            .as_str()
+                            .is_some_and(|name| name.trim() == button_text)
+                    })
+                    .filter_map(|project| {
+                        project["projectId"]
+                            .as_str()
+                            .map(|project_id| ("bind", Some(project_id.to_string())))
+                    }),
+            );
+            if matches.len() != 1 {
+                return Ok(None);
+            }
+            let (action, project_id) = matches.pop().expect("one action matched");
+            return Ok(Some(DingTalkCardActionContextView {
+                kind: "project_selection".to_string(),
+                action: action.to_string(),
+                pending_binding_id: Some(pending_binding_id),
+                expected_version: Some(expected_version),
+                nonce: Some(nonce),
+                project_id,
+                agent_run_id: None,
+                visible: None,
+            }));
+        }
+        let (action, visible) = match button_text {
+            "显示最近输出" => ("execution_recent_output", Some(true)),
+            "收起最近输出" => ("execution_recent_output", Some(false)),
+            "停止执行" => ("execution_stop", None),
+            _ => return Ok(None),
+        };
+        let agent_run_id = connection
+            .query_row(
+                r#"
+                SELECT console.agent_run_id
+                FROM channel_execution_console AS console
+                JOIN channel_conversation AS conversation
+                  ON conversation.id = console.channel_conversation_id
+                WHERE conversation.provider = 'dingtalk'
+                  AND console.target_app_id = ?1
+                  AND console.external_message_id = ?2
+                  AND console.state IN (
+                      'opening', 'active', 'terminal_pending', 'terminal_sealed'
+                  )
+                "#,
+                params![app_id, external_message_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(
+            agent_run_id.map(|agent_run_id| DingTalkCardActionContextView {
+                kind: "execution".to_string(),
+                action: action.to_string(),
+                pending_binding_id: None,
+                expected_version: None,
+                nonce: None,
+                project_id: None,
+                agent_run_id: Some(agent_run_id),
+                visible,
+            }),
+        )
+    }
+
     pub fn execution_console_source(
         &self,
         database: &mut Database,
@@ -14375,6 +14516,35 @@ mod tests {
                 ),
             )
             .unwrap();
+        let recent_context = serde_json::to_value(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    "ding-app-agent_1",
+                    "ding-card-run-1",
+                    "显示最近输出",
+                )
+                .unwrap()
+                .expect("the authoritative DingTalk card must recover its recent-output action"),
+        )
+        .unwrap();
+        assert_eq!(recent_context["kind"], "execution");
+        assert_eq!(recent_context["agentRunId"], console_source.agent_run_id);
+        assert_eq!(recent_context["action"], "execution_recent_output");
+        assert_eq!(recent_context["visible"], true);
+        let stop_context = serde_json::to_value(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    "ding-app-agent_1",
+                    "ding-card-run-1",
+                    "停止执行",
+                )
+                .unwrap()
+                .expect("the authoritative DingTalk card must recover its stop action"),
+        )
+        .unwrap();
+        assert_eq!(stop_context["action"], "execution_stop");
         let web_scope = ChannelExecutionWebScope {
             channel_conversation_id: console_source.channel_conversation_id.clone(),
             target_app_id: console_source.target_app_id.clone(),
@@ -14632,6 +14802,128 @@ mod tests {
             "dingtalk-group-roster-resolve",
             DINGTALK_PROVIDER,
         );
+        let picker_app_id = picker.app_id.clone();
+        let picker_external_message_id = picker.external_picker_message_id.clone();
+        let picker_project_display_name = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT json_extract(delivery.payload_json, '$.projectOptions[0].displayName')
+                FROM channel_delivery AS delivery
+                JOIN pending_camp_binding AS pending ON pending.id = delivery.pending_binding_id
+                WHERE pending.id = ?1
+                  AND delivery.delivery_kind = 'project_selection'
+                  AND delivery.status = 'sent'
+                  AND delivery.external_delivery_message_id = ?2
+                  AND CAST(json_extract(delivery.payload_json, '$.expectedVersion') AS INTEGER)
+                      = pending.version
+                ORDER BY delivery.ended_at DESC, delivery.id DESC
+                LIMIT 1
+                "#,
+                params![pending_id, picker_external_message_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        let picker_context = serde_json::to_value(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    &picker.app_id,
+                    &picker.external_picker_message_id,
+                    "开始快速对话",
+                )
+                .unwrap()
+                .expect("the authoritative DingTalk picker must recover its Quick Chat action"),
+        )
+        .unwrap();
+        assert_eq!(picker_context["kind"], "project_selection");
+        assert_eq!(picker_context["pendingBindingId"], pending_id);
+        assert_eq!(picker_context["expectedVersion"], picker.expected_version);
+        assert_eq!(picker_context["nonce"], picker.nonce);
+        assert_eq!(picker_context["action"], "quick_chat");
+        assert!(picker_context["projectId"].is_null());
+        let refresh_context = serde_json::to_value(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    &picker.app_id,
+                    &picker.external_picker_message_id,
+                    "刷新项目",
+                )
+                .unwrap()
+                .expect("the authoritative DingTalk picker must recover its refresh action"),
+        )
+        .unwrap();
+        assert_eq!(refresh_context["action"], "refresh");
+        let project_context = serde_json::to_value(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    &picker.app_id,
+                    &picker.external_picker_message_id,
+                    &picker_project_display_name,
+                )
+                .unwrap()
+                .expect("the authoritative DingTalk picker must recover one visible project"),
+        )
+        .unwrap();
+        assert_eq!(project_context["action"], "bind");
+        assert_eq!(
+            project_context["projectId"].as_str(),
+            picker.project_id.as_deref()
+        );
+        assert!(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    "ding-app-other",
+                    &picker.external_picker_message_id,
+                    "刷新项目",
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    &picker.app_id,
+                    "ding-card-other",
+                    "刷新项目",
+                )
+                .unwrap()
+                .is_none()
+        );
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE channel_delivery
+                SET payload_json = json_set(
+                    payload_json,
+                    '$.projectOptions[0].displayName',
+                    '刷新项目'
+                )
+                WHERE pending_binding_id = ?1
+                  AND delivery_kind = 'project_selection'
+                  AND status = 'sent'
+                  AND external_delivery_message_id = ?2
+                "#,
+                params![pending_id, picker_external_message_id],
+            )
+            .unwrap();
+        assert!(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    &picker.app_id,
+                    &picker.external_picker_message_id,
+                    "刷新项目",
+                )
+                .unwrap()
+                .is_none(),
+            "a project title colliding with a control title must fail closed"
+        );
         picker.action = "quick_chat".to_string();
         picker.project_id = None;
         let resolved = service
@@ -14643,6 +14935,17 @@ mod tests {
             .unwrap();
         assert_eq!(resolved.result.code, "channel.binding.resolved");
         assert_eq!(resolved.result.payload["executionScopeKind"], "quick_chat");
+        assert!(
+            service
+                .dingtalk_card_action_context(
+                    &mut database,
+                    &picker_app_id,
+                    &picker_external_message_id,
+                    "开始快速对话",
+                )
+                .unwrap()
+                .is_none()
+        );
         let camp_id = resolved.result.payload["campId"].as_str().unwrap();
         assert_channel_camp_name(
             &mut database,
