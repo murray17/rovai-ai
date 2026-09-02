@@ -4111,12 +4111,9 @@ impl ChannelService {
         ) {
             anyhow::bail!("provider must be feishu or dingtalk");
         }
-        if !quick_chat_path.is_dir() {
-            anyhow::bail!("managed Quick Chat path is unavailable");
-        }
         let conversation_display_name =
             normalize_display_name(&envelope.payload.conversation_display_name)?;
-        let canonical_path = quick_chat_path.to_string_lossy().to_string();
+        let canonical_path = canonical_managed_quick_chat_path(quick_chat_path)?;
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
                 return Ok(rejected(
@@ -4778,10 +4775,7 @@ impl ChannelService {
         envelope: &CommandEnvelope<FinalizeChannelInboundCommand>,
     ) -> Result<CommandExecution> {
         refresh_project_catalog(database)?;
-        if !quick_chat_path.is_dir() {
-            anyhow::bail!("managed Quick Chat path is unavailable");
-        }
-        let quick_chat_path = quick_chat_path.to_string_lossy().to_string();
+        let quick_chat_path = canonical_managed_quick_chat_path(quick_chat_path)?;
         let mut settled_run_ids = Vec::new();
         let execution = self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
@@ -7675,6 +7669,16 @@ fn load_active_channel_binding(
         )
         .optional()
         .map_err(Into::into)
+}
+
+fn canonical_managed_quick_chat_path(path: &Path) -> Result<String> {
+    if !path.is_absolute() || !path.is_dir() {
+        anyhow::bail!("managed Quick Chat path is unavailable");
+    }
+    path.canonicalize()?
+        .to_str()
+        .context("canonical Quick Chat path is not valid Unicode")
+        .map(str::to_owned)
 }
 
 fn create_quick_chat_binding(
@@ -15845,6 +15849,83 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn owner_dm_persists_canonical_quick_chat_workspace_for_dispatch() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        let quick_chat_path = quick_chat_path(&database);
+        service
+            .verify_feishu_owner(
+                &mut database,
+                &host_envelope(
+                    "verify-owner-canonical-workspace",
+                    VerifyFeishuOwnerCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        sender_open_id: Some("ou_user".to_string()),
+                        sender_user_id: Some("user_1".to_string()),
+                        sender_union_id: Some("union_user".to_string()),
+                        sender_display_name: "Owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let observation = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope(
+                    "observe-canonical-workspace",
+                    observation_command(
+                        "cli_app_1",
+                        "om_canonical_workspace",
+                        "oc_canonical_workspace",
+                        "",
+                        "p2p",
+                        "帮我检查",
+                        &[("agent_1", "cli_app_1")],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        let finalized = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "finalize-canonical-workspace",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observation.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(finalized.result.code, "channel.turn.admitted");
+        assert_eq!(finalized.result.payload["campCreated"], true);
+        let camp_id = finalized.result.payload["campId"].as_str().unwrap();
+        let stored_path: String = database
+            .connection()
+            .query_row(
+                "SELECT project_path FROM camp WHERE id = ?1",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let canonical_path = quick_chat_path
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(stored_path, canonical_path);
     }
 
     #[test]
