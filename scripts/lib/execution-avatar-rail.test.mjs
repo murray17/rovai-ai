@@ -13,7 +13,7 @@ import { assertUserDataIsIsolated } from './dev-desktop.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/execution-avatar-rail')
 
-test('production execution avatar rail preserves selection, scrolling and navigation through native input', { timeout: 120_000 }, async () => {
+test('production execution popover preserves dismissal, selection, scrolling and navigation through native input', { timeout: 120_000 }, async () => {
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-execution-avatar-rail-'))
   let child
   let closed
@@ -28,7 +28,9 @@ test('production execution avatar rail preserves selection, scrolling and naviga
     delete environment.ELECTRON_RUN_AS_NODE
     const userData = assertUserDataIsIsolated(join(fixture, 'user-data'))
     process.stdout.write(`Isolated execution rail fixture: ${fixture}\n`)
+    const dismissalOnly = process.env.ROVAI_EXECUTION_POPOVER_DISMISSAL_ONLY === '1'
     child = spawn(electron, [join(source, 'main.cjs'), join(fixture, 'renderer/index.html'), userData,
+      ...(dismissalOnly ? ['--dismissal-only'] : []),
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], {
       env: environment, stdio: ['ignore', 'pipe', 'pipe']
     })

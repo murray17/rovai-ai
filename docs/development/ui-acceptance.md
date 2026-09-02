@@ -277,7 +277,8 @@ pnpm accept:runtime-activity-ui
   Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程；只有 `running` Run 使顶栏执行入口 loading，
   waiting/recovery_blocked/terminal 不旋转；浮层开合不挤占文件预览或改变主列宽度；
 - Approval Dock 是唯一普通审批决定 surface；顶栏与通知摘要只展开、定位并聚焦 Dock，不改变执行台 placement 或 Run selection；
-  浮层可以按外部焦点规则收起，不强制切换其内容。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
+  执行、任务与队员浮层在外部点击或焦点移出后仍保持打开，只能通过再次点击当前入口、标题栏关闭按钮或
+  `Esc` 收起，且不强制切换内容。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
 - Drawer 顶栏只为当前聚焦且可停止的 AgentRun 提供一个“停止”按钮；单击必须直接提交、立即进入停止态，
   不挂载确认 Dialog、“继续运行”动作或第二个提交按钮。Composer 继续拥有唯一 CampTurn Stop；两级停止、
   Approval Dock 与 Composer 在 `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、
