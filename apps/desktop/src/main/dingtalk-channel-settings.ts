@@ -93,15 +93,38 @@ export function dingtalkMemberBotWelcomeCardParams(displayName: string): Record<
   })
 }
 
-export function selectSingleDingTalkInboundObservation<T extends {
+export function dingtalkAgentOutputMarkdown(payload: Record<string, unknown>): string {
+  const body = requiredPayloadString(payload, 'body')
+  if (payload.reply === null || payload.reply === undefined) return body
+  const reply = recordValue(payload.reply)
+  if (!reply) throw new Error('dingtalk_delivery_reply_invalid')
+  if (reply.status === 'unavailable') {
+    return `> 回复的上文已不可读取。\n\n${body}`
+  }
+  if (reply.status !== 'available') throw new Error('dingtalk_delivery_reply_invalid')
+  const author = requiredPayloadString(reply, 'authorDisplayName')
+  const excerpt = requiredPayloadString(reply, 'body')
+  const quoted = excerpt.split(/\r?\n/u).map((line) => `> ${line}`).join('\n')
+  return `> 回复 ${escapeDingTalkMarkdownInline(author)}：\n${quoted}\n\n${body}`
+}
+
+export function orderedUniqueDingTalkInboundObservations<T extends {
   message: Pick<DingTalkInboundMessage, 'appId'>
-}>(observed: readonly T[]): T | null {
+}>(observed: readonly T[]): T[] {
   const byApp = new Map<string, T>()
   for (const candidate of observed) {
     if (!byApp.has(candidate.message.appId)) byApp.set(candidate.message.appId, candidate)
   }
-  if (byApp.size !== 1) return null
-  return [...byApp.values()][0] ?? null
+  return [...byApp.values()]
+}
+
+export function dingtalkCanonicalReplayCarrier<T>(
+  observed: readonly T[],
+  completed: readonly boolean[]
+): T | null {
+  if (observed.length !== completed.length) throw new Error('dingtalk_inbound_batch_invalid')
+  const completedIndex = completed.findIndex(Boolean)
+  return observed[completedIndex >= 0 ? completedIndex : 0] ?? null
 }
 
 export function hasCanonicalSingleDingTalkBotTarget(
@@ -165,7 +188,18 @@ type CoreDingTalkSnapshot = {
     topicKey: ''
     conversationKind: 'p2p' | 'group'
     acknowledgementAppId: string
+    canonicalMentionsComplete: boolean
+    deadlineAt: string
   }>
+  diagnostics: {
+    inboundCollectingCount: number
+    inboundReadyCount: number
+    inboundOverdueCount: number
+    cardCreatePendingCount: number
+    cardUpdatePendingCount: number
+    cardRecallPendingCount: number
+    cardFailedCount: number
+  }
 }
 
 type DingTalkPublicationIntent = {
@@ -1028,7 +1062,7 @@ export class DingTalkChannelSettingsService {
     const bot = snapshot.memberBots.find((candidate) => candidate.appKey === message.appId)
     if (!bot || bot.status !== 'published') return
     if (message.conversationKind === 'p2p') {
-      await this.#processInbound(message, bot.agentId, true)
+      await this.#processInbound(message, [bot.agentId], [message.appId], true)
       this.#hostPump.wake()
       return
     }
@@ -1042,7 +1076,12 @@ export class DingTalkChannelSettingsService {
       }, MULTI_BOT_OBSERVATION_WINDOW_MS).unref?.()
     }
     if (pending.has(message.appId)) return
-    const observation = this.#processInbound(message, bot.agentId, false).catch((error) => {
+    const observation = this.#processInbound(
+      message,
+      [bot.agentId],
+      [message.appId],
+      false
+    ).catch((error) => {
       console.warn(`[rovai] DingTalk inbound observation failed: ${failureCode(error)}`)
       return false
     })
@@ -1054,18 +1093,21 @@ export class DingTalkChannelSettingsService {
     const pending = this.#inboundBatch.get(key)
     this.#inboundBatch.delete(key)
     if (!pending || this.#stopped) return
-    const observed = [...pending.values()]
-    const eligible = (await Promise.all(observed.map(async (candidate) => ({
-      candidate,
-      observed: await candidate.observation
-    })))).filter((candidate) => candidate.observed)
-    // Multi-Bot direct mentions remain behind the real-tenant capability
-    // gate. Seeing more than one receiving App for the same message proves
-    // this root cannot safely be reduced to a single canonical target, so it
-    // must fail closed instead of starting whichever Bot arrived first.
-    const selected = selectSingleDingTalkInboundObservation(observed)
-    if (!selected || eligible.length !== 1) return
-    await this.#processInbound(selected.message, selected.agentId, true).catch((error) => {
+    const observed = orderedUniqueDingTalkInboundObservations([...pending.values()])
+    if (observed.length === 0) return
+    const completed = await Promise.all(observed.map((candidate) => candidate.observation))
+    // A rejected/failed response can still follow a committed Core command.
+    // Prefer a carrier already proven to have reached Core: the final replay
+    // then either completes the exact observed set or durably fails a missing
+    // App mismatch instead of leaving a known partial set to auto-seal.
+    const replayCarrier = dingtalkCanonicalReplayCarrier(observed, completed)
+    if (!replayCarrier) return
+    await this.#processInbound(
+      replayCarrier.message,
+      observed.map((candidate) => candidate.agentId),
+      observed.map((candidate) => candidate.message.appId),
+      true
+    ).catch((error) => {
         console.warn(`[rovai] DingTalk inbound failed: ${failureCode(error)}`)
     })
     this.#hostPump.wake()
@@ -1073,9 +1115,15 @@ export class DingTalkChannelSettingsService {
 
   async #processInbound(
     message: DingTalkInboundMessage,
-    agentId: string,
+    agentIds: readonly string[],
+    expectedAppIds: readonly string[],
     canonicalMentionsComplete: boolean
   ): Promise<boolean> {
+    const acknowledgementAppId = expectedAppIds[0]
+    const primaryAgentId = agentIds[0]
+    if (!acknowledgementAppId || !primaryAgentId || agentIds.length !== expectedAppIds.length) {
+      throw new Error('dingtalk_inbound_target_set_invalid')
+    }
     const owner = await this.#command('channels.dingtalk.owner.verify', {
       provider: 'dingtalk',
       appId: message.appId,
@@ -1096,11 +1144,10 @@ export class DingTalkChannelSettingsService {
         tenantKey: message.tenantKey,
         chatId: message.chatId,
         conversationDisplayName: message.conversationDisplayName,
-        targetAgentId: agentId
+        targetAgentId: primaryAgentId
       })
       return true
     }
-    if (message.conversationKind === 'group') await this.#reconcileRoster(message)
     const observed = await this.#command('channels.dingtalk.inbound.observe', {
       provider: 'dingtalk',
       appId: message.appId,
@@ -1118,13 +1165,14 @@ export class DingTalkChannelSettingsService {
       body: message.body,
       attachmentSummaries: message.attachmentSummaries,
       quote: message.quote,
-      canonicalAgentIds: [agentId],
+      canonicalAgentIds: [...agentIds],
       canonicalMentionsComplete,
-      expectedAppIds: [message.appId],
-      acknowledgementAppId: message.appId
+      expectedAppIds: [...expectedAppIds],
+      acknowledgementAppId
     })
     this.#hostPump.wake()
     if (canonicalMentionsComplete && observed.payload.readyToFinalize === true) {
+      if (message.conversationKind === 'group') await this.#reconcileRoster(message)
       await this.#finalize(String(observed.payload.aggregateId ?? ''))
       this.#hostPump.wake()
     }
@@ -1164,7 +1212,7 @@ export class DingTalkChannelSettingsService {
     })
   }
 
-  async #finalize(aggregateId: string): Promise<void> {
+  async #finalize(aggregateId: string): Promise<StoredCommandResult> {
     let result = await this.#command('channels.dingtalk.inbound.finalize', { aggregateId }, false)
     if (result.code === 'channel.membership_sync_required') {
       let membership = Number(result.payload.expectedMembershipGeneration)
@@ -1186,7 +1234,7 @@ export class DingTalkChannelSettingsService {
       }
       result = await this.#command('channels.dingtalk.inbound.finalize', { aggregateId }, false)
     }
-    void result
+    return result
   }
 
   async #handleCard(callback: DingTalkCardCallback): Promise<void> {
@@ -1331,7 +1379,15 @@ export class DingTalkChannelSettingsService {
         this.#reconcileKnownGroup(conversation.tenantKey, conversation.chatId, snapshot)
       )))
     }
+    const now = Date.now()
     for (const aggregate of snapshot.pendingAggregates) {
+      const deadline = Date.parse(aggregate.deadlineAt)
+      if (!aggregate.canonicalMentionsComplete
+        && Number.isFinite(deadline)
+        && deadline > now) {
+        this.#hostPump.wakeAt(aggregate.deadlineAt)
+        continue
+      }
       await this.#finalize(aggregate.aggregateId).catch(() => undefined)
     }
     const tick = await this.#dependencies.core.request<{
@@ -1385,7 +1441,7 @@ export class DingTalkChannelSettingsService {
       let externalUpdateMessageId: string | null = null
       let externalId = delivery.updateMessageId
       if (delivery.deliveryKind === 'agent_output') {
-        const body = requiredPayloadString(delivery.payload, 'body')
+        const body = dingtalkAgentOutputMarkdown(delivery.payload)
         const title = bot.botDisplayName
         deliveryMessageId = delivery.conversationKind === 'group'
           ? await api.sendGroupMarkdown({
@@ -1770,6 +1826,7 @@ export function executionCardParams(
   if (!terminal) {
     buttons.push({
       title: '停止执行',
+      color: 'red',
       value: { action: 'execution_stop', agentRunId: source.agentRunId }
     })
   }
@@ -1780,12 +1837,12 @@ export function executionCardParams(
       ? recent.join('\n\n') || '暂无公开执行记录。'
       : null,
     buttons,
-    // DingTalk flowStatus=1 replaces the custom card with its built-in loading shell.
-    // Status 4 keeps the execution layout and its three controls visible.
+    // The built-in generic template renders its custom action layout in state 2.
+    // State 4 delivers successfully but stays blank in the desktop client.
     flowStatus: source.run.status === 'failed' ? '5'
       : terminal ? '3'
         : source.run.status === 'waiting' || source.run.waitReason ? '2'
-          : '4'
+          : '2'
   })
 }
 
@@ -1890,6 +1947,10 @@ function requiredPayloadString(payload: Record<string, unknown>, key: string): s
   const value = payload[key]
   if (typeof value !== 'string' || !value.trim()) throw new Error(`dingtalk_delivery_${key}_missing`)
   return value
+}
+
+function escapeDingTalkMarkdownInline(value: string): string {
+  return value.replace(/[\\`*_[\]#]/gu, '\\$&')
 }
 
 function credentialRefFor(agentId: string, unifiedAppId: string): string {

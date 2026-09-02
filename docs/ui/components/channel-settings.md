@@ -11,12 +11,15 @@ last_updated: 2026-09-02
 渠道设置是 Owner 在 Rovai 本机维护当前开放渠道连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
 [Feishu Channel v15](../../contracts/feishu-channel-v15.md)与
-[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)；本页只拥有信息层级、交互与可访问性。
+[DingTalk Channel v11](../../contracts/dingtalk-channel-v11.md)；本页只拥有信息层级、交互与可访问性。
 
 当前渠道页只开放飞书管理。钉钉保留官方图标，但固定显示为置灰、不可选择的“敬请期待”入口；它使用原生
 `disabled` 与 `aria-disabled=true`，不响应鼠标、键盘或触控，也不展示已保存的钉钉账号、Bot、发布、重连或管理事实。
 已有钉钉数据和 Main/Core 实现不因这个 Renderer gate 删除或迁移，后续重新开放范围记录在
 [v1.38](../../versions/v1.38/README.md)。
+
+重新开放以飞书同等体验为目标：产品时机、反馈、失败和恢复应同等清晰；平台没有提供的原生 `@`、reply、附件或
+disclosure 必须明确呈现为限制，不用伪造字段或自制伪原生组件掩盖。该宗旨不改变当前 disabled gate。
 
 ## 页面结构
 
@@ -163,7 +166,7 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 下一轮召回后不留下完成占位。钉钉真正排队时发送排队 AI Card，admission 后与旧执行卡都通过 Robot recall 删除，
 不更新成“已开始”“状态已结束”或“此执行记录已结束”。安全、固定 URL、Token、callback、双身份和串行更新边界由
 [Feishu Channel v15](../../contracts/feishu-channel-v15.md)和
-[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)拥有。
+[DingTalk Channel v11](../../contracts/dingtalk-channel-v11.md)拥有。
 
 ## 局域网执行台设置
 
@@ -200,5 +203,5 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Feishu Channel v15](../../contracts/feishu-channel-v15.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)
+- [DingTalk Channel v11](../../contracts/dingtalk-channel-v11.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

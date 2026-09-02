@@ -76,7 +76,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Feishu Channel v3（历史）](feishu-channel-v3.md) | 飞书终态外层原生折叠、正文直接可见、仅过程分页与翻页保持展开；终态呈现由 v4 替代 |
 | [Feishu Channel v2（历史）](feishu-channel-v2.md) | Owner-only 入站、Quick Chat/PendingCampBinding、统一 admission、每 AgentRun 临时执行控制台、永久 Markdown 与 Managed Attachment 原生投递；终态平铺由 v3 替代，存储条款由 Channel Storage v2 替代 |
 | [Feishu Channel v1（历史）](feishu-channel-v1.md) | Developer Identity/Session、持久 Bot publication intent、owner-only ProjectBinding、ExternalPrincipal、multi-App aggregate、serial ChannelTurnRequest、roster 与 durable ChannelDelivery；不含 template/activation-first 恢复边界 |
-| [DingTalk Channel v10（当前）](dingtalk-channel-v10.md) | v9 群准入与通用 callback 不变；AI Card 分离 outTrack 更新身份与 carrier 撤回身份，执行卡和排队卡使用 Robot OpenAPI 真实撤回 |
+| [DingTalk Channel v11（当前）](dingtalk-channel-v11.md) | v10 卡片与撤回不变；多 App callback durable 合并为一个有序根请求，截止后可从 SQLite 封口；永久 Markdown 增加父消息摘要，Snapshot 增加安全阶段计数 |
+| [DingTalk Channel v10（历史）](dingtalk-channel-v10.md) | v9 群准入与通用 callback 不变；AI Card 分离 outTrack 更新身份与 carrier 撤回身份，执行卡和排队卡使用 Robot OpenAPI 真实撤回；入站聚合由 v11 替代 |
 | [DingTalk Channel v9（历史）](dingtalk-channel-v9.md) | v8 私聊、执行入口与欢迎卡不变；普通群以 exact credential-bound Stream App、匹配的 `robotCode` 与 `isInAtList` 证明 receiving Bot，不比较 opaque Bot/mention ID；卡片撤回由 v10 替代 |
 | [DingTalk Channel v8（历史）](dingtalk-channel-v8.md) | v7 私聊与执行入口不变；曾要求以 `chatbotUserId + atUsers` 证明 receiving Bot，该 ID 相等假设由 v9 纠正；新 Bot 首次欢迎卡继续继承 |
 | [DingTalk Channel v7（历史）](dingtalk-channel-v7.md) | v6 三入口与渠道边界不变；最近输出 command 与飞书共用 `$` 和首尾截断，但继续排除 result；新 Bot 描述统一为 `Rovai AI Teammate`；群目标与发布通知由 v8 替代 |

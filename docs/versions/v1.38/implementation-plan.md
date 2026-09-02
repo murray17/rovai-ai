@@ -21,14 +21,18 @@ last_updated: 2026-09-02
 - [ ] packaged Applications 视觉验收：Porcelain Day / Steel Night、最小窗口、200% zoom 与键盘顺序。
 - [ ] PR 合入最新 `main` 并从合并后的 `main` 构建、安装 `/Applications/Rovai.app`。
 
-## 重新开放待办（当前暂停）
+## 重新开放待办（执行中，入口仍暂停）
 
-- [ ] 同消息多 Bot callback 聚合为一个根请求和多个目标 `AgentRun`，完成顺序、去重、重启与超时回归。
+- [x] 同消息多 Bot callback 聚合为一个根请求和多个目标 `AgentRun`；Core 按首次持久观察顺序合并，Main 3 秒正常封口，
+  SQLite deadline 支持重启恢复，迟到/重放不新增根请求；Rust/TS owner 覆盖顺序、去重、集合校验和超时恢复。
 - [ ] 执行中三按钮卡立即可见，平台 loading 不覆盖执行期；排队卡、终态卡、下一轮真实撤回完成桌面/手机真实验收。
 - [ ] 内部群项目选择、Quick Chat、刷新、过期、双击和 Non-owner 形成完整 callback 闭环。
-- [ ] 决定并实现或明确限制钉钉真实附件收发。
-- [ ] 评估永久正文的原生 A2A `@`、回复摘要和长正文拆分。
-- [ ] 加入 callback 聚合与 Card create/update/recall 的安全诊断投影。
+- [x] 明确限制钉钉真实附件收发：私聊 file/audio/video 仅摘要，普通群 Bot 平台不接收这些类型；未建立 Managed
+  Attachment ingress 前不下载 `downloadCode`，出站不借用 custom webhook schema。
+- [x] 永久正文增加同 Camp 直接父消息的有界 Markdown 摘要，并明确不是 native reply；原生 A2A `@` 无已验证字段，
+  超长正文仍等待逐片 durable Outbox/顺序/重试设计，不在单 delivery 内多发。
+- [x] 加入 callback 聚合与 Card create/update/recall 的安全诊断计数，不投影正文、附件内容、外部/内部 identity、
+  credential、URL、token 或远端响应。
 - [ ] 通过私聊、单 Bot 群、多 Bot 群、连续排队、停止、最近输出、执行台与撤回的 packaged 双端验收后，才移除
   “敬请期待” gate。
 
@@ -36,8 +40,30 @@ last_updated: 2026-09-02
 
 - `apps/desktop/src/main/channel-host-pump.test.ts`、`channel-settings.test.ts`：飞书 tracked-Run event scope、active
   门禁、started/terminal 时序、钉钉仍使用的默认策略，以及启动恢复先 tick 且不读取历史群 roster。
+- `apps/desktop/src/main/dingtalk-channel-settings.test.ts`：多 App callback 首次顺序/去重、永久 Markdown 父消息摘要、
+  Card 参数/callback 与既有执行卡动作。
+- `crates/rovai-core/src/channel.rs`：一个 durable aggregate/根请求、多有序 AgentRun、deadline auto-seal、迟到 replay、
+  父消息投影、安全诊断，以及既有项目卡、FIFO、执行/排队 recall owner。
 - `apps/desktop/src/renderer/src/ChannelSettings.test.ts`：开放 Provider 过滤、固定钉钉预告、disabled/ARIA、legacy
   Snapshot 不泄露和飞书回退。
 - `pnpm typecheck`、Renderer/Vitest 全量、`pnpm build:desktop`：类型、现有渠道交互与生产构建回归。
 - `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=<main base> pnpm docs:check:ci`：版本切换、当前 UI 权威和文档路由。
 - packaged App 人工检查：入口在日/夜主题均清晰置灰，真实图标比例不变，“敬请期待”可读且不产生点击反馈。
+- packaged 钉钉真实租户：桌面端/手机端分别保留多 Bot callback、项目卡、三入口、排队、停止、最近输出、执行台、
+  终态与下一轮真实撤回的脱敏证据；本地 fixture 不能替代。
+
+## 本次实现验证（2026-09-02）
+
+- 已通过 `cargo fmt --all`、`cargo check --workspace --all-targets` 与
+  `cargo clippy --workspace --all-targets -- -D warnings`。
+- 已通过三个 Rust owner：多 Bot 一个有序 durable request、SQLite deadline auto-seal/replay、飞书与钉钉父消息投影；
+  多 Bot owner 同时核对 collecting/ready 与 Card create/recall 安全诊断计数。
+- 已通过钉钉 Main 定向 Vitest 49/49、`pnpm typecheck`、`pnpm test`（Vitest 135 files / 1425 tests；
+  Node/协议 220 passed、1 个 Windows-only skip）与 `pnpm build:desktop`。
+- 已通过 `pnpm docs:test`、`pnpm docs:check`、
+  `DOCS_BASE_REF=aa8a734125b867fc3c25de3a5b0f243c4fdb038d pnpm docs:check:ci`；Impeccable 静态探测对
+  本次卡片呈现和 UI/合同目标返回零问题。
+- `cargo test -p rovai-core --lib` 本轮为 475 passed / 1 failed；唯一失败是未改动的 macOS 嵌套沙箱 owner，当前执行环境对
+  最小 `/usr/bin/sandbox-exec` 同样返回 `sandbox_apply: Operation not permitted`（exit 71），因此不把全量 Rust lib 记为通过，
+  留给具备 nested sandbox 权限的 CI/本机复验。
+- packaged App 与钉钉真实租户双端矩阵仍未执行，Renderer gate 保持关闭。

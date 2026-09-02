@@ -259,7 +259,11 @@ describe('DingTalk OpenAPI client', () => {
       buttons: [
         { title: '显示最近输出', value: { action: 'execution_recent_output', agentRunId: 'run-1' } },
         { title: '打开执行台', url },
-        { title: '停止执行', value: { action: 'execution_stop', agentRunId: 'run-1' } }
+        {
+          title: '停止执行',
+          color: 'red',
+          value: { action: 'execution_stop', agentRunId: 'run-1' }
+        }
       ]
     })
     const system = JSON.parse(params.sys_full_json_obj) as {
@@ -286,7 +290,7 @@ describe('DingTalk OpenAPI client', () => {
       text: '打开执行台', color: 'blue', url, iosUrl: url
     })
     expect(system.msgButtons[2]).toMatchObject({
-      text: '停止执行', color: 'gray', request: true
+      text: '停止执行', color: 'red', request: true
     })
   })
 
