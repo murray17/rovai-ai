@@ -69,6 +69,12 @@ app.whenReady().then(async () => {
     if (waitForScroll) await settle()
     return state()
   }
+  const openDetail = async tab => {
+    const selector = `.camp-detail-entry[data-detail="${tab}"]`
+    const expanded = await run(`document.querySelector(${JSON.stringify(selector)})?.getAttribute('aria-expanded') === 'true'
+      && document.querySelector('.camp-detail-popover')?.hidden === false`)
+    return expanded ? state() : click(selector)
+  }
   const focusWindow = async () => {
     // Native keyboard input requires a focused window; DOM activeElement alone is not enough.
     if (window.isFocused() && await run('document.hasFocus()')) return
@@ -146,6 +152,40 @@ app.whenReady().then(async () => {
     assert.equal(value.count, 12)
     assertLayout(value)
     await assertExecutionWidth()
+
+    value = await click('.composer-box')
+    assert.ok(value.panel.height > 0, 'Outside pointer interaction keeps the execution popover open')
+    await run("document.querySelector('.structured-mention-editor').focus({ preventScroll: true })")
+    await settle()
+    value = await state()
+    assert.ok(value.panel.height > 0, 'Moving focus outside keeps the execution popover open')
+    value = await key('Escape')
+    assert.equal(value.panel.height, 0, 'Escape closes the execution popover')
+    value = await click('.camp-detail-entry[data-detail="execution"]')
+    assert.ok(value.panel.height > 0, 'The execution entry reopens the popover')
+    await run("document.querySelector('.structured-mention-editor').focus({ preventScroll: true })")
+    await settle()
+    value = await key('Escape')
+    assert.equal(value.panel.height, 0, 'Escape closes a manually opened execution popover')
+    assert.equal(await run("document.activeElement === document.querySelector('.camp-detail-entry[data-detail=\"execution\"]')"), true,
+      'Escape returns focus to the execution entry after a manual open')
+    value = await click('.camp-detail-entry[data-detail="execution"]')
+    value = await click('.camp-detail-heading button[aria-label="收起会话详情"]')
+    assert.equal(value.panel.height, 0, 'The explicit close button closes the execution popover')
+    assert.equal(await run("document.activeElement === document.querySelector('.camp-detail-entry[data-detail=\"execution\"]')"), true,
+      'The explicit close button returns focus to the execution entry')
+    value = await click('.camp-detail-entry[data-detail="execution"]')
+    assert.ok(value.panel.height > 0, 'The execution popover reopens after explicit dismissal')
+    if (process.argv.includes('--dismissal-only')) {
+      console.log(JSON.stringify({ ok: true, cases: [
+        'persistent outside pointer/focus',
+        'explicit close and Escape focus return'
+      ] }))
+      window.destroy()
+      app.quit()
+      return
+    }
+
     await run("document.querySelector('.tool-group-summary').scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'})")
     await settle()
     await click('.tool-group-summary')
@@ -180,8 +220,7 @@ app.whenReady().then(async () => {
     window.webContents.sendInputEvent({ type: 'mouseMove', x: 800, y: 400 })
     await capture('avatar-rail-day-1440')
     await click('[data-count="20"]')
-    await click('.camp-detail-entry[data-detail="execution"]')
-    value = await state()
+    value = await openDetail('execution')
     const order = value.ids
     const before = value.visible
     value = await click('.run-pulse-avatar-scroll.is-right')
@@ -240,7 +279,8 @@ app.whenReady().then(async () => {
     assert.equal(value.left, scrolled)
     assert.ok(value.sameNode)
     await click('[data-refresh]')
-    value = await click('.camp-detail-entry[data-detail="execution"]')
+    await click('.camp-detail-heading button[aria-label="收起会话详情"]')
+    value = await openDetail('execution')
     assert.deepEqual(value.ids, order, 'Status refresh must not reorder members')
     assert.equal(value.left, scrolled, 'Refresh and reopening preserve scroll position')
     assert.ok(value.sameNode)
@@ -249,7 +289,7 @@ app.whenReady().then(async () => {
     for (let attempt = 0; attempt < 2; attempt++) {
       await focusAvatar('agent-1')
       await key('Home')
-      await click('.camp-detail-entry[data-detail="tasks"]')
+      await openDetail('tasks')
       if (!await run("Boolean(document.querySelector('.task-related-runs button'))")) await click('.task-list-row')
       value = await click('.task-related-runs button')
       value = await waitForState(value => value.panel.height > 0 && value.selected === 'agent-20' && value.left > 0,
@@ -260,7 +300,7 @@ app.whenReady().then(async () => {
     }
 
     await click('[data-count="8"]')
-    value = await click('.camp-detail-entry[data-detail="execution"]')
+    value = await openDetail('execution')
     assert.equal(value.maximum, 0)
     assert.ok(!value.leftEnabled && !value.rightEnabled)
     assertLayout(value)
@@ -268,7 +308,7 @@ app.whenReady().then(async () => {
 
     await click('[data-count="12"]')
     await click('[data-theme-toggle]')
-    await click('.camp-detail-entry[data-detail="execution"]')
+    await openDetail('execution')
     await click('.run-pulse-avatar-rail [data-agent-id="agent-1"]')
     await click('.execution-disclosure.worked > summary')
     await assertExecutionWidth()
@@ -363,7 +403,7 @@ app.whenReady().then(async () => {
     assert.equal(await run("window.deliveryDrawer === document.querySelector('.execution-drawer')"), true)
     await click('[data-recipient-count="16"]')
     await click('[data-theme-toggle]')
-    await click('.camp-detail-entry[data-detail="execution"]')
+    await openDetail('execution')
     await revealRecipients()
     await assertRecipients(16)
     await capture('delivery-avatars-popover-day')
@@ -372,7 +412,7 @@ app.whenReady().then(async () => {
     await click('.execution-recipient-close')
     assert.ok((await recipients()).drawer && !(await recipients()).popup)
     await click('[data-theme-toggle]')
-    await click('.camp-detail-entry[data-detail="execution"]')
+    await openDetail('execution')
     for (const [width, height] of [[1040, 700], [720, 460], [1440, 920]]) {
       await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
       await settle()
@@ -385,6 +425,7 @@ app.whenReady().then(async () => {
     await capture('delivery-avatars-popover-night-1440')
 
     console.log(JSON.stringify({ ok: true, cases: ['12/20-member overflow', '176px steps and overlap', 'mouse wheel/trackpad', 'keyboard and long-name tooltip',
+      'persistent outside pointer/focus', 'explicit close and Escape focus return',
       'selection and node retention', 'status refresh/reopen', 'Task navigation/repeated target', '8-member no overflow',
       'long prose containment', 'single-line command and full expanded output',
       'Day/Night', '1040/1440/2560/200% layout', 'reduced motion', 'forced colors', 'bottom dock unchanged',
