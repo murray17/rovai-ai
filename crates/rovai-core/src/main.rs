@@ -8729,7 +8729,7 @@ impl Core {
         })
         .await
         .context("workspace safety worker failed")??;
-        if canonical != requested_path {
+        if !git::persisted_workspace_path_matches_canonical(&requested_path, &canonical) {
             anyhow::bail!(
                 "Camp project path no longer resolves to its persisted canonical directory"
             );

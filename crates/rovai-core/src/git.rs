@@ -90,6 +90,26 @@ pub fn validate_workspace_directory(
     Ok(canonical)
 }
 
+/// Preserves canonical-path drift detection while accepting the representation
+/// difference added by `std::fs::canonicalize` for local Windows paths.
+pub fn persisted_workspace_path_matches_canonical(persisted: &Path, canonical: &Path) -> bool {
+    if persisted == canonical {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        let (Some(persisted), Some(canonical)) = (persisted.to_str(), canonical.to_str()) else {
+            return false;
+        };
+        canonical.strip_prefix(r"\\?\") == Some(persisted)
+            || persisted.strip_prefix(r"\\?\") == Some(canonical)
+    }
+
+    #[cfg(not(windows))]
+    false
+}
+
 pub async fn inspect_workspace(
     path: &Path,
     application_data_dir: &Path,
@@ -482,6 +502,17 @@ mod tests {
         assert!(
             validate_workspace_directory(&data_dir.join("quick-chat"), &data_dir, true).is_ok()
         );
+        let persisted_quick_chat = data_dir.join("quick-chat");
+        let canonical_quick_chat =
+            validate_workspace_directory(&persisted_quick_chat, &data_dir, true).unwrap();
+        assert!(persisted_workspace_path_matches_canonical(
+            &persisted_quick_chat,
+            &canonical_quick_chat
+        ));
+        assert!(!persisted_workspace_path_matches_canonical(
+            &project,
+            &canonical_quick_chat
+        ));
         assert!(validate_workspace_directory(Path::new("/"), &data_dir, false).is_err());
 
         fs::remove_dir_all(root).unwrap();
