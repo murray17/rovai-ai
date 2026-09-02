@@ -271,12 +271,14 @@ reconciliation 后才恢复物化。若目标已经移出则 fail closed。已�
 
 ## 输出、恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v4](../contracts/channel-host-maintenance-v4.md) 使用直接参数与响应，
+共享 Host tick 按 [Channel Host Maintenance v5](../contracts/channel-host-maintenance-v5.md) 使用直接参数与响应，
 不生成 commandId 或永久 poll 回执；超时、投影、FIFO 提升和 delivery 领取仍原子提交。Main 不再永久每 750ms
-扫描：入站、状态变更卡片、Bot/roster、AgentRun/Runtime 事件与 settlement 触发合并快路径；Core 返回
-provider-scoped `hasOutstandingWork`，只有为真时才保留十分钟 one-shot watchdog，为假立即休眠。终态另有跨过
-900ms quiet window 的 one-shot，短重试按 `availableAt` 唤醒。事件丢失仍依靠持久领域事实和 watchdog 恢复，
-真实入站、绑定、admission 与 delivery settlement 的防重不变；历史 tick 回执不清理。
+扫描：入站、状态变更卡片、Bot/roster 和 settlement 继续显式唤醒；active 状态下只有 Run started/terminal 与
+当前 `opening | active | terminal_pending` 执行卡对应的 live Runtime event 进入事件快路径，其他 Run 和事件忽略。
+Core 返回 provider-scoped `hasOutstandingWork`，只有为真时才保留十分钟 one-shot watchdog，为假立即休眠。终态另有
+跨过 900ms quiet window 的 one-shot，短重试按 `availableAt` 唤醒。启动恢复先执行 Core tick，不先扫描全部历史群；
+精确 roster refresh 和运行期 fallback 保留。事件丢失仍依靠持久领域事实和 watchdog 恢复，真实入站、绑定、
+admission 与 delivery settlement 的防重不变；历史 tick 回执不清理。
 
 `project_selection` 是唯一不依赖 ChannelTurnRequest 的 delivery：它关联 exact PendingCampBinding，使用冻结的
 acknowledgement App 直接发送到原群或原 Topic。payload 只有会话显示名、opaque 项目选项、nonce/version 与

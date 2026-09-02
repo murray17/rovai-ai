@@ -1985,7 +1985,10 @@ describe('channel settings service', () => {
       })
     })
     await service.start()
-    await vi.waitFor(() => expect(harness.isInChat.get('cli_a')).toHaveBeenCalled())
+    await vi.waitFor(() => expect(commands.some(({ method }) => (
+      method === 'channels.host.tick'
+    ))).toBe(true))
+    expect(harness.isInChat.get('cli_a')).not.toHaveBeenCalled()
     const messageHandler = harness.handlers.get('cli_a:message')!
 
     const outsider = normalizedMessage({
@@ -2351,6 +2354,7 @@ describe('channel settings service', () => {
       chatId === 'oc_topic_group' ? 'topic' : 'group'
     ))
     const observations: Record<string, unknown>[] = []
+    let hostTicks = 0
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({
         'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
@@ -2386,13 +2390,15 @@ describe('channel settings service', () => {
           }
         }
         if (method === 'channels.host.tick') {
+          hostTicks += 1
           return { deliveries: [] }
         }
         return { status: 'applied', code: `${method}.applied`, payload: {} }
       })
     })
     await service.start()
-    await vi.waitFor(() => expect(harness.isInChat.get('cli_a')).toHaveBeenCalled())
+    await vi.waitFor(() => expect(hostTicks).toBe(1))
+    expect(harness.isInChat.get('cli_a')).not.toHaveBeenCalled()
     const messageHandler = harness.handlers.get('cli_a:message')!
     const initialRosterReads = harness.isInChat.get('cli_a')!.mock.calls.length
     const mention = [{ key: '@_bot', openId: 'ou_bot_a', name: '审阅员', isBot: true }]

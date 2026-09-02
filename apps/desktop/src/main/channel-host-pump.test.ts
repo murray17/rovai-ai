@@ -3,7 +3,8 @@ import {
   AdaptiveChannelHostPump,
   CHANNEL_HOST_EVENT_DEBOUNCE_MS,
   CHANNEL_HOST_WATCHDOG_MS,
-  CHANNEL_TERMINAL_QUIET_WAKE_MS
+  CHANNEL_TERMINAL_QUIET_WAKE_MS,
+  trackedExecutionCoreEventWake
 } from './channel-host-pump'
 
 afterEach(() => vi.useRealTimers())
@@ -20,6 +21,65 @@ describe('AdaptiveChannelHostPump', () => {
 
     await vi.advanceTimersByTimeAsync(CHANNEL_HOST_WATCHDOG_MS * 2)
     expect(run).toHaveBeenCalledOnce()
+
+    pump.handleCoreEvent({ method: 'agent_run.started', params: { agentRunId: 'run-1' } })
+    pump.handleCoreEvent({ method: 'agent_run.terminal', params: { agentRunId: 'run-1' } })
+    pump.handleCoreEvent({ method: 'runtime.action', params: { agentRunId: 'run-1' } })
+    await vi.advanceTimersByTimeAsync(CHANNEL_TERMINAL_QUIET_WAKE_MS)
+    expect(run).toHaveBeenCalledOnce()
+    pump.stop()
+  })
+
+  it('supports a provider-specific Core event wake scope', async () => {
+    vi.useFakeTimers()
+    const run = vi.fn(async () => true)
+    const hasLiveExecutionCard = vi.fn((agentRunId: string) => agentRunId === 'run-1')
+    const classifyCoreEvent = vi.fn((event: Parameters<typeof trackedExecutionCoreEventWake>[0]) => (
+      trackedExecutionCoreEventWake(event, hasLiveExecutionCard)
+    ))
+    const pump = new AdaptiveChannelHostPump({ run, onError: vi.fn(), classifyCoreEvent })
+
+    pump.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledOnce()
+
+    pump.handleCoreEvent({ method: 'agent_run.log', params: { agentRunId: 'run-1' } })
+    pump.handleCoreEvent({ method: 'runtime.state', params: {} })
+    pump.handleCoreEvent({ method: 'runtime.action', params: { agentRunId: 'run-2' } })
+    await vi.advanceTimersByTimeAsync(CHANNEL_HOST_EVENT_DEBOUNCE_MS)
+    expect(run).toHaveBeenCalledOnce()
+
+    pump.handleCoreEvent({ method: 'agent.text.delta', params: { agentRunId: 'run-1' } })
+    await vi.advanceTimersByTimeAsync(CHANNEL_HOST_EVENT_DEBOUNCE_MS - 1)
+    expect(run).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(hasLiveExecutionCard).toHaveBeenCalledWith('run-2')
+    expect(hasLiveExecutionCard).toHaveBeenCalledWith('run-1')
+
+    pump.handleCoreEvent({ method: 'agent_run.started', params: { agentRunId: 'run-2' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledTimes(3)
+
+    pump.handleCoreEvent({ method: 'agent_run.terminal', params: { agentRunId: 'run-2' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledTimes(4)
+    await vi.advanceTimersByTimeAsync(CHANNEL_TERMINAL_QUIET_WAKE_MS)
+    expect(run).toHaveBeenCalledTimes(5)
+    pump.stop()
+  })
+
+  it('keeps the default broad agent-run wake policy when no classifier is supplied', async () => {
+    vi.useFakeTimers()
+    const run = vi.fn(async () => true)
+    const pump = new AdaptiveChannelHostPump({ run, onError: vi.fn() })
+
+    pump.start()
+    await vi.advanceTimersByTimeAsync(0)
+    pump.handleCoreEvent({ method: 'agent_run.log', params: { agentRunId: 'run-1' } })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(run).toHaveBeenCalledTimes(2)
     pump.stop()
   })
 
