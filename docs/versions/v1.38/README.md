@@ -11,8 +11,17 @@ last_updated: 2026-09-02
 
 # Rovai-ai v1.38：钉钉渠道暂停开放与重新开放清单
 
-前置：[v1.37](../v1.37/README.md)。本版本先收窄产品入口，不继续扩张钉钉实现；已有钉钉代码、凭据、账号、Bot
-绑定和真实验收记录保持原样，重新开放前要完成的工作集中记录在本版本，避免继续散落在对话或历史版本中。
+前置：[v1.37](../v1.37/README.md)。本版本先收窄产品入口，再按重新开放清单恢复实现；已有钉钉代码、凭据、账号、Bot
+绑定和真实验收记录保持原样。Renderer gate 与后端实现进度分开，只有完整真实验收完成后才重新开放管理入口。
+
+## 体验宗旨
+
+**能力允许处保持与飞书同等体验；平台确有限制时，保持同等清晰、可预期、可恢复，而不伪造一致。**
+
+同等体验首先指用户意图、项目选择、排队、执行状态、停止、永久输出、失败反馈和重启恢复时机一致，不要求把飞书组件
+逐像素搬到钉钉。平台没有提供或尚未以真实租户证明的原生 `@`、reply、附件和 disclosure 必须明确标为限制，不能提交
+不受支持字段、借用 custom webhook schema 或用自制控件冒充平台原生能力。取舍见
+[V1.38-D01](decisions.md#v1-38-d01)。
 
 ## 范围与状态
 
@@ -25,7 +34,7 @@ last_updated: 2026-09-02
 - 飞书连接、队员发布、项目选择、排队/执行卡、最近输出、局域网执行台及既有数据完全保持开放。
 - 发布前收紧飞书后台维护：active Host 只由 Run started/terminal 与当前执行卡 Run 的 live event 唤醒；首次恢复
   Pump 不先扫描全部历史群。Core outstanding、watchdog、Delivery、latest-wins、精确 roster 刷新和 Web 执行台不变。
-- 下列“重新开放清单”只登记范围与优先级；除渠道页 gate 外，本版本当前不实施这些钉钉能力。
+- 下列“重新开放清单”同时记录实现与验收状态；渠道页 gate 在 packaged 桌面端/手机端完整矩阵通过前保持不变。
 
 ## 重新开放清单
 
@@ -33,24 +42,28 @@ last_updated: 2026-09-02
 
 1. **同一群消息直接 @ 多个 Rovai Bot：** 多个 credential-bound Stream callback 必须合并成一个 durable inbound aggregate、
    一个根 `ChannelTurnRequest` 和按目标顺序创建的多个 `AgentRun`；不得继续 `observation_mismatch` fail closed，也不得拆成多次
-   项目选择、排队或根消息。
+   项目选择、排队或根消息。Core/Main 已实现首次持久观察顺序、3 秒正常封口、SQLite deadline 重启恢复与迟到去重；
+   仍待 packaged 双端真实 callback 验收。
 2. **执行卡生命周期与飞书一致：** 收到请求后立即出现“执行中”状态卡和“显示最近输出 / 打开执行台 / 停止执行”三个入口，
    不能让平台 loading 覆盖整个执行期；真正排队时出现排队卡，admission 后撤回；终态卡可见，下一条根请求入场时真实撤回。
 3. **群项目选择闭环：** 同组织内部群第一次有效 mention 后，Owner 选择项目或 Quick Chat 必须可靠消费原卡并继续同一条请求；
-   刷新、双击、过期与 Non-owner 都保持现有 Core 授权和幂等边界。
+   刷新、双击、过期与 Non-owner 都保持现有 Core 授权和幂等边界。现有 Core/Main owner 已覆盖权威卡片恢复与失败路径；
+   packaged 手机端矩阵仍未完成。
 4. **真实租户验收：** 至少覆盖桌面端与手机端、私聊、单 Bot 内部群、多 Bot 内部群、连续两条消息排队、停止、最近输出、
    Web 执行台、终态与下一轮撤回；合成 fixture、单独 OpenAPI 成功或 Main/Core 本地测试不能代替 packaged App 验收。
 
 ### 后续一致性改进
 
-- **附件：** 当前钉钉入站只形成附件摘要，出站文件关闭；飞书可以收取和投递真实图片/文件。重新开放时需决定补齐真实附件，
-  或把该差异明确保留为产品限制并在 UI 中诚实呈现。
-- **永久正文：** 当前钉钉使用 Markdown 回复，未复现飞书的原生 A2A `@`、直接父消息摘要和超长正文分卡；需要评估可用卡片/API
-  能力并形成真实客户端验收。
+- **附件：** 明确保留为产品限制。钉钉私聊 file/audio/video callback 当前只形成名称/媒体类型摘要，普通群 Bot 平台不接收
+  这些类型；没有 Managed Attachment ingress 前不下载 `downloadCode`。出站继续关闭，不借用 custom webhook schema
+  冒充 Internal App Robot 能力。
+- **永久正文：** 新输出已增加同 Camp 直接父消息的有界 Markdown 摘要，并明确不是 native reply。钉钉现有群接口不接受
+  已验证的原生 A2A `@` 字段；超长正文只有在每片具备独立 durable Outbox/顺序/重试身份后才分片，不在 Main 内冒险多发。
 - **最近输出：** 钉钉目前只能整体展开最近输出，不能逐 Command 折叠。按既有产品选择继续不展示 command result；若平台后续
   提供稳定原生 disclosure，再单独评估，不用自制伪折叠。
-- **可观察性：** 为真实群 callback 聚合、卡片 create/update/recall 和项目 callback 增加可诊断但不泄露正文、credential 或
-  Owner 身份的安全状态，避免再次依赖 UI 现象推断链路阶段。
+- **可观察性：** DingTalk Snapshot 已增加 inbound collecting/ready/overdue 与 Card create/update/recall/failed 安全计数，
+  不包含正文、附件内容、tenant/chat/App/Agent/Owner identity、credential、URL、token 或远端响应；真实项目 callback
+  仍复用 nonce/version/Owner 的现有 Core 结果码。
 
 ### 明确接受的平台差异
 
@@ -64,9 +77,9 @@ last_updated: 2026-09-02
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.37 冻结为 historical；本概览、实施计划与版本索引建立唯一 current v1.38 |
-| Decisions | 确认无需更新 | 暂停公开入口是可逆的 Renderer gate；飞书事件过滤与启动时序是复用既有状态的局部维护加固，均未引入新的持久权威或高成本取舍 |
-| Contracts | 已更新 | [Channel Host Maintenance v5](../../contracts/channel-host-maintenance-v5.md)收紧飞书事件快路径和启动 roster 扫描；[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)继续描述保留实现 |
-| Architecture | 已更新 | [飞书渠道架构](../../architecture/feishu-channel.md)同步维护热路径；Main/Core、Stream、SQLite、Outbox 权威边界不变，钉钉实现不改 |
+| Decisions | 已更新 | [V1.38-D01](decisions.md#v1-38-d01)固定飞书同等体验宗旨，并选择 credential-bound callback + SQLite deadline 作为多 Bot target proof 与恢复边界 |
+| Contracts | 已更新 | [Channel Host Maintenance v5](../../contracts/channel-host-maintenance-v5.md)继续拥有按需调度；[DingTalk Channel v11](../../contracts/dingtalk-channel-v11.md)拥有多 Bot durable 聚合、父消息摘要、安全诊断和平台限制 |
+| Architecture | 已更新 | [飞书渠道架构](../../architecture/feishu-channel.md)保持既有热路径；[钉钉渠道架构](../../architecture/dingtalk-channel.md)同步一个 aggregate/一个根请求、截止恢复、永久摘要和诊断投影 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)拥有飞书开放、钉钉禁用预告和 legacy Snapshot 回退语义 |
 | Runtime Activity | 确认无需更新 | 不改变 AgentRun activity 归类或 Canonical Activity 映射 |
 | Runtime compatibility | 确认无需更新 | 不改变任何 Runtime 的平台准入、模型或工具兼容性 |

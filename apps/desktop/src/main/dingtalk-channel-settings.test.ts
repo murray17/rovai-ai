@@ -5,15 +5,17 @@ import {
   DingTalkChannelSettingsService,
   type DingTalkExecutionConsoleSource,
   type DingTalkChannelHostDependencies,
+  dingtalkAgentOutputMarkdown,
+  dingtalkCanonicalReplayCarrier,
   dingtalkCardCallbackText,
   dingtalkCardCallbackValue,
   dingtalkMemberBotWelcomeCardParams,
   dingtalkOutTrackId,
   executionCardParams,
   hasCanonicalSingleDingTalkBotTarget,
+  orderedUniqueDingTalkInboundObservations,
   presentDingTalkAppIds,
   projectCardParams,
-  selectSingleDingTalkInboundObservation,
   shouldAdvanceDingTalkPublicationStep
 } from './dingtalk-channel-settings'
 import type {
@@ -570,14 +572,51 @@ describe('DingTalk channel account connection', () => {
     })).toMatchObject({ action: 'quick_chat' })
   })
 
-  it('fails closed when one DingTalk message reaches multiple managed Bots', () => {
+  it('keeps the first callback order while deduplicating DingTalk Apps', () => {
     const first = { message: { appId: 'ding-app-a' }, agentId: 'agent-a' }
     const retry = { message: { appId: 'ding-app-a' }, agentId: 'agent-a' }
     const second = { message: { appId: 'ding-app-b' }, agentId: 'agent-b' }
 
-    expect(selectSingleDingTalkInboundObservation([first, retry])).toBe(first)
-    expect(selectSingleDingTalkInboundObservation([first, second])).toBeNull()
-    expect(selectSingleDingTalkInboundObservation([])).toBeNull()
+    expect(orderedUniqueDingTalkInboundObservations([first, retry, second])).toEqual([
+      first,
+      second
+    ])
+    expect(orderedUniqueDingTalkInboundObservations([second, first])).toEqual([
+      second,
+      first
+    ])
+    expect(orderedUniqueDingTalkInboundObservations([])).toEqual([])
+    expect(dingtalkCanonicalReplayCarrier([first, second], [true, true])).toBe(first)
+    expect(dingtalkCanonicalReplayCarrier([first, second], [true, false])).toBe(first)
+    expect(dingtalkCanonicalReplayCarrier([first, second], [false, true])).toBe(second)
+    expect(dingtalkCanonicalReplayCarrier([first, second], [false, false])).toBe(first)
+    expect(dingtalkCanonicalReplayCarrier([], [])).toBeNull()
+    expect(() => dingtalkCanonicalReplayCarrier([first], [])).toThrow(
+      'dingtalk_inbound_batch_invalid'
+    )
+  })
+
+  it('renders an honest permanent Markdown parent summary without claiming native reply', () => {
+    expect(dingtalkAgentOutputMarkdown({
+      body: '这是完整回复。',
+      reply: {
+        status: 'available',
+        authorDisplayName: '响子_[审阅]',
+        body: '第一行\n第二行'
+      }
+    })).toBe([
+      '> 回复 响子\\_\\[审阅\\]：',
+      '> 第一行',
+      '> 第二行',
+      '',
+      '这是完整回复。'
+    ].join('\n'))
+    expect(dingtalkAgentOutputMarkdown({
+      body: '这是完整回复。',
+      reply: { status: 'unavailable' }
+    })).toBe('> 回复的上文已不可读取。\n\n这是完整回复。')
+    expect(dingtalkAgentOutputMarkdown({ body: '没有父消息。', reply: null }))
+      .toBe('没有父消息。')
   })
 
   it('requires the receiving Stream App and isInAtList for a direct group target', () => {

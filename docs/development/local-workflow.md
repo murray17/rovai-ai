@@ -127,7 +127,7 @@ ROVAI_DEV_USER_DATA_DIR="$(mktemp -d)/user-data" pnpm dev
 创建取得 ID 后所有恢复使用同一应用；未知创建结果不能重发创建。网页会话的重启/SSO 续接实测与 packaged App/Core
 恢复必须分别验收，不能彼此替代。Schema-1 OAuth Profile 保留到用户显式重连成功；不做伪造 Cookie 的自动迁移。
 
-字段、刷新、feature gate 与错误见 [DingTalk Channel v10](../contracts/dingtalk-channel-v10.md)。验收还须覆盖取消、断网、
+字段、刷新、feature gate 与错误见 [DingTalk Channel v11](../contracts/dingtalk-channel-v11.md)。验收还须覆盖取消、断网、
 明确撤销后重连、Cookie CAS 保存，以及私聊/群聊的 queue/execution carrier recall；普通网络异常不得清空 Session。没有独立生产 OAuth Client 已不构成阻塞，
 但 Owner/Core/群聊/卡片等关键链路证据不完整时仍保持 NO-GO。
 
