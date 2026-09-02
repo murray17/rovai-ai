@@ -116,7 +116,13 @@ type PublicExecutionSnapshot = {
     startedAt: string | null
     endedAt: string | null
     purpose: string
-    trigger: CoreExecutionWebRun['trigger']
+    trigger: {
+      authorKind: 'user' | 'agent'
+      summary: string
+      authorDisplayName: string
+      channelLabel: string
+      createdAt: string
+    }
     items: PublicExecutionItem[]
   }>
 }
@@ -528,6 +534,8 @@ function isPrivateIpv4(value: string): boolean {
 
 function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecutionSnapshot {
   const runs = raw.runs.map((run) => {
+    const agentAuthoredTrigger = run.invocationKind === 'a2a'
+    const authorKind: 'user' | 'agent' = agentAuthoredTrigger ? 'agent' : 'user'
     const events = run.evidence.map(liveRuntimeEventFromExecutionEvidence)
     const redact = createExecutionPublicTextRedactor(events, run.id)
     const projectResult = createExecutionPublicResultProjector(events, run.id)
@@ -606,8 +614,11 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
       endedAt: run.endedAt,
       purpose: bounded(redact(run.trigger.summary || run.purpose), 240),
       trigger: {
+        authorKind,
         summary: bounded(redact(run.trigger.summary), 2_000),
-        authorDisplayName: '你',
+        authorDisplayName: agentAuthoredTrigger
+          ? bounded(redact(run.trigger.authorDisplayName), 80) || '队员'
+          : '你',
         channelLabel: '',
         createdAt: run.trigger.createdAt
       },

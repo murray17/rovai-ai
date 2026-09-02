@@ -114,10 +114,12 @@ export const EXECUTION_VIEW_PAGE = String.raw`<!doctype html>
     .readonly { display: inline-flex; min-height: 22px; align-items: center; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .04em; }
     .content { width: min(960px, 100%); margin: 0 auto; padding: 26px 20px calc(60px + env(safe-area-inset-bottom)); }
     .trigger-message { display: grid; max-width: 760px; grid-template-columns: 32px minmax(0, 1fr); align-items: flex-start; gap: 10px; }
-    .you-avatar { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 36%, var(--line)); border-radius: 50%; color: var(--brand-ink); background: var(--surface-raised); font-size: 10px; font-weight: 700; }
+    .trigger-avatar { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 36%, var(--line)); border-radius: 50%; color: var(--brand-ink); background: var(--surface-raised); font-size: 10px; font-weight: 700; }
+    .trigger-avatar.is-agent { border-color: color-mix(in srgb, var(--identity-agent) 44%, var(--line)); color: var(--identity-agent); }
     .message-body { min-width: 0; max-width: 690px; }
     .message-meta { display: flex; min-height: 20px; align-items: baseline; gap: 7px; margin-bottom: 3px; }
     .message-meta strong { color: var(--brand-ink); font-size: 11.5px; font-weight: 700; }
+    .message-meta strong.is-agent { color: var(--identity-agent); }
     .message-meta time { color: var(--faint); font: 500 9.5px/1.3 var(--mono); }
     .message-copy { max-width: 76ch; margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.68; }
     .console { margin-top: 30px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--conversation-surface); }
@@ -385,9 +387,16 @@ export const EXECUTION_VIEW_PAGE = String.raw`<!doctype html>
         const label = node.querySelector('.selected-label')
         if (label) label.textContent = selected ? '当前消息' : '查看消息'
       })
+      const agentAuthored = run.trigger.authorKind === 'agent'
+      const authorName = agentAuthored ? (run.trigger.authorDisplayName || '队员') : '你'
+      const avatar = document.getElementById('source-avatar')
       const meta = document.getElementById('source-meta')
       const copy = document.getElementById('source-copy')
-      if (meta) meta.replaceChildren(text('strong', '你'), text('time', clock(run.trigger.createdAt || run.createdAt)))
+      if (avatar) {
+        avatar.textContent = Array.from(authorName.trim())[0] || (agentAuthored ? '队' : '你')
+        avatar.classList.toggle('is-agent', agentAuthored)
+      }
+      if (meta) meta.replaceChildren(text('strong', authorName, agentAuthored ? 'is-agent' : ''), text('time', clock(run.trigger.createdAt || run.createdAt)))
       if (copy) copy.textContent = run.trigger.summary || '这次执行没有可显示的触发消息摘要。'
     }
     const renderCommand = (activity, run, groupIndex, activityIndex, defaultOpen) => {
@@ -466,9 +475,10 @@ export const EXECUTION_VIEW_PAGE = String.raw`<!doctype html>
       const source = text('section', '', 'trigger-message')
       source.setAttribute('aria-label', '本次执行的触发消息')
       source.setAttribute('aria-live', 'polite')
-      const userAvatar = text('span', '你', 'you-avatar')
-      userAvatar.setAttribute('aria-hidden', 'true')
-      source.append(userAvatar)
+      const triggerAvatar = text('span', '', 'trigger-avatar')
+      triggerAvatar.id = 'source-avatar'
+      triggerAvatar.setAttribute('aria-hidden', 'true')
+      source.append(triggerAvatar)
       const message = text('div', '', 'message-body')
       const meta = text('div', '', 'message-meta')
       meta.id = 'source-meta'
