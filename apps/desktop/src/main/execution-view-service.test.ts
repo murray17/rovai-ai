@@ -122,6 +122,12 @@ describe('ExecutionViewService', () => {
     const calls: unknown[] = []
     let eventListener: ((event: CoreEvent) => void) | null = null
     let address: string | null = '127.0.0.1'
+    const rawSnapshot = coreSnapshot() as {
+      runs: Array<{
+        invocationKind: string
+        trigger: { authorDisplayName: string }
+      }>
+    }
     const tokens = [
       'fixed-token-with-at-least-thirty-two-characters',
       'replacement-token-with-at-least-thirty-two-characters'
@@ -137,7 +143,7 @@ describe('ExecutionViewService', () => {
         },
         async request<T>(_method: CoreMethod, params?: unknown): Promise<T> {
           calls.push(structuredClone(params))
-          return coreSnapshot() as T
+          return structuredClone(rawSnapshot) as T
         }
       }
     })
@@ -170,6 +176,9 @@ describe('ExecutionViewService', () => {
     expect(pageHtml).not.toContain('nonTerminal(run) ? Date.now()')
     expect(pageHtml).not.toContain('局域网视图')
     expect(pageHtml).not.toContain('飞书成员')
+    expect(pageHtml).toContain("trigger.authorKind === 'agent'")
+    expect(pageHtml).toContain("triggerAvatar.id = 'source-avatar'")
+    expect(pageHtml).not.toContain("text('span', '你', 'you-avatar')")
     const pageScript = pageHtml.match(/<script>([\s\S]*)<\/script>/)?.[1]
     expect(pageScript).toBeTruthy()
     expect(() => new Script(pageScript!)).not.toThrow()
@@ -190,7 +199,7 @@ describe('ExecutionViewService', () => {
       terminal: false,
       runs: [{
         id: 'run-a',
-        trigger: { authorDisplayName: '你', channelLabel: '' },
+        trigger: { authorKind: 'user', authorDisplayName: '你', channelLabel: '' },
         items: [{
           kind: 'activityGroup',
           status: 'completed',
@@ -206,6 +215,18 @@ describe('ExecutionViewService', () => {
       }]
     })
     expect(JSON.stringify(publicSnapshot)).not.toContain('private-stdout-token')
+
+    rawSnapshot.runs[0].invocationKind = 'a2a'
+    rawSnapshot.runs[0].trigger.authorDisplayName = '药师寺惠'
+    const a2aResponse = await fetch(`http://127.0.0.1:${port}/api/execution/run-a/snapshot`, {
+      headers: { Authorization: 'Bearer fixed-token-with-at-least-thirty-two-characters' }
+    })
+    expect(await a2aResponse.json()).toMatchObject({
+      runs: [{
+        id: 'run-a',
+        trigger: { authorKind: 'agent', authorDisplayName: '药师寺惠', channelLabel: '' }
+      }]
+    })
     expect(calls[0]).toMatchObject({ channelConversationId: 'channel-original' })
     expect(eventListener).not.toBeNull()
 
@@ -404,7 +425,7 @@ function coreSnapshot(): unknown {
       id: 'run-a',
       campTurnId: 'turn-a',
       purpose: '公开触发消息',
-      invocationKind: 'channel',
+      invocationKind: 'direct',
       status: 'running',
       waitReason: null,
       terminalReasonCode: null,
