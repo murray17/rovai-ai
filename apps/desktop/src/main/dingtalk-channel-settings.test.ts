@@ -451,6 +451,7 @@ describe('DingTalk channel account connection', () => {
     }
 
     expect(params.msgTitle).toBe('爱丽丝 · 执行中')
+    expect(params.flowStatus).toBe('4')
     expect(params.staticMsgContent).toBe('')
     expect(system.msgButtons.map((button) => button.text)).toEqual([
       '显示最近输出', '打开执行台', '停止执行'

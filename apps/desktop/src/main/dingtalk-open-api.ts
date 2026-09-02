@@ -285,7 +285,7 @@ export function dingtalkCardParams(input: {
   title: string
   content?: string | null
   buttons?: DingTalkCardButton[]
-  flowStatus?: '1' | '2' | '3' | '5'
+  flowStatus?: '1' | '2' | '3' | '4' | '5'
   streamingContent?: boolean
 }): Record<string, string> {
   const buttons = input.buttons ?? []

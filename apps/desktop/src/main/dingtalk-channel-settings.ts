@@ -1780,10 +1780,12 @@ export function executionCardParams(
       ? recent.join('\n\n') || '暂无公开执行记录。'
       : null,
     buttons,
+    // DingTalk flowStatus=1 replaces the custom card with its built-in loading shell.
+    // Status 4 keeps the execution layout and its three controls visible.
     flowStatus: source.run.status === 'failed' ? '5'
       : terminal ? '3'
         : source.run.status === 'waiting' || source.run.waitReason ? '2'
-          : '1'
+          : '4'
   })
 }
 
