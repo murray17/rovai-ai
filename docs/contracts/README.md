@@ -53,7 +53,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Channel Storage v3（当前）](channel-storage-v3.md) | 凭据与存储边界不变；整轮中止使用 nullable retry suppression，迟到 sent 保留证据 |
 | [Channel Storage v2（历史）](channel-storage-v2.md) | v1 存储与秘密边界不变；飞书三态检查、独立 Bot 启动及钉钉 completed 同应用凭据恢复 |
 | [Channel Camp Naming v1（当前）](channel-camp-naming-v1.md) | 五种渠道复用普通自动命名、原始 title 与只读 channelSource 分离、闭合绑定来源保留和 Renderer 前缀 |
-| [Channel Host Maintenance v4（当前）](channel-host-maintenance-v4.md) | v3 事务/FIFO 不变；provider-scoped outstanding 信号、事件快路径、终态/重试 one-shot 与按需十分钟恢复 watchdog |
+| [Channel Host Maintenance v5（当前）](channel-host-maintenance-v5.md) | v4 outstanding/watchdog 不变；飞书只响应执行卡相关 live Run，启动恢复不先扫描历史群；钉钉行为不变 |
+| [Channel Host Maintenance v4（历史）](channel-host-maintenance-v4.md) | v3 事务/FIFO 不变；provider-scoped outstanding 信号、事件快路径、终态/重试 one-shot 与按需十分钟恢复 watchdog |
 | [Channel Host Maintenance v3（历史）](channel-host-maintenance-v3.md) | v2 维护与 FIFO 不变；目标 Camp 半取消修复采用 cancelled 终态投影；永久短周期 Main pump 由 v4 替代 |
 | [Channel Host Maintenance v2（历史）](channel-host-maintenance-v2.md) | 无 poll receipt 与 FIFO 不变；目标 Camp 半取消修复和抑制项不可重试 |
 | [Channel Host Maintenance v1（历史）](channel-host-maintenance-v1.md) | 无永久 poll 回执的强类型维护请求、原子 FIFO/Outbox 维护、lease 恢复与真实业务命令幂等保留 |

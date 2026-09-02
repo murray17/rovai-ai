@@ -1,14 +1,28 @@
 import type { CoreEvent } from '@contracts'
+import { liveRuntimeEventFromCore } from '../shared/execution-presentation'
 
 export const CHANNEL_HOST_WATCHDOG_MS = 10 * 60_000
 export const CHANNEL_HOST_EVENT_DEBOUNCE_MS = 500
 export const CHANNEL_TERMINAL_QUIET_WAKE_MS = 1_000
 
 type TimerHandle = ReturnType<typeof globalThis.setTimeout>
+export type ChannelHostCoreEventWake = 'ignore' | 'immediate' | 'debounced' | 'terminal'
+
+export function trackedExecutionCoreEventWake(
+  event: CoreEvent,
+  hasLiveExecutionCard: (agentRunId: string) => boolean
+): ChannelHostCoreEventWake {
+  if (event.method === 'agent_run.started') return 'immediate'
+  if (event.method === 'agent_run.terminal') return 'terminal'
+  const liveEvent = liveRuntimeEventFromCore(event, 'channel-host-wake')
+  if (!liveEvent) return 'ignore'
+  return hasLiveExecutionCard(liveEvent.agentRunId) ? 'debounced' : 'ignore'
+}
 
 export type AdaptiveChannelHostPumpDependencies = {
   run(): Promise<boolean>
   onError(error: unknown): void
+  classifyCoreEvent?(event: CoreEvent): ChannelHostCoreEventWake
   now?: () => number
   setTimeout?: typeof globalThis.setTimeout
   clearTimeout?: typeof globalThis.clearTimeout
@@ -70,16 +84,17 @@ export class AdaptiveChannelHostPump {
 
   handleCoreEvent(event: CoreEvent): void {
     if (this.#stopped || !this.#active) return
-    if (event.method === 'agent_run.terminal') {
+    const wake = this.#dependencies.classifyCoreEvent?.(event) ?? defaultCoreEventWake(event)
+    if (wake === 'terminal') {
       this.#requestImmediate()
       this.wakeAfter(CHANNEL_TERMINAL_QUIET_WAKE_MS)
       return
     }
-    if (event.method.startsWith('agent_run.')) {
+    if (wake === 'immediate') {
       this.#requestImmediate()
       return
     }
-    if (!event.method.startsWith('runtime.')) return
+    if (wake !== 'debounced') return
     if (this.#eventTimer) return
     this.#eventTimer = this.#schedule(() => {
       this.#eventTimer = null
@@ -172,4 +187,10 @@ export class AdaptiveChannelHostPump {
     timer.unref?.()
     return timer
   }
+}
+
+function defaultCoreEventWake(event: CoreEvent): ChannelHostCoreEventWake {
+  if (event.method === 'agent_run.terminal') return 'terminal'
+  if (event.method.startsWith('agent_run.')) return 'immediate'
+  return event.method.startsWith('runtime.') ? 'debounced' : 'ignore'
 }

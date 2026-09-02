@@ -15,6 +15,9 @@ last_updated: 2026-09-02
 - [x] 保存的钉钉账号、连接、Bot 和管理链接不从 Renderer 暴露；`selectedKind=dingtalk` 与 DingTalk-only Snapshot 均不会
   恢复钉钉管理界面。
 - [x] 保留钉钉 Main/Core、SQLite 数据、凭据、Stream、Card 与 Outbox，不做 destructive migration。
+- [x] 飞书 active Host 只响应 Run started/terminal 与当前执行卡 Run 的 live event；其他 AgentRun、全局 Runtime 及
+  `terminal_sealed` Run 不触发完整 `channels.host.tick`，Web 执行台链路不变。
+- [x] 飞书首次恢复 Pump 跳过历史群全量 roster 网络扫描，仍执行一次 Core 恢复；精确刷新和运行期 fallback 保留。
 - [ ] packaged Applications 视觉验收：Porcelain Day / Steel Night、最小窗口、200% zoom 与键盘顺序。
 - [ ] PR 合入最新 `main` 并从合并后的 `main` 构建、安装 `/Applications/Rovai.app`。
 
@@ -31,6 +34,8 @@ last_updated: 2026-09-02
 
 ## 验证 owner
 
+- `apps/desktop/src/main/channel-host-pump.test.ts`、`channel-settings.test.ts`：飞书 tracked-Run event scope、active
+  门禁、started/terminal 时序、钉钉仍使用的默认策略，以及启动恢复先 tick 且不读取历史群 roster。
 - `apps/desktop/src/renderer/src/ChannelSettings.test.ts`：开放 Provider 过滤、固定钉钉预告、disabled/ARIA、legacy
   Snapshot 不泄露和飞书回退。
 - `pnpm typecheck`、Renderer/Vitest 全量、`pnpm build:desktop`：类型、现有渠道交互与生产构建回归。
