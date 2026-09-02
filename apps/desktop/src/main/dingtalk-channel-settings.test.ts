@@ -443,23 +443,26 @@ describe('DingTalk channel account connection', () => {
     )
   })
 
-  it('renders the active execution card as three state actions without elapsed copy', () => {
+  it('keeps the active execution card on the visible nonterminal template state', () => {
     const params = executionCardParams(executionSource('running'), {
       executionViewUrl: 'http://192.168.1.23:8765/execution/run-1#t=grant',
       recentOutputVisible: false
     })
     const system = JSON.parse(params.sys_full_json_obj) as {
-      msgButtons: Array<{ text: string; request?: boolean; url?: string }>
+      msgButtons: Array<{ text: string; color: string; request?: boolean; url?: string }>
     }
 
     expect(params.msgTitle).toBe('爱丽丝 · 执行中')
-    expect(params.flowStatus).toBe('4')
+    expect(params.flowStatus).toBe('2')
     expect(params.staticMsgContent).toBe('')
     expect(system.msgButtons.map((button) => button.text)).toEqual([
       '显示最近输出', '打开执行台', '停止执行'
     ])
     expect(system.msgButtons.map((button) => button.request === true ? 'callback' : 'url')).toEqual([
       'callback', 'url', 'callback'
+    ])
+    expect(system.msgButtons.map((button) => button.color)).toEqual([
+      'gray', 'blue', 'red'
     ])
     expect(JSON.stringify(params)).not.toMatch(/秒|用时/u)
   })

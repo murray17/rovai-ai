@@ -1826,6 +1826,7 @@ export function executionCardParams(
   if (!terminal) {
     buttons.push({
       title: '停止执行',
+      color: 'red',
       value: { action: 'execution_stop', agentRunId: source.agentRunId }
     })
   }
@@ -1836,12 +1837,12 @@ export function executionCardParams(
       ? recent.join('\n\n') || '暂无公开执行记录。'
       : null,
     buttons,
-    // DingTalk flowStatus=1 replaces the custom card with its built-in loading shell.
-    // Status 4 keeps the execution layout and its three controls visible.
+    // The built-in generic template renders its custom action layout in state 2.
+    // State 4 delivers successfully but stays blank in the desktop client.
     flowStatus: source.run.status === 'failed' ? '5'
       : terminal ? '3'
         : source.run.status === 'waiting' || source.run.waitReason ? '2'
-          : '4'
+          : '2'
   })
 }
 
