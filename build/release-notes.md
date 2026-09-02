@@ -1,19 +1,19 @@
-# Rovai AI v0.0.4
+# Rovai AI v0.0.5
 
-Rovai AI 0.0.4 makes updates proactive, expands Camp membership management, and improves long-running collaboration reliability.
+Rovai AI 0.0.5 expands the daily Camp workflow with continuous input, faster supported runtimes, richer files and images, and Feishu channel collaboration.
 
-macOS arm64 and x64 builds use the same fixed Rovai Release Signing certificate as 0.0.3. Windows x64 remains an unsigned Preview build and may show a SmartScreen warning.
+macOS arm64 and x64 builds use the same fixed Rovai Release Signing certificate as 0.0.4. Windows x64 remains an unsigned Preview build and may show a SmartScreen warning.
 
 ## What's Changed
 
-- Proactively check for new releases and surface update prompts while keeping download, installation, and restart under explicit user control.
-- Add and remove members from an existing Camp with lifecycle-safe handling for runs, deliveries, gathers, tasks, and lead replacement.
-- Ingest new managed attachments without waiting for active runs or the legacy publication gate.
-- Drop high-volume Codex command deltas before persistence to reduce event amplification and improve Camp recovery.
-- Show the latest command in live tool activity and keep completed, failed, and stopped summaries stable.
-- Preserve failed installer retries without redownloading, and keep the app usable when the native updater is unavailable.
-- Coordinate Windows upgrades with planned shutdown before the installer replaces running files.
-- Fix IME input after trailing newlines, make cut operations atomic, and simplify the new-conversation empty state.
-- Clarify Camp member invitation and multiline message guidance.
+- Queue and edit the next Camp message while a run is active, then continue automatically with its routing and execution choices frozen at publication.
+- Add per-member Fast preferences with automatic runtime capability detection and safe fallback when a runtime does not support Fast execution.
+- Open changed, referenced, and external files in resizable preview tabs while preserving inline links, reading anchors, and exact file locations.
+- Persist and display structured Runtime images with consistent message timing and retention across Camp switches.
+- Refine execution into compact avatar rails and detail popovers with live refresh, complete output, clearer initiators, and reliable stopped or cancelled terminal states.
+- Add Feishu bot publishing, group and topic project selection, reply and execution cards, adaptive host maintenance, and a bot-gated LAN execution console.
+- Keep DingTalk unavailable in the public channel UI while its remaining consistency and real-client acceptance work is completed.
+- Improve Desktop startup, shutdown, navigation refresh, composer input recovery, approvals, scrollbars, and model catalog refresh behavior.
+- Fix Windows Quick Chat workspace paths and strengthen channel, attachment, cancellation, and Camp-open reliability.
 
-**Full changelog:** https://github.com/murray17/rovai-ai/compare/v0.0.3...v0.0.4
+**Full changelog:** https://github.com/murray17/rovai-ai/compare/v0.0.4...v0.0.5
