@@ -97,7 +97,6 @@ export function CampDetailPopover({
   const panelId = useId()
   const panelRef = useRef<HTMLElement>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const fallbackEntriesRef = useRef<HTMLDivElement>(null)
   const focusPanelRef = useRef(false)
 
   useEffect(() => {
@@ -108,15 +107,8 @@ export function CampDetailPopover({
 
   useEffect(() => {
     if (!visible) return
-    const isInside = (target: EventTarget | null): boolean => target instanceof Element && Boolean(
-      panelRef.current?.contains(target)
-      || entryHost?.contains(target)
-      || fallbackEntriesRef.current?.contains(target)
-      || target.closest('[data-radix-popper-content-wrapper], .app-dialog, .app-dialog-overlay')
-    )
-    const dismissOutside = (event: Event): void => {
-      if (!isInside(event.target)) onClose()
-    }
+    // Keep this non-modal work surface stable while the user interacts elsewhere.
+    // Only the current entry, the close button, or Escape dismisses it.
     const dismissOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       if (document.querySelector('.app-dialog, [role="menu"][data-state="open"]')) return
@@ -126,15 +118,11 @@ export function CampDetailPopover({
       onClose()
       triggerRef.current?.focus({ preventScroll: true })
     }
-    document.addEventListener('pointerdown', dismissOutside)
-    document.addEventListener('focusin', dismissOutside)
     document.addEventListener('keydown', dismissOnEscape)
     return () => {
-      document.removeEventListener('pointerdown', dismissOutside)
-      document.removeEventListener('focusin', dismissOutside)
       document.removeEventListener('keydown', dismissOnEscape)
     }
-  }, [visible, entryHost, onClose])
+  }, [visible, onClose])
 
   const entries = <CampDetailEntries
     activeTab={activeTab}
@@ -158,7 +146,7 @@ export function CampDetailPopover({
   return <>
     {entryHost
       ? createPortal(entries, entryHost)
-      : <div className="camp-detail-entry-fallback" ref={fallbackEntriesRef}>{entries}</div>}
+      : <div className="camp-detail-entry-fallback">{entries}</div>}
     <aside
       ref={panelRef}
       id={panelId}
