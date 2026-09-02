@@ -18,6 +18,7 @@ import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
 } from './lib/runtime-camp-files-root.mjs'
+import { prepareIsolatedPiAgentDir } from './lib/pi-smoke-config.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-')))
@@ -31,6 +32,7 @@ const explicitModelId = process.env.ROVAI_SKILL_SMOKE_MODEL?.trim() || null
 const requestedAdapters = adapterSelection === 'all'
   ? [
       'codex-cli',
+      'pi',
       'opencode-cli',
       'copilot-cli',
       'claude-code-cli',
@@ -46,6 +48,7 @@ const requestedAdapters = adapterSelection === 'all'
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([
   'codex-cli',
+  'pi',
   'opencode-cli',
   'copilot-cli',
   'claude-code-cli',
@@ -69,11 +72,13 @@ const allDeliveryGroups = [
   'kimi',
   'kiro',
   'opencode',
+  'pi',
   'qoder',
   'qwen',
   'trae'
 ]
 let core = null
+let piAgentDir = null
 
 try {
   if (explicitModelId && requestedAdapters.length !== 1) {
@@ -81,6 +86,9 @@ try {
   }
   for (const adapterKind of requestedAdapters) {
     if (!supportedAdapters.has(adapterKind)) throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
+  }
+  if (requestedAdapters.includes('pi')) {
+    piAgentDir = await prepareIsolatedPiAgentDir(fixtureRoot)
   }
   await mkdir(projectRoot)
   await mkdir(sourceRoot)
@@ -94,6 +102,7 @@ try {
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
   core = startCore()
+  await waitForSkillSubsystem(core.request)
   const initialSkills = await core.request('skills.list')
   const bundledSkillNames = initialSkills.map((skill) => skill.name).sort()
   assert(
@@ -280,6 +289,7 @@ try {
 
   await core.stop()
   core = startCore()
+  await waitForSkillSubsystem(core.request)
   importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
   assert(importedSkill?.enabled, 'Core restart lost the imported enabled Skill')
   await applyCommand('skills.reconcile', {})
@@ -565,10 +575,20 @@ function startCore() {
   const child = spawn(coreExecutable, [
     ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root',
-    libraryRoot
+    libraryRoot,
+    '--mcp-config-path',
+    join(dataDir, 'mcp.json')
   ], {
     cwd: root,
-    env: process.env,
+    env: {
+      ...process.env,
+      ...(requestedAdapters.includes('pi')
+        ? {
+            PI_CODING_AGENT_DIR: piAgentDir,
+            ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
+          }
+        : {})
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   child.stderr.pipe(process.stderr)
@@ -611,6 +631,7 @@ function startCore() {
 
 function groupRoot(groupKey) {
   if (groupKey === 'codex') return '.codex/skills'
+  if (groupKey === 'pi') return '.pi/skills'
   if (groupKey === 'opencode') return '.opencode/skills'
   if (groupKey === 'copilot') return '.github/skills'
   if (groupKey === 'claude_compatible') return '.claude/skills'
@@ -627,6 +648,7 @@ function groupRoot(groupKey) {
 
 function deliveryGroup(adapterKind) {
   if (adapterKind === 'codex-cli') return 'codex'
+  if (adapterKind === 'pi') return 'pi'
   if (adapterKind === 'opencode-cli') return 'opencode'
   if (adapterKind === 'copilot-cli') return 'copilot'
   if (adapterKind === 'claude-code-cli') return 'claude_compatible'
@@ -692,6 +714,17 @@ async function waitFor(read, label, timeoutMs) {
     await wait(500)
   }
   throw new Error(`Timed out waiting for ${label}${lastError ? `: ${lastError.message}` : ''}`)
+}
+
+async function waitForSkillSubsystem(request) {
+  await waitFor(async () => {
+    const subsystems = await request('runtime.subsystems.get')
+    const skills = subsystems.find((subsystem) => subsystem.id === 'skills')
+    if (skills?.state === 'degraded') {
+      throw new Error(`Skills subsystem failed: ${JSON.stringify(skills.error)}`)
+    }
+    return skills?.state === 'ready'
+  }, 'Skills subsystem readiness', 30_000)
 }
 
 function wait(milliseconds) {

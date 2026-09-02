@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.38
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
@@ -11,7 +11,7 @@ last_updated: 2026-09-02
 
 # Rovai-ai v1.38：钉钉渠道暂停开放与重新开放清单
 
-前置：[v1.37](../v1.37/README.md)。本版本先收窄产品入口，不继续扩张钉钉实现；已有钉钉代码、凭据、账号、Bot
+前置：[v1.37](../v1.37/README.md)。后续：[v1.39](../v1.39/README.md)。本版本先收窄产品入口，不继续扩张钉钉实现；已有钉钉代码、凭据、账号、Bot
 绑定和真实验收记录保持原样，重新开放前要完成的工作集中记录在本版本，避免继续散落在对话或历史版本中。
 
 ## 范围与状态

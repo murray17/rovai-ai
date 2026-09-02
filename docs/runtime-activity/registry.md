@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v2
-last_updated: 2026-08-29
+last_updated: 2026-09-02
 ---
 
 # Runtime Activity Mapping Registry
@@ -12,6 +12,7 @@ last_updated: 2026-08-29
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；Core v2 不把 commandActions 翻译成标题，Renderer 从公开 command 生成去 wrapper、保留完整序列并脱敏的标题；只有 `item.type=webSearch` 可把 `item.query` 投影为 Search Operation | 受控 fixture、Renderer 跨 Runtime 命令/脱敏/详情、typed query 与普通 query 排除回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；`0.147.0` WebSearch wire 实证通过 |
+| `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；update 作为累计预览，唯一 terminal 结算 Action；受管 MCP proxy 使用已冻结 logical/runtime name；未知 Tool shape 保持 `unknown`，不从正文或路径猜 Search/Image | Bash/write/edit/MCP 的 envelope、shell transport、started→terminal、重放去重、未知 mutation fail-closed fixture 已建立 | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；完整 Rovai smoke 结果由当前版本验收记录维护，未形成的平台证据不提升正式准入 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text` | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；`1.18.15` 真实 command-output 与完整 allow/deny smoke 通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；`1.0.79 kind=search + query-only rawInput` 可投影 Web 搜索，`kind=read + pattern` 文件搜索不得准入；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | query-only positive、文件搜索 negative、固定 `printf` fixture 已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 Web/file search 与 command-output wire 已核验 |
 | `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；`2.18.1 kind=search + query-only rawInput` 可投影 Web 搜索，`{path,pattern}` 内容搜索与 pattern-only glob 不得准入；成功 Edit/Write 的唯一标准 location 可独立命名文件操作；单 entry Diff 的 rooted-relative path 只在与同 ToolCall location 完全对应时纠正；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | Search Operation positive/negative、path-only、标准 Diff、精确路径对齐与 mismatch fail-closed fixture 通过 | ACP session + Skill turn + MCP projection 通过；`2.18.1` 真实 Web/file search 与 pre-fix file-change wire 已核验，post-fix App smoke 待补 |
@@ -47,6 +48,7 @@ Plan 不再作为新 Canonical 顶层域；历史 v1 值仍可只读展示，并
 | 协议族与适用 Adapter | 过去/当前实际接入事件 | 可靠文件操作 path | 可靠终态内容 | Command file rows |
 | --- | --- | --- | --- | --- |
 | Codex app-server（`codex-cli`） | Codex `item/completed`，`item.type=fileChange`、`status=completed` | `changes[].path` | `changes[] { path, kind, diff }`；update 为 unified diff，add/delete 为完整新/旧内容 | 支持；Core 统一规范化后逐 change 显示 `修改 xxx +A −D` |
+| Pi JSONL RPC（`pi`） | `tool_execution_start/update/end`，只对受管 `write/edit` 的已验证 input 与成功 terminal result 建立事实 | 受管 extension envelope 中的 exact path，经 execution root 规范化；未知或越界 shape fail closed | 当前不把 Pi Tool result 推断成完整 before/after diff | 有可靠 path 时显示普通文件操作；没有可靠内容时不补造增删计数或 inline diff |
 | ACP v1（`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build`） | ACP `session/update.tool_call_update`；私有 Cursor/Kimi/Grok extension 与 run-level fallback 不补造文件操作或 diff | 成功 terminal `edit | write` + 同 ToolCall 累计唯一标准 `locations[].path`；不读取 rawInput/title/output | terminal 累计 `content.type=diff { path, oldText?, newText }`；只接纳标准 ACP terminal Diff | 有 path 即显示普通 `修改 xxx`；另有 Diff 才显示计数并展开。Kiro 单 entry rooted-relative path 只按同 ToolCall 唯一 location 精确对齐 |
 | Claude stream-json（`claude-code-cli`） | 完整 assistant `tool_use(name=Edit)` + 相同 ID 的非错误 user `tool_result` | 完整 `file_path` | `file_path/old_string/new_string` 证明单次 `exact_mutation`，不证明文件行号或完整文件 before/after | 支持 Edit 片段行；不读文件、不生成 `@@`，失败/缺失/取消/`replace_all` 与其他 Tool 不准入 |
 | Antigravity stream-json（`antigravity-app`） | `step_update` terminal state | 无等价可靠单文件终态 path | step/tool 名与公开 payload 没有可证明完整的 terminal patch | 不支持；不按 edit/write 名称推测 |

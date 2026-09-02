@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:646e173a021d4fe28af38b42cd3aa15e81819f4d25ec2ddf9a9d2aa284212dab";
+    "sha256:20203eb6d4ea02e6be548710cbed9320251c99d37101e55d8161a7a27aed1fbc";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -214,7 +214,7 @@ mod tests {
 
         for runtime_kind in AdapterKind::ALL {
             let admission = registry.platform_admission(runtime_kind, HostPlatformKey::WindowsX64);
-            if runtime_kind != AdapterKind::CursorAgent {
+            if !matches!(runtime_kind, AdapterKind::CursorAgent | AdapterKind::Pi) {
                 assert!(admission.is_qualified());
                 assert_eq!(admission.reason_code(), None);
                 assert_eq!(
@@ -248,10 +248,12 @@ mod tests {
     fn macos_catalog_qualifies_each_runtime_only_with_its_bound_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
 
-        for runtime_kind in AdapterKind::ALL
-            .into_iter()
-            .filter(|kind| !matches!(kind, AdapterKind::CursorAgent | AdapterKind::GrokBuild))
-        {
+        for runtime_kind in AdapterKind::ALL.into_iter().filter(|kind| {
+            !matches!(
+                kind,
+                AdapterKind::CursorAgent | AdapterKind::Pi | AdapterKind::GrokBuild
+            )
+        }) {
             for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
                 let admission = registry.platform_admission(runtime_kind, platform);
                 assert!(admission.is_qualified());
@@ -264,16 +266,18 @@ mod tests {
             }
         }
         for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
-            let admission = registry.platform_admission(AdapterKind::CursorAgent, platform);
-            assert_eq!(
-                admission.status(),
-                RuntimePlatformAdmissionStatus::NotQualified
-            );
-            assert_eq!(
-                admission.reason_code(),
-                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
-            );
-            assert_eq!(admission.evidence_revision(), None);
+            for runtime_kind in [AdapterKind::CursorAgent, AdapterKind::Pi] {
+                let admission = registry.platform_admission(runtime_kind, platform);
+                assert_eq!(
+                    admission.status(),
+                    RuntimePlatformAdmissionStatus::NotQualified
+                );
+                assert_eq!(
+                    admission.reason_code(),
+                    Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+                );
+                assert_eq!(admission.evidence_revision(), None);
+            }
         }
         let grok_arm =
             registry.platform_admission(AdapterKind::GrokBuild, HostPlatformKey::MacosArm64);

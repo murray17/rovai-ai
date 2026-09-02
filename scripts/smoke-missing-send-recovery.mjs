@@ -12,6 +12,7 @@ import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
 } from './lib/runtime-camp-files-root.mjs'
+import { prepareIsolatedPiAgentDir } from './lib/pi-smoke-config.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const coreExecutable = resolve(
@@ -20,6 +21,7 @@ const coreExecutable = resolve(
 )
 const allSpecifications = [
   ['codex-cli', 'Codex'],
+  ['pi', 'Pi'],
   ['opencode-cli', 'OpenCode'],
   ['copilot-cli', 'Copilot'],
   ['claude-code-cli', 'Claude'],
@@ -35,7 +37,7 @@ const allSpecifications = [
   adapterKind,
   label,
   slug: adapterKind.replaceAll('-', '_'),
-  acp: !['codex-cli', 'claude-code-cli', 'antigravity-app'].includes(adapterKind)
+  acp: !['codex-cli', 'pi', 'claude-code-cli', 'antigravity-app'].includes(adapterKind)
 }))
 const selected = selectedAdapters()
 const specifications = allSpecifications.filter(({ adapterKind }) => selected.has(adapterKind))
@@ -82,7 +84,10 @@ for (const specification of specifications) {
     await writeFile(join(projectRoot, 'RECOVERY_TOOL_FIXTURE.txt'), `${toolFixtureToken}\n`)
     await gitFixture(projectRoot, specification.label)
 
-    core = startCore(dataDir)
+    const piAgentDir = specification.adapterKind === 'pi'
+      ? await prepareIsolatedPiAgentDir(fixtureRoot)
+      : null
+    core = startCore(dataDir, piAgentDir)
     await core.request('health.check')
     const workspace = await core.request('workspaces.inspect', { path: projectRoot })
     const agentId = 'agent_1'
@@ -544,6 +549,7 @@ function buildAcpProtocolFixture(events, adapterKind, agentRunId, expectedFinal,
 
 function expectedBoundary(specification) {
   if (specification.acp) return 'acp_end_turn_assistant_suffix'
+  if (specification.adapterKind === 'pi') return 'pi_agent_settled'
   if (specification.adapterKind === 'codex-cli') return 'codex_completed_turn'
   if (specification.adapterKind === 'claude-code-cli') return 'claude_success_result'
   return 'antigravity_print_stdout'
@@ -562,12 +568,22 @@ function summarizeFacts(facts) {
   }
 }
 
-function startCore(dataDirectory) {
+function startCore(dataDirectory, piAgentDir = null) {
   const child = spawn(coreExecutable, [
     ...coreDataDirectoryArguments(dataDirectory),
-    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library'),
+    '--mcp-config-path', join(dataDirectory, 'mcp.json')
   ], {
     cwd: root,
+    env: {
+      ...process.env,
+      ...(selected.has('pi')
+        ? {
+            ...(piAgentDir ? { PI_CODING_AGENT_DIR: piAgentDir } : {}),
+            ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
+          }
+        : {})
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   const pending = new Map()

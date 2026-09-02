@@ -199,6 +199,7 @@ impl super::Core {
             }
             let result = match kind {
                 AdapterKind::CodexCli => Ok(()),
+                AdapterKind::Pi => self.initialize_pi_subsystem().await,
                 AdapterKind::ClaudeCodeCli => self.claude_code_cli.initialize_storage(),
                 AdapterKind::AntigravityApp => self.antigravity_app.initialize_storage(),
                 kind => self
@@ -374,5 +375,62 @@ impl super::Core {
                 },
             );
         }
+    }
+
+    /// Pi owns an independent optional subsystem rather than borrowing ACP's
+    /// storage lifecycle.  Installation presence belongs here so a machine
+    /// without Pi keeps Core healthy while exposing only `runtime.pi` as
+    /// degraded. Version, capability and platform qualification remain the
+    /// responsibility of Runtime discovery and the authenticated deep probe.
+    async fn initialize_pi_subsystem(&self) -> Result<()> {
+        use super::*;
+
+        self.pi.initialize_storage()?;
+        let saved_path = {
+            let database = self.database.lock().await;
+            AgentProfileService::default()
+                .managed_installation(&database, AdapterKind::Pi, "default")?
+                .map(|installation| PathBuf::from(installation.executable_path))
+        };
+        let search = self.runtime_search_environment.read().await.clone();
+        let installed = search
+            .candidates(AdapterKind::Pi, saved_path)
+            .into_iter()
+            .any(|candidate| is_runtime_entrypoint_file(&candidate.path));
+        anyhow::ensure!(
+            installed,
+            "Pi executable is not installed or is not visible to the Runtime search environment"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pi_subsystem_failure_is_isolated_from_core_and_peer_runtimes() {
+        let subsystems = CoreSubsystems::new();
+        for entry in subsystems.snapshot() {
+            subsystems.finish(&entry.id, Ok(()));
+        }
+        subsystems.finish(
+            &runtime_subsystem_id(AdapterKind::Pi),
+            Err(anyhow::anyhow!("Pi executable unavailable")),
+        );
+
+        assert!(subsystems.require("skills").is_ok());
+        assert!(subsystems.require("mcp").is_ok());
+        assert!(
+            subsystems
+                .require(&runtime_subsystem_id(AdapterKind::ClaudeCodeCli))
+                .is_ok()
+        );
+        assert!(
+            subsystems
+                .require(&runtime_subsystem_id(AdapterKind::Pi))
+                .is_err()
+        );
     }
 }

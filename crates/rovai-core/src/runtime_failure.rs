@@ -281,6 +281,7 @@ fn classify_high_value_runtime_error(
 fn runtime_display_name(runtime_kind: AdapterKind) -> &'static str {
     match runtime_kind {
         AdapterKind::CodexCli => "Codex CLI",
+        AdapterKind::Pi => "Pi Coding Agent",
         AdapterKind::OpencodeCli => "OpenCode",
         AdapterKind::CopilotCli => "GitHub Copilot CLI",
         AdapterKind::ClaudeCodeCli => "Claude Code",

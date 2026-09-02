@@ -519,8 +519,9 @@ try {
     }
   })()`)
   assert(
-    runtimeSettingsState.rowCount === 13
+    runtimeSettingsState.rowCount === 14
       && runtimeSettingsState.labels.includes('Codex CLI')
+      && runtimeSettingsState.labels.includes('Pi Coding Agent')
       && runtimeSettingsState.labels.includes('Antigravity')
       && runtimeSettingsState.labels.includes('TRAE CLI')
       && runtimeSettingsState.labels.includes('DeepSeek Harness')
@@ -529,14 +530,14 @@ try {
       && !runtimeSettingsState.hasAdvancedDiagnostics
       && !runtimeSettingsState.explainsShell
       && !runtimeSettingsState.exposesMemberPathPicker,
-    `Runtime settings did not preserve twelve managed products plus one pending preview: ${JSON.stringify(runtimeSettingsState)}`
+    `Runtime settings did not preserve thirteen managed products plus one pending preview: ${JSON.stringify(runtimeSettingsState)}`
   )
   await setViewport(running.cdp, 1040, 700)
   await setTheme(running.cdp, 'night')
   await assertNoHorizontalOverflow(running.cdp, 'Runtime settings at 1040×700 Night')
   captures.runtimeSettings = join(
     outputDir,
-    'runtime-settings-twelve-products-one-preview-night-1040x700.png'
+    'runtime-settings-thirteen-products-one-preview-night-1040x700.png'
   )
   await capture(running.cdp, captures.runtimeSettings)
   const discoveredCodex = (await request(running.cdp, 'runtime.installations.list'))

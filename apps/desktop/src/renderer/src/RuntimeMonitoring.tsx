@@ -41,6 +41,7 @@ export function monitoringEventRefreshDelay(
 
 const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'codex-cli', label: 'Codex' },
+  { value: 'pi', label: 'Pi Coding Agent' },
   { value: 'claude-code-cli', label: 'Claude Code' },
   { value: 'copilot-cli', label: 'GitHub Copilot' },
   { value: 'opencode-cli', label: 'OpenCode' },

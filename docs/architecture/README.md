@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # 长期系统架构

@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-31
+last_updated: 2026-09-03
 ---
 
 # Agent Runtime 兼容性清单
@@ -10,7 +10,7 @@ last_updated: 2026-08-31
 Roadmap 或用户可见能力来源；正式目录以代码中的 `AdapterKind`、Migration、健康探测和
 测试为准。跨版本边界见
 [Runtime Catalog 与 Installation 不变量](architecture/foundational-invariants.md#runtime-catalog-installation)与
-[Runtime Catalog 与 Installation 不变量](architecture/foundational-invariants.md#runtime-catalog-installation)。
+[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)。
 
 兼容性清单中的自然语言结论本身不会自动创建产品类型。v0.42 起，Rovai-owned built-in
 operations 的正式准入基线是 [Built-in 运输不变量](architecture/foundational-invariants.md#skills-builtin-transport)：
@@ -20,10 +20,10 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 ## 当前 Product Runtime Catalog
 
-当前 closed `AdapterKind` 包含十三种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
-Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent 与 Kimi Code。
-第十三种为 Grok Build。
-Cursor 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
+当前 closed `AdapterKind` 包含十四种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
+Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
+Grok Build 与 Pi Coding Agent。
+Cursor 与 Pi 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。
 Grok Build 在 adapter-scoped 证据分别覆盖的 macOS arm64、macOS x64 与 Windows x64 均为 `qualified`；
 三个宿主平台各自绑定独立 evidence digest，不互相外推。
@@ -31,6 +31,34 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
+
+### 2026-09-03 Pi 0.84.4 macOS arm64 开发证据与未准入记录
+
+本机把 `@earendil-works/pi-coding-agent@0.84.4` 安装到一次性目录，未替换 PATH 上的 0.84.2。Pi 官方
+`auth.json/settings.json` 使用 `minimax-cn / MiniMax-M3`，直接官方 Pi 请求返回固定 marker；凭据值没有进入仓库、
+测试输出或公开 Runtime trace。Core 的行为 smoke 复制所需官方配置到 0700 临时 `PI_CODING_AGENT_DIR`，并在结束
+时连同 Session 一起删除。
+
+| 能力 | 0.84.4 实际证据 | 当前产品结论 |
+| --- | --- | --- |
+| Ready / Probe | managed extension handshake；创建 Session 后取得 full UUID/canonical file；创建 replacement；实际 `switch_session(exact file)`；`get_state` 核对 ID/file/cwd；Probe session root 未污染 | Pi 专属 Machine Ready 已实现；这些行为仍不是平台 qualification |
+| Auth / Model | 官方 native default MiniMax M3 请求成功；Core catalog/default 与 explicit set/get validator 有 deterministic coverage | 正式 Run 只继承 Pi 官方配置；不借 Claude provider/Home |
+| Session / Host | First Run 后停止 Core，重启后同 full Native Session ID cold exact resume；下一 Run 复用同 Host/Session | `resident_multi_session` 实现成立；真实 A→B→A 与并发 Host 目前只有 deterministic evidence |
+| Bootstrap / receipt | 首次、cold resume、warm reuse 均通过 managed-input receipt；公开 events/stderr 不含 `sessionFile` 或 `nativeSessionFile` | `managed_system_prompt`；locator Core-private；receipt mismatch 全矩阵由 fixture 与 Migration guard 覆盖 |
+| Action / cancel | Bash command output 进入 `runtime.action`；write allow-once 只产生一次目标文件；deny 不建文件；sleep 后 cancel 不建延迟文件 | Core-managed Approval；shell path/args/transport 来自 Pi 实际配置，不伪造 zsh argv |
+| MCP | Pi+MiniMax 单 Run 真实调用三个 projected Tool，覆盖 same-name `RovaiWins`、stdio 与 Streamable HTTP；Action/cancel/no-leak 另有 deterministic coverage | 上游无内建 MCP，但官方 Tool API 可桥接，不能标记 Unsupported；update/delete/deny/cancel/no-leak 产品矩阵待完成 |
+| Skills / Built-in | 真实调用 `.pi/skills` projected Skill；导入、重启、project-owned 同名 shadow 与删除通过；Built-in CLI 15-operation full Run 与 resumed/new-lease Run 通过 | Skill update/普通 disable/re-enable/A→B→A no-leak 待完成；本机 Built-in 能力为 Verified + Implemented |
+| Final / Usage | `agent_settled` 后唯一成功；terminal assistant `message_end.message.usage` 在 Monitoring 得到 input/output；cancel 不触发成功 | streamed update/session totals 不计量；reasoning/cost 缺失保持 unknown |
+| Compaction | 上游源码与 wire 定义显示 system prompt 独立于被压缩 message history，且有结构化 compaction lifecycle | 策略为 `native_system_prompt_preserved`；manual/threshold/overflow+retry/cancel 的完整真实产品 smoke 待完成 |
+
+Pi executable 缺失时，独立 optional subsystem 只把 `runtime.pi` 标成 degraded；Core、Skills、MCP 与其他 Runtime
+仍可用。这个安装存在性检查不等于 Ready 或平台资格。
+
+本记录只形成 `macos-arm64` 开发证据，不是 `Runtime Platform Admission` artifact。Pi 在 macOS arm64、macOS x64、
+Windows x64 均保持 `not_qualified / runtime_platform.qualification_evidence_missing`；普通 discovery、成员选择与
+AgentRun 不可达。Images、Pi-specific structured Web Search 与 Camp Fast 当前明确 unsupported/hidden。完整差异和
+未闭合项见 [Pi Parity Matrix](research/pi-runtime-reintegration-parity-matrix.md)与
+[Runtime Launch v30](contracts/runtime-launch-and-verification-v30.md)。
 
 ### 2026-08-31 Camp Fast metadata 边界
 

@@ -1700,6 +1700,19 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
             mask
         }
         AdapterKind::KiroCli | AdapterKind::QoderCli | AdapterKind::TraeCnCli => ELIGIBLE_COST,
+        AdapterKind::Pi => {
+            if reported_version_at_least(runtime_version, [0, 84, 4]) {
+                ELIGIBLE_PROMPT_INPUT_TOTAL
+                    | ELIGIBLE_UNCACHED_INPUT
+                    | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_CACHE_WRITE
+                    | ELIGIBLE_OUTPUT
+                    | ELIGIBLE_REASONING_OUTPUT
+                    | ELIGIBLE_REQUEST_CACHE_HIT
+            } else {
+                0
+            }
+        }
         AdapterKind::AntigravityApp
         | AdapterKind::CursorAgent
         | AdapterKind::KimiCodeCli
@@ -2964,6 +2977,89 @@ pub fn acp_usage_source_identity(
         .transpose()
 }
 
+/// Parse only Pi's terminal assistant-message snapshot. The top-level Usage on
+/// `message_update` is cumulative while a provider is streaming and must not be
+/// projected as an additional model call.
+pub fn parse_pi_usage_message(
+    event: &Value,
+    native_session_id: &str,
+    native_prompt_id: &str,
+) -> Vec<ParsedRuntimeUsage> {
+    if event.get("type").and_then(Value::as_str) != Some("message_end") {
+        return Vec::new();
+    }
+    let message = event.get("message").unwrap_or(&Value::Null);
+    if message.get("role").and_then(Value::as_str) != Some("assistant")
+        || safe_integer(message.get("timestamp")).is_none()
+    {
+        return Vec::new();
+    }
+    let usage = message.get("usage").unwrap_or(&Value::Null);
+    let fields = RuntimeUsageFields {
+        input_tokens: integer_at_any(usage, &["/input"]),
+        uncached_input_tokens: None,
+        output_tokens: integer_at_any(usage, &["/output"]),
+        reasoning_output_tokens: integer_at_any(usage, &["/reasoning"]),
+        cache_read_input_tokens: integer_at_any(usage, &["/cacheRead"]),
+        cache_write_input_tokens: integer_at_any(usage, &["/cacheWrite"]),
+        context_used_tokens: None,
+        context_size_tokens: None,
+    };
+    if fields.is_empty() {
+        return Vec::new();
+    }
+    vec![ParsedRuntimeUsage {
+        identity_suffix: "assistant_message".to_string(),
+        dialect_id: "pi-message-end-usage-v1".to_string(),
+        source: "runtime_event".to_string(),
+        scope: "model_call".to_string(),
+        counter_mode: RuntimeUsageCounterMode::Delta,
+        input_semantics: RuntimeInputSemantics::ExclusiveBuckets,
+        native_session_id: Some(native_session_id.to_string()),
+        native_turn_id: Some(native_prompt_id.to_string()),
+        fields,
+        // Pi's model catalog calculates monetary cost. It is not provider
+        // billing evidence, so it deliberately remains unprojected.
+        cost: None,
+        occurred_at: None,
+    }]
+}
+
+pub fn pi_usage_source_identity(
+    event: &Value,
+    native_session_id: &str,
+    native_prompt_id: &str,
+) -> Result<Option<String>> {
+    if event.get("type").and_then(Value::as_str) != Some("message_end") {
+        return Ok(None);
+    }
+    let message = event
+        .get("message")
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("assistant"));
+    let Some(message) = message else {
+        return Ok(None);
+    };
+    let timestamp = message
+        .get("timestamp")
+        .and_then(Value::as_u64)
+        .filter(|timestamp| *timestamp <= JS_MAX_SAFE_INTEGER)
+        .context("Pi assistant message_end is missing a stable timestamp")?;
+    if message.get("usage").is_none() {
+        return Ok(None);
+    }
+    crate::command::canonical_json_digest(&json!({
+        "dialect": "pi-message-end-usage-v1",
+        "nativeSessionId": native_session_id,
+        "nativePromptId": native_prompt_id,
+        "timestamp": timestamp,
+        "provider": message.get("provider"),
+        "model": message.get("model"),
+        "stopReason": message.get("stopReason"),
+        "usage": message.get("usage"),
+    }))
+    .map(Some)
+}
+
 pub fn parse_claude_result_usage(result: &Value) -> Vec<ParsedRuntimeUsage> {
     let usage = result.get("usage").unwrap_or(&Value::Null);
     let fields = RuntimeUsageFields {
@@ -3040,6 +3136,112 @@ mod tests {
             cost: None,
             occurred_at: None,
         }
+    }
+
+    #[test]
+    fn pi_usage_uses_terminal_assistant_messages_and_deduplicates_replays() {
+        let message = json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "provider": "minimax",
+                "model": "MiniMax-M2.1",
+                "timestamp": 1_788_355_216_000_u64,
+                "stopReason": "toolUse",
+                "usage": {
+                    "input": 10,
+                    "output": 7,
+                    "reasoning": 3,
+                    "cacheRead": 20,
+                    "cacheWrite": 2,
+                    "totalTokens": 39,
+                    "cost": {"total": 99.0}
+                }
+            }
+        });
+        let parsed = parse_pi_usage_message(&message, "session-pi", "prompt-pi");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].counter_mode, RuntimeUsageCounterMode::Delta);
+        assert_eq!(parsed[0].scope, "model_call");
+        assert_eq!(
+            parsed[0].input_semantics,
+            RuntimeInputSemantics::ExclusiveBuckets
+        );
+        assert_eq!(parsed[0].fields.input_tokens, Some(10));
+        assert_eq!(parsed[0].fields.output_tokens, Some(7));
+        assert_eq!(parsed[0].fields.reasoning_output_tokens, Some(3));
+        assert_eq!(parsed[0].fields.cache_read_input_tokens, Some(20));
+        assert_eq!(parsed[0].fields.cache_write_input_tokens, Some(2));
+        assert_eq!(parsed[0].cost, None);
+        let normalized = normalize_usage(&parsed[0]).unwrap();
+        assert_eq!(normalized.prompt_input_total_tokens, Some(32));
+        assert_eq!(normalized.uncached_input_tokens, Some(10));
+
+        let run = RuntimeUsageRun {
+            key: UsageRunKey {
+                agent_run_id: "pi-run".to_string(),
+                execution_epoch: 1,
+            },
+            runtime_kind: AdapterKind::Pi,
+            runtime_version: Some("0.84.4".to_string()),
+            provider_key: Some("minimax".to_string()),
+            model_key: Some("MiniMax-M2.1".to_string()),
+            service_tier: None,
+        };
+        let identity = pi_usage_source_identity(&message, "session-pi", "prompt-pi")
+            .unwrap()
+            .unwrap();
+        let mut buffer = RuntimeUsageBuffer::default();
+        buffer
+            .observe_run(&run, &identity, &parsed, Instant::now())
+            .unwrap();
+        buffer
+            .observe_run(&run, &identity, &parsed, Instant::now())
+            .unwrap();
+
+        let second = json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "provider": "minimax",
+                "model": "MiniMax-M2.1",
+                "timestamp": 1_788_355_216_001_u64,
+                "stopReason": "stop",
+                "usage": {"input": 4, "output": 2, "cacheRead": 1, "cacheWrite": 0}
+            }
+        });
+        let second_parsed = parse_pi_usage_message(&second, "session-pi", "prompt-pi");
+        let second_identity = pi_usage_source_identity(&second, "session-pi", "prompt-pi")
+            .unwrap()
+            .unwrap();
+        buffer
+            .observe_run(&run, &second_identity, &second_parsed, Instant::now())
+            .unwrap();
+        let batches = buffer.drain(RuntimeUsageFlushTarget::Run {
+            agent_run_id: "pi-run".to_string(),
+            execution_epoch: 1,
+        });
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].records.len(), 1);
+        assert_eq!(batches[0].records[0].usage.fields.input_tokens, Some(14));
+        assert_eq!(batches[0].records[0].usage.fields.output_tokens, Some(9));
+
+        assert!(
+            parse_pi_usage_message(
+                &json!({
+                    "type": "message_update",
+                    "usage": {"input": 999}
+                }),
+                "session-pi",
+                "prompt-pi"
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            eligible_mask(AdapterKind::Pi, Some("0.84.4")) & ELIGIBLE_COST,
+            0
+        );
+        assert_eq!(eligible_mask(AdapterKind::Pi, Some("0.84.3")), 0);
     }
 
     #[test]

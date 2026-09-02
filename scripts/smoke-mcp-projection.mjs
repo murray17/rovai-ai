@@ -20,6 +20,7 @@ import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
 } from './lib/runtime-camp-files-root.mjs'
+import { prepareIsolatedPiAgentDir } from './lib/pi-smoke-config.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mcp-projection-smoke-')))
@@ -44,6 +45,7 @@ const selected = (process.env.ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS ?? 'all')
 const debugGrokProjection = process.env.ROVAI_MCP_PROJECTION_DEBUG_GROK === '1'
 const allAdapters = [
   'codex-cli',
+  'pi',
   'claude-code-cli',
   'opencode-cli',
   'copilot-cli',
@@ -57,18 +59,23 @@ const allAdapters = [
 ]
 const adapters = selected.length === 1 && selected[0] === 'all' ? allAdapters : selected
 const grokOnly = adapters.length === 1 && adapters[0] === 'grok-build'
+const grokSelected = adapters.includes('grok-build')
 let core = null
 let projectedHttp = null
 let nativeHttp = null
+let piAgentDir = null
 
 try {
   for (const adapter of adapters) {
     if (!allAdapters.includes(adapter)) throw new Error(`Unsupported MCP Projection smoke Adapter: ${adapter}`)
   }
+  if (adapters.includes('pi')) {
+    piAgentDir = await prepareIsolatedPiAgentDir(fixtureRoot)
+  }
   projectedHttp = await startMcpHttpServer('rovai-projection-http')
   nativeHttp = await startMcpHttpServer('runtime-native-http')
   await prepareProject(nativeHttp.url)
-  await prepareGrokHome()
+  if (grokSelected) await prepareGrokHome()
   await prepareRovaiConfig(projectedHttp.url)
   core = startCore()
   await core.request('health.check')
@@ -87,7 +94,7 @@ try {
         ]
       : adapterKind === 'grok-build'
         ? [`rovai-projection-stdio:${adapterMarker}-stdio`]
-      : adapterKind === 'kimi-code-cli'
+      : ['pi', 'kimi-code-cli'].includes(adapterKind)
         ? [
             `rovai-projection:${adapterMarker}`,
             `rovai-projection-http:${adapterMarker}-http`,
@@ -106,7 +113,7 @@ try {
             `rovai-projection-http:${adapterMarker}-http`,
             `runtime-native-http:${adapterMarker}-stdio`
           ]
-      : adapterKind === 'kimi-code-cli'
+      : ['pi', 'kimi-code-cli'].includes(adapterKind)
         ? [
             `runtime-native:${adapterMarker}`,
             `runtime-native:${adapterMarker}-http`,
@@ -132,7 +139,7 @@ try {
       assert(await pathExists(grokNativeHttpNameMarker), 'grok-build did not preserve the second native same-name MCP server')
     }
     const expectedServers = adapterKind === 'codex-cli'
-      || ['kimi-code-cli', 'grok-build'].includes(adapterKind)
+      || ['pi', 'kimi-code-cli', 'grok-build'].includes(adapterKind)
       ? [serverName, projectedHttpServerName, projectedStdioServerName]
       : [serverName]
     const exposures = expectedServers.map((name) => result.exposure?.servers?.find((server) => server.name === name))
@@ -350,7 +357,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
           `Call the assigned MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
           'Return exactly that tool result. The other two assigned definitions collide with active native servers and must remain skipped.'
         ]
-    : adapterKind === 'kimi-code-cli'
+    : ['pi', 'kimi-code-cli'].includes(adapterKind)
       ? [
           `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
           `Call the assigned HTTP MCP server named \`${projectedHttpServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-http\`.`,
@@ -514,7 +521,13 @@ function startCore() {
     : join(root, 'target', 'debug', 'rovai-core')
   const coreEnvironment = {
     ...process.env,
-    GROK_HOME: grokHome
+    GROK_HOME: grokHome,
+    ...(adapters.includes('pi')
+      ? {
+          PI_CODING_AGENT_DIR: piAgentDir,
+          ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
+        }
+      : {})
   }
   const child = spawn(coreExecutable, [
     ...coreDataDirectoryArguments(dataDir),

@@ -76,6 +76,7 @@ impl<'a> ContextReadConnection for Transaction<'a> {
 pub enum CharterDeliveryMode {
     NativeAppend,
     FirstPayload,
+    ManagedSystemPrompt,
 }
 
 impl CharterDeliveryMode {
@@ -83,6 +84,7 @@ impl CharterDeliveryMode {
         match self {
             Self::NativeAppend => "native_append",
             Self::FirstPayload => "first_payload",
+            Self::ManagedSystemPrompt => "managed_system_prompt",
         }
     }
 }
@@ -92,6 +94,7 @@ pub const fn charter_delivery_mode_for_adapter(adapter_kind: AdapterKind) -> Cha
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::GrokBuild => {
             CharterDeliveryMode::NativeAppend
         }
+        AdapterKind::Pi => CharterDeliveryMode::ManagedSystemPrompt,
         AdapterKind::OpencodeCli
         | AdapterKind::CopilotCli
         | AdapterKind::AntigravityApp
@@ -233,9 +236,17 @@ pub struct RuntimeInputDelivery {
     pub bootstrap_redelivery_revision: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedPiManagedInputReceipt {
+    pub digest: String,
+    pub commit_nonce: String,
+    pub delivery: RuntimeInputDelivery,
+}
+
 #[derive(Default)]
 struct RuntimeInputDeliveryOptions<'a> {
     proposed_binding_id: Option<&'a str>,
+    proposed_delivery_id: Option<&'a str>,
     bootstrap_redelivery_revision: Option<i64>,
     bootstrap_evidence_id: Option<&'a str>,
     runtime_payload_digest: Option<&'a str>,
@@ -1380,6 +1391,32 @@ impl ContextService {
         )
     }
 
+    pub fn prepare_input_delivery_for_context_with_identity(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        context: &PreparedContext,
+        proposed_delivery_id: &str,
+    ) -> Result<RuntimeInputDelivery> {
+        Uuid::parse_str(proposed_delivery_id)
+            .context("Runtime Input Delivery identity must be a UUID")?;
+        let runtime_payload_digest = sha256_text(&context.runtime_payload);
+        self.prepare_input_delivery_inner(
+            database,
+            agent_run_id,
+            execution_epoch,
+            &context.manifest_id,
+            RuntimeInputDeliveryOptions {
+                proposed_delivery_id: Some(proposed_delivery_id),
+                bootstrap_redelivery_revision: context.bootstrap_redelivery_revision,
+                bootstrap_evidence_id: Some(&context.bootstrap_evidence_id),
+                runtime_payload_digest: Some(&runtime_payload_digest),
+                ..RuntimeInputDeliveryOptions::default()
+            },
+        )
+    }
+
     pub fn prepare_input_delivery_for_binding_context(
         &self,
         database: &mut Database,
@@ -1400,6 +1437,7 @@ impl ContextService {
                 bootstrap_redelivery_revision: context.bootstrap_redelivery_revision,
                 bootstrap_evidence_id: Some(&context.bootstrap_evidence_id),
                 runtime_payload_digest: Some(&runtime_payload_digest),
+                ..RuntimeInputDeliveryOptions::default()
             },
         )
     }
@@ -1435,6 +1473,7 @@ impl ContextService {
     ) -> Result<RuntimeInputDelivery> {
         let RuntimeInputDeliveryOptions {
             proposed_binding_id,
+            proposed_delivery_id,
             bootstrap_redelivery_revision,
             bootstrap_evidence_id,
             runtime_payload_digest,
@@ -1454,6 +1493,9 @@ impl ContextService {
             anyhow::bail!("Runtime input preparation was fenced by Run settlement");
         }
         if let Some(mut existing) = load_delivery(&transaction, agent_run_id, execution_epoch)? {
+            if proposed_delivery_id.is_some_and(|identity| identity != existing.id) {
+                anyhow::bail!("Runtime Input Delivery identity changed after preparation");
+            }
             let target = load_delivery_target(&transaction, &existing.id)?
                 .context("Runtime Input Delivery target does not exist")?;
             if target.current_native_binding_id.as_deref()
@@ -1562,6 +1604,9 @@ impl ContextService {
         if let Some(accepted) =
             load_accepted_delivery_for_current_binding(&transaction, agent_run_id)?
         {
+            if proposed_delivery_id.is_some_and(|identity| identity != accepted.id) {
+                anyhow::bail!("Runtime Input Delivery identity changed after acceptance");
+            }
             transaction.commit()?;
             return Ok(accepted);
         }
@@ -1654,7 +1699,9 @@ impl ContextService {
             "bootstrapRedeliveryRevision": bootstrap_redelivery_revision,
             "runtimeAttachmentAuthReceiptDigest": runtime_attachment_auth_receipt_digest,
         }))?;
-        let delivery_id = Uuid::new_v4().to_string();
+        let delivery_id = proposed_delivery_id
+            .map(str::to_string)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = chrono::Utc::now().to_rfc3339();
         transaction.execute(
             r#"
@@ -1764,141 +1811,145 @@ impl ContextService {
         }
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction()?;
-        let row = load_delivery_target(&transaction, delivery_id)?
-            .context("Runtime Input Delivery does not exist")?;
-        if row.status == "accepted" {
-            if row.native_input_id.as_deref() != Some(native_input_id) {
-                anyhow::bail!("Runtime Input Delivery was accepted with another Native Input ID");
-            }
-            transaction.commit()?;
-            return Ok(row.as_public(delivery_id));
-        }
-        if !matches!(row.status.as_str(), "prepared" | "delivery_unknown") {
-            anyhow::bail!("Runtime Input Delivery is not acknowledgeable");
-        }
-        let updated = transaction.execute(
-            r#"
-            UPDATE runtime_input_delivery
-            SET status = 'accepted', native_input_id = ?2,
-                accepted_at = COALESCE(accepted_at, ?3),
-                resolved_at = ?3, last_error = NULL, updated_at = ?3
-            WHERE id = ?1 AND status IN ('prepared', 'delivery_unknown')
-            "#,
-            params![delivery_id, native_input_id, now],
-        )?;
-        if updated != 1 {
-            anyhow::bail!("Runtime Input Delivery changed before acknowledgement");
-        }
-        let current_execution: bool = transaction.query_row(
-            r#"SELECT EXISTS(SELECT 1 FROM agent_run AS run
-                JOIN conversation ON conversation.id = run.conversation_id
-                JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
-                WHERE run.id = ?1 AND run.execution_epoch = ?2
-                  AND run.status IN ('running', 'waiting') AND run.cancel_requested_at IS NULL
-                  AND turn.status IN ('running', 'waiting') AND turn.cancel_requested_at IS NULL
-                  AND turn.execution_budget_exhausted_at IS NULL
-                  AND conversation.native_binding_id = ?3
-                  AND conversation.native_binding_generation = ?4)"#,
-            params![
-                row.agent_run_id,
-                row.execution_epoch,
-                row.native_binding_id,
-                row.native_binding_generation
-            ],
-            |row| row.get(0),
-        )?;
-        // A late acceptance is evidence only. It cannot move the current
-        // conversation's boundary or overwrite a successor's Native Binding.
-        if current_execution {
-            let marker_updated = transaction.execute(
-                r#"
-            UPDATE conversation
-            SET last_accepted_public_boundary_sequence = MAX(
-                    last_accepted_public_boundary_sequence, ?3
-                ),
-                native_charter_digest = ?4,
-                native_collaboration_state_digest = ?5,
-                version = version + 1, updated_at = ?6
-            WHERE id = ?1 AND native_binding_id = ?2
-              AND native_binding_generation = ?7
-              AND last_accepted_public_boundary_sequence <= ?3
-            "#,
-                params![
-                    row.conversation_id,
-                    row.native_binding_id,
-                    row.boundary_camp_message_sequence,
-                    row.charter_digest,
-                    row.collaboration_state_digest,
-                    now,
-                    row.native_binding_generation,
-                ],
-            )?;
-            if marker_updated != 1 {
-                anyhow::bail!("Native Binding changed before input acknowledgement");
-            }
-            if let Some(redelivery_revision) = row.bootstrap_redelivery_revision {
-                let redelivery_updated = transaction.execute(
-                    r#"
-                UPDATE bootstrap_redelivery_requirement
-                SET acknowledged_revision = MAX(acknowledged_revision, ?3),
-                    updated_at = ?4
-                WHERE native_binding_id = ?1
-                  AND native_binding_generation = ?2
-                  AND requested_revision >= ?3
-                  AND acknowledged_revision <= ?3
-                "#,
-                    params![
-                        row.native_binding_id,
-                        row.native_binding_generation,
-                        redelivery_revision,
-                        now,
-                    ],
-                )?;
-                if redelivery_updated != 1 {
-                    anyhow::bail!(
-                        "Bootstrap Redelivery Requirement changed before input acknowledgement"
-                    );
-                }
-            }
-            if row.status == "delivery_unknown" {
-                transaction.execute(
-                    r#"
-                UPDATE agent_run
-                SET wait_reason = 'runtime_recovery',
-                    runtime_recovery_required = 1,
-                    last_error_code = NULL,
-                    version = version + 1, updated_at = ?2
-                WHERE id = ?1 AND status = 'waiting'
-                  AND wait_reason = 'delivery_unknown'
-                  AND execution_epoch = ?3 AND cancel_requested_at IS NULL
-                "#,
-                    params![row.agent_run_id, now, row.execution_epoch],
-                )?;
-            }
-        }
-        append_raw_event(
+        let delivery = acknowledge_input_delivery_transaction(
             &transaction,
-            "runtime.input_accepted",
-            &row.camp_id,
-            "agent_run",
-            &row.agent_run_id,
-            row.execution_epoch,
-            &json!({
-                "runtimeInputDeliveryId": delivery_id,
-                "nativeInputId": native_input_id,
-                "boundarySequence": row.boundary_camp_message_sequence,
-                "bootstrapRedeliveryRevision": row.bootstrap_redelivery_revision,
-                "collaborationStateDigest": row.collaboration_state_digest,
-                "collaborationStateIncluded": row.collaboration_state_included,
-            }),
+            delivery_id,
+            native_input_id,
+            &now,
         )?;
         transaction.commit()?;
-        Ok(RuntimeInputDelivery {
-            id: delivery_id.to_string(),
-            status: "accepted".to_string(),
-            native_input_id: Some(native_input_id.to_string()),
-            boundary_camp_message_sequence: row.boundary_camp_message_sequence,
-            bootstrap_redelivery_revision: row.bootstrap_redelivery_revision,
+        Ok(delivery)
+    }
+
+    pub fn commit_pi_managed_input_receipt_and_accept(
+        &self,
+        database: &mut Database,
+        delivery_id: &str,
+        native_prompt_id: &str,
+        receipt: &Value,
+        commit_nonce: &str,
+    ) -> Result<CommittedPiManagedInputReceipt> {
+        if native_prompt_id.trim().is_empty() {
+            anyhow::bail!("Pi Native Prompt ID must not be empty");
+        }
+        let receipt_bytes = serde_json::to_vec(receipt)?;
+        if receipt_bytes.len() > 2 * 1024 * 1024 {
+            anyhow::bail!("Pi managed input receipt exceeds the private evidence limit");
+        }
+        if commit_nonce.len() != 64
+            || !commit_nonce
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            anyhow::bail!("Pi managed input receipt commit nonce is invalid");
+        }
+        let receipt_digest = canonical_json_digest(receipt)?;
+        let receipt_delivery_id = required_receipt_string(receipt, "runtimeInputDeliveryId")?;
+        let receipt_prompt_id = required_receipt_string(receipt, "nativePromptId")?;
+        let receipt_agent_run_id = required_receipt_string(receipt, "agentRunId")?;
+        let receipt_native_binding_id = required_receipt_string(receipt, "nativeBindingId")?;
+        let receipt_native_session_id = required_receipt_string(receipt, "nativeSessionId")?;
+        let receipt_execution_epoch = receipt
+            .get("executionEpoch")
+            .and_then(Value::as_i64)
+            .context("Pi managed input receipt omitted executionEpoch")?;
+        let receipt_binding_generation = receipt
+            .get("nativeBindingGeneration")
+            .and_then(Value::as_i64)
+            .context("Pi managed input receipt omitted nativeBindingGeneration")?;
+        if receipt_delivery_id != delivery_id || receipt_prompt_id != native_prompt_id {
+            anyhow::bail!("Pi managed input receipt did not match its Delivery/Prompt route");
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        let row = load_delivery_target(&transaction, delivery_id)?
+            .context("Runtime Input Delivery does not exist")?;
+        let (dispatch_started_at, delivery_mode): (Option<String>, String) = transaction
+            .query_row(
+                r#"
+            SELECT delivery.dispatch_started_at, bootstrap.delivery_mode
+            FROM runtime_input_delivery AS delivery
+            JOIN context_manifest AS manifest ON manifest.id = delivery.context_manifest_id
+            JOIN native_session_bootstrap_evidence AS bootstrap
+              ON bootstrap.id = manifest.bootstrap_evidence_id
+            WHERE delivery.id = ?1
+            "#,
+                [delivery_id],
+                |query_row| Ok((query_row.get(0)?, query_row.get(1)?)),
+            )?;
+        if dispatch_started_at.is_none() || delivery_mode != "managed_system_prompt" {
+            anyhow::bail!("Pi managed input receipt is outside a dispatched managed prompt");
+        }
+        if row.agent_run_id != receipt_agent_run_id
+            || row.execution_epoch != receipt_execution_epoch
+            || row.native_binding_id != receipt_native_binding_id
+            || row.native_binding_generation != receipt_binding_generation
+        {
+            anyhow::bail!("Pi managed input receipt failed durable Run/Binding validation");
+        }
+        let stored = transaction
+            .query_row(
+                r#"
+                SELECT receipt_digest, commit_nonce, native_prompt_id, native_session_id
+                FROM pi_managed_input_receipt
+                WHERE runtime_input_delivery_id = ?1
+                "#,
+                [delivery_id],
+                |query_row| {
+                    Ok((
+                        query_row.get::<_, String>(0)?,
+                        query_row.get::<_, String>(1)?,
+                        query_row.get::<_, String>(2)?,
+                        query_row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((stored_digest, stored_nonce, stored_prompt, stored_session)) = stored {
+            if stored_digest != receipt_digest
+                || stored_nonce != commit_nonce
+                || stored_prompt != native_prompt_id
+                || stored_session != receipt_native_session_id
+            {
+                anyhow::bail!("Pi managed input receipt changed after commit");
+            }
+        } else {
+            transaction.execute(
+                r#"
+                INSERT INTO pi_managed_input_receipt(
+                    id, runtime_input_delivery_id, agent_run_id, execution_epoch,
+                    native_binding_id, native_binding_generation, native_session_id,
+                    native_prompt_id, receipt_version, receipt_json, receipt_digest,
+                    commit_nonce, committed_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?11, ?12)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    delivery_id,
+                    receipt_agent_run_id,
+                    receipt_execution_epoch,
+                    receipt_native_binding_id,
+                    receipt_binding_generation,
+                    receipt_native_session_id,
+                    native_prompt_id,
+                    serde_json::to_string(receipt)?,
+                    receipt_digest,
+                    commit_nonce,
+                    now,
+                ],
+            )?;
+        }
+        let delivery = acknowledge_input_delivery_transaction(
+            &transaction,
+            delivery_id,
+            native_prompt_id,
+            &now,
+        )?;
+        transaction.commit()?;
+        Ok(CommittedPiManagedInputReceipt {
+            digest: receipt_digest,
+            commit_nonce: commit_nonce.to_string(),
+            delivery,
         })
     }
 
@@ -2032,6 +2083,182 @@ impl ContextService {
         transaction.commit()?;
         Ok(())
     }
+}
+
+fn required_receipt_string<'a>(receipt: &'a Value, key: &str) -> Result<&'a str> {
+    receipt
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .with_context(|| format!("Pi managed input receipt omitted {key}"))
+}
+
+fn acknowledge_input_delivery_transaction(
+    transaction: &Transaction<'_>,
+    delivery_id: &str,
+    native_input_id: &str,
+    now: &str,
+) -> Result<RuntimeInputDelivery> {
+    let row = load_delivery_target(transaction, delivery_id)?
+        .context("Runtime Input Delivery does not exist")?;
+    let managed_system_prompt: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM runtime_input_delivery AS delivery
+            JOIN context_manifest AS manifest ON manifest.id = delivery.context_manifest_id
+            JOIN native_session_bootstrap_evidence AS bootstrap
+              ON bootstrap.id = manifest.bootstrap_evidence_id
+            WHERE delivery.id = ?1 AND bootstrap.delivery_mode = 'managed_system_prompt'
+        )
+        "#,
+        [delivery_id],
+        |query_row| query_row.get(0),
+    )?;
+    if managed_system_prompt {
+        let receipt_present: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pi_managed_input_receipt WHERE runtime_input_delivery_id = ?1 AND receipt_version = 1)",
+            [delivery_id],
+            |query_row| query_row.get(0),
+        )?;
+        if !receipt_present {
+            anyhow::bail!(
+                "Managed System Prompt input cannot be accepted without its committed receipt"
+            );
+        }
+    }
+    if row.status == "accepted" {
+        if row.native_input_id.as_deref() != Some(native_input_id) {
+            anyhow::bail!("Runtime Input Delivery was accepted with another Native Input ID");
+        }
+        return Ok(row.as_public(delivery_id));
+    }
+    if !matches!(row.status.as_str(), "prepared" | "delivery_unknown") {
+        anyhow::bail!("Runtime Input Delivery is not acknowledgeable");
+    }
+    let updated = transaction.execute(
+        r#"
+        UPDATE runtime_input_delivery
+        SET status = 'accepted', native_input_id = ?2,
+            accepted_at = COALESCE(accepted_at, ?3),
+            resolved_at = ?3, last_error = NULL, updated_at = ?3
+        WHERE id = ?1 AND status IN ('prepared', 'delivery_unknown')
+        "#,
+        params![delivery_id, native_input_id, now],
+    )?;
+    if updated != 1 {
+        anyhow::bail!("Runtime Input Delivery changed before acknowledgement");
+    }
+    let current_execution: bool = transaction.query_row(
+        r#"SELECT EXISTS(SELECT 1 FROM agent_run AS run
+            JOIN conversation ON conversation.id = run.conversation_id
+            JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
+            WHERE run.id = ?1 AND run.execution_epoch = ?2
+              AND run.status IN ('running', 'waiting') AND run.cancel_requested_at IS NULL
+              AND turn.status IN ('running', 'waiting') AND turn.cancel_requested_at IS NULL
+              AND turn.execution_budget_exhausted_at IS NULL
+              AND conversation.native_binding_id = ?3
+              AND conversation.native_binding_generation = ?4)"#,
+        params![
+            row.agent_run_id,
+            row.execution_epoch,
+            row.native_binding_id,
+            row.native_binding_generation
+        ],
+        |query_row| query_row.get(0),
+    )?;
+    // A late acceptance is evidence only. It cannot move the current
+    // conversation's boundary or overwrite a successor's Native Binding.
+    if current_execution {
+        let marker_updated = transaction.execute(
+            r#"
+            UPDATE conversation
+            SET last_accepted_public_boundary_sequence = MAX(
+                    last_accepted_public_boundary_sequence, ?3
+                ),
+                native_charter_digest = ?4,
+                native_collaboration_state_digest = ?5,
+                version = version + 1, updated_at = ?6
+            WHERE id = ?1 AND native_binding_id = ?2
+              AND native_binding_generation = ?7
+              AND last_accepted_public_boundary_sequence <= ?3
+            "#,
+            params![
+                row.conversation_id,
+                row.native_binding_id,
+                row.boundary_camp_message_sequence,
+                row.charter_digest,
+                row.collaboration_state_digest,
+                now,
+                row.native_binding_generation,
+            ],
+        )?;
+        if marker_updated != 1 {
+            anyhow::bail!("Native Binding changed before input acknowledgement");
+        }
+        if let Some(redelivery_revision) = row.bootstrap_redelivery_revision {
+            let redelivery_updated = transaction.execute(
+                r#"
+                UPDATE bootstrap_redelivery_requirement
+                SET acknowledged_revision = MAX(acknowledged_revision, ?3),
+                    updated_at = ?4
+                WHERE native_binding_id = ?1
+                  AND native_binding_generation = ?2
+                  AND requested_revision >= ?3
+                  AND acknowledged_revision <= ?3
+                "#,
+                params![
+                    row.native_binding_id,
+                    row.native_binding_generation,
+                    redelivery_revision,
+                    now,
+                ],
+            )?;
+            if redelivery_updated != 1 {
+                anyhow::bail!(
+                    "Bootstrap Redelivery Requirement changed before input acknowledgement"
+                );
+            }
+        }
+        if row.status == "delivery_unknown" {
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET wait_reason = 'runtime_recovery',
+                    runtime_recovery_required = 1,
+                    last_error_code = NULL,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND status = 'waiting'
+                  AND wait_reason = 'delivery_unknown'
+                  AND execution_epoch = ?3 AND cancel_requested_at IS NULL
+                "#,
+                params![row.agent_run_id, now, row.execution_epoch],
+            )?;
+        }
+    }
+    append_raw_event(
+        transaction,
+        "runtime.input_accepted",
+        &row.camp_id,
+        "agent_run",
+        &row.agent_run_id,
+        row.execution_epoch,
+        &json!({
+            "runtimeInputDeliveryId": delivery_id,
+            "nativeInputId": native_input_id,
+            "boundarySequence": row.boundary_camp_message_sequence,
+            "bootstrapRedeliveryRevision": row.bootstrap_redelivery_revision,
+            "collaborationStateDigest": row.collaboration_state_digest,
+            "collaborationStateIncluded": row.collaboration_state_included,
+        }),
+    )?;
+    Ok(RuntimeInputDelivery {
+        id: delivery_id.to_string(),
+        status: "accepted".to_string(),
+        native_input_id: Some(native_input_id.to_string()),
+        boundary_camp_message_sequence: row.boundary_camp_message_sequence,
+        bootstrap_redelivery_revision: row.bootstrap_redelivery_revision,
+    })
 }
 
 fn validate_manifest_view_receipt(
@@ -6392,6 +6619,8 @@ mod tests {
                 AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::GrokBuild
             ) {
                 CharterDeliveryMode::NativeAppend
+            } else if adapter_kind == AdapterKind::Pi {
+                CharterDeliveryMode::ManagedSystemPrompt
             } else {
                 CharterDeliveryMode::FirstPayload
             };

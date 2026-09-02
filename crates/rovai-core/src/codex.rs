@@ -1775,6 +1775,7 @@ pub fn intercepted_action_request(
                         .and_then(Value::as_str)
                         .map(|value| vec![value.to_string()])
                         .unwrap_or_default(),
+                    command_transport: None,
                 }
             }
         }
@@ -1799,6 +1800,7 @@ pub fn intercepted_action_request(
                     .unwrap_or(&root)
                     .to_string(),
                 environment_refs: Vec::new(),
+                command_transport: None,
             }
         }
         "item/fileChange/requestApproval" | "applyPatchApproval" => {

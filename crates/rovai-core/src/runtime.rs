@@ -232,6 +232,7 @@ pub enum MissingSendRecoveryBoundary {
     ClaudeSuccessResult,
     AntigravityPrintStdout,
     AcpEndTurnAssistantSuffix,
+    PiAgentSettled,
 }
 
 impl MissingSendRecoveryBoundary {
@@ -241,6 +242,7 @@ impl MissingSendRecoveryBoundary {
             Self::ClaudeSuccessResult => "claude_success_result",
             Self::AntigravityPrintStdout => "antigravity_print_stdout",
             Self::AcpEndTurnAssistantSuffix => "acp_end_turn_assistant_suffix",
+            Self::PiAgentSettled => "pi_agent_settled",
         }
     }
 
@@ -250,6 +252,7 @@ impl MissingSendRecoveryBoundary {
             Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
             Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
             Self::AcpEndTurnAssistantSuffix => adapter_kind.uses_acp(),
+            Self::PiAgentSettled => matches!(adapter_kind, AdapterKind::Pi),
         }
     }
 }
@@ -5697,6 +5700,7 @@ mod tests {
                     AdapterKind::AntigravityApp => {
                         MissingSendRecoveryBoundary::AntigravityPrintStdout
                     }
+                    AdapterKind::Pi => MissingSendRecoveryBoundary::PiAgentSettled,
                     _ => unreachable!("non-ACP Adapter must have a dedicated boundary"),
                 }
             };
@@ -5705,6 +5709,7 @@ mod tests {
                 MissingSendRecoveryBoundary::ClaudeSuccessResult,
                 MissingSendRecoveryBoundary::AntigravityPrintStdout,
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
+                MissingSendRecoveryBoundary::PiAgentSettled,
             ] {
                 assert_eq!(
                     boundary.is_compatible_with(adapter_kind),

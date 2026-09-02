@@ -37,7 +37,9 @@ use crate::windows_runtime_entrypoint::{
 };
 use crate::{
     agent_profile::{AdapterKind, InstallationSource, RuntimeEntrypointLocatorIdentity},
-    agent_runtime_adapter::{executable_fingerprint, grok_build_minimum_version_satisfied},
+    agent_runtime_adapter::{
+        executable_fingerprint, grok_build_minimum_version_satisfied, pi_minimum_version_satisfied,
+    },
     runtime_probe_process::{ProbeCommandLimits, run_bounded_command},
 };
 
@@ -45,6 +47,7 @@ use crate::{
 const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 const CODEBUDDY_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+const PI_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(unix)]
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
@@ -649,6 +652,11 @@ pub async fn discover_runtime_version(
             {
                 observation.diagnostic_code = Some("runtime_version_below_minimum".to_string());
             }
+            if observation.runtime_kind == AdapterKind::Pi
+                && !pi_minimum_version_satisfied(Some(&version))
+            {
+                observation.diagnostic_code = Some("runtime_version_below_minimum".to_string());
+            }
             observation.reported_version = Some(version);
             observation.version_probe_succeeded = Some(true);
         }
@@ -778,6 +786,10 @@ fn version_arguments(kind: AdapterKind) -> &'static [&'static str] {
 fn version_timeout(kind: AdapterKind) -> Duration {
     match kind {
         AdapterKind::CodebuddyCli => CODEBUDDY_VERSION_TIMEOUT,
+        // Pi's packaged JavaScript entrypoint may need a cold Node startup before it can
+        // answer `--version`. Keep the bounded probe, but do not apply the native-binary
+        // deadline to this runtime.
+        AdapterKind::Pi => PI_VERSION_TIMEOUT,
         _ => VERSION_TIMEOUT,
     }
 }
@@ -1394,6 +1406,20 @@ pub fn catalog_entries() -> Vec<BTreeMap<&'static str, &'static str>> {
             ])
         })
         .collect()
+}
+
+#[cfg(test)]
+mod version_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn pi_version_probe_allows_js_cold_start() {
+        assert_eq!(version_timeout(AdapterKind::Pi), Duration::from_secs(5));
+        assert_eq!(
+            version_timeout(AdapterKind::CodexCli),
+            Duration::from_secs(2)
+        );
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -2490,11 +2516,12 @@ mod windows_tests {
     }
 
     #[test]
-    fn codebuddy_version_probe_allows_its_windows_cold_start() {
+    fn script_runtime_version_probes_allow_cold_start() {
         assert_eq!(
             version_timeout(AdapterKind::CodebuddyCli),
             Duration::from_secs(5)
         );
+        assert_eq!(version_timeout(AdapterKind::Pi), Duration::from_secs(5));
         assert_eq!(
             version_timeout(AdapterKind::CodexCli),
             Duration::from_secs(2)

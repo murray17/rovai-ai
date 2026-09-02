@@ -4319,7 +4319,10 @@ fn configure_runtime_command(
             configure_grok_native_environment(command)?;
             return Ok(plugin);
         }
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
+        AdapterKind::CodexCli
+        | AdapterKind::Pi
+        | AdapterKind::ClaudeCodeCli
+        | AdapterKind::AntigravityApp => {
             bail!("Runtime is not implemented through ACP")
         }
     }
@@ -5351,6 +5354,7 @@ pub fn intercepted_action_request(
                     .to_string_lossy()
                     .to_string(),
                     environment_refs: Vec::new(),
+                    command_transport: None,
                 }
             }
         }
@@ -5416,7 +5420,10 @@ pub fn automatically_allows_permission_requests(
         AdapterKind::QwenCode => permissions["approval_mode"] == "yolo",
         AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
         AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => false,
+        AdapterKind::CodexCli
+        | AdapterKind::Pi
+        | AdapterKind::ClaudeCodeCli
+        | AdapterKind::AntigravityApp => false,
     }
 }
 

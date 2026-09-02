@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-08-31
+last_updated: 2026-09-03
 ---
 
 # 测试与 Smoke Test
@@ -270,7 +270,7 @@ Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵�
 | 命令 | 主要范围 | 外部要求 |
 | --- | --- | --- |
 | `pnpm smoke:core` | 全新数据库、普通目录、空 Git 仓库、导航、重启和删除 | Git；不调用模型 |
-| `pnpm smoke:member-config` | 十二种产品目录 identity、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现；Cursor 验证 Catalog/Admission 阻断，不制造 Installation 或配置；macOS arm64/x64 Kimi 已准入，在 PATH 隔离 fixture 中按缺少 executable 返回 `runtime_configuration_unavailable`；Settings Preview 不进入该矩阵 |
+| `pnpm smoke:member-config` | 十四种产品目录 identity、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现；Cursor/Pi 验证 Catalog/Admission 阻断，不制造正式 Installation 或配置；macOS arm64/x64 Kimi 已准入，在 PATH 隔离 fixture 中按缺少 executable 返回 `runtime_configuration_unavailable`；Settings Preview 不进入该矩阵 |
 | `pnpm smoke:memory` | Memory Migration、治理、Revision、导出、投影恢复和权限 | 不调用模型 |
 
 ### 真实 Runtime Smoke
@@ -284,15 +284,16 @@ Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵�
 | `pnpm smoke:acp-runtime` | 已完成接入的 ACP Runtime（含 TRAE、Kimi、Grok） | `ROVAI_ACP_SMOKE_ADAPTER` 可选择单一 Runtime；命令矩阵断言公开 command output 进入 `runtime.action.payload.output`。TRAE 覆盖 warm Host/Session 与 exact `session/load` HistoryRestore；Grok `>= 1.0.0` 覆盖 warm Host/Session 与标准 ACP `session/resume`；Kimi/Grok 的普通 ACP agent text（包括 provider `<think>`）原样进入执行台与 final。Grok 正式 Host 使用官方 `$GROK_HOME/config.toml` 和 mode-0600 `.env`；隔离 Probe/Smoke 使用同一官方布局 |
 | `pnpm smoke:claude-runtime` | Claude Code | 验证原生权限、连续性和 Resume；两次无工具回复必须投影公开 narration；随后强制 `Bash` 固定 `printf`，断言公开 output、原生 tool-use ID 与同 Session/Conversation 关联 |
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 要求 `output.stream_json`，强制原生 `run_command` 固定 `printf` 并断言公开 output/step ID；另覆盖同 Session 续接、私有日志清理和 Antigravity 到 Codex 换绑 |
+| `pnpm smoke:pi-runtime` | Pi 0.84.4+ | 复制官方 Pi auth/settings/models 到临时 0700 `PI_CODING_AGENT_DIR`，隔离 Probe/Native Session/data/workspace；验证 exact cold resume、warm LRU、managed receipt、allow/deny、cancel 无副作用、Action output、locator 隐私与结构化 Usage。自动设置只在 debug Core 有效的 Pi qualification override；结果不是正式平台资格 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:builtin-cli` | 默认十二种已通过完整矩阵的 Runtime；Cursor 未准入 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖。Kimi 与 Grok 均已通过十五项 operation 并进入默认列表 |
-| `pnpm smoke:skills` | Codex 默认；`all` 为十二种已准入 Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 逐一尝试十二组真实投递、发现与消息局部注意力；Cursor `.cursor/skills` 为 DocumentationOnly。Kimi `.kimi-code/skills` 与 Grok `.grok/skills` 的投影、发现、调用 marker 和 canonical `--to-principal` 教学已通过并进入 `all`；`--to-user` 仅为隐藏兼容 alias |
+| `pnpm smoke:builtin-cli` | 默认十三种可执行实现；Cursor 未准入，Pi 仅 debug 验收 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖。选择 Pi 时复制官方配置到临时 Home，不污染用户 Session；通过不晋升平台资格 |
+| `pnpm smoke:skills` | Codex 默认；`all` 为十三种可执行实现 | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 逐一尝试十三组真实投递、发现与消息局部注意力；Cursor `.cursor/skills` 为 DocumentationOnly。Kimi `.kimi-code/skills`、Grok `.grok/skills` 与 Pi `.pi/skills` 进入矩阵；选择 Pi 时使用临时官方配置副本与 debug-only admission，结果不等于正式资格；`--to-user` 仅为隐藏兼容 alias |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
-| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin：原生同名项 `NativeWinsSkip`，不同名 assignment 逐 Run 追加并真实调用；Kimi 额外覆盖 stdio、Streamable HTTP 和第二个 stdio Server；默认十一种 |
+| `pnpm smoke:mcp-projection` | Codex、Pi、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin并 `NativeWinsSkip`；Kimi/Pi 覆盖 stdio、Streamable HTTP 和第二个 stdio Server，Pi 为 `RovaiWins/CoreManaged` 且使用临时官方配置副本；默认十二种 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
-| `pnpm smoke:missing-send-recovery` | 十二种已完成专项矩阵的 Runtime（含 Kimi、Grok）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture。Kimi/Grok 与其他 ACP Runtime 共用公开 assistant stream、严格 candidate/抑制规则和完整正文 digest；provider `<think>` 不清洗、不重分类 |
+| `pnpm smoke:missing-send-recovery` | 十三种可执行实现（含 Pi、Kimi、Grok）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture，Pi 使用 `agent_settled` 专属终点。Pi 官方配置与 Session root 同样逐 Runtime 临时复制；debug pass 不晋升正式资格 |
 | `pnpm accept:planned-shutdown` | 当前平台正式 Runtime + packaged App | 在隔离 Git workspace/`userData` 中等待真实 input handoff 后退出，验证 5 秒目标、10 秒硬 deadline、400ms 关闭反馈门槛、无伪 terminal、进程 reap、重启 blocker、Run 取消审计与安全退出 modal 截图；运行前在 macOS 执行 `pnpm package:mac`，在 Windows x64 执行 `pnpm package:windows:x64` |
 | `pnpm accept:onboarding-ui` | 本机首个可用正式 Runtime + packaged App | 不调用模型；用全新隔离 `userData` 验证三页断点、真实 provisioning、`初次集结`、Draft-only starter、重启与 `1040×700` 双主题截图 |
 | `pnpm accept:bootstrap-shell-ui` | 无 Runtime；packaged App + 独立未知 authority / 崩溃恢复 fixture | 不调用模型；证明未知 authority 保留、业务树不挂载、显式重试不消耗 crash budget；另在真实 Core 写事务产生 WAL 后强杀该隔离子进程，验证结构化失败字段、自动恢复已提交数据和工作区重挂载；覆盖双主题、窄窗口、200% 等效布局与 reduced motion 截图 |
@@ -331,6 +332,9 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | --- | --- |
 | `ROVAI_ACP_SMOKE_ADAPTER` | `smoke:acp-runtime` |
 | `ROVAI_ACP_COMMAND_OUTPUT_ONLY=1` | `smoke:acp-runtime` 在固定 `printf` output 断言后停止；不替代默认完整 write/deny 回归 |
+| `ROVAI_PI_BIN` | Pi 0.84.4+ executable；Pi 专用与通用 Runtime smoke 都只在 debug Core 对该 Adapter启用本机 qualification override |
+| `ROVAI_PI_CONFIG_SOURCE` | Pi smoke 只读复制的官方配置根，默认 `~/.pi/agent`；副本与测试 Session 位于 fixture root，结束时删除 |
+| `ROVAI_BUILTIN_CLI_ADAPTERS` | Built-in CLI Runtime 列表；选择 Pi 时自动隔离官方配置副本 |
 | `ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER` | 仅 Windows debug Core 的逐 Runtime 资格采集；值为一个精确 `AdapterKind`，或仅在跨 Runtime 交接 Smoke / 本机资格 App 中使用逗号分隔的精确 `AdapterKind` 列表。它只允许列出的 Adapter 进入真实检查和执行，并把当前 Windows debug Catalog 中对应行投影为带 `local-debug` evidence 的 `qualified`，使训练营可以继续安装与认证检查；release 构建忽略该变量且仍使用正式平台准入矩阵 |
 | `ROVAI_SKILL_SMOKE_ADAPTERS` | Skill Runtime 列表或 `all` |
 | `ROVAI_SKILL_SMOKE_MODEL` | Skill Smoke 只选一种 Runtime 时要显式验证的模型 ID |
@@ -394,6 +398,8 @@ fixture、截图、窗口尺寸和直接调用 capture 脚本的方法见
 - Smoke 应使用临时 Core `data-dir`、临时工作区和独立配置投影；不得读写日常
   Rovai-ai SQLite。
 - Runtime Smoke 会继承当前进程可见的上游认证环境，但不应改写用户级 Runtime 配置。
+- 选择 Pi 的 smoke 必须把官方 auth/settings/models 以 0600 复制到测试专用 0700 `PI_CODING_AGENT_DIR`，并让
+  Probe 使用自己的 `--session-dir`；禁止把测试 prompt、Session 或 MCP/Skill exposure 写入用户 Pi Session 历史。
 - 任何声明会写文件的测试都必须把目标限制在临时 fixture；失败后先检查脚本是否保留
   了排查路径，再决定清理。
 - 模型回复、耗时和费用不是稳定断言。测试应断言协议、状态、证据和限定 marker。

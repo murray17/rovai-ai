@@ -461,6 +461,7 @@ function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' }): React.JSX.El
 function adapterLabel(kind: AdapterKind): string {
   return ({
     'codex-cli': 'Codex CLI',
+    pi: 'Pi Coding Agent',
     'opencode-cli': 'OpenCode',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',

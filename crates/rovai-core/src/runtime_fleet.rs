@@ -19,6 +19,7 @@ use crate::{
     acp::AcpHost,
     builtin_tool_runtime::{BuiltinToolLeaseRegistry, BuiltinToolProcessConfig},
     codex::CodexHost,
+    pi::PiHost,
 };
 
 pub(crate) const DEFAULT_MAX_RESIDENT_PROCESSES_PER_MEMBER: usize = 20;
@@ -88,6 +89,7 @@ pub(crate) enum FleetResidency {
 pub(crate) enum RuntimeProcessHost {
     Codex(Arc<CodexHost>),
     Acp(Arc<AcpHost>),
+    Pi(Arc<PiHost>),
     #[cfg(test)]
     Fake(Arc<FakeRuntimeProcessHost>),
 }
@@ -105,6 +107,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.host_instance_id(),
             Self::Acp(host) => host.host_instance_id(),
+            Self::Pi(host) => host.host_instance_id(),
             #[cfg(test)]
             Self::Fake(host) => &host.process_id,
         }
@@ -114,6 +117,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.is_alive(),
             Self::Acp(host) => host.is_alive(),
+            Self::Pi(host) => host.is_alive(),
             #[cfg(test)]
             Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
         }
@@ -123,6 +127,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.is_quiescent().await,
             Self::Acp(host) => host.is_quiescent().await,
+            Self::Pi(host) => host.is_quiescent().await,
             #[cfg(test)]
             Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
         }
@@ -132,6 +137,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.shutdown_and_reap().await,
             Self::Acp(host) => host.shutdown_and_reap().await,
+            Self::Pi(host) => host.shutdown_and_reap().await,
             #[cfg(test)]
             Self::Fake(host) => {
                 tokio::time::sleep(host.shutdown_delay).await;
@@ -145,6 +151,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.force_reap_until(deadline).await,
             Self::Acp(host) => host.force_reap_until(deadline).await,
+            Self::Pi(host) => host.force_reap_until(deadline).await,
             #[cfg(test)]
             Self::Fake(host) => {
                 host.reaped.load(std::sync::atomic::Ordering::Acquire)
@@ -164,6 +171,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.pid(),
             Self::Acp(host) => host.pid(),
+            Self::Pi(host) => host.pid(),
             #[cfg(test)]
             Self::Fake(host) => {
                 (!host.reaped.load(std::sync::atomic::Ordering::Acquire)).then_some(42)
@@ -175,6 +183,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.executable_path(),
             Self::Acp(host) => host.executable_path(),
+            Self::Pi(host) => host.executable_path(),
             #[cfg(test)]
             Self::Fake(_) => Path::new("fake-runtime"),
         }
@@ -184,6 +193,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.builtin_tool_process_config().cloned(),
             Self::Acp(host) => host.builtin_tool_process_config().cloned(),
+            Self::Pi(host) => host.builtin_tool_process_config().cloned(),
             #[cfg(test)]
             Self::Fake(_) => None,
         }
@@ -193,6 +203,7 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => Ok(host),
             Self::Acp(_) => bail!("Fleet returned an ACP Host to the Codex Adapter"),
+            Self::Pi(_) => bail!("Fleet returned a Pi Host to the Codex Adapter"),
             #[cfg(test)]
             Self::Fake(_) => bail!("Fleet returned a fake Host to the Codex Adapter"),
         }
@@ -202,8 +213,19 @@ impl RuntimeProcessHost {
         match self {
             Self::Acp(host) => Ok(host),
             Self::Codex(_) => bail!("Fleet returned a Codex Host to an ACP Adapter"),
+            Self::Pi(_) => bail!("Fleet returned a Pi Host to an ACP Adapter"),
             #[cfg(test)]
             Self::Fake(_) => bail!("Fleet returned a fake Host to the ACP Adapter"),
+        }
+    }
+
+    pub(crate) fn into_pi(self) -> Result<Arc<PiHost>> {
+        match self {
+            Self::Pi(host) => Ok(host),
+            Self::Codex(_) => bail!("Fleet returned a Codex Host to the Pi Adapter"),
+            Self::Acp(_) => bail!("Fleet returned an ACP Host to the Pi Adapter"),
+            #[cfg(test)]
+            Self::Fake(_) => bail!("Fleet returned a fake Host to the Pi Adapter"),
         }
     }
 }

@@ -11,9 +11,10 @@ use anyhow::{Context, Result, bail};
 use rovai_core::{
     agent_profile::AdapterKind,
     agent_runtime_adapter::{
-        GROK_BUILD_MINIMUM_VERSION_LABEL, KIRO_ADDITIVE_AGENT_NAME, executable_fingerprint,
-        grok_build_minimum_version_satisfied, trae_machine_ready_capabilities,
-        trae_machine_ready_requirements, write_kiro_additive_agent_config,
+        GROK_BUILD_MINIMUM_VERSION_LABEL, KIRO_ADDITIVE_AGENT_NAME, PI_MINIMUM_VERSION_LABEL,
+        executable_fingerprint, grok_build_minimum_version_satisfied, pi_minimum_version_satisfied,
+        trae_machine_ready_capabilities, trae_machine_ready_requirements,
+        write_kiro_additive_agent_config,
     },
     managed_process::{ManagedChildStdin, ManagedChildStdout},
     runtime_discovery::{
@@ -152,6 +153,12 @@ pub struct ClaudeCodeCapabilityProbe {
 }
 
 #[derive(Debug, Clone)]
+pub struct PiCapabilityProbe {
+    pub result: AgentRuntimeProbeResult,
+    pub raw_model_catalog: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
 pub struct AntigravityCapabilityProbe {
     pub result: AgentRuntimeProbeResult,
     pub models: Vec<String>,
@@ -216,6 +223,139 @@ pub async fn claude_code_capability_probe_at(path: &Path) -> ClaudeCodeCapabilit
 
 pub async fn antigravity_capability_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     antigravity_probe_at(path).await
+}
+
+pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    let path_text = path.to_string_lossy().to_string();
+    if !path.is_file() {
+        return PiCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::Pi.as_str(),
+                Some(path_text),
+                None,
+                None,
+                AgentRuntimeProbeStatus::NotInstalled,
+                Vec::new(),
+                vec!["pi.rpc.agent_settled".to_string()],
+                Some("Configured Pi executable does not exist.".to_string()),
+                probed_at,
+            ),
+            raw_model_catalog: None,
+        };
+    }
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let fingerprint = executable_fingerprint_async(path.clone()).await;
+    let mut version_command = runtime_command(&path);
+    version_command.arg("--version").stdin(Stdio::null());
+    let version = bounded_output(&mut version_command, Duration::from_secs(5))
+        .await
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout.bytes)
+                .trim()
+                .to_string()
+        })
+        .filter(|value| !value.is_empty());
+    if !pi_minimum_version_satisfied(version.as_deref()) {
+        return PiCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::Pi.as_str(),
+                Some(path_text),
+                version,
+                fingerprint,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                Vec::new(),
+                vec![format!("pi.version>={PI_MINIMUM_VERSION_LABEL}")],
+                Some(format!(
+                    "runtime_version_below_minimum: Pi >= {PI_MINIMUM_VERSION_LABEL} is required."
+                )),
+                probed_at,
+            ),
+            raw_model_catalog: None,
+        };
+    }
+    match crate::pi::behavioral_probe(&path).await {
+        Ok(observation) => PiCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::Pi.as_str(),
+                Some(path_text),
+                version,
+                fingerprint,
+                AgentRuntimeProbeStatus::Ready,
+                observation.capabilities,
+                Vec::new(),
+                Some(format!(
+                    "Pi JSONL RPC, managed input, authoritative settlement, and exact Session identity verified (model {})",
+                    observation.model_fingerprint
+                )),
+                probed_at,
+            ),
+            raw_model_catalog: Some(observation.raw_model_catalog),
+        },
+        Err(error) => {
+            let (status, detail) = classify_pi_probe_failure(&format!("{error:#}"));
+            PiCapabilityProbe {
+                result: agent_probe_result(
+                    AdapterKind::Pi.as_str(),
+                    Some(path_text),
+                    version,
+                    fingerprint,
+                    status,
+                    Vec::new(),
+                    vec![
+                        "pi.rpc.agent_settled".to_string(),
+                        "pi.rpc.extension_approval".to_string(),
+                    ],
+                    Some(detail.to_string()),
+                    probed_at,
+                ),
+                raw_model_catalog: None,
+            }
+        }
+    }
+}
+
+fn classify_pi_probe_failure(detail: &str) -> (AgentRuntimeProbeStatus, &'static str) {
+    let lower = detail.to_ascii_lowercase();
+    if [
+        "authentication_required",
+        "authentication required",
+        "not authenticated",
+        "unauthorized",
+        "not logged in",
+        "log in",
+        "login required",
+        "api key",
+        "credential",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return (
+            AgentRuntimeProbeStatus::AuthenticationRequired,
+            "authentication_required: Pi native authentication is unavailable.",
+        );
+    }
+    if [
+        "model_required",
+        "no selected provider/model",
+        "no model configured",
+        "model is not configured",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return (
+            AgentRuntimeProbeStatus::ProbeFailed,
+            "model_required: Pi has no native model configured.",
+        );
+    }
+    (
+        AgentRuntimeProbeStatus::ProbeFailed,
+        "Pi could not verify native authentication, managed input, and the behavioral RPC contract.",
+    )
 }
 
 async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
@@ -2011,7 +2151,10 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         AdapterKind::GrokBuild => {
             configure_grok_acp_command(command, None);
         }
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {}
+        AdapterKind::CodexCli
+        | AdapterKind::Pi
+        | AdapterKind::ClaudeCodeCli
+        | AdapterKind::AntigravityApp => {}
     }
 }
 
@@ -2957,6 +3100,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
             ][..],
             "opencode",
         ),
+        AdapterKind::Pi => (&["ROVAI_PI_BIN"][..], "pi"),
         AdapterKind::CopilotCli => (
             &[
                 "ROVAI_COPILOT_BIN",
