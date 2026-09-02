@@ -5,6 +5,11 @@ export const DINGTALK_AI_CARD_TEMPLATE_ID = '382e4302-551d-4880-bf29-a30acfab2e7
 const DINGTALK_CARD_ACTION_PREFIX = 'rovai.v1.'
 const MAX_DINGTALK_CARD_ACTION_BYTES = 4_096
 
+export type DingTalkCardDeliveryIdentity = {
+  outTrackId: string
+  recallMessageId: string
+}
+
 export class DingTalkOpenApiClient {
   readonly #appKey: string
   readonly #appSecret: string
@@ -87,7 +92,7 @@ export class DingTalkOpenApiClient {
     robotCode: string
     space: 'group' | 'p2p'
     cardParamMap: Record<string, string>
-  }): Promise<string> {
+  }): Promise<DingTalkCardDeliveryIdentity> {
     const expectedPrefix = input.space === 'group'
       ? 'dtv1.card//IM_GROUP.'
       : 'dtv1.card//IM_ROBOT.'
@@ -95,7 +100,7 @@ export class DingTalkOpenApiClient {
       throw new Error('dingtalk_card_space_invalid')
     }
     await this.createCardInstance(input.outTrackId, input.cardParamMap)
-    await this.#request('/v1.0/card/instances/deliver', {
+    const response = await this.#request('/v1.0/card/instances/deliver', {
       method: 'POST',
       body: JSON.stringify({
         outTrackId: input.outTrackId,
@@ -110,7 +115,41 @@ export class DingTalkOpenApiClient {
             })
       })
     })
-    return input.outTrackId
+    const result = singleDeliveryResult(response)
+    if (result.success !== true) throw new Error('dingtalk_open_api_card_delivery_failed')
+    return {
+      outTrackId: input.outTrackId,
+      recallMessageId: requiredString(result, 'carrierId')
+    }
+  }
+
+  async recallRobotMessage(input: {
+    conversationKind: 'group' | 'p2p'
+    chatId: string
+    robotCode: string
+    recallMessageId: string
+  }): Promise<void> {
+    const response = await this.#request(input.conversationKind === 'group'
+      ? '/v1.0/robot/groupMessages/recall'
+      : '/v1.0/robot/otoMessages/batchRecall', {
+      method: 'POST',
+      body: JSON.stringify({
+        processQueryKeys: [input.recallMessageId],
+        robotCode: input.robotCode,
+        ...(input.conversationKind === 'group'
+          ? { openConversationId: input.chatId }
+          : {})
+      })
+    })
+    const failed = response.failedResult
+    if (failed && typeof failed === 'object' && !Array.isArray(failed)
+      && Object.keys(failed).length > 0) {
+      throw new Error('dingtalk_open_api_recall_failed')
+    }
+    const succeeded = response.successResult
+    if (!Array.isArray(succeeded) || !succeeded.includes(input.recallMessageId)) {
+      throw new Error('dingtalk_open_api_recall_identity_missing')
+    }
   }
 
   async createCardInstance(
@@ -246,7 +285,7 @@ export function dingtalkCardParams(input: {
   title: string
   content?: string | null
   buttons?: DingTalkCardButton[]
-  flowStatus?: '1' | '2' | '3' | '5'
+  flowStatus?: '1' | '2' | '3' | '4' | '5'
   streamingContent?: boolean
 }): Record<string, string> {
   const buttons = input.buttons ?? []
@@ -289,4 +328,15 @@ function deliveryIdentity(value: Record<string, unknown>): string {
     ?? optionalString(value, 'messageId')
   if (!identity) throw new Error('dingtalk_open_api_delivery_identity_missing')
   return identity
+}
+
+function singleDeliveryResult(value: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(value.result) || value.result.length !== 1) {
+    throw new Error('dingtalk_open_api_card_delivery_result_missing')
+  }
+  const result = value.result[0]
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw new Error('dingtalk_open_api_card_delivery_result_missing')
+  }
+  return result as Record<string, unknown>
 }

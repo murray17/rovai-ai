@@ -2307,6 +2307,9 @@ export class ChannelSettingsService {
       workerId: HOST_WORKER_ID,
       outcome: error ? 'failed' : 'sent',
       externalDeliveryMessageId: messageId,
+      externalUpdateMessageId: delivery.deliveryKind === 'execution_console_upsert'
+        ? messageId
+        : null,
       failureCode,
       retryable
     })

@@ -3,12 +3,12 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-01
+last_updated: 2026-09-02
 ---
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v14](../contracts/feishu-channel-v14.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v15](../contracts/feishu-channel-v15.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -300,6 +300,10 @@ Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可�
 72 个显示列保留首尾，面板只显示最多两行既有安全 `publicResult`；Main 不从 raw Evidence 或工具输入生成结果。最近输出
 无分页，并继续受 50-element/24 KiB 卡片预算约束，超限从最旧项淘汰。Main 重启恢复收起。所有 upsert、callback 与
 recall 共用 per-card 串行队列。
+
+动作区只有“打开执行台”使用蓝色 `primary` 层级；最近输出保持默认样式，停止保持危险样式。按钮都填满等权列，
+`column_set.flex_mode=stretch` 让宽端保持同行、手机或其他窄端由飞书客户端将每列拉伸成独占整行。Host 不维护按设备
+分叉的卡片 JSON。最近输出内的安全 Command 继续使用默认收起的原生折叠面板，不受动作区布局变化影响。
 
 “打开执行台”不进入 Host callback，也不识别飞书操作者。Main 仅在卡片第一次发送且 `ExecutionViewService` ready 时，
 把当时的私有 LAN IPv4、全局用户端口与新随机 Token 拼成固定 URL；卡片后续更新只复用该字符串。IP/端口变化不扫描、

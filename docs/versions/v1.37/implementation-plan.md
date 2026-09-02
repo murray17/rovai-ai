@@ -26,6 +26,9 @@ last_updated: 2026-09-02
   共享 LAN 执行台及 DingTalk Owner recent/exact-run cancel；Topic、直接多 Bot 和附件 gate 不扩大。
 - [x] 飞书最近输出的每条 command 改为默认收起的原生面板，最多展示两行既有安全结果；钉钉继续不展示
   command result。两端共用 `$`、约 72 显示列的首尾截断；新钉钉 Bot 描述前缀统一为 `Rovai AI Teammate`。
+- [x] 飞书“打开执行台”改为蓝色主按钮，动作列使用 stretch 响应式布局；钉钉执行/排队 AI Card 保存
+  carrier recall identity 并使用 group/p2p Robot API 真正撤回，outTrack 继续独立承担 update/callback；运行中停止
+  按钮和 queue ack FIFO 语义保持启用，不增加未上线旧卡兼容分支。
 - [ ] 使用“爱丽丝”完成钉钉桌面端/手机端真实租户验收；本项不由本地 fixture 或 Core 测试替代。
 - [x] 具体文件点击直接创建临时只读 Preview handle；工作区外文件、五类来源与 symlink 不再自动升级 Root Grant；
   HTML/Markdown 资源限定文档目录并随 Tab 释放，Renderer 删除 `authorization_required → chooseAuthorizedRoot()`。
@@ -497,3 +500,18 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   ChannelTurn 误标 `channel_delivery_failed`；Main 已改为官方 `/v1.0/robot/groupMessages/send` 并移除该接口 schema
   不支持的 `atUserIds`。新 Applications 包再次在同一内部群复验：Run succeeded、`agent_output` 一次 sent、
   ChannelTurn completed，钉钉客户端同时显示完成卡和永久正文。
+
+### 2026-09-02 渠道动作布局与钉钉真实撤回
+
+- 飞书执行卡将“打开执行台”提升为蓝色 `primary` 按钮；动作 `column_set` 使用 `flex_mode=stretch`，宽端继续
+  同行等宽，窄端由 Card 2.0 原生伸展为每个按钮独占一行。最近输出仍沿用既有紧凑呈现：安全 Command 默认折叠，
+  公开结果最多两行，未退回平铺正文。
+- 钉钉 AI Card 把稳定 `outTrackId` 与投递返回的 `carrierId` 分离：前者只负责卡片更新和 callback，后者作为
+  Robot recall 的 `processQueryKey`。运行中卡恢复三个入口，连续请求发送排队卡；请求入场时真实撤回其排队卡和
+  上一张终态执行卡，不再用“状态已结束”伪装撤回。终态仍移除“停止执行”。钉钉最近输出继续只显示紧凑、截断后的
+  Command 文案，不附带 Command result。
+- 完整 `pnpm test` 通过：135 个 Vitest 文件 / 1422 项，Node 221 项中 220 项通过且 1 项 Windows 条件跳过；
+  `cargo test -p rovai-core --lib -- --test-threads=1` 的 474 项全部通过。`pnpm typecheck`、`pnpm build:desktop`、
+  `cargo clippy -p rovai-core --lib -- -D warnings`、Rust fmt、普通文档门禁、以 `origin/main` 为 base 的 CI 文档门禁及
+  `git diff --check` 均通过。本轮未启动日常 App、真实 Runtime 或真实渠道连接；飞书手机端纵向布局与钉钉真实租户
+  撤回仍须在后续 Applications 验收中确认。

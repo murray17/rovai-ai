@@ -76,10 +76,20 @@ describe('Feishu execution console card', () => {
     expect(buttons(card).map((button) => (button.text as { content: string }).content))
       .toEqual(['显示最近输出', '打开执行台', '停止执行'])
     expect(buttons(card)[1]).toMatchObject({
+      type: 'primary',
       behaviors: [{
         type: 'open_url',
         default_url: 'http://192.168.1.23:8765/execution/run-1#t=fixed-token'
       }]
+    })
+    expect(elements(card).at(-1)).toMatchObject({
+      tag: 'column_set',
+      flex_mode: 'stretch',
+      columns: [
+        { elements: [{ width: 'fill' }] },
+        { elements: [{ width: 'fill' }] },
+        { elements: [{ width: 'fill' }] }
+      ]
     })
     expect(JSON.stringify(buttons(card)[1])).not.toContain('callback')
     expect(JSON.stringify(buttons(card)[0])).not.toContain('snapshotSequence')

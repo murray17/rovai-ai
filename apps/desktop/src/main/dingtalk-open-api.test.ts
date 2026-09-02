@@ -16,16 +16,18 @@ describe('DingTalk OpenAPI client', () => {
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null })
       return Response.json(url.endsWith('/oauth2/accessToken')
         ? { accessToken: 'token', expireIn: 7200 }
-        : { success: true })
+        : url.endsWith('/card/instances/deliver')
+          ? { success: true, result: [{ success: true, carrierId: 'carrier-1' }] }
+          : { success: true })
     }))
     const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
-    await client.createAndDeliverCard({
+    await expect(client.createAndDeliverCard({
       outTrackId: 'card-1',
       openSpaceId: 'dtv1.card//IM_ROBOT.owner-1',
       robotCode: 'ding-app',
       space: 'p2p',
       cardParamMap: dingtalkCardParams({ title: 'Rovai', content: '完成' })
-    })
+    })).resolves.toEqual({ outTrackId: 'card-1', recallMessageId: 'carrier-1' })
 
     expect(calls[1]?.body).toMatchObject({
       cardTemplateId: DINGTALK_AI_CARD_TEMPLATE_ID,
@@ -38,6 +40,56 @@ describe('DingTalk OpenAPI client', () => {
       openSpaceId: 'dtv1.card//IM_ROBOT.owner-1',
       imRobotOpenDeliverModel: { spaceType: 'IM_ROBOT' }
     })
+    expect(calls[2]?.body.imRobotOpenDeliverModel).not.toHaveProperty('robotCode')
+  })
+
+  it.each([
+    ['group', '/v1.0/robot/groupMessages/recall', { openConversationId: 'group-1' }],
+    ['p2p', '/v1.0/robot/otoMessages/batchRecall', {}]
+  ] as const)('recalls a delivered %s card by its carrier identity', async (
+    conversationKind,
+    path,
+    expectedTarget
+  ) => {
+    const calls: Array<{ url: string; body: any }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return Response.json(url.endsWith('/oauth2/accessToken')
+        ? { accessToken: 'token', expireIn: 7200 }
+        : { successResult: ['carrier-1'], failedResult: {} })
+    }))
+    const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+
+    await client.recallRobotMessage({
+      conversationKind,
+      chatId: 'group-1',
+      robotCode: 'robot-1',
+      recallMessageId: 'carrier-1'
+    })
+
+    expect(calls[1]?.url).toContain(path)
+    expect(calls[1]?.body).toEqual({
+      processQueryKeys: ['carrier-1'],
+      robotCode: 'robot-1',
+      ...expectedTarget
+    })
+  })
+
+  it('rejects a partial recall response instead of treating it as success', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => Response.json(
+      String(input).endsWith('/oauth2/accessToken')
+        ? { accessToken: 'token', expireIn: 7200 }
+        : { successResult: [], failedResult: { 'carrier-1': 'SYSTEM_ERROR' } }
+    )))
+    const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+
+    await expect(client.recallRobotMessage({
+      conversationKind: 'p2p',
+      chatId: 'owner-1',
+      robotCode: 'robot-1',
+      recallMessageId: 'carrier-1'
+    })).rejects.toThrow('dingtalk_open_api_recall_failed')
   })
 
   it('rejects a card space whose type does not match the delivery model', async () => {
@@ -49,6 +101,25 @@ describe('DingTalk OpenAPI client', () => {
       space: 'p2p',
       cardParamMap: {}
     })).rejects.toThrow('dingtalk_card_space_invalid')
+  })
+
+  it('rejects a delivery result that has a carrier but no explicit success', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => Response.json(
+      String(input).endsWith('/oauth2/accessToken')
+        ? { accessToken: 'token', expireIn: 7200 }
+        : String(input).endsWith('/card/instances/deliver')
+          ? { result: [{ carrierId: 'carrier-1' }] }
+          : { success: true }
+    )))
+    const client = new DingTalkOpenApiClient({ appKey: 'ding-app', appSecret: 'secret' })
+
+    await expect(client.createAndDeliverCard({
+      outTrackId: 'card-1',
+      openSpaceId: 'dtv1.card//IM_ROBOT.owner-1',
+      robotCode: 'robot-1',
+      space: 'p2p',
+      cardParamMap: dingtalkCardParams({ title: 'Rovai', content: '完成' })
+    })).rejects.toThrow('dingtalk_open_api_card_delivery_failed')
   })
 
   it('rejects nested per-target business failures returned with HTTP 200', async () => {

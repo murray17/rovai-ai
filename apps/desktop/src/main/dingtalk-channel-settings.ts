@@ -211,6 +211,7 @@ type ClaimedDelivery = {
   payload: Record<string, unknown>
   attemptCount: number
   updateMessageId: string | null
+  recallMessageId?: string | null
   recipientOpenId: string | null
 }
 
@@ -1380,11 +1381,13 @@ export class DingTalkChannelSettingsService {
     }
     let cardFallback: { title: string; text: string } | null = null
     try {
+      let deliveryMessageId: string | null = null
+      let externalUpdateMessageId: string | null = null
       let externalId = delivery.updateMessageId
       if (delivery.deliveryKind === 'agent_output') {
         const body = requiredPayloadString(delivery.payload, 'body')
         const title = bot.botDisplayName
-        externalId = delivery.conversationKind === 'group'
+        deliveryMessageId = delivery.conversationKind === 'group'
           ? await api.sendGroupMarkdown({
             openConversationId: delivery.chatId,
             robotCode: bot.robotCode,
@@ -1397,16 +1400,18 @@ export class DingTalkChannelSettingsService {
             title,
             text: body
           })
+        externalId = deliveryMessageId
       } else if (delivery.deliveryKind === 'agent_attachment') {
         throw new Error('dingtalk_attachment_delivery_not_supported')
       } else if (delivery.deliveryKind === 'project_selection') {
         const operation = String(delivery.payload.operation ?? 'send')
         const params = projectCardParams(delivery.payload, operation === 'recall')
-        if (externalId) await api.updateCard(externalId, params)
-        else {
-          externalId = dingtalkOutTrackId('bind', delivery.deliveryId)
-          await api.createAndDeliverCard({
-            outTrackId: externalId,
+        if (externalId) {
+          await api.updateCard(externalId, params)
+          deliveryMessageId = externalId
+        } else {
+          const delivered = await api.createAndDeliverCard({
+            outTrackId: dingtalkOutTrackId('bind', delivery.deliveryId),
             openSpaceId: delivery.conversationKind === 'group'
               ? `dtv1.card//IM_GROUP.${delivery.chatId}`
               : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
@@ -1414,19 +1419,22 @@ export class DingTalkChannelSettingsService {
             space: delivery.conversationKind,
             cardParamMap: params
           })
+          externalId = delivered.outTrackId
+          deliveryMessageId = delivered.outTrackId
         }
       } else if (delivery.deliveryKind === 'execution_console_recall') {
+        const recallMessageId = delivery.recallMessageId
+        if (!recallMessageId) throw new Error('dingtalk_recall_identity_missing')
+        await api.recallRobotMessage({
+          conversationKind: delivery.conversationKind,
+          chatId: delivery.chatId,
+          robotCode: bot.robotCode,
+          recallMessageId
+        })
         if (executionAgentRunId) {
           const state = this.#executionCardStates.get(executionAgentRunId)
           this.#dependencies.executionView?.revokeExecutionViewUrl(state?.executionViewUrl ?? null)
           this.#executionCardStates.delete(executionAgentRunId)
-        }
-        if (externalId) {
-          await api.updateCard(externalId, dingtalkCardParams({
-            title: bot.botDisplayName,
-            content: '此执行记录已结束。',
-            flowStatus: '3'
-          }))
         }
       } else if (delivery.deliveryKind === 'execution_console_upsert') {
         const source = await this.#dependencies.core.request<DingTalkExecutionConsoleSource | null>(
@@ -1467,9 +1475,8 @@ export class DingTalkChannelSettingsService {
           if (externalId) {
             if (state.lastCardDigest !== cardDigest) await api.updateCard(externalId, params)
           } else {
-            externalId = dingtalkOutTrackId('run', delivery.deliveryId)
-            await api.createAndDeliverCard({
-              outTrackId: externalId,
+            const delivered = await api.createAndDeliverCard({
+              outTrackId: dingtalkOutTrackId('run', delivery.deliveryId),
               openSpaceId: delivery.conversationKind === 'group'
                 ? `dtv1.card//IM_GROUP.${delivery.chatId}`
                 : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
@@ -1477,36 +1484,55 @@ export class DingTalkChannelSettingsService {
               space: delivery.conversationKind,
               cardParamMap: params
             })
+            externalId = delivered.outTrackId
+            deliveryMessageId = delivered.recallMessageId
           }
+          externalUpdateMessageId = externalId
           state.externalMessageId = externalId
           state.lastCardDigest = cardDigest
         }
       } else {
         const closed = delivery.payload.action === 'recall'
-        cardFallback = {
-          title: delivery.deliveryKind === 'attention' ? 'Rovai 需要你确认' : 'Rovai',
-          text: closed ? '状态已结束。' : String(delivery.payload.text ?? '状态已更新')
-        }
-        const params = dingtalkCardParams({
-          title: delivery.deliveryKind === 'attention' ? 'Rovai 需要你确认' : 'Rovai 已接收',
-          content: closed ? '状态已结束。' : String(delivery.payload.text ?? '状态已更新'),
-          flowStatus: closed ? '3' : '1'
-        })
-        if (externalId) await api.updateCard(externalId, params)
-        else {
-          externalId = dingtalkOutTrackId('status', delivery.deliveryId)
-          await api.createAndDeliverCard({
-            outTrackId: externalId,
-            openSpaceId: delivery.conversationKind === 'group'
-              ? `dtv1.card//IM_GROUP.${delivery.chatId}`
-              : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
+        if (closed) {
+          const recallMessageId = delivery.recallMessageId
+          if (!recallMessageId) throw new Error('dingtalk_recall_identity_missing')
+          await api.recallRobotMessage({
+            conversationKind: delivery.conversationKind,
+            chatId: delivery.chatId,
             robotCode: bot.robotCode,
-            space: delivery.conversationKind,
-            cardParamMap: params
+            recallMessageId
           })
+        } else {
+          cardFallback = {
+            title: delivery.deliveryKind === 'attention' ? 'Rovai 需要你确认' : 'Rovai',
+            text: String(delivery.payload.text ?? '状态已更新')
+          }
+          const params = dingtalkCardParams({
+            title: delivery.deliveryKind === 'attention' ? 'Rovai 需要你确认' : 'Rovai 已接收',
+            content: String(delivery.payload.text ?? '状态已更新'),
+            flowStatus: '1'
+          })
+          if (externalId) {
+            await api.updateCard(externalId, params)
+            deliveryMessageId = externalId
+          } else {
+            const delivered = await api.createAndDeliverCard({
+              outTrackId: dingtalkOutTrackId('status', delivery.deliveryId),
+              openSpaceId: delivery.conversationKind === 'group'
+                ? `dtv1.card//IM_GROUP.${delivery.chatId}`
+                : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
+              robotCode: bot.robotCode,
+              space: delivery.conversationKind,
+              cardParamMap: params
+            })
+            externalId = delivered.outTrackId
+            deliveryMessageId = delivery.deliveryKind === 'queue_ack'
+              ? delivered.recallMessageId
+              : delivered.outTrackId
+          }
         }
       }
-      await this.#settle(delivery, externalId ?? null, null)
+      await this.#settle(delivery, deliveryMessageId, null, externalUpdateMessageId)
     } catch (error) {
       if (cardFallback && !delivery.updateMessageId) {
         try {
@@ -1555,12 +1581,18 @@ export class DingTalkChannelSettingsService {
     })
   }
 
-  async #settle(delivery: ClaimedDelivery, messageId: string | null, error: string | null): Promise<void> {
+  async #settle(
+    delivery: ClaimedDelivery,
+    messageId: string | null,
+    error: string | null,
+    updateMessageId: string | null = null
+  ): Promise<void> {
     const result = await this.#command('channels.dingtalk.deliveries.settle', {
       deliveryId: delivery.deliveryId,
       workerId: WORKER_ID,
       outcome: error ? 'failed' : 'sent',
       externalDeliveryMessageId: messageId,
+      externalUpdateMessageId: updateMessageId,
       failureCode: error,
       retryable: error ? /timeout|rate|connected|network/u.test(error) : false
     }, false)
@@ -1748,10 +1780,12 @@ export function executionCardParams(
       ? recent.join('\n\n') || '暂无公开执行记录。'
       : null,
     buttons,
+    // DingTalk flowStatus=1 replaces the custom card with its built-in loading shell.
+    // Status 4 keeps the execution layout and its three controls visible.
     flowStatus: source.run.status === 'failed' ? '5'
       : terminal ? '3'
         : source.run.status === 'waiting' || source.run.waitReason ? '2'
-          : '1'
+          : '4'
   })
 }
 
