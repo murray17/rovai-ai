@@ -226,9 +226,11 @@ export function ChannelSettingsView({
 }): React.JSX.Element {
   const members = useMemo(() => visibleChannelMembers(agents), [agents])
   const channels = snapshot?.channels ?? []
-  const channel = channels.find((candidate) => candidate.kind === selectedKind)
-    ?? channels[0]
+  const manageableChannels = channels.filter((candidate) => candidate.kind !== 'dingtalk')
+  const channel = manageableChannels.find((candidate) => candidate.kind === selectedKind)
+    ?? manageableChannels[0]
     ?? null
+  const dingtalk = channels.find((candidate) => candidate.kind === 'dingtalk')
   const providerName = channel?.displayName ?? '渠道'
 
   return (
@@ -250,9 +252,7 @@ export function ChannelSettingsView({
         />
       )}
 
-      {snapshot && !channel && <ChannelSettingsState label="当前版本没有可用的渠道。" tone="empty" />}
-
-      {channel && snapshot && (
+      {snapshot && (
         <div className="channel-settings-body">
           {error && (
             <div className="channel-settings-inline-error" role="alert">
@@ -266,11 +266,11 @@ export function ChannelSettingsView({
               id="channel-provider-heading"
               title="渠道"
               description="选择要连接和管理的平台。账号会话、应用凭据与项目路径都留在这台设备。"
-              summary={`${channels.length} 个渠道`}
+              summary={`${manageableChannels.length} 个可用渠道`}
             />
             <div className="channel-provider-strip" role="tablist" aria-label="渠道">
-              {channels.map((provider) => {
-                const selected = provider.kind === channel.kind
+              {manageableChannels.map((provider) => {
+                const selected = provider.kind === channel?.kind
                 return (
                   <button
                     className={`channel-provider-tab${selected ? ' is-selected' : ''}`}
@@ -288,48 +288,67 @@ export function ChannelSettingsView({
                   </button>
                 )
               })}
+              <button
+                className="channel-provider-tab is-disabled"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-disabled="true"
+                disabled
+                title="钉钉渠道敬请期待"
+              >
+                <ChannelMark kind="dingtalk" />
+                <span>
+                  <strong>{dingtalk?.displayName ?? '钉钉'}</strong>
+                  <small>敬请期待</small>
+                </span>
+              </button>
             </div>
           </section>
 
-          <section className="channel-settings-section" aria-labelledby="channel-connection-heading">
-            <ChannelSectionHeading
-              id="channel-connection-heading"
-              title={`${providerName}连接`}
-              description="连接只决定后续 Bot 的发布目标；切换连接不会迁移或停用已发布 Bot。"
-            />
-            <ChannelConnectionRow
-              channel={channel}
-              busy={busy}
-              onConnect={onConnect}
-              onDisconnect={onDisconnect}
-            />
-            <p className="channel-owner-note">
-              <OwnerShieldIcon />
-              <span>{providerName}中的 Owner 消息仍是外部消息身份，不获得本机管理权限。项目绝对路径不会发送到外部渠道。</span>
-            </p>
-          </section>
+          {!channel && <ChannelSettingsState label="当前版本没有可用的渠道。" tone="empty" />}
 
-          <section className="channel-settings-section" aria-labelledby="channel-member-bots-heading">
-            <ChannelSectionHeading
-              id="channel-member-bots-heading"
-              title="队员 Bot"
-              description="每次只发布一名队员。每名队员拥有独立 Bot 身份和隔离的长连接。"
-              summary={memberSummary(members, channel.memberBots)}
-            />
-            <ChannelMemberBotTable
-              channel={channel}
-              members={members}
-              busy={busy}
-              onPublish={onPublish}
-              onRetryPublish={onRetryPublish}
-            />
-          </section>
+          {channel && <>
+            <section className="channel-settings-section" aria-labelledby="channel-connection-heading">
+              <ChannelSectionHeading
+                id="channel-connection-heading"
+                title={`${providerName}连接`}
+                description="连接只决定后续 Bot 的发布目标；切换连接不会迁移或停用已发布 Bot。"
+              />
+              <ChannelConnectionRow
+                channel={channel}
+                busy={busy}
+                onConnect={onConnect}
+                onDisconnect={onDisconnect}
+              />
+              <p className="channel-owner-note">
+                <OwnerShieldIcon />
+                <span>{providerName}中的 Owner 消息仍是外部消息身份，不获得本机管理权限。项目绝对路径不会发送到外部渠道。</span>
+              </p>
+            </section>
+
+            <section className="channel-settings-section" aria-labelledby="channel-member-bots-heading">
+              <ChannelSectionHeading
+                id="channel-member-bots-heading"
+                title="队员 Bot"
+                description="每次只发布一名队员。每名队员拥有独立 Bot 身份和隔离的长连接。"
+                summary={memberSummary(members, channel.memberBots)}
+              />
+              <ChannelMemberBotTable
+                channel={channel}
+                members={members}
+                busy={busy}
+                onPublish={onPublish}
+                onRetryPublish={onRetryPublish}
+              />
+            </section>
+          </>}
 
           <ExecutionWebSettingsPanel />
         </div>
       )}
 
-      {(!channel || !snapshot) && <ExecutionWebSettingsPanel />}
+      {!snapshot && <ExecutionWebSettingsPanel />}
     </div>
   )
 }

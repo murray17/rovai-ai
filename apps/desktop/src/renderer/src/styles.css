@@ -5158,9 +5158,12 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .channel-section-heading > span { flex: 0 0 auto; color: var(--faint); font: 500 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .channel-provider-strip { display: flex; min-width: 0; overflow-x: auto; padding: 7px 2px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .channel-provider-tab { display: grid; width: min(232px, 100%); min-height: 44px; grid-template-columns: 30px minmax(0, 1fr); gap: 9px; align-items: center; padding: 6px 9px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; text-align: left; }
-.channel-provider-tab:hover { color: var(--ink); background: var(--workspace-surface-hover); }
+.channel-provider-tab:hover:not(:disabled) { color: var(--ink); background: var(--workspace-surface-hover); }
 .channel-provider-tab.is-selected { color: var(--brand-ink); background: var(--brand-soft); }
 .channel-provider-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.channel-provider-tab.is-disabled { color: var(--faint); background: transparent; cursor: not-allowed; }
+.channel-provider-tab.is-disabled .channel-mark { border-color: var(--line); background: var(--surface-subtle); }
+.channel-provider-tab.is-disabled .channel-mark img { filter: grayscale(1); opacity: .42; }
 .channel-provider-tab > span:last-child { display: grid; min-width: 0; gap: 2px; }
 .channel-provider-tab strong,
 .channel-provider-tab small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

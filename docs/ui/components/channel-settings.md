@@ -8,22 +8,24 @@ last_updated: 2026-09-02
 
 # 渠道设置
 
-渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
+渠道设置是 Owner 在 Rovai 本机维护当前开放渠道连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
 [Feishu Channel v15](../../contracts/feishu-channel-v15.md)与
 [DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)；本页只拥有信息层级、交互与可访问性。
 
-当前渠道页同时显示飞书与钉钉。切换 Provider 只切换本地管理投影，不合并账号、Bot、待绑定或异常计数；
-既有钉钉账号和已发布 Bot 直接按真实状态恢复，不显示“待接入”占位入口。
+当前渠道页只开放飞书管理。钉钉保留官方图标，但固定显示为置灰、不可选择的“敬请期待”入口；它使用原生
+`disabled` 与 `aria-disabled=true`，不响应鼠标、键盘或触控，也不展示已保存的钉钉账号、Bot、发布、重连或管理事实。
+已有钉钉数据和 Main/Core 实现不因这个 Renderer gate 删除或迁移，后续重新开放范围记录在
+[v1.38](../../versions/v1.38/README.md)。
 
 ## 页面结构
 
 页面沿用设置工作区的 Porcelain Day / Steel Night 世界和现有 `SettingsPageHeader`：
 
 1. `Settings / Channels` eyebrow、标题“渠道”、Owner 本机说明；
-2. 飞书与钉钉 Provider Tab，均使用打包进 App 的真实品牌图标；切换只改变当前展示，不合并账号、Bot 状态或诊断；
-3. 当前 Provider 的渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
-4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
+2. 飞书可选 Provider Tab 与固定禁用的钉钉“敬请期待”Tab，均使用打包进 App 的真实品牌图标；
+3. 飞书渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
+4. 飞书队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
 5. 页面最底部显示默认折叠的“局域网执行台”全局设置，不放入单个 Bot、Camp 或队员行。
 
 窄窗口保持同一内容顺序，表格式行折为纵向信息，不产生横向滚动。共享色彩只使用现有语义 Token；头像、按钮、
@@ -32,8 +34,8 @@ Dialog、状态点和间距复用现有组件语法。
 <a id="渠道连接与二维码"></a>
 ## 渠道连接与 OAuth
 
-飞书未连接时主动作是“登录开放平台”，已连接时为“切换账号”；钉钉为“连接钉钉／重新连接”。已连接时均保留次级“断开”。连接行只展示真实 `userName`、
-`tenantName`、可选 email 与 Feishu/Lark/DingTalk brand，不显示 controller App 或“平台 Owner/企业”占位值。说明必须明确：
+飞书未连接时主动作是“登录开放平台”，已连接时为“切换账号”，并保留次级“断开”。连接行只展示真实 `userName`、
+`tenantName`、可选 email 与 Feishu/Lark brand，不显示 controller App 或“平台 Owner/企业”占位值。说明必须明确：
 连接只决定以后发布的目标，切换不会迁移或停用已发布 Bot。点击“切换账号”后，当前账号在新二维码成功完成前继续
 有效；取消或失败关闭 Dialog 后仍显示原账号，不得降级为“登录已过期”。只有切换成功才展示新账号。
 
@@ -46,17 +48,9 @@ Dialog、状态点和间距复用现有组件语法。
 `system_credential_encryption_unavailable`；身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown` 或原始异常文本。
 连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
-钉钉使用同一个 modal 结构，标题“登录钉钉开放平台”，直接展示 Main 从官方登录页读取的二维码，不打开系统浏览器或独立窗口。
-扫码后清除二维码并显示确认状态；平台提示过期时提供“刷新二维码”，未取得可信过期时间不显示倒计时。
-需要组织选择/安全确认时仅扩大同一个 Dialog，在内容区嵌入 Main-owned 原生官方页面；没有可提取的 QR 时也保留这个交互入口。
-原生页不持有 Rovai bridge；随窗口缩放和内容滚动裁剪，不能覆盖标题、关闭或取消按钮。普通 QR、状态和存储说明分行呈现，
-沿用 Day/Night Token、现有图标与按钮。关闭按钮、取消和 Escape 均取消 exact attempt，只有原子保存阶段短暂禁用。
-未连接时为
-“连接钉钉”，已连接或明确失效时为“重新连接”；进行中显示“等待授权…”。设备授权按钮、提示、等待状态和备用入口均删除。
-说明开发者 Web Session 保存在 Rovai 本地数据库，本次不创建应用或读取 AppSecret。重启恢复 Cookie，平台 SSO 能自动续接
-时不打开 Dialog；只有明确失效才显示“登录已失效，请重新连接”。取消登录是无告警的 no-op；网络、超时、存储或新
-Session/Core commit 失败保留旧账号。不需要 Rovai OAuth Client 配置；旧 OAuth Profile 不能当作 Cookie 使用，提示显式重连，
-但成功提交前不删除旧数据或已发布 Bot。
+钉钉登录、重连、断开、发布和管理 Dialog 当前都不从 Renderer 挂载。Main/Core 中已有 Web Session、credential 和
+published Bot 数据保持原样，但这些事实不得绕过禁用入口重新出现在渠道页；即使 Snapshot 只含钉钉，页面也只展示
+“当前版本没有可用的渠道”和禁用预告，不把钉钉设为当前 Provider。
 
 普通发布不得进入 QR Dialog。点击列表“发布”先打开独立确认 Dialog，展示现有 `MemberAvatar`、队员名称/职责、
 应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示八个进行中阶段。主文案固定为：
@@ -73,11 +67,7 @@ Session/Core commit 失败保留旧账号。不需要 Rovai OAuth Client 配置�
 完成文案为“发布完成”。配置阶段说明 Rovai 正在读取当前配置并提交所需权限、事件与回调变更；等待阶段须说明平台控制面可能需要时间；
 最终核验只描述 Bot、发布版本和应用资料，不声称重新读取已经由同次 convergence 证明的权限与事件。在线配置核验与真正 WebSocket connect 不得合并成
 同一阶段。若配置没有 mutation，可以跳过第 6 阶段，但不得伪造一次最终版本发布。普通发布不得打开平台应用创建确认
-窗口。Session 失效/身份漂移时显示“重新连接飞书/钉钉”并停止发布，不存在其他发布流程。
-
-钉钉远端要求 `SELECT_APPROVER` 时，同一发布 Dialog 在 `waiting_configuration` 阶段显示“版本审批人”下拉框。候选人只
-来自当前远端返回的 bounded 列表；Owner 必须明确选择并点击“提交审批并继续发布”，Rovai 不自动选择第一人。提交后仍在
-审核时显示等待说明和原 App ID，关闭 Dialog 不撤销远端审批，也不把 waiting 状态报成失败。
+窗口。Session 失效/身份漂移时显示“重新连接飞书”并停止发布，不存在其他发布流程。
 
 若上次发布已冻结 App ID 并失败，Owner 再次点击“继续核对”沿用同一 Dialog 与进度语言，后台核对
 并接管该 App；不显示新的创建确认，也不生成第二个 App。初始版本已发布但头像仍是旧 Rovai icon 时，同一流程可以显示
@@ -99,7 +89,7 @@ Session/Core commit 失败保留旧账号。不需要 Rovai OAuth Client 配置�
 | failed，无 App ID | 需处理 / 远端创建结果待核对 | 安全失败可重试；true unknown 不提供重建入口 |
 | disabled（历史数据状态） | 已停用 | 重新发布同一 App |
 
-已发布行不打开 Rovai 管理 Dialog，也不提供停用命令。“飞书管理”或“钉钉管理”是带可访问名称的外部链接，使用 Main
+已发布行不打开 Rovai 管理 Dialog，也不提供停用命令。“飞书管理”是带可访问名称的外部链接，使用 Main
 从该 Bot 绑定账号与冻结 App ID 生成的精确 `managementUrl`，以 `_blank + noreferrer noopener` 交给 Electron 在系统
 浏览器打开。链接不依赖当前 Developer Session 的连接状态；Renderer 不拼接或接受任意 URL。关闭、停用、删除等
 远端应用治理只在官方开放平台完成。
@@ -201,6 +191,7 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 - 所有异步操作使用稳定 busy key，防止双击；失败后恢复原动作；
 - Dialog 使用 Radix focus trap、Escape/关闭、可见 label、描述和 footer actions；
 - 状态不仅靠颜色，始终有文本；loading/failed 通过 `role=status/alert` 公布；
+- 钉钉预告使用原生 disabled 语义、可见“敬请期待”文本与灰度图标；禁用状态不获得 hover/press，也不能成为当前 Tab；
 - Tab 顺序按页面视觉顺序，链接和按钮均可键盘操作，焦点不因 Snapshot 更新跳到页面起点。
 
 ## References
