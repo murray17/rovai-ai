@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.37
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
@@ -11,7 +11,7 @@ last_updated: 2026-09-02
 
 # Rovai-ai v1.37：Runtime 图片、文件预览、取消与渠道只读执行台
 
-前置：[v1.36](../v1.36/README.md)。渠道已有代码先保存为 f0e1ce2f、b7316a57、6f9f8bd2；原钉钉 NO-GO
+前置：[v1.36](../v1.36/README.md)。后继：[v1.38](../v1.38/README.md)。渠道已有代码先保存为 f0e1ce2f、b7316a57、6f9f8bd2；原钉钉 NO-GO
 在本版本后续由用户明确重开为单 Bot 真实验收，Topic/Thread 与附件仍保持关闭。
 
 ## 范围与状态
