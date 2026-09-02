@@ -318,8 +318,8 @@ command 提供原生折叠。把 command result 全量平铺到钉钉会显著�
 发布。completed Bot 的启动、凭据恢复或连接核对不补发，也不新增欢迎消息 Outbox/receipt。渠道页 Provider 标识改用本地
 打包的真实品牌图标，未发布身份说明收敛为“发布后沿用队员身份”。
 
-当前字段与行为由 [Feishu Channel v14](../../contracts/feishu-channel-v14.md)、
-[DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)、[飞书渠道架构](../../architecture/feishu-channel.md)、
+当前字段与行为由 [Feishu Channel v15](../../contracts/feishu-channel-v15.md)、
+[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)、[飞书渠道架构](../../architecture/feishu-channel.md)、
 [钉钉渠道架构](../../architecture/dingtalk-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
 
 ### 后果与替代方案
@@ -417,3 +417,35 @@ nonce/version、AgentRun 与状态校验最终授权。旧 versioned action ID p
   重名或未知按钮均 fail closed。
 - 拒绝信任按钮文本直接执行：文本可被伪造，且不含 Owner、版本或 Run 权威。拒绝只维护 Main 内存映射：重启后旧卡会
   再次失效。拒绝要求用户自建模板：这把渠道实现约束泄漏成每位用户的配置负担。
+
+<a id="v1-37-d15"></a>
+## V1.37-D15：钉钉卡片分离更新与撤回身份，执行卡和排队卡使用真实 Robot recall
+
+### 背景
+
+真实钉钉使用中，运行请求没有稳定呈现与飞书一致的执行中三入口卡；连续消息缺少可撤回的排队卡，上一张终态执行卡在
+下一条 root request 入场后仍残留。旧 Host 只持有 AI Card 的 `outTrackId`，它适用于更新和 callback，却不是 Robot
+撤回接口要求的 `processQueryKey`；因此实现只能把旧卡更新为“状态已结束”，无法完成产品要求的真实撤回。AI Card
+deliver 响应同时返回独立 `carrierId`，两种身份不能互相猜测或复用。
+
+### 决定
+
+钉钉 AI Card 初次投递必须分别保留稳定 `outTrackId` 和响应 `carrierId`。Main 以
+`externalUpdateMessageId` 结算 outTrack，以 `externalDeliveryMessageId` 结算 carrier；Core execution console 只把
+outTrack 保存为当前可更新卡片，recall claim 另从已发送初次投递恢复 carrier。排队卡只保存 carrier，admission 后的
+claim 必须返回 `updateMessageId=null` 与独立 `recallMessageId`。
+
+运行中执行卡保留“显示最近输出 / 打开执行台 / 停止执行”，终态移除停止；终态卡在下一条 root request 入场前继续
+可见。下一条 root 入场时，Host 按群聊/私聊调用 Robot recall 真正撤回上一张执行卡；连续请求真正进入 FIFO 时先发送
+排队卡，入场时用同一 carrier 机制撤回。缺少 carrier、partial failure 或身份不匹配均 fail closed，不恢复结束占位
+更新分支。飞书继续使用单一消息身份和既有召回，不引入钉钉 carrier 语义。
+
+当前字段与行为由 [DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)、
+[钉钉渠道架构](../../architecture/dingtalk-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
+
+### 后果与替代方案
+
+- 执行更新/callback 与真实撤回各使用平台明确身份；Rovai 重试或进程内状态恢复不再把 carrier 当作 outTrack。
+- FIFO 的“排队可见、入场撤回”与飞书保持同一产品时机；终态卡也不会永久留下结束占位。
+- 拒绝继续用 update 模拟 recall：它不满足删除旧临时 surface 的产品语义。拒绝把 outTrack 猜作 processQueryKey：
+  平台没有给出等价保证。未上线旧卡不增加字段兼容、批量修复或持久迁移。

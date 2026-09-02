@@ -364,6 +364,74 @@ describe('DingTalk channel account connection', () => {
     ], new Set(['robot-b', 'robot-disabled']))).toEqual(['ding-app-b'])
   })
 
+  it('sends a queue card and truly recalls queue and execution cards by carrier identity', async () => {
+    const outTrackId = dingtalkOutTrackId('status', 'queue-send')
+    const recallMessageId = `carrier:${outTrackId}`
+    const common = {
+      provider: 'dingtalk', requestId: 'request-1', targetAppId: 'ding-app-a',
+      credentialRef: 'dingtalk-credential-a', chatId: 'owner-a', topicKey: '',
+      conversationKind: 'p2p', attemptCount: 1, recipientOpenId: 'owner-a'
+    } as const
+    const fixture = completedBotFixture({
+      credentialPresent: true,
+      deliveries: [{
+        ...common,
+        deliveryId: 'queue-send', deliveryKind: 'queue_ack',
+        payload: { text: 'Rovai 已接收，正在排队' },
+        updateMessageId: null, recallMessageId: null
+      }, {
+        ...common,
+        deliveryId: 'queue-recall', deliveryKind: 'queue_ack',
+        payload: { action: 'recall' },
+        updateMessageId: null, recallMessageId
+      }, {
+        ...common,
+        deliveryId: 'execution-recall', deliveryKind: 'execution_console_recall',
+        payload: { agentRunId: 'run-1' },
+        updateMessageId: 'rv-run-card', recallMessageId: 'carrier:rv-run-card'
+      }]
+    })
+    const recall = vi.spyOn(fixture.api, 'recallRobotMessage').mockResolvedValue(undefined)
+
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(recall).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(fixture.commandPayloads
+        .filter(({ method }) => method === 'channels.dingtalk.deliveries.settle')
+        .map(({ command }) => command.deliveryId))
+        .toEqual(expect.arrayContaining(['queue-send', 'queue-recall', 'execution-recall'])))
+
+      expect(fixture.welcomeCard).toHaveBeenCalledWith(expect.objectContaining({
+        outTrackId,
+        space: 'p2p',
+        cardParamMap: expect.objectContaining({ staticMsgContent: 'Rovai 已接收，正在排队' })
+      }))
+      expect(recall).toHaveBeenNthCalledWith(1, {
+        conversationKind: 'p2p',
+        chatId: 'owner-a',
+        robotCode: 'robot-a',
+        recallMessageId
+      })
+      expect(recall).toHaveBeenNthCalledWith(2, {
+        conversationKind: 'p2p',
+        chatId: 'owner-a',
+        robotCode: 'robot-a',
+        recallMessageId: 'carrier:rv-run-card'
+      })
+      expect(fixture.commandPayloads).toContainEqual({
+        method: 'channels.dingtalk.deliveries.settle',
+        command: expect.objectContaining({
+          deliveryId: 'queue-send',
+          externalDeliveryMessageId: recallMessageId,
+          externalUpdateMessageId: null,
+          outcome: 'sent'
+        })
+      })
+    } finally {
+      await fixture.service.stop()
+    }
+  })
+
   it('keeps card outTrackId stable across outbox retries', () => {
     expect(dingtalkOutTrackId('run', 'delivery-1')).toBe(
       dingtalkOutTrackId('run', 'delivery-1')
@@ -674,6 +742,7 @@ function completedBotFixture(options: {
   otherAccount?: boolean
   emptyFrozenAppId?: boolean
   beforeApp?: 'created' | 'account_verified'
+  deliveries?: Array<Record<string, unknown>>
 } = {}) {
   const owner = identity('corp-a', 'owner-a')
   const activeOwner = options.otherAccount ? identity('corp-other', 'owner-other') : owner
@@ -703,7 +772,9 @@ function completedBotFixture(options: {
     appKey: bot.appKey, appSecret: 'fixture-recovered-secret', robotCode: bot.robotCode
   } : null
   let rejectedWrites = options.rejectCredentialWrites ?? 0
+  const pendingDeliveries = [...(options.deliveries ?? [])]
   const commands: string[] = []
+  const commandPayloads: Array<{ method: string; command: Record<string, unknown> }> = []
   const core = {
     async request(method: string, params: { command?: Record<string, unknown> }): Promise<unknown> {
       if (method === 'channels.dingtalk.snapshot') return {
@@ -716,9 +787,11 @@ function completedBotFixture(options: {
       }
       const command = params.command ?? {}
       commands.push(method)
+      commandPayloads.push({ method, command })
       if (method === 'channels.dingtalk.host.tick') {
         expect(params).toEqual({ workerId: expect.any(String), limit: 20 })
-        return { deliveries: [], rosterRefreshes: [] }
+        const delivery = pendingDeliveries.shift()
+        return { deliveries: delivery ? [delivery] : [], rosterRefreshes: [] }
       }
       if (method === 'channels.dingtalk.publicationIntent.storeCredential') {
         if (rejectedWrites-- > 0) return { status: 'rejected', code: 'channel_storage_fixture_failed' }
@@ -746,7 +819,10 @@ function completedBotFixture(options: {
   const streamStart = vi.spyOn(stream, 'start').mockResolvedValue(undefined)
   const api = new DingTalkOpenApiClient({ appKey: bot.appKey, appSecret: 'fixture-recovered-secret' })
   const verifyCard = vi.spyOn(api, 'createCardInstance').mockResolvedValue(undefined)
-  const welcomeCard = vi.spyOn(api, 'createAndDeliverCard').mockResolvedValue('rv-welcome')
+  const welcomeCard = vi.spyOn(api, 'createAndDeliverCard').mockImplementation(async (input) => ({
+    outTrackId: input.outTrackId,
+    recallMessageId: `carrier:${input.outTrackId}`
+  }))
   const provision = vi.fn<DingTalkChannelHostDependencies['provisioner']['create']>(async (input) => {
     const facts = {
       unifiedAppId: bot.unifiedAppId, appKey: bot.appKey,
@@ -782,7 +858,8 @@ function completedBotFixture(options: {
     streamRegistry: stream,
     createApiClient: () => api
   })
-  return { service, core, commands, provision, streamStart, verifyCard, welcomeCard, developerSession,
+  return { service, core, commands, commandPayloads, api, provision, streamStart, verifyCard,
+    welcomeCard, developerSession,
     credential: () => credential, intent: () => intent }
 }
 

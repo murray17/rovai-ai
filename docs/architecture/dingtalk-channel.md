@@ -8,7 +8,7 @@ last_updated: 2026-09-02
 
 # 钉钉渠道架构
 
-字段、状态和恢复合同见 [DingTalk Channel v9](../contracts/dingtalk-channel-v9.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [DingTalk Channel v10](../contracts/dingtalk-channel-v10.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v2](../contracts/camp-membership-v2.md)和
@@ -18,8 +18,9 @@ last_updated: 2026-09-02
 [V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)、
 [V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)、
 [V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)、
-[V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)与
-[V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)。
+[V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)、
+[V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)与
+[V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)。
 
 ## 组件与权威
 
@@ -34,7 +35,7 @@ Renderer 渠道设置
              ├─ Member Bot Provisioner
              ├─ SQLite Channel Store Client：Session/credential 原子提交与批量读取
              ├─ 每 App dingtalk-stream Client
-             ├─ App-only Open API：roster、Markdown、AI 卡片
+             ├─ App-only Open API：roster、Markdown、AI 卡片与 Robot recall
              ├─ inbound/card normalization
              ├─ 共享 ExecutionViewService：固定 LAN URL / 内存 Token / SSE
              └─ durable ChannelDelivery worker
@@ -154,6 +155,12 @@ exact `appKey/outTrackId`，Core 再从当前权威项目卡 delivery 或 execut
 校验 Owner、卡片实例、nonce/version 或 Run 状态。按钮文本本身不是授权。旧的 versioned action id parser 仅作兼容；
 自造 `title/action` 对象即使创建 API 返回成功也不会被客户端渲染。
 
+AI Card 投递同时产生两种身份：稳定 `outTrackId` 只用于卡片更新和 callback authority，投递 result 的 `carrierId`
+只用于 Robot message recall。Main 将两者分别结算为 `externalUpdateMessageId` 与
+`externalDeliveryMessageId`；Core 的 execution console 只保存前者为当前外部卡片，recall claim 从同一 console 最近一次
+成功初始投递恢复后者。排队卡没有更新身份，其 recall claim 只暴露 carrier。不得把 outTrack 猜成 processQueryKey，
+也不得在 carrier 缺失时更新一条结束文案冒充撤回。
+
 执行卡不再复制完整执行台或使用 streaming/page callback。每个 Run 的 Main 内存状态冻结首次创建时的 LAN URL、最近输出
 开关、最新公开 source 和卡片摘要，delivery/callback/终态按 Run 串行。执行中为“最近输出 / 打开执行台 / 停止”三个入口，
 终态移除停止；收起时公开 Evidence 变化不更新卡。打开入口是直接 URL action，不做 Owner callback；最近输出最多 30 条，
@@ -161,6 +168,11 @@ exact `appKey/outTrackId`，Core 再从当前权威项目卡 delivery 或 execut
 逐 command 折叠，也不投影 command result。停止只调用 DingTalk Host 的 exact-run Core 命令。共享 `ExecutionViewService` 用 immutable scope 向 Core 读取
 同 Camp/队员、不晚于 focus Run 的公开历史并以 SSE 更新，不提供写入口。正式 Agent 输出仍是新的 Markdown 消息，网络失败
 只结算 Outbox，不回滚 Core 消息。
+
+下一条 root request admission 后，执行卡使用按 group/p2p 选择的 Robot recall API 与持久 carrier identity 真正撤回，
+成功后撤销内存 URL grant；不再更新为“此执行记录已结束”。只有真正进入 FIFO 的请求发送排队 AI Card，admission 后
+使用同样的 carrier identity 撤回，不更新为“已开始”或结束占位。运行中的停止按钮保持 Owner-only exact-run callback，
+终态继续移除；终态卡在下一条 root 入场前仍可见。
 
 ## Core 复用与入站准入
 
@@ -210,7 +222,7 @@ App 或目标已移出时 fail closed。
 | 话题/Thread | disabled；`openConvThreadId / openThreadId` 是普通 callback 可能携带的不透明路由元数据，不作为 Topic 证明；只有明确 `threadId / topicId / topicKey` 才拒绝 | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
 | 入站附件 | summary only | 官方下载、授权和 Managed Attachment ingress 设计 |
 | 出站附件 | disabled，明确 unsupported | 已验证 app-only 原生投递和可恢复 message identity |
-| AI 状态卡 | enabled；平台内置通用卡片无需用户模板；项目刷新、最近输出展开/收起已在真实桌面客户端验收，停止与固定 URL 已接入 | 手机真实投递、URL fragment、SSE 与停止终态矩阵 |
+| AI 状态卡 | enabled；平台内置通用卡片无需用户模板；项目刷新、最近输出展开/收起已在真实桌面客户端验收，停止、固定 URL、排队卡及 execution/queue Robot recall 已接入 | 手机真实投递、URL fragment、SSE、撤回与停止终态矩阵 |
 
 不得通过宽松 parser、普通群 fallback、fabricated message success 或 Renderer 开关绕过这些 gate。
 
@@ -236,7 +248,7 @@ Renderer 状态重建业务事实。
 
 ## References
 
-- [DingTalk Channel v9](../contracts/dingtalk-channel-v9.md)
+- [DingTalk Channel v10](../contracts/dingtalk-channel-v10.md)
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)
@@ -247,3 +259,4 @@ Renderer 状态重建业务事实。
 - [V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)
 - [V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)
 - [V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)
+- [V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)

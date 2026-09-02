@@ -3,15 +3,15 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-09-01
+last_updated: 2026-09-02
 ---
 
 # 渠道设置
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v14](../../contracts/feishu-channel-v14.md)与
-[DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)；本页只拥有信息层级、交互与可访问性。
+[Feishu Channel v15](../../contracts/feishu-channel-v15.md)与
+[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)；本页只拥有信息层级、交互与可访问性。
 
 当前渠道页同时显示飞书与钉钉。切换 Provider 只切换本地管理投影，不合并账号、Bot、待绑定或异常计数；
 既有钉钉账号和已发布 Bot 直接按真实状态恢复，不显示“待接入”占位入口。
@@ -165,10 +165,15 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 “已发送到私聊”或 Owner-only 文案；按钮只在卡片首次创建时已有可用 URL 才显示。“停止执行”在平台支持时使用危险样式，
 只在非终态显示，不使用 Spinner 制造第二个执行状态。
 
+飞书把“打开执行台”作为唯一蓝色主按钮；其余动作层级不变。三个按钮在桌面宽端保持等宽同行，在手机或其他窄端各自
+独占一整行，文字不得依靠裁切表达。该适配使用 Card 2.0 的 stretch 列布局，不按设备生成两套卡片。最近输出展开后，
+安全 Command 仍是默认收起的原生折叠面板。
+
 卡片只在状态、按钮可用性或已展开最近输出窗口变化时更新。永久正文卡继续独立发布，执行卡仍是临时 surface；
-下一轮召回后不留下完成占位。安全、固定 URL、Token、callback 和串行更新边界由
-[Feishu Channel v14](../../contracts/feishu-channel-v14.md)和
-[DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)拥有。
+下一轮召回后不留下完成占位。钉钉真正排队时发送排队 AI Card，admission 后与旧执行卡都通过 Robot recall 删除，
+不更新成“已开始”“状态已结束”或“此执行记录已结束”。安全、固定 URL、Token、callback、双身份和串行更新边界由
+[Feishu Channel v15](../../contracts/feishu-channel-v15.md)和
+[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)拥有。
 
 ## 局域网执行台设置
 
@@ -202,7 +207,7 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v14](../../contracts/feishu-channel-v14.md)
+- [Feishu Channel v15](../../contracts/feishu-channel-v15.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)
+- [DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

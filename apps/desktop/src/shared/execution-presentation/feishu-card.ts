@@ -108,7 +108,7 @@ export function feishuExecutionStateCard(
       buttons.push({
         tag: 'button',
         text: { tag: 'plain_text', content: '打开执行台' },
-        type: 'default',
+        type: 'primary',
         width: 'fill',
         behaviors: [{ type: 'open_url', default_url: options.executionViewUrl }]
       })
@@ -127,6 +127,7 @@ export function feishuExecutionStateCard(
     }
     elements.push({
       tag: 'column_set',
+      flex_mode: 'stretch',
       horizontal_spacing: '8px',
       columns: buttons.map((button) => ({
         tag: 'column',

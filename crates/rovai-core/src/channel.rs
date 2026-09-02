@@ -575,6 +575,8 @@ pub struct SettleChannelDeliveryCommand {
     pub worker_id: String,
     pub outcome: String,
     pub external_delivery_message_id: Option<String>,
+    #[serde(default)]
+    pub external_update_message_id: Option<String>,
     pub failure_code: Option<String>,
     #[serde(default)]
     pub retryable: bool,
@@ -801,6 +803,8 @@ pub struct ClaimedChannelDelivery {
     pub payload: Value,
     pub attempt_count: i64,
     pub update_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recall_message_id: Option<String>,
     pub recipient_open_id: Option<String>,
 }
 
@@ -6262,7 +6266,7 @@ impl ChannelService {
                         .and_then(Value::as_i64)
                         .context("execution console upsert has no expected sequence")?;
                     if let Some(external_message_id) =
-                        envelope.payload.external_delivery_message_id.as_deref()
+                        envelope.payload.external_update_message_id.as_deref()
                     {
                         let updated = transaction.execute(
                             r#"
@@ -10316,6 +10320,10 @@ fn claim_deliveries(
                        )
                        WHEN delivery.delivery_kind = 'queue_ack'
                         AND json_extract(delivery.payload_json, '$.action') = 'recall'
+                        AND COALESCE(
+                            request_conversation.provider,
+                            pending_conversation.provider
+                        ) = 'feishu'
                        THEN (
                            SELECT previous.external_delivery_message_id
                            FROM channel_delivery AS previous
@@ -10329,6 +10337,43 @@ fn claim_deliveries(
                        )
                        ELSE NULL
                    END AS update_message_id
+                   ,CASE
+                       WHEN COALESCE(
+                           request_conversation.provider,
+                           pending_conversation.provider
+                       ) = 'dingtalk'
+                        AND delivery.delivery_kind = 'execution_console_recall'
+                       THEN (
+                           SELECT previous.external_delivery_message_id
+                           FROM channel_delivery AS previous
+                           WHERE previous.console_id = delivery.console_id
+                             AND previous.delivery_kind = 'execution_console_upsert'
+                             AND previous.target_app_id = delivery.target_app_id
+                             AND previous.status = 'sent'
+                             AND previous.external_delivery_message_id IS NOT NULL
+                           ORDER BY previous.ended_at DESC, previous.id DESC
+                           LIMIT 1
+                       )
+                       WHEN COALESCE(
+                           request_conversation.provider,
+                           pending_conversation.provider
+                       ) = 'dingtalk'
+                        AND delivery.delivery_kind = 'queue_ack'
+                        AND json_extract(delivery.payload_json, '$.action') = 'recall'
+                       THEN (
+                           SELECT previous.external_delivery_message_id
+                           FROM channel_delivery AS previous
+                           WHERE previous.request_id = delivery.request_id
+                             AND previous.delivery_kind = 'queue_ack'
+                             AND previous.target_app_id = delivery.target_app_id
+                             AND json_extract(previous.payload_json, '$.action') IS NULL
+                             AND previous.status = 'sent'
+                             AND previous.external_delivery_message_id IS NOT NULL
+                           ORDER BY previous.ended_at DESC, previous.id DESC
+                           LIMIT 1
+                       )
+                       ELSE NULL
+                   END AS recall_message_id
                    ,(
                        SELECT identity.external_id
                        FROM external_principal_app_identity AS identity
@@ -10385,7 +10430,7 @@ fn claim_deliveries(
                 })?;
                 Ok(ClaimedChannelDelivery {
                     delivery_id: row.get(0)?,
-                    provider: row.get(12)?,
+                    provider: row.get(13)?,
                     request_id: row.get(1)?,
                     delivery_kind: row.get(2)?,
                     target_app_id: row.get(3)?,
@@ -10396,7 +10441,8 @@ fn claim_deliveries(
                     payload,
                     attempt_count: row.get(9)?,
                     update_message_id: row.get(10)?,
-                    recipient_open_id: row.get(11)?,
+                    recall_message_id: row.get(11)?,
+                    recipient_open_id: row.get(12)?,
                 })
             },
         )?;
@@ -12172,6 +12218,7 @@ mod tests {
             payload: json!({"body": "@你 原始显示缓存", "mentionPrincipal": true}),
             attempt_count: 1,
             update_message_id: None,
+            recall_message_id: None,
             recipient_open_id: Some("ou_owner_in_sender_app".to_string()),
         };
         upgrade_legacy_feishu_output_claim(&transaction, &mut claim).unwrap();
@@ -13423,6 +13470,7 @@ mod tests {
                                 worker_id,
                                 outcome: "sent".to_string(),
                                 external_delivery_message_id: Some(picker_message_id.clone()),
+                                external_update_message_id: None,
                                 failure_code: None,
                                 retryable: false,
                             },
@@ -14473,6 +14521,45 @@ mod tests {
             assert_eq!(count, 1, "DingTalk must reuse atomic admission for {table}");
         }
 
+        let mut queued_observation = observation_command(
+            "ding-app-agent_1",
+            "ding-message-2",
+            "ding-dm-1",
+            "",
+            "p2p",
+            "继续检查会话过期逻辑",
+            &[("agent_1", "ding-app-agent_1")],
+            true,
+        );
+        queued_observation.provider = DINGTALK_PROVIDER.to_string();
+        queued_observation.tenant_key = "ding-corp-1".to_string();
+        queued_observation.sender_external_user_id = "owner-staff-1".to_string();
+        queued_observation.sender_open_id = None;
+        queued_observation.sender_user_id = Some("owner-staff-1".to_string());
+        queued_observation.sender_union_id = None;
+        let queued_observed = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope("dingtalk-observe-queued", queued_observation),
+            )
+            .unwrap();
+        let queued = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-finalize-queued",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: queued_observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(queued.result.code, "channel.turn.queued");
+
         let console_tick = service
             .host_tick(
                 &mut database,
@@ -14490,6 +14577,30 @@ mod tests {
             .iter()
             .find(|delivery| delivery.delivery_kind == "execution_console_upsert")
             .expect("DingTalk admission must open one execution state card");
+        let queue_delivery = console_tick
+            .deliveries
+            .iter()
+            .find(|delivery| {
+                delivery.delivery_kind == "queue_ack" && delivery.payload.get("action").is_none()
+            })
+            .expect("the second DingTalk request must emit a queue card");
+        service
+            .settle_delivery(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-queue-card-sent",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: queue_delivery.delivery_id.clone(),
+                        worker_id: "dingtalk-console-worker".to_string(),
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: Some("ding-carrier-queue-2".to_string()),
+                        external_update_message_id: None,
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
         let console_source = service
             .execution_console_source(
                 &mut database,
@@ -14509,7 +14620,8 @@ mod tests {
                         delivery_id: console_delivery.delivery_id.clone(),
                         worker_id: "dingtalk-console-worker".to_string(),
                         outcome: "sent".to_string(),
-                        external_delivery_message_id: Some("ding-card-run-1".to_string()),
+                        external_delivery_message_id: Some("ding-carrier-run-1".to_string()),
+                        external_update_message_id: Some("ding-card-run-1".to_string()),
                         failure_code: None,
                         retryable: false,
                     },
@@ -14595,6 +14707,47 @@ mod tests {
             .unwrap();
         assert_eq!(cancelled.result.status, CommandResultStatus::Applied);
         assert_eq!(cancelled.result.payload["status"], "cancelled");
+
+        let promoted_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: DINGTALK_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "dingtalk-promoted-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let queue_recall = promoted_tick
+            .deliveries
+            .iter()
+            .find(|delivery| {
+                delivery.delivery_kind == "queue_ack" && delivery.payload["action"] == "recall"
+            })
+            .expect("promoting the second DingTalk request must recall its queue card");
+        assert_eq!(
+            queue_recall.update_message_id, None,
+            "a DingTalk carrier must never masquerade as an AI Card update outTrackId"
+        );
+        assert_eq!(
+            queue_recall.recall_message_id.as_deref(),
+            Some("ding-carrier-queue-2")
+        );
+        let execution_recall = promoted_tick
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_kind == "execution_console_recall")
+            .expect("the next DingTalk root must truly recall the previous terminal card");
+        assert_eq!(
+            execution_recall.update_message_id.as_deref(),
+            Some("ding-card-run-1")
+        );
+        assert_eq!(
+            execution_recall.recall_message_id.as_deref(),
+            Some("ding-carrier-run-1")
+        );
 
         let aggregate_count: i64 = database
             .connection()
@@ -15655,6 +15808,7 @@ mod tests {
                                 outcome: outcome.into(),
                                 external_delivery_message_id: (outcome == "sent")
                                     .then(|| "late-sent".into()),
+                                external_update_message_id: None,
                                 failure_code: None,
                                 retryable,
                             },
@@ -15899,6 +16053,7 @@ mod tests {
                         worker_id: "channel-test-worker".to_string(),
                         outcome: "sent".to_string(),
                         external_delivery_message_id: Some("om-console-1".to_string()),
+                        external_update_message_id: Some("om-console-1".to_string()),
                         failure_code: None,
                         retryable: false,
                     },
@@ -16480,6 +16635,7 @@ mod tests {
                         worker_id: "channel-test-worker".to_string(),
                         outcome: "sent".to_string(),
                         external_delivery_message_id: Some("om-output-1".to_string()),
+                        external_update_message_id: None,
                         failure_code: None,
                         retryable: false,
                     },
@@ -16526,6 +16682,7 @@ mod tests {
                         worker_id: "channel-test-worker".to_string(),
                         outcome: "failed".to_string(),
                         external_delivery_message_id: None,
+                        external_update_message_id: None,
                         failure_code: Some("upload_failed".to_string()),
                         retryable: false,
                     },
@@ -16765,6 +16922,7 @@ mod tests {
                         worker_id: "exact-cancel-worker".to_string(),
                         outcome: "sent".to_string(),
                         external_delivery_message_id: Some("om_exact_console".to_string()),
+                        external_update_message_id: Some("om_exact_console".to_string()),
                         failure_code: None,
                         retryable: false,
                     },
@@ -16990,6 +17148,7 @@ mod tests {
                         worker_id: "terminal-console-opening-worker".to_string(),
                         outcome: "sent".to_string(),
                         external_delivery_message_id: Some("om_terminal_console_card".to_string()),
+                        external_update_message_id: Some("om_terminal_console_card".to_string()),
                         failure_code: None,
                         retryable: false,
                     },
@@ -17027,6 +17186,7 @@ mod tests {
                         worker_id: "terminal-console-live-followup-worker".to_string(),
                         outcome: "sent".to_string(),
                         external_delivery_message_id: Some("om_terminal_console_card".to_string()),
+                        external_update_message_id: Some("om_terminal_console_card".to_string()),
                         failure_code: None,
                         retryable: false,
                     },
@@ -17278,6 +17438,7 @@ mod tests {
                         worker_id: "terminal-console-restart-worker".to_string(),
                         outcome: "sent".to_string(),
                         external_delivery_message_id: Some("om_terminal_console_card".to_string()),
+                        external_update_message_id: Some("om_terminal_console_card".to_string()),
                         failure_code: None,
                         retryable: false,
                     },
@@ -17833,6 +17994,7 @@ mod tests {
                 worker_id: "binding-worker".to_string(),
                 outcome: "sent".to_string(),
                 external_delivery_message_id: Some("om_recovered_ack".to_string()),
+                external_update_message_id: None,
                 failure_code: None,
                 retryable: false,
             },
@@ -17925,7 +18087,19 @@ mod tests {
             .execute_batch("DROP TRIGGER fail_channel_claim")
             .unwrap();
         // The next wake promotes the root; another must not duplicate it.
-        service.host_tick(&mut database, &actor, &poll).unwrap();
+        let promoted = service.host_tick(&mut database, &actor, &poll).unwrap();
+        let queue_recall = promoted
+            .deliveries
+            .iter()
+            .find(|delivery| {
+                delivery.delivery_kind == "queue_ack" && delivery.payload["action"] == "recall"
+            })
+            .expect("admitting the queued root must recall its queue acknowledgement");
+        assert_eq!(
+            queue_recall.update_message_id.as_deref(),
+            Some("om_recovered_ack")
+        );
+        assert_eq!(queue_recall.recall_message_id, None);
         service.host_tick(&mut database, &actor, &poll).unwrap();
         assert_channel_camp_name(
             &mut database,
@@ -18269,6 +18443,7 @@ mod tests {
                         worker_id: "obsolete-picker-worker".to_string(),
                         outcome: "failed".to_string(),
                         external_delivery_message_id: None,
+                        external_update_message_id: None,
                         failure_code: Some("format_error".to_string()),
                         retryable: false,
                     },
@@ -18324,6 +18499,7 @@ mod tests {
                         worker_id: "recovered-picker-worker".to_string(),
                         outcome: "failed".to_string(),
                         external_delivery_message_id: None,
+                        external_update_message_id: None,
                         failure_code: Some("format_error".to_string()),
                         retryable: false,
                     },
@@ -18467,6 +18643,7 @@ mod tests {
                         worker_id: "sent-obsolete-picker-worker".to_string(),
                         outcome: "sent".to_string(),
                         external_delivery_message_id: Some("om_sent_obsolete_picker".to_string()),
+                        external_update_message_id: None,
                         failure_code: None,
                         retryable: false,
                     },

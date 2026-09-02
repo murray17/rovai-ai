@@ -3296,6 +3296,11 @@ describe('channel settings service', () => {
     })
     expect(JSON.stringify(harness.send.mock.calls)).not.toContain('Rovai 队员回复')
     expect(settlements.every((command) => command.outcome === 'sent')).toBe(true)
+    expect(settlements).toContainEqual(expect.objectContaining({
+      deliveryId: 'delivery-console',
+      externalDeliveryMessageId: updateMessageId ?? 'om_sent',
+      externalUpdateMessageId: updateMessageId ?? 'om_sent'
+    }))
     await service.stop()
   })
 
