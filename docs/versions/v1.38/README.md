@@ -23,6 +23,8 @@ last_updated: 2026-09-02
 - 本次不删除或迁移钉钉的 Main/Core、SQLite 数据、credential、Developer Session、Stream、Card 或 Outbox 实现；已经发布的
   Bot 仍按既有后台语义运行。该边界只关闭新的用户管理入口，不伪装成后端代码清理。
 - 飞书连接、队员发布、项目选择、排队/执行卡、最近输出、局域网执行台及既有数据完全保持开放。
+- 发布前收紧飞书后台维护：active Host 只由 Run started/terminal 与当前执行卡 Run 的 live event 唤醒；首次恢复
+  Pump 不先扫描全部历史群。Core outstanding、watchdog、Delivery、latest-wins、精确 roster 刷新和 Web 执行台不变。
 - 下列“重新开放清单”只登记范围与优先级；除渠道页 gate 外，本版本当前不实施这些钉钉能力。
 
 ## 重新开放清单
@@ -62,11 +64,11 @@ last_updated: 2026-09-02
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.37 冻结为 historical；本概览、实施计划与版本索引建立唯一 current v1.38 |
-| Decisions | 确认无需更新 | 暂停公开入口是可逆的 Renderer 产品 gate；重新开放条件由本版本范围拥有，未改变长期领域取舍 |
-| Contracts | 确认无需更新 | 不改变 DingTalk/Feishu wire、字段、状态、幂等或恢复语义；现有 [DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md) 继续描述保留实现 |
-| Architecture | 确认无需更新 | Main/Core、Stream、SQLite、Outbox 和既有已发布 Bot 运行边界均不改变，只收窄 Renderer 管理入口 |
+| Decisions | 确认无需更新 | 暂停公开入口是可逆的 Renderer gate；飞书事件过滤与启动时序是复用既有状态的局部维护加固，均未引入新的持久权威或高成本取舍 |
+| Contracts | 已更新 | [Channel Host Maintenance v5](../../contracts/channel-host-maintenance-v5.md)收紧飞书事件快路径和启动 roster 扫描；[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)继续描述保留实现 |
+| Architecture | 已更新 | [飞书渠道架构](../../architecture/feishu-channel.md)同步维护热路径；Main/Core、Stream、SQLite、Outbox 权威边界不变，钉钉实现不改 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)拥有飞书开放、钉钉禁用预告和 legacy Snapshot 回退语义 |
 | Runtime Activity | 确认无需更新 | 不改变 AgentRun activity 归类或 Canonical Activity 映射 |
 | Runtime compatibility | 确认无需更新 | 不改变任何 Runtime 的平台准入、模型或工具兼容性 |
-| Documentation routing | 已更新 | 版本索引切换到 v1.38；既有渠道 Architecture/Contract 任务路由保持有效 |
+| Documentation routing | 已更新 | 版本索引保持 v1.38；[文档导航](../../README.md)、合同索引和当前决定导航切换到 Channel Host Maintenance v5 |
 | Root README | 确认无需更新 | 根 README 未承诺钉钉公开可用，产品定位与安装方式不变 |

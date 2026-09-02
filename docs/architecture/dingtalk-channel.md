@@ -228,7 +228,7 @@ App 或目标已移出时 fail closed。
 
 ## 恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v4](../contracts/channel-host-maintenance-v4.md) 使用无 commandId 的直接
+共享 Host tick 按 [Channel Host Maintenance v5](../contracts/channel-host-maintenance-v5.md) 使用无 commandId 的直接
 维护请求，不写永久 poll 回执。原事务、FIFO、delivery lease/重试及真实结算命令的永久幂等保留，飞书与钉钉复用
 provider-scoped outstanding 判定和按需调度；钉钉不再永久每 800ms 扫描，事件/入站/settlement 走合并快路径，
 只有 Core 仍报告未收口工作时才保留十分钟 one-shot watchdog。

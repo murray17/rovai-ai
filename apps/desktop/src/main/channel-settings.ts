@@ -53,7 +53,10 @@ import {
   type ExecutionConsoleSnapshot
 } from '../shared/execution-presentation/feishu-card'
 import type { ExecutionViewScope } from './execution-view-service'
-import { AdaptiveChannelHostPump } from './channel-host-pump'
+import {
+  AdaptiveChannelHostPump,
+  trackedExecutionCoreEventWake
+} from './channel-host-pump'
 
 type CoreChannelSnapshot = {
   schemaVersion: 2
@@ -309,6 +312,11 @@ export class ChannelSettingsService {
       onError: (error) => {
         console.warn(`[rovai] Feishu outbox pump failed: ${channelFailureCode(error)}`)
       },
+      classifyCoreEvent: (event) => trackedExecutionCoreEventWake(event, (agentRunId) => {
+        const state = this.#executionCardStates.get(agentRunId)
+        return Boolean(state
+          && ['opening', 'active', 'terminal_pending'].includes(state.latestSource.state))
+      }),
       now: this.#now,
       setTimeout: dependencies.setTimeout,
       clearTimeout: dependencies.clearTimeout
@@ -339,6 +347,7 @@ export class ChannelSettingsService {
         }
       }
       await this.#emit()
+      this.#nextRosterSweepAt = this.#now() + ROSTER_SWEEP_MS
       this.#hostPump?.start()
       if (snapshot.account?.status === 'connected') {
         void this.#checkDeveloperSession(snapshot.account, sessionCheckGeneration)
