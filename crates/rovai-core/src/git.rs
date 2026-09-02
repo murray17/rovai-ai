@@ -364,7 +364,11 @@ mod tests {
     use uuid::Uuid;
 
     fn test_root(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("rovai-git-{name}-{}", Uuid::new_v4()))
+        let temp_dir = std::env::temp_dir();
+        #[cfg(not(windows))]
+        let temp_dir = fs::canonicalize(&temp_dir)
+            .expect("the platform temporary directory should have a canonical path");
+        temp_dir.join(format!("rovai-git-{name}-{}", Uuid::new_v4()))
     }
 
     async fn run_git(path: &Path, args: &[&str]) {

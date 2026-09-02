@@ -9,7 +9,7 @@ const packageMetadata = JSON.parse(readFileSync(
 describe('desktop package metadata', () => {
   it('keeps the visible brand separate from Electron helper bundle identity', () => {
     expect(packageMetadata.productName).toBe('Rovai AI')
-    expect(packageMetadata.version).toBe('0.0.4')
+    expect(packageMetadata.version).toBe('0.0.5')
     expect(packageMetadata.build.productName).toBe('Rovai AI')
     expect(packageMetadata.build.mac.executableName).toBeUndefined()
     expect(packageMetadata.build.win.executableName).toBe('Rovai-ai')
