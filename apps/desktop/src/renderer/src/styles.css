@@ -1869,9 +1869,14 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .file-preview-markdown { width: 100%; overflow: auto; overscroll-behavior: contain; padding: 26px clamp(24px, 6vw, 68px) 54px; }
 .file-preview-markdown .safe-markdown { max-width: 780px; margin: 0 auto; font-size: 13px; line-height: 1.72; }
 .file-preview-markdown .safe-markdown img { display: block; max-width: 100%; height: auto; margin: 18px auto; border-radius: 7px; box-shadow: var(--shadow-card); }
-.markdown-file-reference,
+.safe-markdown .markdown-file-reference,
+.safe-markdown .markdown-web-reference,
 .message-file-reference {
-  display: inline;
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: baseline;
+  gap: .28em;
   padding: 0;
   border: 0;
   color: var(--resource-link);
@@ -1879,36 +1884,48 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
   font: inherit;
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-decoration-thickness: 1px;
   text-underline-offset: 2px;
   overflow-wrap: anywhere;
+  vertical-align: baseline;
   cursor: pointer;
 }
-.markdown-file-reference:hover,
+.safe-markdown .markdown-file-reference:hover,
+.safe-markdown .markdown-web-reference:hover,
 .message-file-reference:hover { color: var(--resource-link-hover); text-decoration-color: currentColor; }
-.markdown-file-reference:focus-visible,
+.safe-markdown .markdown-file-reference:focus-visible,
+.safe-markdown .markdown-web-reference:focus-visible,
 .message-file-reference:focus-visible { border-radius: 2px; outline: 2px solid var(--focus); outline-offset: 2px; }
-.markdown-file-reference.inline-code-file-reference,
+.safe-markdown .markdown-file-reference.inline-code-file-reference,
 .message-file-reference.inline-code-file-reference {
-  font: .9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   text-decoration: none;
 }
-.inline-code-file-reference .file-preview-tab-icon {
-  display: inline-block;
-  width: 1em;
-  height: 1em;
-  margin-right: .28em;
-  vertical-align: -.12em;
+.resource-reference-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  align-self: baseline;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  transform: translateY(2px);
+  opacity: .84;
 }
+.file-reference-label,
+.resource-reference-label { min-width: 0; overflow-wrap: anywhere; }
+.file-reference-label.is-code { font: .9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .inline-code-file-reference:hover,
 .inline-code-file-reference:active { color: var(--resource-link-hover); }
-.inline-code-file-reference:hover .inline-code-file-reference-label {
+.inline-code-file-reference:hover .file-reference-label {
   text-decoration-line: underline;
-  text-decoration-style: dashed;
+  text-decoration-style: dotted;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
-.inline-code-file-reference:active .inline-code-file-reference-label,
-.inline-code-file-reference:focus-visible .inline-code-file-reference-label { text-decoration: none; }
+.inline-code-file-reference:active .file-reference-label,
+.inline-code-file-reference:focus-visible .file-reference-label { text-decoration: none; }
 .file-preview-inline-error { max-width: 780px; margin: 0 auto 12px; color: var(--danger); font-size: 10px; }
 .file-preview-html-stage { position: relative; width: 100%; min-width: 0; min-height: 0; }
 .file-preview-html { width: 100%; height: 100%; border: 0; background: var(--conversation-surface); }
@@ -3067,9 +3084,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .safe-markdown li + li { margin-top: 3px; }
 .safe-markdown blockquote { margin: 8px 0; padding: 3px 10px; border-left: 3px solid var(--line-strong); color: var(--muted); }
 .safe-markdown pre { max-width: 100%; margin: 9px 0; overflow: auto; padding: 9px 10px; border: 1px solid var(--evidence-line); border-radius: 6px; color: var(--evidence-ink); background: var(--code-block-canvas); font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
-.message-file-reference code,
 .safe-markdown code { padding: 0 2px; border-radius: 3px; color: var(--evidence-ink); background: var(--inline-code-canvas); font: .9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.message-file-reference code,
 .safe-markdown .markdown-file-reference code { color: inherit; }
 .safe-markdown pre code { padding: 0; background: transparent; font-size: inherit; }
 .safe-markdown table { display: block; width: 100%; margin: 9px 0; overflow-x: auto; border-spacing: 0; border-collapse: collapse; font-size: 11px; }

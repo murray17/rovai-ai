@@ -2,12 +2,12 @@ import { createContext, isValidElement, useContext, useEffect, useLayoutEffect, 
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { FILE_REFERENCE_FRAGMENT, FileReferenceLink, type FileReferenceActivation } from './FileReferenceLink'
+import { ResourceReferenceIcon } from './FilePreviewTabIcon'
 import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
 import {
   inlineFileReferenceSource,
   isInlineFileReference,
-  parseFileReference,
-  tokenizeFileReferences
+  parseFileReference
 } from '../../file-preview-reference'
 
 type MarkdownTreeNode = {
@@ -78,8 +78,6 @@ function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
         if (node.url && parseFileReference(node.url)) candidates.push(node.url)
       } else if (node.type === 'inlineCode') {
         if (node.value && isInlineFileReference(node.value)) candidates.push(node.value)
-      } else if (node.type === 'text' && node.value) {
-        candidates.push(...tokenizeFileReferences(node.value).map((token) => token.raw))
       } else if (!['code', 'html', 'definition', 'image', 'imageReference', 'linkReference'].includes(node.type ?? '')) {
         node.children?.forEach(collect)
       }
@@ -89,46 +87,27 @@ function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
       if (!Array.isArray(node.children)) return
       const next: MarkdownTreeNode[] = []
       for (const child of node.children) {
-        if (child.type !== 'text' || typeof child.value !== 'string') {
-          if (child.type === 'link' && typeof child.url === 'string' && parseFileReference(child.url)) {
-            next.push({ ...child, url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.url)}` })
-            continue
-          }
-          if (
-            child.type === 'inlineCode'
-            && typeof child.value === 'string'
-            && inlineFileReferenceSource(child.value, candidates) !== null
-          ) {
-            const sourceReference = inlineFileReferenceSource(child.value, candidates)!
-            next.push({
-              type: 'link',
-              url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.value)}`,
-              ...(sourceReference !== child.value
-                ? { data: { hProperties: { 'data-file-source-reference': sourceReference } } } : {}),
-              children: [{ type: 'inlineCode', value: child.value }]
-            })
-            continue
-          }
-          if (child.type !== 'link' && child.type !== 'inlineCode' && child.type !== 'code') visit(child)
-          next.push(child)
+        if (child.type === 'link' && typeof child.url === 'string' && parseFileReference(child.url)) {
+          next.push({ ...child, url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.url)}` })
           continue
         }
-        const tokens = tokenizeFileReferences(child.value)
-        if (tokens.length === 0) {
-          next.push(child)
-          continue
-        }
-        let offset = 0
-        for (const token of tokens) {
-          if (token.start > offset) next.push({ type: 'text', value: child.value.slice(offset, token.start) })
+        if (
+          child.type === 'inlineCode'
+          && typeof child.value === 'string'
+          && inlineFileReferenceSource(child.value, candidates) !== null
+        ) {
+          const sourceReference = inlineFileReferenceSource(child.value, candidates)!
           next.push({
             type: 'link',
-            url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(token.raw)}`,
-            children: [{ type: 'text', value: token.raw }]
+            url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.value)}`,
+            ...(sourceReference !== child.value
+              ? { data: { hProperties: { 'data-file-source-reference': sourceReference } } } : {}),
+            children: [{ type: 'inlineCode', value: child.value }]
           })
-          offset = token.end
+          continue
         }
-        if (offset < child.value.length) next.push({ type: 'text', value: child.value.slice(offset) })
+        if (child.type !== 'link' && child.type !== 'inlineCode' && child.type !== 'code') visit(child)
+        next.push(child)
       }
       node.children = next
     }
@@ -256,8 +235,9 @@ export function SafeMarkdown({
               return <code className="markdown-inert-link">{linkChildren}</code>
             }
             return (
-              <a href={href} target="_blank" rel="noreferrer noopener">
-                {linkChildren}
+              <a className="markdown-web-reference" href={href} target="_blank" rel="noreferrer noopener">
+                <ResourceReferenceIcon kind="web" className="resource-reference-icon web-reference-icon" />
+                <span className="resource-reference-label">{linkChildren}</span>
               </a>
             )
           },

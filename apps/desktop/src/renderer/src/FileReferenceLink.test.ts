@@ -14,20 +14,22 @@ const examples = [
 
 const renderers = [{
   name: 'user message text',
+  rendersWebLinks: false,
   render: (source: string) => renderToStaticMarkup(createElement(FileReferenceText, {
     text: source,
     onActivate: () => undefined
   }))
 }, {
   name: 'safe Markdown',
+  rendersWebLinks: true,
   render: (source: string) => renderToStaticMarkup(createElement(SafeMarkdown, {
     children: source,
     onFileReference: () => undefined
   }))
 }]
 
-describe.each(renderers)('file-link presentation in $name', ({ render }) => {
-  it('shows descriptions once, keeps targets in tooltips, and distinguishes code file links', () => {
+describe.each(renderers)('file-link presentation in $name', ({ render, rendersWebLinks }) => {
+  it('shows descriptions once, keeps relative targets in tooltips, and uses true file-type icons', () => {
     const markup = render(examples)
     const visibleText = markup.replace(/<[^>]*>/gu, '')
     expect(markup.match(/<a /gu)).toHaveLength(5)
@@ -44,14 +46,17 @@ describe.each(renderers)('file-link presentation in $name', ({ render }) => {
       expect(visibleText).not.toContain(`[${label}]`)
     }
     expect(markup.match(/class="(?:message|markdown)-file-reference inline-code-file-reference"/gu)).toHaveLength(1)
-    expect(markup.match(/<svg /gu)).toHaveLength(1)
+    expect(markup.match(/<svg /gu)).toHaveLength(5)
     expect(markup).toContain('aria-hidden="true"')
-    expect(markup).toContain('<span class="inline-code-file-reference-label">apps/desktop/src/renderer/src/FilePreviewPane.tsx:1</span>')
+    for (const kind of ['markdown', 'html', 'code', 'image', 'svg']) {
+      expect(markup).toContain(`data-resource-type="${kind}"`)
+    }
+    expect(markup).toContain('<span class="file-reference-label is-code">apps/desktop/src/renderer/src/FilePreviewPane.tsx:1</span>')
     expect(markup).not.toContain('<code>')
     expect(visibleText.match(/apps\/desktop\/src\/renderer\/src\/FilePreviewPane.tsx:1/gu)).toHaveLength(1)
   })
 
-  it('does not nest file links inside labels or web URLs, or activate code blocks', () => {
+  it('does not scan labels, code blocks, web URLs, or ordinary path-shaped prose as files', () => {
     const markup = render([
       '[src/label.ts](src/target.ts:20)',
       'https://example.com/src/remote.ts',
@@ -66,17 +71,19 @@ describe.each(renderers)('file-link presentation in $name', ({ render }) => {
       '请查看 src/bare.ts:20。'
     ].join('\n'))
     expect(markup).toContain('title="src/target.ts:20"')
-    expect(markup).toContain('title="src/bare.ts:20"')
+    expect(markup).not.toContain('title="src/bare.ts:20"')
     expect(markup).not.toContain('title="src/label.ts"')
     expect(markup).not.toContain('title="src/secret')
     expect(markup).not.toContain('title="https:')
-    expect(markup.match(/class="(?:message|markdown)-file-reference"/gu)).toHaveLength(2)
+    expect(markup.match(/class="(?:message|markdown)-file-reference"/gu)).toHaveLength(1)
+    expect(markup.match(/data-resource-type="web"/gu) ?? []).toHaveLength(rendersWebLinks ? 2 : 0)
   })
 
   it('keeps labels separate from targets with spaces, escapes and line fragments', () => {
     const markup = render('请看 [**规划** 与 `配置`](<docs/my plan.md#L3> "额外说明") 和 [Windows](C:/work/app.ts:20)。')
     expect(markup).toContain('title="docs/my plan.md#L3"')
-    expect(markup).toContain('title="C:/work/app.ts:20"')
+    expect(markup).not.toContain('title="C:/work/app.ts:20"')
+    expect(markup).toContain('data-resource-type="code"')
     const visibleText = markup.replace(/<[^>]*>/gu, '')
     expect(visibleText).toContain('规划 与 配置')
     expect(visibleText).not.toContain('docs/my plan.md')
@@ -85,8 +92,10 @@ describe.each(renderers)('file-link presentation in $name', ({ render }) => {
 
   it('keeps a visible name for empty labels and uses the same literal tilde rules', () => {
     const markup = render('[](src/app.ts) [~原样~](docs/plan.md)')
-    expect(markup).toContain('title="src/app.ts">src/app.ts</a>')
-    expect(markup).toContain('title="docs/plan.md">~原样~</a>')
+    expect(markup).toContain('title="src/app.ts"')
+    expect(markup).toContain('<span class="file-reference-label">src/app.ts</span>')
+    expect(markup).toContain('title="docs/plan.md"')
+    expect(markup).toContain('<span class="file-reference-label">~原样~</span>')
   })
 
   it('leaves field lists and unqualified filenames inert, and links a located short name only with a source', () => {

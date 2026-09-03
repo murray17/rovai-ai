@@ -201,9 +201,8 @@ describe('Agent Current User Mention Markdown rendering', () => {
     expect(markup).toContain('<h3 data-markdown-heading="请确认">请确认</h3>')
     expect(markup).toContain('<ul>')
     expect(markup).toContain('<code>方案 B</code>')
-    expect(markup).toContain(
-      '<a href="https://example.com/migration" target="_blank" rel="noreferrer noopener">迁移说明</a>'
-    )
+    expect(markup).toContain('<a class="markdown-web-reference" href="https://example.com/migration"')
+    expect(markup).toContain('<span class="resource-reference-label">迁移说明</span>')
     expect(markup).toContain('<pre><code class="language-sh">pnpm test')
     expect(markup).toContain('<table>')
     expect(markup).toContain('请 @沐瓦 与 @所有队员 审阅。')
@@ -260,8 +259,9 @@ describe('Agent Current User Mention Markdown rendering', () => {
     expect(markup).toContain('aria-label="查看沐瓦的基础信息"')
     expect(markup).toContain('class="message-mention-token skill-mention"')
     expect(markup).toContain('aria-label="Skill /review"')
-    expect(markup).toContain('title="docs/versions/v1.30/README.md">v1.30 方案</a>')
-    expect(markup).toContain('<span class="inline-code-file-reference-label">src/app.ts:20</span>')
+    expect(markup).toContain('title="docs/versions/v1.30/README.md"')
+    expect(markup).toContain('<span class="file-reference-label">v1.30 方案</span>')
+    expect(markup).toContain('<span class="file-reference-label is-code">src/app.ts:20</span>')
     expect(markup).not.toContain('<code>src/app.ts:20</code>')
     expect(markup.replace(/<[^>]*>/gu, '')).not.toContain('docs/versions/v1.30/README.md')
     expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
@@ -276,7 +276,8 @@ describe('Agent Current User Mention Markdown rendering', () => {
       { kind: 'text', text: source }
     ])
     for (const markup of [user, currentUser]) {
-      expect(markup).toContain('title="docs/plan.md">方案</a>')
+      expect(markup).toContain('title="docs/plan.md"')
+      expect(markup).toContain('<span class="file-reference-label">方案</span>')
       expect(markup.replace(/<[^>]*>/gu, '')).not.toContain('docs/plan.md')
     }
     expect(currentUser).toContain('message-mention-token current-user')
@@ -319,7 +320,8 @@ describe('Agent leading Member Mention Markdown rendering', () => {
     expect(markup).toContain('<h3 data-markdown-heading="事实复核">事实复核</h3>')
     expect(markup).toContain('<ul>')
     expect(markup).toContain('<code>行内代码</code>')
-    expect(markup).toContain('title="docs/plan.md">验收说明</a>')
+    expect(markup).toContain('title="docs/plan.md"')
+    expect(markup).toContain('<span class="file-reference-label">验收说明</span>')
     expect(markup).toContain('<pre><code class="language-sh">pnpm test')
     expect(markup).toContain('<table>')
     expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
