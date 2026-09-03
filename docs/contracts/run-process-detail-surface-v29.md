@@ -16,25 +16,22 @@ last_updated: 2026-09-03
 
 ## 本地展示事件
 
-Core 可在 Runtime 已准入的精确信号旁，或由 Claude/Cursor 的 display-only Hook 生成
-`runtime.compaction.display` / schema 1。事件只允许绑定信号捕获当时仍可证明的
+Core 只能在 Rovai 现有入口已经捕获的 Runtime 精确信号旁生成 `runtime.compaction.display` / schema 1。事件只允许绑定
+信号捕获当时仍可证明的
 `agentRunId + executionEpoch`；没有 exact active lease/route、Runtime 或 Native Session 不一致、Run 已换 epoch、已取消或
 已终态时静默跳过展示。
 Bootstrap redelivery observation、digest、observer lease、v1 IPC 和 uncertain recovery outbox 保持原协议；outbox replay 不补挂
 展示事件。Codex `item/started|completed` 的 `item.type=contextCompaction` 必须在普通 activity 投影前拦截；缺少非空
 item ID 时降为不可展示的 native 事件，不能变成 Tool。
 
-Claude Code 只把本次启动的 additive `PostCompact(manual|auto)` Hook 映射为
-`completed + native_terminal`，并只复制非空 `compact_summary`。Cursor Agent 只把进程私有配置中的
-`preCompact(manual|auto)` 映射为 `imminent + pre_compaction_only`，并逐字段复制
-`context_tokens/context_window_size/context_usage_percent`。这两条 Hook 使用 active Built-in Tool lease 进行本地展示授权，
-不创建 observer lease、不调用 `submit_compaction_observation`、不写 observation outbox，也不改变对应 Runtime 的 detector
-policy 或产品资格。
+Runtime Compact 行只投影 Rovai 当前已有入口能够捕获的原生事件。执行台展示功能不得主动为尚未接入的 Runtime 安装 Hook、
+Plugin 或配置 Overlay，也不得修改 Runtime 的启动参数、环境或用户配置。Claude Code 与 Cursor Agent 当前无展示入口；本次
+需求不新增其协议接入。
 
 展示载荷只保留 `schemaVersion`、`compactionId`、`adapterKind`、`phase`、可选 `completionEvidence`、Runtime 明确给出的
 token/message/elapsed 字段及显式 summary。不得从 token drop、文本关键词、Session ID、时间窗口或其他事件猜缺失字段。
-summary 可复用本地 Execution Evidence/Managed Blob 全文路径，但整个事件不进入公开 execution Evidence、飞书、钉钉、
-局域网执行台、世界地图或 Canonical Activity。
+现有 Qoder/Qwen observation Hook 的 `summaryText` 可复用本地 Execution Evidence/Managed Blob 全文路径，但整个事件不进入
+公开 execution Evidence、飞书、钉钉、局域网执行台、世界地图或 Canonical Activity。
 
 ## 执行台呈现
 

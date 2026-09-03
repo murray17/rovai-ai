@@ -23,8 +23,8 @@ use antigravity::{
 };
 use anyhow::{Context, Result};
 use builtin_tool_runtime::{
-    AuthorizedBuiltinToolInvocation, BuiltinToolLeaseRegistry, BuiltinToolProcessConfig,
-    builtin_tool_endpoint, bundled_cli_executable, request_digest,
+    BuiltinToolLeaseRegistry, BuiltinToolProcessConfig, builtin_tool_endpoint,
+    bundled_cli_executable, request_digest,
 };
 use claude::{
     ClaudeCodeCliRuntimeAdapter, ClaudeCodeDeliveredFailure, ClaudeCodeInputAccepted,
@@ -76,7 +76,6 @@ use rovai_core::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
         BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolError, BuiltinToolInvocationEnvelope,
         BuiltinToolIpcRequest, BuiltinToolIpcRequestBody, BuiltinToolIpcResponse,
-        COMPACTION_DISPLAY_IPC_KIND, COMPACTION_DISPLAY_IPC_PROTOCOL_VERSION,
         COMPACTION_HOOK_IPC_PROTOCOL_VERSION, COMPACTION_OBSERVATION_IPC_KIND,
         CompactionHookIpcRequest, CompactionHookIpcResponse, builtin_tool_catalog_digest,
         builtin_tool_description, recovery_for_error_code,
@@ -214,7 +213,6 @@ use rovai_core::{
     runtime_compaction_display::{
         RUNTIME_COMPACTION_DISPLAY_EVENT, RuntimeCompactionCompletionEvidence,
         RuntimeCompactionDisplayEvent, RuntimeCompactionDisplayPhase,
-        RuntimeCompactionTokenSnapshot,
     },
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeExecutableCandidate,
@@ -4412,12 +4410,8 @@ impl Core {
         request: CompactionHookIpcRequest,
     ) -> CompactionHookIpcResponse {
         let rejected = || CompactionHookIpcResponse { accepted: false };
-        let expected_protocol_version = match request.kind.as_str() {
-            COMPACTION_OBSERVATION_IPC_KIND => COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
-            COMPACTION_DISPLAY_IPC_KIND => COMPACTION_DISPLAY_IPC_PROTOCOL_VERSION,
-            _ => return rejected(),
-        };
-        if request.ipc_protocol_version != expected_protocol_version
+        if request.kind != COMPACTION_OBSERVATION_IPC_KIND
+            || request.ipc_protocol_version != COMPACTION_HOOK_IPC_PROTOCOL_VERSION
             || uuid::Uuid::parse_str(&request.request_id).is_err()
             || !self
                 .builtin_tool_leases
@@ -4434,12 +4428,6 @@ impl Core {
         {
             return rejected();
         }
-        if request.kind == COMPACTION_DISPLAY_IPC_KIND {
-            return self
-                .handle_compaction_display_hook_ipc(request, adapter_kind)
-                .await;
-        }
-
         let native_session_id = request.native_session_id.as_str();
         let hook_event_name = request.hook_event_name.as_str();
         let compact_trigger = request.trigger.as_str();
@@ -4448,9 +4436,23 @@ impl Core {
         else {
             return rejected();
         };
-        let display_target = self
-            .active_compaction_display_target(&request, adapter_kind)
-            .await;
+        let display_target = match request.display_auth.as_ref() {
+            Some(auth)
+                if auth.process_id == request.process_id
+                    && auth.process_token == request.process_token =>
+            {
+                self.builtin_tool_leases
+                    .authenticate(auth)
+                    .await
+                    .ok()
+                    .filter(|target| {
+                        !target.native_binding.binding_replaced
+                            && target.native_binding.native_session_id.as_deref()
+                                == Some(request.native_session_id.as_str())
+                    })
+            }
+            Some(_) | None => None,
+        };
         let display_event = observation_hook_compaction_display_event(
             adapter_kind,
             &request.source_event_digest,
@@ -4509,74 +4511,6 @@ impl Core {
             );
         }
         CompactionHookIpcResponse { accepted }
-    }
-
-    async fn handle_compaction_display_hook_ipc(
-        &self,
-        request: CompactionHookIpcRequest,
-        adapter_kind: AdapterKind,
-    ) -> CompactionHookIpcResponse {
-        let rejected = || CompactionHookIpcResponse { accepted: false };
-        let Some(display_event) = display_only_hook_compaction_display_event(
-            adapter_kind,
-            &request.source_event_digest,
-            &request.hook_event_name,
-            &request.trigger,
-            request.summary_text.as_deref(),
-            request.tokens.as_ref(),
-        ) else {
-            return rejected();
-        };
-        let Some(target) = self
-            .active_compaction_display_target(&request, adapter_kind)
-            .await
-        else {
-            return rejected();
-        };
-        match persist_runtime_compaction_display(
-            self,
-            &self.output,
-            &target.agent_run_id,
-            target.execution_epoch,
-            Some(&target.run_tmp),
-            display_event,
-            &request.hook_event_name,
-        )
-        .await
-        {
-            Ok(()) => CompactionHookIpcResponse { accepted: true },
-            Err(error) => {
-                eprintln!(
-                    "{} local compaction display was skipped: {error:#}",
-                    adapter_kind.as_str()
-                );
-                rejected()
-            }
-        }
-    }
-
-    async fn active_compaction_display_target(
-        &self,
-        request: &CompactionHookIpcRequest,
-        adapter_kind: AdapterKind,
-    ) -> Option<AuthorizedBuiltinToolInvocation> {
-        let auth = request.display_auth.as_ref()?;
-        if auth.process_id != request.process_id || auth.process_token != request.process_token {
-            return None;
-        }
-        let target = self.builtin_tool_leases.authenticate(auth).await.ok()?;
-        if target.native_binding.binding_replaced {
-            return None;
-        }
-        let execution = {
-            let database = self.database.lock().await;
-            ExecutionRuntimeService::default()
-                .load_agent_run_execution(&database, &target.agent_run_id, target.execution_epoch)
-                .ok()??
-        };
-        (execution.runtime.adapter_kind == adapter_kind
-            && execution.native_session_id.as_deref() == Some(request.native_session_id.as_str()))
-        .then_some(target)
     }
 
     async fn handle_builtin_operation(
@@ -15765,58 +15699,6 @@ fn observation_hook_compaction_display_event(
     Some(event)
 }
 
-fn display_only_hook_compaction_display_event(
-    adapter_kind: AdapterKind,
-    compaction_id: &str,
-    hook_event_name: &str,
-    trigger: &str,
-    summary_text: Option<&str>,
-    tokens: Option<&RuntimeCompactionTokenSnapshot>,
-) -> Option<RuntimeCompactionDisplayEvent> {
-    if !matches!(trigger, "manual" | "auto") {
-        return None;
-    }
-    let (phase, completion_evidence) = match (adapter_kind, hook_event_name) {
-        (AdapterKind::ClaudeCodeCli, "PostCompact") => (
-            RuntimeCompactionDisplayPhase::Completed,
-            RuntimeCompactionCompletionEvidence::NativeTerminal,
-        ),
-        (AdapterKind::CursorAgent, "preCompact") => (
-            RuntimeCompactionDisplayPhase::Imminent,
-            RuntimeCompactionCompletionEvidence::PreCompactionOnly,
-        ),
-        _ => return None,
-    };
-    let mut event =
-        RuntimeCompactionDisplayEvent::new(compaction_id, adapter_kind.as_str(), phase)?;
-    event.completion_evidence = Some(completion_evidence);
-    match adapter_kind {
-        AdapterKind::ClaudeCodeCli => event.set_summary_text(summary_text),
-        AdapterKind::CursorAgent => {
-            let tokens = tokens.map(|tokens| RuntimeCompactionTokenSnapshot {
-                current: tokens.current,
-                context_window: tokens.context_window,
-                usage_percent: tokens.usage_percent,
-                ..RuntimeCompactionTokenSnapshot::default()
-            });
-            if tokens.as_ref().is_some_and(|tokens| {
-                tokens.usage_percent.is_some_and(|usage_percent| {
-                    !usage_percent.is_finite() || !(0.0..=100.0).contains(&usage_percent)
-                })
-            }) {
-                return None;
-            }
-            event.tokens = tokens.filter(|tokens| {
-                tokens.current.is_some()
-                    || tokens.context_window.is_some()
-                    || tokens.usage_percent.is_some()
-            });
-        }
-        _ => unreachable!(),
-    }
-    Some(event)
-}
-
 async fn persist_runtime_compaction_display(
     core: &Core,
     output: &mpsc::UnboundedSender<String>,
@@ -18649,9 +18531,7 @@ async fn handle_builtin_tool_connection(core: Arc<Core>, stream: LocalIpcStream)
                 .as_ref()
                 .and_then(|value| value.get("kind"))
                 .and_then(Value::as_str)
-                .is_some_and(|kind| {
-                    kind == COMPACTION_OBSERVATION_IPC_KIND || kind == COMPACTION_DISPLAY_IPC_KIND
-                })
+                == Some(COMPACTION_OBSERVATION_IPC_KIND)
             {
                 let response = match value.and_then(|value| {
                     serde_json::from_value::<CompactionHookIpcRequest>(value).ok()
@@ -19095,103 +18975,6 @@ mod tests {
             )
             .is_none()
         );
-    }
-
-    #[test]
-    fn display_only_hooks_map_claude_summary_and_cursor_tokens_without_admission() {
-        let cursor_tokens = RuntimeCompactionTokenSnapshot {
-            before: Some(180_000),
-            after: Some(90_000),
-            current: Some(91_000),
-            context_window: Some(128_000),
-            usage_percent: Some(71.09375),
-        };
-        let claude = display_only_hook_compaction_display_event(
-            AdapterKind::ClaudeCodeCli,
-            "compact-claude",
-            "PostCompact",
-            "manual",
-            Some(" compact summary "),
-            Some(&cursor_tokens),
-        )
-        .unwrap();
-        assert_eq!(claude.phase, RuntimeCompactionDisplayPhase::Completed);
-        assert_eq!(
-            claude.completion_evidence,
-            Some(RuntimeCompactionCompletionEvidence::NativeTerminal)
-        );
-        assert_eq!(claude.summary_text.as_deref(), Some("compact summary"));
-        assert!(claude.tokens.is_none());
-
-        let cursor = display_only_hook_compaction_display_event(
-            AdapterKind::CursorAgent,
-            "compact-cursor",
-            "preCompact",
-            "auto",
-            Some("must not be copied"),
-            Some(&cursor_tokens),
-        )
-        .unwrap();
-        assert_eq!(cursor.phase, RuntimeCompactionDisplayPhase::Imminent);
-        assert_eq!(
-            cursor.completion_evidence,
-            Some(RuntimeCompactionCompletionEvidence::PreCompactionOnly)
-        );
-        assert_eq!(
-            cursor.tokens,
-            Some(RuntimeCompactionTokenSnapshot {
-                current: Some(91_000),
-                context_window: Some(128_000),
-                usage_percent: Some(71.09375),
-                ..RuntimeCompactionTokenSnapshot::default()
-            })
-        );
-        assert!(cursor.summary_text.is_none());
-
-        let invalid_tokens = RuntimeCompactionTokenSnapshot {
-            usage_percent: Some(100.1),
-            ..RuntimeCompactionTokenSnapshot::default()
-        };
-        assert!(
-            display_only_hook_compaction_display_event(
-                AdapterKind::CursorAgent,
-                "compact-cursor",
-                "preCompact",
-                "manual",
-                None,
-                Some(&invalid_tokens),
-            )
-            .is_none()
-        );
-
-        for invalid in [
-            display_only_hook_compaction_display_event(
-                AdapterKind::ClaudeCodeCli,
-                "compact-claude",
-                "PreCompact",
-                "manual",
-                None,
-                None,
-            ),
-            display_only_hook_compaction_display_event(
-                AdapterKind::CursorAgent,
-                "compact-cursor",
-                "preCompact",
-                "other",
-                None,
-                None,
-            ),
-            display_only_hook_compaction_display_event(
-                AdapterKind::QwenCode,
-                "compact-qwen",
-                "PostCompact",
-                "manual",
-                None,
-                None,
-            ),
-        ] {
-            assert!(invalid.is_none());
-        }
     }
 
     #[cfg(feature = "slow-tests")]
