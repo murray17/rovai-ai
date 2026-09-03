@@ -326,6 +326,9 @@ const api: RovaiApi = {
     bindCamp(campId) {
       return ipcRenderer.invoke('rovai:file-preview-bind-camp', campId)
     },
+    resolveMessageReferences(request) {
+      return ipcRenderer.invoke('rovai:file-preview-resolve-message-references', request)
+    },
     open(request) {
       return ipcRenderer.invoke('rovai:file-preview-open', request)
     },

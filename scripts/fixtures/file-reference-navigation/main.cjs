@@ -3,6 +3,7 @@ const { mkdirSync, writeFileSync } = require('node:fs')
 const { isAbsolute, join, dirname } = require('node:path')
 const { app, BrowserWindow } = require('electron')
 const [renderer, userData] = process.argv.slice(2)
+const interactive = process.env.ROVAI_SHOW_FILE_REFERENCE_FIXTURE === '1'
 assert.ok(isAbsolute(renderer) && isAbsolute(userData))
 mkdirSync(userData, { recursive: true })
 app.setPath('userData', userData)
@@ -11,7 +12,7 @@ app.setPath('sessionData', join(userData, 'session'))
 // This fixture mounts the production Camp and file preview with a closed fake API.
 // It never starts Core, SQLite, a Skill Library, or a Runtime.
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: process.platform === 'linux', width: 1440, height: 920, useContentSize: true,
+  const window = new BrowserWindow({ show: process.platform === 'linux' || interactive, width: 1440, height: 920, useContentSize: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
   window.webContents.on('console-message', event => console.error(event.message))
   await window.loadFile(renderer)
@@ -77,7 +78,7 @@ app.whenReady().then(async () => {
     }
   }
   await state()
-  await check('located short name preserves source authority, highlights the range, and anchors a long message', async () => {
+  await check('an existing Camp-relative short name highlights the range and anchors a long message', async () => {
     await run('window.navigationTest.bookmark()')
     const before = await state()
     const after = await click('[title="run_report.py:44-46"]')
@@ -87,10 +88,18 @@ app.whenReady().then(async () => {
     measurements.openAnchorDrift = Math.abs(after.linkY - before.linkY)
     assert.deepEqual(after.targetLines, [44, 45, 46])
     assert.equal(after.targetVisible, true)
-    assert.equal(after.opens.at(-1).rawReference, 'src/report/run_report.py')
+    assert.equal(after.opens.at(-1).rawReference, 'run_report.py:44-46')
     assert.equal(after.sameTimeline, true)
     assert.equal(after.sameLink, true)
     assert.equal(after.falseLinks, 0)
+    assert.deepEqual(after.inlineReferenceTypes, [
+      { title: 'src/report/run_report.py', type: 'code' },
+      { title: 'run_report.py:44-46', type: 'code' },
+      { title: 'config.toml', type: 'config' },
+      { title: 'demo.mp4', type: 'video' }
+    ])
+    assert.ok(after.inertInlineCodes.includes('missing.toml'))
+    assert.ok(after.inertInlineCodes.includes('run_gr_reminder.py'))
     assert.equal(after.webHref, 'https://example.com/wiki/spec')
     assert.equal(after.webText, 'https://example.com/wiki/spec')
     assert.deepEqual(after.notices, [])
@@ -140,15 +149,18 @@ app.whenReady().then(async () => {
   })
   const locatedLink = '[title="run_report.py:44-46"]'
   const plainLink = 'a[title="src/report/run_report.py"]:not(.inline-code-file-reference)'
-  const nearbyProse = 'p:has([title="run_report.py:44-46"]) + p'
-  for (const [label, selector] of [['inline code', locatedLink], ['plain Markdown', plainLink]]) {
+  const nearbyProse = 'p:has([title="run_report.py:44-46"]) + p + p'
+  for (const [label, selector, expectedReference] of [
+    ['inline code', locatedLink, 'run_report.py:44-46'],
+    ['plain Markdown', plainLink, 'src/report/run_report.py']
+  ]) {
     await check(`${label} opens with an existing selection elsewhere in the message`, async () => {
       await run('window.navigationTest.bookmark()')
       const selection = await selectText(nearbyProse)
       const before = await state()
       const after = await click(selector)
       assert.equal(after.opens.length, before.opens.length + 1)
-      assert.equal(after.opens.at(-1).rawReference, 'src/report/run_report.py')
+      assert.equal(after.opens.at(-1).rawReference, expectedReference)
       assert.equal(after.visible, true)
       assert.equal(await run('window.getSelection().toString()'), selection)
       assert.equal(await run('location.hash'), '')
@@ -183,5 +195,13 @@ app.whenReady().then(async () => {
   const report = { ok: true, cases, measurements }
   writeFileSync(join(dirname(userData), 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report))
-  app.exit(0)
+  if (interactive) {
+    window.show()
+    window.focus()
+    app.focus({ steal: true })
+  } else {
+    app.exit(0)
+  }
 }).catch(error => { console.error(error); app.exit(1) })
+
+app.on('window-all-closed', () => app.quit())

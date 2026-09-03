@@ -59,10 +59,15 @@ describe('parseFileReference', () => {
 })
 
 describe('isInlineFileReference', () => {
-  it('keeps ordinary inline code inert while accepting intentional file references', () => {
+  it('admits known basename types for existence resolution while rejecting ordinary inline code', () => {
     expect(isInlineFileReference('方案 B')).toBe(false)
-    expect(isInlineFileReference('notes.txt')).toBe(false)
-    expect(isInlineFileReference('run_gr_reminder.py')).toBe(false)
+    expect(isInlineFileReference('notes.txt')).toBe(true)
+    expect(isInlineFileReference('run_gr_reminder.py')).toBe(true)
+    expect(isInlineFileReference('demo.mp4')).toBe(true)
+    expect(isInlineFileReference('notebook.ipynb')).toBe(true)
+    expect(isInlineFileReference('data.sqlite')).toBe(true)
+    expect(isInlineFileReference('Promise.all')).toBe(false)
+    expect(isInlineFileReference('sum()')).toBe(false)
     expect(isInlineFileReference('./Makefile')).toBe(true)
     expect(isInlineFileReference('src/app.ts:42')).toBe(true)
   })

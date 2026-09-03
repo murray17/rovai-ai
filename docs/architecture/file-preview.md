@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-08-31
+last_updated: 2026-09-03
 ---
 
 # File Preview Architecture
@@ -18,15 +18,35 @@ Renderer entry
   → safe metadata/content response
 ```
 
+消息 inline-code 在成为 entry 前先走一条不产生能力的呈现准入：
+
+```text
+Renderer whole-inline-code candidate
+  → typed Preload existence probe
+  → Desktop Main sender/camp gate
+  → Core exact Message source authority
+  → Main path resolution + realpath + stat
+  → exact existing-file references only
+  → Renderer link or inert <code>
+
+trusted click
+  → existing v3 open pipeline
+  → unchanged Main classifier
+  → Preview Tab | system application | public failure
+```
+
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v3](../contracts/file-preview-v3.md) 的场景化方法；iframe 不获得 Preload；
-- **Renderer** 拥有当前 Camp 的 Tab、布局与阅读状态，不解析路径形成 Authority，也不读取磁盘。
+- **Preload** 只暴露 [File Preview v4](../contracts/file-preview-v4.md) 的场景化方法；iframe 不获得 Preload；
+- **Renderer** 拥有当前 Camp 的 Tab、布局与阅读状态，只提取完整 inline-code 语法候选并消费探测结果；它不解析
+  路径形成 Authority，也不读取磁盘。
 
 预览仅提供阅读能力。文字选择与系统复制是本地阅读行为，不连接 Composer 写入、消息持久化或 Agent input；
 引用能力不在当前组件图内。
 
-任何来源必须先成为封闭 `OpenFilePreviewRequest`。Core 返回的 root/base/candidate 只在 Core↔Main 内部存在；
+任何打开来源必须先成为封闭 `OpenFilePreviewRequest`。呈现探测使用有界的
+`ResolveMessageFileReferencesRequest`，其中每项仍须由 Core 证明来自 exact Message；Core 返回的
+root/base/candidate 只在 Core↔Main 内部存在；
 Main 对 root 和目标分别 realpath，拒绝特殊文件，并把一次可信用户激活最终定位到的普通文件收敛成“具体文件能力”。
 该能力不要求 canonical file 位于 Camp/project root：外部文件使用 `dirname(canonicalFile)` 作为临时 watcher、相对子链接
 和资源边界，但不创建、持久化或公开 Root Grant。Message、Camp Workspace、Attachment、Run Evidence `open_current`
@@ -39,6 +59,20 @@ Main 对 root 和目标分别 realpath，拒绝特殊文件，并把一次可信
 
 消息/工作区引用的尾部单个冒号仅由 Main 在原路径不存在、无行列/范围目标、去掉冒号后仍为合法路径且普通文件
 实际存在时恢复；不修改原始引用或 Core 来源校验，刷新、重开与系统动作重复相同解析及 containment 检查。
+
+## 消息文件入口准入与视觉类型
+
+完整 inline-code 只有在共享资源类型定义认得其扩展名/既有特殊文件名，或本身属于既有高置信路径语法时，才成为
+探测候选。相对引用以消息来源工作目录解析：来源 AgentRun 的绝对 `executionRoot` 优先，否则使用 directory Camp
+的绝对项目目录；绝对路径、Home 相对路径和本机 file URI 直接沿用既有解析。Main 只把最终落到现存普通文件的原始
+引用返回 Renderer；缺失文件、目录和失败项保持普通 inline-code。
+
+这次探测只执行 path resolution、realpath 与 stat，不读取内容、不调用 classifier，也不创建 handle、token、watcher、
+Tab 或系统动作。响应不是 capability，点击仍重新校验来源和文件身份。
+
+共享资源类型定义只拥有“是否为已知资源类型”和 `ResourceVisualKind`。会话链接与普通文件 Tab 以同一个文件名查询
+同一视觉类型；它不拥有 `FilePreviewKind` 或打开策略。Main 的既有 classifier 继续独立结合扩展名、大小、MIME 与内容
+决定 Preview、系统应用或失败，不支持预览的文件不会因已经显示类型图标而创建 Preview Tab。
 
 ## 窗口文件能力
 

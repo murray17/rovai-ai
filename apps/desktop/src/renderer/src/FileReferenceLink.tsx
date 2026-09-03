@@ -2,7 +2,7 @@ import { Children, isValidElement, useMemo, useRef, type JSX, type ReactNode } f
 import type { FileLocationTarget } from '@contracts'
 import { parseFileReference } from '../../file-preview-reference'
 import { FileReferenceIcon } from './FilePreviewTabIcon'
-import { projectMessageFileReferences } from './safe-markdown-model'
+import { projectMessageFileReferences, projectMessageInlineCodes } from './safe-markdown-model'
 
 export const FILE_REFERENCE_FRAGMENT = '#rovai-file-reference='
 export type FileReferenceActivation = (rawReference: string, source: HTMLElement, target?: FileLocationTarget) => void
@@ -65,30 +65,49 @@ export function FileReferenceLink({
 
 export function FileReferenceText({
   text,
-  onActivate
+  onActivate,
+  resolvedInlineFileReferences
 }: {
   text: string
   onActivate?: FileReferenceActivation
+  resolvedInlineFileReferences?: ReadonlySet<string>
 }): JSX.Element {
   const enabled = Boolean(onActivate)
-  const references = useMemo(() => enabled ? projectMessageFileReferences(text) : [], [enabled, text])
-  if (!onActivate || references.length === 0) return <>{text}</>
+  const references = useMemo(
+    () => enabled ? projectMessageFileReferences(text, resolvedInlineFileReferences) : [],
+    [enabled, resolvedInlineFileReferences, text]
+  )
+  const inlineCodes = useMemo(() => enabled ? projectMessageInlineCodes(text) : [], [enabled, text])
+  if (!onActivate || (references.length === 0 && inlineCodes.length === 0)) return <>{text}</>
+  const parts = [
+    ...references.map((reference) => ({ kind: 'reference' as const, ...reference })),
+    ...inlineCodes
+      .filter((inlineCode) => !references.some((reference) => (
+        inlineCode.start < reference.end && inlineCode.end > reference.start
+      )))
+      .map((inlineCode) => ({ kind: 'code' as const, ...inlineCode }))
+  ].sort((left, right) => left.start - right.start)
   const output: ReactNode[] = []
   let offset = 0
-  for (const reference of references) {
-    if (reference.start > offset) output.push(text.slice(offset, reference.start))
+  for (const part of parts) {
+    if (part.start > offset) output.push(text.slice(offset, part.start))
+    if (part.kind === 'code') {
+      output.push(<code key={`code-${part.start}`}>{part.value}</code>)
+      offset = part.end
+      continue
+    }
     output.push(
       <FileReferenceLink
         className="message-file-reference"
-        rawReference={reference.rawReference}
-        sourceReference={reference.sourceReference}
-        key={`${reference.start}:${reference.rawReference}`}
+        rawReference={part.rawReference}
+        sourceReference={part.sourceReference}
+        key={`${part.start}:${part.rawReference}`}
         onActivate={onActivate}
       >
-        {reference.inlineCode ? <code>{reference.label}</code> : reference.label}
+        {part.inlineCode ? <code>{part.label}</code> : part.label}
       </FileReferenceLink>
     )
-    offset = reference.end
+    offset = part.end
   }
   if (offset < text.length) output.push(text.slice(offset))
   return <>{output}</>

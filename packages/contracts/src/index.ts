@@ -1203,6 +1203,16 @@ export type OpenFilePreviewRequest =
       rawReference: string
     }
 
+export interface ResolveMessageFileReferencesRequest {
+  campId: string
+  messageId: string
+  rawReferences: string[]
+}
+
+export interface ResolveMessageFileReferencesResult {
+  resolvedReferences: string[]
+}
+
 export interface ReopenFilePreviewRequest {
   campId: string
   reopenToken: string
@@ -1364,6 +1374,7 @@ export interface FilePreviewExternalUpdateEvent {
 
 export interface FilePreviewApi {
   bindCamp(campId: string | null): Promise<void>
+  resolveMessageReferences(request: ResolveMessageFileReferencesRequest): Promise<ResolveMessageFileReferencesResult>
   open(request: OpenFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
   reopen(request: ReopenFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
   readText(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewTextContent>>

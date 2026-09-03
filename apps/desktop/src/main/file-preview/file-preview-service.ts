@@ -18,9 +18,11 @@ import type {
   OpenFilePreviewRequest,
   OpenFilePreviewResult,
   ParsedFileReference,
+  ResolveMessageFileReferencesRequest,
+  ResolveMessageFileReferencesResult,
   ResolvedFilePreview
 } from '@contracts'
-import { parseFileReference } from '../../file-preview-reference'
+import { isInlineFileReference, parseFileReference } from '../../file-preview-reference'
 import { filePreviewAssetUrl, parseFilePreviewAssetUrl } from '../../file-preview-asset-url'
 import {
   canonicalizeExistingPath,
@@ -298,6 +300,39 @@ export class FilePreviewService {
     } catch (error) {
       return this.#errorResult(error)
     }
+  }
+
+  async resolveMessageReferences(
+    webContentsId: number,
+    request: ResolveMessageFileReferencesRequest
+  ): Promise<ResolveMessageFileReferencesResult> {
+    this.#prune()
+    this.#requireActiveCamp(webContentsId, request.campId)
+    const rawReferences = [...new Set(request.rawReferences)].filter(isInlineFileReference)
+    const resolved = await Promise.all(rawReferences.map(async (rawReference) => {
+      try {
+        const target = await this.#resolveTarget(webContentsId, {
+          kind: 'message_reference',
+          campId: request.campId,
+          messageId: request.messageId,
+          rawReference
+        })
+        if (!target || target.kind !== 'file_target') return null
+        const parsed = this.#parsedReference(target)
+        const candidatePath = await this.#candidatePath(target, parsed)
+        const inspected = await inspectPreviewPath(
+          target.rootPath,
+          candidatePath,
+          this.#fileAccessOptions(target)
+        )
+        return inspected.kind === 'file' ? rawReference : null
+      } catch {
+        // Resolution is presentation admission, so individual failures degrade
+        // to ordinary inline code. A later activation still revalidates fully.
+        return null
+      }
+    }))
+    return { resolvedReferences: resolved.filter((reference): reference is string => reference !== null) }
   }
 
   async reopen(

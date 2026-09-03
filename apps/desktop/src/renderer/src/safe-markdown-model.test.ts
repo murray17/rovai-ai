@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { projectMessageFileReferences, safeMarkdownHasRenderableContent } from './safe-markdown-model'
+import {
+  projectInlineFileReferenceCandidates,
+  projectMessageInlineCodes,
+  projectMessageFileReferences,
+  safeMarkdownHasRenderableContent
+} from './safe-markdown-model'
 
 describe('safe Markdown presentation admission', () => {
   it.each([
@@ -18,6 +23,27 @@ describe('safe Markdown presentation admission', () => {
 })
 
 describe('message file-reference projection', () => {
+  it('preserves unresolved references and ordinary expressions as inline code', () => {
+    expect(projectMessageInlineCodes('`missing.toml` 与 `Promise.all`')).toMatchObject([
+      { value: 'missing.toml' },
+      { value: 'Promise.all' }
+    ])
+  })
+
+  it('projects known whole-inline-code candidates without scanning prose or fenced code', () => {
+    const source = '`config.toml` `demo.mp4` missing.toml\n\n```md\n`secret.toml`\n```\n\n`Promise.all`'
+    expect(projectInlineFileReferenceCandidates(source)).toEqual(['config.toml', 'demo.mp4'])
+  })
+
+  it('keeps unresolved inline-code inert while preserving explicit Markdown links', () => {
+    const source = '[配置](config.toml) `config.toml` `missing.toml`'
+    const references = projectMessageFileReferences(source, new Set(['config.toml']))
+    expect(references.map(({ rawReference, inlineCode }) => ({ rawReference, inlineCode }))).toEqual([
+      { rawReference: 'config.toml', inlineCode: false },
+      { rawReference: 'config.toml', inlineCode: true }
+    ])
+  })
+
   it('uses source offsets, including Unicode and Markdown escapes before the link', () => {
     const source = '📝 **原文** &amp; \\* [计划](docs/plan.md)；代码 `src/app.ts:20`。'
     const references = projectMessageFileReferences(source)

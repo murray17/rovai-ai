@@ -135,6 +135,7 @@ import {
   parseOpenFilePreviewRequest,
   parsePageRequest,
   parseReloadRequest,
+  parseResolveMessageFileReferencesRequest,
   parseReopenRequest
 } from './file-preview/file-preview-ipc-input'
 
@@ -980,6 +981,12 @@ ipcMain.handle('rovai:supervisor-retry', () => {
 
 ipcMain.handle('rovai:file-preview-bind-camp', (event, value: unknown) =>
   filePreview.bindCamp(requireFilePreviewSender(event), parseFilePreviewCamp(value)))
+
+ipcMain.handle('rovai:file-preview-resolve-message-references', (event, value: unknown) =>
+  filePreview.resolveMessageReferences(
+    requireFilePreviewSender(event),
+    parseResolveMessageFileReferencesRequest(value)
+  ))
 
 ipcMain.handle('rovai:file-preview-open', (event, value: unknown) =>
   filePreview.open(requireFilePreviewSender(event), parseOpenFilePreviewRequest(value)))

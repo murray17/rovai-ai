@@ -62,9 +62,9 @@ export function ResourceReferenceIcon({
 }): React.JSX.Element {
   const typeAttribute = fileType
     ? { 'data-file-type': fileType }
-    : { 'data-resource-type': kind }
+    : {}
   return (
-    <svg className={className} {...typeAttribute} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <svg className={className} data-resource-type={kind} {...typeAttribute} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <ResourceReferenceGlyph kind={kind} />
     </svg>
   )
@@ -75,11 +75,12 @@ export function FileReferenceIcon({ rawReference }: { rawReference: string }): R
   return <ResourceReferenceIcon kind={kind} className="resource-reference-icon file-reference-icon" />
 }
 
-export function FilePreviewTabIcon({ kind }: { kind: FilePreviewKind | 'file_change' }): React.JSX.Element {
-  const resourceKind: ResourceReferenceVisualKind = kind === 'file_change'
-    ? 'patch'
-    : kind === 'paged_text'
-      ? 'text'
-      : kind
-  return <ResourceReferenceIcon kind={resourceKind} className="file-preview-tab-icon" fileType={kind} />
+export function FilePreviewTabIcon({
+  kind,
+  fileType
+}: {
+  kind: ResourceReferenceVisualKind
+  fileType?: FilePreviewKind | 'file_change'
+}): React.JSX.Element {
+  return <ResourceReferenceIcon kind={kind} className="file-preview-tab-icon" fileType={fileType} />
 }

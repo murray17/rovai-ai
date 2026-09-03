@@ -1,4 +1,8 @@
-use std::path::{Component, Path};
+use std::{
+    collections::HashSet,
+    path::{Component, Path},
+    sync::OnceLock,
+};
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, params};
@@ -149,124 +153,83 @@ fn plausible_file_reference(value: &str) -> bool {
         && !reference_has_disallowed_scheme(value)
 }
 
-fn known_file_extension(value: &str) -> bool {
-    const EXTENSIONS: &[&str] = &[
-        "md",
-        "markdown",
-        "mdown",
-        "mkd",
-        "mdx",
-        "html",
-        "htm",
-        "ts",
-        "tsx",
-        "mts",
-        "cts",
-        "js",
-        "jsx",
-        "mjs",
-        "cjs",
-        "py",
-        "pyw",
-        "pyi",
-        "rb",
-        "rake",
-        "php",
-        "lua",
-        "rs",
-        "go",
-        "java",
-        "kt",
-        "kts",
-        "swift",
-        "dart",
-        "c",
-        "h",
-        "cc",
-        "cpp",
-        "cxx",
-        "hh",
-        "hpp",
-        "hxx",
-        "cs",
-        "m",
-        "mm",
-        "sh",
-        "bash",
-        "zsh",
-        "fish",
-        "ps1",
-        "psm1",
-        "bat",
-        "cmd",
-        "css",
-        "scss",
-        "sass",
-        "less",
-        "vue",
-        "svelte",
-        "hbs",
-        "handlebars",
-        "pug",
-        "json",
-        "jsonc",
-        "json5",
-        "yaml",
-        "yml",
-        "toml",
-        "ini",
-        "cfg",
-        "conf",
-        "env",
-        "properties",
-        "xml",
-        "xsd",
-        "xsl",
-        "plist",
-        "sql",
-        "pgsql",
-        "graphql",
-        "gql",
-        "cypher",
-        "tf",
-        "tfvars",
-        "hcl",
-        "proto",
-        "csv",
-        "tsv",
-        "txt",
-        "log",
-        "diff",
-        "patch",
-        "png",
-        "jpg",
-        "jpeg",
-        "gif",
-        "webp",
-        "avif",
-        "bmp",
-        "ico",
-        "svg",
-        "pdf",
-        "doc",
-        "docx",
-        "xls",
-        "xlsx",
-        "ppt",
-        "pptx",
-        "zip",
-        "tar",
-        "gz",
-        "7z",
-        "rar",
-    ];
-    let path = value
-        .split(['?', '#'])
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedResourceTypeDefinition {
+    extensions: Vec<String>,
+    #[serde(default)]
+    file_names: Vec<String>,
+    #[serde(default)]
+    file_name_prefixes: Vec<String>,
+}
+
+struct SharedResourceTypeRegistry {
+    extensions: HashSet<String>,
+    file_names: HashSet<String>,
+    file_name_prefixes: Vec<String>,
+}
+
+fn shared_resource_type_registry() -> &'static SharedResourceTypeRegistry {
+    static REGISTRY: OnceLock<SharedResourceTypeRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let definitions: Vec<SharedResourceTypeDefinition> = serde_json::from_str(include_str!(
+            "../../../apps/desktop/src/resource-type-registry.json"
+        ))
+        .expect("shared resource type registry must be valid JSON");
+        SharedResourceTypeRegistry {
+            extensions: definitions
+                .iter()
+                .flat_map(|definition| definition.extensions.iter().cloned())
+                .collect(),
+            file_names: definitions
+                .iter()
+                .flat_map(|definition| definition.file_names.iter().cloned())
+                .collect(),
+            file_name_prefixes: definitions
+                .into_iter()
+                .flat_map(|definition| definition.file_name_prefixes)
+                .collect(),
+        }
+    })
+}
+
+fn location_suffix(value: &str) -> bool {
+    let numeric = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    numeric(value)
+        || value
+            .split_once(':')
+            .is_some_and(|(line, column)| numeric(line) && numeric(column))
+        || value
+            .split_once('-')
+            .is_some_and(|(start, end)| numeric(start) && numeric(end))
+}
+
+fn path_without_location(value: &str) -> &str {
+    let path = value.split(['?', '#']).next().unwrap_or(value);
+    path.match_indices(':')
+        .find_map(|(offset, _)| location_suffix(&path[offset + 1..]).then_some(&path[..offset]))
+        .unwrap_or(path)
+}
+
+fn known_resource_type(value: &str) -> bool {
+    let registry = shared_resource_type_registry();
+    let path = path_without_location(value);
+    let file_name = path
+        .rsplit(['/', '\\'])
         .next()
-        .unwrap_or(value)
-        .trim_end_matches(|character: char| character.is_ascii_digit() || character == ':');
-    path.rsplit_once('.')
-        .is_some_and(|(_, extension)| EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
+        .unwrap_or(path)
+        .to_ascii_lowercase();
+    if registry.file_names.contains(&file_name)
+        || registry
+            .file_name_prefixes
+            .iter()
+            .any(|prefix| file_name.starts_with(prefix))
+    {
+        return true;
+    }
+    file_name
+        .rfind('.')
+        .is_some_and(|offset| registry.extensions.contains(&file_name[offset..]))
 }
 
 fn high_confidence_bare_reference(value: &str) -> bool {
@@ -291,7 +254,7 @@ fn high_confidence_bare_reference(value: &str) -> bool {
             && matches!(bytes[2], b'/' | b'\\'));
     non_relative
         || ((value.contains('/') || value.contains('\\'))
-            && (known_file_extension(value)
+            && (known_resource_type(value)
                 || value
                     .rsplit_once(':')
                     .is_some_and(|(_, line)| line.bytes().all(|byte| byte.is_ascii_digit()))))
@@ -365,7 +328,7 @@ fn message_authorizes_reference(body: &str, raw_reference: &str) -> bool {
     for (index, segment) in visible.split('`').enumerate() {
         if index % 2 == 1 {
             if segment.trim() == raw_reference
-                && (known_file_extension(raw_reference)
+                && (known_resource_type(raw_reference)
                     || high_confidence_bare_reference(raw_reference))
             {
                 return true;
@@ -610,6 +573,14 @@ mod tests {
         assert!(message_authorizes_reference(
             "修改位于 ./src/app.ts:42。",
             "./src/app.ts:42"
+        ));
+        assert!(message_authorizes_reference(
+            "查看 `notebook.ipynb` 与 `data.sqlite`。",
+            "notebook.ipynb"
+        ));
+        assert!(message_authorizes_reference(
+            "查看 `notebook.ipynb` 与 `data.sqlite`。",
+            "data.sqlite"
         ));
         assert!(!message_authorizes_reference(
             "普通文字里提到了 README.md，但没有可点击语法。",

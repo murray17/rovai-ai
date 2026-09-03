@@ -33,6 +33,50 @@ export interface MessageFileReference {
   sourceReference?: string
 }
 
+export interface MessageInlineCode {
+  start: number
+  end: number
+  value: string
+}
+
+export function projectMessageInlineCodes(source: string): MessageInlineCode[] {
+  if (!source || source.length > 1_048_576) return []
+  const inlineCodes: MessageInlineCode[] = []
+  const visit = (node: MarkdownNode): void => {
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    if (node.type === 'inlineCode') {
+      if (typeof start === 'number' && typeof end === 'number' && typeof node.value === 'string') {
+        inlineCodes.push({ start, end, value: node.value })
+      }
+      return
+    }
+    if (node.type === 'code' || node.type === 'link' || node.type === 'linkReference'
+      || omittedNodeTypes.has(String(node.type))) return
+    if (Array.isArray(node.children)) node.children.forEach(visit)
+  }
+  visit(safeMarkdownParser.parse(source))
+  return inlineCodes
+}
+
+export function projectInlineFileReferenceCandidates(source: string): string[] {
+  if (!source || source.length > 1_048_576) return []
+  const candidates = new Set<string>()
+  const visit = (node: MarkdownNode): void => {
+    if (node.type === 'inlineCode') {
+      if (typeof node.value === 'string' && isInlineFileReference(node.value)) {
+        candidates.add(node.value)
+      }
+      return
+    }
+    if (node.type === 'code' || node.type === 'link' || node.type === 'linkReference'
+      || omittedNodeTypes.has(String(node.type))) return
+    if (Array.isArray(node.children)) node.children.forEach(visit)
+  }
+  visit(safeMarkdownParser.parse(source))
+  return [...candidates]
+}
+
 function markdownLinkLabel(node: MarkdownNode): string {
   if ((node.type === 'text' || node.type === 'inlineCode') && typeof node.value === 'string') {
     return node.value
@@ -43,7 +87,10 @@ function markdownLinkLabel(node: MarkdownNode): string {
 
 // Project only file references. Source ranges outside those nodes stay byte-for-byte
 // intact so ordinary user text and structured Mention/Skill rendering remain independent.
-export function projectMessageFileReferences(source: string): MessageFileReference[] {
+export function projectMessageFileReferences(
+  source: string,
+  resolvedInlineFileReferences?: ReadonlySet<string>
+): MessageFileReference[] {
   if (!source || source.length > 1_048_576) return []
   const references: MessageFileReference[] = []
   const visit = (node: MarkdownNode): void => {
@@ -71,7 +118,11 @@ export function projectMessageFileReferences(source: string): MessageFileReferen
   const candidates = references.map((reference) => reference.rawReference)
   return references.flatMap((reference) => {
     if (!reference.inlineCode) return [reference]
-    const sourceReference = inlineFileReferenceSource(reference.rawReference, candidates)
+    const sourceReference = resolvedInlineFileReferences === undefined
+      ? inlineFileReferenceSource(reference.rawReference, candidates)
+      : resolvedInlineFileReferences.has(reference.rawReference)
+        ? reference.rawReference
+        : null
     return sourceReference === null ? [] : [{
       ...reference,
       ...(sourceReference !== reference.rawReference ? { sourceReference } : {})

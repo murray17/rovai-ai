@@ -1,4 +1,5 @@
 import type { FileLocationTarget, ParsedFileReference } from '@contracts'
+import { hasKnownResourceType } from './resource-type-registry'
 
 const DISALLOWED_SCHEME = /^[a-z][a-z0-9+.-]*:/i
 const WINDOWS_ABSOLUTE = /^[a-z]:[\\/]/i
@@ -7,7 +8,6 @@ const LINE_FRAGMENT = /^L([1-9]\d*)(?:C([1-9]\d*))?(?:-L?([1-9]\d*)(?:C([1-9]\d*
 const LINE_AND_COLUMN_SUFFIX = /^(.*):([1-9]\d*):([1-9]\d*)$/
 const LINE_SUFFIX = /^(.*):([1-9]\d*)$/
 const LINE_RANGE_SUFFIX = /^(.*):([1-9]\d*)-([1-9]\d*)$/
-const KNOWN_FILE_EXTENSION = /\.(?:md|markdown|mdown|mkd|mdx|html?|tsx?|mts|cts|jsx?|mjs|cjs|pyw?|pyi|rb|rake|php|lua|rs|go|java|kts?|swift|dart|c|h|cc|cpp|cxx|hh|hpp|hxx|cs|m|mm|sh|bash|zsh|fish|ps1|psm1|bat|cmd|css|scss|sass|less|vue|svelte|hbs|handlebars|pug|jsonc?|json5|ya?ml|toml|ini|cfg|conf|env|properties|xml|xsd|xsl|plist|sql|pgsql|graphql|gql|cypher|tf|tfvars|hcl|proto|csv|tsv|txt|log|diff|patch|png|jpe?g|gif|webp|avif|bmp|ico|svg|pdf|docx?|xlsx?|pptx?|zip|tar|gz|7z|rar)(?=$|[:#?])/i
 const TRAILING_PUNCTUATION = /[.,;!?，。；！？、'"”’)>\]}]+$/u
 const LEADING_PUNCTUATION = /^[('"“‘<\[{]+/u
 
@@ -114,7 +114,7 @@ export function parseFileReference(input: string): ParsedFileReference | null {
   const isFileUri = /^file:\/\//i.test(reference)
   const locatedFile = splitLineSuffix(reference)
   if (!isFileUri && DISALLOWED_SCHEME.test(reference) && !WINDOWS_ABSOLUTE.test(reference)
-    && !(locatedFile.target && KNOWN_FILE_EXTENSION.test(locatedFile.path)
+    && !(locatedFile.target && hasKnownResourceType(locatedFile.path)
       && !DISALLOWED_SCHEME.test(locatedFile.path))) {
     return null
   }
@@ -173,14 +173,14 @@ function highConfidenceBareReference(raw: string, parsed: ParsedFileReference): 
   if (parsed.pathKind !== 'relative') return true
   if (raw.startsWith('./') || raw.startsWith('../') || raw.startsWith('.\\') || raw.startsWith('..\\')) return true
   const hasSeparator = parsed.pathPart.includes('/') || parsed.pathPart.includes('\\')
-  return hasSeparator && (KNOWN_FILE_EXTENSION.test(raw) || parsed.target?.line !== undefined)
+  return hasSeparator && (hasKnownResourceType(parsed.pathPart) || parsed.target?.line !== undefined)
 }
 
 export function isInlineFileReference(raw: string): boolean {
   const parsed = parseFileReference(raw)
   if (!parsed) return false
   return highConfidenceBareReference(raw, parsed)
-    || (parsed.target?.line !== undefined && KNOWN_FILE_EXTENSION.test(parsed.pathPart))
+    || hasKnownResourceType(parsed.pathPart)
 }
 
 // A short location is useful only when this Markdown names one unambiguous path.
@@ -190,6 +190,7 @@ export function inlineFileReferenceSource(raw: string, candidates: readonly stri
   if (!isInlineFileReference(raw)) return null
   const parsed = parseFileReference(raw)!
   if (parsed.pathKind !== 'relative' || /[\\/]/u.test(parsed.pathPart)) return raw
+  if (parsed.target?.line === undefined) return null
   const matches = new Map<string, string>()
   for (const candidate of candidates) {
     const source = parseFileReference(candidate)

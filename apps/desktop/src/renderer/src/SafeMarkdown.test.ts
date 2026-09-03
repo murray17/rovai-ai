@@ -4,6 +4,20 @@ import { describe, expect, it } from 'vitest'
 import { SafeMarkdown } from './SafeMarkdown'
 
 describe('SafeMarkdown file preview references', () => {
+  it('links only inline-code references confirmed as existing files', () => {
+    const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
+      onFileReference: () => undefined,
+      resolvedInlineFileReferences: new Set(['config.toml', 'demo.mp4']),
+      children: '打开 `config.toml` 和 `demo.mp4`；`missing.toml` 与 `Promise.all` 保持代码。'
+    }))
+
+    expect(markup.match(/inline-code-file-reference/gu)).toHaveLength(2)
+    expect(markup).toContain('data-resource-type="config"')
+    expect(markup).toContain('data-resource-type="video"')
+    expect(markup).toContain('<code>missing.toml</code>')
+    expect(markup).toContain('<code>Promise.all</code>')
+  })
+
   it('enables only explicit Markdown links and whole inline-code file references in file contexts', () => {
     const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
       onFileReference: () => undefined,

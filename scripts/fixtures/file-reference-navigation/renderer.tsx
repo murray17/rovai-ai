@@ -20,6 +20,19 @@ let chooseRootCalls = 0
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected navigation fixture operation') }
 const api: FilePreviewApi = {
   bindCamp: async () => {},
+  resolveMessageReferences: async (request) => {
+    const existing = new Set([
+      'src/report/run_report.py',
+      'run_report.py:44-46',
+      'config.toml',
+      'demo.mp4'
+    ])
+    return {
+      resolvedReferences: request.messageId === 'message-12'
+        ? request.rawReferences.filter((reference) => existing.has(reference))
+        : []
+    }
+  },
   open: async (request) => {
     opens.push(request)
     if (request.kind === 'message_reference' && request.rawReference === '../outside/config.toml') {
@@ -30,8 +43,17 @@ const api: FilePreviewApi = {
         }
       } }
     }
-    if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
-    return { ok: true, value: { kind: 'file_preview', file: { ...file, handleId: crypto.randomUUID() } } }
+    if (request.kind !== 'message_reference'
+      || (request.rawReference !== file.displayPath && request.rawReference !== 'run_report.py:44-46')) {
+      return unsupported()
+    }
+    return { ok: true, value: { kind: 'file_preview', file: {
+      ...file,
+      handleId: crypto.randomUUID(),
+      ...(request.rawReference === 'run_report.py:44-46'
+        ? { target: { line: 44, endLine: 46 } }
+        : {})
+    } } }
   },
   readText: async () => ({ ok: true, value: {
     text: Array.from({ length: 300 }, (_, index) => `value_${index + 1} = "line ${index + 1}"`).join('\n'),
@@ -60,6 +82,7 @@ const targetBody = [
   '普通正文 src/report/run_report.py 保持文本。',
   '外部配置：[config.toml](../outside/config.toml)。',
   '定位 `run_report.py:44-46`，这里是当前阅读位置。',
+  '本地配置 `config.toml`；视频 `demo.mp4`；不存在 `missing.toml`。',
   'WBS(外码)/WBS描述/成本中心/FBP/GR-手工金额；心/FBP）有值；`run_gr_reminder.py`。',
   '已读取（https://example.com/wiki/spec）。文档中的改动：',
   ...Array.from({ length: 4 }, () => prose)
@@ -145,6 +168,15 @@ Object.assign(window, { navigationTest: {
       draft: element('[contenteditable]')?.textContent,
       falseLinks: [...document.querySelectorAll<HTMLAnchorElement>('a[title]')]
         .filter((a) => /FBP|run_gr_reminder/u.test(a.title)).length,
+      inlineReferenceTypes: [...document.querySelectorAll<HTMLAnchorElement>(
+        '[data-message-id="message-12"] a.inline-code-file-reference'
+      )].map((anchor) => ({
+        title: anchor.title,
+        type: anchor.querySelector('svg')?.dataset.resourceType
+      })),
+      inertInlineCodes: [...document.querySelectorAll<HTMLElement>(
+        '[data-message-id="message-12"] code'
+      )].map((code) => code.textContent),
       webHref: element('[data-message-id="message-12"] a[href^="https:"]')?.getAttribute('href'),
       webText: element('[data-message-id="message-12"] a[href^="https:"]')?.textContent,
       tabCount: document.querySelectorAll('[role="tab"]').length,
