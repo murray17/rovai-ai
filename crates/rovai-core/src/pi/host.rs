@@ -193,9 +193,18 @@ struct PiHostLaunch<'a> {
     cwd: &'a Path,
     private_runtime_dir: &'a Path,
     session_dir: Option<&'a Path>,
+    initial_session_file: Option<&'a Path>,
     initial_binding: &'a PiBindingSeed,
     incoming: mpsc::UnboundedSender<PiIncoming>,
     builtin_tools: Option<BuiltinToolProcessConfig>,
+}
+
+struct PiProbeRootCleanup(PathBuf);
+
+impl Drop for PiProbeRootCleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 struct ActivatedPiSession {
@@ -209,6 +218,12 @@ struct ActivatedPiSession {
 fn append_session_directory_argument(command: &mut Command, session_dir: Option<&Path>) {
     if let Some(session_dir) = session_dir {
         command.arg("--session-dir").arg(session_dir);
+    }
+}
+
+fn append_initial_session_argument(command: &mut Command, session_file: Option<&Path>) {
+    if let Some(session_file) = session_file {
+        command.arg("--session").arg(session_file);
     }
 }
 
@@ -250,6 +265,7 @@ impl PiHost {
             ])
             .arg(&extension_path);
         append_session_directory_argument(&mut command, launch.session_dir);
+        append_initial_session_argument(&mut command, launch.initial_session_file);
         command
             .env("ROVAI_PI_HOST_BINDING_FILE", &binding_path)
             .env("PI_TELEMETRY", "0")
@@ -669,16 +685,25 @@ impl PiHost {
         reaped
     }
 
-    pub(crate) async fn shutdown_and_reap(&self) {
+    async fn shutdown_and_reap_with_status(&self) -> bool {
         self.alive.store(false, Ordering::Release);
         let mut child = self.child.lock().await;
         let _ = child.request_graceful_termination();
-        if timeout(Duration::from_secs(3), child.wait()).await.is_err() {
+        let reaped_gracefully = matches!(
+            timeout(Duration::from_secs(3), child.wait()).await,
+            Ok(Ok(_))
+        );
+        if !reaped_gracefully {
             let _ = child.force_terminate_tree();
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
         let _ = child.force_terminate_tree();
         let _ = std::fs::remove_dir_all(&self.config_root);
+        reaped_gracefully
+    }
+
+    pub(crate) async fn shutdown_and_reap(&self) {
+        let _ = self.shutdown_and_reap_with_status().await;
     }
 }
 
@@ -1266,6 +1291,7 @@ impl PiRpcRuntimeAdapter {
                         cwd: request.cwd,
                         private_runtime_dir: &self.private_runtime_dir,
                         session_dir: None,
+                        initial_session_file: None,
                         initial_binding: &seed,
                         incoming: self.incoming.clone(),
                         builtin_tools: Some(request.builtin_tools.clone()),
@@ -1466,22 +1492,24 @@ impl AgentRuntimeAdapter for PiRpcRuntimeAdapter {
     }
 }
 
-pub(crate) struct PiBehavioralProbe {
+pub(crate) struct PiMachineReadyProbe {
     pub model_fingerprint: String,
     pub capabilities: Vec<String>,
     pub raw_model_catalog: Value,
 }
 
-pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralProbe> {
-    use rovai_core::mcp_projection::McpExposureSnapshot;
-
+pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineReadyProbe> {
     let probe_root = std::env::temp_dir().join(format!("rovai-pi-probe-{}", uuid::Uuid::new_v4()));
+    let _probe_root_cleanup = PiProbeRootCleanup(probe_root.clone());
     let private_runtime_dir = probe_root.join("private");
     let session_dir = probe_root.join("sessions");
     let skill_root = probe_root.join(".pi/skills");
     create_private_directory(&private_runtime_dir)?;
+    create_private_directory(&session_dir)?;
+    let initial_session_file = session_dir.join("machine-ready-session.jsonl");
+    write_private_file(&initial_session_file, b"")?;
     std::fs::create_dir_all(&skill_root)?;
-    let bootstrap = "Rovai Pi managed-input capability probe.".to_string();
+    let bootstrap = "Rovai Pi no-Prompt Machine Ready probe.".to_string();
     let seed = PiBindingSeed {
         agent_run_id: uuid::Uuid::new_v4().to_string(),
         execution_epoch: 1,
@@ -1498,26 +1526,40 @@ pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralPr
         mcp_projection_digest: "pi-probe-empty-mcp".to_string(),
         mcp_tools: Vec::new(),
     };
-    let (incoming, mut receiver) = mpsc::unbounded_channel();
+    let (incoming, _receiver) = mpsc::unbounded_channel();
     let host = PiHost::spawn(PiHostLaunch {
         executable,
         cwd: &probe_root,
         private_runtime_dir: &private_runtime_dir,
         session_dir: Some(&session_dir),
+        initial_session_file: Some(&initial_session_file),
         initial_binding: &seed,
         incoming,
         builtin_tools: None,
     })
     .await?;
     let result = async {
-        *host.managed_session_state.write().await = None;
-        let replacement = host.command("new_session", json!({})).await?;
-        ensure_session_replacement_succeeded(&replacement, "new_session")?;
         let models_response = host.command("get_available_models", json!({})).await?;
         let raw_model_catalog = models_response
             .pointer("/data/models")
             .cloned()
             .context("Pi probe model catalog is unavailable")?;
+        let models = raw_model_catalog
+            .as_array()
+            .filter(|models| !models.is_empty())
+            .context("Pi probe model catalog is empty or malformed")?;
+        if models.iter().any(|model| {
+            model
+                .get("provider")
+                .and_then(Value::as_str)
+                .is_none_or(|provider| provider.trim().is_empty())
+                || model
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_none_or(|id| id.trim().is_empty())
+        }) {
+            bail!("Pi probe model catalog contains an invalid entry");
+        }
         let state = host.command("get_state", json!({})).await?;
         let locator_root = private_runtime_dir.join("probe-locator");
         let (session_id, session_file, provider, model, thinking) = validate_host_state(
@@ -1545,221 +1587,118 @@ pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralPr
             &probe_root,
         )?;
         validate_probe_session_file_directory(&session_file, &session_dir)?;
+        let canonical_session_file = session_file
+            .canonicalize()
+            .context("Pi probe empty Session did not materialize canonically")?;
         write_session_locator(
             &locator_root,
             &session_id,
-            &session_file,
+            &canonical_session_file,
             &probe_root,
-            false,
+            true,
         )?;
-        let commands = host.command("get_commands", json!({})).await?;
-        let skill_command_catalog =
-            validate_skill_commands(&commands, &seed.skill_root, &probe_root, &[])?;
-        *host.session_id.write().await = session_id.clone();
-        *host.session_file.write().await = session_file.clone();
-        *host.model_identity.write().await =
-            Some((provider.clone(), model.clone(), thinking.clone()));
-        let mcp_projection = PreparedMcpProjection {
-            snapshot: McpExposureSnapshot::default(),
-            exposure_digest: "pi-probe-empty-mcp-exposure".to_string(),
-            projection_digest: seed.mcp_projection_digest.clone(),
-            canonical_path: private_runtime_dir.join("probe-mcp.json"),
-            servers: Default::default(),
-        };
-        let mcp = PiMcpBridge::start(&mcp_projection).await?;
-        let owner = PiRuntimeOwner {
-            agent_run_id: seed.agent_run_id.clone(),
-            execution_epoch: 1,
-            native_prompt_id: uuid::Uuid::new_v4().to_string(),
-            delivery_id: uuid::Uuid::new_v4().to_string(),
-        };
-        host.bind(owner.clone()).await?;
-        let binding_document = host
-            .binding_document
-            .read()
-            .await
-            .clone()
-            .context("Pi probe Host binding disappeared")?;
-        let activation = ActivatedPiSession {
-            session_id: session_id.clone(),
-            session_file: session_file.clone(),
-            model_fingerprint: short_digest(format!("{provider}\0{model}\0{thinking}").as_bytes()),
-            binding_document,
-            skill_command_catalog,
-        };
-        let runtime = PiRuntime::from_host(
-            owner,
-            "pi-probe-camp".to_string(),
-            host.clone(),
-            mcp,
-            activation,
-            Vec::new(),
-        );
-        let prompt_runtime = runtime.clone();
-        let prompt_task = tokio::spawn(async move {
-            prompt_runtime
-                .start_prompt(
-                    "Reply with exactly PI_RUNTIME_PROBE_OK and no other text. Do not use tools.",
-                )
+        if !models.iter().any(|entry| {
+            entry.get("provider").and_then(Value::as_str) == Some(provider.as_str())
+                && entry.get("id").and_then(Value::as_str) == Some(model.as_str())
+        }) {
+            bail!("Pi current model is absent from the available model catalog");
+        }
+
+        *host.managed_session_state.write().await = None;
+        let replacement = host.command("new_session", json!({})).await?;
+        ensure_session_replacement_succeeded(&replacement, "new_session")?;
+        let replacement_state = host.command("get_state", json!({})).await?;
+        let (replacement_id, replacement_file, _, _, _) = validate_host_state(
+            &replacement_state,
+            None,
+            &locator_root,
+            &probe_root,
+            PI_RUNTIME_DEFAULT_MODEL_ID,
+        )?;
+        validate_probe_session_file_directory(&replacement_file, &session_dir)?;
+        validate_managed_session_state(
+            host.managed_session_state
+                .read()
                 .await
-        });
-        timeout(Duration::from_secs(120), async {
-            loop {
-                let incoming = receiver
-                    .recv()
-                    .await
-                    .context("Pi probe Host exited before agent_settled")?;
-                match incoming {
-                    PiIncoming::Message { message, .. } => {
-                        runtime.observe(&message).await?;
-                        if message.get("type").and_then(Value::as_str)
-                            == Some("extension_ui_request")
-                            && message.get("method").and_then(Value::as_str) == Some("input")
-                            && message.get("title").and_then(Value::as_str)
-                                == Some("Rovai managed input receipt")
-                        {
-                            let receipt: Value = serde_json::from_str(
-                                message
-                                    .get("placeholder")
-                                    .and_then(Value::as_str)
-                                    .context("Pi probe receipt request omitted evidence")?,
-                            )?;
-                            let (_, nonce) = runtime.validate_managed_receipt(&receipt)?;
-                            runtime.mark_receipt_committed();
-                            let id = message
-                                .get("id")
-                                .cloned()
-                                .context("Pi probe receipt request omitted id")?;
-                            runtime
-                                .respond(
-                                    id.clone(),
-                                    json!({"type":"extension_ui_response", "id":id, "value":nonce}),
-                                )
-                                .await?;
-                        }
-                        if message.get("type").and_then(Value::as_str) == Some("agent_settled") {
-                            break Ok::<(), anyhow::Error>(());
-                        }
-                    }
-                    PiIncoming::Exited { .. } => {
-                        bail!("Pi probe Host exited before agent_settled")
-                    }
-                    PiIncoming::IngressFlushed { acknowledgement } => {
-                        let _ = acknowledgement.send(());
-                    }
-                }
-            }
-        })
-        .await
-        .context("Pi managed-input capability probe timed out")??;
-        prompt_task.await.context("Pi probe prompt task failed")??;
-        let (final_message, stop_reason) = runtime.terminal().await;
-        if stop_reason.as_deref() != Some("stop")
-            || final_message.as_deref().map(str::trim) != Some("PI_RUNTIME_PROBE_OK")
-            || !runtime.approval_handshake_observed()
-            || !runtime.receipt_committed()
+                .as_ref()
+                .context("Pi probe replacement Session state was not reported")?,
+            &probe_binding,
+            &replacement_id,
+            &replacement_file,
+            &probe_root,
+        )?;
+        if replacement_id == session_id
+            || canonical_or_future_session_path(&replacement_file)?
+                == canonical_or_future_session_path(&session_file)?
         {
-            bail!("Pi probe did not verify managed input and reliable final boundaries");
+            bail!("Pi probe new_session did not replace the Native Session identity");
         }
-        let model_fingerprint = runtime.model_fingerprint().to_string();
-        let exact_resume_result = async {
-            let canonical_session_file = session_file
-                .canonicalize()
-                .context("Pi probe Session file did not materialize canonically")?;
-            write_session_locator(
-                &locator_root,
-                &session_id,
-                &canonical_session_file,
-                &probe_root,
-                true,
-            )?;
 
-            *host.managed_session_state.write().await = None;
-            let replacement = host.command("new_session", json!({})).await?;
-            ensure_session_replacement_succeeded(&replacement, "new_session")?;
-            let replacement_state = host.command("get_state", json!({})).await?;
-            let (replacement_id, replacement_file, _, _, _) = validate_host_state(
-                &replacement_state,
-                None,
-                &locator_root,
-                &probe_root,
-                PI_RUNTIME_DEFAULT_MODEL_ID,
-            )?;
-            validate_probe_session_file_directory(&replacement_file, &session_dir)?;
-            validate_managed_session_state(
-                host.managed_session_state
-                    .read()
-                    .await
-                    .as_ref()
-                    .context("Pi probe replacement Session state was not reported")?,
-                &runtime.binding_document,
-                &replacement_id,
-                &replacement_file,
-                &probe_root,
-            )?;
-            if replacement_id == session_id || replacement_file == canonical_session_file {
-                bail!("Pi probe new_session did not replace the Native Session identity");
-            }
-
-            *host.managed_session_state.write().await = None;
-            let switched = host
-                .command(
-                    "switch_session",
-                    json!({"sessionPath": canonical_session_file.to_string_lossy().to_string()}),
-                )
-                .await?;
-            ensure_session_replacement_succeeded(&switched, "switch_session")?;
-            let restored_state = host.command("get_state", json!({})).await?;
-            // Pi get_state reports the Session identity and file, but not cwd.
-            // validate_host_state therefore verifies cwd against the restored
-            // Session file header while also matching the private exact locator.
-            let (restored_id, restored_file, _, _, _) = validate_host_state(
-                &restored_state,
-                Some(&session_id),
-                &locator_root,
-                &probe_root,
-                PI_RUNTIME_DEFAULT_MODEL_ID,
-            )?;
-            if restored_id != session_id || restored_file.canonicalize()? != canonical_session_file
-            {
-                bail!("Pi probe switch_session did not restore the exact Native Session");
-            }
-            validate_managed_session_state(
-                host.managed_session_state
-                    .read()
-                    .await
-                    .as_ref()
-                    .context("Pi probe restored Session state was not reported")?,
-                &runtime.binding_document,
-                &restored_id,
-                &restored_file,
-                &probe_root,
-            )?;
-            Ok::<(), anyhow::Error>(())
+        *host.managed_session_state.write().await = None;
+        let switched = host
+            .command(
+                "switch_session",
+                json!({"sessionPath": canonical_session_file.to_string_lossy().to_string()}),
+            )
+            .await?;
+        ensure_session_replacement_succeeded(&switched, "switch_session")?;
+        let restored_state = host.command("get_state", json!({})).await?;
+        // Pi get_state reports the Session identity and file, but not cwd.
+        // validate_host_state therefore verifies cwd against the restored
+        // Session file header while also matching the private exact locator.
+        let (restored_id, restored_file, _, _, _) = validate_host_state(
+            &restored_state,
+            Some(&session_id),
+            &locator_root,
+            &probe_root,
+            PI_RUNTIME_DEFAULT_MODEL_ID,
+        )?;
+        if restored_id != session_id || restored_file.canonicalize()? != canonical_session_file {
+            bail!("Pi probe switch_session did not restore the exact Native Session");
         }
-        .await;
-        let cleanup_result = runtime.cleanup_for_release().await;
-        exact_resume_result.context("Pi exact Session resume capability probe failed")?;
-        cleanup_result.context("Pi capability probe cleanup failed")?;
-        Ok(PiBehavioralProbe {
-            model_fingerprint,
+        validate_managed_session_state(
+            host.managed_session_state
+                .read()
+                .await
+                .as_ref()
+                .context("Pi probe restored Session state was not reported")?,
+            &probe_binding,
+            &restored_id,
+            &restored_file,
+            &probe_root,
+        )?;
+
+        Ok(PiMachineReadyProbe {
+            model_fingerprint: short_digest(format!("{provider}\0{model}\0{thinking}").as_bytes()),
             raw_model_catalog,
             capabilities: vec![
                 PI_PROTOCOL_VERSION.to_string(),
-                "pi.rpc.prompt".to_string(),
-                "pi.rpc.agent_settled".to_string(),
-                "pi.rpc.structured_tools".to_string(),
-                "pi.rpc.extension_approval".to_string(),
-                "pi.rpc.managed_input_receipt".to_string(),
+                "pi.rpc.host".to_string(),
+                "pi.rpc.managed_extension".to_string(),
+                "pi.rpc.get_state".to_string(),
+                "model.dynamic_catalog".to_string(),
+                "session.new".to_string(),
                 "conversation.exact_resume".to_string(),
-                "process.interrupt".to_string(),
             ],
         })
     }
     .await;
-    host.shutdown_and_reap().await;
-    let _ = std::fs::remove_dir_all(&probe_root);
-    result
+    let reaped_gracefully = host.shutdown_and_reap_with_status().await;
+    let cleanup = std::fs::remove_dir_all(&probe_root)
+        .context("failed to remove the private Pi probe Session/config root");
+    match result {
+        Ok(observation) => {
+            if !reaped_gracefully {
+                bail!("Pi probe Host did not shutdown and reap within the grace period");
+            }
+            cleanup?;
+            Ok(observation)
+        }
+        Err(error) => {
+            let _ = cleanup;
+            Err(error)
+        }
+    }
 }
 
 pub(crate) fn managed_receipt_nonce(receipt: &Value) -> Result<String> {
@@ -2116,6 +2055,11 @@ fn validate_host_state(
         .filter(|value| !value.trim().is_empty())
         .context("Pi get_state omitted sessionId")?
         .to_string();
+    let parsed_session_id =
+        uuid::Uuid::parse_str(&session_id).context("Pi get_state sessionId is not a full UUID")?;
+    if parsed_session_id.hyphenated().to_string() != session_id {
+        bail!("Pi get_state sessionId is not a canonical full UUID");
+    }
     if let Some(expected) = expected_session_id
         && session_id != expected
     {
@@ -2365,22 +2309,189 @@ fn is_hex_digest(value: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn machine_ready_probe_never_sends_a_prompt_or_waits_for_agent_events() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-pi-machine-ready-fixture-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("pi");
+        std::fs::write(
+            &executable,
+            r###"#!/bin/sh
+set -eu
+fixture_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+request_log="$fixture_dir/requests.jsonl"
+event_log="$fixture_dir/events.jsonl"
+shutdown_marker="$fixture_dir/shutdown"
+probe_root_log="$fixture_dir/probe-root"
+printf '%s\n' "$PWD" > "$probe_root_log"
+session_dir="$PWD/sessions"
+mkdir -p "$session_dir"
+session_number=1
+session_id="00000000-0000-4000-8000-000000000001"
+session_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--session" ]; then
+    session_file="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+if [ -z "$session_file" ]; then
+  printf '%s\n' 'controlled Pi Host requires --session' >&2
+  exit 1
+fi
+initial_session_file="$session_file"
+
+write_session() {
+  printf '{"type":"session","id":"%s","cwd":"%s"}\n' "$session_id" "$PWD" > "$session_file"
+}
+
+emit_managed_session_state() {
+  host_instance_id=$(sed -n 's/.*"hostInstanceId":"\([^"]*\)".*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
+  host_binding_generation=$(sed -n 's/.*"hostBindingGeneration":\([0-9][0-9]*\).*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
+  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":1,\\"extensionVersion\\":\\"rovai-pi-host-v3\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
+  printf '%s\n' "$event" >> "$event_log"
+  printf '%s\n' "$event"
+}
+
+write_session
+trap 'printf stopped > "$shutdown_marker"; exit 0' TERM INT
+
+while IFS= read -r request; do
+  printf '%s\n' "$request" >> "$request_log"
+  request_id=$(printf '%s\n' "$request" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  request_type=$(printf '%s\n' "$request" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+  case "$request_type" in
+    get_state)
+      emit_managed_session_state
+      printf '{"type":"response","id":"%s","success":true,"command":"get_state","data":{"sessionId":"%s","sessionFile":"%s","model":{"provider":"minimax","id":"MiniMax-M3"},"thinkingLevel":"off"}}\n' "$request_id" "$session_id" "$session_file"
+      ;;
+    get_available_models)
+      printf '{"type":"response","id":"%s","success":true,"command":"get_available_models","data":{"models":[{"provider":"minimax","id":"MiniMax-M3","name":"MiniMax M3"}]}}\n' "$request_id"
+      ;;
+    get_commands)
+      printf '{"type":"response","id":"%s","success":true,"command":"get_commands","data":{"commands":[]}}\n' "$request_id"
+      ;;
+    new_session)
+      session_number=$((session_number + 1))
+      session_id=$(printf '00000000-0000-4000-8000-%012d' "$session_number")
+      session_file="$session_dir/$session_id.jsonl"
+      write_session
+      emit_managed_session_state
+      printf '{"type":"response","id":"%s","success":true,"command":"new_session","data":{"cancelled":false}}\n' "$request_id"
+      ;;
+    switch_session)
+      session_id="00000000-0000-4000-8000-000000000001"
+      session_file="$initial_session_file"
+      emit_managed_session_state
+      printf '{"type":"response","id":"%s","success":true,"command":"switch_session","data":{"cancelled":false}}\n' "$request_id"
+      ;;
+    prompt)
+      event='{"type":"agent_settled"}'
+      printf '%s\n' "$event" >> "$event_log"
+      printf '%s\n' "$event"
+      printf '{"type":"response","id":"%s","success":false,"error":"machine Ready probe sent a model Prompt"}\n' "$request_id"
+      ;;
+    *)
+      printf '{"type":"response","id":"%s","success":false,"error":"unexpected readiness command: %s"}\n' "$request_id" "$request_type"
+      ;;
+  esac
+done
+"###,
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let observation = machine_ready_probe(&executable)
+            .await
+            .expect("the no-Prompt Machine Ready exchange should succeed");
+        let requests = std::fs::read_to_string(root.join("requests.jsonl")).unwrap();
+        let command_types = requests
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<Value>(line).unwrap()["type"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            command_types,
+            [
+                "get_state",
+                "get_available_models",
+                "get_state",
+                "new_session",
+                "get_state",
+                "switch_session",
+                "get_state",
+            ]
+        );
+        assert!(!requests.contains("\"type\":\"prompt\""));
+
+        let events = std::fs::read_to_string(root.join("events.jsonl")).unwrap();
+        for forbidden in [
+            "\"type\":\"agent_start\"",
+            "\"type\":\"message_update\"",
+            "\"type\":\"message_end\"",
+            "\"type\":\"agent_settled\"",
+        ] {
+            assert!(
+                !events.contains(forbidden),
+                "Machine Ready must not depend on {forbidden}"
+            );
+        }
+        assert!(observation.raw_model_catalog.is_array());
+        assert!(
+            observation
+                .capabilities
+                .contains(&"conversation.exact_resume".to_string())
+        );
+        assert!(root.join("shutdown").is_file());
+        let probe_root = PathBuf::from(
+            std::fs::read_to_string(root.join("probe-root"))
+                .unwrap()
+                .trim(),
+        );
+        assert!(
+            !probe_root.exists(),
+            "the private probe Session/config root must be removed"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
-    fn host_launch_adds_a_session_directory_only_when_explicitly_requested() {
+    fn host_launch_adds_probe_session_arguments_only_when_explicitly_requested() {
         let session_dir = std::env::temp_dir().join("rovai-pi-probe-session-argument");
+        let session_file = session_dir.join("machine-ready-session.jsonl");
         let mut production = Command::new("pi");
         append_session_directory_argument(&mut production, None);
+        append_initial_session_argument(&mut production, None);
         assert!(production.as_std().get_args().next().is_none());
 
         let mut probe = Command::new("pi");
         append_session_directory_argument(&mut probe, Some(&session_dir));
+        append_initial_session_argument(&mut probe, Some(&session_file));
         assert_eq!(
             probe
                 .as_std()
                 .get_args()
                 .map(|argument| argument.to_os_string())
                 .collect::<Vec<_>>(),
-            vec!["--session-dir".into(), session_dir.into_os_string()]
+            vec![
+                "--session-dir".into(),
+                session_dir.into_os_string(),
+                "--session".into(),
+                session_file.into_os_string(),
+            ]
         );
     }
 
@@ -2524,23 +2635,23 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires a qualified local Pi installation and native authentication"]
-    async fn real_pi_managed_input_smoke() {
+    #[ignore = "requires a qualified local Pi installation and native configuration"]
+    async fn real_pi_machine_ready_smoke() {
         let executable = std::env::var_os("ROVAI_REAL_PI_EXECUTABLE")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/opt/homebrew/bin/pi"));
-        let observation = behavioral_probe(&executable).await.unwrap();
-        assert!(
-            observation
-                .capabilities
-                .iter()
-                .any(|capability| capability == "pi.rpc.managed_input_receipt")
-        );
+        let observation = machine_ready_probe(&executable).await.unwrap();
         assert!(
             observation
                 .capabilities
                 .iter()
                 .any(|capability| capability == "conversation.exact_resume")
+        );
+        assert!(
+            !observation
+                .capabilities
+                .iter()
+                .any(|capability| capability == "pi.rpc.prompt")
         );
         assert!(observation.raw_model_catalog.is_array());
     }

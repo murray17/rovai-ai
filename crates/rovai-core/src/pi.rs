@@ -21,7 +21,7 @@ use tokio::io::AsyncBufRead;
 use crate::acp::CompletedAcpAction;
 
 pub use host::{PiAgentRunRuntimeRequest, PiRpcRuntimeAdapter, PiRuntime};
-pub(crate) use host::{PiHost, behavioral_probe};
+pub(crate) use host::{PiHost, machine_ready_probe};
 
 pub(crate) const PI_PROTOCOL_VERSION: &str = "pi-jsonl-rpc-v1";
 pub(crate) const PI_HOST_EXTENSION_VERSION: &str = "rovai-pi-host-v3";

@@ -12,7 +12,8 @@ use rovai_core::{
     agent_profile::AdapterKind,
     agent_runtime_adapter::{
         GROK_BUILD_MINIMUM_VERSION_LABEL, KIRO_ADDITIVE_AGENT_NAME, PI_MINIMUM_VERSION_LABEL,
-        executable_fingerprint, grok_build_minimum_version_satisfied, pi_minimum_version_satisfied,
+        executable_fingerprint, grok_build_minimum_version_satisfied,
+        pi_machine_ready_requirements, pi_minimum_version_satisfied,
         trae_machine_ready_capabilities, trae_machine_ready_requirements,
         write_kiro_additive_agent_config,
     },
@@ -237,7 +238,7 @@ pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
                 None,
                 AgentRuntimeProbeStatus::NotInstalled,
                 Vec::new(),
-                vec!["pi.rpc.agent_settled".to_string()],
+                pi_machine_ready_requirements(),
                 Some("Configured Pi executable does not exist.".to_string()),
                 probed_at,
             ),
@@ -276,7 +277,7 @@ pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
             raw_model_catalog: None,
         };
     }
-    match crate::pi::behavioral_probe(&path).await {
+    match crate::pi::machine_ready_probe(&path).await {
         Ok(observation) => PiCapabilityProbe {
             result: agent_probe_result(
                 AdapterKind::Pi.as_str(),
@@ -287,7 +288,7 @@ pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
                 observation.capabilities,
                 Vec::new(),
                 Some(format!(
-                    "Pi JSONL RPC, managed input, authoritative settlement, and exact Session identity verified (model {})",
+                    "Pi JSONL RPC Host, managed extension, model catalog, and exact Session identity verified without a model Prompt (model {})",
                     observation.model_fingerprint
                 )),
                 probed_at,
@@ -304,10 +305,7 @@ pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
                     fingerprint,
                     status,
                     Vec::new(),
-                    vec![
-                        "pi.rpc.agent_settled".to_string(),
-                        "pi.rpc.extension_approval".to_string(),
-                    ],
+                    pi_machine_ready_requirements(),
                     Some(detail.to_string()),
                     probed_at,
                 ),
@@ -354,7 +352,7 @@ fn classify_pi_probe_failure(detail: &str) -> (AgentRuntimeProbeStatus, &'static
     }
     (
         AgentRuntimeProbeStatus::ProbeFailed,
-        "Pi could not verify native authentication, managed input, and the behavioral RPC contract.",
+        "Pi could not verify the no-Prompt JSONL RPC Machine Ready contract.",
     )
 }
 

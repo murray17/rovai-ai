@@ -16,9 +16,11 @@ last_updated: 2026-09-03
   retry 幂等。版本、Machine Ready 与平台资格仍是独立门禁。
 - [x] Migration 135：v1.44/schema85 → v1.45/schema86、当前 DDL closed-set 扩展、不可变 exact-binding receipt、
   acceptance guard、原子回滚、外键检查和重开幂等测试。
-- [x] Pi 专属 Machine Ready：版本、extension handshake、原生 model state、创建 Session、完整 ID/canonical file、
-  实际 `switch_session(exact file)` 与 `get_state` 三元一致性；Snapshot validation 与 dispatch blocker 共用重检。
-- [x] Probe 通过 `--session-dir <probe-root>/sessions` 隔离原生 Session，正式 AgentRun 继续使用用户 Pi 原生 state。
+- [x] Pi 专属无 Prompt Machine Ready：版本、JSONL Host、extension handshake、原生 model state、private
+  `--session` seed 初始化空 Session、完整 ID/canonical file、`new_session`、实际 `switch_session(exact file)` 与
+  `get_state` 三元一致性；Snapshot validation 与 dispatch blocker 共用重检，且不自动声明行为能力。
+- [x] Probe 通过 `--session-dir <probe-root>/sessions` 隔离原生 Session，不发送 Prompt/Tool/MCP，不等待 assistant
+  lifecycle；正式 AgentRun 继续使用用户 Pi 原生 state，付费行为只留在显式 smoke/qualification suite。
 - [x] Fleet `resident_multi_session`、串行 Session switch、并发 Burst、health/quiescence、owner lease、LRU、cancel、
   shutdown/reap 与 private directory cleanup；Pi 使用 workspace reuse identity，同时保留当前 Camp/member invalidation
   scope，其他 Runtime 的 member-scoped identity 不变。
@@ -49,8 +51,8 @@ last_updated: 2026-09-03
 - [x] Pi 0.84.4 当前 Built-in CLI 15-operation full Run 与 resumed/new-lease Run。
 - [x] deterministic tests：A→B→A exact switch、并发独立 Host、receipt 全字段/nonce mismatch、协议重放/迟到、
   stdio/HTTP MCP bridge、Usage dedupe、Unknown mutation、cleanup 和 platform matrix。
-- [x] Migration 135 专项：无 receipt acceptance 拒绝、错 binding 拒绝、合法原子接受、receipt 不可改删、FK=0、
-  reopen 只保留一条 migration marker。
+- [x] Migration 135 专项：无 receipt acceptance 拒绝、错 binding 拒绝、合法原子接受、receipt 不可直接改删、父
+  Delivery 与 Camp 永久删除可合法 cascade、FK=0，reopen 只保留一条 migration marker。
 
 ## 发布前仍需关闭
 

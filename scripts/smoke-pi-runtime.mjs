@@ -93,7 +93,7 @@ try {
   assertCapabilitySnapshot(installation?.snapshot)
   const leakedProbeSessions = await listFiles(join(piAgentDir, 'sessions'))
   if (leakedProbeSessions.length !== 0) {
-    throw new Error(`Pi behavioral Probe polluted the native Session root: ${JSON.stringify(leakedProbeSessions)}`)
+    throw new Error(`Pi Machine Ready Probe polluted the native Session root: ${JSON.stringify(leakedProbeSessions)}`)
   }
 
   const profile = await client.request('members.get', { agentId })
@@ -441,14 +441,23 @@ try {
 
 function assertCapabilitySnapshot(snapshot) {
   const requiredCapabilities = [
+    'pi-jsonl-rpc-v1',
+    'pi.rpc.host',
+    'pi.rpc.managed_extension',
+    'pi.rpc.get_state',
+    'model.dynamic_catalog',
+    'session.new',
+    'conversation.exact_resume'
+  ]
+  const unobservedBehaviorCapabilities = [
     'pi.rpc.prompt',
     'pi.rpc.agent_settled',
     'pi.rpc.structured_tools',
     'pi.rpc.extension_approval',
     'pi.rpc.managed_input_receipt',
-    'conversation.exact_resume',
-    'process.interrupt',
     'context.charter.managed_system_prompt',
+    'context.compaction.native_system_prompt_preserved',
+    'usage.model_call.structured',
     'mcp.external_projection.additive_per_run',
     'mcp.same_name_policy.rovai_wins',
     'mcp.approval.core_managed',
@@ -459,6 +468,7 @@ function assertCapabilitySnapshot(snapshot) {
       || !snapshot.protocols?.includes('pi-jsonl-rpc-v1')
       || !snapshot.models?.some((model) => model.id === 'pi://runtime-default' && model.isDefault)
       || !requiredCapabilities.every((capability) => snapshot.capabilities?.includes(capability))
+      || unobservedBehaviorCapabilities.some((capability) => snapshot.capabilities?.includes(capability))
       || approval?.recommendedValue !== 'managed'
       || snapshot.nativeSessionCompatibilityKey !== 'pi-jsonl-rpc-v1:managed-system-prompt-v1') {
     throw new Error(`Pi capability snapshot is invalid: ${JSON.stringify({

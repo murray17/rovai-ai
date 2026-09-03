@@ -20785,6 +20785,10 @@ impl Database {
 
                 CREATE TRIGGER pi_managed_input_receipt_delete_guard
                 BEFORE DELETE ON pi_managed_input_receipt
+                WHEN EXISTS(
+                    SELECT 1 FROM runtime_input_delivery AS delivery
+                    WHERE delivery.id = OLD.runtime_input_delivery_id
+                )
                 BEGIN
                     SELECT RAISE(ABORT, 'Pi managed input receipt is immutable');
                 END;
@@ -31065,7 +31069,7 @@ mod tests {
     }
 
     #[test]
-    fn v135_pi_receipt_fences_acceptance_and_survives_reopen() {
+    fn v135_pi_receipt_is_immutable_but_cascades_through_parent_and_camp_delete() {
         let (mut database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v134_source_for_test(database.connection());
         database.migrate_pi_runtime_v135().unwrap();
@@ -31290,6 +31294,96 @@ mod tests {
                     .to_string()
                     .contains("Pi managed input receipt is immutable")
             );
+        }
+        database
+            .connection()
+            .execute(
+                "DELETE FROM runtime_input_delivery WHERE id = 'delivery-pi-v135'",
+                [],
+            )
+            .expect("deleting the parent Runtime Input Delivery should cascade its Pi receipt");
+        let remaining_receipts: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM pi_managed_input_receipt WHERE id = 'receipt-pi-v135'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining_receipts, 0);
+        let foreign_key_violations: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO runtime_input_delivery(
+                    id, agent_run_id, execution_epoch, context_manifest_id,
+                    native_binding_id, native_binding_generation,
+                    boundary_camp_message_sequence, dynamic_payload_digest,
+                    status, prepared_at, updated_at,
+                    runtime_attachment_auth_receipt_version,
+                    runtime_attachment_auth_receipt_json,
+                    runtime_attachment_auth_receipt_digest,
+                    runtime_request_digest, dispatch_started_at
+                ) VALUES (
+                    'delivery-pi-v135', 'run-pi-v135', 1,
+                    'manifest-pi-v135', 'binding-pi-v135', 1, 0,
+                    'payload-pi-v135', 'prepared', '2026-09-03T00:00:03Z',
+                    '2026-09-03T00:00:03Z', 1, '{}',
+                    'attachment-auth-pi-v135', 'request-pi-v135',
+                    '2026-09-03T00:00:03Z'
+                );
+                INSERT INTO pi_managed_input_receipt(
+                    id, runtime_input_delivery_id, agent_run_id, execution_epoch,
+                    native_binding_id, native_binding_generation,
+                    native_session_id, native_prompt_id, receipt_version,
+                    receipt_json, receipt_digest, commit_nonce, committed_at
+                ) VALUES (
+                    'receipt-pi-v135-camp-delete', 'delivery-pi-v135',
+                    'run-pi-v135', 1, 'binding-pi-v135', 1,
+                    'native-session-pi-v135', 'prompt-pi-v135-camp-delete', 1, '{}',
+                    '7777777777777777777777777777777777777777777777777777777777777777',
+                    '8888888888888888888888888888888888888888888888888888888888888888',
+                    '2026-09-03T00:00:03Z'
+                );
+                "#,
+            )
+            .unwrap();
+        let foreign_keys_enabled: bool = database
+            .connection()
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            foreign_keys_enabled,
+            "Camp delete must not disable foreign keys"
+        );
+        {
+            let transaction = database.connection_mut().transaction().unwrap();
+            crate::collaboration::delete_camp_aggregate(&transaction, "camp-pi-v135")
+                .expect("Camp aggregate deletion should cascade its Pi receipt");
+            transaction.commit().unwrap();
+        }
+        for (table, id) in [
+            ("camp", "camp-pi-v135"),
+            ("runtime_input_delivery", "delivery-pi-v135"),
+            ("pi_managed_input_receipt", "receipt-pi-v135-camp-delete"),
+        ] {
+            let remaining: i64 = database
+                .connection()
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE id = ?1"),
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(remaining, 0, "{table} should be removed by Camp deletion");
         }
         let foreign_key_violations: i64 = database
             .connection()

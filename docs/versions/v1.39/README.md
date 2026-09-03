@@ -29,7 +29,8 @@ last_updated: 2026-09-03
   保留用于删除失效，其他 Runtime 的 Camp/member 复用语义不变。动态 Session/model/Bootstrap/Skill/MCP 不进入 process
   digest；只有 healthy、quiescent 且无 pending command/tool/MCP/lease 的 Host 才进入统一 LRU。
 - Native Session 只用完整 Session ID 与 Core 私有 canonical session file 精确恢复。Availability Probe 在临时
-  `--session-dir` 创建、切换、验证并清理测试 Session，不污染用户 Pi 历史。
+  `--session-dir` 中用 private `--session` seed 创建、切换、验证并清理空测试 Session，不发送 Prompt、不调用模型，
+  也不污染用户 Pi 历史；Prompt/final、receipt、Approval、Tool/MCP 与 Usage 只由显式 smoke 验证。
 - Bootstrap 通过官方 extension `before_agent_start` 进入高权限 system prompt；每轮由不可变 managed-input receipt
   证明 exact binding、Bootstrap、Skills、MCP、Tool 集与 session digest，并与 input acceptance 原子提交。
 - Pi 没有内建 MCP，但官方 extension Tool API 足以建立 Core-owned bridge；因此 External MCP 是
@@ -59,8 +60,8 @@ last_updated: 2026-09-03
 
 Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升级到
 `Data Contract v1.45 / Projection Schema 86`。它从当前 v1.44 DDL 扩展五个 closed set，新增
-`runtime_input_delivery_pi_binding_unique`、不可变 `pi_managed_input_receipt` 及三类 guard；失败整体回滚，提交后
-执行 `foreign_key_check`，重开数据库不会重复应用。
+`runtime_input_delivery_pi_binding_unique`、禁止直接改删且允许父 Delivery cascade 的
+`pi_managed_input_receipt` 及三类 guard；失败整体回滚，提交后执行 `foreign_key_check`，重开数据库不会重复应用。
 
 ## 跨版本文档影响
 

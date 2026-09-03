@@ -30,15 +30,22 @@ v30 replaces [v29](runtime-launch-and-verification-v29.md). v29 的所有 Runtim
 Availability Check 与 Dispatch Preflight 使用同一 Pi requirements、builder 和 snapshot validator。Ready 必须同时证明：
 
 1. canonical executable identity/fingerprint 与 non-prerelease `>=0.84.4` version；
-2. managed extension `rovai-pi-host-v3` handshake；
+2. Pi JSONL RPC Host 可启动，且 managed extension `rovai-pi-host-v3` handshake；
 3. 非空、coherent 的原生 model catalog/current model；
-4. `new_session` 后 `get_state` 给出完整 UUID session ID、absolute canonical-or-future session file 与 exact cwd；
-5. 再创建一个不同 Session，实际调用 `switch_session` 传入第一项 exact canonical file；
+4. 在 private Session root 创建零字节 seed file，以官方 `--session <exact file>` 启动，让 Pi 自己初始化一个
+   materialized 空 Native Session；`get_state` 给出 canonical full UUID session ID、absolute canonical file 与 exact cwd；
+5. `new_session` 创建一个不同 Session，实际调用 `switch_session` 传入第一项 exact canonical file；
 6. 最后 `get_state` 的 session ID、canonical materialized file 与 cwd 与第一项完全一致。
 
 只有第 6 步成功才声明 `conversation.exact_resume`。Probe 使用 private
-`--session-dir <probe-root>/sessions`；所有测试 Session、binding、extension 和子进程随 probe root 清理，不写用户
-Native Session root。正式 AgentRun 不传 `--session-dir`。
+`--session-dir <probe-root>/sessions` 和 private `--session <seed file>`；所有测试 Session、binding、extension 和子进程
+随 probe root 清理，不写用户 Native Session root。正式 AgentRun 不传这两个 Probe-only 参数。
+
+Machine Ready、Availability Check 与 Dispatch Preflight 禁止发送 `prompt`、等待 assistant/final 或
+`agent_start/message_update/message_end/agent_settled`，也禁止执行 Tool、启动 MCP bridge 或产生 Provider token/cost。
+Ready snapshot 只记录这次无 Prompt 观察到的 JSONL Host、managed extension、`get_state`、model catalog、
+`new_session` 与 exact resume；Prompt/final、receipt、Approval、Tool、MCP、compaction、Usage、Built-in CLI 与 interrupt
+只由显式 smoke/qualification suite 证明，不能由 Machine Ready 自动补写。
 
 旧 Ready 缺少上述任一 capability，或 version/fingerprint/requirements digest 不匹配，Snapshot validation 和
 dispatch blocker 都必须降级并重新检查，不能复用较弱 evidence。
@@ -90,9 +97,9 @@ mismatch 或 timeout 都 fail closed。
 
 Migration 135 的 `pi_managed_input_receipt` 以 delivery/run/epoch/binding/generation composite FK 精确绑定
 `runtime_input_delivery`。insert 只允许 `prepared|delivery_unknown`、dispatch 已开始、matching
-`managed_system_prompt` bootstrap；row insert 后不可 update/delete。managed delivery 没有 version-1 receipt 不可转为
-accepted。Core 必须在单一 SQLite transaction 插入 receipt 并调用 acceptance transition；transaction 任一步失败都
-不留下半状态。
+`managed_system_prompt` bootstrap；row insert 后不可直接 update/delete，但删除父 `runtime_input_delivery` 时必须允许
+外键 `ON DELETE CASCADE` 清理 Receipt。managed delivery 没有 version-1 receipt 不可转为 accepted。Core 必须在单一
+SQLite transaction 插入 receipt 并调用 acceptance transition；transaction 任一步失败都不留下半状态。
 
 Compaction strategy 为 `native_system_prompt_preserved`：Pi 每次 provider request 重新取得 Session system prompt，
 因此 Pi 不进入 `bootstrap_redelivery_requirement`、`compaction_detector_policy` 或

@@ -1082,20 +1082,6 @@ impl AgentRuntimeAdapterRegistry {
     ) -> Result<AdapterCapabilitySnapshot> {
         let ready = observation.probe_status == "ready";
         let mut capabilities = observation.capabilities;
-        if ready {
-            for capability in [
-                "context.charter.managed_system_prompt",
-                "context.compaction.native_system_prompt_preserved",
-                "usage.model_call.structured",
-                BUILTIN_TOOL_RUNTIME_CAPABILITY,
-            ] {
-                if !capabilities.iter().any(|value| value == capability) {
-                    capabilities.push(capability.to_string());
-                }
-            }
-            append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
-            capabilities.push("mcp.approval.core_managed".to_string());
-        }
         capabilities.sort();
         capabilities.dedup();
         let permission_options = ready.then(pi_permission_options).unwrap_or_default();
@@ -1700,20 +1686,12 @@ pub fn trae_machine_ready_requirements() -> Vec<String> {
 pub fn pi_machine_ready_requirements() -> Vec<String> {
     [
         PI_MACHINE_PROTOCOL,
-        "pi.rpc.prompt",
-        "pi.rpc.agent_settled",
-        "pi.rpc.structured_tools",
-        "pi.rpc.extension_approval",
-        "pi.rpc.managed_input_receipt",
+        "pi.rpc.host",
+        "pi.rpc.managed_extension",
+        "pi.rpc.get_state",
+        "model.dynamic_catalog",
+        "session.new",
         "conversation.exact_resume",
-        "process.interrupt",
-        "context.charter.managed_system_prompt",
-        "context.compaction.native_system_prompt_preserved",
-        "usage.model_call.structured",
-        BUILTIN_TOOL_RUNTIME_CAPABILITY,
-        "mcp.external_projection.additive_per_run",
-        "mcp.same_name_policy.rovai_wins",
-        "mcp.approval.core_managed",
     ]
     .into_iter()
     .map(str::to_string)
@@ -3633,6 +3611,68 @@ mod tests {
             old.last_error.as_deref(),
             Some("runtime_version_below_minimum")
         );
+    }
+
+    #[test]
+    fn pi_machine_ready_snapshot_does_not_synthesize_behavioral_capabilities() {
+        let observed = [
+            PI_MACHINE_PROTOCOL,
+            "pi.rpc.host",
+            "pi.rpc.managed_extension",
+            "pi.rpc.get_state",
+            "model.dynamic_catalog",
+            "session.new",
+            "conversation.exact_resume",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .pi_capability_snapshot(PiProbeObservation {
+                reported_version: Some("pi 0.84.4".to_string()),
+                executable_fingerprint: Some("sha256:pi-ready".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: observed.clone(),
+                raw_model_catalog: Some(json!([{
+                    "provider": "minimax",
+                    "id": "MiniMax-M3",
+                    "name": "MiniMax M3"
+                }])),
+                attempted_at: "2026-09-03T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .unwrap();
+
+        for unobserved in [
+            "pi.rpc.prompt",
+            "pi.rpc.agent_settled",
+            "pi.rpc.structured_tools",
+            "pi.rpc.extension_approval",
+            "pi.rpc.managed_input_receipt",
+            "context.charter.managed_system_prompt",
+            "context.compaction.native_system_prompt_preserved",
+            "usage.model_call.structured",
+            BUILTIN_TOOL_RUNTIME_CAPABILITY,
+            "mcp.external_projection.additive_per_run",
+            "mcp.same_name_policy.rovai_wins",
+            "mcp.approval.core_managed",
+        ] {
+            assert!(
+                !snapshot.capabilities.contains(&unobserved.to_string()),
+                "Machine Ready synthesized unobserved capability {unobserved}"
+            );
+        }
+        assert_eq!(
+            snapshot
+                .capabilities
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>(),
+            observed.into_iter().collect()
+        );
+        validate_machine_ready_snapshot(AdapterKind::Pi, &snapshot)
+            .expect("the no-Prompt Pi evidence should satisfy Machine Ready");
     }
 
     #[test]
