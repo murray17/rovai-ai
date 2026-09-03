@@ -125,6 +125,7 @@ import {
   groupExecutionEventsByRunId,
   isViewingNonTerminalAgentRun,
   loadCompleteAgentRunExecutionEvidence,
+  MessageAttachmentGroups,
   memberRuntimeConfigurationPresentation,
   preferredAgentProcessRun,
   rectanglesOverlap,
@@ -1393,12 +1394,28 @@ describe('task event projections', () => {
       message('kiro-message', 2, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
     ], [], [run('running')], [], [changes('run-claude', '2026-08-28T06:49:40.554605Z')], images)
     expect(imageTimeline.map((item) => item.id)).toEqual([
-      'claude-message', 'run-images:run-claude:1', 'run-file-changes:run-claude:1', 'kiro-message'
+      'claude-message', 'run-file-changes:run-claude:1', 'kiro-message'
     ])
+    expect(imageTimeline[0]).toMatchObject({ kind: 'camp_message', runtimeImageGroups: images })
+    const imageTimelineWithEpochs = campConversationTimeline([
+      message('claude-message', 1, 'run-claude', 'agent-claude', '2026-08-28T06:49:36.444822Z')
+    ], [], [run('running')], [], [], [{
+      ...images[0], executionEpoch: 2, createdAt: '2026-08-28T06:50:00.000000Z',
+      images: [{ ...images[0].images[0], id: 'runtime-image-2' }]
+    }, images[0]])
+    expect(imageTimelineWithEpochs[0]).toMatchObject({
+      kind: 'camp_message',
+      runtimeImageGroups: [{ executionEpoch: 1 }, { executionEpoch: 2 }]
+    })
     expect(campConversationTimeline([
       message('kiro-message', 1, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
     ], [], [run('running')], [], [], images)
       .map((item) => item.id)).toEqual(['kiro-message'])
+    expect(campConversationTimeline([{
+      ...message('invalid-user-source', 1, 'run-claude', 'local_user', '2026-08-28T06:49:40.099875Z'),
+      authorType: 'user'
+    }], [], [run('running')], [], [], images)
+      .map((item) => item.id)).toEqual(['invalid-user-source'])
     expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images)
       .map((item) => item.kind)).toEqual(['run_images', 'run_file_changes'])
   })
@@ -4095,6 +4112,37 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
   })
 
+  it('keeps image and file regions separate and orders them by author intent', () => {
+    const attachments: CampMessageView['attachments'] = [{
+      id: 'file-first', displayName: 'report.pdf', kind: 'file', fileCount: 1,
+      mediaType: 'application/pdf', byteSize: 1200, previewKind: 'none', runtimeProjectionState: 'available'
+    }, {
+      id: 'image-second', displayName: 'preview.png', kind: 'file', fileCount: 1,
+      mediaType: 'image/png', byteSize: 2400, previewKind: 'image', runtimeProjectionState: 'available'
+    }, {
+      id: 'opaque-image', displayName: 'corrupt.webp', kind: 'file', fileCount: 1,
+      mediaType: 'image/webp', byteSize: 1800, previewKind: 'none', runtimeProjectionState: 'available'
+    }]
+    const renderGroups = (presentation: 'user' | 'agent') => renderToStaticMarkup(createElement(
+      MessageAttachmentGroups,
+      { attachments, campId: 'camp', presentation, onNotify: vi.fn() }
+    ))
+
+    const userMarkup = renderGroups('user')
+    expect(userMarkup.indexOf('user-message-images')).toBeLessThan(userMarkup.indexOf('user-message-files'))
+    expect(userMarkup).toContain('image-gallery-user-attachment')
+    expect(userMarkup).toContain('class="attachment-card user-timeline')
+    expect(userMarkup).not.toContain('PDF · 1.2 KB')
+
+    const agentMarkup = renderGroups('agent')
+    expect(agentMarkup.indexOf('agent-output-images')).toBeLessThan(agentMarkup.indexOf('agent-output-files'))
+    expect(agentMarkup).toContain('class="agent-output-file-grid"')
+    expect(agentMarkup).toContain('agent-artifact-icon type-pdf')
+    expect(agentMarkup).toContain('agent-artifact-icon type-image')
+    expect(agentMarkup).toContain('交付文件')
+    expect(agentMarkup).toContain('>2 个</span>')
+  })
+
   it('renders an attachment-only message shell without an empty body bubble', () => {
     const attachmentOnlyMessage: CampMessageView = {
       id: 'message-attachment-only',
@@ -4173,8 +4221,9 @@ describe('task event projections', () => {
     expect(markup).toContain('class="timeline-node conversation-bubble user"')
     expect(markup).toContain('<strong>你</strong>')
     expect(markup).toContain('aria-label="回复这条消息"')
-    expect(markup).toContain('class="timeline-attachments" aria-label="消息附件"')
-    expect(markup).toContain('说明.txt')
+    expect(markup).toContain('class="message-attachments user-message-attachments" aria-label="消息附件"')
+    expect(markup).toContain('title="说明.txt">说明</strong>')
+    expect(markup).toContain('>TXT</span>')
     expect(markup).toContain('正在准备供队员读取')
     expect(markup).toContain('队员读取不可用')
     expect(markup).toContain('attachment-projection-pending')

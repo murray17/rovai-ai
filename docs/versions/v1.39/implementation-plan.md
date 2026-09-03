@@ -39,6 +39,8 @@ last_updated: 2026-09-03
   类型定义统一 inline-code 已知类型、会话链接与普通文件 Tab 图标，Main classifier 与不支持类型的系统打开路径不变。
 - [x] 不存在通用偏好文件的新 profile 默认关闭世界地图；schema v4 保存值原样保留，schema v1–v3 继续迁移为开启，
   设置页未完成加载时也不短暂显示为开启。
+- [x] Renderer 附件展示统一：集中分类、Composer 48px 单排、用户 72px 图片与 46px 文件、Agent 正文后图片区和
+  两列文件区；Runtime 图片并入来源消息，两个主题共用组件树并提供十类 artifact token。
 
 ## 已取得的本机证据
 
@@ -139,3 +141,15 @@ DOCS_BASE_REF=aae13734669c363e7b307a6407e6868eda1e6b8e pnpm docs:check:ci
 - `pnpm docs:test`、`pnpm docs:check` 与
   `DOCS_BASE_REF=5cfbce5ff8d734fb84b46fddacd91d011898cf85 pnpm docs:check:ci` 通过；Impeccable
   changed-target detector 无发现。
+
+## 附件分区展示验证（2026-09-03）
+
+- `pnpm typecheck`：通过；
+- `pnpm test`：141 个 Vitest 文件、1490 项测试通过，后续 Node suites 220 项通过、1 项平台条件跳过；
+- `pnpm build:desktop`：Main、Preload 与 Renderer production build 通过；
+- production `runtime-image-gallery` fixture：Day/Night、1040/1440/2560 三档窗口、Agent 原比例图片区、
+  用户 72px 方形预览、键盘焦点与 Lightbox 验证通过；
+- production `camp-open-projection` fixture：用户/Agent/Composer 三种附件样式、Agent 十类文件、
+  560px 阈值下两列/一列切换、48px 单排滚动、方向键/Home/End、鼠标滚轮横移及无页面横向溢出验证通过；
+- `pnpm docs:test`、`pnpm docs:check`、
+  `DOCS_BASE_REF=5cfbce5ff8d734fb84b46fddacd91d011898cf85 pnpm docs:check:ci`：通过。

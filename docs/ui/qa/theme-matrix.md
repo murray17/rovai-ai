@@ -2,7 +2,7 @@
 document_type: ui-qa-contract
 authority: renderer-theme-verification
 status: accepted
-last_updated: 2026-08-22
+last_updated: 2026-09-03
 ---
 
 # Renderer 主题覆盖矩阵
@@ -15,7 +15,7 @@ Porcelain Day 与 Steel Night 必须在同一生产组件、数据和功能上�
 | 首次绘制与 System 解析 | Required | Required | 无反色闪烁；Main snapshot 最终权威 |
 | App Shell / Project / Quick Chat | Required | Required | rail、选中、未读、菜单和焦点 |
 | 空 Camp 与长会话 | Required | Required | 阅读宽度、宽工件、复制入口、滚动 |
-| Composer / Mention / Skill / Attachment | Required | Required | Draft 不丢失；Popover、候选、错误和 disabled |
+| Composer / Mention / Skill / Attachment | Required | Required | Draft 不丢失；48/72px 图片、用户/Agent 分区、十类 artifact、横向浏览、Popover、错误和 disabled |
 | Agent Process Drawer | Required | Required | running、terminal、recovery blocked、长证据 |
 | Task / Inspector / Approval Dock | Required | Required | layering、focus、danger/attention 语义 |
 | 队员 / Memory / Settings | Required | Required | identity、evidence、表单、列表、partial/recovery |

@@ -55,7 +55,7 @@ root.render(
     <p style={{ marginBottom: 18 }}>检查结果如下，图片只展示在本地运行记录中。</p>
     <ImageGallery images={['first', 'second', 'broken'].map(id => ({ kind: 'runtime', campId: 'fixture', image: image(id) }))} />
     <p style={{ margin: '24px 0 12px' }}>这张图片已作为消息附件发送。</p>
-    <ImageGallery images={['attachment', 'attachment-broken'].map(id => ({ kind: 'attachment', campId: 'fixture', image: {
+    <ImageGallery variant="user-attachment" images={['attachment', 'attachment-broken'].map(id => ({ kind: 'attachment', campId: 'fixture', image: {
       ...image(id), kind: 'file', fileCount: 1, previewKind: 'image', runtimeProjectionState: 'available'
     } }))} />
   </main>
@@ -126,8 +126,10 @@ Object.assign(window, { imageGalleryTest: {
     failed: [...document.querySelectorAll('.image-tile-placeholder')].filter(node => node.textContent === '图片已不可用').length,
     columns: getComputedStyle(document.querySelector('.image-gallery-grid')!).gridTemplateColumns.split(' ').length,
     overflow: document.documentElement.scrollWidth > innerWidth,
-    fit: [...document.querySelectorAll('.image-tile-preview img')].map(node => getComputedStyle(node).objectFit),
-    frames: [...document.querySelectorAll<HTMLImageElement>('.image-tile-preview img')].map(imageFrame),
+    fit: [...document.querySelectorAll('.image-gallery-agent-output .image-tile-preview img')].map(node => getComputedStyle(node).objectFit),
+    userFit: [...document.querySelectorAll('.image-gallery-user-attachment .image-tile-preview img')].map(node => getComputedStyle(node).objectFit),
+    frames: [...document.querySelectorAll<HTMLImageElement>('.image-gallery-agent-output .image-tile-preview img')].map(imageFrame),
+    userFrames: [...document.querySelectorAll<HTMLImageElement>('.image-gallery-user-attachment .image-tile-preview img')].map(imageFrame),
     lightboxFrames: [...document.querySelectorAll<HTMLImageElement>('.image-gallery-lightbox img')].map(imageFrame),
     dialog: Boolean(document.querySelector('[role="dialog"]')),
     active: document.activeElement?.getAttribute('aria-label')

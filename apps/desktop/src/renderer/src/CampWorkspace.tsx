@@ -1,5 +1,5 @@
 import { readErrorMessage } from './error-message'
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -66,7 +66,15 @@ import {
   type RuntimeCompactionDisplayItem
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
-import { ImageGallery, groupMessageAttachments } from './ImageGallery'
+import { ImageGallery, partitionMessageAttachments, type GalleryImage } from './ImageGallery'
+import {
+  AgentArtifactIcon,
+  FileExtensionLabel,
+  UserFileIcon,
+  attachmentBaseName,
+  attachmentFormatLabel,
+  classifyAttachmentDisplay
+} from './attachment-presentation'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { AgentRunDeliveryRecipients } from './AgentRunDeliveryRecipients'
 import { MemberPortrait } from './MemberPortrait'
@@ -915,6 +923,7 @@ export type CampConversationTimelineItem =
       id: string
       createdAt: string
       message: CampMessageView
+      runtimeImageGroups: AgentRunImagesView[]
     }
   | {
       kind: 'run_file_changes'
@@ -985,16 +994,19 @@ export function campConversationTimeline(
       kind: 'camp_message',
       id: message.id,
       createdAt: message.createdAt,
-      message
+      message,
+      runtimeImageGroups: []
     }))
-  const publicMessageRunIds = new Set(
-    publicMessages.flatMap((item) => item.message.sourceAgentRunId ?? [])
+  const publicAgentMessageRunIds = new Set(
+    publicMessages.flatMap((item) => item.message.authorType === 'agent'
+      ? item.message.sourceAgentRunId ?? []
+      : [])
   )
   const runStatusById = new Map(agentRuns.map((run) => [run.id, run.status]))
   const runImageCards: CampConversationTimelineItem[] = agentRunImages
     .filter((images) => {
       if (images.images.length === 0) return false
-      if (publicMessageRunIds.has(images.agentRunId)) return true
+      if (publicAgentMessageRunIds.has(images.agentRunId)) return true
       const status = runStatusById.get(images.agentRunId)
       return status !== undefined && !NON_TERMINAL_RUNS.has(status)
     })
@@ -1041,7 +1053,9 @@ export function campConversationTimeline(
   sortedItems.push(...sortedMessages.slice(messageIndex), ...sortedCards.slice(cardIndex))
   const lastPublicMessageByRunId = new Map<string, CampConversationTimelineItem>()
   for (const item of sortedMessages) {
-    if (item.kind === 'camp_message' && item.message.sourceAgentRunId) {
+    if (item.kind === 'camp_message'
+      && item.message.authorType === 'agent'
+      && item.message.sourceAgentRunId) {
       lastPublicMessageByRunId.set(item.message.sourceAgentRunId, item)
     }
   }
@@ -1058,6 +1072,12 @@ export function campConversationTimeline(
     const anchor = lastPublicMessageByRunId.get(runId) ?? fileCard
     if (!anchor) continue
     anchoredCardIds.add(card.id)
+    if (card.kind === 'run_images' && anchor.kind === 'camp_message') {
+      anchor.runtimeImageGroups.push(card.images)
+      anchor.runtimeImageGroups.sort((left, right) => left.createdAt.localeCompare(right.createdAt)
+        || left.executionEpoch - right.executionEpoch)
+      continue
+    }
     cardsByAnchorMessageId.set(
       anchor.id,
       [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card].sort((left, right) =>
@@ -3958,6 +3978,9 @@ export function CampWorkspace({
                     ? runById.get(campMessage.sourceAgentRunId) ?? null
                     : null
                   const displayBody = campMessage.body
+                  const humanAuthored = campMessage.authorType === 'user'
+                    || campMessage.authorType === 'external_principal'
+                  const runtimeImages = timelineItem.runtimeImageGroups.flatMap((group) => group.images)
                   const messageAuthorKey = campMessage.authorType === 'user'
                     || campMessage.authorType === 'agent'
                     || campMessage.authorType === 'external_principal'
@@ -4060,6 +4083,14 @@ export function CampWorkspace({
                                     onReveal={() => void revealReplyParent(replyParentId)}
                                   />
                                 )}
+                                {humanAuthored && (
+                                  <MessageAttachmentGroups
+                                    attachments={campMessage.attachments}
+                                    campId={snapshot.camp.id}
+                                    presentation="user"
+                                    onNotify={onNotify}
+                                  />
+                                )}
                                 {displayBody.trim().length > 0 && (
                                   campMessage.authorType === 'agent'
                                   && !campMessage.content?.some((segment) =>
@@ -4126,14 +4157,18 @@ export function CampWorkspace({
                                         </div>
                                       )
                                 )}
-                                {campMessage.attachments.length > 0 && (
-                                  <div className="timeline-attachments" aria-label="消息附件">
-                                    {groupMessageAttachments(campMessage.attachments).map((segment) => segment.kind === 'images'
-                                      ? <ImageGallery key={segment.attachments[0].id}
-                                          images={segment.attachments.map((image) => ({ kind: 'attachment', campId: snapshot.camp.id, image }))} />
-                                      : <AttachmentCard attachment={segment.attachment} campId={snapshot.camp.id}
-                                          key={segment.attachment.id} onNotify={onNotify} timeline />)}
-                                  </div>
+                                {!humanAuthored && (
+                                  <MessageAttachmentGroups
+                                    attachments={campMessage.attachments}
+                                    runtimeImages={runtimeImages.map((image) => ({
+                                      kind: 'runtime',
+                                      campId: snapshot.camp.id,
+                                      image
+                                    }))}
+                                    campId={snapshot.camp.id}
+                                    presentation="agent"
+                                    onNotify={onNotify}
+                                  />
                                 )}
                               </MessageSurface>
                               <CampMessageDeliveryFooter
@@ -4392,12 +4427,13 @@ export function CampWorkspace({
               || preparingAttachments.length > 0
               || failedAttachments.length > 0
               ? (
-                  <div className="composer-attachment-strip" aria-label="待发送附件">
+                  <ComposerAttachmentStrip>
                     {composerDraft?.attachments.map((attachment) => (
                       <AttachmentCard
                         attachment={attachment}
                         key={attachment.id}
                         onRemove={() => void removePreparedAttachment(attachment.id)}
+                        presentation="composer"
                       />
                     ))}
                     {preparingAttachments.map((attachment) => (
@@ -4420,7 +4456,7 @@ export function CampWorkspace({
                         )}
                       />
                     ))}
-                  </div>
+                  </ComposerAttachmentStrip>
                 )
               : null}
             {composerDraft?.replyIntent && (
@@ -7355,18 +7391,93 @@ function AttachmentFolderGlyph(): JSX.Element {
   )
 }
 
+export function MessageAttachmentGroups({
+  attachments,
+  runtimeImages = [],
+  campId,
+  presentation,
+  onNotify
+}: {
+  attachments: CampMessageAttachmentView[]
+  runtimeImages?: GalleryImage[]
+  campId: string
+  presentation: 'user' | 'agent'
+  onNotify: (message: string) => void
+}): JSX.Element | null {
+  const groups = partitionMessageAttachments(attachments)
+  const images: GalleryImage[] = [
+    ...groups.images.map((image): GalleryImage => ({ kind: 'attachment', campId, image })),
+    ...runtimeImages
+  ]
+  if (images.length === 0 && groups.files.length === 0) return null
+
+  if (presentation === 'user') {
+    return (
+      <section className="message-attachments user-message-attachments" aria-label="消息附件">
+        {images.length > 0 && (
+          <div className="user-message-images">
+            <ImageGallery images={images} variant="user-attachment" />
+          </div>
+        )}
+        {groups.files.length > 0 && (
+          <div className="user-message-files" role="group" aria-label="消息文件">
+            {groups.files.map((attachment) => (
+              <AttachmentCard
+                attachment={attachment}
+                campId={campId}
+                key={attachment.id}
+                onNotify={onNotify}
+                presentation="user-timeline"
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  return (
+    <section className="message-attachments agent-message-outputs" aria-label="Agent 交付">
+      {images.length > 0 && (
+        <div className="agent-output-images">
+          <ImageGallery images={images} variant="agent-output" />
+        </div>
+      )}
+      {groups.files.length > 0 && (
+        <div className="agent-output-files">
+          <div className="agent-delivery-heading">
+            <strong>交付文件</strong>
+            <span>{groups.files.length} 个</span>
+          </div>
+          <div className="agent-output-file-grid" role="group" aria-label={`Agent 交付文件：${groups.files.length} 个`}>
+            {groups.files.map((attachment) => (
+              <AttachmentCard
+                attachment={attachment}
+                campId={campId}
+                key={attachment.id}
+                onNotify={onNotify}
+                presentation="agent-timeline"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function AttachmentCard({
   attachment,
   onRemove,
   campId,
   onNotify = () => undefined,
-  timeline = false
+  presentation = 'composer'
 }: {
   attachment: CampMessageAttachmentView | PreparedAttachmentView
   onRemove?: () => void
   campId?: string
   onNotify?: (message: string) => void
-  timeline?: boolean
+  presentation?: 'composer' | 'user-timeline' | 'agent-timeline'
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -7379,6 +7490,12 @@ function AttachmentCard({
   const runtimeProjectionState = 'runtimeProjectionState' in attachment
     ? attachment.runtimeProjectionState
     : 'available'
+  const timeline = presentation !== 'composer'
+  const agentPresentation = presentation === 'agent-timeline'
+  const composerImage = presentation === 'composer' && attachment.previewKind === 'image'
+  const displayClassification = classifyAttachmentDisplay(attachment)
+  const baseName = attachmentBaseName(attachment.displayName, attachment.kind)
+  const formatLabel = attachmentFormatLabel(attachment.displayName, attachment.kind)
   const rendererPlatform = typeof window === 'undefined' ? 'darwin' : window.rovai.platform
   useEffect(() => {
     if (attachment.previewKind !== 'image') return
@@ -7466,29 +7583,53 @@ function AttachmentCard({
       ? '正在准备供队员读取'
       : null
 
-  const content = (
-    <>
-      <span className="attachment-visual" aria-hidden="true">
-        {attachment.kind === 'directory'
-          ? <AttachmentFolderGlyph />
-          : previewUrl
-          ? <img src={previewUrl} alt="" />
-          : attachment.previewKind === 'image' && !previewFailed ? <i className="attachment-loading" /> : '文'}
-      </span>
-      <span className="attachment-copy">
-        <strong title={attachment.displayName}>{attachment.displayName}</strong>
-        <small>
-          {projectionLabel ?? (attachment.kind === 'directory'
-            ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
-            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`)}
-        </small>
-      </span>
-    </>
-  )
+  const detailLabel = projectionLabel ?? (agentPresentation
+    ? attachment.kind === 'directory'
+      ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
+      : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`
+    : null)
+
+  const content = composerImage
+    ? (
+        <span className="attachment-visual composer-image-preview" aria-hidden="true">
+          {previewUrl
+            ? <img src={previewUrl} alt="" />
+            : !previewFailed ? <i className="attachment-loading" /> : <b>!</b>}
+        </span>
+      )
+    : (
+        <>
+          {agentPresentation
+            ? <AgentArtifactIcon type={displayClassification.agentDisplayType} />
+            : (
+                <UserFileIcon
+                  type={displayClassification.userDisplayType === 'image'
+                    ? 'document'
+                    : displayClassification.userDisplayType}
+                />
+              )}
+          <span className="attachment-copy">
+            <span className="attachment-title-line">
+              <strong title={attachment.displayName}>{baseName}</strong>
+              <FileExtensionLabel>{formatLabel}</FileExtensionLabel>
+            </span>
+            {detailLabel && <small>{detailLabel}</small>}
+          </span>
+          {agentPresentation && (
+            <span className="agent-file-open-cue" aria-hidden="true">
+              <svg viewBox="0 0 18 18">
+                <path d="M10.3 3.3h4.4v4.4M14.5 3.5 8.6 9.4" />
+                <path d="M13.5 9.5v4.3H3.8v-9.7h4.3" />
+              </svg>
+              <span>打开</span>
+            </span>
+          )}
+        </>
+      )
 
   return (
     <div
-      className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''} ${projectionLabel ? `attachment-projection-${runtimeProjectionState}` : ''}`}
+      className={`attachment-card ${presentation === 'composer' ? 'composer-attachment-card' : presentation} ${composerImage ? 'composer-image-attachment' : ''} type-${displayClassification.agentDisplayType} ${projectionLabel ? `attachment-projection-${runtimeProjectionState}` : ''}`}
       aria-label={projectionLabel ? `${attachment.displayName}：${projectionLabel}` : undefined}
       data-context-open={contextMenuOpen ? 'true' : undefined}
       onContextMenu={timeline && campId
@@ -7638,6 +7779,51 @@ function AttachmentRevealGlyph(): JSX.Element {
   )
 }
 
+function ComposerAttachmentStrip({ children }: { children: ReactNode }): JSX.Element {
+  const stripRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+    const onWheel = (event: WheelEvent): void => scrollAttachmentStripOnWheel(strip, event)
+    strip.addEventListener('wheel', onWheel, { passive: false })
+    return () => strip.removeEventListener('wheel', onWheel)
+  }, [])
+  return (
+    <div
+      className="composer-attachment-strip"
+      role="group"
+      aria-label="待发送附件，使用左右方向键浏览"
+      tabIndex={0}
+      onKeyDown={scrollAttachmentStripOnKeyDown}
+      ref={stripRef}
+    >
+      {children}
+    </div>
+  )
+}
+
+function scrollAttachmentStripOnKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  const strip = event.currentTarget
+  const step = Math.max(144, Math.round(strip.clientWidth * 0.64))
+  if (event.key === 'ArrowLeft') strip.scrollBy({ left: -step })
+  else if (event.key === 'ArrowRight') strip.scrollBy({ left: step })
+  else if (event.key === 'Home') strip.scrollTo({ left: 0 })
+  else if (event.key === 'End') strip.scrollTo({ left: strip.scrollWidth })
+  else return
+  event.preventDefault()
+}
+
+function scrollAttachmentStripOnWheel(strip: HTMLDivElement, event: WheelEvent): void {
+  if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY) || event.deltaY === 0) return
+  const nextScrollLeft = Math.max(0, Math.min(
+    strip.scrollWidth - strip.clientWidth,
+    strip.scrollLeft + event.deltaY
+  ))
+  if (nextScrollLeft === strip.scrollLeft) return
+  strip.scrollLeft = nextScrollLeft
+  event.preventDefault()
+}
+
 function AttachmentPlaceholder({
   name,
   kind,
@@ -7652,7 +7838,7 @@ function AttachmentPlaceholder({
   onRemove?: () => void
 }): JSX.Element {
   return (
-    <div className={`attachment-card attachment-${state}`}>
+    <div className={`attachment-card composer-attachment-card attachment-${state}`}>
       <span className="attachment-visual" aria-hidden="true">
         {kind === 'directory'
           ? (
