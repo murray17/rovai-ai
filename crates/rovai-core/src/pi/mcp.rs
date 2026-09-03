@@ -334,7 +334,7 @@ impl PiMcpHttpClient {
         }
         if let Some(value) = response.headers().get("mcp-session-id").cloned() {
             let mut session_id = self.session_id.lock().await;
-            if session_id.as_ref().is_some_and(|current| current != &value) {
+            if session_id.as_ref().is_some_and(|current| current != value) {
                 bail!("Pi MCP HTTP Server changed its Session identity");
             }
             *session_id = Some(value);

@@ -8295,6 +8295,14 @@ mod slow_tests {
             .execute_batch(
                 r#"
                 PRAGMA foreign_keys = OFF;
+                -- The current-schema fixture includes post-v71 Pi receipt objects.
+                -- Remove those dependants so this test can replay only v68-v71.
+                DROP TRIGGER IF EXISTS pi_managed_input_acceptance_update_guard;
+                DROP TRIGGER IF EXISTS pi_managed_input_receipt_delete_guard;
+                DROP TRIGGER IF EXISTS pi_managed_input_receipt_update_guard;
+                DROP TRIGGER IF EXISTS pi_managed_input_receipt_insert_guard;
+                DROP TABLE IF EXISTS pi_managed_input_receipt;
+                DROP INDEX IF EXISTS runtime_input_delivery_pi_binding_unique;
                 ALTER TABLE conversation
                     RENAME COLUMN native_collaboration_state_digest
                     TO native_member_state_digest;

@@ -1793,6 +1793,11 @@ struct CampAttachmentRunAccess<'a> {
     authorization: &'a CampAttachmentRuntimeAuthorization,
 }
 
+struct RuntimeInputPreparationRequest<'a> {
+    charter_delivery_mode: CharterDeliveryMode,
+    proposed_delivery_id: Option<&'a str>,
+}
+
 impl CampAttachmentRunAccess<'_> {
     fn prove(self, execution: &AgentRunExecution) -> Result<()> {
         self.admission.prove(&execution.camp_id)?;
@@ -9626,8 +9631,7 @@ impl Core {
         attachment_access: CampAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
-        charter_delivery_mode: CharterDeliveryMode,
-        proposed_delivery_id: Option<&str>,
+        request: RuntimeInputPreparationRequest<'_>,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<(PreparedContext, RuntimeInputDelivery)>> {
         attachment_access.prove(execution)?;
@@ -9644,13 +9648,13 @@ impl Core {
                 &MaterializeContextRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
-                    charter_delivery_mode,
+                    charter_delivery_mode: request.charter_delivery_mode,
                     max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
                 },
             )?;
             match materialization {
                 ContextMaterialization::Ready(context) => {
-                    let delivery = match proposed_delivery_id {
+                    let delivery = match request.proposed_delivery_id {
                         Some(identity) => ContextService
                             .prepare_input_delivery_for_context_with_identity(
                                 &mut database,
@@ -11178,8 +11182,10 @@ impl Core {
                 },
                 skill_exposure,
                 mcp_projection,
-                CharterDeliveryMode::ManagedSystemPrompt,
-                Some(&delivery_id),
+                RuntimeInputPreparationRequest {
+                    charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
+                    proposed_delivery_id: Some(&delivery_id),
+                },
                 output,
             )
             .await;
@@ -12459,8 +12465,10 @@ impl Core {
                 attachment_access,
                 skill_exposure,
                 mcp_projection,
-                charter_delivery_mode,
-                None,
+                RuntimeInputPreparationRequest {
+                    charter_delivery_mode,
+                    proposed_delivery_id: None,
+                },
                 output,
             )
             .await
