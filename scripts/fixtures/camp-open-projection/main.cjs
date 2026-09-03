@@ -39,7 +39,14 @@ app.whenReady().then(async () => {
         await new Promise(resolve => setTimeout(resolve, 25))
       }
       await run("window.campOpenTest.scrollAttachmentSurface('user')")
-      await run('window.campOpenTest.settle()')
+      const userImageDeadline = Date.now() + 5000
+      while (Date.now() < userImageDeadline) {
+        await run('window.campOpenTest.settle()')
+        attachmentState = await run('window.campOpenTest.attachmentSurfaceState()')
+        if (attachmentState.decodedImages === 6) break
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      assert.equal(attachmentState.decodedImages, 6, 'All user and agent review images are decoded')
       await capture('attachment-review-ready')
       console.log(JSON.stringify({ reviewReady: true, userData, attachmentState }))
       return
