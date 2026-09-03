@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fetch pull request base
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+
+      - name: Detect fast-check scopes
+        id: changes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          write_outputs() {
+            {
+              printf 'node=%s\n' "$1"
+              printf 'rust=%s\n' "$2"
+              printf 'docs=%s\n' "$3"
+              printf 'skills=%s\n' "$4"
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          fail_closed() {
+            echo "::warning::Path detection failed; enabling every fast check."
+            write_outputs true true true true
+            exit 0
+          }
+          trap fail_closed ERR
+
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            echo "Manual CI run; enabling every fast check."
+            write_outputs true true true true
+            exit 0
+          fi
+
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          changed_file_list="$RUNNER_TEMP/rovai-ci-changed-files"
+          git diff --name-only "$BASE_SHA" HEAD > "$changed_file_list"
+
+          node=false
+          rust=false
+          docs=false
+          skills=false
+
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            printf '%s\n' "$file"
+
+            case "$file" in
+              .github/workflows/*|package.json|pnpm-lock.yaml|Cargo.toml|Cargo.lock)
+                node=true
+                rust=true
+                docs=true
+                skills=true
+                ;;
+            esac
+
+            case "$file" in
+              apps/desktop/*|packages/contracts/*|scripts/*|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig*.json|vite*.*|vitest*.*)
+                node=true
+                ;;
+            esac
+
+            case "$file" in
+              *.rs|Cargo.toml|*/Cargo.toml|Cargo.lock|*/Cargo.lock|.cargo/*|rust-toolchain*|rustfmt.toml|clippy.toml)
+                rust=true
+                ;;
+            esac
+
+            case "$file" in
+              docs/*|README*|CONTRIBUTING*|SECURITY*|CODE_OF_CONDUCT*|scripts/check-doc-*|scripts/lib/doc-*)
+                docs=true
+                ;;
+            esac
+
+            case "$file" in
+              skills/*|scripts/check-skills.mjs|scripts/lib/skill-authoring.test.mjs)
+                skills=true
+                ;;
+            esac
+          done < "$changed_file_list"
+
+          if [[ "$node" == true || "$rust" == true ]]; then
+            docs=true
+          fi
+
+          write_outputs "$node" "$rust" "$docs" "$skills"
+          printf 'Fast-check scopes: node=%s rust=%s docs=%s skills=%s\n' \
+            "$node" "$rust" "$docs" "$skills"
+
+      - name: Install pnpm
+        if: steps.changes.outputs.node == 'true' || steps.changes.outputs.docs == 'true' || steps.changes.outputs.skills == 'true'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.20.0
+          run_install: false
+
+      - name: Set up Node.js
+        if: steps.changes.outputs.node == 'true' || steps.changes.outputs.docs == 'true' || steps.changes.outputs.skills == 'true'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked Node dependencies
+        if: steps.changes.outputs.node == 'true' || steps.changes.outputs.docs == 'true' || steps.changes.outputs.skills == 'true'
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Run TypeScript and Vitest checks
+        if: steps.changes.outputs.node == 'true'
+        run: |
+          pnpm typecheck
+          pnpm exec vitest run
+
+      - name: Run diff-aware documentation governance
+        if: steps.changes.outputs.docs == 'true'
+        env:
+          DOCS_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -z "$DOCS_BASE_REF" ]]; then
+            export DOCS_BASE_REF="$GITHUB_SHA"
+          fi
+          pnpm docs:check:ci
+
+      - name: Run Skill checks
+        if: steps.changes.outputs.skills == 'true'
+        run: |
+          pnpm skills:test
+          pnpm skills:check
+
+      - name: Install Rust toolchain
+        if: steps.changes.outputs.rust == 'true'
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: rustfmt
+
+      - name: Restore Cargo cache
+        if: steps.changes.outputs.rust == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Run Rust format and compile checks
+        if: steps.changes.outputs.rust == 'true'
+        run: |
+          cargo fmt --all --check
+          cargo check --workspace --all-targets
+
+      - name: Report no-op gate
+        if: steps.changes.outputs.node != 'true' && steps.changes.outputs.rust != 'true' && steps.changes.outputs.docs != 'true' && steps.changes.outputs.skills != 'true'
+        run: echo "No relevant fast checks were required."
