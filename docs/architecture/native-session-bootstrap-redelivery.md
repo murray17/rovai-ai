@@ -139,7 +139,7 @@ Adapter 已经收到明确原生事件时投影，不为填满 Runtime 矩阵新
 该事件使用本地 Execution Evidence/Managed Blob 以支持长 summary 惰性读取，但 Canonical Activity classifier 明确返回
 non-activity，public execution query 明确排除，Main 的飞书/钉钉 Host 与局域网执行台也不因它唤醒。它不是公共 Evidence、
 Camp Message、世界地图活动或 Runtime detector policy。呈现合同见
-[Run Process Detail Surface v29](../contracts/run-process-detail-surface-v29.md)。
+[Run Process Detail Surface v30](../contracts/run-process-detail-surface-v30.md)。
 
 ## Observer Lease 与去重
 

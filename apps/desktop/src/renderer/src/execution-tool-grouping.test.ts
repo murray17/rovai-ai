@@ -225,6 +225,20 @@ describe('execution Tool grouping', () => {
     })
   })
 
+  it('uses the concrete public instruction instead of a generic Tool row title', () => {
+    const fileOperation = tool('file', 'running')
+    fileOperation.step.title = '文件操作'
+    fileOperation.step.currentInstruction = '修改 settings.ts'
+    fileOperation.step.activityDomain = 'file'
+    fileOperation.step.iconKind = 'file'
+
+    expect(toolActivityGroupPresentation([fileOperation], 'running')).toMatchObject({
+      primary: '执行中',
+      currentTitle: '修改 settings.ts',
+      accessibleLabel: '执行中：修改 settings.ts'
+    })
+  })
+
   it('uses a successful group result when any Tool succeeded and omits terminal outcome copy', () => {
     expect(toolActivityGroupPresentation([
       tool('one'),

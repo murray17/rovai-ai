@@ -40,6 +40,8 @@ last_updated: 2026-09-03
 - macOS arm64、macOS x64、Windows x64 都没有 Pi 专属 immutable qualification artifact，正式 Admission 均为
   `not_qualified / runtime_platform.qualification_evidence_missing`。本机 debug smoke 不是发布资格，普通 discovery、
   成员选择和 AgentRun 不会绕过此门禁。
+- 执行台、Inspector 与局域网只读执行台的活动 Tool 组优先展示已有公开证据中的具体当前指令；稳定 Tool 行标题、
+  渠道卡片和 Activity 分类不变，文件路径与 Web query 继续遵守 typed/Canonical Evidence 边界。
 
 ## 已接受的差异与未关闭证据
 
@@ -69,12 +71,12 @@ Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.38 冻结为 historical；本概览、实施计划、确认说明和版本索引建立唯一 current v1.39 |
 | Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact resume、managed receipt 与 MCP bridge 的高成本取舍；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)成为当前入口，完整拥有 Pi wire、Ready、Session、receipt、MCP、Action、Usage 与未准入边界 |
+| Contracts | 已更新 | [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)完整拥有 Pi wire、Ready、Session、receipt、MCP、Action、Usage 与未准入边界；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)和[基础不变量](../../architecture/foundational-invariants.md)加入 Pi 的独立 transport、Fleet、隐私、managed input 与 bridge 边界 |
-| UI | 确认无需更新 | Pi 复用既有 Runtime/成员/监控表面和通用状态，不引入新的跨版本交互；本版只补 closed-set row 与 logo |
-| Runtime Activity | 已更新 | [Activity Registry](../../runtime-activity/registry.md)与维护指南加入 Pi verified tool lifecycle 映射，未知 shape 继续 fail closed |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组的具体当前指令、稳定 Tool 行与渠道边界；Pi 仍只复用既有 Runtime/成员/监控表面 |
+| Runtime Activity | 已更新 | [Activity Registry](../../runtime-activity/registry.md)与维护指南加入 Pi verified tool lifecycle 映射，未知 shape 继续 fail closed；当前指令只改共享 presentation，不增加分类映射 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 Pi 0.84.4 本机证据、专属未准入矩阵与剩余 Golden Flow |
-| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航指向 v30、Pi research 与 parity matrix |
+| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航分别指向两份 v30 合同、Pi research 与 parity matrix |
 | Root README | 确认无需更新 | Pi 在所有 shipped platform 仍未准入，不应加入面向用户的 Supported Runtime 表 |
 
 ## References
@@ -83,4 +85,5 @@ Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升
 - [模型上下文变更 revision 1](model-context-change-pi-managed-system-prompt.md)
 - [Parity Matrix](../../research/pi-runtime-reintegration-parity-matrix.md)
 - [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)
+- [Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)
 - [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)

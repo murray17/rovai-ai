@@ -330,7 +330,10 @@ Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` �
 
 同一 Run 内最大连续的 Tool items 默认收成一条可展开组摘要；narration、plan 与 diagnostic 都会截断
 分组，不能跨 Run 或跨队员合并。有 running/waiting 操作时，活动组只显示“执行中/等待审批 · 当前操作”，
-不再同时追加累计数。当前 Tool 已结算但尾组尚未收口时，继续显示“执行中 · <最近一条指令>”，不回退为
+不再同时追加累计数。当前操作优先展示已有公开证据中的具体指令：Shell 使用完整脱敏 command，File 使用
+可靠 `修改 <basename>` 或多文件数量，Web 搜索使用 typed query，其他操作使用非通用 Runtime title/toolName；
+没有具体值时回退稳定 Tool 行标题，不从 raw input/output 猜测。当前 Tool 已结算但尾组尚未收口时，继续显示
+“执行中 · <最近一条指令>”，不回退为
 “已执行/已汇总 N 项操作”；成功、失败、停止和仅记录仍只在展开后的精确 Tool 行表达。终态同样只保留
 一段主文案。
 
@@ -339,7 +342,7 @@ Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 
 `compactionId` 的 started/completed 在当前 Run 原位更新。只有明确 token 字段或非空 summary 才可展开；message count、
 elapsed、Runtime/事件/Session identity、trigger 与 phase 单独存在时保持无箭头、不可点击的静态单行。summary 的完整内容
 沿用本地 Managed Blob 惰性读取，不投影到渠道、局域网执行台、世界地图或公开 Evidence。精确归属、协议和失败关闭边界见
-[Run Process Detail Surface v29](../../contracts/run-process-detail-surface-v29.md)。
+[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
 独立图标沿用普通 command 的 muted 色，不使用品牌色。`imminent` 是一次性 `recorded` 记录，不压掉 Run 的“正在处理”；只有
 非终态 Run 的 `started` 显示 running 状态并暂停重复的底部进行中提示，`completed` 使用完成状态。
 
@@ -366,7 +369,7 @@ Authorization、API key 与 `rovai send` 正文值替换为脱敏占位。标题
 Diff 有可靠 path 时显示 `修改 <basename>`，否则使用 toolName/title/“文件操作”；`tool.web.search` 固定为“Web 搜索”，普通 Tool
 使用 canonical toolName/title/“工具调用”，Runtime 与 Unknown 使用对应中文 fallback。命令展示只改变
 presentation，不得参与 identity 或 lifecycle 合并；ACP 仅由 Adapter 白名单的 command shape 在原生 kind
-缺失时证明 execute。
+缺失时证明 execute。上述稳定 Tool 行标题不因活动组的具体当前指令而改变，渠道卡片也不读取该组摘要字段。
 
 Tool 行固定为 `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨`，不可展开行也保留末轨占位。
 类型图标收敛为 Terminal、File、Web、Tool、Rovai、Runtime 和 Unknown 七类统一 16px 单色 SVG，不代表状态。
@@ -391,7 +394,7 @@ Shell 结果面的左边界与 Tool 行 16px 类型图标的左边界同轴，�
 既有对齐。底部和 Inspector 复用同一行为。仍不显示
 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v29](../../contracts/run-process-detail-surface-v29.md)。
+[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
@@ -448,7 +451,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不删除底层 Input/Action 审计；业务取消本身不产生外部效果待确认提示。明确 canonical cancelled 的 Tool Call
 同样显示“已停止”，其他非取消路径独立投影的待确认提示仍保留。精确合同见
-[Run Process Detail Surface v29](../../contracts/run-process-detail-surface-v29.md)。
+[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
 
 当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
 notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
@@ -456,7 +459,7 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
 下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
 凭证、用户名或绝对路径。精确合同见
-[Run Process Detail Surface v29](../../contracts/run-process-detail-surface-v29.md)。
+[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -532,7 +535,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v29](../../contracts/run-process-detail-surface-v29.md)。
+[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
 
 ## 会话 Pane 紧凑布局
 
