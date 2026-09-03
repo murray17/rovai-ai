@@ -2504,20 +2504,59 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .camp-world-map.is-static .camp-world-map-route, .camp-world-map.is-static .camp-world-map-route[data-active], .camp-world-map.is-static .camp-world-map-agent-button::before, .camp-world-map.is-static .camp-world-map-speech, .camp-world-map.is-static .camp-world-map-ambient-encounter { animation: none; transition: none; }
 .camp-world-map.is-static .camp-world-map-agent-button::before { opacity: 0; }
 .timeline-track { position: relative; width: min(790px, 100%); min-height: 100%; margin: 0 auto; }
-.camp-history-loader,
-.camp-history-error {
+.camp-history-loader {
   display: flex;
   min-height: 36px;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 7px;
   margin: 0 auto 14px;
   color: var(--muted);
   font-size: 11px;
+  white-space: nowrap;
 }
-.camp-history-loader .quiet-button,
-.camp-history-error .quiet-button { flex: 0 0 auto; }
-.camp-history-error { color: var(--danger); }
+.camp-history-text-button {
+  display: inline-flex;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--brand-ink);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-decoration: none;
+  text-underline-offset: 3px;
+  transition: color 150ms ease;
+}
+.camp-history-text-button:hover:not(:disabled) {
+  color: var(--brand-hover);
+  text-decoration: underline;
+}
+.camp-history-text-button:disabled {
+  color: var(--muted);
+  font-weight: 500;
+  text-decoration: none;
+}
+.camp-history-loader.is-error,
+.camp-history-loader.is-error .camp-history-text-button { color: var(--danger); }
+.camp-history-loader.is-error .camp-history-text-button:hover { color: var(--danger); }
+.camp-history-separator { color: var(--line-strong); }
+.camp-history-count { color: var(--faint); font-variant-numeric: tabular-nums; }
+.camp-history-spinner {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--muted);
+  border-radius: 50%;
+  animation: camp-marker-spin 900ms linear infinite;
+}
 .empty-camp-welcome {
   display: grid;
   min-height: 100%;

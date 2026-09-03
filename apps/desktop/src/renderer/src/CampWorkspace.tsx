@@ -153,6 +153,17 @@ const EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT = 112
 const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
+const CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX = 120
+
+export function campHistoryKeyboardInputMovesEarlier(
+  key: string,
+  shiftKey: boolean
+): boolean {
+  return key === 'ArrowUp'
+    || key === 'PageUp'
+    || key === 'Home'
+    || (key === ' ' && shiftKey)
+}
 
 export function composerHasSendablePayload(
   message: string,
@@ -1402,6 +1413,7 @@ export function CampWorkspace({
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const earlierMessageLoadInFlightRef = useRef(false)
   const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
   const conversationFindRequestGeneration = useRef(0)
@@ -3538,23 +3550,59 @@ export function CampWorkspace({
   }
 
   const loadEarlierMessages = async (): Promise<void> => {
-    if (!onLoadEarlierMessages || earlierMessageStatus === 'loading') return
+    if (
+      !onLoadEarlierMessages
+      || !messageHistory?.hasEarlier
+      || earlierMessageLoadInFlightRef.current
+    ) return
     const timeline = timelineScrollRef.current
-    const previousScrollHeight = timeline?.scrollHeight ?? 0
-    const previousScrollTop = timeline?.scrollTop ?? 0
+    if (!timeline) return
+    const campId = snapshot.camp.id
+    const previousScrollHeight = timeline.scrollHeight
+    const previousScrollTop = timeline.scrollTop
+    earlierMessageLoadInFlightRef.current = true
     setEarlierMessageStatus('loading')
     try {
       await onLoadEarlierMessages()
-      setEarlierMessageStatus('idle')
-      window.requestAnimationFrame(() => {
+      await new Promise<void>((resolve) => {
         window.requestAnimationFrame(() => {
-          if (!timeline) return
-          timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+          window.requestAnimationFrame(() => resolve())
         })
       })
+
+      if (
+        timelineScrollRef.current === timeline
+        && mountedCampId.current === campId
+        && !timeline.hidden
+        && !conversationFindOpenRef.current
+      ) {
+        timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+        recordTimelineReadingPosition(campId, timeline)
+      }
+      setEarlierMessageStatus('idle')
     } catch {
-      setEarlierMessageStatus('error')
+      setEarlierMessageStatus(mountedCampId.current === campId ? 'error' : 'idle')
+    } finally {
+      earlierMessageLoadInFlightRef.current = false
     }
+  }
+
+  const maybeLoadEarlierFromUserInput = (): void => {
+    const timeline = timelineScrollRef.current
+    if (
+      !timeline
+      || conversationView !== 'conversation'
+      || conversationFindOpenRef.current
+      || earlierMessageStatus !== 'idle'
+      || !messageHistory?.hasEarlier
+      || timeline.scrollTop > CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX
+    ) return
+
+    void loadEarlierMessages()
+  }
+
+  const checkHistoryAfterUserInput = (): void => {
+    window.requestAnimationFrame(maybeLoadEarlierFromUserInput)
   }
 
   const openExecutionProcess = (
@@ -3856,11 +3904,17 @@ export function CampWorkspace({
               tabIndex={-1}
               aria-label="对话时间线"
               hidden={conversationView !== 'conversation'}
-              onWheelCapture={() => captureFilePreviewAnchor()}
+              onWheelCapture={(event) => {
+                captureFilePreviewAnchor()
+                if (event.deltaY < 0) checkHistoryAfterUserInput()
+              }}
               onTouchStartCapture={() => captureFilePreviewAnchor()}
               onKeyDownCapture={(event) => {
                 if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
                   captureFilePreviewAnchor()
+                }
+                if (campHistoryKeyboardInputMovesEarlier(event.key, event.shiftKey)) {
+                  checkHistoryAfterUserInput()
                 }
               }}
               onScroll={(event) => recordTimelineReadingPosition(
@@ -3870,26 +3924,48 @@ export function CampWorkspace({
             >
               <div className="timeline-track">
               {!conversationFind.open && messageHistory?.hasEarlier && (
-                <div className="camp-history-loader" role="status" aria-live="polite">
-                  <button
-                    className="quiet-button compact"
-                    type="button"
-                    disabled={earlierMessageStatus === 'loading'}
-                    onClick={() => void loadEarlierMessages()}
-                  >
-                    {earlierMessageStatus === 'loading' ? '正在加载更早消息…' : '加载更早消息'}
-                  </button>
-                  <span>
+                <div
+                  className={`camp-history-loader is-${earlierMessageStatus}`}
+                  role={earlierMessageStatus === 'error' ? 'alert' : 'status'}
+                  aria-live={earlierMessageStatus === 'error' ? 'assertive' : 'polite'}
+                  aria-atomic="true"
+                >
+                  {earlierMessageStatus === 'error' ? (
+                    <>
+                      <span className="camp-history-error-message">较早消息暂时没有加载</span>
+                      <span className="camp-history-separator" aria-hidden="true">·</span>
+                      <button
+                        className="camp-history-text-button"
+                        type="button"
+                        onClick={() => void loadEarlierMessages()}
+                      >
+                        重试
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="camp-history-text-button"
+                      type="button"
+                      disabled={earlierMessageStatus === 'loading'}
+                      onClick={() => void loadEarlierMessages()}
+                    >
+                      {earlierMessageStatus === 'loading' ? (
+                        <>
+                          <span className="camp-history-spinner" aria-hidden="true" />
+                          <span>正在加载更早消息…</span>
+                        </>
+                      ) : (
+                        <>
+                          <span aria-hidden="true">↑</span>
+                          <span>加载更早消息</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  <span className="camp-history-separator" aria-hidden="true">·</span>
+                  <span className="camp-history-count">
                     已显示 {messageHistory.loadedCount} / {messageHistory.totalCount} 条
                   </span>
-                </div>
-              )}
-              {!conversationFind.open && earlierMessageStatus === 'error' && messageHistory?.hasEarlier && (
-                <div className="camp-history-error" role="alert">
-                  <span>较早消息暂时没有加载。</span>
-                  <button className="quiet-button compact" type="button" onClick={() => void loadEarlierMessages()}>
-                    重试
-                  </button>
                 </div>
               )}
               {(() => {
