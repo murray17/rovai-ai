@@ -86,17 +86,25 @@ describe('Channel settings', () => {
   })
 
   it('shows the selected provider, real local roster, and owner-only management boundary', () => {
+    const snapshot = unavailableSnapshot()
+    snapshot.channels.push({
+      kind: 'dingtalk',
+      displayName: '钉钉',
+      hostStatus: 'ready',
+      connection: { status: 'not_connected', account: null },
+      memberBots: []
+    })
     const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {
       agents: [agent('removed', 0, 'removed'), agent('agent-b', 2), agent('agent-a', 1)],
-      snapshot: unavailableSnapshot()
+      snapshot
     }))
 
     expect(markup).toContain('role="tablist" aria-label="渠道"')
     expect(markup).toContain('<strong>飞书</strong>')
     expect(markup).toContain('<strong>钉钉</strong>')
-    expect(markup).toContain('<small>敬请期待</small>')
-    expect(markup).toContain('aria-disabled="true"')
-    expect(markup).toMatch(/channel-provider-tab is-disabled[^>]*disabled=""/u)
+    expect(markup).not.toContain('敬请期待')
+    expect(markup).not.toContain('aria-disabled="true"')
+    expect(markup).not.toContain('channel-provider-tab is-disabled')
     expect(markup).not.toContain('Telegram')
     expect(markup).toContain('只有 Rovai Owner 可以从外部渠道触发队员')
     expect(markup).toContain('飞书中的 Owner 消息仍是外部消息身份')
@@ -113,7 +121,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('>等待连接</button>')
   })
 
-  it('keeps DingTalk visible as a disabled coming-soon preview without exposing saved management facts', () => {
+  it('opens DingTalk as a selectable provider and exposes its saved management facts', () => {
     const snapshot = unavailableSnapshot()
     snapshot.channels.push({
       kind: 'dingtalk',
@@ -149,23 +157,25 @@ describe('Channel settings', () => {
     expect(markup).toContain('<strong>飞书</strong>')
     expect(markup).toContain('<strong>钉钉</strong>')
     expect(markup).toMatch(/channel-mark-dingtalk[^>]*>\s*<img src=/u)
-    expect(markup).toContain('1 个可用渠道')
+    expect(markup).toContain('2 个可用渠道')
     expect(markup.match(/role="tab"/gu)).toHaveLength(2)
-    expect(markup).toContain('<small>敬请期待</small>')
-    expect(markup).toContain('aria-disabled="true"')
-    expect(markup).toMatch(/channel-provider-tab is-disabled[^>]*disabled=""/u)
-    expect(markup).toContain('飞书连接')
-    expect(markup).not.toContain('钉钉连接')
-    expect(markup).not.toContain('星海科技')
-    expect(markup).not.toContain('芝士')
-    expect(markup).not.toContain('u-app-1')
+    expect(markup).toMatch(/channel-provider-tab is-selected[^>]*role="tab"[^>]*aria-selected="true"[^>]*>.*?<strong>钉钉<\/strong>/u)
+    expect(markup).not.toContain('敬请期待')
+    expect(markup).not.toContain('aria-disabled="true"')
+    expect(markup).not.toContain('channel-provider-tab is-disabled')
+    expect(markup).toContain('钉钉连接')
+    expect(markup).not.toContain('飞书连接')
+    expect(markup).toContain('星海科技')
+    expect(markup).toContain('芝士')
+    expect(markup).toContain('href="https://open-dev.dingtalk.com/fe/app#/corp/app?appId=u-app-1"')
+    expect(markup).toContain('>钉钉管理</a>')
     expect(snapshot.channels).toHaveLength(2)
     expect(snapshot.channels[1].memberBots[0].appId).toBe('u-app-1')
     expect(markup).not.toMatch(/app secret|client secret|access token/i)
   })
 
   it.each(['not_connected', 'session_expired', 'connected'] as const)(
-    'does not reopen DingTalk management from a legacy %s-only snapshot',
+    'keeps DingTalk manageable from a standalone %s snapshot',
     (status) => {
       const snapshot = unavailableSnapshot()
       snapshot.channels = [{
@@ -181,13 +191,14 @@ describe('Channel settings', () => {
         agents: [], snapshot, selectedKind: 'dingtalk', onConnect: () => undefined
       }))
 
-      expect(markup).toContain('当前版本没有可用的渠道')
+      expect(markup).not.toContain('当前版本没有可用的渠道')
       expect(markup).toContain('role="tab"')
       expect(markup).toContain('<strong>钉钉</strong>')
-      expect(markup).toContain('<small>敬请期待</small>')
-      expect(markup).toContain('aria-disabled="true"')
-      expect(markup).not.toContain('钉钉连接')
-      expect(markup).not.toContain('星海科技')
+      expect(markup).not.toContain('敬请期待')
+      expect(markup).not.toContain('aria-disabled="true"')
+      expect(markup).toContain('钉钉连接')
+      expect(markup).toContain(status === 'not_connected' ? '连接钉钉' : '重新连接')
+      expect(markup.includes('星海科技')).toBe(status === 'connected')
       expect(snapshot.channels[0].connection.status).toBe(status)
     }
   )

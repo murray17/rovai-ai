@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.38
 lifecycle: current
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # v1.38 决定
@@ -47,3 +47,37 @@ packaged 桌面端与手机端完整矩阵后才重新开放。当前字段、�
 - 拒绝每 callback 一个根请求：它破坏同一用户意图、项目选择、队列和 CampTurn 的原子边界。
 - 拒绝 Main-only debounce：重启会丢目标或重复 admission。拒绝伪造原生 `@`/reply/附件：不可验证的“同款外观”不满足
   清晰、可预期、可恢复的体验宗旨。
+
+<a id="v1-38-d02"></a>
+## V1.38-D02：开放钉钉管理入口，未验收能力改为独立 Gate
+
+### 背景
+
+v1.38 初始把 Renderer 的“敬请期待”作为整个钉钉管理面的发布门，等待桌面端和手机端完成一张完整真实租户矩阵。
+随后 Main/Core 的账号、发布、Stream、项目选择、durable 多 Bot 聚合、执行卡、永久输出、诊断与恢复路径均已保留并通过
+自动门禁，packaged 日常 App 也完成了实际群消息、执行中卡片、终态与撤回问题的迭代验证。继续隐藏整个管理面会让已经
+可用的连接、账号和 Bot 管理能力一并不可达；另一方面，手机矩阵、附件、原生 A2A `@`、native reply 与逐 Command
+disclosure 仍不能被推断为完成。
+
+2026-09-03，产品 Owner 明确要求把钉钉渠道入口改为开放。该指令改变的是产品发布时机，不是对缺失平台证据的补写。
+
+### 决定
+
+Renderer 不再过滤 DingTalk Provider，也不再生成禁用的“敬请期待”Tab。Snapshot 中的飞书和钉钉进入同一可选择 Provider
+路径；选择钉钉后显示现有 typed account、连接、队员 Bot、发布与受控管理链接。DingTalk-only Snapshot 回退到钉钉自身，
+不再显示无可用渠道。
+
+原来的整面 gate 改为逐能力 gate：话题、Managed 入站附件、出站附件、原生 A2A `@`、native reply、超长正文 durable
+分片和逐 Command disclosure 继续保持 unsupported 或 summary-only；尚未完成的手机端与真实租户组合继续作为这些具体
+能力的后续验收。入口可见或可点击不替代 Main/Core 的 Owner、credential、App、卡片、Outbox 与 Run 授权。
+当前精确边界由 [DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)、
+[钉钉渠道架构](../../architecture/dingtalk-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
+
+### 后果与替代方案
+
+- 用户可直接连接或重连钉钉、查看已保存账号和 Bot、继续原 App 发布恢复，并进入官方管理链接；飞书路径不分叉。
+- 后续验收失败只能关闭或修复对应能力，不能再靠 Renderer 隐藏整个 Provider 掩盖后台事实。
+- 拒绝继续等待完整双端矩阵后才开放：它把不同风险等级的子能力绑定成一个全有或全无入口，与 Owner 已确认的发布时机
+  不一致。
+- 拒绝另建 Beta/实验开关：现有 Snapshot、授权和恢复边界已是生产路径，增加第二套选择状态只会制造持久化与支持分叉。
+- 拒绝把开放入口解释为全能力完成：这会伪造手机、附件和平台原生交互证据，违反 D01 的体验宗旨。
