@@ -19,6 +19,7 @@ import { MemberPortrait } from './MemberPortrait'
 import { BUILTIN_MEMBER_PRESETS, type BuiltinMemberPreset } from './member-presets'
 import {
   runtimeAvailabilityPresentation,
+  runtimePlatformAdmissionAllowsUse,
   runtimePlatformAdmissionFor,
   runtimeProductPresentation,
   type RuntimeStatusPresentation
@@ -374,8 +375,8 @@ function RuntimeStep({
   const scanning = phase !== 'ready' && phase !== 'error'
   const hasUsableRuntime = onboardingHasUsableRuntime(phase, health, installations)
   const showingEmpty = !provisioning && !scanning && !hasUsableRuntime
-  const hasQualifiedRuntime = health?.runtimePlatformAdmission.some((row) => (
-    row.platform === health.hostPlatform && row.status === 'qualified'
+  const hasEnabledRuntime = health?.runtimePlatformAdmission.some((row) => (
+    row.platform === health.hostPlatform && runtimePlatformAdmissionAllowsUse(row)
   )) ?? false
 
   return (
@@ -387,7 +388,7 @@ function RuntimeStep({
             ? 'Rovai 会检查这台电脑上已经安装的 Agent 运行时。找到可用入口后，你可以选择模型；也可以先进入 Rovai，稍后再配置。'
             : 'Rovai 会检查本机。找到可用的 Agent 运行时后，再选择模型。'}</p>
         </div>
-        {!scanning && !showingEmpty && hasQualifiedRuntime && (
+        {!scanning && !showingEmpty && hasEnabledRuntime && (
           <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>重新扫描</button>
         )}
       </header>
@@ -423,7 +424,7 @@ function RuntimeStep({
                 <>
           <section className="onboarding-runtime-panel">
             <header>
-              <span><strong>本机 Agent 运行时</strong><small>{scanning ? '正在读取本机环境' : hasQualifiedRuntime ? '选择一个可用的运行入口' : '当前平台的 Runtime 资格状态'}</small></span>
+              <span><strong>本机 Agent 运行时</strong><small>{scanning ? '正在读取本机环境' : hasEnabledRuntime ? '选择一个可用的运行入口' : '当前平台的 Runtime 资格状态'}</small></span>
               {scanning && <span className="onboarding-scan-status"><i />正在检查</span>}
             </header>
             {scanning
@@ -444,7 +445,7 @@ function RuntimeStep({
                           kind={kind}
                           presentation={presentation}
                           checked={selection?.adapterKind === kind}
-                          disabled={busy || provisioning || admission?.status !== 'qualified'}
+                          disabled={busy || provisioning || !runtimePlatformAdmissionAllowsUse(admission)}
                           onSelect={() => onSelectionChange(
                             onboardingRuntimeSelectionFor(kind, installations)
                           )}
@@ -690,7 +691,7 @@ export function onboardingRuntimeCanContinue(
   admission: RuntimePlatformAdmission | null = null
 ): boolean {
   if (phase !== 'ready' || !selection?.model || !installation?.memberRuntimeDefaults) return false
-  if (admission && admission.status !== 'qualified') return false
+  if (admission && !runtimePlatformAdmissionAllowsUse(admission)) return false
   const status = admission
     ? runtimeProductPresentation(admission, availability).status
     : runtimeAvailabilityPresentation(availability).status

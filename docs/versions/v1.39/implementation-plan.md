@@ -31,7 +31,8 @@ last_updated: 2026-09-03
 - [x] `agent_settled` 唯一成功终点、assistant snapshot 去重、Missing-Send gate、Cancellation Settlement v2 与迟到
   epoch/binding fence。
 - [x] Activity v2、terminal write/edit path、Pi assistant model-call Usage、稀疏 cache/cost 与 source digest 去重。
-- [x] 三 shipped platform 均显式 NotQualified；release build 忽略本地 qualification override。
+- [x] 三 shipped platform 均显式 `preview`：开放 discovery、检查、队员选择、Diagnostics 与 AgentRun 供主动测试，
+  同时保留 `qualification_evidence_missing`、空 evidence revision 和实验性 UI disclosure；release 不使用本地 override。
 - [x] 活动 Tool 组在底部执行台、Inspector 与局域网只读执行台优先展示已有公开证据中的具体当前指令；
   稳定 Tool 行、渠道卡片、Activity 分类及文件/Web typed Evidence 边界保持不变。
 - [x] 消息完整 inline-code 文件候选通过 Core 来源与 Main `realpath + stat` 证明为现存普通文件后才生成链接；共享资源
@@ -68,8 +69,8 @@ last_updated: 2026-09-03
 - [ ] macOS arm64 通过后生成 Pi 专属 immutable qualification artifact，并单独审查是否晋升该平台。
 - [ ] 在真实 macOS x64 与 Windows x64 分别重复完整矩阵；Windows 额外验证 npm `.cmd/.bat` locator、System32
   interpreter、resolved target、fingerprint 与执行期 identity。
-- [ ] 只有精确平台证据完成后才把对应 Pi Admission 行改为 `qualified`；不得从本机 debug smoke 或其他 Runtime
-  evidence 外推。
+- [ ] 只有精确平台证据完成后才把对应 Pi Admission 从 `preview` 改为 `qualified`；不得从本机 smoke 或其他 Runtime
+  evidence 外推，Preview 的可运行性也不替代该证据。
 
 ## 必跑命令
 
@@ -124,3 +125,17 @@ DOCS_BASE_REF=aae13734669c363e7b307a6407e6868eda1e6b8e pnpm docs:check:ci
 - `pnpm docs:test`、`pnpm docs:check`、
   `DOCS_BASE_REF=c6098169943471bacead4ab04cc1bbce24394ff3 pnpm docs:check:ci`：通过；
 - Impeccable changed-target detector：无发现。
+
+## Pi 三平台实验性开放验证（2026-09-03）
+
+- Runtime Platform Admission 矩阵断言 Pi 在 macOS arm64、macOS x64、Windows x64 均为 `preview`，
+  `allows_runtime_use=true`、`is_qualified=false`、`evidenceRevision=null`；Cursor 继续被阻断。
+- Core 定向测试证明 Pi 进入 discovery/Diagnostics/Dispatch 且没有平台 blocker；Renderer 182 项定向测试证明
+  Runtime 检查、队员 selector 与 onboarding 接受 Preview，并显示实验性 disclosure。
+- `pnpm check:rust`、Rust lib 484 项、CLI 32 项、Core 208 项通过，5 项 manual Runtime smoke 按设计忽略；
+  `pnpm typecheck` 通过。
+- `pnpm test`：140 个 Vitest 文件、1477 项测试通过，后续 Node suites 220 项通过、1 项 Windows-only skip；
+  `pnpm build:desktop` 通过。
+- `pnpm docs:test`、`pnpm docs:check` 与
+  `DOCS_BASE_REF=5cfbce5ff8d734fb84b46fddacd91d011898cf85 pnpm docs:check:ci` 通过；Impeccable
+  changed-target detector 无发现。

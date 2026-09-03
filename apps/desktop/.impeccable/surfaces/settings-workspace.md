@@ -134,6 +134,11 @@ availability probe, install, rescan, selection or execution action. They must no
 installed, unavailable, a red health failure or synthetic checking. Diagnostics may show the platform row
 and evidence revision without starting that Adapter.
 
+`preview` is an admitted Product Runtime state, distinct from the Renderer-only `待支持` row below. It enters normal
+availability checks, selection, diagnostics and execution while supporting copy says “实验性开放”; its machine-state
+badge remains the real checking/available/login/install/error result. Pi uses this state on all three shipped platforms
+and must not be presented as qualified or as having immutable platform evidence.
+
 Cursor Agent remains a closed internal Product Runtime identity for historical reads, but its current macOS and
 Windows admissions are all `not_qualified` and the product chain has not passed. Do not render it in the Agent
 Runtime settings directory until a later qualified integration explicitly reopens that surface. This is not a

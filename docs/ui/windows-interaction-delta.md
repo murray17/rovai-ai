@@ -68,13 +68,14 @@ Windows 的统一侧栏只把 traffic-light 预留从 38px 收至 8px；品牌�
 
 ## 4. Runtime 平台准入与机器可用性
 
-[Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)在 discovery 之前生效。设置、队员编辑和
+[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)在 discovery 之前生效。设置、队员编辑和
 Onboarding 先呈现准入，再呈现机器状态：
 
 | Platform admission | 机器 availability | 普通 UI | 可执行动作 |
 | --- | --- | --- | --- |
 | `qualified` | 正常状态机 | 继续现有 checking / 可用 / 需登录 / 未安装等文案 | 按现有合同检查、选择、保存、执行 |
 | `not_qualified` | 不存在 | `Windows 尚未验证`，并说明不是本机安装故障 | 无检查、安装、选择或执行 |
+| `preview` | 真实本机状态 | `实验性开放`，并继续显示检查/安装/登录结果 | 允许检查、安装、选择与执行；不宣称 qualified |
 | `unsupported` | 不存在 | `此平台不支持`，并显示稳定产品级说明 | 无检查、安装、选择或执行 |
 
 禁止把 `not_qualified` 画成 `not_installed`、`unavailable`、红色健康失败或永不结束的 checking；禁止显示“重新扫描”
