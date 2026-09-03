@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: native-session-bootstrap-redelivery
-last_updated: 2026-08-25
+last_updated: 2026-09-03
 ---
 
 # Native Session Bootstrap Redelivery
@@ -118,7 +118,8 @@ pre edge，避免等待不存在的 completed Hook。其余 Runtime 有可靠 co
 ## 执行台 Compaction 展示旁路
 
 Compaction observation 仍只拥有 Bootstrap redelivery。作为独立、本地、无副作用的产品投影，Core 可在同一个已准入 signal
-旁生成 `runtime.compaction.display`，但仅当捕获瞬间还能由 active ACP Prompt route 或 Built-in Tool active lease 精确取得
+旁，或从明确的 display-only Hook 生成 `runtime.compaction.display`，但仅当捕获瞬间还能由 active ACP Prompt route 或
+Built-in Tool active lease 精确取得
 `agentRunId + executionEpoch`。warm Session 已 detach、Hook IPC lease 已换代、Run 已取消/终态或 observation 是 outbox replay
 时，不补挂到当前或后续 Run。展示写入失败也不改变 observation Applied/Duplicate/Fenced 结果。
 
@@ -127,6 +128,13 @@ Compaction observation 仍只拥有 Bootstrap redelivery。作为独立、本地
 只表达完成，CodeBuddy 只表达 post-compaction Session boundary；缺失值保持缺失。`summary_preview`、trigger、Session ID、时间差、
 token drop 与普通文本不能补造展示数据。Codex 不进入本 detector policy；其 app-server `contextCompaction` item 由执行 Evidence
 入口直接截获为同一 display schema，仍不推进 Bootstrap revision。
+
+Claude Code 与 Cursor 的 display-only Hook 不进入上面的 signal admission：Claude 本次进程通过 additive `--settings`
+注册 `PostCompact(manual|auto)`，只映射 `compact_summary` 为 completed 展示；Cursor ACP Host 通过进程私有
+`CURSOR_CONFIG_DIR` 保留用户配置并追加 native `preCompact`，只映射当前 token、窗口与占用率为 imminent 展示。两者都必须
+通过 active Built-in Tool lease、当前 Run 的 adapter 与 Native Session 三重校验；relay 不建立 observation outbox，Core 不查询
+observer lease，也不调用 Bootstrap command。Cursor 的这段 wiring 不改变其 `not_qualified` 产品状态或 Disabled detector
+policy。
 
 该事件使用本地 Execution Evidence/Managed Blob 以支持长 summary 惰性读取，但 Canonical Activity classifier 明确返回
 non-activity，public execution query 明确排除，Main 的飞书/钉钉 Host 与局域网执行台也不因它唤醒。它不是公共 Evidence、

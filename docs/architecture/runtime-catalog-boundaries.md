@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-25
+last_updated: 2026-09-03
 ---
 
 # Runtime Catalog Boundaries
@@ -228,7 +228,9 @@ accepted-send suppression 与真实 tool→final 三条专项 Smoke 通过后启
 
 `cursor/ask_question` 与 `cursor/create_plan` 只能进入唯一 Active Prompt；当前分别返回 skipped/rejected。
 三个已知 private notification 保持私有，未知 Cursor request 返回 Method not found。External MCP、cold
-continuation、Missing-Send、Usage、Compaction 和细粒度 Activity 都没有真实资格证据，保持禁用或 run-level。
+continuation、Missing-Send、Usage、Bootstrap Compaction detector 和细粒度 Activity 都没有真实资格证据，保持禁用或
+run-level。ACP Host 已准备进程私有 `CURSOR_CONFIG_DIR` display-only `preCompact` 映射，只复制明确 token 字段到本地执行台；
+它不建立 observation、不启用 detector，也不能替代真实 Cursor AgentRun 资格证据。
 Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
