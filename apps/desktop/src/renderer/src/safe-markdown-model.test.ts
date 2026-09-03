@@ -46,7 +46,11 @@ describe('message file-reference projection', () => {
       '',
       '外部 src/visible.ts:20'
     ].join('\n')
-    expect(projectMessageFileReferences(source).map((reference) => reference.rawReference)).toEqual(['src/visible.ts:20'])
+    expect(projectMessageFileReferences(source)).toEqual([])
+  })
+
+  it('does not scan ordinary message text for path-shaped prose', () => {
+    expect(projectMessageFileReferences('src/App.tsx:20 /compact docs/prototypes/demo/')).toEqual([])
   })
 
   it('does not interpret ordinary prose, unsafe URLs, inline code or incomplete code fences as files', () => {

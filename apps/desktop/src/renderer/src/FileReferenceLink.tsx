@@ -1,7 +1,7 @@
 import { Children, isValidElement, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import type { FileLocationTarget } from '@contracts'
 import { parseFileReference } from '../../file-preview-reference'
-import { FilePreviewTabIcon } from './FilePreviewTabIcon'
+import { FileReferenceIcon } from './FilePreviewTabIcon'
 import { projectMessageFileReferences } from './safe-markdown-model'
 
 export const FILE_REFERENCE_FRAGMENT = '#rovai-file-reference='
@@ -26,12 +26,13 @@ export function FileReferenceLink({
   const codeLabel = isValidElement<{ children?: ReactNode }>(onlyChild) && onlyChild.type === 'code'
     ? onlyChild
     : null
+  const parsedReference = parseFileReference(rawReference)
 
   return (
     <a
       className={codeLabel ? `${className} inline-code-file-reference` : className}
       href={`${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(rawReference)}`}
-      title={rawReference}
+      title={parsedReference?.pathKind === 'relative' ? rawReference : undefined}
       onPointerDown={() => {
         const selection = window.getSelection()
         selectionAtPointerDown.current = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null
@@ -54,12 +55,10 @@ export function FileReferenceLink({
       }}
       onAuxClick={(event) => event.preventDefault()}
     >
-      {codeLabel ? (
-        <>
-          <FilePreviewTabIcon kind="text" />
-          <span className="inline-code-file-reference-label">{codeLabel.props.children}</span>
-        </>
-      ) : children}
+      <FileReferenceIcon rawReference={rawReference} />
+      <span className={codeLabel ? 'file-reference-label is-code' : 'file-reference-label'}>
+        {codeLabel ? codeLabel.props.children : children}
+      </span>
     </a>
   )
 }

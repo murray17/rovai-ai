@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-08-31
+last_updated: 2026-09-03
 ---
 
 # Camp 文件预览区
@@ -14,15 +14,26 @@ last_updated: 2026-08-31
 轻下划线，Hover 加强下划线；键盘焦点使用既有 focus token，长路径可自然换行，不让正文横向溢出。
 
 - Markdown 文件链接 `[label](target)` 只显示可点击的 label；target 仅用于解析/打开，不在正文中重复常驻展示。
-- 文件链接的整个 label 为 inline-code 时，显示通用文件 SVG 与一份等宽文字，移除灰底和嵌套 `<code>`。
-  默认无下划线，Hover 加强链接色并仅为文字显示 1px 虚线底线，按下或键盘焦点时不显示底线；不记录“已打开”状态。
-  普通 inline-code、代码块、混合格式 label 和其他链接的结构与交互保持原样；裸路径继续按高置信度规则识别。
-- 链接 title 显示完整原始 target，包括行列或 fragment。复制路径与显示所在位置继续使用文件 Tab 的既有上下文菜单。
+- 整体为文件引用的 inline-code（如 `` `src/App.tsx:20` ``）成为文件入口。其等宽文字移除灰底和嵌套
+  `<code>`，默认无下划线；Hover 加强链接色并只为文字显示 1px 点状下划线，按下或键盘焦点时不显示下划线。
+  普通 inline-code、代码块和混合正文保持原样。
+- 普通正文不扫描、不猜测本地路径。`src/App.tsx:20`、`/compact` 与 `docs/prototypes/demo/` 只有在显式
+  Markdown 文件链接或整体 inline-code 中才可能成为文件入口；消息存储、整条消息复制与模型输入保持原文。
+- 每个文件入口在 label 前显示真实资源类型的 14px 单色线性 SVG，不再由 label 是否为 inline-code 决定是否显示。
+  类型至少区分 Markdown、HTML、代码、配置/数据、文本、图片、SVG、Diff/Patch、目录、PDF、文档、表格、
+  演示文稿、Notebook、压缩包、音频、视频、数据库、可执行/安装包和未知文件。不支持应用内预览的格式仍保留
+  真实类型图标，再交给系统默认应用打开。
+- HTTPS Markdown 链接与 GFM 自动链接都在 label 前显示统一网页图标；inline-code 中的 `https://` 仍是普通代码。
+  文件与网页图标均为装饰元素，对辅助技术隐藏，使用 `currentColor` 与链接文字同步变色，不用颜色区分资源类别。
+- 普通 Markdown label 使用 UI 字体；文件 inline-code 使用等宽字体。所有资源链接使用相同的 icon + label DOM
+  顺序，不嵌套第二层代码背景块。
+- 项目相对 target 可以通过 title 显示完整原始值（含行列或 fragment）；绝对 target 不增加 tooltip 或在正文中
+  重复展示。复制路径与显示所在位置继续使用文件 Tab 的既有上下文菜单。
 - 普通点击与键盘激活不受页面已有选区影响；只有本次指针操作新产生或改变的文字选区才阻止文件打开。
   不主动清除用户选区，保留拖选与系统复制行为。
-- 文件引用按 Markdown 语法节点识别，不拆开普通 URL、链接 label、图片、代码块或其他非文件 inline-code；
+- 文件引用只按 Markdown link 与整体 inline-code 语法节点识别，不拆开普通 URL、链接 label、图片、代码块或正文；
   用户消息其余文本、结构化 Mention/Skill、消息存储、整条消息复制与模型输入保持原合同。
-- 无路径的裸文件名不自动生成链接；字段列表中的斜杠不作为绝对路径起点。带行号短名仅在同条消息存在唯一
+- 无路径的文件名不自动生成链接；字段列表中的斜杠不作为绝对路径起点。带行号短名仅在同条消息存在唯一
   明确路径时复用该引用，不猜测文件目录；显式 Markdown 文件链接继续表达作者的链接意图。
 - 点击继续使用既有来源校验，打开/激活文件 Tab；同一文件去重，支持 `:44-46` 行范围，定位起始行并高亮范围。
   最终定位到具体普通文件后，无论位于 Camp 工作区内外，都直接进入相同 Preview；绝对路径、`~/`、本机 file URI、
