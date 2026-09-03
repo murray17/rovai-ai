@@ -7583,8 +7583,11 @@ function AttachmentCard({
           </span>
           {agentPresentation && (
             <span className="agent-file-open-cue" aria-hidden="true">
+              <svg viewBox="0 0 18 18">
+                <path d="M10.3 3.3h4.4v4.4M14.5 3.5 8.6 9.4" />
+                <path d="M13.5 9.5v4.3H3.8v-9.7h4.3" />
+              </svg>
               <span>打开</span>
-              <svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" /></svg>
             </span>
           )}
         </>

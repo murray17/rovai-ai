@@ -27,7 +27,10 @@ test('business-only CampOpen keeps cards, earlier pages and reading position acr
     process.stdout.write(`Automatic acceptance userData: ${join(fixture, 'user-data')}; no Core/SQLite/Skill Library/Runtime\n`)
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
-      ...(process.platform === 'linux' ? ['--no-sandbox'] : [])
+      ...(process.platform === 'linux'
+        || process.env.ROVAI_CAMP_OPEN_ACCEPT_NO_SANDBOX === '1'
+        ? ['--no-sandbox']
+        : [])
     ], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')
     let output = ''

@@ -113,8 +113,8 @@ export function UserFileIcon({ type }: { type: Exclude<UserAttachmentDisplayType
     return (
       <span className="user-file-icon" aria-hidden="true">
         <svg viewBox="0 0 36 36">
-          <path d="M5.5 11.3c0-1.5 1.2-2.7 2.7-2.7h7l2.8 3h9.8c1.5 0 2.7 1.2 2.7 2.7v11c0 1.5-1.2 2.7-2.7 2.7H8.2c-1.5 0-2.7-1.2-2.7-2.7Z" />
-          <path d="M5.5 14h25" />
+          <path d="M5.8 12.6a3.4 3.4 0 0 1 3.4-3.4h6.2c1 0 1.9.42 2.56 1.14l1.52 1.66h7.28a3.4 3.4 0 0 1 3.4 3.4v10.38a3.4 3.4 0 0 1-3.4 3.4H9.2a3.4 3.4 0 0 1-3.4-3.4Z" />
+          <path d="M5.8 15h24.4" />
         </svg>
       </span>
     )
@@ -123,8 +123,8 @@ export function UserFileIcon({ type }: { type: Exclude<UserAttachmentDisplayType
     return (
       <span className="user-file-icon" aria-hidden="true">
         <svg viewBox="0 0 36 36">
-          <rect x="5.5" y="6" width="25" height="24" rx="6" />
-          <path d="m15.2 14.2-4 3.8 4 3.8M20.8 14.2l4 3.8-4 3.8" />
+          <rect x="7.8" y="7.1" width="20.4" height="21.8" rx="5.4" />
+          <path d="m15 14.5-4 4 4 4M21 14.5l4 4-4 4M18.8 13.2l-1.6 10.4" />
         </svg>
       </span>
     )
@@ -132,8 +132,9 @@ export function UserFileIcon({ type }: { type: Exclude<UserAttachmentDisplayType
   return (
     <span className="user-file-icon" aria-hidden="true">
       <svg viewBox="0 0 36 36">
-        <path d="M9 5.7h12l6 6v18.6H9Z" />
-        <path d="M21 5.7v6h6M13.5 17h9M13.5 21.5h9M13.5 26h6" />
+        <rect x="8.2" y="5.6" width="18.6" height="24.8" rx="4.4" />
+        <path d="M20.8 5.6v5.8a2.2 2.2 0 0 0 2.2 2.2h3.8" />
+        <path d="M14.1 18h8.3M14.1 22h7.3M14.1 26h5.9" />
       </svg>
     </span>
   )
@@ -141,16 +142,16 @@ export function UserFileIcon({ type }: { type: Exclude<UserAttachmentDisplayType
 
 export function AgentArtifactIcon({ type }: { type: AgentAttachmentDisplayType }): JSX.Element {
   const paths: Record<AgentAttachmentDisplayType, JSX.Element> = {
-    web: <><rect x="3.5" y="4" width="17" height="16" rx="2.7" /><path d="M3.5 8.5h17M7 6.2h.1M9.5 6.2h.1M12 6.2h.1M7 13h10M7 16.2h7" /></>,
-    code: <><rect x="3.5" y="4" width="17" height="16" rx="2.7" /><path d="m9.4 9.5-3 2.5 3 2.5M14.6 9.5l3 2.5-3 2.5M13 7.8l-2 8.4" /></>,
-    notes: <><path d="M6 3.8h9l3 3V20H6Z" /><path d="M15 3.8v3h3M9 10h6M9 13.3h6M9 16.6h4" /></>,
-    pdf: <><path d="M6 3.8h9l3 3V20H6Z" /><path d="M15 3.8v3h3M8.7 15.8c1.7-2.1 2.8-4.3 3.4-6.7.2 2.6 1.2 4.8 3 6.5-2.2-.8-4.3-.7-6.4.2Z" /></>,
-    word: <><path d="M6 3.8h9l3 3V20H6Z" /><path d="M15 3.8v3h3M9 10.2h6M9 13.2h6M9 16.2h4.5" /><path d="M7.2 9.5v7.4" /></>,
-    sheet: <><rect x="4" y="4" width="16" height="16" rx="2.5" /><path d="M4 9h16M4 14h16M9.3 4v16M14.7 4v16" /></>,
-    slide: <><rect x="3.5" y="4" width="17" height="13" rx="2.7" /><path d="M8 20h8M12 17v3M7.5 13l3-3 2.3 2.2 3.7-4" /></>,
-    image: <><rect x="3.5" y="4" width="17" height="16" rx="2.7" /><path d="m7 16 3.4-3.6 2.7 2.5 3.9-4.2 3 3.4" /><circle cx="9" cy="8.5" r="1.4" /></>,
-    archive: <><path d="M4.5 7.5 12 3.8l7.5 3.7v9L12 20.2l-7.5-3.7Z" /><path d="m4.5 7.5 7.5 3.7 7.5-3.7M12 11.2v9M8.2 5.7l7.5 3.7" /></>,
-    generic: <><path d="M6 3.8h9l3 3V20H6Z" /><path d="M15 3.8v3h3M9 11h6M9 14.2h6M9 17.4h4" /></>
+    web: <><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M3 8h18M7 6h.01M10 6h.01M9.2 11.2 6.7 13.7l2.5 2.5M14.8 11.2l2.5 2.5-2.5 2.5M13.2 10.7l-2.4 6" /></>,
+    code: <path d="m8.5 6-5 6 5 6M15.5 6l5 6-5 6M14 4l-4 16" />,
+    notes: <><path d="M6 3.5h9l3 3V20.5H6Z" /><path d="M15 3.5v3h3M9 10h6M9 13.5h6M9 17h4" /></>,
+    pdf: <><path d="M6 3.5h9l3 3V20.5H6Z" /><path d="M15 3.5v3h3" /><path d="M8.7 16.9c2.4-1.25 4.15-3.75 4.4-6.45.15-1.55-.65-2.05-1.25-.75-.55 1.2.2 3.8 1.35 5.25 1.2 1.5 2.55 2.05 3.1 1.35.55-.7-.6-1.35-2.7-1.15-1.9.2-4.05.8-4.9 1.75Z" /></>,
+    word: <><path d="M6 3.5h9l3 3V20.5H6Z" /><path d="M15 3.5v3h3M9 10h6M9 13.5h6M9 17h4" /><path d="M7.6 9.4v8.2" /></>,
+    sheet: <><path d="M6 3.5h9l3 3V20.5H6Z" /><path d="M15 3.5v3h3M8.8 10h6.4M8.8 13.4h6.4M8.8 16.8h6.4M12 9.6v7.6" /></>,
+    slide: <><rect x="4.5" y="5" width="15" height="11.5" rx="2.2" /><path d="M12 16.5v3.5M9 20h6M8 8.2h8M8 11.2h5.3" /></>,
+    image: <><rect x="3.5" y="4" width="17" height="16" rx="2.7" /><path d="M7 15.8 10.4 12.4l2.7 2.5 3.9-4.2 3 3.4" /><circle cx="9" cy="8.5" r="1.4" /></>,
+    archive: <><path d="M6 6.2h12v2.6H6zM7 8.8h10v10.7H7Z" /><path d="M10.2 11.4h3.6M11.1 8.8v2.6" /></>,
+    generic: <><path d="M6 3.5h9l3 3V20.5H6Z" /><path d="M15 3.5v3h3M9 10h6M9 14h6M9 18h4" /></>
   }
   return (
     <span className={`agent-artifact-icon type-${type}`} aria-hidden="true">
