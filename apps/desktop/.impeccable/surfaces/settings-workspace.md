@@ -45,14 +45,16 @@ New-conversation defaults use the user-facing terms 队员 and 队长. Ten or fe
 remain directly visible in a two-column chooser; only counts above ten collapse behind a searchable
 disclosure whose expanded chooser stays two-column. Narrow layouts reflow the chooser to one column.
 
-World-map availability appears in a 会话 section immediately after 新对话 and before 窗口. It starts
-enabled for new and migrated preferences and commits immediately. The row does not repeat that default
-as a badge, add a current-effective summary or add a conversation-page preview action. Turning it off
-forces Camp reading surfaces back to the timeline and removes the entire 会话 / 地图 switcher and map
-route controls. Do not retain a disabled entry, explanatory popover or settings shortcut. Conversation
-find remains available independently. Re-enabling the setting restores the switcher without opening
-the map automatically. Preserve the established 启动 and 新对话 composition. The 窗口 reset row uses
-one quiet raised surface, including in Porcelain Day where it reads as a white support card.
+World-map availability appears in a 会话 section immediately after 新对话 and before 窗口. A new profile
+with no preferences source starts disabled. Exact schema-v4 saved values remain authoritative, while
+schema-v1–v3 preferences migrate enabled so an upgrade does not silently revoke the previously effective
+map availability. Changes commit immediately. The row does not repeat the default as a badge, add a
+current-effective summary or add a conversation-page preview action. Turning it off forces Camp reading
+surfaces back to the timeline and removes the entire 会话 / 地图 switcher and map route controls. Do not
+retain a disabled entry, explanatory popover or settings shortcut. Conversation find remains available
+independently. Re-enabling the setting restores the switcher without opening the map automatically.
+Preserve the established 启动 and 新对话 composition. The 窗口 reset row uses one quiet raised surface,
+including in Porcelain Day where it reads as a white support card.
 
 ## 外观与提醒
 

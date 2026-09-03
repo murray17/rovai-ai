@@ -22,9 +22,10 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 describe('general preferences', () => {
-  it('uses memory defaults and preserves a malformed source file for recovery', async () => {
+  it('defaults a new profile to the timeline and preserves a malformed source file for recovery', async () => {
     const directory = await temporaryDirectory()
     const filePath = join(directory, 'general-preferences.json')
+    expect(DEFAULT_GENERAL_PREFERENCES.worldMapEnabled).toBe(false)
     expect(await readGeneralPreferences(filePath)).toEqual({
       ...DEFAULT_GENERAL_PREFERENCES,
       executionConsolePlacement: 'inspector'
@@ -79,7 +80,8 @@ describe('general preferences', () => {
     })).toEqual({
       ...DEFAULT_GENERAL_PREFERENCES,
       lastSettingsSection: 'channels',
-      executionConsolePlacement: 'bottom'
+      executionConsolePlacement: 'bottom',
+      worldMapEnabled: true
     })
     expect(parseGeneralPreferences({
       schemaVersion: 2,
@@ -114,7 +116,8 @@ describe('general preferences', () => {
       oneClickNewConversationEnabled: false
     })).toEqual({
       ...DEFAULT_GENERAL_PREFERENCES,
-      executionConsolePlacement: 'inspector'
+      executionConsolePlacement: 'inspector',
+      worldMapEnabled: true
     })
     expect(parseGeneralPreferences({
       schemaVersion: 1,
@@ -129,7 +132,10 @@ describe('general preferences', () => {
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false
-    })).toEqual(DEFAULT_GENERAL_PREFERENCES)
+    })).toEqual({
+      ...DEFAULT_GENERAL_PREFERENCES,
+      worldMapEnabled: true
+    })
     expect(parseGeneralPreferences({
       schemaVersion: 3,
       startupLocationMode: 'last_location',
@@ -137,7 +143,10 @@ describe('general preferences', () => {
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false
-    })).toEqual(DEFAULT_GENERAL_PREFERENCES)
+    })).toEqual({
+      ...DEFAULT_GENERAL_PREFERENCES,
+      worldMapEnabled: true
+    })
     expect(parseGeneralPreferences({
       schemaVersion: 2,
       startupLocationMode: 'last_location',

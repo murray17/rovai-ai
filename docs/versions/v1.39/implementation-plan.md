@@ -36,6 +36,8 @@ last_updated: 2026-09-03
   稳定 Tool 行、渠道卡片、Activity 分类及文件/Web typed Evidence 边界保持不变。
 - [x] 消息完整 inline-code 文件候选通过 Core 来源与 Main `realpath + stat` 证明为现存普通文件后才生成链接；共享资源
   类型定义统一 inline-code 已知类型、会话链接与普通文件 Tab 图标，Main classifier 与不支持类型的系统打开路径不变。
+- [x] 不存在通用偏好文件的新 profile 默认关闭世界地图；schema v4 保存值原样保留，schema v1–v3 继续迁移为开启，
+  设置页未完成加载时也不短暂显示为开启。
 
 ## 已取得的本机证据
 
@@ -112,3 +114,13 @@ DOCS_BASE_REF=aae13734669c363e7b307a6407e6868eda1e6b8e pnpm docs:check:ci
   和显式 `--no-sandbox` 受控重跑后 10/10 业务断言通过，并生成 Day/Night 截图供界面验收。
 - 当前本机执行环境没有 `cargo`、`rustfmt` 或 `rustc`；Core 对共享注册表的读取、格式与授权断言由 PR Rust CI 门禁复验，
   不使用 TypeScript 结果替代。
+
+## 世界地图首次默认验证（2026-09-03）
+
+- 定向 red：新 profile 默认值与设置页加载态断言按预期失败 2 项；实现后 green：2 个文件、10 项测试通过；
+- `pnpm typecheck`：通过；
+- `pnpm test`：140 个 Vitest 文件、1475 项测试通过，后续 Node suites 220 项通过、1 项平台条件跳过；
+- `pnpm build:desktop`：Main、Preload 与 Renderer production build 通过；
+- `pnpm docs:test`、`pnpm docs:check`、
+  `DOCS_BASE_REF=c6098169943471bacead4ab04cc1bbce24394ff3 pnpm docs:check:ci`：通过；
+- Impeccable changed-target detector：无发现。
