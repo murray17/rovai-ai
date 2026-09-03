@@ -117,24 +117,24 @@ pre edge，避免等待不存在的 completed Hook。其余 Runtime 有可靠 co
 
 ## 执行台 Compaction 展示旁路
 
-Compaction observation 仍只拥有 Bootstrap redelivery。作为独立、本地、无副作用的产品投影，Core 可在同一个已准入 signal
-旁，或从明确的 display-only Hook 生成 `runtime.compaction.display`，但仅当捕获瞬间还能由 active ACP Prompt route 或
-Built-in Tool active lease 精确取得
-`agentRunId + executionEpoch`。warm Session 已 detach、Hook IPC lease 已换代、Run 已取消/终态或 observation 是 outbox replay
-时，不补挂到当前或后续 Run。展示写入失败也不改变 observation Applied/Duplicate/Fenced 结果。
+Compaction observation 仍只拥有 Bootstrap redelivery。作为独立、本地、无副作用的产品投影，Core 只能在 Rovai 现有入口已经
+捕获的同一个原生 signal 旁生成 `runtime.compaction.display`，且捕获瞬间必须还能由 active ACP Prompt route 或现有
+observation Hook 的 Built-in Tool active lease 精确取得 `agentRunId + executionEpoch`。warm Session 已 detach、Hook IPC
+lease 已换代、Run 已取消/终态或 observation 是 outbox replay 时，不补挂到当前或后续 Run。展示写入失败也不改变
+observation Applied/Duplicate/Fenced 结果。
+
+执行台展示不得为尚未接入的 Runtime 安装 Hook、Plugin 或配置 Overlay，也不得修改 Runtime 启动参数、环境或用户配置来制造
+新的展示信号。现有本地 Hook IPC 只识别 `compaction_observation`；`display_auth` 只把同一次 live observation 安全归属到当前
+AgentRun，`summary_text` 只携带现有 Qoder/Qwen Hook 已经明确给出的摘要。两者都不改变 observation 的 Bootstrap 语义。
 
 旁路只复制 Runtime 明确给出的字段：Kiro `summary`，Kimi exact completion 的 message/token 三个整数，Grok structured
-`tokens_before/tokens_after/elapsed_ms`，以及 Qoder/Qwen live Hook 的显式 `compact_summary`。Copilot 只表达 pre edge，OpenCode
-只表达完成，CodeBuddy 只表达 post-compaction Session boundary；缺失值保持缺失。`summary_preview`、trigger、Session ID、时间差、
-token drop 与普通文本不能补造展示数据。Codex 不进入本 detector policy；其 app-server `contextCompaction` item 由执行 Evidence
-入口直接截获为同一 display schema，仍不推进 Bootstrap revision。
+`tokens_before/tokens_after/elapsed_ms`，以及 Qoder/Qwen live observation Hook 的显式 `compact_summary`。Copilot 只表达 pre
+edge，OpenCode 只表达完成，CodeBuddy 只表达 post-compaction Session boundary；缺失值保持缺失。`summary_preview`、trigger、
+Session ID、时间差、token drop 与普通文本不能补造展示数据。Codex 不进入本 detector policy；其 app-server
+`contextCompaction` item 由执行 Evidence 入口直接截获为同一 display schema，仍不推进 Bootstrap revision。
 
-Claude Code 与 Cursor 的 display-only Hook 不进入上面的 signal admission：Claude 本次进程通过 additive `--settings`
-注册 `PostCompact(manual|auto)`，只映射 `compact_summary` 为 completed 展示；Cursor ACP Host 通过进程私有
-`CURSOR_CONFIG_DIR` 保留用户配置并追加 native `preCompact`，只映射当前 token、窗口与占用率为 imminent 展示。两者都必须
-通过 active Built-in Tool lease、当前 Run 的 adapter 与 Native Session 三重校验；relay 不建立 observation outbox，Core 不查询
-observer lease，也不调用 Bootstrap command。Cursor 的这段 wiring 不改变其 `not_qualified` 产品状态或 Disabled detector
-policy。
+Claude Code 与 Cursor Agent 当前没有执行台 Compaction 展示入口；本次需求不新增其协议接入。Antigravity 也只允许在现有
+Adapter 已经收到明确原生事件时投影，不为填满 Runtime 矩阵新增 detector 或启动配置。
 
 该事件使用本地 Execution Evidence/Managed Blob 以支持长 summary 惰性读取，但 Canonical Activity classifier 明确返回
 non-activity，public execution query 明确排除，Main 的飞书/钉钉 Host 与局域网执行台也不因它唤醒。它不是公共 Evidence、

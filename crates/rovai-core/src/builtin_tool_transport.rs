@@ -7,10 +7,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::{
-    command::canonical_json_digest, runtime_compaction_display::RuntimeCompactionTokenSnapshot,
-    team_tool_catalog::builtin_tool_definitions,
-};
+use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
 pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 21;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 2;
@@ -24,9 +21,7 @@ pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
 pub const COMPACTION_HOOK_IPC_PROTOCOL_VERSION: u32 = 1;
-pub const COMPACTION_DISPLAY_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const COMPACTION_OBSERVATION_IPC_KIND: &str = "compaction_observation";
-pub const COMPACTION_DISPLAY_IPC_KIND: &str = "compaction_display";
 pub const COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -152,8 +147,6 @@ pub struct CompactionHookIpcRequest {
     pub display_auth: Option<BuiltinToolAuth>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tokens: Option<RuntimeCompactionTokenSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

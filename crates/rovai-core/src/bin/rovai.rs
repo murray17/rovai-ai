@@ -17,8 +17,7 @@ use rovai_core::builtin_tool_transport::{
     BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
     BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolArgument, BuiltinToolCliContext,
     BuiltinToolCliIdentity, BuiltinToolDescription, BuiltinToolIpcRequest,
-    BuiltinToolIpcRequestBody, BuiltinToolIpcResponse, COMPACTION_DISPLAY_IPC_KIND,
-    COMPACTION_DISPLAY_IPC_PROTOCOL_VERSION, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
+    BuiltinToolIpcRequestBody, BuiltinToolIpcResponse, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
     COMPACTION_OBSERVATION_IPC_KIND, COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,
     CompactionHookIpcRequest, CompactionHookIpcResponse, CompactionObservationOutboxRecord,
     LocalIpcEndpoint, ROVAI_CLI_CONTEXT_ENV, ROVAI_RUN_TMP_ENV, builtin_tool_description,
@@ -31,7 +30,6 @@ use rovai_core::camp_message_send_teaching::{
 };
 use rovai_core::command::canonical_json_digest;
 use rovai_core::platform::local_ipc::LocalIpcClientStream;
-use rovai_core::runtime_compaction_display::RuntimeCompactionTokenSnapshot;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -108,15 +106,6 @@ async fn run() -> Result<u8> {
         // Core, and uncertain acknowledgements must never block compaction or
         // the AgentRun that triggered it.
         let _ = run_compaction_hook(&args[1..]).await;
-        return Ok(0);
-    }
-    if args
-        .first()
-        .is_some_and(|arg| arg == "__compaction-display-hook")
-    {
-        // Display hooks are an active-AgentRun enhancement only. They have no
-        // recovery outbox and must never delay or change Runtime compaction.
-        let _ = run_compaction_display_hook(&args[1..]).await;
         return Ok(0);
     }
     if args.as_slice() == ["--version"] || args.as_slice() == ["version"] {
@@ -352,7 +341,6 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
         source_event_digest,
         display_auth,
         summary_text,
-        tokens: None,
     };
     if request.summary_text.is_some()
         && serde_json::to_vec(&request)?.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES
@@ -389,169 +377,6 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
     }
     let error = last_error.context("compaction observation submission remained uncertain")?;
     Err(error)
-}
-
-async fn run_compaction_display_hook(args: &[String]) -> Result<()> {
-    let [adapter_flag, adapter_kind, signal_flag, source_signal] = args else {
-        bail!("invalid internal compaction display hook arguments");
-    };
-    if adapter_flag != "--adapter-kind"
-        || signal_flag != "--source-signal"
-        || !matches!(
-            (adapter_kind.as_str(), source_signal.as_str()),
-            ("claude-code-cli", "PostCompact") | ("cursor-agent", "preCompact")
-        )
-    {
-        bail!("invalid internal compaction display hook identity");
-    }
-
-    let context = load_context()?;
-    let (process_id, process_token) = context.process_auth()?;
-    let display_auth = context.auth()?;
-    let mut hook_input = String::new();
-    std::io::stdin()
-        .read_to_string(&mut hook_input)
-        .context("failed to read compaction display hook input")?;
-    let hook_input: Value = serde_json::from_str(&hook_input)
-        .context("compaction display hook input is not valid JSON")?;
-    if !hook_input.is_object() {
-        bail!("compaction display hook input must be an object");
-    }
-    let reported_hook_event_name = hook_input
-        .get("hook_event_name")
-        .or_else(|| hook_input.get("hookEventName"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty());
-    if reported_hook_event_name.is_some_and(|reported| reported != source_signal) {
-        bail!("compaction display hook signal does not match its configured source");
-    }
-    let native_session_id = if adapter_kind == "cursor-agent" {
-        hook_input
-            .get("conversation_id")
-            .or_else(|| hook_input.get("conversationId"))
-    } else {
-        hook_input
-            .get("session_id")
-            .or_else(|| hook_input.get("sessionId"))
-    }
-    .and_then(Value::as_str)
-    .map(str::trim)
-    .filter(|value| !value.is_empty())
-    .context("compaction display hook input has no Native Session identity")?
-    .to_string();
-    let trigger = hook_input
-        .get("trigger")
-        .and_then(Value::as_str)
-        .filter(|trigger| matches!(*trigger, "manual" | "auto"))
-        .context("compaction display hook trigger is invalid")?
-        .to_string();
-    let summary_text = (adapter_kind == "claude-code-cli")
-        .then(|| {
-            hook_input
-                .get("compact_summary")
-                .or_else(|| hook_input.get("compactSummary"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|summary| !summary.is_empty())
-                .map(str::to_string)
-        })
-        .flatten();
-    let tokens = if adapter_kind == "cursor-agent" {
-        let tokens = RuntimeCompactionTokenSnapshot {
-            current: optional_hook_u64(&hook_input, "context_tokens")?,
-            context_window: optional_hook_u64(&hook_input, "context_window_size")?,
-            usage_percent: optional_hook_percentage(&hook_input, "context_usage_percent")?,
-            ..RuntimeCompactionTokenSnapshot::default()
-        };
-        (tokens.current.is_some()
-            || tokens.context_window.is_some()
-            || tokens.usage_percent.is_some())
-        .then_some(tokens)
-    } else {
-        None
-    };
-    let runtime_occurrence = hook_input
-        .get("compaction_id")
-        .or_else(|| hook_input.get("compactionId"))
-        .or_else(|| hook_input.get("generation_id"))
-        .or_else(|| hook_input.get("generationId"))
-        .or_else(|| hook_input.get("request_id"))
-        .or_else(|| hook_input.get("requestId"))
-        .or_else(|| hook_input.get("timestamp"))
-        .cloned()
-        .unwrap_or_else(|| Value::String(Uuid::new_v4().to_string()));
-    let source_event_digest = canonical_json_digest(&json!({
-        "schemaVersion": 1,
-        "adapterKind": adapter_kind,
-        "nativeSessionId": native_session_id,
-        "hookEventName": source_signal,
-        "trigger": trigger,
-        "runtimeOccurrence": runtime_occurrence,
-        "tokens": tokens,
-    }))?;
-    let mut request = CompactionHookIpcRequest {
-        kind: COMPACTION_DISPLAY_IPC_KIND.to_string(),
-        ipc_protocol_version: COMPACTION_DISPLAY_IPC_PROTOCOL_VERSION,
-        process_id,
-        process_token,
-        request_id: Uuid::new_v4().to_string(),
-        adapter_kind: adapter_kind.clone(),
-        host_instance_id: String::new(),
-        native_session_id,
-        hook_event_name: source_signal.clone(),
-        trigger,
-        source_event_digest,
-        display_auth: Some(display_auth),
-        summary_text,
-        tokens,
-    };
-    if request.summary_text.is_some()
-        && serde_json::to_vec(&request)?.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES
-    {
-        request.summary_text = None;
-    }
-    if serde_json::to_vec(&request)?.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
-        bail!("compaction display hook request is too large");
-    }
-
-    let mut last_error = None;
-    for attempt in 0..COMPACTION_HOOK_ATTEMPTS {
-        match send_compaction_hook(&context.core_endpoint, &request).await {
-            Ok(response) if response.accepted => return Ok(()),
-            Ok(_) => {
-                last_error = Some(anyhow::anyhow!(
-                    "compaction display hook request was rejected"
-                ))
-            }
-            Err(error) => last_error = Some(error),
-        }
-        if attempt + 1 < COMPACTION_HOOK_ATTEMPTS {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-    let error = last_error.context("compaction display submission remained unavailable")?;
-    Err(error)
-}
-
-fn optional_hook_u64(input: &Value, field: &str) -> Result<Option<u64>> {
-    let Some(value) = input.get(field) else {
-        return Ok(None);
-    };
-    value
-        .as_u64()
-        .map(Some)
-        .with_context(|| format!("compaction display hook {field} is invalid"))
-}
-
-fn optional_hook_percentage(input: &Value, field: &str) -> Result<Option<f64>> {
-    let Some(value) = input.get(field) else {
-        return Ok(None);
-    };
-    value
-        .as_f64()
-        .filter(|value| value.is_finite() && (0.0..=100.0).contains(value))
-        .map(Some)
-        .with_context(|| format!("compaction display hook {field} is invalid"))
 }
 
 fn stage_compaction_observation(

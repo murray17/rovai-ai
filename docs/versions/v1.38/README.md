@@ -33,9 +33,9 @@ last_updated: 2026-09-03
   Bot 仍按既有后台语义运行。该边界只关闭新的用户管理入口，不伪装成后端代码清理。
 - 飞书连接、队员发布、项目选择、排队/执行卡、最近输出、局域网执行台及既有数据完全保持开放。
 - 执行台新增 active AgentRun 专用的 Runtime Compaction 本地事件行。它不是 Tool、不增加操作数，只在明确 token 或 summary
-  存在时展开；`imminent` 是中性记录，只有 `started` 占用活动态。Claude `PostCompact` 映射显式 summary，Cursor
-  `preCompact` 映射显式 token 快照；两者只走 display-only Hook，不改变 Bootstrap redelivery observation、detector policy、
-  渠道、局域网执行台和世界地图边界。
+  存在时展开；`imminent` 是中性记录，只有 `started` 占用活动态。展示只复用 Rovai 已有入口捕获的事件，不为展示安装
+  Runtime Hook、Plugin 或配置 Overlay；Claude 与 Cursor 当前无展示入口，本次需求不新增其协议接入。Bootstrap redelivery
+  observation、detector policy、渠道、局域网执行台和世界地图边界不变。
 - 发布前收紧飞书后台维护：active Host 只由 Run started/terminal 与当前执行卡 Run 的 live event 唤醒；首次恢复
   Pump 不先扫描全部历史群。Core outstanding、watchdog、Delivery、latest-wins、精确 roster 刷新和 Web 执行台不变。
 - 下列“重新开放清单”同时记录实现与验收状态；渠道页 gate 在 packaged 桌面端/手机端完整矩阵通过前保持不变。
@@ -83,9 +83,9 @@ last_updated: 2026-09-03
 | Version lifecycle | 已更新 | v1.37 冻结为 historical；本概览、实施计划与版本索引建立唯一 current v1.38 |
 | Decisions | 已更新 | [V1.38-D01](decisions.md#v1-38-d01)固定飞书同等体验宗旨，并选择 credential-bound callback + SQLite deadline 作为多 Bot target proof 与恢复边界 |
 | Contracts | 已更新 | [Channel Host Maintenance v5](../../contracts/channel-host-maintenance-v5.md)继续拥有按需调度；[DingTalk Channel v11](../../contracts/dingtalk-channel-v11.md)拥有多 Bot durable 聚合；[Run Process Detail Surface v29](../../contracts/run-process-detail-surface-v29.md)拥有本地 Compaction 行 |
-| Architecture | 已更新 | [飞书渠道架构](../../architecture/feishu-channel.md)与[钉钉渠道架构](../../architecture/dingtalk-channel.md)保持渠道边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)区分 observation 与本地 display sidecar |
+| Architecture | 已更新 | [飞书渠道架构](../../architecture/feishu-channel.md)与[钉钉渠道架构](../../architecture/dingtalk-channel.md)保持渠道边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)限定本地 display sidecar 只复用现有捕获入口 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)拥有 Provider gate；[Camp 会话工作区](../../ui/components/conversation-workspace.md)拥有非 Tool Compaction 行与 disclosure 规则 |
 | Runtime Activity | 已更新 | `runtime.compaction.display` 明确是 local non-activity，不进入 Canonical Activity、世界地图或 Tool 计数 |
-| Runtime compatibility | 已更新 | Claude/Cursor 增加 display-only 字段映射说明；不改变任何 Runtime 的平台准入、模型、工具兼容性或 Compaction detector policy |
+| Runtime compatibility | 已更新 | 展示矩阵明确 Claude/Cursor 当前无入口且本次不新增其协议接入；不改变任何 Runtime 的平台准入、模型、工具兼容性或 Compaction detector policy |
 | Documentation routing | 已更新 | 版本索引保持 v1.38；[文档导航](../../README.md)、合同索引和当前决定导航切换到 Channel Host Maintenance v5 |
 | Root README | 确认无需更新 | 根 README 未承诺钉钉公开可用，产品定位与安装方式不变 |

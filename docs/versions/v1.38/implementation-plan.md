@@ -20,9 +20,8 @@ last_updated: 2026-09-03
 - [x] 飞书首次恢复 Pump 跳过历史群全量 roster 网络扫描，仍执行一次 Core 恢复；精确刷新和运行期 fallback 保留。
 - [x] Runtime 已捕获的 Compaction 信号可为同一 active AgentRun 生成本地 display sidecar；Codex
   `contextCompaction` 在普通 activity 前截获，其他 Runtime 不扩 detector policy、不猜缺失字段。
-- [x] Claude additive `PostCompact` 只投影非空 `compact_summary`；Cursor 进程私有 `preCompact` 只投影明确
-  current/window/usage token 字段。两条 display-only Hook 均由 active Run/adapter/Native Session fence 授权，不建立
-  observation、outbox、跨 Run 状态或新 detector policy。
+- [x] 展示只复用当前已有 Runtime 入口；不修改 Runtime 启动参数或环境，不安装仅用于展示的 Hook、Plugin 或配置 Overlay。
+  Claude 与 Cursor 当前无展示入口，本次需求不新增其协议接入。
 - [x] 执行台使用非 Tool 的 28px 四轨 Compaction 行；只有 token/summary 可展开，长 summary 复用 Managed Blob，
   公共渠道、局域网执行台、世界地图与 Bootstrap outbox 均排除；`imminent` 为中性 recorded，只有 `started` 算 active，
   图标沿用普通 command muted 色。
@@ -54,9 +53,9 @@ last_updated: 2026-09-03
   父消息投影、安全诊断，以及既有项目卡、FIFO、执行/排队 recall owner。
 - `apps/desktop/src/renderer/src/ChannelSettings.test.ts`：开放 Provider 过滤、固定钉钉预告、disabled/ARIA、legacy
   Snapshot 不泄露和飞书回退。
-- `crates/rovai-core/src/acp.rs`、`claude.rs`、`codex.rs`、`main.rs`、`bin/rovai.rs`、`execution_evidence.rs`、
-  `read_model.rs`：精确信号字段映射、Claude/Cursor display-only Hook、Codex 先行截获、active Run fencing、Managed Blob
-  和 public/non-activity 隔离。
+- `crates/rovai-core/src/acp.rs`、`codex.rs`、`main.rs`、`bin/rovai.rs`、`execution_evidence.rs`、`read_model.rs`：
+  现有精确信号字段映射、Codex 先行截获、observation active Run 归属、Managed Blob 和 public/non-activity 隔离；
+  `acp.rs` 的私有 Host 配置测试同时约束只有 Kiro 获得现有 Overlay。
 - `apps/desktop/src/renderer/src/App.test.ts`、`execution-tool-grouping.test.ts`、Main channel tests：同 ID 原位更新、
   token/summary disclosure、静态行、Tool 计数边界和公共 wake 隔离。
 - `pnpm typecheck`、Renderer/Vitest 全量、`pnpm build:desktop`：类型、现有渠道交互与生产构建回归。
@@ -81,13 +80,17 @@ last_updated: 2026-09-03
   留给具备 nested sandbox 权限的 CI/本机复验。
 - packaged App 与钉钉真实租户双端矩阵仍未执行，Renderer gate 保持关闭。
 
-## Compaction 跟进验证（2026-09-03）
+## Compaction 选择性撤回验证（2026-09-03）
 
-- 已通过 `cargo fmt --all --check` 与 `cargo clippy -p rovai-core --all-targets -- -D warnings`；`rovai-core`
-  binary tests 为 192 passed / 4 个 manual Runtime smoke ignored，`rovai` CLI tests 为 32 passed。
+- 已通过 `cargo fmt --all --check`、`cargo check -p rovai-core --all-targets` 与
+  `cargo clippy -p rovai-core --all-targets -- -D warnings`；`rovai-core` binary tests 为 189 passed / 4 个 manual
+  Runtime smoke ignored，`rovai` CLI tests 为 32 passed，slow tests 为 297 passed。
 - `cargo test -p rovai-core --lib` 为 477 passed / 1 failed；唯一失败仍是未改动的 macOS nested sandbox owner，
-  当前执行环境的 `sandbox-exec` 返回 exit 71。Runtime compatibility 冻结摘要、Compaction admission、Claude/Cursor
-  Hook 映射与本地 display persistence 均已通过。
-- 已通过 `pnpm typecheck`、`pnpm test`、Compaction grouping 定向 Vitest 10/10 与 `pnpm build:desktop`。
-- 当前安装的 Cursor `2025.09.18-7ae6800` 不具备 ACP，未把 display-only wiring 记作真实 Runtime Smoke；Cursor
-  全平台资格与 detector policy 保持原状态。
+  最小 `/usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/true` 在当前执行环境同样返回
+  `sandbox_apply: Operation not permitted`（exit 71），因此不把全量 Rust lib 记为通过。
+- 已通过 `pnpm typecheck`、`pnpm test`（Vitest 137 files / 1433 tests；Node/协议 220 passed、1 个 Windows-only
+  skip）、Compaction grouping 定向 Vitest 10/10 与 `pnpm build:desktop`。
+- 已通过 `pnpm docs:test`、`pnpm docs:check` 与
+  `DOCS_BASE_REF=b9870c0c28b2487ddfac723fe2e932c0e3fabfac pnpm docs:check:ci`。
+- 源码审计确认不存在展示专用 CLI/IPC、Claude `PostCompact` 注入或 Cursor 配置 Overlay；现有 observation 路径、
+  Codex 先行截获、`imminent` 中性状态、仅 `started` 算 active 以及普通 command muted 图标颜色均保留。

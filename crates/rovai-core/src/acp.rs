@@ -1263,21 +1263,6 @@ impl AcpHost {
                 .map(BuiltinToolProcessConfig::run_tmp),
         )
         .context("failed to configure ACP Runtime command")?;
-        #[cfg(unix)]
-        if frozen_runtime.adapter_kind == AdapterKind::CursorAgent
-            && let (Some(private_config_root), Some(builtin_tools)) =
-                (private_config_root, builtin_tools.as_ref())
-            && let Err(error) = configure_cursor_compaction_display_hook(
-                &mut command,
-                private_config_root,
-                builtin_tools,
-                cwd,
-            )
-        {
-            eprintln!(
-                "Cursor compaction display Hook is unavailable; Runtime startup continues: {error:#}"
-            );
-        }
         let detector_config_root = if compaction_detector_policy
             == CompactionDetectorPolicy::BestEffort
         {
@@ -4163,13 +4148,6 @@ fn prepare_private_host_config(
                 .join(uuid::Uuid::new_v4().to_string()),
             true,
         ),
-        #[cfg(unix)]
-        AdapterKind::CursorAgent => (
-            private_runtime_dir
-                .join("acp-host")
-                .join(uuid::Uuid::new_v4().to_string()),
-            true,
-        ),
         _ => return Ok(None),
     };
     std::fs::create_dir_all(&root).with_context(|| {
@@ -5150,140 +5128,6 @@ fn append_opencode_compaction_plugin(config: &mut Value, plugin_path: &Path) -> 
         .as_array_mut()
         .context("OpenCode Runtime config plugins must be an array")?;
     plugins.push(Value::String(plugin_path.to_string_lossy().into_owned()));
-    Ok(())
-}
-
-#[cfg(unix)]
-fn configure_cursor_compaction_display_hook(
-    command: &mut Command,
-    private_config_root: &Path,
-    builtin_tools: &BuiltinToolProcessConfig,
-    runtime_cwd: &Path,
-) -> Result<()> {
-    let source_config_root = cursor_user_config_root(runtime_cwd)?;
-    let hook_command = format!(
-        "{} __compaction-display-hook --adapter-kind cursor-agent --source-signal preCompact",
-        quote_posix_shell_word(&builtin_tools.cli_executable().to_string_lossy())
-    );
-    prepare_cursor_private_config(&source_config_root, private_config_root, &hook_command)?;
-    command.env("CURSOR_CONFIG_DIR", private_config_root);
-    Ok(())
-}
-
-#[cfg(unix)]
-fn cursor_user_config_root(runtime_cwd: &Path) -> Result<PathBuf> {
-    if let Some(configured) = std::env::var_os("CURSOR_CONFIG_DIR") {
-        return resolve_runtime_config_root(configured, runtime_cwd);
-    }
-    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))]
-    if let Some(configured) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Ok(resolve_runtime_config_root(configured, runtime_cwd)?.join("cursor"));
-    }
-    Ok(
-        PathBuf::from(std::env::var_os("HOME").context("Cursor Runtime has no home directory")?)
-            .join(".cursor"),
-    )
-}
-
-#[cfg(unix)]
-fn resolve_runtime_config_root(configured: OsString, runtime_cwd: &Path) -> Result<PathBuf> {
-    let configured = PathBuf::from(configured);
-    if configured.is_absolute() {
-        return Ok(configured);
-    }
-    if configured == Path::new("~") {
-        return Ok(PathBuf::from(
-            std::env::var_os("HOME").context("Runtime has no home directory")?,
-        ));
-    }
-    if let Ok(relative_to_home) = configured.strip_prefix("~/") {
-        return Ok(PathBuf::from(
-            std::env::var_os("HOME").context("Runtime has no home directory")?,
-        )
-        .join(relative_to_home));
-    }
-    Ok(runtime_cwd.join(configured))
-}
-
-#[cfg(unix)]
-fn prepare_cursor_private_config(
-    source_config_root: &Path,
-    private_config_root: &Path,
-    hook_command: &str,
-) -> Result<()> {
-    use std::os::unix::fs::symlink;
-
-    if source_config_root.exists() && !source_config_root.is_dir() {
-        bail!(
-            "Cursor user configuration root is not a directory: {}",
-            source_config_root.display()
-        );
-    }
-    std::fs::create_dir_all(private_config_root).with_context(|| {
-        format!(
-            "failed to create private Cursor configuration {}",
-            private_config_root.display()
-        )
-    })?;
-    restrict_private_directory(private_config_root)?;
-    if source_config_root.is_dir() {
-        for entry in std::fs::read_dir(source_config_root)? {
-            let entry = entry?;
-            if entry.file_name() == "hooks.json" {
-                continue;
-            }
-            symlink(entry.path(), private_config_root.join(entry.file_name())).with_context(
-                || {
-                    format!(
-                        "failed to project Cursor user configuration {}",
-                        entry.path().display()
-                    )
-                },
-            )?;
-        }
-    }
-    let hooks_path = source_config_root.join("hooks.json");
-    let mut hooks = if hooks_path.exists() {
-        let text = std::fs::read_to_string(&hooks_path)
-            .with_context(|| format!("failed to read {}", hooks_path.display()))?;
-        serde_json::from_str(&text)
-            .with_context(|| format!("invalid Cursor hooks {}", hooks_path.display()))?
-    } else {
-        json!({"version": 1})
-    };
-    append_cursor_pre_compact_display_hook(&mut hooks, hook_command)?;
-    write_private_json_file(&private_config_root.join("hooks.json"), &hooks)
-}
-
-#[cfg(unix)]
-fn append_cursor_pre_compact_display_hook(
-    hooks_config: &mut Value,
-    hook_command: &str,
-) -> Result<()> {
-    let config = hooks_config
-        .as_object_mut()
-        .context("Cursor hooks configuration must be a JSON object")?;
-    match config.get("version") {
-        Some(Value::Number(version)) if version.as_u64() == Some(1) => {}
-        Some(_) => bail!("Cursor hooks configuration version is unsupported"),
-        None => {
-            config.insert("version".to_string(), json!(1));
-        }
-    }
-    let hooks = config
-        .entry("hooks")
-        .or_insert_with(|| json!({}))
-        .as_object_mut()
-        .context("Cursor hooks must be a JSON object")?;
-    let pre_compact = hooks
-        .entry("preCompact")
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .context("Cursor preCompact hooks must be an array")?;
-    pre_compact.push(json!({
-        "command": hook_command,
-        "timeout": 3
-    }));
     Ok(())
 }
 
@@ -9877,7 +9721,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn private_host_config_is_created_for_runtime_owned_overlays_only() {
+    fn private_host_config_is_created_only_for_kiro() {
         let root = std::env::temp_dir().join(format!(
             "rovai-private-host-config-{}",
             uuid::Uuid::new_v4()
@@ -9892,77 +9736,17 @@ while IFS= read -r ignored; do :; done
         assert!(kiro_one.remove_on_shutdown);
         assert!(kiro_two.remove_on_shutdown);
 
-        #[cfg(unix)]
-        {
-            let cursor = prepare_private_host_config(&root, AdapterKind::CursorAgent)
+        assert!(
+            prepare_private_host_config(&root, AdapterKind::CursorAgent)
                 .unwrap()
-                .unwrap();
-            assert_ne!(cursor.root, kiro_one.root);
-            assert!(cursor.remove_on_shutdown);
-        }
-
+                .is_none()
+        );
         assert!(
             prepare_private_host_config(&root, AdapterKind::KimiCodeCli)
                 .unwrap()
                 .is_none()
         );
         assert!(!root.join("home").exists());
-
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn cursor_private_config_preserves_user_entries_and_appends_display_hook() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-cursor-compaction-hook-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let source = root.join("source");
-        let private = root.join("private");
-        std::fs::create_dir_all(source.join("hooks")).unwrap();
-        std::fs::write(
-            source.join("cli-config.json"),
-            r#"{"version":1,"editor":{"vimMode":false},"permissions":{"allow":[],"deny":[]}}"#,
-        )
-        .unwrap();
-        std::fs::write(source.join("hooks").join("audit.sh"), "exit 0\n").unwrap();
-        std::fs::write(
-            source.join("hooks.json"),
-            r#"{"version":1,"hooks":{"preCompact":[{"command":"./hooks/audit.sh"}],"stop":[{"command":"./hooks/audit.sh"}]}}"#,
-        )
-        .unwrap();
-
-        prepare_cursor_private_config(
-            &source,
-            &private,
-            "'/tmp/Rovai CLI' __compaction-display-hook --adapter-kind cursor-agent --source-signal preCompact",
-        )
-        .unwrap();
-
-        let hooks: Value =
-            serde_json::from_slice(&std::fs::read(private.join("hooks.json")).unwrap()).unwrap();
-        assert_eq!(hooks["hooks"]["preCompact"].as_array().unwrap().len(), 2);
-        assert_eq!(hooks["hooks"]["stop"].as_array().unwrap().len(), 1);
-        assert_eq!(hooks["hooks"]["preCompact"][1]["timeout"], 3);
-        assert!(
-            hooks["hooks"]["preCompact"][1]["command"]
-                .as_str()
-                .unwrap()
-                .contains("__compaction-display-hook")
-        );
-        assert!(
-            std::fs::symlink_metadata(private.join("cli-config.json"))
-                .unwrap()
-                .file_type()
-                .is_symlink()
-        );
-        assert!(
-            std::fs::symlink_metadata(private.join("hooks"))
-                .unwrap()
-                .file_type()
-                .is_symlink()
-        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
