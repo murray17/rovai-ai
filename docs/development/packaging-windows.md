@@ -130,8 +130,9 @@ timestamp 与 release-manifest hash。SmartScreen reputation 与签名有效性�
 
 ## Acceptance routing
 
-固定 Windows Server CI 证明编译、打包和自动化；`.github/workflows/windows-package.yml` 使用 `windows-2022`、
-Node 26、pnpm 11.20.0、Rust 1.97.1 与 frozen lockfile 生成并上传 unsigned 证据。正式发布另在 Windows 10 22H2 与 Windows 11 客户端环境完成 native
+手动 `.github/workflows/full-check.yml` 的固定 `windows-2022` job 证明 Windows 编译与专项自动化；只允许从
+`main` 手动运行的 `.github/workflows/windows-package.yml` 使用 Node 26、pnpm 11.20.0、Rust 1.97.1 与 frozen
+lockfile 生成并上传 unsigned NSIS 证据，不上传 `win-unpacked` 目录。正式发布另在 Windows 10 22H2 与 Windows 11 客户端环境完成 native
 frame、DPI、Forced Colors/High Contrast、NVDA、中文 IME、Explorer、安装/升级/卸载和 SmartScreen 验收。逐 Runtime
 资格证据仍按 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)独立取得，三类 execution-shape
 基础设施测试不能自行批量放行十二个 Adapter。当前 Windows 10 x64 设置页范围内十一种 Runtime 由同一份

@@ -351,15 +351,15 @@ lifecycle: current
   });
 });
 
-test("documentation workflow checks both PRs and main pushes without legacy generation", async () => {
+test("PR gate runs one diff-aware documentation check without a main push trigger", async () => {
   const workflow = await readFile(
-    path.join(repositoryRoot, ".github/workflows/docs-governance.yml"),
+    path.join(repositoryRoot, ".github/workflows/ci.yml"),
     "utf8"
   );
   assert.doesNotMatch(workflow, /docs:adr:generate/);
   assert.ok(workflow.includes("DOCS_BASE_REF: ${{ github.event.pull_request.base.sha }}"));
-  assert.ok(workflow.includes("DOCS_BASE_REF: ${{ github.event.before }}"));
-  assert.equal(workflow.match(/run: pnpm docs:check:ci/g)?.length, 2);
+  assert.doesNotMatch(workflow, /^\s+push:/m);
+  assert.equal(workflow.match(/pnpm docs:check:ci/g)?.length, 1);
 });
 
 test("numbered ADR files and unmanifested ADR headings are rejected", async () => {
