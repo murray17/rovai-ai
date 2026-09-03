@@ -65,7 +65,7 @@ let current = campOpenProjectionAsSnapshot(projection(60), earlier)
 let updateSnapshot: (snapshot: typeof current) => void
 let closeTask: () => void
 let imageResult = { mediaType: 'image/svg+xml', data: '' }
-const draft: CampComposerDraftView = { campId, body: '', content: [], revision: 1, attachments: [],
+let draft: CampComposerDraftView = { campId, body: '', content: [], revision: 1, attachments: [],
   replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: () => () => {},
@@ -131,8 +131,129 @@ Object.assign(window, { campOpenTest: {
     }
     updateSnapshot(current)
   },
+  showAttachmentSurfaces: (result: { displayName: string; mediaType: string; data: string }) => {
+    imageResult = result
+    const file = (id: string, displayName: string, mediaType: string, options: {
+      previewKind?: 'image' | 'none'
+      kind?: 'file' | 'directory'
+      fileCount?: number
+    } = {}) => ({
+      id, displayName, kind: options.kind ?? 'file', fileCount: options.fileCount ?? 1,
+      mediaType, byteSize: id.length * 2048, previewKind: options.previewKind ?? 'none',
+      runtimeProjectionState: 'available' as const
+    })
+    const userAttachments = [
+      file('user-report', '调研说明.pdf', 'application/pdf'),
+      file('user-image', '参考界面.png', 'image/png', { previewKind: 'image' }),
+      file('user-code', 'parser.ts', 'text/typescript'),
+      file('user-archive', '资料包.zip', 'application/zip')
+    ]
+    const agentFiles = [
+      file('agent-web', 'rovai-file-surfaces.html', 'text/html'),
+      file('agent-code', 'file-icon-map.ts', 'text/typescript'),
+      file('agent-notes', 'implementation-notes.md', 'text/markdown'),
+      file('agent-pdf', 'attachment-spec.pdf', 'application/pdf'),
+      file('agent-word', 'copy-guide.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+      file('agent-sheet', 'attachment-matrix.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+      file('agent-slide', 'handoff-slides.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+      file('agent-image', 'corrupt-preview.webp', 'image/webp'),
+      file('agent-archive', 'design-export.zip', 'application/zip'),
+      file('agent-generic', 'handoff.asset', 'application/octet-stream')
+    ]
+    const explicitAgentImage = file('agent-preview', 'surface-preview.png', 'image/png', { previewKind: 'image' })
+    const composerFiles = [
+      file('draft-image-one', '输入参考一.png', 'image/png', { previewKind: 'image' }),
+      file('draft-notes', '展示规则.md', 'text/markdown'),
+      file('draft-code', 'attachment-card.tsx', 'text/typescript'),
+      file('draft-folder', 'design-assets', 'inode/directory', { kind: 'directory', fileCount: 12 }),
+      file('draft-image-two', '输入参考二.png', 'image/png', { previewKind: 'image' }),
+      file('draft-pdf', 'review.pdf', 'application/pdf')
+    ]
+    draft = {
+      ...draft,
+      revision: draft.revision + 1,
+      attachments: composerFiles.map(({ runtimeProjectionState: _state, ...attachment }) => ({
+        ...attachment, state: 'ready' as const, errorMessage: null, createdAt: now
+      }))
+    }
+    current = {
+      ...current,
+      tasks: [], turns: [], agentRuns: [], agentRunFileChanges: [], messageDeliveries: [],
+      messages: [{
+        ...messages[0], id: 'attachment-surface-user', sequence: 101, authorType: 'user', authorId: 'local_user',
+        sourceAgentRunId: null, body: '这些是我准备交给队员的参考资料。',
+        content: [{ kind: 'text', text: '这些是我准备交给队员的参考资料。' }], attachments: userAttachments
+      }, {
+        ...messages[1], id: 'attachment-surface-agent', sequence: 102, authorType: 'agent', authorId: agent.agentId,
+        sourceAgentRunId: 'attachment-output-run', body: '已经整理好预览与交付文件，图片和文件分别放置。',
+        content: [{ kind: 'text', text: '已经整理好预览与交付文件，图片和文件分别放置。' }],
+        attachments: [agentFiles[0], explicitAgentImage, ...agentFiles.slice(1)]
+      }],
+      agentRunImages: [{
+        agentRunId: 'attachment-output-run', executionEpoch: 1, createdAt: now,
+        images: [{ id: 'agent-runtime-preview', displayName: result.displayName,
+          mediaType: result.mediaType, byteSize: atob(result.data).length }]
+      }]
+    }
+    updateSnapshot(current)
+  },
+  scrollAttachmentSurface: (surface: 'user' | 'agent') => {
+    element(`[data-message-id="attachment-surface-${surface}"]`).scrollIntoView({ block: surface === 'agent' ? 'center' : 'start' })
+  },
+  browseComposerAttachments: (key: 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End') => {
+    const strip = element('.composer-attachment-strip')
+    strip.focus()
+    strip.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+    return strip.scrollLeft
+  },
+  wheelComposerAttachments: (deltaY: number) => {
+    const strip = element('.composer-attachment-strip')
+    strip.scrollLeft = 0
+    const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true })
+    strip.dispatchEvent(event)
+    return { scrollLeft: strip.scrollLeft, defaultPrevented: event.defaultPrevented }
+  },
+  setAgentOutputWidth: (width: number | null) => {
+    const outputs = element('[data-message-id="attachment-surface-agent"] .agent-message-outputs')
+    outputs.style.width = width === null ? '' : `${width}px`
+  },
+  attachmentSurfaceState: () => {
+    const user = element('[data-message-id="attachment-surface-user"]')
+    const agent = element('[data-message-id="attachment-surface-agent"]')
+    const userImages = user.querySelector('.user-message-images')!
+    const userFiles = user.querySelector('.user-message-files')!
+    const userBody = user.querySelector('.message-bubble')!
+    const agentBody = agent.querySelector('.final-copy')!
+    const agentImages = agent.querySelector('.agent-output-images')!
+    const agentFiles = agent.querySelector('.agent-output-files')!
+    const imageTile = user.querySelector<HTMLElement>('.image-tile-preview')!
+    const userFileCards = Array.from(user.querySelectorAll<HTMLElement>('.user-timeline'))
+    const composerCards = Array.from(document.querySelectorAll<HTMLElement>('.composer-attachment-card'))
+    return {
+      decodedImages: document.querySelectorAll('.image-tile-preview img').length,
+      order: {
+        userImagesBeforeFiles: Boolean(userImages.compareDocumentPosition(userFiles) & Node.DOCUMENT_POSITION_FOLLOWING),
+        userFilesBeforeBody: Boolean(userFiles.compareDocumentPosition(userBody) & Node.DOCUMENT_POSITION_FOLLOWING),
+        agentBodyBeforeImages: Boolean(agentBody.compareDocumentPosition(agentImages) & Node.DOCUMENT_POSITION_FOLLOWING),
+        agentImagesBeforeFiles: Boolean(agentImages.compareDocumentPosition(agentFiles) & Node.DOCUMENT_POSITION_FOLLOWING)
+      },
+      userImage: { width: Math.round(imageTile.getBoundingClientRect().width), height: Math.round(imageTile.getBoundingClientRect().height) },
+      userFileHeights: userFileCards.map(card => Math.round(card.getBoundingClientRect().height)),
+      userFileDetails: user.querySelectorAll('.user-timeline .attachment-copy small').length,
+      agentFileCount: agent.querySelectorAll('.agent-timeline').length,
+      agentIconTypes: Array.from(agent.querySelectorAll('.agent-artifact-icon')).map(icon =>
+        Array.from(icon.classList).find(name => name.startsWith('type-'))),
+      agentColumns: getComputedStyle(agent.querySelector('.agent-output-file-grid')!).gridTemplateColumns.split(' ').length,
+      composerHeights: composerCards.map(card => Math.round(card.getBoundingClientRect().height)),
+      composerImageWidths: Array.from(document.querySelectorAll<HTMLElement>('.composer-image-attachment')).map(card =>
+        Math.round(card.getBoundingClientRect().width)),
+      composerOverflow: element('.composer-attachment-strip').scrollWidth > element('.composer-attachment-strip').clientWidth,
+      composerScrollbar: getComputedStyle(element('.composer-attachment-strip')).scrollbarWidth,
+      overflow: document.documentElement.scrollWidth > innerWidth
+    }
+  },
   imageAppearance: (source: 'tool' | 'send') => {
-    const container = element(source === 'tool' ? '.runtime-image-supplement' : '.timeline-attachments')
+    const container = element(`[data-message-id="image-message-${source === 'tool' ? 0 : 1}"] .agent-output-images`)
     const previews = Array.from(container.querySelectorAll<HTMLButtonElement>('.image-tile-preview'))
     container.scrollIntoView({ block: 'center' })
     return previews.map(preview => {

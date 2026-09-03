@@ -68,7 +68,17 @@ const requiredTokens = [
   '--diff-add',
   '--diff-add-soft',
   '--diff-remove',
-  '--diff-remove-soft'
+  '--diff-remove-soft',
+  '--attachment-web',
+  '--attachment-code',
+  '--attachment-notes',
+  '--attachment-pdf',
+  '--attachment-word',
+  '--attachment-sheet',
+  '--attachment-slide',
+  '--attachment-image',
+  '--attachment-archive',
+  '--attachment-generic'
 ] as const
 
 function tokenBlock(selector: string): Record<string, string> {
@@ -249,6 +259,17 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(new Set(Array.from({ length: 8 }, (_, index) => night[`--identity-${index + 1}`])).size).toBe(8)
     expect(css).toMatch(/\.skill-identity-mark\s*\{[^}]*color:\s*var\(--skill-identity\)/)
     expect(css).toMatch(/\.mcp-assignment-option-mark, \.mcp-server-mark\s*\{[^}]*color:\s*var\(--mcp-identity\)/)
+  })
+
+  it('keeps every Agent artifact icon family distinguishable in both themes', () => {
+    const attachmentTokens = requiredTokens.filter((token) => token.startsWith('--attachment-'))
+    for (const tokens of [day, night]) {
+      for (const token of attachmentTokens) {
+        expect(contrast(tokens[token], tokens['--surface-raised']), token).toBeGreaterThanOrEqual(3)
+      }
+    }
+    expect(css).toMatch(/\.agent-artifact-icon\.type-generic\s*\{[^}]*color: var\(--attachment-generic\)/)
+    expect(css).toMatch(/\.agent-output-file-grid\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
   })
 
   it('uses quiet selected backgrounds for the active Camp and current Project', () => {

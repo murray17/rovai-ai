@@ -12,9 +12,12 @@ export type GalleryImage = {
   image: CampMessageAttachmentView
 }
 
-export type AttachmentSegment =
-  | { kind: 'images'; attachments: CampMessageAttachmentView[] }
-  | { kind: 'file'; attachment: CampMessageAttachmentView }
+export type MessageAttachmentGroups = {
+  images: CampMessageAttachmentView[]
+  files: CampMessageAttachmentView[]
+}
+
+export type ImageGalleryVariant = 'agent-output' | 'user-attachment'
 
 export type ImagePayload = {
   blob: Blob
@@ -72,17 +75,17 @@ export function imageCacheKey(source: GalleryImage): string {
     : `attachment:${source.campId}:${source.image.id}`
 }
 
-/** Keep the publication order: image/image/file/image is two galleries, not one. */
-export function groupMessageAttachments(attachments: CampMessageAttachmentView[]): AttachmentSegment[] {
-  const segments: AttachmentSegment[] = []
+/** Preserve order within each kind while giving images and files independent layout regions. */
+export function partitionMessageAttachments(
+  attachments: CampMessageAttachmentView[]
+): MessageAttachmentGroups {
+  const groups: MessageAttachmentGroups = { images: [], files: [] }
   for (const attachment of attachments) {
     if (attachment.kind === 'file' && attachment.previewKind === 'image') {
-      const previous = segments.at(-1)
-      if (previous?.kind === 'images') previous.attachments.push(attachment)
-      else segments.push({ kind: 'images', attachments: [attachment] })
-    } else segments.push({ kind: 'file', attachment })
+      groups.images.push(attachment)
+    } else groups.files.push(attachment)
   }
-  return segments
+  return groups
 }
 
 async function decodeObjectUrl(url: string): Promise<void> {
@@ -153,12 +156,21 @@ export function clearImagePayloadState(): void {
   imageLoadCache.clear()
 }
 
-export function ImageGallery({ images }: { images: GalleryImage[] }): JSX.Element | null {
+export function ImageGallery({
+  images,
+  variant = 'agent-output'
+}: {
+  images: GalleryImage[]
+  variant?: ImageGalleryVariant
+}): JSX.Element | null {
   if (images.length === 0) return null
   return (
-    <section className="image-gallery" aria-label="图片">
+    <section
+      className={`image-gallery image-gallery-${variant}`}
+      aria-label={variant === 'user-attachment' ? '消息图片' : 'Agent 输出图片'}
+    >
       <div className={`image-gallery-grid${images.length === 1 ? ' is-single' : ''}`}>
-        {images.map((source) => <ImageTile key={source.image.id} source={source} />)}
+        {images.map((source) => <ImageTile key={`${source.kind}:${source.image.id}`} source={source} />)}
       </div>
     </section>
   )

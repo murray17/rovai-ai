@@ -78,6 +78,59 @@ app.whenReady().then(async () => {
         assert.ok([...tool, ...sent].every(image => image.extraText === ''), 'Images have no visible labels, filenames or actions')
       }
     }
+    window.setContentSize(1200, 900)
+    await run("document.documentElement.dataset.theme = 'day'")
+    await run(`window.campOpenTest.showAttachmentSurfaces(${JSON.stringify(result)})`)
+    const attachmentDeadline = Date.now() + 5000
+    let attachmentState
+    while (Date.now() < attachmentDeadline) {
+      await run('window.campOpenTest.settle()')
+      attachmentState = await run('window.campOpenTest.attachmentSurfaceState()')
+      if (attachmentState.agentFileCount === 10 && attachmentState.decodedImages === 5) break
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    assert.deepEqual(attachmentState.order, {
+      userImagesBeforeFiles: true,
+      userFilesBeforeBody: true,
+      agentBodyBeforeImages: true,
+      agentImagesBeforeFiles: true
+    })
+    assert.deepEqual(attachmentState.userImage, { width: 72, height: 72 })
+    assert.deepEqual(attachmentState.userFileHeights, [46, 46, 46])
+    assert.equal(attachmentState.userFileDetails, 0)
+    assert.equal(attachmentState.agentFileCount, 10)
+    assert.equal(attachmentState.agentColumns, 2)
+    assert.deepEqual(new Set(attachmentState.agentIconTypes), new Set([
+      'type-web', 'type-code', 'type-notes', 'type-pdf', 'type-word', 'type-sheet',
+      'type-slide', 'type-image', 'type-archive', 'type-generic'
+    ]))
+    assert.deepEqual(attachmentState.composerHeights, [48, 48, 48, 48, 48, 48])
+    assert.deepEqual(attachmentState.composerImageWidths, [48, 48])
+    assert.equal(attachmentState.composerOverflow, true)
+    assert.equal(attachmentState.composerScrollbar, 'none')
+    assert.equal(attachmentState.overflow, false)
+    assert.ok(await run("window.campOpenTest.browseComposerAttachments('ArrowRight')") > 0)
+    assert.ok(await run("window.campOpenTest.browseComposerAttachments('Home')") <= 2)
+    const wheelResult = await run('window.campOpenTest.wheelComposerAttachments(120)')
+    assert.ok(wheelResult.scrollLeft > 0)
+    assert.equal(wheelResult.defaultPrevented, true)
+    await run("window.campOpenTest.scrollAttachmentSurface('user')")
+    await run('window.campOpenTest.settle()')
+    await capture('attachments-day-user-composer')
+    await run("window.campOpenTest.scrollAttachmentSurface('agent')")
+    await run('window.campOpenTest.settle()')
+    await capture('attachments-day-agent')
+    await run("document.documentElement.dataset.theme = 'night'")
+    await run('window.campOpenTest.settle()')
+    await capture('attachments-night-agent')
+    await run('window.campOpenTest.setAgentOutputWidth(520)')
+    await run('window.campOpenTest.settle()')
+    assert.equal((await run('window.campOpenTest.attachmentSurfaceState()')).agentColumns, 1)
+    await capture('attachments-night-agent-narrow-output')
+    await run('window.campOpenTest.setAgentOutputWidth(null)')
+    await run("window.campOpenTest.scrollAttachmentSurface('user')")
+    await run('window.campOpenTest.settle()')
+    await capture('attachments-night-user-composer')
     assert.deepEqual(errors, [], 'No React key, rendering or fixture API errors')
     console.log(JSON.stringify({ ok: true, messages: appended.messages.length,
       refreshAnchorDelta: refreshed.anchorTop - before.anchorTop,

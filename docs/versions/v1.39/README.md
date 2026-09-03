@@ -18,8 +18,10 @@ last_updated: 2026-09-03
 ## 范围与当前状态
 
 - Product Runtime closed set、Migration 135、Core optional subsystem、Fleet、Desktop 配置、模型目录、Skill group、
-  MCP projection、Activity、Usage 与 smoke 已加入 Pi；旧 Runtime、渠道、附件、membership、取消和 planned
-  shutdown 分支保持原样。
+  MCP projection、Activity、Usage 与 smoke 已加入 Pi；旧 Runtime、渠道、附件存储/发布、membership、取消和
+  planned shutdown 分支保持原样。
+- 当前版本另收敛 Renderer 附件展示：用户消息按图片/文件/正文分区，Agent 按正文/图片/文件分区；Runtime 图片
+  并入来源 Agent 消息，Agent 文件使用十类主题 token。该项不改变附件数据、Open wire、读取授权或渠道发布。
 - Pi executable 不存在时只有 `runtime.pi` optional subsystem degraded；Core、Skills、MCP 与其他 Runtime 继续启动。
   安装存在性不替代独立的 version、Machine Ready、capability 与 platform admission。
 - 正式 AgentRun 继承 Pi 官方 `PI_CODING_AGENT_DIR`/原生默认配置；Core 不读取 Claude Home、不建立 Pi 私有
@@ -75,12 +77,12 @@ Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.38 冻结为 historical；本概览、实施计划、确认说明和版本索引建立唯一 current v1.39 |
 | Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact resume、managed receipt、MCP bridge，以及消息文件存在性与视觉类型分离的高成本取舍；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)完整拥有 Pi wire、Ready、Session、receipt、MCP、Action、Usage 与未准入边界；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v4](../../contracts/file-preview-v4.md)拥有消息文件存在性探测 wire |
-| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)和[基础不变量](../../architecture/foundational-invariants.md)加入 Pi 的独立 transport、Fleet、隐私、managed input 与 bridge 边界；[File Preview](../../architecture/file-preview.md)拥有消息引用准入与既有 classifier 边界 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组的具体当前指令、稳定 Tool 行、渠道边界和世界地图首次默认；[Camp 文件预览区](../../ui/components/file-preview.md)拥有真实文件链接和共享图标语义；Pi 仍只复用既有 Runtime/成员/监控表面 |
+| Contracts | 已更新 | [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)完整拥有 Pi wire、Ready、Session、receipt、MCP、Action、Usage 与未准入边界；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v4](../../contracts/file-preview-v4.md)拥有消息文件存在性探测 wire；[Runtime Images v4](../../contracts/runtime-images-v4.md)拥有作者感知图片分区与几何 |
+| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)和[基础不变量](../../architecture/foundational-invariants.md)加入 Pi 的独立 transport、Fleet、隐私、managed input 与 bridge 边界；[File Preview](../../architecture/file-preview.md)拥有消息引用准入与既有 classifier 边界；[Runtime 图片](../../architecture/runtime-images.md)同步消息内来源合并与两种 Gallery variant |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组具体指令、稳定 Tool 行、渠道边界和世界地图首次默认，并定义 Composer、用户消息与 Agent 交付的附件分区；[Camp 文件预览区](../../ui/components/file-preview.md)拥有真实文件链接和共享图标语义；[Porcelain Day](../../ui/themes/porcelain-day.md)和[Steel Night](../../ui/themes/steel-night.md)加入十类 Agent artifact token；Pi 仍只复用既有 Runtime/成员/监控表面 |
 | Runtime Activity | 已更新 | [Activity Registry](../../runtime-activity/registry.md)与维护指南加入 Pi verified tool lifecycle 映射，未知 shape 继续 fail closed；当前指令只改共享 presentation，不增加分类映射 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 Pi 0.84.4 本机证据、专属未准入矩阵与剩余 Golden Flow |
-| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航分别指向两份 v30 合同、File Preview v4、Pi research 与 parity matrix |
+| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航分别指向两份 v30 合同、File Preview v4、Runtime Images v4、Pi research 与 parity matrix |
 | Root README | 确认无需更新 | Pi 在所有 shipped platform 仍未准入，不应加入面向用户的 Supported Runtime 表 |
 
 ## References
@@ -91,4 +93,5 @@ Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升
 - [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)
 - [Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)
 - [File Preview v4](../../contracts/file-preview-v4.md)
+- [Runtime Images v4](../../contracts/runtime-images-v4.md)
 - [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)
