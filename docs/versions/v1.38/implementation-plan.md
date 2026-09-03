@@ -10,10 +10,10 @@ last_updated: 2026-09-03
 
 ## 当前交付
 
-- [x] 渠道页只把飞书作为可管理 Provider。
-- [x] 钉钉固定显示官方图标、置灰状态和“敬请期待”，使用原生 disabled/ARIA 语义，无 hover、点击或键盘动作。
-- [x] 保存的钉钉账号、连接、Bot 和管理链接不从 Renderer 暴露；`selectedKind=dingtalk` 与 DingTalk-only Snapshot 均不会
-  恢复钉钉管理界面。
+- [x] 渠道页同时把飞书和钉钉作为可管理 Provider；两者复用同一 Tab、连接、账号与队员 Bot 路径。
+- [x] 钉钉使用官方图标、真实连接状态、原生 button/Tab、`aria-selected` 和可见键盘焦点，不再显示禁用的“敬请期待”。
+- [x] 保存的钉钉账号、连接、Bot 和受控管理链接从 typed Snapshot 恢复；`selectedKind=dingtalk` 与 DingTalk-only Snapshot
+  均进入钉钉管理界面，秘密和项目绝对路径仍不进入 Renderer。
 - [x] 保留钉钉 Main/Core、SQLite 数据、凭据、Stream、Card 与 Outbox，不做 destructive migration。
 - [x] 飞书 active Host 只响应 Run started/terminal 与当前执行卡 Run 的 live event；其他 AgentRun、全局 Runtime 及
   `terminal_sealed` Run 不触发完整 `channels.host.tick`，Web 执行台链路不变。
@@ -28,7 +28,7 @@ last_updated: 2026-09-03
 - [ ] packaged Applications 视觉验收：Porcelain Day / Steel Night、最小窗口、200% zoom 与键盘顺序。
 - [ ] PR 合入最新 `main` 并从合并后的 `main` 构建、安装 `/Applications/Rovai.app`。
 
-## 重新开放待办（执行中，入口仍暂停）
+## 重新开放与能力待办（管理入口已开放）
 
 - [x] 同消息多 Bot callback 聚合为一个根请求和多个目标 `AgentRun`；Core 按首次持久观察顺序合并，Main 3 秒正常封口，
   SQLite deadline 支持重启恢复，迟到/重放不新增根请求；Rust/TS owner 覆盖顺序、去重、集合校验和超时恢复。
@@ -40,8 +40,9 @@ last_updated: 2026-09-03
   超长正文仍等待逐片 durable Outbox/顺序/重试设计，不在单 delivery 内多发。
 - [x] 加入 callback 聚合与 Card create/update/recall 的安全诊断计数，不投影正文、附件内容、外部/内部 identity、
   credential、URL、token 或远端响应。
-- [ ] 通过私聊、单 Bot 群、多 Bot 群、连续排队、停止、最近输出、执行台与撤回的 packaged 双端验收后，才移除
-  “敬请期待” gate。
+- [x] 按 [V1.38-D02](decisions.md#v1-38-d02) 移除“敬请期待”整面 gate，未验收平台能力改为独立 Gate。
+- [ ] 继续完成私聊、单 Bot 群、多 Bot 群、连续排队、停止、最近输出、执行台与撤回的 packaged 双端组合验收；该矩阵
+  约束对应能力结论，不再隐藏整个钉钉管理入口。
 
 ## 验证 owner
 
@@ -51,8 +52,8 @@ last_updated: 2026-09-03
   Card 参数/callback 与既有执行卡动作。
 - `crates/rovai-core/src/channel.rs`：一个 durable aggregate/根请求、多有序 AgentRun、deadline auto-seal、迟到 replay、
   父消息投影、安全诊断，以及既有项目卡、FIFO、执行/排队 recall owner。
-- `apps/desktop/src/renderer/src/ChannelSettings.test.ts`：开放 Provider 过滤、固定钉钉预告、disabled/ARIA、legacy
-  Snapshot 不泄露和飞书回退。
+- `apps/desktop/src/renderer/src/ChannelSettings.test.ts`：双 Provider 选择、钉钉账号/Bot 管理事实、DingTalk-only Snapshot
+  回退、Provider 计数、无旧预告/disabled gate，以及秘密与项目路径不泄露。
 - `crates/rovai-core/src/acp.rs`、`codex.rs`、`main.rs`、`bin/rovai.rs`、`execution_evidence.rs`、`read_model.rs`：
   现有精确信号字段映射、Codex 先行截获、observation active Run 归属、Managed Blob 和 public/non-activity 隔离；
   `acp.rs` 的私有 Host 配置测试同时约束只有 Kiro 获得现有 Overlay。
@@ -60,7 +61,8 @@ last_updated: 2026-09-03
   token/summary disclosure、静态行、Tool 计数边界和公共 wake 隔离。
 - `pnpm typecheck`、Renderer/Vitest 全量、`pnpm build:desktop`：类型、现有渠道交互与生产构建回归。
 - `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=<main base> pnpm docs:check:ci`：版本切换、当前 UI 权威和文档路由。
-- packaged App 人工检查：入口在日/夜主题均清晰置灰，真实图标比例不变，“敬请期待”可读且不产生点击反馈。
+- packaged App 人工检查：飞书/钉钉在日/夜主题都可选择，真实图标比例不变，选中、连接、空态和键盘焦点清晰；不出现
+  旧“敬请期待”预告。
 - packaged 钉钉真实租户：桌面端/手机端分别保留多 Bot callback、项目卡、三入口、排队、停止、最近输出、执行台、
   终态与下一轮真实撤回的脱敏证据；本地 fixture 不能替代。
 
@@ -94,3 +96,19 @@ last_updated: 2026-09-03
   `DOCS_BASE_REF=b9870c0c28b2487ddfac723fe2e932c0e3fabfac pnpm docs:check:ci`。
 - 源码审计确认不存在展示专用 CLI/IPC、Claude `PostCompact` 注入或 Cursor 配置 Overlay；现有 observation 路径、
   Codex 先行截获、`imminent` 中性状态、仅 `started` 算 active 以及普通 command muted 图标颜色均保留。
+
+## 钉钉管理入口开放验证（2026-09-03）
+
+- Renderer owner 在旧 gate 下先得到 5/16 失败，入口实现后通过 16/16；覆盖双 Provider 选择、钉钉连接与 Bot 管理事实、
+  DingTalk-only Snapshot 回退、Provider 数量、旧预告/disabled gate 移除，以及秘密和项目路径不泄露。
+- 已通过 `pnpm typecheck` 与 `pnpm test`（Vitest 138 files / 1456 tests；Node/协议 220 passed、1 个 Windows-only
+  skip）；`pnpm package:mac:daily` 同时完成 release Core、`pnpm build:desktop`、arm64 App 打包和 ad-hoc 签名校验。
+- 已通过 `pnpm docs:test`、`pnpm docs:check` 与
+  `DOCS_BASE_REF=f84f642e5278740001c4a80f2f2f7c8f7c81a0a6 pnpm docs:check:ci`；Impeccable 对本次 Renderer 目标的单次
+  静态探测返回零问题。
+- 已把构建产物无中断安装到 `/Applications/Rovai AI.app` 并保留旧包备份；安装源与目标 `app.asar` SHA-256 一致，
+  目标深度签名复核通过，安装前记录的日常 App/Core/Helper 进程均继续存活。磁盘 Bundle 已更新，当前运行进程仍需用户在
+  合适时机从 canonical path 退出并重开才会载入新版。
+- packaged App 使用全新隔离 `userData` 启动到主窗口；空白 profile 因没有可打开的会话而保持启动门禁，未借用日常
+  SQLite、凭据或伪造状态绕过，因此不把本轮记作渠道页日/夜主题、缩放或真实租户验收。手机端与各具体平台能力矩阵仍是
+  后续 owner，不由开放入口推断为完成。

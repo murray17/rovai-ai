@@ -2,7 +2,7 @@
 document_type: versions-index
 authority: version-lifecycle
 current_version: v1.38
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # Rovai-ai 版本记录
@@ -189,4 +189,4 @@ last_updated: 2026-09-02
 | v1.35 | `historical` | 飞书队员 Bot、Owner-only Camp、原会话项目卡、动态 roster 与执行输出；channel 分支原 v1.33 编号顺延 | [v1.35/README.md](v1.35/README.md) |
 | v1.36 | `historical` | 共享 SQLite、飞书终态卡与钉钉 Web Session；钉钉单应用发布已隔离验证，Core/收发/群卡片与 packaged 验收未闭环 | [v1.36/README.md](v1.36/README.md) |
 | v1.37 | `historical` | Runtime 图片、取消可用性、Agent 目标教学与飞书 LAN 只读执行台；部分真实 Runtime/渠道验收未完成即冻结 | [v1.37/README.md](v1.37/README.md) |
-| v1.38 | `current` | 钉钉渠道入口继续置灰；按飞书同等体验宗旨实施多 Bot durable 聚合、永久摘要与安全诊断，等待 packaged 双端验收后重新开放 | [v1.38/README.md](v1.38/README.md) |
+| v1.38 | `current` | 钉钉渠道管理入口重新开放；按飞书同等体验宗旨交付多 Bot durable 聚合、状态卡、永久摘要与安全诊断，未验收平台能力保持独立 Gate | [v1.38/README.md](v1.38/README.md) |

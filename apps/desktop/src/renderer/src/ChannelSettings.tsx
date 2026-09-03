@@ -226,11 +226,10 @@ export function ChannelSettingsView({
 }): React.JSX.Element {
   const members = useMemo(() => visibleChannelMembers(agents), [agents])
   const channels = snapshot?.channels ?? []
-  const manageableChannels = channels.filter((candidate) => candidate.kind !== 'dingtalk')
+  const manageableChannels = channels
   const channel = manageableChannels.find((candidate) => candidate.kind === selectedKind)
     ?? manageableChannels[0]
     ?? null
-  const dingtalk = channels.find((candidate) => candidate.kind === 'dingtalk')
   const providerName = channel?.displayName ?? '渠道'
 
   return (
@@ -288,21 +287,6 @@ export function ChannelSettingsView({
                   </button>
                 )
               })}
-              <button
-                className="channel-provider-tab is-disabled"
-                type="button"
-                role="tab"
-                aria-selected="false"
-                aria-disabled="true"
-                disabled
-                title="钉钉渠道敬请期待"
-              >
-                <ChannelMark kind="dingtalk" />
-                <span>
-                  <strong>{dingtalk?.displayName ?? '钉钉'}</strong>
-                  <small>敬请期待</small>
-                </span>
-              </button>
             </div>
           </section>
 

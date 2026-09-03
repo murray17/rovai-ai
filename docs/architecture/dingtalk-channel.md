@@ -3,12 +3,12 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # 钉钉渠道架构
 
-字段、状态和恢复合同见 [DingTalk Channel v11](../contracts/dingtalk-channel-v11.md)，credential 与 Developer Session 持久化见
+字段、状态、Renderer 管理入口和恢复合同见 [DingTalk Channel v12](../contracts/dingtalk-channel-v12.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v2](../contracts/camp-membership-v2.md)和
@@ -19,8 +19,10 @@ last_updated: 2026-09-02
 [V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)、
 [V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)、
 [V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)、
-[V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)与
-[V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)。
+[V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)、
+[V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)、
+[V1.38-D01](../versions/v1.38/decisions.md#v1-38-d01)与
+[V1.38-D02](../versions/v1.38/decisions.md#v1-38-d02)。
 
 ## 组件与权威
 
@@ -217,19 +219,23 @@ Main 正常存活时在 3 秒后提交完整集合；Main 重启错过定时器�
 generation/source binding reconcile。加入/移出从下一次新 Run 生效，已运行 Run 与历史保持冻结。roster 不可读、出现未知
 App 或目标已移出时 fail closed。
 
-## 当前 Feature Gate
+<a id="当前-feature-gate"></a>
+## 当前管理入口与能力 Gate
+
+Renderer 渠道设置已开放钉钉管理入口：Snapshot 中的飞书、钉钉 Provider 都进入同一可选择 Tab、连接、账号与队员 Bot
+管理路径。入口可见不扩大 Provider 能力，未具备平台证据的子能力仍按下表分别关闭。
 
 | 能力 | 当前状态 | 解除条件 |
 | --- | --- | --- |
 | Owner 私聊 | enabled | 真实租户 Web Session、Stream 与回复验收 |
 | Owner 同组织内部群显式 `@` | enabled；Bot 必须由群“添加机器人”入口安装，普通成员形态的普通群/外部群不产生 Stream callback | 真实群 roster、项目卡和输出验收 |
-| 同消息直接多 Bot | Core/Main enabled、Renderer gate 仍关闭；多个 exact Stream callback durable 合并为一个根请求和有序多个 AgentRun，正常 3 秒封口，重启后按 SQLite deadline 恢复 | packaged 桌面端/手机端真实多 Bot callback 与顺序证据 |
+| 同消息直接多 Bot | enabled；多个 exact Stream callback durable 合并为一个根请求和有序多个 AgentRun，正常 3 秒封口，重启后按 SQLite deadline 恢复；Renderer 可管理对应 Bot | packaged 桌面端/手机端真实多 Bot callback 与顺序证据继续作为能力验收，不关闭整个管理入口 |
 | 话题/Thread | disabled；`openConvThreadId / openThreadId` 是普通 callback 可能携带的不透明路由元数据，不作为 Topic 证明；只有明确 `threadId / topicId / topicKey` 才拒绝 | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
 | 入站附件 | summary only；私聊 file/audio/video 虽可能提供 downloadCode，但未建立 Managed Attachment ingress；群 Bot 平台不接收这些类型 | 官方下载、授权、大小/媒体校验和 Managed Attachment ingress 设计 |
 | 出站附件 | disabled，明确 unsupported；不借用 custom webhook schema | 已验证 Internal App Robot app-only 原生投递、顺序和可恢复 message identity |
 | AI 状态卡 | enabled；平台内置通用卡片无需用户模板；项目刷新、最近输出展开/收起已在真实桌面客户端验收，停止、固定 URL、排队卡及 execution/queue Robot recall 已接入 | 手机真实投递、URL fragment、SSE、撤回与停止终态矩阵 |
 
-不得通过宽松 parser、普通群 fallback、fabricated message success 或 Renderer 开关绕过这些 gate。
+不得通过宽松 parser、普通群 fallback、fabricated message success，或仅因 Renderer 管理入口已开放就绕过这些能力 gate。
 
 ## 恢复与秘密
 
@@ -256,7 +262,7 @@ DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card crea
 
 ## References
 
-- [DingTalk Channel v11](../contracts/dingtalk-channel-v11.md)
+- [DingTalk Channel v12](../contracts/dingtalk-channel-v12.md)
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)
@@ -269,3 +275,4 @@ DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card crea
 - [V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)
 - [V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)
 - [V1.38-D01](../versions/v1.38/decisions.md#v1-38-d01)
+- [V1.38-D02](../versions/v1.38/decisions.md#v1-38-d02)
