@@ -58,6 +58,6 @@ describe('attachment presentation classification', () => {
       agentDisplayType: 'archive'
     })
     expect(attachmentBaseName('design-export', 'directory')).toBe('design-export')
-    expect(attachmentFormatLabel('design-export', 'directory')).toBe('文件夹')
+    expect(attachmentFormatLabel('design-export', 'directory')).toBe('DIR')
   })
 })
