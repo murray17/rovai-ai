@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-09-01
+last_updated: 2026-09-03
 ---
 
 # Porcelain Day
@@ -121,6 +121,18 @@ Light. `color-scheme: light`.
 | `--identity-2` | `#39777a` | `--identity-6` | `#8a5c75` |
 | `--identity-3` | `#74628f` | `--identity-7` | `#547245` |
 | `--identity-4` | `#9a6a32` | `--identity-8` | `#8c6146` |
+
+### Agent artifact families
+
+Agent 交付文件的图形色只表达格式家族，不表达状态、身份或可写权限；用户附件继续使用中性单色图形。
+
+| Token | Value | Token | Value |
+|---|---:|---|---:|
+| `--attachment-web` | `#8a5f35` | `--attachment-code` | `#476b85` |
+| `--attachment-notes` | `#626b72` | `--attachment-pdf` | `#9a4f49` |
+| `--attachment-word` | `#3f6991` | `--attachment-sheet` | `#3f7559` |
+| `--attachment-slide` | `#956b38` | `--attachment-image` | `#74628f` |
+| `--attachment-archive` | `#7d6840` | `--attachment-generic` | `#616a73` |
 
 ### Evidence and diff
 

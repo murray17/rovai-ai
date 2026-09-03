@@ -141,6 +141,12 @@ export function runtimePlatformAdmissionFor(
   )) ?? null
 }
 
+export function runtimePlatformAdmissionAllowsUse(
+  admission: RuntimePlatformAdmission | null
+): boolean {
+  return admission?.status === 'qualified' || admission?.status === 'preview'
+}
+
 export function runtimeProductPresentation(
   admission: RuntimePlatformAdmission | null,
   availability: ProductRuntimeAvailability | null,
@@ -164,7 +170,15 @@ export function runtimeProductPresentation(
   if (admission.status === 'unsupported') {
     return presentation('unsupported', '该 Agent 运行时不支持当前平台。')
   }
-  return runtimeAvailabilityPresentation(availability, pending)
+  const availabilityPresentation = runtimeAvailabilityPresentation(availability, pending)
+  if (admission.status !== 'preview') return availabilityPresentation
+  const previewDetail = '实验性开放；当前平台尚未完成正式资格验证，请自行验证后使用。'
+  return {
+    ...availabilityPresentation,
+    detail: availabilityPresentation.detail
+      ? `${previewDetail}\n${availabilityPresentation.detail}`
+      : previewDetail
+  }
 }
 
 export function memberRuntimePresentation(

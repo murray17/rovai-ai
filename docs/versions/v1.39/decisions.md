@@ -18,8 +18,8 @@ Pi 0.84.4 提供 LF-delimited JSONL RPC 和官方 extension API，而不是 ACP�
 ### 决定
 
 从当前 main 重新实现 `pi-jsonl-rpc-v1` 与独立 `runtime.pi` optional subsystem，不复用 ACP init/storage，也不
-合并旧分支。Pi 可以进入编译时 Product Runtime closed set，但 macOS arm64、macOS x64、Windows x64 在取得各自
-Pi immutable qualification artifact 前全部 NotQualified；debug-only 本机 override 不能进入 release。
+合并旧分支。Pi 可以进入编译时 Product Runtime closed set。最初决定在取得各平台 immutable qualification artifact
+前全部 NotQualified；该平台开放部分已由 [V1.39-D06](#v1-39-d06) 取代，独立 transport 与证据不可继承边界仍有效。
 
 ### 后果与被拒绝方案
 
@@ -123,3 +123,29 @@ Host 无需因 Skill/MCP 更新重启，相邻 Session 又不会继承前一 Run
 - 拒绝“已知扩展名即链接”：它无法证明目标存在，会制造虚假可操作状态。
 - 拒绝让资源注册表包含 `openStrategy`：它会复制并削弱 Main classifier 的大小、MIME、内容和平台判断。
 - 拒绝让 Renderer 直接检查磁盘：它会越过 Preload/Main/Core 的来源权威并暴露宿主路径能力。
+
+<a id="v1-39-d06"></a>
+## V1.39-D06：Pi 三平台以可运行 Preview 开放，不伪造 Qualified 证据
+
+### 背景
+
+Pi 的 Adapter、无 Prompt Machine Ready、managed receipt、Skills/MCP、Action、Usage、Session 与本机 macOS arm64
+行为 smoke 已可供主动测试，但完整 compaction、workspace/read-only、failure/retry、idle eviction、packaged lifecycle
+以及 macOS x64/Windows x64 证据仍未闭合。既有三态 Platform Admission 只能在“完全阻断”和“宣称 qualified”之间
+选择，无法诚实表达用户明确要求的实验性开放。
+
+### 决定
+
+Runtime Platform Admission 增加 `preview`：它允许 discovery、检查、Installation、Onboarding/Member 选择、Diagnostics
+与 AgentRun，但必须保留阻止正式资格化的 reason，且 `evidenceRevision = null`。Pi 的 macOS arm64、macOS x64、
+Windows x64 三行均改为 `preview / runtime_platform.qualification_evidence_missing`；Renderer 显示“实验性开放”，
+真实 machine availability 与所有 Runtime/Dispatch blocker 继续独立生效。release 不再依赖 debug-only Pi qualification
+override。Cursor 和其他 Runtime 的 admission 不变。
+
+### 后果与被拒绝方案
+
+- 用户可以在三个 shipped platform 主动选择和验证 Pi，但产品不得称其为 First-Class 或 qualified。
+- 后续每个平台仍须生成独立 immutable qualification artifact，才能把该精确行升级为 `qualified`。
+- 拒绝直接把 Pi 三行写成 `qualified`：这会伪造尚不存在的跨平台 Golden Flow 证据。
+- 拒绝只在 Renderer 解禁下拉框：Core discovery、Installation 与 Dispatch 仍会阻断，形成不可执行的假入口。
+- 拒绝继续使用 release 环境变量 override：隐藏开关不能成为可审计的产品准入合同。

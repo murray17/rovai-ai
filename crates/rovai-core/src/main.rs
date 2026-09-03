@@ -1606,26 +1606,8 @@ fn windows_runtime_qualification_allows(runtime_kind: AdapterKind) -> bool {
     }
 }
 
-fn pi_runtime_qualification_allows(runtime_kind: AdapterKind) -> bool {
-    #[cfg(debug_assertions)]
-    {
-        runtime_kind == AdapterKind::Pi
-            && std::env::var("ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER")
-                .ok()
-                .is_some_and(|candidate| candidate.trim() == AdapterKind::Pi.as_str())
-    }
-
-    #[cfg(not(debug_assertions))]
-    {
-        let _ = runtime_kind;
-        false
-    }
-}
-
 const WINDOWS_LOCAL_QUALIFICATION_EVIDENCE_REVISION: &str =
     "local-debug:windows-runtime-qualification-adapter";
-const PI_LOCAL_QUALIFICATION_EVIDENCE_REVISION: &str =
-    "local-debug:pi-runtime-qualification-adapter";
 
 fn apply_windows_runtime_qualification_override(
     admission: RuntimePlatformAdmission,
@@ -1642,34 +1624,15 @@ fn apply_windows_runtime_qualification_override(
     }
 }
 
-fn apply_pi_runtime_qualification_override(
-    admission: RuntimePlatformAdmission,
-    locally_qualified: bool,
-) -> RuntimePlatformAdmission {
-    if locally_qualified && admission.runtime_kind() == AdapterKind::Pi {
-        RuntimePlatformAdmission::qualified(
-            admission.runtime_kind(),
-            admission.platform(),
-            PI_LOCAL_QUALIFICATION_EVIDENCE_REVISION,
-        )
-    } else {
-        admission
-    }
-}
-
 fn current_runtime_platform_admission(
     runtime_kind: AdapterKind,
 ) -> Option<RuntimePlatformAdmission> {
     AgentRuntimeAdapterRegistry::default()
         .current_platform_admission(runtime_kind)
         .map(|admission| {
-            let admission = apply_windows_runtime_qualification_override(
+            apply_windows_runtime_qualification_override(
                 admission,
                 windows_runtime_qualification_allows(runtime_kind),
-            );
-            apply_pi_runtime_qualification_override(
-                admission,
-                pi_runtime_qualification_allows(runtime_kind),
             )
         })
 }
@@ -1680,35 +1643,29 @@ fn runtime_platform_admission_matrix() -> Vec<RuntimePlatformAdmission> {
         .into_iter()
         .map(|admission| {
             let locally_qualified = windows_runtime_qualification_allows(admission.runtime_kind());
-            let admission =
-                apply_windows_runtime_qualification_override(admission, locally_qualified);
-            let pi_locally_qualified = pi_runtime_qualification_allows(admission.runtime_kind());
-            apply_pi_runtime_qualification_override(admission, pi_locally_qualified)
+            apply_windows_runtime_qualification_override(admission, locally_qualified)
         })
         .collect()
 }
 
-fn current_platform_qualified_runtime_kinds() -> Vec<AdapterKind> {
+fn current_platform_enabled_runtime_kinds() -> Vec<AdapterKind> {
     AdapterKind::ALL
         .into_iter()
         .filter(|kind| {
             windows_runtime_qualification_allows(*kind)
-                || pi_runtime_qualification_allows(*kind)
                 || current_runtime_platform_admission(*kind)
                     .as_ref()
-                    .is_some_and(RuntimePlatformAdmission::is_qualified)
+                    .is_some_and(RuntimePlatformAdmission::allows_runtime_use)
         })
         .collect()
 }
 
 fn current_runtime_platform_blocker(runtime_kind: AdapterKind) -> Option<CommandHandlerResult> {
-    if windows_runtime_qualification_allows(runtime_kind)
-        || pi_runtime_qualification_allows(runtime_kind)
-    {
+    if windows_runtime_qualification_allows(runtime_kind) {
         return None;
     }
     match current_runtime_platform_admission(runtime_kind) {
-        Some(admission) if admission.is_qualified() => None,
+        Some(admission) if admission.allows_runtime_use() => None,
         Some(admission) => Some(CommandHandlerResult::rejected(
             admission
                 .blocker_code()
@@ -1921,7 +1878,7 @@ fn runtime_diagnostic_checks(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let qualified_runtime_kinds = match (
+    let enabled_runtime_kinds = match (
         runtime_health.get("hostPlatform").and_then(Value::as_str),
         runtime_health
             .get("runtimePlatformAdmission")
@@ -1932,7 +1889,10 @@ fn runtime_diagnostic_checks(
                 .iter()
                 .filter(|row| {
                     row.get("platform").and_then(Value::as_str) == Some(host_platform)
-                        && row.get("status").and_then(Value::as_str) == Some("qualified")
+                        && matches!(
+                            row.get("status").and_then(Value::as_str),
+                            Some("qualified" | "preview")
+                        )
                 })
                 .filter_map(|row| row.get("runtimeKind")?.as_str().map(str::to_string))
                 .collect::<BTreeSet<_>>(),
@@ -1943,9 +1903,9 @@ fn runtime_diagnostic_checks(
     AdapterKind::ALL
         .into_iter()
         .filter(|kind| {
-            qualified_runtime_kinds
+            enabled_runtime_kinds
                 .as_ref()
-                .is_none_or(|qualified| qualified.contains(kind.as_str()))
+                .is_none_or(|enabled| enabled.contains(kind.as_str()))
         })
         .map(|kind| {
             let current = availability.iter().find(|candidate| {
@@ -2362,7 +2322,7 @@ impl Core {
 
     async fn run_runtime_discovery(&self) {
         let search = self.runtime_search_environment.read().await.clone();
-        let qualified_runtime_kinds = current_platform_qualified_runtime_kinds();
+        let enabled_runtime_kinds = current_platform_enabled_runtime_kinds();
         self.runtime_product_diagnostics.write().await.clear();
         let managed_installations = {
             let database = self.database.lock().await;
@@ -2398,8 +2358,8 @@ impl Core {
         };
         {
             let mut observations = self.runtime_discovery.write().await;
-            observations.retain(|kind, _| qualified_runtime_kinds.contains(kind));
-            for kind in qualified_runtime_kinds.iter().copied() {
+            observations.retain(|kind, _| enabled_runtime_kinds.contains(kind));
+            for kind in enabled_runtime_kinds.iter().copied() {
                 let observation = RuntimeDiscoveryObservation::detecting(kind, search.generation());
                 observations.insert(kind, observation.clone());
                 emit(
@@ -2412,7 +2372,7 @@ impl Core {
 
         let mut path_tasks = tokio::task::JoinSet::new();
         let mut path_attempts = HashMap::new();
-        for kind in qualified_runtime_kinds {
+        for kind in enabled_runtime_kinds {
             let search = search.clone();
             let managed_installation = managed_installations.get(&kind).cloned();
             let handle = path_tasks.spawn_blocking(move || {
@@ -3043,7 +3003,7 @@ impl Core {
     async fn runtime_health_payload(&self) -> Result<Value> {
         let host_platform = HostPlatformKey::current();
         let platform_admission = runtime_platform_admission_matrix();
-        let qualified_runtime_kinds = current_platform_qualified_runtime_kinds();
+        let enabled_runtime_kinds = current_platform_enabled_runtime_kinds();
         let observations = self.runtime_discovery.read().await.clone();
         let product_diagnostics = self.runtime_product_diagnostics.read().await.clone();
         let checking = self.runtime_check_activity.read().await.clone();
@@ -3052,7 +3012,7 @@ impl Core {
             AgentProfileService::default().list_installations(&database)?
         };
         let availability =
-            qualified_runtime_kinds
+            enabled_runtime_kinds
                 .into_iter()
                 .map(|kind| {
                     let discovery = observations
@@ -3282,7 +3242,7 @@ impl Core {
                 runtime_usage_known,
                 &checked_at,
             )),
-            Err(_) => checks.extend(current_platform_qualified_runtime_kinds().into_iter().map(
+            Err(_) => checks.extend(current_platform_enabled_runtime_kinds().into_iter().map(
                 |kind| {
                     DiagnosticCheck::new(
                         format!("runtime:{}", kind.as_str()),
@@ -13715,7 +13675,7 @@ async fn run_core(
         output: output_tx.clone(),
         runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
         runtime_discovery: RwLock::new(
-            current_platform_qualified_runtime_kinds()
+            current_platform_enabled_runtime_kinds()
                 .into_iter()
                 .map(|kind| {
                     (
@@ -22364,6 +22324,52 @@ while IFS= read -r _ignored; do :; done
     }
 
     #[test]
+    fn diagnostics_include_machine_health_for_preview_runtimes() {
+        let runtime_health = json!({
+            "hostPlatform": "macos-arm64",
+            "runtimeCatalog": [{
+                "runtimeKind": "pi",
+                "displayName": "Pi Coding Agent"
+            }],
+            "runtimePlatformAdmission": [{
+                "runtimeKind": "pi",
+                "platform": "macos-arm64",
+                "status": "preview",
+                "reasonCode": "runtime_platform.qualification_evidence_missing",
+                "evidenceRevision": null
+            }],
+            "runtimeAvailability": [{
+                "runtimeKind": "pi",
+                "status": "ready",
+                "checking": false,
+                "discovery": { "observedAt": "2026-09-03T00:00:00Z" }
+            }]
+        });
+
+        let checks = runtime_diagnostic_checks(
+            &runtime_health,
+            &BTreeMap::from([(AdapterKind::Pi, 1)]),
+            true,
+            "2026-09-03T00:00:00Z",
+        );
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].subject_id.as_deref(), Some("pi"));
+    }
+
+    #[test]
+    fn pi_preview_enters_discovery_and_dispatch_without_becoming_qualified() {
+        let enabled = current_platform_enabled_runtime_kinds();
+        assert!(enabled.contains(&AdapterKind::Pi));
+        assert!(!enabled.contains(&AdapterKind::CursorAgent));
+        assert!(current_runtime_platform_blocker(AdapterKind::Pi).is_none());
+
+        let admission = current_runtime_platform_admission(AdapterKind::Pi).unwrap();
+        assert!(admission.allows_runtime_use());
+        assert!(!admission.is_qualified());
+        assert_eq!(admission.evidence_revision(), None);
+    }
+
+    #[test]
     fn local_windows_qualification_updates_the_projected_admission_only_when_allowed() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let denied = apply_windows_runtime_qualification_override(
@@ -22391,31 +22397,6 @@ while IFS= read -r _ignored; do :; done
         assert_ne!(
             macos.evidence_revision(),
             Some(WINDOWS_LOCAL_QUALIFICATION_EVIDENCE_REVISION)
-        );
-    }
-
-    #[test]
-    fn local_pi_qualification_is_debug_evidence_without_changing_the_frozen_matrix() {
-        let registry = AgentRuntimeAdapterRegistry::default();
-        for platform in HostPlatformKey::ALL {
-            let frozen = registry.platform_admission(AdapterKind::Pi, platform);
-            assert!(!frozen.is_qualified());
-            assert_eq!(frozen.evidence_revision(), None);
-
-            let local = apply_pi_runtime_qualification_override(frozen, true);
-            assert!(local.is_qualified());
-            assert_eq!(
-                local.evidence_revision(),
-                Some(PI_LOCAL_QUALIFICATION_EVIDENCE_REVISION)
-            );
-        }
-        let unrelated = apply_pi_runtime_qualification_override(
-            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::MacosArm64),
-            true,
-        );
-        assert_ne!(
-            unrelated.evidence_revision(),
-            Some(PI_LOCAL_QUALIFICATION_EVIDENCE_REVISION)
         );
     }
 

@@ -28,17 +28,19 @@ Renderer 在当前进程内以实际 Blob 大小维护 128 MiB 的已解码 payl
 保留内部解码结果。
 
 Renderer 在来源 Run 尚未公开发言且未终态时保留图片等待，不把无作者图片提前混入其他队员消息；
-公开消息出现后随该 Run 最后一条公开消息展示，只有终态仍无公开消息时才释放独立兜底。
+公开消息出现后把图片并入该 Run 最后一条公开 Agent 消息的图片区，只有终态仍无公开消息时才释放独立兜底。
 
 同一 Run 已通过消息发送的可用图片附件，若其已有 SHA-256 与 Runtime Blob 相同，读取投影仅保留
 附件展示，底层两份记录不删除。匹配只读已有 SQLite 元数据，不扫描文件；可变的稳定路径不参与。
-两种图片共用消息内容列与图片组件，预览框贴合原比例，不跟随正文长短收缩，不裁图或填充黑边。
+显式图片附件和 Runtime 图片继续共用读取、decoder、cache、Tile 与 Lightbox owner。Agent variant 把两种来源
+合进正文后的同一图片区，按原比例和 160–240px 响应式单元呈现；用户消息 variant 在正文前使用 72px 方形
+缩略图，只有缩略图允许 `cover`。图片与普通文件先稳定分区并保持各自内部顺序，永不混排在同一内容行。
 
 显式文件发送继续由 `rovai send --file` 创建不可变 Camp Attachment，再由既有飞书 Outbox/Host 上传。
 图片观察不会调用这条发布链，也不增加 CampMessage 或 AgentRun。飞书原生消息和附件可独立重试；
 这次不扩展钉钉附件、登录、发布或 Stream 行为。
 
-接口与限额见 [Runtime Images v3](../contracts/runtime-images-v3.md)、投影见
+接口与限额见 [Runtime Images v4](../contracts/runtime-images-v4.md)、投影见
 [Camp Open Projection v14](../contracts/camp-open-projection-v14.md)、展示见
 [Camp 会话工作区](../ui/components/conversation-workspace.md#runtime-图片与消息图片)。混合保存的理由见
 [V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)。

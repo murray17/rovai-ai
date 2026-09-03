@@ -511,17 +511,28 @@ summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开
 ## Runtime 图片与消息图片
 
 来源 Run 尚未产生公开消息且仍未终态时，Runtime 图片留在该 Run 内等待，不提前进入会话 Timeline。
-公开正文出现后先显示原有顺序的消息附件，再显示来源 Run 的本地图片，最后显示 `Files Changed`；
-每个 Run/epoch 的图片固定跟随该 Run 最后一条公开消息。只有 Run 已终态仍没有公开消息时，才按图片时间
-显示独立兜底，并保持在同 Run 文件变化卡之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
+公开正文出现后，每个 Run/epoch 的图片固定并入该 Run 最后一条公开消息的 Agent 图片区；`Files Changed`
+仍在整条消息之后。只有 Run 已终态仍没有公开消息时，才按图片时间显示独立兜底，并保持在同 Run 文件变化卡
+之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
 
-显式图片附件和 Runtime 图片共用 `ImageGallery` / `ImageTile` / Lightbox。一张单列，多张在正常宽度下
-双列、窄容器单列；全部展示，不增加四张上限或“查看全部”。使用 `object-fit: contain`，保留截图、文字和
-图表完整边界。只把连续图片附件组合成一段 Gallery；`image A / image B / PDF / image C` 的文件顺序不变。
-PDF、文档、压缩包和目录继续使用现有文件块。
+消息附件先按类型稳定分区，保留图片内部和文件内部的原顺序，不再让两类对象混排。用户消息顺序固定为
+“图片区 → 文件区 → 正文”，Agent 消息固定为“正文 → 图片区 → 文件区”；空区域不渲染。Agent 的显式图片
+附件与 Runtime 图片进入同一个 `agent-output-images`，同摘要过滤后显式附件在前、Runtime 图片在后；进入图片区
+的对象不再生成重复文件卡。两个区域必须是独立容器，不能因为横向空间充足而进入同一内容行。
 
-两种图片共用消息内容列及响应式宽度，发送图片区域不随正文长短收缩。预览框和大图窗口贴合原图比例，
-保留高度上限和既有细边框，不用固定宽高补黑边，不裁切或重编码图片；圆角、间距与焦点样式一致。
+Agent 图片继续共用 `ImageGallery` / `ImageTile` / Lightbox：单张按原比例、最大宽约 560px，多张只在图片区
+以 160–240px 单元响应式排列，窄容器退为单列。预览使用 `object-fit: contain`，保留截图、文字和图表完整边界；
+区域不随正文长度收缩，预览框和大图窗口贴合原图比例，不补黑边、不裁切或重编码。
+
+用户消息图片使用同一读取、decoder、Tile 和 Lightbox 基础能力，但时间线缩略图固定为 72×72px 圆角方块，
+多张只在图片区内换行；缩略图允许 `cover`，大图仍按原比例完整显示。该差异由显式 Gallery variant 表达，
+不能复制 decoder、缓存或 Lightbox 实现。
+
+普通文件使用集中分类函数，不能在 Composer、用户消息和 Agent 消息分别维护扩展名判断。用户侧只用中性的
+文档、代码、文件夹三类图形，目录与压缩包共用文件夹，未知格式回退文档；文件项高 46px，显示文件名与独立
+格式标签，不显示大小。Agent 文件使用 Web、Code、Notes、PDF、Word、Sheet、Slide、Image、Archive、Generic
+十个主题 token 家族，未知格式回退 Generic；桌面两列、窄容器一列，并可保留大小和打开入口。`previewKind`
+不是图片的 image MIME/扩展名对象进入 Agent 文件区的 Image 家族。
 
 图片接近可视区域时读取，通过 Chromium 真实图片解码后展示；损坏/消失的 Runtime 图片显示“图片已不可用”，
 不影响其他图片或 AgentRun。稳定路径重开时可读取更新后的内容，不承诺历史不可变；临时路径和 inline 内容由
@@ -533,13 +544,13 @@ PDF、文档、压缩包和目录继续使用现有文件块。
 旧图；正常返回不可用或候选内容解码失败则清除缓存并显示失败；成功候选完成真实解码后无空白替换。
 不持久化缓存，不区分 Runtime 底层存储，也不保证 Chromium 不重新进行内部解码。
 
-Tool/Runtime 图片和发送图片均只显示图片，不显示文件名、来源/数量标题或 Runtime projection 说明；
+Tool/Runtime 图片和显式图片附件均只显示图片，不显示文件名、来源/数量标题或 Runtime projection 说明；
 移除附件操作菜单、右键菜单、系统打开和在 Finder/文件资源管理器中显示的入口。非图片附件不受影响。
 只保留点击或键盘查看大图及关闭；大图标题仅供辅助技术读取，不占据可见空间，关闭控件覆盖在图片角落。
 图片解码失败时显示“图片已不可用”并禁用点击，不回退到系统打开。
 同一 Run 的可用图片附件与 Runtime Blob 摘要完全相同时只显示显式附件；底层记录保留，失效附件不能
 隐藏 Runtime 图。不同 Run、不同内容和可变稳定路径不参与过滤。底层边界见
-[Runtime Images v3](../../contracts/runtime-images-v3.md)，不引入 File Preview 授权流程。
+[Runtime Images v4](../../contracts/runtime-images-v4.md)，不引入 File Preview 授权流程。
 
 ## Task、Approval 与停止
 
@@ -646,21 +657,26 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
 视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
 占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)，发送边界见
+快照限制见 [Camp Attachment v7](../../contracts/camp-attachment-v7.md)，发送边界见
 [Camp Composer Draft v4](../../contracts/camp-composer-draft-v4.md)。
+
+准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
+独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除
+按钮固定在每项右上角。超宽时隐藏视觉滚动条，保留触控板水平滚动；普通鼠标的主滚轮在附件带仍有可滚空间
+时转为横向浏览。附件带本身可聚焦，并以 Left/Right 分段浏览、Home/End 到首尾，不抢占移除按钮的键盘入口。
 
 Timeline Attachment Card 必须投影 `runtimeProjectionState`。`pending | recovery_required` 使用低强调的
 “正在准备供队员读取”，不得伪造百分比或进度；`failed` 明确显示“队员读取不可用”。该状态只描述队员
 Runtime View，不禁用用户对仍完整 Authority Attachment 的预览、打开或显示所在位置。状态使用既有
 Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不暴露 Authority/View 路径或内部 operation ID。
 
-图片单击继续打开会话内大图预览；图片 Authority preview 失败时，卡片退化为“使用系统应用打开”。普通
-文件单击交给系统默认应用，目录单击在 Finder / 文件资源管理器中打开。Timeline 卡片右键菜单提供同一
+普通文件单击继续进入应用内文件预览或受控系统打开，目录单击在 Finder / 文件资源管理器中打开。Timeline
+文件项右键菜单提供同一
 主动作和“在 Finder / 文件资源管理器中显示”；菜单支持键盘循环、Escape 关闭、collision handling 与关闭后
 焦点回到真实卡片。执行中单卡防重复提交；目标 parent 不可枚举、target 消失或 native 请求失败时均显示固定
 的无路径提示，不把 best-effort Shell dispatch 当作文件管理器已确认选择。高风险文件由 Desktop Main 使用原生
 确认，不在 Renderer 判断。Composer Prepared Attachment 保持既有预览/移除交互，不复用 Timeline open API。
-精确安全与结果合同见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)。
+精确安全与结果合同见 [Camp Attachment v7](../../contracts/camp-attachment-v7.md)。
 
 ## 空 Camp 欢迎状态
 

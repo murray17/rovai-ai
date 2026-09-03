@@ -74,7 +74,7 @@ Manifest 只证明本次迁移，禁止随着新版本或新决定扩充。历�
 ```bash
 pnpm docs:test
 pnpm docs:check
-DOCS_BASE_REF=<PR base SHA 或 push 前的 main SHA> pnpm docs:check:ci
+DOCS_BASE_REF=<目标 base SHA> pnpm docs:check:ci
 ```
 
-CI 在 PR 上使用 base commit，在 `main` push 上使用 push 前的 commit 运行 diff-aware 检查。校验动态检查：数字 ADR 为零、版本决策元数据、当前版本内 ID、Manifest 自包含完整性、历史正文等价、Legacy Map 一一对应、覆盖处理方式与当前有效标志一致、当前权威类型/文件/fragment 精确存在、`replaced/retired` 与固定迁移裁决来源一一对应、CURRENT 链接、全仓 Markdown 本地链接/fragment，以及 historical decisions 的 Git-base 冻结。语义准入和规范内核是否真正完整仍是人工审阅责任，不能用关键词或行数启发式替代。
+PR 的 `CI / gate` 使用 base commit 运行 diff-aware 检查；合并到 `main` 后不再自动重复执行。校验动态检查：数字 ADR 为零、版本决策元数据、当前版本内 ID、Manifest 自包含完整性、历史正文等价、Legacy Map 一一对应、覆盖处理方式与当前有效标志一致、当前权威类型/文件/fragment 精确存在、`replaced/retired` 与固定迁移裁决来源一一对应、CURRENT 链接、全仓 Markdown 本地链接/fragment，以及 historical decisions 的 Git-base 冻结。语义准入和规范内核是否真正完整仍是人工审阅责任，不能用关键词或行数启发式替代。

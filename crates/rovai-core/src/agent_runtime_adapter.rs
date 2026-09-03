@@ -693,8 +693,15 @@ impl AgentRuntimeAdapterRegistry {
         kind: AdapterKind,
         platform: HostPlatformKey,
     ) -> RuntimePlatformAdmission {
-        if matches!(kind, AdapterKind::CursorAgent | AdapterKind::Pi) {
+        if kind == AdapterKind::CursorAgent {
             return RuntimePlatformAdmission::not_qualified(
+                kind,
+                platform,
+                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+            );
+        }
+        if kind == AdapterKind::Pi {
+            return RuntimePlatformAdmission::preview(
                 kind,
                 platform,
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,

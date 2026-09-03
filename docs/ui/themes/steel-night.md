@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-09-01
+last_updated: 2026-09-03
 ---
 
 # Steel Night
@@ -121,6 +121,18 @@ Dark. `color-scheme: dark`.
 | `--identity-2` | `#70b0ae` | `--identity-6` | `#b37d9a` |
 | `--identity-3` | `#a89ac8` | `--identity-7` | `#89a878` |
 | `--identity-4` | `#d0a46c` | `--identity-8` | `#b58b68` |
+
+### Agent artifact families
+
+Night 为相同十个格式家族提供独立亮度值；它们只表达文件类别，不复用状态色或成员身份色。
+
+| Token | Value | Token | Value |
+|---|---:|---|---:|
+| `--attachment-web` | `#d0a46c` | `--attachment-code` | `#8fadc0` |
+| `--attachment-notes` | `#abb5bc` | `--attachment-pdf` | `#dc8b85` |
+| `--attachment-word` | `#80abd1` | `--attachment-sheet` | `#82b695` |
+| `--attachment-slide` | `#d2aa72` | `--attachment-image` | `#aa9bc6` |
+| `--attachment-archive` | `#bea773` | `--attachment-generic` | `#abb5bc` |
 
 ### Evidence and diff
 

@@ -9,6 +9,7 @@ import type {
 import {
   memberRuntimePresentation,
   runtimePlatformAdmissionFor,
+  runtimePlatformAdmissionAllowsUse,
   runtimeAvailabilityPresentation,
   runtimeProductPresentation,
   runtimeReadinessLabel
@@ -182,6 +183,23 @@ describe('Runtime user status projection', () => {
 
     expect(result.status).toBe('not_qualified')
     expect(result.label).toBe('Windows 尚未验证')
+  })
+
+  it('keeps preview admission usable while disclosing missing qualification evidence', () => {
+    const admission: RuntimePlatformAdmission = {
+      runtimeKind: 'pi',
+      platform: 'macos-arm64',
+      status: 'preview',
+      reasonCode: 'runtime_platform.qualification_evidence_missing',
+      evidenceRevision: null
+    }
+
+    expect(runtimePlatformAdmissionAllowsUse(admission)).toBe(true)
+    expect(runtimeProductPresentation(admission, availability('ready', 'pi'))).toEqual({
+      status: 'available',
+      label: '可用',
+      detail: '实验性开放；当前平台尚未完成正式资格验证，请自行验证后使用。'
+    })
   })
 })
 

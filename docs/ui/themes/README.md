@@ -2,7 +2,7 @@
 document_type: ui-theme-index
 authority: renderer-theme-routing
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-09-03
 ---
 
 # Renderer 主题
@@ -43,7 +43,7 @@ Theme Token → Shared Component → Surface Composition
 ## 新增或修改主题
 
 1. 从 [`_template.md`](_template.md) 创建主题合同并声明稳定 `theme_id`。
-2. 为现有完整语义 Token 集提供值，包括八组身份色、状态色、证据色和浮层色。
+2. 为现有完整语义 Token 集提供值，包括八组身份色、十组 Agent artifact 格式色、状态色、证据色和浮层色。
 3. 只修改 canonical Token block；组件选择器不得出现主题专属色值。
 4. 按[主题矩阵](../qa/theme-matrix.md)验证相同页面、状态和功能。
 5. 运行 Renderer 主题 Token/对比度测试，并完成真实 App 双主题验收。

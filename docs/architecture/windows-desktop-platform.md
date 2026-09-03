@@ -19,7 +19,7 @@ system frame + hidden title strip + Window Controls Overlay 和 NSIS。Windows A
 企业 MSI、系统服务、UNC/network/removable workspace 与 non-NTFS 不在首版准入。
 
 Host envelope 通过不等于 Runtime 可选。每个 Adapter 还必须通过
-[Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)。
+[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)。
 
 ## 2. Platform seams
 
