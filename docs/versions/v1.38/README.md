@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # Rovai-ai v1.38：钉钉渠道暂停开放与重新开放清单
@@ -33,7 +33,9 @@ last_updated: 2026-09-02
   Bot 仍按既有后台语义运行。该边界只关闭新的用户管理入口，不伪装成后端代码清理。
 - 飞书连接、队员发布、项目选择、排队/执行卡、最近输出、局域网执行台及既有数据完全保持开放。
 - 执行台新增 active AgentRun 专用的 Runtime Compaction 本地事件行。它不是 Tool、不增加操作数，只在明确 token 或 summary
-  存在时展开；Bootstrap redelivery observation、detector policy、渠道、局域网执行台和世界地图保持原边界。
+  存在时展开；`imminent` 是中性记录，只有 `started` 占用活动态。Claude `PostCompact` 映射显式 summary，Cursor
+  `preCompact` 映射显式 token 快照；两者只走 display-only Hook，不改变 Bootstrap redelivery observation、detector policy、
+  渠道、局域网执行台和世界地图边界。
 - 发布前收紧飞书后台维护：active Host 只由 Run started/terminal 与当前执行卡 Run 的 live event 唤醒；首次恢复
   Pump 不先扫描全部历史群。Core outstanding、watchdog、Delivery、latest-wins、精确 roster 刷新和 Web 执行台不变。
 - 下列“重新开放清单”同时记录实现与验收状态；渠道页 gate 在 packaged 桌面端/手机端完整矩阵通过前保持不变。
@@ -84,6 +86,6 @@ last_updated: 2026-09-02
 | Architecture | 已更新 | [飞书渠道架构](../../architecture/feishu-channel.md)与[钉钉渠道架构](../../architecture/dingtalk-channel.md)保持渠道边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)区分 observation 与本地 display sidecar |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)拥有 Provider gate；[Camp 会话工作区](../../ui/components/conversation-workspace.md)拥有非 Tool Compaction 行与 disclosure 规则 |
 | Runtime Activity | 已更新 | `runtime.compaction.display` 明确是 local non-activity，不进入 Canonical Activity、世界地图或 Tool 计数 |
-| Runtime compatibility | 确认无需更新 | 不改变任何 Runtime 的平台准入、模型或工具兼容性 |
+| Runtime compatibility | 已更新 | Claude/Cursor 增加 display-only 字段映射说明；不改变任何 Runtime 的平台准入、模型、工具兼容性或 Compaction detector policy |
 | Documentation routing | 已更新 | 版本索引保持 v1.38；[文档导航](../../README.md)、合同索引和当前决定导航切换到 Channel Host Maintenance v5 |
 | Root README | 确认无需更新 | 根 README 未承诺钉钉公开可用，产品定位与安装方式不变 |

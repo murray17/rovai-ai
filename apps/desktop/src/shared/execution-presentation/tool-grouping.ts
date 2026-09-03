@@ -3,7 +3,8 @@ import {
   activityStatusForAgentRun,
   executionStepPublicTitle,
   type ActivityStatus,
-  type ExecutionProgressItem
+  type ExecutionProgressItem,
+  type RuntimeCompactionDisplayItem
 } from './index'
 
 export type ToolProgressItem = Extract<ExecutionProgressItem, { kind: 'tool' }>
@@ -63,6 +64,24 @@ export function toolActivityGroupHasActiveTool(
     const status = activityStatusForAgentRun(item.step.status, runStatus)
     return status === 'running' || status === 'waiting'
   })
+}
+
+export function runtimeCompactionActivityStatus(
+  compaction: RuntimeCompactionDisplayItem,
+  runStatus: AgentRunView['status']
+): ActivityStatus {
+  if (compaction.phase === 'completed') return 'completed'
+  if (
+    compaction.phase === 'started'
+    && (runStatus === 'queued' || runStatus === 'running' || runStatus === 'waiting')
+  ) return 'running'
+  return 'recorded'
+}
+
+export function executionHasActiveCompaction(items: ExecutionProgressItem[]): boolean {
+  return items.some((item) =>
+    item.kind === 'compaction' && item.compaction.phase === 'started'
+  )
 }
 
 export function toolActivityGroupPresentation(

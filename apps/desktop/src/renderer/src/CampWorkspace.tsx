@@ -122,7 +122,9 @@ import {
   pendingConversationFindStatus
 } from './camp-conversation-find'
 import {
+  executionHasActiveCompaction,
   groupConsecutiveToolItems,
+  runtimeCompactionActivityStatus,
   toolActivityGroupHasActiveTool,
   toolActivityGroupPresentation,
   type ToolProgressItem
@@ -8210,11 +8212,7 @@ function CompactionEventRow({
   const title = runtimeCompactionTitle(compaction)
   const detail = runtimeCompactionDetailText(compaction) ?? ''
   const expandable = runtimeCompactionIsExpandable(compaction)
-  const status = compaction.phase === 'completed'
-    ? 'completed'
-    : NON_TERMINAL_RUNS.has(runStatus)
-      ? compaction.phase === 'imminent' ? 'waiting' : 'running'
-      : 'recorded'
+  const status = runtimeCompactionActivityStatus(compaction, runStatus)
   const summary = (
     <>
       <CompactionEventIcon />
@@ -8457,8 +8455,7 @@ export function RunExecutionDisclosure({
     [processItems]
   )
   const hasActiveTool = toolActivityGroupHasActiveTool(activeToolItems, run.status)
-  const hasActiveCompaction = processItems.some((item) => item.kind === 'compaction'
-    && (item.compaction.phase === 'imminent' || item.compaction.phase === 'started'))
+  const hasActiveCompaction = executionHasActiveCompaction(processItems)
   const trailingProcessItem = groupedProcessItems[groupedProcessItems.length - 1]
   const liveTailToolGroupKey = run.status === 'running'
     && !cancelling
