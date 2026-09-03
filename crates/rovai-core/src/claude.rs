@@ -372,6 +372,14 @@ impl ClaudeCodeCliRuntimeAdapter {
         };
         let mut inline_settings = serde_json::json!({});
         rovai_core::camp_fast::merge_claude_inline_settings(&mut inline_settings, fast_override)?;
+        #[cfg(unix)]
+        if let Some(config) = request.builtin_tools.as_ref() {
+            let hook_command = format!(
+                "{} __compaction-display-hook --adapter-kind claude-code-cli --source-signal PostCompact",
+                quote_posix_shell_word(&config.cli_executable().to_string_lossy())
+            );
+            append_claude_compaction_display_hook(&mut inline_settings, &hook_command)?;
+        }
         let mut command = Command::new(executable);
         configure_active_runtime_command(&mut command);
         if let Some(config) = &request.builtin_tools {
@@ -1736,6 +1744,37 @@ fn launch_session_arguments(
     Ok(args)
 }
 
+#[cfg(unix)]
+fn append_claude_compaction_display_hook(settings: &mut Value, hook_command: &str) -> Result<()> {
+    let settings = settings
+        .as_object_mut()
+        .context("Claude inline settings must be a JSON object")?;
+    let hooks = settings
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .context("Claude inline settings hooks must be a JSON object")?;
+    let post_compact = hooks
+        .entry("PostCompact")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .context("Claude inline settings PostCompact hooks must be an array")?;
+    post_compact.push(serde_json::json!({
+        "matcher": "manual|auto",
+        "hooks": [{
+            "type": "command",
+            "command": hook_command,
+            "timeout": 3
+        }]
+    }));
+    Ok(())
+}
+
+#[cfg(unix)]
+fn quote_posix_shell_word(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
 fn session_arguments(
     resumable_session_id: Option<&str>,
     native_session_id: &str,
@@ -1920,6 +1959,48 @@ mod tests {
                 "--append-system-prompt",
                 "bootstrap-latest",
             ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn appends_additive_post_compact_display_hook_to_inline_settings() {
+        let mut settings = json!({
+            "fastMode": true,
+            "hooks": {
+                "PostCompact": [{"matcher": "manual", "hooks": []}],
+                "Stop": [{"hooks": []}]
+            }
+        });
+        append_claude_compaction_display_hook(
+            &mut settings,
+            "'/tmp/Rovai CLI' __compaction-display-hook --adapter-kind claude-code-cli --source-signal PostCompact",
+        )
+        .unwrap();
+
+        assert_eq!(settings["fastMode"], true);
+        assert_eq!(settings["hooks"]["Stop"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            settings["hooks"]["PostCompact"].as_array().unwrap().len(),
+            2
+        );
+        assert_eq!(
+            settings["hooks"]["PostCompact"][1]["matcher"],
+            "manual|auto"
+        );
+        assert_eq!(
+            settings["hooks"]["PostCompact"][1]["hooks"][0]["type"],
+            "command"
+        );
+        assert!(
+            settings["hooks"]["PostCompact"][1]["hooks"][0]["command"]
+                .as_str()
+                .unwrap()
+                .contains("__compaction-display-hook")
+        );
+        assert_eq!(
+            quote_posix_shell_word("/tmp/Rovai's CLI"),
+            "'/tmp/Rovai'\"'\"'s CLI'"
         );
     }
 
