@@ -32,7 +32,7 @@ describe('General settings', () => {
     expect(markup).toContain('使用入口对应的项目')
     expect(markup).toContain('请先保存默认队员与默认队长')
     expect(markup).toContain('<h2 id="general-conversation-heading">会话</h2>')
-    expect(markup).toMatch(/aria-label="启用世界地图"[^>]*checked=""/)
+    expect(markup).not.toMatch(/aria-label="启用世界地图"[^>]*checked=""/)
     expect(markup).not.toContain('默认开启')
     expect(markup.indexOf('general-new-conversation-heading'))
       .toBeLessThan(markup.indexOf('general-conversation-heading'))
@@ -79,6 +79,7 @@ describe('General settings', () => {
     }))
     expect(markup).toContain('当前生效：rovai-ai · 2 位默认队员 · 队长 洛可')
     expect(markup).toContain('aria-label="一键创建新对话" checked=""')
+    expect(markup).toMatch(/aria-label="启用世界地图"[^>]*checked=""/)
     expect(markup).not.toContain('默认队员配置需要重新确认')
   })
 

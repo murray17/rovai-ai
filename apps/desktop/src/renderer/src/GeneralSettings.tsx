@@ -266,7 +266,7 @@ export function GeneralSettings({
       ?? preferences.newConversationDefaults.defaultLeadAgentId
     : null
   const oneClickEnabled = preferences?.oneClickNewConversationEnabled ?? false
-  const worldMapEnabled = preferences?.worldMapEnabled ?? true
+  const worldMapEnabled = preferences?.worldMapEnabled ?? false
   const oneClickCanEnable = Boolean(savedDefaults) && !defaultsDirty && !oneClickBusy
   const shouldCollapseMembers = defaultMemberCandidates.length > DEFAULT_MEMBER_COLLAPSE_THRESHOLD
   const normalizedMemberQuery = defaultMemberQuery.trim().toLocaleLowerCase('zh-CN')

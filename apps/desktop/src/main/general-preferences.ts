@@ -33,7 +33,7 @@ export const DEFAULT_GENERAL_PREFERENCES: GeneralPreferencesSnapshot = {
   newConversationDefaults: null,
   newConversationDefaultsRequireConfirmation: false,
   oneClickNewConversationEnabled: false,
-  worldMapEnabled: true
+  worldMapEnabled: false
 }
 
 export function isStartupLocationMode(value: unknown): value is StartupLocationMode {
@@ -67,7 +67,8 @@ export function parseGeneralPreferences(value: unknown): GeneralPreferencesSnaps
     return {
       ...DEFAULT_GENERAL_PREFERENCES,
       startupLocationMode: value.startupLocationMode,
-      lastSettingsSection: value.lastSettingsSection
+      lastSettingsSection: value.lastSettingsSection,
+      worldMapEnabled: true
     }
   }
   const v2Keys = [
