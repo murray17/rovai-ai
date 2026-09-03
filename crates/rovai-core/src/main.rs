@@ -5,6 +5,7 @@ mod claude;
 mod codex;
 mod core_subsystems;
 mod health;
+mod pi;
 mod runtime_fleet;
 mod runtime_mcp;
 
@@ -37,6 +38,7 @@ use codex::{
 use core_subsystems::{
     CoreSubsystems, SubsystemInitialization, SubsystemUnavailable, runtime_subsystem_id,
 };
+use pi::{PiAgentRunRuntimeRequest, PiIncoming, PiRpcRuntimeAdapter, PiRuntime};
 #[cfg(target_os = "macos")]
 use rovai_core::managed_process::configure_user_automation_denial_root;
 use rovai_core::{
@@ -63,8 +65,8 @@ use rovai_core::{
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
-        executable_fingerprint as fingerprint_executable, observe_executable_file_identity,
-        verify_executable_integrity,
+        PiProbeObservation, executable_fingerprint as fingerprint_executable,
+        observe_executable_file_identity, verify_executable_integrity,
     },
     authority_migration::{
         AuthorityMigrationProgress, AuthorityMigrationRunner, trace_startup_stage,
@@ -182,6 +184,7 @@ use rovai_core::{
         MonitoringFilter, MonitoringService, ParsedRuntimeUsage, RuntimeUsageBuffer,
         RuntimeUsageFlushTarget, acp_usage_source_identity, codex_usage_source_identity,
         parse_acp_usage_message, parse_claude_result_usage, parse_codex_usage_message,
+        parse_pi_usage_message, pi_usage_source_identity,
     },
     notification::{
         AcknowledgeNotificationEpisodeCommand, AcknowledgeVisibleNotificationSourcesCommand,
@@ -1591,8 +1594,26 @@ fn windows_runtime_qualification_allows(runtime_kind: AdapterKind) -> bool {
     }
 }
 
+fn pi_runtime_qualification_allows(runtime_kind: AdapterKind) -> bool {
+    #[cfg(debug_assertions)]
+    {
+        runtime_kind == AdapterKind::Pi
+            && std::env::var("ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER")
+                .ok()
+                .is_some_and(|candidate| candidate.trim() == AdapterKind::Pi.as_str())
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = runtime_kind;
+        false
+    }
+}
+
 const WINDOWS_LOCAL_QUALIFICATION_EVIDENCE_REVISION: &str =
     "local-debug:windows-runtime-qualification-adapter";
+const PI_LOCAL_QUALIFICATION_EVIDENCE_REVISION: &str =
+    "local-debug:pi-runtime-qualification-adapter";
 
 fn apply_windows_runtime_qualification_override(
     admission: RuntimePlatformAdmission,
@@ -1609,15 +1630,34 @@ fn apply_windows_runtime_qualification_override(
     }
 }
 
+fn apply_pi_runtime_qualification_override(
+    admission: RuntimePlatformAdmission,
+    locally_qualified: bool,
+) -> RuntimePlatformAdmission {
+    if locally_qualified && admission.runtime_kind() == AdapterKind::Pi {
+        RuntimePlatformAdmission::qualified(
+            admission.runtime_kind(),
+            admission.platform(),
+            PI_LOCAL_QUALIFICATION_EVIDENCE_REVISION,
+        )
+    } else {
+        admission
+    }
+}
+
 fn current_runtime_platform_admission(
     runtime_kind: AdapterKind,
 ) -> Option<RuntimePlatformAdmission> {
     AgentRuntimeAdapterRegistry::default()
         .current_platform_admission(runtime_kind)
         .map(|admission| {
-            apply_windows_runtime_qualification_override(
+            let admission = apply_windows_runtime_qualification_override(
                 admission,
                 windows_runtime_qualification_allows(runtime_kind),
+            );
+            apply_pi_runtime_qualification_override(
+                admission,
+                pi_runtime_qualification_allows(runtime_kind),
             )
         })
 }
@@ -1628,7 +1668,10 @@ fn runtime_platform_admission_matrix() -> Vec<RuntimePlatformAdmission> {
         .into_iter()
         .map(|admission| {
             let locally_qualified = windows_runtime_qualification_allows(admission.runtime_kind());
-            apply_windows_runtime_qualification_override(admission, locally_qualified)
+            let admission =
+                apply_windows_runtime_qualification_override(admission, locally_qualified);
+            let pi_locally_qualified = pi_runtime_qualification_allows(admission.runtime_kind());
+            apply_pi_runtime_qualification_override(admission, pi_locally_qualified)
         })
         .collect()
 }
@@ -1638,6 +1681,7 @@ fn current_platform_qualified_runtime_kinds() -> Vec<AdapterKind> {
         .into_iter()
         .filter(|kind| {
             windows_runtime_qualification_allows(*kind)
+                || pi_runtime_qualification_allows(*kind)
                 || current_runtime_platform_admission(*kind)
                     .as_ref()
                     .is_some_and(RuntimePlatformAdmission::is_qualified)
@@ -1646,7 +1690,9 @@ fn current_platform_qualified_runtime_kinds() -> Vec<AdapterKind> {
 }
 
 fn current_runtime_platform_blocker(runtime_kind: AdapterKind) -> Option<CommandHandlerResult> {
-    if windows_runtime_qualification_allows(runtime_kind) {
+    if windows_runtime_qualification_allows(runtime_kind)
+        || pi_runtime_qualification_allows(runtime_kind)
+    {
         return None;
     }
     match current_runtime_platform_admission(runtime_kind) {
@@ -1708,6 +1754,7 @@ struct Core {
     mcp_config: Result<McpConfigStore>,
     mcp_projection: McpProjectionService,
     codex_cli: CodexCliRuntimeAdapter,
+    pi: PiRpcRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
     kiro_cli: AcpCliRuntimeAdapter,
@@ -1746,6 +1793,11 @@ struct CampAttachmentRunAccess<'a> {
     authorization: &'a CampAttachmentRuntimeAuthorization,
 }
 
+struct RuntimeInputPreparationRequest<'a> {
+    charter_delivery_mode: CharterDeliveryMode,
+    proposed_delivery_id: Option<&'a str>,
+}
+
 impl CampAttachmentRunAccess<'_> {
     fn prove(self, execution: &AgentRunExecution) -> Result<()> {
         self.admission.prove(&execution.camp_id)?;
@@ -1758,6 +1810,7 @@ impl CampAttachmentRunAccess<'_> {
 
 enum AgentRunRuntime {
     Codex(Arc<CodexRuntime>),
+    Pi(Arc<PiRuntime>),
     Acp(Arc<AcpRuntime>),
 }
 
@@ -2032,6 +2085,7 @@ fn runtime_diagnostic_checks(
 fn runtime_display_name(kind: AdapterKind) -> &'static str {
     match kind {
         AdapterKind::CodexCli => "Codex CLI",
+        AdapterKind::Pi => "Pi",
         AdapterKind::OpencodeCli => "OpenCode",
         AdapterKind::CopilotCli => "GitHub Copilot CLI",
         AdapterKind::ClaudeCodeCli => "Claude Code",
@@ -2051,6 +2105,7 @@ impl AgentRunRuntime {
     fn adapter_kind(&self) -> rovai_core::agent_profile::AdapterKind {
         match self {
             Self::Codex(_) => rovai_core::agent_profile::AdapterKind::CodexCli,
+            Self::Pi(_) => rovai_core::agent_profile::AdapterKind::Pi,
             Self::Acp(runtime) => runtime.adapter_kind(),
         }
     }
@@ -2062,6 +2117,7 @@ impl AgentRunRuntime {
     async fn respond(&self, id: Value, result: Value) -> Result<()> {
         match self {
             Self::Codex(runtime) => runtime.respond(id, result).await,
+            Self::Pi(runtime) => runtime.respond(id, result).await,
             Self::Acp(runtime) => runtime.respond(id, result).await,
         }
     }
@@ -2069,6 +2125,7 @@ impl AgentRunRuntime {
     async fn cancel(&self) -> Result<()> {
         match self {
             Self::Codex(runtime) => runtime.interrupt().await,
+            Self::Pi(runtime) => runtime.cancel().await,
             Self::Acp(runtime) => runtime.cancel().await,
         }
     }
@@ -2076,6 +2133,7 @@ impl AgentRunRuntime {
     async fn detach_and_flush_ingress(&self) -> bool {
         match self {
             Self::Codex(runtime) => runtime.detach_and_flush_ingress().await,
+            Self::Pi(runtime) => runtime.detach_and_flush_ingress().await,
             Self::Acp(runtime) => runtime.detach_and_flush_ingress().await,
         }
     }
@@ -2216,6 +2274,7 @@ impl Core {
 
     async fn forget_deleted_camp_runtimes(&self, camp_id: &str) {
         self.codex_cli.forget_camp(camp_id).await;
+        self.pi.forget_camp(camp_id).await;
     }
 
     async fn stop_deleted_camp_runtimes(
@@ -3843,6 +3902,9 @@ impl Core {
         {
             return Some(AgentRunRuntime::Codex(runtime));
         }
+        if let Some(runtime) = self.pi.get_agent_run(agent_run_id, execution_epoch).await {
+            return Some(AgentRunRuntime::Pi(runtime));
+        }
         if let Some(runtime) = self
             .opencode_cli
             .get_agent_run(agent_run_id, execution_epoch)
@@ -4011,6 +4073,7 @@ impl Core {
     async fn shutdown_all_runtimes(&self) {
         tokio::join!(
             self.codex_cli.shutdown_all(),
+            self.pi.shutdown_all(),
             self.opencode_cli.shutdown_all(),
             self.copilot_cli.shutdown_all(),
             self.kiro_cli.shutdown_all(),
@@ -4031,6 +4094,7 @@ impl Core {
         let adapters_quiesced = tokio::time::timeout_at(deadline, async {
             tokio::join!(
                 self.codex_cli.shutdown_all(),
+                self.pi.shutdown_all(),
                 self.opencode_cli.shutdown_all(),
                 self.copilot_cli.shutdown_all(),
                 self.kiro_cli.shutdown_all(),
@@ -4067,6 +4131,7 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::KimiCodeCli => Some(&self.kimi_code_cli),
             rovai_core::agent_profile::AdapterKind::GrokBuild => Some(&self.grok_build),
             rovai_core::agent_profile::AdapterKind::CodexCli
+            | rovai_core::agent_profile::AdapterKind::Pi
             | rovai_core::agent_profile::AdapterKind::ClaudeCodeCli
             | rovai_core::agent_profile::AdapterKind::AntigravityApp => None,
         }
@@ -8095,6 +8160,26 @@ impl Core {
                     None,
                 )
             }
+            rovai_core::agent_profile::AdapterKind::Pi => {
+                let probe = health::pi_capability_probe_at(executable_path).await;
+                let last_error = (probe.result.status != health::AgentRuntimeProbeStatus::Ready)
+                    .then(|| probe.result.detail.clone())
+                    .flatten();
+                (
+                    registry.pi_capability_snapshot(PiProbeObservation {
+                        reported_version: probe.result.reported_version,
+                        executable_fingerprint: probe.result.executable_fingerprint,
+                        authentication_status: probe_authentication_status(probe.result.status)
+                            .to_string(),
+                        probe_status: probe_status_name(probe.result.status).to_string(),
+                        capabilities: probe.result.capabilities,
+                        raw_model_catalog: probe.raw_model_catalog,
+                        attempted_at,
+                        last_error,
+                    })?,
+                    None,
+                )
+            }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
@@ -9083,6 +9168,10 @@ impl Core {
                         self.codex_cli
                             .forget_agent_run(agent_run_id, execution_epoch)
                             .await;
+                    } else if adapter_kind == "pi" {
+                        self.pi
+                            .forget_agent_run(agent_run_id, execution_epoch)
+                            .await;
                     } else if let Ok(kind) = adapter_kind.parse::<AdapterKind>()
                         && let Some(adapter) = self.acp_adapter(kind)
                     {
@@ -9542,7 +9631,7 @@ impl Core {
         attachment_access: CampAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
-        charter_delivery_mode: CharterDeliveryMode,
+        request: RuntimeInputPreparationRequest<'_>,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<(PreparedContext, RuntimeInputDelivery)>> {
         attachment_access.prove(execution)?;
@@ -9559,18 +9648,28 @@ impl Core {
                 &MaterializeContextRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
-                    charter_delivery_mode,
+                    charter_delivery_mode: request.charter_delivery_mode,
                     max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
                 },
             )?;
             match materialization {
                 ContextMaterialization::Ready(context) => {
-                    let delivery = ContextService.prepare_input_delivery_for_context(
-                        &mut database,
-                        &execution.agent_run_id,
-                        execution.execution_epoch,
-                        &context,
-                    )?;
+                    let delivery = match request.proposed_delivery_id {
+                        Some(identity) => ContextService
+                            .prepare_input_delivery_for_context_with_identity(
+                                &mut database,
+                                &execution.agent_run_id,
+                                execution.execution_epoch,
+                                &context,
+                                identity,
+                            )?,
+                        None => ContextService.prepare_input_delivery_for_context(
+                            &mut database,
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                            &context,
+                        )?,
+                    };
                     Some(Ok((context, delivery)))
                 }
                 ContextMaterialization::Waiting(wait) => Some(Err(wait)),
@@ -10569,6 +10668,20 @@ impl Core {
                 })
                 .await;
         }
+        if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::Pi {
+            return self
+                .launch_pi_agent_run(PreparedRuntimeLaunch {
+                    execution,
+                    resume_disposition,
+                    skill_exposure: &skill_exposure,
+                    mcp_projection: &mcp_projection,
+                    attachment_admission,
+                    attachment_authorization,
+                    output,
+                    launch_permit,
+                })
+                .await;
+        }
         if execution.runtime.adapter_kind.uses_acp() {
             return self
                 .launch_acp_agent_run(PreparedRuntimeLaunch {
@@ -10895,6 +11008,269 @@ impl Core {
             &execution.agent_run_id,
             execution.execution_epoch,
             runtime.observed_model_id().await,
+        )
+        .await;
+        Ok(())
+    }
+
+    async fn launch_pi_agent_run(&self, launch: PreparedRuntimeLaunch<'_>) -> Result<()> {
+        let PreparedRuntimeLaunch {
+            execution,
+            resume_disposition,
+            skill_exposure,
+            mcp_projection,
+            attachment_admission,
+            attachment_authorization,
+            output,
+            launch_permit,
+        } = launch;
+        CampAttachmentRunAccess {
+            admission: attachment_admission,
+            authorization: attachment_authorization,
+        }
+        .prove(execution)?;
+        let execution_root = PathBuf::from(&execution.workspace.execution_root);
+        if !execution_root.is_dir() {
+            anyhow::bail!(
+                "AgentRun execution directory no longer exists: {}",
+                execution_root.display()
+            );
+        }
+        launch_permit.check_cancelled()?;
+        let mut binding_credential = self
+            .prepare_initial_builtin_tool_binding(execution, resume_disposition)
+            .await?;
+        let exact_resume = binding_credential.native_session_id.is_some();
+        let session_bootstrap = {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_session_bootstrap(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                CharterDeliveryMode::ManagedSystemPrompt,
+            )?
+        };
+        // These identities are allocated before the Native Session is touched so
+        // the managed Extension can bind them without materializing a Context or
+        // a sendable Input against an unverified resumed Session.
+        let mut delivery_id = uuid::Uuid::new_v4().to_string();
+        let mut native_prompt_id = format!(
+            "pi-prompt:{}:{}:{}",
+            execution.agent_run_id,
+            execution.execution_epoch,
+            uuid::Uuid::new_v4()
+        );
+        let runtime_compatibility_digest = pi::runtime_compatibility_digest(
+            &execution.runtime,
+            &execution_root,
+            attachment_authorization,
+        )?;
+        self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
+            .await?;
+        let builtin_tools = self.prepare_builtin_tool_process_config()?;
+        launch_permit.check_cancelled()?;
+        let runtime_result = self
+            .pi
+            .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
+                agent_run_id: &execution.agent_run_id,
+                execution_epoch: execution.execution_epoch,
+                camp_id: &execution.camp_id,
+                agent_id: &execution.agent_id,
+                cwd: &execution_root,
+                frozen_runtime: &execution.runtime,
+                runtime_compatibility_digest: &runtime_compatibility_digest,
+                native_session_id: binding_credential.native_session_id.as_deref(),
+                delivery_id: &delivery_id,
+                native_prompt_id: &native_prompt_id,
+                native_binding_id: &binding_credential.native_binding_id,
+                native_binding_generation: binding_credential.native_binding_generation,
+                bootstrap: &session_bootstrap,
+                skill_exposure,
+                mcp_projection,
+                builtin_tools: &builtin_tools,
+            })
+            .await;
+        let runtime = match runtime_result {
+            Ok(runtime) => runtime,
+            Err(error) if exact_resume => {
+                let failure = classify_native_resume_failure(&error);
+                {
+                    let mut database = self.database.lock().await;
+                    if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                        ExecutionRuntimeService::default().record_native_session_resume_failure(
+                            &mut database,
+                            execution,
+                            failure,
+                        )?;
+                    }
+                    ExecutionRuntimeService::default().record_native_session_continuity_lost(
+                        &mut database,
+                        execution,
+                        "pi_exact_session_file",
+                        failure,
+                    )?;
+                }
+                launch_permit.check_cancelled()?;
+                let replacement_binding =
+                    self.prepare_builtin_tool_binding(execution, true).await?;
+                let replacement_bootstrap = {
+                    let mut database = self.database.lock().await;
+                    ContextService.prepare_session_bootstrap(
+                        &mut database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                        CharterDeliveryMode::ManagedSystemPrompt,
+                    )?
+                };
+                let replacement_delivery_id = uuid::Uuid::new_v4().to_string();
+                let replacement_prompt_id = format!(
+                    "pi-prompt:{}:{}:{}",
+                    execution.agent_run_id,
+                    execution.execution_epoch,
+                    uuid::Uuid::new_v4()
+                );
+                launch_permit.check_cancelled()?;
+                let replacement = self
+                    .pi
+                    .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
+                        agent_run_id: &execution.agent_run_id,
+                        execution_epoch: execution.execution_epoch,
+                        camp_id: &execution.camp_id,
+                        agent_id: &execution.agent_id,
+                        cwd: &execution_root,
+                        frozen_runtime: &execution.runtime,
+                        runtime_compatibility_digest: &runtime_compatibility_digest,
+                        native_session_id: None,
+                        delivery_id: &replacement_delivery_id,
+                        native_prompt_id: &replacement_prompt_id,
+                        native_binding_id: &replacement_binding.native_binding_id,
+                        native_binding_generation: replacement_binding.native_binding_generation,
+                        bootstrap: &replacement_bootstrap,
+                        skill_exposure,
+                        mcp_projection,
+                        builtin_tools: &builtin_tools,
+                    })
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to create the single replacement Pi Session after exact resume failed: {error:#}"
+                        )
+                    })?;
+                binding_credential = replacement_binding;
+                delivery_id = replacement_delivery_id;
+                native_prompt_id = replacement_prompt_id;
+                replacement
+            }
+            Err(error) => return Err(error).context("Pi Native Session activation failed closed"),
+        };
+        let active_builtin_tools = runtime
+            .builtin_tool_process_config()
+            .context("Pi Runtime has no Built-in Tool process context")?
+            .clone();
+        self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &binding_credential)
+            .await?;
+        self.bind_prepared_native_session(execution, &binding_credential, runtime.session_id())
+            .await?;
+        let prepared = self
+            .materialize_and_prepare_agent_run_input(
+                execution,
+                CampAttachmentRunAccess {
+                    admission: attachment_admission,
+                    authorization: attachment_authorization,
+                },
+                skill_exposure,
+                mcp_projection,
+                RuntimeInputPreparationRequest {
+                    charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
+                    proposed_delivery_id: Some(&delivery_id),
+                },
+                output,
+            )
+            .await;
+        let (prepared_context, delivery) = match prepared {
+            Ok(Some(prepared)) => prepared,
+            Ok(None) => {
+                self.pi
+                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+                return Ok(());
+            }
+            Err(error) => {
+                self.pi
+                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+                return Err(error).context("failed to atomically prepare Pi AgentRun input");
+            }
+        };
+        if delivery.id != delivery_id {
+            self.pi
+                .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                .await;
+            anyhow::bail!("Pi Runtime Input Delivery identity changed before dispatch");
+        }
+        if delivery.status == "accepted" {
+            anyhow::bail!(
+                "accepted Pi input has no verified cross-process Prompt reconciliation path"
+            );
+        }
+        if delivery.status != "prepared" {
+            anyhow::bail!("Pi Runtime Input Delivery is not ready to send");
+        }
+        self.begin_agent_run_input_dispatch(execution, &delivery.id, launch_permit)
+            .await?;
+        if let Err(error) = runtime
+            .start_prompt(&prepared_context.rendered_payload)
+            .await
+        {
+            let mut database = self.database.lock().await;
+            ContextService.mark_input_delivery_unknown(
+                &mut database,
+                &delivery.id,
+                "Pi prompt acceptance could not be confirmed",
+            )?;
+            return Err(error).context("Pi input delivery outcome is unknown");
+        }
+        self.complete_active_runtime_route_handoff(
+            execution,
+            RuntimeRouteBinding {
+                route_identity: runtime.host_instance_id().to_string(),
+                adapter_turn_correlation: native_prompt_id.clone(),
+                provider_turn_id: None,
+            },
+            launch_permit,
+        )
+        .await?;
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "campId": execution.camp_id,
+                "campTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentId": execution.agent_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
+                "hostInstanceId": runtime.host_instance_id(),
+                "nativeThreadId": runtime.session_id(),
+                "nativeTurnId": native_prompt_id,
+                "providerModelFingerprint": runtime.model_fingerprint(),
+            }),
+        );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
+        record_available_runtime_model(
+            self,
+            output,
+            AdapterKind::Pi,
+            &execution.camp_id,
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            Some(execution.runtime.model.model_id.clone()),
         )
         .await;
         Ok(())
@@ -12089,7 +12465,10 @@ impl Core {
                 attachment_access,
                 skill_exposure,
                 mcp_projection,
-                charter_delivery_mode,
+                RuntimeInputPreparationRequest {
+                    charter_delivery_mode,
+                    proposed_delivery_id: None,
+                },
                 output,
             )
             .await
@@ -12316,6 +12695,11 @@ impl Core {
         match execution.runtime.adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
                 self.codex_cli
+                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+            }
+            rovai_core::agent_profile::AdapterKind::Pi => {
+                self.pi
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
                     .await;
             }
@@ -13163,6 +13547,7 @@ async fn run_core(
         .map(McpConfigStore::new);
     let mcp_projection = McpProjectionService::new(&data_dir);
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
+    let (pi_tx, pi_rx) = mpsc::unbounded_channel();
     let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
     let (output_control_tx, output_control_rx) = mpsc::channel(1);
@@ -13217,6 +13602,7 @@ async fn run_core(
         mcp_config,
         mcp_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
+        pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
         opencode_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::OpencodeCli,
             acp_tx.clone(),
@@ -13335,6 +13721,13 @@ async fn run_core(
         codex_rx,
         output_tx.clone(),
         event_shutdown_rx,
+    ));
+    let (pi_shutdown_tx, pi_shutdown_rx) = oneshot::channel();
+    let mut pi_event_handle = tokio::spawn(process_pi_events(
+        core.clone(),
+        pi_rx,
+        output_tx.clone(),
+        pi_shutdown_rx,
     ));
     let (acp_shutdown_tx, acp_shutdown_rx) = oneshot::channel();
     let mut acp_event_handle = tokio::spawn(process_acp_events(
@@ -13673,9 +14066,11 @@ async fn run_core(
         // tracked owners, drain any guard admitted before the cutoff, then make
         // the durable cancellation terminal authoritative.
         let _ = event_shutdown_tx.send(());
+        let _ = pi_shutdown_tx.send(());
         let _ = acp_shutdown_tx.send(());
         let _ = builtin_tool_shutdown_tx.send(());
         event_handle.abort();
+        pi_event_handle.abort();
         acp_event_handle.abort();
         let agent_tasks_aborted = core
             .abort_agent_run_tasks_now_until(std::cmp::min(
@@ -13711,6 +14106,12 @@ async fn run_core(
                 .await;
         let event_quiesced = join_or_abort_until(
             &mut event_handle,
+            tokio::time::Instant::now(),
+            fence_settlement_deadline,
+        )
+        .await;
+        let pi_event_quiesced = join_or_abort_until(
+            &mut pi_event_handle,
             tokio::time::Instant::now(),
             fence_settlement_deadline,
         )
@@ -13768,6 +14169,7 @@ async fn run_core(
             && builtin_tools_fenced
             && agent_tasks_quiesced
             && event_quiesced
+            && pi_event_quiesced
             && acp_event_quiesced
             && runtime_usage_quiesced;
         let controlled_fence_settlement = if fence_prerequisites_quiesced {
@@ -13878,6 +14280,7 @@ async fn run_core(
             || !agent_tasks_quiesced
             || !runtimes_quiesced
             || !event_quiesced
+            || !pi_event_quiesced
             || !acp_event_quiesced
             || !runtime_usage_quiesced;
 
@@ -13936,6 +14339,8 @@ async fn run_core(
         let _ = builtin_tool_handle.await;
         let _ = event_shutdown_tx.send(());
         let _ = event_handle.await;
+        let _ = pi_shutdown_tx.send(());
+        let _ = pi_event_handle.await;
         let _ = acp_shutdown_tx.send(());
         let _ = acp_event_handle.await;
         let _ = runtime_usage_shutdown_tx.send(());
@@ -14297,6 +14702,877 @@ async fn process_codex_events(
                 unreachable!("Codex ingress barriers are handled before Runtime routing")
             }
         }
+    }
+}
+
+async fn process_pi_events(
+    core: Arc<Core>,
+    mut receiver: mpsc::UnboundedReceiver<PiIncoming>,
+    output: mpsc::UnboundedSender<String>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    loop {
+        let incoming = tokio::select! {
+            incoming = receiver.recv() => match incoming {
+                Some(incoming) => incoming,
+                None => break,
+            },
+            _ = &mut shutdown => break,
+        };
+        let incoming = match incoming {
+            PiIncoming::IngressFlushed { acknowledgement } => {
+                let _ = acknowledgement.send(());
+                continue;
+            }
+            incoming => incoming,
+        };
+        let Some(mut runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await
+        else {
+            break;
+        };
+        match incoming {
+            PiIncoming::Message {
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence,
+                message,
+            } => {
+                if let Err(error) = process_agent_run_pi_message(
+                    &core,
+                    &output,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                    &native_session_id,
+                    &native_prompt_id,
+                    &delivery_id,
+                    sequence,
+                    message,
+                    &mut runtime_route_permit,
+                )
+                .await
+                {
+                    eprintln!("failed to process Pi Runtime event: {error:#}");
+                }
+            }
+            PiIncoming::Exited {
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+            } => {
+                process_pi_agent_run_exit(
+                    &core,
+                    &output,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                )
+                .await;
+            }
+            PiIncoming::IngressFlushed { .. } => {
+                unreachable!("Pi ingress barriers are handled before Runtime routing")
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_agent_run_pi_message(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    native_session_id: &str,
+    native_prompt_id: &str,
+    delivery_id: &str,
+    sequence: u64,
+    message: Value,
+    runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
+) -> Result<()> {
+    let Some(runtime) = core
+        .pi
+        .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
+        .await
+    else {
+        return Ok(());
+    };
+    if runtime.session_id() != native_session_id
+        || runtime.prompt_id() != native_prompt_id
+        || runtime.delivery_id() != delivery_id
+    {
+        eprintln!(
+            "dropped fenced Pi message for AgentRun {agent_run_id} at Session sequence {sequence}"
+        );
+        return Ok(());
+    }
+    let message_type = message
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let usage = parse_pi_usage_message(&message, native_session_id, native_prompt_id);
+    if !usage.is_empty() {
+        match pi_usage_source_identity(&message, native_session_id, native_prompt_id) {
+            Ok(Some(source_identity)) => {
+                if let Err(error) = buffer_runtime_usage(
+                    core,
+                    agent_run_id,
+                    execution_epoch,
+                    &source_identity,
+                    &usage,
+                )
+                .await
+                {
+                    eprintln!("failed to persist Pi Usage for AgentRun {agent_run_id}: {error:#}");
+                }
+            }
+            Ok(None) => {}
+            Err(error) => eprintln!(
+                "dropped Pi Usage without a stable source identity for AgentRun {agent_run_id}: {error:#}"
+            ),
+        }
+    }
+    let completed_action = runtime.observe(&message).await?;
+    if message_type == "extension_ui_request" {
+        match message.get("method").and_then(Value::as_str) {
+            Some("setStatus") => return Ok(()),
+            Some("confirm") => {
+                process_agent_run_pi_approval_request(
+                    core,
+                    output,
+                    &runtime,
+                    agent_run_id,
+                    execution_epoch,
+                    &message,
+                )
+                .await?;
+                return Ok(());
+            }
+            Some("input")
+                if message.get("title").and_then(Value::as_str)
+                    == Some("Rovai managed input receipt") =>
+            {
+                process_pi_managed_input_receipt(core, &runtime, delivery_id, &message).await?;
+                return Ok(());
+            }
+            Some("input")
+                if message.get("title").and_then(Value::as_str) == Some("Rovai MCP bridge") =>
+            {
+                process_pi_mcp_bridge_request(&runtime, &message).await?;
+                return Ok(());
+            }
+            Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
+            _ => {
+                runtime.mark_failed_closed();
+                let id = message.get("id").cloned().unwrap_or(Value::Null);
+                if !id.is_null() {
+                    runtime
+                        .respond(
+                            id.clone(),
+                            json!({"type":"extension_ui_response","id":id,"cancelled":true}),
+                        )
+                        .await?;
+                }
+                anyhow::bail!("Pi emitted an unsupported Extension UI request");
+            }
+        }
+    }
+    let (event_type, payload) = pi::normalize_event(&message);
+    if event_type != "runtime.usage" {
+        let evidence = persist_runtime_evidence(
+            core,
+            agent_run_id,
+            execution_epoch,
+            runtime
+                .builtin_tool_process_config()
+                .map(BuiltinToolProcessConfig::run_tmp),
+            event_type,
+            &payload,
+        )
+        .await?;
+        if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type)
+            || evidence.is_some()
+        {
+            let evidence_id = evidence.as_ref().map(|value| value.id.as_str());
+            let public_payload = evidence
+                .as_ref()
+                .map(|value| &value.payload)
+                .unwrap_or(&payload);
+            emit(
+                output,
+                event_type,
+                json!({
+                    "agentRunId": agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "adapterKind": AdapterKind::Pi,
+                    "nativeMethod": message_type,
+                    "evidenceId": evidence_id,
+                    "payload": public_payload,
+                    "canonical": evidence.as_ref().and_then(|value| value.canonical.as_ref()),
+                }),
+            );
+        }
+    }
+    if let Some(completion) = completed_action {
+        record_acp_action_completion(
+            core,
+            output,
+            AdapterKind::Pi,
+            agent_run_id,
+            execution_epoch,
+            completion,
+        )
+        .await?;
+    }
+    if message_type == "agent_settled" {
+        if let Err(error) =
+            flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "terminal_flush")
+                .await
+        {
+            eprintln!("failed to flush Pi monitoring for AgentRun {agent_run_id}: {error:#}");
+        }
+        persist_pi_prompt_completion(
+            core,
+            output,
+            &runtime,
+            host_instance_id,
+            agent_run_id,
+            execution_epoch,
+            runtime_route_permit,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn process_pi_managed_input_receipt(
+    core: &Arc<Core>,
+    runtime: &PiRuntime,
+    delivery_id: &str,
+    request: &Value,
+) -> Result<()> {
+    let id = request
+        .get("id")
+        .cloned()
+        .context("Pi managed input receipt request omitted id")?;
+    let receipt: Value = serde_json::from_str(
+        request
+            .get("placeholder")
+            .and_then(Value::as_str)
+            .context("Pi managed input receipt request omitted evidence")?,
+    )
+    .context("Pi managed input receipt request is invalid")?;
+    let (expected_digest, commit_nonce) = runtime.validate_managed_receipt(&receipt)?;
+    let committed = {
+        let mut database = core.database.lock().await;
+        ContextService.commit_pi_managed_input_receipt_and_accept(
+            &mut database,
+            delivery_id,
+            runtime.prompt_id(),
+            &receipt,
+            &commit_nonce,
+        )?
+    };
+    if committed.digest != expected_digest
+        || committed.commit_nonce != commit_nonce
+        || committed.delivery.status != "accepted"
+        || committed.delivery.native_input_id.as_deref() != Some(runtime.prompt_id())
+    {
+        anyhow::bail!("Pi managed input receipt commit evidence diverged");
+    }
+    runtime.mark_receipt_committed();
+    runtime
+        .respond(
+            id.clone(),
+            json!({"type":"extension_ui_response", "id":id, "value":commit_nonce}),
+        )
+        .await
+}
+
+async fn process_pi_mcp_bridge_request(runtime: &PiRuntime, request: &Value) -> Result<()> {
+    let id = request
+        .get("id")
+        .cloned()
+        .context("Pi MCP bridge request omitted id")?;
+    let envelope: Value = serde_json::from_str(
+        request
+            .get("placeholder")
+            .and_then(Value::as_str)
+            .context("Pi MCP bridge request omitted envelope")?,
+    )
+    .context("Pi MCP bridge request envelope is invalid")?;
+    let result = runtime
+        .execute_mcp_bridge(&envelope)
+        .await
+        .unwrap_or_else(|_| {
+            json!({
+                "content": [{"type":"text", "text": "Rovai MCP bridge rejected the call"}],
+                "isError": true,
+            })
+        });
+    runtime
+        .respond(
+            id.clone(),
+            json!({
+                "type":"extension_ui_response",
+                "id":id,
+                "value":serde_json::to_string(&result).unwrap_or_else(|_| "{\"content\":[],\"isError\":true}".to_string()),
+            }),
+        )
+        .await
+}
+
+async fn process_agent_run_pi_approval_request(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &PiRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    request: &Value,
+) -> Result<()> {
+    if !runtime.approval_handshake_observed() {
+        reject_pi_approval_request(
+            output,
+            runtime,
+            agent_run_id,
+            execution_epoch,
+            request,
+            "Pi managed Approval Extension handshake is unavailable",
+        )
+        .await?;
+        return Ok(());
+    }
+    let execution = {
+        let database = core.database.lock().await;
+        ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            agent_run_id,
+            execution_epoch,
+        )
+    }?;
+    let Some(execution) = execution else {
+        reject_pi_approval_request(
+            output,
+            runtime,
+            agent_run_id,
+            execution_epoch,
+            request,
+            "AgentRun is unavailable or fenced",
+        )
+        .await?;
+        return Ok(());
+    };
+    let action_request = match pi::intercepted_action_request(
+        agent_run_id,
+        execution_epoch,
+        runtime.host_instance_id(),
+        runtime.host_binding_generation(),
+        runtime.native_binding_generation(),
+        runtime.session_id(),
+        runtime.prompt_id(),
+        Path::new(&execution.workspace.execution_root),
+        request,
+    ) {
+        Ok(request) => request,
+        Err(error) => {
+            reject_pi_approval_request(
+                output,
+                runtime,
+                agent_run_id,
+                execution_epoch,
+                request,
+                &format!("Pi Action request failed managed Extension validation: {error}"),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    if let Some(envelope) = action_request.mcp_envelope.as_ref() {
+        runtime
+            .register_mcp_approval(
+                request
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .context("Pi MCP Approval request omitted UI identity")?,
+                envelope,
+            )
+            .await?;
+    }
+    if execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
+        && execution.workspace.access == "read_only"
+        && matches!(
+            &action_request.input,
+            rovai_core::action::CanonicalActionInput::FileWrite { .. }
+                | rovai_core::action::CanonicalActionInput::FileDelete { .. }
+                | rovai_core::action::CanonicalActionInput::ShellCommand { .. }
+                | rovai_core::action::CanonicalActionInput::GitMutation { .. }
+                | rovai_core::action::CanonicalActionInput::NetworkWrite { .. }
+        )
+    {
+        reject_pi_approval_request(
+            output,
+            runtime,
+            agent_run_id,
+            execution_epoch,
+            request,
+            "read-only AgentRun rejected a mutating Pi tool request",
+        )
+        .await?;
+        return Ok(());
+    }
+    let request_reason = action_request.reason.clone();
+    let preparation = {
+        let mut database = core.database.lock().await;
+        ActionSafetyService::default().prepare_action(
+            &mut database,
+            &CommandEnvelope {
+                command_id: format!("runtime-action-prepare:{}", action_request.action_id),
+                actor: ActorRef::Agent {
+                    agent_id: execution.agent_id.clone(),
+                    source_agent_run_id: agent_run_id.to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: Some(execution_epoch),
+                payload: PrepareActionCommand {
+                    action_id: action_request.action_id,
+                    input: action_request.input,
+                    control_mode: ActionControlMode::Intercepted,
+                    native_action_id: Some(action_request.native_action_id),
+                    runtime_request: Some(action_request.runtime_request),
+                    reason: request_reason.clone(),
+                    execute_before: None,
+                    requested_for_user_id: CURRENT_USER_ID.to_string(),
+                },
+            },
+        )
+    };
+    match preparation {
+        Ok(preparation) if preparation.result.status != CommandResultStatus::Rejected => emit(
+            output,
+            "action.prepared",
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "nativeMethod": "pi/extension_ui/confirm",
+                "reason": request_reason,
+                "result": preparation.result,
+                "replayed": preparation.replayed,
+            }),
+        ),
+        Ok(preparation) => {
+            reject_pi_approval_request(
+                output,
+                runtime,
+                agent_run_id,
+                execution_epoch,
+                request,
+                &format!(
+                    "Action admission rejected: {} · {}",
+                    preparation.result.code, preparation.result.payload
+                ),
+            )
+            .await?;
+        }
+        Err(error) => {
+            reject_pi_approval_request(
+                output,
+                runtime,
+                agent_run_id,
+                execution_epoch,
+                request,
+                "Pi Action request could not be persisted safely",
+            )
+            .await?;
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+async fn reject_pi_approval_request(
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &PiRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    request: &Value,
+    reason: &str,
+) -> Result<()> {
+    let id = request.get("id").cloned().unwrap_or(Value::Null);
+    if !id.is_null()
+        && let Ok(response) = pi::rejection_response(request)
+    {
+        runtime.respond(id, response).await?;
+    }
+    emit(
+        output,
+        "agent_run.request_rejected",
+        json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "nativeMethod": "pi/extension_ui/confirm",
+            "reason": reason,
+        }),
+    );
+    Ok(())
+}
+
+async fn persist_pi_prompt_completion(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &PiRuntime,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
+) -> Result<()> {
+    let (final_message, stop_reason) = runtime.terminal().await;
+    let stop_reason = stop_reason.unwrap_or_else(|| "unknown".to_string());
+    let outcome = if stop_reason == "stop" && final_message.is_some() {
+        RuntimeTerminalOutcome::Succeeded
+    } else if stop_reason == "aborted" {
+        RuntimeTerminalOutcome::Cancelled
+    } else {
+        RuntimeTerminalOutcome::Failed
+    };
+    let delivery_status = if outcome == RuntimeTerminalOutcome::Failed {
+        let database = core.database.lock().await;
+        ContextService.runtime_input_delivery_status(&database, runtime.delivery_id())?
+    } else {
+        None
+    };
+    let manual_retry_allowed = outcome == RuntimeTerminalOutcome::Failed
+        && delivery_status.as_deref() == Some("not_accepted");
+    let base_error_code = if stop_reason == "stop" {
+        "runtime_missing_final_output".to_string()
+    } else {
+        format!("runtime_prompt_{stop_reason}")
+    };
+    let error_detail = format!("Pi agent_settled ended the prompt as {stop_reason}");
+    let public_failure = (outcome == RuntimeTerminalOutcome::Failed).then(|| {
+        public_runtime_failure_from_output(
+            AdapterKind::Pi,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            &base_error_code,
+            "Pi 未能完成运行",
+            Some(&error_detail),
+            &[(&core.data_dir, "<data-dir>")],
+            manual_retry_allowed,
+        )
+    });
+    let error_code = public_failure
+        .as_ref()
+        .map(|failure| failure.code.clone())
+        .unwrap_or(base_error_code);
+    let prompt_id = runtime.prompt_id().to_string();
+    let terminal_discriminator = canonical_json_digest(&json!({
+        "adapterKind": AdapterKind::Pi,
+        "sessionId": runtime.session_id(),
+        "promptId": prompt_id,
+        "stopReason": stop_reason,
+        "finalDigest": final_message
+            .as_ref()
+            .and_then(|value| canonical_json_digest(&json!(value)).ok()),
+    }))?;
+    let mut terminal_admission = core
+        .admit_planned_shutdown_terminal(
+            agent_run_id,
+            execution_epoch,
+            RuntimeRouteBinding {
+                route_identity: host_instance_id.to_string(),
+                adapter_turn_correlation: prompt_id.clone(),
+                provider_turn_id: None,
+            },
+            outcome,
+            &terminal_discriminator,
+        )
+        .await?;
+    if let Some(permit) = terminal_admission.planned_permit()
+        && outcome != RuntimeTerminalOutcome::Succeeded
+    {
+        let terminal_execution_root = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default()
+                .load_agent_run_execution(&database, agent_run_id, execution_epoch)?
+                .map(|execution| execution.workspace.execution_root)
+        };
+        let settlement = core
+            .settle_planned_shutdown_abortive_terminal(
+                permit,
+                PlannedShutdownAbortiveTerminal {
+                    agent_run_id: agent_run_id.to_string(),
+                    execution_epoch,
+                    outcome,
+                    error_code: error_code.clone(),
+                    error_detail: Some(error_detail.clone()),
+                    failure: public_failure.clone(),
+                    manual_retry_allowed,
+                },
+            )
+            .await?;
+        core.planned_shutdown
+            .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+            .await;
+        terminal_admission.complete_settlement();
+        runtime_route_permit.complete_callback();
+        emit_agent_run_terminal(
+            output,
+            None,
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "adapterKind": AdapterKind::Pi,
+                "settlement": settlement,
+            }),
+        );
+        if let Some(execution_root) = terminal_execution_root {
+            core.reconcile_skill_projection_after_run_terminal(&execution_root)
+                .await;
+        }
+        if let Some(process_id) = runtime
+            .builtin_tool_process_config()
+            .map(|config| config.process_id().to_string())
+        {
+            core.builtin_tool_leases
+                .unbind(&process_id, agent_run_id, execution_epoch)
+                .await;
+        }
+        core.pi
+            .forget_agent_run(agent_run_id, execution_epoch)
+            .await;
+        core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
+            .await;
+        return Ok(());
+    }
+    for attempt in 0..80 {
+        let execution = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                agent_run_id,
+                execution_epoch,
+            )
+        }?;
+        let Some(execution) = execution else {
+            return Ok(());
+        };
+        let ending_git_observation = core
+            .observe_run_git(&execution.project_binding_kind, &execution.project_path)
+            .await;
+        let terminal = if outcome == RuntimeTerminalOutcome::Succeeded {
+            let final_output = final_message
+                .clone()
+                .context("Pi successful terminal has no final message")?;
+            let mut database = core.database.lock().await;
+            let envelope = CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-adapter:pi".to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: SucceedAgentRunCommand {
+                    agent_run_id: agent_run_id.to_string(),
+                    expected_version: execution.version,
+                    execution_epoch,
+                    native_turn_id: prompt_id.clone(),
+                    final_output: final_output.clone(),
+                    missing_send_recovery_candidate: Some(MissingSendRecoveryCandidate::new(
+                        MissingSendRecoveryBoundary::PiAgentSettled,
+                        final_output,
+                    )),
+                    ending_git_observation: ending_git_observation.clone(),
+                },
+            };
+            let service = ExecutionRuntimeService::default();
+            match terminal_admission.planned_permit() {
+                Some(permit) => service.succeed_agent_run_during_planned_shutdown(
+                    &mut database,
+                    permit,
+                    &envelope,
+                ),
+                None => service.succeed_agent_run(&mut database, &envelope),
+            }
+        } else {
+            let mut database = core.database.lock().await;
+            ExecutionRuntimeService::default().fail_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:pi".to_string(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: FailAgentRunCommand {
+                        agent_run_id: agent_run_id.to_string(),
+                        expected_version: execution.version,
+                        execution_epoch,
+                        error_code: error_code.clone(),
+                        error_detail: Some(error_detail.clone()),
+                        failure: public_failure.clone(),
+                        manual_retry_allowed,
+                        ending_git_observation,
+                    },
+                },
+            )
+        };
+        match terminal {
+            Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
+                core.planned_shutdown
+                    .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+                    .await;
+                terminal_admission.complete_settlement();
+                runtime_route_permit.complete_callback();
+                emit_agent_run_terminal(
+                    output,
+                    Some(&execution.camp_id),
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "adapterKind": AdapterKind::Pi,
+                        "result": terminal.result,
+                        "replayed": terminal.replayed,
+                    }),
+                );
+                core.reconcile_skill_projection_after_run_terminal(
+                    &execution.workspace.execution_root,
+                )
+                .await;
+                if let Some(process_id) = runtime
+                    .builtin_tool_process_config()
+                    .map(|config| config.process_id().to_string())
+                {
+                    core.builtin_tool_leases
+                        .unbind(&process_id, agent_run_id, execution_epoch)
+                        .await;
+                }
+                if outcome == RuntimeTerminalOutcome::Succeeded {
+                    core.pi
+                        .complete_agent_run(agent_run_id, execution_epoch)
+                        .await;
+                } else {
+                    core.pi
+                        .forget_agent_run(agent_run_id, execution_epoch)
+                        .await;
+                }
+                core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
+                    .await;
+                return Ok(());
+            }
+            Ok(terminal)
+                if attempt < 79
+                    && matches!(
+                        terminal.result.code.as_str(),
+                        "agent_run.version_conflict"
+                            | "agent_run.terminal_fenced"
+                            | "agent_run.terminal_safety_blocked"
+                    ) =>
+            {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Ok(terminal) => {
+                emit(
+                    output,
+                    "agent_run.terminal_deferred",
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "result": terminal.result,
+                    }),
+                );
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+async fn process_pi_agent_run_exit(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) {
+    if core.planned_shutdown.shutdown_started() {
+        return;
+    }
+    if let Err(error) =
+        flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "host_exit_flush").await
+    {
+        eprintln!(
+            "failed to flush Pi monitoring after Host exit for AgentRun {agent_run_id}: {error:#}"
+        );
+    }
+    if core
+        .pi
+        .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
+        .await
+        .is_none()
+    {
+        return;
+    }
+    core.pi
+        .forget_agent_run(agent_run_id, execution_epoch)
+        .await;
+    core.planned_shutdown
+        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+        .await;
+    let execution = {
+        let database = core.database.lock().await;
+        ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            agent_run_id,
+            execution_epoch,
+        )
+    };
+    let Ok(Some(execution)) = execution else {
+        return;
+    };
+    let recovery = {
+        let mut database = core.database.lock().await;
+        ActionSafetyService::default().reconcile_runtime_loss(
+            &mut database,
+            &CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-recovery-coordinator".to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: ReconcileRuntimeLossCommand {
+                    agent_run_id: agent_run_id.to_string(),
+                    expected_version: execution.version,
+                    execution_epoch,
+                    reason: "pi_host_exited".to_string(),
+                },
+            },
+        )
+    };
+    match recovery {
+        Ok(recovery) if recovery.result.status != CommandResultStatus::Rejected => emit(
+            output,
+            "agent_run.recovering",
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "adapterKind": AdapterKind::Pi,
+                "reason": "pi_host_exited",
+            }),
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!("failed to mark AgentRun {agent_run_id} for recovery: {error:#}"),
     }
 }
 
@@ -20977,6 +22253,31 @@ while IFS= read -r _ignored; do :; done
         assert_ne!(
             macos.evidence_revision(),
             Some(WINDOWS_LOCAL_QUALIFICATION_EVIDENCE_REVISION)
+        );
+    }
+
+    #[test]
+    fn local_pi_qualification_is_debug_evidence_without_changing_the_frozen_matrix() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        for platform in HostPlatformKey::ALL {
+            let frozen = registry.platform_admission(AdapterKind::Pi, platform);
+            assert!(!frozen.is_qualified());
+            assert_eq!(frozen.evidence_revision(), None);
+
+            let local = apply_pi_runtime_qualification_override(frozen, true);
+            assert!(local.is_qualified());
+            assert_eq!(
+                local.evidence_revision(),
+                Some(PI_LOCAL_QUALIFICATION_EVIDENCE_REVISION)
+            );
+        }
+        let unrelated = apply_pi_runtime_qualification_override(
+            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::MacosArm64),
+            true,
+        );
+        assert_ne!(
+            unrelated.evidence_revision(),
+            Some(PI_LOCAL_QUALIFICATION_EVIDENCE_REVISION)
         );
     }
 

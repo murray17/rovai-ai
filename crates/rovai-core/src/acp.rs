@@ -3833,11 +3833,11 @@ impl AcpCliRuntimeAdapter {
                     agent_run_id: agent_run_id.to_string(),
                     execution_epoch,
                     adapter_kind: self.kind,
-                    compatibility: RuntimeCompatibilityKey {
-                        camp_id: camp_id.to_string(),
-                        agent_id: agent_id.to_string(),
-                        runtime_compatibility_digest: runtime_compatibility_digest.to_string(),
-                    },
+                    compatibility: RuntimeCompatibilityKey::member(
+                        camp_id,
+                        agent_id,
+                        runtime_compatibility_digest,
+                    ),
                 },
                 || async {
                     let host = AcpHost::spawn(
@@ -4420,7 +4420,10 @@ fn configure_runtime_command(
             configure_grok_native_environment(command)?;
             return Ok(plugin);
         }
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
+        AdapterKind::CodexCli
+        | AdapterKind::Pi
+        | AdapterKind::ClaudeCodeCli
+        | AdapterKind::AntigravityApp => {
             bail!("Runtime is not implemented through ACP")
         }
     }
@@ -5452,6 +5455,7 @@ pub fn intercepted_action_request(
                     .to_string_lossy()
                     .to_string(),
                     environment_refs: Vec::new(),
+                    command_transport: None,
                 }
             }
         }
@@ -5517,7 +5521,10 @@ pub fn automatically_allows_permission_requests(
         AdapterKind::QwenCode => permissions["approval_mode"] == "yolo",
         AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
         AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => false,
+        AdapterKind::CodexCli
+        | AdapterKind::Pi
+        | AdapterKind::ClaudeCodeCli
+        | AdapterKind::AntigravityApp => false,
     }
 }
 

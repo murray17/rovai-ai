@@ -8,6 +8,7 @@ import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
 } from './lib/runtime-camp-files-root.mjs'
+import { prepareIsolatedPiAgentDir } from './lib/pi-smoke-config.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const coreExecutable = resolve(
@@ -46,6 +47,7 @@ const expectedOperations = [
 ]
 const allRuntimeSpecifications = [
   ['codex-cli', 'Codex'],
+  ['pi', 'Pi'],
   ['opencode-cli', 'OpenCode'],
   ['copilot-cli', 'Copilot'],
   ['claude-code-cli', 'Claude'],
@@ -76,8 +78,12 @@ const runtimeSpecifications = allRuntimeSpecifications.filter((value) =>
 
 let core = null
 let keepFixture = process.env.ROVAI_KEEP_BUILTIN_CLI_FIXTURE === '1'
+let piAgentDir = null
 
 try {
+  if (selectedAdapters.has('pi')) {
+    piAgentDir = await prepareIsolatedPiAgentDir(fixtureRoot)
+  }
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Built-in CLI Runtime Qualification\n')
   await runCapture('git', ['init', '-b', 'main'], { cwd: projectRoot, expectedCode: 0 })
@@ -186,7 +192,7 @@ try {
     specification.currentMarker = `ROVAI_CURRENT_${specification.slug.toUpperCase()}_V1`
     specification.successMarker = `ROVAI_BUILTIN_CLI_${specification.slug.toUpperCase()}_OK`
     specification.resumeMarker = `ROVAI_BUILTIN_CLI_${specification.slug.toUpperCase()}_RESUME_OK`
-    specification.gatherMarker = `ROVAI_GATHER_${specification.slug.toUpperCase()}_RETURN_OK`
+    specification.gatherMarker = `ROVAI_GATHER_${specification.slug.toUpperCase()}_DIRECTED_DELIVERY_OBSERVED`
     specification.contextPathFile = join(projectRoot, `.context-path-${specification.slug}`)
     specification.resumeContextPathFile = join(projectRoot, `.resume-context-path-${specification.slug}`)
     specification.resumeCompletionFile = join(projectRoot, `.resume-complete-${specification.slug}`)
@@ -1403,7 +1409,7 @@ public_message_id="$(printf '%s\n' "$public_send" | "$JQ" -er '.messageId')"
 STEP=team_gather
 gather_result="$("$CLI" gather \
   --to ${shellQuote(input.recipientProfileId)} \
-  --body ${shellQuote(`Run rovai send --to ${input.agentId} --body '${input.gatherMarker}' exactly once, then finish.`)})"
+  --body ${shellQuote(`Report this substantive transport finding to ${input.agentId} with exactly one command: rovai send --to ${input.agentId} --body 'Built-in CLI Gather finding: ${input.gatherMarker}. The delegated recipient received the requested work and can execute the Core-owned directed send.' Then finish. Because RUN_FACTS.gather.returnTarget is the current input source, this directed result is captured by Gather and does not schedule new work. This is a requested finding, not an acknowledgement or courtesy reply.`)})"
 assert_success "$gather_result" 'team.gather'
 printf '%s\n' "$gather_result" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
   (keys | sort) == ["completion", "effectiveRecipients", "gatherId", "requestMessageId"]
@@ -1619,10 +1625,19 @@ function shellContextPrivacyAssertion() {
 function startCore(dataDirectory) {
   const child = spawn(coreExecutable, [
     ...coreDataDirectoryArguments(dataDirectory),
-    '--skill-library-root', skillLibraryRoot
+    '--skill-library-root', skillLibraryRoot,
+    '--mcp-config-path', join(dataDirectory, 'mcp.json')
   ], {
     cwd: root,
-    env: process.env,
+    env: {
+      ...process.env,
+      ...(selectedAdapters.has('pi')
+        ? {
+            PI_CODING_AGENT_DIR: piAgentDir,
+            ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
+          }
+        : {})
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   const pending = new Map()

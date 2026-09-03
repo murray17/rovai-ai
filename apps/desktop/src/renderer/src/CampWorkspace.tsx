@@ -8753,6 +8753,7 @@ function comparableMessageText(value: string): string {
 function runtimeAdapterLabel(kind: string): string {
   return ({
     'codex-cli': 'Codex CLI',
+    pi: 'Pi Coding Agent',
     'opencode-cli': 'OpenCode',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',

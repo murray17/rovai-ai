@@ -2525,6 +2525,7 @@ fn append_skill_event(
 fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
     match key {
         SkillDeliveryGroupKey::Codex => "Codex",
+        SkillDeliveryGroupKey::Pi => "Pi Coding Agent",
         SkillDeliveryGroupKey::Opencode => "OpenCode",
         SkillDeliveryGroupKey::Copilot => "Copilot",
         SkillDeliveryGroupKey::ClaudeCompatible => "Claude 兼容",

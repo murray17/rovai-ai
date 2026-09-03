@@ -22,6 +22,7 @@ export function isCampId(value: unknown): value is string {
 
 export type AdapterKind =
   | 'codex-cli'
+  | 'pi'
   | 'opencode-cli'
   | 'copilot-cli'
   | 'claude-code-cli'

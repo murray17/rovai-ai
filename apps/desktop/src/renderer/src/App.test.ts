@@ -6575,6 +6575,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('Codex CLI')
+    expect(markup).toContain('Pi Coding Agent')
     expect(markup).toContain('OpenCode')
     expect(markup).toContain('GitHub Copilot')
     expect(markup).toContain('Claude Code')
@@ -6595,8 +6596,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('已检查')
     expect(markup).toContain('实验性')
-    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(13)
-    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(13)
+    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(14)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(14)
     expect(markup.match(/检查可用性/g)).toHaveLength(12)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
@@ -6638,8 +6639,8 @@ describe('task event projections', () => {
       onReload: async () => undefined
     }))
 
-    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(12)
-    expect(markup.match(/不可检查/g)).toHaveLength(12)
+    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(13)
+    expect(markup.match(/不可检查/g)).toHaveLength(13)
     expect(markup).not.toContain('检查可用性')
     expect(markup).toContain('当前平台尚无可检测 Runtime')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')
@@ -6763,6 +6764,7 @@ function runtimeAdmissionRows(
 ): HealthStatus['runtimePlatformAdmission'] {
   const runtimeKinds: HealthStatus['runtimePlatformAdmission'][number]['runtimeKind'][] = [
     'codex-cli',
+    'pi',
     'opencode-cli',
     'copilot-cli',
     'claude-code-cli',
@@ -6778,6 +6780,7 @@ function runtimeAdmissionRows(
   ]
   return runtimeKinds.map((runtimeKind) => {
     const requiresQualification = runtimeKind === 'cursor-agent'
+      || runtimeKind === 'pi'
       || (runtimeKind === 'grok-build' && platform !== 'macos-arm64')
     const effectiveStatus = requiresQualification && status === 'qualified'
       ? 'not_qualified'

@@ -18,6 +18,7 @@ import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
 } from './lib/runtime-camp-files-root.mjs'
+import { prepareIsolatedPiAgentDir } from './lib/pi-smoke-config.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-')))
@@ -31,6 +32,7 @@ const explicitModelId = process.env.ROVAI_SKILL_SMOKE_MODEL?.trim() || null
 const requestedAdapters = adapterSelection === 'all'
   ? [
       'codex-cli',
+      'pi',
       'opencode-cli',
       'copilot-cli',
       'claude-code-cli',
@@ -46,6 +48,7 @@ const requestedAdapters = adapterSelection === 'all'
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([
   'codex-cli',
+  'pi',
   'opencode-cli',
   'copilot-cli',
   'claude-code-cli',
@@ -69,11 +72,15 @@ const allDeliveryGroups = [
   'kimi',
   'kiro',
   'opencode',
+  'pi',
   'qoder',
   'qwen',
   'trae'
 ]
 let core = null
+let piAgentDir = null
+let immutableUpdateCount = 0
+let piSkillLifecycle = null
 
 try {
   if (explicitModelId && requestedAdapters.length !== 1) {
@@ -81,6 +88,9 @@ try {
   }
   for (const adapterKind of requestedAdapters) {
     if (!supportedAdapters.has(adapterKind)) throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
+  }
+  if (requestedAdapters.includes('pi')) {
+    piAgentDir = await prepareIsolatedPiAgentDir(fixtureRoot)
   }
   await mkdir(projectRoot)
   await mkdir(sourceRoot)
@@ -94,6 +104,7 @@ try {
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
   core = startCore()
+  await waitForSkillSubsystem(core.request)
   const initialSkills = await core.request('skills.list')
   const bundledSkillNames = initialSkills.map((skill) => skill.name).sort()
   assert(
@@ -195,6 +206,7 @@ try {
       assert(updateCandidate.importAction === 'update', `Changed import was not an update: ${JSON.stringify(updateCandidate)}`)
       const updated = await commitCandidate(updateInspection, updateCandidate, true)
       assert(updated.code === 'skill_updated', `Skill update failed: ${JSON.stringify(updated)}`)
+      immutableUpdateCount += 1
       importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
     }
 
@@ -263,6 +275,113 @@ try {
     })
   }
 
+  if (requestedAdapters.length === 1 && requestedAdapters[0] === 'pi') {
+    const originalMarker = marker
+    const updatedMarker = markerFor('pi-update')
+    marker = updatedMarker
+    await writeSmokeSkill(updatedMarker)
+    const updateInspection = await core.request('skills.import.inspect', { path: sourceSkill })
+    const updateCandidate = onlyCandidate(updateInspection)
+    assert(updateCandidate.importAction === 'update', `Pi changed Skill import was not an update: ${JSON.stringify(updateCandidate)}`)
+    const updated = await commitCandidate(updateInspection, updateCandidate, true)
+    assert(updated.code === 'skill_updated', `Pi Skill update failed: ${JSON.stringify(updated)}`)
+    immutableUpdateCount += 1
+    importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
+
+    const updatedResult = await runNativeDiscoveryWithRetry(
+      core.request,
+      selectedWorkspace,
+      'pi',
+      updatedMarker
+    )
+    const updatedExposure = updatedResult.exposure?.skills.find((skill) =>
+      skill.name === 'rovai-skill-smoke'
+        && skill.groupKey === 'pi'
+        && skill.status === 'ready'
+    )
+    assert(
+      updatedExposure?.revisionId === importedSkill.currentRevision.id
+        && !updatedResult.output.includes(originalMarker),
+      `Pi next eligible Session did not use only the updated immutable Skill Revision: ${JSON.stringify({ updatedExposure, updatedResult })}`
+    )
+
+    await applyCommand('skills.setEnabled', {
+      skillId: importedSkill.id,
+      expectedVersion: importedSkill.version,
+      enabled: false
+    })
+    importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
+    await applyCommand('skills.reconcile', {})
+    const disabledProbe = await runSkillAbsenceProbe(
+      core.request,
+      selectedWorkspace,
+      [originalMarker, updatedMarker]
+    )
+    assertSkillAbsent(disabledProbe, 'disabled')
+    assert(
+      disabledProbe.hostInstanceId === updatedResult.hostInstanceId
+        && disabledProbe.nativeThreadId !== updatedResult.nativeThreadId,
+      `Pi disabled-Skill probe did not reuse the Host with a fresh Session: ${JSON.stringify({ updatedResult, disabledProbe })}`
+    )
+
+    await applyCommand('skills.setEnabled', {
+      skillId: importedSkill.id,
+      expectedVersion: importedSkill.version,
+      enabled: true
+    })
+    importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
+    const reenabledResult = await runNativeDiscoveryWithRetry(
+      core.request,
+      selectedWorkspace,
+      'pi',
+      updatedMarker
+    )
+    assert(
+      reenabledResult.exposure?.skills.some((skill) =>
+        skill.name === 'rovai-skill-smoke'
+          && skill.revisionId === importedSkill.currentRevision.id
+          && skill.status === 'ready'
+      ),
+      `Pi re-enabled Skill was not callable in the next Session: ${JSON.stringify(reenabledResult)}`
+    )
+
+    const assignedGroups = importedSkill.groupAssignments.map((assignment) => assignment.groupKey)
+    await applyCommand('skills.setGroupAssignments', {
+      skillId: importedSkill.id,
+      expectedVersion: importedSkill.version,
+      groupKeys: assignedGroups.filter((groupKey) => groupKey !== 'pi')
+    })
+    importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
+    await applyCommand('skills.reconcile', {})
+    const unassignedProbe = await runSkillAbsenceProbe(
+      core.request,
+      selectedWorkspace,
+      [originalMarker, updatedMarker]
+    )
+    assertSkillAbsent(unassignedProbe, 'unassigned')
+    assert(
+      unassignedProbe.hostInstanceId === reenabledResult.hostInstanceId
+        && unassignedProbe.nativeThreadId !== reenabledResult.nativeThreadId,
+      `Pi unassigned-Skill probe did not reuse the Host with a fresh Session: ${JSON.stringify({ reenabledResult, unassignedProbe })}`
+    )
+
+    await applyCommand('skills.setGroupAssignments', {
+      skillId: importedSkill.id,
+      expectedVersion: importedSkill.version,
+      groupKeys: assignedGroups
+    })
+    importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
+    await applyCommand('skills.reconcile', {})
+    piSkillLifecycle = {
+      updatedRevisionObserved: true,
+      disabledNextSessionHidden: true,
+      reenabledNextSessionCallable: true,
+      unassignedNextSessionHidden: true,
+      residentHostNoCrossSessionLeak: true,
+      hardDeleteNextSessionHidden: false
+    }
+  }
+
   if (requestedAdapters.length > 0) {
     const exclude = await readFile(await gitPath(projectRoot, 'info/exclude'), 'utf8')
     assert(exclude.includes('BEGIN ROVAI MANAGED SKILL PROJECTIONS'), 'Git info/exclude has no Rovai-ai managed block')
@@ -280,6 +399,7 @@ try {
 
   await core.stop()
   core = startCore()
+  await waitForSkillSubsystem(core.request)
   importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
   assert(importedSkill?.enabled, 'Core restart lost the imported enabled Skill')
   await applyCommand('skills.reconcile', {})
@@ -324,6 +444,15 @@ try {
       'Imported Skill deletion removed the project-owned same-name directory'
     )
   }
+  if (piSkillLifecycle) {
+    const deletedProbe = await runSkillAbsenceProbe(
+      core.request,
+      selectedWorkspace,
+      [marker]
+    )
+    assertSkillAbsent(deletedProbe, 'hard-deleted')
+    piSkillLifecycle.hardDeleteNextSessionHidden = true
+  }
 
   console.log(JSON.stringify({
     ok: true,
@@ -331,12 +460,13 @@ try {
     importedDefaultEnabled: true,
     importedDefaultAllGroups: true,
     duplicateImportIdempotent: true,
-    immutableUpdateCount: Math.max(0, requestedAdapters.length - 1),
+    immutableUpdateCount,
     sourceIndependent: true,
     gitignoreUnchanged: true,
     projectOwnedConflictPreserved: Boolean(shadowed),
     restartRecovered: true,
     importedHardDeleted: true,
+    piSkillLifecycle,
     runtimes: runtimeResults
   }, null, 2))
 } finally {
@@ -517,7 +647,10 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
     agentRunId,
     conversationId: run.conversationId,
     selectedModel: started.params.modelId,
-    exposure: manifest?.skillExposure
+    exposure: manifest?.skillExposure,
+    output,
+    hostInstanceId: started.params.hostInstanceId,
+    nativeThreadId: started.params.nativeThreadId
   }
 }
 
@@ -535,6 +668,84 @@ async function runNativeDiscoveryWithRetry(request, workspace, adapterKind, mark
     }
   }
   throw firstError
+}
+
+async function runSkillAbsenceProbe(request, workspace, forbiddenMarkers) {
+  const created = await createConfiguredCampAndSend(request, {
+    commandId: crypto.randomUUID(),
+    workspace,
+    body: [
+      'Briefly report whether the project Skill named `rovai-skill-smoke` appears in the Skills catalog supplied for this new Session.',
+      'Do not use facts from another conversation and do not modify the workspace.'
+    ].join(' '),
+    address: { mode: 'explicit', agentIds: ['agent_1'] },
+    purpose: 'Verify a disabled, unassigned, or deleted Pi Skill is absent from the next Native Session.'
+  })
+  if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
+    throw new Error(`Pi Skill absence Camp was not accepted: ${JSON.stringify(created)}`)
+  }
+  const campId = created.payload.campId
+  const agentRunId = created.payload.agentRunIds[0]
+  const resolvedApprovals = new Set()
+  const snapshot = await waitFor(async () => {
+    const candidate = await request('camps.snapshot', { campId })
+    for (const approval of candidate.approvals.filter((value) =>
+      value.status === 'pending'
+        && !resolvedApprovals.has(value.id)
+        && candidate.actions.some((action) => action.id === value.actionId && action.agentRunId === agentRunId)
+    )) {
+      const option = approval.options.find((value) => value.kind === 'deny')
+      if (!option) throw new Error(`Pi Skill absence probe Approval has no deny option: ${JSON.stringify(approval)}`)
+      const resolution = await request('action.approvals.resolve', {
+        commandId: crypto.randomUUID(),
+        campId,
+        approvalId: approval.id,
+        expectedVersion: approval.version,
+        optionId: option.optionId,
+        reason: 'Skill absence probes never authorize mutation.'
+      })
+      if (resolution.status === 'rejected') {
+        throw new Error(`Pi Skill absence probe Approval was rejected: ${JSON.stringify(resolution)}`)
+      }
+      resolvedApprovals.add(approval.id)
+    }
+    const run = candidate.agentRuns.find((value) => value.id === agentRunId)
+    if (run && ['failed', 'cancelled'].includes(run.status)) {
+      throw new Error(`Pi Skill absence AgentRun failed: ${JSON.stringify({ run, timeline: candidate.timeline.slice(-12) })}`)
+    }
+    return run?.status === 'succeeded' ? candidate : null
+  }, 'Pi Skill absence probe', 360_000)
+  const output = snapshot.messages
+    .filter((message) => message.authorType === 'agent' && message.sourceAgentRunId === agentRunId)
+    .map((message) => message.body)
+    .join('\n')
+  const leakedMarker = forbiddenMarkers.find((candidate) => output.includes(candidate))
+  if (leakedMarker) {
+    throw new Error(`Pi Skill marker leaked into an ineligible Session: ${JSON.stringify({ leakedMarker, output })}`)
+  }
+  const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
+  const started = core.events.find((event) =>
+    event.method === 'agent_run.started' && event.params?.agentRunId === agentRunId
+  )
+  return {
+    agentRunId,
+    exposure: manifest?.skillExposure,
+    output,
+    hostInstanceId: started?.params?.hostInstanceId,
+    nativeThreadId: started?.params?.nativeThreadId
+  }
+}
+
+function assertSkillAbsent(result, state) {
+  assert(
+    !result.exposure?.skills.some((skill) => skill.name === 'rovai-skill-smoke'),
+    `Pi ${state} Skill remained in the next ContextManifest: ${JSON.stringify(result)}`
+  )
+  assert(
+    typeof result.hostInstanceId === 'string'
+      && typeof result.nativeThreadId === 'string',
+    `Pi ${state} Skill probe omitted Host/Session identity: ${JSON.stringify(result)}`
+  )
 }
 
 async function assertManagedProjection(adapterKind, label, entryPath, managedPath) {
@@ -565,10 +776,20 @@ function startCore() {
   const child = spawn(coreExecutable, [
     ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root',
-    libraryRoot
+    libraryRoot,
+    '--mcp-config-path',
+    join(dataDir, 'mcp.json')
   ], {
     cwd: root,
-    env: process.env,
+    env: {
+      ...process.env,
+      ...(requestedAdapters.includes('pi')
+        ? {
+            PI_CODING_AGENT_DIR: piAgentDir,
+            ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
+          }
+        : {})
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   child.stderr.pipe(process.stderr)
@@ -611,6 +832,7 @@ function startCore() {
 
 function groupRoot(groupKey) {
   if (groupKey === 'codex') return '.codex/skills'
+  if (groupKey === 'pi') return '.pi/skills'
   if (groupKey === 'opencode') return '.opencode/skills'
   if (groupKey === 'copilot') return '.github/skills'
   if (groupKey === 'claude_compatible') return '.claude/skills'
@@ -627,6 +849,7 @@ function groupRoot(groupKey) {
 
 function deliveryGroup(adapterKind) {
   if (adapterKind === 'codex-cli') return 'codex'
+  if (adapterKind === 'pi') return 'pi'
   if (adapterKind === 'opencode-cli') return 'opencode'
   if (adapterKind === 'copilot-cli') return 'copilot'
   if (adapterKind === 'claude-code-cli') return 'claude_compatible'
@@ -692,6 +915,17 @@ async function waitFor(read, label, timeoutMs) {
     await wait(500)
   }
   throw new Error(`Timed out waiting for ${label}${lastError ? `: ${lastError.message}` : ''}`)
+}
+
+async function waitForSkillSubsystem(request) {
+  await waitFor(async () => {
+    const subsystems = await request('runtime.subsystems.get')
+    const skills = subsystems.find((subsystem) => subsystem.id === 'skills')
+    if (skills?.state === 'degraded') {
+      throw new Error(`Skills subsystem failed: ${JSON.stringify(skills.error)}`)
+    }
+    return skills?.state === 'ready'
+  }, 'Skills subsystem readiness', 30_000)
 }
 
 function wait(milliseconds) {

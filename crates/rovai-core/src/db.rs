@@ -208,8 +208,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.44";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 85;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.45";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 86;
+const V135_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.44";
+const V135_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 85;
 const V134_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.43";
 const V134_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 84;
 const V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.42";
@@ -592,6 +594,7 @@ struct CurrentMigrationState {
     v132: bool,
     v133: bool,
     v134: bool,
+    v135: bool,
 }
 
 impl CurrentMigrationState {
@@ -670,6 +673,24 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v135 {
+            return false;
+        }
+        if contract == V135_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V135_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v134
                 && self.v133
@@ -2044,11 +2065,14 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
         |row| row.get(0),
     );
     let migration_state = load_current_migration_state(connection);
-    let normally_admissible = matches!(
-        (marker, projection_exists, migration_state),
+    let normally_admissible = match (marker, projection_exists, migration_state) {
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
-            if migrations.admits(&contract, schema, &classifier)
-    );
+            if migrations.admits(&contract, schema, &classifier) =>
+        {
+            !migrations.v135 || pi_runtime_v135_schema_matches(connection)?
+        }
+        _ => false,
+    };
     if normally_admissible {
         return Ok(true);
     }
@@ -2374,7 +2398,8 @@ pub(crate) fn classify_database_contract(
         &marker.contract_version,
         marker.projection_schema_version,
         &marker.classifier_version,
-    ) {
+    ) || (migrations.v135 && !pi_runtime_v135_schema_matches(connection)?)
+    {
         if connection_has_legacy_feishu_migration_collision(connection)?
             || main_camp_migration_collision(connection)?.is_some()
         {
@@ -2396,6 +2421,75 @@ pub(crate) fn classify_database_contract(
     }
 }
 
+fn pi_runtime_v135_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    let table_sql = |table: &str| -> rusqlite::Result<Option<String>> {
+        connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .optional()
+    };
+    for (table, token) in [
+        ("adapter_installation", "'pi'"),
+        ("agent_profile", "'pi'"),
+        ("skill_group_assignment", "'pi'"),
+        ("skill_projection_observation", "'pi'"),
+        (
+            "native_session_bootstrap_evidence",
+            "'managed_system_prompt'",
+        ),
+    ] {
+        if !table_sql(table)?.is_some_and(|sql| sql.contains(token)) {
+            return Ok(false);
+        }
+    }
+    for table in [
+        "bootstrap_redelivery_requirement",
+        "compaction_detector_policy",
+        "native_session_compaction_observer_lease",
+    ] {
+        if table_sql(table)?.is_none_or(|sql| sql.contains("'pi'")) {
+            return Ok(false);
+        }
+    }
+    let Some(receipt) = table_sql("pi_managed_input_receipt")? else {
+        return Ok(false);
+    };
+    for token in [
+        "runtime_input_delivery_id",
+        "agent_run_id",
+        "execution_epoch",
+        "native_binding_id",
+        "native_binding_generation",
+        "native_session_id",
+        "native_prompt_id",
+        "receipt_json",
+        "receipt_digest",
+        "length(receipt_digest) = 64",
+        "commit_nonce",
+        "REFERENCES runtime_input_delivery",
+    ] {
+        if !receipt.contains(token) {
+            return Ok(false);
+        }
+    }
+    let required_objects: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN (
+            'runtime_input_delivery_pi_binding_unique',
+            'pi_managed_input_receipt_run_idx',
+            'pi_managed_input_receipt_insert_guard',
+            'pi_managed_input_receipt_update_guard',
+            'pi_managed_input_receipt_delete_guard',
+            'pi_managed_input_acceptance_update_guard'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(required_objects == 6)
+}
+
 #[cfg(test)]
 fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     if !connection_has_admissible_data_contract(connection)? {
@@ -2406,7 +2500,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 134)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 135)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2488,7 +2582,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 131),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 132),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 133),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 134)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 134),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 135)
         "#,
         [],
         |row| {
@@ -2558,6 +2653,7 @@ fn load_current_migration_state(
                 v132: row.get(62)?,
                 v133: row.get(63)?,
                 v134: row.get(64)?,
+                v135: row.get(65)?,
             })
         },
     )
@@ -5028,6 +5124,9 @@ impl Database {
             if !self.schema_migration_applied(134)? {
                 migration_step!("migration_134", self.migrate_cancellation_settlement_v134());
             }
+            if !self.schema_migration_applied(135)? {
+                migration_step!("migration_135", self.migrate_pi_runtime_v135());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -5609,6 +5708,9 @@ impl Database {
         }
         if !self.schema_migration_applied(134)? {
             migration_step!("migration_134", self.migrate_cancellation_settlement_v134());
+        }
+        if !self.schema_migration_applied(135)? {
+            migration_step!("migration_135", self.migrate_pi_runtime_v135());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -20464,13 +20566,286 @@ impl Database {
         )?;
         transaction.execute(
             "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2, updated_at = datetime('now') WHERE singleton = 1",
-            params![CURRENT_DATA_CONTRACT_VERSION, CURRENT_PROJECTION_SCHEMA_VERSION],
+            params![
+                V135_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V135_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
         )?;
         transaction.execute(
             "INSERT INTO schema_migration(version, applied_at) VALUES(134, datetime('now'))",
             [],
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_pi_runtime_v135(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+                "SELECT contract_version, projection_schema_version, classifier_version
+                 FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            if contract != V135_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                || schema != V135_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                || !load_current_migration_state(&transaction)?.admits(
+                    &contract,
+                    schema,
+                    &classifier,
+                )
+            {
+                anyhow::bail!("Pi Runtime migration requires the exact preceding data contract");
+            }
+
+            // Rebuild from the installed v1.44 table definitions rather than copying
+            // stale historical DDL. Every replacement is exact and fails closed when
+            // the admitted source shape does not contain the expected closed set.
+            fn expand_closed_set(
+                transaction: &Transaction<'_>,
+                table: &str,
+                source: &str,
+                expanded: &str,
+            ) -> Result<()> {
+                let create_sql: String = transaction.query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )?;
+                if create_sql.contains(expanded) {
+                    return Ok(());
+                }
+                if !create_sql.contains(source) {
+                    anyhow::bail!("v135 could not prove the admitted {table} closed-set shape");
+                }
+                let definition = create_sql
+                    .find('(')
+                    .map(|offset| &create_sql[offset..])
+                    .with_context(|| format!("v135 could not read the {table} definition"))?;
+                let replacement_table = format!("{table}_v135");
+                let replacement_sql = format!("CREATE TABLE \"{replacement_table}\" {definition}")
+                    .replace(source, expanded);
+                if !replacement_sql.contains(expanded) {
+                    anyhow::bail!("v135 could not expand the {table} closed set");
+                }
+
+                let dependent_schema = {
+                    let mut statement = transaction.prepare(
+                        "SELECT sql FROM sqlite_master
+                         WHERE tbl_name = ?1 AND type IN ('index', 'trigger')
+                           AND sql IS NOT NULL
+                         ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name",
+                    )?;
+                    statement
+                        .query_map([table], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                let columns = {
+                    let mut statement =
+                        transaction.prepare(&format!("PRAGMA table_info('{table}')"))?;
+                    statement
+                        .query_map([], |row| row.get::<_, String>(1))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                if columns.is_empty() {
+                    anyhow::bail!("v135 found no columns for {table}");
+                }
+                let columns = columns
+                    .iter()
+                    .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                transaction.execute_batch(&replacement_sql)?;
+                transaction.execute_batch(&format!(
+                    "INSERT INTO \"{replacement_table}\" ({columns}) SELECT {columns} FROM \"{table}\";
+                     DROP TABLE \"{table}\";
+                     ALTER TABLE \"{replacement_table}\" RENAME TO \"{table}\";"
+                ))?;
+                for schema in dependent_schema {
+                    transaction.execute_batch(&schema)?;
+                }
+                Ok(())
+            }
+
+            let adapter_binding_trigger: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger'
+                 AND name = 'adapter_installation_fast_binding_update'",
+                [],
+                |row| row.get(0),
+            )?;
+            transaction.execute_batch("DROP TRIGGER adapter_installation_fast_binding_update;")?;
+            expand_closed_set(
+                &transaction,
+                "adapter_installation",
+                "'grok-build'",
+                "'grok-build', 'pi'",
+            )?;
+            expand_closed_set(
+                &transaction,
+                "agent_profile",
+                "'grok-build'",
+                "'grok-build', 'pi'",
+            )?;
+            transaction.execute_batch(&adapter_binding_trigger)?;
+            expand_closed_set(
+                &transaction,
+                "skill_group_assignment",
+                "'grok'",
+                "'grok', 'pi'",
+            )?;
+            expand_closed_set(
+                &transaction,
+                "skill_projection_observation",
+                "'grok'",
+                "'grok', 'pi'",
+            )?;
+            expand_closed_set(
+                &transaction,
+                "native_session_bootstrap_evidence",
+                "'native_append', 'first_payload'",
+                "'native_append', 'first_payload', 'managed_system_prompt'",
+            )?;
+
+            transaction.execute_batch(
+                r#"
+                CREATE UNIQUE INDEX runtime_input_delivery_pi_binding_unique
+                    ON runtime_input_delivery(
+                        id, agent_run_id, execution_epoch,
+                        native_binding_id, native_binding_generation
+                    );
+
+                CREATE TABLE pi_managed_input_receipt (
+                    id TEXT PRIMARY KEY,
+                    runtime_input_delivery_id TEXT NOT NULL UNIQUE,
+                    agent_run_id TEXT NOT NULL,
+                    execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    native_session_id TEXT NOT NULL CHECK(length(trim(native_session_id)) > 0),
+                    native_prompt_id TEXT NOT NULL CHECK(length(trim(native_prompt_id)) > 0),
+                    receipt_version INTEGER NOT NULL CHECK(receipt_version = 1),
+                    receipt_json TEXT NOT NULL
+                        CHECK(json_valid(receipt_json) AND json_type(receipt_json) = 'object'),
+                    receipt_digest TEXT NOT NULL CHECK(
+                        length(receipt_digest) = 64
+                        AND receipt_digest NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    commit_nonce TEXT NOT NULL CHECK(
+                        length(commit_nonce) = 64
+                        AND commit_nonce NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    committed_at TEXT NOT NULL,
+                    FOREIGN KEY(
+                        runtime_input_delivery_id, agent_run_id, execution_epoch,
+                        native_binding_id, native_binding_generation
+                    ) REFERENCES runtime_input_delivery(
+                        id, agent_run_id, execution_epoch,
+                        native_binding_id, native_binding_generation
+                    ) ON DELETE CASCADE
+                );
+                CREATE INDEX pi_managed_input_receipt_run_idx
+                    ON pi_managed_input_receipt(agent_run_id, execution_epoch);
+
+                CREATE TRIGGER pi_managed_input_receipt_insert_guard
+                BEFORE INSERT ON pi_managed_input_receipt
+                WHEN NOT EXISTS(
+                    SELECT 1
+                    FROM runtime_input_delivery AS delivery
+                    JOIN context_manifest AS manifest
+                      ON manifest.id = delivery.context_manifest_id
+                    JOIN native_session_bootstrap_evidence AS bootstrap
+                      ON bootstrap.id = manifest.bootstrap_evidence_id
+                    WHERE delivery.id = NEW.runtime_input_delivery_id
+                      AND delivery.agent_run_id = NEW.agent_run_id
+                      AND delivery.execution_epoch = NEW.execution_epoch
+                      AND delivery.native_binding_id = NEW.native_binding_id
+                      AND delivery.native_binding_generation = NEW.native_binding_generation
+                      AND delivery.status IN ('prepared', 'delivery_unknown')
+                      AND delivery.dispatch_started_at IS NOT NULL
+                      AND bootstrap.native_binding_id = delivery.native_binding_id
+                      AND bootstrap.native_binding_generation = delivery.native_binding_generation
+                      AND bootstrap.delivery_mode = 'managed_system_prompt'
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid Pi managed input receipt target');
+                END;
+
+                CREATE TRIGGER pi_managed_input_receipt_update_guard
+                BEFORE UPDATE ON pi_managed_input_receipt
+                BEGIN
+                    SELECT RAISE(ABORT, 'Pi managed input receipt is immutable');
+                END;
+
+                CREATE TRIGGER pi_managed_input_receipt_delete_guard
+                BEFORE DELETE ON pi_managed_input_receipt
+                WHEN EXISTS(
+                    SELECT 1 FROM runtime_input_delivery AS delivery
+                    WHERE delivery.id = OLD.runtime_input_delivery_id
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'Pi managed input receipt is immutable');
+                END;
+
+                CREATE TRIGGER pi_managed_input_acceptance_update_guard
+                BEFORE UPDATE OF status ON runtime_input_delivery
+                WHEN NEW.status = 'accepted'
+                  AND EXISTS(
+                      SELECT 1
+                      FROM context_manifest AS manifest
+                      JOIN native_session_bootstrap_evidence AS bootstrap
+                        ON bootstrap.id = manifest.bootstrap_evidence_id
+                      WHERE manifest.id = NEW.context_manifest_id
+                        AND bootstrap.delivery_mode = 'managed_system_prompt'
+                  )
+                  AND NOT EXISTS(
+                      SELECT 1 FROM pi_managed_input_receipt AS receipt
+                      WHERE receipt.runtime_input_delivery_id = NEW.id
+                        AND receipt.agent_run_id = NEW.agent_run_id
+                        AND receipt.execution_epoch = NEW.execution_epoch
+                        AND receipt.native_binding_id = NEW.native_binding_id
+                        AND receipt.native_binding_generation = NEW.native_binding_generation
+                        AND receipt.receipt_version = 1
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'Pi managed input receipt is required');
+                END;
+                "#,
+            )?;
+            transaction.execute(
+                "UPDATE rovai_data_contract
+                 SET contract_version = ?1, projection_schema_version = ?2,
+                     updated_at = datetime('now') WHERE singleton = 1",
+                params![
+                    CURRENT_DATA_CONTRACT_VERSION,
+                    CURRENT_PROJECTION_SCHEMA_VERSION
+                ],
+            )?;
+            transaction.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES(135, datetime('now'))",
+                [],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v135 migration left a foreign-key violation in {table} row {row_id}");
+        }
         Ok(())
     }
 
@@ -25171,7 +25546,155 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v134_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 135)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    let transaction = connection.unchecked_transaction().unwrap();
+    let adapter_binding_trigger: String = transaction
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger'
+             AND name = 'adapter_installation_fast_binding_update'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    transaction
+        .execute_batch(
+            "DROP TRIGGER adapter_installation_fast_binding_update;
+             DROP TRIGGER pi_managed_input_acceptance_update_guard;
+             DROP TRIGGER pi_managed_input_receipt_delete_guard;
+             DROP TRIGGER pi_managed_input_receipt_update_guard;
+             DROP TRIGGER pi_managed_input_receipt_insert_guard;
+             DROP TABLE pi_managed_input_receipt;
+             DROP INDEX runtime_input_delivery_pi_binding_unique;",
+        )
+        .unwrap();
+
+    fn contract_closed_set(
+        transaction: &Transaction<'_>,
+        table: &str,
+        current: &str,
+        preceding: &str,
+    ) {
+        let create_sql: String = transaction
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let definition = &create_sql[create_sql.find('(').unwrap()..];
+        let replacement = format!("{table}_v134_source");
+        let replacement_sql =
+            format!("CREATE TABLE \"{replacement}\" {definition}").replace(current, preceding);
+        assert!(replacement_sql.contains(preceding));
+        let dependent_schema = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT sql FROM sqlite_master
+                     WHERE tbl_name = ?1 AND type IN ('index', 'trigger') AND sql IS NOT NULL
+                     ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name",
+                )
+                .unwrap();
+            statement
+                .query_map([table], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let columns = {
+            let mut statement = transaction
+                .prepare(&format!("PRAGMA table_info('{table}')"))
+                .unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        transaction.execute_batch(&replacement_sql).unwrap();
+        transaction
+            .execute_batch(&format!(
+                "INSERT INTO \"{replacement}\" ({columns}) SELECT {columns} FROM \"{table}\";
+                 DROP TABLE \"{table}\";
+                 ALTER TABLE \"{replacement}\" RENAME TO \"{table}\";"
+            ))
+            .unwrap();
+        for schema in dependent_schema {
+            transaction.execute_batch(&schema).unwrap();
+        }
+    }
+
+    contract_closed_set(
+        &transaction,
+        "native_session_bootstrap_evidence",
+        "'native_append', 'first_payload', 'managed_system_prompt'",
+        "'native_append', 'first_payload'",
+    );
+    contract_closed_set(
+        &transaction,
+        "skill_projection_observation",
+        "'grok', 'pi'",
+        "'grok'",
+    );
+    contract_closed_set(
+        &transaction,
+        "skill_group_assignment",
+        "'grok', 'pi'",
+        "'grok'",
+    );
+    contract_closed_set(
+        &transaction,
+        "agent_profile",
+        "'grok-build', 'pi'",
+        "'grok-build'",
+    );
+    contract_closed_set(
+        &transaction,
+        "adapter_installation",
+        "'grok-build', 'pi'",
+        "'grok-build'",
+    );
+    transaction.execute_batch(&adapter_binding_trigger).unwrap();
+    transaction
+        .execute_batch(
+            "DELETE FROM schema_migration WHERE version = 135;
+             UPDATE rovai_data_contract
+             SET contract_version = 'v1.44', projection_schema_version = 85
+             WHERE singleton = 1;",
+        )
+        .unwrap();
+    transaction.commit().unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON;")
+        .unwrap();
+    assert_eq!(
+        connection
+            .query_row("PRAGMA foreign_key_check", [], |_row| Ok(()))
+            .optional()
+            .unwrap(),
+        None
+    );
+}
+
+#[cfg(test)]
 pub(crate) fn downgrade_current_schema_to_v131_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v134_source_for_test(connection);
     let has_dispatch_boundary: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('runtime_input_delivery') WHERE name = 'dispatch_started_at')",
         [], |row| row.get(0),
@@ -27339,6 +27862,7 @@ mod tests {
             v132: version >= 132,
             v133: version >= 133,
             v134: version >= 134,
+            v135: version >= 135,
         }
     }
 
@@ -27444,6 +27968,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                135,
+            ),
+            (
+                "v1.44/schema-85 before Pi Runtime",
+                V135_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V135_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 134,
             ),
             (
@@ -27807,7 +28337,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(134);
+        let current = migration_state_through(135);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -27819,7 +28349,16 @@ mod tests {
         missing_image_migration.v133 = false;
         let mut missing_cancellation_migration = current;
         missing_cancellation_migration.v134 = false;
+        let mut missing_pi_migration = current;
+        missing_pi_migration.v135 = false;
         let rejected = [
+            (
+                "current marker without Pi Runtime migration",
+                missing_pi_migration,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without cancellation dispatch boundary",
                 missing_cancellation_migration,
@@ -28073,7 +28612,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(134));
+        assert_eq!(state, migration_state_through(135));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -29198,6 +29737,7 @@ mod tests {
                     | SkillDeliveryGroupKey::Cursor
                     | SkillDeliveryGroupKey::Kimi
                     | SkillDeliveryGroupKey::Grok
+                    | SkillDeliveryGroupKey::Pi
             )
         }) {
             for (skill_id, revision_id) in [
@@ -29411,6 +29951,7 @@ mod tests {
                 SkillDeliveryGroupKey::Cursor
                     | SkillDeliveryGroupKey::Kimi
                     | SkillDeliveryGroupKey::Grok
+                    | SkillDeliveryGroupKey::Pi
             )
         }) {
             for (skill_id, revision_id) in [
@@ -29587,7 +30128,9 @@ mod tests {
         for group in SkillDeliveryGroupKey::ALL.into_iter().filter(|group| {
             !matches!(
                 *group,
-                SkillDeliveryGroupKey::Kimi | SkillDeliveryGroupKey::Grok
+                SkillDeliveryGroupKey::Kimi
+                    | SkillDeliveryGroupKey::Grok
+                    | SkillDeliveryGroupKey::Pi
             )
         }) {
             for (skill_id, revision_id) in [
@@ -29940,10 +30483,12 @@ mod tests {
             )
             .unwrap();
         let now = chrono::Utc::now().to_rfc3339();
-        for group in SkillDeliveryGroupKey::ALL
-            .into_iter()
-            .filter(|group| *group != SkillDeliveryGroupKey::Grok)
-        {
+        for group in SkillDeliveryGroupKey::ALL.into_iter().filter(|group| {
+            !matches!(
+                *group,
+                SkillDeliveryGroupKey::Grok | SkillDeliveryGroupKey::Pi
+            )
+        }) {
             for (skill_id, revision_id) in [
                 ("v107-full", "v107-full-revision"),
                 ("v107-required", "v107-required-revision"),
@@ -30460,6 +31005,36 @@ mod tests {
             .execute_batch("DROP TRIGGER reject_cancellation_receipt")
             .unwrap();
         database.migrate_cancellation_settlement_v134().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database
+            .connection()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_pi_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 135 BEGIN SELECT RAISE(ABORT, 'Pi receipt fixture failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            database
+                .migrate_pi_runtime_v135()
+                .unwrap_err()
+                .to_string()
+                .contains("Pi receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(135).unwrap());
+        assert!(!database.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'pi_managed_input_receipt')",
+            [], |row| row.get::<_, bool>(0)
+        ).unwrap());
+        let adapter_schema: String = database.connection().query_row(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'adapter_installation'",
+            [], |row| row.get(0)
+        ).unwrap();
+        assert!(!adapter_schema.contains("'pi'"));
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_pi_receipt")
+            .unwrap();
+        database.migrate_pi_runtime_v135().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -30491,6 +31066,347 @@ mod tests {
                 .prepare("SELECT observed_service_tier FROM runtime_usage_run_summary")
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn v135_pi_receipt_is_immutable_but_cascades_through_parent_and_camp_delete() {
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v134_source_for_test(database.connection());
+        database.migrate_pi_runtime_v135().unwrap();
+
+        assert!(pi_runtime_v135_schema_matches(database.connection()).unwrap());
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO managed_blob(
+                    id, sha256, byte_size, media_type, storage_relative_path,
+                    state, sensitivity, created_at, updated_at
+                ) VALUES
+                    ('pi-v135-charter',
+                     '1111111111111111111111111111111111111111111111111111111111111111',
+                     1, 'text/plain', 'pi-v135/charter', 'present', 'normal',
+                     '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z'),
+                    ('pi-v135-memory',
+                     '2222222222222222222222222222222222222222222222222222222222222222',
+                     1, 'text/plain', 'pi-v135/memory', 'present', 'normal',
+                     '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z'),
+                    ('pi-v135-payload',
+                     '3333333333333333333333333333333333333333333333333333333333333333',
+                     1, 'text/plain', 'pi-v135/payload', 'present', 'normal',
+                     '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z');
+
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-pi-v135', 'Pi receipt migration fixture', 'directory',
+                    '/tmp/rovai-pi-v135', 0, 1,
+                    '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z'
+                );
+                INSERT INTO conversation(
+                    id, camp_id, agent_id, native_session_id,
+                    summary_through_message_sequence, last_message_sequence,
+                    version, created_at, updated_at,
+                    native_binding_id, native_binding_generation,
+                    last_accepted_public_boundary_sequence, last_input_sequence
+                ) VALUES (
+                    'conversation-pi-v135', 'camp-pi-v135', 'agent_1',
+                    'native-session-pi-v135', 0, 0, 1,
+                    '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z',
+                    'binding-pi-v135', 1, 0, 0
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'turn-pi-v135', 'camp-pi-v135', 'system_event',
+                    'trigger-pi-v135', 'running', 1,
+                    '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z'
+                );
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    start_reason, purpose, completion_role,
+                    effective_config_json, status, idempotency_key,
+                    execution_epoch, version, created_at, started_at, updated_at,
+                    runtime_adapter_kind, runtime_protocol_version
+                ) VALUES (
+                    'run-pi-v135', 'turn-pi-v135', 'conversation-pi-v135',
+                    0, 0, 'fixture-pi-v135', 0, 'initial',
+                    'prove managed input receipt fencing', 'required', '{}',
+                    'running', 'fixture-pi-v135', 1, 1,
+                    '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z',
+                    '2026-09-03T00:00:00Z', 'pi', 'pi-jsonl-rpc-v1'
+                );
+                INSERT INTO native_session_bootstrap_evidence(
+                    id, conversation_id, native_binding_id,
+                    native_binding_generation, contract_version,
+                    bootstrap_formatter_version, session_charter_blob_id,
+                    session_charter_digest, memory_entrypoint_blob_id,
+                    memory_entrypoint_digest, observed_memory_revisions_json,
+                    authorization_basis_digest, delivery_mode, created_at
+                ) VALUES (
+                    'bootstrap-pi-v135', 'conversation-pi-v135',
+                    'binding-pi-v135', 1, 'native_session_bootstrap_v3', 3,
+                    'pi-v135-charter',
+                    '1111111111111111111111111111111111111111111111111111111111111111',
+                    'pi-v135-memory',
+                    '2222222222222222222222222222222222222222222222222222222222222222',
+                    '[]',
+                    '4444444444444444444444444444444444444444444444444444444444444444',
+                    'managed_system_prompt', '2026-09-03T00:00:00Z'
+                );
+                INSERT INTO context_manifest(
+                    id, agent_run_id, bootstrap_evidence_id,
+                    native_binding_generation, camp_message_boundary_sequence,
+                    conversation_message_boundary_sequence,
+                    collaboration_state_digest, collaboration_state_included,
+                    run_fact_digest, current_input_source_json,
+                    attachment_digest, skill_exposure_json,
+                    skill_exposure_digest, current_input_skill_resolution_json,
+                    current_input_skill_resolution_digest,
+                    message_projection_audience, a2a_guidance_evidence_json,
+                    a2a_guidance_evidence_digest, mcp_exposure_json,
+                    mcp_exposure_digest, mcp_projection_digest,
+                    self_active_task_evidence_json,
+                    self_active_task_evidence_digest,
+                    previous_accepted_public_boundary_sequence,
+                    context_delivery_profile_version,
+                    context_delivery_profile_json,
+                    context_delivery_profile_digest, formatter_version,
+                    rendered_payload_blob_id, rendered_payload_digest,
+                    shared_message_evidence_digest, context_manifest_version,
+                    run_facts_schema_version,
+                    camp_attachment_view_receipt_version,
+                    camp_attachment_view_receipt_json,
+                    camp_attachment_view_receipt_digest, created_at
+                ) VALUES (
+                    'manifest-pi-v135', 'run-pi-v135', 'bootstrap-pi-v135',
+                    1, 0, 0, 'collaboration-pi-v135', 1,
+                    'run-facts-pi-v135', '{}', 'attachments-pi-v135', '{}',
+                    'skills-pi-v135', '{}', 'skill-resolution-pi-v135',
+                    'agent_v1', '{}', 'a2a-pi-v135', '{}', 'mcp-pi-v135',
+                    'mcp-projection-pi-v135', '{}', 'active-task-pi-v135',
+                    0, 4, '{}', 'delivery-profile-pi-v135', 22,
+                    'pi-v135-payload',
+                    '3333333333333333333333333333333333333333333333333333333333333333',
+                    'shared-message-pi-v135', 22, 2, 2, '{}',
+                    'camp-attachment-view-pi-v135', '2026-09-03T00:00:00Z'
+                );
+                INSERT INTO runtime_input_delivery(
+                    id, agent_run_id, execution_epoch, context_manifest_id,
+                    native_binding_id, native_binding_generation,
+                    boundary_camp_message_sequence, dynamic_payload_digest,
+                    status, prepared_at, updated_at,
+                    runtime_attachment_auth_receipt_version,
+                    runtime_attachment_auth_receipt_json,
+                    runtime_attachment_auth_receipt_digest,
+                    runtime_request_digest, dispatch_started_at
+                ) VALUES (
+                    'delivery-pi-v135', 'run-pi-v135', 1,
+                    'manifest-pi-v135', 'binding-pi-v135', 1, 0,
+                    'payload-pi-v135', 'prepared', '2026-09-03T00:00:00Z',
+                    '2026-09-03T00:00:00Z', 1, '{}',
+                    'attachment-auth-pi-v135', 'request-pi-v135',
+                    '2026-09-03T00:00:01Z'
+                );
+                "#,
+            )
+            .unwrap();
+
+        let unreceipted_accept = database.connection().execute(
+            "UPDATE runtime_input_delivery
+             SET status = 'accepted', native_input_id = 'prompt-pi-v135',
+                 accepted_at = '2026-09-03T00:00:02Z',
+                 updated_at = '2026-09-03T00:00:02Z'
+             WHERE id = 'delivery-pi-v135'",
+            [],
+        );
+        assert!(
+            unreceipted_accept
+                .unwrap_err()
+                .to_string()
+                .contains("Pi managed input receipt is required")
+        );
+
+        let mismatched_receipt = database.connection().execute(
+            r#"
+            INSERT INTO pi_managed_input_receipt(
+                id, runtime_input_delivery_id, agent_run_id, execution_epoch,
+                native_binding_id, native_binding_generation,
+                native_session_id, native_prompt_id, receipt_version,
+                receipt_json, receipt_digest, commit_nonce, committed_at
+            ) VALUES (
+                'receipt-pi-v135-mismatch', 'delivery-pi-v135',
+                'run-pi-v135', 1, 'binding-pi-v135', 2,
+                'native-session-pi-v135', 'prompt-pi-v135', 1, '{}',
+                '5555555555555555555555555555555555555555555555555555555555555555',
+                '6666666666666666666666666666666666666666666666666666666666666666',
+                '2026-09-03T00:00:02Z'
+            )
+            "#,
+            [],
+        );
+        assert!(
+            mismatched_receipt
+                .unwrap_err()
+                .to_string()
+                .contains("invalid Pi managed input receipt target")
+        );
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO pi_managed_input_receipt(
+                    id, runtime_input_delivery_id, agent_run_id, execution_epoch,
+                    native_binding_id, native_binding_generation,
+                    native_session_id, native_prompt_id, receipt_version,
+                    receipt_json, receipt_digest, commit_nonce, committed_at
+                ) VALUES (
+                    'receipt-pi-v135', 'delivery-pi-v135', 'run-pi-v135', 1,
+                    'binding-pi-v135', 1, 'native-session-pi-v135',
+                    'prompt-pi-v135', 1, '{}',
+                    '5555555555555555555555555555555555555555555555555555555555555555',
+                    '6666666666666666666666666666666666666666666666666666666666666666',
+                    '2026-09-03T00:00:02Z'
+                );
+                UPDATE runtime_input_delivery
+                SET status = 'accepted', native_input_id = 'prompt-pi-v135',
+                    accepted_at = '2026-09-03T00:00:02Z',
+                    updated_at = '2026-09-03T00:00:02Z'
+                WHERE id = 'delivery-pi-v135';
+                "#,
+            )
+            .unwrap();
+        for mutation in [
+            "UPDATE pi_managed_input_receipt SET native_prompt_id = 'tampered' WHERE id = 'receipt-pi-v135'",
+            "DELETE FROM pi_managed_input_receipt WHERE id = 'receipt-pi-v135'",
+        ] {
+            assert!(
+                database
+                    .connection()
+                    .execute(mutation, [])
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Pi managed input receipt is immutable")
+            );
+        }
+        database
+            .connection()
+            .execute(
+                "DELETE FROM runtime_input_delivery WHERE id = 'delivery-pi-v135'",
+                [],
+            )
+            .expect("deleting the parent Runtime Input Delivery should cascade its Pi receipt");
+        let remaining_receipts: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM pi_managed_input_receipt WHERE id = 'receipt-pi-v135'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining_receipts, 0);
+        let foreign_key_violations: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO runtime_input_delivery(
+                    id, agent_run_id, execution_epoch, context_manifest_id,
+                    native_binding_id, native_binding_generation,
+                    boundary_camp_message_sequence, dynamic_payload_digest,
+                    status, prepared_at, updated_at,
+                    runtime_attachment_auth_receipt_version,
+                    runtime_attachment_auth_receipt_json,
+                    runtime_attachment_auth_receipt_digest,
+                    runtime_request_digest, dispatch_started_at
+                ) VALUES (
+                    'delivery-pi-v135', 'run-pi-v135', 1,
+                    'manifest-pi-v135', 'binding-pi-v135', 1, 0,
+                    'payload-pi-v135', 'prepared', '2026-09-03T00:00:03Z',
+                    '2026-09-03T00:00:03Z', 1, '{}',
+                    'attachment-auth-pi-v135', 'request-pi-v135',
+                    '2026-09-03T00:00:03Z'
+                );
+                INSERT INTO pi_managed_input_receipt(
+                    id, runtime_input_delivery_id, agent_run_id, execution_epoch,
+                    native_binding_id, native_binding_generation,
+                    native_session_id, native_prompt_id, receipt_version,
+                    receipt_json, receipt_digest, commit_nonce, committed_at
+                ) VALUES (
+                    'receipt-pi-v135-camp-delete', 'delivery-pi-v135',
+                    'run-pi-v135', 1, 'binding-pi-v135', 1,
+                    'native-session-pi-v135', 'prompt-pi-v135-camp-delete', 1, '{}',
+                    '7777777777777777777777777777777777777777777777777777777777777777',
+                    '8888888888888888888888888888888888888888888888888888888888888888',
+                    '2026-09-03T00:00:03Z'
+                );
+                "#,
+            )
+            .unwrap();
+        let foreign_keys_enabled: bool = database
+            .connection()
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            foreign_keys_enabled,
+            "Camp delete must not disable foreign keys"
+        );
+        {
+            let transaction = database.connection_mut().transaction().unwrap();
+            crate::collaboration::delete_camp_aggregate(&transaction, "camp-pi-v135")
+                .expect("Camp aggregate deletion should cascade its Pi receipt");
+            transaction.commit().unwrap();
+        }
+        for (table, id) in [
+            ("camp", "camp-pi-v135"),
+            ("runtime_input_delivery", "delivery-pi-v135"),
+            ("pi_managed_input_receipt", "receipt-pi-v135-camp-delete"),
+        ] {
+            let remaining: i64 = database
+                .connection()
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE id = ?1"),
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(remaining, 0, "{table} should be removed by Camp deletion");
+        }
+        let foreign_key_violations: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+
+        drop(database);
+        let reopened = Database::open(&directory).unwrap();
+        assert!(pi_runtime_v135_schema_matches(reopened.connection()).unwrap());
+        let migration_receipts: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 135",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_receipts, 1, "reopen must not reapply v135");
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -33567,38 +34483,24 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.52', projection_schema_version = 28
+                SET contract_version = 'v0.52', projection_schema_version = 28,
+                    classifier_version = 'activity-v1'
                 WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 70;
-                DELETE FROM schema_migration WHERE version = 71;
+                DELETE FROM schema_migration WHERE version >= 70;
                 "#,
             )
             .unwrap();
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(
+                DatabaseContractMarker {
+                    contract_version,
+                    projection_schema_version: 28,
+                    ..
+                }
+            ) if contract_version == "v0.52"
+        ));
         drop(database);
-
-        let reopened = Database::open(&directory).expect("v69 source should reopen");
-        let contract: (String, i64, i64, i64) = reopened
-            .connection()
-            .query_row(
-                r#"
-                SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 70),
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 71)
-                FROM rovai_data_contract WHERE singleton = 1
-                "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(contract, ("v0.54".to_string(), 30, 1, 1));
-        let foreign_key_violations: i64 = reopened
-            .connection()
-            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(foreign_key_violations, 0);
-        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use url::form_urlencoded;
 
 #[cfg(windows)]
 use crate::windows_runtime_entrypoint::{
@@ -54,6 +55,8 @@ pub trait AgentRuntimeAdapter {
 
 pub const GROK_BUILD_MINIMUM_VERSION: [u64; 3] = [1, 0, 0];
 pub const GROK_BUILD_MINIMUM_VERSION_LABEL: &str = "1.0.0";
+pub const PI_MINIMUM_VERSION: [u64; 3] = [0, 84, 4];
+pub const PI_MINIMUM_VERSION_LABEL: &str = "0.84.4";
 
 pub fn grok_build_minimum_version_satisfied(reported_version: Option<&str>) -> bool {
     reported_version
@@ -61,6 +64,14 @@ pub fn grok_build_minimum_version_satisfied(reported_version: Option<&str>) -> b
         .is_some_and(|(version, prerelease)| {
             version > GROK_BUILD_MINIMUM_VERSION
                 || (version == GROK_BUILD_MINIMUM_VERSION && !prerelease)
+        })
+}
+
+pub fn pi_minimum_version_satisfied(reported_version: Option<&str>) -> bool {
+    reported_version
+        .and_then(parse_reported_runtime_version)
+        .is_some_and(|(version, prerelease)| {
+            version > PI_MINIMUM_VERSION || (version == PI_MINIMUM_VERSION && !prerelease)
         })
 }
 
@@ -336,6 +347,7 @@ pub struct AdapterRuntimeProjection {
 #[serde(rename_all = "snake_case")]
 pub enum SkillDeliveryGroupKey {
     Codex,
+    Pi,
     Opencode,
     Copilot,
     ClaudeCompatible,
@@ -351,8 +363,9 @@ pub enum SkillDeliveryGroupKey {
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Codex,
+        Self::Pi,
         Self::Opencode,
         Self::Copilot,
         Self::ClaudeCompatible,
@@ -370,6 +383,7 @@ impl SkillDeliveryGroupKey {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Codex => "codex",
+            Self::Pi => "pi",
             Self::Opencode => "opencode",
             Self::Copilot => "copilot",
             Self::ClaudeCompatible => "claude_compatible",
@@ -388,6 +402,7 @@ impl SkillDeliveryGroupKey {
     pub fn relative_path(self) -> &'static Path {
         match self {
             Self::Codex => Path::new(".codex/skills"),
+            Self::Pi => Path::new(".pi/skills"),
             Self::Opencode => Path::new(".opencode/skills"),
             Self::Copilot => Path::new(".github/skills"),
             Self::ClaudeCompatible => Path::new(".claude/skills"),
@@ -410,6 +425,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "codex" => Ok(Self::Codex),
+            "pi" => Ok(Self::Pi),
             "opencode" => Ok(Self::Opencode),
             "copilot" => Ok(Self::Copilot),
             "claude_compatible" => Ok(Self::ClaudeCompatible),
@@ -459,6 +475,7 @@ pub enum McpSameNamePolicy {
 #[serde(rename_all = "snake_case")]
 pub enum McpApprovalControl {
     RuntimeNative,
+    CoreManaged,
     Unsupported,
 }
 
@@ -488,7 +505,17 @@ fn unsupported_external_mcp_projection() -> McpProjectionCapability {
         supports_streamable_http: false,
         external_mcp_projection: ExternalMcpProjection::Unsupported,
         same_name_policy: None,
-        approval_control: McpApprovalControl::RuntimeNative,
+        approval_control: McpApprovalControl::Unsupported,
+    }
+}
+
+fn pi_core_managed_mcp_projection() -> McpProjectionCapability {
+    McpProjectionCapability {
+        supports_stdio: true,
+        supports_streamable_http: true,
+        external_mcp_projection: ExternalMcpProjection::AdditivePerRun,
+        same_name_policy: Some(McpSameNamePolicy::RovaiWins),
+        approval_control: McpApprovalControl::CoreManaged,
     }
 }
 
@@ -553,11 +580,26 @@ pub struct ClaudeCodeProbeObservation {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PiProbeObservation {
+    pub reported_version: Option<String>,
+    pub executable_fingerprint: Option<String>,
+    pub authentication_status: String,
+    pub probe_status: String,
+    pub capabilities: Vec<String>,
+    pub raw_model_catalog: Option<Value>,
+    pub attempted_at: String,
+    pub last_error: Option<String>,
+}
+
 /// Synthetic catalog entry used to represent Antigravity's own default
 /// selection. It is never passed to `agy --model`; a runtime-default Run
 /// omits that flag.
 pub const ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID: &str = "antigravity://runtime-default";
 pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-default";
+pub const PI_RUNTIME_DEFAULT_MODEL_ID: &str = "pi://runtime-default";
+pub const PI_MACHINE_PROTOCOL: &str = "pi-jsonl-rpc-v1";
+pub const PI_NATIVE_SESSION_COMPATIBILITY_KEY: &str = "pi-jsonl-rpc-v1:managed-system-prompt-v1";
 /// Frozen model identity used only while TRAE is statically installed but has
 /// not yet exposed its live model catalog. The first real ACP Session leaves
 /// the Runtime's current model untouched.
@@ -651,7 +693,7 @@ impl AgentRuntimeAdapterRegistry {
         kind: AdapterKind,
         platform: HostPlatformKey,
     ) -> RuntimePlatformAdmission {
-        if kind == AdapterKind::CursorAgent {
+        if matches!(kind, AdapterKind::CursorAgent | AdapterKind::Pi) {
             return RuntimePlatformAdmission::not_qualified(
                 kind,
                 platform,
@@ -724,6 +766,9 @@ impl AgentRuntimeAdapterRegistry {
                 "sandbox_mode": "danger-full-access",
                 "approval_policy": "never",
             }),
+            AdapterKind::Pi => json!({
+                "approval_mode": "managed",
+            }),
             AdapterKind::OpencodeCli => json!({
                 "permission": "allow",
             }),
@@ -773,6 +818,7 @@ impl AgentRuntimeAdapterRegistry {
     ) -> Result<AdapterRuntimeProjection> {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.resolve_runtime(input),
+            AdapterKind::Pi => resolve_pi_runtime(input),
             AdapterKind::OpencodeCli => self.opencode_cli.resolve_runtime(input),
             AdapterKind::CopilotCli => self.copilot_cli.resolve_runtime(input),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.resolve_runtime(input),
@@ -791,6 +837,10 @@ impl AgentRuntimeAdapterRegistry {
     pub fn skill_discovery(&self, kind: AdapterKind) -> SkillDiscoveryCapability {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.skill_discovery(),
+            AdapterKind::Pi => native_skill_discovery(
+                [SkillDeliveryGroupKey::Pi],
+                SkillDiscoveryVerification::Verified,
+            ),
             AdapterKind::OpencodeCli => self.opencode_cli.skill_discovery(),
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.skill_discovery(),
@@ -833,6 +883,7 @@ impl AgentRuntimeAdapterRegistry {
     pub fn mcp_projection(&self, kind: AdapterKind) -> McpProjectionCapability {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
+            AdapterKind::Pi => pi_core_managed_mcp_projection(),
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -908,6 +959,7 @@ impl AgentRuntimeAdapterRegistry {
     ) -> Result<AdapterCapabilitySnapshot> {
         let permission_options = match kind {
             AdapterKind::CodexCli => codex_permission_options(),
+            AdapterKind::Pi => pi_permission_options(),
             AdapterKind::OpencodeCli => opencode_permission_options(),
             AdapterKind::CopilotCli => copilot_permission_options(),
             AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
@@ -924,11 +976,13 @@ impl AgentRuntimeAdapterRegistry {
         let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
         let grok_version_unsupported = kind == AdapterKind::GrokBuild
             && !grok_build_minimum_version_satisfied(reported_version.as_deref());
+        let pi_version_unsupported =
+            kind == AdapterKind::Pi && !pi_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
             reported_version,
             executable_fingerprint: Some(executable_fingerprint),
             authentication_status: "unknown".to_string(),
-            probe_status: if grok_version_unsupported {
+            probe_status: if grok_version_unsupported || pi_version_unsupported {
                 "light_failed".to_string()
             } else {
                 "light_ready".to_string()
@@ -943,7 +997,7 @@ impl AgentRuntimeAdapterRegistry {
             last_attempted_at: observed_at,
             last_successful_probe_at: None,
             stale_at: None,
-            last_error: grok_version_unsupported
+            last_error: (grok_version_unsupported || pi_version_unsupported)
                 .then(|| "runtime_version_below_minimum".to_string()),
             native_session_compatibility_key: None,
         })
@@ -1022,12 +1076,99 @@ impl AgentRuntimeAdapterRegistry {
         self.claude_code_cli.capability_snapshot(observation)
     }
 
+    pub fn pi_capability_snapshot(
+        &self,
+        observation: PiProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        let ready = observation.probe_status == "ready";
+        let mut capabilities = observation.capabilities;
+        capabilities.sort();
+        capabilities.dedup();
+        let permission_options = ready.then(pi_permission_options).unwrap_or_default();
+        let permission_schema_digest =
+            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+        Ok(AdapterCapabilitySnapshot {
+            reported_version: observation.reported_version,
+            executable_fingerprint: observation.executable_fingerprint,
+            authentication_status: observation.authentication_status,
+            probe_status: observation.probe_status,
+            permission_schema_version: 1,
+            permission_schema_digest,
+            capabilities,
+            protocols: if ready {
+                vec![PI_MACHINE_PROTOCOL.to_string()]
+            } else {
+                Vec::new()
+            },
+            models: if ready {
+                pi_models(observation.raw_model_catalog.as_ref())?
+            } else {
+                Vec::new()
+            },
+            permission_options,
+            observed_at: ready.then(|| observation.attempted_at.clone()),
+            last_attempted_at: observation.attempted_at.clone(),
+            last_successful_probe_at: ready.then(|| observation.attempted_at.clone()),
+            stale_at: (!ready).then_some(observation.attempted_at),
+            last_error: (!ready).then_some(observation.last_error).flatten(),
+            native_session_compatibility_key: ready
+                .then(|| PI_NATIVE_SESSION_COMPATIBILITY_KEY.to_string()),
+        })
+    }
+
     pub fn antigravity_capability_snapshot(
         &self,
         observation: AntigravityProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
         self.antigravity_app.capability_snapshot(observation)
     }
+}
+
+fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
+    let mut models = vec![ModelDescriptor {
+        id: PI_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+        display_name: "Pi native default".to_string(),
+        is_default: true,
+        hidden: false,
+        deprecated: false,
+        options: Vec::new(),
+    }];
+    let Some(values) = catalog
+        .and_then(|value| value.get("models").or(Some(value)))
+        .and_then(Value::as_array)
+    else {
+        return Ok(models);
+    };
+    for value in values {
+        let provider = value
+            .get("provider")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .context("Pi model catalog entry has no provider")?;
+        let model_id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .context("Pi model catalog entry has no id")?;
+        let query = form_urlencoded::Serializer::new(String::new())
+            .append_pair("provider", provider)
+            .append_pair("id", model_id)
+            .finish();
+        let id = format!("pi://model?{query}");
+        models.push(ModelDescriptor {
+            id,
+            display_name: value
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(model_id)
+                .to_string(),
+            is_default: false,
+            hidden: false,
+            deprecated: false,
+            options: Vec::new(),
+        });
+    }
+    Ok(models)
 }
 
 #[derive(Debug, Default)]
@@ -1542,6 +1683,21 @@ pub fn trae_machine_ready_requirements() -> Vec<String> {
     .collect()
 }
 
+pub fn pi_machine_ready_requirements() -> Vec<String> {
+    [
+        PI_MACHINE_PROTOCOL,
+        "pi.rpc.host",
+        "pi.rpc.managed_extension",
+        "pi.rpc.get_state",
+        "model.dynamic_catalog",
+        "session.new",
+        "conversation.exact_resume",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
 pub fn trae_machine_ready_capabilities(
     reported_version: Option<&str>,
     executable_fingerprint: Option<&str>,
@@ -1636,6 +1792,39 @@ pub fn validate_machine_ready_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
 ) -> Result<()> {
+    if adapter_kind == AdapterKind::Pi && snapshot.probe_status == "ready" {
+        validate_pi_machine_ready_evidence(
+            snapshot.reported_version.as_deref(),
+            snapshot.executable_fingerprint.as_deref(),
+            &snapshot.capabilities,
+        )?;
+        let managed_approval = snapshot.permission_options.iter().any(|option| {
+            option.key == "approval_mode"
+                && option.required
+                && option.supported
+                && option.recommended_value == json!("managed")
+                && option
+                    .choices
+                    .iter()
+                    .any(|choice| choice.value == "managed")
+        });
+        let complete = snapshot.authentication_status == "authenticated"
+            && snapshot
+                .protocols
+                .iter()
+                .any(|protocol| protocol == PI_MACHINE_PROTOCOL)
+            && snapshot
+                .models
+                .iter()
+                .any(|model| model.id == PI_RUNTIME_DEFAULT_MODEL_ID && model.is_default)
+            && managed_approval
+            && snapshot.native_session_compatibility_key.as_deref()
+                == Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY);
+        if !complete {
+            anyhow::bail!("Pi ready snapshot does not satisfy the machine Ready contract");
+        }
+        return Ok(());
+    }
     if adapter_kind == AdapterKind::CursorAgent && snapshot.probe_status == "ready" {
         let required = ["acp.initialize", "cursor.authenticate", "session.new"];
         let complete = snapshot.authentication_status == "authenticated"
@@ -1689,6 +1878,32 @@ pub fn validate_machine_ready_snapshot(
         || snapshot.permission_options.is_empty()
     {
         anyhow::bail!("TRAE ready snapshot does not satisfy the machine Ready contract");
+    }
+    Ok(())
+}
+
+pub fn validate_pi_machine_ready_evidence(
+    reported_version: Option<&str>,
+    executable_fingerprint: Option<&str>,
+    capabilities: &[String],
+) -> Result<()> {
+    let missing = pi_machine_ready_requirements()
+        .into_iter()
+        .filter(|required| !capabilities.contains(required))
+        .collect::<Vec<_>>();
+    if !missing.is_empty()
+        || !pi_minimum_version_satisfied(reported_version)
+        || executable_fingerprint.is_none_or(|value| value.trim().is_empty())
+    {
+        anyhow::bail!(
+            "Pi machine Ready evidence requires version >= {}{}",
+            PI_MINIMUM_VERSION_LABEL,
+            if missing.is_empty() {
+                String::new()
+            } else {
+                format!(": missing {}", missing.join(", "))
+            }
+        );
     }
     Ok(())
 }
@@ -2322,6 +2537,22 @@ pub(crate) fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor
     }]
 }
 
+fn pi_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "approval_mode".to_string(),
+        label: "approval-mode".to_string(),
+        description: "Pi has no native sandbox or permission callback. Rovai's explicitly loaded extension gates every mutating Tool through durable Approval.".to_string(),
+        value_type: "enum".to_string(),
+        choices: vec![choice("managed", "managed (Rovai approval)")],
+        recommended_value: json!("managed"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
 fn claude_code_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "permission_mode".to_string(),
@@ -2393,6 +2624,55 @@ fn antigravity_permission_options() -> Vec<PermissionOptionDescriptor> {
             unsupported_reason: None,
         },
     ]
+}
+
+fn resolve_pi_runtime(
+    input: AdapterRuntimeResolutionInput<'_>,
+) -> Result<AdapterRuntimeProjection> {
+    if input.permissions.adapter_kind != AdapterKind::Pi {
+        anyhow::bail!("Pi permission configuration belongs to another Adapter");
+    }
+    let protocol_version = input
+        .protocols
+        .iter()
+        .find(|protocol| protocol.as_str() == PI_MACHINE_PROTOCOL)
+        .context("Pi installation does not advertise JSONL RPC v1")?
+        .clone();
+    let approval_mode = input
+        .permissions
+        .values
+        .get("approval_mode")
+        .and_then(Value::as_str)
+        .context("Pi permission configuration requires approval_mode")?;
+    if approval_mode != "managed" {
+        anyhow::bail!("Pi only supports the Rovai managed approval mode");
+    }
+    let binding_compatibility_digest = canonical_json_digest(&json!({
+        "adapterKind": AdapterKind::Pi,
+        "installationId": input.installation_id,
+        "protocolVersion": protocol_version,
+        "contextContract": native_binding_context_contract(),
+        "managedSystemPrompt": "rovai-pi-host-v3",
+    }))?;
+    let host_config_digest = canonical_json_digest(&json!({
+        "adapterKind": AdapterKind::Pi,
+        "installationId": input.installation_id,
+        "executablePath": input.executable_path,
+        "entrypointKind": runtime_entrypoint_kind(input.executable_path),
+        "executableFingerprint": input.executable_fingerprint,
+        "reportedVersion": input.reported_version,
+        "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
+        "authScope": input.auth_scope,
+        "protocolVersion": protocol_version,
+        "permissionSchemaVersion": input.permissions.schema_version,
+        "approvalMode": approval_mode,
+        "managedExtension": "rovai-pi-host-v3",
+    }))?;
+    Ok(AdapterRuntimeProjection {
+        protocol_version,
+        binding_compatibility_digest,
+        host_config_digest,
+    })
 }
 
 fn resolve_acp_runtime(
@@ -3069,6 +3349,18 @@ mod tests {
     }
 
     #[test]
+    fn pi_model_identity_uses_one_canonical_query_string() {
+        let models = pi_models(Some(&json!([{
+            "provider": "minimax-cn",
+            "id": "MiniMax-M3",
+            "name": "MiniMax-M3"
+        }])))
+        .unwrap();
+
+        assert_eq!(models[1].id, "pi://model?provider=minimax-cn&id=MiniMax-M3");
+    }
+
+    #[test]
     fn opencode_models_are_read_from_acp_config_options() {
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .acp_capability_snapshot(AcpProbeObservation {
@@ -3295,6 +3587,92 @@ mod tests {
             old.last_error.as_deref(),
             Some("runtime_version_below_minimum")
         );
+    }
+
+    #[test]
+    fn pi_minimum_version_gate_excludes_the_historical_probe_version() {
+        assert!(!pi_minimum_version_satisfied(Some("0.84.2")));
+        assert!(!pi_minimum_version_satisfied(Some("pi 0.84.4-beta.1")));
+        assert!(pi_minimum_version_satisfied(Some("0.84.4")));
+        assert!(pi_minimum_version_satisfied(Some("pi v0.85.0 (build)")));
+        assert!(!pi_minimum_version_satisfied(Some("pi development")));
+        assert!(!pi_minimum_version_satisfied(None));
+
+        let old = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::Pi,
+                Some("0.84.2".to_string()),
+                "sha256:pi-old".to_string(),
+                "2026-09-02T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(old.probe_status, "light_failed");
+        assert_eq!(
+            old.last_error.as_deref(),
+            Some("runtime_version_below_minimum")
+        );
+    }
+
+    #[test]
+    fn pi_machine_ready_snapshot_does_not_synthesize_behavioral_capabilities() {
+        let observed = [
+            PI_MACHINE_PROTOCOL,
+            "pi.rpc.host",
+            "pi.rpc.managed_extension",
+            "pi.rpc.get_state",
+            "model.dynamic_catalog",
+            "session.new",
+            "conversation.exact_resume",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .pi_capability_snapshot(PiProbeObservation {
+                reported_version: Some("pi 0.84.4".to_string()),
+                executable_fingerprint: Some("sha256:pi-ready".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: observed.clone(),
+                raw_model_catalog: Some(json!([{
+                    "provider": "minimax",
+                    "id": "MiniMax-M3",
+                    "name": "MiniMax M3"
+                }])),
+                attempted_at: "2026-09-03T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .unwrap();
+
+        for unobserved in [
+            "pi.rpc.prompt",
+            "pi.rpc.agent_settled",
+            "pi.rpc.structured_tools",
+            "pi.rpc.extension_approval",
+            "pi.rpc.managed_input_receipt",
+            "context.charter.managed_system_prompt",
+            "context.compaction.native_system_prompt_preserved",
+            "usage.model_call.structured",
+            BUILTIN_TOOL_RUNTIME_CAPABILITY,
+            "mcp.external_projection.additive_per_run",
+            "mcp.same_name_policy.rovai_wins",
+            "mcp.approval.core_managed",
+        ] {
+            assert!(
+                !snapshot.capabilities.contains(&unobserved.to_string()),
+                "Machine Ready synthesized unobserved capability {unobserved}"
+            );
+        }
+        assert_eq!(
+            snapshot
+                .capabilities
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>(),
+            observed.into_iter().collect()
+        );
+        validate_machine_ready_snapshot(AdapterKind::Pi, &snapshot)
+            .expect("the no-Prompt Pi evidence should satisfy Machine Ready");
     }
 
     #[test]
@@ -3763,6 +4141,11 @@ mod tests {
                 SkillDiscoveryVerification::Verified,
             ),
             (
+                AdapterKind::Pi,
+                &[SkillDeliveryGroupKey::Pi],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
                 AdapterKind::OpencodeCli,
                 &[
                     SkillDeliveryGroupKey::Opencode,
@@ -3885,6 +4268,15 @@ mod tests {
                 McpApprovalControl::RuntimeNative
             );
         }
+        let pi = registry.mcp_projection(AdapterKind::Pi);
+        assert!(pi.supports_stdio);
+        assert!(pi.supports_streamable_http);
+        assert_eq!(
+            pi.external_mcp_projection,
+            ExternalMcpProjection::AdditivePerRun
+        );
+        assert_eq!(pi.same_name_policy, Some(McpSameNamePolicy::RovaiWins));
+        assert_eq!(pi.approval_control, McpApprovalControl::CoreManaged);
         for kind in [AdapterKind::AntigravityApp, AdapterKind::CursorAgent] {
             let capability = registry.mcp_projection(kind);
             assert!(!capability.supports_stdio);
@@ -3894,10 +4286,7 @@ mod tests {
                 ExternalMcpProjection::Unsupported
             );
             assert_eq!(capability.same_name_policy, None);
-            assert_eq!(
-                capability.approval_control,
-                McpApprovalControl::RuntimeNative
-            );
+            assert_eq!(capability.approval_control, McpApprovalControl::Unsupported);
         }
     }
 }

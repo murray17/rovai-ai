@@ -12,6 +12,7 @@ import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
 } from './lib/runtime-camp-files-root.mjs'
+import { prepareIsolatedPiAgentDir } from './lib/pi-smoke-config.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const coreExecutable = resolve(
@@ -20,6 +21,7 @@ const coreExecutable = resolve(
 )
 const allSpecifications = [
   ['codex-cli', 'Codex'],
+  ['pi', 'Pi'],
   ['opencode-cli', 'OpenCode'],
   ['copilot-cli', 'Copilot'],
   ['claude-code-cli', 'Claude'],
@@ -35,7 +37,7 @@ const allSpecifications = [
   adapterKind,
   label,
   slug: adapterKind.replaceAll('-', '_'),
-  acp: !['codex-cli', 'claude-code-cli', 'antigravity-app'].includes(adapterKind)
+  acp: !['codex-cli', 'pi', 'claude-code-cli', 'antigravity-app'].includes(adapterKind)
 }))
 const selected = selectedAdapters()
 const specifications = allSpecifications.filter(({ adapterKind }) => selected.has(adapterKind))
@@ -82,7 +84,10 @@ for (const specification of specifications) {
     await writeFile(join(projectRoot, 'RECOVERY_TOOL_FIXTURE.txt'), `${toolFixtureToken}\n`)
     await gitFixture(projectRoot, specification.label)
 
-    core = startCore(dataDir)
+    const piAgentDir = specification.adapterKind === 'pi'
+      ? await prepareIsolatedPiAgentDir(fixtureRoot)
+      : null
+    core = startCore(dataDir, piAgentDir)
     await core.request('health.check')
     const workspace = await core.request('workspaces.inspect', { path: projectRoot })
     const agentId = 'agent_1'
@@ -146,12 +151,15 @@ for (const specification of specifications) {
     process.stderr.write(`[missing-send-recovery] ${specification.adapterKind}: accepted send suppressed fallback\n`)
 
     let acpProtocol = null
-    if (specification.acp) {
+    let nativeToolFinal = null
+    if (specification.acp || specification.adapterKind === 'pi') {
       const toolStart = await startFollowUpRun(
         core.request,
         campId,
-        toolThenFinalPrompt(),
-        'Exercise a real ACP tool boundary followed by a zero-send final.'
+        toolThenFinalPrompt(specification),
+        specification.acp
+          ? 'Exercise a real ACP tool boundary followed by a zero-send final.'
+          : 'Exercise a real Pi tool boundary followed by a zero-send final.'
       )
       await waitForTerminalRun(
         core,
@@ -164,24 +172,31 @@ for (const specification of specifications) {
         adapterKind: specification.adapterKind,
         marker: toolFixtureToken,
         expectedAuthorId: agentId,
-        expectedBoundary: 'acp_end_turn_assistant_suffix'
+        expectedBoundary: expectedBoundary(specification)
       })
       if (toolFacts.runtimeActivities.length === 0) {
         throw new Error(`${specification.adapterKind} did not persist real tool activity`)
       }
-      const protocolFixture = buildAcpProtocolFixture(
-        core.events,
-        specification.adapterKind,
-        toolStart.agentRunId,
-        toolFacts.messages[0]?.body,
-        toolFacts
-      )
-      acpProtocol = validateAcpRecoveryProtocolFixture(protocolFixture)
-      await writeFile(
-        join(reportDirectory, `${specification.adapterKind}-protocol-fixture.json`),
-        `${JSON.stringify(protocolFixture, null, 2)}\n`
-      )
-      process.stderr.write(`[missing-send-recovery] ${specification.adapterKind}: real tool→final protocol fixture passed\n`)
+      if (specification.acp) {
+        const protocolFixture = buildAcpProtocolFixture(
+          core.events,
+          specification.adapterKind,
+          toolStart.agentRunId,
+          toolFacts.messages[0]?.body,
+          toolFacts
+        )
+        acpProtocol = validateAcpRecoveryProtocolFixture(protocolFixture)
+        await writeFile(
+          join(reportDirectory, `${specification.adapterKind}-protocol-fixture.json`),
+          `${JSON.stringify(protocolFixture, null, 2)}\n`
+        )
+      } else {
+        nativeToolFinal = {
+          activityCount: toolFacts.runtimeActivities.length,
+          recovery: toolFacts.terminalEvent?.missingSendRecovery ?? null
+        }
+      }
+      process.stderr.write(`[missing-send-recovery] ${specification.adapterKind}: real tool→final recovery passed\n`)
     }
 
     const result = {
@@ -192,7 +207,8 @@ for (const specification of specifications) {
       )?.params?.modelId ?? null,
       zeroSend: summarizeFacts(zeroFacts),
       acceptedSendSuppression: summarizeFacts(suppressionFacts),
-      acpProtocol
+      acpProtocol,
+      nativeToolFinal
     }
     report.results.push(result)
     await persistReport()
@@ -229,7 +245,8 @@ console.log(JSON.stringify({
     model: result.selectedModel,
     zeroSend: result.zeroSend.decision,
     suppression: result.acceptedSendSuppression.decision,
-    acpToolEvents: result.acpProtocol?.toolEventCount ?? null
+    acpToolEvents: result.acpProtocol?.toolEventCount ?? null,
+    nativeToolActivities: result.nativeToolFinal?.activityCount ?? null
   }))
 }, null, 2))
 
@@ -276,9 +293,9 @@ function suppressionPrompt(adapterKind, progressMarker, privateFinalMarker) {
   ].join('\n')
 }
 
-function toolThenFinalPrompt() {
+function toolThenFinalPrompt(specification) {
   return [
-    'This is a controlled ACP tool-boundary acceptance case.',
+    `This is a controlled ${specification.acp ? 'ACP' : 'Pi native'} tool-boundary acceptance case.`,
     'Use your native file-reading tool (not shell) to read RECOVERY_TOOL_FIXTURE.txt from the current workspace.',
     'The file contains one unpredictable token that is not included in this request; do not guess it.',
     'Do not call rovai or rovai send.',
@@ -544,6 +561,7 @@ function buildAcpProtocolFixture(events, adapterKind, agentRunId, expectedFinal,
 
 function expectedBoundary(specification) {
   if (specification.acp) return 'acp_end_turn_assistant_suffix'
+  if (specification.adapterKind === 'pi') return 'pi_agent_settled'
   if (specification.adapterKind === 'codex-cli') return 'codex_completed_turn'
   if (specification.adapterKind === 'claude-code-cli') return 'claude_success_result'
   return 'antigravity_print_stdout'
@@ -562,12 +580,22 @@ function summarizeFacts(facts) {
   }
 }
 
-function startCore(dataDirectory) {
+function startCore(dataDirectory, piAgentDir = null) {
   const child = spawn(coreExecutable, [
     ...coreDataDirectoryArguments(dataDirectory),
-    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library'),
+    '--mcp-config-path', join(dataDirectory, 'mcp.json')
   ], {
     cwd: root,
+    env: {
+      ...process.env,
+      ...(selected.has('pi')
+        ? {
+            ...(piAgentDir ? { PI_CODING_AGENT_DIR: piAgentDir } : {}),
+            ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
+          }
+        : {})
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   const pending = new Map()

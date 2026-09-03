@@ -28,6 +28,11 @@ legible on Rovai's required white Runtime logo surface.
 
 Material SVG changes: `1`.
 
+`pi.svg` is the Pi Coding Agent logo published at
+[`https://pi.dev/logo-auto.svg`](https://pi.dev/logo-auto.svg), retrieved on 2026-08-24. The
+geometry is unchanged; Rovai fixes the adaptive fill to dark ink so the mark remains legible on
+the product's required white Runtime-logo surface.
+
 Lobe Icons is distributed under the MIT License:
 
 Copyright (c) 2023 LobeHub

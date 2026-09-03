@@ -41,6 +41,8 @@ pub enum CanonicalActionInput {
         cwd: String,
         #[serde(default)]
         environment_refs: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command_transport: Option<ShellCommandTransport>,
     },
     FileWrite {
         path: String,
@@ -87,6 +89,24 @@ pub enum CanonicalActionInput {
     },
 }
 
+/// Lossless execution transport for Runtime-owned shell tools whose process
+/// invocation cannot be inferred from a command string alone. Existing Core
+/// scheduled shell actions omit this field and retain their v1 argv meaning.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ShellCommandTransport {
+    CommandArgument {
+        command_index: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<f64>,
+    },
+    StandardInput {
+        command: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<f64>,
+    },
+}
+
 impl CanonicalActionInput {
     fn action_kind(&self) -> &'static str {
         match self {
@@ -105,15 +125,30 @@ impl CanonicalActionInput {
 
     fn summary(&self) -> String {
         match self {
-            Self::ShellCommand { argv, cwd, .. } => {
-                let command = match argv.as_slice() {
-                    [shell, flag, command, ..]
-                        if flag == "-lc"
-                            && matches!(shell.as_str(), "/bin/zsh" | "/bin/bash" | "/bin/sh") =>
-                    {
-                        command.clone()
-                    }
-                    _ => argv.join(" "),
+            Self::ShellCommand {
+                argv,
+                cwd,
+                command_transport,
+                ..
+            } => {
+                let command = match command_transport {
+                    Some(ShellCommandTransport::CommandArgument { command_index, .. }) => argv
+                        .get(*command_index)
+                        .cloned()
+                        .unwrap_or_else(|| argv.join(" ")),
+                    Some(ShellCommandTransport::StandardInput { command, .. }) => command.clone(),
+                    None => match argv.as_slice() {
+                        [shell, flag, command, ..]
+                            if flag == "-lc"
+                                && matches!(
+                                    shell.as_str(),
+                                    "/bin/zsh" | "/bin/bash" | "/bin/sh"
+                                ) =>
+                        {
+                            command.clone()
+                        }
+                        _ => argv.join(" "),
+                    },
                 };
                 format!("Run {command} in {cwd}")
             }
@@ -157,11 +192,43 @@ impl CanonicalActionInput {
 
     fn validate(&self) -> Result<()> {
         match self {
-            Self::ShellCommand { argv, cwd, .. } => {
+            Self::ShellCommand {
+                argv,
+                cwd,
+                command_transport,
+                ..
+            } => {
                 if argv.is_empty() || argv.iter().any(|part| part.is_empty()) {
                     anyhow::bail!("Shell action requires non-empty argv");
                 }
                 require_absolute_path(cwd, "shell cwd")?;
+                if let Some(transport) = command_transport {
+                    match transport {
+                        ShellCommandTransport::CommandArgument {
+                            command_index,
+                            timeout_seconds,
+                        } => {
+                            if argv
+                                .get(*command_index)
+                                .is_none_or(|command| command.trim().is_empty())
+                            {
+                                anyhow::bail!(
+                                    "Shell action command argument index is out of range"
+                                );
+                            }
+                            validate_shell_timeout(*timeout_seconds)?;
+                        }
+                        ShellCommandTransport::StandardInput {
+                            command,
+                            timeout_seconds,
+                        } => {
+                            if command.trim().is_empty() {
+                                anyhow::bail!("Shell stdin command must not be empty");
+                            }
+                            validate_shell_timeout(*timeout_seconds)?;
+                        }
+                    }
+                }
             }
             Self::FileWrite {
                 path,
@@ -260,6 +327,13 @@ impl CanonicalActionInput {
         }
         Ok(())
     }
+}
+
+fn validate_shell_timeout(timeout_seconds: Option<f64>) -> Result<()> {
+    if timeout_seconds.is_some_and(|timeout| !timeout.is_finite() || timeout <= 0.0) {
+        anyhow::bail!("Shell action timeout is invalid");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3768,6 +3842,7 @@ mod tests {
                     argv: vec!["cargo".to_string(), "test".to_string()],
                     cwd: fixture.workspace.clone(),
                     environment_refs: Vec::new(),
+                    command_transport: None,
                 },
                 control_mode: ActionControlMode::Mediated,
                 native_action_id: Some(format!("native-{action_id}")),
@@ -3799,6 +3874,7 @@ mod tests {
                     argv: vec!["cargo".to_string(), "test".to_string()],
                     cwd: fixture.workspace.clone(),
                     environment_refs: Vec::new(),
+                    command_transport: None,
                 },
                 control_mode: ActionControlMode::Intercepted,
                 native_action_id: Some(format!("approval-{native_item_id}")),
@@ -3986,6 +4062,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
             environment_refs: Vec::new(),
+            command_transport: None,
         };
 
         let prepared = ActionSafetyService::default()

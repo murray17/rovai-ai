@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.38
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
@@ -11,7 +11,7 @@ last_updated: 2026-09-03
 
 # Rovai-ai v1.38：钉钉渠道重新开放与同等体验收口
 
-前置：[v1.37](../v1.37/README.md)。本版本曾先收窄产品入口，再按重新开放清单恢复实现；已有钉钉代码、凭据、账号、Bot
+前置：[v1.37](../v1.37/README.md)。后续：[v1.39](../v1.39/README.md)。本版本曾先收窄产品入口，再按重新开放清单恢复实现；已有钉钉代码、凭据、账号、Bot
 绑定和真实验收记录保持原样。2026-09-03，产品 Owner 明确确认重新开放管理入口；未完成的手机、附件与平台原生能力
 改为独立 Gate，不把入口开放伪装成全能力验收完成。取舍见 [V1.38-D02](decisions.md#v1-38-d02)。
 

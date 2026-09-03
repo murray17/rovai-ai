@@ -18,9 +18,11 @@ use crate::{
     agent_runtime_adapter::{
         ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, AdapterRuntimeResolutionInput,
         AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
+        PI_MACHINE_PROTOCOL, PI_NATIVE_SESSION_COMPATIBILITY_KEY, PI_RUNTIME_DEFAULT_MODEL_ID,
         TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
         trae_static_permission_options, validate_grok_machine_ready_evidence,
-        validate_machine_ready_snapshot, validate_trae_machine_ready_evidence,
+        validate_machine_ready_snapshot, validate_pi_machine_ready_evidence,
+        validate_trae_machine_ready_evidence,
     },
     collaboration::end_camp_membership,
     command::{
@@ -36,6 +38,7 @@ use crate::{
 #[serde(rename_all = "kebab-case")]
 pub enum AdapterKind {
     CodexCli,
+    Pi,
     OpencodeCli,
     CopilotCli,
     ClaudeCodeCli,
@@ -94,8 +97,9 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::CodexCli,
+        Self::Pi,
         Self::OpencodeCli,
         Self::CopilotCli,
         Self::ClaudeCodeCli,
@@ -113,6 +117,7 @@ impl AdapterKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CodexCli => "codex-cli",
+            Self::Pi => "pi",
             Self::OpencodeCli => "opencode-cli",
             Self::CopilotCli => "copilot-cli",
             Self::ClaudeCodeCli => "claude-code-cli",
@@ -131,6 +136,7 @@ impl AdapterKind {
     pub fn command_name(self) -> &'static str {
         match self {
             Self::CodexCli => "codex",
+            Self::Pi => "pi",
             Self::OpencodeCli => "opencode",
             Self::CopilotCli => "copilot",
             Self::ClaudeCodeCli => "claude",
@@ -154,6 +160,7 @@ impl AdapterKind {
     pub fn command_names(self) -> &'static [&'static str] {
         match self {
             Self::CursorAgent => &["cursor-agent", "agent"],
+            Self::Pi => &["pi"],
             Self::KimiCodeCli => &["kimi"],
             Self::GrokBuild => &["grok"],
             Self::CodexCli => &["codex"],
@@ -172,6 +179,7 @@ impl AdapterKind {
     pub fn display_name(self) -> &'static str {
         match self {
             Self::CodexCli => "Codex CLI",
+            Self::Pi => "Pi Coding Agent",
             Self::OpencodeCli => "OpenCode",
             Self::CopilotCli => "GitHub Copilot",
             Self::ClaudeCodeCli => "Claude Code",
@@ -206,6 +214,7 @@ impl AdapterKind {
     pub fn override_environment_key(self) -> &'static str {
         match self {
             Self::CodexCli => "ROVAI_CODEX_BIN",
+            Self::Pi => "ROVAI_PI_BIN",
             Self::OpencodeCli => "ROVAI_OPENCODE_BIN",
             Self::CopilotCli => "ROVAI_COPILOT_BIN",
             Self::ClaudeCodeCli => "ROVAI_CLAUDE_CODE_BIN",
@@ -229,6 +238,7 @@ impl AdapterKind {
     pub const fn public_output_mode(self) -> PublicOutputMode {
         match self {
             Self::CodexCli
+            | Self::Pi
             | Self::OpencodeCli
             | Self::CopilotCli
             | Self::ClaudeCodeCli
@@ -250,6 +260,7 @@ impl AdapterKind {
     pub const fn missing_send_recovery_mode(self) -> MissingSendRecoveryMode {
         match self {
             Self::CodexCli
+            | Self::Pi
             | Self::OpencodeCli
             | Self::CopilotCli
             | Self::ClaudeCodeCli
@@ -272,6 +283,7 @@ impl FromStr for AdapterKind {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "codex-cli" => Ok(Self::CodexCli),
+            "pi" => Ok(Self::Pi),
             "opencode-cli" => Ok(Self::OpencodeCli),
             "copilot-cli" => Ok(Self::CopilotCli),
             "claude-code-cli" => Ok(Self::ClaudeCodeCli),
@@ -1443,6 +1455,41 @@ impl AgentProfileService {
                     "probeStatus": probe_status,
                 }),
             )));
+        }
+        if runtime.adapter_kind == AdapterKind::Pi {
+            let result = validate_pi_machine_ready_evidence(
+                runtime.reported_version.as_deref(),
+                Some(&runtime.executable_fingerprint),
+                &runtime.capabilities,
+            )
+            .and_then(|_| {
+                if authentication_status.as_deref() != Some("authenticated")
+                    || runtime.protocol_version != PI_MACHINE_PROTOCOL
+                    || runtime.model.model_id.trim().is_empty()
+                    || runtime.permissions.adapter_kind != AdapterKind::Pi
+                    || runtime.permissions.schema_version != 1
+                    || runtime
+                        .permissions
+                        .values
+                        .get("approval_mode")
+                        .and_then(Value::as_str)
+                        != Some("managed")
+                    || runtime.native_session_compatibility_key.as_deref()
+                        != Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY)
+                {
+                    anyhow::bail!("Pi frozen Runtime does not satisfy the machine Ready contract");
+                }
+                Ok(())
+            });
+            if let Err(error) = result {
+                return Ok(Some(runtime_blocker(
+                    "runtime_probe_required",
+                    json!({
+                        "installationId": runtime.installation_id,
+                        "detail": error.to_string(),
+                    }),
+                )));
+            }
         }
         if runtime.adapter_kind == AdapterKind::TraeCnCli
             && let Err(error) = validate_trae_machine_ready_evidence(
@@ -3640,6 +3687,7 @@ fn runtime_candidate_targets_installation(installation_path: &str, candidate_pat
 fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
     match adapter_kind {
         AdapterKind::CodexCli => "codex-app-server-v2",
+        AdapterKind::Pi => PI_MACHINE_PROTOCOL,
         AdapterKind::ClaudeCodeCli => "claude-code-print-v1",
         AdapterKind::AntigravityApp => "antigravity-app-cli-v1",
         AdapterKind::OpencodeCli
@@ -4929,6 +4977,7 @@ fn provisional_runtime_models(adapter_kind: AdapterKind) -> Vec<ModelDescriptor>
 
 fn runtime_default_model_id(adapter_kind: AdapterKind) -> String {
     match adapter_kind {
+        AdapterKind::Pi => PI_RUNTIME_DEFAULT_MODEL_ID.to_string(),
         AdapterKind::ClaudeCodeCli => CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
         AdapterKind::TraeCnCli => TRAE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
         AdapterKind::AntigravityApp => ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
