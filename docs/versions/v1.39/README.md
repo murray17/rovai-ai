@@ -39,9 +39,9 @@ last_updated: 2026-09-03
   `AdditivePerRun / RovaiWins / CoreManaged`，支持 stdio 与 Streamable HTTP，不写 Pi 全局配置。
 - Pi 结构化 assistant `message_end.message.usage` 进入当前稀疏 Usage；只记可证明的 model-call delta，未知 reasoning
   与无法归因的 cost 保持 `NULL`。
-- macOS arm64、macOS x64、Windows x64 都没有 Pi 专属 immutable qualification artifact，正式 Admission 均为
-  `not_qualified / runtime_platform.qualification_evidence_missing`。本机 debug smoke 不是发布资格，普通 discovery、
-  成员选择和 AgentRun 不会绕过此门禁。
+- macOS arm64、macOS x64、Windows x64 都没有 Pi 专属 immutable qualification artifact，Admission 均为
+  `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`。三平台开放普通 discovery、检查、
+  成员选择和 AgentRun 供主动测试，UI 明确标记实验性；这不把本机 smoke 或其他平台能力改写为正式资格。
 - 执行台、Inspector 与局域网只读执行台的活动 Tool 组优先展示已有公开证据中的具体当前指令；稳定 Tool 行标题、
   渠道卡片和 Activity 分类不变，文件路径与 Web query 继续遵守 typed/Canonical Evidence 边界。
 - Camp 消息中的完整 inline-code 文件候选只有在同一来源工作目录可解析为现存普通文件时才成为链接；共享资源类型
@@ -76,21 +76,22 @@ Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.38 冻结为 historical；本概览、实施计划、确认说明和版本索引建立唯一 current v1.39 |
-| Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact resume、managed receipt、MCP bridge，以及消息文件存在性与视觉类型分离的高成本取舍；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)完整拥有 Pi wire、Ready、Session、receipt、MCP、Action、Usage 与未准入边界；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v4](../../contracts/file-preview-v4.md)拥有消息文件存在性探测 wire；[Runtime Images v4](../../contracts/runtime-images-v4.md)拥有作者感知图片分区与几何 |
+| Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact resume、managed receipt、MCP bridge、消息文件存在性与视觉类型分离，以及 Pi 三平台可运行 Preview；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Runtime Launch and Verification v31](../../contracts/runtime-launch-and-verification-v31.md)保留 Pi wire/安全合同并开放三平台实验性执行；[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)拥有 Preview 准入语义；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v4](../../contracts/file-preview-v4.md)拥有消息文件存在性探测 wire；[Runtime Images v4](../../contracts/runtime-images-v4.md)拥有作者感知图片分区与几何 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)和[基础不变量](../../architecture/foundational-invariants.md)加入 Pi 的独立 transport、Fleet、隐私、managed input 与 bridge 边界；[File Preview](../../architecture/file-preview.md)拥有消息引用准入与既有 classifier 边界；[Runtime 图片](../../architecture/runtime-images.md)同步消息内来源合并与两种 Gallery variant |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组具体指令、稳定 Tool 行、渠道边界和世界地图首次默认，并定义 Composer、用户消息与 Agent 交付的附件分区；[Camp 文件预览区](../../ui/components/file-preview.md)拥有真实文件链接和共享图标语义；[Porcelain Day](../../ui/themes/porcelain-day.md)和[Steel Night](../../ui/themes/steel-night.md)加入十类 Agent artifact token；Pi 仍只复用既有 Runtime/成员/监控表面 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组的具体当前指令、稳定 Tool 行、渠道边界和世界地图首次默认，定义 Composer、用户消息与 Agent 交付的附件分区；[Camp 文件预览区](../../ui/components/file-preview.md)拥有真实文件链接和共享图标语义；[Porcelain Day](../../ui/themes/porcelain-day.md)和[Steel Night](../../ui/themes/steel-night.md)加入十类 Agent artifact token；Pi 在既有 Runtime、成员与 onboarding 表面标记“实验性开放” |
 | Runtime Activity | 已更新 | [Activity Registry](../../runtime-activity/registry.md)与维护指南加入 Pi verified tool lifecycle 映射，未知 shape 继续 fail closed；当前指令只改共享 presentation，不增加分类映射 |
-| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 Pi 0.84.4 本机证据、专属未准入矩阵与剩余 Golden Flow |
-| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航分别指向两份 v30 合同、File Preview v4、Runtime Images v4、Pi research 与 parity matrix |
-| Root README | 确认无需更新 | Pi 在所有 shipped platform 仍未准入，不应加入面向用户的 Supported Runtime 表 |
+| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 Pi 0.84.4 本机证据、三平台实验性 Preview 与剩余 Golden Flow |
+| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航指向 Runtime Launch v31、Platform Admission v2、File Preview v4、Runtime Images v4、Pi research 与 parity matrix |
+| Root README | 已更新 | Supported Runtime 表增加 Pi，并明确标记 experimental preview，避免暗示 First-Class qualification |
 
 ## References
 
 - [实施与验收](implementation-plan.md)
 - [模型上下文变更 revision 1](model-context-change-pi-managed-system-prompt.md)
 - [Parity Matrix](../../research/pi-runtime-reintegration-parity-matrix.md)
-- [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)
+- [Runtime Launch and Verification v31](../../contracts/runtime-launch-and-verification-v31.md)
+- [Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)
 - [Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)
 - [File Preview v4](../../contracts/file-preview-v4.md)
 - [Runtime Images v4](../../contracts/runtime-images-v4.md)

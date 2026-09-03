@@ -106,6 +106,13 @@ describe('first-run onboarding flow', () => {
       installation,
       windowsNotQualifiedAdmission()
     )).toBe(false)
+    expect(onboardingRuntimeCanContinue(
+      'ready',
+      selection,
+      readyAvailability(),
+      installation,
+      previewAdmission()
+    )).toBe(true)
     expect(onboardingRuntimeCanContinue('ready', selection, {
       ...readyAvailability(),
       status: 'installed_unverified'
@@ -118,6 +125,16 @@ function windowsNotQualifiedAdmission(): RuntimePlatformAdmission {
     runtimeKind: 'codex-cli',
     platform: 'windows-x64',
     status: 'not_qualified',
+    reasonCode: 'runtime_platform.qualification_evidence_missing',
+    evidenceRevision: null
+  }
+}
+
+function previewAdmission(): RuntimePlatformAdmission {
+  return {
+    runtimeKind: 'codex-cli',
+    platform: 'macos-arm64',
+    status: 'preview',
     reasonCode: 'runtime_platform.qualification_evidence_missing',
     evidenceRevision: null
   }

@@ -6634,6 +6634,24 @@ describe('task event projections', () => {
     expect(markup).not.toContain('前往 Agent 运行时')
   })
 
+  it('keeps Pi selectable on a platform preview row and labels it experimental', () => {
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
+      agent: agentProfile(),
+      installations: [],
+      runtimeAvailability: [],
+      hostPlatform: 'macos-arm64',
+      runtimePlatformAdmission: runtimeAdmissionRows('macos-arm64', 'qualified'),
+      busy: null,
+      onSave: async () => undefined,
+      onClear: async () => undefined,
+      onReload: async () => undefined,
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('<option value="pi">Pi Coding Agent（实验性）</option>')
+    expect(markup).not.toContain('<option value="pi" disabled="">')
+  })
+
   it('keeps all product checks visible without discovery diagnostics', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
@@ -6700,7 +6718,8 @@ describe('task event projections', () => {
     expect(markup).toContain('实验性')
     expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(14)
     expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(14)
-    expect(markup.match(/检查可用性/g)).toHaveLength(12)
+    expect(markup.match(/检查可用性/g)).toHaveLength(13)
+    expect(markup).toContain('实验性开放 ·')
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
     expect(markup).not.toContain('来源 inherited_path')
@@ -6881,12 +6900,11 @@ function runtimeAdmissionRows(
     'antigravity-app'
   ]
   return runtimeKinds.map((runtimeKind) => {
-    const requiresQualification = runtimeKind === 'cursor-agent'
-      || runtimeKind === 'pi'
-      || (runtimeKind === 'grok-build' && platform !== 'macos-arm64')
-    const effectiveStatus = requiresQualification && status === 'qualified'
-      ? 'not_qualified'
-      : status
+    const effectiveStatus = runtimeKind === 'pi' && status === 'qualified'
+      ? 'preview'
+      : runtimeKind === 'cursor-agent' && status === 'qualified'
+        ? 'not_qualified'
+        : status
     return {
       runtimeKind,
       platform,

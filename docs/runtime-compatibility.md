@@ -23,7 +23,7 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 当前 closed `AdapterKind` 包含十四种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
 Grok Build 与 Pi Coding Agent。
-Cursor 与 Pi 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
+Cursor 在三个目标平台均为 `not_qualified`；Pi 在三个目标平台均为可运行但未正式资格化的 `preview`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。
 Grok Build 在 adapter-scoped 证据分别覆盖的 macOS arm64、macOS x64 与 Windows x64 均为 `qualified`；
 三个宿主平台各自绑定独立 evidence digest，不互相外推。
@@ -32,7 +32,7 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
-### 2026-09-03 Pi 0.84.4 macOS arm64 开发证据与未准入记录
+### 2026-09-03 Pi 0.84.4 macOS arm64 开发证据与实验性开放记录
 
 本机把 `@earendil-works/pi-coding-agent@0.84.4` 安装到一次性目录，未替换 PATH 上的 0.84.2。Pi 官方
 `auth.json/settings.json` 使用 `minimax-cn / MiniMax-M3`，直接官方 Pi 请求返回固定 marker；凭据值没有进入仓库、
@@ -55,10 +55,11 @@ Pi executable 缺失时，独立 optional subsystem 只把 `runtime.pi` 标成 d
 仍可用。这个安装存在性检查不等于 Ready 或平台资格。
 
 本记录只形成 `macos-arm64` 开发证据，不是 `Runtime Platform Admission` artifact。Pi 在 macOS arm64、macOS x64、
-Windows x64 均保持 `not_qualified / runtime_platform.qualification_evidence_missing`；普通 discovery、成员选择与
-AgentRun 不可达。Images、Pi-specific structured Web Search 与 Camp Fast 当前明确 unsupported/hidden。完整差异和
+Windows x64 均为 `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`；普通 discovery、
+检查、成员选择、Diagnostics 与 AgentRun 已开放供主动测试，但不宣称 First-Class/qualified。Images、Pi-specific
+structured Web Search 与 Camp Fast 当前明确 unsupported/hidden。完整差异和
 未闭合项见 [Pi Parity Matrix](research/pi-runtime-reintegration-parity-matrix.md)与
-[Runtime Launch v30](contracts/runtime-launch-and-verification-v30.md)。
+[Runtime Launch v31](contracts/runtime-launch-and-verification-v31.md)。
 
 ### 2026-08-31 Camp Fast metadata 边界
 
@@ -249,14 +250,15 @@ implementation `Disabled`，不是 `Unsupported`；usage/token 变化、历史�
 
 v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
 Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。2026-08-23 复核既有 Windows 证据并在当前源码树完成
-逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已准入；明确不在本轮设置页范围的
-`cursor-agent` 仍不准入。下表是当前资格状态，不是本机
+逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已资格化；Pi 另以实验性 Preview 开放，明确不在本轮设置页范围的
+`cursor-agent` 仍不准入。下表是当前准入状态，不是本机
 `not_installed`、Probe 失败、上游不支持或 Renderer allowlist；唯一产品真源是 Rust Registry 的
-[Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)投影。
+[Runtime Platform Admission v2](contracts/runtime-platform-admission-v2.md)投影。
 
 | AdapterKind | `windows-x64` admission | evidence revision | 说明 |
 | --- | --- | --- | --- |
 | `codex-cli` | `qualified` | `sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054` | 两轮纯消息与 Native Session 延续通过 |
+| `pi` | `preview` | — | 实验性开放供主动测试；Windows 专属 qualification evidence 仍缺失 |
 | `opencode-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
 | `copilot-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
 | `claude-code-cli` | `qualified` | 同上 | 两轮、取消与 packaged planned-shutdown 证据通过 |
@@ -292,7 +294,8 @@ terminal。凭据、原始 Prompt、本机用户路径、Session/Run ID 均未�
 Codex、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen、TRAE 与 Kimi 都在各自隔离 Rovai Camp 完成两轮；
 第二轮与第一轮绑定同一 Native Session。除 Codex、Kimi 使用两轮纯消息外，其余当前可重复 Runtime 还确认了
 终端输出投影。Antigravity 按操作员明确确认复用此前成功运行，本次 companion 在当前额度状态下未返回模型
-输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，仍为唯一 Windows `not_qualified` 行。
+输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，仍为唯一 Windows `not_qualified` 行；Pi 是唯一
+Windows `preview` 行。
 
 ### 2026-08-21 Windows 10 22H2 本机实施复核
 
