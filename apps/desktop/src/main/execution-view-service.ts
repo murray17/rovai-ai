@@ -421,6 +421,7 @@ export class ExecutionViewService {
   }
 
   #handleCoreEvent(event: CoreEvent): void {
+    if (event.method === 'runtime.compaction.display') return
     const liveEvent = liveRuntimeEventFromCore(event, 'execution-view-refresh')
     if (!event.method.startsWith('agent_run.') && !liveEvent) return
     const eventRunId = liveEvent?.agentRunId ?? coreEventAgentRunId(event)

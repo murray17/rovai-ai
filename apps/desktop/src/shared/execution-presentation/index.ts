@@ -114,6 +114,25 @@ export type ExecutionStep = {
   fileChangeSemantics?: CanonicalRuntimeDiffProjectionView['semanticKind']
 }
 
+export type RuntimeCompactionDisplayItem = {
+  id: string
+  adapterKind: string
+  phase: 'imminent' | 'started' | 'completed'
+  completionEvidence: 'native_terminal' | 'pre_compaction_only' | 'post_compaction_boundary' | null
+  tokens: {
+    before?: number
+    after?: number
+    current?: number
+    contextWindow?: number
+    usagePercent?: number
+  }
+  messages: {
+    compacted?: number
+  }
+  elapsedMs?: number
+  summaryText: string | null
+}
+
 export function executionStepPublicTitle(step: ExecutionStep): string {
   return step.publicCommand ?? step.title
 }
@@ -131,6 +150,7 @@ export type ExecutionProgressItem =
   | { key: string; kind: 'narration'; body: string }
   | { key: string; kind: 'plan'; explanation: string; plan: ExecutionPlanStep[] }
   | { key: string; kind: 'diagnostic'; diagnostic: RuntimeDiagnostic }
+  | { key: string; kind: 'compaction'; compaction: RuntimeCompactionDisplayItem }
   | { key: string; kind: 'tool'; step: ExecutionStep }
 
 export type LiveExecutionProgress = {
@@ -253,6 +273,7 @@ const LIVE_RUNTIME_EVENT_TYPES = new Set([
   'runtime.plan',
   'runtime.plan.delta',
   'runtime.diagnostic',
+  'runtime.compaction.display',
   'runtime.action'
 ])
 
@@ -288,6 +309,159 @@ export function liveRuntimeEventFromExecutionEvidence(
   }
 }
 
+export function runtimeCompactionDisplayItem(
+  payloadValue: unknown
+): RuntimeCompactionDisplayItem | null {
+  const payload = asRecord(payloadValue)
+  const schemaVersion = numberField(payload, 'schemaVersion')
+  const id = stringField(payload, 'compactionId')?.trim()
+  const adapterKind = stringField(payload, 'adapterKind')?.trim()
+  const phase = stringField(payload, 'phase')
+  if (
+    schemaVersion !== 1
+    || !id
+    || !adapterKind
+    || (phase !== 'imminent' && phase !== 'started' && phase !== 'completed')
+  ) return null
+
+  const completionCandidate = stringField(payload, 'completionEvidence')
+  const completionEvidence = completionCandidate === 'native_terminal'
+    || completionCandidate === 'pre_compaction_only'
+    || completionCandidate === 'post_compaction_boundary'
+    ? completionCandidate
+    : null
+  const tokens = asRecord(payload.tokens)
+  const messages = asRecord(payload.messages)
+  const summary = stringField(payload, 'summaryText')?.trim() ?? ''
+  return {
+    id,
+    adapterKind,
+    phase,
+    completionEvidence,
+    tokens: {
+      ...optionalUnsignedInteger(tokens, 'before', 'before'),
+      ...optionalUnsignedInteger(tokens, 'after', 'after'),
+      ...optionalUnsignedInteger(tokens, 'current', 'current'),
+      ...optionalUnsignedInteger(tokens, 'contextWindow', 'contextWindow'),
+      ...optionalNonNegativeNumber(tokens, 'usagePercent', 'usagePercent')
+    },
+    messages: {
+      ...optionalUnsignedInteger(messages, 'compacted', 'compacted')
+    },
+    ...optionalUnsignedInteger(payload, 'elapsedMs', 'elapsedMs'),
+    summaryText: summary || null
+  }
+}
+
+function optionalUnsignedInteger<K extends string>(
+  value: Record<string, unknown>,
+  field: string,
+  output: K
+): Partial<Record<K, number>> {
+  const candidate = numberField(value, field)
+  return candidate !== null && Number.isSafeInteger(candidate) && candidate >= 0
+    ? { [output]: candidate } as Partial<Record<K, number>>
+    : {}
+}
+
+function optionalNonNegativeNumber<K extends string>(
+  value: Record<string, unknown>,
+  field: string,
+  output: K
+): Partial<Record<K, number>> {
+  const candidate = numberField(value, field)
+  return candidate !== null && Number.isFinite(candidate) && candidate >= 0
+    ? { [output]: candidate } as Partial<Record<K, number>>
+    : {}
+}
+
+export function runtimeCompactionIsExpandable(item: RuntimeCompactionDisplayItem): boolean {
+  return item.tokens.before !== undefined
+    || item.tokens.after !== undefined
+    || item.tokens.current !== undefined
+    || item.tokens.contextWindow !== undefined
+    || item.tokens.usagePercent !== undefined
+    || item.summaryText !== null
+}
+
+export function runtimeAdapterDisplayLabel(kind: string): string {
+  return ({
+    'codex-cli': 'Codex',
+    'opencode-cli': 'OpenCode',
+    'copilot-cli': 'GitHub Copilot',
+    'claude-code-cli': 'Claude Code',
+    'kiro-cli': 'Kiro',
+    'qoder-cli': 'Qoder',
+    'codebuddy-cli': 'CodeBuddy',
+    'qwen-code': 'Qwen Code',
+    'trae-cn-cli': 'TRAE CLI',
+    'cursor-agent': 'Cursor Agent',
+    'kimi-code-cli': 'Kimi',
+    'grok-build': 'Grok',
+    'antigravity-app': 'Antigravity'
+  } as Record<string, string>)[kind] ?? kind
+}
+
+export function runtimeCompactionTitle(item: RuntimeCompactionDisplayItem): string {
+  const action = item.phase === 'imminent'
+    ? '即将压缩会话上下文'
+    : item.phase === 'started'
+      ? '正在压缩会话上下文'
+      : item.completionEvidence === 'post_compaction_boundary'
+        ? '已进入压缩后的新上下文'
+        : '压缩会话上下文'
+  const tokenTransition = item.tokens.before !== undefined && item.tokens.after !== undefined
+    ? ` · ${compactTokenCount(item.tokens.before)} → ${compactTokenCount(item.tokens.after)}`
+    : ''
+  return `${action} · ${runtimeAdapterDisplayLabel(item.adapterKind)}${tokenTransition}`
+}
+
+export function runtimeCompactionDetailText(
+  item: RuntimeCompactionDisplayItem
+): string | null {
+  if (!runtimeCompactionIsExpandable(item)) return null
+  const metrics: string[] = []
+  const formatTokens = (value: number): string => `${new Intl.NumberFormat('zh-CN').format(value)} tokens`
+  if (item.tokens.before !== undefined) metrics.push(`压缩前：${formatTokens(item.tokens.before)}`)
+  if (item.tokens.after !== undefined) metrics.push(`压缩后：${formatTokens(item.tokens.after)}`)
+  if (item.tokens.current !== undefined) metrics.push(`当前：${formatTokens(item.tokens.current)}`)
+  if (item.tokens.contextWindow !== undefined) {
+    metrics.push(`上下文窗口：${formatTokens(item.tokens.contextWindow)}`)
+  }
+  if (
+    item.tokens.before !== undefined
+    && item.tokens.after !== undefined
+    && item.tokens.before >= item.tokens.after
+  ) {
+    const reduction = item.tokens.before - item.tokens.after
+    const percent = item.tokens.before > 0
+      ? ` · ${((reduction / item.tokens.before) * 100).toFixed(1)}%`
+      : ''
+    metrics.push(`减少：${formatTokens(reduction)}${percent}`)
+  }
+  if (item.tokens.usagePercent !== undefined) {
+    metrics.push(`上下文使用：${item.tokens.usagePercent.toFixed(1)}%`)
+  }
+  if (item.messages.compacted !== undefined) {
+    metrics.push(`整理消息：${new Intl.NumberFormat('zh-CN').format(item.messages.compacted)}`)
+  }
+  if (item.elapsedMs !== undefined) {
+    const seconds = (item.elapsedMs / 1_000).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
+    metrics.push(`耗时：${seconds} 秒`)
+  }
+  if (!item.summaryText) return metrics.join('\n') || null
+  return metrics.length > 0
+    ? `${metrics.join('\n')}\n\n会话摘要\n\n${item.summaryText}`
+    : item.summaryText
+}
+
+function compactTokenCount(value: number): string {
+  if (value < 1_000) return String(value)
+  const divisor = value >= 1_000_000 ? 1_000_000 : 1_000
+  const suffix = value >= 1_000_000 ? 'M' : 'K'
+  return `${(value / divisor).toFixed(1).replace(/\.0$/, '')}${suffix}`
+}
+
 export function buildLiveExecutionProgress(
   events: LiveRuntimeEvent[],
   agentRunId: string,
@@ -299,6 +473,7 @@ export function buildLiveExecutionProgress(
   let planExplanation = ''
   let plan: ExecutionPlanStep[] = []
   const diagnosticsById = new Map<string, RuntimeDiagnostic>()
+  const compactionsById = new Map<string, RuntimeCompactionDisplayItem>()
   const steps: ExecutionStep[] = []
   const stepIndexes = new Map<string, number>()
   const itemOrder: string[] = []
@@ -336,6 +511,21 @@ export function buildLiveExecutionProgress(
       publicCommand: step.publicCommand ?? previous.publicCommand,
       detail: step.detail || previous.detail
     }
+  }
+
+  const upsertCompaction = (compaction: RuntimeCompactionDisplayItem): void => {
+    const previous = compactionsById.get(compaction.id)
+    compactionsById.set(compaction.id, previous
+      ? {
+          ...previous,
+          ...compaction,
+          completionEvidence: compaction.completionEvidence ?? previous.completionEvidence,
+          tokens: { ...previous.tokens, ...compaction.tokens },
+          messages: { ...previous.messages, ...compaction.messages },
+          elapsedMs: compaction.elapsedMs ?? previous.elapsedMs,
+          summaryText: compaction.summaryText ?? previous.summaryText
+        }
+      : compaction)
   }
 
   for (const event of events) {
@@ -413,6 +603,16 @@ export function buildLiveExecutionProgress(
           maxAttempts,
           retryAfterSeconds
         })
+      }
+      continue
+    }
+
+    if (event.eventType === 'runtime.compaction.display') {
+      finishNarrationStream()
+      const compaction = runtimeCompactionDisplayItem(payload)
+      if (compaction) {
+        rememberItem(`compaction:${compaction.id}`)
+        upsertCompaction(compaction)
       }
       continue
     }
@@ -536,6 +736,10 @@ export function buildLiveExecutionProgress(
       const diagnostic = diagnosticsById.get(key.slice('diagnostic:'.length))
       return diagnostic ? [{ key, kind: 'diagnostic', diagnostic }] : []
     }
+    if (key.startsWith('compaction:')) {
+      const compaction = compactionsById.get(key.slice('compaction:'.length))
+      return compaction ? [{ key, kind: 'compaction', compaction }] : []
+    }
     if (key.startsWith('tool:')) {
       const step = stepById.get(key.slice('tool:'.length))
       return step ? [{ key, kind: 'tool', step }] : []
@@ -578,11 +782,25 @@ const TOOL_EVIDENCE_KINDS = new Set<AgentRunExecutionEvidenceView['kind']>([
 
 export function selectCompleteExecutionEvidence<T extends AgentRunExecutionEvidenceView>(evidence: T[]): {
   byToolId: Map<string, T>
+  byCompactionId: Map<string, T>
   unassigned: T[]
 } {
   const byToolId = new Map<string, T>()
+  const byCompactionId = new Map<string, T>()
   const unassigned: T[] = []
   for (const item of evidence) {
+    if (item.eventType === 'runtime.compaction.display') {
+      const compactionId = runtimeCompactionDisplayItem(item.payload)?.id ?? null
+      if (!compactionId) {
+        unassigned.push(item)
+        continue
+      }
+      const current = byCompactionId.get(compactionId)
+      if (!current || shouldPreferCompleteEvidence(item, current)) {
+        byCompactionId.set(compactionId, item)
+      }
+      continue
+    }
     const toolId = TOOL_EVIDENCE_KINDS.has(item.kind)
       ? executionEvidenceToolId(item)
       : null
@@ -595,7 +813,7 @@ export function selectCompleteExecutionEvidence<T extends AgentRunExecutionEvide
       byToolId.set(toolId, item)
     }
   }
-  return { byToolId, unassigned }
+  return { byToolId, byCompactionId, unassigned }
 }
 
 function executionEvidenceToolId(evidence: AgentRunExecutionEvidenceView): string | null {
@@ -782,6 +1000,10 @@ export function executionEvidenceResultText(
   canonical?: CanonicalRuntimeActivityView | null
 ): string | null {
   const payload = asRecord(payloadValue)
+  if (eventType === 'runtime.compaction.display') {
+    const compaction = runtimeCompactionDisplayItem(payload)
+    return compaction ? runtimeCompactionDetailText(compaction) : null
+  }
   if (eventType === 'activity.started' || eventType === 'activity.completed') {
     const item = asRecord(payload.item)
     const command = stringField(item, 'command')

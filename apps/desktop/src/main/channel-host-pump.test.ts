@@ -10,6 +10,15 @@ import {
 afterEach(() => vi.useRealTimers())
 
 describe('AdaptiveChannelHostPump', () => {
+  it('never wakes a public channel for the local Compaction display sidecar', () => {
+    const hasLiveExecutionCard = vi.fn(() => true)
+    expect(trackedExecutionCoreEventWake({
+      method: 'runtime.compaction.display',
+      params: { agentRunId: 'run-1' }
+    }, hasLiveExecutionCard)).toBe('ignore')
+    expect(hasLiveExecutionCard).not.toHaveBeenCalled()
+  })
+
   it('does one startup recovery probe and stays dormant after a clean result', async () => {
     vi.useFakeTimers()
     const run = vi.fn(async () => false)

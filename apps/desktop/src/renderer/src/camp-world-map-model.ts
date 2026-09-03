@@ -366,6 +366,7 @@ function executionProgressItemText(item: ExecutionProgressItem): string {
       ? item.step.title
       : `${item.step.title}：${item.step.detail}`
   }
+  if (item.kind === 'compaction') return ''
   const currentStep = item.plan.find((step) => step.status === 'inProgress')
     ?? item.plan.find((step) => step.status === 'pending')
     ?? item.plan.at(-1)

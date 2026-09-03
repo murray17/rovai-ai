@@ -58,8 +58,12 @@ import {
   localDayKey,
   messageClockTime,
   relativeTimeLabel,
+  runtimeCompactionDetailText,
+  runtimeCompactionIsExpandable,
+  runtimeCompactionTitle,
   selectCompleteExecutionEvidence,
-  timelineDayLabel
+  timelineDayLabel,
+  type RuntimeCompactionDisplayItem
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
 import { ImageGallery, groupMessageAttachments } from './ImageGallery'
@@ -8175,6 +8179,93 @@ function ToolCallRow({
   )
 }
 
+function CompactionEventIcon(): JSX.Element {
+  return (
+    <span className="tool-call-icon" data-icon-domain="compaction" aria-hidden="true">
+      <svg viewBox="0 0 16 16" focusable="false">
+        <path d="M3 2.5h10M3 13.5h10" />
+        <path d="M8 3.75v3M6.25 5.25 8 7l1.75-1.75" />
+        <path d="M8 12.25v-3M6.25 10.75 8 9l1.75 1.75" />
+      </svg>
+    </span>
+  )
+}
+
+function CompactionEventRow({
+  campId,
+  compaction,
+  runId,
+  runStatus,
+  completeEvidence
+}: {
+  campId: string
+  compaction: RuntimeCompactionDisplayItem
+  runId: string
+  runStatus: AgentRunView['status']
+  completeEvidence?: PresentableExecutionEvidence
+}): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const [activated, setActivated] = useState(false)
+  const summaryRef = useRef<HTMLElement>(null)
+  const title = runtimeCompactionTitle(compaction)
+  const detail = runtimeCompactionDetailText(compaction) ?? ''
+  const expandable = runtimeCompactionIsExpandable(compaction)
+  const status = compaction.phase === 'completed'
+    ? 'completed'
+    : NON_TERMINAL_RUNS.has(runStatus)
+      ? compaction.phase === 'imminent' ? 'waiting' : 'running'
+      : 'recorded'
+  const summary = (
+    <>
+      <CompactionEventIcon />
+      <span className="tool-call-title" title={title}>{title}</span>
+      <ToolCallState status={status} />
+      <span
+        className={`tool-call-disclosure-slot${expandable ? '' : ' is-placeholder'}`}
+        aria-hidden="true"
+      >
+        {expandable && (
+          <svg viewBox="0 0 16 16" focusable="false">
+            <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
+          </svg>
+        )}
+      </span>
+    </>
+  )
+
+  if (!expandable) {
+    return (
+      <div className={`process-action tool-call-summary tool-call-static compaction-event status-${status}`}>
+        {summary}
+      </div>
+    )
+  }
+
+  return (
+    <details
+      className={`process-action tool-call-disclosure compaction-event status-${status}`}
+      onToggle={(event) => {
+        const nextExpanded = event.currentTarget.open
+        setExpanded(nextExpanded)
+        if (nextExpanded) setActivated(true)
+      }}
+    >
+      <summary ref={summaryRef} className="tool-call-summary">{summary}</summary>
+      {activated && (
+        <ToolCallDetail
+          campId={campId}
+          detail={detail}
+          completeEvidence={completeEvidence}
+          expanded={expanded}
+          resultKey={`${runId}:compaction:${compaction.id}`}
+          title={title}
+          summaryRef={summaryRef}
+        />
+      )}
+    </details>
+  )
+}
+
 function ToolActivityGroupIcon(): JSX.Element {
   return (
     <span className="tool-group-icon" aria-hidden="true">
@@ -8366,6 +8457,8 @@ export function RunExecutionDisclosure({
     [processItems]
   )
   const hasActiveTool = toolActivityGroupHasActiveTool(activeToolItems, run.status)
+  const hasActiveCompaction = processItems.some((item) => item.kind === 'compaction'
+    && (item.compaction.phase === 'imminent' || item.compaction.phase === 'started'))
   const trailingProcessItem = groupedProcessItems[groupedProcessItems.length - 1]
   const liveTailToolGroupKey = run.status === 'running'
     && !cancelling
@@ -8428,6 +8521,18 @@ export function RunExecutionDisclosure({
           return nonTerminal
             ? <RuntimeRetryNotice diagnostic={item.diagnostic} key={item.key} />
             : null
+        }
+        if (item.kind === 'compaction') {
+          return (
+            <CompactionEventRow
+              key={item.key}
+              campId={campId}
+              compaction={item.compaction}
+              runId={run.id}
+              runStatus={run.status}
+              completeEvidence={completeEvidence.byCompactionId.get(item.compaction.id)}
+            />
+          )
         }
         if (item.kind === 'narration') {
           return (
@@ -8513,6 +8618,7 @@ export function RunExecutionDisclosure({
         && !cancelling
         && run.waitReason !== 'recovery_blocked'
         && !hasActiveTool
+        && !hasActiveCompaction
         && liveTailToolGroupKey === null
         && (
           <div className="process-action current" role="status">

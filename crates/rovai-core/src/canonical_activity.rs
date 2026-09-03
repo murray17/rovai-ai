@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     builtin_tool_transport, runtime_activity_mapping,
+    runtime_compaction_display::RUNTIME_COMPACTION_DISPLAY_EVENT,
     runtime_diff::{self, CommandDiffProjection},
     runtime_file_operation,
 };
@@ -139,6 +140,7 @@ pub fn classify_evidence_with_version(
                 | "runtime.diagnostic"
                 | "runtime.fast.observed"
                 | "runtime.file_changes.snapshot"
+                | RUNTIME_COMPACTION_DISPLAY_EVENT
         );
     let (mut activity_domain, mut semantic_kind, runtime_classification_is_structured) =
         runtime_activity_mapping::classify_with_structure_for_version(

@@ -275,7 +275,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v28（当前）](run-process-detail-surface-v28.md) | v27 布局不变；取消显示已取消并清除旧外部效果提示 |
+| [Run Process Detail Surface v29（当前）](run-process-detail-surface-v29.md) | v28 布局与取消不变；增加 active AgentRun 的本地非 Tool Compaction 展示旁路 |
+| [Run Process Detail Surface v28（历史）](run-process-detail-surface-v28.md) | v27 布局不变；取消显示已取消并清除旧外部效果提示 |
 | [Run Process Detail Surface v27（历史）](run-process-detail-surface-v27.md) | v26 布局不变；停止等待仅限 IPC，立即显示 Core 实际终态 |
 | [Run Process Detail Surface v26（历史）](run-process-detail-surface-v26.md) | 完整继承 v25；Web 搜索使用 `搜索 <query>` 与连续公开结果，保留非 Shell 结果面与缩进 |
 | [Run Process Detail Surface v25（历史）](run-process-detail-surface-v25.md) | 完整继承 v24；Shell disclosure 使用 `$ command` 与连续 output、独立结果面 token，并与 Terminal 图标左边界同轴 |

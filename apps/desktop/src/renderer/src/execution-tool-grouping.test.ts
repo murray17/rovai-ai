@@ -57,6 +57,36 @@ describe('execution Tool grouping', () => {
     expect(groupConsecutiveToolItems([tool('one')])[0].key).toBe(grouped[0].key)
   })
 
+  it('uses a Compaction item as a root boundary without counting it as a Tool operation', () => {
+    const grouped = groupConsecutiveToolItems([
+      tool('one'),
+      tool('two'),
+      {
+        key: 'compaction:compact-1',
+        kind: 'compaction',
+        compaction: {
+          id: 'compact-1',
+          adapterKind: 'codex-cli',
+          phase: 'completed',
+          completionEvidence: 'native_terminal',
+          tokens: {},
+          messages: {},
+          summaryText: null
+        }
+      },
+      tool('three')
+    ])
+
+    expect(grouped.map((item) => item.kind)).toEqual([
+      'toolGroup', 'compaction', 'toolGroup'
+    ])
+    const groups = grouped.filter((item) => item.kind === 'toolGroup')
+    expect(toolActivityGroupPresentation(groups[0].items, 'succeeded').primary)
+      .toBe('已执行 2 项操作')
+    expect(toolActivityGroupPresentation(groups[1].items, 'succeeded').primary)
+      .toBe('已执行 1 项操作')
+  })
+
   it('keeps FileChange Activities inside the Tool group without counting presentation rows as operations', () => {
     const fileChange = tool('files')
     fileChange.step.fileChanges = [{

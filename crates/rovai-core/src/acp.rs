@@ -40,6 +40,11 @@ use rovai_core::{
     },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
+    runtime_compaction_display::{
+        RuntimeCompactionCompletionEvidence, RuntimeCompactionDisplayEvent,
+        RuntimeCompactionDisplayPhase, RuntimeCompactionMessageSnapshot,
+        RuntimeCompactionTokenSnapshot,
+    },
     runtime_discovery::{
         RuntimeLaunchPurpose, configure_active_runtime_command, runtime_launch_allowed,
     },
@@ -120,6 +125,9 @@ pub enum AcpIncoming {
         admission_point: String,
         source_event_digest: String,
         observed_at: String,
+        display_agent_run_id: Option<String>,
+        display_execution_epoch: Option<i64>,
+        display_event: Option<Box<RuntimeCompactionDisplayEvent>>,
     },
     IngressBarrier {
         completion: oneshot::Sender<()>,
@@ -1554,6 +1562,7 @@ impl AcpHost {
                                     session_id,
                                     &message,
                                     AcpCompactionSignalSurface::ActivePrompt,
+                                    Some(owner.clone()),
                                 )
                                 .await;
                                 let _ = host.incoming.send(owner.message(
@@ -1569,10 +1578,12 @@ impl AcpHost {
                                 let session_id = session_id
                                     .as_deref()
                                     .expect("Session metadata route has Session ID");
+                                let display_owner = host.compaction_display_owner(session_id).await;
                                 host.forward_compaction_observation(
                                     session_id,
                                     &message,
                                     AcpCompactionSignalSurface::SessionMetadata,
+                                    display_owner,
                                 )
                                 .await;
                             }
@@ -2219,6 +2230,7 @@ impl AcpHost {
         session_id: &str,
         message: &Value,
         surface: AcpCompactionSignalSurface,
+        display_owner: Option<AcpRuntimeOwner>,
     ) {
         let Some(detected) = detect_acp_compaction_signal(self.adapter_kind, message, surface)
         else {
@@ -2241,6 +2253,8 @@ impl AcpHost {
             |occurrence| format!("runtime:{occurrence}"),
         );
         let source_observation_id = format!("{}:{runtime_occurrence}", detected.source_signal);
+        let display_event =
+            acp_compaction_display_event(self.adapter_kind, &source_observation_id, message);
         let source_event_digest = match canonical_json_digest(&json!({
             "schemaVersion": 1,
             "adapterKind": self.adapter_kind.as_str(),
@@ -2267,7 +2281,26 @@ impl AcpHost {
             admission_point: detected.admission_point.to_string(),
             source_event_digest,
             observed_at: chrono::Utc::now().to_rfc3339(),
+            display_agent_run_id: display_owner
+                .as_ref()
+                .map(|owner| owner.agent_run_id.clone()),
+            display_execution_epoch: display_owner.map(|owner| owner.execution_epoch),
+            display_event: display_event.map(Box::new),
         });
+    }
+
+    async fn compaction_display_owner(&self, session_id: &str) -> Option<AcpRuntimeOwner> {
+        self.routes
+            .read()
+            .await
+            .get(session_id)
+            .filter(|route| {
+                matches!(
+                    route.phase,
+                    AcpSessionPhase::PromptActive(_) | AcpSessionPhase::PromptCompleted(_)
+                )
+            })
+            .map(|route| route.owner.clone())
     }
 
     async fn unbind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) {
@@ -2680,6 +2713,74 @@ fn detect_acp_compaction_signal(
         }
         _ => None,
     }
+}
+
+fn acp_compaction_display_event(
+    adapter_kind: AdapterKind,
+    compaction_id: &str,
+    message: &Value,
+) -> Option<RuntimeCompactionDisplayEvent> {
+    let mut event = RuntimeCompactionDisplayEvent::new(
+        compaction_id,
+        adapter_kind.as_str(),
+        RuntimeCompactionDisplayPhase::Completed,
+    )?;
+    event.completion_evidence = Some(RuntimeCompactionCompletionEvidence::NativeTerminal);
+    match adapter_kind {
+        AdapterKind::KiroCli => {
+            event.set_summary_text(message.pointer("/params/summary").and_then(Value::as_str));
+        }
+        AdapterKind::KimiCodeCli => {
+            let (messages_compacted, tokens_before, tokens_after) =
+                kimi_completed_compaction_metrics(message)?;
+            event.tokens = Some(RuntimeCompactionTokenSnapshot {
+                before: Some(tokens_before),
+                after: Some(tokens_after),
+                ..RuntimeCompactionTokenSnapshot::default()
+            });
+            event.messages = Some(RuntimeCompactionMessageSnapshot {
+                compacted: Some(messages_compacted),
+            });
+        }
+        AdapterKind::GrokBuild => {
+            event.tokens = Some(RuntimeCompactionTokenSnapshot {
+                before: message
+                    .pointer("/params/update/tokens_before")
+                    .and_then(Value::as_u64),
+                after: message
+                    .pointer("/params/update/tokens_after")
+                    .and_then(Value::as_u64),
+                ..RuntimeCompactionTokenSnapshot::default()
+            });
+            event.elapsed_ms = message
+                .pointer("/params/update/elapsed_ms")
+                .and_then(Value::as_u64);
+        }
+        _ => {}
+    }
+    Some(event)
+}
+
+fn kimi_completed_compaction_metrics(message: &Value) -> Option<(u64, u64, u64)> {
+    let text = message
+        .pointer("/params/update/content/text")
+        .and_then(Value::as_str)?;
+    if !is_kimi_compaction_completed_text(text) {
+        return None;
+    }
+    let mut lines = text.split('\n');
+    lines.next()?;
+    let messages =
+        parse_en_us_unsigned_integer(lines.next()?.strip_prefix("- Messages compacted: ")?)?;
+    let before = parse_en_us_unsigned_integer(lines.next()?.strip_prefix("- Tokens before: ")?)?;
+    let after = parse_en_us_unsigned_integer(lines.next()?.strip_prefix("- Tokens after: ")?)?;
+    Some((messages, before, after))
+}
+
+fn parse_en_us_unsigned_integer(value: &str) -> Option<u64> {
+    is_en_us_unsigned_integer(value)
+        .then(|| value.replace(',', "").parse::<u64>().ok())
+        .flatten()
 }
 
 #[derive(Debug, Default)]
@@ -8886,11 +8987,15 @@ while IFS= read -r ignored; do :; done
                 native_session_id,
                 source_signal,
                 admission_point,
+                display_agent_run_id,
+                display_execution_epoch,
                 ..
             } if observer_lease_id == "observer-kimi-warm"
                 && native_session_id == session_id
                 && source_signal == "kimi.acp.compaction.completed_text.v1"
                 && admission_point == "completed"
+                && display_agent_run_id.is_none()
+                && display_execution_epoch.is_none()
         ));
 
         let second = adapter
@@ -9057,12 +9162,27 @@ while IFS= read -r ignored; do :; done
                     native_session_id,
                     source_signal,
                     admission_point,
+                    display_agent_run_id,
+                    display_execution_epoch,
+                    display_event,
                     ..
                 } => {
                     assert_eq!(observer_lease_id, "observer-kimi-active");
                     assert_eq!(native_session_id, session_id);
                     assert_eq!(source_signal, "kimi.acp.compaction.completed_text.v1");
                     assert_eq!(admission_point, "completed");
+                    assert_eq!(
+                        display_agent_run_id.as_deref(),
+                        Some("run-kimi-active-compaction")
+                    );
+                    assert_eq!(display_execution_epoch, Some(1));
+                    assert_eq!(
+                        display_event
+                            .as_ref()
+                            .and_then(|event| event.tokens.as_ref())
+                            .and_then(|tokens| tokens.before),
+                        Some(34_567)
+                    );
                     observation_count += 1;
                 }
                 AcpIncoming::Message {
@@ -9219,20 +9339,28 @@ while IFS= read -r ignored; do :; done
             "OpenCode's ACP server does not expose its native event stream; the isolated Runtime plugin owns this signal"
         );
 
+        let kiro_completed = json!({
+            "method": "_kiro.dev/compaction/status",
+            "params": {
+                "sessionId": "session-2",
+                "status": {"type": "completed"},
+                "summary": "explicit Kiro summary"
+            }
+        });
         let kiro = detect_acp_compaction_signal(
             AdapterKind::KiroCli,
-            &json!({
-                "method": "_kiro.dev/compaction/status",
-                "params": {
-                    "sessionId": "session-2",
-                    "status": {"type": "completed"},
-                    "summary": "must not participate in signal admission"
-                }
-            }),
+            &kiro_completed,
             AcpCompactionSignalSurface::SessionMetadata,
         )
         .expect("Kiro completed status should be detected");
         assert_eq!(kiro.admission_point, "completed");
+        let kiro_display =
+            acp_compaction_display_event(AdapterKind::KiroCli, "kiro-display-1", &kiro_completed)
+                .unwrap();
+        assert_eq!(
+            kiro_display.summary_text.as_deref(),
+            Some("explicit Kiro summary")
+        );
         assert!(
             detect_acp_compaction_signal(
                 AdapterKind::KiroCli,
@@ -9275,6 +9403,13 @@ while IFS= read -r ignored; do :; done
             grok.runtime_occurrence_id.as_deref(),
             Some("session-grok:42")
         );
+        let grok_display =
+            acp_compaction_display_event(AdapterKind::GrokBuild, "grok-display-1", &grok_completed)
+                .unwrap();
+        assert_eq!(grok_display.tokens.as_ref().unwrap().before, Some(12_345));
+        assert_eq!(grok_display.tokens.as_ref().unwrap().after, Some(6_789));
+        assert_eq!(grok_display.elapsed_ms, Some(123));
+        assert!(grok_display.summary_text.is_none());
         assert!(is_idle_session_metadata(
             AdapterKind::GrokBuild,
             &grok_completed
@@ -9387,6 +9522,18 @@ while IFS= read -r ignored; do :; done
         assert_eq!(kimi.source_signal, "kimi.acp.compaction.completed_text.v1");
         assert_eq!(kimi.admission_point, "completed");
         assert!(kimi.runtime_occurrence_id.is_none());
+        let kimi_display = acp_compaction_display_event(
+            AdapterKind::KimiCodeCli,
+            "kimi-display-1",
+            &kimi_completed,
+        )
+        .unwrap();
+        assert_eq!(kimi_display.tokens.as_ref().unwrap().before, Some(12_345));
+        assert_eq!(kimi_display.tokens.as_ref().unwrap().after, Some(6_789));
+        assert_eq!(
+            kimi_display.messages.as_ref().unwrap().compacted,
+            Some(1_234)
+        );
         assert!(is_idle_session_metadata(
             AdapterKind::KimiCodeCli,
             &kimi_completed

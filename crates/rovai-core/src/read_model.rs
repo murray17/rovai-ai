@@ -3135,7 +3135,8 @@ pub(crate) fn public_execution_evidence_for_agent_run(
         FROM agent_run_execution_evidence AS evidence
         WHERE evidence.agent_run_id = ?1
           AND evidence.event_type NOT IN (
-              'agent.reasoning.summary.delta', 'agent.thought.delta'
+              'agent.reasoning.summary.delta', 'agent.thought.delta',
+              'runtime.compaction.display'
           )
         ORDER BY evidence.sequence
         "#,
@@ -5393,6 +5394,48 @@ mod slow_tests {
         assert_eq!(open.coverage.execution_evidence.loaded_count, 85);
         assert_eq!(open.coverage.execution_evidence.total_count, 85);
         assert!(open.coverage.execution_evidence.complete);
+
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO agent_run_execution_evidence(
+                    id, agent_run_id, execution_epoch, sequence,
+                    event_type, kind, phase, source_event_key,
+                    payload_preview_json, content_blob_id,
+                    content_byte_count, is_truncated, occurred_at
+                ) VALUES (
+                    'evidence-compaction', ?1, 0, 86,
+                    'runtime.compaction.display', 'step', 'completed',
+                    'runtime.compaction.display:compact-1:completed',
+                    ?2, NULL, 96, 0, ?3
+                )
+                "#,
+                params![
+                    agent_run_id,
+                    json!({
+                        "schemaVersion": 1,
+                        "compactionId": "compact-1",
+                        "adapterKind": "codex-cli",
+                        "phase": "completed"
+                    })
+                    .to_string(),
+                    now,
+                ],
+            )
+            .unwrap();
+        let local = read_model
+            .agent_run_execution_evidence_page(&mut database, camp_id, agent_run_id, 85, 2)
+            .unwrap();
+        assert_eq!(local.evidence[0].event_type, "runtime.compaction.display");
+        let transaction = database.connection_mut().transaction().unwrap();
+        let public = public_execution_evidence_for_agent_run(&transaction, agent_run_id).unwrap();
+        assert!(
+            public
+                .iter()
+                .all(|evidence| evidence.event_type != "runtime.compaction.display")
+        );
+        transaction.commit().unwrap();
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
