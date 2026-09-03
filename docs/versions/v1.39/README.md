@@ -25,7 +25,8 @@ last_updated: 2026-09-03
 - 正式 AgentRun 继承 Pi 官方 `PI_CODING_AGENT_DIR`/原生默认配置；Core 不读取 Claude Home、不建立 Pi 私有
   provider 真源，也不把 secret 写入 argv、SQLite、Prompt、Evidence、diagnostics 或公开事件。
 - Host 策略为 workspace/process-compatible 的 `resident_multi_session`：同一 Host 串行服务多个 Session，并发 Run
-  获取不同 Host；统一 Fleet key 保留 Camp/member isolation，动态 Session/model/Bootstrap/Skill/MCP 不进入 process
+  获取不同 Host；Pi 的复用 identity 是 canonical workspace + process digest，当前独占 lease 的 Camp/member 则单独
+  保留用于删除失效，其他 Runtime 的 Camp/member 复用语义不变。动态 Session/model/Bootstrap/Skill/MCP 不进入 process
   digest；只有 healthy、quiescent 且无 pending command/tool/MCP/lease 的 Host 才进入统一 LRU。
 - Native Session 只用完整 Session ID 与 Core 私有 canonical session file 精确恢复。Availability Probe 在临时
   `--session-dir` 创建、切换、验证并清理测试 Session，不污染用户 Pi 历史。
@@ -49,8 +50,10 @@ last_updated: 2026-09-03
   path、MCP 名或普通 query 猜测。
 - 当前 macOS arm64 + Pi 0.84.4 + MiniMax M3 已取得 first run、cold exact resume、warm Host reuse、allow/deny、
   cancel、Action output、结构化 Usage、真实 Skill 调用、stdio/HTTP MCP、三类 Missing-Send 与 Built-in CLI 15-operation
-  smoke。完整 compaction、Skill/MCP 变更/no-leak、六类 shell output、真实并发/eviction/packaged shutdown 及另外两个
-  平台仍需各自真实验收，所以本版尚不宣称 Pi 为任一 shipped platform 的 First-Class Runtime。
+  smoke；本机又完成 A→B→A、跨 Camp workspace Host 复用、真实并发 Host、六类 shell output、Skill
+  update/disable/re-enable/unassign/delete、MCP update/disable/unassign/delete/deny/cancel/no-leak，以及 Core planned
+  shutdown 的完整子进程回收。完整 compaction、idle eviction、packaged App shutdown、故障注入、安全 workspace
+  边界及另外两个平台仍需各自真实验收，所以本版尚不宣称 Pi 为任一 shipped platform 的 First-Class Runtime。
 
 ## 数据合同
 

@@ -344,10 +344,12 @@ Pi 是独立 `pi-jsonl-rpc-v1` Product Runtime，不进入 ACP initialize/storag
 这只定义 identity/version gate，不构成平台资格。
 
 Pi Host 进入统一 Fleet，策略为 `resident_multi_session`：一个 Host 串行服务多个 Native Session，并发 Run 使用
-不同 Host。process key 不包含 Session、Bootstrap、Skills、MCP、model 或 Prompt。恢复只使用 Core 私有完整
-canonical session file，实际调用 `switch_session` 后核对 full ID/file/cwd；公开 read/event/diagnostic 只允许不可逆
-digest。失败 Host 不进 LRU，continuity lost 后最多创建一个 replacement。Deep Probe 同样执行 exact switch，但用
-`--session-dir <probe-root>/sessions` 隔离并清理测试 Session。
+不同 Host。Pi 的复用 identity 是 canonical workspace + process digest；当前独占 lease 的 Camp/member invalidation
+scope 单独保存并随每次领取更新，因此允许同 workspace 跨 Camp 串行复用而不削弱删除失效。其他 Runtime 的
+Camp/member-scoped identity 不变。process key 不包含 Session、Bootstrap、Skills、MCP、model 或 Prompt。恢复只使用
+Core 私有完整 canonical session file，实际调用 `switch_session` 后核对 full ID/file/cwd；公开 read/event/diagnostic
+只允许不可逆 digest。失败 Host 不进 LRU，continuity lost 后最多创建一个 replacement。Deep Probe 同样执行 exact
+switch，但用 `--session-dir <probe-root>/sessions` 隔离并清理测试 Session。
 
 Bootstrap 使用官方 managed extension 的 `before_agent_start`，在 Pi base system prompt 后追加当前完整 Bootstrap；
 Dynamic Context bytes 不变。extension 必须先提交绑定 Host/run/epoch/delivery/prompt/session、base/effective prompt、

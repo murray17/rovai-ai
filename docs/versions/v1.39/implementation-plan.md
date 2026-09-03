@@ -20,7 +20,8 @@ last_updated: 2026-09-03
   实际 `switch_session(exact file)` 与 `get_state` 三元一致性；Snapshot validation 与 dispatch blocker 共用重检。
 - [x] Probe 通过 `--session-dir <probe-root>/sessions` 隔离原生 Session，正式 AgentRun 继续使用用户 Pi 原生 state。
 - [x] Fleet `resident_multi_session`、串行 Session switch、并发 Burst、health/quiescence、owner lease、LRU、cancel、
-  shutdown/reap 与 private directory cleanup。
+  shutdown/reap 与 private directory cleanup；Pi 使用 workspace reuse identity，同时保留当前 Camp/member invalidation
+  scope，其他 Runtime 的 member-scoped identity 不变。
 - [x] `ManagedSystemPrompt` 与 revision 1 收据；完整 session locator 只在 Core 私有状态，公开面仅有不可逆 digest。
 - [x] Shell Approval 使用 Pi 实际 shell path/args/transport；read/write/edit/bash 与未知 mutation fail-closed。
 - [x] `.pi/skills` delivery group；managed extension 每 Session 重新发现并验证 exact Skill catalog。
@@ -37,7 +38,14 @@ last_updated: 2026-09-03
   cancel 无延迟文件副作用、公开 locator 隐私与结构化 Usage。
 - [x] Pi 0.84.4 真实 Skill 调用；导入、重启恢复、project-owned 同名 shadow 与删除产品流程。
 - [x] Pi 0.84.4 真实 External MCP 单 Run：RovaiWins、stdio、Streamable HTTP 三个 projected Tool。
-- [x] Pi 0.84.4 真实 Missing-Send zero-send、accepted-send suppression 与 Bash tool→final。
+- [x] Pi 0.84.4 真实 workspace Resident：跨 Camp A→B→A exact Session switch、并发 Run 独立 Host、六类 Bash output
+  与 Core planned shutdown 后完整 descendant/private Host config 回收。
+- [x] Pi 0.84.4 真实 Skill 动态矩阵：update、disable/re-enable、unassign/restore、hard delete、project-owned 同名
+  shadow，以及同一 Host 相邻 Session 无旧 catalog/marker 泄漏。
+- [x] Pi 0.84.4 真实 MCP 动态矩阵：update、disable/re-enable、unassign/restore、delete、相邻 Session no-leak、
+  mutation deny-before-dispatch、cancelled settlement、stdio Server reap 与延迟副作用缺失。
+- [x] Pi 0.84.4 真实 Missing-Send zero-send、accepted-send suppression 与原生 Read tool→final；Bash matrix 另覆盖
+  多 Tool 后 final。
 - [x] Pi 0.84.4 当前 Built-in CLI 15-operation full Run 与 resumed/new-lease Run。
 - [x] deterministic tests：A→B→A exact switch、并发独立 Host、receipt 全字段/nonce mismatch、协议重放/迟到、
   stdio/HTTP MCP bridge、Usage dedupe、Unknown mutation、cleanup 和 platform matrix。
@@ -46,9 +54,9 @@ last_updated: 2026-09-03
 
 ## 发布前仍需关闭
 
-- [ ] 在 macOS arm64 补齐接入 Checklist 的剩余真实 Golden Flow：manual/threshold/overflow compaction、Skill
-  update/disable/re-enable/删除后 Run/A→B→A、MCP 更新/删除/deny/cancel/no-leak、六类 shell output、read-only/workspace
-  边界、invalid JSON/crash/timeout、真实并发、idle eviction 与 packaged planned shutdown。
+- [ ] 在 macOS arm64 补齐接入 Checklist 的剩余真实 Golden Flow：manual/threshold/overflow compaction、read-only/
+  workspace 边界、invalid JSON/crash/timeout、真实 retry/queue late event、idle eviction、packaged planned shutdown 与
+  Core crash recovery。
 - [ ] macOS arm64 通过后生成 Pi 专属 immutable qualification artifact，并单独审查是否晋升该平台。
 - [ ] 在真实 macOS x64 与 Windows x64 分别重复完整矩阵；Windows 额外验证 npm `.cmd/.bat` locator、System32
   interpreter、resolved target、fingerprint 与执行期 identity。

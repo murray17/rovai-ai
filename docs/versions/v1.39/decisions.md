@@ -37,17 +37,21 @@ Pi 的一个 RPC 进程可以 `new_session` 和 `switch_session(exact path)`；�
 
 ### 决定
 
-Pi Host 策略为 `resident_multi_session`，同一 Host 一次只绑定一个 Run；并发使用独立 Host。统一 Fleet key 继续
-保留 Camp/member isolation；Pi process digest 只包含 workspace、executable/fingerprint、protocol、managed
-extension、固定 managed permission boundary 与 process compatibility。每次恢复实际调用
+Pi Host 策略为 `resident_multi_session`，同一 Host 一次只绑定一个 Run；并发使用独立 Host。Pi 在统一 Fleet 中用
+canonical workspace + process digest 作为复用 identity，因此同 workspace、process-compatible 的不同 Camp/成员可
+串行领取同一 Host；Fleet 另存当前独占 lease 的 Camp/member invalidation scope，并在每次领取时更新，Camp 删除或成员
+移除仍会停止当前属于该 scope 的 Host。其他 Runtime 的 Camp/member-scoped identity 不变。Pi process digest 只包含
+workspace、executable/fingerprint、protocol、managed extension、固定 managed permission boundary 与 process
+compatibility。每次恢复实际调用
 `switch_session(exact canonical file)`，再用 `get_state` 核对完整 session ID、file 和 cwd；失败停止 Host、记录
 continuity lost，并最多创建一个 replacement。完整 locator 只在 Core 私有状态，公开面最多给不可逆 digest。
 
 ### 后果与被拒绝方案
 
-Bootstrap/Skills/MCP/model 可以逐 Session 刷新，不要求重启进程；只有真正 quiescent Host 进入 LRU。拒绝把 Pi
-永久绑定单 Session、模糊扫描最近历史或把 locator 放进 Activity/read model；前者浪费可验证的上游能力，后两者
-破坏身份和隐私边界。
+Bootstrap/Skills/MCP/model 可以逐 Session 刷新，不要求重启进程；只有真正 quiescent Host 进入 LRU。workspace
+Resident 使用独立 quota bucket，仍受 Fleet global quota、TTL 与 LRU 约束。拒绝把 Pi 永久绑定单 Session、模糊扫描
+最近历史、丢失当前 Camp/member invalidation scope 或把 locator 放进 Activity/read model；这些方案分别浪费可验证的
+上游能力，或破坏删除、身份和隐私边界。
 
 <a id="v1-39-d03"></a>
 ## V1.39-D03：Bootstrap 使用 managed system prompt 与不可变原子 receipt

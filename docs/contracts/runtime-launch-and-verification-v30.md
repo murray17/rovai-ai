@@ -49,11 +49,14 @@ Host strategy 为 `resident_multi_session`，但每个 Host 同时最多一个 A
 Pi 实现 `pid/executable_path/is_alive/is_quiescent/shutdown_and_reap/force_reap_until/shutdown_and_reap_until` 与当前
 planned shutdown protocol 3。
 
-统一 Fleet compatibility key 的外层继续包含 Camp ID 与 member Agent ID，保留当前 Camp/member invalidation；其中 Pi 的
-process digest 包含 canonical workspace、Pi executable/fingerprint、protocol、minimum-version policy、managed extension、
-固定 managed permission boundary 与真实 process-scoped launch inputs。Session ID/file、Bootstrap、Skills、MCP、model、
-Prompt、AgentRun 和 Built-in lease 不进入 process digest。只有没有 pending RPC、queue、Approval、Tool/MCP call、Run
-lease，且 healthy/quiescent 的 Host 才能 IdleWarm；失败、协议错误、取消未收敛、receipt/capability drift 一律停止。
+统一 Fleet 默认仍以 Camp ID + member Agent ID + process digest 复用。Pi 是显式的 workspace-scoped 例外：复用 identity
+为 canonical workspace + Pi process digest，当前独占 lease 的 Camp ID/member Agent ID 作为独立 invalidation scope，并在
+每次跨 scope 领取时更新；Camp 删除或成员永久移除仍停止当前属于该 scope 的 Host，其他 Runtime 的复用与失效行为不变。
+Pi workspace Resident 使用独立 quota bucket，并继续受 global quota、TTL 与 LRU 约束。Pi process digest 包含 canonical
+workspace、Pi executable/fingerprint、protocol、minimum-version policy、managed extension、固定 managed permission
+boundary 与真实 process-scoped launch inputs。Session ID/file、Bootstrap、Skills、MCP、model、Prompt、AgentRun 和
+Built-in lease 不进入 process digest。只有没有 pending RPC、queue、Approval、Tool/MCP call、Run lease，且
+healthy/quiescent 的 Host 才能 IdleWarm；失败、协议错误、取消未收敛、receipt/capability drift 一律停止。
 
 Conversation binding 保存完整 native session ID 和 Core-private canonical session file。恢复还必须精确匹配
 installation id/generation、executable/entrypoint identity、runtime compatibility digest、

@@ -50,10 +50,72 @@ impl Default for AgentRuntimeFleetConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum RuntimeReuseScope {
+    Member { camp_id: String, agent_id: String },
+    Workspace { workspace_key: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct RuntimeCompatibilityKey {
-    pub camp_id: String,
-    pub agent_id: String,
+    reuse_scope: RuntimeReuseScope,
+    invalidation_camp_id: Option<String>,
+    invalidation_agent_id: Option<String>,
+    residency_bucket: String,
     pub runtime_compatibility_digest: String,
+}
+
+impl RuntimeCompatibilityKey {
+    pub(crate) fn member(
+        camp_id: impl Into<String>,
+        agent_id: impl Into<String>,
+        runtime_compatibility_digest: impl Into<String>,
+    ) -> Self {
+        let camp_id = camp_id.into();
+        let agent_id = agent_id.into();
+        Self {
+            reuse_scope: RuntimeReuseScope::Member {
+                camp_id: camp_id.clone(),
+                agent_id: agent_id.clone(),
+            },
+            invalidation_camp_id: Some(camp_id),
+            invalidation_agent_id: Some(agent_id.clone()),
+            residency_bucket: agent_id,
+            runtime_compatibility_digest: runtime_compatibility_digest.into(),
+        }
+    }
+
+    pub(crate) fn workspace(
+        camp_id: impl Into<String>,
+        agent_id: impl Into<String>,
+        workspace_key: impl Into<String>,
+        runtime_compatibility_digest: impl Into<String>,
+    ) -> Self {
+        let camp_id = camp_id.into();
+        let agent_id = agent_id.into();
+        let workspace_key = workspace_key.into();
+        Self {
+            reuse_scope: RuntimeReuseScope::Workspace {
+                workspace_key: workspace_key.clone(),
+            },
+            invalidation_camp_id: Some(camp_id),
+            invalidation_agent_id: Some(agent_id),
+            residency_bucket: format!("workspace:{workspace_key}"),
+            runtime_compatibility_digest: runtime_compatibility_digest.into(),
+        }
+    }
+
+    fn is_process_compatible_with(&self, candidate: &Self) -> bool {
+        self.reuse_scope == candidate.reuse_scope
+            && self.runtime_compatibility_digest == candidate.runtime_compatibility_digest
+    }
+
+    fn belongs_to_camp(&self, camp_id: &str) -> bool {
+        self.invalidation_camp_id.as_deref() == Some(camp_id)
+    }
+
+    fn belongs_to_member(&self, agent_id: &str) -> bool {
+        self.invalidation_agent_id.as_deref() == Some(agent_id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -291,7 +353,7 @@ struct FleetState {
     processes: HashMap<String, ProcessEntry>,
     process_by_run: HashMap<RunLeaseKey, String>,
     resident_processes: HashSet<String>,
-    resident_processes_by_member: HashMap<String, HashSet<String>>,
+    resident_processes_by_bucket: HashMap<String, HashSet<String>>,
     idle_lru: BTreeSet<(u64, String)>,
     next_sequence: u64,
 }
@@ -302,23 +364,28 @@ impl FleetState {
         self.next_sequence
     }
 
-    fn resident_count_for_member(&self, agent_id: &str) -> usize {
-        self.resident_processes_by_member
-            .get(agent_id)
+    fn resident_count_for_bucket(&self, residency_bucket: &str) -> usize {
+        self.resident_processes_by_bucket
+            .get(residency_bucket)
             .map_or(0, HashSet::len)
     }
 
-    fn has_resident_capacity(&self, config: &AgentRuntimeFleetConfig, agent_id: &str) -> bool {
+    fn has_resident_capacity(
+        &self,
+        config: &AgentRuntimeFleetConfig,
+        residency_bucket: &str,
+    ) -> bool {
         self.resident_processes.len() < config.max_resident_processes_global
-            && self.resident_count_for_member(agent_id) < config.max_resident_processes_per_member
+            && self.resident_count_for_bucket(residency_bucket)
+                < config.max_resident_processes_per_member
     }
 
     fn insert_resident(&mut self, entry: ProcessEntry) {
         let process_id = entry.process_id.clone();
-        let member_id = entry.compatibility.agent_id.clone();
+        let residency_bucket = entry.compatibility.residency_bucket.clone();
         self.resident_processes.insert(process_id.clone());
-        self.resident_processes_by_member
-            .entry(member_id)
+        self.resident_processes_by_bucket
+            .entry(residency_bucket)
             .or_default()
             .insert(process_id.clone());
         self.processes.insert(process_id, entry);
@@ -333,11 +400,11 @@ impl FleetState {
         }
         if entry.state.is_resident() {
             self.resident_processes.remove(process_id);
-            let member_id = &entry.compatibility.agent_id;
-            if let Some(processes) = self.resident_processes_by_member.get_mut(member_id) {
+            let residency_bucket = &entry.compatibility.residency_bucket;
+            if let Some(processes) = self.resident_processes_by_bucket.get_mut(residency_bucket) {
                 processes.remove(process_id);
                 if processes.is_empty() {
-                    self.resident_processes_by_member.remove(member_id);
+                    self.resident_processes_by_bucket.remove(residency_bucket);
                 }
             }
         }
@@ -355,13 +422,13 @@ impl FleetState {
         entry.host.clone()
     }
 
-    fn oldest_idle_for_member(&self, agent_id: &str) -> Option<String> {
+    fn oldest_idle_for_bucket(&self, residency_bucket: &str) -> Option<String> {
         self.idle_lru.iter().find_map(|(_, process_id)| {
             self.processes
                 .get(process_id)
                 .filter(|entry| {
                     entry.state == FleetProcessState::IdleWarm
-                        && entry.compatibility.agent_id == agent_id
+                        && entry.compatibility.residency_bucket == residency_bucket
                 })
                 .map(|_| process_id.clone())
         })
@@ -766,18 +833,18 @@ impl AgentRuntimeFleetManager {
             self.state
                 .lock()
                 .await
-                .has_resident_capacity(&self.config, &request.compatibility.agent_id)
+                .has_resident_capacity(&self.config, &request.compatibility.residency_bucket)
         };
         if !has_capacity {
             let eviction = {
                 let state = self.state.lock().await;
-                if state.resident_count_for_member(&request.compatibility.agent_id)
+                if state.resident_count_for_bucket(&request.compatibility.residency_bucket)
                     >= self.config.max_resident_processes_per_member
                 {
-                    state.oldest_idle_for_member(&request.compatibility.agent_id)
+                    state.oldest_idle_for_bucket(&request.compatibility.residency_bucket)
                 } else {
                     state
-                        .oldest_idle_for_member(&request.compatibility.agent_id)
+                        .oldest_idle_for_bucket(&request.compatibility.residency_bucket)
                         .or_else(|| state.oldest_idle_global())
                 }
             };
@@ -791,7 +858,7 @@ impl AgentRuntimeFleetManager {
                     .state
                     .lock()
                     .await
-                    .has_resident_capacity(&self.config, &request.compatibility.agent_id)
+                    .has_resident_capacity(&self.config, &request.compatibility.residency_bucket)
             {
                 residency = FleetResidency::Burst;
             }
@@ -911,7 +978,9 @@ impl AgentRuntimeFleetManager {
                 .filter(|entry| {
                     entry.state == FleetProcessState::IdleWarm
                         && entry.adapter_kind == request.adapter_kind
-                        && entry.compatibility == request.compatibility
+                        && entry
+                            .compatibility
+                            .is_process_compatible_with(&request.compatibility)
                         && entry
                             .host
                             .as_ref()
@@ -926,6 +995,10 @@ impl AgentRuntimeFleetManager {
             entry.state = FleetProcessState::BusyResident;
             entry.run_lease = Some(run_lease.clone());
             entry.idle_since = None;
+            // Reusable workspace Hosts follow the Camp/member that currently owns
+            // their exclusive lease. This preserves precise deletion invalidation
+            // without putting those dynamic scopes into the process reuse key.
+            entry.compatibility = request.compatibility.clone();
             (last_used_sequence, entry.host.clone()?)
         };
         state
@@ -1050,7 +1123,7 @@ impl AgentRuntimeFleetManager {
     }
 
     pub(crate) async fn invalidate_camp(&self, camp_id: &str) {
-        self.invalidate_matching(|entry| entry.compatibility.camp_id == camp_id)
+        self.invalidate_matching(|entry| entry.compatibility.belongs_to_camp(camp_id))
             .await;
     }
 
@@ -1060,7 +1133,7 @@ impl AgentRuntimeFleetManager {
             let state = self.state.lock().await;
             let mut process_ids = Vec::new();
             for (process_id, entry) in &state.processes {
-                if entry.compatibility.camp_id != camp_id {
+                if !entry.compatibility.belongs_to_camp(camp_id) {
                     continue;
                 }
                 if !matches!(
@@ -1084,7 +1157,7 @@ impl AgentRuntimeFleetManager {
             .await
             .processes
             .values()
-            .any(|entry| entry.compatibility.camp_id == camp_id);
+            .any(|entry| entry.compatibility.belongs_to_camp(camp_id));
         if retained {
             bail!("camp_attachment_view_busy: Camp Runtime Host remains resident");
         }
@@ -1098,7 +1171,7 @@ impl AgentRuntimeFleetManager {
             state
                 .processes
                 .iter()
-                .filter(|(_, entry)| entry.compatibility.camp_id == camp_id)
+                .filter(|(_, entry)| entry.compatibility.belongs_to_camp(camp_id))
                 .map(|(process_id, _)| process_id.clone())
                 .collect::<Vec<_>>()
         };
@@ -1113,7 +1186,7 @@ impl AgentRuntimeFleetManager {
             .await
             .processes
             .values()
-            .any(|entry| entry.compatibility.camp_id == camp_id)
+            .any(|entry| entry.compatibility.belongs_to_camp(camp_id))
         {
             bail!("camp_attachment_view_busy: Camp Runtime Host remains resident");
         }
@@ -1121,7 +1194,7 @@ impl AgentRuntimeFleetManager {
     }
 
     pub(crate) async fn invalidate_member(&self, agent_id: &str) {
-        self.invalidate_matching(|entry| entry.compatibility.agent_id == agent_id)
+        self.invalidate_matching(|entry| entry.compatibility.belongs_to_member(agent_id))
             .await;
     }
 
@@ -1427,11 +1500,7 @@ mod tests {
             agent_run_id: run.to_string(),
             execution_epoch: 1,
             adapter_kind: AdapterKind::TraeCnCli,
-            compatibility: RuntimeCompatibilityKey {
-                camp_id: camp.to_string(),
-                agent_id: "agent-1".to_string(),
-                runtime_compatibility_digest: "digest-1".to_string(),
-            },
+            compatibility: RuntimeCompatibilityKey::member(camp, "agent-1", "digest-1"),
         }
     }
 
@@ -1453,11 +1522,11 @@ mod tests {
             ProcessEntry {
                 process_id: process_id.to_string(),
                 adapter_kind: AdapterKind::CodexCli,
-                compatibility: RuntimeCompatibilityKey {
-                    camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
-                    agent_id: "agent-1".to_string(),
-                    runtime_compatibility_digest: "digest-1".to_string(),
-                },
+                compatibility: RuntimeCompatibilityKey::member(
+                    "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+                    "agent-1",
+                    "digest-1",
+                ),
                 state: FleetProcessState::BusyBurst,
                 host: Some(RuntimeProcessHost::Fake(Arc::new(FakeRuntimeProcessHost {
                     process_id: process_id.to_string(),
@@ -1522,6 +1591,81 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(camp_a_again.host.process_id(), "host-a");
+        fleet.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn workspace_hosts_reuse_across_camps_and_track_the_current_invalidation_scope() {
+        let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
+        let request = |run: &str, camp: &str, agent: &str, workspace: &str| FleetAcquireRequest {
+            agent_run_id: run.to_string(),
+            execution_epoch: 1,
+            adapter_kind: AdapterKind::Pi,
+            compatibility: RuntimeCompatibilityKey::workspace(
+                camp,
+                agent,
+                workspace,
+                "pi-digest-1",
+            ),
+        };
+        let first = fleet
+            .acquire(
+                request("run-a", "camp-a", "agent-a", "workspace-a"),
+                || async { Ok(fake_host("pi-host-a")) },
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.host.process_id(), "pi-host-a");
+        fleet
+            .release("run-a", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
+        let second = fleet
+            .acquire(
+                request("run-b", "camp-b", "agent-b", "workspace-a"),
+                || async { Ok(fake_host("unexpected-pi-host")) },
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.host.process_id(), "pi-host-a");
+        fleet
+            .release("run-b", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
+        let other_workspace = fleet
+            .acquire(
+                request("run-other", "camp-other", "agent-other", "workspace-b"),
+                || async { Ok(fake_host("pi-host-b")) },
+            )
+            .await
+            .unwrap();
+        assert_eq!(other_workspace.host.process_id(), "pi-host-b");
+        fleet
+            .release("run-other", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
+        fleet.invalidate_camp("camp-a").await;
+        let second_again = fleet
+            .acquire(
+                request("run-b2", "camp-b", "agent-b", "workspace-a"),
+                || async { Ok(fake_host("unexpected-pi-host-2")) },
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_again.host.process_id(), "pi-host-a");
+        fleet
+            .release("run-b2", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
+        fleet.invalidate_member("agent-b").await;
+        let third = fleet
+            .acquire(
+                request("run-c", "camp-c", "agent-c", "workspace-a"),
+                || async { Ok(fake_host("pi-host-c")) },
+            )
+            .await
+            .unwrap();
+        assert_eq!(third.host.process_id(), "pi-host-c");
         fleet.shutdown_all().await;
     }
 

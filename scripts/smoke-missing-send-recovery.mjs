@@ -151,12 +151,15 @@ for (const specification of specifications) {
     process.stderr.write(`[missing-send-recovery] ${specification.adapterKind}: accepted send suppressed fallback\n`)
 
     let acpProtocol = null
-    if (specification.acp) {
+    let nativeToolFinal = null
+    if (specification.acp || specification.adapterKind === 'pi') {
       const toolStart = await startFollowUpRun(
         core.request,
         campId,
-        toolThenFinalPrompt(),
-        'Exercise a real ACP tool boundary followed by a zero-send final.'
+        toolThenFinalPrompt(specification),
+        specification.acp
+          ? 'Exercise a real ACP tool boundary followed by a zero-send final.'
+          : 'Exercise a real Pi tool boundary followed by a zero-send final.'
       )
       await waitForTerminalRun(
         core,
@@ -169,24 +172,31 @@ for (const specification of specifications) {
         adapterKind: specification.adapterKind,
         marker: toolFixtureToken,
         expectedAuthorId: agentId,
-        expectedBoundary: 'acp_end_turn_assistant_suffix'
+        expectedBoundary: expectedBoundary(specification)
       })
       if (toolFacts.runtimeActivities.length === 0) {
         throw new Error(`${specification.adapterKind} did not persist real tool activity`)
       }
-      const protocolFixture = buildAcpProtocolFixture(
-        core.events,
-        specification.adapterKind,
-        toolStart.agentRunId,
-        toolFacts.messages[0]?.body,
-        toolFacts
-      )
-      acpProtocol = validateAcpRecoveryProtocolFixture(protocolFixture)
-      await writeFile(
-        join(reportDirectory, `${specification.adapterKind}-protocol-fixture.json`),
-        `${JSON.stringify(protocolFixture, null, 2)}\n`
-      )
-      process.stderr.write(`[missing-send-recovery] ${specification.adapterKind}: real tool→final protocol fixture passed\n`)
+      if (specification.acp) {
+        const protocolFixture = buildAcpProtocolFixture(
+          core.events,
+          specification.adapterKind,
+          toolStart.agentRunId,
+          toolFacts.messages[0]?.body,
+          toolFacts
+        )
+        acpProtocol = validateAcpRecoveryProtocolFixture(protocolFixture)
+        await writeFile(
+          join(reportDirectory, `${specification.adapterKind}-protocol-fixture.json`),
+          `${JSON.stringify(protocolFixture, null, 2)}\n`
+        )
+      } else {
+        nativeToolFinal = {
+          activityCount: toolFacts.runtimeActivities.length,
+          recovery: toolFacts.terminalEvent?.missingSendRecovery ?? null
+        }
+      }
+      process.stderr.write(`[missing-send-recovery] ${specification.adapterKind}: real tool→final recovery passed\n`)
     }
 
     const result = {
@@ -197,7 +207,8 @@ for (const specification of specifications) {
       )?.params?.modelId ?? null,
       zeroSend: summarizeFacts(zeroFacts),
       acceptedSendSuppression: summarizeFacts(suppressionFacts),
-      acpProtocol
+      acpProtocol,
+      nativeToolFinal
     }
     report.results.push(result)
     await persistReport()
@@ -234,7 +245,8 @@ console.log(JSON.stringify({
     model: result.selectedModel,
     zeroSend: result.zeroSend.decision,
     suppression: result.acceptedSendSuppression.decision,
-    acpToolEvents: result.acpProtocol?.toolEventCount ?? null
+    acpToolEvents: result.acpProtocol?.toolEventCount ?? null,
+    nativeToolActivities: result.nativeToolFinal?.activityCount ?? null
   }))
 }, null, 2))
 
@@ -281,9 +293,9 @@ function suppressionPrompt(adapterKind, progressMarker, privateFinalMarker) {
   ].join('\n')
 }
 
-function toolThenFinalPrompt() {
+function toolThenFinalPrompt(specification) {
   return [
-    'This is a controlled ACP tool-boundary acceptance case.',
+    `This is a controlled ${specification.acp ? 'ACP' : 'Pi native'} tool-boundary acceptance case.`,
     'Use your native file-reading tool (not shell) to read RECOVERY_TOOL_FIXTURE.txt from the current workspace.',
     'The file contains one unpredictable token that is not included in this request; do not guess it.',
     'Do not call rovai or rovai send.',

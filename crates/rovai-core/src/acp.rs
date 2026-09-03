@@ -3732,11 +3732,11 @@ impl AcpCliRuntimeAdapter {
                     agent_run_id: agent_run_id.to_string(),
                     execution_epoch,
                     adapter_kind: self.kind,
-                    compatibility: RuntimeCompatibilityKey {
-                        camp_id: camp_id.to_string(),
-                        agent_id: agent_id.to_string(),
-                        runtime_compatibility_digest: runtime_compatibility_digest.to_string(),
-                    },
+                    compatibility: RuntimeCompatibilityKey::member(
+                        camp_id,
+                        agent_id,
+                        runtime_compatibility_digest,
+                    ),
                 },
                 || async {
                     let host = AcpHost::spawn(

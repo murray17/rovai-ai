@@ -1245,6 +1245,7 @@ impl PiRpcRuntimeAdapter {
         };
         let locator_root =
             session_locator_root(&self.private_runtime_dir, request.camp_id, request.agent_id)?;
+        let workspace_key = canonical_workspace_key(request.cwd)?;
         let lease = self
             .fleet
             .acquire(
@@ -1252,13 +1253,12 @@ impl PiRpcRuntimeAdapter {
                     agent_run_id: request.agent_run_id.to_string(),
                     execution_epoch: request.execution_epoch,
                     adapter_kind: AdapterKind::Pi,
-                    compatibility: RuntimeCompatibilityKey {
-                        camp_id: request.camp_id.to_string(),
-                        agent_id: request.agent_id.to_string(),
-                        runtime_compatibility_digest: request
-                            .runtime_compatibility_digest
-                            .to_string(),
-                    },
+                    compatibility: RuntimeCompatibilityKey::workspace(
+                        request.camp_id,
+                        request.agent_id,
+                        workspace_key,
+                        request.runtime_compatibility_digest,
+                    ),
                 },
                 || async {
                     let host = PiHost::spawn(PiHostLaunch {
@@ -1423,6 +1423,11 @@ impl PiRpcRuntimeAdapter {
             self.fleet
                 .release(&run_id, epoch, FleetReleaseDisposition::Stop)
                 .await;
+        }
+        self.fleet.invalidate_camp(camp_id).await;
+        if let Ok(camp_scope) = scope_key("camp", camp_id) {
+            let _ =
+                std::fs::remove_dir_all(self.private_runtime_dir.join("sessions").join(camp_scope));
         }
     }
 
@@ -2088,6 +2093,13 @@ fn session_file_path_digest(path: &Path) -> Result<String> {
         "{:x}",
         Sha256::digest(canonical.to_string_lossy().as_bytes())
     ))
+}
+
+fn canonical_workspace_key(cwd: &Path) -> Result<String> {
+    let cwd = cwd
+        .canonicalize()
+        .with_context(|| format!("failed to resolve Pi Workspace {}", cwd.display()))?;
+    canonical_json_digest(&json!({"workspace": cwd}))
 }
 
 fn validate_host_state(

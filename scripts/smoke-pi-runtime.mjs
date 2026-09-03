@@ -27,22 +27,58 @@ const piVersion = (await runCapture(piBinary, ['--version'], root)).trim()
 if (!piVersionAtLeast(piVersion, [0, 84, 4])) {
   throw new Error(`Pi Runtime smoke requires Pi >= 0.84.4; found ${JSON.stringify(piVersion)}`)
 }
-const markerPath = join(projectRoot, 'native-session-marker.txt')
 const approvedPath = join(projectRoot, 'PI_APPROVED_WRITE.txt')
 const deniedPath = join(projectRoot, 'PI_WRITE_ATTEMPT.txt')
 const cancelledPath = join(projectRoot, 'PI_CANCELLED_WRITE.txt')
-const continuityMarker = `PI_CONTINUITY_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
+const bashOutputCases = [
+  {
+    name: 'stdout',
+    command: "printf 'PI_STDOUT_MARKER\\n'",
+    terminalStatus: 'completed',
+    included: ['PI_STDOUT_MARKER']
+  },
+  {
+    name: 'stderr',
+    command: "printf 'PI_STDERR_MARKER\\n' >&2",
+    terminalStatus: 'completed',
+    included: ['PI_STDERR_MARKER']
+  },
+  {
+    name: 'mixed',
+    command: "printf 'PI_MIXED_STDOUT\\n'; printf 'PI_MIXED_STDERR\\n' >&2",
+    terminalStatus: 'completed',
+    included: ['PI_MIXED_STDOUT', 'PI_MIXED_STDERR']
+  },
+  {
+    name: 'empty',
+    command: ':',
+    terminalStatus: 'completed',
+    included: ['(no output)']
+  },
+  {
+    name: 'nonzero',
+    command: "printf 'PI_NONZERO_MARKER\\n' >&2; exit 7",
+    terminalStatus: 'failed',
+    included: ['PI_NONZERO_MARKER', 'Command exited with code 7']
+  },
+  {
+    name: 'large',
+    command: "printf 'PI_LARGE_BEGIN\\n'; yes 'PI_LARGE_FILL_ABCDEFGHIJKLMNOPQRSTUVWXYZ' | head -n 2500; printf 'PI_LARGE_END\\n'",
+    terminalStatus: 'completed',
+    included: ['PI_LARGE_END', '[Showing lines', 'Full output:'],
+    excluded: ['PI_LARGE_BEGIN']
+  }
+]
 let client = null
 
 try {
   await prepareIsolatedPiConfig(piConfigSource, piAgentDir)
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Pi Runtime qualification fixture\n')
-  await writeFile(markerPath, `${continuityMarker}\n`)
   await run('git', ['init', '-b', 'main'], projectRoot)
   await run('git', ['config', 'user.name', 'Rovai Pi Runtime Smoke'], projectRoot)
   await run('git', ['config', 'user.email', 'pi-runtime@rovai.local'], projectRoot)
-  await run('git', ['add', 'README.md', 'native-session-marker.txt'], projectRoot)
+  await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
   client = startCore(dataDir, piAgentDir, piBinary)
@@ -70,12 +106,11 @@ try {
     commandId: crypto.randomUUID(),
     workspace,
     body: [
-      'Use the Bash tool exactly once to run: cat native-session-marker.txt.',
-      'Do not call another tool. Remember the exact single-line result.',
-      'Reply exactly MARKER_STORED; when the immediately next user message asks, repeat the remembered result.'
+      'Answer this ordinary arithmetic question in one short sentence: what is 17 plus 25?',
+      'Do not modify the workspace.'
     ].join(' '),
     address: { mode: 'explicit', agentIds: [agentId] },
-    purpose: 'Freeze a benign continuity token in the Pi Native Session before Core restart.'
+    purpose: 'Begin an ordinary conversation in the Pi Native Session before Core restart.'
   })
   const firstAccepted = acceptedRun(first)
   const firstResult = await waitForRun(client, firstAccepted.campId, firstAccepted.agentRunId, {
@@ -83,23 +118,13 @@ try {
   })
   const firstOutput = outputForRun(firstResult.snapshot, firstAccepted.agentRunId)
   const firstStart = startForRun(client.events, firstAccepted.agentRunId)
-  const firstActions = actionsForRun(firstResult.snapshot, firstAccepted.agentRunId)
-  const privateOutputEvent = client.events.find((event) =>
-    event.method === 'runtime.action'
-      && event.params?.agentRunId === firstAccepted.agentRunId
-      && String(event.params?.payload?.output ?? '').includes(continuityMarker)
-  )
   if (firstResult.run.status !== 'succeeded'
-      || !firstOutput?.body.includes('MARKER_STORED')
-      || firstOutput.body.includes(continuityMarker)
-      || !privateOutputEvent
-      || !firstActions.some((action) => action.status === 'succeeded')
+      || !firstOutput?.body.includes('42')
       || !isUuid(firstStart?.params?.nativeThreadId)
       || !isUuid(firstStart?.params?.hostInstanceId)) {
     throw new Error(`Initial Pi run failed: ${diagnostics(client, firstResult, firstAccepted.agentRunId)}`)
   }
 
-  await rm(markerPath)
   await client.stop()
   client = startCore(dataDir, piAgentDir, piBinary)
   await client.request('runtime.installations.list')
@@ -107,7 +132,7 @@ try {
   const restoredRequest = await sendExistingCampMessage(
     client.request,
     firstAccepted.campId,
-    'Do not call tools or inspect files. Repeat the benign continuity token returned by cat in the immediately preceding turn. Reply with exactly that token and nothing else.',
+    'Continue the immediately preceding arithmetic discussion: which two addends did I ask you to combine? Answer in one short sentence.',
     'Verify Pi exact Session resume after Core and Host restart.'
   )
   const restoredAccepted = acceptedRun(restoredRequest, firstAccepted.campId)
@@ -120,13 +145,58 @@ try {
   const restoredStart = startForRun(client.events, restoredAccepted.agentRunId)
   const restoredActions = actionsForRun(restoredResult.snapshot, restoredAccepted.agentRunId)
   if (restoredResult.run.status !== 'succeeded'
-      || restoredOutput?.body.trim() !== continuityMarker
+      || !restoredOutput?.body.includes('17')
+      || !restoredOutput.body.includes('25')
       || restoredStart?.params?.nativeThreadId !== firstStart.params.nativeThreadId
       || restoredStart?.params?.hostInstanceId === firstStart.params.hostInstanceId
       || restoredResult.run.conversationId !== firstResult.run.conversationId
       || restoredActions.length !== 0
       || client.events.some((event) => event.method === 'runtime.host.log')) {
     throw new Error(`Pi cold exact-resume failed: ${diagnostics(client, restoredResult, restoredAccepted.agentRunId)}`)
+  }
+
+  const secondSession = await createConfiguredCampAndSend(client.request, {
+    commandId: crypto.randomUUID(),
+    workspace,
+    body: [
+      'Answer this ordinary arithmetic question in one short sentence: what is 9 multiplied by 7?',
+      'Do not modify the workspace.'
+    ].join(' '),
+    address: { mode: 'explicit', agentIds: [agentId] },
+    purpose: 'Verify a workspace-resident Pi Host can switch to a distinct Native Session.'
+  })
+  const secondAccepted = acceptedRun(secondSession)
+  const secondResult = await waitForRun(client, secondAccepted.campId, secondAccepted.agentRunId)
+  const secondOutput = outputForRun(secondResult.snapshot, secondAccepted.agentRunId)
+  const secondStart = startForRun(client.events, secondAccepted.agentRunId)
+  if (secondResult.run.status !== 'succeeded'
+      || !secondOutput?.body.includes('63')
+      || secondOutput.body.includes('42')
+      || secondStart?.params?.hostInstanceId !== restoredStart.params.hostInstanceId
+      || secondStart?.params?.nativeThreadId === restoredStart.params.nativeThreadId) {
+    throw new Error(`Pi workspace Host did not switch cleanly to Session B: ${diagnostics(client, secondResult, secondAccepted.agentRunId)}`)
+  }
+
+  const switchBackRequest = await sendExistingCampMessage(
+    client.request,
+    firstAccepted.campId,
+    'Return to our earlier arithmetic discussion in this conversation: what sum did you calculate? Answer with the number.',
+    'Verify the workspace-resident Pi Host switches exactly from Session B back to Session A.'
+  )
+  const switchBackAccepted = acceptedRun(switchBackRequest, firstAccepted.campId)
+  const switchBackResult = await waitForRun(
+    client,
+    firstAccepted.campId,
+    switchBackAccepted.agentRunId
+  )
+  const switchBackOutput = outputForRun(switchBackResult.snapshot, switchBackAccepted.agentRunId)
+  const switchBackStart = startForRun(client.events, switchBackAccepted.agentRunId)
+  if (switchBackResult.run.status !== 'succeeded'
+      || !switchBackOutput?.body.includes('42')
+      || switchBackOutput.body.includes('63')
+      || switchBackStart?.params?.hostInstanceId !== secondStart.params.hostInstanceId
+      || switchBackStart?.params?.nativeThreadId !== restoredStart.params.nativeThreadId) {
+    throw new Error(`Pi exact Session A→B→A switch failed: ${diagnostics(client, switchBackResult, switchBackAccepted.agentRunId)}`)
   }
 
   const approvedRequest = await sendExistingCampMessage(
@@ -148,10 +218,87 @@ try {
   if (approvedResult.run.status !== 'succeeded'
       || approvedBody?.trim() !== 'PI_APPROVED_WRITE_OK'
       || !approvedActions.some((action) => action.status === 'succeeded')
-      || approvedStart?.params?.hostInstanceId !== restoredStart.params.hostInstanceId
-      || approvedStart?.params?.nativeThreadId !== restoredStart.params.nativeThreadId) {
+      || approvedStart?.params?.hostInstanceId !== switchBackStart.params.hostInstanceId
+      || approvedStart?.params?.nativeThreadId !== switchBackStart.params.nativeThreadId) {
     throw new Error(`Pi warm-LRU/approved-write failed: ${diagnostics(client, approvedResult, approvedAccepted.agentRunId)}`)
   }
+
+  const concurrentOne = await createConfiguredCampAndSend(client.request, {
+    commandId: crypto.randomUUID(),
+    workspace,
+    body: "Use the Bash tool exactly once to run: sleep 2; printf 'PI_CONCURRENT_ONE_OK\\n'. Do not call another tool. Then reply exactly CONCURRENT_ONE_DONE.",
+    address: { mode: 'explicit', agentIds: [agentId] },
+    purpose: 'Hold one Pi Host busy while proving concurrent dispatch acquires another Host.'
+  })
+  const concurrentOneAccepted = acceptedRun(concurrentOne)
+  await waitForPendingApproval(client, concurrentOneAccepted.campId, concurrentOneAccepted.agentRunId)
+  const concurrentOneStart = startForRun(client.events, concurrentOneAccepted.agentRunId)
+
+  const concurrentTwo = await createConfiguredCampAndSend(client.request, {
+    commandId: crypto.randomUUID(),
+    workspace,
+    body: "Use the Bash tool exactly once to run: sleep 2; printf 'PI_CONCURRENT_TWO_OK\\n'. Do not call another tool. Then reply exactly CONCURRENT_TWO_DONE.",
+    address: { mode: 'explicit', agentIds: [agentId] },
+    purpose: 'Prove concurrent Pi work in one Workspace uses a distinct Host.'
+  })
+  const concurrentTwoAccepted = acceptedRun(concurrentTwo)
+  await waitForPendingApproval(client, concurrentTwoAccepted.campId, concurrentTwoAccepted.agentRunId)
+  const concurrentTwoStart = startForRun(client.events, concurrentTwoAccepted.agentRunId)
+  if (!concurrentOneStart || !concurrentTwoStart
+      || concurrentOneStart.params.hostInstanceId === concurrentTwoStart.params.hostInstanceId
+      || concurrentOneStart.params.nativeThreadId === concurrentTwoStart.params.nativeThreadId) {
+    throw new Error(`Concurrent Pi Runs did not acquire distinct Host/Session identities: ${JSON.stringify({
+      concurrentOneStart,
+      concurrentTwoStart
+    })}`)
+  }
+  const concurrentTwoResult = await waitForRun(
+    client,
+    concurrentTwoAccepted.campId,
+    concurrentTwoAccepted.agentRunId,
+    { approval: 'allow_once' }
+  )
+  const concurrentOneResult = await waitForRun(
+    client,
+    concurrentOneAccepted.campId,
+    concurrentOneAccepted.agentRunId,
+    { approval: 'allow_once' }
+  )
+  if (concurrentOneResult.run.status !== 'succeeded'
+      || concurrentTwoResult.run.status !== 'succeeded'
+      || !runtimeActionOutput(client.events, concurrentOneAccepted.agentRunId).includes('PI_CONCURRENT_ONE_OK')
+      || !runtimeActionOutput(client.events, concurrentTwoAccepted.agentRunId).includes('PI_CONCURRENT_TWO_OK')) {
+    throw new Error(`Concurrent Pi Runs did not settle independently: ${JSON.stringify({
+      one: diagnostics(client, concurrentOneResult, concurrentOneAccepted.agentRunId),
+      two: diagnostics(client, concurrentTwoResult, concurrentTwoAccepted.agentRunId)
+    })}`)
+  }
+
+  const bashMatrixRequest = await createConfiguredCampAndSend(client.request, {
+    commandId: crypto.randomUUID(),
+    workspace,
+    body: [
+      'This is an authorized local Runtime acceptance test. Invoke the Bash tool exactly six times, sequentially, using the following six commands verbatim and as six separate tool calls; never combine commands into one call:',
+      ...bashOutputCases.map((testCase, index) => `${index + 1}. ${testCase.command}`),
+      'After a command error, do not retry it and continue with the next numbered command. Do not call any other tool. After all six calls, reply exactly BASH_MATRIX_DONE.'
+    ].join('\n'),
+    address: { mode: 'explicit', agentIds: [agentId] },
+    purpose: 'Verify Pi Bash stdout, stderr, mixed, empty, nonzero, and bounded large-output lifecycle.'
+  })
+  const bashMatrixAccepted = acceptedRun(bashMatrixRequest)
+  const bashMatrixResult = await waitForRun(
+    client,
+    bashMatrixAccepted.campId,
+    bashMatrixAccepted.agentRunId,
+    { approval: 'allow_once' }
+  )
+  await assertBashOutputMatrix(
+    client,
+    bashMatrixResult,
+    bashMatrixAccepted.campId,
+    bashMatrixAccepted.agentRunId,
+    bashOutputCases
+  )
 
   const deniedRequest = await sendExistingCampMessage(
     client.request,
@@ -178,7 +325,12 @@ try {
   const cancelRequest = await sendExistingCampMessage(
     client.request,
     firstAccepted.campId,
-    `Use the Bash tool exactly once to run: sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelledPath}'. Do not call another tool.`,
+    [
+      'This is a managed tool-routing test.',
+      `You must invoke the Bash tool exactly once to run: sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelledPath}'.`,
+      'Do not decide whether the command should run; the Host will decide.',
+      'Do not simulate the command. Do not call another tool. If the tool returns an error, do not retry.'
+    ].join(' '),
     'Verify Pi abort and descendant cleanup.'
   )
   const cancelAccepted = acceptedRun(cancelRequest, firstAccepted.campId)
@@ -189,7 +341,7 @@ try {
   )
   await delay(1_500)
   const cancelledBody = await readFile(cancelledPath, 'utf8').catch(() => null)
-  if (!['cancelled', 'failed'].includes(cancelledResult.run.status) || cancelledBody !== null) {
+  if (cancelledResult.run.status !== 'cancelled' || cancelledBody !== null) {
     throw new Error(`Pi cancel did not stop the side effect: ${diagnostics(client, cancelledResult, cancelAccepted.agentRunId)}`)
   }
 
@@ -215,6 +367,32 @@ try {
     throw new Error(`Pi structured Usage was not persisted: ${JSON.stringify(usage)}`)
   }
 
+  const corePid = client.pid
+  const processSnapshot = await readProcessTable()
+  const descendants = descendantsOf(processSnapshot, corePid)
+  const residentPiProcesses = descendants.filter((process) => {
+    const command = process.command.trim()
+    return command === 'pi'
+      || (command.includes('--mode rpc') && command.includes('--extension'))
+  })
+  if (residentPiProcesses.length === 0) {
+    throw new Error(`No resident Pi RPC Host was observable before planned shutdown: ${JSON.stringify({ corePid, descendants })}`)
+  }
+  const shutdown = await client.stop()
+  client = null
+  const remainingProcesses = await waitForProcessesGone(
+    [corePid, ...descendants.map((process) => process.pid)],
+    10_000
+  )
+  const remainingHostConfigFiles = await listFiles(join(dataDir, 'runtime', 'pi', 'host-config'))
+  if (shutdown.forced || remainingProcesses.length > 0 || remainingHostConfigFiles.length > 0) {
+    throw new Error(`Pi planned shutdown did not fully reap private Runtime state: ${JSON.stringify({
+      shutdown,
+      remainingProcesses,
+      remainingHostConfigFiles
+    })}`)
+  }
+
   console.log(JSON.stringify({
     ok: true,
     adapterKind: 'pi',
@@ -230,6 +408,13 @@ try {
     restoredHostInstanceId: restoredStart.params.hostInstanceId,
     warmHostReused: approvedStart.params.hostInstanceId === restoredStart.params.hostInstanceId,
     coldSessionResumed: restoredStart.params.nativeThreadId === firstStart.params.nativeThreadId,
+    workspaceSessionSwitch: {
+      hostReusedAcrossCamps: secondStart.params.hostInstanceId === restoredStart.params.hostInstanceId,
+      sessionIdsDistinct: secondStart.params.nativeThreadId !== restoredStart.params.nativeThreadId,
+      switchedBackExactly: switchBackStart.params.nativeThreadId === restoredStart.params.nativeThreadId
+    },
+    concurrentHostsDistinct: concurrentOneStart.params.hostInstanceId !== concurrentTwoStart.params.hostInstanceId,
+    bashOutputMatrix: bashOutputCases.map((testCase) => testCase.name),
     approvedActionCount: approvedActions.filter((action) => action.status === 'succeeded').length,
     deniedActionCount: deniedApprovals.filter((approval) => approval.status === 'denied').length,
     cancelStatus: cancelledResult.run.status,
@@ -240,7 +425,13 @@ try {
     externalMcpStdio: true,
     externalMcpStreamableHttp: true,
     managedSkillDelivery: '.pi/skills',
-    structuredUsageObserved: true
+    structuredUsageObserved: true,
+    plannedShutdown: {
+      graceful: true,
+      observedResidentHostCount: residentPiProcesses.length,
+      descendantsReaped: descendants.length,
+      privateHostConfigFilesRemaining: 0
+    }
   }, null, 2))
 } finally {
   await client?.stop()
@@ -353,17 +544,33 @@ function startCore(dataDirectory, isolatedPiAgentDir, resolvedPiBinary) {
     })
   })
   const stop = async () => {
-    if (stopping || child.exitCode !== null) return
+    if (stopping || child.exitCode !== null) {
+      return { forced: false, exitCode: child.exitCode, signalCode: child.signalCode }
+    }
     stopping = true
+    const closed = new Promise((resolveClose) => child.once('close', () => resolveClose(true)))
     child.stdin.end()
-    await Promise.race([
-      new Promise((resolveClose) => child.once('close', resolveClose)),
-      delay(10_000)
+    const exitedGracefully = await Promise.race([
+      closed,
+      delay(10_000).then(() => false)
     ])
-    if (child.exitCode === null) child.kill('SIGTERM')
+    let forced = false
+    if (!exitedGracefully && child.exitCode === null) {
+      forced = true
+      child.kill('SIGTERM')
+      const terminated = await Promise.race([
+        closed,
+        delay(5_000).then(() => false)
+      ])
+      if (!terminated && child.exitCode === null) {
+        child.kill('SIGKILL')
+        await Promise.race([closed, delay(5_000)])
+      }
+    }
     lines.close()
+    return { forced, exitCode: child.exitCode, signalCode: child.signalCode }
   }
-  return { events, stderr, request, stop }
+  return { events, stderr, pid: child.pid, request, stop }
 }
 
 async function sendExistingCampMessage(request, campId, body, purpose) {
@@ -450,6 +657,9 @@ async function cancelRunningTool(client, campId, agentRunId) {
       resolved.add(approval.id)
     }
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+    if (!cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
+      throw new Error(`Pi Run settled before its expected cancel Approval: ${diagnostics(client, { snapshot, run }, agentRunId)}`)
+    }
     if (!cancellationRequested && resolved.size > 0 && run) {
       const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
       const cancellation = await client.request('campTurns.cancel', {
@@ -478,6 +688,109 @@ function approvalsForRun(snapshot, agentRunId) {
 
 function outputForRun(snapshot, agentRunId) {
   return snapshot.messages.find((message) => message.sourceAgentRunId === agentRunId)
+}
+
+function runtimeActionOutput(events, agentRunId) {
+  return events
+    .filter((event) => event.method === 'runtime.action' && event.params?.agentRunId === agentRunId)
+    .map((event) => String(event.params?.payload?.output ?? ''))
+    .join('\n')
+}
+
+async function assertBashOutputMatrix(client, result, campId, agentRunId, testCases) {
+  const output = outputForRun(result.snapshot, agentRunId)
+  const events = client.events.filter((event) =>
+    event.method === 'runtime.action'
+      && event.params?.agentRunId === agentRunId
+      && event.params?.payload?.toolName === 'bash'
+  )
+  const inputByToolCallId = new Map()
+  const terminalByToolCallId = new Map()
+  for (const event of events) {
+    const payload = event.params.payload
+    const toolCallId = payload.toolCallId
+    if (typeof toolCallId !== 'string' || toolCallId.length === 0) continue
+    if (typeof payload.input === 'string') {
+      const previous = inputByToolCallId.get(toolCallId)
+      if (previous !== undefined && previous !== payload.input) {
+        throw new Error(`Pi Bash input changed within one tool call: ${JSON.stringify({ toolCallId, previous, current: payload.input })}`)
+      }
+      inputByToolCallId.set(toolCallId, payload.input)
+    }
+    if (['completed', 'failed'].includes(payload.status)) {
+      const terminals = terminalByToolCallId.get(toolCallId) ?? []
+      terminals.push(event)
+      terminalByToolCallId.set(toolCallId, terminals)
+    }
+  }
+
+  const failures = []
+  if (result.run.status !== 'succeeded') failures.push(`run status=${result.run.status}`)
+  if (output?.body.trim() !== 'BASH_MATRIX_DONE') failures.push(`final output=${JSON.stringify(output?.body)}`)
+  if (inputByToolCallId.size !== testCases.length) failures.push(`input tool count=${inputByToolCallId.size}`)
+  if (terminalByToolCallId.size !== testCases.length) failures.push(`terminal tool count=${terminalByToolCallId.size}`)
+  const evidencePage = await client.request('agentRunEvidence.list', {
+    campId,
+    agentRunId,
+    afterSequence: 0,
+    limit: 1_000
+  })
+  const evidenceById = new Map(evidencePage.evidence.map((evidence) => [evidence.id, evidence]))
+
+  for (const testCase of testCases) {
+    const matches = [...inputByToolCallId.entries()].filter(([, input]) => input === testCase.command)
+    if (matches.length !== 1) {
+      failures.push(`${testCase.name}: exact input matches=${matches.length}`)
+      continue
+    }
+    const [toolCallId] = matches[0]
+    const terminals = terminalByToolCallId.get(toolCallId) ?? []
+    if (terminals.length !== 1) {
+      failures.push(`${testCase.name}: terminal count=${terminals.length}`)
+      continue
+    }
+    const terminalEvent = terminals[0]
+    let terminal = terminalEvent.params.payload
+    if (terminal._rovaiTruncated === true) {
+      const evidence = evidenceById.get(terminalEvent.params.evidenceId)
+      if (!evidence?.isTruncated || !evidence.contentBlobId) {
+        failures.push(`${testCase.name}: truncated preview has no managed evidence Blob`)
+      } else {
+        const full = await client.request('agentRunEvidence.getContent', {
+          campId,
+          evidenceId: evidence.id
+        })
+        terminal = full.payload
+      }
+    }
+    const terminalOutput = String(terminal.output ?? '')
+    if (terminal.status !== testCase.terminalStatus) {
+      failures.push(`${testCase.name}: terminal status=${terminal.status}`)
+    }
+    for (const marker of testCase.included) {
+      if (!terminalOutput.includes(marker)) failures.push(`${testCase.name}: missing ${JSON.stringify(marker)}`)
+    }
+    for (const marker of testCase.excluded ?? []) {
+      if (terminalOutput.includes(marker)) failures.push(`${testCase.name}: unexpectedly retained ${JSON.stringify(marker)}`)
+    }
+    if (testCase.name === 'large' && Buffer.byteLength(terminalOutput, 'utf8') > 60 * 1024) {
+      failures.push(`${testCase.name}: terminal output was not bounded (${Buffer.byteLength(terminalOutput, 'utf8')} bytes)`)
+    }
+  }
+
+  const actions = actionsForRun(result.snapshot, agentRunId)
+  const actionIds = new Set(actions.map((action) => action.id))
+  if (actions.length !== testCases.length || actionIds.size !== testCases.length) {
+    failures.push(`snapshot actions=${actions.length}, unique=${actionIds.size}`)
+  }
+  if (actions.filter((action) => action.status === 'succeeded').length !== testCases.length - 1
+      || actions.filter((action) => action.status === 'failed').length !== 1) {
+    failures.push(`snapshot action statuses=${JSON.stringify(actions.map((action) => action.status))}`)
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`Pi Bash output matrix failed (${failures.join('; ')}): ${diagnostics(client, result, agentRunId)}`)
+  }
 }
 
 function startForRun(events, agentRunId) {
@@ -514,6 +827,21 @@ async function waitForEvent(client, method, timeoutMs) {
   throw new Error(`Timed out waiting for ${method}`)
 }
 
+async function waitForPendingApproval(client, campId, agentRunId) {
+  const deadline = Date.now() + 300_000
+  while (Date.now() < deadline) {
+    const snapshot = await client.request('camps.snapshot', { campId })
+    const approval = approvalsForRun(snapshot, agentRunId).find((candidate) => candidate.status === 'pending')
+    if (approval) return { snapshot, approval }
+    const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+    if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
+      throw new Error(`Pi Run settled before its expected Approval: ${diagnostics(client, { snapshot, run }, agentRunId)}`)
+    }
+    await delay(250)
+  }
+  throw new Error(`Timed out waiting for Pi Approval in ${agentRunId}`)
+}
+
 function trace(message) {
   if (traceEnabled) process.stderr.write(`[pi-smoke] ${message}\n`)
 }
@@ -542,6 +870,43 @@ async function runCapture(command, args, cwd) {
       ? resolveRun(stdout.join(''))
       : rejectRun(new Error(`${command} failed (${code}): ${stderr.join('')}`)))
   })
+}
+
+async function readProcessTable() {
+  const output = await runCapture('/bin/ps', ['-axo', 'pid=,ppid=,command='])
+  return output
+    .split('\n')
+    .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/))
+    .filter(Boolean)
+    .map((match) => ({ pid: Number(match[1]), parentPid: Number(match[2]), command: match[3] }))
+}
+
+function descendantsOf(processes, rootPid) {
+  const descendantIds = new Set()
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const process of processes) {
+      if ((process.parentPid === rootPid || descendantIds.has(process.parentPid))
+          && !descendantIds.has(process.pid)) {
+        descendantIds.add(process.pid)
+        changed = true
+      }
+    }
+  }
+  return processes.filter((process) => descendantIds.has(process.pid))
+}
+
+async function waitForProcessesGone(processIds, timeoutMs) {
+  const expected = new Set(processIds.filter((pid) => Number.isInteger(pid) && pid > 0))
+  const deadline = Date.now() + timeoutMs
+  let remaining = []
+  while (Date.now() < deadline) {
+    remaining = (await readProcessTable()).filter((process) => expected.has(process.pid))
+    if (remaining.length === 0) return []
+    await delay(100)
+  }
+  return remaining
 }
 
 async function resolvePiBinary(configured) {
