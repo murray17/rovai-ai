@@ -14267,7 +14267,18 @@ mod tests {
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .unwrap()
                     .into_iter()
-                    .filter(|column| column != "retry_suppression_json")
+                    .filter(|column| {
+                        column != "retry_suppression_json"
+                            && !(table == "camp_turn" && column == "kind")
+                            && !(table == "agent_run"
+                                && matches!(
+                                    column.as_str(),
+                                    "response_delivery"
+                                        | "operation_policy"
+                                        | "operation_policy_version"
+                                        | "destination_conversation_id"
+                                ))
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 let mut statement = connection

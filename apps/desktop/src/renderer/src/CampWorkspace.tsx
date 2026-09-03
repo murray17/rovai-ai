@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { CampDetailPopover } from './CampDetailPopover'
+import { SingleChatPanel } from './SingleChatPanel'
 import { CampMemberFastToggle } from './CampMemberFastToggle'
 import type {
   ActionApprovalView,
@@ -1251,6 +1252,9 @@ export function CampWorkspace({
   inspectorVisible = false,
   inspectorTab: controlledInspectorTab,
   detailEntryHost,
+  singleChatVisible = false,
+  onOpenSingleChat = () => undefined,
+  onCloseSingleChat = () => undefined,
   onCloseInspector = () => undefined,
   onInspectorTabChange,
   onOpenInspector,
@@ -1296,6 +1300,9 @@ export function CampWorkspace({
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
   detailEntryHost?: HTMLElement | null
+  singleChatVisible?: boolean
+  onOpenSingleChat?(): void
+  onCloseSingleChat?(): void
   onCloseInspector?(): void
   onInspectorTabChange?(tab: CampInspectorTab): void
   onOpenInspector?(tab: CampInspectorTab): void
@@ -4221,6 +4228,17 @@ export function CampWorkspace({
               />
             </section>
             </CampDetailPopover>}
+            {snapshot.camp.activationState === 'active' && (
+              <SingleChatPanel
+                campId={snapshot.camp.id}
+                members={snapshot.members}
+                entryHost={detailEntryHost}
+                visible={singleChatVisible}
+                onOpen={onOpenSingleChat}
+                onClose={onCloseSingleChat}
+                onNotify={onNotify}
+              />
+            )}
           </div>
           {executionPlacement === 'bottom' && (
             <RunPulse

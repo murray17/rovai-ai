@@ -793,6 +793,70 @@ export interface CancelCampTurnCommand {
   expectedVersion: number
 }
 
+export interface OpenSingleChatCommand {
+  campId: string
+  agentId: string
+}
+
+export interface SendSingleChatMessageCommand {
+  campId: string
+  conversationId: string
+  body: string
+  expectedConversationVersion: number
+}
+
+export interface EndSingleChatCommand {
+  campId: string
+  conversationId: string
+  expectedConversationVersion: number
+}
+
+export interface SingleChatConversationView {
+  id: string
+  campId: string
+  agentId: string
+  version: number
+  status: 'active' | 'ended'
+  lastMessageSequence: number
+  lastAcceptedPublicBoundarySequence: number
+  activeAgentRunId: string | null
+  createdAt: string
+  updatedAt: string
+  endedAt: string | null
+}
+
+export interface SingleChatMessageView {
+  id: string
+  sequence: number
+  authorType: 'user' | 'agent' | 'system'
+  authorId: string
+  body: string
+  agentRunId: string | null
+  createdAt: string
+}
+
+export interface SingleChatRunView {
+  id: string
+  triggerConversationMessageId: string
+  status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
+  version: number
+  executionEpoch: number
+  cancelRequestedAt: string | null
+  lastErrorCode: string | null
+  createdAt: string
+  startedAt: string | null
+  endedAt: string | null
+  finalConversationMessageId: string | null
+  executionEvidenceCount: number
+}
+
+export interface SingleChatSnapshot {
+  conversation: SingleChatConversationView
+  messages: SingleChatMessageView[]
+  agentRuns: SingleChatRunView[]
+  executionEvidence: AgentRunExecutionEvidenceView[]
+}
+
 export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 
 export type CampChannelSource =
@@ -1434,6 +1498,7 @@ export type AgentRunCancelReasonCode =
   | 'camp_turn_cancelled'
   | 'execution_budget_exhausted'
   | 'user_requested_agent_run_stop'
+  | 'single_chat_ended'
 
 export interface AgentRunView {
   id: string
@@ -1461,7 +1526,7 @@ export interface AgentRunView {
   runtimeModel: { modelId: string | null } | null
   executionEpoch: number
   permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
-  invocationKind: 'direct' | 'a2a' | 'gather_completion'
+  invocationKind: 'direct' | 'a2a' | 'gather_completion' | 'single_chat'
   triggerDeliveryGeneration: number
   a2aParentAgentRunId: string | null
   a2aRootAgentRunId: string | null
@@ -3317,6 +3382,11 @@ export type CoreMethod =
   | 'camps.enter'
   | 'camps.open'
   | 'camps.delete'
+  | 'singleChat.list'
+  | 'singleChat.get'
+  | 'singleChat.open'
+  | 'singleChat.send'
+  | 'singleChat.end'
   | 'campTurns.cancel'
   | 'agentRuns.cancel'
   | 'agentRuns.diagnostic.get'

@@ -602,6 +602,65 @@ impl DomainCommand for RecordObservedRuntimeModelCommand {
 }
 
 impl ExecutionRuntimeService {
+    /// Single Chat does not participate in Runtime recovery. Process startup
+    /// settles only the interrupted reply; its Conversation remains active.
+    pub fn cancel_interrupted_single_chat_runs(
+        &self,
+        database: &mut Database,
+    ) -> Result<Vec<String>> {
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let targets = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
+                       agent_run.execution_epoch
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE agent_run.invocation_kind = 'single_chat'
+                  AND agent_run.status IN ('queued', 'running', 'waiting')
+                ORDER BY agent_run.created_at, agent_run.id
+                "#,
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let actor = ActorRef::System {
+            component_id: "runtime-recovery-coordinator".to_string(),
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut cancelled = Vec::with_capacity(targets.len());
+        for (agent_run_id, camp_id, camp_turn_id, execution_epoch) in targets {
+            settle_abortive_agent_run_in_tx(
+                &transaction,
+                &agent_run_id,
+                "core_restarted",
+                &actor,
+                &now,
+            )?;
+            recompute_camp_turn(
+                &transaction,
+                &camp_id,
+                &camp_turn_id,
+                &actor,
+                Some(execution_epoch),
+                &now,
+            )?;
+            cancelled.push(agent_run_id);
+        }
+        transaction.commit()?;
+        Ok(cancelled)
+    }
+
     pub fn record_observed_runtime_model(
         &self,
         database: &mut Database,
@@ -2950,6 +3009,14 @@ impl ExecutionRuntimeService {
             )? {
                 return Ok(rejection);
             }
+            if target.invocation_kind == "single_chat" {
+                return persist_single_chat_success(
+                    transaction,
+                    &target,
+                    envelope,
+                    terminal_reason_code,
+                );
+            }
             let adapter_kind = target
                 .runtime_adapter_kind
                 .as_deref()
@@ -4195,6 +4262,9 @@ struct TerminalTarget {
     agent_run_id: String,
     camp_id: String,
     camp_turn_id: String,
+    conversation_id: String,
+    conversation_kind: String,
+    conversation_ended_at: Option<String>,
     agent_id: String,
     runtime_adapter_kind: Option<String>,
     status: String,
@@ -4205,7 +4275,161 @@ struct TerminalTarget {
     final_camp_message_id: Option<String>,
     terminal_resolution_source: Option<String>,
     terminal_reason_code: Option<String>,
+    invocation_kind: String,
+    response_delivery: String,
+    operation_policy: String,
+    operation_policy_version: i64,
+    destination_conversation_id: Option<String>,
     now: String,
+}
+
+fn persist_single_chat_success(
+    transaction: &Transaction<'_>,
+    target: &TerminalTarget,
+    envelope: &CommandEnvelope<SucceedAgentRunCommand>,
+    terminal_reason_code: Option<&str>,
+) -> Result<CommandHandlerResult> {
+    let final_output_digest = canonical_content_digest(&[StructuredCampMessageSegment::Text {
+        text: envelope.payload.final_output.clone(),
+    }])?;
+    let final_conversation_message_id = Uuid::new_v4().to_string();
+    let ending_git_observation = envelope
+        .payload
+        .ending_git_observation
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    let conversation_updated = transaction.execute(
+        r#"
+        UPDATE conversation
+        SET last_message_sequence = last_message_sequence + 1,
+            version = version + 1, updated_at = ?2
+        WHERE id = ?1 AND kind = 'single_chat' AND ended_at IS NULL
+        "#,
+        params![target.conversation_id, target.now],
+    )?;
+    if conversation_updated != 1 {
+        return Ok(rejected(
+            "agent_run.terminal_fenced",
+            "Single Chat ended before its final output arrived",
+        ));
+    }
+    let message_sequence: i64 = transaction.query_row(
+        "SELECT last_message_sequence FROM conversation WHERE id = ?1",
+        [&target.conversation_id],
+        |row| row.get(0),
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO conversation_message(
+            id, conversation_id, sequence,
+            author_type, author_id, source_agent_run_id, body,
+            source_camp_message_id, source_inbox_message_id,
+            camp_turn_id, agent_run_id, created_at
+        ) VALUES (?1, ?2, ?3, 'agent', ?4, ?5, ?6, NULL, NULL, ?7, ?5, ?8)
+        "#,
+        params![
+            final_conversation_message_id,
+            target.conversation_id,
+            message_sequence,
+            target.agent_id,
+            target.agent_run_id,
+            envelope.payload.final_output,
+            target.camp_turn_id,
+            target.now,
+        ],
+    )?;
+    let updated = transaction.execute(
+        r#"
+        UPDATE agent_run
+        SET status = 'succeeded', wait_reason = NULL, wait_deadline_at = NULL,
+            runtime_recovery_required = 0,
+            execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+            terminal_resolution_source = 'runtime_terminal',
+            terminal_reason_code = ?7,
+            final_conversation_message_id = ?2,
+            final_camp_message_id = NULL,
+            ending_git_observation_json = ?6,
+            ended_at = ?3, version = version + 1, updated_at = ?3
+        WHERE id = ?1 AND status = 'running'
+          AND version = ?4 AND execution_epoch = ?5
+          AND invocation_kind = 'single_chat'
+          AND response_delivery = 'conversation_message'
+          AND operation_policy = 'single_chat_v1'
+          AND operation_policy_version = 1
+          AND destination_conversation_id = ?8
+        "#,
+        params![
+            target.agent_run_id,
+            final_conversation_message_id,
+            target.now,
+            envelope.payload.expected_version,
+            envelope.payload.execution_epoch,
+            ending_git_observation,
+            terminal_reason_code,
+            target.conversation_id,
+        ],
+    )?;
+    if updated != 1 {
+        anyhow::bail!("Single Chat AgentRun changed inside its completion transaction");
+    }
+    append_domain_event(
+        transaction,
+        "agent_run.succeeded",
+        &target.camp_id,
+        ("agent_run", &target.agent_run_id),
+        &envelope.actor,
+        Some(envelope.payload.execution_epoch),
+        &json!({
+            "nativeTurnId": envelope.payload.native_turn_id,
+            "conversationId": target.conversation_id,
+            "finalConversationMessageId": final_conversation_message_id,
+            "finalCampMessageId": Value::Null,
+            "finalOutputDigest": final_output_digest,
+            "responseDelivery": "conversation_message",
+            "operationPolicy": "single_chat_v1",
+            "terminalResolutionSource": "runtime_terminal",
+            "terminalReasonCode": terminal_reason_code,
+            "endingGitObservation": envelope.payload.ending_git_observation,
+        }),
+    )?;
+    settle_materialized_delivery_for_agent_run(
+        transaction,
+        AgentRunDeliverySettlement {
+            agent_run_id: &target.agent_run_id,
+            agent_run_status: "succeeded",
+            agent_run_error_code: None,
+            terminal_resolution_source: Some("runtime_terminal"),
+            terminal_reason_code,
+            final_output: Some(&envelope.payload.final_output),
+            actor: &envelope.actor,
+            execution_epoch: Some(envelope.payload.execution_epoch),
+            now: &target.now,
+        },
+    )?;
+    let camp_turn_status = recompute_camp_turn(
+        transaction,
+        &target.camp_id,
+        &target.camp_turn_id,
+        &envelope.actor,
+        Some(envelope.payload.execution_epoch),
+        &target.now,
+    )?;
+    Ok(CommandHandlerResult::applied(
+        "agent_run.succeeded",
+        json!({
+            "agentRunId": target.agent_run_id,
+            "campTurnId": target.camp_turn_id,
+            "campTurnStatus": camp_turn_status,
+            "finalConversationMessageId": final_conversation_message_id,
+            "finalCampMessageId": Value::Null,
+            "finalOutputDigest": final_output_digest,
+            "responseDelivery": "conversation_message",
+            "automaticPublicOutputSuppressed": true,
+            "missingSendRecovery": Value::Null,
+        }),
+        Some(entity_ref("agent_run", &target.agent_run_id)),
+    ))
 }
 
 #[derive(Debug, Serialize)]
@@ -4433,6 +4657,7 @@ fn load_terminal_target(
         .query_row(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
+                   conversation.id, conversation.kind, conversation.ended_at,
                    conversation.agent_id,
                    agent_run.runtime_adapter_kind,
                    agent_run.status, agent_run.version, agent_run.execution_epoch,
@@ -4440,7 +4665,10 @@ fn load_terminal_target(
                    agent_run.final_conversation_message_id,
                    agent_run.final_camp_message_id,
                    agent_run.terminal_resolution_source,
-                   agent_run.terminal_reason_code
+                   agent_run.terminal_reason_code,
+                   agent_run.invocation_kind, agent_run.response_delivery,
+                   agent_run.operation_policy, agent_run.operation_policy_version,
+                   agent_run.destination_conversation_id
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             JOIN conversation ON conversation.id = agent_run.conversation_id
@@ -4452,16 +4680,24 @@ fn load_terminal_target(
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
                     camp_turn_id: row.get(2)?,
-                    agent_id: row.get(3)?,
-                    runtime_adapter_kind: row.get(4)?,
-                    status: row.get(5)?,
-                    version: row.get(6)?,
-                    execution_epoch: row.get(7)?,
-                    cancel_requested_at: row.get(8)?,
-                    final_conversation_message_id: row.get(9)?,
-                    final_camp_message_id: row.get(10)?,
-                    terminal_resolution_source: row.get(11)?,
-                    terminal_reason_code: row.get(12)?,
+                    conversation_id: row.get(3)?,
+                    conversation_kind: row.get(4)?,
+                    conversation_ended_at: row.get(5)?,
+                    agent_id: row.get(6)?,
+                    runtime_adapter_kind: row.get(7)?,
+                    status: row.get(8)?,
+                    version: row.get(9)?,
+                    execution_epoch: row.get(10)?,
+                    cancel_requested_at: row.get(11)?,
+                    final_conversation_message_id: row.get(12)?,
+                    final_camp_message_id: row.get(13)?,
+                    terminal_resolution_source: row.get(14)?,
+                    terminal_reason_code: row.get(15)?,
+                    invocation_kind: row.get(16)?,
+                    response_delivery: row.get(17)?,
+                    operation_policy: row.get(18)?,
+                    operation_policy_version: row.get(19)?,
+                    destination_conversation_id: row.get(20)?,
                     now: chrono::Utc::now().to_rfc3339(),
                 })
             },
@@ -4505,6 +4741,21 @@ fn validate_terminal_target(
         return Ok(Some(rejected(
             "agent_run.output_already_recorded",
             "AgentRun already has a final output",
+        )));
+    }
+    if target.invocation_kind == "single_chat"
+        && (target.conversation_kind != "single_chat"
+            || target.conversation_ended_at.is_some()
+            || target.response_delivery != crate::single_chat::SINGLE_CHAT_RESPONSE_DELIVERY
+            || target.operation_policy != crate::single_chat::SINGLE_CHAT_OPERATION_POLICY
+            || target.operation_policy_version
+                != crate::single_chat::SINGLE_CHAT_OPERATION_POLICY_VERSION
+            || target.destination_conversation_id.as_deref()
+                != Some(target.conversation_id.as_str()))
+    {
+        return Ok(Some(rejected(
+            "agent_run.terminal_fenced",
+            "Single Chat output route is closed or does not match the active Conversation",
         )));
     }
     if has_terminal_safety_blocker(transaction, &target.agent_run_id)? {

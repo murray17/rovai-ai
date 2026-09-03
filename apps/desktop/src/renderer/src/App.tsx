@@ -1022,6 +1022,7 @@ function AuthoritativeApp({
   const campSnapshot = campSnapshotState.snapshot
   const [campInspectorCampId, setCampInspectorCampId] = useState<string | null>(null)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
+  const [singleChatCampId, setSingleChatCampId] = useState<string | null>(null)
   const [campDetailEntryHost, setCampDetailEntryHost] = useState<HTMLDivElement | null>(null)
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
@@ -1056,6 +1057,7 @@ function AuthoritativeApp({
   const [currentWorkspaceHint, setCurrentWorkspaceHint] = useState<WorkspaceSelection | null>(null)
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const campInspectorVisible = activeCampId !== null && campInspectorCampId === activeCampId
+  const singleChatVisible = activeCampId !== null && singleChatCampId === activeCampId
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
   const [visibleNotificationSources, setVisibleNotificationSources] = useState<VisibleNotificationSources | null>(null)
   const [notificationAnchor, setNotificationAnchor] = useState<{
@@ -1190,6 +1192,7 @@ function AuthoritativeApp({
 
   useEffect(() => {
     setCampInspectorCampId((current) => view === 'camp' && current === activeCampId ? current : null)
+    setSingleChatCampId((current) => view === 'camp' && current === activeCampId ? current : null)
   }, [activeCampId, view])
 
   const loadAgents = useCallback((): Promise<AgentProfile[]> => {
@@ -3381,7 +3384,13 @@ function AuthoritativeApp({
 
   const openCampInspector = (tab: CampInspectorTab): void => {
     setCampInspectorTab(tab)
+    setSingleChatCampId(null)
     setCampInspectorCampId(activeCampId)
+  }
+
+  const openSingleChat = (): void => {
+    setCampInspectorCampId(null)
+    setSingleChatCampId(activeCampId)
   }
 
   const changeExecutionConsolePlacement = useCallback(async (
@@ -3667,6 +3676,9 @@ function AuthoritativeApp({
             inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}
             detailEntryHost={campDetailEntryHost}
+            singleChatVisible={visibleCampSnapshot.camp.activationState === 'active' && singleChatVisible}
+            onOpenSingleChat={openSingleChat}
+            onCloseSingleChat={() => setSingleChatCampId(null)}
             onCloseInspector={() => setCampInspectorCampId(null)}
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}

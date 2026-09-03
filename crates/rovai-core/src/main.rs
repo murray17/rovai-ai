@@ -231,6 +231,10 @@ use rovai_core::{
     runtime_platform_admission::RuntimePlatformAdmission,
     runtime_resolution::RuntimeResolutionService,
     runtime_search_operation,
+    single_chat::{
+        EndSingleChatCommand, OpenSingleChatCommand, SendSingleChatMessageCommand,
+        SingleChatService,
+    },
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
         SetSkillGroupAssignmentsCommand, SkillLibraryService,
@@ -595,6 +599,8 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "camp.attachments.desktopOpenTarget"
             | "campTurns.cancel"
             | "agentRuns.cancel"
+            | "singleChat.send"
+            | "singleChat.end"
             | "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel"
             | "runtime.pendingExecution.cancel"
@@ -879,6 +885,12 @@ struct CampCreationMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: CampId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SingleChatSnapshotParams {
+    conversation_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4183,6 +4195,34 @@ impl Core {
                         "Command input does not match the accepted arguments.",
                     );
                 }
+                let single_chat_denial = {
+                    let database = self.database.lock().await;
+                    rovai_core::single_chat::authorize_builtin_operation(
+                        &database,
+                        &authorized.agent_run_id,
+                        authorized.execution_epoch,
+                        &operation,
+                        &input,
+                    )
+                };
+                match single_chat_denial {
+                    Ok(Some(rejection)) => {
+                        return builtin_tool_rejection(
+                            &operation,
+                            &request_id,
+                            &rejection.code,
+                            &command_rejection_message(&rejection.payload),
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("failed to authorize Single Chat Built-in operation: {error:#}");
+                        return BuiltinToolIpcResponse::ipc_error(
+                            "builtin_tool.internal_error",
+                            "Built-in Tool authorization could not be verified",
+                        );
+                    }
+                }
                 let digest = match request_digest(&operation, &input) {
                     Ok(digest) => digest,
                     Err(error) => {
@@ -4626,6 +4666,20 @@ impl Core {
                 )?
             };
             evidence_run = Some(authenticated_run.clone());
+            if let Some(rejection) = rovai_core::single_chat::authorize_builtin_operation(
+                &database,
+                &authenticated_run.agent_run_id,
+                authenticated_run.execution_epoch,
+                &request.tool_name,
+                &request.input,
+            )? {
+                return Err(BuiltinOperationError {
+                    code: rejection.code,
+                    message: command_rejection_message(&rejection.payload),
+                    details: Some(rejection.payload),
+                }
+                .into());
+            }
             // Scope the request identity to the authenticated Run so retries in one
             // Run replay while a later Run cannot collide with the same request ID.
             request.runtime_tool_call_id = scoped_runtime_tool_call_id(
@@ -6707,6 +6761,89 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_exists(&database, params.camp_id.as_str())?,
                 )?)
+            }
+            "singleChat.list" => {
+                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    SingleChatService::default().list_active(&database, params.camp_id.as_str())?,
+                )?)
+            }
+            "singleChat.get" => {
+                let params: SingleChatSnapshotParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    SingleChatService::default().snapshot(&database, &params.conversation_id)?,
+                )?)
+            }
+            "singleChat.open" => {
+                let params: UserCommandParams<OpenSingleChatCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = SingleChatService::default().open(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                let changed = execution.result.status != CommandResultStatus::Rejected;
+                drop(database);
+                if changed {
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "singleChat.send" => {
+                let params: UserCommandParams<SendSingleChatMessageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = SingleChatService::default().send(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                let changed = execution.result.status != CommandResultStatus::Rejected;
+                drop(database);
+                if changed {
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "singleChat.end" => {
+                let params: UserCommandParams<EndSingleChatCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = SingleChatService::default().end(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                let changed = execution.result.status != CommandResultStatus::Rejected;
+                let cancelled = execution
+                    .result
+                    .payload
+                    .get("cancelledAgentRunId")
+                    .is_some_and(|value| !value.is_null());
+                drop(database);
+                if cancelled {
+                    self.agent_run_cancellation_notify.notify_one();
+                }
+                if changed {
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
             }
             "camps.enter" => {
                 let params: CampEnterParams = serde_json::from_value(request.params.clone())?;
@@ -13502,6 +13639,7 @@ async fn run_core(
         if let Err(error) = fence_active_observers_on_core_start(&mut database) {
             eprintln!("Stale Compaction Observer fencing unavailable: {error:#}");
         }
+        ExecutionRuntimeService::default().cancel_interrupted_single_chat_runs(&mut database)?;
         database.prepare_v2_recovery()?;
         mark_unstarted_deliveries_interrupted_before_dispatch(&mut database)?;
         rovai_core::runtime::settle_legacy_retry_waits(&mut database)?;

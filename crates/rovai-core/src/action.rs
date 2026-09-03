@@ -12,7 +12,7 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     db::Database,
-    runtime::PermissionSemantics,
+    runtime::{PermissionSemantics, recompute_camp_turn, settle_abortive_agent_run_in_tx},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2616,7 +2616,8 @@ impl ActionSafetyService {
                 .query_row(
                     r#"
                     SELECT camp_turn.camp_id, agent_run.status,
-                           agent_run.version, agent_run.execution_epoch
+                           agent_run.version, agent_run.execution_epoch,
+                           agent_run.invocation_kind, agent_run.camp_turn_id
                     FROM agent_run
                     JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                     WHERE agent_run.id = ?1
@@ -2628,11 +2629,15 @@ impl ActionSafetyService {
                             row.get::<_, String>(1)?,
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((camp_id, run_status, run_version, run_epoch)) = run else {
+            let Some((camp_id, run_status, run_version, run_epoch, invocation_kind, camp_turn_id)) =
+                run
+            else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
             if envelope.camp_id.as_deref() != Some(camp_id.as_str())
@@ -2647,6 +2652,33 @@ impl ActionSafetyService {
             }
 
             let now = chrono::Utc::now().to_rfc3339();
+            if invocation_kind == "single_chat" {
+                let settlement = settle_abortive_agent_run_in_tx(
+                    transaction,
+                    &envelope.payload.agent_run_id,
+                    "runtime_connection_lost",
+                    &envelope.actor,
+                    &now,
+                )?;
+                let camp_turn_status = recompute_camp_turn(
+                    transaction,
+                    &camp_id,
+                    &camp_turn_id,
+                    &envelope.actor,
+                    Some(run_epoch),
+                    &now,
+                )?;
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.cancelled",
+                    json!({
+                        "agentRunId": envelope.payload.agent_run_id,
+                        "campTurnId": camp_turn_id,
+                        "campTurnStatus": camp_turn_status,
+                        "status": settlement.terminal_status,
+                    }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
             let actions_marked_unknown = transaction.execute(
                 r#"
                 UPDATE action_execution

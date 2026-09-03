@@ -247,6 +247,40 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)，交互探索见
 [延续路由原型](../../prototypes/composer-continuation-routing/index.html)。
 
+## Camp 内单聊
+
+Camp Header 的“当前会话”详情入口包含一个独立“单聊”项；打开后使用锚定在会话区右上方的非模态 panel，
+与既有成员/Task/文件详情互斥，但不改变 Camp route、公共时间线、Composer Draft 或执行台位置。入口显示 active
+Single Chat 数量；任一会话正在回复时复用紧凑运行 spinner，不用未读或通知语义。
+
+panel 顶部先显示标题，再显示单聊对象选择栏和直接“结束”按钮，不提供省略号菜单。选择器 trigger 使用当前队员头像、
+显示名和团队角色；展开列表每个选项也显示头像、名称和角色，不把对象分成“已有单聊 / 新的单聊”两组，也不暴露
+Conversation、Binding 或 Session 状态。选择器和用户消息使用既有执行浮层的 `--execution-running-surface` 分层，
+不能新增主题专属色值。
+
+transcript 采用对话式双轨：用户纯文本消息居右，队员回复居左；正文区两侧都不显示头像。队员一次回复由“执行过程 +
+final message”组成。运行中过程复用当前执行台的 narration、plan、command/tool 与状态视觉；连续 Command 聚合为一个
+可展开的“已执行 x 项操作”，而不是平铺多个重边框卡片。运行中默认展开，用户仍可主动收起；Run 进入 terminal 后
+过程自动折叠，summary 使用中文：成功为“工作了 {时长}”，取消为“你在 {时长}后停止了运行”，失败保持明确失败语义。
+summary 下方以一条分隔线连接始终展开的 final message；不得把 final 收进执行 disclosure，也不得保留英文
+“Working for / You stopped after”。取消或失败没有 final 时只显示诚实终态，不合成队员答案。
+
+同一段 Single Chat 有非终态 Run 时 Composer 禁止提交下一条，并把主要动作替换为“停止”；停止只结束当前回复，
+对话仍可继续。输入支持 `Command/Ctrl + Enter`，发送后回到最新；后台 Evidence 更新仅在用户原本接近底部时跟随，
+用户上滚阅读时不得抢走位置。选择另一个对象恢复其 active transcript 或创建新 transcript，UI 不区分这两种内部结果。
+
+“结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，
+并提供“不再询问”复选框；选择后只把该确认偏好保存在本机。结束成功立即从产品 surface 移除该 transcript，之后与
+同一队员发起单聊显示新的空白 Conversation。具体 ended/审计保留、取消和迟到事件行为由
+[Single Chat v1](../../contracts/single-chat-v1.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
+
+panel 保留明确的收起按钮与 `Esc`，对象菜单和确认 Dialog 打开时 `Esc` 先关闭最上层浮层。选择器、Disclosure、停止、
+结束和发送均需可键盘到达并有可见 `focus-visible`；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
+不能遮住全局侧栏或溢出可视区；reduced motion 关闭非必要位移和旋转动画但保留状态变化。
+
+领域、权限与输出路由见 [Single Chat v1](../../contracts/single-chat-v1.md)，组件数据流见
+[Single Chat Architecture](../../architecture/single-chat.md)。
+
 ## Camp 执行过程
 
 底部执行台与执行浮层使用同一背景分层：外壳、队员入口区、历史 Run 卡片与空白区域均使用
