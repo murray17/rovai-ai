@@ -471,6 +471,42 @@ export function executionDisclosureIsLiveOpen(
   return NON_TERMINAL_RUNS.has(status) && focused && !cancelling
 }
 
+export function groupExecutionEventsByRunId(
+  runs: readonly Pick<AgentRunView, 'id'>[],
+  executionEvidence: readonly AgentRunExecutionEvidenceView[],
+  liveRuntimeEvents: readonly LiveRuntimeEvent[]
+): Map<string, LiveRuntimeEvent[]> {
+  const currentRunIds = new Set(runs.map((run) => run.id))
+  const grouped = new Map<string, Map<string, LiveRuntimeEvent>>()
+
+  const append = (event: LiveRuntimeEvent, authoritative: boolean): void => {
+    if (!currentRunIds.has(event.agentRunId)) return
+
+    let eventsById = grouped.get(event.agentRunId)
+    if (!eventsById) {
+      eventsById = new Map<string, LiveRuntimeEvent>()
+      grouped.set(event.agentRunId, eventsById)
+    }
+
+    if (authoritative || !eventsById.has(event.id)) {
+      eventsById.set(event.id, event)
+    }
+  }
+
+  for (const evidence of executionEvidence) {
+    append(liveRuntimeEventFromExecutionEvidence(evidence), true)
+  }
+  for (const event of liveRuntimeEvents) {
+    append(event, false)
+  }
+
+  return new Map([...grouped.entries()].map(([runId, eventsById]) => {
+    const events = [...eventsById.values()]
+    events.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    return [runId, events]
+  }))
+}
+
 export function firstSubmittedAgentRun(
   receipt: CampMessageSendReceipt,
   runs: readonly AgentRunView[]
@@ -1853,22 +1889,20 @@ export function CampWorkspace({
     : null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
   const previousPendingApprovalCount = useRef(pendingApprovals.length)
-  const executionEvents = useMemo(() => {
-    const events = new Map<string, LiveRuntimeEvent>()
-    for (const evidence of snapshot.executionEvidence) {
-      events.set(evidence.id, liveRuntimeEventFromExecutionEvidence(evidence))
-    }
-    for (const event of liveRuntimeEvents) {
-      if (!events.has(event.id)) events.set(event.id, event)
-    }
-    return [...events.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-  }, [liveRuntimeEvents, snapshot.executionEvidence])
+  const executionEventsByRunId = useMemo(
+    () => groupExecutionEventsByRunId(
+      snapshot.agentRuns,
+      snapshot.executionEvidence,
+      liveRuntimeEvents
+    ),
+    [liveRuntimeEvents, snapshot.agentRuns, snapshot.executionEvidence]
+  )
   const executionProgressByRunId = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [
       run.id,
-      buildLiveExecutionProgress(executionEvents, run.id)
+      buildLiveExecutionProgress(executionEventsByRunId.get(run.id) ?? [], run.id)
     ])),
-    [executionEvents, snapshot.agentRuns]
+    [executionEventsByRunId, snapshot.agentRuns]
   )
   const worldMapProjection = useMemo(
     () => projectCampWorldMap(snapshot.members, snapshot.agentRuns, executionProgressByRunId),
@@ -8436,46 +8470,36 @@ function RuntimeRetryNotice({ diagnostic }: {
   )
 }
 
-export function RunExecutionDisclosure({
+type RunExecutionHistoryStatus = 'idle' | 'loading' | 'ready' | 'failed'
+
+function RunExecutionContent({
   run,
   progress,
   campId,
-  truncatedEvidence = [],
-  loadedEvidenceCount = 0,
-  finalBody = null,
-  cancelling = false,
-  focused = false,
+  truncatedEvidence,
+  historicalEvidence,
+  historyStatus,
+  finalBody,
+  cancelling,
+  onLoadHistoricalEvidence,
   onResolveRecoveryBlocker,
-  resolvingRecoveryBlocker = false
+  resolvingRecoveryBlocker
 }: {
   run: AgentRunView
   progress?: LiveExecutionProgress
   campId: string
-  truncatedEvidence?: AgentRunExecutionEvidenceView[]
-  loadedEvidenceCount?: number
-  finalBody?: string | null
-  cancelling?: boolean
-  focused?: boolean
+  truncatedEvidence: AgentRunExecutionEvidenceView[]
+  historicalEvidence: AgentRunExecutionEvidenceView[] | null
+  historyStatus: RunExecutionHistoryStatus
+  finalBody: string | null
+  cancelling: boolean
+  onLoadHistoricalEvidence(): Promise<void>
   onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
-  resolvingRecoveryBlocker?: boolean
-}): JSX.Element | null {
+  resolvingRecoveryBlocker: boolean
+}): JSX.Element {
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
-  const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
-  const cancellingActive = nonTerminal && cancelling && focused
   const publicFailure = run.status === 'failed' ? run.failure : null
-  const hasPublicFailure = publicFailure !== null
-  const [open, setOpen] = useState(active || hasPublicFailure)
-  const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
-  const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
-  useEffect(() => {
-    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(
-      currentOpen,
-      active || cancellingActive || hasPublicFailure
-    ))
-  }, [active, cancellingActive, hasPublicFailure])
-
-  const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
-  const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
+  const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
   const historicalProgress = useMemo(() => historicalEvidence
     ? buildLiveExecutionProgress(
         historicalEvidence.map(liveRuntimeEventFromExecutionEvidence),
@@ -8511,32 +8535,8 @@ export function RunExecutionDisclosure({
         item.kind === 'diagnostic' ? item.diagnostic : latest, null)
     : null
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
-  const hasProgress = processItems.length > 0
-  const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
-  if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning && !hasPublicFailure) {
-    return null
-  }
 
-  const loadHistoricalEvidence = async (): Promise<void> => {
-    if (!historyNeeded || historyStatus === 'loading' || historyStatus === 'ready') return
-    setHistoryStatus('loading')
-    try {
-      const evidence = await loadCompleteAgentRunExecutionEvidence(
-        (params) => window.rovai.request<AgentRunExecutionEvidencePage>(
-          'agentRunEvidence.list',
-          params
-        ),
-        campId,
-        run.id
-      )
-      setHistoricalEvidence(evidence)
-      setHistoryStatus('ready')
-    } catch {
-      setHistoryStatus('failed')
-    }
-  }
-
-  const content = (
+  return (
     <div className="process-content">
       {publicFailure && <RuntimeFailureNotice failure={publicFailure} />}
       {showUnsettledWarning && (
@@ -8631,7 +8631,7 @@ export function RunExecutionDisclosure({
       {historyStatus === 'failed' && (
         <div className="process-action history-load-error" role="status">
           <span>完整执行过程读取失败。</span>
-          <button className="quiet-button compact" type="button" onClick={() => void loadHistoricalEvidence()}>
+          <button className="quiet-button compact" type="button" onClick={() => void onLoadHistoricalEvidence()}>
             重试
           </button>
         </div>
@@ -8680,6 +8680,102 @@ export function RunExecutionDisclosure({
       )}
     </div>
   )
+}
+
+export function RunExecutionDisclosure({
+  run,
+  progress,
+  campId,
+  truncatedEvidence = [],
+  loadedEvidenceCount = 0,
+  finalBody = null,
+  cancelling = false,
+  focused = false,
+  onResolveRecoveryBlocker,
+  resolvingRecoveryBlocker = false
+}: {
+  run: AgentRunView
+  progress?: LiveExecutionProgress
+  campId: string
+  truncatedEvidence?: AgentRunExecutionEvidenceView[]
+  loadedEvidenceCount?: number
+  finalBody?: string | null
+  cancelling?: boolean
+  focused?: boolean
+  onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
+  resolvingRecoveryBlocker?: boolean
+}): JSX.Element | null {
+  const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
+  const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
+  const cancellingActive = nonTerminal && cancelling && focused
+  const publicFailure = run.status === 'failed' ? run.failure : null
+  const hasPublicFailure = publicFailure !== null
+  const [open, setOpen] = useState(active || hasPublicFailure)
+  const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
+  const [historyStatus, setHistoryStatus] = useState<RunExecutionHistoryStatus>('idle')
+  const shouldActivateContent = open || focused || nonTerminal
+  const [contentMounted, setContentMounted] = useState(() => shouldActivateContent)
+  useEffect(() => {
+    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(
+      currentOpen,
+      active || cancellingActive || hasPublicFailure
+    ))
+  }, [active, cancellingActive, hasPublicFailure])
+  useEffect(() => {
+    if (shouldActivateContent) setContentMounted(true)
+  }, [shouldActivateContent])
+
+  const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
+  const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
+  const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
+  const hasDisclosureWithoutProgress = nonTerminal
+    || durableEvidenceCount > 0
+    || truncatedEvidence.length > 0
+    || showUnsettledWarning
+    || hasPublicFailure
+  if (!hasDisclosureWithoutProgress) {
+    const finalKey = finalBody ? comparableMessageText(finalBody) : null
+    const hasProgress = (progress?.items ?? []).some((item) =>
+      item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
+    )
+    if (!hasProgress) return null
+  }
+
+  const loadHistoricalEvidence = async (): Promise<void> => {
+    if (!historyNeeded || historyStatus === 'loading' || historyStatus === 'ready') return
+    setHistoryStatus('loading')
+    try {
+      const evidence = await loadCompleteAgentRunExecutionEvidence(
+        (params) => window.rovai.request<AgentRunExecutionEvidencePage>(
+          'agentRunEvidence.list',
+          params
+        ),
+        campId,
+        run.id
+      )
+      setHistoricalEvidence(evidence)
+      setHistoryStatus('ready')
+    } catch {
+      setHistoryStatus('failed')
+    }
+  }
+
+  const shouldMountContent = contentMounted || shouldActivateContent
+  const content = shouldMountContent ? (
+    <RunExecutionContent
+      run={run}
+      progress={progress}
+      campId={campId}
+      truncatedEvidence={truncatedEvidence}
+      historicalEvidence={historicalEvidence}
+      historyStatus={historyStatus}
+      finalBody={finalBody}
+      cancelling={cancelling}
+      onLoadHistoricalEvidence={loadHistoricalEvidence}
+      onResolveRecoveryBlocker={onResolveRecoveryBlocker}
+      resolvingRecoveryBlocker={resolvingRecoveryBlocker}
+    />
+  ) : null
 
   if (cancellingActive) {
     return <div className="execution-disclosure run-live is-cancelling">{content}</div>
@@ -8694,7 +8790,10 @@ export function RunExecutionDisclosure({
       onToggle={(event) => {
         const nextOpen = event.currentTarget.open
         setOpen(nextOpen)
-        if (nextOpen) void loadHistoricalEvidence()
+        if (nextOpen) {
+          setContentMounted(true)
+          void loadHistoricalEvidence()
+        }
       }}
     >
       <summary>

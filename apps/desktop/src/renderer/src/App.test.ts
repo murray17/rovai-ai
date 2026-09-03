@@ -122,6 +122,7 @@ import {
   executionDisclosureIsLiveOpen,
   firstSubmittedAgentRun,
   formatStopElapsed,
+  groupExecutionEventsByRunId,
   isViewingNonTerminalAgentRun,
   loadCompleteAgentRunExecutionEvidence,
   memberRuntimeConfigurationPresentation,
@@ -4516,6 +4517,68 @@ describe('task event projections', () => {
     expect(accepted).toBe(0)
   })
 
+  it('groups execution events by current Run while preserving snapshot authority and stable time order', () => {
+    const evidence = (
+      id: string,
+      agentRunId: string,
+      sequence: number,
+      occurredAt: string,
+      source: string
+    ): AgentRunExecutionEvidenceView => ({
+      id,
+      agentRunId,
+      executionEpoch: 1,
+      sequence,
+      eventType: 'agent.text.delta',
+      kind: 'narration',
+      phase: 'updated',
+      payload: { source },
+      canonical: null,
+      contentBlobId: null,
+      contentByteCount: 0,
+      isTruncated: false,
+      occurredAt
+    })
+    const sharedTime = '2026-09-03T08:00:01Z'
+    const buckets = groupExecutionEventsByRunId(
+      [{ id: 'run-a' }, { id: 'run-b' }, { id: 'run-empty' }],
+      [
+        evidence('snapshot-z', 'run-a', 2, sharedTime, 'snapshot-z'),
+        evidence('snapshot-a', 'run-a', 3, sharedTime, 'snapshot-a'),
+        evidence('snapshot-b', 'run-b', 1, sharedTime, 'snapshot-b')
+      ],
+      [{
+        id: 'snapshot-z',
+        agentRunId: 'run-a',
+        eventType: 'agent.text.delta',
+        payload: { source: 'live-duplicate' },
+        createdAt: '2026-09-03T08:00:00Z'
+      }, {
+        id: 'live-y',
+        agentRunId: 'run-a',
+        eventType: 'agent.text.delta',
+        payload: { source: 'live-y' },
+        createdAt: sharedTime
+      }, {
+        id: 'outside-camp',
+        agentRunId: 'run-outside',
+        eventType: 'agent.text.delta',
+        payload: { source: 'outside' },
+        createdAt: sharedTime
+      }]
+    )
+
+    expect(buckets.get('run-a')?.map((event) => event.id)).toEqual([
+      'snapshot-z',
+      'snapshot-a',
+      'live-y'
+    ])
+    expect(buckets.get('run-a')?.[0]?.payload).toEqual({ source: 'snapshot-z' })
+    expect(buckets.get('run-b')?.map((event) => event.id)).toEqual(['snapshot-b'])
+    expect(buckets.has('run-empty')).toBe(false)
+    expect(buckets.has('run-outside')).toBe(false)
+  })
+
   it('omits live reasoning summaries while projecting narration, plans and execution steps', () => {
     const reasoningEvent = liveRuntimeEventFromCore({
       method: 'agent.reasoning.summary.delta',
@@ -5034,6 +5097,59 @@ describe('task event projections', () => {
     expect(markup).toContain('请求受到速率限制')
     expect(markup).toContain('请稍后重试。')
     expect(markup).not.toContain('Rovai 内部错误')
+  })
+
+  it('mounts Run details only after a terminal Run is focused while keeping non-terminal details immediate', () => {
+    const run: AgentRunView = {
+      id: 'run-lazy-history', campTurnId: 'turn-1', conversationId: 'conversation-lazy',
+      agentId: 'agent-lazy', taskId: null, responsibilityKey: 'direct:agent-lazy',
+      responsibilityGeneration: 0, purpose: '检查懒挂载', completionRole: 'required',
+      status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: null,
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-09-03T08:00:00Z', startedAt: '2026-09-03T08:00:01Z',
+      endedAt: '2026-09-03T08:00:02Z', updatedAt: '2026-09-03T08:00:02Z'
+    }
+    const progress = {
+      items: [{
+        key: 'narration:lazy',
+        kind: 'narration' as const,
+        body: '仅在详情激活后渲染'
+      }]
+    }
+
+    const collapsedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1'
+    }))
+    expect(collapsedMarkup).toContain('<details class="execution-disclosure worked is-terminal">')
+    expect(collapsedMarkup).toContain('class="process-disclosure-label"')
+    expect(collapsedMarkup).not.toContain('class="process-content"')
+    expect(collapsedMarkup).not.toContain('仅在详情激活后渲染')
+
+    const focusedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(focusedMarkup).toContain('class="process-content"')
+    expect(focusedMarkup).toContain('仅在详情激活后渲染')
+
+    const waitingMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run: {
+        ...run,
+        id: 'run-lazy-waiting',
+        status: 'waiting' as const,
+        waitReason: 'recovery_blocked' as const,
+        endedAt: null
+      },
+      progress,
+      campId: 'camp-1'
+    }))
+    expect(waitingMarkup).toContain('class="process-content"')
+    expect(waitingMarkup).toContain('仅在详情激活后渲染')
+    expect(waitingMarkup).toContain('无法安全自动恢复')
   })
 
   it('does not present an ACP protocol kind as Copilot execution detail', () => {

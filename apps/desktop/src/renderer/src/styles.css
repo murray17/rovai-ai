@@ -2251,7 +2251,7 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .execution-run-stop-state.tone-attention { color: var(--attention); }
 .execution-run-stop-state.tone-neutral { color: var(--muted); }
 .execution-drawer-action-button { min-width: 48px; }
-.execution-drawer-body { min-height: 0; overflow: auto; padding: 12px 20px 18px; overscroll-behavior: contain; scroll-behavior: smooth; }
+.execution-drawer-body { min-height: 0; overflow: auto; padding: 12px 20px 18px; overscroll-behavior: contain; scroll-behavior: auto; }
 .execution-process-timeline { position: relative; display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .execution-process-timeline::before { position: absolute; top: 13px; bottom: 17px; left: 6px; width: 1px; background: var(--line-strong); content: ""; }
 .execution-process-stage { position: relative; display: grid; min-width: 0; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; padding: 0 0 13px; border-radius: 8px; scroll-margin: 22px; }
