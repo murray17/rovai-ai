@@ -91,6 +91,11 @@ export type ExecutionStep = {
   id: string
   title: string
   /**
+   * The most specific public instruction available for an active group summary.
+   * This does not replace the stable Tool row title or provider-card copy.
+   */
+  currentInstruction?: string | null
+  /**
    * The complete command presentation that is safe to show outside raw
    * Runtime evidence. It retains non-sensitive flags, arguments and paths,
    * while applying the same redaction rules as the local execution console.
@@ -135,6 +140,10 @@ export type RuntimeCompactionDisplayItem = {
 
 export function executionStepPublicTitle(step: ExecutionStep): string {
   return step.publicCommand ?? step.title
+}
+
+export function executionStepCurrentInstructionTitle(step: ExecutionStep): string {
+  return step.publicCommand ?? step.currentInstruction ?? step.title
 }
 
 export type RuntimeDiagnostic = {
@@ -508,6 +517,7 @@ export function buildLiveExecutionProgress(
       ...previous,
       ...step,
       title,
+      currentInstruction: step.currentInstruction ?? previous.currentInstruction,
       publicCommand: step.publicCommand ?? previous.publicCommand,
       detail: step.detail || previous.detail
     }
@@ -664,6 +674,7 @@ export function buildLiveExecutionProgress(
       upsertStep({
         id: itemId,
         title,
+        currentInstruction: executionActivityCurrentInstruction(canonical, payload),
         publicCommand,
         publicResult: null,
         detail,
@@ -693,6 +704,7 @@ export function buildLiveExecutionProgress(
       upsertStep({
         id: itemId,
         title,
+        currentInstruction: executionActivityCurrentInstruction(canonical, payload),
         publicCommand: canonical?.activityDomain === 'shell'
           ? publicShellCommandPresentation(payload)
           : null,
@@ -1108,6 +1120,87 @@ export function executionActivityTitle(
   return '系统活动'
 }
 
+const GENERIC_CURRENT_INSTRUCTION_TITLES = new Set([
+  'agent 正在处理',
+  'agent 运行',
+  'apply patch',
+  'apply_patch',
+  'edit',
+  'file change',
+  'file operation',
+  'read',
+  'read file',
+  'read_file',
+  'readfile',
+  'runtime activity',
+  'runtime tool call',
+  'search',
+  'shell',
+  'terminal',
+  'tool',
+  'tool call',
+  'tool_call',
+  'web search',
+  'web_search',
+  'websearch',
+  'write',
+  'write file',
+  'write_file',
+  '文件操作',
+  '修改文件',
+  '工具调用',
+  '搜索',
+  '系统活动',
+  '终端操作',
+  '读取文件'
+])
+
+/**
+ * Resolves only public, already-admitted evidence into the active Tool-group instruction.
+ * Raw input/output and display text never establish file/search classification through this
+ * helper; an explicit Runtime title is used only as presentation.
+ */
+export function executionActivityCurrentInstruction(
+  canonical: CanonicalRuntimeActivityView | null | undefined,
+  payload: unknown
+): string | null {
+  const runtimeTitle = canonical?.presentationHint
+    ?.replaceAll('Runtime 工具调用', '工具调用')
+    .replaceAll('Runtime 活动', '系统活动')
+  const domain = canonical?.activityDomain ?? 'unknown'
+
+  if (domain === 'shell') {
+    return publicShellCommandPresentation(payload)
+      ?? specificShellCurrentInstruction(runtimeTitle)
+      ?? specificShellCurrentInstruction(canonical?.toolName)
+  }
+  if (domain === 'file') {
+    return reliableFileActivityInstruction(canonical, payload)
+      ?? specificCurrentInstruction(runtimeTitle)
+      ?? specificCurrentInstruction(canonical?.toolName)
+  }
+  if (domain === 'tool' && canonical?.semanticKind === 'tool.web.search') {
+    const query = typedSearchQuery(payload, canonical)
+    return query
+      ? `搜索 ${query}`
+      : specificCurrentInstruction(runtimeTitle)
+        ?? specificCurrentInstruction(canonical?.toolName)
+  }
+  return specificCurrentInstruction(runtimeTitle)
+    ?? specificCurrentInstruction(canonical?.toolName)
+}
+
+function specificCurrentInstruction(value: string | null | undefined): string | null {
+  const title = value?.trim()
+  if (!title || GENERIC_CURRENT_INSTRUCTION_TITLES.has(title.toLowerCase())) return null
+  return title
+}
+
+function specificShellCurrentInstruction(value: string | null | undefined): string | null {
+  const title = value?.trim()
+  return title && !genericShellTitle(title) ? title : null
+}
+
 export function activityIconKind(
   canonical: CanonicalRuntimeActivityView | null | undefined
 ): ActivityIconKind {
@@ -1144,6 +1237,19 @@ function reliableFileActivityTitle(
   return fileName ? `修改 ${fileName}` : null
 }
 
+function reliableFileActivityInstruction(
+  canonical: CanonicalRuntimeActivityView | null | undefined,
+  payload: unknown
+): string | null {
+  const singleFileTitle = reliableFileActivityTitle(canonical, payload)
+  if (singleFileTitle) return singleFileTitle
+  const entries = canonical?.diffProjection?.status === 'available'
+    && Array.isArray(canonical.diffProjection.entries)
+    ? canonical.diffProjection.entries
+    : []
+  return entries.length > 1 ? `修改 ${entries.length} 个文件` : null
+}
+
 const GENERIC_SHELL_TITLES = new Set([
   'bash',
   'execute',
@@ -1158,7 +1264,7 @@ const GENERIC_SHELL_TITLES = new Set([
 ])
 
 function genericShellTitle(title: string): boolean {
-  return GENERIC_SHELL_TITLES.has(title.toLocaleLowerCase())
+  return GENERIC_SHELL_TITLES.has(title.toLowerCase())
 }
 
 function shouldDeferUnresolvedShellActivity(

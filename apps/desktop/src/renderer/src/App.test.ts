@@ -162,6 +162,7 @@ import {
   buildGitStatusEntries,
   buildLiveExecutionProgress,
   diffLineKind,
+  executionActivityCurrentInstruction,
   executionActivityTitle,
   executionEvidenceResultText,
   formatByteSize,
@@ -5521,6 +5522,7 @@ describe('task event projections', () => {
     expect(progress.items[0]).toMatchObject({
       kind: 'tool',
       step: {
+        currentInstruction: '修改 2 个文件',
         fileChanges: [
           { path: 'src/app.ts', additions: 2, deletions: 1 },
           { path: 'src/styles.css', additions: 1, deletions: 1 }
@@ -5586,6 +5588,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: '修改 qoder-cli.txt',
+        currentInstruction: '修改 qoder-cli.txt',
         detail: 'Successfully modified file',
         status: 'completed',
         activityDomain: 'file'
@@ -5897,6 +5900,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: 'Web 搜索',
+        currentInstruction: `搜索 ${queries.join('，')}`,
         iconKind: 'web',
         detail: `搜索 ${queries.join('，')}\n找到 3 条结果`
       }
@@ -5996,6 +6000,55 @@ describe('task event projections', () => {
         path: 'rovai-runtime-validation/qoder-cli.txt'
       }
     })).toBe('修改 qoder-cli.txt')
+  })
+
+  it('prefers concrete active-group instructions without changing generic Tool row fallbacks', () => {
+    const genericShellActivity = canonicalActivity('generic-shell-current-instruction', {
+      activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'exec_command',
+      presentationHint: 'Shell', phase: 'started', outcome: 'unknown'
+    })
+    expect(executionActivityCurrentInstruction(genericShellActivity, {})).toBeNull()
+    expect(executionActivityCurrentInstruction(genericShellActivity, {
+      input: { command: 'pnpm typecheck' }
+    })).toBe('pnpm typecheck')
+
+    const fileActivity = canonicalActivity('file-current-instruction', {
+      activityDomain: 'file', semanticKind: 'file.write', toolName: 'Edit',
+      presentationHint: '修改 settings.ts', phase: 'started', outcome: 'unknown'
+    })
+    expect(executionActivityTitle(fileActivity, {})).toBe('Edit')
+    expect(executionActivityCurrentInstruction(fileActivity, {})).toBe('修改 settings.ts')
+
+    const genericFileActivity = canonicalActivity('generic-file-current-instruction', {
+      activityDomain: 'file', semanticKind: 'file.write', toolName: 'Edit',
+      presentationHint: '文件操作', phase: 'started', outcome: 'unknown'
+    })
+    expect(executionActivityCurrentInstruction(genericFileActivity, {})).toBeNull()
+
+    const toolActivity = canonicalActivity('tool-current-instruction', {
+      activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'workspace.inspect',
+      presentationHint: '检查工作区状态', phase: 'started', outcome: 'unknown'
+    })
+    expect(executionActivityCurrentInstruction(toolActivity, {})).toBe('检查工作区状态')
+
+    const sparseTerminalProgress = buildLiveExecutionProgress([{
+      id: 'file-instruction-started', agentRunId: 'run-file-instruction', eventType: 'runtime.action',
+      payload: { toolCallId: 'file-instruction', status: 'pending', kind: 'edit', toolName: 'Edit', title: '修改 settings.ts' },
+      canonical: fileActivity,
+      createdAt: '2026-09-03T00:00:00Z'
+    }, {
+      id: 'file-instruction-completed', agentRunId: 'run-file-instruction', eventType: 'runtime.action',
+      payload: { toolCallId: 'file-instruction', status: 'completed', kind: 'edit', toolName: 'Edit', title: null },
+      canonical: canonicalActivity('file-current-instruction', {
+        activityDomain: 'file', semanticKind: 'file.write', toolName: 'Edit',
+        presentationHint: null, phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-09-03T00:00:01Z'
+    }], 'run-file-instruction')
+    expect(sparseTerminalProgress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { title: 'Edit', currentInstruction: '修改 settings.ts', status: 'completed' }
+    })
   })
 
   it('presents a Codex structured read as the observed terminal command', () => {

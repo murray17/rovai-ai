@@ -32,6 +32,8 @@ last_updated: 2026-09-03
   epoch/binding fence。
 - [x] Activity v2、terminal write/edit path、Pi assistant model-call Usage、稀疏 cache/cost 与 source digest 去重。
 - [x] 三 shipped platform 均显式 NotQualified；release build 忽略本地 qualification override。
+- [x] 活动 Tool 组在底部执行台、Inspector 与局域网只读执行台优先展示已有公开证据中的具体当前指令；
+  稳定 Tool 行、渠道卡片、Activity 分类及文件/Web typed Evidence 边界保持不变。
 
 ## 已取得的本机证据
 
@@ -73,6 +75,7 @@ pnpm test:rust:lib
 pnpm test:rust:cli
 pnpm test:rust:core
 pnpm typecheck
+pnpm exec vitest run apps/desktop/src/renderer/src/execution-tool-grouping.test.ts apps/desktop/src/renderer/src/App.test.ts apps/desktop/src/shared/execution-presentation/feishu-card.test.ts
 pnpm test
 pnpm build:desktop
 pnpm smoke:skills
@@ -83,3 +86,14 @@ pnpm docs:test
 pnpm docs:check
 DOCS_BASE_REF=aae13734669c363e7b307a6407e6868eda1e6b8e pnpm docs:check:ci
 ```
+
+## 活动组具体指令验证（2026-09-03）
+
+- `pnpm typecheck`：通过；
+- `pnpm exec vitest run apps/desktop/src/renderer/src/execution-tool-grouping.test.ts apps/desktop/src/renderer/src/App.test.ts apps/desktop/src/shared/execution-presentation/feishu-card.test.ts`：
+  3 个文件、211 项测试通过；
+- `pnpm test`：138 个 Vitest 文件、1459 项测试通过，后续 Node suites 220 项通过、1 项平台条件跳过；
+- `pnpm build:desktop`：Main、Preload 与 Renderer production build 通过；
+- `pnpm docs:test`、`pnpm docs:check`、
+  `DOCS_BASE_REF=53858ed40ca4a011d0e0e8f69a52e5d5e673cbde pnpm docs:check:ci`：通过；
+- Impeccable changed-target detector：无发现。
