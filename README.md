@@ -223,6 +223,7 @@ depending on the team.
 |---|---|---|---|
 | [Claude Code](https://code.claude.com/docs/en/installation) | Added alongside native | Added alongside native | Native support |
 | [Codex CLI](https://developers.openai.com/codex/cli/) | Added alongside native | Added alongside native | Native support |
+| [Pi Coding Agent](https://github.com/earendil-works/pi) *(experimental preview)* | Added through Rovai-managed bridge | Added through native discovery | Native exact resume |
 | [OpenCode](https://opencode.ai/docs/) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | Runtime-native only | Added alongside native | Based on Runtime capabilities |

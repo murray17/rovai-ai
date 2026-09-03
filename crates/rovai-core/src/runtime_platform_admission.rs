@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:da663113d53d35f81b6ba1ad099885170c54432c08d7c59bd4da0c86ca6654ca";
+    "sha256:fd06bed7f16614497ed99fe40418e46f30c3912a2ec0535e229e3a1b87f941af";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -28,6 +28,7 @@ pub const GROK_BUILD_MACOS_X64_EVIDENCE_REVISION: &str =
 #[serde(rename_all = "snake_case")]
 pub enum RuntimePlatformAdmissionStatus {
     Qualified,
+    Preview,
     NotQualified,
     Unsupported,
 }
@@ -93,6 +94,20 @@ impl RuntimePlatformAdmission {
         }
     }
 
+    pub fn preview(
+        runtime_kind: AdapterKind,
+        platform: HostPlatformKey,
+        reason_code: RuntimePlatformAdmissionReasonCode,
+    ) -> Self {
+        Self {
+            runtime_kind,
+            platform,
+            status: RuntimePlatformAdmissionStatus::Preview,
+            reason_code: Some(reason_code),
+            evidence_revision: None,
+        }
+    }
+
     pub fn unsupported(
         runtime_kind: AdapterKind,
         platform: HostPlatformKey,
@@ -131,9 +146,18 @@ impl RuntimePlatformAdmission {
         matches!(self.status, RuntimePlatformAdmissionStatus::Qualified)
     }
 
+    pub const fn allows_runtime_use(&self) -> bool {
+        matches!(
+            self.status,
+            RuntimePlatformAdmissionStatus::Qualified | RuntimePlatformAdmissionStatus::Preview
+        )
+    }
+
     pub const fn blocker_code(&self) -> Option<&'static str> {
         match self.status {
-            RuntimePlatformAdmissionStatus::Qualified => None,
+            RuntimePlatformAdmissionStatus::Qualified | RuntimePlatformAdmissionStatus::Preview => {
+                None
+            }
             RuntimePlatformAdmissionStatus::NotQualified => Some("runtime_platform_not_qualified"),
             RuntimePlatformAdmissionStatus::Unsupported => Some("runtime_platform_unsupported"),
         }
@@ -214,8 +238,19 @@ mod tests {
 
         for runtime_kind in AdapterKind::ALL {
             let admission = registry.platform_admission(runtime_kind, HostPlatformKey::WindowsX64);
-            if !matches!(runtime_kind, AdapterKind::CursorAgent | AdapterKind::Pi) {
+            if runtime_kind == AdapterKind::Pi {
+                assert_eq!(admission.status(), RuntimePlatformAdmissionStatus::Preview);
+                assert!(admission.allows_runtime_use());
+                assert!(!admission.is_qualified());
+                assert_eq!(
+                    admission.reason_code(),
+                    Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+                );
+                assert_eq!(admission.evidence_revision(), None);
+                assert_eq!(admission.blocker_code(), None);
+            } else if runtime_kind != AdapterKind::CursorAgent {
                 assert!(admission.is_qualified());
+                assert!(admission.allows_runtime_use());
                 assert_eq!(admission.reason_code(), None);
                 assert_eq!(
                     admission.evidence_revision(),
@@ -231,6 +266,7 @@ mod tests {
                     admission.status(),
                     RuntimePlatformAdmissionStatus::NotQualified
                 );
+                assert!(!admission.allows_runtime_use());
                 assert_eq!(
                     admission.reason_code(),
                     Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
@@ -266,18 +302,27 @@ mod tests {
             }
         }
         for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
-            for runtime_kind in [AdapterKind::CursorAgent, AdapterKind::Pi] {
-                let admission = registry.platform_admission(runtime_kind, platform);
-                assert_eq!(
-                    admission.status(),
-                    RuntimePlatformAdmissionStatus::NotQualified
-                );
-                assert_eq!(
-                    admission.reason_code(),
-                    Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
-                );
-                assert_eq!(admission.evidence_revision(), None);
-            }
+            let cursor = registry.platform_admission(AdapterKind::CursorAgent, platform);
+            assert_eq!(
+                cursor.status(),
+                RuntimePlatformAdmissionStatus::NotQualified
+            );
+            assert!(!cursor.allows_runtime_use());
+            assert_eq!(
+                cursor.reason_code(),
+                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+            );
+            assert_eq!(cursor.evidence_revision(), None);
+
+            let pi = registry.platform_admission(AdapterKind::Pi, platform);
+            assert_eq!(pi.status(), RuntimePlatformAdmissionStatus::Preview);
+            assert!(pi.allows_runtime_use());
+            assert!(!pi.is_qualified());
+            assert_eq!(
+                pi.reason_code(),
+                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+            );
+            assert_eq!(pi.evidence_revision(), None);
         }
         let grok_arm =
             registry.platform_admission(AdapterKind::GrokBuild, HostPlatformKey::MacosArm64);
@@ -310,6 +355,19 @@ mod tests {
             "runtime_platform.qualification_evidence_missing"
         );
         assert!(blocked["evidenceRevision"].is_null());
+
+        let preview = serde_json::to_value(
+            registry.platform_admission(AdapterKind::Pi, HostPlatformKey::WindowsX64),
+        )
+        .unwrap();
+        assert_eq!(preview["runtimeKind"], "pi");
+        assert_eq!(preview["platform"], "windows-x64");
+        assert_eq!(preview["status"], "preview");
+        assert_eq!(
+            preview["reasonCode"],
+            "runtime_platform.qualification_evidence_missing"
+        );
+        assert!(preview["evidenceRevision"].is_null());
 
         let qualified = serde_json::to_value(
             registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),

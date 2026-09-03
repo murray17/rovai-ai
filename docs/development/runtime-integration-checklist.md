@@ -16,7 +16,7 @@ last_updated: 2026-08-24
 权威边界：
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
-- [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
+- [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)
 - [Contracts Index](../contracts/README.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
@@ -30,6 +30,8 @@ last_updated: 2026-08-24
 | First-Class | 本文所有核心能力轴均已闭合，或有明确的上游 Unsupported 产品决定 | 才能进入正式 Product Runtime Catalog |
 
 **正式“第一版接入”必须达到 First-Class。** Core Compatible 只是开发中的中间状态，不能作为“已完成接入”发布。
+经当前 Version Decision 明确接受的 Runtime Platform `preview` 可以把已进入 Product Runtime Catalog 的 Adapter
+开放给用户主动测试，但必须显示实验性、保留缺失资格 reason/空 evidence revision，且不计作 First-Class 完成。
 
 每个能力轴分别记录：
 

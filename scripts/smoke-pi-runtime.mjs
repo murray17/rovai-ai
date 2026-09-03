@@ -400,7 +400,7 @@ try {
     reportedVersion: installation.snapshot.reportedVersion,
     testedPiVersion: piVersion,
     localEvidencePlatform: `${process.platform}-${process.arch}`,
-    formalPlatformAdmission: 'not_qualified',
+    formalPlatformAdmission: 'preview',
     probeSessionRootPollution: false,
     nativeSessionCompatibilityKey: installation.snapshot.nativeSessionCompatibilityKey,
     nativeSessionId: firstStart.params.nativeThreadId,
@@ -498,8 +498,7 @@ function startCore(dataDirectory, isolatedPiAgentDir, resolvedPiBinary) {
     env: {
       ...process.env,
       PI_CODING_AGENT_DIR: isolatedPiAgentDir,
-      ROVAI_PI_BIN: resolvedPiBinary,
-      ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
+      ROVAI_PI_BIN: resolvedPiBinary
     }
   })
   child.stderr.on('data', (chunk) => {

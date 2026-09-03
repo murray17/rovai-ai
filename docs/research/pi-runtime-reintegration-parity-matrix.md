@@ -35,7 +35,7 @@ Core parser、fence 和状态机，不替代目标版本真实 Runtime smoke；�
 | Built-in `rovai` CLI | 当前 bundled CLI、operation catalog、Charter 与 per-Run lease；真实正式 operation smoke | 通过受管 Bash 与 Fleet builtin process config；旧 smoke 曾受 provider 并发预算中断 | Pi 可通过受管 shell Tool 调用 bundled CLI；无 Pi 专有 Built-in transport | 复用当前 Built-in Tool Runtime/lease/env；真实 0.84.4 完成当前 15-operation full Run 和 resumed/new-lease Run，覆盖三种输入、Gather、exact successor read、conflict 与 lease fencing | 另外两个平台及 packaged shutdown 未验证；本机能力本身已是 `Verified + Implemented` |
 | Usage / Cache / Cost | 有结构化 usage 就实现；字段保留 source/scope/counter/input semantics/session/turn；baseline/dedupe；未知保持 NULL；不推价格 | 旧分支因未完成归因而 Disabled | `message_end.message.usage` 是该 assistant response 的权威 usage；字段含 input/output/cacheRead/cacheWrite 与 provider cost；session stats 是全 Session total | 仅 terminal assistant `message_end.message.usage` 形成 `model_call/delta/exclusive_buckets`，按 session+prompt+message digest 去重；session stats/update 不计量。真实 MiniMax Monitoring 观察到 input/output；未知 cache/reasoning/cost 保持 NULL | cache read/write 非零语义、provider cost、retry/compaction/cold resume 去重的真实计量矩阵尚未完成；不消费未证明的 ToolResult/compaction nested usage |
 | Retry / Queue / Cancel / Cleanup | accepted 使用 native evidence；不重投；queue/retry/late event fenced；业务 cancelled 先提交，cleanup best effort；host quiescent 才进 LRU | prompt response + managed receipt 作为 accepted；abort+Fleet stop；旧分支早于 Cancellation Settlement v2 | prompt response 明确 accepted/queued；有 `clear_queue`、`abort`、retry/queue events；`agent_settled` 为最终收敛 | receipt 与 accepted 原子提交；cancel 先提交业务终态，再 `clear_queue`+`abort`+bounded reap；late event 被 epoch/binding fence 丢弃。真实 Bash 与 MCP cancel 都严格为 `cancelled` 且无延迟文件；MCP Server PID 被回收；Core planned shutdown 后精确 descendant 与 Host config 均为零；cleanup/replay 有 deterministic coverage | crash、invalid JSON、Probe timeout、真实 retry/queue late event、idle eviction、packaged planned shutdown 与 Core crash recovery 尚未完成 |
-| Ready / Version / Platform | availability、authenticated Ready、capability、platform qualification 分离；专属 immutable evidence；每 shipped platform独立 Golden Flow | 旧分支有 deep probe/validator，但曾提前把 macOS arm64 qualified；后加 exact switch 与独立 session dir | `--version`、RPC state/catalog/extension handshake 可证明 machine ready，但不能自动证明行为资格 | Pi 专属 deep probe 已在本机 0.84.4 真实通过：创建 Session→full ID/file→replacement→`switch_session(exact file)`→`get_state` ID/file/cwd；Probe 使用临时 `--session-dir` 且无污染；snapshot/dispatch 复检。缺安装时只降级 `runtime.pi`；三平台均 NotQualified，Fast hidden | macOS arm64 尚无完整 Golden Flow/immutable artifact；macOS x64、Windows x64 完全无真实证据。Windows `.cmd/.bat`/interpreter/resolved target/fingerprint/identity 尚待验证 |
+| Ready / Version / Platform | availability、authenticated Ready、capability、platform qualification 分离；专属 immutable evidence；每 shipped platform独立 Golden Flow | 旧分支有 deep probe/validator，但曾提前把 macOS arm64 qualified；后加 exact switch 与独立 session dir | `--version`、RPC state/catalog/extension handshake 可证明 machine ready，但不能自动证明行为资格 | Pi 专属 deep probe 已在本机 0.84.4 真实通过：创建 Session→full ID/file→replacement→`switch_session(exact file)`→`get_state` ID/file/cwd；Probe 使用临时 `--session-dir` 且无污染；snapshot/dispatch 复检。缺安装时只降级 `runtime.pi`；三平台均以 `preview` 开放 discovery、检查、选择与 AgentRun，Fast 仍 hidden | macOS arm64 尚无完整 Golden Flow/immutable artifact；macOS x64、Windows x64 完全无真实证据。Windows `.cmd/.bat`/interpreter/resolved target/fingerprint/identity 尚待验证 |
 
 ## 实施结论
 
@@ -49,10 +49,11 @@ Core parser、fence 和状态机，不替代目标版本真实 Runtime smoke；�
 - Compaction 使用 `native_system_prompt_preserved`，不把高权限 Bootstrap 降格为普通 first payload。
 - Pi 0.84.4 已有可归因的 model-call Usage，因此不允许继续把整个 Usage 轴标为 Disabled。
 - Images、Web Search 与 Fast 在没有 Pi 专属结构化事件/资格前明确 Unsupported；不从正文、路径、MCP 名或普通 query 推断。
-- 平台资格和实现完成分开：没有精确平台的不可变真实证据时，Pi identity 可以存在于 closed set，但 discovery、成员选择和 AgentRun 均被 Platform Admission 阻断。
+- 平台资格和实现完成分开：没有精确平台的不可变真实证据时，Pi 以 `preview` 开放 discovery、成员选择与 AgentRun
+  供主动测试，但不得宣称 First-Class/qualified。
 
-本机当前结论是 `Core Compatible / platform not qualified`，不是 First-Class。已通过的真实 smoke 关闭了多个实现疑问，
-但上表最后一列仍有 Checklist 核心轴缺口，不能用本机 debug override 或 deterministic fixture 把任何 shipped platform 晋升。
+本机当前结论是 `Core Compatible / platform preview`，不是 First-Class。已通过的真实 smoke 关闭了多个实现疑问，
+但上表最后一列仍有 Checklist 核心轴缺口，不能用 Preview 可运行性或 deterministic fixture 把任何 shipped platform 晋升。
 
 ## 上游证据入口
 
