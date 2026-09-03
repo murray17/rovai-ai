@@ -68,7 +68,7 @@ export function attachmentBaseName(displayName: string, kind: AttachmentKind): s
 }
 
 export function attachmentFormatLabel(displayName: string, kind: AttachmentKind): string {
-  if (kind === 'directory') return '文件夹'
+  if (kind === 'directory') return 'DIR'
   return attachmentExtension(displayName).toLocaleUpperCase('en-US') || 'FILE'
 }
 
