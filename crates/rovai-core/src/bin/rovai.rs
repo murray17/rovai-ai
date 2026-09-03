@@ -18,9 +18,9 @@ use rovai_core::builtin_tool_transport::{
     BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolArgument, BuiltinToolCliContext,
     BuiltinToolCliIdentity, BuiltinToolDescription, BuiltinToolIpcRequest,
     BuiltinToolIpcRequestBody, BuiltinToolIpcResponse, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
-    COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION, CompactionHookIpcRequest,
-    CompactionHookIpcResponse, CompactionObservationOutboxRecord, LocalIpcEndpoint,
-    ROVAI_CLI_CONTEXT_ENV, ROVAI_RUN_TMP_ENV, builtin_tool_description,
+    COMPACTION_OBSERVATION_IPC_KIND, COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,
+    CompactionHookIpcRequest, CompactionHookIpcResponse, CompactionObservationOutboxRecord,
+    LocalIpcEndpoint, ROVAI_CLI_CONTEXT_ENV, ROVAI_RUN_TMP_ENV, builtin_tool_description,
     builtin_tool_identity_by_command,
 };
 use rovai_core::camp_message_send_teaching::{
@@ -262,6 +262,7 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
         .context("ROVAI_CLI_CONTEXT is not set")?;
     let context = load_context()?;
     let (process_id, process_token) = context.process_auth()?;
+    let display_auth = context.auth().ok();
     let mut hook_input = String::new();
     std::io::stdin()
         .read_to_string(&mut hook_input)
@@ -293,9 +294,19 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    // Never relay or persist a digest of compact_summary, transcript content,
-    // or other context-bearing Hook fields. Runtime occurrence metadata is
-    // sufficient for durable idempotence and carries no Bootstrap content.
+    // The explicit compact_summary field may travel only on this live local IPC
+    // request so the execution console can reuse its Managed Blob result path.
+    // It never participates in the observation digest or recovery outbox.
+    let summary_text = hook_input
+        .get("compact_summary")
+        .or_else(|| hook_input.get("compactSummary"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|summary| !summary.is_empty())
+        .map(str::to_string);
+    // Runtime occurrence metadata remains sufficient for durable Bootstrap
+    // redelivery idempotence; transcript and other context-bearing fields stay
+    // out of that lifecycle completely.
     let runtime_occurrence = hook_input
         .get("compaction_id")
         .or_else(|| hook_input.get("compactionId"))
@@ -316,8 +327,8 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
     }))?;
     let request_id = Uuid::new_v4().to_string();
     let observed_at = chrono::Utc::now().to_rfc3339();
-    let request = CompactionHookIpcRequest {
-        kind: "compaction_observation".to_string(),
+    let mut request = CompactionHookIpcRequest {
+        kind: COMPACTION_OBSERVATION_IPC_KIND.to_string(),
         ipc_protocol_version: COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
         process_id,
         process_token,
@@ -328,7 +339,16 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
         hook_event_name,
         trigger,
         source_event_digest,
+        display_auth,
+        summary_text,
     };
+    if request.summary_text.is_some()
+        && serde_json::to_vec(&request)?.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES
+    {
+        // The optional display sidecar must never make the lifecycle observation
+        // undeliverable. Keep the exact observation and omit only oversized UI text.
+        request.summary_text = None;
+    }
     let outbox_record = CompactionObservationOutboxRecord {
         schema_version: COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,
         request_id,

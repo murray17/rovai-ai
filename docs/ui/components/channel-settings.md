@@ -3,7 +3,7 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # 渠道设置
@@ -11,21 +11,23 @@ last_updated: 2026-09-02
 渠道设置是 Owner 在 Rovai 本机维护当前开放渠道连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
 [Feishu Channel v15](../../contracts/feishu-channel-v15.md)与
-[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)；本页只拥有信息层级、交互与可访问性。
+[DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)；本页只拥有信息层级、交互与可访问性。
 
-当前渠道页只开放飞书管理。钉钉保留官方图标，但固定显示为置灰、不可选择的“敬请期待”入口；它使用原生
-`disabled` 与 `aria-disabled=true`，不响应鼠标、键盘或触控，也不展示已保存的钉钉账号、Bot、发布、重连或管理事实。
-已有钉钉数据和 Main/Core 实现不因这个 Renderer gate 删除或迁移，后续重新开放范围记录在
-[v1.38](../../versions/v1.38/README.md)。
+当前渠道页同时开放飞书和钉钉管理。两个 Provider 使用同一 Tab、连接、账号、队员 Bot 和管理信息层级；Renderer 只展示
+typed Snapshot 已提供的 Provider，不制造缺失平台。钉钉已有账号、Bot、发布、重连与受控管理链接按真实状态呈现，Cookie、
+AppSecret、credential、项目绝对路径和控制面原文仍不进入 Renderer。
+
+重新开放以飞书同等体验为目标：产品时机、反馈、失败和恢复应同等清晰；平台没有提供的原生 `@`、reply、附件或
+disclosure 必须明确呈现为限制，不用伪造字段或自制伪原生组件掩盖。管理入口开放不自动扩大这些 Provider 能力。
 
 ## 页面结构
 
 页面沿用设置工作区的 Porcelain Day / Steel Night 世界和现有 `SettingsPageHeader`：
 
 1. `Settings / Channels` eyebrow、标题“渠道”、Owner 本机说明；
-2. 飞书可选 Provider Tab 与固定禁用的钉钉“敬请期待”Tab，均使用打包进 App 的真实品牌图标；
-3. 飞书渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
-4. 飞书队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
+2. 飞书与钉钉可选 Provider Tab，均使用打包进 App 的真实品牌图标，并显示各自真实连接状态；
+3. 当前 Provider 的渠道连接，展示真实开发者用户名、企业与可选 email，提供对应登录、重连、切换和断开；
+4. 当前 Provider 的队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
 5. 页面最底部显示默认折叠的“局域网执行台”全局设置，不放入单个 Bot、Camp 或队员行。
 
 窄窗口保持同一内容顺序，表格式行折为纵向信息，不产生横向滚动。共享色彩只使用现有语义 Token；头像、按钮、
@@ -48,9 +50,10 @@ Dialog、状态点和间距复用现有组件语法。
 `system_credential_encryption_unavailable`；身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown` 或原始异常文本。
 连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
-钉钉登录、重连、断开、发布和管理 Dialog 当前都不从 Renderer 挂载。Main/Core 中已有 Web Session、credential 和
-published Bot 数据保持原样，但这些事实不得绕过禁用入口重新出现在渠道页；即使 Snapshot 只含钉钉，页面也只展示
-“当前版本没有可用的渠道”和禁用预告，不把钉钉设为当前 Provider。
+钉钉未连接时主动作是“连接钉钉”，Session 失效或已有历史账号时为“重新连接”，已连接时保留“断开”。登录复用内置
+QR Dialog、隐藏官方页面和必要时嵌入的 sandbox 原生交互页；Renderer 不获得 Web Session。DingTalk-only Snapshot 直接把
+钉钉作为当前 Provider，不再显示“当前版本没有可用的渠道”。暂时不可用的 Host 仍显示 Provider Tab，但只禁用连接与发布
+动作并给出真实状态，不退回“敬请期待”。
 
 普通发布不得进入 QR Dialog。点击列表“发布”先打开独立确认 Dialog，展示现有 `MemberAvatar`、队员名称/职责、
 应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示八个进行中阶段。主文案固定为：
@@ -89,7 +92,7 @@ published Bot 数据保持原样，但这些事实不得绕过禁用入口重新
 | failed，无 App ID | 需处理 / 远端创建结果待核对 | 安全失败可重试；true unknown 不提供重建入口 |
 | disabled（历史数据状态） | 已停用 | 重新发布同一 App |
 
-已发布行不打开 Rovai 管理 Dialog，也不提供停用命令。“飞书管理”是带可访问名称的外部链接，使用 Main
+已发布行不打开 Rovai 管理 Dialog，也不提供停用命令。“飞书管理”或“钉钉管理”是带可访问名称的外部链接，使用 Main
 从该 Bot 绑定账号与冻结 App ID 生成的精确 `managementUrl`，以 `_blank + noreferrer noopener` 交给 Electron 在系统
 浏览器打开。链接不依赖当前 Developer Session 的连接状态；Renderer 不拼接或接受任意 URL。关闭、停用、删除等
 远端应用治理只在官方开放平台完成。
@@ -163,7 +166,7 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 下一轮召回后不留下完成占位。钉钉真正排队时发送排队 AI Card，admission 后与旧执行卡都通过 Robot recall 删除，
 不更新成“已开始”“状态已结束”或“此执行记录已结束”。安全、固定 URL、Token、callback、双身份和串行更新边界由
 [Feishu Channel v15](../../contracts/feishu-channel-v15.md)和
-[DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)拥有。
+[DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)拥有。
 
 ## 局域网执行台设置
 
@@ -191,7 +194,7 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 - 所有异步操作使用稳定 busy key，防止双击；失败后恢复原动作；
 - Dialog 使用 Radix focus trap、Escape/关闭、可见 label、描述和 footer actions；
 - 状态不仅靠颜色，始终有文本；loading/failed 通过 `role=status/alert` 公布；
-- 钉钉预告使用原生 disabled 语义、可见“敬请期待”文本与灰度图标；禁用状态不获得 hover/press，也不能成为当前 Tab；
+- 飞书与钉钉 Provider Tab 都使用原生 button/Tab、`aria-selected` 与可见焦点；Host 不可用只禁用下游动作，不禁用 Tab；
 - Tab 顺序按页面视觉顺序，链接和按钮均可键盘操作，焦点不因 Snapshot 更新跳到页面起点。
 
 ## References
@@ -200,5 +203,5 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Feishu Channel v15](../../contracts/feishu-channel-v15.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v10](../../contracts/dingtalk-channel-v10.md)
+- [DingTalk Channel v12](../../contracts/dingtalk-channel-v12.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

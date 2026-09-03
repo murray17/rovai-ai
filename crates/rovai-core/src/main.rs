@@ -78,8 +78,9 @@ use rovai_core::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
         BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolError, BuiltinToolInvocationEnvelope,
         BuiltinToolIpcRequest, BuiltinToolIpcRequestBody, BuiltinToolIpcResponse,
-        COMPACTION_HOOK_IPC_PROTOCOL_VERSION, CompactionHookIpcRequest, CompactionHookIpcResponse,
-        builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
+        COMPACTION_HOOK_IPC_PROTOCOL_VERSION, COMPACTION_OBSERVATION_IPC_KIND,
+        CompactionHookIpcRequest, CompactionHookIpcResponse, builtin_tool_catalog_digest,
+        builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
     camp_attachment_publication::{AuthorityAttachment, unresolved_publication_camp_ids},
@@ -211,6 +212,10 @@ use rovai_core::{
         RecordObservedRuntimeModelCommand, RejectAgentRunDispatchCommand,
         ResolveAcceptedInputRecoveryBlockerCommand, RestartNativeSessionCommand,
         SucceedAgentRunCommand,
+    },
+    runtime_compaction_display::{
+        RUNTIME_COMPACTION_DISPLAY_EVENT, RuntimeCompactionCompletionEvidence,
+        RuntimeCompactionDisplayEvent, RuntimeCompactionDisplayPhase,
     },
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeExecutableCandidate,
@@ -4465,7 +4470,7 @@ impl Core {
         request: CompactionHookIpcRequest,
     ) -> CompactionHookIpcResponse {
         let rejected = || CompactionHookIpcResponse { accepted: false };
-        if request.kind != "compaction_observation"
+        if request.kind != COMPACTION_OBSERVATION_IPC_KIND
             || request.ipc_protocol_version != COMPACTION_HOOK_IPC_PROTOCOL_VERSION
             || uuid::Uuid::parse_str(&request.request_id).is_err()
             || !self
@@ -4491,6 +4496,29 @@ impl Core {
         else {
             return rejected();
         };
+        let display_target = match request.display_auth.as_ref() {
+            Some(auth)
+                if auth.process_id == request.process_id
+                    && auth.process_token == request.process_token =>
+            {
+                self.builtin_tool_leases
+                    .authenticate(auth)
+                    .await
+                    .ok()
+                    .filter(|target| {
+                        !target.native_binding.binding_replaced
+                            && target.native_binding.native_session_id.as_deref()
+                                == Some(request.native_session_id.as_str())
+                    })
+            }
+            Some(_) | None => None,
+        };
+        let display_event = observation_hook_compaction_display_event(
+            adapter_kind,
+            &request.source_event_digest,
+            admission_point,
+            request.summary_text.as_deref(),
+        );
         let source_event_digest = request.source_event_digest;
         let source_observation_id = format!("{source_signal}:{source_event_digest}");
         let observed_at = chrono::Utc::now().to_rfc3339();
@@ -4518,13 +4546,31 @@ impl Core {
                 },
             )
         };
-        CompactionHookIpcResponse {
-            accepted: matches!(
-                result,
-                Ok(CompactionObservationResult::Applied { .. })
-                    | Ok(CompactionObservationResult::Duplicate { .. })
-            ),
+        let applied = matches!(&result, Ok(CompactionObservationResult::Applied { .. }));
+        let accepted = matches!(
+            &result,
+            Ok(CompactionObservationResult::Applied { .. })
+                | Ok(CompactionObservationResult::Duplicate { .. })
+        );
+        if applied
+            && let (Some(target), Some(display_event)) = (display_target, display_event)
+            && let Err(error) = persist_runtime_compaction_display(
+                self,
+                &self.output,
+                &target.agent_run_id,
+                target.execution_epoch,
+                Some(&target.run_tmp),
+                display_event,
+                hook_event_name,
+            )
+            .await
+        {
+            eprintln!(
+                "{} local compaction display was skipped without affecting Bootstrap redelivery: {error:#}",
+                adapter_kind.as_str()
+            );
         }
+        CompactionHookIpcResponse { accepted }
     }
 
     async fn handle_builtin_operation(
@@ -15814,6 +15860,9 @@ async fn process_acp_events(
                 admission_point,
                 source_event_digest,
                 observed_at,
+                display_agent_run_id,
+                display_execution_epoch,
+                display_event,
             } => {
                 let result = {
                     let mut database = core.database.lock().await;
@@ -15840,6 +15889,24 @@ async fn process_acp_events(
                             host_instance_id,
                             requested_revision,
                         );
+                        if let (Some(agent_run_id), Some(execution_epoch), Some(display_event)) =
+                            (display_agent_run_id, display_execution_epoch, display_event)
+                            && let Err(error) = persist_runtime_compaction_display(
+                                &core,
+                                &output,
+                                &agent_run_id,
+                                execution_epoch,
+                                None,
+                                *display_event,
+                                &source_signal,
+                            )
+                            .await
+                        {
+                            eprintln!(
+                                "{} local compaction display was skipped without affecting Bootstrap redelivery: {error:#}",
+                                adapter_kind.as_str()
+                            );
+                        }
                     }
                     Ok(CompactionObservationResult::Duplicate { .. })
                     | Ok(CompactionObservationResult::Fenced) => {}
@@ -16869,6 +16936,74 @@ async fn persist_runtime_evidence(
         managed_output_root,
     )?;
     Ok(recorded.map(RecordedExecutionEvidence::into_evidence))
+}
+
+fn observation_hook_compaction_display_event(
+    adapter_kind: AdapterKind,
+    compaction_id: &str,
+    admission_point: &str,
+    summary_text: Option<&str>,
+) -> Option<RuntimeCompactionDisplayEvent> {
+    let phase = if admission_point == "imminent_edge" {
+        RuntimeCompactionDisplayPhase::Imminent
+    } else if admission_point == "completed" {
+        RuntimeCompactionDisplayPhase::Completed
+    } else {
+        return None;
+    };
+    let mut event =
+        RuntimeCompactionDisplayEvent::new(compaction_id, adapter_kind.as_str(), phase)?;
+    event.completion_evidence = Some(match adapter_kind {
+        AdapterKind::CopilotCli => RuntimeCompactionCompletionEvidence::PreCompactionOnly,
+        AdapterKind::CodebuddyCli => RuntimeCompactionCompletionEvidence::PostCompactionBoundary,
+        AdapterKind::OpencodeCli | AdapterKind::QoderCli | AdapterKind::QwenCode => {
+            RuntimeCompactionCompletionEvidence::NativeTerminal
+        }
+        _ => return None,
+    });
+    if matches!(adapter_kind, AdapterKind::QoderCli | AdapterKind::QwenCode) {
+        event.set_summary_text(summary_text);
+    }
+    Some(event)
+}
+
+async fn persist_runtime_compaction_display(
+    core: &Core,
+    output: &mpsc::UnboundedSender<String>,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    managed_output_root: Option<&Path>,
+    display_event: RuntimeCompactionDisplayEvent,
+    native_method: &str,
+) -> Result<()> {
+    let adapter_kind = display_event.adapter_kind.clone();
+    let payload = display_event.payload();
+    let Some(evidence) = persist_runtime_evidence(
+        core,
+        agent_run_id,
+        execution_epoch,
+        managed_output_root,
+        RUNTIME_COMPACTION_DISPLAY_EVENT,
+        &payload,
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+    emit(
+        output,
+        RUNTIME_COMPACTION_DISPLAY_EVENT,
+        json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "adapterKind": adapter_kind,
+            "nativeMethod": native_method,
+            "evidenceId": evidence.id,
+            "payload": evidence.payload,
+            "canonical": evidence.canonical,
+        }),
+    );
+    Ok(())
 }
 
 async fn persist_prepared_runtime_evidence_batch(
@@ -19664,7 +19799,7 @@ async fn handle_builtin_tool_connection(core: Arc<Core>, stream: LocalIpcStream)
                 .as_ref()
                 .and_then(|value| value.get("kind"))
                 .and_then(Value::as_str)
-                == Some("compaction_observation")
+                == Some(COMPACTION_OBSERVATION_IPC_KIND)
             {
                 let response = match value.and_then(|value| {
                     serde_json::from_value::<CompactionHookIpcRequest>(value).ok()
@@ -20051,6 +20186,63 @@ mod tests {
             RuntimeTerminalOutcome::Cancelled,
             Some("not_accepted")
         ));
+    }
+
+    #[test]
+    fn observation_hook_compaction_display_maps_only_existing_admitted_fields() {
+        let copilot = observation_hook_compaction_display_event(
+            AdapterKind::CopilotCli,
+            "compact-copilot",
+            "imminent_edge",
+            Some("must not be copied"),
+        )
+        .unwrap();
+        assert_eq!(copilot.phase, RuntimeCompactionDisplayPhase::Imminent);
+        assert_eq!(
+            copilot.completion_evidence,
+            Some(RuntimeCompactionCompletionEvidence::PreCompactionOnly)
+        );
+        assert!(copilot.summary_text.is_none());
+
+        let qoder = observation_hook_compaction_display_event(
+            AdapterKind::QoderCli,
+            "compact-qoder",
+            "completed",
+            Some(" explicit summary "),
+        )
+        .unwrap();
+        assert_eq!(qoder.phase, RuntimeCompactionDisplayPhase::Completed);
+        assert_eq!(qoder.summary_text.as_deref(), Some("explicit summary"));
+
+        let codebuddy = observation_hook_compaction_display_event(
+            AdapterKind::CodebuddyCli,
+            "compact-codebuddy",
+            "completed",
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            codebuddy.completion_evidence,
+            Some(RuntimeCompactionCompletionEvidence::PostCompactionBoundary)
+        );
+        assert!(
+            observation_hook_compaction_display_event(
+                AdapterKind::ClaudeCodeCli,
+                "compact-claude",
+                "completed",
+                None,
+            )
+            .is_none()
+        );
+        assert!(
+            observation_hook_compaction_display_event(
+                AdapterKind::CursorAgent,
+                "compact-cursor",
+                "imminent_edge",
+                None,
+            )
+            .is_none()
+        );
     }
 
     #[cfg(feature = "slow-tests")]

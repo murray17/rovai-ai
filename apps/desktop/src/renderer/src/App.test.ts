@@ -168,6 +168,9 @@ import {
   liveRuntimeEventFromCore,
   liveRuntimeEventFromExecutionEvidence,
   parseGitStatus,
+  runtimeCompactionDetailText,
+  runtimeCompactionIsExpandable,
+  runtimeCompactionTitle,
   selectCompleteExecutionEvidence,
   type LiveRuntimeEvent
 } from './ui-model'
@@ -4606,6 +4609,107 @@ describe('task event projections', () => {
       }
     ], 'run-muwa')
     expect(historicalProgress.items).toEqual([])
+  })
+
+  it('folds Codex Compaction phases into one non-Tool item with explicit expansion content', () => {
+    const compactionEvents = [
+      liveRuntimeEventFromCore({
+        method: 'runtime.compaction.display',
+        params: {
+          agentRunId: 'run-compact',
+          evidenceId: 'evidence-started',
+          payload: {
+            schemaVersion: 1,
+            compactionId: 'compact-1',
+            adapterKind: 'codex-cli',
+            phase: 'started'
+          }
+        }
+      }, 'compact-started'),
+      liveRuntimeEventFromCore({
+        method: 'runtime.compaction.display',
+        params: {
+          agentRunId: 'run-compact',
+          evidenceId: 'evidence-completed',
+          payload: {
+            schemaVersion: 1,
+            compactionId: 'compact-1',
+            adapterKind: 'codex-cli',
+            phase: 'completed',
+            completionEvidence: 'native_terminal',
+            tokens: { before: 128_420, after: 61_208 },
+            messages: { compacted: 37 },
+            elapsedMs: 1_420,
+            summaryText: 'The conversation focused on preserving explicit boundaries.'
+          }
+        }
+      }, 'compact-completed')
+    ].filter((event) => event !== null)
+
+    const progress = buildLiveExecutionProgress(compactionEvents, 'run-compact')
+    expect(progress.items).toHaveLength(1)
+    expect(progress.items[0]).toMatchObject({
+      key: 'compaction:compact-1',
+      kind: 'compaction',
+      compaction: {
+        phase: 'completed',
+        tokens: { before: 128_420, after: 61_208 },
+        messages: { compacted: 37 }
+      }
+    })
+    const item = progress.items[0].kind === 'compaction'
+      ? progress.items[0].compaction
+      : null
+    expect(item).not.toBeNull()
+    expect(runtimeCompactionIsExpandable(item!)).toBe(true)
+    expect(runtimeCompactionTitle(item!)).toBe('压缩会话上下文 · Codex · 128.4K → 61.2K')
+    expect(runtimeCompactionDetailText(item!)).toBe([
+      '压缩前：128,420 tokens',
+      '压缩后：61,208 tokens',
+      '减少：67,212 tokens · 52.3%',
+      '整理消息：37',
+      '耗时：1.42 秒',
+      '',
+      '会话摘要',
+      '',
+      'The conversation focused on preserving explicit boundaries.'
+    ].join('\n'))
+  })
+
+  it('keeps metadata-only Compaction static and selects only its truncated local evidence', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'evidence-compact',
+      agentRunId: 'run-compact-static',
+      eventType: 'runtime.compaction.display',
+      payload: {
+        schemaVersion: 1,
+        compactionId: 'compact-static',
+        adapterKind: 'codebuddy-cli',
+        phase: 'completed',
+        completionEvidence: 'post_compaction_boundary',
+        elapsedMs: 800
+      },
+      createdAt: '2026-09-02T00:00:00Z'
+    }], 'run-compact-static')
+    const item = progress.items[0].kind === 'compaction'
+      ? progress.items[0].compaction
+      : null
+    expect(runtimeCompactionTitle(item!)).toBe('已进入压缩后的新上下文 · CodeBuddy')
+    expect(runtimeCompactionIsExpandable(item!)).toBe(false)
+    expect(runtimeCompactionDetailText(item!)).toBeNull()
+
+    const evidence = {
+      id: 'evidence-compact', agentRunId: 'run-compact-static', executionEpoch: 1,
+      sequence: 1, eventType: 'runtime.compaction.display', kind: 'step',
+      phase: 'completed', payload: {
+        schemaVersion: 1, compactionId: 'compact-static', adapterKind: 'codebuddy-cli',
+        phase: 'completed', summaryText: 'preview'
+      }, contentBlobId: 'blob-1', contentByteCount: 20_000, isTruncated: true,
+      occurredAt: '2026-09-02T00:00:00Z', canonical: null
+    } satisfies AgentRunExecutionEvidenceView
+    const selected = selectCompleteExecutionEvidence([evidence])
+    expect(selected.byCompactionId.get('compact-static')?.id).toBe('evidence-compact')
+    expect(selected.byToolId.size).toBe(0)
   })
 
   it.each(['message-1', null])('keeps complete streaming narration for item %s', (itemId) => {

@@ -603,6 +603,7 @@ function renderNonGroupItem(
   if (item.kind === 'diagnostic') {
     return `○ 正在重试运行时请求（${item.diagnostic.attempt}/${item.diagnostic.maxAttempts}）`
   }
+  if (item.kind === 'compaction') return ''
   return renderTool(item, runStatus)
 }
 

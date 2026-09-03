@@ -30,6 +30,10 @@ use rovai_core::{
         ManagedWindowsArgvDialect,
     },
     mcp::McpServerDefinition,
+    runtime_compaction_display::{
+        RUNTIME_COMPACTION_DISPLAY_EVENT, RuntimeCompactionCompletionEvidence,
+        RuntimeCompactionDisplayEvent, RuntimeCompactionDisplayPhase,
+    },
     runtime_discovery::configure_active_runtime_command,
     runtime_search_operation,
 };
@@ -2117,6 +2121,9 @@ pub fn completed_intercepted_action(
 }
 
 pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
+    if let Some(compaction) = normalize_context_compaction_event(method, params) {
+        return compaction;
+    }
     match method {
         "item/agentMessage/delta" => ("agent.text.delta", params.clone()),
         "item/reasoning/summaryTextDelta" => ("agent.reasoning.summary.delta", params.clone()),
@@ -2149,6 +2156,40 @@ pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
             json!({"method": method, "params": params}),
         ),
     }
+}
+
+fn normalize_context_compaction_event(
+    method: &str,
+    params: &Value,
+) -> Option<(&'static str, Value)> {
+    if !matches!(method, "item/started" | "item/completed")
+        || params.pointer("/item/type").and_then(Value::as_str) != Some("contextCompaction")
+    {
+        return None;
+    }
+    let Some(compaction_id) = params
+        .pointer("/item/id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|compaction_id| !compaction_id.is_empty())
+    else {
+        return Some((
+            "runtime.native",
+            json!({"method": method, "params": params}),
+        ));
+    };
+    let phase = if method == "item/completed" {
+        RuntimeCompactionDisplayPhase::Completed
+    } else {
+        RuntimeCompactionDisplayPhase::Started
+    };
+    let mut event =
+        RuntimeCompactionDisplayEvent::new(compaction_id, AdapterKind::CodexCli.as_str(), phase)
+            .expect("validated Codex contextCompaction identity");
+    if phase == RuntimeCompactionDisplayPhase::Completed {
+        event.completion_evidence = Some(RuntimeCompactionCompletionEvidence::NativeTerminal);
+    }
+    Some((RUNTIME_COMPACTION_DISPLAY_EVENT, event.payload()))
 }
 
 fn activity_payload_with_search_candidate(method: &str, mut payload: Value) -> Value {
@@ -3046,6 +3087,46 @@ while IFS= read -r ignored; do :; done
             terminal_payload["item"]["aggregatedOutput"],
             "secret output"
         );
+    }
+
+    #[test]
+    fn context_compaction_is_intercepted_before_generic_activity_projection() {
+        for (method, expected_phase, completion_evidence) in [
+            ("item/started", "started", Value::Null),
+            ("item/completed", "completed", json!("native_terminal")),
+        ] {
+            let (event_type, payload) = normalize_event(
+                method,
+                &json!({
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "id": "compact-1",
+                        "type": "contextCompaction",
+                        "status": expected_phase,
+                    }
+                }),
+            );
+            assert_eq!(event_type, RUNTIME_COMPACTION_DISPLAY_EVENT);
+            assert_eq!(payload["schemaVersion"], 1);
+            assert_eq!(payload["compactionId"], "compact-1");
+            assert_eq!(payload["adapterKind"], "codex-cli");
+            assert_eq!(payload["phase"], expected_phase);
+            assert_eq!(
+                payload
+                    .get("completionEvidence")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                completion_evidence
+            );
+            assert!(payload.get("item").is_none());
+        }
+
+        let (event_type, _) = normalize_event(
+            "item/started",
+            &json!({"item": {"id": " ", "type": "contextCompaction"}}),
+        );
+        assert_eq!(event_type, "runtime.native");
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
 pub const COMPACTION_HOOK_IPC_PROTOCOL_VERSION: u32 = 1;
+pub const COMPACTION_OBSERVATION_IPC_KIND: &str = "compaction_observation";
 pub const COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -142,6 +143,10 @@ pub struct CompactionHookIpcRequest {
     pub hook_event_name: String,
     pub trigger: String,
     pub source_event_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_auth: Option<BuiltinToolAuth>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

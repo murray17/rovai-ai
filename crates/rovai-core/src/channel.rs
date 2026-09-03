@@ -613,6 +613,31 @@ pub struct PendingChannelAggregateView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PendingDingTalkAggregateView {
+    pub aggregate_id: String,
+    pub tenant_key: String,
+    pub chat_id: String,
+    pub topic_key: String,
+    pub conversation_kind: String,
+    pub acknowledgement_app_id: String,
+    pub canonical_mentions_complete: bool,
+    pub deadline_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DingTalkChannelDiagnosticsView {
+    pub inbound_collecting_count: i64,
+    pub inbound_ready_count: i64,
+    pub inbound_overdue_count: i64,
+    pub card_create_pending_count: i64,
+    pub card_update_pending_count: i64,
+    pub card_recall_pending_count: i64,
+    pub card_failed_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FeishuAccountView {
     pub account_id: String,
     pub user_id_digest: String,
@@ -741,7 +766,8 @@ pub struct DingTalkChannelSnapshot {
     pub pending_binding_count: i64,
     pub binding_issue_count: i64,
     pub transport_conversations: Vec<ChannelTransportConversationView>,
-    pub pending_aggregates: Vec<PendingChannelAggregateView>,
+    pub pending_aggregates: Vec<PendingDingTalkAggregateView>,
+    pub diagnostics: DingTalkChannelDiagnosticsView,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1913,7 +1939,8 @@ impl ChannelService {
             r#"
             SELECT aggregate.id, aggregate.tenant_key, aggregate.chat_id,
                    aggregate.topic_key, conversation.conversation_kind,
-                   json_extract(aggregate.frozen_payload_json, '$.acknowledgementAppId')
+                   json_extract(aggregate.frozen_payload_json, '$.acknowledgementAppId'),
+                   aggregate.canonical_mentions_complete, aggregate.deadline_at
             FROM channel_inbound_aggregate AS aggregate
             JOIN channel_conversation AS conversation
               ON conversation.id = json_extract(
@@ -1921,21 +1948,122 @@ impl ChannelService {
                  )
             WHERE aggregate.status = 'collecting'
               AND conversation.provider = 'dingtalk'
-              AND aggregate.canonical_mentions_complete = 1
             ORDER BY aggregate.created_at, aggregate.id
             "#,
             [],
             |row| {
-                Ok(PendingChannelAggregateView {
+                Ok(PendingDingTalkAggregateView {
                     aggregate_id: row.get(0)?,
                     tenant_key: row.get(1)?,
                     chat_id: row.get(2)?,
                     topic_key: row.get(3)?,
                     conversation_kind: row.get(4)?,
                     acknowledgement_app_id: row.get(5)?,
+                    canonical_mentions_complete: row.get(6)?,
+                    deadline_at: row.get(7)?,
                 })
             },
         )?;
+        let (inbound_collecting_count, inbound_ready_count, inbound_overdue_count) = connection
+            .query_row(
+                r#"
+                SELECT COUNT(*),
+                       COALESCE(SUM(canonical_mentions_complete), 0),
+                       COALESCE(SUM(
+                         CASE WHEN canonical_mentions_complete = 0 AND deadline_at <= ?1
+                              THEN 1 ELSE 0 END
+                       ), 0)
+                FROM channel_inbound_aggregate
+                WHERE provider = 'dingtalk' AND status = 'collecting'
+                "#,
+                [Utc::now().to_rfc3339()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )?;
+        let (
+            card_create_pending_count,
+            card_update_pending_count,
+            card_recall_pending_count,
+            card_failed_count,
+        ) = connection.query_row(
+            r#"
+            SELECT
+              COALESCE(SUM(CASE
+                WHEN delivery.status IN ('pending', 'attempting')
+                 AND (
+                   (delivery.delivery_kind = 'execution_console_upsert'
+                     AND console.external_message_id IS NULL)
+                   OR (delivery.delivery_kind = 'project_selection'
+                     AND COALESCE(json_extract(delivery.payload_json, '$.operation'), 'send')
+                         = 'send')
+                   OR (delivery.delivery_kind = 'queue_ack'
+                     AND json_extract(delivery.payload_json, '$.action') IS NULL)
+                   OR delivery.delivery_kind = 'attention'
+                 )
+                THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE
+                WHEN delivery.status IN ('pending', 'attempting')
+                 AND (
+                   (delivery.delivery_kind = 'execution_console_upsert'
+                     AND console.external_message_id IS NOT NULL)
+                   OR (delivery.delivery_kind = 'project_selection'
+                     AND json_extract(delivery.payload_json, '$.operation') = 'update')
+                 )
+                THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE
+                WHEN delivery.status IN ('pending', 'attempting')
+                 AND (
+                   delivery.delivery_kind = 'execution_console_recall'
+                   OR json_extract(delivery.payload_json, '$.action') = 'recall'
+                   OR json_extract(delivery.payload_json, '$.operation') = 'recall'
+                 )
+                THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE
+                WHEN delivery.status = 'failed'
+                 AND delivery.delivery_kind IN (
+                   'project_selection', 'queue_ack', 'execution_console_upsert',
+                   'execution_console_recall', 'attention'
+                 )
+                THEN 1 ELSE 0 END), 0)
+            FROM channel_delivery AS delivery
+            LEFT JOIN channel_turn_request AS request ON request.id = delivery.request_id
+            LEFT JOIN channel_conversation_binding AS request_binding
+              ON request_binding.id = request.binding_id
+            LEFT JOIN pending_camp_binding AS pending
+              ON pending.id = delivery.pending_binding_id
+            LEFT JOIN channel_execution_console AS console
+              ON console.id = delivery.console_id
+            JOIN channel_conversation AS conversation
+              ON conversation.id = COALESCE(
+                   request_binding.channel_conversation_id,
+                   pending.channel_conversation_id
+                 )
+            WHERE conversation.provider = 'dingtalk'
+            "#,
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )?;
+        let diagnostics = DingTalkChannelDiagnosticsView {
+            inbound_collecting_count,
+            inbound_ready_count,
+            inbound_overdue_count,
+            card_create_pending_count,
+            card_update_pending_count,
+            card_recall_pending_count,
+            card_failed_count,
+        };
         let pending_binding_count = connection.query_row(
             r#"
             SELECT COUNT(*)
@@ -1972,6 +2100,7 @@ impl ChannelService {
             binding_issue_count,
             transport_conversations,
             pending_aggregates,
+            diagnostics,
         })
     }
 
@@ -4521,6 +4650,8 @@ impl ChannelService {
             let target_agent_ids = resolve_observation_targets(transaction, &envelope.payload)?;
             let structured_content = build_external_content(&envelope.payload, &target_agent_ids)?;
             validate_content(&structured_content)?;
+            let dingtalk_group_aggregate = envelope.payload.provider == DINGTALK_PROVIDER
+                && envelope.payload.conversation_kind == "group";
             let observed_binding_id = transaction
                 .query_row(
                     r#"
@@ -4532,9 +4663,19 @@ impl ChannelService {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            let payload_digest = format!(
-                "sha256:{}",
-                canonical_json_digest(&json!({
+            let payload_identity = if dingtalk_group_aggregate {
+                json!({
+                    "provider": envelope.payload.provider,
+                    "tenantKey": envelope.payload.tenant_key,
+                    "chatId": envelope.payload.chat_id,
+                    "topicKey": envelope.payload.topic_key,
+                    "conversationKind": envelope.payload.conversation_kind,
+                    "principalId": principal_id,
+                    "transportContent": assemble_external_content(&envelope.payload, &[])?,
+                    "bindingIdAtObservation": observed_binding_id,
+                })
+            } else {
+                json!({
                     "provider": envelope.payload.provider,
                     "tenantKey": envelope.payload.tenant_key,
                     "chatId": envelope.payload.chat_id,
@@ -4546,8 +4687,9 @@ impl ChannelService {
                     "expectedAppIds": sorted_unique(&envelope.payload.expected_app_ids),
                     "acknowledgementAppId": envelope.payload.acknowledgement_app_id,
                     "bindingIdAtObservation": observed_binding_id,
-                }))?
-            );
+                })
+            };
+            let payload_digest = format!("sha256:{}", canonical_json_digest(&payload_identity)?);
             let bot_scope_app_id = if envelope.payload.conversation_kind == "p2p" {
                 envelope.payload.app_id.as_str()
             } else {
@@ -4571,7 +4713,8 @@ impl ChannelService {
                 .query_row(
                     r#"
                     SELECT id, payload_digest, status, observed_app_ids_json,
-                           canonical_mentions_complete, expected_app_ids_json
+                           canonical_mentions_complete, expected_app_ids_json,
+                           frozen_payload_json
                     FROM channel_inbound_aggregate
                     WHERE provider = ?1 AND tenant_key = ?2
                       AND external_message_digest = ?3
@@ -4589,6 +4732,7 @@ impl ChannelService {
                             row.get::<_, String>(3)?,
                             row.get::<_, bool>(4)?,
                             row.get::<_, String>(5)?,
+                            row.get::<_, String>(6)?,
                         ))
                     },
                 )
@@ -4600,8 +4744,23 @@ impl ChannelService {
                 observed_json,
                 mentions_complete,
                 expected_json,
+                frozen_payload_json,
             )) = existing
             {
+                if status != "collecting" && dingtalk_group_aggregate {
+                    return Ok(CommandHandlerResult::applied(
+                        "channel.inbound.replayed",
+                        json!({
+                            "aggregateId": existing_id,
+                            "status": status,
+                            "readyToFinalize": false,
+                        }),
+                        Some(EntityReference {
+                            entity_type: "channel_inbound_aggregate".to_string(),
+                            entity_id: existing_id,
+                        }),
+                    ));
+                }
                 if existing_payload_digest != payload_digest {
                     if status == "collecting" {
                         transaction.execute(
@@ -4655,19 +4814,56 @@ impl ChannelService {
                 )?;
                 let mut observed = parse_string_set(&observed_json)?;
                 observed.insert(envelope.payload.app_id.clone());
-                let expected = parse_string_set(&expected_json)?;
+                let mut expected = parse_string_set(&expected_json)?;
                 let complete = mentions_complete || envelope.payload.canonical_mentions_complete;
+                let mut frozen_payload_json = frozen_payload_json;
+                if dingtalk_group_aggregate {
+                    expected.extend(envelope.payload.expected_app_ids.iter().cloned());
+                    if envelope.payload.canonical_mentions_complete && expected != observed {
+                        mark_aggregate_failed(
+                            transaction,
+                            &existing_id,
+                            "observation_mismatch",
+                            &now_text,
+                        )?;
+                        return Ok(CommandHandlerResult::applied(
+                            "channel.inbound.failed",
+                            json!({
+                                "aggregateId": existing_id,
+                                "status": "failed",
+                                "failureCode": "observation_mismatch",
+                                "readyToFinalize": false,
+                            }),
+                            None,
+                        ));
+                    }
+                    let mut frozen: FrozenInboundPayload =
+                        serde_json::from_str(&frozen_payload_json)
+                            .context("channel inbound frozen payload is invalid")?;
+                    for target_agent_id in &target_agent_ids {
+                        if !frozen.target_agent_ids.contains(target_agent_id) {
+                            frozen.target_agent_ids.push(target_agent_id.clone());
+                        }
+                    }
+                    frozen.structured_content =
+                        build_external_content(&envelope.payload, &frozen.target_agent_ids)?;
+                    frozen_payload_json = serde_json::to_string(&frozen)?;
+                }
                 transaction.execute(
                     r#"
                     UPDATE channel_inbound_aggregate
                     SET observed_app_ids_json = ?2,
-                        canonical_mentions_complete = ?3,
-                        updated_at = ?4
+                        expected_app_ids_json = ?3,
+                        frozen_payload_json = ?4,
+                        canonical_mentions_complete = ?5,
+                        updated_at = ?6
                     WHERE id = ?1
                     "#,
                     params![
                         existing_id,
                         serde_json::to_string(&observed)?,
+                        serde_json::to_string(&expected)?,
+                        frozen_payload_json,
                         complete,
                         now_text,
                     ],
@@ -4785,7 +4981,7 @@ impl ChannelService {
                 ));
             }
             let aggregate = load_collecting_aggregate(transaction, &envelope.payload.aggregate_id)?;
-            let Some(aggregate) = aggregate else {
+            let Some(mut aggregate) = aggregate else {
                 let existing = transaction
                     .query_row(
                         "SELECT status, provider FROM channel_inbound_aggregate WHERE id = ?1",
@@ -4827,21 +5023,51 @@ impl ChannelService {
             let now_text = now.to_rfc3339();
             let expected = parse_string_set(&aggregate.expected_app_ids_json)?;
             let observed = parse_string_set(&aggregate.observed_app_ids_json)?;
-            let ready = if aggregate.provider == DINGTALK_PROVIDER {
+            let mut ready = if aggregate.provider == DINGTALK_PROVIDER {
                 aggregate.canonical_mentions_complete
             } else {
                 aggregate.canonical_mentions_complete || expected.is_subset(&observed)
             };
             if !ready {
-                if now
-                    < chrono::DateTime::parse_from_rfc3339(&aggregate.deadline_at)?
-                        .with_timezone(&Utc)
-                {
+                let deadline = chrono::DateTime::parse_from_rfc3339(&aggregate.deadline_at)?
+                    .with_timezone(&Utc);
+                if now < deadline {
                     return Ok(rejected(
                         "channel.inbound.not_ready",
                         "Canonical mentions or all expected App observations are still incomplete",
                     ));
                 }
+                if aggregate.provider == DINGTALK_PROVIDER {
+                    if observed.is_empty() || expected != observed {
+                        mark_aggregate_failed(
+                            transaction,
+                            &aggregate.id,
+                            "observation_mismatch",
+                            &now_text,
+                        )?;
+                        return Ok(CommandHandlerResult::applied(
+                            "channel.inbound.failed",
+                            json!({
+                                "aggregateId": aggregate.id,
+                                "status": "failed",
+                                "failureCode": "observation_mismatch",
+                            }),
+                            None,
+                        ));
+                    }
+                    transaction.execute(
+                        r#"
+                        UPDATE channel_inbound_aggregate
+                        SET canonical_mentions_complete = 1, updated_at = ?2
+                        WHERE id = ?1 AND status = 'collecting'
+                        "#,
+                        params![aggregate.id, now_text],
+                    )?;
+                    aggregate.canonical_mentions_complete = true;
+                    ready = true;
+                }
+            }
+            if !ready {
                 mark_aggregate_failed(
                     transaction,
                     &aggregate.id,
@@ -6007,16 +6233,14 @@ impl ChannelService {
                 WHERE status = 'collecting' AND deadline_at <= ?1
                   AND provider = ?2
                   AND canonical_mentions_complete = 0
-                  AND (
-                      provider = 'dingtalk'
-                      OR EXISTS (
+                  AND provider != 'dingtalk'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM json_each(channel_inbound_aggregate.expected_app_ids_json) AS expected
+                      WHERE NOT EXISTS (
                           SELECT 1
-                          FROM json_each(channel_inbound_aggregate.expected_app_ids_json) AS expected
-                          WHERE NOT EXISTS (
-                              SELECT 1
-                              FROM json_each(channel_inbound_aggregate.observed_app_ids_json) AS observed
-                              WHERE observed.value = expected.value
-                          )
+                          FROM json_each(channel_inbound_aggregate.observed_app_ids_json) AS observed
+                          WHERE observed.value = expected.value
                       )
                   )
                 "#,
@@ -6626,7 +6850,7 @@ struct CollectingAggregate {
     deadline_at: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FrozenInboundPayload {
     conversation_id: String,
@@ -9455,12 +9679,13 @@ fn project_active_request_deliveries_for_turn(
                             &content,
                         )?
                     } else {
-                        json!({
-                            "kind": "agent_output",
-                            "agentId": agent_id,
-                            "body": body,
-                            "mentionPrincipal": mentions_current_user(&content),
-                        })
+                        dingtalk_agent_output_projection(
+                            transaction,
+                            &message_id,
+                            &agent_id,
+                            &body,
+                            &content,
+                        )?
                     };
                     insert_delivery(
                         transaction,
@@ -9612,6 +9837,74 @@ fn feishu_agent_reply_projection(
             },
         )
         .optional()?;
+    channel_agent_reply_projection(transaction, source)
+}
+
+fn dingtalk_agent_output_projection(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+    agent_id: &str,
+    body: &str,
+    content: &[StructuredCampMessageSegment],
+) -> Result<Value> {
+    Ok(json!({
+        "kind": "agent_output",
+        "presentationVersion": 2,
+        "agentId": agent_id,
+        "body": body,
+        "mentionPrincipal": mentions_current_user(content),
+        "reply": dingtalk_agent_reply_projection(transaction, message_id)?,
+    }))
+}
+
+fn dingtalk_agent_reply_projection(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+) -> Result<Value> {
+    // DingTalk's Internal App Robot response is a permanent Markdown message,
+    // not a native reply. Project only the same-Camp semantic parent so Main
+    // can render an honest, bounded summary without leaking another Camp.
+    let source = transaction
+        .query_row(
+            r#"
+            SELECT source.reply_to_camp_message_id, parent.structured_content_json,
+                   CASE parent.author_type
+                     WHEN 'agent' THEN COALESCE(profile.display_name, '队员')
+                     WHEN 'external_principal' THEN COALESCE(
+                         principal.display_name, '消息作者'
+                     )
+                     WHEN 'user' THEN 'Owner'
+                     ELSE '系统'
+                   END
+            FROM camp_message AS source
+            LEFT JOIN camp_message AS parent
+              ON parent.id = source.reply_to_camp_message_id
+             AND parent.camp_id = source.camp_id
+             AND parent.sequence < source.sequence
+             AND parent.tombstoned_at IS NULL
+            LEFT JOIN agent_profile AS profile
+              ON parent.author_type = 'agent' AND profile.id = parent.author_id
+            LEFT JOIN external_principal AS principal
+              ON parent.author_type = 'external_principal' AND principal.id = parent.author_id
+            WHERE source.id = ?1
+            "#,
+            [message_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    channel_agent_reply_projection(transaction, source)
+}
+
+fn channel_agent_reply_projection(
+    transaction: &Transaction<'_>,
+    source: Option<(Option<String>, Option<String>, String)>,
+) -> Result<Value> {
     let Some((Some(parent_id), parent_content_json, author_name)) = source else {
         return Ok(Value::Null);
     };
@@ -9635,15 +9928,18 @@ fn feishu_agent_reply_projection(
     let Ok(body) = render_current_plain_text(transaction, &body_content) else {
         return Ok(json!({"status": "unavailable"}));
     };
+    if body.trim().is_empty() {
+        return Ok(json!({"status": "unavailable"}));
+    }
     Ok(json!({
         "status": "available",
         "messageId": parent_id,
         "authorDisplayName": author_name.chars().take(120).collect::<String>(),
-        "body": feishu_reply_excerpt(&body),
+        "body": channel_reply_excerpt(&body),
     }))
 }
 
-fn feishu_reply_excerpt(body: &str) -> String {
+fn channel_reply_excerpt(body: &str) -> String {
     // A quote is a bounded preview; the public output itself remains complete.
     let mut lines = body.trim().lines();
     let first_lines = lines.by_ref().take(3).collect::<Vec<_>>().join("\n");
@@ -10572,16 +10868,34 @@ fn resolve_observation_targets(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    if command.canonical_mentions_complete && canonical_targets != expected_targets {
-        anyhow::bail!("canonical Agent mentions do not match expected member Bot Apps");
+    if command.canonical_mentions_complete {
+        if canonical_targets.len() != command.canonical_agent_ids.len() {
+            anyhow::bail!("canonical Agent mentions must be distinct");
+        }
+        if canonical_targets != expected_targets {
+            anyhow::bail!("canonical Agent mentions do not match expected member Bot Apps");
+        }
     }
     if expected_targets.is_empty() {
         anyhow::bail!("channel message has no expected member Bot target");
+    }
+    if command.provider == DINGTALK_PROVIDER && command.canonical_mentions_complete {
+        return Ok(command.canonical_agent_ids.clone());
     }
     Ok(expected_targets.into_iter().collect())
 }
 
 fn build_external_content(
+    command: &ObserveChannelInboundCommand,
+    target_agent_ids: &[String],
+) -> Result<StructuredCampMessageContent> {
+    let content = assemble_external_content(command, target_agent_ids)?;
+    validate_content(&content)?;
+    let _ = canonical_content_digest(&content)?;
+    Ok(content)
+}
+
+fn assemble_external_content(
     command: &ObserveChannelInboundCommand,
     target_agent_ids: &[String],
 ) -> Result<StructuredCampMessageContent> {
@@ -10640,8 +10954,6 @@ fn build_external_content(
         });
     }
     let content = normalize_content(content);
-    validate_content(&content)?;
-    let _ = canonical_content_digest(&content)?;
     Ok(content)
 }
 
@@ -11971,7 +12283,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{command::CommandResultStatus, test_support::seeded_runtime_database_owned};
+    use crate::{
+        camp_content::member_mention_ids, command::CommandResultStatus,
+        test_support::seeded_runtime_database_owned,
+    };
 
     #[test]
     fn host_ticks_are_ephemeral_and_reject_untrusted_or_invalid_requests() {
@@ -12209,6 +12524,18 @@ mod tests {
                 {"agentId": "agent_4", "displayName": "离线队员", "openId": null},
             ])
         );
+        let dingtalk_projected = dingtalk_agent_output_projection(
+            &transaction,
+            "message_1",
+            "agent_1",
+            "@你 原始显示缓存",
+            &content,
+        )
+        .unwrap();
+        assert_eq!(dingtalk_projected["presentationVersion"], 2);
+        assert_eq!(dingtalk_projected["body"], "@你 原始显示缓存");
+        assert_eq!(dingtalk_projected["mentionPrincipal"], true);
+        assert_eq!(dingtalk_projected["reply"], projected["reply"]);
         let mut claim = ClaimedChannelDelivery {
             delivery_id: "channel_delivery".to_string(),
             provider: FEISHU_PROVIDER.to_string(),
@@ -12303,7 +12630,7 @@ mod tests {
             ("😀".repeat(241), format!("{}…", "😀".repeat(239))),
             (" \n ".to_string(), String::new()),
         ] {
-            let excerpt = feishu_reply_excerpt(&body);
+            let excerpt = channel_reply_excerpt(&body);
             assert_eq!(excerpt, expected);
             assert!(excerpt.lines().count() <= 3);
             assert!(excerpt.chars().count() <= 240);
@@ -13270,6 +13597,35 @@ mod tests {
                 .collect(),
             acknowledgement_app_id: targets[0].1.to_string(),
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dingtalk_observation_command(
+        app_id: &str,
+        external_message_id: &str,
+        chat_id: &str,
+        conversation_kind: &str,
+        body: &str,
+        targets: &[(&str, &str)],
+        canonical_mentions_complete: bool,
+    ) -> ObserveChannelInboundCommand {
+        let mut command = observation_command(
+            app_id,
+            external_message_id,
+            chat_id,
+            "",
+            conversation_kind,
+            body,
+            targets,
+            canonical_mentions_complete,
+        );
+        command.provider = DINGTALK_PROVIDER.to_string();
+        command.tenant_key = "ding-corp-1".to_string();
+        command.sender_external_user_id = "owner-staff-1".to_string();
+        command.sender_open_id = None;
+        command.sender_user_id = Some("owner-staff-1".to_string());
+        command.sender_union_id = None;
+        command
     }
 
     fn seed_project(database: &Database, suffix: &str) -> std::path::PathBuf {
@@ -14803,7 +15159,7 @@ mod tests {
     }
 
     #[test]
-    fn dingtalk_incomplete_canonical_observation_times_out_after_the_collecting_window() {
+    fn dingtalk_incomplete_observation_auto_seals_from_sqlite_after_the_collecting_window() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
         connect_dingtalk_account(&service, &mut database);
@@ -14852,18 +15208,307 @@ mod tests {
             )
             .unwrap();
 
-        let timed_out = service.host_tick(&mut database, &actor, &request).unwrap();
-        assert!(!timed_out.has_outstanding_work);
-        let terminal: (String, Option<String>) = database
+        let overdue = service.host_tick(&mut database, &actor, &request).unwrap();
+        assert!(
+            overdue.has_outstanding_work,
+            "an overdue DingTalk aggregate remains durable until finalization auto-seals it"
+        );
+        let restarted_service = ChannelService::default();
+        let recovered = restarted_service.dingtalk_snapshot(&mut database).unwrap();
+        assert_eq!(recovered.pending_aggregates.len(), 1);
+        assert!(!recovered.pending_aggregates[0].canonical_mentions_complete);
+        assert_eq!(recovered.pending_aggregates[0].aggregate_id, aggregate_id);
+        assert_eq!(recovered.diagnostics.inbound_collecting_count, 1);
+        assert_eq!(recovered.diagnostics.inbound_ready_count, 0);
+        assert_eq!(recovered.diagnostics.inbound_overdue_count, 1);
+
+        let recovered_quick_chat_path = quick_chat_path(&database);
+        let finalized = restarted_service
+            .finalize_inbound(
+                &mut database,
+                &recovered_quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-timeout-recover",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: aggregate_id.to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(finalized.result.code, "channel.turn.admitted");
+        let terminal: (String, bool, Option<String>) = database
             .connection()
             .query_row(
-                "SELECT status, failure_code FROM channel_inbound_aggregate WHERE id = ?1",
+                "SELECT status, canonical_mentions_complete, failure_code FROM channel_inbound_aggregate WHERE id = ?1",
                 [aggregate_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(terminal.0, "finalized");
+        assert!(terminal.1);
+        assert_eq!(terminal.2, None);
+        let replay = restarted_service
+            .finalize_inbound(
+                &mut database,
+                &recovered_quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-timeout-recover-replay",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: aggregate_id.to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(replay.result.code, "channel.inbound.already_finalized");
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM channel_turn_request", [], |row| row
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn dingtalk_multi_bot_callbacks_form_one_ordered_durable_request() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_dingtalk_account(&service, &mut database);
+        publish_dingtalk_bot(&service, &mut database, "agent_1");
+        publish_dingtalk_bot(&service, &mut database, "agent_2");
+        seed_project(&database, "dingtalk-multi-bot");
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-multi-roster",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: DINGTALK_PROVIDER.to_string(),
+                        tenant_key: "ding-corp-1".to_string(),
+                        chat_id: "ding-multi-group".to_string(),
+                        present_app_ids: vec![
+                            "ding-app-agent_1".to_string(),
+                            "ding-app-agent_2".to_string(),
+                        ],
+                    },
+                ),
+            )
+            .unwrap();
+
+        let first = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-multi-first",
+                    dingtalk_observation_command(
+                        "ding-app-agent_2",
+                        "ding-multi-message",
+                        "ding-multi-group",
+                        "group",
+                        "一起检查多 Bot 聚合",
+                        &[("agent_2", "ding-app-agent_2")],
+                        false,
+                    ),
+                ),
+            )
+            .unwrap();
+        let aggregate_id = first.result.payload["aggregateId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let second = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-multi-second",
+                    dingtalk_observation_command(
+                        "ding-app-agent_1",
+                        "ding-multi-message",
+                        "ding-multi-group",
+                        "group",
+                        "一起检查多 Bot 聚合",
+                        &[("agent_1", "ding-app-agent_1")],
+                        false,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(second.result.payload["aggregateId"], aggregate_id);
+        assert_eq!(second.result.payload["observationCount"], 2);
+        assert_eq!(second.result.payload["readyToFinalize"], false);
+
+        let completed = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-multi-complete",
+                    dingtalk_observation_command(
+                        "ding-app-agent_2",
+                        "ding-multi-message",
+                        "ding-multi-group",
+                        "group",
+                        "一起检查多 Bot 聚合",
+                        &[
+                            ("agent_2", "ding-app-agent_2"),
+                            ("agent_1", "ding-app-agent_1"),
+                        ],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(completed.result.payload["aggregateId"], aggregate_id);
+        assert_eq!(completed.result.payload["readyToFinalize"], true);
+        let collecting_snapshot = service.dingtalk_snapshot(&mut database).unwrap();
+        assert_eq!(collecting_snapshot.diagnostics.inbound_collecting_count, 1);
+        assert_eq!(collecting_snapshot.diagnostics.inbound_ready_count, 1);
+        assert_eq!(collecting_snapshot.diagnostics.inbound_overdue_count, 0);
+        assert_eq!(collecting_snapshot.diagnostics.card_create_pending_count, 0);
+        let frozen_json: String = database
+            .connection()
+            .query_row(
+                "SELECT frozen_payload_json FROM channel_inbound_aggregate WHERE id = ?1",
+                [&aggregate_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let frozen: FrozenInboundPayload = serde_json::from_str(&frozen_json).unwrap();
+        assert_eq!(frozen.target_agent_ids, ["agent_2", "agent_1"]);
+        assert_eq!(
+            member_mention_ids(&frozen.structured_content),
+            ["agent_2", "agent_1"]
+        );
+        assert_eq!(frozen.acknowledgement_app_id, "ding-app-agent_2");
+
+        let multi_quick_chat_path = quick_chat_path(&database);
+        let pending = service
+            .finalize_inbound(
+                &mut database,
+                &multi_quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-multi-finalize",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: aggregate_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(pending.result.code, "channel.binding.pending");
+        assert_eq!(
+            pending.result.payload["acknowledgementAppId"],
+            "ding-app-agent_2"
+        );
+        let pending_snapshot = service.dingtalk_snapshot(&mut database).unwrap();
+        assert_eq!(pending_snapshot.diagnostics.inbound_collecting_count, 0);
+        assert_eq!(pending_snapshot.diagnostics.card_create_pending_count, 1);
+        let resolved = resolve_pending_for_provider(
+            &service,
+            &mut database,
+            pending.result.payload["pendingBindingId"].as_str().unwrap(),
+            "dingtalk-multi-resolve",
+            DINGTALK_PROVIDER,
+        );
+        assert_eq!(resolved.result.code, "channel.binding.resolved");
+        let dispatched = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: DINGTALK_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "dingtalk-multi-worker".to_string(),
+                    limit: 10,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            dispatched
+                .deliveries
+                .iter()
+                .filter(|delivery| delivery.delivery_kind == "execution_console_upsert")
+                .count(),
+            2
+        );
+        assert_eq!(
+            dispatched
+                .deliveries
+                .iter()
+                .filter(|delivery| {
+                    delivery.delivery_kind == "project_selection"
+                        && delivery.payload["operation"] == "recall"
+                })
+                .count(),
+            1
+        );
+        let resolved_snapshot = service.dingtalk_snapshot(&mut database).unwrap();
+        assert_eq!(resolved_snapshot.diagnostics.card_create_pending_count, 2);
+        assert_eq!(resolved_snapshot.diagnostics.card_update_pending_count, 0);
+        assert_eq!(resolved_snapshot.diagnostics.card_recall_pending_count, 1);
+        assert_eq!(resolved_snapshot.diagnostics.card_failed_count, 0);
+        let request: (i64, String) = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*), addressed_agent_ids_json FROM channel_turn_request",
+                [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(terminal.0, "failed");
-        assert_eq!(terminal.1.as_deref(), Some("aggregation_timeout"));
+        assert_eq!(request.0, 1);
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&request.1).unwrap(),
+            ["agent_2", "agent_1"]
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM agent_run", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+
+        let replay = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-multi-late-replay",
+                    dingtalk_observation_command(
+                        "ding-app-agent_1",
+                        "ding-multi-message",
+                        "ding-multi-group",
+                        "group",
+                        "一起检查多 Bot 聚合",
+                        &[("agent_1", "ding-app-agent_1")],
+                        false,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(replay.result.code, "channel.inbound.replayed");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM channel_inbound_aggregate",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM channel_turn_request", [], |row| row
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

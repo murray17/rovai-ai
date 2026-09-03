@@ -987,6 +987,10 @@ mod tests {
             release_default_policy(AdapterKind::TraeCnCli),
             CompactionDetectorPolicy::Disabled
         );
+        assert_eq!(
+            release_default_policy(AdapterKind::CursorAgent),
+            CompactionDetectorPolicy::Disabled
+        );
     }
 
     #[test]
@@ -1016,6 +1020,24 @@ mod tests {
             "PostCompact",
             "completed"
         ));
+        assert!(!qualified_admission(
+            AdapterKind::ClaudeCodeCli,
+            "PostCompact",
+            "completed"
+        ));
+        assert!(!qualified_admission(
+            AdapterKind::CursorAgent,
+            "preCompact",
+            "imminent_edge"
+        ));
+        assert!(
+            admitted_hook_compaction_signal(AdapterKind::ClaudeCodeCli, "PostCompact", "manual")
+                .is_none()
+        );
+        assert!(
+            admitted_hook_compaction_signal(AdapterKind::CursorAgent, "preCompact", "auto")
+                .is_none()
+        );
         assert!(qualified_admission(
             AdapterKind::CodebuddyCli,
             "SessionStart",

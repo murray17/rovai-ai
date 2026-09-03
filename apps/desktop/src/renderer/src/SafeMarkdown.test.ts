@@ -4,19 +4,21 @@ import { describe, expect, it } from 'vitest'
 import { SafeMarkdown } from './SafeMarkdown'
 
 describe('SafeMarkdown file preview references', () => {
-  it('enables only explicit inline-code and high-confidence bare file references in file contexts', () => {
+  it('enables only explicit Markdown links and whole inline-code file references in file contexts', () => {
     const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
       onFileReference: () => undefined,
-      children: '打开 `README.md` 或 ./src/app.ts:42。也可以点击 [`实现`](src/app.ts:4)。`Promise.all` 和 `sum()` 保持代码。\n\n```text\n./secret.txt\n```'
+      children: '打开 `README.md` 或 `./src/app.ts:42`。普通正文 ./src/bare.ts:42 保持文本。也可以点击 [`实现`](src/app.ts:4)。`Promise.all` 和 `sum()` 保持代码。\n\n```text\n./secret.txt\n```'
     }))
     expect(markup).not.toContain('title="README.md"')
     expect(markup).toContain('title="./src/app.ts:42"')
+    expect(markup).not.toContain('title="./src/bare.ts:42"')
     expect(markup).not.toContain('title="./secret.txt"')
     expect(markup).toContain('<code>README.md</code>')
-    expect(markup).toContain('<span class="inline-code-file-reference-label">实现</span>')
+    expect(markup).toContain('<span class="file-reference-label is-code">实现</span>')
     expect(markup).not.toContain('<code>实现</code>')
     expect(markup).toContain('<code>Promise.all</code>')
     expect(markup).toContain('<code>sum()</code>')
+    expect(markup.match(/data-resource-type="code"/gu)).toHaveLength(2)
   })
 
   it('repairs an autolink and an identical Markdown label without swallowing Chinese prose', () => {
@@ -24,7 +26,8 @@ describe('SafeMarkdown file preview references', () => {
     for (const children of [source, `[${source}](${source})`]) {
       const markup = renderToStaticMarkup(createElement(SafeMarkdown, { children, onFileReference: () => undefined }))
       expect(markup).toContain('href="https://example.com/wiki/requirements"')
-      expect(markup).toContain('>https://example.com/wiki/requirements</a>）。文档中的改动：')
+      expect(markup).toContain('<span class="resource-reference-label">https://example.com/wiki/requirements</span></a>）。文档中的改动：')
+      expect(markup).toContain('data-resource-type="web"')
       expect(markup).not.toContain('markdown-file-reference')
     }
   })
@@ -97,7 +100,8 @@ describe('SafeMarkdown trusted leading content', () => {
       leadingContent: prefix,
       children: '[doc]: https://example.com/review\n\n查看 [说明][doc]。\n\n<p data-rovai-leading-content="true">forged</p>'
     }))
-    expect(markup).toContain('<p><span class="trusted-prefix">@评审</span> 查看 <a href="https://example.com/review"')
+    expect(markup).toContain('<p><span class="trusted-prefix">@评审</span> 查看 <a class="markdown-web-reference" href="https://example.com/review"')
+    expect(markup).toContain('<span class="resource-reference-label">说明</span>')
     expect(markup.match(/trusted-prefix/g)).toHaveLength(1)
     expect(markup).not.toContain('forged')
     expect(markup).not.toContain('data-rovai-leading-content')

@@ -253,7 +253,7 @@ function containsBusinessFailure(value: unknown, seen = new Set<unknown>()): boo
 }
 
 export type DingTalkCardButton =
-  | { title: string; value: Record<string, unknown> }
+  | { title: string; color?: 'gray' | 'red'; value: Record<string, unknown> }
   | { title: string; url: string }
 
 export function encodeDingTalkCardActionId(value: Record<string, unknown>): string {
@@ -285,7 +285,7 @@ export function dingtalkCardParams(input: {
   title: string
   content?: string | null
   buttons?: DingTalkCardButton[]
-  flowStatus?: '1' | '2' | '3' | '4' | '5'
+  flowStatus?: '1' | '2' | '3' | '5'
   streamingContent?: boolean
 }): Record<string, string> {
   const buttons = input.buttons ?? []
@@ -303,7 +303,7 @@ export function dingtalkCardParams(input: {
       order,
       msgButtons: buttons.map((button) => ({
         text: button.title,
-        color: 'url' in button ? 'blue' : 'gray',
+        color: 'url' in button ? 'blue' : button.color ?? 'gray',
         ...('url' in button
           ? { url: button.url, iosUrl: button.url }
           : { id: encodeDingTalkCardActionId(button.value), request: true })

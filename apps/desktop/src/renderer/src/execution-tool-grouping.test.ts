@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecutionProgressItem } from './ui-model'
 import {
+  executionHasActiveCompaction,
   groupConsecutiveToolItems,
+  runtimeCompactionActivityStatus,
   toolActivityGroupHasActiveTool,
   toolActivityGroupPresentation,
   type ToolProgressItem
@@ -55,6 +57,66 @@ describe('execution Tool grouping', () => {
       items: [{ step: { id: 'one' } }, { step: { id: 'two' } }]
     })
     expect(groupConsecutiveToolItems([tool('one')])[0].key).toBe(grouped[0].key)
+  })
+
+  it('uses a Compaction item as a root boundary without counting it as a Tool operation', () => {
+    const grouped = groupConsecutiveToolItems([
+      tool('one'),
+      tool('two'),
+      {
+        key: 'compaction:compact-1',
+        kind: 'compaction',
+        compaction: {
+          id: 'compact-1',
+          adapterKind: 'codex-cli',
+          phase: 'completed',
+          completionEvidence: 'native_terminal',
+          tokens: {},
+          messages: {},
+          summaryText: null
+        }
+      },
+      tool('three')
+    ])
+
+    expect(grouped.map((item) => item.kind)).toEqual([
+      'toolGroup', 'compaction', 'toolGroup'
+    ])
+    const groups = grouped.filter((item) => item.kind === 'toolGroup')
+    expect(toolActivityGroupPresentation(groups[0].items, 'succeeded').primary)
+      .toBe('已执行 2 项操作')
+    expect(toolActivityGroupPresentation(groups[1].items, 'succeeded').primary)
+      .toBe('已执行 1 项操作')
+  })
+
+  it('keeps imminent Compaction neutral and treats only started as active', () => {
+    const compaction = (phase: 'imminent' | 'started' | 'completed'): ExecutionProgressItem => ({
+      key: `compaction:${phase}`,
+      kind: 'compaction',
+      compaction: {
+        id: phase,
+        adapterKind: 'cursor-agent',
+        phase,
+        completionEvidence: phase === 'imminent' ? 'pre_compaction_only' : null,
+        tokens: {},
+        messages: {},
+        summaryText: null
+      }
+    })
+    const imminent = compaction('imminent')
+    const started = compaction('started')
+    const completed = compaction('completed')
+
+    if (imminent.kind !== 'compaction' || started.kind !== 'compaction' || completed.kind !== 'compaction') {
+      throw new Error('test fixture must contain Compaction items')
+    }
+    expect(runtimeCompactionActivityStatus(imminent.compaction, 'running')).toBe('recorded')
+    expect(runtimeCompactionActivityStatus(started.compaction, 'running')).toBe('running')
+    expect(runtimeCompactionActivityStatus(started.compaction, 'cancelled')).toBe('recorded')
+    expect(runtimeCompactionActivityStatus(completed.compaction, 'running')).toBe('completed')
+    expect(executionHasActiveCompaction([imminent])).toBe(false)
+    expect(executionHasActiveCompaction([imminent, started])).toBe(true)
+    expect(executionHasActiveCompaction([completed])).toBe(false)
   })
 
   it('keeps FileChange Activities inside the Tool group without counting presentation rows as operations', () => {

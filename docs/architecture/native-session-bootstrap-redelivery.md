@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: native-session-bootstrap-redelivery
-last_updated: 2026-08-25
+last_updated: 2026-09-03
 ---
 
 # Native Session Bootstrap Redelivery
@@ -69,7 +69,7 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | --- | --- | --- | --- |
 | GitHub Copilot | `preCompact` / `imminent_edge` | 隔离官方 Plugin `preCompact` Hook | 目标 CLI 没有对等 completed Hook；该 edge 一次性推进 revision，accepted redelivery 后即结束，不等待 post event |
 | OpenCode | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | ACP 主消息流不转发 native event，完成事件本身可靠 |
-| Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；忽略 started 与 summary |
+| Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；started 与 summary 不参与 admission |
 | Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only Prompt lifecycle correlation + idle/detached completion compatibility route | Kimi native ACP server 把内部 lifecycle 降格为同形 `agent_message_chunk`；Active Prompt 只有 exact started 建立 pending 后的 exact completed 才准入，blocked 保持 pending，cancelled 清除 pending；idle/detached 保留 exact completion detector |
 | Grok Build | `grok.acp.auto_compact_completed.v1` / `completed` | 当前 ACP `_x.ai/session_notification` inbound route | `0.2.118` no-leader live wire 是初始历史证据；当前支持门为 `>= 1.0.0`，detector 保持 `best_effort` 且目标版本需分别复核。event ID 作为 Runtime occurrence identity，started/failed/cancelled/replay/unknown 全部忽略 |
 | Qoder | `PostCompact` / `completed` | 隔离 `--settings` Hook | 目标版本真实 `/compact` 完成态可靠 |
@@ -81,7 +81,8 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 Hook relay command 冻结 adapter、Host 与 expected source signal，不信任 payload 自报 source；payload
 若携带 event name 必须完全匹配。Copilot 目标版本 payload 不带 event name，因此 command-side source
 尤其必要。relay 只持久化 lifecycle metadata 的 digest，不把 compact summary、prompt、Bootstrap 或
-identity-derived bytes 写入 observation evidence。
+identity-derived bytes 写入 observation evidence/outbox；Qoder/Qwen 的显式 `compact_summary` 只可随同一次 live local IPC
+进入下述执行台旁路，uncertain recovery 不回放该内容。
 
 Kimi detector 不安装 Hook、不修改用户 `KIMI_CODE_HOME/config.toml`，也不建立额外 side-channel。官方 started
 帧为 `Compacting conversation context…` 或带 instruction 的同一模板；completed 固定为
@@ -113,6 +114,32 @@ Copilot 的一次 `preCompact` 只产生一个 requirement revision。目标版�
 已有历史并保留其间新增消息；真实 smoke 也确认 Hook 后下一 ACP 输入可 accepted。因此 v0.48 选择
 pre edge，避免等待不存在的 completed Hook。其余 Runtime 有可靠 completed surface，只认完成态，
 不接受 PreCompact、started、failed、cancelled、unknown 或 telemetry。
+
+## 执行台 Compaction 展示旁路
+
+Compaction observation 仍只拥有 Bootstrap redelivery。作为独立、本地、无副作用的产品投影，Core 只能在 Rovai 现有入口已经
+捕获的同一个原生 signal 旁生成 `runtime.compaction.display`，且捕获瞬间必须还能由 active ACP Prompt route 或现有
+observation Hook 的 Built-in Tool active lease 精确取得 `agentRunId + executionEpoch`。warm Session 已 detach、Hook IPC
+lease 已换代、Run 已取消/终态或 observation 是 outbox replay 时，不补挂到当前或后续 Run。展示写入失败也不改变
+observation Applied/Duplicate/Fenced 结果。
+
+执行台展示不得为尚未接入的 Runtime 安装 Hook、Plugin 或配置 Overlay，也不得修改 Runtime 启动参数、环境或用户配置来制造
+新的展示信号。现有本地 Hook IPC 只识别 `compaction_observation`；`display_auth` 只把同一次 live observation 安全归属到当前
+AgentRun，`summary_text` 只携带现有 Qoder/Qwen Hook 已经明确给出的摘要。两者都不改变 observation 的 Bootstrap 语义。
+
+旁路只复制 Runtime 明确给出的字段：Kiro `summary`，Kimi exact completion 的 message/token 三个整数，Grok structured
+`tokens_before/tokens_after/elapsed_ms`，以及 Qoder/Qwen live observation Hook 的显式 `compact_summary`。Copilot 只表达 pre
+edge，OpenCode 只表达完成，CodeBuddy 只表达 post-compaction Session boundary；缺失值保持缺失。`summary_preview`、trigger、
+Session ID、时间差、token drop 与普通文本不能补造展示数据。Codex 不进入本 detector policy；其 app-server
+`contextCompaction` item 由执行 Evidence 入口直接截获为同一 display schema，仍不推进 Bootstrap revision。
+
+Claude Code 与 Cursor Agent 当前没有执行台 Compaction 展示入口；本次需求不新增其协议接入。Antigravity 也只允许在现有
+Adapter 已经收到明确原生事件时投影，不为填满 Runtime 矩阵新增 detector 或启动配置。
+
+该事件使用本地 Execution Evidence/Managed Blob 以支持长 summary 惰性读取，但 Canonical Activity classifier 明确返回
+non-activity，public execution query 明确排除，Main 的飞书/钉钉 Host 与局域网执行台也不因它唤醒。它不是公共 Evidence、
+Camp Message、世界地图活动或 Runtime detector policy。呈现合同见
+[Run Process Detail Surface v29](../contracts/run-process-detail-surface-v29.md)。
 
 ## Observer Lease 与去重
 

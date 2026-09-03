@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # Rovai-ai 开发者指南
@@ -109,7 +109,7 @@ App，以受控本机 API 和时钟验证页面框架、截止时间与 authorit
 | 任务 | 文档 |
 | --- | --- |
 | 启动开发 App、运行打包产物或区分日常/开发数据 | [本地开发与 App 隔离流程](local-workflow.md) |
-| 配置和验收钉钉 Web Session 渠道 | [本地开发与 App 隔离流程：钉钉 Web Session](local-workflow.md#钉钉-web-session-验收前置)、[DingTalk Channel v10](../contracts/dingtalk-channel-v10.md)、[Channel Storage v3](../contracts/channel-storage-v3.md) |
+| 配置和验收钉钉 Web Session 渠道 | [本地开发与 App 隔离流程：钉钉 Web Session](local-workflow.md#钉钉-web-session-验收前置)、[DingTalk Channel v12](../contracts/dingtalk-channel-v12.md)、[Channel Storage v3](../contracts/channel-storage-v3.md) |
 | 创建、复用、交接、合入或清理 Git worktree | [Git Worktree 生命周期与清理](worktrees.md) |
 | 判断主机、Node、pnpm、Rust、Git 或 Runtime 前置条件 | [开发环境与依赖](environment.md) |
 | 新增 Product Runtime、建立真实 Probe 或完成逐平台准入 | [Agent Runtime 接入与准入 Checklist](runtime-integration-checklist.md) |

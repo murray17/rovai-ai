@@ -170,7 +170,7 @@ login、没有发送模型 Prompt，也没有读写日常数据库。
 | Permission / workspace | 官方文档提供 agent/plan/ask 与 auto-review/force | 静态配置已实现；read-only 强制 plan 并移除高权限 flag；尚无 allow/deny 副作用证据 |
 | Skill | 官方文档列出项目 `.cursor/skills` 与 `.agents/skills` | Rovai 只拥有 `.cursor/skills` projection；Runtime load/invocation 为 DocumentationOnly |
 | MCP / continuation | 官方文档只确认 Cursor 配置面；本轮未获得 authenticated Session | External MCP、session/load/resume、warm reuse 均 Disabled；完成 Run 后停止 Host |
-| Activity / final / usage | 无 authenticated Prompt、Tool 或 terminal transcript | Activity baseline 为 `run_level`；Missing-Send、Usage/Cost、Compaction 均 Disabled |
+| Activity / final / usage | 无 authenticated Prompt、Tool 或 terminal transcript；官方现已记录 observation-only `preCompact` 及 current/window/usage token 字段 | Activity baseline 为 `run_level`；Missing-Send、Usage/Cost 与 Bootstrap Compaction detector 均 Disabled。执行台当前无展示入口，本次需求不新增其协议接入 |
 
 本轮不满足 checklist 的 First run、Command output、Approval、Cancellation、Private request、Built-in CLI、
 Process cleanup 与 continuation 必过 Smoke。macOS arm64、macOS x64、Windows x64 因而全部保持
@@ -815,6 +815,28 @@ detector。Antigravity v0.48 与 TRAE 当前 policy 为 `disabled`，因为尚�
 使用 token 数或 context telemetry 猜测 compaction。detector 建立失败、短暂中断或恢复都不改变 Product
 Runtime 的 Built-in CLI 兼容性结论。完整时序与持久边界见
 [Native Session Bootstrap Redelivery](architecture/native-session-bootstrap-redelivery.md)。
+
+执行台 display sidecar 与本节 detector 资格独立，但只复用 Rovai 当前已经能够捕获的原生事件；展示功能不得为尚未接入的
+Runtime 安装 Hook、Plugin、配置 Overlay，或改变其启动环境。当前展示范围为：
+
+| Runtime | 当前展示 | 现有数据来源 | 可展开内容 |
+| --- | --- | --- | --- |
+| Codex CLI | 是 | app-server `contextCompaction` | 无 |
+| OpenCode | 是 | 已有 managed Plugin `session.compacted` | 无 |
+| GitHub Copilot | 是 | 已有 detector Hook `preCompact` | 无 |
+| Claude Code | 否 | 当前无展示入口；本次需求不新增其协议接入 | — |
+| Kiro | 是 | 已有 ACP compaction status | Runtime 明确给出 summary 时展开 |
+| Qoder | 是 | 已有 `PostCompact` observation Hook | summary |
+| CodeBuddy | 是 | 已有 `SessionStart(source=compact)` | 无 |
+| Qwen Code | 是 | 已有 `PostCompact` observation Hook | summary |
+| TRAE CLI CN | 否 | 无可靠信号 | — |
+| Cursor Agent | 否 | 当前无展示入口；本次需求不新增其协议接入 | — |
+| Kimi Code | 是 | 已有 ACP compaction lifecycle | token、消息数量 |
+| Grok Build | 是 | 已有 native extension | token、耗时 |
+| Antigravity | 条件性 | 仅现有 Adapter 已收到的明确事件；不新增 Hook | 当前无额外数据 |
+
+因此当前明确接受 Claude 暂不显示 Compact 摘要、Cursor 暂不显示 Compact token；这不改变 Cursor 全平台
+`not_qualified`、任何 Runtime 的 detector policy 或 Bootstrap observation/outbox。
 
 ## External MCP 兼容性
 

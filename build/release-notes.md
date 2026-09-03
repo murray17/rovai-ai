@@ -1,19 +1,17 @@
-# Rovai AI v0.0.5
+# Rovai AI v0.0.6
 
-Rovai AI 0.0.5 expands the daily Camp workflow with continuous input, faster supported runtimes, richer files and images, and Feishu channel collaboration.
+Rovai AI 0.0.6 improves persistent Camp controls, safer resource navigation, trustworthy Runtime compaction visibility, and DingTalk channel management.
 
-macOS arm64 and x64 builds use the same fixed Rovai Release Signing certificate as 0.0.4. Windows x64 remains an unsigned Preview build and may show a SmartScreen warning.
+macOS arm64 and x64 builds use the same fixed Rovai Release Signing certificate as 0.0.5. Windows x64 remains an unsigned Preview build and may show a SmartScreen warning.
 
 ## What's Changed
 
-- Queue and edit the next Camp message while a run is active, then continue automatically with its routing and execution choices frozen at publication.
-- Add per-member Fast preferences with automatic runtime capability detection and safe fallback when a runtime does not support Fast execution.
-- Open changed, referenced, and external files in resizable preview tabs while preserving inline links, reading anchors, and exact file locations.
-- Persist and display structured Runtime images with consistent message timing and retention across Camp switches.
-- Refine execution into compact avatar rails and detail popovers with live refresh, complete output, clearer initiators, and reliable stopped or cancelled terminal states.
-- Add Feishu bot publishing, group and topic project selection, reply and execution cards, adaptive host maintenance, and a bot-gated LAN execution console.
-- Keep DingTalk unavailable in the public channel UI while its remaining consistency and real-client acceptance work is completed.
-- Improve Desktop startup, shutdown, navigation refresh, composer input recovery, approvals, scrollbars, and model catalog refresh behavior.
-- Fix Windows Quick Chat workspace paths and strengthen channel, attachment, cancellation, and Camp-open reliability.
+- Keep execution, task, and member detail popovers open while you work elsewhere, with explicit dismissal from the active entry, close button, or Escape.
+- Fix the shared-memory review drawer layering so its content stays visible and interactive above the page overlay.
+- Recognize local resources only from explicit Markdown links or whole inline-code references, with clearer file-type and web-link icons and the existing safe-open boundary preserved.
+- Show explicitly attributable Runtime compaction as a standalone non-Tool execution row with bounded token or summary details, neutral imminent state, and active started state.
+- Keep compaction display tied to existing native Runtime events without installing display-only hooks, plugins, or configuration overlays.
+- Add durable DingTalk multi-bot aggregation, ordered target admission, restart-safe collection, replay deduplication, bounded parent-message context, and privacy-safe diagnostics.
+- Open DingTalk as a selectable channel provider with typed account, connection, Bot, and management-link controls, while unsupported attachment and native-interaction capabilities remain independently gated.
 
-**Full changelog:** https://github.com/murray17/rovai-ai/compare/v0.0.4...v0.0.5
+**Full changelog:** https://github.com/murray17/rovai-ai/compare/v0.0.5...v0.0.6

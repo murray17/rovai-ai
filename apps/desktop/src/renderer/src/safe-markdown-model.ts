@@ -2,7 +2,7 @@ export * from '../../shared/execution-presentation/safe-markdown-model'
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
-import { inlineFileReferenceSource, isInlineFileReference, parseFileReference, tokenizeFileReferences } from '../../file-preview-reference'
+import { inlineFileReferenceSource, isInlineFileReference, parseFileReference } from '../../file-preview-reference'
 
 type MarkdownNode = {
   type?: unknown
@@ -61,18 +61,6 @@ export function projectMessageFileReferences(source: string): MessageFileReferen
       if (typeof start === 'number' && typeof end === 'number'
         && typeof node.value === 'string' && isInlineFileReference(node.value)) {
         references.push({ start, end, rawReference: node.value, label: node.value, inlineCode: true })
-      }
-      return
-    }
-    if (node.type === 'text' && typeof start === 'number' && typeof end === 'number') {
-      for (const token of tokenizeFileReferences(source.slice(start, end))) {
-        references.push({
-          start: start + token.start,
-          end: start + token.end,
-          rawReference: token.raw,
-          label: token.raw,
-          inlineCode: false
-        })
       }
       return
     }

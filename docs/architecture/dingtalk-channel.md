@@ -3,12 +3,12 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # 钉钉渠道架构
 
-字段、状态和恢复合同见 [DingTalk Channel v10](../contracts/dingtalk-channel-v10.md)，credential 与 Developer Session 持久化见
+字段、状态、Renderer 管理入口和恢复合同见 [DingTalk Channel v12](../contracts/dingtalk-channel-v12.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v2](../contracts/camp-membership-v2.md)和
@@ -19,8 +19,10 @@ last_updated: 2026-09-02
 [V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)、
 [V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)、
 [V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)、
-[V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)与
-[V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)。
+[V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)、
+[V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)、
+[V1.38-D01](../versions/v1.38/decisions.md#v1-38-d01)与
+[V1.38-D02](../versions/v1.38/decisions.md#v1-38-d02)。
 
 ## 组件与权威
 
@@ -166,8 +168,10 @@ AI Card 投递同时产生两种身份：稳定 `outTrackId` 只用于卡片更�
 终态移除停止；收起时公开 Evidence 变化不更新卡。打开入口是直接 URL action，不做 Owner callback；最近输出最多 30 条，
 安全 shell command 使用状态符号、`$` 与约 72 显示列的首尾截断。内置 AI 模板只提供整个输出区的展开状态，Main 不模拟
 逐 command 折叠，也不投影 command result。停止只调用 DingTalk Host 的 exact-run Core 命令。共享 `ExecutionViewService` 用 immutable scope 向 Core 读取
-同 Camp/队员、不晚于 focus Run 的公开历史并以 SSE 更新，不提供写入口。正式 Agent 输出仍是新的 Markdown 消息，网络失败
-只结算 Outbox，不回滚 Core 消息。
+同 Camp/队员、不晚于 focus Run 的公开历史并以 SSE 更新，不提供写入口。正式 Agent 输出仍是新的 Markdown 消息；有语义
+父消息时，Core 冻结同 Camp、较早且未删除父消息的有界摘要，Main 以 blockquote 明示“回复”，但不声称 native reply。
+网络失败只结算 Outbox，不回滚 Core 消息。超长正文不得在一个 delivery 内分片发送；只有每片拥有独立 durable Outbox、
+顺序和重试身份后才开放。
 
 下一条 root request admission 后，执行卡使用按 group/p2p 选择的 Robot recall API 与持久 carrier identity 真正撤回，
 成功后撤销内存 URL grant；不再更新为“此执行记录已结束”。只有真正进入 FIFO 的请求发送排队 AI Card，admission 后
@@ -188,9 +192,9 @@ Stream callback fast ACK
 → classify p2p/group, ignore opaque openConvThreadId/openThreadId, reject explicit group topic identity
 → require exact Stream binding + matching robotCode + isInAtList
 → Core verify Owner from appKey + userId digest
-→ p2p exact /new OR group roster reconcile
-→ group first observe as durable incomplete aggregate
-→ 3-second single-App proof, then replay the same observation as canonical complete
+→ p2p exact /new OR every receiving group App immediately observes into one durable incomplete aggregate
+→ 3-second callback collection, then replay the ordered observed set as canonical complete
+→ group roster reconcile
 → finalize
 → PendingCampBinding or existing binding FIFO
 → CollaborationService atomic external-channel admission
@@ -205,26 +209,33 @@ Stream callback fast ACK
 
 群 callback 由 exact credential-bound App Stream、已校验的 `robotCode` 与 `isInAtList=true` 共同证明 receiving Bot。
 `chatbotUserId` 与 `atUsers[].dingtalkId` 都是 opaque provider identity，真实 callback 可能使用不同编码，二者不得再做
-相等判断；普通成员 mention 也不得推导 Agent target。多 Rovai Bot 仍由多个独立 App Stream 的真实接收事实证明，
-并在 3 秒窗口后整条 fail closed。私聊不依赖 `isInAtList` 或 mention identity，继续直接进入 Quick Chat。
+相等判断；普通成员 mention 也不得推导 Agent target。多 Rovai Bot 由多个独立 App Stream 的真实接收事实证明，每份
+callback 立即合并到同一 SQLite aggregate，目标按首次持久观察顺序冻结，首观察 App 唯一负责 acknowledgement 与项目卡。
+Main 正常存活时在 3 秒后提交完整集合；Main 重启错过定时器时，Core 在 deadline 后以非空且相等的 expected/observed
+集合自动封口。两条路径都只能产生一个 `ChannelTurnRequest` 与同一 CampTurn 的多个 AgentRun；迟到 callback 不建第二根。
+私聊不依赖 `isInAtList` 或 mention identity，继续直接进入 Quick Chat。
 
 群 roster 以远端当前机器人列表与本机 published DingTalk Bot 的交集为 authority，使用既有 membership
 generation/source binding reconcile。加入/移出从下一次新 Run 生效，已运行 Run 与历史保持冻结。roster 不可读、出现未知
 App 或目标已移出时 fail closed。
 
-## 当前 Feature Gate
+<a id="当前-feature-gate"></a>
+## 当前管理入口与能力 Gate
+
+Renderer 渠道设置已开放钉钉管理入口：Snapshot 中的飞书、钉钉 Provider 都进入同一可选择 Tab、连接、账号与队员 Bot
+管理路径。入口可见不扩大 Provider 能力，未具备平台证据的子能力仍按下表分别关闭。
 
 | 能力 | 当前状态 | 解除条件 |
 | --- | --- | --- |
 | Owner 私聊 | enabled | 真实租户 Web Session、Stream 与回复验收 |
 | Owner 同组织内部群显式 `@` | enabled；Bot 必须由群“添加机器人”入口安装，普通成员形态的普通群/外部群不产生 Stream callback | 真实群 roster、项目卡和输出验收 |
-| 同消息直接多 Bot | disabled；普通群须由 exact Stream App、匹配 `robotCode` 与 `isInAtList=true` 证明 receiving Bot；opaque `chatbotUserId/atUsers` 不做相等判断，多个 receiving Rovai App 仍整条 fail closed，单 Bot 协作扩展只走 Core A2A | 多 App observation 真实证据 |
+| 同消息直接多 Bot | enabled；多个 exact Stream callback durable 合并为一个根请求和有序多个 AgentRun，正常 3 秒封口，重启后按 SQLite deadline 恢复；Renderer 可管理对应 Bot | packaged 桌面端/手机端真实多 Bot callback 与顺序证据继续作为能力验收，不关闭整个管理入口 |
 | 话题/Thread | disabled；`openConvThreadId / openThreadId` 是普通 callback 可能携带的不透明路由元数据，不作为 Topic 证明；只有明确 `threadId / topicId / topicKey` 才拒绝 | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
-| 入站附件 | summary only | 官方下载、授权和 Managed Attachment ingress 设计 |
-| 出站附件 | disabled，明确 unsupported | 已验证 app-only 原生投递和可恢复 message identity |
+| 入站附件 | summary only；私聊 file/audio/video 虽可能提供 downloadCode，但未建立 Managed Attachment ingress；群 Bot 平台不接收这些类型 | 官方下载、授权、大小/媒体校验和 Managed Attachment ingress 设计 |
+| 出站附件 | disabled，明确 unsupported；不借用 custom webhook schema | 已验证 Internal App Robot app-only 原生投递、顺序和可恢复 message identity |
 | AI 状态卡 | enabled；平台内置通用卡片无需用户模板；项目刷新、最近输出展开/收起已在真实桌面客户端验收，停止、固定 URL、排队卡及 execution/queue Robot recall 已接入 | 手机真实投递、URL fragment、SSE、撤回与停止终态矩阵 |
 
-不得通过宽松 parser、普通群 fallback、fabricated message success 或 Renderer 开关绕过这些 gate。
+不得通过宽松 parser、普通群 fallback、fabricated message success，或仅因 Renderer 管理入口已开放就绕过这些能力 gate。
 
 ## 恢复与秘密
 
@@ -240,6 +251,9 @@ Session 失效只阻止新的发布，不停止已有 Bot。按需 worker 在启
 唤醒时重取已知群 roster、finalize ready aggregate、领取 delivery 并结算；清空后不再周期运行。任何外部失败都不从
 Renderer 状态重建业务事实。
 
+DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card create/update/recall/failed 计数，用于判断链路阶段；
+不暴露正文、附件内容、tenant/chat/App/Agent/Owner identity、credential、URL、token 或远端响应。计数不参与 admission。
+
 ## Core authority 与渠道启动
 
 渠道 Host 生命周期由 Main 的 `ChannelHostLifecycle` 与 Supervisor authority 对齐：只在 Core ready 且业务请求能力
@@ -248,7 +262,7 @@ Renderer 状态重建业务事实。
 
 ## References
 
-- [DingTalk Channel v10](../contracts/dingtalk-channel-v10.md)
+- [DingTalk Channel v12](../contracts/dingtalk-channel-v12.md)
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)
@@ -260,3 +274,5 @@ Renderer 状态重建业务事实。
 - [V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)
 - [V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)
 - [V1.37-D15](../versions/v1.37/decisions.md#v1-37-d15)
+- [V1.38-D01](../versions/v1.38/decisions.md#v1-38-d01)
+- [V1.38-D02](../versions/v1.38/decisions.md#v1-38-d02)

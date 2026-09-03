@@ -157,7 +157,7 @@ app.whenReady().then(async () => {
   }
   await check('dragging text inside a link does not open it, but a later single click does', async () => {
     const before = await state()
-    await selectText(`${locatedLink} .inline-code-file-reference-label`)
+    await selectText(`${locatedLink} .file-reference-label.is-code`)
     assert.equal((await state()).opens.length, before.opens.length)
     const after = await click(locatedLink)
     assert.equal(after.opens.length, before.opens.length + 1)

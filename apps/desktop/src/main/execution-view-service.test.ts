@@ -302,6 +302,12 @@ describe('ExecutionViewService', () => {
       reader = stream.body!.getReader()
       expect((await reader.read()).done).toBe(false)
 
+      for (const listener of eventListeners) {
+        listener({ method: 'runtime.compaction.display', params: { agentRunId: 'run-a' } })
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(requestCount).toBe(1)
+
       snapshot.runs[0].evidence[1].payload.delta = '自动更新后的正文'
       for (const method of ['agent.text.delta', 'activity.started', 'activity.completed']) {
         for (const listener of eventListeners) {
