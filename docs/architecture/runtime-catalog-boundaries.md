@@ -363,7 +363,10 @@ receipt并接受 Input。Pi system prompt 不属于压缩的消息历史，compa
 managed Skill target 为 `.pi/skills`，每次 Session activation 重新发现并把 exact catalog 写入 receipt。Pi 没有内建
 MCP，但官方 extension Tool API 可安全桥接，因此 External MCP 为
 `AdditivePerRun / RovaiWins / CoreManaged`：Core 持有 stdio/Streamable HTTP transport、secret、cancel 与 cleanup，
-Pi 只看当前 Run proxy tools。Shell Approval 保存 Pi 实际解析的 shell path/args/argv-or-stdin transport，不伪造
+Pi 只看当前 Run 成功激活的 proxy tools。stdio command 保留用户配置中的 bare/relative/absolute 结构，并在每次
+AgentRun/恢复时按当轮 Runtime PATH/cwd 重新解析，不写回设备路径、不经过 Shell。单个用户外部 Server 的解析、启动、
+initialize 或 Tool catalog 失败只将该 Server 标记 unavailable 并记录安全诊断；Pi Session 与其他 Server 继续。
+投影身份损坏与调用期 bridge/fence 失败仍 fail closed。Shell Approval 保存 Pi 实际解析的 shell path/args/argv-or-stdin transport，不伪造
 `/bin/zsh -lc`。`agent_settled` 是唯一成功边界；Usage 只读 terminal assistant `message_end.message.usage`，未知
 reasoning/cost 保持 NULL。
 

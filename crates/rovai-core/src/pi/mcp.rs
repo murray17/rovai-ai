@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -54,6 +54,14 @@ pub(crate) struct PiMcpToolDefinition {
     pub input_schema: Value,
     pub description_digest: String,
     pub input_schema_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PiMcpActivationFailure {
+    pub server_id: String,
+    pub server_name: String,
+    pub diagnostic_code: String,
+    pub reason: String,
 }
 
 #[derive(Debug)]
@@ -556,6 +564,7 @@ pub(crate) struct PiMcpBridge {
     tools: Vec<PiMcpToolDefinition>,
     tools_by_runtime_name: BTreeMap<String, PiMcpToolDefinition>,
     clients: BTreeMap<String, Arc<PiMcpClient>>,
+    activation_failures: Vec<PiMcpActivationFailure>,
     projection_digest: String,
 }
 
@@ -563,6 +572,8 @@ impl PiMcpBridge {
     pub(crate) async fn start(projection: &PreparedMcpProjection) -> Result<Arc<Self>> {
         let mut tools = Vec::new();
         let mut clients: BTreeMap<String, Arc<PiMcpClient>> = BTreeMap::new();
+        let mut activation_failures = Vec::new();
+        let mut seen_server_ids = BTreeSet::new();
         let mut source_identities = BTreeSet::new();
         let mut runtime_names = NATIVE_TOOL_NAMES
             .into_iter()
@@ -583,54 +594,102 @@ impl PiMcpBridge {
                 let definition = projection.servers.get(projection_name).with_context(|| {
                     format!("ready MCP Server {} has no definition", exposure.name)
                 })?;
-                let client = PiMcpClient::spawn(&exposure.server_id, definition).await?;
-                if clients.contains_key(&exposure.server_id) {
-                    client.shutdown().await;
+                if !seen_server_ids.insert(exposure.server_id.clone()) {
                     bail!("Pi MCP projection contains a duplicate Server identity");
                 }
-                clients.insert(exposure.server_id.clone(), client.clone());
-                let listed = client.list_tools().await?;
-                for value in listed {
-                    let tool_name = value
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.trim().is_empty())
-                        .context("Pi MCP tools/list returned a Tool without a name")?;
-                    if !source_identities.insert((exposure.name.clone(), tool_name.to_string())) {
-                        bail!("Pi MCP tools/list returned a duplicate source identity");
+                let client = match PiMcpClient::spawn(&exposure.server_id, definition).await {
+                    Ok(client) => client,
+                    Err(error) => {
+                        record_optional_activation_failure(
+                            &mut activation_failures,
+                            exposure,
+                            definition,
+                            PiMcpActivationStage::Start,
+                            &error,
+                        );
+                        continue;
                     }
-                    let runtime_name = mcp_runtime_name(&exposure.name, tool_name);
-                    if !runtime_names.insert(runtime_name.clone()) {
-                        bail!("Pi MCP proxy Tool name collision");
+                };
+                let listed = match client.list_tools().await {
+                    Ok(listed) => listed,
+                    Err(error) => {
+                        client.shutdown().await;
+                        record_optional_activation_failure(
+                            &mut activation_failures,
+                            exposure,
+                            definition,
+                            PiMcpActivationStage::ToolCatalog,
+                            &error,
+                        );
+                        continue;
                     }
-                    let description = value
-                        .get("description")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
-                    if description.len() > MCP_DESCRIPTION_MAX_BYTES {
-                        bail!("Pi MCP Tool description exceeds the model-input limit");
+                };
+                let mut staged_source_identities = source_identities.clone();
+                let mut staged_runtime_names = runtime_names.clone();
+                let prepared_tools = listed
+                    .into_iter()
+                    .map(|value| {
+                        let tool_name = value
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.trim().is_empty())
+                            .context("Pi MCP tools/list returned a Tool without a name")?;
+                        if !staged_source_identities
+                            .insert((exposure.name.clone(), tool_name.to_string()))
+                        {
+                            bail!("Pi MCP tools/list returned a duplicate source identity");
+                        }
+                        let runtime_name = mcp_runtime_name(&exposure.name, tool_name);
+                        if !staged_runtime_names.insert(runtime_name.clone()) {
+                            bail!("Pi MCP proxy Tool name collision");
+                        }
+                        let description = value
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if description.len() > MCP_DESCRIPTION_MAX_BYTES {
+                            bail!("Pi MCP Tool description exceeds the model-input limit");
+                        }
+                        let input_schema = value
+                            .get("inputSchema")
+                            .filter(|value| value.is_object())
+                            .cloned()
+                            .context("Pi MCP Tool has no object inputSchema")?;
+                        if input_schema.get("type").and_then(Value::as_str) != Some("object") {
+                            bail!("Pi MCP Tool inputSchema must describe an object");
+                        }
+                        Ok(PiMcpToolDefinition {
+                            server_id: exposure.server_id.clone(),
+                            server_name: exposure.name.clone(),
+                            tool_name: tool_name.to_string(),
+                            runtime_name,
+                            description_digest: canonical_json_digest(&json!(description))?,
+                            input_schema_digest: canonical_json_digest(&input_schema)?,
+                            description,
+                            input_schema,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>();
+                let prepared_tools = match prepared_tools {
+                    Ok(prepared_tools) => prepared_tools,
+                    Err(error) => {
+                        client.shutdown().await;
+                        record_optional_activation_failure(
+                            &mut activation_failures,
+                            exposure,
+                            definition,
+                            PiMcpActivationStage::ToolCatalog,
+                            &error,
+                        );
+                        continue;
                     }
-                    let input_schema = value
-                        .get("inputSchema")
-                        .filter(|value| value.is_object())
-                        .cloned()
-                        .context("Pi MCP Tool has no object inputSchema")?;
-                    if input_schema.get("type").and_then(Value::as_str) != Some("object") {
-                        bail!("Pi MCP Tool inputSchema must describe an object");
-                    }
-                    tools.push(PiMcpToolDefinition {
-                        server_id: exposure.server_id.clone(),
-                        server_name: exposure.name.clone(),
-                        tool_name: tool_name.to_string(),
-                        runtime_name,
-                        description_digest: canonical_json_digest(&json!(description))?,
-                        input_schema_digest: canonical_json_digest(&input_schema)?,
-                        description,
-                        input_schema,
-                    });
-                }
+                };
+                source_identities = staged_source_identities;
+                runtime_names = staged_runtime_names;
+                clients.insert(exposure.server_id.clone(), client);
+                tools.extend(prepared_tools);
             }
             Ok::<(), anyhow::Error>(())
         }
@@ -650,6 +709,7 @@ impl PiMcpBridge {
             tools,
             tools_by_runtime_name,
             clients,
+            activation_failures,
             projection_digest: projection.projection_digest.clone(),
         }))
     }
@@ -660,6 +720,10 @@ impl PiMcpBridge {
 
     pub(crate) fn projection_digest(&self) -> &str {
         &self.projection_digest
+    }
+
+    pub(crate) fn activation_failures(&self) -> &[PiMcpActivationFailure] {
+        &self.activation_failures
     }
 
     pub(crate) fn tool(&self, runtime_name: &str) -> Option<&PiMcpToolDefinition> {
@@ -683,6 +747,67 @@ impl PiMcpBridge {
             client.shutdown().await;
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PiMcpActivationStage {
+    Start,
+    ToolCatalog,
+}
+
+fn record_optional_activation_failure(
+    failures: &mut Vec<PiMcpActivationFailure>,
+    exposure: &rovai_core::mcp_projection::McpExposureEntry,
+    definition: &McpServerDefinition,
+    stage: PiMcpActivationStage,
+    error: &anyhow::Error,
+) {
+    let error_chain = format!("{error:#}");
+    let process_not_found = matches!(stage, PiMcpActivationStage::Start)
+        && error.chain().any(|cause| {
+            cause
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        });
+    let relative_stdio_command = matches!(
+        definition,
+        McpServerDefinition::Stdio { command, .. }
+            if {
+                let path = Path::new(command);
+                path.is_relative() && path.components().count() > 1
+            }
+    );
+    let (diagnostic_code, reason) = if error_chain
+        .contains("command is not available on Runtime PATH")
+        || (process_not_found && !relative_stdio_command)
+    {
+        (
+            "mcp.runtime_launch_failed",
+            "executable_not_found_in_runtime_path",
+        )
+    } else if error_chain.contains("relative application is unavailable")
+        || (process_not_found && relative_stdio_command)
+    {
+        (
+            "mcp.runtime_launch_failed",
+            "relative_executable_not_found_in_runtime_cwd",
+        )
+    } else {
+        match stage {
+            PiMcpActivationStage::Start => {
+                ("mcp.activation_failed", "server_start_or_initialize_failed")
+            }
+            PiMcpActivationStage::ToolCatalog => {
+                ("mcp.tool_catalog_unavailable", "server_tool_catalog_failed")
+            }
+        }
+    };
+    failures.push(PiMcpActivationFailure {
+        server_id: exposure.server_id.clone(),
+        server_name: exposure.name.clone(),
+        diagnostic_code: diagnostic_code.to_string(),
+        reason: reason.to_string(),
+    });
 }
 
 impl Drop for PiMcpBridge {
@@ -836,17 +961,24 @@ mod tests {
             .find(|path| path.is_file())
             .and_then(|path| path.canonicalize().ok())
             .expect("Node.js is required for the MCP process fixture");
+        let runtime_path = std::env::join_paths([node.parent().unwrap()])
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         let mut servers = BTreeMap::new();
         servers.insert(
             "github".to_string(),
             McpServerDefinition::Stdio {
-                command: node.to_string_lossy().to_string(),
+                command: "node".to_string(),
                 args: vec![fixture.to_string_lossy().to_string()],
                 cwd: Some(cwd.to_string_lossy().to_string()),
-                env: BTreeMap::from([(
-                    "ROVAI_MCP_SMOKE_SOURCE".to_string(),
-                    "pi-core-bridge".to_string(),
-                )]),
+                env: BTreeMap::from([
+                    ("PATH".to_string(), runtime_path),
+                    (
+                        "ROVAI_MCP_SMOKE_SOURCE".to_string(),
+                        "pi-core-bridge".to_string(),
+                    ),
+                ]),
             },
         );
         let projection = PreparedMcpProjection {
@@ -874,8 +1006,13 @@ mod tests {
         };
 
         let bridge = PiMcpBridge::start(&projection).await.unwrap();
+        assert!(matches!(
+            &projection.servers["github"],
+            McpServerDefinition::Stdio { command, .. } if command == "node"
+        ));
         assert_eq!(bridge.tools().len(), 1);
         assert_eq!(bridge.tools()[0].runtime_name, "mcp_github_echo");
+        assert!(bridge.activation_failures().is_empty());
         assert_eq!(
             bridge
                 .execute("mcp_github_echo", json!({"text":"ok"}))
@@ -883,6 +1020,115 @@ mod tests {
                 .unwrap(),
             json!({
                 "content": [{"type":"text", "text":"pi-core-bridge:ok"}],
+                "isError": false,
+            })
+        );
+        bridge.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn unavailable_optional_server_does_not_block_a_ready_pi_mcp_server() {
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp-smoke-server.mjs");
+        let cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let node_name = if cfg!(windows) { "node.exe" } else { "node" };
+        let node = std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+            .map(|path| path.join(node_name))
+            .find(|path| path.is_file())
+            .and_then(|path| path.canonicalize().ok())
+            .expect("Node.js is required for the MCP process fixture");
+        let runtime_path = std::env::join_paths([node.parent().unwrap()])
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let missing_command = format!("rovai-missing-mcp-{}", uuid::Uuid::new_v4());
+        let mut servers = BTreeMap::new();
+        servers.insert(
+            "broken".to_string(),
+            McpServerDefinition::Stdio {
+                command: missing_command,
+                args: Vec::new(),
+                cwd: Some(cwd.to_string_lossy().to_string()),
+                env: BTreeMap::from([("PATH".to_string(), runtime_path.clone())]),
+            },
+        );
+        servers.insert(
+            "github".to_string(),
+            McpServerDefinition::Stdio {
+                command: "node".to_string(),
+                args: vec![fixture.to_string_lossy().to_string()],
+                cwd: Some(cwd.to_string_lossy().to_string()),
+                env: BTreeMap::from([
+                    ("PATH".to_string(), runtime_path),
+                    (
+                        "ROVAI_MCP_SMOKE_SOURCE".to_string(),
+                        "pi-core-bridge".to_string(),
+                    ),
+                ]),
+            },
+        );
+        let projection = PreparedMcpProjection {
+            snapshot: McpExposureSnapshot {
+                schema_version: 2,
+                config_digest: "sha256:pi-mcp-optional-config".to_string(),
+                config_status: "ready".to_string(),
+                projection_mode: ExternalMcpProjection::AdditivePerRun,
+                same_name_policy: Some(McpSameNamePolicy::RovaiWins),
+                warnings: Vec::new(),
+                servers: vec![
+                    McpExposureEntry {
+                        server_id: "pi-mcp-broken-server".to_string(),
+                        name: "broken".to_string(),
+                        runtime_name: "broken".to_string(),
+                        transport: "stdio".to_string(),
+                        config_digest: "sha256:pi-mcp-broken-config".to_string(),
+                        status: McpExposureStatus::Ready,
+                        reason: None,
+                    },
+                    McpExposureEntry {
+                        server_id: "pi-mcp-ready-server".to_string(),
+                        name: "github".to_string(),
+                        runtime_name: "github".to_string(),
+                        transport: "stdio".to_string(),
+                        config_digest: "sha256:pi-mcp-ready-config".to_string(),
+                        status: McpExposureStatus::Ready,
+                        reason: None,
+                    },
+                ],
+            },
+            exposure_digest: "sha256:pi-mcp-optional-exposure".to_string(),
+            projection_digest: "sha256:pi-mcp-optional-projection".to_string(),
+            canonical_path: cwd.join("target/pi-mcp-optional-fixture.json"),
+            servers,
+        };
+
+        let bridge = PiMcpBridge::start(&projection)
+            .await
+            .expect("an unavailable optional Server must not block the Pi MCP bridge");
+        assert!(matches!(
+            &projection.servers["github"],
+            McpServerDefinition::Stdio { command, .. } if command == "node"
+        ));
+        assert_eq!(bridge.tools().len(), 1);
+        assert_eq!(bridge.tools()[0].runtime_name, "mcp_github_echo");
+        assert_eq!(
+            bridge.activation_failures(),
+            [PiMcpActivationFailure {
+                server_id: "pi-mcp-broken-server".to_string(),
+                server_name: "broken".to_string(),
+                diagnostic_code: "mcp.runtime_launch_failed".to_string(),
+                reason: "executable_not_found_in_runtime_path".to_string(),
+            }]
+        );
+        assert_eq!(
+            bridge
+                .execute("mcp_github_echo", json!({"text":"still-running"}))
+                .await
+                .unwrap(),
+            json!({
+                "content": [{"type":"text", "text":"pi-core-bridge:still-running"}],
                 "isError": false,
             })
         );

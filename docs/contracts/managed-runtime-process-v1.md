@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v1
 status: accepted
 source_version: v1.05
-last_updated: 2026-08-25
+last_updated: 2026-09-03
 ---
 
 # Managed Runtime Process v1
@@ -12,7 +12,8 @@ last_updated: 2026-08-25
 [ADR-0211](../versions/v1.05/decisions.md#adr-0211)。Runtime terminal 与领域终态仍由既有 AgentRun、
 Fleet 与 Planned Shutdown 合同拥有；进程退出不是 Provider outcome。macOS User Automation credential 隔离的
 修正理由见[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)。Windows command shim 扩展见
-[V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)。
+[V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)。Runtime portable child command 与 Pi MCP
+逐 Server 降级理由见[V1.39-D07](../versions/v1.39/decisions.md#v1-39-d07)。
 
 ## 1. Module interface
 
@@ -20,7 +21,7 @@ Fleet 与 Planned Shutdown 合同拥有；进程退出不是 Provider outcome。
 
 ```text
 purpose
-absolute application path
+structured application (absolute path | command name | cwd-relative path)
 argv[]
 working directory
 explicit environment snapshot
@@ -35,11 +36,19 @@ Core 初始化时可以向 Managed Process 配置实例级 protected local trees
 冻结，路径必须是规范化绝对路径，且不会作为普通 Runtime environment 字段暴露。所有 purpose 和 Adapter 共享
 同一保护集，调用方不能选择性关闭。
 
+capture 先冻结工作目录与显式环境。绝对 application 保持原有直接启动行为；Unix 普通命令名在 launch 时由 OS 使用
+该冻结环境的 `PATH` 查找；含路径分隔符的相对 application 只相对该冻结工作目录形成 launch path。Windows 则按下述
+封闭规则为本次 launch 解析并验证入口。任何解析结果都不回写用户配置，也不跨 AgentRun/恢复缓存；每次新的 capture
+都使用当轮 Runtime 环境。argv 始终保持结构化字段，不经 Shell 拼接。
+
 Windows launch policy 只允许以下封闭 entrypoint：
 
 - 经 Runtime Platform Admission 的 native `.exe`；
 - 已知 npm/pnpm Codex `.cmd` locator，经验证后解析到 platform package 内真实 native `codex.exe`；
 - bounded regular `.cmd` / `.bat` `CommandShim`，以明确的 `windows_command_shim` identity 启动。
+
+Windows 的普通命令名与 cwd-relative 输入只在冻结 Runtime `PATH`/cwd 中按 `.exe → .cmd → .bat` 的封闭顺序
+解析，然后进入上述相同 entrypoint、identity 与 Job 流程；不读取 PATHEXT，也不把命令交给通用 Shell。
 
 `.com`、`.ps1`、PowerShell fallback、PATHEXT 全量扩展和调用方自行拼装的通用 Shell command 不属于 v1。
 用户 prompt 仍只能经 stdin 投递；command shim argv 只承载 Adapter 声明的控制参数。
@@ -82,6 +91,12 @@ SQLite、日志和 Core 内部 handles 必须不可继承且不在列表中。�
 attribute 不可用、嵌套 Job 不兼容或 handle policy 不能证明时，输入投递前 fail closed。
 
 ## 3. Application and argv
+
+application 的持久配置可以是绝对路径、普通命令名或 cwd-relative path。Unix 普通命令名使用本轮冻结 Runtime
+`PATH` 交给 OS 启动；相对 application 先锚定到本轮 working directory。Windows 普通命令名和相对 PATH entry 以本轮
+working directory 为基准按封闭候选解析。找不到入口或 spawn 失败时返回稳定 Managed Process error，由拥有语义的
+调用方决定该 child 是 required 还是 optional；Managed Process 本身不把一次失败改写为整个 Runtime 的身份失败。
+恢复或新 AgentRun 必须重新 capture，不能复用上一轮解析后的设备路径。
 
 native entrypoint 的 `lpApplicationName` 必须是已打开并验证身份的绝对 Runtime executable path；command shim
 的 `lpApplicationName` 必须是上述已验证 System32 `cmd.exe`，shim 同时保持打开并在 CreateProcess 前复核。
@@ -138,6 +153,8 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 - 子进程只继承声明的 stdio，不继承 Job、token 或无关文件 handle；
 - `.cmd/.bat` 的内容或 interpreter identity 变化使旧 capture 失效，timeout/cancel 清理完整 shim child tree；
 - Windows rescan 的 inherited/HKCU/HKLM/known PATH 快照同时进入 discovery、Probe 与正式 AgentRun；
+- bare command 与 cwd-relative application 在冻结 Runtime PATH/cwd 中可启动；下一次 launch 更换 PATH 后会由 OS
+  重新查找（Windows 重新执行封闭解析），用户配置仍保留原始 portable command；
 - macOS process-group 启动、终止和 Fleet 回归保持；
 - macOS 受管 shell 及其后代不能读取或写入 `automation-v1` credential/context，但仍能读取保护树外的 fixture。
 
@@ -145,5 +162,6 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 
 - [ADR-0211](../versions/v1.05/decisions.md#adr-0211)
 - [V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)
+- [V1.39-D07](../versions/v1.39/decisions.md#v1-39-d07)
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
 - [Planned Shutdown](../architecture/planned-shutdown.md)
