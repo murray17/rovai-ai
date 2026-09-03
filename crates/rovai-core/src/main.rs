@@ -11125,6 +11125,16 @@ impl Core {
             }
             Err(error) => return Err(error).context("Pi Native Session activation failed closed"),
         };
+        for failure in runtime.mcp_activation_failures() {
+            eprintln!(
+                "optional Pi MCP Server {} ({}) is unavailable for AgentRun {}: {} ({})",
+                failure.server_name,
+                failure.server_id,
+                execution.agent_run_id,
+                failure.diagnostic_code,
+                failure.reason,
+            );
+        }
         let active_builtin_tools = runtime
             .builtin_tool_process_config()
             .context("Pi Runtime has no Built-in Tool process context")?

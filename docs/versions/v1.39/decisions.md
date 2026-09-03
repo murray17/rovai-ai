@@ -149,3 +149,36 @@ override。Cursor 和其他 Runtime 的 admission 不变。
 - 拒绝直接把 Pi 三行写成 `qualified`：这会伪造尚不存在的跨平台 Golden Flow 证据。
 - 拒绝只在 Renderer 解禁下拉框：Core discovery、Installation 与 Dispatch 仍会阻断，形成不可执行的假入口。
 - 拒绝继续使用 release 环境变量 override：隐藏开关不能成为可审计的产品准入合同。
+
+<a id="v1-39-d07"></a>
+## V1.39-D07：Runtime portable child command 与 Pi 外部 MCP 逐 Server 降级
+
+### 背景
+
+用户 MCP 配置通常使用 `npx`、`node`、`python`、`uvx`、`bunx` 等可移植命令名。Pi 的 Core-managed bridge 将这些
+结构化命令交给 Managed Process 时，旧 absolute-only capture 会在 Runtime PATH 查找前拒绝；任一已请求 Server 的
+启动或握手失败又会中止 Pi Native Session activation，使一个可选外部能力阻断整个 AgentRun。
+
+### 决定
+
+Managed Process 接受 absolute、bare command 与 cwd-relative application。每次 capture 先冻结当轮 Runtime cwd/env：
+Unix bare command 以原值交给 OS 并只使用该 PATH，relative path 只相对该 cwd，argv 始终保持独立字段，不引入 Shell。
+Windows 为保持 atomic Job 与 entrypoint safety，只在本次 launch 内按 `.exe → .cmd → .bat` 解析并验证。解析出的设备路径
+不回写用户配置、不跨 Run/恢复缓存；下一次启动按新的 Runtime 环境重新查找。绝对路径与 Windows 已有
+native/command-shim identity、原子 Job 和受控 argv serializer 行为不变。
+
+Pi bridge 将用户分配的外部 MCP 视为逐 Server optional。command resolution、process start、initialize、`tools/list`
+或 Tool catalog validation 失败时，只保存 server identity 与稳定非敏感 code/reason，将该 Server 从本轮 active catalog
+排除并继续创建 Pi Session。投影缺失/重复 identity 等 Core 状态损坏仍阻断；已暴露 Tool 的调用期 bridge、Approval、
+epoch/binding 或 mutation safety 失败仍 fail closed。原始 `PreparedMcpProjection` 与用户 `mcp.json` 均不被改写。
+
+### 后果与被拒绝方案
+
+- 同一份 `command = "npx"` 配置可以随 macOS GUI Runtime PATH、nvm/fnm/volta 或另一台机器的安装位置变化而工作；
+  恢复时找不到它只让该 Server unavailable。
+- Managed Process 继续拥有 stdio、PID、process group/Job、cancel、tree termination 与 reap；portable command 不等于
+  放弃单次 launch 的 executable/entrypoint 检查。
+- 当前 Pi bridge 只承载用户外部 MCP，因此不新增未被其他调用方消费的 `McpRequirement` schema；未来若引入 Runtime
+  必需内部 Server，必须另行建立 required 类型与准入合同。
+- 拒绝硬编码 Homebrew/Node 路径、把解析结果写回配置、用 `which` 修改配置、把 command+args 拼为 Shell 字符串，或因
+  单个 optional Server 失败清空全部 MCP/终止 AgentRun。
