@@ -1,4 +1,4 @@
-import { Children, isValidElement, useMemo, useRef, type JSX, type ReactNode } from 'react'
+import { useMemo, useRef, type JSX, type ReactNode } from 'react'
 import type { FileLocationTarget } from '@contracts'
 import { parseFileReference } from '../../file-preview-reference'
 import { FileReferenceIcon } from './FilePreviewTabIcon'
@@ -11,26 +11,19 @@ export function FileReferenceLink({
   rawReference,
   children,
   className,
-  sourceReference,
   onActivate
 }: {
   rawReference: string
   children: ReactNode
   className: string
-  sourceReference?: string
   onActivate: FileReferenceActivation
 }): JSX.Element {
   const selectionAtPointerDown = useRef<Range | null>(null)
-  const labelNodes = Children.toArray(children)
-  const onlyChild = labelNodes.length === 1 ? labelNodes[0] : null
-  const codeLabel = isValidElement<{ children?: ReactNode }>(onlyChild) && onlyChild.type === 'code'
-    ? onlyChild
-    : null
   const parsedReference = parseFileReference(rawReference)
 
   return (
     <a
-      className={codeLabel ? `${className} inline-code-file-reference` : className}
+      className={className}
       href={`${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(rawReference)}`}
       title={parsedReference?.pathKind === 'relative' ? rawReference : undefined}
       onPointerDown={() => {
@@ -50,32 +43,27 @@ export function FileReferenceLink({
             || range.compareBoundaryPoints(Range.START_TO_START, before) !== 0
             || range.compareBoundaryPoints(Range.END_TO_END, before) !== 0) return
         }
-        onActivate(sourceReference ?? rawReference, event.currentTarget,
-          sourceReference ? parseFileReference(rawReference)?.target : undefined)
+        onActivate(rawReference, event.currentTarget)
       }}
       onAuxClick={(event) => event.preventDefault()}
     >
       <FileReferenceIcon rawReference={rawReference} />
-      <span className={codeLabel ? 'file-reference-label is-code' : 'file-reference-label'}>
-        {codeLabel ? codeLabel.props.children : children}
-      </span>
+      <span className="file-reference-label">{children}</span>
     </a>
   )
 }
 
 export function FileReferenceText({
   text,
-  onActivate,
-  resolvedInlineFileReferences
+  onActivate
 }: {
   text: string
   onActivate?: FileReferenceActivation
-  resolvedInlineFileReferences?: ReadonlySet<string>
 }): JSX.Element {
   const enabled = Boolean(onActivate)
   const references = useMemo(
-    () => enabled ? projectMessageFileReferences(text, resolvedInlineFileReferences) : [],
-    [enabled, resolvedInlineFileReferences, text]
+    () => enabled ? projectMessageFileReferences(text) : [],
+    [enabled, text]
   )
   const inlineCodes = useMemo(() => enabled ? projectMessageInlineCodes(text) : [], [enabled, text])
   if (!onActivate || (references.length === 0 && inlineCodes.length === 0)) return <>{text}</>
@@ -100,11 +88,10 @@ export function FileReferenceText({
       <FileReferenceLink
         className="message-file-reference"
         rawReference={part.rawReference}
-        sourceReference={part.sourceReference}
         key={`${part.start}:${part.rawReference}`}
         onActivate={onActivate}
       >
-        {part.inlineCode ? <code>{part.label}</code> : part.label}
+        {part.label}
       </FileReferenceLink>
     )
     offset = part.end

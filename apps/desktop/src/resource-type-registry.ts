@@ -68,10 +68,6 @@ function visualKindForFileName(fileName: string): ResourceVisualKind | undefined
   return dot >= 0 ? extensionKinds.get(fileName.slice(dot)) : undefined
 }
 
-export function hasKnownResourceType(target: string): boolean {
-  return visualKindForFileName(resourceFileName(target)) !== undefined
-}
-
 export function getResourceVisualKind(target: string): ResourceVisualKind {
   return visualKindForFileName(resourceFileName(target)) ?? 'file'
 }

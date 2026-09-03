@@ -4,15 +4,10 @@ import remarkGfm from 'remark-gfm'
 import { FILE_REFERENCE_FRAGMENT, FileReferenceLink, type FileReferenceActivation } from './FileReferenceLink'
 import { ResourceReferenceIcon } from './FilePreviewTabIcon'
 import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
-import {
-  inlineFileReferenceSource,
-  isInlineFileReference,
-  parseFileReference
-} from '../../file-preview-reference'
+import { parseFileReference } from '../../file-preview-reference'
 
 type MarkdownTreeNode = {
   type?: string
-  value?: string
   children?: MarkdownTreeNode[]
   url?: string
   data?: { hProperties?: Record<string, string> }
@@ -70,55 +65,18 @@ function scrollToMarkdownHeading(root: HTMLElement, target: string): boolean {
   return Boolean(heading)
 }
 
-function remarkFileReferences(
-  resolvedInlineFileReferences?: ReadonlySet<string>
-): (tree: MarkdownTreeNode) => void {
+function remarkFileLinks(): (tree: MarkdownTreeNode) => void {
   return (tree) => {
-    const candidates: string[] = []
-    const collect = (node: MarkdownTreeNode): void => {
-      if (node.type === 'link') {
-        if (node.url && parseFileReference(node.url)) candidates.push(node.url)
-      } else if (node.type === 'inlineCode') {
-        if (node.value && isInlineFileReference(node.value)) candidates.push(node.value)
-      } else if (!['code', 'html', 'definition', 'image', 'imageReference', 'linkReference'].includes(node.type ?? '')) {
-        node.children?.forEach(collect)
-      }
-    }
-    collect(tree)
     const visit = (node: MarkdownTreeNode): void => {
       if (!Array.isArray(node.children)) return
-      const next: MarkdownTreeNode[] = []
       for (const child of node.children) {
         if (child.type === 'link' && typeof child.url === 'string' && parseFileReference(child.url)) {
-          next.push({ ...child, url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.url)}` })
+          child.url = `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.url)}`
           continue
         }
-        if (
-          child.type === 'inlineCode'
-          && typeof child.value === 'string'
-        ) {
-          const sourceReference = resolvedInlineFileReferences === undefined
-            ? inlineFileReferenceSource(child.value, candidates)
-            : isInlineFileReference(child.value) && resolvedInlineFileReferences.has(child.value)
-              ? child.value
-              : null
-          if (sourceReference === null) {
-            next.push(child)
-            continue
-          }
-          next.push({
-            type: 'link',
-            url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.value)}`,
-            ...(sourceReference !== child.value
-              ? { data: { hProperties: { 'data-file-source-reference': sourceReference } } } : {}),
-            children: [{ type: 'inlineCode', value: child.value }]
-          })
-          continue
-        }
-        if (child.type !== 'link' && child.type !== 'inlineCode' && child.type !== 'code') visit(child)
-        next.push(child)
+        if (!['link', 'inlineCode', 'code', 'html', 'definition', 'image', 'imageReference', 'linkReference']
+          .includes(child.type ?? '')) visit(child)
       }
-      node.children = next
     }
     visit(tree)
   }
@@ -132,8 +90,7 @@ export function SafeMarkdown({
   headingTarget,
   onHeadingTargetResult,
   leadingContent,
-  inlineLeadingContent = true,
-  resolvedInlineFileReferences
+  inlineLeadingContent = true
 }: {
   children: string
   className?: string
@@ -144,8 +101,6 @@ export function SafeMarkdown({
   /** Trusted inline UI, never parsed from the Markdown source. */
   leadingContent?: ReactNode
   inlineLeadingContent?: boolean
-  /** Exact inline-code references already confirmed as existing ordinary files. */
-  resolvedInlineFileReferences?: ReadonlySet<string>
 }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const callbacks = useRef({ onFileReference, onHeadingTargetResult })
@@ -173,15 +128,12 @@ export function SafeMarkdown({
       const text = markdownHeadingText(headingChildren)
       return <Tag data-markdown-heading={text}>{headingChildren}</Tag>
     }
-    const resolvedFileReferencesPlugin = (): ((tree: MarkdownTreeNode) => void) =>
-      remarkFileReferences(resolvedInlineFileReferences)
-
     return (
       <Markdown
         remarkPlugins={[
           [remarkGfm, { singleTilde: false }],
           remarkRepairCjkUrlTail,
-          ...(fileReferencesEnabled ? [resolvedFileReferencesPlugin] : []),
+          ...(fileReferencesEnabled ? [remarkFileLinks] : []),
           [remarkLeadingContent, { enabled: hasLeadingContent, inline: inlineLeadingContent }]
         ]}
         skipHtml
@@ -204,7 +156,7 @@ export function SafeMarkdown({
           h1: heading('h3'),
           h2: heading('h3'),
           h3: heading('h4'),
-          a({ href, children: linkChildren, node }) {
+          a({ href, children: linkChildren }) {
             if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && fileReferencesEnabled) {
               let rawReference: string
               try {
@@ -217,8 +169,6 @@ export function SafeMarkdown({
                 <FileReferenceLink
                   className="markdown-file-reference"
                   rawReference={rawReference}
-                  sourceReference={typeof node?.properties['data-file-source-reference'] === 'string'
-                    ? node.properties['data-file-source-reference'] : undefined}
                   onActivate={(reference, source, target) => callbacks.current.onFileReference?.(reference, source, target)}
                 >
                   {markdownHeadingText(linkChildren).trim() ? linkChildren : rawReference}
@@ -264,18 +214,12 @@ export function SafeMarkdown({
             return safeUrl ? <img src={safeUrl} alt={alt ?? ''} loading="lazy" /> : null
           }
         }}
-        urlTransform={(url) => {
-          if (fileReferencesEnabled && parseFileReference(url)) {
-            return `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(url)}`
-          }
-          return defaultUrlTransform(url)
-        }}
+        urlTransform={defaultUrlTransform}
       >
         {children}
       </Markdown>
     )
-  }, [children, fileReferencesEnabled, localImageUrl, hasLeadingContent, inlineLeadingContent,
-    resolvedInlineFileReferences])
+  }, [children, fileReferencesEnabled, localImageUrl, hasLeadingContent, inlineLeadingContent])
 
   return (
     <LeadingMarkdownContentContext.Provider value={leadingContent}>

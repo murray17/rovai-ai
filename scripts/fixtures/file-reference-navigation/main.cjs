@@ -32,7 +32,8 @@ app.whenReady().then(async () => {
       window.getSelection().removeAllRanges();
       const node = document.querySelector(${JSON.stringify(selector)}).firstChild;
       const range = document.createRange();
-      range.setStart(node, 1); range.setEnd(node, 8);
+      const end = Math.min(8, node.length);
+      range.setStart(node, end > 1 ? 1 : 0); range.setEnd(node, end);
       const r = range.getClientRects()[0];
       return { left: Math.ceil(r.left), right: Math.floor(r.right), y: Math.round(r.top + r.height / 2) };
     })()`)
@@ -78,7 +79,7 @@ app.whenReady().then(async () => {
     }
   }
   await state()
-  await check('an existing Camp-relative short name highlights the range and anchors a long message', async () => {
+  await check('an explicit Markdown location highlights the range and anchors a long message', async () => {
     await run('window.navigationTest.bookmark()')
     const before = await state()
     const after = await click('[title="run_report.py:44-46"]')
@@ -92,16 +93,20 @@ app.whenReady().then(async () => {
     assert.equal(after.sameTimeline, true)
     assert.equal(after.sameLink, true)
     assert.equal(after.falseLinks, 0)
-    assert.deepEqual(after.inlineReferenceTypes, [
+    assert.deepEqual(after.explicitReferenceTypes, [
       { title: 'src/report/run_report.py', type: 'code' },
-      { title: 'run_report.py:44-46', type: 'code' },
-      { title: 'config.toml', type: 'config' },
-      { title: 'demo.mp4', type: 'video' }
+      { title: '../outside/config.toml', type: 'config' },
+      { title: 'run_report.py:44-46', type: 'code' }
     ])
+    assert.equal(after.inlineFileLinkCount, 0)
+    assert.ok(after.inertInlineCodes.includes('src/report/run_report.py'))
+    assert.ok(after.inertInlineCodes.includes('config.toml'))
+    assert.ok(after.inertInlineCodes.includes('demo.mp4'))
+    assert.ok(after.inertInlineCodes.includes('/Users/name/Downloads/demo.html'))
     assert.ok(after.inertInlineCodes.includes('missing.toml'))
     assert.ok(after.inertInlineCodes.includes('run_gr_reminder.py'))
-    assert.equal(after.webHref, 'https://example.com/wiki/spec')
-    assert.equal(after.webText, 'https://example.com/wiki/spec')
+    assert.equal(after.webHref, 'https://github.com/')
+    assert.equal(after.webText, '网页 · GitHub')
     assert.deepEqual(after.notices, [])
     await capture('range-day')
   })
@@ -148,10 +153,10 @@ app.whenReady().then(async () => {
     await capture('range-night')
   })
   const locatedLink = '[title="run_report.py:44-46"]'
-  const plainLink = 'a[title="src/report/run_report.py"]:not(.inline-code-file-reference)'
+  const plainLink = 'a[title="src/report/run_report.py"]'
   const nearbyProse = 'p:has([title="run_report.py:44-46"]) + p + p'
   for (const [label, selector, expectedReference] of [
-    ['inline code', locatedLink, 'run_report.py:44-46'],
+    ['located Markdown', locatedLink, 'run_report.py:44-46'],
     ['plain Markdown', plainLink, 'src/report/run_report.py']
   ]) {
     await check(`${label} opens with an existing selection elsewhere in the message`, async () => {
@@ -169,7 +174,7 @@ app.whenReady().then(async () => {
   }
   await check('dragging text inside a link does not open it, but a later single click does', async () => {
     const before = await state()
-    await selectText(`${locatedLink} .file-reference-label.is-code`)
+    await selectText(`${locatedLink} .file-reference-label`)
     assert.equal((await state()).opens.length, before.opens.length)
     const after = await click(locatedLink)
     assert.equal(after.opens.length, before.opens.length + 1)

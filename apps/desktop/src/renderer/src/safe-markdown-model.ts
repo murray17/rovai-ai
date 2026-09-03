@@ -2,7 +2,7 @@ export * from '../../shared/execution-presentation/safe-markdown-model'
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
-import { inlineFileReferenceSource, isInlineFileReference, parseFileReference } from '../../file-preview-reference'
+import { parseFileReference } from '../../file-preview-reference'
 
 type MarkdownNode = {
   type?: unknown
@@ -29,8 +29,6 @@ export interface MessageFileReference {
   end: number
   rawReference: string
   label: string
-  inlineCode: boolean
-  sourceReference?: string
 }
 
 export interface MessageInlineCode {
@@ -59,24 +57,6 @@ export function projectMessageInlineCodes(source: string): MessageInlineCode[] {
   return inlineCodes
 }
 
-export function projectInlineFileReferenceCandidates(source: string): string[] {
-  if (!source || source.length > 1_048_576) return []
-  const candidates = new Set<string>()
-  const visit = (node: MarkdownNode): void => {
-    if (node.type === 'inlineCode') {
-      if (typeof node.value === 'string' && isInlineFileReference(node.value)) {
-        candidates.add(node.value)
-      }
-      return
-    }
-    if (node.type === 'code' || node.type === 'link' || node.type === 'linkReference'
-      || omittedNodeTypes.has(String(node.type))) return
-    if (Array.isArray(node.children)) node.children.forEach(visit)
-  }
-  visit(safeMarkdownParser.parse(source))
-  return [...candidates]
-}
-
 function markdownLinkLabel(node: MarkdownNode): string {
   if ((node.type === 'text' || node.type === 'inlineCode') && typeof node.value === 'string') {
     return node.value
@@ -87,10 +67,7 @@ function markdownLinkLabel(node: MarkdownNode): string {
 
 // Project only file references. Source ranges outside those nodes stay byte-for-byte
 // intact so ordinary user text and structured Mention/Skill rendering remain independent.
-export function projectMessageFileReferences(
-  source: string,
-  resolvedInlineFileReferences?: ReadonlySet<string>
-): MessageFileReference[] {
+export function projectMessageFileReferences(source: string): MessageFileReference[] {
   if (!source || source.length > 1_048_576) return []
   const references: MessageFileReference[] = []
   const visit = (node: MarkdownNode): void => {
@@ -100,32 +77,14 @@ export function projectMessageFileReferences(
       if (typeof start === 'number' && typeof end === 'number'
         && typeof node.url === 'string' && parseFileReference(node.url)) {
         const label = markdownLinkLabel(node)
-        references.push({ start, end, rawReference: node.url, label: label.trim() ? label : node.url, inlineCode: false })
+        references.push({ start, end, rawReference: node.url, label: label.trim() ? label : node.url })
       }
       return
     }
-    if (node.type === 'inlineCode') {
-      if (typeof start === 'number' && typeof end === 'number'
-        && typeof node.value === 'string' && isInlineFileReference(node.value)) {
-        references.push({ start, end, rawReference: node.value, label: node.value, inlineCode: true })
-      }
-      return
-    }
-    if (node.type === 'code' || node.type === 'linkReference' || omittedNodeTypes.has(String(node.type))) return
+    if (node.type === 'inlineCode' || node.type === 'code' || node.type === 'linkReference'
+      || omittedNodeTypes.has(String(node.type))) return
     if (Array.isArray(node.children)) node.children.forEach(visit)
   }
   visit(safeMarkdownParser.parse(source))
-  const candidates = references.map((reference) => reference.rawReference)
-  return references.flatMap((reference) => {
-    if (!reference.inlineCode) return [reference]
-    const sourceReference = resolvedInlineFileReferences === undefined
-      ? inlineFileReferenceSource(reference.rawReference, candidates)
-      : resolvedInlineFileReferences.has(reference.rawReference)
-        ? reference.rawReference
-        : null
-    return sourceReference === null ? [] : [{
-      ...reference,
-      ...(sourceReference !== reference.rawReference ? { sourceReference } : {})
-    }]
-  })
+  return references
 }

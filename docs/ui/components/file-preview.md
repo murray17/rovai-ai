@@ -14,32 +14,29 @@ last_updated: 2026-09-03
 轻下划线，Hover 加强下划线；键盘焦点使用既有 focus token，长路径可自然换行，不让正文横向溢出。
 
 - Markdown 文件链接 `[label](target)` 只显示可点击的 label；target 仅用于解析/打开，不在正文中重复常驻展示。
-- 整体为文件引用的 inline-code（如 `` `src/App.tsx:20` ``）只有在当前消息来源工作目录可解析为现存普通文件时
-  才成为文件入口。相对路径使用来源 AgentRun 的工作目录、无来源 Run 时使用 directory Camp 项目目录；绝对路径
-  直接解析。不存在、目录或解析失败时保持原生 `<code>`，不显示图标、链接或错误。成功入口的等宽文字移除灰底和嵌套
-  `<code>`，默认无下划线；Hover 加强链接色并只为文字显示 1px 点状下划线，按下或键盘焦点时不显示下划线。
-  普通 inline-code、代码块和混合正文保持原样。
-- 普通正文不扫描、不猜测本地路径。`src/App.tsx:20`、`/compact` 与 `docs/prototypes/demo/` 只有在显式
-  Markdown 文件链接或整体 inline-code 中才可能成为文件入口；消息存储、整条消息复制与模型输入保持原文。
+- inline-code 永远保持原生 `<code>`。`` `config.toml` ``、`` `src/App.tsx:20` ``、相对路径和绝对路径都不显示
+  文件图标、不生成链接、不绑定点击，也不查询磁盘；代码块和混合正文同样保持原样。
+- 普通正文不扫描、不猜测本地路径。`src/App.tsx:20`、`/compact` 与 `docs/prototypes/demo/` 只有在显式 Markdown
+  文件链接 target 中才可能成为文件入口；消息存储、整条消息复制与模型输入保持原文。
 - 每个文件入口在 label 前显示真实资源类型的 14px 单色线性 SVG，不再由 label 是否为 inline-code 决定是否显示。
   类型至少区分 Markdown、HTML、代码、配置/数据、文本、图片、SVG、Diff/Patch、目录、PDF、文档、表格、
   演示文稿、Notebook、压缩包、音频、视频、数据库、可执行/安装包和未知文件。不支持应用内预览的格式仍保留
   真实类型图标，再交给系统默认应用打开。
 - HTTPS Markdown 链接与 GFM 自动链接都在 label 前显示统一网页图标；inline-code 中的 `https://` 仍是普通代码。
   文件与网页图标均为装饰元素，对辅助技术隐藏，使用 `currentColor` 与链接文字同步变色，不用颜色区分资源类别。
-- 普通 Markdown label 使用 UI 字体；文件 inline-code 使用等宽字体。所有资源链接使用相同的 icon + label DOM
-  顺序，不嵌套第二层代码背景块。
+- 普通 Markdown label 使用 UI 字体。显式链接 label 自身包含 Markdown inline-code 时保留其代码样式；
+  所有资源链接使用相同的 icon + label DOM 顺序。
 - 项目相对 target 可以通过 title 显示完整原始值（含行列或 fragment）；绝对 target 不增加 tooltip 或在正文中
   重复展示。复制路径与显示所在位置继续使用文件 Tab 的既有上下文菜单。
 - 普通点击与键盘激活不受页面已有选区影响；只有本次指针操作新产生或改变的文字选区才阻止文件打开。
   不主动清除用户选区，保留拖选与系统复制行为。
-- 文件引用只按 Markdown link 与整体 inline-code 语法节点识别，不拆开普通 URL、链接 label、图片、代码块或正文；
+- 文件引用只按显式 Markdown link 语法节点识别，不拆开普通 URL、链接 label、inline-code、图片、代码块或正文；
   用户消息其余文本、结构化 Mention/Skill、消息存储、整条消息复制与模型输入保持原合同。
-- `config.toml`、`demo.mp4` 等已知完整短文件名可以进入存在性探测，不在消息正文中猜测目录或搜索同名文件；只按
-  当前消息来源工作目录中的 exact relative path 判断。字段列表中的斜杠不作为绝对路径起点。显式 Markdown 文件链接
-  继续表达作者的链接意图，不以存在性探测决定是否显示；点击仍执行既有来源和文件校验。
-- 资源类型注册表只决定候选是否为已知类型及其图标；不得从图标推断 Preview 支持性。消息链接和普通文件 Tab 都按
-  文件名查询同一视觉类型，Main 仍以既有 classifier 的扩展名、大小、MIME 与内容规则决定 Preview、系统打开或失败。
+- 显式 Markdown 文件链接表达作者的导航意图，消息呈现阶段不检查目标是否存在。点击后才按消息来源工作目录解析
+  exact relative path，或直接解析绝对路径，并执行既有来源、文件身份和可访问性校验。
+- 资源类型注册表只决定显式文件链接和普通文件 Tab 的图标；不得从图标推断 Preview 支持性。两处都按文件名查询
+  同一视觉类型，未知类型使用通用文件图标。Main 仍以既有 classifier 的扩展名、大小、MIME 与内容规则决定
+  Preview、系统打开或失败。
 - 点击继续使用既有来源校验，打开/激活文件 Tab；同一文件去重，支持 `:44-46` 行范围，定位起始行并高亮范围。
   最终定位到具体普通文件后，无论位于 Camp 工作区内外，都直接进入相同 Preview；绝对路径、`~/`、本机 file URI、
   symlink、Attachment、Run Evidence 当前文件与预览内子链接都不弹目录授权选择器。不支持格式仍调用默认应用；

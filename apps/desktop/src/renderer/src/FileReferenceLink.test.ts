@@ -7,7 +7,7 @@ import { SafeMarkdown } from './SafeMarkdown'
 const examples = [
   '- Markdown：[v1.30 方案](docs/versions/v1.30/README.md)',
   '- HTML：[成员管理原型](docs/prototypes/camp-member-management/index.html)',
-  '- 代码：`apps/desktop/src/renderer/src/FilePreviewPane.tsx:1`',
+  '- 代码：[预览实现](apps/desktop/src/renderer/src/FilePreviewPane.tsx:1)',
   '- 图片：[Camp 会话截图](docs/assets/readme/camp-conversation.png)',
   '- SVG：[应用图标](build/icon.svg)'
 ].join('\n')
@@ -29,7 +29,7 @@ const renderers = [{
 }]
 
 describe.each(renderers)('file-link presentation in $name', ({ render, rendersWebLinks }) => {
-  it('shows descriptions once, keeps relative targets in tooltips, and uses true file-type icons', () => {
+  it('shows explicit labels once, keeps relative targets in tooltips, and uses true file-type icons', () => {
     const markup = render(examples)
     const visibleText = markup.replace(/<[^>]*>/gu, '')
     expect(markup.match(/<a /gu)).toHaveLength(5)
@@ -37,6 +37,7 @@ describe.each(renderers)('file-link presentation in $name', ({ render, rendersWe
     for (const [label, target] of [
       ['v1.30 方案', 'docs/versions/v1.30/README.md'],
       ['成员管理原型', 'docs/prototypes/camp-member-management/index.html'],
+      ['预览实现', 'apps/desktop/src/renderer/src/FilePreviewPane.tsx:1'],
       ['Camp 会话截图', 'docs/assets/readme/camp-conversation.png'],
       ['应用图标', 'build/icon.svg']
     ]) {
@@ -45,23 +46,21 @@ describe.each(renderers)('file-link presentation in $name', ({ render, rendersWe
       expect(markup).toContain(`title="${target}"`)
       expect(visibleText).not.toContain(`[${label}]`)
     }
-    expect(markup.match(/class="(?:message|markdown)-file-reference inline-code-file-reference"/gu)).toHaveLength(1)
     expect(markup.match(/<svg /gu)).toHaveLength(5)
     expect(markup).toContain('aria-hidden="true"')
     for (const kind of ['markdown', 'html', 'code', 'image', 'svg']) {
       expect(markup).toContain(`data-resource-type="${kind}"`)
     }
-    expect(markup).toContain('<span class="file-reference-label is-code">apps/desktop/src/renderer/src/FilePreviewPane.tsx:1</span>')
-    expect(markup).not.toContain('<code>')
-    expect(visibleText.match(/apps\/desktop\/src\/renderer\/src\/FilePreviewPane.tsx:1/gu)).toHaveLength(1)
+    expect(markup).not.toContain('inline-code-file-reference')
+    expect(markup).not.toContain('file-reference-label is-code')
   })
 
-  it('does not scan labels, code blocks, web URLs, or ordinary path-shaped prose as files', () => {
+  it('does not scan labels, inline code, code blocks, web URLs, or ordinary prose as files', () => {
     const markup = render([
       '[src/label.ts](src/target.ts:20)',
       'https://example.com/src/remote.ts',
       '[网站](https://example.com/src/remote.ts)',
-      '`sum()`',
+      '`src/inline.ts:4` 与 `sum()`',
       '',
       '```md',
       '[不要打开](src/secret.md)',
@@ -71,10 +70,12 @@ describe.each(renderers)('file-link presentation in $name', ({ render, rendersWe
       '请查看 src/bare.ts:20。'
     ].join('\n'))
     expect(markup).toContain('title="src/target.ts:20"')
+    expect(markup).not.toContain('title="src/inline.ts:4"')
     expect(markup).not.toContain('title="src/bare.ts:20"')
     expect(markup).not.toContain('title="src/label.ts"')
     expect(markup).not.toContain('title="src/secret')
     expect(markup).not.toContain('title="https:')
+    expect(markup).toContain('<code>src/inline.ts:4</code>')
     expect(markup.match(/class="(?:message|markdown)-file-reference"/gu)).toHaveLength(1)
     expect(markup.match(/data-resource-type="web"/gu) ?? []).toHaveLength(rendersWebLinks ? 2 : 0)
   })
@@ -84,6 +85,7 @@ describe.each(renderers)('file-link presentation in $name', ({ render, rendersWe
     expect(markup).toContain('title="docs/my plan.md#L3"')
     expect(markup).not.toContain('title="C:/work/app.ts:20"')
     expect(markup).toContain('data-resource-type="code"')
+    expect(markup).not.toContain('file-reference-label is-code')
     const visibleText = markup.replace(/<[^>]*>/gu, '')
     expect(visibleText).toContain('规划 与 配置')
     expect(visibleText).not.toContain('docs/my plan.md')
@@ -98,16 +100,15 @@ describe.each(renderers)('file-link presentation in $name', ({ render, rendersWe
     expect(markup).toContain('<span class="file-reference-label">~原样~</span>')
   })
 
-  it('leaves field lists and unqualified filenames inert, and links a located short name only with a source', () => {
-    const markup = render('WBS(外码)/WBS描述/成本中心/FBP/GR-手工金额，心/FBP）有值。`run_gr_reminder.py`；`run_report.py:44-46`')
-    expect(markup).not.toContain('<a ')
-    const resolved = render('主实现 `src/report/run_report.py`，定位 `run_report.py:44-46`；`run_gr_reminder.py` 保持原文。')
-    expect(resolved.match(/<a /gu)).toHaveLength(2)
-    expect(resolved).toContain('title="run_report.py:44-46"')
-    expect(resolved).not.toContain('title="run_gr_reminder.py"')
-    expect(render('`src/a/run_report.py` `src/b/run_report.py` `run_report.py:44-46`'))
-      .not.toContain('title="run_report.py:44-46"')
-    expect(render('```\nsrc/run_report.py\n```\n\n`run_report.py:44-46`')).not.toContain('<a ')
+  it('keeps every inline-code path inert and opens a located name only when explicitly linked', () => {
+    const inert = render('`config.toml`；`run_gr_reminder.py`；`run_report.py:44-46`；`/Users/name/demo.html`')
+    expect(inert).not.toContain('<a ')
+    expect(inert.match(/<code>/gu)).toHaveLength(4)
+
+    const linked = render('主实现 `src/report/run_report.py`，定位 [对应代码](run_report.py:44-46)。')
+    expect(linked.match(/<a /gu)).toHaveLength(1)
+    expect(linked).toContain('title="run_report.py:44-46"')
+    expect(linked).toContain('<code>src/report/run_report.py</code>')
   })
 })
 

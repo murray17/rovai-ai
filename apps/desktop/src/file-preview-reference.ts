@@ -1,5 +1,4 @@
 import type { FileLocationTarget, ParsedFileReference } from '@contracts'
-import { hasKnownResourceType } from './resource-type-registry'
 
 const DISALLOWED_SCHEME = /^[a-z][a-z0-9+.-]*:/i
 const WINDOWS_ABSOLUTE = /^[a-z]:[\\/]/i
@@ -8,8 +7,6 @@ const LINE_FRAGMENT = /^L([1-9]\d*)(?:C([1-9]\d*))?(?:-L?([1-9]\d*)(?:C([1-9]\d*
 const LINE_AND_COLUMN_SUFFIX = /^(.*):([1-9]\d*):([1-9]\d*)$/
 const LINE_SUFFIX = /^(.*):([1-9]\d*)$/
 const LINE_RANGE_SUFFIX = /^(.*):([1-9]\d*)-([1-9]\d*)$/
-const TRAILING_PUNCTUATION = /[.,;!?，。；！？、'"”’)>\]}]+$/u
-const LEADING_PUNCTUATION = /^[('"“‘<\[{]+/u
 
 function decodeOnce(value: string): string | null {
   try {
@@ -67,6 +64,13 @@ function splitLineSuffix(path: string): { path: string; target?: FileLocationTar
   return { path }
 }
 
+function isLocatedFilePath(path: string): boolean {
+  if (DISALLOWED_SCHEME.test(path) || WINDOWS_ABSOLUTE.test(path)) return false
+  const fileName = path.split(/[\\/]/u).at(-1) ?? ''
+  const extensionOffset = fileName.lastIndexOf('.')
+  return extensionOffset > 0 && extensionOffset < fileName.length - 1
+}
+
 function splitQueryAndFragment(reference: string): {
   path: string
   query?: string
@@ -114,8 +118,7 @@ export function parseFileReference(input: string): ParsedFileReference | null {
   const isFileUri = /^file:\/\//i.test(reference)
   const locatedFile = splitLineSuffix(reference)
   if (!isFileUri && DISALLOWED_SCHEME.test(reference) && !WINDOWS_ABSOLUTE.test(reference)
-    && !(locatedFile.target && hasKnownResourceType(locatedFile.path)
-      && !DISALLOWED_SCHEME.test(locatedFile.path))) {
+    && !(locatedFile.target && isLocatedFilePath(locatedFile.path))) {
     return null
   }
 
@@ -160,66 +163,4 @@ export function parseFileReference(input: string): ParsedFileReference | null {
     target,
     pathKind
   }
-}
-
-export interface FileReferenceToken {
-  start: number
-  end: number
-  raw: string
-  parsed: ParsedFileReference
-}
-
-function highConfidenceBareReference(raw: string, parsed: ParsedFileReference): boolean {
-  if (parsed.pathKind !== 'relative') return true
-  if (raw.startsWith('./') || raw.startsWith('../') || raw.startsWith('.\\') || raw.startsWith('..\\')) return true
-  const hasSeparator = parsed.pathPart.includes('/') || parsed.pathPart.includes('\\')
-  return hasSeparator && (hasKnownResourceType(parsed.pathPart) || parsed.target?.line !== undefined)
-}
-
-export function isInlineFileReference(raw: string): boolean {
-  const parsed = parseFileReference(raw)
-  if (!parsed) return false
-  return highConfidenceBareReference(raw, parsed)
-    || hasKnownResourceType(parsed.pathPart)
-}
-
-// A short location is useful only when this Markdown names one unambiguous path.
-// Return that original source reference so Main/Core still authorize the actual
-// message destination; the location itself remains a Renderer reading target.
-export function inlineFileReferenceSource(raw: string, candidates: readonly string[]): string | null {
-  if (!isInlineFileReference(raw)) return null
-  const parsed = parseFileReference(raw)!
-  if (parsed.pathKind !== 'relative' || /[\\/]/u.test(parsed.pathPart)) return raw
-  if (parsed.target?.line === undefined) return null
-  const matches = new Map<string, string>()
-  for (const candidate of candidates) {
-    const source = parseFileReference(candidate)
-    if (!source || !/[\\/]/u.test(source.pathPart)) continue
-    const path = source.pathPart.replace(/\\/gu, '/').replace(/^\.\//u, '')
-    if (path.split('/').at(-1) === parsed.pathPart) matches.set(path, candidate)
-  }
-  return matches.size === 1 ? [...matches.values()][0] : null
-}
-
-export function tokenizeFileReferences(text: string): FileReferenceToken[] {
-  if (!text || text.length > 1_048_576) return []
-  const tokens: FileReferenceToken[] = []
-  const candidatePattern = /(?:file:\/\/\/[^\s<>`，。；！？、]+|[a-z]:[\\/][^\s<>`，。；！？、]+|\\\\[^\s<>`，。；！？、]+|\/\/[^\s<>`，。；！？、]+|~[\\/][^\s<>`，。；！？、]+|\.\.?[\\/][^\s<>`，。；！？、]+|\/[A-Za-z0-9._~%+@-][^\s<>`，。；！？、]*|[A-Za-z0-9_.@-]+(?:[\\/][A-Za-z0-9_.@%+()#?:=-]+)+)/giu
-  for (const match of text.matchAll(candidatePattern)) {
-    const matched = match[0]
-    const previousCharacter = text[(match.index ?? 0) - 1]
-    // Do not start a path in the middle of a word, URL, or slash-separated prose.
-    if (previousCharacter && !/[\s([{"'“‘（【「『：:，。；！？、]/u.test(previousCharacter)) continue
-    if (previousCharacter === ':' && /[A-Za-z][A-Za-z0-9+.-]*:$/u.test(text.slice(0, match.index))) continue
-    const leading = matched.match(LEADING_PUNCTUATION)?.[0].length ?? 0
-    const withoutLeading = matched.slice(leading)
-    const trailing = withoutLeading.match(TRAILING_PUNCTUATION)?.[0].length ?? 0
-    const raw = withoutLeading.slice(0, withoutLeading.length - trailing)
-    const parsed = parseFileReference(raw)
-    if (parsed?.pathKind === 'windows_absolute' && previousCharacter && /[a-z0-9+.-]/i.test(previousCharacter)) continue
-    if (!parsed || !highConfidenceBareReference(raw, parsed)) continue
-    const start = (match.index ?? 0) + leading
-    tokens.push({ start, end: start + raw.length, raw, parsed })
-  }
-  return tokens
 }

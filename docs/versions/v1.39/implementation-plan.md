@@ -34,8 +34,8 @@ last_updated: 2026-09-03
 - [x] 三 shipped platform 均显式 NotQualified；release build 忽略本地 qualification override。
 - [x] 活动 Tool 组在底部执行台、Inspector 与局域网只读执行台优先展示已有公开证据中的具体当前指令；
   稳定 Tool 行、渠道卡片、Activity 分类及文件/Web typed Evidence 边界保持不变。
-- [x] 消息完整 inline-code 文件候选通过 Core 来源与 Main `realpath + stat` 证明为现存普通文件后才生成链接；共享资源
-  类型定义统一 inline-code 已知类型、会话链接与普通文件 Tab 图标，Main classifier 与不支持类型的系统打开路径不变。
+- [x] 消息只有显式 Markdown link 产生文件或 Web 资源入口；inline-code 与正文不扫描、不访问磁盘。共享资源类型定义
+  只统一显式文件链接与普通文件 Tab 图标，Main classifier 与不支持类型的系统打开路径不变。
 - [x] 不存在通用偏好文件的新 profile 默认关闭世界地图；schema v4 保存值原样保留，schema v1–v3 继续迁移为开启，
   设置页未完成加载时也不短暂显示为开启。
 
@@ -102,18 +102,22 @@ DOCS_BASE_REF=aae13734669c363e7b307a6407e6868eda1e6b8e pnpm docs:check:ci
   `DOCS_BASE_REF=53858ed40ca4a011d0e0e8f69a52e5d5e673cbde pnpm docs:check:ci`：通过；
 - Impeccable changed-target detector：无发现。
 
-## 文件引用存在性与共享图标验证（2026-09-03）
+## 显式 Markdown 文件入口与共享图标验证（2026-09-03）
 
-- 基于 `main@5a56103ee56a0e4c3e7a4a4c05917dbd5e05c7c3` 重放后通过 `pnpm typecheck`、`pnpm test`
-  （Vitest 140 files / 1475 tests；Node/协议 220 passed、1 个 Windows-only skip）与 `pnpm build:desktop`。
-- 已通过 `pnpm docs:test` 与
-  `DOCS_BASE_REF=5a56103ee56a0e4c3e7a4a4c05917dbd5e05c7c3 pnpm docs:check:ci`；源码差异确认既有
-  `file-preview-classifier.ts` 未修改。
-- `pnpm test:desktop-bridge` 与 `pnpm test:file-reference-navigation` 在本机 Electron 启动阶段被宿主 sandbox 拒绝，
-  进程在进入业务断言前退出，因此不把它们记为本机通过或功能失败；相同文件导航夹具以独立 `userData`、封闭 fake API
-  和显式 `--no-sandbox` 受控重跑后 10/10 业务断言通过，并生成 Day/Night 截图供界面验收。
-- 当前本机执行环境没有 `cargo`、`rustfmt` 或 `rustc`；Core 对共享注册表的读取、格式与授权断言由 PR Rust CI 门禁复验，
-  不使用 TypeScript 结果替代。
+- 基于 `main@5cfbce5ff8d734fb84b46fddacd91d011898cf85` 通过 `pnpm typecheck`、`pnpm test`
+  （Vitest 139 files / 1465 tests；Node/协议 220 passed、1 个 Windows-only skip）与 `pnpm build:desktop`。
+- 6 个文件引用专项测试文件共 81 项通过；删除的 Preload/Main resolver 名称在生产源码与合同中无残留，源码差异确认
+  既有 `file-preview-classifier.ts` 未修改。
+- 已通过 `pnpm docs:test`、`pnpm docs:check` 与
+  `DOCS_BASE_REF=5cfbce5ff8d734fb84b46fddacd91d011898cf85 pnpm docs:check:ci`。
+- `pnpm test:desktop-bridge` 与 `pnpm test:file-reference-navigation` 的标准启动在本机进入业务断言前被宿主 Chromium
+  sandbox 拒绝；相同生产 Preload/组件夹具以独立 `userData`、封闭 fake API 和显式 `--no-sandbox` 受控重跑后，
+  contextBridge 4 类 rejection 与文件导航 10/10 业务断言通过。导航夹具同时断言显式链接类型、inline-code 链接数为 0、
+  行范围、选区、键盘、双主题、阅读锚点和旧授权错误降级。
+- Impeccable changed-target 检测只报告 `styles.css` 中既有的全局侧边强调/宽度 transition 告警，均不在本次资源链接
+  删除样式的差异行；Day/Night 截图人工复核确认显式链接保留图标与焦点语义，inline-code 恢复普通代码底色。
+- 当前本机执行环境没有 `cargo`、`rustfmt` 或 `rustc`；Core 显式 Markdown destination 授权的 Rust 编译、格式与单测
+  需由 PR Rust CI 门禁复验，不使用 TypeScript 结果替代。
 
 ## 世界地图首次默认验证（2026-09-03）
 

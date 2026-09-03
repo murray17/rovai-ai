@@ -96,6 +96,8 @@ Host 无需因 Skill/MCP 更新重启，相邻 Session 又不会继承前一 Run
 <a id="v1-39-d05"></a>
 ## V1.39-D05：消息文件链接先证明存在，视觉类型不接管打开分类
 
+> 消息 inline-code 存在性探测部分已由 [V1.39-D06](#v1-39-d06) 替代；共享视觉类型与 Main classifier 分离的决定继续有效。
+
 ### 背景
 
 会话过去只凭 Markdown 语法和一组分散扩展名，把部分整体 inline-code 投影成可点击文件引用。于是 `config.toml`
@@ -123,3 +125,34 @@ Host 无需因 Skill/MCP 更新重启，相邻 Session 又不会继承前一 Run
 - 拒绝“已知扩展名即链接”：它无法证明目标存在，会制造虚假可操作状态。
 - 拒绝让资源注册表包含 `openStrategy`：它会复制并削弱 Main classifier 的大小、MIME、内容和平台判断。
 - 拒绝让 Renderer 直接检查磁盘：它会越过 Preload/Main/Core 的来源权威并暴露宿主路径能力。
+
+<a id="v1-39-d06"></a>
+## V1.39-D06：只有显式 Markdown link 承担消息文件导航语义
+
+### 背景
+
+D05 为整体 inline-code 增加存在性探测，试图只把真实文件显示为链接。但 inline-code 原本表达的是代码样式，不是作者
+明确的导航意图；为推断这一意图，Renderer、Preload、Main 与 Core 增加了一条渲染期 IPC 和磁盘访问链。消息只要
+包含绝对路径就可能在展示期间触碰系统目录权限，而且“文件存在”仍不能证明作者希望它可点击。
+
+继续探测可以减少死链接，却要用权限提示、渲染时 I/O、额外协议和状态竞态交换；只认已知扩展名则会再次把视觉类型
+误当导航资格。Markdown link 已经提供无歧义且可由作者控制的入口语义。
+
+### 决定
+
+只有显式 Markdown link 可以产生消息资源入口。本地 target 显示共享资源图标，HTTPS target 显示网页图标；
+inline-code、代码块和普通正文永远不扫描、不查询磁盘、不生成文件链接。删除 D05 引入的 typed Preload/Main 存在性
+探测 wire，Core 的 `message_reference` 来源校验也只接受 exact Message 中的显式本地 Markdown destination。
+
+共享资源类型继续统一显式消息文件链接和普通 Preview Tab 的 `ResourceVisualKind`，未知类型使用通用文件图标；它不
+参与消息引用识别。用户点击显式文件链接后，仍由 Main 既有 classifier 根据路径、扩展名、大小、MIME、内容与平台
+能力决定 Preview、系统应用或失败，不支持预览的文件不创建 Tab。当前边界由
+[File Preview v5](../../contracts/file-preview-v5.md)、[File Preview Architecture](../../architecture/file-preview.md)和
+[Camp 文件预览区](../../ui/components/file-preview.md)拥有。
+
+### 后果与替代方案
+
+- 消息展示不再访问磁盘，路径不存在与否只在明确点击后反馈；作者可通过显式链接表达导航意图。
+- 旧消息中的 inline-code 文件名恢复为普通代码样式，不再具有点击行为；这是有意的语义收敛。
+- 拒绝保留“仅相对路径探测”或“仅已知扩展名自动链接”：两者仍会让代码样式隐式承担导航语义，并产生两套规则。
+- 拒绝在 Renderer 直接 `stat` 或缓存存在性：它越过进程权威，也无法消除展示与点击之间的文件竞态。

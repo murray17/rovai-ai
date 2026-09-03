@@ -30,8 +30,8 @@ last_updated: 2026-09-03
 
 ## Camp 文件预览
 
-- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v4](../contracts/file-preview-v4.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)。
-- 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)、[V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)、[V1.39-D05](../versions/v1.39/decisions.md#v1-39-d05)；[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案已撤回。
+- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v5](../contracts/file-preview-v5.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)。
+- 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)、[V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)、[V1.39-D06](../versions/v1.39/decisions.md#v1-39-d06)；[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案与 [V1.39-D05](../versions/v1.39/decisions.md#v1-39-d05) 的 inline-code 存在性探测已被替代。
 
 ## Channels 与 External Principals
 

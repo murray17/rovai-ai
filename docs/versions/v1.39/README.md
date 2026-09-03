@@ -42,8 +42,8 @@ last_updated: 2026-09-03
   成员选择和 AgentRun 不会绕过此门禁。
 - 执行台、Inspector 与局域网只读执行台的活动 Tool 组优先展示已有公开证据中的具体当前指令；稳定 Tool 行标题、
   渠道卡片和 Activity 分类不变，文件路径与 Web query 继续遵守 typed/Canonical Evidence 边界。
-- Camp 消息中的完整 inline-code 文件候选只有在同一来源工作目录可解析为现存普通文件时才成为链接；共享资源类型
-  定义统一候选已知类型、会话图标和普通文件 Tab 图标，但不改变 Main 既有 Preview／系统打开 classifier。
+- Camp 消息只有显式 Markdown link 产生文件或 Web 资源入口；inline-code 与普通正文不扫描、不访问磁盘。共享资源
+  类型定义统一显式文件链接和普通文件 Tab 图标，但不改变 Main 既有 Preview／系统打开 classifier。
 - 通用设置的世界地图对不存在偏好文件的新 profile 默认关闭；schema v4 已保存值保持权威，schema v1–v3 仍迁移为
   开启，不在升级时覆盖既有用户的有效行为。关闭后的时间线回退与地图入口隐藏语义不变。
 
@@ -74,13 +74,13 @@ Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.38 冻结为 historical；本概览、实施计划、确认说明和版本索引建立唯一 current v1.39 |
-| Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact resume、managed receipt、MCP bridge，以及消息文件存在性与视觉类型分离的高成本取舍；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)完整拥有 Pi wire、Ready、Session、receipt、MCP、Action、Usage 与未准入边界；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v4](../../contracts/file-preview-v4.md)拥有消息文件存在性探测 wire |
+| Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact resume、managed receipt、MCP bridge，以及消息只由显式 Markdown link 产生资源入口、视觉类型与打开分类分离的取舍；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)完整拥有 Pi wire、Ready、Session、receipt、MCP、Action、Usage 与未准入边界；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v5](../../contracts/file-preview-v5.md)拥有显式消息资源入口且撤销渲染前存在性探测 wire |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)和[基础不变量](../../architecture/foundational-invariants.md)加入 Pi 的独立 transport、Fleet、隐私、managed input 与 bridge 边界；[File Preview](../../architecture/file-preview.md)拥有消息引用准入与既有 classifier 边界 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组的具体当前指令、稳定 Tool 行、渠道边界和世界地图首次默认；[Camp 文件预览区](../../ui/components/file-preview.md)拥有真实文件链接和共享图标语义；Pi 仍只复用既有 Runtime/成员/监控表面 |
 | Runtime Activity | 已更新 | [Activity Registry](../../runtime-activity/registry.md)与维护指南加入 Pi verified tool lifecycle 映射，未知 shape 继续 fail closed；当前指令只改共享 presentation，不增加分类映射 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 Pi 0.84.4 本机证据、专属未准入矩阵与剩余 Golden Flow |
-| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航分别指向两份 v30 合同、File Preview v4、Pi research 与 parity matrix |
+| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航分别指向两份 v30 合同、File Preview v5、Pi research 与 parity matrix |
 | Root README | 确认无需更新 | Pi 在所有 shipped platform 仍未准入，不应加入面向用户的 Supported Runtime 表 |
 
 ## References
@@ -90,5 +90,5 @@ Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升
 - [Parity Matrix](../../research/pi-runtime-reintegration-parity-matrix.md)
 - [Runtime Launch and Verification v30](../../contracts/runtime-launch-and-verification-v30.md)
 - [Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)
-- [File Preview v4](../../contracts/file-preview-v4.md)
+- [File Preview v5](../../contracts/file-preview-v5.md)
 - [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)
