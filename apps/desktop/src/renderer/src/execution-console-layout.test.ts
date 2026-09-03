@@ -75,6 +75,11 @@ describe('execution console layout', () => {
     expect(styleBlock('.run-pulse-chip-copy')).toMatch(/margin-inline-start:\s*4px/)
   })
 
+  it('uses immediate drawer scrolling while JavaScript owns latest-position restoration', () => {
+    expect(styleBlock('.execution-drawer-body')).toMatch(/scroll-behavior:\s*auto/)
+    expect(styleBlock('.execution-drawer-body')).not.toMatch(/scroll-behavior:\s*smooth/)
+  })
+
   it('keeps the Tool group operation count visible in the right sidecar', () => {
     expect(styles).not.toMatch(
       /\.execution-drawer-inspector \.tool-group-count\s*\{[^}]*display:\s*none/
