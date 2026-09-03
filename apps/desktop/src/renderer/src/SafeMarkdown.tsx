@@ -70,7 +70,9 @@ function scrollToMarkdownHeading(root: HTMLElement, target: string): boolean {
   return Boolean(heading)
 }
 
-function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
+function remarkFileReferences(
+  resolvedInlineFileReferences?: ReadonlySet<string>
+): (tree: MarkdownTreeNode) => void {
   return (tree) => {
     const candidates: string[] = []
     const collect = (node: MarkdownTreeNode): void => {
@@ -94,9 +96,16 @@ function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
         if (
           child.type === 'inlineCode'
           && typeof child.value === 'string'
-          && inlineFileReferenceSource(child.value, candidates) !== null
         ) {
-          const sourceReference = inlineFileReferenceSource(child.value, candidates)!
+          const sourceReference = resolvedInlineFileReferences === undefined
+            ? inlineFileReferenceSource(child.value, candidates)
+            : isInlineFileReference(child.value) && resolvedInlineFileReferences.has(child.value)
+              ? child.value
+              : null
+          if (sourceReference === null) {
+            next.push(child)
+            continue
+          }
           next.push({
             type: 'link',
             url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.value)}`,
@@ -123,7 +132,8 @@ export function SafeMarkdown({
   headingTarget,
   onHeadingTargetResult,
   leadingContent,
-  inlineLeadingContent = true
+  inlineLeadingContent = true,
+  resolvedInlineFileReferences
 }: {
   children: string
   className?: string
@@ -134,6 +144,8 @@ export function SafeMarkdown({
   /** Trusted inline UI, never parsed from the Markdown source. */
   leadingContent?: ReactNode
   inlineLeadingContent?: boolean
+  /** Exact inline-code references already confirmed as existing ordinary files. */
+  resolvedInlineFileReferences?: ReadonlySet<string>
 }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const callbacks = useRef({ onFileReference, onHeadingTargetResult })
@@ -161,13 +173,15 @@ export function SafeMarkdown({
       const text = markdownHeadingText(headingChildren)
       return <Tag data-markdown-heading={text}>{headingChildren}</Tag>
     }
+    const resolvedFileReferencesPlugin = (): ((tree: MarkdownTreeNode) => void) =>
+      remarkFileReferences(resolvedInlineFileReferences)
 
     return (
       <Markdown
         remarkPlugins={[
           [remarkGfm, { singleTilde: false }],
           remarkRepairCjkUrlTail,
-          ...(fileReferencesEnabled ? [remarkFileReferences] : []),
+          ...(fileReferencesEnabled ? [resolvedFileReferencesPlugin] : []),
           [remarkLeadingContent, { enabled: hasLeadingContent, inline: inlineLeadingContent }]
         ]}
         skipHtml
@@ -260,7 +274,8 @@ export function SafeMarkdown({
         {children}
       </Markdown>
     )
-  }, [children, fileReferencesEnabled, localImageUrl, hasLeadingContent, inlineLeadingContent])
+  }, [children, fileReferencesEnabled, localImageUrl, hasLeadingContent, inlineLeadingContent,
+    resolvedInlineFileReferences])
 
   return (
     <LeadingMarkdownContentContext.Provider value={leadingContent}>

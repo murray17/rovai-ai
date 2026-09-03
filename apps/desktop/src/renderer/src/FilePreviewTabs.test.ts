@@ -83,6 +83,25 @@ beforeEach(() => {
 })
 
 describe('FilePreviewTabs open feedback', () => {
+  it('uses the shared filename visual instead of the preview classifier kind', () => {
+    const config = tab('config')
+    config.file = {
+      ...config.file,
+      fileName: 'config.toml',
+      displayPath: 'config.toml',
+      extension: '.toml',
+      kind: 'text'
+    }
+    preview.tabs = [config]
+    preview.activeTab = config
+    preview.activeTabId = config.id
+
+    const markup = renderTabs()
+
+    expect(markup).toContain('data-resource-type="config"')
+    expect(markup).not.toContain('data-resource-type="text"')
+  })
+
   it('distinguishes a historical review from the same current file without changing accessible tab names', () => {
     const currentFile = tab('readme')
     currentFile.file = { ...currentFile.file, kind: 'markdown', fileName: 'readme.md', displayPath: 'docs/readme.md' }

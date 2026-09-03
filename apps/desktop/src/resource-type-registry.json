@@ -1,0 +1,94 @@
+[
+  {
+    "extensions": [".md", ".markdown", ".mdown", ".mkd", ".mdx"],
+    "visualKind": "markdown"
+  },
+  {
+    "extensions": [".html", ".htm"],
+    "visualKind": "html"
+  },
+  {
+    "extensions": [
+      ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
+      ".py", ".pyw", ".pyi", ".rb", ".rake", ".php", ".lua", ".rs",
+      ".go", ".java", ".kt", ".kts", ".swift", ".dart", ".c", ".h",
+      ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx", ".cs", ".m", ".mm",
+      ".sh", ".bash", ".zsh", ".fish", ".ps1", ".psm1", ".bat", ".cmd",
+      ".css", ".scss", ".sass", ".less", ".vue", ".svelte", ".hbs",
+      ".handlebars", ".pug", ".sql", ".pgsql", ".graphql", ".gql", ".cypher",
+      ".tf", ".tfvars", ".hcl", ".proto"
+    ],
+    "visualKind": "code"
+  },
+  {
+    "extensions": [
+      ".json", ".jsonc", ".json5", ".yaml", ".yml", ".toml", ".env",
+      ".ini", ".cfg", ".conf", ".properties", ".xml", ".xsd", ".xsl", ".plist"
+    ],
+    "fileNames": [
+      ".editorconfig", ".env", ".gitattributes", ".gitignore", ".npmrc",
+      ".prettierrc", "dockerfile", "makefile"
+    ],
+    "fileNamePrefixes": [".env."],
+    "visualKind": "config"
+  },
+  {
+    "extensions": [".txt", ".log", ".csv", ".tsv"],
+    "visualKind": "text"
+  },
+  {
+    "extensions": [
+      ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".ico",
+      ".tif", ".tiff", ".heic"
+    ],
+    "visualKind": "image"
+  },
+  {
+    "extensions": [".svg"],
+    "visualKind": "svg"
+  },
+  {
+    "extensions": [".diff", ".patch"],
+    "visualKind": "patch"
+  },
+  {
+    "extensions": [".pdf"],
+    "visualKind": "pdf"
+  },
+  {
+    "extensions": [".doc", ".docx", ".odt", ".rtf"],
+    "visualKind": "document"
+  },
+  {
+    "extensions": [".xls", ".xlsx", ".ods"],
+    "visualKind": "spreadsheet"
+  },
+  {
+    "extensions": [".ppt", ".pptx", ".odp"],
+    "visualKind": "presentation"
+  },
+  {
+    "extensions": [".ipynb"],
+    "visualKind": "notebook"
+  },
+  {
+    "extensions": [".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar"],
+    "visualKind": "archive"
+  },
+  {
+    "extensions": [".mp3", ".m4a", ".wav", ".flac", ".aac", ".ogg", ".opus"],
+    "visualKind": "audio"
+  },
+  {
+    "extensions": [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"],
+    "visualKind": "video"
+  },
+  {
+    "extensions": [".sqlite", ".sqlite3", ".db"],
+    "visualKind": "database"
+  },
+  {
+    "extensions": [".app", ".dmg", ".pkg", ".exe", ".msi", ".deb", ".rpm", ".apk"],
+    "visualKind": "executable"
+  }
+]

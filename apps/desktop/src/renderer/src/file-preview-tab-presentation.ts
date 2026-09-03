@@ -1,19 +1,24 @@
-import type { FilePreviewKind, ResolvedFilePreview } from '@contracts'
+import type { ResolvedFilePreview } from '@contracts'
+import { getResourceVisualKind, type ResourceVisualKind } from '../../resource-type-registry'
 import type { PreviewTabModel } from './FilePreviewContext'
 import { agentRunFilePathParts } from './file-changes-presentation'
 
 export function previewTabPresentation(tab: PreviewTabModel): {
   fileName: string
   displayPath: string
-  icon: FilePreviewKind | 'file_change'
+  icon: ResourceVisualKind
 } {
-  if (tab.kind === 'file') return { fileName: tab.file.fileName, displayPath: tab.file.displayPath, icon: tab.file.kind }
+  if (tab.kind === 'file') return {
+    fileName: tab.file.fileName,
+    displayPath: tab.file.displayPath,
+    icon: getResourceVisualKind(tab.file.fileName)
+  }
   const file = tab.changes.files.find((entry) => entry.evidenceFileId === tab.selectedEvidenceFileId)
     ?? tab.changes.files[0]
   return {
     fileName: file ? agentRunFilePathParts(file.path).basename : '文件变更',
     displayPath: file?.path ?? '',
-    icon: 'file_change'
+    icon: 'patch'
   }
 }
 

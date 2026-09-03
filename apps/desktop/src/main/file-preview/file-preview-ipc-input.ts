@@ -1,4 +1,8 @@
-import { isCampId, type OpenFilePreviewRequest } from '@contracts'
+import {
+  isCampId,
+  type OpenFilePreviewRequest,
+  type ResolveMessageFileReferencesRequest
+} from '@contracts'
 import { isAttachmentId } from '../attachment-desktop'
 
 function record(value: unknown): Record<string, unknown> {
@@ -32,6 +36,22 @@ function positiveInteger(value: unknown): number {
 
 export function parseFilePreviewCamp(value: unknown): string | null {
   return value === null ? null : campId(value)
+}
+
+export function parseResolveMessageFileReferencesRequest(
+  value: unknown
+): ResolveMessageFileReferencesRequest {
+  const input = record(value)
+  if (!Array.isArray(input.rawReferences)
+    || input.rawReferences.length === 0
+    || input.rawReferences.length > 64) {
+    throw new Error('Unsupported file preview reference batch')
+  }
+  return {
+    campId: campId(input.campId),
+    messageId: string(input.messageId, 128),
+    rawReferences: input.rawReferences.map((reference) => string(reference))
+  }
 }
 
 export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequest {

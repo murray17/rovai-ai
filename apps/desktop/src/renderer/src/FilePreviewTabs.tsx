@@ -278,7 +278,10 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   onClick={() => activate(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                 >
-                  <FilePreviewTabIcon kind={icon} />
+                  <FilePreviewTabIcon
+                    kind={icon}
+                    fileType={tab.kind === 'file' ? tab.file.kind : 'file_change'}
+                  />
                   <span className="file-preview-tab-label">{label}</span>
                   {hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
                 </button>
