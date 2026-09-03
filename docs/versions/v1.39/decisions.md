@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.39
 lifecycle: current
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # v1.39 决定
@@ -182,3 +182,34 @@ epoch/binding 或 mutation safety 失败仍 fail closed。原始 `PreparedMcpPro
   必需内部 Server，必须另行建立 required 类型与准入合同。
 - 拒绝硬编码 Homebrew/Node 路径、把解析结果写回配置、用 `which` 修改配置、把 command+args 拼为 Shell 字符串，或因
   单个 optional Server 失败清空全部 MCP/终止 AgentRun。
+
+<a id="v1-39-d08"></a>
+## V1.39-D08：派生子进程在最终请求上下文解析，Pi MCP 使用有界并发激活
+
+### 背景
+
+portable command 的逐 launch 语义落地后，ACP Client Terminal 仍先使用 Host 模板 cwd/PATH 解析 application，随后
+才应用 `terminal/create` 自身的 cwd/env。这使请求级 PATH 覆盖、相对 command 和 Windows `.cmd/.bat` shim 进入错误
+上下文或 EXE-only 派生路径。Pi bridge 又按 projection 顺序串行完成每个 optional Server 的 initialize 与
+`tools/list`；多个无响应 Server 会把相同 timeout 线性累加到 Session 启动。
+
+### 决定
+
+Managed Process 提供单一 `derive_runtime_one_shot_command`：调用方提交原始 application、结构化 argv、最终 cwd 与
+环境覆盖；模块先验证 cwd/argv，形成最终环境，再处理 application 和平台 entrypoint。Unix bare command 保持到 OS
+launch，相对路径以最终 cwd 锚定；Windows 使用最终 cwd/PATH 解析后重新 capture `NativeExecutable | CommandShim`。
+ACP Terminal 删除外部“先解析、后派生”组合，Runtime 主进程 capture 不变。
+
+Pi 在启动任何 Server 前完成 projection 缺失与重复 identity 的结构预检；随后并发激活全部 Ready Server。每个 Server
+独占 60 秒总 activation deadline，覆盖 transport open、initialize、initialized notification、`tools/list` 与 catalog
+validation。协议失败或 timeout 必须显式 shutdown/reap；stdio reader 不长期强持有 client，取消 future 仍允许
+Managed Process Drop 收口。结果按原 projection index 排序后合并，跨 Server collision 只降级当前 optional Server。
+
+### 后果与被拒绝方案
+
+- ACP request 的 PATH/cwd override 现在同时决定 executable 与实际执行上下文；command/args 仍不经过 Shell，Windows
+  Job、shim/interpreter identity 和 argv serializer 不变。
+- Pi MCP 总 activation 延迟由最慢 Server 的单份 deadline 加有界 cleanup 决定，不再是 Server 数量乘 timeout；并发完成
+  顺序不会改变 active Tool、receipt/digest 或冲突赢家。
+- 拒绝在 ACP Bridge 外继续暴露分离的 resolve/derive API，因为调用顺序无法由类型保证；拒绝无界并发等待、取消 future
+  后不清理 client、或按完成顺序合并，因为它们分别破坏启动上界、进程所有权和确定性。
