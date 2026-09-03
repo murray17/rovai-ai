@@ -10,6 +10,7 @@ use crate::{
     canonical_activity::{self, CanonicalRuntimeActivity, EvidenceActivityFacts},
     db::Database,
     managed_blob::ManagedBlobStore,
+    runtime_compaction_display::RUNTIME_COMPACTION_DISPLAY_EVENT,
     runtime_diff::{self, COMMAND_DIFF_SCHEMA_VERSION},
     runtime_file_operation::{
         self, FILE_OPERATION_SCHEMA_VERSION, RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT,
@@ -99,6 +100,7 @@ impl ExecutionEvidenceService {
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
                 | "runtime.fast.observed"
+                | RUNTIME_COMPACTION_DISPLAY_EVENT
                 | "file.change.updated"
                 | "runtime.file_changes.snapshot"
                 | "runtime.action"
@@ -759,6 +761,11 @@ fn evidence_classification(
         "runtime.plan" | "runtime.plan.delta" => Some(("plan", "updated")),
         "runtime.diagnostic" => Some(("step", "updated")),
         "runtime.fast.observed" => Some(("step", "updated")),
+        RUNTIME_COMPACTION_DISPLAY_EVENT => match payload.get("phase").and_then(Value::as_str) {
+            Some("imminent" | "started") => Some(("step", "started")),
+            Some("completed") => Some(("step", "completed")),
+            _ => None,
+        },
         "file.change.updated" => Some(("file_change", "updated")),
         "runtime.file_changes.snapshot" => Some(("file_change", "completed")),
         "runtime.action" => Some((
@@ -823,6 +830,25 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 .filter(|tier| matches!(*tier, "priority" | "fast" | "default" | "standard"));
             serde_json::json!({ "state": state, "observedServiceTier": tier })
         }
+        RUNTIME_COMPACTION_DISPLAY_EVENT => serde_json::json!({
+            "schemaVersion": payload.get("schemaVersion"),
+            "compactionId": payload.get("compactionId"),
+            "adapterKind": payload.get("adapterKind"),
+            "phase": payload.get("phase"),
+            "completionEvidence": payload.get("completionEvidence"),
+            "tokens": {
+                "before": payload.pointer("/tokens/before"),
+                "after": payload.pointer("/tokens/after"),
+                "current": payload.pointer("/tokens/current"),
+                "contextWindow": payload.pointer("/tokens/contextWindow"),
+                "usagePercent": payload.pointer("/tokens/usagePercent"),
+            },
+            "messages": {
+                "compacted": payload.pointer("/messages/compacted"),
+            },
+            "elapsedMs": payload.get("elapsedMs"),
+            "summaryText": payload.get("summaryText"),
+        }),
         "file.change.updated" => serde_json::json!({
             "itemId": payload.get("itemId"),
             "patch": payload.get("patch").or_else(|| payload.get("delta")),
@@ -1194,6 +1220,7 @@ fn source_event_key(event_type: &str, payload: &Value) -> Option<String> {
     let identity = payload
         .get("eventId")
         .or_else(|| payload.get("toolCallId"))
+        .or_else(|| payload.get("compactionId"))
         .or_else(|| payload.pointer("/item/id"))
         .and_then(Value::as_str)?;
     if event_type == "runtime.action"
@@ -1211,9 +1238,16 @@ fn source_event_key(event_type: &str, payload: &Value) -> Option<String> {
     } else {
         ""
     };
-    Some(format!(
-        "{event_type}:{identity}:{}{replay_observation}",
+    let phase = if event_type == RUNTIME_COMPACTION_DISPLAY_EVENT {
+        payload
+            .get("phase")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+    } else {
         phase_from_payload(payload)
+    };
+    Some(format!(
+        "{event_type}:{identity}:{phase}{replay_observation}"
     ))
 }
 
@@ -2220,6 +2254,54 @@ mod tests {
         let encoded = serde_json::to_string(&normalized).unwrap();
         assert!(!encoded.contains("bindingCredential"));
         assert!(!encoded.contains("must-not-persist"));
+    }
+
+    #[test]
+    fn compaction_display_is_durable_local_evidence_without_canonical_activity() {
+        let summary = "summary line\n".repeat(2_000);
+        let source = json!({
+            "schemaVersion": 1,
+            "compactionId": "compact-1",
+            "adapterKind": "kimi-code-cli",
+            "phase": "completed",
+            "completionEvidence": "native_terminal",
+            "tokens": {"before": 128_420, "after": 61_208},
+            "messages": {"compacted": 37},
+            "elapsedMs": 1_420,
+            "summaryText": summary,
+            "nativeSessionId": "must-not-persist",
+        });
+        assert!(ExecutionEvidenceService::is_durable_runtime_evidence_event(
+            RUNTIME_COMPACTION_DISPLAY_EVENT
+        ));
+        let prepared = ExecutionEvidenceService
+            .prepare_runtime_event(RUNTIME_COMPACTION_DISPLAY_EVENT, &source)
+            .unwrap()
+            .unwrap();
+        assert_eq!(prepared.kind, "step");
+        assert_eq!(prepared.phase, "completed");
+        assert_eq!(prepared.payload["summaryText"], source["summaryText"]);
+        assert!(prepared.payload.get("nativeSessionId").is_none());
+        assert_eq!(
+            source_event_key(RUNTIME_COMPACTION_DISPLAY_EVENT, &source).as_deref(),
+            Some("runtime.compaction.display:compact-1:completed")
+        );
+        let mut started = source.clone();
+        started["phase"] = json!("started");
+        assert_eq!(
+            source_event_key(RUNTIME_COMPACTION_DISPLAY_EVENT, &started).as_deref(),
+            Some("runtime.compaction.display:compact-1:started")
+        );
+        let facts = canonical_activity::classify_evidence(
+            "run-1",
+            1,
+            "evidence-1",
+            RUNTIME_COMPACTION_DISPLAY_EVENT,
+            "step",
+            "completed",
+            &prepared.payload,
+        );
+        assert!(!facts.is_activity);
     }
 
     #[test]

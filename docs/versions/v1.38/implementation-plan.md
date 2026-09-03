@@ -18,6 +18,10 @@ last_updated: 2026-09-02
 - [x] 飞书 active Host 只响应 Run started/terminal 与当前执行卡 Run 的 live event；其他 AgentRun、全局 Runtime 及
   `terminal_sealed` Run 不触发完整 `channels.host.tick`，Web 执行台链路不变。
 - [x] 飞书首次恢复 Pump 跳过历史群全量 roster 网络扫描，仍执行一次 Core 恢复；精确刷新和运行期 fallback 保留。
+- [x] Runtime 已捕获的 Compaction 信号可为同一 active AgentRun 生成本地 display sidecar；Codex
+  `contextCompaction` 在普通 activity 前截获，其他 Runtime 不扩 detector policy、不猜缺失字段。
+- [x] 执行台使用非 Tool 的 28px 四轨 Compaction 行；只有 token/summary 可展开，长 summary 复用 Managed Blob，
+  公共渠道、局域网执行台、世界地图与 Bootstrap outbox 均排除。
 - [ ] packaged Applications 视觉验收：Porcelain Day / Steel Night、最小窗口、200% zoom 与键盘顺序。
 - [ ] PR 合入最新 `main` 并从合并后的 `main` 构建、安装 `/Applications/Rovai.app`。
 
@@ -46,6 +50,10 @@ last_updated: 2026-09-02
   父消息投影、安全诊断，以及既有项目卡、FIFO、执行/排队 recall owner。
 - `apps/desktop/src/renderer/src/ChannelSettings.test.ts`：开放 Provider 过滤、固定钉钉预告、disabled/ARIA、legacy
   Snapshot 不泄露和飞书回退。
+- `crates/rovai-core/src/acp.rs`、`codex.rs`、`execution_evidence.rs`、`read_model.rs`：精确信号字段映射、Codex 先行截获、
+  active Run fencing、Managed Blob 和 public/non-activity 隔离。
+- `apps/desktop/src/renderer/src/App.test.ts`、`execution-tool-grouping.test.ts`、Main channel tests：同 ID 原位更新、
+  token/summary disclosure、静态行、Tool 计数边界和公共 wake 隔离。
 - `pnpm typecheck`、Renderer/Vitest 全量、`pnpm build:desktop`：类型、现有渠道交互与生产构建回归。
 - `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=<main base> pnpm docs:check:ci`：版本切换、当前 UI 权威和文档路由。
 - packaged App 人工检查：入口在日/夜主题均清晰置灰，真实图标比例不变，“敬请期待”可读且不产生点击反馈。

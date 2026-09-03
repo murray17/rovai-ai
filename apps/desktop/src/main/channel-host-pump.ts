@@ -14,6 +14,7 @@ export function trackedExecutionCoreEventWake(
 ): ChannelHostCoreEventWake {
   if (event.method === 'agent_run.started') return 'immediate'
   if (event.method === 'agent_run.terminal') return 'terminal'
+  if (event.method === 'runtime.compaction.display') return 'ignore'
   const liveEvent = liveRuntimeEventFromCore(event, 'channel-host-wake')
   if (!liveEvent) return 'ignore'
   return hasLiveExecutionCard(liveEvent.agentRunId) ? 'debounced' : 'ignore'

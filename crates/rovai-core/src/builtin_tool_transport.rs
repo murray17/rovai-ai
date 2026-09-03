@@ -142,6 +142,10 @@ pub struct CompactionHookIpcRequest {
     pub hook_event_name: String,
     pub trigger: String,
     pub source_event_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_auth: Option<BuiltinToolAuth>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
