@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.39
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # v1.39 实施与验收
@@ -29,7 +29,10 @@ last_updated: 2026-09-03
 - [x] `.pi/skills` delivery group；managed extension 每 Session 重新发现并验证 exact Skill catalog。
 - [x] External MCP `AdditivePerRun / RovaiWins / CoreManaged`；Core-owned stdio/Streamable HTTP transport、取消和清理；
   bare/relative/absolute stdio command 每轮按 Runtime PATH/cwd 解析且不写回配置，单个用户 Server 激活失败只降级该
-  Server，不阻断 Pi Session/AgentRun。
+  Server，不阻断 Pi Session/AgentRun；Ready Server 以独立 60 秒 activation budget 并发启动，超时显式回收，结果按
+  projection index 稳定合并。
+- [x] ACP Client Terminal 使用单一 derived-child API，在 request 最终 cwd/env 生效后解析 bare/relative command；
+  Windows 派生 `.cmd/.bat` 继续进入 CommandShim identity 与原子 Job 链。
 - [x] `agent_settled` 唯一成功终点、assistant snapshot 去重、Missing-Send gate、Cancellation Settlement v2 与迟到
   epoch/binding fence。
 - [x] Activity v2、terminal write/edit path、Pi assistant model-call Usage、稀疏 cache/cost 与 source digest 去重。
@@ -61,8 +64,8 @@ last_updated: 2026-09-03
   多 Tool 后 final。
 - [x] Pi 0.84.4 当前 Built-in CLI 15-operation full Run 与 resumed/new-lease Run。
 - [x] deterministic tests：A→B→A exact switch、并发独立 Host、receipt 全字段/nonce mismatch、协议重放/迟到、
-  stdio/HTTP MCP bridge、portable command、单 Server unavailable 后其余 Server 继续、Usage dedupe、Unknown mutation、
-  cleanup 和 platform matrix。
+  stdio/HTTP MCP bridge、portable/derived command、并发 MCP activation、activation timeout process-tree reap、单 Server
+  unavailable 后其余 Server 继续、Usage dedupe、Unknown mutation、cleanup 和 platform matrix。
 - [x] Migration 135 专项：无 receipt acceptance 拒绝、错 binding 拒绝、合法原子接受、receipt 不可直接改删、父
   Delivery 与 Camp 永久删除可合法 cascade、FK=0，reopen 只保留一条 migration marker。
 

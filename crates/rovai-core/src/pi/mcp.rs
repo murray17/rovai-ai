@@ -5,7 +5,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail};
@@ -22,7 +22,7 @@ use rovai_core::{
         ManagedProcessPurpose, ManagedStdinPolicy, ManagedWindowsArgvDialect,
     },
     mcp::McpServerDefinition,
-    mcp_projection::{McpExposureStatus, PreparedMcpProjection},
+    mcp_projection::{McpExposureEntry, McpExposureStatus, PreparedMcpProjection},
     runtime_discovery::configure_active_runtime_command,
 };
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
     sync::{Mutex, oneshot},
+    task::JoinSet,
     time::timeout,
 };
 
@@ -39,6 +40,7 @@ use super::{PI_MAX_JSONL_RECORD_BYTES, read_jsonl_record};
 
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 const MCP_COMMAND_TIMEOUT: Duration = Duration::from_secs(45);
+const MCP_SERVER_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(60);
 const MCP_DESCRIPTION_MAX_BYTES: usize = 16 * 1024;
 const MCP_MAX_LIST_PAGES: usize = 128;
 const NATIVE_TOOL_NAMES: [&str; 7] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -62,6 +64,33 @@ pub(crate) struct PiMcpActivationFailure {
     pub server_name: String,
     pub diagnostic_code: String,
     pub reason: String,
+}
+
+struct ActivatedPiMcpServer {
+    projection_index: usize,
+    exposure: McpExposureEntry,
+    definition: McpServerDefinition,
+    client: Arc<PiMcpClient>,
+    tools: Vec<PiMcpToolDefinition>,
+}
+
+struct FailedPiMcpServer {
+    projection_index: usize,
+    failure: PiMcpActivationFailure,
+}
+
+enum PiMcpServerActivation {
+    Active(ActivatedPiMcpServer),
+    Failed(FailedPiMcpServer),
+}
+
+impl PiMcpServerActivation {
+    fn projection_index(&self) -> usize {
+        match self {
+            Self::Active(activation) => activation.projection_index,
+            Self::Failed(activation) => activation.projection_index,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -129,6 +158,7 @@ impl PiMcpStdioClient {
     }
 
     fn spawn_stdout_reader(client: Arc<Self>, stdout: ManagedChildStdout) {
+        let client = Arc::downgrade(&client);
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -141,6 +171,9 @@ impl PiMcpStdioClient {
                 };
                 let Some(id) = message.get("id").and_then(super::value_id) else {
                     continue;
+                };
+                let Some(client) = client.upgrade() else {
+                    break;
                 };
                 let Some(pending) = client.pending.lock().await.remove(&id) else {
                     continue;
@@ -155,9 +188,11 @@ impl PiMcpStdioClient {
                 };
                 let _ = pending.sender.send(result);
             }
-            client.alive.store(false, Ordering::Release);
-            for (_, pending) in client.pending.lock().await.drain() {
-                let _ = pending.sender.send(Err("MCP Server exited".to_string()));
+            if let Some(client) = client.upgrade() {
+                client.alive.store(false, Ordering::Release);
+                for (_, pending) in client.pending.lock().await.drain() {
+                    let _ = pending.sender.send(Err("MCP Server exited".to_string()));
+                }
             }
         });
     }
@@ -389,8 +424,8 @@ enum PiMcpClient {
 }
 
 impl PiMcpClient {
-    async fn spawn(server_id: &str, definition: &McpServerDefinition) -> Result<Arc<Self>> {
-        let client = Arc::new(match definition {
+    async fn open(server_id: &str, definition: &McpServerDefinition) -> Result<Arc<Self>> {
+        Ok(Arc::new(match definition {
             McpServerDefinition::Stdio {
                 command,
                 args,
@@ -402,37 +437,29 @@ impl PiMcpClient {
             McpServerDefinition::StreamableHttp { url, headers } => {
                 Self::StreamableHttp(PiMcpHttpClient::new(server_id, url, headers)?)
             }
-        });
-        let initialization = async {
-            let initialize = client
-                .command(
-                    "initialize",
-                    json!({
-                        "protocolVersion": MCP_PROTOCOL_VERSION,
-                        "capabilities": {},
-                        "clientInfo": {"name": "rovai-pi-core", "version": "1"},
-                    }),
-                )
-                .await
-                .context("Pi MCP initialize failed")?;
-            let negotiated = initialize
-                .get("protocolVersion")
-                .and_then(Value::as_str)
-                .context("Pi MCP initialize omitted protocolVersion")?;
-            if negotiated.trim().is_empty() {
-                bail!("Pi MCP initialize returned an invalid protocolVersion");
-            }
-            client
-                .notify("notifications/initialized", json!({}))
-                .await?;
-            Ok::<(), anyhow::Error>(())
+        }))
+    }
+
+    async fn initialize(&self) -> Result<()> {
+        let initialize = self
+            .command(
+                "initialize",
+                json!({
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "rovai-pi-core", "version": "1"},
+                }),
+            )
+            .await
+            .context("Pi MCP initialize failed")?;
+        let negotiated = initialize
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .context("Pi MCP initialize omitted protocolVersion")?;
+        if negotiated.trim().is_empty() {
+            bail!("Pi MCP initialize returned an invalid protocolVersion");
         }
-        .await;
-        if let Err(error) = initialization {
-            client.shutdown().await;
-            return Err(error);
-        }
-        Ok(client)
+        self.notify("notifications/initialized", json!({})).await
     }
 
     async fn command(&self, method: &str, params: Value) -> Result<Value> {
@@ -570,135 +597,112 @@ pub(crate) struct PiMcpBridge {
 
 impl PiMcpBridge {
     pub(crate) async fn start(projection: &PreparedMcpProjection) -> Result<Arc<Self>> {
+        Self::start_with_activation_timeout(projection, MCP_SERVER_ACTIVATION_TIMEOUT).await
+    }
+
+    async fn start_with_activation_timeout(
+        projection: &PreparedMcpProjection,
+        activation_timeout: Duration,
+    ) -> Result<Arc<Self>> {
         let mut tools = Vec::new();
         let mut clients: BTreeMap<String, Arc<PiMcpClient>> = BTreeMap::new();
         let mut activation_failures = Vec::new();
         let mut seen_server_ids = BTreeSet::new();
+        let mut ready_servers = Vec::new();
+        for (projection_index, exposure) in projection
+            .snapshot
+            .servers
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.status == McpExposureStatus::Ready)
+        {
+            let projection_name = if exposure.runtime_name.is_empty() {
+                &exposure.name
+            } else {
+                &exposure.runtime_name
+            };
+            let definition = projection
+                .servers
+                .get(projection_name)
+                .with_context(|| format!("ready MCP Server {} has no definition", exposure.name))?;
+            if !seen_server_ids.insert(exposure.server_id.clone()) {
+                bail!("Pi MCP projection contains a duplicate Server identity");
+            }
+            ready_servers.push((projection_index, exposure.clone(), definition.clone()));
+        }
+
+        let mut activation_tasks = JoinSet::new();
+        for (projection_index, exposure, definition) in ready_servers {
+            activation_tasks.spawn(activate_pi_mcp_server(
+                projection_index,
+                exposure,
+                definition,
+                activation_timeout,
+            ));
+        }
+        let mut activations = Vec::new();
+        let mut join_failure = None;
+        while let Some(result) = activation_tasks.join_next().await {
+            match result {
+                Ok(activation) => activations.push(activation),
+                Err(error) => {
+                    join_failure.get_or_insert(error);
+                }
+            };
+        }
+        if let Some(error) = join_failure {
+            for activation in &activations {
+                if let PiMcpServerActivation::Active(activation) = activation {
+                    activation.client.shutdown().await;
+                }
+            }
+            bail!("Pi MCP activation task failed: {error}");
+        }
+        activations.sort_by_key(PiMcpServerActivation::projection_index);
+
         let mut source_identities = BTreeSet::new();
         let mut runtime_names = NATIVE_TOOL_NAMES
             .into_iter()
             .map(str::to_string)
             .collect::<BTreeSet<_>>();
-        let preparation = async {
-            for exposure in projection
-                .snapshot
-                .servers
-                .iter()
-                .filter(|entry| entry.status == McpExposureStatus::Ready)
-            {
-                let projection_name = if exposure.runtime_name.is_empty() {
-                    &exposure.name
-                } else {
-                    &exposure.runtime_name
-                };
-                let definition = projection.servers.get(projection_name).with_context(|| {
-                    format!("ready MCP Server {} has no definition", exposure.name)
-                })?;
-                if !seen_server_ids.insert(exposure.server_id.clone()) {
-                    bail!("Pi MCP projection contains a duplicate Server identity");
+        for activation in activations {
+            match activation {
+                PiMcpServerActivation::Failed(activation) => {
+                    activation_failures.push(activation.failure);
                 }
-                let client = match PiMcpClient::spawn(&exposure.server_id, definition).await {
-                    Ok(client) => client,
-                    Err(error) => {
-                        record_optional_activation_failure(
-                            &mut activation_failures,
-                            exposure,
-                            definition,
-                            PiMcpActivationStage::Start,
-                            &error,
-                        );
-                        continue;
-                    }
-                };
-                let listed = match client.list_tools().await {
-                    Ok(listed) => listed,
-                    Err(error) => {
-                        client.shutdown().await;
-                        record_optional_activation_failure(
-                            &mut activation_failures,
-                            exposure,
-                            definition,
-                            PiMcpActivationStage::ToolCatalog,
-                            &error,
-                        );
-                        continue;
-                    }
-                };
-                let mut staged_source_identities = source_identities.clone();
-                let mut staged_runtime_names = runtime_names.clone();
-                let prepared_tools = listed
-                    .into_iter()
-                    .map(|value| {
-                        let tool_name = value
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .filter(|value| !value.trim().is_empty())
-                            .context("Pi MCP tools/list returned a Tool without a name")?;
+                PiMcpServerActivation::Active(activation) => {
+                    let exposure = &activation.exposure;
+                    let client = activation.client;
+                    let prepared_tools = activation.tools;
+                    let mut staged_source_identities = source_identities.clone();
+                    let mut staged_runtime_names = runtime_names.clone();
+                    let merged = prepared_tools.iter().try_for_each(|tool| {
                         if !staged_source_identities
-                            .insert((exposure.name.clone(), tool_name.to_string()))
+                            .insert((exposure.name.clone(), tool.tool_name.clone()))
                         {
                             bail!("Pi MCP tools/list returned a duplicate source identity");
                         }
-                        let runtime_name = mcp_runtime_name(&exposure.name, tool_name);
-                        if !staged_runtime_names.insert(runtime_name.clone()) {
+                        if !staged_runtime_names.insert(tool.runtime_name.clone()) {
                             bail!("Pi MCP proxy Tool name collision");
                         }
-                        let description = value
-                            .get("description")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        if description.len() > MCP_DESCRIPTION_MAX_BYTES {
-                            bail!("Pi MCP Tool description exceeds the model-input limit");
-                        }
-                        let input_schema = value
-                            .get("inputSchema")
-                            .filter(|value| value.is_object())
-                            .cloned()
-                            .context("Pi MCP Tool has no object inputSchema")?;
-                        if input_schema.get("type").and_then(Value::as_str) != Some("object") {
-                            bail!("Pi MCP Tool inputSchema must describe an object");
-                        }
-                        Ok(PiMcpToolDefinition {
-                            server_id: exposure.server_id.clone(),
-                            server_name: exposure.name.clone(),
-                            tool_name: tool_name.to_string(),
-                            runtime_name,
-                            description_digest: canonical_json_digest(&json!(description))?,
-                            input_schema_digest: canonical_json_digest(&input_schema)?,
-                            description,
-                            input_schema,
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>();
-                let prepared_tools = match prepared_tools {
-                    Ok(prepared_tools) => prepared_tools,
-                    Err(error) => {
+                        Ok(())
+                    });
+                    if let Err(error) = merged {
                         client.shutdown().await;
-                        record_optional_activation_failure(
-                            &mut activation_failures,
+                        activation_failures.push(optional_activation_failure(
                             exposure,
-                            definition,
+                            &activation.definition,
                             PiMcpActivationStage::ToolCatalog,
                             &error,
-                        );
+                        ));
                         continue;
                     }
-                };
-                source_identities = staged_source_identities;
-                runtime_names = staged_runtime_names;
-                clients.insert(exposure.server_id.clone(), client);
-                tools.extend(prepared_tools);
+                    source_identities = staged_source_identities;
+                    runtime_names = staged_runtime_names;
+                    clients.insert(exposure.server_id.clone(), client);
+                    tools.extend(prepared_tools);
+                }
             }
-            Ok::<(), anyhow::Error>(())
-        }
-        .await;
-        if let Err(error) = preparation {
-            for client in clients.values() {
-                client.shutdown().await;
-            }
-            return Err(error);
         }
         tools.sort_by(|left, right| left.runtime_name.cmp(&right.runtime_name));
         let tools_by_runtime_name = tools
@@ -753,15 +757,135 @@ impl PiMcpBridge {
 enum PiMcpActivationStage {
     Start,
     ToolCatalog,
+    Timeout,
 }
 
-fn record_optional_activation_failure(
-    failures: &mut Vec<PiMcpActivationFailure>,
-    exposure: &rovai_core::mcp_projection::McpExposureEntry,
+async fn activate_pi_mcp_server(
+    projection_index: usize,
+    exposure: McpExposureEntry,
+    definition: McpServerDefinition,
+    activation_timeout: Duration,
+) -> PiMcpServerActivation {
+    let activation_started = Instant::now();
+    let client = match PiMcpClient::open(&exposure.server_id, &definition).await {
+        Ok(client) => client,
+        Err(error) => {
+            return PiMcpServerActivation::Failed(FailedPiMcpServer {
+                projection_index,
+                failure: optional_activation_failure(
+                    &exposure,
+                    &definition,
+                    PiMcpActivationStage::Start,
+                    &error,
+                ),
+            });
+        }
+    };
+    let remaining = activation_timeout.saturating_sub(activation_started.elapsed());
+    let activation = timeout(remaining, async {
+        client
+            .initialize()
+            .await
+            .map_err(|error| (PiMcpActivationStage::Start, error))?;
+        let listed = client
+            .list_tools()
+            .await
+            .map_err(|error| (PiMcpActivationStage::ToolCatalog, error))?;
+        prepare_pi_mcp_tools(&exposure, listed)
+            .map_err(|error| (PiMcpActivationStage::ToolCatalog, error))
+    })
+    .await;
+    match activation {
+        Ok(Ok(tools)) => PiMcpServerActivation::Active(ActivatedPiMcpServer {
+            projection_index,
+            exposure,
+            definition,
+            client,
+            tools,
+        }),
+        Ok(Err((stage, error))) => {
+            client.shutdown().await;
+            PiMcpServerActivation::Failed(FailedPiMcpServer {
+                projection_index,
+                failure: optional_activation_failure(&exposure, &definition, stage, &error),
+            })
+        }
+        Err(error) => {
+            client.shutdown().await;
+            PiMcpServerActivation::Failed(FailedPiMcpServer {
+                projection_index,
+                failure: optional_activation_failure(
+                    &exposure,
+                    &definition,
+                    PiMcpActivationStage::Timeout,
+                    &error.into(),
+                ),
+            })
+        }
+    }
+}
+
+fn prepare_pi_mcp_tools(
+    exposure: &McpExposureEntry,
+    listed: Vec<Value>,
+) -> Result<Vec<PiMcpToolDefinition>> {
+    let mut source_identities = BTreeSet::new();
+    let mut runtime_names = NATIVE_TOOL_NAMES
+        .into_iter()
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    listed
+        .into_iter()
+        .map(|value| {
+            let tool_name = value
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .context("Pi MCP tools/list returned a Tool without a name")?;
+            if !source_identities.insert((exposure.name.clone(), tool_name.to_string())) {
+                bail!("Pi MCP tools/list returned a duplicate source identity");
+            }
+            let runtime_name = mcp_runtime_name(&exposure.name, tool_name);
+            if !runtime_names.insert(runtime_name.clone()) {
+                bail!("Pi MCP proxy Tool name collision");
+            }
+            let description = value
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if description.len() > MCP_DESCRIPTION_MAX_BYTES {
+                bail!("Pi MCP Tool description exceeds the model-input limit");
+            }
+            let input_schema = value
+                .get("inputSchema")
+                .filter(|value| value.is_object())
+                .cloned()
+                .context("Pi MCP Tool has no object inputSchema")?;
+            if input_schema.get("type").and_then(Value::as_str) != Some("object") {
+                bail!("Pi MCP Tool inputSchema must describe an object");
+            }
+            Ok(PiMcpToolDefinition {
+                server_id: exposure.server_id.clone(),
+                server_name: exposure.name.clone(),
+                tool_name: tool_name.to_string(),
+                runtime_name,
+                description_digest: canonical_json_digest(&json!(description))?,
+                input_schema_digest: canonical_json_digest(&input_schema)?,
+                description,
+                input_schema,
+            })
+        })
+        .collect()
+}
+
+fn optional_activation_failure(
+    exposure: &McpExposureEntry,
     definition: &McpServerDefinition,
     stage: PiMcpActivationStage,
     error: &anyhow::Error,
-) {
+) -> PiMcpActivationFailure {
     let error_chain = format!("{error:#}");
     let process_not_found = matches!(stage, PiMcpActivationStage::Start)
         && error.chain().any(|cause| {
@@ -777,8 +901,9 @@ fn record_optional_activation_failure(
                 path.is_relative() && path.components().count() > 1
             }
     );
-    let (diagnostic_code, reason) = if error_chain
-        .contains("command is not available on Runtime PATH")
+    let (diagnostic_code, reason) = if matches!(stage, PiMcpActivationStage::Timeout) {
+        ("mcp.activation_timeout", "server_activation_timed_out")
+    } else if error_chain.contains("command is not available on Runtime PATH")
         || (process_not_found && !relative_stdio_command)
     {
         (
@@ -800,14 +925,17 @@ fn record_optional_activation_failure(
             PiMcpActivationStage::ToolCatalog => {
                 ("mcp.tool_catalog_unavailable", "server_tool_catalog_failed")
             }
+            PiMcpActivationStage::Timeout => {
+                ("mcp.activation_timeout", "server_activation_timed_out")
+            }
         }
     };
-    failures.push(PiMcpActivationFailure {
+    PiMcpActivationFailure {
         server_id: exposure.server_id.clone(),
         server_name: exposure.name.clone(),
         diagnostic_code: diagnostic_code.to_string(),
         reason: reason.to_string(),
-    });
+    }
 }
 
 impl Drop for PiMcpBridge {
@@ -1133,6 +1261,201 @@ mod tests {
             })
         );
         bridge.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn optional_stdio_servers_activate_concurrently() {
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp-smoke-server.mjs");
+        let cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let node_name = if cfg!(windows) { "node.exe" } else { "node" };
+        let node = std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+            .map(|path| path.join(node_name))
+            .find(|path| path.is_file())
+            .and_then(|path| path.canonicalize().ok())
+            .expect("Node.js is required for the MCP process fixture");
+        let runtime_path = std::env::join_paths([node.parent().unwrap()])
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let marker_root = std::env::temp_dir().join(format!(
+            "rovai-pi-mcp-concurrent-activation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&marker_root).unwrap();
+        let zeta_marker = marker_root.join("zeta.started");
+        let alpha_marker = marker_root.join("alpha.started");
+
+        let mut servers = BTreeMap::new();
+        for (name, own_marker, peer_marker) in [
+            ("zeta", &zeta_marker, &alpha_marker),
+            ("alpha", &alpha_marker, &zeta_marker),
+        ] {
+            servers.insert(
+                name.to_string(),
+                McpServerDefinition::Stdio {
+                    command: "node".to_string(),
+                    args: vec![fixture.to_string_lossy().to_string()],
+                    cwd: Some(cwd.to_string_lossy().to_string()),
+                    env: BTreeMap::from([
+                        ("PATH".to_string(), runtime_path.clone()),
+                        ("ROVAI_MCP_SMOKE_SOURCE".to_string(), name.to_string()),
+                        (
+                            "ROVAI_MCP_SMOKE_STARTUP_MARKER".to_string(),
+                            own_marker.to_string_lossy().into_owned(),
+                        ),
+                        (
+                            "ROVAI_MCP_SMOKE_WAIT_FOR_STARTUP_MARKER".to_string(),
+                            peer_marker.to_string_lossy().into_owned(),
+                        ),
+                    ]),
+                },
+            );
+        }
+        let projection = PreparedMcpProjection {
+            snapshot: McpExposureSnapshot {
+                schema_version: 2,
+                config_digest: "sha256:pi-mcp-concurrent-config".to_string(),
+                config_status: "ready".to_string(),
+                projection_mode: ExternalMcpProjection::AdditivePerRun,
+                same_name_policy: Some(McpSameNamePolicy::RovaiWins),
+                warnings: Vec::new(),
+                servers: ["zeta", "alpha"]
+                    .into_iter()
+                    .map(|name| McpExposureEntry {
+                        server_id: format!("pi-mcp-{name}-server"),
+                        name: name.to_string(),
+                        runtime_name: name.to_string(),
+                        transport: "stdio".to_string(),
+                        config_digest: format!("sha256:pi-mcp-{name}-config"),
+                        status: McpExposureStatus::Ready,
+                        reason: None,
+                    })
+                    .collect(),
+            },
+            exposure_digest: "sha256:pi-mcp-concurrent-exposure".to_string(),
+            projection_digest: "sha256:pi-mcp-concurrent-projection".to_string(),
+            canonical_path: cwd.join("target/pi-mcp-concurrent-fixture.json"),
+            servers,
+        };
+
+        let bridge = timeout(Duration::from_secs(5), PiMcpBridge::start(&projection))
+            .await
+            .expect("MCP Servers waiting on each other must activate concurrently")
+            .unwrap();
+        assert!(bridge.activation_failures().is_empty());
+        assert_eq!(
+            bridge
+                .tools()
+                .iter()
+                .map(|tool| tool.runtime_name.as_str())
+                .collect::<Vec<_>>(),
+            ["mcp_alpha_echo", "mcp_zeta_echo"]
+        );
+        bridge.shutdown().await;
+        std::fs::remove_dir_all(marker_root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn activation_timeout_explicitly_reaps_the_stdio_process_tree() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-pi-mcp-activation-timeout-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let script = root.join("hung-mcp.sh");
+        let leader_marker = root.join("leader.pid");
+        let child_marker = root.join("child.pid");
+        std::fs::write(
+            &script,
+            concat!(
+                "#!/bin/sh\n",
+                "printf '%s' \"$$\" > \"$ROVAI_MCP_LEADER_MARKER\"\n",
+                "IFS= read -r ignored || exit 1\n",
+                "sleep 30 &\n",
+                "printf '%s' \"$!\" > \"$ROVAI_MCP_CHILD_MARKER\"\n",
+                "wait\n",
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let projection = PreparedMcpProjection {
+            snapshot: McpExposureSnapshot {
+                schema_version: 2,
+                config_digest: "sha256:pi-mcp-timeout-config".to_string(),
+                config_status: "ready".to_string(),
+                projection_mode: ExternalMcpProjection::AdditivePerRun,
+                same_name_policy: Some(McpSameNamePolicy::RovaiWins),
+                warnings: Vec::new(),
+                servers: vec![McpExposureEntry {
+                    server_id: "pi-mcp-timeout-server".to_string(),
+                    name: "hung".to_string(),
+                    runtime_name: "hung".to_string(),
+                    transport: "stdio".to_string(),
+                    config_digest: "sha256:pi-mcp-timeout-server-config".to_string(),
+                    status: McpExposureStatus::Ready,
+                    reason: None,
+                }],
+            },
+            exposure_digest: "sha256:pi-mcp-timeout-exposure".to_string(),
+            projection_digest: "sha256:pi-mcp-timeout-projection".to_string(),
+            canonical_path: root.join("projection.json"),
+            servers: BTreeMap::from([(
+                "hung".to_string(),
+                McpServerDefinition::Stdio {
+                    command: "/bin/sh".to_string(),
+                    args: vec![script.to_string_lossy().into_owned()],
+                    cwd: Some(root.to_string_lossy().into_owned()),
+                    env: BTreeMap::from([
+                        (
+                            "ROVAI_MCP_LEADER_MARKER".to_string(),
+                            leader_marker.to_string_lossy().into_owned(),
+                        ),
+                        (
+                            "ROVAI_MCP_CHILD_MARKER".to_string(),
+                            child_marker.to_string_lossy().into_owned(),
+                        ),
+                    ]),
+                },
+            )]),
+        };
+
+        let bridge =
+            PiMcpBridge::start_with_activation_timeout(&projection, Duration::from_millis(500))
+                .await
+                .unwrap();
+        assert!(bridge.tools().is_empty());
+        assert_eq!(
+            bridge.activation_failures(),
+            [PiMcpActivationFailure {
+                server_id: "pi-mcp-timeout-server".to_string(),
+                server_name: "hung".to_string(),
+                diagnostic_code: "mcp.activation_timeout".to_string(),
+                reason: "server_activation_timed_out".to_string(),
+            }]
+        );
+        let leader_pid = std::fs::read_to_string(&leader_marker)
+            .unwrap()
+            .parse::<i32>()
+            .unwrap();
+        let child_pid = std::fs::read_to_string(&child_marker)
+            .unwrap()
+            .parse::<i32>()
+            .unwrap();
+        for pid in [leader_pid, child_pid] {
+            assert!(
+                unsafe { libc::kill(pid, 0) } != 0
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH),
+                "activation timeout left MCP process {pid} alive"
+            );
+        }
+        bridge.shutdown().await;
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

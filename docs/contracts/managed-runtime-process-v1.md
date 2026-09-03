@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v1
 status: accepted
 source_version: v1.05
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Managed Runtime Process v1
@@ -13,7 +13,8 @@ last_updated: 2026-09-03
 Fleet 与 Planned Shutdown 合同拥有；进程退出不是 Provider outcome。macOS User Automation credential 隔离的
 修正理由见[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)。Windows command shim 扩展见
 [V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)。Runtime portable child command 与 Pi MCP
-逐 Server 降级理由见[V1.39-D07](../versions/v1.39/decisions.md#v1-39-d07)。
+逐 Server 降级理由见[V1.39-D07](../versions/v1.39/decisions.md#v1-39-d07)；ACP Terminal 最终请求上下文解析
+与 Pi MCP 并发激活理由见[V1.39-D08](../versions/v1.39/decisions.md#v1-39-d08)。
 
 ## 1. Module interface
 
@@ -40,6 +41,12 @@ capture 先冻结工作目录与显式环境。绝对 application 保持原有�
 该冻结环境的 `PATH` 查找；含路径分隔符的相对 application 只相对该冻结工作目录形成 launch path。Windows 则按下述
 封闭规则为本次 launch 解析并验证入口。任何解析结果都不回写用户配置，也不跨 AgentRun/恢复缓存；每次新的 capture
 都使用当轮 Runtime 环境。argv 始终保持结构化字段，不经 Shell 拼接。
+
+从已准入 Host 派生 `RuntimeOneShot` 时，调用方必须把原始 application、结构化 argv、请求 cwd 与环境覆盖一起交给
+`derive_runtime_one_shot_command`。Managed Process 先验证最终 cwd、在 Host 环境快照上应用覆盖，再按最终
+cwd/environment 处理 application；调用方不得先按 Host 模板 cwd/PATH 解析再套用请求覆盖。Unix bare command 保持
+bare 到 launch，relative path 以最终 cwd 锚定并验证；Windows 使用最终 cwd/PATH 解析后重新进入完整
+`NativeExecutable | CommandShim` capture、identity 与原子 Job 链路。
 
 Windows launch policy 只允许以下封闭 entrypoint：
 
@@ -155,6 +162,8 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 - Windows rescan 的 inherited/HKCU/HKLM/known PATH 快照同时进入 discovery、Probe 与正式 AgentRun；
 - bare command 与 cwd-relative application 在冻结 Runtime PATH/cwd 中可启动；下一次 launch 更换 PATH 后会由 OS
   重新查找（Windows 重新执行封闭解析），用户配置仍保留原始 portable command；
+- ACP derived child 的 bare/relative command 使用请求最终覆盖后的 PATH/cwd；Windows `.cmd/.bat` 保持
+  `CommandShim` identity，不退化为 EXE-only 派生入口；
 - macOS process-group 启动、终止和 Fleet 回归保持；
 - macOS 受管 shell 及其后代不能读取或写入 `automation-v1` credential/context，但仍能读取保护树外的 fixture。
 
@@ -163,5 +172,6 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 - [ADR-0211](../versions/v1.05/decisions.md#adr-0211)
 - [V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)
 - [V1.39-D07](../versions/v1.39/decisions.md#v1-39-d07)
+- [V1.39-D08](../versions/v1.39/decisions.md#v1-39-d08)
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
 - [Planned Shutdown](../architecture/planned-shutdown.md)

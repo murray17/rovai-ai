@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     path::{Component, Path, PathBuf},
     process::ExitStatus,
     sync::{
@@ -811,14 +811,13 @@ impl AcpClientTerminalBridge {
             .get("command")
             .and_then(Value::as_str)
             .context("terminal/create has no command")?;
-        let application = self.launch_template.resolve_child_application(command)?;
         let arguments = terminal_arguments(params)?;
         let environment = terminal_environment(params)?;
         let working_directory = terminal_working_directory(&self.execution_root, params)?;
         let output_byte_limit = terminal_output_byte_limit(params)?;
         let terminal_id = format!("terminal-{}", uuid::Uuid::new_v4());
-        let spec = self.launch_template.derive_runtime_one_shot(
-            application,
+        let spec = self.launch_template.derive_runtime_one_shot_command(
+            OsStr::new(command),
             arguments,
             working_directory,
             environment,
@@ -7012,6 +7011,95 @@ while IFS= read -r ignored; do :; done
         assert!(bridge.is_empty().await);
         std::fs::remove_dir_all(root).unwrap();
         std::fs::remove_dir_all(external_cwd).unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_terminal_resolves_commands_after_request_cwd_and_env_are_final() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-command-context-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let request_cwd = root.join("request-cwd");
+        let request_bin = root.join("request-bin");
+        std::fs::create_dir_all(request_cwd.join("scripts")).unwrap();
+        std::fs::create_dir_all(&request_bin).unwrap();
+        make_executable(
+            &request_bin.join("terminal-context-tool"),
+            "#!/bin/sh\nprintf 'request-path:%s' \"$PWD\"\n",
+        );
+        make_executable(
+            &request_cwd.join("scripts/build"),
+            "#!/bin/sh\nprintf relative-cwd\n",
+        );
+        let bridge = terminal_bridge(&root);
+        let owner = terminal_owner();
+
+        let bare = bridge
+            .create(
+                "session-command-context",
+                &owner,
+                &json!({
+                    "sessionId": "session-command-context",
+                    "command": "terminal-context-tool",
+                    "cwd": request_cwd,
+                    "env": [{
+                        "name": "PATH",
+                        "value": std::env::join_paths([&request_bin]).unwrap().to_string_lossy()
+                    }],
+                }),
+            )
+            .await
+            .unwrap();
+        let bare_id = bare["terminalId"].as_str().unwrap();
+        bridge
+            .wait_for_exit("session-command-context", &owner, bare_id)
+            .await
+            .unwrap();
+        let bare_output = bridge
+            .output("session-command-context", &owner, bare_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            bare_output["output"],
+            format!(
+                "request-path:{}",
+                request_cwd.canonicalize().unwrap().display()
+            )
+        );
+        bridge
+            .release("session-command-context", &owner, bare_id)
+            .await
+            .unwrap();
+
+        let relative = bridge
+            .create(
+                "session-command-context",
+                &owner,
+                &json!({
+                    "sessionId": "session-command-context",
+                    "command": "scripts/build",
+                    "cwd": request_cwd,
+                }),
+            )
+            .await
+            .unwrap();
+        let relative_id = relative["terminalId"].as_str().unwrap();
+        bridge
+            .wait_for_exit("session-command-context", &owner, relative_id)
+            .await
+            .unwrap();
+        let relative_output = bridge
+            .output("session-command-context", &owner, relative_id)
+            .await
+            .unwrap();
+        assert_eq!(relative_output["output"], "relative-cwd");
+        bridge
+            .release("session-command-context", &owner, relative_id)
+            .await
+            .unwrap();
+
+        assert!(bridge.is_empty().await);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

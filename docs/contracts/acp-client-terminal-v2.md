@@ -4,14 +4,14 @@ name: ACP Client Terminal
 version: v2
 status: accepted
 source_version: v1.29
-last_updated: 2026-08-27
+last_updated: 2026-09-04
 ---
 
 # ACP Client Terminal v2
 
-v2 replaces [v1](acp-client-terminal-v1.md). v1 的 Runtime capability policy、ACP wire、命令与环境参数、
-Managed Runtime Process 派生、有界输出、进程树所有权和 Terminal 生命周期全部保持不变。本版只收敛
-`terminal/create.cwd`：execution root 是缺省工作目录，不再是 Core 强制的 Shell 权限边界。
+v2 replaces [v1](acp-client-terminal-v1.md). v1 的 Runtime capability policy、ACP wire、有界输出、进程树所有权
+和 Terminal 生命周期保持不变。本版收敛 `terminal/create.cwd` 与派生命令解析上下文：execution root 是缺省工作目录，
+不再是 Core 强制的 Shell 权限边界；application 必须在请求最终 cwd/env 生效后解析。
 
 ## Runtime capability policy
 
@@ -46,8 +46,11 @@ Runtime 之间的私有协议数据，不投影为 Camp message、Host diagnosti
 `terminal/create` 仅在 `sessionId` 属于当前 `AgentRun owner + execution_epoch` 且 Session 处于 Active Prompt 时
 准入。Host 最多同时拥有 16 个 Terminal。
 
-`command` 必须是绝对可执行文件，或是能从该 Runtime Host 已冻结 `PATH` 解析的单个命令名；shell command string
-和带目录的相对路径拒绝。`cwd` 的解释固定为：
+`command` 必须是单个结构化 application，不接受 Shell command string；允许绝对路径、bare command 与带目录的
+相对路径。Core 先确定最终 cwd，在 Host 冻结环境上应用本请求 `env`，随后才解析 application：Unix bare command
+保持原值并由 launch 使用最终 `PATH`，相对路径以最终 cwd 锚定；Windows bare/relative command 在最终
+PATH/cwd 中按 `.exe → .cmd → .bat` 解析，并进入 Managed Process 的完整 native/CommandShim identity 链。
+`cwd` 的解释固定为：
 
 - 省略或传 `null` 时使用当前 AgentRun 的 execution root；
 - 显式值必须是 string、绝对路径并且在创建时是已存在的目录；相对路径和不存在/非目录路径拒绝；
@@ -64,6 +67,7 @@ Terminal 的通用 sandbox。`args` 与 `env` 仍只接受标准数组 shape，�
 实际进程由本地 Core Host 通过 Managed Runtime Process 派生的 `RuntimeOneShot` 启动：
 
 - 继承 Runtime Host 捕获后的精确环境，包括 provider、Built-in CLI、PATH 与平台保护配置，再应用 request env；
+- application 只在上述最终环境与 cwd 已形成后处理，调用方不得提前使用 Host 模板上下文解析；
 - 使用按上节解析的 cwd、null stdin、独立 Unix process group 或 Windows Job；
 - 继续继承 macOS User Automation protected-tree deny，不创建新的执行后端或云端路径；
 - Terminal identity 同时绑定 Host、Session、AgentRun owner 与 execution epoch，不允许跨 Run 复用。
@@ -84,6 +88,8 @@ warm reuse。
 - Kimi 0.38 compatibility fixture 初始化必须观测 `terminal=true`；普通 ACP Runtime 必须观测 `false` 且没有 Bridge；
 - execution root 外的已存在绝对 cwd 可以 create 并作为实际子进程 cwd；
 - 相对 cwd 和不存在/非目录的绝对 cwd 拒绝；省略 cwd 时实际子进程仍使用 execution root；
+- bare command 使用 request env 覆盖后的最终 PATH；relative command 使用 request 的最终 cwd；Windows
+  `.cmd/.bat` 继续使用受控 CommandShim；
 - create → output → wait → release 继续覆盖 Host env、request env、stdout/stderr 和非零 exit；
 - kill、重复 kill、重复 release、Run cancellation 与 Host cleanup 不遗留进程；
 - 输出窗口有界并报告 truncation；Terminal wire/output/error 不进入 Camp incoming route；
@@ -102,3 +108,4 @@ authenticated/ready，两次 Bash 分别返回 execution root cwd 与 `ROVAI_KIM
 - [Managed Runtime Process v1](managed-runtime-process-v1.md)
 - [Runtime Launch and Verification v28](runtime-launch-and-verification-v28.md)
 - [V1.29-D10](../versions/v1.29/decisions.md#v1-29-d10)
+- [V1.39-D08](../versions/v1.39/decisions.md#v1-39-d08)
