@@ -4,13 +4,13 @@ import {
   $getState,
   $setState,
   createState,
-  TextNode,
+  DecoratorNode,
   type EditorConfig,
   type LexicalEditor,
   type LexicalNode,
   type LexicalUpdateJSON,
   type NodeKey,
-  type SerializedTextNode
+  type SerializedLexicalNode
 } from 'lexical'
 
 export type ComposerAtomType = ComposerAtom['type']
@@ -23,7 +23,7 @@ export interface ComposerAtomPresentation {
   ariaLabel: string
 }
 
-export type SerializedComposerAtomNode = SerializedTextNode & {
+export type SerializedComposerAtomNode = SerializedLexicalNode & {
   atomType?: ComposerAtomType
   referenceId?: string | null
   nameAtSend?: string | null
@@ -56,22 +56,22 @@ export function setComposerAtomPresentationResolver(
   else presentationResolvers.delete(editor)
 }
 
-export class ComposerAtomNode extends TextNode {
+export class ComposerAtomNode extends DecoratorNode<null> {
   static getType(): string {
     return 'composer-atom'
   }
 
   static clone(node: ComposerAtomNode): ComposerAtomNode {
-    return new ComposerAtomNode(node.__text, node.__key)
+    return new ComposerAtomNode(node.__key)
   }
 
   static importJSON(serializedNode: SerializedComposerAtomNode): ComposerAtomNode {
     return new ComposerAtomNode().updateFromJSON(serializedNode)
   }
 
-  $config(): ReturnType<TextNode['$config']> {
+  $config(): ReturnType<DecoratorNode<null>['$config']> {
     return this.config('composer-atom', {
-      extends: TextNode,
+      extends: DecoratorNode,
       stateConfigs: [
         { stateConfig: atomTypeState, flat: true },
         { stateConfig: referenceIdState, flat: true },
@@ -81,8 +81,8 @@ export class ComposerAtomNode extends TextNode {
     })
   }
 
-  constructor(text = '', key?: NodeKey) {
-    super(text, key)
+  constructor(key?: NodeKey) {
+    super(key)
   }
 
   updateFromJSON(serializedNode: LexicalUpdateJSON<SerializedComposerAtomNode>): this {
@@ -92,38 +92,39 @@ export class ComposerAtomNode extends TextNode {
       .setReferenceId(serializedNode.referenceId ?? null)
       .setNameAtSend(serializedNode.nameAtSend ?? null)
       .setFallbackLabel(serializedNode.fallbackLabel ?? '')
-      .setMode('token')
-      .setUnmergeable(true)
   }
 
   exportJSON(): SerializedComposerAtomNode {
     return super.exportJSON() as SerializedComposerAtomNode
   }
 
-  createDOM(config: EditorConfig, editor: LexicalEditor): HTMLElement {
-    const dom = super.createDOM(config, editor)
+  createDOM(_config: EditorConfig, editor: LexicalEditor): HTMLElement {
+    const dom = document.createElement('span')
     domEditors.set(dom, editor)
     updateComposerAtomDOM(dom, this, editor)
     return dom
   }
 
-  updateDOM(prevNode: this, dom: HTMLElement, config: EditorConfig): boolean {
-    super.updateDOM(prevNode, dom, config)
+  updateDOM(_prevNode: this, dom: HTMLElement, _config: EditorConfig): boolean {
     const editor = domEditors.get(dom)
     if (editor) updateComposerAtomDOM(dom, this, editor)
     return false
   }
 
-  canInsertTextBefore(): false {
-    return false
+  decorate(): null {
+    return null
   }
 
-  canInsertTextAfter(): false {
-    return false
-  }
-
-  isTextEntity(): true {
+  isInline(): true {
     return true
+  }
+
+  isKeyboardSelectable(): true {
+    return true
+  }
+
+  isIsolated(): false {
+    return false
   }
 
   getAtomType(): ComposerAtomType {
@@ -156,11 +157,6 @@ export class ComposerAtomNode extends TextNode {
 
   setFallbackLabel(value: string): this {
     return $setState(this, fallbackLabelState, value)
-  }
-
-  setUnmergeable(unmergeable: boolean): this {
-    if (this.isUnmergeable() !== unmergeable) this.toggleUnmergeable()
-    return this
   }
 
   getAtom(): ComposerAtom {
@@ -235,21 +231,12 @@ function updateComposerAtomDOM(
   }
 }
 
-export function $createComposerAtomNode(atom: ComposerAtom, fallbackLabel?: string): ComposerAtomNode {
-  const visibleFallback = atom.type === 'member'
-    ? fallbackLabel ?? atom.labelFallback ?? '不可用队员'
-    : atom.type === 'all_members'
-      ? '所有队员'
-      : atom.nameAtSend
-  const node = $applyNodeReplacement(new ComposerAtomNode(
-    atom.type === 'skill' ? `/${visibleFallback}` : `@${visibleFallback}`
-  ))
+export function $createComposerAtomNode(atom: ComposerAtom): ComposerAtomNode {
+  const node = $applyNodeReplacement(new ComposerAtomNode())
     .setAtomType(atom.type)
     .setReferenceId(atom.type === 'member' ? atom.agentId : atom.type === 'skill' ? atom.skillId : null)
     .setNameAtSend(atom.type === 'skill' ? atom.nameAtSend : null)
     .setFallbackLabel(atom.type === 'member' ? atom.labelFallback ?? '' : atom.type === 'skill' ? atom.nameAtSend : '所有队员')
-    .setMode('token')
-    .setUnmergeable(true)
   return node
 }
 

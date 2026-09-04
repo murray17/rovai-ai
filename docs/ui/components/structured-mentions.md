@@ -24,9 +24,9 @@ DOM 形态，但 identity、候选来源、激活行为和发送校验保持强�
 信息卡打开时只使用既有 8% mention feedback。Skill 使用既有 Skill 行内语言。unavailable 状态保留可见标签，
 通过弱化样式和明确状态反馈表达，不消失、不变回可编辑文字。
 
-每个 Composer Atom 只对应一个简单 span DOM；不得挂载独立 React Root、Portal 或 Catalog 订阅。Atom 内没有
-独立可聚焦按钮，光标不能进入其中，Backspace/Delete 一次删除整个 Atom。普通字符落在 Atom 前后的独立
-TextNode，不能与 Atom 合并。
+每个 Composer Atom 是 identity-only inline `DecoratorNode<null>`，只对应一个 `contentEditable=false` span DOM；
+`decorate()` 返回 null，不得挂载独立 React Root、Portal 或 Catalog 订阅。Atom 内没有独立可聚焦按钮，光标不能
+进入其中，键盘可以 NodeSelection，Backspace/Delete 一次删除整个 Atom。普通字符落在 Atom 前后的独立 TextNode。
 
 Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp Catalog 解析；改名只刷新显示。离队或不可解析时
 保留 identity 和 fallback label，不按同名成员重新绑定。Skill 的唯一身份是 `skillId`，`nameAtSend` 保留发送时
@@ -35,16 +35,17 @@ Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp Catalog 
 ## Member Typeahead
 
 `@`、`@a`、`@alice` 只在折叠光标、普通 TextNode、非 composition，且 `@` 位于文本开头或允许分隔符之后时
-打开。查询不得跨 Atom、换行或 Paragraph，最多读取光标左侧 128 个字符。方向键移动候选，Enter 选择，Esc
-关闭；菜单消费按键时不得触发发送。
+打开。Member 与 Skill 共用一个 Trigger Plugin 和一个 Editor update listener；查询不得跨 Atom、换行或 Paragraph，
+从当前 TextNode 的 caret 位置只分配光标左侧最多 128 个字符。方向键移动候选，Enter 选择，Esc 关闭；菜单消费
+按键时不得触发发送。
 
 选择 Member/All Members 后，匹配查询被一个 Atom 替换。右侧已有空白时复用；否则插入一个普通空格，并把
 光标放在空格之后。查询或显示文本都不构成 identity。
 
 ## Skill Typeahead
 
-`/`、`/rev`、`/review` 只在文本开头、空白、换行、中文标点或明确允许的命令边界之后打开，并使用同样的
-128 字符局部扫描。`https://example.com/a/b`、`src/components/a/b.ts` 和 `word/review` 不触发。
+`/`、`/rev`、`/review` 只在文本开头、空白、换行、中文标点或明确允许的命令边界之后打开，并与 Member 查询使用
+同一个 128 字符 suffix matcher。`https://example.com/a/b`、`src/components/a/b.ts` 和 `word/review` 不触发。
 
 选择候选后用 `skillId + nameAtSend` Atom 替换查询并执行同样的尾随空格规则。`/review` 只是查询/显示形式，
 不是 Skill identity。Skill 不可用时保留 Atom，发送前由 Core 返回明确错误或既定降级结果；Composer 不重绑
@@ -93,7 +94,8 @@ Composer 选区 Copy/Cut 同时写：
 
 - `text/plain`：Member 使用当前名称或 fallback、All Members 为 `@所有队员`、Skill 为 `/<nameAtSend>`、
   LineBreak 为 `\n`；
-- `application/x-rovai-composer+json`：选区对应的 `ComposerDocument` V2，不是 Lexical JSON；
+- `application/x-rovai-composer+json`：选区对应的 `ComposerDocument` V2，不是 Lexical JSON；RangeSelection 与
+  键盘选中的 Atom NodeSelection 都必须产生对应投影；
 - `text/html`：仅兼容可见文本，不拥有 identity。
 
 粘贴时文件优先交给附件入口。没有文件时优先读取私有 MIME，严格校验 version、closed Segment/Atom shape 和
@@ -102,6 +104,9 @@ identity；当前 Catalog 中可恢复的引用还原为 Atom，不可恢复引�
 
 不得从纯文本 `@Alice`、`/review-code` 或外部 HTML 的 `data-reference-id`、`data-atom-type`、`data-skill-id`
 猜测 identity。整条历史用户消息的专用复制入口继续保留文件链接原始 target，不因显示 label 丢失路径。
+
+Draft 自动保存失败时 Composer 保留内容与 dirty 状态，显示可恢复的保存错误；当前 epoch 内可有限退避重试，发送
+必须通过显式 flush 确认持久化后继续。保存状态反馈不进入 EditorState 或 undo history。
 
 <a id="current-user-mention"></a>
 

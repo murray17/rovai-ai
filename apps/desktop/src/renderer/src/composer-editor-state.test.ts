@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
+import type { ComposerDocument } from '@contracts'
 import {
   $createParagraphNode,
+  $createNodeSelection,
   $createTextNode,
   $getRoot,
+  $isDecoratorNode,
   $isElementNode,
   $isLineBreakNode,
   $isParagraphNode,
+  $setSelection,
   createEditor,
   type LexicalEditor
 } from 'lexical'
@@ -13,6 +17,7 @@ import { ComposerAtomNode, $isComposerAtomNode } from './ComposerAtomNode'
 import {
   $insertComposerAtomWithTrailingSpace,
   $replaceEditorWithComposerDocument,
+  $selectedComposerDocument,
   composerDocumentToEditorState,
   editorStateToComposerDocument
 } from './composer-editor-state'
@@ -35,7 +40,7 @@ describe('Composer Lexical state boundary', () => {
         { kind: 'atom', atom: { type: 'member', agentId: 'agent-a' } },
         { kind: 'text', text: ' 处理\n下一项' }
       ]
-    }, () => '洛可')
+    })
 
     state.read(() => {
       const children = $getRoot().getChildren()
@@ -89,7 +94,7 @@ describe('Composer Lexical state boundary', () => {
     })
   })
 
-  it('serializes one Atom node with token and unmergeable behavior', () => {
+  it('serializes one identity-only inline Decorator Atom', () => {
     const editor = createComposerEditor()
     composerDocumentToEditorState(editor, {
       version: 2,
@@ -103,10 +108,11 @@ describe('Composer Lexical state boundary', () => {
       const atom = $getRoot().getFirstDescendant()
       expect($isComposerAtomNode(atom)).toBe(true)
       if (!$isComposerAtomNode(atom)) return
-      expect(atom.getMode()).toBe('token')
-      expect(atom.isUnmergeable()).toBe(true)
-      expect(atom.canInsertTextBefore()).toBe(false)
-      expect(atom.canInsertTextAfter()).toBe(false)
+      expect($isDecoratorNode(atom)).toBe(true)
+      expect(atom.isInline()).toBe(true)
+      expect(atom.isKeyboardSelectable()).toBe(true)
+      expect(atom.isIsolated()).toBe(false)
+      expect(atom.getTextContent()).toBe('')
     })
     const atomJson = (editor.getEditorState().toJSON().root.children[0] as unknown as {
       children: Array<Record<string, unknown>>
@@ -114,9 +120,10 @@ describe('Composer Lexical state boundary', () => {
     expect(atomJson).toMatchObject({
       type: 'composer-atom',
       referenceId: 'agent-a',
-      fallbackLabel: '洛可',
-      mode: 'token'
+      fallbackLabel: '洛可'
     })
+    expect(atomJson).not.toHaveProperty('text')
+    expect(atomJson).not.toHaveProperty('mode')
     expect(atomJson).not.toHaveProperty('presentationState')
   })
 
@@ -146,6 +153,36 @@ describe('Composer Lexical state boundary', () => {
         },
         { kind: 'text', text: ' 继续' }
       ]
+    })
+  })
+
+  it('projects a keyboard-selected Decorator Atom for structured clipboard copy', () => {
+    const editor = createComposerEditor()
+    let selected: ComposerDocument = { version: 2, segments: [] }
+    editor.update(() => {
+      $replaceEditorWithComposerDocument({
+        version: 2,
+        segments: [{
+          kind: 'atom',
+          atom: { type: 'skill', skillId: 'skill-review', nameAtSend: 'review-pr' }
+        }]
+      })
+      const paragraph = $getRoot().getFirstChildOrThrow()
+      if (!$isElementNode(paragraph)) throw new Error('expected paragraph')
+      const atom = paragraph.getFirstChild()
+      if (!$isComposerAtomNode(atom)) throw new Error('expected atom')
+      const selection = $createNodeSelection()
+      selection.add(atom.getKey())
+      $setSelection(selection)
+      selected = $selectedComposerDocument()
+    }, { discrete: true })
+
+    expect(selected).toEqual({
+      version: 2,
+      segments: [{
+        kind: 'atom',
+        atom: { type: 'skill', skillId: 'skill-review', nameAtSend: 'review-pr' }
+      }]
     })
   })
 })

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.44
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -11,7 +11,7 @@ last_updated: 2026-09-04
 
 # Rovai-ai v1.44：Pi 原生输入边界与 Fleet 并发启动
 
-前置：[v1.43](../v1.43/README.md)。本版本收敛 Pi Coding Agent 的责任边界：Rovai 只投递普通 Agent
+前置：[v1.43](../v1.43/README.md)。后续：[v1.45](../v1.45/README.md)。本版本收敛 Pi Coding Agent 的责任边界：Rovai 只投递普通 Agent
 Prompt、结构化图片、Bootstrap、最小 receipt 与部分审批，Pi 自己发现原生资源；同时把公共 Runtime Fleet 的
 耗时 spawn 移出全局锁，并精确限定 exact-resume replacement。
 

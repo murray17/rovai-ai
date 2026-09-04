@@ -21,7 +21,8 @@ Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v8](../contr
 | React Composer Shell | 稳定挂载编辑器；拥有 Member/Skill Catalog、placeholder、disabled、Picker UI、发送编排和 dirty/saving 等小型状态；不逐字符保存完整正文 |
 | Lexical Editor | 输入期间唯一拥有节点树、selection、composition、局部 DOM reconciliation、undo/redo、当前 local version 与最新 EditorState snapshot |
 | Composer adapters | 在 Lexical tree 与 `ComposerDocument` V2 间双向转换；生成纯文本；校验/恢复私有 Clipboard；不把 Lexical JSON 变成领域协议 |
-| Draft Sync | 识别真实内容更新，维护 local/saving/saved version，以 debounce/max-wait single-flight 保存，并在业务边界 flush exact snapshot |
+| Draft Sync | 只拥有 EditorState ref、epoch、local/saved version、dirty 与 persistence status；以 debounce/max-wait single-flight 请求内容保存，并在业务边界 flush 捕获 snapshot；不保存完整 Draft View 或 Core revision |
+| Draft Mutation Coordinator | Renderer 唯一完整 `CampComposerDraftView` owner；将正文、附件、Reply、Continuation 与接收者 mutation 串入同一队列，并用每次 Core 返回的完整 View 原子替换 authority |
 | Camp Draft module | 持久化 V2 document、source refs、legacy Prepared 互斥状态、Reply/Continuation、recipient touched、revision 与 expiry；从 document 派生 body |
 | Pending module | 原子保存已提交的完整 V2 下一轮意图、FIFO、edit token/revision、working source refs 与 needs-repair 状态 |
 | Collaboration send | 从 exact Draft/Pending 读取 V2，物化 continuation，最终校验 Reply/Atom/source availability，转换成公共 Structured Content，并只在 accepted transaction 消费 owner |
@@ -41,9 +42,9 @@ RootNode
 ```
 
 普通 TextNode 不直接挂 Root；换行使用 LineBreakNode。粘贴或外部状态产生多个 Paragraph 时，节点 transform
-把段落边界归一成 LineBreakNode 并合并到前一个 Paragraph。`ComposerAtomNode` 是单一自定义 TextNode，使用
-token mode 与 unmergeable，Member、All Members、Skill 只由 payload 区分；它拒绝前后直接插字，并以一个
-简单 span DOM 呈现。
+把段落边界归一成 LineBreakNode 并合并到前一个 Paragraph。`ComposerAtomNode` 是单一 identity-only inline
+`DecoratorNode<null>`；Member、All Members、Skill 只由 payload 区分。Atom 没有字符 offset，允许键盘 NodeSelection，
+并以一个 `contentEditable=false` span DOM 呈现；`decorate()` 返回 null，不挂载独立 React 子树。
 
 领域层只有：
 
@@ -69,7 +70,8 @@ Skill Atom.skillId  ──> current Skill Catalog       ──> current presenta
                        nameAtSend remains the semantic snapshot
 ```
 
-Catalog 变化使用 `rovai:atom-presentation` 更新标签和 DOM 属性。Draft Sync 忽略该 tag；更新不增加 local
+Catalog 变化使用 `rovai:atom-presentation` 只更新标签和 DOM 属性。节点不保存当前动态 label，Lexical 文本长度与
+DOM 展示不会因改名分叉。Draft Sync 忽略该 tag；更新不增加 local
 version、不触发保存、不进入 undo。不可解析对象保留原 identity 并显示 unavailable，不按显示名重绑、不转普通
 文本、不在输入阶段删除。Member `labelFallback` 与 Skill `nameAtSend` 只承担合同规定的降级/快照职责。
 
@@ -85,12 +87,12 @@ beforeinput / composition
 ```
 
 普通按键路径禁止完整 tree serialization、完整纯文本投影、全文 trigger 正则、完整 React content setState、DOM
-snapshot、Core IPC 或 Draft persistence。Typeahead 只读取当前普通 TextNode 和必要的相邻边界，从光标向左最多
-128 字符；遇到 Atom、LineBreak、空白、非法标点或 Paragraph 边界即停止。composition 期间不查询、不插 Atom、
-不发送、不替换 EditorState。
+snapshot、Core IPC 或 Draft persistence。Member 与 Skill 共用一个 Trigger Plugin 和一个 Editor update listener；
+它从当前普通 TextNode 的 caret 位置只分配最多 128 字符 suffix，并在同一 matcher 内区分 `@` 与 `/`。查询不跨
+Atom、LineBreak、非法标点或 Paragraph 边界。composition 期间不更新候选、不插 Atom、不发送、不替换 EditorState。
 
 Editor Extension 图是模块级稳定引用，由 `LexicalExtensionComposer` 挂载 Plain Text、History、Atom、command、
-clipboard 与 Draft Sync；React Typeahead 只负责候选和 Portal。普通 Catalog、placeholder、disabled 或父组件 render
+clipboard 与 Draft Sync；统一 React Typeahead Plugin 负责有界匹配、候选键盘所有权和 Portal。普通 Catalog、placeholder、disabled 或父组件 render
 不重新创建 Editor。
 
 ## Draft synchronization
@@ -100,15 +102,19 @@ committed EditorState
   -> localVersion / latestEditorState ref
   -> debounce 350 ms (max wait 1500 ms)
   -> serialize one ComposerDocument snapshot
-  -> exact-revision Core mutation
-  -> savedVersion / coreRevision
+  -> DraftMutationCoordinator queue
+  -> current Draft exact-revision Core mutation
+  -> authoritative Draft replacement + savedVersion
 ```
 
-同一 Draft 只允许一个 save 在途。若 version 10 保存时继续输入至 version 13，不并发提交 11/12；10 完成后直接
-保存当时最新的 13。完成只确认对应 version；`localVersion > completedVersion` 时保持 dirty 并继续追赶。selection、
-focus、Picker highlight、Catalog presentation、placeholder、disabled 和 history bookkeeping 不增加版本。
+同一 Draft 的全部 mutation 共用 Coordinator queue，内容层仍只允许一个 save 在途。若 version 10 保存时继续输入至
+version 13，不并发提交 11/12；10 完成后直接保存当时最新的 13。完成只确认同 epoch 对应 version；
+`localVersion > completedVersion` 时保持 dirty 并继续追赶。selection、focus、Picker highlight、Catalog presentation、
+placeholder、disabled 和 history bookkeeping 不增加版本。
 
-以下动作先停止 timer，等待在途 save，读取最新已提交 EditorState，保存 exact V2 并取得 Core revision：发送、
+自动保存失败保持 dirty，记录 `error` persistence status，并只在当前 epoch 做有限退避重试；显式 flush/发送直接暴露
+失败。以下动作先停止 timer，等待在途 save 与 Coordinator queue，读取最新已提交 EditorState，按需保存 exact V2
+并取得 Coordinator 当前 Core revision：发送、
 Reply、Continuation、依赖 Draft revision 的 mutation、Camp/Draft 切换，以及需要持久草稿的上下文关闭。离散提交
 只用于显式更新后必须立即读取的边界，不用于普通输入。
 
@@ -118,10 +124,10 @@ Reply、Continuation、依赖 Draft revision 的 mutation、Camp/Draft 切换，
 identity 会新建 editor 并清除 history、Picker、pending save、selection 和 composition。相同 identity 下，Core
 返回当前已保存 revision、Catalog/placeholder/disabled 更新或页面其他 render 都不得替换 EditorState。
 
-本地 `dirty = false` 时可以接收明确 authoritative replacement。本地有未保存修改时，自己的 save 回执只更新
-revision；普通迟到 props 不得调用 `setEditorState` 覆盖输入。Draft restore、放弃本地修改等动作必须由上层明确
-决定后调用 replacement。发送成功仅当 current local version 等于发送开始记录的 version 才清空；否则保留发送中
-新增内容并恢复同步。
+本地 `dirty = false` 时可以接收明确 authoritative replacement。本地有未保存修改时，自己的 save 回执只由
+Coordinator 更新 Core authority；普通迟到 props 不得调用 `setEditorState` 覆盖输入。切换 Camp/Draft、restore、
+发送后下一 Draft 或明确 replacement 推进 epoch；旧 epoch 结果不能更新新编辑对象的 saved/dirty/UI 状态。发送成功
+仅当 current local version 等于发送开始记录的 version 才清空；否则保留发送中新增内容，在下一 Draft epoch 恢复同步。
 
 ## Clipboard and commands
 
@@ -131,13 +137,13 @@ Copy/Cut 同时写 `text/plain`、兼容 `text/html` 和 `application/x-rovai-co
 `@name`、`/skill` 永远不能成为 identity 来源。
 
 Enter 在非 composition、菜单未消费、内容可发送时交给发送；Shift+Enter 插入 LineBreakNode。Escape 先关闭
-Typeahead，再关闭 Atom 激活展示并保留内容。Backspace/Delete 与 History 由 Lexical 处理，token Atom 一次整体删除；
+Typeahead，再关闭 Atom 激活展示并保留内容。Backspace/Delete 与 History 由 Lexical 处理，Decorator Atom 一次整体删除；
 编辑器绝对起点继续调用 Rovai 的 `onBackspaceAtStart`。
 
 ## Send and queue flow
 
 ```text
-flush latest local version -> exact Core Draft revision
+capture local version -> flush through Coordinator -> current exact Core Draft revision
   -> derived body non-empty OR source/legacy attachment exists
      -> Camp idle and Pending empty
         -> validate current Atom/source availability
@@ -182,3 +188,6 @@ pendingInputId、pending revision 与 editToken fencing，且不会消费或覆�
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [V1.43-D01](../versions/v1.43/decisions.md#v1-43-d01)
 - [V1.43-D02](../versions/v1.43/decisions.md#v1-43-d02)
+- [V1.45-D01](../versions/v1.45/decisions.md#v1-45-d01)
+- [V1.45-D02](../versions/v1.45/decisions.md#v1-45-d02)
+- [V1.45-D03](../versions/v1.45/decisions.md#v1-45-d03)

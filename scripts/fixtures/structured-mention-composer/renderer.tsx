@@ -1,4 +1,4 @@
-import type { CampComposerDraftView, ComposerDocument } from '@contracts'
+import type { ComposerDocument } from '@contracts'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
@@ -9,8 +9,7 @@ import {
 import {
   ROVAI_COMPOSER_CLIPBOARD_MIME,
   cloneComposerDocument,
-  composerDocumentFromText,
-  composerDocumentToPlainText
+  composerDocumentFromText
 } from '../../../apps/desktop/src/renderer/src/composer-document'
 import type { ComposerSkillOption } from '../../../apps/desktop/src/renderer/src/composer-skill-picker'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -48,7 +47,6 @@ let localStatus = {
   hasUnavailableAtom: false
 }
 let dirty = false
-let revision = 0
 
 function editor(): HTMLElement {
   const element = document.getElementById('composer')
@@ -84,20 +82,6 @@ function normalizeInput(value: string | ComposerDocument): ComposerDocument {
     : cloneComposerDocument(value)
 }
 
-function draftResult(document: ComposerDocument): CampComposerDraftView {
-  return {
-    campId: 'fixture-camp',
-    body: composerDocumentToPlainText(document, initialMembers),
-    content: cloneComposerDocument(document),
-    revision,
-    attachments: [],
-    replyIntent: null,
-    continuationIntent: null,
-    updatedAt: '2026-09-04T00:00:00Z',
-    expiresAt: '2026-09-11T00:00:00Z'
-  }
-}
-
 function Harness() {
   const composerRef = useRef<StructuredMentionComposerHandle>(null)
   const [draftIdentity, setDraftIdentity] = useState('fixture-camp:draft-0')
@@ -119,11 +103,10 @@ function Harness() {
           backspaceAtStartCount = 0
           activatedAtom = null
           pastedFileCount = 0
-          revision = 0
           setMembers(initialMembers)
           setSkills(fixtureSkills)
           setDisabled(false)
-          composerRef.current?.replaceDocument(normalizeInput(value), null, 'end')
+          composerRef.current?.replaceDocument(normalizeInput(value), 'end')
           composerRef.current?.focus('end')
         },
         setDocument(value: string | ComposerDocument, boundary: 'start' | 'end' = 'end') {
@@ -264,8 +247,6 @@ function Harness() {
       disabled={disabled}
       persistDocument={async (document) => {
         savedDocuments.push(cloneComposerDocument(document))
-        revision += 1
-        return draftResult(document)
       }}
       onLocalStatusChange={(status) => { localStatus = status }}
       onDirtyChange={(value) => { dirty = value }}

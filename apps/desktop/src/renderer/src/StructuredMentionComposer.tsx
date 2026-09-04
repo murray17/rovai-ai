@@ -1,23 +1,12 @@
 import type { CampComposerDraftView, ComposerAtom, ComposerDocument } from '@contracts'
 import { LexicalExtensionComposer } from '@lexical/react/LexicalExtensionComposer'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
-import {
-  LexicalTypeaheadMenuPlugin,
-  MenuOption,
-  type MenuRenderFn,
-  type MenuTextMatch,
-  type TriggerFn
-} from '@lexical/react/LexicalTypeaheadMenuPlugin'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import {
   $getRoot,
-  $getSelection,
-  $isLineBreakNode,
-  $isRangeSelection,
   $nodesOfType,
   CLEAR_HISTORY_COMMAND,
-  HISTORY_PUSH_TAG,
-  type LexicalEditor
+  HISTORY_PUSH_TAG
 } from 'lexical'
 import {
   forwardRef,
@@ -33,12 +22,12 @@ import {
   type JSX,
   type RefObject
 } from 'react'
-import { createPortal } from 'react-dom'
 import {
   ComposerAtomNode,
   setComposerAtomPresentationResolver,
   type ComposerAtomPresentation
 } from './ComposerAtomNode'
+import { ComposerTypeaheadPlugin } from './ComposerTypeaheadPlugin'
 import { MemberAvatar } from './MemberAvatar'
 import {
   RovaiComposerExtension,
@@ -47,10 +36,11 @@ import {
 } from './RovaiComposerExtension'
 import { SkillIdentityMark } from './SkillIdentityMark'
 import type { ComposerSkillOption } from './composer-skill-picker'
+import { $replaceEditorWithComposerDocument } from './composer-editor-state'
 import {
-  $insertComposerAtomWithTrailingSpace,
-  $replaceEditorWithComposerDocument
-} from './composer-editor-state'
+  $replaceComposerTriggerWithAtom,
+  type ComposerTriggerMatch
+} from './composer-trigger'
 import {
   ComposerDraftSync,
   ROVAI_ATOM_PRESENTATION_TAG,
@@ -58,10 +48,10 @@ import {
   ROVAI_COMPOSER_REPLACE_TAG,
   type ComposerFlushResult,
   type ComposerFlushOptions,
-  type ComposerPersistContext
+  type ComposerPersistContext,
+  type ComposerDraftPersistenceStatus
 } from './composer-draft-sync'
 import {
-  MAX_TYPEAHEAD_QUERY_LENGTH,
   composerDocumentToPlainText,
   emptyComposerDocument,
   parseComposerClipboardDocument,
@@ -83,16 +73,15 @@ export type StructuredMentionOption =
 export interface StructuredMentionComposerHandle {
   flush(options?: ComposerFlushOptions): Promise<ComposerFlushResult<CampComposerDraftView>>
   resumePersistence(): void
+  advancePersistenceEpoch(savedLocalVersion?: number): void
   replaceDocument(
     document: ComposerDocument,
-    result?: CampComposerDraftView | null,
     boundary?: 'start' | 'end'
   ): void
   setDocument(document: ComposerDocument, boundary?: 'start' | 'end'): void
   clearIfVersion(
     localVersion: number,
-    document: ComposerDocument,
-    result?: CampComposerDraftView | null
+    document: ComposerDocument
   ): boolean
   focus(boundary?: 'start' | 'end'): void
   getLocalVersion(): number
@@ -104,7 +93,7 @@ export interface StructuredMentionComposerProps {
   draftIdentity: string
   document: ComposerDocument
   ready?: boolean
-  authoritativeResult?: CampComposerDraftView | null
+  getAuthoritativeDraft?(): CampComposerDraftView | null
   members: readonly StructuredMentionMember[]
   skills?: readonly ComposerSkillOption[] | null
   skillCatalogStatus?: 'loading' | 'ready' | 'error'
@@ -116,10 +105,11 @@ export interface StructuredMentionComposerProps {
   persistDocument?(
     document: ComposerDocument,
     context: ComposerPersistContext
-  ): Promise<CampComposerDraftView>
-  onDraftSaved?(draft: CampComposerDraftView, localVersion: number): void
+  ): Promise<void>
+  waitForDraftAuthority?(): Promise<void>
   onLocalStatusChange?(status: ComposerLocalStatus): void
   onDirtyChange?(dirty: boolean): void
+  onPersistenceStatusChange?(status: ComposerDraftPersistenceStatus): void
   onSubmit(): void | Promise<void>
   onBackspaceAtStart?(): void | Promise<void>
   onPasteFiles?(files: File[]): void
@@ -210,7 +200,7 @@ function ComposerBridge({
   id,
   document,
   ready = true,
-  authoritativeResult = null,
+  getAuthoritativeDraft,
   members,
   skills = [],
   skillCatalogStatus = 'ready',
@@ -220,9 +210,10 @@ function ComposerBridge({
   className = '',
   editorRef,
   persistDocument,
-  onDraftSaved,
+  waitForDraftAuthority,
   onLocalStatusChange,
   onDirtyChange,
+  onPersistenceStatusChange,
   onSubmit,
   onBackspaceAtStart,
   onPasteFiles,
@@ -239,13 +230,14 @@ function ComposerBridge({
   const initializedRef = useRef(false)
   const readyRef = useRef(ready)
   const callbacks = useRef({
-    authoritativeResult,
+    getAuthoritativeDraft,
     members,
     skills: skills ?? [],
     persistDocument,
-    onDraftSaved,
+    waitForDraftAuthority,
     onLocalStatusChange,
     onDirtyChange,
+    onPersistenceStatusChange,
     onSubmit,
     onBackspaceAtStart,
     onPasteFiles,
@@ -254,13 +246,14 @@ function ComposerBridge({
     onActivateSkillMention
   })
   callbacks.current = {
-    authoritativeResult,
+    getAuthoritativeDraft,
     members,
     skills: skills ?? [],
     persistDocument,
-    onDraftSaved,
+    waitForDraftAuthority,
     onLocalStatusChange,
     onDirtyChange,
+    onPersistenceStatusChange,
     onSubmit,
     onBackspaceAtStart,
     onPasteFiles,
@@ -269,20 +262,14 @@ function ComposerBridge({
     onActivateSkillMention
   }
 
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
-  const [skillQuery, setSkillQuery] = useState<string | null>(null)
-  const updateMentionQuery = useCallback((query: string | null) => {
-    if (!editor.isComposing()) setMentionQuery(query)
-  }, [editor])
-  const updateSkillQuery = useCallback((query: string | null) => {
-    if (!editor.isComposing()) setSkillQuery(query)
-  }, [editor])
+  const [triggerMatch, setTriggerMatch] = useState<ComposerTriggerMatch | null>(null)
   const closeTypeaheads = useCallback(() => {
-    setMentionQuery(null)
-    setSkillQuery(null)
+    setTriggerMatch(null)
   }, [])
-  const mentionOpen = mentionQuery !== null
-  const skillOpen = skillQuery !== null
+  const mentionQuery = triggerMatch?.kind === 'member' ? triggerMatch.query : null
+  const skillQuery = triggerMatch?.kind === 'skill' ? triggerMatch.query : null
+  const mentionOpen = triggerMatch?.kind === 'member'
+  const skillOpen = triggerMatch?.kind === 'skill'
   const mentionOptions = useMemo(
     () => mentionQuery === null ? [] : structuredMentionOptions(members, mentionQuery),
     [members, mentionQuery]
@@ -296,34 +283,31 @@ function ComposerBridge({
 
   const bindings = useCallback(() => ({
     persist: callbacks.current.persistDocument,
-    currentResult: () => callbacks.current.authoritativeResult,
+    waitForAuthority: callbacks.current.waitForDraftAuthority,
+    currentDraft: () => callbacks.current.getAuthoritativeDraft?.() ?? null,
     atomIsAvailable: (node: ComposerAtomNode) =>
       atomPresentation(node, callbacks.current).availability === 'available',
-    onSaved: (draft: CampComposerDraftView, localVersion: number) =>
-      callbacks.current.onDraftSaved?.(draft, localVersion),
     onStatusChange: (status: ComposerLocalStatus) =>
       callbacks.current.onLocalStatusChange?.(status),
-    onDirtyChange: (dirty: boolean) => callbacks.current.onDirtyChange?.(dirty)
+    onDirtyChange: (dirty: boolean) => callbacks.current.onDirtyChange?.(dirty),
+    onPersistenceStatusChange: (status: ComposerDraftPersistenceStatus) =>
+      callbacks.current.onPersistenceStatusChange?.(status)
   }), [])
 
   const replaceAuthoritativeDocument = useCallback((
     nextDocument: ComposerDocument,
-    result: CampComposerDraftView | null = null,
     boundary: 'start' | 'end' = 'end'
   ): void => {
     closeTypeaheads()
     editor.update(() => {
-      $replaceEditorWithComposerDocument(
-        nextDocument,
-        (atom) => fallbackForAtom(atom, callbacks.current)
-      )
+      $replaceEditorWithComposerDocument(nextDocument)
       if (boundary === 'start') $getRoot().selectStart()
       else $getRoot().selectEnd()
     }, {
       discrete: true,
       tag: ROVAI_COMPOSER_REPLACE_TAG,
       onUpdate: () => {
-        syncRef.current?.acceptAuthoritativeState(editor.getEditorState(), result)
+        syncRef.current?.acceptAuthoritativeState(editor.getEditorState())
         editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined)
       }
     })
@@ -336,10 +320,7 @@ function ComposerBridge({
     )
     const initialDocument = ready ? document : emptyComposerDocument()
     editor.update(() => {
-      $replaceEditorWithComposerDocument(
-        initialDocument,
-        (atom) => fallbackForAtom(atom, callbacks.current)
-      )
+      $replaceEditorWithComposerDocument(initialDocument)
     }, { discrete: true, tag: ROVAI_COMPOSER_INITIALIZE_TAG })
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), bindings())
     const runtime: ComposerExtensionRuntime<CampComposerDraftView> = {
@@ -405,8 +386,8 @@ function ComposerBridge({
       return
     }
     readyRef.current = true
-    replaceAuthoritativeDocument(document, authoritativeResult)
-  }, [authoritativeResult, document, ready, replaceAuthoritativeDocument])
+    replaceAuthoritativeDocument(document)
+  }, [document, ready, replaceAuthoritativeDocument])
 
   useEffect(() => { editor.setEditable(ready && !disabled) }, [disabled, editor, ready])
 
@@ -418,29 +399,28 @@ function ComposerBridge({
           document,
           localVersion: 0,
           savedVersion: 0,
-          result: authoritativeResult
+          draft: getAuthoritativeDraft?.() ?? null
         }
       }
       return sync.flush(options)
     },
     resumePersistence: () => syncRef.current?.resumePersistence(),
+    advancePersistenceEpoch: (savedLocalVersion) =>
+      syncRef.current?.advancePersistenceEpoch(savedLocalVersion),
     replaceDocument: replaceAuthoritativeDocument,
     setDocument(nextDocument, boundary = 'end') {
       closeTypeaheads()
       editor.update(() => {
-        $replaceEditorWithComposerDocument(
-          nextDocument,
-          (atom) => fallbackForAtom(atom, callbacks.current)
-        )
+        $replaceEditorWithComposerDocument(nextDocument)
         if (boundary === 'start') $getRoot().selectStart()
         else $getRoot().selectEnd()
       }, { discrete: true, tag: HISTORY_PUSH_TAG })
       editor.focus(undefined, { defaultSelection: boundary === 'start' ? 'rootStart' : 'rootEnd' })
     },
-    clearIfVersion(localVersion, nextDocument, result = null) {
+    clearIfVersion(localVersion, nextDocument) {
       const sync = syncRef.current
       if (!sync || sync.getLocalVersion() !== localVersion) return false
-      replaceAuthoritativeDocument(nextDocument, result)
+      replaceAuthoritativeDocument(nextDocument)
       return true
     },
     focus(boundary = 'end') {
@@ -452,22 +432,14 @@ function ComposerBridge({
     },
     getLocalVersion: () => syncRef.current?.getLocalVersion() ?? 0,
     isDirty: () => syncRef.current?.isDirty() ?? false
-  }), [authoritativeResult, closeTypeaheads, document, editor, replaceAuthoritativeDocument])
+  }), [closeTypeaheads, document, editor, getAuthoritativeDraft, replaceAuthoritativeDocument])
 
   const setEditorElement = useCallback((element: HTMLDivElement | null) => {
     if (editorRef) editorRef.current = element
   }, [editorRef])
 
-  const mentionTrigger = useMemo(() => createTypeaheadTrigger('@', 'member'), [])
-  const skillTrigger = useMemo(() => createTypeaheadTrigger('/', 'skill'), [])
-  const mentionMenuOptions = useMemo(
-    () => mentionOptions.slice(0, 50).map((option) => new MemberTypeaheadOption(option)),
-    [mentionOptions]
-  )
-  const skillMenuOptions = useMemo(
-    () => skillOptions.slice(0, 50).map((option) => new SkillTypeaheadOption(option)),
-    [skillOptions]
-  )
+  const mentionMenuOptions = useMemo(() => mentionOptions.slice(0, 50), [mentionOptions])
+  const skillMenuOptions = useMemo(() => skillOptions.slice(0, 50), [skillOptions])
   const mentionMenuId = `${id || generatedId}-mention-options`
   const skillMenuId = `${id || generatedId}-skill-options`
   const menuOpen = mentionOpen || skillOpen
@@ -479,178 +451,118 @@ function ComposerBridge({
       aria-disabled={disabled || !ready} spellCheck
       placeholder={<span className="structured-mention-placeholder">{placeholder}</span>}
       aria-placeholder={placeholder} />
-    <LexicalTypeaheadMenuPlugin<MemberTypeaheadOption>
-      triggerFn={mentionTrigger} options={mentionMenuOptions}
-      onQueryChange={updateMentionQuery}
-      onClose={() => setMentionQuery(null)}
-      onSelectOption={(option, queryNode, close) => {
-        if (!queryNode || editor.isComposing()) return
-        editor.update(() => {
-          const atom: ComposerAtom = option.value.kind === 'all_members'
+    <ComposerTypeaheadPlugin match={triggerMatch}
+      optionCount={mentionOpen ? mentionMenuOptions.length : skillMenuOptions.length}
+      onMatchChange={setTriggerMatch}
+      onSelect={(index, match) => {
+        if (editor.isComposing()) return
+        if (match.kind === 'member') {
+          const option = mentionMenuOptions[index]
+          if (!option) return
+          const atom: ComposerAtom = option.kind === 'all_members'
             ? { type: 'all_members' }
             : {
                 type: 'member',
-                agentId: option.value.member.agentId,
-                labelFallback: option.value.member.displayName
+                agentId: option.member.agentId,
+                labelFallback: option.member.displayName
               }
-          $insertComposerAtomWithTrailingSpace(
-            queryNode,
-            atom,
-            option.value.kind === 'member' ? option.value.member.displayName : '所有队员'
+          editor.update(() => {
+            $replaceComposerTriggerWithAtom(
+              match,
+              atom
+            )
+          }, { tag: HISTORY_PUSH_TAG })
+        } else {
+          const option = skillMenuOptions[index]
+          if (!option) return
+          editor.update(() => {
+            $replaceComposerTriggerWithAtom(match, {
+              type: 'skill', skillId: option.id, nameAtSend: option.name
+            })
+          }, { tag: HISTORY_PUSH_TAG })
+        }
+        closeTypeaheads()
+      }}
+      renderMenu={({ selectedIndex, setHighlightedIndex, selectIndex }) => mentionOpen
+        ? renderMentionMenu(
+            mentionMenuId,
+            mentionMenuOptions,
+            selectedIndex,
+            setHighlightedIndex,
+            selectIndex
           )
-        }, { tag: HISTORY_PUSH_TAG })
-        close()
-      }}
-      menuRenderFn={mentionMenuRender(mentionMenuId)} />
-    <LexicalTypeaheadMenuPlugin<SkillTypeaheadOption>
-      triggerFn={skillTrigger} options={skillMenuOptions}
-      onQueryChange={updateSkillQuery}
-      onClose={() => setSkillQuery(null)}
-      onSelectOption={(option, queryNode, close) => {
-        if (!queryNode || editor.isComposing()) return
-        editor.update(() => {
-          $insertComposerAtomWithTrailingSpace(queryNode, {
-            type: 'skill',
-            skillId: option.value.id,
-            nameAtSend: option.value.name
-          }, option.value.name)
-        }, { tag: HISTORY_PUSH_TAG })
-        close()
-      }}
-      menuRenderFn={skillMenuRender(skillMenuId, skillCatalogStatus)} />
+        : renderSkillMenu(
+            skillMenuId,
+            skillCatalogStatus,
+            skillMenuOptions,
+            selectedIndex,
+            setHighlightedIndex,
+            selectIndex
+          )} />
   </div>
 }
 
-class MemberTypeaheadOption extends MenuOption {
-  readonly value: StructuredMentionOption
-
-  constructor(value: StructuredMentionOption) {
-    super(value.kind === 'all_members' ? 'all-members' : `member:${value.member.agentId}`)
-    this.value = value
-  }
+function renderMentionMenu(
+  menuId: string,
+  options: readonly StructuredMentionOption[],
+  selectedIndex: number,
+  setHighlightedIndex: (index: number) => void,
+  selectIndex: (index: number) => void
+): JSX.Element {
+  return <div id={menuId} className="mention-menu structured-mention-menu" role="listbox"
+    aria-label="选择接收队员">
+    <div className="mention-menu-heading"><strong>选择接收者</strong><span>↑↓ 选择 · Enter 确认</span></div>
+    {options.length === 0
+      ? <p className="structured-mention-empty">没有匹配的队员</p>
+      : options.map((option, index) => <button type="button" role="option"
+          key={option.kind === 'all_members' ? 'all-members' : `member:${option.member.agentId}`}
+          aria-selected={selectedIndex === index}
+          className={selectedIndex === index ? 'active' : ''}
+          onMouseMove={() => setHighlightedIndex(index)}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => selectIndex(index)}>
+          <StructuredMentionOptionAvatar option={option} />
+          <span>
+            <strong>{option.kind === 'all_members' ? '所有队员' : option.member.displayName}</strong>
+            <small>{option.kind === 'all_members' ? '广播给当前全部队员' : 'Camp 成员'}</small>
+          </span>
+          <i aria-hidden="true" />
+        </button>)}
+  </div>
 }
 
-class SkillTypeaheadOption extends MenuOption {
-  readonly value: ComposerSkillOption
-
-  constructor(value: ComposerSkillOption) {
-    super(`skill:${value.id}`)
-    this.value = value
-  }
-}
-
-function mentionMenuRender(menuId: string): MenuRenderFn<MemberTypeaheadOption> {
-  return (anchorRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex, options }) => {
-    const anchor = anchorRef.current
-    if (!anchor) return null
-    return createPortal(
-      <div id={menuId} className="mention-menu structured-mention-menu" role="listbox"
-        aria-label="选择接收队员">
-        <div className="mention-menu-heading"><strong>选择接收者</strong><span>↑↓ 选择 · Enter 确认</span></div>
-        {options.length === 0
-          ? <p className="structured-mention-empty">没有匹配的队员</p>
+function renderSkillMenu(
+  menuId: string,
+  status: 'loading' | 'ready' | 'error',
+  options: readonly ComposerSkillOption[],
+  selectedIndex: number,
+  setHighlightedIndex: (index: number) => void,
+  selectIndex: (index: number) => void
+): JSX.Element {
+  return <div id={menuId} className="mention-menu skill-picker-menu structured-skill-menu"
+    role="listbox" aria-label="选择 Skill">
+    <div className="mention-menu-heading"><strong>选择 Skill</strong><span>↑↓ 选择 · Enter 确认</span></div>
+    {status === 'loading'
+      ? <p className="structured-mention-empty">正在读取可用 Skills…</p>
+      : status === 'error'
+        ? <p className="structured-mention-empty">Skills 暂时无法读取，请稍后重试</p>
+        : options.length === 0
+          ? <p className="structured-mention-empty">没有匹配的 Skill</p>
           : options.map((option, index) => <button type="button" role="option"
-              key={option.key} ref={(element) => option.setRefElement(element)}
+              key={`skill:${option.id}`} data-skill-name={option.name}
               aria-selected={selectedIndex === index}
               className={selectedIndex === index ? 'active' : ''}
               onMouseMove={() => setHighlightedIndex(index)}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => selectOptionAndCleanUp(option)}>
-              <StructuredMentionOptionAvatar option={option.value} />
-              <span>
-                <strong>{option.value.kind === 'all_members'
-                  ? '所有队员'
-                  : option.value.member.displayName}</strong>
-                <small>{option.value.kind === 'all_members'
-                  ? '广播给当前全部队员'
-                  : 'Camp 成员'}</small>
+              onClick={() => selectIndex(index)}>
+              <SkillIdentityMark skillId={option.id} name={option.name} size="compact" />
+              <span className="skill-picker-copy">
+                <strong>/{option.name}</strong>
+                <small>{option.description}</small>
               </span>
-              <i aria-hidden="true" />
+              <span className="skill-picker-enter" aria-hidden="true">↵</span>
             </button>)}
-      </div>,
-      anchor
-    )
-  }
-}
-
-function skillMenuRender(
-  menuId: string,
-  status: 'loading' | 'ready' | 'error'
-): MenuRenderFn<SkillTypeaheadOption> {
-  return (anchorRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex, options }) => {
-    const anchor = anchorRef.current
-    if (!anchor) return null
-    return createPortal(
-      <div id={menuId} className="mention-menu skill-picker-menu structured-skill-menu"
-        role="listbox" aria-label="选择 Skill">
-        <div className="mention-menu-heading"><strong>选择 Skill</strong><span>↑↓ 选择 · Enter 确认</span></div>
-        {status === 'loading'
-          ? <p className="structured-mention-empty">正在读取可用 Skills…</p>
-          : status === 'error'
-            ? <p className="structured-mention-empty">Skills 暂时无法读取，请稍后重试</p>
-            : options.length === 0
-              ? <p className="structured-mention-empty">没有匹配的 Skill</p>
-              : options.map((option, index) => <button type="button" role="option"
-                  key={option.key} ref={(element) => option.setRefElement(element)}
-                  data-skill-name={option.value.name}
-                  aria-selected={selectedIndex === index}
-                  className={selectedIndex === index ? 'active' : ''}
-                  onMouseMove={() => setHighlightedIndex(index)}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => selectOptionAndCleanUp(option)}>
-                  <SkillIdentityMark skillId={option.value.id} name={option.value.name} size="compact" />
-                  <span className="skill-picker-copy">
-                    <strong>/{option.value.name}</strong>
-                    <small>{option.value.description}</small>
-                  </span>
-                  <span className="skill-picker-enter" aria-hidden="true">↵</span>
-                </button>)}
-      </div>,
-      anchor
-    )
-  }
-}
-
-function createTypeaheadTrigger(symbol: '@' | '/', kind: 'member' | 'skill'): TriggerFn {
-  const queryPattern = kind === 'member'
-    ? '[\\p{L}\\p{N}_-]'
-    : '[A-Za-z0-9-]'
-  const boundaryPattern = '[\\s，。！？；：、（(\\[【{「『]'
-  const pattern = new RegExp(
-    `(^|${boundaryPattern})${symbol}(${queryPattern}{0,${MAX_TYPEAHEAD_QUERY_LENGTH}})$`,
-    'u'
-  )
-  return (text: string, editor: LexicalEditor): MenuTextMatch | null => {
-    if (editor.isComposing()) return null
-    const bounded = text.slice(-(MAX_TYPEAHEAD_QUERY_LENGTH + 2))
-    const match = pattern.exec(bounded)
-    if (!match) return null
-    const query = match[2] ?? ''
-    const replaceableString = `${symbol}${query}`
-    const leadOffset = text.length - replaceableString.length
-    if (leadOffset === 0) {
-      const selection = $getSelection()
-      if (!$isRangeSelection(selection) || !selection.isCollapsed()) return null
-      const previous = selection.anchor.getNode().getPreviousSibling()
-      if (previous && !$isLineBreakNode(previous)) return null
-    }
-    return { leadOffset, matchingString: query, replaceableString }
-  }
-}
-
-function fallbackForAtom(
-  atom: ComposerAtom,
-  input: Pick<StructuredMentionComposerProps, 'members' | 'skills'>
-): string | undefined {
-  if (atom.type === 'member') {
-    return input.members.find((member) => member.agentId === atom.agentId)?.displayName
-      ?? atom.labelFallback
-  }
-  if (atom.type === 'skill') {
-    return (input.skills ?? []).find((skill) => skill.id === atom.skillId)?.name
-      ?? atom.nameAtSend
-  }
-  return '所有队员'
+  </div>
 }
 
 function atomPresentation(

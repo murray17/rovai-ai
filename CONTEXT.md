@@ -1627,16 +1627,28 @@ A legacy Draft-private reference to one Authority Attachment inside a Camp Compo
 _Avoid_: Local Attachment Source Ref, new user attachment, Published Attachment, Runtime-readable file, mixed Draft
 
 **Camp Composer Draft**:
-The private, durable user preparation for one future CampMessage, containing Structured Camp Message Content and ordered Local Attachment Source Refs, or mutually exclusive legacy Prepared Attachments. It may survive Camp navigation or application restart, is invisible to Agents and public history, and is consumed only by an accepted direct send or complete-intent transfer to Pending.
+The private, durable user preparation for one future CampMessage, containing a ComposerDocument V2 and ordered Local Attachment Source Refs, or mutually exclusive legacy Prepared Attachments, plus Reply/Continuation intent and one exact Revision. It may survive Camp navigation or application restart, is invisible to Agents and public history, and is consumed only by an accepted direct send or complete-intent transfer to Pending.
 _Avoid_: CampMessage, New Conversation Draft, Agent context, public draft
 
 **Camp Composer Draft Revision**:
 The opaque, monotonically advancing identity of one exact Camp Composer Draft state. A send can consume only the referenced current Revision, so a newer Draft remains a distinct unsent preparation.
 _Avoid_: updated timestamp, Renderer counter, CampMessage version, best-effort autosave marker
 
+**ComposerDocument**:
+The closed version-2 Draft/Pending domain protocol containing only adjacent-normalized `Text(text)` and typed `Atom(member | all_members | skill)` segments. Newlines are characters inside Text; Lexical Paragraph/LineBreak nodes, selection, history, node keys, DOM and presentation never enter it. Core derives plain `body` from this document and maps it to public Structured Camp Message Content only at publication.
+_Avoid_: Lexical JSON, rich-text document, public Message Content, independent body state, presentation label
+
+**Draft Mutation Coordinator**:
+The single Renderer owner of the complete current `CampComposerDraftView`. It serializes content, source attachment, Reply, Continuation and recipient mutations against the latest Core Revision, replaces authority only with a complete Core response, and fences late responses by editing epoch. React and Composer Draft Sync may observe or project it but must not cache a competing complete View.
+_Avoid_: latest autosave result cache, React Draft state, per-feature revision ref, parallel attachment/content mutation
+
+**Composer Local Sync**:
+The Renderer-local Lexical persistence state for one editing epoch: latest EditorState, local/saved version, dirty flag, debounce/single-flight work and saved/dirty/saving/error status. It serializes only at save/flush boundaries and obtains complete Draft authority from Draft Mutation Coordinator; it never owns a Core Revision or complete Draft View.
+_Avoid_: controlled Composer value, Core Draft authority, per-keystroke serialization, swallowed explicit flush error
+
 **Structured Camp Message Content**:
-The authoritative ordered content of one CampMessage and, for user-authored input, its Camp Composer Draft, using the closed `Text`, `MemberMention(agentId)`, `AllMembersMention`, and Core-generated `CurrentUserMention(local_user)` segments. Plain-text display, search, Context, Clipboard, accessibility and mention projections derive from it; submitted or stored plain body must not become a parallel content truth.
-_Avoid_: generic rich-text document, HTML, Markdown AST, mention character offsets, parsed user lookalike, parallel body and routing truth
+The authoritative ordered public content of one CampMessage, using the closed `Text`, `MemberMention(agentId)`, `AllMembersMention`, `SkillMention(skillId, nameAtSend)` and Core-generated `CurrentUserMention(local_user)` segments. Core maps user ComposerDocument into it only during accepted publication. Plain-text display, search, Context and historical accessibility projections derive from it; Draft/Pending persistence uses ComposerDocument instead.
+_Avoid_: ComposerDocument, generic rich-text document, HTML, Markdown AST, mention character offsets, parsed user lookalike, Draft authority
 
 **Published Attachment**:
 An immutable Authority or Managed Attachment adopted by one accepted public CampMessage from a legacy Prepared Attachment or admitted Agent file ingress. New Desktop user attachments remain Local Attachment Source Refs on the Message and are not Published Attachments in this storage sense. For legacy/Agent data, the message commit makes it shared with the whole Camp regardless of addressing or whether it appears in a particular AgentRun's Context; it may accompany a body or constitute the complete attachment-only payload, and every eligible Camp Agent may enumerate and read its Published Attachment Path while it is currently available.
