@@ -451,13 +451,14 @@ impl FleetState {
 
     fn mark_stopping(&mut self, process_id: &str) -> Option<RuntimeProcessHost> {
         let entry = self.processes.get_mut(process_id)?;
+        let host = entry.host.clone()?;
         self.idle_lru
             .remove(&(entry.last_used_sequence, process_id.to_string()));
         // Preserve the lease until a confirmed reap. A timeout must not make
         // the next cleanup attempt mistake an owned process for an absent one.
         entry.idle_since = None;
         entry.state = FleetProcessState::Stopping;
-        entry.host.clone()
+        Some(host)
     }
 
     fn reserve_idle_eviction(&mut self, process_id: &str) -> Option<RuntimeProcessHost> {
@@ -1208,30 +1209,59 @@ impl AgentRuntimeFleetManager {
                 entry.retire_after_run = true;
             }
         }
-        let Ok(_operation) = timeout_at(deadline, self.operations.lock()).await else {
+        let Ok(operation) = timeout_at(deadline, self.operations.lock()).await else {
             return false;
         };
+        enum StopTarget {
+            Starting(Arc<FleetStartupCompletion>),
+            Host(String, RuntimeProcessHost),
+        }
         let target = {
             let mut state = self.state.lock().await;
             let Some(id) = state.process_by_run.get(&key).cloned() else {
                 return true;
             };
-            let Some(host) = state.mark_stopping(&id) else {
-                return false;
-            };
-            (id, host)
+            if state
+                .processes
+                .get(&id)
+                .is_some_and(|entry| entry.state == FleetProcessState::Starting)
+            {
+                let Some(entry) = state.processes.get_mut(&id) else {
+                    return true;
+                };
+                entry.retire_after_run = true;
+                let Some(completion) = entry.startup.clone() else {
+                    return false;
+                };
+                StopTarget::Starting(completion)
+            } else {
+                let Some(host) = state.mark_stopping(&id) else {
+                    return false;
+                };
+                StopTarget::Host(id, host)
+            }
         };
-        if let Some(config) = target.1.builtin_tool_process_config() {
+        let (process_id, host) = match target {
+            StopTarget::Starting(completion) => {
+                drop(operation);
+                if !matches!(timeout_at(deadline, completion.wait()).await, Ok(Err(_))) {
+                    return false;
+                }
+                return !self.state.lock().await.process_by_run.contains_key(&key);
+            }
+            StopTarget::Host(process_id, host) => (process_id, host),
+        };
+        if let Some(config) = host.builtin_tool_process_config() {
             self.builtin_tool_leases
                 .unregister(config.process_id())
                 .await;
         }
-        if !target.1.force_reap_until(deadline).await {
+        if !host.force_reap_until(deadline).await {
             return false;
         }
-        self.state.lock().await.remove_process(&target.0);
+        self.state.lock().await.remove_process(&process_id);
         if let Some(records) = &self.owner_records {
-            records.remove(target.1.process_id());
+            records.remove(host.process_id());
         }
         true
     }
@@ -1279,26 +1309,46 @@ impl AgentRuntimeFleetManager {
     }
 
     pub(crate) async fn force_fence_camp_for_deletion(&self, camp_id: &str) -> Result<()> {
-        let _operation = self.operations.lock().await;
-        let process_ids = {
+        {
             let mut state = self.state.lock().await;
-            state
-                .processes
-                .iter_mut()
-                .filter_map(|(process_id, entry)| {
-                    if !entry.compatibility.belongs_to_camp(camp_id) {
-                        return None;
-                    }
-                    if entry.state == FleetProcessState::Starting {
-                        entry.retire_after_run = true;
-                    }
-                    Some(process_id.clone())
-                })
-                .collect::<Vec<_>>()
+            for entry in state.processes.values_mut().filter(|entry| {
+                entry.state == FleetProcessState::Starting
+                    && entry.compatibility.belongs_to_camp(camp_id)
+            }) {
+                entry.retire_after_run = true;
+            }
+        }
+        let operation = self.operations.lock().await;
+        let (process_ids, starting) = {
+            let mut state = self.state.lock().await;
+            let mut process_ids = Vec::new();
+            let mut starting = Vec::new();
+            for (process_id, entry) in &mut state.processes {
+                if !entry.compatibility.belongs_to_camp(camp_id) {
+                    continue;
+                }
+                if entry.state == FleetProcessState::Starting {
+                    entry.retire_after_run = true;
+                    let Some(completion) = entry.startup.clone() else {
+                        bail!("camp_attachment_view_busy: Camp Runtime startup cannot be fenced");
+                    };
+                    starting.push(completion);
+                } else {
+                    process_ids.push(process_id.clone());
+                }
+            }
+            (process_ids, starting)
         };
         for process_id in process_ids {
             if !self.stop_process_locked(&process_id).await {
                 bail!("camp_attachment_view_busy: Camp Runtime Host could not be fenced");
+            }
+        }
+        drop(operation);
+        let deadline = Instant::now() + self.config.stop_timeout;
+        for completion in starting {
+            if !matches!(timeout_at(deadline, completion.wait()).await, Ok(Err(_))) {
+                bail!("camp_attachment_view_busy: Camp Runtime startup could not be fenced");
             }
         }
         if self
@@ -2019,6 +2069,134 @@ mod tests {
             .expect("Fleet must remain closed after shutdown")
             .to_string();
         assert_eq!(rejected, "Runtime Fleet is shutting down");
+    }
+
+    #[tokio::test]
+    async fn force_stop_waits_for_an_inflight_start_to_reap() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let spawned_host = Arc::new(FakeRuntimeProcessHost {
+            process_id: "force-stop-starting-host".to_string(),
+            shutdown_delay: Duration::ZERO,
+            reaped: std::sync::atomic::AtomicBool::new(false),
+        });
+        let acquire = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            let spawned_host = spawned_host.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(
+                        acquire_request("force-stop-starting", "camp-a"),
+                        move || async move {
+                            started.notify_one();
+                            release.notified().await;
+                            Ok(RuntimeProcessHost::Fake(spawned_host))
+                        },
+                    )
+                    .await
+            })
+        };
+        started.notified().await;
+        let stop = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move {
+                fleet
+                    .stop_agent_run_until(
+                        "force-stop-starting",
+                        1,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await
+            })
+        };
+        loop {
+            if fleet
+                .state
+                .lock()
+                .await
+                .processes
+                .values()
+                .any(|entry| entry.retire_after_run)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        release.notify_one();
+
+        assert!(stop.await.unwrap());
+        assert!(acquire.await.unwrap().is_err());
+        assert!(
+            spawned_host
+                .reaped
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+        assert!(fleet.state.lock().await.processes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn forced_camp_deletion_waits_for_an_inflight_start_to_reap() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let spawned_host = Arc::new(FakeRuntimeProcessHost {
+            process_id: "delete-starting-host".to_string(),
+            shutdown_delay: Duration::ZERO,
+            reaped: std::sync::atomic::AtomicBool::new(false),
+        });
+        let acquire = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            let spawned_host = spawned_host.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(
+                        acquire_request("delete-starting", "camp-a"),
+                        move || async move {
+                            started.notify_one();
+                            release.notified().await;
+                            Ok(RuntimeProcessHost::Fake(spawned_host))
+                        },
+                    )
+                    .await
+            })
+        };
+        started.notified().await;
+        let deletion_fence = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move { fleet.force_fence_camp_for_deletion("camp-a").await })
+        };
+        loop {
+            if fleet
+                .state
+                .lock()
+                .await
+                .processes
+                .values()
+                .any(|entry| entry.retire_after_run)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        release.notify_one();
+
+        deletion_fence.await.unwrap().unwrap();
+        assert!(acquire.await.unwrap().is_err());
+        assert!(
+            spawned_host
+                .reaped
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+        assert!(fleet.state.lock().await.processes.is_empty());
     }
 
     #[tokio::test]

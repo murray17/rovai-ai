@@ -51,11 +51,11 @@ git diff --check
 
 - [x] `cargo fmt --all -- --check`、`cargo check -p rovai-core --all-targets` 与
   `cargo clippy --workspace --all-targets -- -D warnings` 通过。
-- [x] Pi 定向测试 15 项通过、1 项真实 Runtime smoke 保持 ignored；Fleet 12 项、Migration 138 cascade 1 项与
+- [x] Pi 定向测试 15 项通过、1 项真实 Runtime smoke 保持 ignored；Fleet 14 项、Migration 138 cascade 1 项与
   feature-gated 结构化图片投递 1 项通过。Machine Ready fixture 精确观察
   `get_state → get_available_models → get_state → new_session → get_state → switch_session → get_state`，没有
   `prompt`、Agent 事件、Tool 或 MCP。
-- [x] `pnpm test:rust:staged` 选择完整 workspace 路由：library 496、CLI 32、Core binary 214 项通过，5 项手工
+- [x] `pnpm test:rust:staged` 选择完整 workspace 路由：library 496、CLI 32、Core binary 216 项通过，5 项手工
   Runtime smoke ignored；Doc tests 0 项。
 - [x] `pnpm typecheck`、`pnpm test` 与 `pnpm build:desktop` 通过；Vitest 147 files / 1491 tests，Node 套件
   220 项通过、1 项 Windows-only 跳过。
