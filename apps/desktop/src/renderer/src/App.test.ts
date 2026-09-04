@@ -3537,12 +3537,13 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('aria-label="复制这条消息"')
+    expect(markup).not.toContain('aria-label="回复这条消息"')
     expect(markup).toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
     expect(markup).not.toContain('集结队伍，写下这次冒险的目标…')
     expect(markup).toContain('title="复制"')
     expect(markup).not.toContain('>复制</button>')
-    expect(markup).toContain('d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"')
-    expect(markup).toContain('d="m15.2 9.2-3.6 3.5 3.6 3.5"')
+    expect(markup).not.toContain('d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"')
+    expect(markup).not.toContain('d="m15.2 9.2-3.6 3.5 3.6 3.5"')
     expect(markup).toContain('class="message-actions" role="group" aria-label="消息操作"')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
@@ -3799,6 +3800,13 @@ describe('task event projections', () => {
           attachments: [],
           addressedAgentIds: [], replyToCampMessageId: 'message-user',
           campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
+        }, {
+          id: 'message-user-follow-up', sequence: 3, timelineGlobalSequence: 5,
+          authorType: 'user' as const, authorId: 'local_user',
+          sourceAgentRunId: null, body: '我再确认一下。', content: [{ kind: 'text', text: '我再确认一下。' }], addressMode: 'default' as const,
+          attachments: [],
+          addressedAgentIds: ['agent_2'], replyToCampMessageId: null,
+          campTurnId: null, presentation: null, createdAt: '2026-07-28T05:03:00Z'
         }],
         turns: snapshot.turns.map((turn) => ({
           ...turn,
@@ -3830,6 +3838,13 @@ describe('task event projections', () => {
     expect(terminalMarkup).toContain('reply-parent-quote')
     expect(terminalMarkup).toContain('你 ·')
     expect(terminalMarkup).toContain('aria-label="回复这条消息"')
+    expect((terminalMarkup.match(/aria-label="回复这条消息"/g) ?? [])).toHaveLength(1)
+    expect(terminalMarkup).toContain('class="message-actions agent-message-actions is-persistent"')
+    const persistentActionsStart = terminalMarkup.indexOf('class="message-actions agent-message-actions is-persistent"')
+    const persistentActionsEnd = terminalMarkup.indexOf('</div>', persistentActionsStart)
+    const persistentActionsMarkup = terminalMarkup.slice(persistentActionsStart, persistentActionsEnd)
+    expect(persistentActionsMarkup.indexOf('class="message-copy-button"'))
+      .toBeLessThan(persistentActionsMarkup.indexOf('class="message-reply-button"'))
     expect(terminalMarkup).not.toContain('class="danger-button composer-stop"')
     expect(terminalMarkup).toMatch(/class="primary-button composer-send"[^>]*>发送<\/button>/)
 
@@ -4234,7 +4249,7 @@ describe('task event projections', () => {
 
     expect(markup).toContain('class="timeline-node conversation-bubble user"')
     expect(markup).toContain('<strong>你</strong>')
-    expect(markup).toContain('aria-label="回复这条消息"')
+    expect(markup).not.toContain('aria-label="回复这条消息"')
     expect(markup).toContain('class="message-attachments user-message-attachments" aria-label="消息附件"')
     expect(markup).toContain('title="说明.txt">说明</strong>')
     expect(markup).toContain('>TXT</span>')
@@ -4406,9 +4421,10 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="timeline-node conversation-bubble agent"'))
       .toBeLessThan(markup.indexOf('class="timeline-node run-file-changes-card"'))
     expect(markup.indexOf('class="timeline-node run-file-changes-card"'))
-      .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions"'))
+      .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions is-persistent"'))
     expect(markup.indexOf('class="message-delivery-footer"'))
-      .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions"'))
+      .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions is-persistent"'))
+    expect(markup).toContain('class="message-actions agent-message-output-actions is-persistent"')
     expect((markup.match(/class="message-actions/g) ?? [])).toHaveLength(1)
     expect(markup).toContain('class="message-surface has-delivery"')
     expect(markup).toContain('class="message-delivery-footer"')

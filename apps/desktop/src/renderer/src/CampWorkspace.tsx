@@ -1922,6 +1922,15 @@ export function CampWorkspace({
       visibleCampMessages
     ]
   )
+  const latestAgentMessageId = useMemo(() => {
+    for (let index = conversationTimeline.length - 1; index >= 0; index -= 1) {
+      const item = conversationTimeline[index]
+      if (item.kind === 'camp_message' && item.message.authorType === 'agent') {
+        return item.message.id
+      }
+    }
+    return null
+  }, [conversationTimeline])
   const isCampEmpty = !campConversationHasVisibleHistory(conversationTimeline)
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const replyRepairRequired = composerDraftNeedsReplyRepair(composerDraft)
@@ -4123,7 +4132,7 @@ export function CampWorkspace({
                                 copied={copied}
                                 hasDelivery={campMessageDeliveries.length > 0}
                                 showActions={campMessage.authorType !== 'agent'}
-                                onReply={handleReply}
+                                onReply={humanAuthored ? undefined : handleReply}
                                 onCopy={handleCopy}
                               >
                                 {replyParentId && (
@@ -4231,7 +4240,7 @@ export function CampWorkspace({
                                 && (
                                   <MessageActions
                                     copied={copied}
-                                    className="agent-message-actions"
+                                    className={`agent-message-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                                     onReply={handleReply}
                                     onCopy={handleCopy}
                                   />
@@ -4264,7 +4273,7 @@ export function CampWorkspace({
                         ))}
                         <MessageActions
                           copied={copied}
-                          className="agent-message-output-actions"
+                          className={`agent-message-output-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                           onReply={handleReply}
                           onCopy={handleCopy}
                         />
@@ -7230,6 +7239,7 @@ function MessageActions({
       <span className="copy-feedback" role="status" aria-live="polite">
         {copied ? '已复制' : ''}
       </span>
+      <MessageCopyButton copied={copied} onCopy={onCopy} />
       {onReply && (
         <button
           className="message-reply-button"
@@ -7241,7 +7251,6 @@ function MessageActions({
           <MessageReplyIcon />
         </button>
       )}
-      <MessageCopyButton copied={copied} onCopy={onCopy} />
     </div>
   )
 }
@@ -7285,7 +7294,9 @@ function TruncatedStructuredMessageBody({
     () => truncate ? collapsedMessageProjection(body, content) : null,
     [body, content, truncate]
   )
-  const displayFullMessage = forceExpanded || projection === null
+  const [expanded, setExpanded] = useState(false)
+  const contentId = useId()
+  const displayFullMessage = forceExpanded || expanded || projection === null
   const displayBody = displayFullMessage ? body : projection.body
   const displayContent = displayFullMessage ? content : projection.content
 
@@ -7304,9 +7315,22 @@ function TruncatedStructuredMessageBody({
 
   return (
     <div className="message-long-copy">
-      <div>{messageBody}</div>
-      <span className="message-long-ellipsis" aria-hidden="true">…</span>
-      <span className="sr-only">其余内容已省略，共 {projection.lineCount} 行</span>
+      <div id={contentId}>{messageBody}</div>
+      <button
+        className="message-long-toggle"
+        type="button"
+        aria-controls={contentId}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span>{expanded ? '收起' : '展开'}</span>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m4 6 4 4 4-4" />
+        </svg>
+      </button>
+      <span className="sr-only" aria-live="polite">
+        {expanded ? '全文已展开' : '其余内容已收起'}，共 {projection.lineCount} 行
+      </span>
     </div>
   )
 }

@@ -24,6 +24,7 @@ const query = 'orbit-needle'
 
 await mkdir(dataDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
+const canonicalDataDir = await realpath(dataDir)
 seedCompletedOnboardingForAcceptance(dataDir)
 const fixture = await createFixture()
 
@@ -32,6 +33,13 @@ let compactApp = null
 try {
   app = await launchApp(await availableLoopbackPort(), 1440, 920, false)
   await setTheme(app.cdp, 'day')
+  const messageActionsCapture = join(outputDir, 'conversation-message-actions-day-1440x920.png')
+  const messageActions = await verifyConversationMessageActions(
+    app.cdp,
+    fixture,
+    '1440×920',
+    messageActionsCapture
+  )
   const desktopCapture = join(outputDir, 'conversation-find-day-1440x920.png')
   const desktop = await verifyConversationFind(
     app.cdp,
@@ -68,6 +76,7 @@ try {
       readyQueryEditDoesNotAnnounceNoMatch: desktop.readyQueryEdit,
       unloadedOlderTargetUsesBoundedWindow: desktop.loadedOlderTarget,
       exactOccurrenceVisibilityInLongMessage: desktop.longMessageOccurrenceVisibility,
+      conversationMessageActions: messageActions,
       enterAndShiftEnterWrap: desktop.wrapTraversal,
       escapeRestoresFocusAndReadingAnchor: desktop.escapeRestore,
       cssHighlightsAndCurrentMessageRail: desktop.highlightPresentation,
@@ -78,6 +87,7 @@ try {
       nightCompactReducedMotionLayout: compact
     },
     captures: {
+      messageActions: messageActionsCapture,
       desktop: desktopCapture,
       compact: compactCapture
     }
@@ -91,7 +101,7 @@ try {
 }
 
 async function createFixture() {
-  const core = startCore(dataDir)
+  const core = startCore(canonicalDataDir)
   let campId
   let leadAgentId
   try {
@@ -138,7 +148,11 @@ async function createFixture() {
         'Final orbit-needle at the bottom of the same long message.'
       ].join('\n\n')
     } else if (sequence === 64) {
-      body = 'Final orbit-needle near the current reading position.'
+      body = [
+        'Final orbit-needle near the current reading position.',
+        ...Array.from({ length: 24 }, (_, index) =>
+          `MESSAGE-ACTIONS-LINE-${String(index + 2).padStart(2, '0')}`)
+      ].join('\n')
     }
     rows.push(`(
       ${sqlLiteral(`find-message-${sequence}`)}, ${sqlLiteral(campId)}, ${sequence},
@@ -162,6 +176,86 @@ async function createFixture() {
     COMMIT;
   `)
   return { campId, leadAgentId }
+}
+
+async function verifyConversationMessageActions(cdp, fixture, context, screenshotPath) {
+  await openCamp(cdp, fixture.campId)
+  await chooseConversationView(cdp, 'conversation')
+  await waitForExpression(cdp,
+    `document.querySelectorAll('.camp-timeline [data-message-id]').length === 20`)
+  await evaluate(cdp, `document.querySelector('[data-message-id="find-message-64"]')?.scrollIntoView({ block: 'center' })`)
+
+  const collapsed = await evaluate(cdp, `(() => {
+    const latest = document.querySelector('[data-message-id="find-message-63"]')
+    const previous = document.querySelector('[data-message-id="find-message-60"]')
+    const user = document.querySelector('[data-message-id="find-message-64"]')
+    const actions = latest?.querySelector('.agent-message-actions')
+    const surface = latest?.querySelector('.message-surface')
+    const copy = actions?.querySelector('.message-copy-button')
+    const reply = actions?.querySelector('.message-reply-button')
+    const copyIcon = copy?.querySelector('svg')
+    const replyIcon = reply?.querySelector('svg')
+    const toggle = user?.querySelector('.message-long-toggle')
+    const actionsRect = actions?.getBoundingClientRect()
+    const surfaceRect = surface?.getBoundingClientRect()
+    const copyRect = copy?.getBoundingClientRect()
+    const replyRect = reply?.getBoundingClientRect()
+    return {
+      latestPersistent: actions?.classList.contains('is-persistent') ?? false,
+      latestOpacity: actions ? getComputedStyle(actions).opacity : null,
+      previousPersistent: previous?.querySelector('.agent-message-actions')?.classList.contains('is-persistent') ?? false,
+      previousOpacity: previous?.querySelector('.agent-message-actions')
+        ? getComputedStyle(previous.querySelector('.agent-message-actions')).opacity
+        : null,
+      actionOffset: actionsRect && surfaceRect ? actionsRect.left - surfaceRect.left : null,
+      copyWidth: copyRect?.width ?? null,
+      replyWidth: replyRect?.width ?? null,
+      copyReplyGap: copyRect && replyRect ? replyRect.left - copyRect.right : null,
+      copyIconWidth: copyIcon?.getBoundingClientRect().width ?? null,
+      replyIconWidth: replyIcon?.getBoundingClientRect().width ?? null,
+      copyBeforeReply: Boolean(copy && reply && (copy.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      userCopyCount: user?.querySelectorAll('.message-copy-button').length ?? 0,
+      userReplyCount: user?.querySelectorAll('.message-reply-button').length ?? 0,
+      toggleText: toggle?.textContent?.trim() ?? null,
+      toggleExpanded: toggle?.getAttribute('aria-expanded') ?? null,
+      toggleControlsContent: Boolean(toggle?.getAttribute('aria-controls')
+        && user?.querySelector('#' + CSS.escape(toggle.getAttribute('aria-controls')))),
+      collapsedLine25Present: user?.textContent?.includes('MESSAGE-ACTIONS-LINE-25') ?? false
+    }
+  })()`)
+  assert(collapsed.latestPersistent && collapsed.latestOpacity === '1'
+    && !collapsed.previousPersistent && collapsed.previousOpacity === '0',
+  `Latest Agent actions were not the only persistent row at ${context}: ${JSON.stringify(collapsed)}`)
+  assert(Math.abs(collapsed.actionOffset + 5) <= 0.1
+    && collapsed.copyWidth === 28 && collapsed.replyWidth === 28
+    && Math.abs(collapsed.copyReplyGap - 1) <= 0.1
+    && collapsed.copyIconWidth === 17 && collapsed.replyIconWidth === 17
+    && collapsed.copyBeforeReply,
+  `Agent action geometry was incorrect at ${context}: ${JSON.stringify(collapsed)}`)
+  assert(collapsed.userCopyCount === 1 && collapsed.userReplyCount === 0,
+    `User message actions were incorrect at ${context}: ${JSON.stringify(collapsed)}`)
+  assert(collapsed.toggleText === '展开' && collapsed.toggleExpanded === 'false'
+    && collapsed.toggleControlsContent && !collapsed.collapsedLine25Present,
+  `Long message did not start collapsed at ${context}: ${JSON.stringify(collapsed)}`)
+
+  await evaluate(cdp, `document.querySelector('[data-message-id="find-message-64"] .message-long-toggle')?.click()`)
+  await waitForExpression(cdp, `(() => {
+    const user = document.querySelector('[data-message-id="find-message-64"]')
+    const toggle = user?.querySelector('.message-long-toggle')
+    return toggle?.getAttribute('aria-expanded') === 'true'
+      && toggle.textContent.trim() === '收起'
+      && user.textContent.includes('MESSAGE-ACTIONS-LINE-25')
+  })()`)
+  await evaluate(cdp, `document.querySelector('[data-message-id="find-message-64"] .message-long-toggle')?.click()`)
+  await waitForExpression(cdp, `(() => {
+    const user = document.querySelector('[data-message-id="find-message-64"]')
+    const toggle = user?.querySelector('.message-long-toggle')
+    return toggle?.getAttribute('aria-expanded') === 'false'
+      && toggle.textContent.trim() === '展开'
+      && !user.textContent.includes('MESSAGE-ACTIONS-LINE-25')
+  })()`)
+  await capture(cdp, screenshotPath)
+  return collapsed
 }
 
 async function verifyConversationFind(cdp, fixture, context, screenshotPath) {
@@ -529,7 +623,7 @@ async function launchApp(port, width, height, reducedMotion) {
   const stderr = []
   const child = spawn(executable, [
     `--remote-debugging-port=${port}`,
-    `--user-data-dir=${dataDir}`
+    `--user-data-dir=${canonicalDataDir}`
   ], {
     cwd: root,
     stdio: ['ignore', 'ignore', 'pipe'],
@@ -706,16 +800,50 @@ async function connectCdp(url) {
 function startCore(dataDirectory) {
   const child = spawn(stagedSidecarPath(root, 'rovai-core'), [
     ...coreDataDirectoryArguments(dataDirectory),
-    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library'),
+    '--mcp-config-path', join(dataDirectory, 'mcp.json')
   ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, TMPDIR: runtimeTempDir }
   })
   const pending = new Map()
-  let nextId = 1
+  let nextId = 0
+  let stderr = ''
+  let resolveReady
+  let rejectReady
+  const ready = new Promise((resolve, reject) => {
+    resolveReady = resolve
+    rejectReady = reject
+  })
+  const startupTimer = setTimeout(() => {
+    rejectReady(new Error(`Timed out waiting for Core readiness: ${stderr}`))
+  }, 30_000)
+  child.stdin.on('error', () => {})
+  child.stderr.on('data', (chunk) => {
+    stderr = (stderr + String(chunk)).slice(-8_000)
+  })
+  child.on('error', rejectReady)
+  child.once('exit', (code, signal) => {
+    clearTimeout(startupTimer)
+    const error = new Error(`Core exited before readiness/RPC (${code ?? signal}): ${stderr}`)
+    rejectReady(error)
+    for (const request of pending.values()) {
+      clearTimeout(request.timer)
+      request.reject(error)
+    }
+    pending.clear()
+  })
   createInterface({ input: child.stdout }).on('line', (line) => {
     const message = JSON.parse(line)
+    if (message.kind === 'core_startup' && message.status === 'ready') {
+      clearTimeout(startupTimer)
+      resolveReady(message)
+    }
+    if (message.kind === 'core_startup' && ['failed', 'blocked'].includes(message.status)) {
+      clearTimeout(startupTimer)
+      rejectReady(new Error(message.error?.message ?? 'Core startup was refused'))
+    }
     if (message.method) return
     const pendingRequest = pending.get(message.id)
     if (!pendingRequest) return
@@ -724,15 +852,18 @@ function startCore(dataDirectory) {
     if (message.error) pendingRequest.reject(new Error(message.error.message))
     else pendingRequest.resolve(message.result)
   })
-  const request = (method, params = {}) => new Promise((resolveRequest, rejectRequest) => {
-    const id = nextId++
-    const timer = setTimeout(() => {
-      pending.delete(id)
-      rejectRequest(new Error(`Timed out waiting for ${method}`))
-    }, 30_000)
-    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
-    child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
-  })
+  const request = async (method, params = {}) => {
+    await ready
+    return new Promise((resolveRequest, rejectRequest) => {
+      const id = String(++nextId)
+      const timer = setTimeout(() => {
+        pending.delete(id)
+        rejectRequest(new Error(`Timed out waiting for ${method}`))
+      }, 30_000)
+      pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
+      child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+    })
+  }
   const stop = async () => {
     if (child.killed || child.exitCode !== null) return
     child.stdin.end()
