@@ -33,7 +33,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Images v4（当前）](runtime-images-v4.md) | v3 来源/读取/去重不变；Runtime 图片并入 Agent 图片区，按作者分区并采用 Agent 原比例与用户 72px 两种 Gallery variant |
 | [Runtime Images v3（历史）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示；统一图片几何与附件原序规则由 v4 替代 |
 | [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
-| [Camp Open Projection v14（当前）](camp-open-projection-v14.md) | v13 wire/修复不变；精确兼容投影旧取消失败行，不改写底层证据 |
+| [Camp Open Projection v15（当前）](camp-open-projection-v15.md) | v14 取消兼容不变；统一 source/Managed/legacy 无路径附件 View，历史读取 availability unknown 且不访问文件系统 |
+| [Camp Open Projection v14（历史）](camp-open-projection-v14.md) | v13 wire/修复不变；精确兼容投影旧取消失败行，不改写底层证据 |
 | [Camp Open Projection v13（历史）](camp-open-projection-v13.md) | Snapshot 34/Open 6 不变；service 先定向修复半取消，投影仍不读事件日志 |
 | [Camp Open Projection v12（历史）](camp-open-projection-v12.md) | Snapshot 34/Open 6；保留 main 业务投影与渠道来源、Runtime 图片，只读图片 bytes 按需读取 |
 | [Camp Open Projection v11（历史）](camp-open-projection-v11.md) | 渠道分支 Snapshot 34/Open 5 的可选 agentRunImages 元数据 |
@@ -46,7 +47,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v30（历史）](runtime-launch-and-verification-v30.md) | v29 保留；增加 Pi JSONL Host、专属 Ready/exact resume、managed receipt、动态 Skills/MCP、Action/Usage 与三平台未准入边界 |
 | [Runtime Launch and Verification v29（历史）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
 | [Runtime Usage Monitoring v4（当前）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
-| [Pending Camp Input v1（当前）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
+| [Pending Camp Input v2（当前）](pending-camp-input-v2.md) | v1 FIFO/edit token 不变；原生保存 source refs，working refs 支持添加/删除/排序与附件-only，发布失败精确 needs-repair |
+| [Pending Camp Input v1（历史）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
 | [Desktop Runtime Availability v2（当前）](desktop-runtime-availability-v2.md) | 严格 lease/ticket 后原位逐版本事务、receipt 续跑、旧 manifest 恢复、独立瞬时重试与统一会话启动反馈；generation/capability 不变 |
 | [Desktop Runtime Availability v1（历史）](desktop-runtime-availability-v1.md) | Bootstrap/Full Core、SQLite 准入、copy/switch 与结构化 failure；旧 manifest 恢复仍保留，普通升级执行策略由 v2 替代 |
@@ -102,7 +104,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v2（历史）](camp-open-projection-v2.md) | v1 methods/window 不变；AgentRun 独立取消请求事实、Camp Open schema 2 与 Read Model schema 31；不含 Runtime 模型观测 |
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
-| [File Preview v4（当前）](file-preview-v4.md) | v3 打开与分类不变；消息 inline-code 只在同来源可解析为现存普通文件时生成链接，共享资源类型定义统一候选已知类型和会话/Tab 图标 |
+| [File Preview v5（当前）](file-preview-v5.md) | v4 文件引用不变；附件 preview/open/reveal 使用 Composer/Pending/Pending Edit/Message exact owner locator 并返回按动作 availability |
+| [File Preview v4（历史）](file-preview-v4.md) | v3 打开与分类不变；消息 inline-code 只在同来源可解析为现存普通文件时生成链接，共享资源类型定义统一候选已知类型和会话/Tab 图标 |
 | [File Preview v3（历史）](file-preview-v3.md) | 具体文件点击直接创建临时只读能力；Main 签发项目相对路径或仅文件名的安全呈现语义，工作区外文件不升级目录授权，HTML/Markdown 资源绑定文档目录 |
 | [File Preview v2（历史）](file-preview-v2.md) | v1 预览读取/授权不变；撤回选区附加，预览不写入 Composer 或模型输入 |
 | [File Preview v1（历史）](file-preview-v1.md) | 封闭文件来源、窗口句柄、读取、Root Grant、更新、HTML 资源与系统动作；选区子项未交付并由 v2 撤回 |
@@ -214,18 +217,20 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Missing-Send Recovery Publication v2（当前）](missing-send-recovery-publication-v2.md) | v1 candidate/replay 不变；普通输出与 Missing-Send 均受 frozen membership lifetime publication fence 约束 |
 | [Missing-Send Recovery Publication v1（历史）](missing-send-recovery-publication-v1.md) | 成功 AgentRun 的 typed final candidate、同 Run accepted-send 抑制、recipient-free 原子恢复消息与 terminal replay/竞态语义 |
 | [Pending Camp Activation v1（当前）](pending-camp-activation-v1.md) | 一键 Pending 创建、Snapshot/Navigation activation state、首消息原子激活、mutation guard 与窄 discard/启动清理 |
-| [Camp Attachment v7（当前）](camp-attachment-v7.md) | v6 Managed v2 不变；CLI 私有外部源快照、共享安全复制与 lease 清理 |
+| [Camp Attachment v8（当前）](camp-attachment-v8.md) | Desktop 新用户附件只存 owner source refs，Pending 原生携带，外部 Runtime 路径仅复制到当前 Run Temp；Agent Managed 与 legacy 兼容不变 |
+| [Camp Attachment v7（历史）](camp-attachment-v7.md) | v6 Managed v2 不变；CLI 私有外部源快照、共享安全复制与 lease 清理 |
 | [Camp Attachment v6（历史）](camp-attachment-v6.md) | 新写 Managed v2 单副本、durable ingest、同 Camp ref 复用、无 Run 等待、DB-only Context path 与 legacy v1 只读兼容 |
 | [Camp Attachment v5（历史）](camp-attachment-v5.md) | v4 ingress/Runtime 不变；Published Authority 的 Desktop open target、Core 风险判定与 Renderer 无路径边界 |
 | [Camp Attachment v4（历史）](camp-attachment-v4.md) | v3 publication 不变；Run tmp 逐 lease 隔离，并以共享 per-Camp gate 串行 Authority 权限切换与清理 |
 | [Camp Attachment v3（历史）](camp-attachment-v3.md) | v2 shape/limits/Authority 不变；统一 Composer/Agent ingress 与 pending/available/recovery/failed Runtime projection |
 | [Camp Attachment v2（历史）](camp-attachment-v2.md) | v1 ingress/限制/digest 不变；Draft 保持 Core-private，Published Attachment 成为 Camp-shared 并只通过 Runtime View 暴露 |
-| [Camp Published Attachment View v4（当前 legacy v1 兼容）](camp-published-attachment-view-v4.md) | 只约束历史 Authority/View publication、recovery 与 gate；所有新附件由 Camp Attachment v7 写入 Managed v2 |
+| [Camp Published Attachment View v4（当前 legacy v1 兼容）](camp-published-attachment-view-v4.md) | 只约束历史 Authority/View publication、recovery 与 gate；Desktop 新用户 source refs 在其范围外，Agent 产物仍由 Managed v2 合同拥有 |
 | [Camp Published Attachment View v3（历史）](camp-published-attachment-view-v3.md) | v2 receipt wire 不变；semantic/resolved/catalog 三轴、FIFO worker、failed tombstone 与统一 available Desired set |
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v6（当前）](camp-composer-draft-v6.md) | exact Draft 经 Core 决定直接发送或私有 FIFO 入队；Pending 编辑独立于普通 Draft |
+| [Camp Composer Draft v7（当前）](camp-composer-draft-v7.md) | exact Draft 保存 source refs，可直接发送或连同附件进入私有 FIFO；旧 Prepared Draft 互斥自然耗尽 |
+| [Camp Composer Draft v6（历史）](camp-composer-draft-v6.md) | exact Draft 经 Core 决定直接发送或私有 FIFO 入队；Pending 编辑独立于普通 Draft |
 | [Camp Composer Draft v5（历史）](camp-composer-draft-v5.md) | v4 Draft/revision 语义不变；Send 时 ingest Managed v2，最终事务原子提交 Message/ref/Delivery 且不等待 Run |
 | [Camp Composer Draft v4（历史）](camp-composer-draft-v4.md) | v3 sendability 不变；语义事务先提交并由持久 writer intent 阻断 Run，View 异步物化 |
 | [Camp Composer Draft v3（历史）](camp-composer-draft-v3.md) | v2 reply/continuation 边界不变；ready 附件可以独立构成用户发送 payload，空正文忠实持久化并保留原子消费 |

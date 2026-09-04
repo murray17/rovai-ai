@@ -298,7 +298,8 @@ const api: RovaiApi = {
           campId,
           expectedRevision,
           sourcePath,
-          file.name
+          file.name,
+          file.type || null
         )
       }
       const bytes = new Uint8Array(await file.arrayBuffer())
@@ -307,19 +308,40 @@ const api: RovaiApi = {
         campId,
         expectedRevision,
         file.name,
+        file.type || null,
         bytes
       )
     },
-    preview(attachmentId) {
-      return ipcRenderer.invoke('rovai:composer-attachment-preview', attachmentId)
+    async preparePending(input, file) {
+      const sourcePath = webUtils.getPathForFile(file)
+      if (sourcePath) {
+        return ipcRenderer.invoke(
+          'rovai:pending-attachment-prepare-path',
+          input,
+          sourcePath,
+          file.name,
+          file.type || null
+        )
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      return ipcRenderer.invoke(
+        'rovai:pending-attachment-prepare-bytes',
+        input,
+        file.name,
+        file.type || null,
+        bytes
+      )
+    },
+    preview(locator) {
+      return ipcRenderer.invoke('rovai:composer-attachment-preview', locator)
     }
   },
   attachments: {
-    open(campId, attachmentId) {
-      return ipcRenderer.invoke('rovai:attachment-open', campId, attachmentId)
+    open(locator) {
+      return ipcRenderer.invoke('rovai:attachment-open', locator)
     },
-    reveal(campId, attachmentId) {
-      return ipcRenderer.invoke('rovai:attachment-reveal', campId, attachmentId)
+    reveal(locator) {
+      return ipcRenderer.invoke('rovai:attachment-reveal', locator)
     }
   },
   filePreview: {

@@ -137,8 +137,9 @@ Alt+Shift+左右重排。关闭后优先激活右侧，再回到左侧；最后�
 
 Tabs 下只在项目内普通文件具有目录层级时显示一行只读项目相对路径，格式为
 `apps > desktop > … > filename`。项目根目录文件、项目外文件与 Attachment 不显示路径行，Viewer 直接紧接 Tabs；
-Attachment 即使原始文件来自项目内也按 Attachment 处理，不从 managed storage 或文件名回推原路径。项目内判定只信
-Main 在 canonical 文件仍位于当前 Camp 项目根目录后签发的呈现语义，Renderer 不自行猜测。
+Attachment 即使引用的 source 当前位于项目内也按 Attachment 处理，不从卡片 metadata、Managed storage 或文件名
+回推原路径或 storage model。项目内判定只信 Main 在 canonical 文件仍位于当前 Camp 项目根目录后签发的呈现语义，
+Renderer 不自行猜测。
 
 显示路径时整体从左侧自然排列，文件名紧跟最后一个可见目录，不固定到最右侧。空间不足时从目录中部省略，
 优先完整保留文件名；无水平滚动。完整相对路径进入 title 与可访问名称。路径与 Tabs 间无线，路径与正文间一条
@@ -167,6 +168,8 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 首次打开只有 opening/ready/error；快速成功直接显示正文，耗时后才显示轻量 Loading。只有文件确实无法定位或读取时
 才显示“无法打开文件 / 文件可能已被移动或删除 / 重试”；工作区外、未授权目录、Root Grant、handle 或 capability
 不足不得成为用户文案，也不得触发 Modal。
+历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、
+unreadable 或 kind_changed，不写回历史，也不启动后台监控。
 外部变化只显示 Tab 圆点与当前 Viewer 的“有更新 / 重新加载”。主动刷新期间旧内容继续显示；失败显示
 “重新加载失败 / 重试”且不销毁 Tab。句柄、Grant、token、watcher 和 generation 永远不是用户文案。
 

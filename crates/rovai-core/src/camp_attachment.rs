@@ -41,6 +41,11 @@ use crate::{
     camp_id::CampId,
     current_user::{CURRENT_USER_ID, CurrentUserResolver},
     db::Database,
+    local_attachment_source::{
+        LocalAttachmentAvailability, LocalAttachmentKind, LocalAttachmentOwnerLocator,
+        LocalAttachmentSourceRef, LocalAttachmentSourceView, parse_source_attachments,
+        serialize_source_attachments, validate_source_attachment,
+    },
 };
 
 const DRAFT_RETENTION_DAYS: i64 = 7;
@@ -137,21 +142,6 @@ fn pause_composer_prepare_for_test(camp_root: &Path) {
 const DIRECTORY_SNAPSHOT_FIXTURE_DIGEST: &str =
     "sha256:69c6a7b4e706d0177bdcc3b806c25daac505628a8d9f22c4976fd5c93ef87501";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreparedAttachmentView {
-    pub id: String,
-    pub display_name: String,
-    pub kind: String,
-    pub file_count: u64,
-    pub media_type: String,
-    pub byte_size: u64,
-    pub preview_kind: String,
-    pub state: String,
-    pub error_message: Option<String>,
-    pub created_at: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManagedAttachmentSummary {
     pub kind: String,
@@ -181,7 +171,7 @@ pub struct CampComposerDraftView {
     pub body: String,
     pub content: StructuredCampMessageContent,
     pub revision: i64,
-    pub attachments: Vec<PreparedAttachmentView>,
+    pub attachments: Vec<LocalAttachmentSourceView>,
     pub reply_intent: Option<CampComposerReplyIntentView>,
     pub continuation_intent: Option<CampComposerContinuationIntentView>,
     pub updated_at: Option<String>,
@@ -313,6 +303,96 @@ pub struct DesktopAttachmentTarget {
     pub media_type: String,
     pub path: PathBuf,
     pub open_risk: DesktopAttachmentOpenRisk,
+}
+
+pub fn preview_source_attachment(
+    source_ref: &LocalAttachmentSourceRef,
+) -> Result<Option<AttachmentPreviewSource>> {
+    validate_source_attachment(source_ref).map_err(anyhow::Error::new)?;
+    if source_ref.kind != LocalAttachmentKind::File
+        || !source_ref
+            .media_type
+            .as_deref()
+            .is_some_and(|media_type| media_type.starts_with("image/"))
+    {
+        return Ok(None);
+    }
+    let path = PathBuf::from(&source_ref.source_path);
+    let byte_size = fs::metadata(&path)?.len();
+    Ok(Some(AttachmentPreviewSource {
+        path,
+        media_type: source_ref
+            .media_type
+            .clone()
+            .expect("image Source Attachment has a media type"),
+        byte_size,
+    }))
+}
+
+pub fn desktop_target_for_source_attachment(
+    source_ref: &LocalAttachmentSourceRef,
+) -> Result<DesktopAttachmentTarget> {
+    validate_source_attachment(source_ref).map_err(anyhow::Error::new)?;
+    let path = PathBuf::from(&source_ref.source_path);
+    let inspected_path = fs::canonicalize(&path)?;
+    let kind = source_ref.kind.as_str().to_string();
+    let media_type = source_ref
+        .media_type
+        .clone()
+        .unwrap_or_else(|| match source_ref.kind {
+            LocalAttachmentKind::File => "application/octet-stream".to_string(),
+            LocalAttachmentKind::Directory => DIRECTORY_MEDIA_TYPE.to_string(),
+        });
+    let open_risk = desktop_attachment_open_risk(
+        &inspected_path,
+        &source_ref.display_name,
+        &media_type,
+        &kind,
+    )?;
+    Ok(DesktopAttachmentTarget {
+        attachment_id: source_ref.id.clone(),
+        display_name: source_ref.display_name.clone(),
+        kind,
+        media_type,
+        path,
+        open_risk,
+    })
+}
+
+pub fn legacy_attachment_belongs_to_owner(
+    database: &Database,
+    locator: &LocalAttachmentOwnerLocator,
+) -> Result<bool> {
+    let belongs = match locator {
+        LocalAttachmentOwnerLocator::Composer {
+            camp_id,
+            attachment_ref_id,
+        } => database.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1 AND id = ?2)",
+            params![camp_id, attachment_ref_id],
+            |row| row.get(0),
+        )?,
+        LocalAttachmentOwnerLocator::Message {
+            camp_id,
+            message_id,
+            attachment_ref_id,
+        } => database.connection().query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM message_attachment
+                WHERE camp_id = ?1 AND camp_message_id = ?2 AND id = ?3
+                UNION ALL
+                SELECT 1 FROM camp_message_attachment_ref
+                WHERE camp_id = ?1 AND camp_message_id = ?2 AND attachment_id = ?3
+            )
+            "#,
+            params![camp_id, message_id, attachment_ref_id],
+            |row| row.get(0),
+        )?,
+        LocalAttachmentOwnerLocator::Pending { .. }
+        | LocalAttachmentOwnerLocator::PendingEdit { .. } => false,
+    };
+    Ok(belongs)
 }
 
 #[derive(Debug, Clone)]
@@ -491,7 +571,7 @@ impl CampAttachmentStore {
                        continuation_source_message_id,
                        continuation_suppressed_source_message_id,
                        recipient_selection_touched,
-                       updated_at, expires_at
+                       updated_at, expires_at, source_attachments_json
                 FROM camp_composer_draft
                 WHERE camp_id = ?1
                 "#,
@@ -507,11 +587,12 @@ impl CampAttachmentStore {
                         row.get::<_, bool>(6)?,
                         row.get::<_, String>(7)?,
                         row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
                     ))
                 },
             )
             .optional()?;
-        let attachments = load_prepared_attachments(database, camp_id)?;
+        let prepared_attachments = load_prepared_attachments(database, camp_id)?;
         Ok(match draft {
             Some((
                 content,
@@ -523,7 +604,21 @@ impl CampAttachmentStore {
                 recipient_selection_touched,
                 updated_at,
                 expires_at,
+                source_attachments_json,
             )) => {
+                let source_attachments = parse_source_attachments(&source_attachments_json)?;
+                anyhow::ensure!(
+                    prepared_attachments.is_empty() || source_attachments.is_empty(),
+                    "Camp Composer Draft mixes legacy Prepared and Source Attachments"
+                );
+                let attachments = if prepared_attachments.is_empty() {
+                    source_attachments
+                        .iter()
+                        .map(|source_ref| source_ref.view(LocalAttachmentAvailability::Unknown))
+                        .collect()
+                } else {
+                    prepared_attachments.clone()
+                };
                 let content = normalize_content(serde_json::from_str(&content)?);
                 validate_user_authored_content(&content)?;
                 let continuation_intent = project_continuation_intent(
@@ -565,7 +660,7 @@ impl CampAttachmentStore {
                         recipient_selection_touched: false,
                         content: &[],
                         reply_to_camp_message_id: None,
-                        has_attachments: !attachments.is_empty(),
+                        has_attachments: !prepared_attachments.is_empty(),
                     },
                 )?;
                 CampComposerDraftView {
@@ -573,7 +668,7 @@ impl CampAttachmentStore {
                     body: String::new(),
                     content: Vec::new(),
                     revision: 0,
-                    attachments,
+                    attachments: prepared_attachments,
                     reply_intent: None,
                     continuation_intent,
                     updated_at: None,
@@ -675,7 +770,11 @@ impl CampAttachmentStore {
             return self.load_draft(database, camp_id);
         }
         let has_attachments: bool = database.connection().query_row(
-            "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)
+                 OR EXISTS(
+                    SELECT 1 FROM camp_composer_draft
+                    WHERE camp_id = ?1 AND source_attachments_json <> '[]'
+                 )",
             [camp_id],
             |row| row.get(0),
         )?;
@@ -987,7 +1086,11 @@ impl CampAttachmentStore {
             continuation_candidate_for_state(&transaction, camp_id, Some(source_message_id))?
                 .context("continuation_recipient_required")?;
         let has_attachments: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)
+                 OR EXISTS(
+                    SELECT 1 FROM camp_composer_draft
+                    WHERE camp_id = ?1 AND source_attachments_json <> '[]'
+                 )",
             [camp_id],
             |row| row.get(0),
         )?;
@@ -1043,6 +1146,18 @@ impl CampAttachmentStore {
         CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
+        let has_source_attachments: bool = database.connection().query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM camp_composer_draft
+                WHERE camp_id = ?1 AND source_attachments_json <> '[]'
+             )",
+            [camp_id],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(
+            !has_source_attachments,
+            "legacy_draft.source_attachments_present"
+        );
         validate_draft_capacity(database, camp_id, 0)?;
         Ok(ComposerAttachmentPreparePlan {
             camp_id: camp_id.to_string(),
@@ -1051,6 +1166,66 @@ impl CampAttachmentStore {
             display_name: normalize_display_name(requested_display_name)?,
             attachment_id: Uuid::new_v4().to_string(),
         })
+    }
+
+    pub fn commit_source_attachment(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        source_ref: LocalAttachmentSourceRef,
+    ) -> Result<CampComposerDraftView> {
+        CampId::parse(camp_id)?;
+        ensure_camp_exists(database, camp_id)?;
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        ensure_draft_revision(&transaction, camp_id, expected_revision)?;
+        let has_prepared: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)",
+            [camp_id],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(!has_prepared, "legacy_draft.attachments_locked");
+        let mut refs = transaction
+            .query_row(
+                "SELECT source_attachments_json FROM camp_composer_draft WHERE camp_id = ?1",
+                [camp_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|value| parse_source_attachments(&value))
+            .transpose()?
+            .unwrap_or_default();
+        refs.push(source_ref);
+        let refs_json = serialize_source_attachments(&refs)?;
+        let (now, expires_at) = draft_times();
+        if expected_revision == 0 {
+            transaction.execute(
+                r#"
+                INSERT INTO camp_composer_draft(
+                    camp_id, body, structured_content_json, revision,
+                    source_attachments_json, created_at, updated_at, expires_at
+                ) VALUES (?1, '', '[]', 1, ?2, ?3, ?3, ?4)
+                "#,
+                params![camp_id, refs_json, now, expires_at],
+            )?;
+        } else {
+            let updated = transaction.execute(
+                r#"
+                UPDATE camp_composer_draft
+                SET source_attachments_json = ?3, revision = revision + 1,
+                    updated_at = ?4, expires_at = ?5
+                WHERE camp_id = ?1 AND revision = ?2
+                "#,
+                params![camp_id, expected_revision, refs_json, now, expires_at],
+            )?;
+            if updated != 1 {
+                anyhow::bail!("draft_changed");
+            }
+        }
+        transaction.commit()?;
+        self.load_draft(database, camp_id)
     }
 
     pub fn prepare_from_path_filesystem(
@@ -1097,6 +1272,18 @@ impl CampAttachmentStore {
     ) -> Result<()> {
         let transaction = database.connection_mut().transaction()?;
         ensure_draft_revision(&transaction, &prepared.camp_id, prepared.expected_revision)?;
+        let has_source_attachments: bool = transaction.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM camp_composer_draft
+                WHERE camp_id = ?1 AND source_attachments_json <> '[]'
+             )",
+            [&prepared.camp_id],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(
+            !has_source_attachments,
+            "legacy_draft.source_attachments_present"
+        );
         validate_draft_capacity_tx(&transaction, &prepared.camp_id, prepared.prepared.byte_size)?;
         let (now, expires_at) = draft_times();
         transaction.execute(
@@ -1186,6 +1373,52 @@ impl CampAttachmentStore {
         CampId::parse(camp_id)?;
         validate_component(attachment_id, "Prepared Attachment")?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
+        let source_json = database
+            .connection()
+            .query_row(
+                "SELECT source_attachments_json FROM camp_composer_draft WHERE camp_id = ?1",
+                [camp_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(source_json) = source_json {
+            let mut source_refs = parse_source_attachments(&source_json)?;
+            let previous_len = source_refs.len();
+            source_refs.retain(|source_ref| source_ref.id != attachment_id);
+            if source_refs.len() != previous_len {
+                let transaction = database
+                    .connection_mut()
+                    .transaction_with_behavior(TransactionBehavior::Immediate)?;
+                ensure_draft_revision(&transaction, camp_id, expected_revision)?;
+                let (now, expires_at) = draft_times();
+                let updated = transaction.execute(
+                    r#"
+                    UPDATE camp_composer_draft
+                    SET source_attachments_json = ?3, revision = revision + 1,
+                        updated_at = ?4, expires_at = ?5
+                    WHERE camp_id = ?1 AND revision = ?2
+                    "#,
+                    params![
+                        camp_id,
+                        expected_revision,
+                        serialize_source_attachments(&source_refs)?,
+                        now,
+                        expires_at
+                    ],
+                )?;
+                if updated != 1 {
+                    anyhow::bail!("draft_changed");
+                }
+                transaction.commit()?;
+                return Ok((
+                    self.load_draft(database, camp_id)?,
+                    CampAttachmentCleanupPlan {
+                        camp_id: camp_id.to_string(),
+                        attachment_paths: Vec::new(),
+                    },
+                ));
+            }
+        }
         let path = database
             .connection()
             .query_row(
@@ -2647,11 +2880,11 @@ fn desktop_attachment_open_risk(
 fn load_prepared_attachments(
     database: &Database,
     camp_id: &str,
-) -> Result<Vec<PreparedAttachmentView>> {
+) -> Result<Vec<LocalAttachmentSourceView>> {
     let mut statement = database.connection().prepare(
         r#"
         SELECT id, display_name, media_type, byte_size, preview_kind,
-               state, last_error_code, created_at, storage_path
+               state, last_error_code, storage_path
         FROM prepared_attachment
         WHERE camp_id = ?1
         ORDER BY ordinal, id
@@ -2668,7 +2901,6 @@ fn load_prepared_attachments(
                 row.get::<_, String>(5)?,
                 row.get::<_, Option<String>>(6)?,
                 row.get::<_, String>(7)?,
-                row.get::<_, String>(8)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2682,21 +2914,22 @@ fn load_prepared_attachments(
                 preview_kind,
                 state,
                 last_error_code,
-                created_at,
                 storage_path,
             )| {
                 let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
-                Ok(PreparedAttachmentView {
+                Ok(LocalAttachmentSourceView {
                     id,
                     display_name,
                     kind: summary.kind,
-                    file_count: summary.file_count,
-                    media_type,
-                    byte_size: byte_size.max(0) as u64,
+                    file_count: Some(summary.file_count),
+                    media_type: Some(media_type),
+                    byte_size: Some(byte_size.max(0) as u64),
                     preview_kind,
-                    state,
-                    error_message: last_error_code.map(error_message),
-                    created_at,
+                    availability: if state == "ready" && last_error_code.is_none() {
+                        LocalAttachmentAvailability::Available
+                    } else {
+                        LocalAttachmentAvailability::Unreadable
+                    },
                 })
             },
         )
@@ -3065,13 +3298,6 @@ fn draft_times() -> (String, String) {
         now.to_rfc3339(),
         (now + Duration::days(DRAFT_RETENTION_DAYS)).to_rfc3339(),
     )
-}
-
-fn error_message(code: String) -> String {
-    match code.as_str() {
-        "attachment_missing" => "附件文件已不可用，请移除后重新添加。".to_string(),
-        _ => "附件准备失败，请移除后重新添加。".to_string(),
-    }
 }
 
 fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -4226,6 +4452,84 @@ mod slow_tests {
     }
 
     #[test]
+    fn unavailable_continuation_treats_source_attachment_only_draft_as_payload() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-draft-source-attachment-continuation-repair-test-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = Database::open(&directory).unwrap();
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        insert_test_camp(&database, camp_id);
+        insert_test_member(&database, camp_id, "agent_1");
+        insert_test_member(&database, camp_id, "agent_2");
+        database
+            .connection()
+            .execute(
+                "UPDATE camp SET default_lead_agent_id = 'agent_1' WHERE id = ?1",
+                [camp_id],
+            )
+            .unwrap();
+        insert_test_explicit_user_message(
+            &database,
+            camp_id,
+            "source-attachment-repair-source",
+            1,
+            &["agent_2"],
+        );
+        let store = CampAttachmentStore::new(&directory);
+        let draft = store
+            .save_content_with_continuation(
+                &mut database,
+                camp_id,
+                0,
+                Vec::new(),
+                Some("source-attachment-repair-source"),
+            )
+            .unwrap();
+        let source_path = directory.join("source-only.txt");
+        fs::write(&source_path, b"source attachment only").unwrap();
+        let source_ref = crate::local_attachment_source::observe_source_attachment(
+            &source_path,
+            "source-only.txt",
+            Some("text/plain"),
+        )
+        .unwrap();
+        let attached = store
+            .commit_source_attachment(&mut database, camp_id, draft.revision, source_ref)
+            .unwrap();
+        assert!(attached.content.is_empty());
+        assert_eq!(attached.attachments.len(), 1);
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+        let unavailable = store.load_draft(&database, camp_id).unwrap();
+        assert!(
+            unavailable
+                .continuation_intent
+                .as_ref()
+                .unwrap()
+                .recipient_selection_required
+        );
+        let repaired = store
+            .resolve_continuation_recipient(&mut database, camp_id, unavailable.revision, "agent_1")
+            .unwrap();
+        assert!(repaired.continuation_intent.is_none());
+        assert!(matches!(
+            repaired.content.first(),
+            Some(Segment::MemberMention { agent_id }) if agent_id == "agent_1"
+        ));
+        assert_eq!(repaired.attachments.len(), 1);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn unavailable_blank_candidate_never_appears_after_the_draft_becomes_meaningful() {
         let directory = std::env::temp_dir().join(format!(
             "rovai-draft-continuation-blank-unavailable-test-{}",
@@ -4478,6 +4782,76 @@ mod slow_tests {
     }
 
     #[test]
+    fn legacy_prepared_draft_exhausts_before_source_refs_can_be_added() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-legacy-draft-source-cutover-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = Database::open(&directory).unwrap();
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        insert_test_camp(&database, camp_id);
+        let store = CampAttachmentStore::new(&directory);
+        let legacy_source = directory.join("legacy.txt");
+        let current_source = directory.join("current.txt");
+        fs::write(&legacy_source, b"legacy").unwrap();
+        fs::write(&current_source, b"current").unwrap();
+
+        // This internal helper constructs the pre-upgrade Draft fixture; no public
+        // Core method creates new Prepared Attachments after the cutover.
+        let legacy = store
+            .prepare_from_path(&mut database, camp_id, 0, &legacy_source, "legacy.txt")
+            .unwrap();
+        let source_ref = crate::local_attachment_source::observe_source_attachment(
+            &current_source,
+            "current.txt",
+            Some("text/plain"),
+        )
+        .unwrap();
+        assert!(
+            store
+                .commit_source_attachment(
+                    &mut database,
+                    camp_id,
+                    legacy.revision,
+                    source_ref.clone(),
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("legacy_draft.attachments_locked")
+        );
+
+        let exhausted = store
+            .remove_prepared(
+                &mut database,
+                camp_id,
+                legacy.revision,
+                &legacy.attachments[0].id,
+            )
+            .unwrap();
+        assert!(exhausted.attachments.is_empty());
+        let current = store
+            .commit_source_attachment(&mut database, camp_id, exhausted.revision, source_ref)
+            .unwrap();
+        assert_eq!(current.attachments.len(), 1);
+        assert_eq!(current.attachments[0].display_name, "current.txt");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM prepared_attachment WHERE camp_id = ?1",
+                    [camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+
+        store.remove_camp(camp_id).unwrap();
+        drop(database);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn directory_attachment_is_one_frozen_hierarchical_snapshot() {
         let fixture = std::env::temp_dir().join(format!(
             "rovai-directory-attachment-test-{}",
@@ -4500,14 +4874,16 @@ mod slow_tests {
         assert_eq!(draft.attachments.len(), 1);
         let attachment = &draft.attachments[0];
         assert_eq!(attachment.kind, "directory");
-        assert_eq!(attachment.file_count, 3);
-        assert_eq!(attachment.media_type, DIRECTORY_MEDIA_TYPE);
+        assert_eq!(attachment.file_count, Some(3));
+        assert_eq!(attachment.media_type.as_deref(), Some(DIRECTORY_MEDIA_TYPE));
         assert_eq!(attachment.preview_kind, "none");
         assert_eq!(
             attachment.byte_size,
-            b"directory snapshot".len() as u64
-                + b"frozen plan".len() as u64
-                + b"TOKEN=example".len() as u64
+            Some(
+                b"directory snapshot".len() as u64
+                    + b"frozen plan".len() as u64
+                    + b"TOKEN=example".len() as u64
+            )
         );
 
         let (storage_path, digest): (String, String) = database

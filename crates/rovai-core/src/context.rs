@@ -344,7 +344,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, None, None, request)
+        self.materialize_inner(database, blob_store, None, None, &[], request)
     }
 
     pub fn materialize_with_skill_exposure(
@@ -354,7 +354,32 @@ impl ContextService {
         skill_exposure: &PreparedSkillExposure,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, Some(skill_exposure), None, request)
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
+            None,
+            &[],
+            request,
+        )
+    }
+
+    pub fn materialize_with_skill_exposure_and_source_attachments(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        skill_exposure: &PreparedSkillExposure,
+        source_attachment_paths: &[String],
+        request: &MaterializeContextRequest<'_>,
+    ) -> Result<ContextMaterialization> {
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
+            None,
+            source_attachment_paths,
+            request,
+        )
     }
 
     pub fn materialize_with_exposures(
@@ -370,6 +395,26 @@ impl ContextService {
             blob_store,
             Some(skill_exposure),
             Some(mcp_projection),
+            &[],
+            request,
+        )
+    }
+
+    pub fn materialize_with_exposures_and_source_attachments(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
+        source_attachment_paths: &[String],
+        request: &MaterializeContextRequest<'_>,
+    ) -> Result<ContextMaterialization> {
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
+            Some(mcp_projection),
+            source_attachment_paths,
             request,
         )
     }
@@ -434,6 +479,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         prepared_skill_exposure: Option<&PreparedSkillExposure>,
         prepared_mcp_projection: Option<&PreparedMcpProjection>,
+        source_attachment_paths: &[String],
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
         if request.execution_epoch < 1 {
@@ -589,10 +635,11 @@ impl ContextService {
         );
         let current_input = load_current_input(database, &snapshot)?;
         let attachment_refs = load_current_attachment_refs(database, &current_input)?;
-        let attachment_paths = attachment_refs
+        let mut attachment_paths = attachment_refs
             .iter()
             .map(|attachment| attachment.path.clone())
             .collect::<Vec<_>>();
+        attachment_paths.extend_from_slice(source_attachment_paths);
         if snapshot.invocation_kind != "direct"
             && !snapshot.skill_selection_snapshot.entries.is_empty()
         {

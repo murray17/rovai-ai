@@ -129,7 +129,7 @@ const attachmentFile = (id: string, displayName: string, mediaType: string, opti
 } = {}) => ({
   id, displayName, kind: options.kind ?? 'file', fileCount: options.fileCount ?? 1,
   mediaType, byteSize: id.length * 2048, previewKind: options.previewKind ?? 'none',
-  runtimeProjectionState: 'available' as const
+  availability: 'unknown' as const
 })
 
 function installAttachmentSurfaceState(result: FixtureImageResult): void {
@@ -186,7 +186,7 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
     body: draftBody,
     content: [{ kind: 'text', text: draftBody }],
     revision: draft.revision + 1,
-    attachments: composerFiles.map(({ runtimeProjectionState: _state, ...attachment }) => ({
+    attachments: composerFiles.map((attachment) => ({
       ...attachment, state: 'ready' as const, errorMessage: null, createdAt: now
     }))
   }
@@ -357,7 +357,7 @@ Object.assign(window, { campOpenTest: {
         ...messages[index], id: `image-message-${index}`, authorType: 'agent', authorId: agent.agentId,
         sourceAgentRunId: index === 0 ? 'tool-run' : 'send-run', body, content: [{ kind: 'text', text: body }],
         attachments: index === 0 ? [] : images.map(image => ({ ...image, kind: 'file', fileCount: 1,
-          previewKind: 'image', runtimeProjectionState: 'available' }))
+          previewKind: 'image', availability: 'unknown' }))
       })),
       agentRunImages: [{ agentRunId: 'tool-run', executionEpoch: 1, createdAt: now, images }]
     }

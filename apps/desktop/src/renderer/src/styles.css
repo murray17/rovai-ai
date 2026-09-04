@@ -3969,6 +3969,13 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .pending-input-row.is-editing .pending-input-mark { border-color: var(--brand); background: var(--brand); }
 .pending-input-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pending-input-preview small { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; }
+.pending-input-attachments { display: flex; min-width: 0; flex: 1 1 100%; flex-wrap: wrap; gap: 4px; padding: 0 0 3px 13px; }
+.pending-input-attachment { display: inline-flex; min-width: 0; max-width: min(260px, 100%); align-items: center; gap: 5px; padding: 2px 6px; border: 0; border-radius: 5px; color: var(--muted); background: color-mix(in srgb, var(--surface-subtle) 76%, transparent); cursor: pointer; }
+.pending-input-attachment:hover:not(:disabled) { color: var(--ink); background: var(--surface-subtle); }
+.pending-input-attachment:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pending-input-attachment > svg { width: 12px; height: 12px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+.pending-input-attachment > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-input-attachment > small { flex: 0 0 auto; color: var(--danger); font-size: 10px; }
 .pending-input-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 1px; }
 .pending-input-edit:focus-visible, .pending-input-delete:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .pending-input-edit, .pending-input-delete { display: grid; flex: 0 0 24px; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--faint); background: transparent; cursor: pointer; }
@@ -3980,7 +3987,20 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .pending-input-error { flex-basis: 100%; margin: 0; padding: 2px 0 4px; color: var(--danger); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .pending-input-notice { width: min(var(--conversation-composer-width), 100%); margin: 4px auto 8px; color: var(--danger); font-size: 11px; }
 .pending-input-editor .composer-action-row { justify-content: flex-end; }
-.pending-input-attachment-notice { max-width: 240px; color: var(--attention); font-size: 10.5px; line-height: 1.4; }
+.pending-input-editor { gap: 6px; }
+.pending-edit-attachments { display: grid; gap: 4px; padding: 2px 0; }
+.pending-edit-attachment { display: flex; min-width: 0; align-items: center; gap: 4px; border-radius: 6px; background: color-mix(in srgb, var(--surface-subtle) 78%, transparent); }
+.pending-edit-attachment-open { display: flex; min-width: 0; min-height: 30px; flex: 1 1 auto; align-items: center; gap: 7px; padding: 4px 7px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+.pending-edit-attachment-open:hover:not(:disabled) { color: var(--ink); }
+.pending-edit-attachment-open:focus-visible, .pending-edit-attachment-actions button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.pending-edit-attachment-open > svg { width: 14px; height: 14px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.45; stroke-linejoin: round; }
+.pending-edit-attachment-open > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-edit-attachment-open > small { flex: 0 0 auto; color: var(--danger); font-size: 10px; }
+.pending-edit-attachment-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 1px; padding-inline-end: 3px; }
+.pending-edit-attachment-actions button { display: grid; min-width: 24px; height: 24px; place-items: center; padding: 0 5px; border: 0; border-radius: 5px; color: var(--faint); background: transparent; cursor: pointer; font-size: 10px; }
+.pending-edit-attachment-actions button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
+.pending-edit-attachment-actions button:last-child:hover:not(:disabled) { color: var(--danger); }
+.pending-edit-attachment-actions button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 @media (max-width: 1200px) { .pending-input-editor .composer-action-row { flex-wrap: wrap; } .pending-input-editor .composer-actions { margin-left: auto; } }
 .composer.suppress-pointer-focus-ring .composer-box:focus-within { border-color: var(--control-line); box-shadow: none; }
 .composer.is-dragging-attachments { z-index: 10; }
@@ -4174,15 +4194,13 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .attachment-preparing { opacity: .76; }
 .attachment-error { border-color: color-mix(in srgb, var(--danger) 52%, var(--line)); }
 .attachment-error .attachment-visual { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); }
-.attachment-projection-pending,
-.attachment-projection-recovery_required { border-color: var(--line-strong); }
-.attachment-projection-pending .attachment-visual,
-.attachment-projection-recovery_required .attachment-visual,
-.attachment-projection-pending .user-file-icon,
-.attachment-projection-recovery_required .user-file-icon { color: var(--muted); }
-.attachment-projection-failed { border-color: color-mix(in srgb, var(--danger) 52%, var(--line)); }
-.attachment-projection-failed :is(.attachment-visual, .user-file-icon, .agent-artifact-icon) { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); }
-.attachment-projection-failed .attachment-copy small { color: var(--danger); }
+.attachment-availability-missing,
+.attachment-availability-unreadable,
+.attachment-availability-kind_changed { border-color: color-mix(in srgb, var(--danger) 52%, var(--line)); }
+.attachment-availability-missing :is(.attachment-visual, .user-file-icon, .agent-artifact-icon),
+.attachment-availability-unreadable :is(.attachment-visual, .user-file-icon, .agent-artifact-icon),
+.attachment-availability-kind_changed :is(.attachment-visual, .user-file-icon, .agent-artifact-icon) { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); }
+:is(.attachment-availability-missing, .attachment-availability-unreadable, .attachment-availability-kind_changed) .attachment-copy small { color: var(--danger); }
 .attachment-loading { width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-top-color: var(--brand); border-radius: 50%; animation: attachment-spin .8s linear infinite; }
 @keyframes attachment-spin { to { transform: rotate(360deg); } }
 .conversation-drop-layer { position: relative; z-index: 12; display: grid; min-width: 0; min-height: 0; grid-column: 1; grid-row: 1 / span 2; margin: 10px; place-items: center; border: 1.5px dashed color-mix(in srgb, var(--brand) 80%, var(--line-strong)); border-radius: 10px; background: color-mix(in srgb, var(--brand-soft) 54%, transparent); pointer-events: none; animation: conversation-drop-enter 120ms ease-out; }

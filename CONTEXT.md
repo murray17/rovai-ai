@@ -59,7 +59,7 @@ A transient user preparation inside the explicit creation Dialog. It has no dura
 _Avoid_: Pending Camp Draft, Conversation, first-message creation
 
 **Pending Camp Draft**:
-A Core-owned Camp with `activationState = pending`, created only by a confirmed one-click new-conversation entry. It already owns the selected Workspace Binding, Initial Camp Membership, Default Lead, stable Camp ID, structured Composer Draft, and prepared attachments, but it is not yet a formal Active Camp. An empty Pending Camp Draft is absent from Navigation and Restorable Location and may be removed only by guarded leave/startup cleanup. Non-whitespace body or prepared attachments make it navigable and restorable with the product label `草稿`. Its first accepted user message atomically changes it to Active in the same transaction as message persistence; every rejected send leaves the exact Pending state and Draft Revision unchanged.
+A Core-owned Camp with `activationState = pending`, created only by a confirmed one-click new-conversation entry. It already owns the selected Workspace Binding, Initial Camp Membership, Default Lead, stable Camp ID, structured Composer Draft, and source attachment refs or mutually exclusive legacy Prepared Attachments, but it is not yet a formal Active Camp. An empty Pending Camp Draft is absent from Navigation and Restorable Location and may be removed only by guarded leave/startup cleanup. Non-whitespace body or attachments make it navigable and restorable with the product label `草稿`. Its first accepted user message atomically changes it to Active in the same transaction as message persistence; every rejected send leaves the exact Pending state and Draft Revision unchanged.
 _Avoid_: Renderer-only Draft, hidden Active Camp, sequential first-message Camp creation
 
 **Camp Creation**:
@@ -1614,16 +1614,20 @@ _Avoid_: AgentRun-only aggregation, early completion, Outcome-as-recovery, busin
 The path, symlink, ownership, permission, size, and atomic-write protections applied when Rovai-ai manages its own blobs, projections, private configurations, sockets, logs, or temporary files. It is independent of Runtime-Managed Permission and remains Core-enforced.
 _Avoid_: Agent filesystem permission, Run Workspace boundary, Runtime sandbox
 
+**Local Attachment Source Ref**:
+The Core-private, owner-scoped record of one new Desktop user-input file or directory, stored only as a closed item inside the Composer, Pending, Pending Edit, or CampMessage source-attachment JSON array. It keeps a Core-generated local element ID, absolute `sourcePath`, observed kind and display metadata; Renderer Views omit the path and storage model. A native input keeps its original path, while pathless bytes or Blob are written once to OS Temp. It is mutable-by-reference and weakly durable: later reads may observe changed content or fail after movement, deletion, permission loss, or Temp cleanup.
+_Avoid_: attachment entity, Managed Attachment, frozen upload, permanent file ownership, Renderer path
+
 **Authority Attachment**:
-The immutable Core-owned payload and private metadata stored under `<data_dir>/camp-attachments/`. It is the only content authority for both Draft and Published Attachments; database state, rather than a second authority tree, determines publication. Runtime never receives the Authority root or `.rovai-attachment.json`, and deletion or rebuild of a Runtime View does not change the Authority Attachment, its `contentDigest`, or historical evidence.
-_Avoid_: Runtime attachment root, Published Attachment Path, original user file, second authoritative copy
+The legacy immutable Core-owned payload and private metadata stored under `<data_dir>/camp-attachments/`. It remains the content authority only for existing Prepared/Published attachments and compatibility data; new Desktop user-input attachments are Local Attachment Source Refs and never enter this directory. Runtime never receives the Authority root or `.rovai-attachment.json`, and deletion or rebuild of a Runtime View does not change a legacy Authority Attachment, its `contentDigest`, or historical evidence.
+_Avoid_: new Desktop user attachment, Runtime attachment root, Published Attachment Path, original user file, second authoritative copy
 
 **Prepared Attachment**:
-A Draft-private reference to one Authority Attachment inside a Camp Composer Draft that is ready to be consumed by one accepted message send. It has no original local path in product-facing state, never enters the Camp Published Attachment View, remains distinct from a Published Attachment, and may survive Camp navigation or application restart until it is sent, explicitly discarded, or automatically expired.
-_Avoid_: Published Attachment, Runtime-readable file, Renderer file path, uploaded message, permanent draft
+A legacy Draft-private reference to one Authority Attachment inside a Camp Composer Draft. Upgraded Drafts keep existing Prepared rows unchanged until direct send, removal, or discard, but no new public Desktop ingress creates one. A Draft with any Prepared Attachment has no source refs, cannot add either attachment form, and cannot enter the source-ref Pending flow; removing the last row returns later additions to source-ref mode.
+_Avoid_: Local Attachment Source Ref, new user attachment, Published Attachment, Runtime-readable file, mixed Draft
 
 **Camp Composer Draft**:
-The private, durable user preparation for one future CampMessage, containing Structured Camp Message Content and ordered Prepared Attachments. It may survive Camp navigation or application restart, is invisible to Agents and public history, and is consumed only by an accepted send.
+The private, durable user preparation for one future CampMessage, containing Structured Camp Message Content and ordered Local Attachment Source Refs, or mutually exclusive legacy Prepared Attachments. It may survive Camp navigation or application restart, is invisible to Agents and public history, and is consumed only by an accepted direct send or complete-intent transfer to Pending.
 _Avoid_: CampMessage, New Conversation Draft, Agent context, public draft
 
 **Camp Composer Draft Revision**:
@@ -1635,12 +1639,12 @@ The authoritative ordered content of one CampMessage and, for user-authored inpu
 _Avoid_: generic rich-text document, HTML, Markdown AST, mention character offsets, parsed user lookalike, parallel body and routing truth
 
 **Published Attachment**:
-An immutable Authority Attachment adopted by one accepted public CampMessage from a consumed Prepared Attachment or admitted Agent file ingress. The message commit makes it shared with the whole Camp regardless of addressing or whether it appears in a particular AgentRun's Context; it may accompany a body or constitute the complete attachment-only payload, and every eligible Camp Agent may enumerate and read its Published Attachment Path while it is currently available.
+An immutable Authority or Managed Attachment adopted by one accepted public CampMessage from a legacy Prepared Attachment or admitted Agent file ingress. New Desktop user attachments remain Local Attachment Source Refs on the Message and are not Published Attachments in this storage sense. For legacy/Agent data, the message commit makes it shared with the whole Camp regardless of addressing or whether it appears in a particular AgentRun's Context; it may accompany a body or constitute the complete attachment-only payload, and every eligible Camp Agent may enumerate and read its Published Attachment Path while it is currently available.
 Its successful publication history is immutable, while current Runtime readability may later become unavailable for only that attachment after Authority kind, size, digest, path, or tree verification fails.
-_Avoid_: Prepared Attachment, addressed-recipient attachment, Context-scoped grant, mutable upload, permanently readable attachment
+_Avoid_: Local Attachment Source Ref, Prepared Attachment, addressed-recipient attachment, Context-scoped grant, mutable upload, permanently readable attachment
 
 **Camp Published Attachment View**:
-The instance-isolated, derived and rebuildable Runtime filesystem catalog containing one Camp's currently available Published Attachments and no Draft Attachment or Core-private metadata. A successfully published attachment that is currently `recovery_required` remains in immutable semantic history but is omitted from this physical catalog and from new Context. Runtime receives only that Camp's exact `attachments` root; the View follows the Camp lifecycle, is not a second content authority, and never becomes a Camp Workspace Binding, Git worktree, Run projection, Session projection, or cross-Camp library.
+The instance-isolated, derived and rebuildable compatibility Runtime filesystem catalog containing one Camp's currently available legacy Published Attachments and no Draft Attachment or Core-private metadata. New Desktop source refs never enter it; external source paths are instead copied only to the current `ROVAI_RUN_TMP` when outside executionRoot. A successfully published legacy attachment that is currently `recovery_required` remains in immutable semantic history but is omitted from this physical catalog and from new Context. Runtime receives only that Camp's exact `attachments` root; the View follows the Camp lifecycle, is not a second content authority, and never becomes a Camp Workspace Binding, Git worktree, Run projection, Session projection, or cross-Camp library.
 _Avoid_: Authority Attachment root, Run Attachment Projection, Agent Session projection, Project attachment folder, global Runtime files root
 
 **Camp Attachment Semantic Receipt**:
@@ -1668,7 +1672,7 @@ The authoritative SQLite transaction that resolves exact Camp targets, validates
 _Avoid_: execution preflight, Runtime permission policy, disabled Composer, Renderer readiness guess, partial delivery, automatic Lead fallback
 
 **Execution Dispatch Check**:
-The scheduler-owned pre-launch boundary for one queued AgentRun. It performs a lightweight canonical Workspace safety check, validates the current Runtime state and executable identity against the frozen Run Runtime Configuration, and obtains one verified Camp Attachment read admission. A failed attachment verification gets one bounded reconciliation attempt that can omit only invalid post-publication attachments before Claim; unresolved writer intent and unsafe root/containment state remain fail closed. The check then records the starting Git observation before claiming and starting the Run. Failure marks the queued Run failed and lets its CampTurn fail or wait for repair/retry without removing the trigger message or writing a false start observation.
+The scheduler-owned pre-launch boundary for one queued AgentRun. It performs a lightweight canonical Workspace safety check, validates the current Runtime state and executable identity against the frozen Run Runtime Configuration, obtains the existing verified Managed/legacy Camp Attachment read admission, and resolves trigger-Message Local Attachment Source Refs to their original executionRoot-contained paths or current `ROVAI_RUN_TMP`. A source validation or ordinary Run-local copy failure fails that AgentRun without removing its already-published Message or materializing a Managed attachment. Existing failed Managed/legacy verification keeps its bounded reconciliation behavior before Claim. The check then records the starting Git observation before claiming and starting the Run. Failure marks the queued Run failed and lets its CampTurn fail or wait for repair/retry without writing a false start observation.
 _Avoid_: message-send preflight, CampMessage admission, Git permission policy, Renderer readiness guess
 
 **Capability**:

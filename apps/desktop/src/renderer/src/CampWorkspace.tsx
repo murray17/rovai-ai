@@ -30,11 +30,12 @@ import type {
   CampOpenProjection,
   CampSnapshot,
   ExecutionConsolePlacement,
+  LocalAttachmentAvailability,
+  LocalAttachmentOwnerLocator,
   MessageDeliveryView,
   TaskStatus,
   TaskView,
   NavigationCampItem,
-  PreparedAttachmentView,
   SkillDeliveryGroupView,
   SkillView,
   StoredCommandResult,
@@ -42,7 +43,7 @@ import type {
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
-import { PendingCampInputs, pendingQueueRequiresEnqueue } from './PendingCampInputs'
+import { PendingCampInputs } from './PendingCampInputs'
 import {
   activityStatusForAgentRun,
   agentRunPresentation,
@@ -1892,11 +1893,7 @@ export function CampWorkspace({
   )
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
-  const showComposerStop = executionBlocked && message.trim().length === 0
-  const requiresQueue = pendingQueueRequiresEnqueue(
-    pendingQueue?.campId === snapshot.camp.id ? pendingQueue : null, executionBlocked
-  )
-  const queueAttachmentsBlocked = requiresQueue && hasReadyAttachment
+  const showComposerStop = executionBlocked && !hasSendablePayload
   const composerSendDisabled = composerSendIsDisabled({
     hasSendablePayload,
     hasUnavailableMention,
@@ -1908,7 +1905,7 @@ export function CampWorkspace({
     composerDraftAvailable: composerDraft !== null,
     preparingAttachmentCount: preparingAttachments.length,
     failedAttachmentCount: failedAttachments.length
-  }) || queueAttachmentsBlocked
+  })
   const executionDrawerProcess = executionDrawerAgentId
     ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
     : null
@@ -3261,10 +3258,7 @@ export function CampWorkspace({
   }
 
   const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
-    if (pendingEditing || requiresQueue) {
-      onNotify?.('待发送消息暂不支持附件，请在队列结束后添加。')
-      return
-    }
+    if (pendingEditing) return
     const campId = snapshot.camp.id
     const pending = inputs.map(({ file, kindHint }, index) => ({
       id: crypto.randomUUID(),
@@ -3347,7 +3341,7 @@ export function CampWorkspace({
   const attachmentDropBlocked = attachmentDropIsBlocked({
     executionDrawerPresent: Boolean(executionDrawerProcess),
     mentionPopoverPresent: Boolean(mentionPopover)
-  }) || pendingEditing || requiresQueue
+  }) || pendingEditing
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -4195,6 +4189,7 @@ export function CampWorkspace({
                                   <MessageAttachmentGroups
                                     attachments={campMessage.attachments}
                                     campId={snapshot.camp.id}
+                                    messageId={campMessage.id}
                                     presentation="user"
                                     onNotify={onNotify}
                                   />
@@ -4276,6 +4271,7 @@ export function CampWorkspace({
                                       image
                                     }))}
                                     campId={snapshot.camp.id}
+                                    messageId={campMessage.id}
                                     presentation="agent"
                                     onNotify={onNotify}
                                   />
@@ -4585,6 +4581,11 @@ export function CampWorkspace({
                     {composerDraft?.attachments.map((attachment) => (
                       <AttachmentCard
                         attachment={attachment}
+                        locator={{
+                          owner: 'composer',
+                          campId: snapshot.camp.id,
+                          attachmentRefId: attachment.id
+                        }}
                         key={attachment.id}
                         onRemove={() => void removePreparedAttachment(attachment.id)}
                         presentation="composer"
@@ -4773,7 +4774,7 @@ export function CampWorkspace({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={busy || composerSubmitting || routingMutating || requiresQueue}
+                disabled={busy || composerSubmitting || routingMutating}
                 onClick={() => composerFileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18">
@@ -4782,9 +4783,7 @@ export function CampWorkspace({
               </button>
             </div>
             <div className="composer-actions">
-              {queueAttachmentsBlocked
-                ? <span className="pending-input-attachment-notice">暂不支持排队附件，草稿已保留。</span>
-                : !executionBlocked && (
+              {!executionBlocked && (
                 <span className="composer-hint">
                   <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
                   <span className="composer-hint-visual" aria-hidden="true">
@@ -4836,8 +4835,8 @@ export function CampWorkspace({
                 <strong>松手添加到当前消息</strong>
                 <span>
                   {attachmentDragState === 'directory'
-                    ? '文件夹将保存为只读快照，原文件不会移动'
-                    : '支持文件与文件夹 · 将安全复制到附件队列'}
+                    ? '将引用此文件夹的当前位置，不会移动原文件'
+                    : '支持文件与文件夹 · 原位置移动或删除后可能不可用'}
                 </span>
               </span>
             </div>
@@ -7646,18 +7645,25 @@ export function MessageAttachmentGroups({
   attachments,
   runtimeImages = [],
   campId,
+  messageId,
   presentation,
   onNotify
 }: {
   attachments: CampMessageAttachmentView[]
   runtimeImages?: GalleryImage[]
   campId: string
+  messageId: string
   presentation: 'user' | 'agent'
   onNotify: (message: string) => void
 }): JSX.Element | null {
   const groups = partitionMessageAttachments(attachments)
   const images: GalleryImage[] = [
-    ...groups.images.map((image): GalleryImage => ({ kind: 'attachment', campId, image })),
+    ...groups.images.map((image): GalleryImage => ({
+      kind: 'attachment',
+      campId,
+      locator: { owner: 'message', campId, messageId, attachmentRefId: image.id },
+      image
+    })),
     ...runtimeImages
   ]
   if (images.length === 0 && groups.files.length === 0) return null
@@ -7675,7 +7681,7 @@ export function MessageAttachmentGroups({
             {groups.files.map((attachment) => (
               <AttachmentCard
                 attachment={attachment}
-                campId={campId}
+                locator={{ owner: 'message', campId, messageId, attachmentRefId: attachment.id }}
                 key={attachment.id}
                 onNotify={onNotify}
                 presentation="user-timeline"
@@ -7704,7 +7710,7 @@ export function MessageAttachmentGroups({
             {groups.files.map((attachment) => (
               <AttachmentCard
                 attachment={attachment}
-                campId={campId}
+                locator={{ owner: 'message', campId, messageId, attachmentRefId: attachment.id }}
                 key={attachment.id}
                 onNotify={onNotify}
                 presentation="agent-timeline"
@@ -7717,16 +7723,29 @@ export function MessageAttachmentGroups({
   )
 }
 
+function localAttachmentLocatorKey(locator: LocalAttachmentOwnerLocator): string {
+  if (locator.owner === 'composer') {
+    return `composer:${locator.campId}:${locator.attachmentRefId}`
+  }
+  if (locator.owner === 'message') {
+    return `message:${locator.campId}:${locator.messageId}:${locator.attachmentRefId}`
+  }
+  if (locator.owner === 'pending') {
+    return `pending:${locator.campId}:${locator.pendingInputId}:${locator.attachmentRefId}`
+  }
+  return `pending-edit:${locator.campId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
+}
+
 function AttachmentCard({
   attachment,
   onRemove,
-  campId,
+  locator,
   onNotify = () => undefined,
   presentation = 'composer'
 }: {
-  attachment: CampMessageAttachmentView | PreparedAttachmentView
+  attachment: CampMessageAttachmentView
   onRemove?: () => void
-  campId?: string
+  locator: LocalAttachmentOwnerLocator
   onNotify?: (message: string) => void
   presentation?: 'composer' | 'user-timeline' | 'agent-timeline'
 }): JSX.Element {
@@ -7735,12 +7754,12 @@ function AttachmentCard({
   const [previewFailed, setPreviewFailed] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [attachmentAction, setAttachmentAction] = useState<'open' | 'reveal' | null>(null)
+  const [availability, setAvailability] = useState<LocalAttachmentAvailability>(attachment.availability)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [contextAnchor, setContextAnchor] = useState({ x: 0, y: 0 })
   const attachmentButtonRef = useRef<HTMLButtonElement>(null)
-  const runtimeProjectionState = 'runtimeProjectionState' in attachment
-    ? attachment.runtimeProjectionState
-    : 'available'
+  const locatorRef = useRef(locator)
+  locatorRef.current = locator
   const timeline = presentation !== 'composer'
   const agentPresentation = presentation === 'agent-timeline'
   const composerImage = presentation === 'composer' && attachment.previewKind === 'image'
@@ -7748,16 +7767,20 @@ function AttachmentCard({
   const baseName = attachmentBaseName(attachment.displayName, attachment.kind)
   const formatLabel = attachmentFormatLabel(attachment.displayName, attachment.kind)
   const rendererPlatform = typeof window === 'undefined' ? 'darwin' : window.rovai.platform
+  const locatorKey = localAttachmentLocatorKey(locator)
   useEffect(() => {
     if (attachment.previewKind !== 'image') return
+    if (timeline && attachment.availability === 'unknown') return
     let active = true
     let objectUrl: string | null = null
-    void window.rovai.composerAttachments.preview(attachment.id)
-      .then((preview) => {
-        if (!active || !preview) {
+    void window.rovai.composerAttachments.preview(locatorRef.current)
+      .then((result) => {
+        if (active) setAvailability(result.availability)
+        if (!active || !result.preview) {
           if (active) setPreviewFailed(true)
           return
         }
+        const preview = result.preview
         objectUrl = URL.createObjectURL(new Blob(
           [Uint8Array.from(preview.bytes).buffer],
           { type: preview.mediaType }
@@ -7771,30 +7794,37 @@ function AttachmentCard({
       active = false
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [attachment.id, attachment.previewKind])
+  }, [attachment.availability, attachment.id, attachment.previewKind, locatorKey, timeline])
 
   const runAttachmentAction = async (
     action: 'open' | 'reveal',
     forceSystem = false
   ): Promise<void> => {
-    if (!timeline || !campId || attachmentAction) return
+    if (!timeline || attachmentAction) return
     setAttachmentAction(action)
     try {
       if (action === 'open') {
         if (!forceSystem && attachment.kind === 'file' && filePreview) {
           const outcome = await filePreview.open({
             kind: 'attachment',
-            campId,
-            attachmentId: attachment.id
+            campId: locator.campId,
+            locator
           })
-          if (outcome.kind === 'error') onNotify(outcome.error.message)
+          if (outcome.kind === 'error') {
+            if (outcome.error.code === 'attachment_missing') setAvailability('missing')
+            else if (outcome.error.code === 'attachment_unreadable') setAvailability('unreadable')
+            else if (outcome.error.code === 'attachment_kind_changed') setAvailability('kind_changed')
+            onNotify(outcome.error.message)
+          } else setAvailability('available')
           return
         }
-        const result = await window.rovai.attachments.open(campId, attachment.id)
+        const result = await window.rovai.attachments.open(locator)
+        setAvailability(result.availability)
         if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
         else if (result.error) onNotify('无法使用系统应用打开此附件')
       } else {
-        const result = await window.rovai.attachments.reveal(campId, attachment.id)
+        const result = await window.rovai.attachments.reveal(locator)
+        setAvailability(result.availability)
         if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
         else if (result.error) {
           onNotify(rendererPlatform === 'darwin'
@@ -7827,17 +7857,18 @@ function AttachmentCard({
     showAttachmentContextMenu(bounds?.left ?? 8, bounds?.bottom ?? 8)
   }
 
-  const projectionLabel = runtimeProjectionState === 'failed'
-    ? '队员读取不可用'
-    : runtimeProjectionState === 'pending'
-      || runtimeProjectionState === 'recovery_required'
-      ? '正在准备供队员读取'
-      : null
+  const availabilityLabel = availability === 'missing'
+    ? '文件已不可用'
+    : availability === 'unreadable'
+      ? '文件无法读取'
+      : availability === 'kind_changed'
+        ? '文件类型已变化'
+        : null
 
-  const detailLabel = projectionLabel ?? (agentPresentation
+  const detailLabel = availabilityLabel ?? (agentPresentation
     ? attachment.kind === 'directory'
-      ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
-      : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`
+      ? `${attachment.fileCount === null ? '文件数未知' : `${attachment.fileCount} 个文件`} · ${attachment.byteSize === null ? '大小未知' : formatByteSize(attachment.byteSize)}`
+      : `${attachmentTypeLabel(attachment.mediaType)} · ${attachment.byteSize === null ? '大小未知' : formatByteSize(attachment.byteSize)}`
     : null)
 
   const content = composerImage
@@ -7880,10 +7911,10 @@ function AttachmentCard({
 
   return (
     <div
-      className={`attachment-card ${presentation === 'composer' ? 'composer-attachment-card' : presentation} ${composerImage ? 'composer-image-attachment' : ''} type-${displayClassification.agentDisplayType} ${projectionLabel ? `attachment-projection-${runtimeProjectionState}` : ''}`}
-      aria-label={projectionLabel ? `${attachment.displayName}：${projectionLabel}` : undefined}
+      className={`attachment-card ${presentation === 'composer' ? 'composer-attachment-card' : presentation} ${composerImage ? 'composer-image-attachment' : ''} type-${displayClassification.agentDisplayType} ${availabilityLabel ? `attachment-availability-${availability}` : ''}`}
+      aria-label={availabilityLabel ? `${attachment.displayName}：${availabilityLabel}` : undefined}
       data-context-open={contextMenuOpen ? 'true' : undefined}
-      onContextMenu={timeline && campId
+      onContextMenu={timeline
         ? (event) => {
             event.preventDefault()
             if (event.clientX === 0 && event.clientY === 0) showAttachmentKeyboardMenu()
@@ -7891,7 +7922,7 @@ function AttachmentCard({
           }
         : undefined}
     >
-      {timeline && campId
+      {timeline
         ? (
             <>
               <button
@@ -8106,7 +8137,7 @@ function AttachmentPlaceholder({
         <strong title={name}>{name}</strong>
         <small title={detail}>
           {state === 'preparing'
-            ? kind === 'directory' ? '正在创建只读快照…' : '正在安全接入…'
+            ? kind === 'directory' ? '正在添加文件夹…' : '正在添加…'
             : detail ?? '附件处理失败'}
         </small>
       </span>
@@ -8117,7 +8148,8 @@ function AttachmentPlaceholder({
   )
 }
 
-function attachmentTypeLabel(mediaType: string): string {
+function attachmentTypeLabel(mediaType: string | null): string {
+  if (!mediaType) return '文件'
   if (mediaType === 'inode/directory') return '文件夹'
   if (mediaType.startsWith('image/')) return '图片'
   if (mediaType === 'application/pdf') return 'PDF'
@@ -8129,12 +8161,9 @@ function attachmentTypeLabel(mediaType: string): string {
 function attachmentErrorMessage(error: unknown): string {
   const message = readErrorMessage(error)
   if (message.includes('25 MiB')) return '文件超过 25 MiB'
-  if (message.includes('count limit')) return '一条消息最多 10 个附件'
-  if (message.includes('total attachment') || message.includes('64 MiB')) return '附件总大小超过 64 MiB'
-  if (message.includes('2000-file')) return '文件夹内文件数量超过 2,000 个'
-  if (message.includes('4000-entry')) return '文件夹内项目数量超过 4,000 个'
-  if (message.includes('32-level')) return '文件夹层级超过 32 层'
-  if (message.includes('symbolic link') || message.includes('symlinks')) return '文件夹包含不支持的软链接'
+  if (message.includes('attachment_unreadable')) return '文件当前无法读取'
+  if (message.includes('attachment_kind_changed')) return '文件类型已变化'
+  if (message.includes('legacy_draft.attachments_locked')) return '请先发送或移除旧版草稿附件'
   if (message.includes('unsupported item')) return '文件夹包含不支持的项目'
   if (message.includes('regular files and directories')) return '仅支持普通文件或文件夹'
   return '安全接入失败，可移除后重试'

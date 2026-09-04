@@ -3,12 +3,12 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-09-01
+last_updated: 2026-09-04
 ---
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v14](../contracts/camp-open-projection-v14.md)与
+字段与窗口见 [Camp Open Projection v15](../contracts/camp-open-projection-v15.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -38,6 +38,8 @@ ReadModel 另对 #153 已写入的精确取消失败形状做只读兼容：有 
 
 Open 仅读取当前 Camp 的业务表。它及其嵌套 loader、CTE、view 不得访问 `event_log`；消息专用
 `load_open_messages()` 复用正文、附件和 presentation hydration，但不查询 publication event sequence。
+附件 hydration 对 source refs、Managed v2 和 legacy rows 统一返回无路径 View 与
+`availability = unknown`；Open、earlier、around、thread 和 timeline 不为可用性访问文件系统。
 `throughGlobalSequence` 仍从 `event_sequence` singleton 读取，不通过事件表求最大值。移除 timeline 与其
 exact count 后，打开成本不随其他 Camp 的事件历史增长；当前 Camp 的活动 Evidence 完整性不因此降级。
 
@@ -135,6 +137,6 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v14](../contracts/camp-open-projection-v14.md)
+- [Camp Open Projection v15](../contracts/camp-open-projection-v15.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
 - [Desktop Navigation Refresh](desktop-navigation-refresh.md)
