@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.42
+current_version: v1.43
 last_updated: 2026-09-04
 ---
 
@@ -193,4 +193,5 @@ last_updated: 2026-09-04
 | v1.39 | `historical` | Pi JSONL Runtime、原生能力加 v5 薄扩展、exact-first resume、追加 Skills、partial approval、Prompt images 与稀疏 Usage；External MCP 明确 Unsupported；三平台保持 Preview；Renderer 附件按作者分区展示 | [v1.39/README.md](v1.39/README.md) |
 | v1.40 | `historical` | Desktop 新用户附件改为弱持久 source path refs，Pending 原生携带附件，Runtime 仅做 Run-local 适配 | [v1.40/README.md](v1.40/README.md) |
 | v1.41 | `historical` | Sidecar 首次冻结用户现有 Project 顺序，后续仅同步成员变化，不再按消息活动移动 Project | [v1.41/README.md](v1.41/README.md) |
-| v1.42 | `current` | 只有显式 Markdown 链接产生消息资源入口；共享 Markdown/代码图标与用户附件卡宽度收敛 | [v1.42/README.md](v1.42/README.md) |
+| v1.42 | `historical` | 只有显式 Markdown 链接产生消息资源入口；共享 Markdown/代码图标与用户附件卡宽度收敛 | [v1.42/README.md](v1.42/README.md) |
+| v1.43 | `current` | Lexical 驱动的 Text + Atom 结构化纯文本 Composer、低频 Draft Snapshot 与 V2 领域协议 | [v1.43/README.md](v1.43/README.md) |

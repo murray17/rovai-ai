@@ -36,8 +36,9 @@ test('Composer edits preserve text, structured tokens and Skill query interactio
       join(fixtureSource, 'main.cjs'),
       join(fixture, 'renderer/index.html'),
       join(fixture, 'user-data'),
-      // This local component fixture starts no Core, Runtime or network content.
-      ...(process.platform === 'linux' ? ['--no-sandbox'] : [])
+      // This isolated component fixture starts no Core, Runtime or network content.
+      // CI/container hosts can forbid Chromium's nested process sandbox on every OS.
+      '--no-sandbox'
     ], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')
     let stdout = ''
@@ -53,9 +54,11 @@ test('Composer edits preserve text, structured tokens and Skill query interactio
       clearTimeout(timeout)
     }
     assert.equal(code, 0, `Native Composer regression failed (${signal}):\n${stdout}\n${stderr}`)
-    const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
+    const reportLine = stdout.split('\n').find(line => line.startsWith('{'))
+    assert.ok(reportLine, `Native Composer fixture produced no report:\n${stdout}\n${stderr}`)
+    const report = JSON.parse(reportLine)
     assert.equal(report.ok, true)
-    assert.equal(report.cases.length, 19)
+    assert.equal(report.cases.length, 23)
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')

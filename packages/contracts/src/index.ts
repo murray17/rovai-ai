@@ -983,6 +983,36 @@ export type StructuredCampMessageSegment =
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
 
+export interface ComposerDocument {
+  version: 2
+  segments: ComposerSegment[]
+}
+
+export type ComposerSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'atom'; atom: ComposerAtom }
+
+export type ComposerAtom =
+  | MemberComposerAtom
+  | AllMembersComposerAtom
+  | SkillComposerAtom
+
+export interface MemberComposerAtom {
+  type: 'member'
+  agentId: string
+  labelFallback?: string
+}
+
+export interface AllMembersComposerAtom {
+  type: 'all_members'
+}
+
+export interface SkillComposerAtom {
+  type: 'skill'
+  skillId: string
+  nameAtSend: string
+}
+
 export type SkillSelectionOmissionReason =
   | 'missing_at_send'
   | 'inactive_at_send'
@@ -1090,7 +1120,7 @@ export type LocalAttachmentOwnerLocator =
 export interface CampComposerDraftView {
   campId: string
   body: string
-  content: StructuredCampMessageContent
+  content: ComposerDocument
   revision: number
   attachments: LocalAttachmentSourceView[]
   replyIntent: CampComposerReplyIntentView | null
@@ -1105,7 +1135,7 @@ export interface PendingCampInputView {
   enqueueSequence: number
   revision: number
   state: 'queued' | 'needs_repair'
-  content: StructuredCampMessageContent
+  content: ComposerDocument
   body: string
   replyIntent: CampComposerReplyIntentView | null
   recipientSelectionRequired: boolean
@@ -1132,7 +1162,7 @@ export type PendingInputEditAction =
   | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
   | {
       type: 'save'
-      content: StructuredCampMessageContent
+      content: ComposerDocument
       replyToCampMessageId: string | null
       recipientSelectionRequired: boolean
     }

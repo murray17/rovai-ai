@@ -34,9 +34,11 @@ use uuid::Uuid;
 use crate::{
     camp_attachment_publication::AuthorityAttachment,
     camp_content::{
-        StructuredCampMessageContent, StructuredCampMessageSegment, has_all_members_mention,
-        member_mention_ids, normalize_content, render_current_plain_text,
-        validate_user_authored_content,
+        ComposerAtom, ComposerDocument, ComposerSegment, EMPTY_COMPOSER_DOCUMENT_JSON,
+        StructuredCampMessageContent, StructuredCampMessageSegment, composer_document_to_content,
+        has_all_members_mention, member_mention_ids, normalize_composer_document,
+        parse_composer_document_json, render_composer_plain_text, render_current_plain_text,
+        serialize_composer_document, validate_composer_document,
     },
     camp_id::CampId,
     current_user::{CURRENT_USER_ID, CurrentUserResolver},
@@ -169,7 +171,7 @@ struct ManagedAttachmentMetadata {
 pub struct CampComposerDraftView {
     pub camp_id: String,
     pub body: String,
-    pub content: StructuredCampMessageContent,
+    pub content: ComposerDocument,
     pub revision: i64,
     pub attachments: Vec<LocalAttachmentSourceView>,
     pub reply_intent: Option<CampComposerReplyIntentView>,
@@ -619,8 +621,8 @@ impl CampAttachmentStore {
                 } else {
                     prepared_attachments.clone()
                 };
-                let content = normalize_content(serde_json::from_str(&content)?);
-                validate_user_authored_content(&content)?;
+                let content = parse_composer_document_json(&content)?;
+                let structured_content = composer_document_to_content(&content)?;
                 let continuation_intent = project_continuation_intent(
                     database.connection(),
                     camp_id,
@@ -628,14 +630,14 @@ impl CampAttachmentStore {
                         stored_source_message_id: continuation_source.as_deref(),
                         suppressed_source_message_id: continuation_suppressed_source.as_deref(),
                         recipient_selection_touched,
-                        content: &content,
+                        content: &structured_content,
                         reply_to_camp_message_id: reply_to.as_deref(),
                         has_attachments: !attachments.is_empty(),
                     },
                 )?;
                 CampComposerDraftView {
                     camp_id: camp_id.to_string(),
-                    body: render_content(database, &content)?,
+                    body: render_composer_document_for_connection(database.connection(), &content)?,
                     content,
                     revision,
                     attachments,
@@ -666,7 +668,7 @@ impl CampAttachmentStore {
                 CampComposerDraftView {
                     camp_id: camp_id.to_string(),
                     body: String::new(),
-                    content: Vec::new(),
+                    content: ComposerDocument::default(),
                     revision: 0,
                     attachments: prepared_attachments,
                     reply_intent: None,
@@ -685,12 +687,15 @@ impl CampAttachmentStore {
         body: &str,
     ) -> Result<CampComposerDraftView> {
         let current = self.load_draft(database, camp_id)?;
-        let content = (!body.is_empty())
-            .then(|| StructuredCampMessageSegment::Text {
-                text: body.to_string(),
-            })
-            .into_iter()
-            .collect();
+        let content = ComposerDocument {
+            version: crate::camp_content::COMPOSER_DOCUMENT_VERSION,
+            segments: (!body.is_empty())
+                .then(|| crate::camp_content::ComposerSegment::Text {
+                    text: body.to_string(),
+                })
+                .into_iter()
+                .collect(),
+        };
         self.save_content(database, camp_id, current.revision, content)
     }
 
@@ -699,7 +704,7 @@ impl CampAttachmentStore {
         database: &mut Database,
         camp_id: &str,
         expected_revision: i64,
-        content: StructuredCampMessageContent,
+        content: ComposerDocument,
     ) -> Result<CampComposerDraftView> {
         self.save_content_with_continuation(database, camp_id, expected_revision, content, None)
     }
@@ -709,7 +714,7 @@ impl CampAttachmentStore {
         database: &mut Database,
         camp_id: &str,
         expected_revision: i64,
-        content: StructuredCampMessageContent,
+        content: ComposerDocument,
         continuation_source_message_id: Option<&str>,
     ) -> Result<CampComposerDraftView> {
         CampId::parse(camp_id)?;
@@ -717,10 +722,11 @@ impl CampAttachmentStore {
         if let Some(source_message_id) = continuation_source_message_id {
             validate_component(source_message_id, "Camp Message")?;
         }
-        let content = normalize_content(content);
-        validate_user_authored_content(&content)?;
-        let content_json = serde_json::to_string(&content)?;
-        let body = render_content(database, &content)?;
+        let content = normalize_composer_document(content);
+        validate_composer_document(&content)?;
+        let structured_content = composer_document_to_content(&content)?;
+        let content_json = serialize_composer_document(&content)?;
+        let body = render_composer_document_for_connection(database.connection(), &content)?;
         let current = load_draft_mutation_state(database.connection(), camp_id)?;
         let current_revision = current.as_ref().map_or(0, |draft| draft.revision);
         if current_revision != expected_revision {
@@ -728,8 +734,10 @@ impl CampAttachmentStore {
         }
 
         let route_changed = current.as_ref().is_some_and(|draft| {
-            recipient_signature(&draft.content) != recipient_signature(&content)
-        }) || (current.is_none() && has_explicit_recipient(&content));
+            recipient_signature(&draft.structured_content)
+                != recipient_signature(&structured_content)
+        }) || (current.is_none()
+            && has_explicit_recipient(&structured_content));
         let recipient_selection_touched = current
             .as_ref()
             .is_some_and(|draft| draft.recipient_selection_touched)
@@ -747,7 +755,7 @@ impl CampAttachmentStore {
                 .as_ref()
                 .and_then(|draft| draft.reply_to_camp_message_id.as_ref())
                 .is_none()
-            && !has_explicit_recipient(&content)
+            && !has_explicit_recipient(&structured_content)
             && let Some(requested_source) = continuation_source_message_id
         {
             let latest = latest_continuation_candidate(database.connection(), camp_id)?
@@ -761,7 +769,7 @@ impl CampAttachmentStore {
         }
 
         if current.as_ref().is_some_and(|draft| {
-            draft.content == content
+            draft.document == content
                 && draft.continuation_source_message_id == resolved_continuation_source
                 && draft.continuation_suppressed_source_message_id
                     == continuation_suppressed_source_message_id
@@ -779,7 +787,7 @@ impl CampAttachmentStore {
             |row| row.get(0),
         )?;
         if current.is_none()
-            && content.is_empty()
+            && content.segments.is_empty()
             && !has_attachments
             && resolved_continuation_source.is_none()
         {
@@ -872,14 +880,15 @@ impl CampAttachmentStore {
         require_expected_revision(current.as_ref(), expected_revision)?;
         let mut content = current
             .as_ref()
-            .map(|draft| draft.content.clone())
+            .map(|draft| draft.document.clone())
             .unwrap_or_default();
         let recipient_selection_required = if author_type == "agent" {
             if active_reply_agent(&transaction, camp_id, &author_id)? {
-                ensure_leading_recipient(
+                ensure_leading_composer_recipient(
                     &mut content,
-                    StructuredCampMessageSegment::MemberMention {
+                    ComposerAtom::Member {
                         agent_id: author_id,
+                        label_fallback: None,
                     },
                 );
                 false
@@ -930,7 +939,7 @@ impl CampAttachmentStore {
             expected_revision,
             Some(current),
             ReplyMutation {
-                content: current.content.clone(),
+                content: current.document.clone(),
                 reply_to_camp_message_id: None,
                 recipient_selection_required: false,
                 recipient_selection_touched: current.recipient_selection_touched,
@@ -967,15 +976,16 @@ impl CampAttachmentStore {
             )
             .optional()?
             .context("camp_message.invalid_reply")?;
-        let mut content = current.content.clone();
+        let mut content = current.document.clone();
         if original_author.0 == "agent"
             && !active_reply_agent(&transaction, camp_id, &original_author.1)?
         {
-            content.retain(|segment| {
+            content.segments.retain(|segment| {
                 !matches!(
                     segment,
-                    StructuredCampMessageSegment::MemberMention { agent_id }
-                        if agent_id == &original_author.1
+                    ComposerSegment::Atom {
+                        atom: ComposerAtom::Member { agent_id, .. }
+                    } if agent_id == &original_author.1
                 )
             });
         }
@@ -984,13 +994,14 @@ impl CampAttachmentStore {
                 if !active_reply_agent(&transaction, camp_id, &agent_id)? {
                     anyhow::bail!("mention_target_unavailable");
                 }
-                StructuredCampMessageSegment::MemberMention { agent_id }
+                ComposerAtom::Member {
+                    agent_id,
+                    label_fallback: None,
+                }
             }
-            CampComposerReplyRecipient::AllMembers => {
-                StructuredCampMessageSegment::AllMembersMention
-            }
+            CampComposerReplyRecipient::AllMembers => ComposerAtom::AllMembers,
         };
-        ensure_leading_recipient(&mut content, replacement);
+        ensure_leading_composer_recipient(&mut content, replacement);
         persist_reply_mutation(
             &transaction,
             camp_id,
@@ -1025,7 +1036,7 @@ impl CampAttachmentStore {
         if current.as_ref().is_some_and(|draft| {
             draft.reply_to_camp_message_id.is_some()
                 || draft.recipient_selection_touched
-                || has_explicit_recipient(&draft.content)
+                || has_explicit_recipient(&draft.structured_content)
         }) {
             anyhow::bail!("continuation_source_invalid");
         }
@@ -1048,7 +1059,7 @@ impl CampAttachmentStore {
             ContinuationMutation {
                 content: current
                     .as_ref()
-                    .map(|draft| draft.content.clone())
+                    .map(|draft| draft.document.clone())
                     .unwrap_or_default(),
                 continuation_source_message_id: None,
                 continuation_suppressed_source_message_id: Some(source_camp_message_id),
@@ -1094,15 +1105,16 @@ impl CampAttachmentStore {
             [camp_id],
             |row| row.get(0),
         )?;
-        let has_payload = !render_current_plain_text(&transaction, &current.content)?
-            .trim()
-            .is_empty()
-            || has_attachments;
+        let has_payload =
+            !render_composer_document_for_connection(&transaction, &current.document)?
+                .trim()
+                .is_empty()
+                || has_attachments;
         if candidate.available
             || !has_payload
             || current.reply_to_camp_message_id.is_some()
             || current.recipient_selection_touched
-            || has_explicit_recipient(&current.content)
+            || has_explicit_recipient(&current.structured_content)
         {
             anyhow::bail!("continuation_recipient_required");
         }
@@ -1112,11 +1124,12 @@ impl CampAttachmentStore {
         if !active_reply_agent(&transaction, camp_id, agent_id)? {
             anyhow::bail!("mention_target_unavailable");
         }
-        let mut content = current.content.clone();
-        ensure_leading_recipient(
+        let mut content = current.document.clone();
+        ensure_leading_composer_recipient(
             &mut content,
-            StructuredCampMessageSegment::MemberMention {
+            ComposerAtom::Member {
                 agent_id: agent_id.to_string(),
+                label_fallback: None,
             },
         );
         persist_continuation_mutation(
@@ -1206,9 +1219,15 @@ impl CampAttachmentStore {
                 INSERT INTO camp_composer_draft(
                     camp_id, body, structured_content_json, revision,
                     source_attachments_json, created_at, updated_at, expires_at
-                ) VALUES (?1, '', '[]', 1, ?2, ?3, ?3, ?4)
+                ) VALUES (?1, '', ?2, 1, ?3, ?4, ?4, ?5)
                 "#,
-                params![camp_id, refs_json, now, expires_at],
+                params![
+                    camp_id,
+                    EMPTY_COMPOSER_DOCUMENT_JSON,
+                    refs_json,
+                    now,
+                    expires_at
+                ],
             )?;
         } else {
             let updated = transaction.execute(
@@ -1288,14 +1307,21 @@ impl CampAttachmentStore {
         let (now, expires_at) = draft_times();
         transaction.execute(
             r#"
-            INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
-            VALUES (?1, '', ?2, ?2, ?3)
+            INSERT INTO camp_composer_draft(
+                camp_id, body, structured_content_json, created_at, updated_at, expires_at
+            )
+            VALUES (?1, '', ?2, ?3, ?3, ?4)
             ON CONFLICT(camp_id) DO UPDATE SET
                 revision = camp_composer_draft.revision + 1,
                 updated_at = excluded.updated_at,
                 expires_at = excluded.expires_at
             "#,
-            params![prepared.camp_id, now, expires_at],
+            params![
+                prepared.camp_id,
+                EMPTY_COMPOSER_DOCUMENT_JSON,
+                now,
+                expires_at
+            ],
         )?;
         let ordinal: i64 = transaction.query_row(
             "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM prepared_attachment WHERE camp_id = ?1",
@@ -2117,7 +2143,8 @@ pub(crate) fn cleanup_consumed_prepared_attachment_paths(
 
 #[derive(Debug, Clone)]
 struct DraftMutationState {
-    content: StructuredCampMessageContent,
+    document: ComposerDocument,
+    structured_content: StructuredCampMessageContent,
     revision: i64,
     reply_to_camp_message_id: Option<String>,
     recipient_selection_required: bool,
@@ -2127,14 +2154,14 @@ struct DraftMutationState {
 }
 
 struct ReplyMutation<'a> {
-    content: StructuredCampMessageContent,
+    content: ComposerDocument,
     reply_to_camp_message_id: Option<&'a str>,
     recipient_selection_required: bool,
     recipient_selection_touched: bool,
 }
 
 struct ContinuationMutation<'a> {
-    content: StructuredCampMessageContent,
+    content: ComposerDocument,
     continuation_source_message_id: Option<&'a str>,
     continuation_suppressed_source_message_id: Option<&'a str>,
     recipient_selection_touched: bool,
@@ -2180,10 +2207,11 @@ fn load_draft_mutation_state(
                 continuation_suppressed_source_message_id,
                 recipient_selection_touched,
             )| {
-                let content = normalize_content(serde_json::from_str(&content)?);
-                validate_user_authored_content(&content)?;
+                let document = parse_composer_document_json(&content)?;
+                let structured_content = composer_document_to_content(&document)?;
                 Ok(DraftMutationState {
-                    content,
+                    document,
+                    structured_content,
                     revision,
                     reply_to_camp_message_id,
                     recipient_selection_required: required,
@@ -2219,18 +2247,18 @@ fn persist_reply_mutation(
         recipient_selection_required,
         recipient_selection_touched,
     } = mutation;
-    let content = normalize_content(content);
-    validate_user_authored_content(&content)?;
+    let content = normalize_composer_document(content);
+    validate_composer_document(&content)?;
     if current.is_some_and(|draft| {
-        draft.content == content
+        draft.document == content
             && draft.reply_to_camp_message_id.as_deref() == reply_to_camp_message_id
             && draft.recipient_selection_required == recipient_selection_required
             && draft.recipient_selection_touched == recipient_selection_touched
     }) {
         return Ok(false);
     }
-    let content_json = serde_json::to_string(&content)?;
-    let body = render_current_plain_text(transaction, &content)?;
+    let content_json = serialize_composer_document(&content)?;
+    let body = render_composer_document_for_connection(transaction, &content)?;
     let (now, expires_at) = draft_times();
     if expected_revision == 0 {
         transaction.execute(
@@ -2299,10 +2327,10 @@ fn persist_continuation_mutation(
         continuation_suppressed_source_message_id,
         recipient_selection_touched,
     } = mutation;
-    let content = normalize_content(content);
-    validate_user_authored_content(&content)?;
+    let content = normalize_composer_document(content);
+    validate_composer_document(&content)?;
     if current.is_some_and(|draft| {
-        draft.content == content
+        draft.document == content
             && draft.continuation_source_message_id.as_deref() == continuation_source_message_id
             && draft.continuation_suppressed_source_message_id.as_deref()
                 == continuation_suppressed_source_message_id
@@ -2310,8 +2338,8 @@ fn persist_continuation_mutation(
     }) {
         return Ok(false);
     }
-    let content_json = serde_json::to_string(&content)?;
-    let body = render_current_plain_text(transaction, &content)?;
+    let content_json = serialize_composer_document(&content)?;
+    let body = render_composer_document_for_connection(transaction, &content)?;
     let (now, expires_at) = draft_times();
     if expected_revision == 0 {
         transaction.execute(
@@ -2546,45 +2574,57 @@ fn project_continuation_intent(
     }))
 }
 
-fn ensure_leading_recipient(
-    content: &mut StructuredCampMessageContent,
-    recipient: StructuredCampMessageSegment,
-) {
-    let covered = content.iter().any(|segment| match (&recipient, segment) {
-        (
-            StructuredCampMessageSegment::MemberMention {
-                agent_id: requested,
-            },
-            StructuredCampMessageSegment::MemberMention { agent_id: existing },
-        ) => requested == existing,
-        (
-            StructuredCampMessageSegment::MemberMention { .. },
-            StructuredCampMessageSegment::AllMembersMention,
-        )
-        | (
-            StructuredCampMessageSegment::AllMembersMention,
-            StructuredCampMessageSegment::AllMembersMention,
-        ) => true,
-        _ => false,
-    });
+fn ensure_leading_composer_recipient(document: &mut ComposerDocument, recipient: ComposerAtom) {
+    let covered = document
+        .segments
+        .iter()
+        .any(|segment| match (&recipient, segment) {
+            (
+                ComposerAtom::Member {
+                    agent_id: requested,
+                    ..
+                },
+                ComposerSegment::Atom {
+                    atom:
+                        ComposerAtom::Member {
+                            agent_id: existing, ..
+                        },
+                },
+            ) => requested == existing,
+            (
+                ComposerAtom::Member { .. },
+                ComposerSegment::Atom {
+                    atom: ComposerAtom::AllMembers,
+                },
+            )
+            | (
+                ComposerAtom::AllMembers,
+                ComposerSegment::Atom {
+                    atom: ComposerAtom::AllMembers,
+                },
+            ) => true,
+            _ => false,
+        });
     if covered {
         return;
     }
     let has_leading_whitespace = matches!(
-        content.first(),
-        Some(StructuredCampMessageSegment::Text { text })
+        document.segments.first(),
+        Some(ComposerSegment::Text { text })
             if text.chars().next().is_some_and(char::is_whitespace)
     );
-    content.insert(0, recipient);
+    document
+        .segments
+        .insert(0, ComposerSegment::Atom { atom: recipient });
     if !has_leading_whitespace {
-        content.insert(
+        document.segments.insert(
             1,
-            StructuredCampMessageSegment::Text {
+            ComposerSegment::Text {
                 text: " ".to_string(),
             },
         );
     }
-    *content = normalize_content(std::mem::take(content));
+    *document = normalize_composer_document(std::mem::take(document));
 }
 
 fn active_reply_agent(connection: &Connection, camp_id: &str, agent_id: &str) -> Result<bool> {
@@ -2936,11 +2976,21 @@ fn load_prepared_attachments(
         .collect()
 }
 
-pub(crate) fn render_content(
-    database: &Database,
-    content: &[StructuredCampMessageSegment],
+fn render_composer_document_for_connection(
+    connection: &Connection,
+    document: &ComposerDocument,
 ) -> Result<String> {
-    render_current_plain_text(database.connection(), content)
+    render_composer_plain_text(document, |agent_id| {
+        connection
+            .query_row(
+                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                [agent_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    })
 }
 
 fn load_prepared_rows(database: &Database, camp_id: &str) -> Result<Vec<PreparedRow>> {
@@ -3621,6 +3671,14 @@ mod slow_tests {
     use super::*;
     use crate::camp_content::StructuredCampMessageSegment as Segment;
 
+    fn composer_document(content: StructuredCampMessageContent) -> ComposerDocument {
+        crate::camp_content::composer_document_from_content(&content).unwrap()
+    }
+
+    fn structured_content(document: &ComposerDocument) -> StructuredCampMessageContent {
+        composer_document_to_content(document).unwrap()
+    }
+
     fn insert_test_member(database: &Database, camp_id: &str, agent_id: &str) {
         database
             .connection()
@@ -3932,10 +3990,15 @@ mod slow_tests {
             text: "让@普通文字 ".into(),
         }];
         let first = store
-            .save_content(&mut database, camp_id, 0, first_content.clone())
+            .save_content(
+                &mut database,
+                camp_id,
+                0,
+                composer_document(first_content.clone()),
+            )
             .unwrap();
         assert_eq!(first.revision, 1);
-        assert_eq!(first.content, first_content);
+        assert_eq!(structured_content(&first.content), first_content);
 
         let unchanged = store
             .save_content(
@@ -3952,12 +4015,12 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 first.revision,
-                vec![
+                composer_document(vec![
                     Segment::Text { text: "让".into() },
                     Segment::MemberMention {
                         agent_id: "agent_2".into(),
                     },
-                ],
+                ]),
             )
             .unwrap();
         assert_eq!(second.revision, 2);
@@ -3986,11 +4049,16 @@ mod slow_tests {
         );
 
         let cleared = store
-            .save_content(&mut database, camp_id, second.revision, Vec::new())
+            .save_content(
+                &mut database,
+                camp_id,
+                second.revision,
+                ComposerDocument::default(),
+            )
             .unwrap();
         assert_eq!(cleared.revision, 3);
         assert!(cleared.body.is_empty());
-        assert!(cleared.content.is_empty());
+        assert!(cleared.content.segments.is_empty());
         let persisted_revision: i64 = database
             .connection()
             .query_row(
@@ -4038,9 +4106,9 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 0,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "继续处理".into(),
-                }],
+                }]),
             )
             .unwrap();
 
@@ -4054,7 +4122,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(replying.revision, saved.revision + 1);
         assert_eq!(
-            replying.content,
+            structured_content(&replying.content),
             vec![
                 Segment::MemberMention {
                     agent_id: "agent_2".into()
@@ -4088,8 +4156,9 @@ mod slow_tests {
             .cancel_reply(&mut database, camp_id, idempotent.revision)
             .unwrap();
         assert!(cancelled.reply_intent.is_none());
+        let cancelled_content = structured_content(&cancelled.content);
         assert!(matches!(
-            cancelled.content.first(),
+            cancelled_content.first(),
             Some(Segment::MemberMention { agent_id }) if agent_id == "agent_2"
         ));
 
@@ -4165,11 +4234,12 @@ mod slow_tests {
                 .unwrap()
                 .recipient_selection_required
         );
-        assert!(resolved.content.iter().any(|segment| matches!(
+        let resolved_content = structured_content(&resolved.content);
+        assert!(resolved_content.iter().any(|segment| matches!(
             segment,
             Segment::MemberMention { agent_id } if agent_id == "agent_3"
         )));
-        assert!(!resolved.content.iter().any(|segment| matches!(
+        assert!(!resolved_content.iter().any(|segment| matches!(
             segment,
             Segment::MemberMention { agent_id } if agent_id == "agent_2"
         )));
@@ -4217,7 +4287,7 @@ mod slow_tests {
         let reply = store
             .start_reply(&mut database, camp_id, 0, "away-agent-message")
             .unwrap();
-        assert!(reply.content.is_empty());
+        assert!(reply.content.segments.is_empty());
         assert_eq!(reply.revision, 1);
         assert!(
             reply
@@ -4368,9 +4438,9 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 candidate.revision,
-                vec![Segment::MemberMention {
+                composer_document(vec![Segment::MemberMention {
                     agent_id: "agent_1".into(),
-                }],
+                }]),
                 Some("dismiss-source"),
             )
             .unwrap();
@@ -4380,9 +4450,9 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 addressed.revision,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "删除显式 Mention 后仍回到 Lead".into(),
-                }],
+                }]),
             )
             .unwrap();
         assert!(cleared.continuation_intent.is_none());
@@ -4416,9 +4486,9 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 0,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "保留这份草稿".into(),
-                }],
+                }]),
                 Some("repair-source"),
             )
             .unwrap();
@@ -4442,8 +4512,9 @@ mod slow_tests {
             .resolve_continuation_recipient(&mut database, camp_id, unavailable.revision, "agent_1")
             .unwrap();
         assert!(repaired.continuation_intent.is_none());
+        let repaired_content = structured_content(&repaired.content);
         assert!(matches!(
-            repaired.content.first(),
+            repaired_content.first(),
             Some(Segment::MemberMention { agent_id }) if agent_id == "agent_1"
         ));
 
@@ -4482,7 +4553,7 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 0,
-                Vec::new(),
+                ComposerDocument::default(),
                 Some("source-attachment-repair-source"),
             )
             .unwrap();
@@ -4497,7 +4568,7 @@ mod slow_tests {
         let attached = store
             .commit_source_attachment(&mut database, camp_id, draft.revision, source_ref)
             .unwrap();
-        assert!(attached.content.is_empty());
+        assert!(attached.content.segments.is_empty());
         assert_eq!(attached.attachments.len(), 1);
 
         database
@@ -4519,8 +4590,9 @@ mod slow_tests {
             .resolve_continuation_recipient(&mut database, camp_id, unavailable.revision, "agent_1")
             .unwrap();
         assert!(repaired.continuation_intent.is_none());
+        let repaired_content = structured_content(&repaired.content);
         assert!(matches!(
-            repaired.content.first(),
+            repaired_content.first(),
             Some(Segment::MemberMention { agent_id }) if agent_id == "agent_1"
         ));
         assert_eq!(repaired.attachments.len(), 1);
@@ -4574,9 +4646,9 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 0,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "默认交给 Lead".into(),
-                }],
+                }]),
             )
             .unwrap();
         database
@@ -4593,7 +4665,7 @@ mod slow_tests {
                 .continuation_intent
                 .is_none()
         );
-        assert_eq!(draft.content.len(), 1);
+        assert_eq!(draft.content.segments.len(), 1);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
@@ -4639,9 +4711,9 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 0,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "继续".into(),
-                }],
+                }]),
                 Some("reply-priority-source"),
             )
             .unwrap();
@@ -4658,7 +4730,9 @@ mod slow_tests {
             .cancel_reply(&mut database, camp_id, replying_to_self.revision)
             .unwrap();
         assert!(restored.continuation_intent.is_some());
-        assert!(!has_explicit_recipient(&restored.content));
+        assert!(!has_explicit_recipient(&structured_content(
+            &restored.content
+        )));
 
         let replying_to_agent = store
             .start_reply(
@@ -4672,8 +4746,9 @@ mod slow_tests {
             .cancel_reply(&mut database, camp_id, replying_to_agent.revision)
             .unwrap();
         assert!(cancelled.continuation_intent.is_some());
+        let cancelled_content = structured_content(&cancelled.content);
         assert!(matches!(
-            cancelled.content.first(),
+            cancelled_content.first(),
             Some(Segment::MemberMention { agent_id }) if agent_id == "agent_2"
         ));
 
@@ -4682,7 +4757,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn structured_draft_rejects_core_owned_current_user_mentions_without_mutation() {
+    fn structured_draft_rejects_invalid_atom_identity_without_mutation() {
         let directory =
             std::env::temp_dir().join(format!("rovai-draft-user-mention-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
@@ -4695,18 +4770,19 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 0,
-                vec![
-                    Segment::CurrentUserMention {
-                        user_id: CURRENT_USER_ID.to_string(),
-                    },
-                    Segment::Text {
-                        text: "伪造提醒".to_string(),
-                    },
-                ],
+                ComposerDocument {
+                    version: crate::camp_content::COMPOSER_DOCUMENT_VERSION,
+                    segments: vec![ComposerSegment::Atom {
+                        atom: ComposerAtom::Member {
+                            agent_id: " agent_2".to_string(),
+                            label_fallback: None,
+                        },
+                    }],
+                },
             )
             .unwrap_err();
 
-        assert!(error.to_string().contains("only be generated by Core"));
+        assert!(error.to_string().contains("canonical identity"));
         assert_eq!(
             database
                 .connection()
@@ -4738,9 +4814,9 @@ mod slow_tests {
                 &mut database,
                 camp_id,
                 0,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "附件正文".to_string(),
-                }],
+                }]),
             )
             .unwrap();
         let source = directory.join("source.txt");

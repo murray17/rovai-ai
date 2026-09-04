@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.42
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -50,6 +50,7 @@ Renderer 呈现，不进入持久化或模型输入。
 
 ## References
 
+- 下一版本：[v1.43](../v1.43/README.md)
 - [实施与验收](implementation-plan.md)
 - [版本决定](decisions.md)
 - [File Preview v6](../../contracts/file-preview-v6.md)

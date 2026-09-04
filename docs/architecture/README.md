@@ -33,7 +33,7 @@ last_updated: 2026-09-04
 | [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、durable shutdown cycle、退出时 AgentRun 全量取消、product fence 启动补偿、分层 deadline、route reap 与 Desktop child-exit 边界 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共 Structured Message、统一历史 publication seam、canonical/line-leading display-name addressing、正交 Current User Attention、forward/caller-return Delivery、原子通知、Context gate 与 UI projection 边界 |
 | [Camp Activation Lifecycle](camp-activation-lifecycle.md) | 一键 Pending、Composer Draft、Navigation、Restorable Location、首消息原子激活与启动清理的组件权威 |
-| [Camp Composer Draft](camp-composer-draft.md) | Structured Content、source refs、Pending/working refs、持久 reply/continuation、显式接收者修复、exact-revision user send 与 timeline projection 的组件权威 |
+| [Camp Composer Draft](camp-composer-draft.md) | Lexical 本地 EditorState、Text + Atom V2、低频 single-flight Draft Snapshot、source refs、Pending、持久 reply/continuation 与 exact-revision user send 的组件权威 |
 | [Camp Open Read Path](camp-open-read-path.md) | Desktop 两阶段冷启动壳层、enter/reconcile、不读 event_log 的业务 open projection、渐进消息、当前会话精确查找/anchored 定位、Run detail、high-water/cache 与 meaningful-paint 后台维护边界 |
 | [Camp Attachments：Source Refs、Agent Managed Artifacts 与 Legacy View](camp-published-attachment-view.md) | Desktop 用户 source refs、Pending 原生携带、Run-local resolver、Agent Managed v2 及 legacy Authority/View 兼容边界 |
 | [First-run Onboarding](first-run-onboarding.md) | Full Core authority-origin 首次安装 admission、schema 2 三页状态、无 Runtime 延后完成、幂等 provisioning 与 Draft-only 第四页边界 |

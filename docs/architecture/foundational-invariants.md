@@ -112,11 +112,12 @@ last_updated: 2026-09-04
 
 ### Composer Draft 与用户发送
 
-- 每个 Camp 至多一个 Core-owned Composer Draft。Draft 保存 Structured Content、用户 source attachment refs、reply intent、显式接收者修复状态和 recipient continuation，并以统一 revision、恢复、过期和消费边界保持用户私有编辑状态；升级前 Prepared rows 只作为互斥 legacy Draft 自然耗尽。
-- Composer 提交只能引用精确 Draft revision。Core 准入后直接物化 CampMessage、source refs 和执行意图，或把完整意图原子转入私有 Pending Camp Input；两种成功都消费 Draft，冲突或拒绝不部分消费。用户消息、Agent 消息和系统来源都保存封闭、版本化的 Structured Content，而不是依赖 Renderer Markdown 推断身份。
-- 用户 Draft 的 rendered body 非空或至少一个 source/legacy attachment 时才可发送；两者同时为空继续拒绝。纯附件 accepted 消息忠实保存空 body 与空 Structured Content，不生成占位正文，并沿用同一 consume、CampTurn 与 AgentRun 原子边界。
+- 每个 Camp 至多一个 Core-owned Composer Draft。Draft 保存 Text + Atom `ComposerDocument` V2、用户 source attachment refs、reply intent、显式接收者修复状态和 recipient continuation，并以统一 revision、恢复、过期和消费边界保持用户私有编辑状态；`body` 只从 document 派生，升级前 Prepared rows 只作为互斥 legacy Draft 自然耗尽。
+- 输入期间由 Lexical EditorState 唯一拥有正文、selection、composition 和 history；React 不逐字符持有完整正文。普通输入只增加本地版本并低频 single-flight 保存 V2 Snapshot，发送与其他 revision-dependent mutation 必须先 flush 最新 EditorState。Lexical JSON、DOM、节点 key 和 presentation state 不进入 Core。
+- Composer 提交只能引用 flush 后的精确 Draft revision。Core 准入后把 V2 映射为既有公共 Structured Content，直接物化 CampMessage、source refs 和执行意图，或把完整 V2 意图原子转入私有 Pending Camp Input；两种成功都消费 Draft，冲突或拒绝不部分消费。公共用户、Agent 与系统消息继续保存封闭 Structured Content，不依赖 Renderer Markdown 推断身份。
+- 用户 Draft 的 derived body 非空或至少一个 source/legacy attachment 时才可发送；两者同时为空继续拒绝。纯附件 accepted 消息忠实保存空 body 与空公共 Structured Content，不生成占位正文，并沿用同一 consume、CampTurn 与 AgentRun 原子边界。
 - Reply 是持久双意图：引用同 Camp 可回复消息，并从其最终冻结寻址推导接收者；引用失效时必须显式修复，不能静默退回 Default Lead。单一非 Lead 显式收件人可形成下一空白 Draft 的 continuation，Agent 发言、Default、Broadcast、多收件人或 Lead 消息不会推进该候选。
-- 私有 Pending 不进入公共时间线、History 或 Runtime Context。Renderer 先等 Core 决定入队或发布；只有具有正式 Message 身份的输入才展示为消息。Pending 原子保存 source refs，working refs 受 edit token/revision 约束；FIFO、编辑与 needs-repair 见 [Pending Camp Input v2](../contracts/pending-camp-input-v2.md)。
+- 私有 Pending 不进入公共时间线、History 或 Runtime Context。Renderer 先等 Core 决定入队或发布；只有具有正式 Message 身份的输入才展示为消息。Pending 原子保存 V2 document 与 source refs，working refs 受 edit token/revision 约束；FIFO、编辑与 needs-repair 见 [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)，完整 Draft 合同见 [Camp Composer Draft v8](../contracts/camp-composer-draft-v8.md)。
 
 <a id="camp-resources"></a>
 

@@ -4027,10 +4027,11 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer textarea { width: 100%; min-height: 42px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; padding: 5px 0 4px; font-size: 13px; line-height: 1.5; }
 .composer textarea:focus { border: 0; box-shadow: none; }
 .composer textarea:focus-visible { outline: 0; }
-.structured-mention-composer { width: 100%; min-height: 0; }
-.structured-mention-editor { display: block; width: 100%; min-height: 42px; max-height: min(180px, 26vh); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; outline: 0; }
+.structured-mention-composer { position: relative; width: 100%; min-height: 0; }
+.structured-mention-editor { display: block; width: 100%; min-height: 42px; max-height: min(180px, 26vh); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 5px 0 4px; outline: 0; color: var(--ink); caret-color: var(--brand); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; cursor: text; }
 .structured-mention-editor:focus-visible { outline: 0; }
-.structured-mention-editor:not(:has(> [data-editor-empty="true"]:only-child > [data-editor-empty-break="true"]:only-child)) + .structured-mention-placeholder { visibility: hidden; }
+.structured-mention-paragraph { margin: 0; }
+.structured-mention-placeholder { position: absolute; top: 5px; right: 0; left: 0; overflow: hidden; color: var(--faint); font-size: 13px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 .composer-reply-region { display: grid; min-width: 0; gap: 4px; padding: 1px 0 2px; }
 .composer-reply-line {
   display: grid;
@@ -4069,8 +4070,19 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer-continuation button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .composer-continuation button:disabled { cursor: wait; opacity: .55; }
 .structured-mention-token {
+  display: inline;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 1px;
+  border: 0;
+  border-radius: 3px;
   color: var(--mention-ink);
   background: transparent;
+  font-weight: 600;
+  line-height: inherit;
+  white-space: nowrap;
+  cursor: default;
+  user-select: all;
   vertical-align: baseline;
   transition: color 110ms ease, background-color 110ms ease, box-shadow 110ms ease;
 }
@@ -4080,6 +4092,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
   background: var(--mention-feedback);
   box-shadow: 0 0 0 1px var(--mention-feedback);
 }
+.structured-mention-token.is-interactive { cursor: pointer; }
 .structured-mention-token.is-interactive:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;

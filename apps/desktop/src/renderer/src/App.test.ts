@@ -902,12 +902,16 @@ describe('task event projections', () => {
         profilePresence: 'present', memberOrder: 1, isDefaultLead: false, version: 1
       }
     ]
-    expect(composerRecipientSummary([], members)).toBe('默认由 Lead · 叮叮接收')
-    expect(composerRecipientSummary([
-      { kind: 'member_mention', agentId: 'agent_2' },
-      { kind: 'member_mention', agentId: 'agent_1' }
-    ], members)).toBeNull()
-    expect(composerRecipientSummary([{ kind: 'all_members_mention' }], members))
+    expect(composerRecipientSummary({ version: 2, segments: [] }, members))
+      .toBe('默认由 Lead · 叮叮接收')
+    expect(composerRecipientSummary({ version: 2, segments: [
+      { kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } },
+      { kind: 'atom', atom: { type: 'member', agentId: 'agent_1' } }
+    ] }, members)).toBeNull()
+    expect(composerRecipientSummary({
+      version: 2,
+      segments: [{ kind: 'atom', atom: { type: 'all_members' } }]
+    }, members))
       .toBeNull()
   })
 
@@ -915,7 +919,10 @@ describe('task event projections', () => {
     const base: CampComposerDraftView = {
       campId: 'camp-1', body: '继续', revision: 4, attachments: [],
       updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
-      content: [{ kind: 'member_mention', agentId: 'agent_2' }],
+      content: {
+        version: 2,
+        segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } }]
+      },
       continuationIntent: null,
       replyIntent: {
         replyToCampMessageId: 'message-1', targetState: 'available', excerpt: '原消息',
@@ -929,16 +936,19 @@ describe('task event projections', () => {
     expect(composerDraftNeedsReplyRepair(base)).toBe(true)
     expect(composerDraftNeedsReplyRepair({
       ...base,
-      content: [{ kind: 'member_mention', agentId: 'agent_1' }]
+      content: {
+        version: 2,
+        segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent_1' } }]
+      }
     })).toBe(false)
     expect(composerDraftNeedsReplyRepair({
       ...base,
-      content: [],
+      content: { version: 2, segments: [] },
       replyIntent: { ...base.replyIntent!, recipientSelectionRequired: true }
     })).toBe(true)
     expect(composerDraftNeedsReplyRepair({
       ...base,
-      content: [],
+      content: { version: 2, segments: [] },
       replyIntent: {
         ...base.replyIntent!, targetState: 'message_unavailable', author: null, excerpt: null
       }
@@ -1768,11 +1778,11 @@ describe('task event projections', () => {
       {
         campId: 'camp-optimistic',
         body: '立即显示这条消息',
-        content: [
+        content: { version: 2, segments: [
           { kind: 'text', text: '立即显示这条消息 ' },
-          { kind: 'member_mention', agentId: 'agent_2' },
-          { kind: 'member_mention', agentId: 'agent_2' }
-        ],
+          { kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } },
+          { kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } }
+        ] },
         revision: 3,
         attachments: [{
           id: 'attachment-1',
@@ -1827,7 +1837,10 @@ describe('task event projections', () => {
     const params = campMessageSendParams('command-1', 'camp-1', {
       campId: 'camp-1',
       body: '请 @沐瓦 检查',
-      content: [{ kind: 'member_mention', agentId: 'agent_2' }],
+      content: {
+        version: 2,
+        segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } }]
+      },
       revision: 7,
       attachments: [],
       replyIntent: null,
@@ -1888,7 +1901,7 @@ describe('task event projections', () => {
     const draft: CampComposerDraftView = {
       campId: 'camp-attachment-only',
       body: '',
-      content: [],
+      content: { version: 2, segments: [] },
       revision: 4,
       attachments: [{
         id: 'attachment-only',
@@ -2195,7 +2208,7 @@ describe('task event projections', () => {
     const draft: CampComposerDraftView = {
       campId: 'camp-1', body: '继续', revision: 3, attachments: [],
       updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
-      content: [{ kind: 'text', text: '继续' }], replyIntent: null,
+      content: { version: 2, segments: [{ kind: 'text', text: '继续' }] }, replyIntent: null,
       continuationIntent: {
         sourceCampMessageId: 'message-1', recipientSelectionRequired: false,
         recipient: {
@@ -3294,7 +3307,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('给 默认负责人 发消息')
-    expect(markup).not.toMatch(/id="camp-message"[^>]*disabled/)
+    expect(markup).toMatch(/id="camp-message"[^>]*contentEditable="true"|contentEditable="true"[^>]*id="camp-message"/)
+    expect(markup).not.toMatch(/id="camp-message"[^>]*\sdisabled(?:=|\s|>)/)
     expect(commandFailureMessage({
       commandId: 'command-1',
       commandType: 'camp.message.send',
