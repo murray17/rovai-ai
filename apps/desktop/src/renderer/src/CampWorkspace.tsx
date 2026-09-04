@@ -116,14 +116,11 @@ import {
 } from './AppDialog'
 import { projectCampWorldMap } from './camp-world-map-model'
 import {
-  CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
   campTimelineContentChanged,
   campTimelineFollowingLatestAfterScroll,
   campTimelineIsNearBottom,
-  campTimelineReadingPositionFromStoredValue,
   followLatestCampTimeline,
   restoredCampTimelineScrollTop,
-  storedCampTimelineReadingPositionsWithUpdate,
   type CampTimelineReadingPosition,
   type CampTimelineViewportGeometry
 } from './camp-timeline-position'
@@ -155,6 +152,40 @@ const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
 const CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX = 120
+const CAMP_TIMELINE_READING_POSITION_LIMIT = 50
+const campTimelineReadingPositions = new Map<string, CampTimelineReadingPosition>()
+
+if (typeof window !== 'undefined') {
+  try {
+    window.localStorage.removeItem('rovai.camp-timeline-reading-positions.v2')
+  } catch {
+    // Legacy cleanup is best effort; reading positions now live only in Renderer memory.
+  }
+}
+
+export function rememberedCampTimelineReadingPosition(
+  campId: string
+): CampTimelineReadingPosition | null {
+  const position = campTimelineReadingPositions.get(campId)
+  return position ? { ...position } : null
+}
+
+export function rememberCampTimelineReadingPosition(
+  campId: string,
+  position: CampTimelineReadingPosition
+): void {
+  campTimelineReadingPositions.delete(campId)
+  campTimelineReadingPositions.set(campId, {
+    scrollTop: Math.max(0, Number.isFinite(position.scrollTop) ? position.scrollTop : 0),
+    followingLatest: position.followingLatest
+  })
+
+  while (campTimelineReadingPositions.size > CAMP_TIMELINE_READING_POSITION_LIMIT) {
+    const oldestCampId = campTimelineReadingPositions.keys().next().value
+    if (!oldestCampId) break
+    campTimelineReadingPositions.delete(oldestCampId)
+  }
+}
 
 export function campHistoryKeyboardInputMovesEarlier(
   key: string,
@@ -719,36 +750,6 @@ function persistExecutionDrawerHeight(height: number | null): void {
     }
   } catch {
     // Session persistence is an enhancement; resizing remains usable if storage is unavailable.
-  }
-}
-
-function storedCampTimelineReadingPosition(
-  campId: string
-): CampTimelineReadingPosition | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return campTimelineReadingPositionFromStoredValue(
-      window.localStorage.getItem(CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY),
-      campId
-    )
-  } catch {
-    return null
-  }
-}
-
-function persistCampTimelineReadingPosition(
-  campId: string,
-  position: CampTimelineReadingPosition
-): void {
-  if (typeof window === 'undefined') return
-  try {
-    const current = window.localStorage.getItem(CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY)
-    window.localStorage.setItem(
-      CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
-      storedCampTimelineReadingPositionsWithUpdate(current, campId, position)
-    )
-  } catch {
-    // Reading-position persistence is an enhancement; the timeline remains usable without it.
   }
 }
 
@@ -2828,7 +2829,7 @@ export function CampWorkspace({
     }
     const current = timelineReadingPosition.current
     if (!current || (campId && current.campId !== campId)) return
-    persistCampTimelineReadingPosition(current.campId, current.position)
+    rememberCampTimelineReadingPosition(current.campId, current.position)
   }, [])
 
   const recordTimelineReadingPosition = useCallback((
@@ -2881,7 +2882,7 @@ export function CampWorkspace({
     timelinePositionSaveTimer.current = window.setTimeout(() => {
       timelinePositionSaveTimer.current = null
       const current = timelineReadingPosition.current
-      if (current) persistCampTimelineReadingPosition(current.campId, current.position)
+      if (current) rememberCampTimelineReadingPosition(current.campId, current.position)
     }, 180)
   }, [conversationFind.open])
 
@@ -2942,7 +2943,7 @@ export function CampWorkspace({
       window.clearTimeout(timelinePositionSaveTimer.current)
       timelinePositionSaveTimer.current = null
     }
-    persistCampTimelineReadingPosition(campId, position)
+    rememberCampTimelineReadingPosition(campId, position)
   }, [])
 
   useLayoutEffect(() => {
@@ -2952,7 +2953,7 @@ export function CampWorkspace({
       if (scroll) {
         const current = timelineReadingPosition.current?.campId === campId
           ? timelineReadingPosition.current.position
-          : storedCampTimelineReadingPosition(campId)
+          : rememberedCampTimelineReadingPosition(campId)
         const scrollTop = restoredCampTimelineScrollTop(
           current,
           scroll.scrollHeight,
