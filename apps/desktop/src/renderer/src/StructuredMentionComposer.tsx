@@ -1281,17 +1281,25 @@ function restoreDomSelection(
   const focus = domPointAtOffset(editor, clamp(selectionValue.focus, 0, length))
   if (typeof selection.setBaseAndExtent === 'function') {
     selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset)
-    return
+  } else {
+    const range = document.createRange()
+    const start = Math.min(selectionValue.anchor, selectionValue.focus)
+    const end = Math.max(selectionValue.anchor, selectionValue.focus)
+    const startPoint = domPointAtOffset(editor, clamp(start, 0, length))
+    const endPoint = domPointAtOffset(editor, clamp(end, 0, length))
+    range.setStart(startPoint.node, startPoint.offset)
+    range.setEnd(endPoint.node, endPoint.offset)
+    selection.removeAllRanges()
+    selection.addRange(range)
   }
-  const range = document.createRange()
-  const start = Math.min(selectionValue.anchor, selectionValue.focus)
-  const end = Math.max(selectionValue.anchor, selectionValue.focus)
-  const startPoint = domPointAtOffset(editor, clamp(start, 0, length))
-  const endPoint = domPointAtOffset(editor, clamp(end, 0, length))
-  range.setStart(startPoint.node, startPoint.offset)
-  range.setEnd(endPoint.node, endPoint.offset)
-  selection.removeAllRanges()
-  selection.addRange(range)
+  // Controlled edits restore the caret after React commits. Chromium does not
+  // reliably move this scroll container with a programmatically restored caret.
+  if (
+    selectionValue.anchor === selectionValue.focus
+    && clamp(selectionValue.focus, 0, length) === length
+  ) {
+    editor.scrollTop = editor.scrollHeight
+  }
 }
 
 function editorContainsPoint(editor: HTMLDivElement, node: Node): boolean {
