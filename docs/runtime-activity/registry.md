@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v2
-last_updated: 2026-09-02
+last_updated: 2026-09-04
 ---
 
 # Runtime Activity Mapping Registry
@@ -12,7 +12,7 @@ last_updated: 2026-09-02
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；Core v2 不把 commandActions 翻译成标题，Renderer 从公开 command 生成去 wrapper、保留完整序列并脱敏的标题；只有 `item.type=webSearch` 可把 `item.query` 投影为 Search Operation | 受控 fixture、Renderer 跨 Runtime 命令/脱敏/详情、typed query 与普通 query 排除回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；`0.147.0` WebSearch wire 实证通过 |
-| `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；update 作为累计预览，唯一 terminal 结算 Action；受管 MCP proxy 使用已冻结 logical/runtime name；未知 Tool shape 保持 `unknown`，不从正文或路径猜 Search/Image | Bash/write/edit/MCP 的 envelope、shell transport、started→terminal、重放去重、未知 mutation fail-closed fixture 已建立 | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；完整 Rovai smoke 结果由当前版本验收记录维护，未形成的平台证据不提升正式准入 |
+| `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；update 作为累计预览，唯一 terminal 结算 Action；Rovai 只对 bash/edit/write 提供 `partial_managed` Approval，未知 Pi/Extension Tool 仍按结构化事件归类或保持 `unknown`，不从正文或路径猜 Search/Image | Bash/write/edit envelope、实际 shell transport、started→terminal、重放去重和未知 Tool shape fixture 已建立；Pi 无 Rovai MCP proxy | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；完整 Rovai smoke 结果由当前版本验收记录维护，未形成的平台证据不提升正式准入 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text` | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；`1.18.15` 真实 command-output 与完整 allow/deny smoke 通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；`1.0.79 kind=search + query-only rawInput` 可投影 Web 搜索，`kind=read + pattern` 文件搜索不得准入；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | query-only positive、文件搜索 negative、固定 `printf` fixture 已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 Web/file search 与 command-output wire 已核验 |
 | `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；`2.18.1 kind=search + query-only rawInput` 可投影 Web 搜索，`{path,pattern}` 内容搜索与 pattern-only glob 不得准入；成功 Edit/Write 的唯一标准 location 可独立命名文件操作；单 entry Diff 的 rooted-relative path 只在与同 ToolCall location 完全对应时纠正；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | Search Operation positive/negative、path-only、标准 Diff、精确路径对齐与 mismatch fail-closed fixture 通过 | ACP session + Skill turn + MCP projection 通过；`2.18.1` 真实 Web/file search 与 pre-fix file-change wire 已核验，post-fix App smoke 待补 |

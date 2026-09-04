@@ -7,9 +7,9 @@ import {
   getShellConfig,
 } from "@earendil-works/pi-coding-agent";
 
-const SCHEMA_VERSION = 1;
-const EXTENSION_VERSION = "rovai-pi-host-v4";
-const NATIVE_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+const SCHEMA_VERSION = 2;
+const EXTENSION_VERSION = "rovai-pi-host-v5";
+const GOVERNED_NATIVE_TOOLS = ["bash", "edit", "write"];
 const BINDING_KEYS = [
   "agentRunId",
   "bootstrap",
@@ -66,24 +66,6 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function canonicalSessionFilePath(sessionFile: string): string {
-  if (!path.isAbsolute(sessionFile)) throw new Error("non-absolute Session file");
-  try {
-    const metadata = lstatSync(sessionFile);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new Error("invalid Session file");
-    }
-    return realpathSync(sessionFile);
-  } catch (error: any) {
-    if (error?.code !== "ENOENT") throw error;
-    return path.join(realpathSync(path.dirname(sessionFile)), path.basename(sessionFile));
-  }
-}
-
-function failClosed(): Promise<never> {
-  return new Promise(() => undefined);
-}
-
 function loadBinding(cwd: string): any {
   const bindingPath = process.env.ROVAI_PI_HOST_BINDING_FILE;
   if (!bindingPath || !path.isAbsolute(bindingPath)) throw new Error("missing binding path");
@@ -116,7 +98,7 @@ function loadBinding(cwd: string): any {
     typeof binding.bootstrap !== "string" ||
     !/^[a-f0-9]{64}$/.test(binding.bootstrapPayloadDigest) ||
     sha256(binding.bootstrap) !== binding.bootstrapPayloadDigest ||
-    !nonEmpty(binding.expectedManagedSkillExposureDigest)
+    !/^[a-f0-9]{64}$/.test(binding.expectedManagedSkillExposureDigest)
   ) {
     throw new Error("binding evidence mismatch");
   }
@@ -127,8 +109,8 @@ function loadBinding(cwd: string): any {
   return binding;
 }
 
-function resolvedShell(cwd: string): any {
-  const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted: false });
+function resolvedShell(cwd: string, projectTrusted: boolean): any {
+  const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted });
   const resolved = getShellConfig(settings.getShellPath());
   if (
     !nonEmpty(resolved.shell) ||
@@ -166,9 +148,35 @@ function publishManagedSessionState(ctx: any, current: any): void {
   );
 }
 
-function approvalEnvelope(binding: any, toolCallId: string, toolName: string, input: any, cwd: string): any {
+function publishFailure(ctx: any, binding: any, phase: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  ctx.ui.setStatus(
+    "rovai-managed-failure",
+    canonicalJson({
+      schemaVersion: 1,
+      extensionVersion: EXTENSION_VERSION,
+      hostInstanceId: binding?.hostInstanceId ?? null,
+      agentRunId: binding?.agentRunId ?? null,
+      executionEpoch: binding?.executionEpoch ?? null,
+      hostBindingGeneration: binding?.hostBindingGeneration ?? null,
+      nativeSessionId: ctx.sessionManager?.getSessionId?.() ?? null,
+      phase,
+      code: "pi_managed_extension_failure",
+      message: message.slice(0, 2000),
+    }),
+  );
+}
+
+function approvalEnvelope(
+  binding: any,
+  toolCallId: string,
+  toolName: string,
+  input: any,
+  cwd: string,
+  projectTrusted: boolean,
+): any {
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: 1,
     extensionVersion: EXTENSION_VERSION,
     kind: "native_tool",
     hostInstanceId: binding.hostInstanceId,
@@ -179,67 +187,59 @@ function approvalEnvelope(binding: any, toolCallId: string, toolName: string, in
     toolCallId,
     toolName,
     input,
-    shell: toolName === "bash" ? resolvedShell(cwd) : null,
+    shell: toolName === "bash" ? resolvedShell(cwd, projectTrusted) : null,
   };
+}
+
+function validateSession(binding: any, ctx: any): { sessionId: string; cwd: string } {
+  const sessionId = ctx.sessionManager.getSessionId();
+  const cwd = realpathSync(ctx.sessionManager.getCwd());
+  if (!nonEmpty(sessionId) || !nonEmpty(cwd)) throw new Error("Pi managed Session identity is incomplete");
+  if (binding.expectedNativeSessionId !== null && binding.expectedNativeSessionId !== sessionId) {
+    throw new Error("Pi managed Session identity mismatch");
+  }
+  return { sessionId, cwd };
 }
 
 export default function (pi: any) {
   let binding: any;
+  let approvedBindingDigest: string | undefined;
 
-  pi.on("resources_discover", async (event: any) => {
+  pi.on("resources_discover", async (event: any, ctx: any) => {
     try {
       binding = loadBinding(event.cwd);
       return { skillPaths: [binding.skillRoot] };
-    } catch (_) {
-      return await failClosed();
+    } catch (error) {
+      publishFailure(ctx, binding, "resources_discover", error);
+      return {};
     }
   });
 
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
       binding = loadBinding(ctx.cwd);
-      pi.setActiveTools(NATIVE_TOOLS);
+      approvedBindingDigest = undefined;
       ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
       publishManagedSessionState(ctx, binding);
-    } catch (_) {
-      return await failClosed();
+    } catch (error) {
+      publishFailure(ctx, binding, "session_start", error);
     }
   });
 
-  pi.on("tool_call", async (event: any, ctx: any) => {
-    if (["read", "grep", "find", "ls"].includes(event.toolName)) return undefined;
-    if (!["bash", "write", "edit"].includes(event.toolName) || !ctx.hasUI || ctx.mode !== "rpc") {
-      return { block: true, reason: "Rovai managed Host blocks unknown mutating tools" };
-    }
+  pi.on("input", async (event: any, ctx: any) => {
+    if (event.source !== "rpc") return { action: "continue" };
     try {
       const current = loadBinding(ctx.cwd);
-      const allowed = await ctx.ui.confirm(
-        "Rovai managed approval",
-        JSON.stringify(approvalEnvelope(current, event.toolCallId, event.toolName, event.input, ctx.cwd)),
-      );
-      return allowed ? undefined : { block: true, reason: "Blocked by Rovai approval" };
-    } catch (_) {
-      return { block: true, reason: "Rovai managed approval failed closed" };
-    }
-  });
-
-  pi.on("before_agent_start", async (event: any, ctx: any) => {
-    try {
-      const current = loadBinding(ctx.cwd);
-      ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
-      const effectiveSystemPrompt = `${event.systemPrompt}\n\n${current.bootstrap}`;
-      const skillCatalog = [...(event.systemPromptOptions.skills ?? [])]
-        .map((skill: any) => ({
-          name: skill.name,
-          descriptionDigest: canonicalDigest(skill.description ?? ""),
-          entryPath: skill.filePath,
-          modelVisible: !skill.disableModelInvocation,
-        }))
-        .sort((left: any, right: any) =>
-          left.name === right.name
-            ? Buffer.from(left.entryPath).compare(Buffer.from(right.entryPath))
-            : Buffer.from(left.name).compare(Buffer.from(right.name)),
-        );
+      const { sessionId, cwd } = validateSession(current, ctx);
+      if (!ctx.hasUI || ctx.mode !== "rpc") throw new Error("managed receipt channel is unavailable");
+      const availableTools = new Set(pi.getAllTools().map((tool: any) => tool.name));
+      const governedNativeTools = GOVERNED_NATIVE_TOOLS.map((name) => ({
+        name,
+        observable: availableTools.has(name),
+      }));
+      if (governedNativeTools.some((tool) => !tool.observable)) {
+        throw new Error("a governed native Tool is not observable");
+      }
       const receipt = {
         schemaVersion: SCHEMA_VERSION,
         extensionVersion: EXTENSION_VERSION,
@@ -251,30 +251,68 @@ export default function (pi: any) {
         nativeBindingGeneration: current.nativeBindingGeneration,
         runtimeInputDeliveryId: current.runtimeInputDeliveryId,
         nativePromptId: current.nativePromptId,
-        nativeSessionId: ctx.sessionManager.getSessionId(),
-        nativeSessionFileDigest: sha256(canonicalSessionFilePath(ctx.sessionManager.getSessionFile())),
-        cwd: realpathSync(ctx.sessionManager.getCwd()),
+        nativeSessionId: sessionId,
+        cwd,
         bootstrapEvidenceId: current.bootstrapEvidenceId,
         bootstrapPayloadDigest: current.bootstrapPayloadDigest,
-        skillExposureDigest: current.expectedManagedSkillExposureDigest,
-        piBaseSystemPromptDigest: sha256(event.systemPrompt),
-        effectiveSystemPromptDigest: sha256(effectiveSystemPrompt),
-        skillCatalog,
-        skillCatalogDigest: canonicalDigest(skillCatalog),
-        activeToolNames: pi.getActiveTools(),
+        governedNativeTools,
         bindingDocumentDigest: canonicalDigest(current),
       };
       const expectedNonce = sha256(
-        `rovai-pi-managed-input-receipt-v1\n${canonicalJson(receipt)}`,
+        `rovai-pi-managed-input-receipt-v2\n${canonicalJson(receipt)}`,
       );
       const nonce = await ctx.ui.input(
         "Rovai managed input receipt",
         JSON.stringify(receipt),
       );
       if (nonce !== expectedNonce) throw new Error("receipt commit nonce mismatch");
-      return { systemPrompt: effectiveSystemPrompt };
-    } catch (_) {
-      return await failClosed();
+      binding = current;
+      approvedBindingDigest = receipt.bindingDocumentDigest;
+      return { action: "continue" };
+    } catch (error) {
+      approvedBindingDigest = undefined;
+      publishFailure(ctx, binding, "input", error);
+      return { action: "handled" };
     }
+  });
+
+  pi.on("tool_call", async (event: any, ctx: any) => {
+    if (!GOVERNED_NATIVE_TOOLS.includes(event.toolName)) return undefined;
+    if (!ctx.hasUI || ctx.mode !== "rpc") {
+      return { block: true, reason: "Rovai partial approval channel is unavailable" };
+    }
+    try {
+      const current = loadBinding(ctx.cwd);
+      validateSession(current, ctx);
+      const allowed = await ctx.ui.confirm(
+        "Rovai partial approval",
+        JSON.stringify(
+          approvalEnvelope(
+            current,
+            event.toolCallId,
+            event.toolName,
+            event.input,
+            ctx.cwd,
+            ctx.isProjectTrusted(),
+          ),
+        ),
+      );
+      return allowed ? undefined : { block: true, reason: "Blocked by Rovai approval" };
+    } catch (error) {
+      publishFailure(ctx, binding, "tool_call", error);
+      return { block: true, reason: "Rovai partial approval failed closed" };
+    }
+  });
+
+  pi.on("before_agent_start", async (event: any, ctx: any) => {
+    const currentDigest = binding ? canonicalDigest(binding) : undefined;
+    if (!binding || approvedBindingDigest !== currentDigest) {
+      publishFailure(ctx, binding, "before_agent_start", new Error("managed input receipt was not committed"));
+      ctx.abort();
+      return undefined;
+    }
+    approvedBindingDigest = undefined;
+    ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
+    return { systemPrompt: `${event.systemPrompt}\n\n${binding.bootstrap}` };
   });
 }

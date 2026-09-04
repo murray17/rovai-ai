@@ -44,8 +44,8 @@ Probe、成员选择、诊断或 AgentRun 语义。
 | Ready / Probe | managed extension handshake；创建 Session 后取得 full UUID/canonical file；创建 replacement；实际 `switch_session(exact file)`；`get_state` 核对 ID/file/cwd；Probe session root 未污染 | Pi 专属 Machine Ready 已实现；这些行为仍不是平台 qualification |
 | Auth / Model | 官方 native default MiniMax M3 请求成功；Core catalog/default 与 explicit set/get validator 有 deterministic coverage | 正式 Run 只继承 Pi 官方配置；不借 Claude provider/Home |
 | Session / Host | First Run 后停止 Core，重启后同 full Native Session ID cold exact resume；下一 Run 复用同 Host/Session；跨 Camp A→B→A 使用同 workspace Host、两个 full Session ID 严格分离并准确切回；两个并发 Run 使用不同 Host | `resident_multi_session` 实现成立；复用 identity 是 workspace/process，当前 Camp/member invalidation scope 单独更新；Core planned shutdown 后 descendant 与 Host config 为零 |
-| Bootstrap / receipt | 首次、cold resume、warm reuse 均通过 managed-input receipt；公开 events/stderr 不含 `sessionFile` 或 `nativeSessionFile` | `managed_system_prompt`；locator Core-private；receipt mismatch 全矩阵由 fixture 与 Migration guard 覆盖 |
-| Action / cancel | 单一真实 Run 覆盖 stdout、stderr、mixed、empty、exit 7 与 >50KB/2500 行；每个 Tool ID 一个 terminal Action，command 在 `runtime.action`，完整大输出由 Blob evidence 取回；write allow-once 只产生一次文件，deny 不建文件，sleep cancel 严格结算 `cancelled` 且不建延迟文件 | Core-managed Approval；shell path/args/transport 来自 Pi 实际配置，不伪造 zsh argv；Windows shell identity 仍待目标机验证 |
+| Bootstrap / receipt | 首次、cold resume、warm reuse 均通过 managed-input receipt；公开 events/stderr 不含 `sessionFile` 或 `nativeSessionFile` | v5 在自身 hook 位置追加 `managed_system_prompt`；locator Core-private；V2 receipt 只证明最小 binding/Bootstrap/三个 governed Tool，不声明后加载 Extension 未改写最终输入 |
+| Action / cancel | 单一真实 Run 覆盖 stdout、stderr、mixed、empty、exit 7 与 >50KB/2500 行；每个 Tool ID 一个 terminal Action，command 在 `runtime.action`，完整大输出由 Blob evidence 取回；write allow-once 只产生一次文件，deny 不建文件，sleep cancel 严格结算 `cancelled` 且不建延迟文件 | `partial_managed` 只审批 bash/edit/write；shell path/args/transport 来自 Pi 当前 project trust 下实际配置，不伪造 zsh argv；未知 Extension Tool 按 Pi 原生语义执行，Windows shell identity 仍待目标机验证 |
 | MCP | 上游没有原生 External MCP；通用 Extension Tool API 不作为产品 MCP transport | `Unsupported`；Pi 静默忽略已保存 Assignment，不读取配置、不投影或启动 Server、不注册 proxy Tool，MCP 变化不参与 Host/LRU/resume |
 | Skills / Built-in | 真实调用 `.pi/skills` projected Skill；导入、Revision update、disable/re-enable、unassign/restore、hard delete、重启、project-owned 同名 shadow 与同 Host 相邻 Session no-leak 全部通过；Built-in CLI 15-operation full Run 与 resumed/new-lease Run 通过 | 本机两项均为 Verified + Implemented；compaction 后 catalog 连续性与另外两个平台仍待验 |
 | Final / Usage | `agent_settled` 后唯一成功；terminal assistant `message_end.message.usage` 在 Monitoring 得到 input/output；cancel 不触发成功 | streamed update/session totals 不计量；reasoning/cost 缺失保持 unknown |
@@ -56,10 +56,10 @@ Pi executable 缺失时，独立 optional subsystem 只把 `runtime.pi` 标成 d
 
 本记录只形成 `macos-arm64` 开发证据，不是 `Runtime Platform Admission` artifact。Pi 在 macOS arm64、macOS x64、
 Windows x64 均为 `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`；普通 discovery、
-检查、成员选择、Diagnostics 与 AgentRun 已开放供主动测试，但不宣称 First-Class/qualified。Images、Pi-specific
-structured Web Search 与 Camp Fast 当前明确 unsupported/hidden。完整差异和
+检查、成员选择、Diagnostics 与 AgentRun 已开放供主动测试，但不宣称 First-Class/qualified。Pi Prompt images 已接入
+原生 RPC；Pi-specific structured Web Search 与 Camp Fast 当前明确 unsupported/hidden。完整差异和
 未闭合项见 [Pi Parity Matrix](research/pi-runtime-reintegration-parity-matrix.md)与
-[Runtime Launch v32](contracts/runtime-launch-and-verification-v32.md)。
+[Runtime Launch v33](contracts/runtime-launch-and-verification-v33.md)。
 
 ### 2026-08-31 Camp Fast metadata 边界
 

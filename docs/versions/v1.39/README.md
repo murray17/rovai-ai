@@ -12,12 +12,13 @@ last_updated: 2026-09-04
 # Rovai-ai v1.39：Pi Runtime 安全重接入
 
 前置：[v1.38](../v1.38/README.md)。本版本基于
-`main@991d0cb24b3edc6dd67b823fdf11fe3caa7e2e17` 重新接入 Pi Coding Agent；旧 Pi 分支只作为协议与负向
+`main@991d0cb24b3edc6dd67b823fdf11fe3caa7e2e17` 重新接入 Pi Coding Agent，并以
+`main@72ecbce9f4892433727d01e348da9a56c5926863` 作为 revision 3 原生能力调整的实现基线；旧 Pi 分支只作为协议与负向
 边界参考，没有 merge、rebase 或 cherry-pick。实现使用独立 `pi-jsonl-rpc-v1` Adapter，不把 Pi 伪装成 ACP。
 
 ## 范围与当前状态
 
-- Product Runtime closed set、Migration 135、Core optional subsystem、Fleet、Desktop 配置、模型目录、Skill group、
+- Product Runtime closed set、Migration 135/136、Core optional subsystem、Fleet、Desktop 配置、模型目录、Skill group、
   Activity、Usage 与 smoke 已加入 Pi；旧 Runtime、渠道、附件存储/发布、membership、取消和
   planned shutdown 分支保持原样。
 - 当前版本另收敛 Renderer 附件展示：用户消息按图片/文件/正文分区，Agent 按正文/图片/文件分区；Runtime 图片
@@ -26,6 +27,9 @@ last_updated: 2026-09-04
   安装存在性不替代独立的 version、Machine Ready、capability 与 platform admission。
 - 正式 AgentRun 继承 Pi 官方 `PI_CODING_AGENT_DIR`/原生默认配置；Core 不读取 Claude Home、不建立 Pi 私有
   provider 真源，也不把 secret 写入 argv、SQLite、Prompt、Evidence、diagnostics 或公开事件。
+- 正式 Host 使用 `pi --mode rpc --no-themes --extension <rovai-pi-host-v5>`，保留 Pi 原生 Built-in tools、
+  Extensions、Skills、Context files、Prompt templates 与用户 Settings。自动发现 Extension 阻断 pre-input RPC 时只
+  降级重试一次 `--no-extensions`；Rovai extension 仍显式加载，Machine Ready 继续使用 managed-only 隔离环境。
 - Host 策略为 workspace/process-compatible 的 `resident_multi_session`：同一 Host 串行服务多个 Session，并发 Run
   获取不同 Host；Pi 的复用 identity 是 canonical workspace + process digest，当前独占 lease 的 Camp/member 则单独
   保留用于删除失效，其他 Runtime 的 Camp/member 复用语义不变。动态 Session/model/Bootstrap/Skill 不进入 process
@@ -33,8 +37,12 @@ last_updated: 2026-09-04
 - Native Session 只用完整 Session ID 与 Core 私有 canonical session file 精确恢复。Availability Probe 在临时
   `--session-dir` 中用 private `--session` seed 创建、切换、验证并清理空测试 Session，不发送 Prompt、不调用模型，
   也不污染用户 Pi 历史；Prompt/final、receipt、Approval、Tool 与 Usage 只由显式 smoke 验证。
-- Bootstrap 通过官方 extension `before_agent_start` 进入高权限 system prompt；每轮由不可变 managed-input receipt
-  证明 exact binding、Bootstrap、Skills、native Tool 集与 session digest，并与 input acceptance 原子提交。
+- Bootstrap 通过官方 extension `before_agent_start` 在自身 hook 位置进入高权限 system prompt；后加载 Pi extension
+  仍可能继续改写最终 provider payload。每轮不可变 V2 managed-input receipt 只证明 exact binding/session/cwd、
+  Bootstrap 与 `bash/edit/write` 三个 governed Tool 可观察，并与 input acceptance 原子提交；不再声称完整环境 attestation。
+- Rovai managed Skill root 作为 Pi 原生 Skill 的追加来源，Core 只验证本轮分配项是 catalog 子集。direct human
+  prompt/skill slash command 由 Core 按 `get_commands` 显式展开并私有留证；当前已授权 PNG/JPEG/GIF/WebP 以 exact
+  bytes/MIME/order 发送到 `prompt.images`，零图片和有图片都保存私有集合摘要。
 - Pi External MCP 为 `Unsupported`。成员已有 MCP Assignment 与全局配置原样保留，但 Pi dispatch 在 projection 前
   静默分流，不读取配置、不依赖 `mcp` subsystem、不启动 Server、不注册 proxy Tool，也不生成 warning。切换到支持
   MCP 的 Runtime 后原 Assignment 继续生效。Pi compatibility、Host reuse、LRU 与 exact resume 不受 MCP 变化影响。
@@ -54,12 +62,14 @@ last_updated: 2026-09-04
 
 ## 已接受的差异与未关闭证据
 
-- Pi 原生没有 sandbox 或 permission popup；所有 mutation 由 managed extension 在执行前阻塞，并交给 Core Durable
-  Approval。Shell Action 保存 Pi 实际解析出的 shell path、args 与 command transport，不伪造成 `/bin/zsh -lc`。
+- Pi 原生没有 sandbox 或 permission popup；Rovai 的 `partial_managed` 只在 `bash/edit/write` 执行前提供 Durable
+  Approval，只读与未知 Extension Tool 按 Pi 自身语义执行。它不覆盖全部 mutation，也不证明后加载 handler 未改写
+  input。Shell Action 保存 Pi 在当前 project trust 下实际解析出的 shell path、args 与 command transport，不伪造成
+  `/bin/zsh -lc`。
 - Pi system prompt 独立于 Session message compaction，策略固定为 `native_system_prompt_preserved`；Pi 不加入
   Bootstrap redelivery requirement 或 compaction observer lease closed set。
-- Images、结构化 Web Search 与 Camp Fast 没有可靠 Pi 0.84.4 evidence，保持明确 unsupported/hidden；不从正文、
-  path、MCP 名或普通 query 猜测。
+- Pi Prompt images 已接入原生 RPC；结构化 Web Search 与 Camp Fast 没有可靠 Pi 0.84.4 evidence，保持明确
+  unsupported/hidden，不从正文、path、MCP 名或普通 query 猜测。
 - 当前 macOS arm64 + Pi 0.84.4 + MiniMax M3 已取得 first run、cold exact resume、warm Host reuse、allow/deny、
   cancel、Action output、结构化 Usage、真实 Skill 调用、三类 Missing-Send 与 Built-in CLI 15-operation
   smoke；本机又完成 A→B→A、跨 Camp workspace Host 复用、真实并发 Host、六类 shell output、Skill
@@ -69,31 +79,32 @@ last_updated: 2026-09-04
 
 ## 数据合同
 
-Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升级到
-`Data Contract v1.45 / Projection Schema 86`。它从当前 v1.44 DDL 扩展五个 closed set，新增
-`runtime_input_delivery_pi_binding_unique`、禁止直接改删且允许父 Delivery cascade 的
-`pi_managed_input_receipt` 及三类 guard；失败整体回滚，提交后执行 `foreign_key_check`，重开数据库不会重复应用。
+Migration 135 只接受 `Data Contract v1.44 / Projection Schema 85`，原子升级到 v1.45/schema86，并创建
+Pi receipt 基础表与 guard。Migration 136 只接受 v1.45/schema86，原子升级到 `Data Contract v1.46 / Projection
+Schema 87`：receipt reader 接受历史 V1 与当前 V2、Writer 只写 V2；新增 Pi Prompt Transform 与图片私有证据表，
+把既有 Pi `approval_mode=managed` 规范化为 `partial_managed`。Receipt 直接 UPDATE/DELETE 保护与父 Delivery 合法
+`ON DELETE CASCADE` 并存；失败整体回滚，提交后 `foreign_key_check=0`，重开不会重复应用。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.38 冻结为 historical；本概览、实施计划、确认说明和版本索引建立唯一 current v1.39 |
-| Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact resume、managed receipt、Pi MCP bridge 的撤销、ACP derived child command、消息文件存在性与视觉类型分离，以及 Pi 三平台可运行 Preview；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Launch and Verification v32](../../contracts/runtime-launch-and-verification-v32.md)保留 Pi wire/安全与 Preview，同时冻结 External MCP Unsupported；[Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)保留 ACP derived child 的最终 request cwd/PATH 解析；[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)拥有 Preview 准入语义；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v4](../../contracts/file-preview-v4.md)拥有消息文件存在性探测 wire；[Runtime Images v4](../../contracts/runtime-images-v4.md)拥有作者感知图片分区与几何 |
+| Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact-first/fallback、V2 最小 receipt、Pi 原生能力与部分审批、Pi MCP bridge 的撤销、ACP derived child command、消息文件存在性与视觉类型分离，以及 Pi 三平台可运行 Preview；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Runtime Launch and Verification v33](../../contracts/runtime-launch-and-verification-v33.md)冻结 Pi 原生环境、v5 薄扩展、partial approval、Prompt transform/images/diagnostics/singleflight，并继承 External MCP Unsupported 与 Preview；[Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)保留 ACP derived child 的最终 request cwd/PATH 解析；[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)拥有 Preview 准入语义；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v4](../../contracts/file-preview-v4.md)拥有消息文件存在性探测 wire；[Runtime Images v4](../../contracts/runtime-images-v4.md)拥有作者感知图片分区与几何 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)和[基础不变量](../../architecture/foundational-invariants.md)加入 Pi 的独立 transport、Fleet、隐私、managed input 与 External MCP Unsupported 边界；[File Preview](../../architecture/file-preview.md)拥有消息引用准入与既有 classifier 边界；[Runtime 图片](../../architecture/runtime-images.md)同步消息内来源合并与两种 Gallery variant |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组的具体当前指令、稳定 Tool 行、渠道边界和世界地图首次默认，定义 Composer、用户消息与 Agent 交付的附件分区；[Camp 文件预览区](../../ui/components/file-preview.md)拥有真实文件链接和共享图标语义；[Porcelain Day](../../ui/themes/porcelain-day.md)和[Steel Night](../../ui/themes/steel-night.md)加入十类 Agent artifact token；Pi 在既有 Runtime、成员与 onboarding 表面标记“实验性开放” |
 | Runtime Activity | 已更新 | [Activity Registry](../../runtime-activity/registry.md)与维护指南加入 Pi verified tool lifecycle 映射，未知 shape 继续 fail closed；当前指令只改共享 presentation，不增加分类映射 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 Pi 0.84.4 本机证据、三平台实验性 Preview 与剩余 Golden Flow |
-| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航指向 Runtime Launch v32、Platform Admission v2、File Preview v4、Runtime Images v4、Pi research 与 parity matrix |
+| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航指向 Runtime Launch v33、Platform Admission v2、File Preview v4、Runtime Images v4、Pi research 与 parity matrix |
 | Root README | 已更新 | Supported Runtime 表增加 Pi，并明确标记 experimental preview，避免暗示 First-Class qualification |
 
 ## References
 
 - [实施与验收](implementation-plan.md)
-- [模型上下文变更 revision 2](model-context-change-pi-managed-system-prompt.md)
+- [模型上下文变更 revision 3](model-context-change-pi-managed-system-prompt.md)
 - [Parity Matrix](../../research/pi-runtime-reintegration-parity-matrix.md)
-- [Runtime Launch and Verification v32](../../contracts/runtime-launch-and-verification-v32.md)
+- [Runtime Launch and Verification v33](../../contracts/runtime-launch-and-verification-v33.md)
 - [Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)
 - [Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)
 - [File Preview v4](../../contracts/file-preview-v4.md)

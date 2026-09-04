@@ -400,7 +400,7 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
     case 'codex-cli':
       return { sandbox_mode: 'danger-full-access', approval_policy: 'never' }
     case 'pi':
-      return { approval_mode: 'managed' }
+      return { approval_mode: 'partial_managed' }
     case 'opencode-cli':
       return { permission: 'allow' }
     case 'copilot-cli':

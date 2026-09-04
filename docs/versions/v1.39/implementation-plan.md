@@ -16,6 +16,9 @@ last_updated: 2026-09-04
   retry 幂等。版本、Machine Ready 与平台资格仍是独立门禁。
 - [x] Migration 135：v1.44/schema85 → v1.45/schema86、当前 DDL closed-set 扩展、不可变 exact-binding receipt、
   acceptance guard、原子回滚、外键检查和重开幂等测试。
+- [x] Migration 136：v1.45/schema86 → v1.46/schema87；保留历史 receipt V1 reader、Writer 只写 V2，新增 Prompt
+  Transform/Image 私有证据，把旧 Pi `managed` permission 规范化为 `partial_managed`；Receipt UPDATE guard 与父
+  Delivery cascade-safe DELETE guard、回滚、重开和 `foreign_key_check` 有专项测试。
 - [x] Pi 专属无 Prompt Machine Ready：版本、JSONL Host、extension handshake、原生 model state、private
   `--session` seed 初始化空 Session、完整 ID/canonical file、`new_session`、实际 `switch_session(exact file)` 与
   `get_state` 三元一致性；Snapshot validation 与 dispatch blocker 共用重检，且不自动声明行为能力。
@@ -24,9 +27,18 @@ last_updated: 2026-09-04
 - [x] Fleet `resident_multi_session`、串行 Session switch、并发 Burst、health/quiescence、owner lease、LRU、cancel、
   shutdown/reap 与 private directory cleanup；Pi 使用 workspace reuse identity，同时保留当前 Camp/member invalidation
   scope，其他 Runtime 的 member-scoped identity 不变。
-- [x] `ManagedSystemPrompt` 与 revision 1 收据；完整 session locator 只在 Core 私有状态，公开面仅有不可逆 digest。
-- [x] Shell Approval 使用 Pi 实际 shell path/args/transport；read/write/edit/bash 与未知 mutation fail-closed。
-- [x] `.pi/skills` delivery group；managed extension 每 Session 重新发现并验证 exact Skill catalog。
+- [x] confirmed revision 3：正式 Host 恢复 Pi 原生 Built-in tools、Extensions、Skills、Context files、Prompt templates
+  与 Settings；v5 薄 extension 只保留 binding、Bootstrap、最小 V2 receipt、Session 状态和 `bash/edit/write` 部分审批。
+  自动 Extension 阻断 pre-input RPC 时只允许一次 managed-only 降级；完整 session locator 仍只在 Core 私有状态。
+- [x] Shell Approval 使用当前 project trust 下 Pi 实际 shell path/args/transport；permission 为 `partial_managed`，
+  read/grep/find/ls 与未知 Extension Tool 按 Pi 原生语义执行，不声明完整 sandbox 或 mutation coverage。
+- [x] `.pi/skills` delivery group作为原生资源的追加来源；每 Session 只验证本轮 managed Skill 是实际 catalog 子集。
+- [x] direct human prompt/skill Slash Command 按 Pi `get_commands` catalog 显式展开；原始 Formatter 22、实际 Runtime
+  payload、source/expanded bytes 与 closed transform evidence 在 dispatch 前私有冻结，extension command 不绕过 receipt。
+- [x] 当前授权 PNG/JPEG/GIF/WebP 以 exact bytes/MIME/order 进入 Pi `prompt.images`；模型 image capability、每项
+  20 MiB/合计 80 MiB、digest 漂移均在 prompt 前验证，图片数量、每项证据和有序集合 digest 私有持久化。
+- [x] stderr、startup prelude 与单条 malformed stdout 进入脱敏 Runtime diagnostic；持续 framing/response identity
+  冲突才 poison Host。创建 gate 按 `(agent_run_id, execution_epoch)` singleflight，不跨进程或文件 IO 持有全局锁。
 - [x] 删除 Pi Core-managed MCP bridge；Pi capability 为 `Unsupported`，dispatch 不读取 MCP 配置/Assignment、不依赖
   `mcp` subsystem、不生成 projection、不启动 Server 或 proxy Tool。已有 Assignment 与其他 Runtime projection 不变，
   历史 ContextManifest MCP 字段在 Pi 无 MCP 恢复路径中忽略。
@@ -61,9 +73,10 @@ last_updated: 2026-09-04
 - [x] Pi 0.84.4 当前 Built-in CLI 15-operation full Run 与 resumed/new-lease Run。
 - [x] deterministic tests：A→B→A exact switch、并发独立 Host、receipt 全字段/nonce mismatch、协议重放/迟到、
   Pi dispatch 无 MCP subsystem 依赖、managed extension 无 MCP surface、历史 MCP manifest 忽略、ACP derived command、
-  Usage dedupe、Unknown mutation、cleanup 和 platform matrix。
-- [x] Migration 135 专项：无 receipt acceptance 拒绝、错 binding 拒绝、合法原子接受、receipt 不可直接改删、父
-  Delivery 与 Camp 永久删除可合法 cascade、FK=0，reopen 只保留一条 migration marker。
+  Usage dedupe、cleanup 和 platform matrix；revision 3 另覆盖原生 launch args、零模型 Machine Ready、V2 nonce/
+  governed subset、prompt/skill Slash 展开、digest drift、图片 bytes/MIME/order、宽容 Session header 与私有证据。
+- [x] Migration 135/136 专项：无 receipt acceptance 拒绝、错 binding 拒绝、合法原子接受、receipt 不可直接改删、父
+  Delivery 与 Camp 永久删除可合法 cascade、历史 V1 保留、新 V2 写入、permission migration、FK=0 与 reopen 幂等。
 
 ## 发布前仍需关闭
 
@@ -93,7 +106,7 @@ pnpm smoke:missing-send-recovery
 ROVAI_PI_BIN=<pi-0.84.4> pnpm smoke:pi-runtime
 pnpm docs:test
 pnpm docs:check
-DOCS_BASE_REF=991d0cb24b3edc6dd67b823fdf11fe3caa7e2e17 pnpm docs:check:ci
+DOCS_BASE_REF=<merge-base-with-main> pnpm docs:check:ci
 ```
 
 ## 活动组具体指令验证（2026-09-03）

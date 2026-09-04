@@ -1473,7 +1473,7 @@ impl AgentProfileService {
                         .values
                         .get("approval_mode")
                         .and_then(Value::as_str)
-                        != Some("managed")
+                        != Some("partial_managed")
                     || runtime.native_session_compatibility_key.as_deref()
                         != Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY)
                 {
