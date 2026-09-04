@@ -4,7 +4,7 @@ version: v1.42
 lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: in_progress
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-09-04
 ---
