@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.47
 authority: implementation-and-acceptance-status
-status: in_progress
+status: complete
 last_updated: 2026-09-05
 ---
 
@@ -17,7 +17,7 @@ last_updated: 2026-09-05
 - [x] 保留附件等待、Composer flush、Coordinator idle、Pending 收尾和 clean Draft no-op revision 语义。
 - [x] 增加 leave 判定、成功 transition、未离开 completion 和 transition failure 的定向回归。
 - [x] 完成全量 TypeScript、Vitest、桌面构建和文档治理门禁。
-- [ ] 完成 PR CI 并合入 `main`。
+- [x] 完成 PR #231 CI；本版本随该 PR 合入 `main`。
 
 ## 验收矩阵
 
@@ -26,7 +26,7 @@ last_updated: 2026-09-05
 | App / Camp Workspace 定向回归 | `passed` | `App.test.ts` 159 项通过，覆盖 active Surface 判定、Camp transition、未离开解锁与 transition failure |
 | TypeScript、全仓 Vitest 与桌面构建 | `passed` | `pnpm typecheck`、149 files / 1510 Vitest tests、220 Node tests 通过（1 项既有 Windows-only skip），`pnpm build:desktop` 通过 |
 | 文档治理 | `passed` | `docs:test` 9 项、`docs:check` 与基于 `b47882369b7e22d82ab589e29f31a065ab09f9cd` 的 diff-aware `docs:check:ci` 通过 |
-| PR CI 与合入 | `pending` | 等待 PR gate 与 merge |
+| PR CI 与合入 | `passed` | PR #231 的 GitHub `gate` 首轮通过；本完成状态随该 PR 的最终检查与合并进入 `main` |
 
 ## 完成条件
 
