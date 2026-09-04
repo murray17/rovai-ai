@@ -12,7 +12,7 @@ last_updated: 2026-09-05
 | Component | Responsibility |
 | --- | --- |
 | Electron Main | Stores the one-click preference and saved default member/Lead configuration; it does not store Camp activation or Composer content. |
-| Renderer | Chooses `pending` for a valid one-click entry and `active` for the explicit Dialog, renders the returned Camp, autosaves through the existing Core Composer Draft APIs, commits a Pending restore target only after Navigation proves the Draft meaningful, and flushes the current Composer before activating another Camp. |
+| Renderer | Chooses `pending` for a valid one-click entry and `active` for the explicit Dialog, renders the returned Camp, autosaves through the existing Core Composer Draft APIs, commits a Pending restore target only after Navigation proves the Draft meaningful, and reuses the App-level active-Camp leave guard before activating another Camp. |
 | Core collaboration service | Validates creation structure, persists Camp activation, guards pre-activation mutation/discard, and activates Pending in the accepted first-message transaction. |
 | Camp attachment store | Remains the sole authority for structured Composer Draft content, revision and prepared attachments for both Pending and Active Camps. |
 | Navigation/Read Model | Hides empty Pending, exposes meaningful Pending with its activation state, and continues to expose every Active Camp. |
@@ -35,8 +35,9 @@ explicit Dialog
   -> durable zero-message Camp
 ```
 
-Renderer locks the current Composer and completes its Draft/attachment queue before switching Camps; failure leaves the
-current Camp and EditorState in place. Unmount cleanup is not a persistence boundary. After a successful switch,
+Renderer uses the same active-Camp leave guard as every other navigation that unmounts the Composer: it locks the current
+Composer and completes its Draft/attachment queue before switching Camps; failure leaves the current Camp and EditorState
+in place. Unmount cleanup is not a persistence boundary. After a successful switch,
 Renderer may request an advisory guarded discard for the already-flushed Pending Camp, but never deletes a row or
 attachment directory directly. Core re-reads activation, Draft body, prepared attachments, version and domain facts in
 the delete transaction. Startup applies the same authority after attachment expiry cleanup, covering crashes and
@@ -53,5 +54,5 @@ forced window termination.
 ## References
 
 - [Camp 生命周期不变量](foundational-invariants.md#camp-lifecycle)
-- [Camp Composer Draft v9](../contracts/camp-composer-draft-v9.md)
+- [Camp Composer Draft v10](../contracts/camp-composer-draft-v10.md)
 - [Pending Camp Activation v1](../contracts/pending-camp-activation-v1.md)

@@ -27,6 +27,7 @@ import type {
 } from '@contracts'
 import {
   activeCampChangeNeedsDraftFlush,
+  activeCampSurfaceNeedsLeaveGuard,
   App,
   applyCancellationResult,
   AppHeader,
@@ -63,6 +64,7 @@ import {
   rememberCampSnapshot,
   requestAuthoritativeCampOpenProjection,
   runtimeRecoveryFromCommandResult,
+  runPreparedCampLeaveTransition,
   selectProjectDirectory,
   SettingsView,
   shouldRefreshNavigationForCoreEvent,
@@ -1903,6 +1905,49 @@ describe('task event projections', () => {
     expect(activeCampChangeNeedsDraftFlush('camp', 'camp-a', 'camp-a')).toBe(false)
     expect(activeCampChangeNeedsDraftFlush('compose', 'camp-a', 'camp-b')).toBe(false)
     expect(activeCampChangeNeedsDraftFlush('camp', null, 'camp-b')).toBe(false)
+  })
+
+  it('guards every transition away from a mounted Camp surface', () => {
+    expect(activeCampSurfaceNeedsLeaveGuard('camp', 'camp-a')).toBe(true)
+    expect(activeCampSurfaceNeedsLeaveGuard('compose', 'camp-a')).toBe(false)
+    expect(activeCampSurfaceNeedsLeaveGuard('members', 'camp-a')).toBe(false)
+    expect(activeCampSurfaceNeedsLeaveGuard('camp', null)).toBe(false)
+  })
+
+  it('settles a prepared Camp leave only after the transition outcome is known', async () => {
+    const events: string[] = []
+    const complete = vi.fn((didLeave: boolean) => events.push(`complete:${didLeave}`))
+    let didLeave = false
+
+    await runPreparedCampLeaveTransition(
+      { complete },
+      async () => {
+        events.push('transition:start')
+        await Promise.resolve()
+        didLeave = true
+        events.push('transition:end')
+      },
+      () => didLeave
+    )
+
+    expect(events).toEqual(['transition:start', 'transition:end', 'complete:true'])
+    expect(complete).toHaveBeenCalledOnce()
+
+    const stayedComplete = vi.fn()
+    await runPreparedCampLeaveTransition(
+      { complete: stayedComplete },
+      () => undefined,
+      () => false
+    )
+    expect(stayedComplete).toHaveBeenCalledWith(false)
+
+    const failedComplete = vi.fn()
+    await expect(runPreparedCampLeaveTransition(
+      { complete: failedComplete },
+      () => { throw new Error('navigation failed') },
+      () => true
+    )).rejects.toThrow('navigation failed')
+    expect(failedComplete).toHaveBeenCalledWith(false)
   })
 
   it('keeps attachment-only message bytes empty while supplying a non-empty execution purpose', () => {

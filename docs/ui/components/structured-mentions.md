@@ -108,7 +108,7 @@ identity；当前 Catalog 中可恢复的引用还原为 Atom，不可恢复引�
 猜测 identity。整条历史用户消息的专用复制入口继续保留文件链接原始 target，不因显示 label 丢失路径。
 
 Draft 自动保存失败时 Composer 保留内容与 dirty 状态，显示可恢复的保存错误；当前 epoch 内可有限退避重试，发送
-和 Camp 切换必须通过显式 flush 确认持久化后继续。普通 dirty/saving/saved 不提升到 Workspace，保存状态反馈不进入
+和任何会卸载或替换当前 Camp Composer 的普通导航必须通过显式 flush 确认持久化后继续。普通 dirty/saving/saved 不提升到 Workspace，保存状态反馈不进入
 EditorState 或 undo history。正文 autosave 回执不刷新整个 Workspace；批量附件只在批次开始前 flush 一次正文。
 
 Draft 加载失败显示原位“草稿无法加载”和重新加载入口；此时正文、附件、Reply/Continuation 与发送全部禁用，不能
@@ -131,7 +131,7 @@ Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内
 
 | 层级 | 权威入口 |
 | --- | --- |
-| Draft/Pending V2、identity、旧读新写与 exact revision | [Camp Composer Draft v9](../../contracts/camp-composer-draft-v9.md)与[Pending Camp Input v3](../../contracts/pending-camp-input-v3.md) |
+| Draft/Pending V2、identity、旧读新写与 exact revision | [Camp Composer Draft v10](../../contracts/camp-composer-draft-v10.md)与[Pending Camp Input v3](../../contracts/pending-camp-input-v3.md) |
 | Lexical/React/Core 所有权、局部编辑、同步与 replacement | [Composer 架构](../../architecture/camp-composer-draft.md) |
 | Reply/Continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer) |
 | Renderer 视觉、Typeahead、Popover、IME、键盘与 Clipboard | 本文 |
