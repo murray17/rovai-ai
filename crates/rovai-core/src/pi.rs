@@ -20,10 +20,13 @@ use tokio::io::AsyncBufRead;
 use crate::acp::CompletedAcpAction;
 
 pub use host::{PiAgentRunRuntimeRequest, PiRpcRuntimeAdapter, PiRuntime};
-pub(crate) use host::{PiHost, machine_ready_probe};
+pub(crate) use host::{
+    PiHost, PiPromptImage, PreparedPiPromptImage, PreparedPiPromptTransform, machine_ready_probe,
+    prepare_prompt_images,
+};
 
 pub(crate) const PI_PROTOCOL_VERSION: &str = "pi-jsonl-rpc-v1";
-pub(crate) const PI_HOST_EXTENSION_VERSION: &str = "rovai-pi-host-v4";
+pub(crate) const PI_HOST_EXTENSION_VERSION: &str = "rovai-pi-host-v5";
 const PI_APPROVAL_SCHEMA_VERSION: i64 = 1;
 pub(super) const PI_MAX_JSONL_RECORD_BYTES: usize = 4 * 1024 * 1024;
 pub(super) const PI_COMMAND_TIMEOUT: Duration = Duration::from_secs(45);
@@ -44,6 +47,13 @@ pub enum PiIncoming {
         host_instance_id: String,
         agent_run_id: String,
         execution_epoch: i64,
+    },
+    Diagnostic {
+        host_instance_id: String,
+        agent_run_id: Option<String>,
+        execution_epoch: Option<i64>,
+        phase: String,
+        message: String,
     },
     IngressFlushed {
         acknowledgement: tokio::sync::oneshot::Sender<()>,
@@ -114,7 +124,7 @@ pub fn intercepted_action_request(
 ) -> Result<InterceptedPiActionRequest> {
     if request.get("type").and_then(Value::as_str) != Some("extension_ui_request")
         || request.get("method").and_then(Value::as_str) != Some("confirm")
-        || request.get("title").and_then(Value::as_str) != Some("Rovai managed approval")
+        || request.get("title").and_then(Value::as_str) != Some("Rovai partial approval")
     {
         bail!("Pi request is not a managed Approval confirmation");
     }
@@ -623,7 +633,10 @@ mod tests {
         assert!(!source.contains("mcpProjectionDigest"));
         assert!(!source.contains("registerTool"));
         assert!(!source.contains("Rovai MCP bridge"));
-        assert!(source.contains("pi.setActiveTools(NATIVE_TOOLS)"));
+        assert!(!source.contains("pi.setActiveTools"));
+        assert!(source.contains("GOVERNED_NATIVE_TOOLS"));
+        assert!(source.contains("ctx.isProjectTrusted()"));
+        assert!(source.contains("SettingsManager.create(cwd, getAgentDir(), { projectTrusted })"));
         assert!(source.contains("Rovai managed input receipt"));
     }
 
@@ -653,7 +666,7 @@ mod tests {
         let request = json!({
             "type": "extension_ui_request",
             "method": "confirm",
-            "title": "Rovai managed approval",
+            "title": "Rovai partial approval",
             "id": "ui-1",
             "message": serde_json::to_string(&envelope).unwrap(),
         });
@@ -716,7 +729,7 @@ mod tests {
         let request = json!({
             "type": "extension_ui_request",
             "method": "confirm",
-            "title": "Rovai managed approval",
+            "title": "Rovai partial approval",
             "id": "ui-1",
             "message": serde_json::to_string(&envelope).unwrap(),
         });

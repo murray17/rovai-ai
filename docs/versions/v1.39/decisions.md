@@ -31,7 +31,7 @@ evidence；两者都会伪造 protocol/capability 或开放未经验证的产品
 
 ### 背景
 
-Pi 的一个 RPC 进程可以 `new_session` 和 `switch_session(exact path)`；把 Session、Bootstrap、Skills 或 MCP 放入
+Pi 的一个 RPC 进程可以 `new_session` 和 `switch_session(exact path)`；把 Session、Bootstrap、managed Skills 或 MCP 放入
 进程 key 会失去安全复用，使用 recent/partial ID 又会破坏 exact continuation。完整 session file 同时是用户原生
 历史 locator，不应出现在公开诊断。
 
@@ -48,13 +48,13 @@ continuity lost，并最多创建一个 replacement。完整 locator 只在 Core
 
 ### 后果与被拒绝方案
 
-Bootstrap/Skills/MCP/model 可以逐 Session 刷新，不要求重启进程；只有真正 quiescent Host 进入 LRU。workspace
+Bootstrap/managed Skills/model 可以逐 Session 刷新，不要求重启进程；MCP 由 D09 明确不参与 Pi Runtime。只有真正 quiescent Host 进入 LRU。workspace
 Resident 使用独立 quota bucket，仍受 Fleet global quota、TTL 与 LRU 约束。拒绝把 Pi 永久绑定单 Session、模糊扫描
 最近历史、丢失当前 Camp/member invalidation scope 或把 locator 放进 Activity/read model；这些方案分别浪费可验证的
 上游能力，或破坏删除、身份和隐私边界。
 
 <a id="v1-39-d03"></a>
-## V1.39-D03：Bootstrap 使用 managed system prompt 与不可变原子 receipt
+## V1.39-D03：Bootstrap 使用 managed system prompt 与不可变原子 receipt（完整 attestation 已由 D10 取代）
 
 ### 背景
 
@@ -66,15 +66,18 @@ Resident 使用独立 quota bucket，仍受 Fleet global quota、TTL 与 LRU 约
 采用已确认的[模型上下文 revision 1](model-context-change-pi-managed-system-prompt.md)：官方
 `before_agent_start` 把完整 Bootstrap 追加到 Pi base system prompt。extension 在 provider request 前提交 closed、
 nonce-bound receipt；Core 逐字段验证并在同一 SQLite 事务写入不可变 receipt、接受 Runtime Input Delivery。
-Pi compaction 固定为 `native_system_prompt_preserved`，不加入 redelivery requirement/observer lease。
+Pi compaction 固定为 `native_system_prompt_preserved`，不加入 redelivery requirement/observer lease。D10 保留
+Bootstrap 注入和 receipt/acceptance 原子性，但把完整环境 attestation 收窄为最小 V2 receipt，并明确后加载的 Pi
+extension 仍可修改最终 provider payload。
 
 ### 后果与被拒绝方案
 
-每轮都能证明 exact high-authority bytes 和 Session capability，没有 receipt 就不接受输入。拒绝 `--append-system-prompt`
+每轮能证明 Rovai hook 在自己的执行位置追加 exact high-authority bytes；不再证明后续 native extension 没有改写。
+没有 receipt 就不接受输入。拒绝 `--append-system-prompt`
 进程级固定、普通用户消息注入或只信 prompt ACK；它们分别阻止多 Session、降低权限层或缺少实际投递证据。
 
 <a id="v1-39-d04"></a>
-## V1.39-D04：Pi Skills/MCP 动态兼容追加，mutation 由 Core 管理（MCP 部分已由 D09 取代）
+## V1.39-D04：Pi Skills/MCP 动态兼容追加，mutation 由 Core 管理（MCP 由 D09、其余完整治理由 D10 取代）
 
 ### 背景
 
@@ -234,6 +237,9 @@ managed extension 升级为 `rovai-pi-host-v4`，active tools 只含既有 Pi na
 Approval、Bootstrap、Skills、receipt 原子提交、exact resume、Fleet/LRU 与 platform preview 不变。MCP Library、成员
 Assignment、设置 UI 和其他 Runtime projection 完全不变，不为 Pi 增加提示或自动取消分配。
 
+其中 v4 固定 Active Tools、完整 Skill/Tool receipt 与完整治理语义已由 D10 取代；本决定对 External MCP Unsupported、
+Assignment 静默保留和 bridge clean removal 的结论继续有效。
+
 普通 Managed Process capture 恢复 absolute application 边界，删除只为 Pi MCP portable Server command 存在的
 bare/cwd-relative 行为。D08 中 ACP Client Terminal 的 `derive_runtime_one_shot_command` 保留，因为它独立需要在最终
 request cwd/environment 中解析命令及 Windows shim。
@@ -247,3 +253,47 @@ request cwd/environment 中解析命令及 Windows shim。
 - Runtime compatibility register 因当前 Pi 能力结论变化生成新的完整文件 digest；这不改变任何 Adapter 的平台
   Admission status，也不为 Pi 生成 qualification artifact。
 - 拒绝保留空 bridge、空 projection 或 warning 路径；这些残留仍会让 Pi 依赖 MCP 状态并维持无意义的协议表面。
+
+<a id="v1-39-d10"></a>
+## V1.39-D10：Pi 拥有原生能力，Rovai 只保留薄接入与部分治理
+
+### 背景
+
+v4 Host 通过关闭 Extensions、Skills、Context files、Prompt templates 与 Built-in tools，再由 Rovai 固定完整 Tool/Skill
+catalog，获得了较强 attestation，却把 Pi 变成需要 Rovai 重建的空壳。它阻断用户原生扩展与新增能力，也把任意额外
+资源误判为不兼容。恢复原生 Extension 后，Pi 的 hook 顺序又决定 Rovai 无法证明自己之后的 handler 没有继续改写
+system prompt、context 或 Tool input，因此继续声称完整 sandbox/全覆盖审批是不真实的。
+
+### 决定
+
+采用已二次确认的[模型上下文 revision 3](model-context-change-pi-managed-system-prompt.md)，并以
+[Runtime Launch and Verification v33](../../contracts/runtime-launch-and-verification-v33.md)为字段级合同。正式 Host 使用
+`pi --mode rpc --no-themes --extension <rovai-pi-host-v5>`，恢复 Pi 原生 Built-in tools、Extensions、Skills、Context
+files、Prompt templates 与用户 Settings；自动 Extension 使 pre-input RPC 启动失败时只允许一次 `--no-extensions`
+降级。Machine Ready 仍是 managed-only、隔离 Session 且零模型调用。
+
+v5 extension 不再调用 `setActiveTools`，只负责 Run/Session binding、Bootstrap、最小输入确认、Session 状态和
+`bash/edit/write` 部分审批。Core 只证明三个 governed Tool 可观察、Rovai 分配 Skill 是 catalog 子集；额外原生
+Tool/Skill/Extension/template 均允许。permission 改为 `partial_managed`，明确不是完整 sandbox 或未知 mutation
+fail-closed。Bash 继续使用 Pi 当前 project trust 下实际解析的 shell path/args/transport，不伪造 argv。
+
+binding/receipt 升为 closed V2，删除 Session file digest、完整 Tool/Skill/system-prompt attestation；receipt 与 Input
+accepted 仍原子提交，父 Delivery cascade 与不可变保护并存。Core 在 dispatch 前保存 slash prompt/skill 展开、实际
+Runtime payload 和图片 bytes/order/MIME/digest 的私有证据；正式 Prompt 支持 Pi 原生 images。stderr、startup prelude
+和可恢复 malformed stdout 进入脱敏诊断；只有不可恢复 framing/response/身份冲突才 poison Host。
+
+恢复保持 exact-first，但 locator 或历史不可用不再使 AgentRun 永久不可运行：记录 continuity lost 后最多创建一个新
+Session，以相同 Bootstrap 和可恢复 Rovai context 继续。Runtime 创建 gate 按 `(agent_run_id, execution_epoch)`
+singleflight，不跨 IO 持有全局锁。External MCP 继续遵循 D09：Rovai 不投影，但 Pi 自身 Extension 能力不受禁止。
+
+### 后果与被拒绝方案
+
+- 用户 Pi 原生能力和版本新增 Tool 可直接工作；Rovai 不再维护第二套完整 Pi Runtime。
+- Rovai 只声明 hook-position Bootstrap、最小 receipt 与三个已知 Tool 的 best-effort durable Approval；后续 extension
+  改写及未知 Tool 的副作用属于明确接受的安全降级。
+- Prompt template/Skill slash command 由 Core 在 Formatter 22 的 current human input 上显式展开，避免 RPC wrapper
+  使原生命令入口失效；Extension command 不绕过 receipt 直接执行。
+- Migration 136 将 Data Contract v1.45/schema86 升到 v1.46/schema87，Writer 只写 V2，并把历史 Pi `managed`
+  permission 规范化为 `partial_managed`。平台继续 Preview/NotQualified，不生成资格证据。
+- 拒绝继续关闭全部原生环境、拒绝恢复未知 Tool 全阻止、拒绝把后加载 extension 当作已 attested，也拒绝重新引入 Pi
+  MCP bridge；这些选择会分别损失原生兼容性、形成虚假的安全承诺或重新扩大已删除的协议表面。

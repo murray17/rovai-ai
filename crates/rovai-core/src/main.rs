@@ -38,7 +38,10 @@ use codex::{
 use core_subsystems::{
     CoreSubsystems, SubsystemInitialization, SubsystemUnavailable, runtime_subsystem_id,
 };
-use pi::{PiAgentRunRuntimeRequest, PiIncoming, PiRpcRuntimeAdapter, PiRuntime};
+use pi::{
+    PiAgentRunRuntimeRequest, PiIncoming, PiPromptImage, PiRpcRuntimeAdapter, PiRuntime,
+    PreparedPiPromptImage, PreparedPiPromptTransform, prepare_prompt_images,
+};
 #[cfg(target_os = "macos")]
 use rovai_core::managed_process::configure_user_automation_denial_root;
 use rovai_core::{
@@ -135,8 +138,9 @@ use rovai_core::{
     },
     context::{
         CharterDeliveryMode, ContextMaterialization, ContextPayloadTooLarge, ContextService,
-        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
-        RuntimeInputDelivery, charter_delivery_mode_for_adapter,
+        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PersistPiPromptEvidence,
+        PiPromptImageEvidence, PreparedContext, RuntimeInputDelivery,
+        charter_delivery_mode_for_adapter,
     },
     core_data_dir_lock::{CoreDataDirLease, CoreDataDirLeaseAcquisition},
     current_user::CURRENT_USER_ID,
@@ -11211,10 +11215,64 @@ impl Core {
         if delivery.status != "prepared" {
             anyhow::bail!("Pi Runtime Input Delivery is not ready to send");
         }
+        let input_projection = {
+            let database = self.database.lock().await;
+            ContextService.pi_runtime_input_projection(
+                &database,
+                &delivery.id,
+                &prepared_context.rendered_payload,
+            )?
+        };
+        let prompt_transform: PreparedPiPromptTransform = runtime.prepare_prompt_transform(
+            &prepared_context.rendered_payload,
+            &input_projection.invocation_kind,
+        )?;
+        let image_sources = input_projection
+            .attachments
+            .iter()
+            .map(|attachment| {
+                (
+                    PathBuf::from(&attachment.path),
+                    attachment.content_digest.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let prepared_images: Vec<PreparedPiPromptImage> = prepare_prompt_images(&image_sources)?;
+        let image_evidence = prepared_images
+            .iter()
+            .enumerate()
+            .map(|(image_index, image)| PiPromptImageEvidence {
+                image_index,
+                mime_type: image.wire.mime_type.clone(),
+                content_digest: image.content_digest.clone(),
+                byte_length: image.byte_length,
+            })
+            .collect::<Vec<_>>();
+        {
+            let mut database = self.database.lock().await;
+            ContextService.persist_pi_prompt_evidence(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                PersistPiPromptEvidence {
+                    delivery_id: &delivery.id,
+                    original_payload: &prepared_context.rendered_payload,
+                    runtime_payload: &prompt_transform.runtime_payload,
+                    transform: &prompt_transform.evidence,
+                    source_path: prompt_transform.source_path.as_deref(),
+                    source_content: prompt_transform.source_content.as_deref(),
+                    expanded_content: prompt_transform.expanded_content.as_deref(),
+                    images: &image_evidence,
+                },
+            )?;
+        }
         self.begin_agent_run_input_dispatch(execution, &delivery.id, launch_permit)
             .await?;
+        let prompt_images: Vec<PiPromptImage> = prepared_images
+            .iter()
+            .map(|image| image.wire.clone())
+            .collect::<Vec<_>>();
         if let Err(error) = runtime
-            .start_prompt(&prepared_context.rendered_payload)
+            .start_prompt(&prompt_transform.runtime_payload, &prompt_images)
             .await
         {
             let mut database = self.database.lock().await;
@@ -14766,6 +14824,33 @@ async fn process_pi_events(
                 )
                 .await;
             }
+            PiIncoming::Diagnostic {
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+                phase,
+                message,
+            } => {
+                emit(
+                    &output,
+                    "runtime.host.log",
+                    json!({
+                        "hostInstanceId": host_instance_id,
+                        "adapterKind": AdapterKind::Pi,
+                        "stream": "diagnostic",
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "phase": phase,
+                        "text": message,
+                    }),
+                );
+                eprintln!(
+                    "Pi Runtime diagnostic host={host_instance_id} run={} epoch={} phase={phase}: {message}",
+                    agent_run_id.as_deref().unwrap_or("unbound"),
+                    execution_epoch
+                        .map_or_else(|| "unbound".to_string(), |value| value.to_string()),
+                );
+            }
             PiIncoming::IngressFlushed { .. } => {
                 unreachable!("Pi ingress barriers are handled before Runtime routing")
             }
@@ -14850,7 +14935,20 @@ async fn process_agent_run_pi_message(
                 if message.get("title").and_then(Value::as_str)
                     == Some("Rovai managed input receipt") =>
             {
-                process_pi_managed_input_receipt(core, &runtime, delivery_id, &message).await?;
+                if let Err(error) =
+                    process_pi_managed_input_receipt(core, &runtime, delivery_id, &message).await
+                {
+                    runtime.mark_failed_closed();
+                    if let Some(id) = message.get("id").cloned() {
+                        runtime
+                            .respond(
+                                id.clone(),
+                                json!({"type":"extension_ui_response", "id":id, "cancelled":true}),
+                            )
+                            .await?;
+                    }
+                    return Err(error).context("Pi managed input receipt was rejected");
+                }
                 return Ok(());
             }
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
@@ -20380,6 +20478,7 @@ mod tests {
         let (runtime_check_requests, _runtime_check_rx) = mpsc::unbounded_channel();
         let (attachment_projection_requests, _attachment_projection_rx) = mpsc::unbounded_channel();
         let (codex_tx, _codex_rx) = mpsc::unbounded_channel();
+        let (pi_tx, _pi_rx) = mpsc::unbounded_channel();
         let (acp_tx, _acp_rx) = mpsc::unbounded_channel();
         let builtin_tool_leases = Arc::new(BuiltinToolLeaseRegistry::default());
         let runtime_fleet = Arc::new(AgentRuntimeFleetManager::new_with_builtin_tools(
@@ -20415,6 +20514,7 @@ mod tests {
             mcp_config: Ok(mcp_config),
             mcp_projection,
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
+            pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
             opencode_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::OpencodeCli,
                 acp_tx.clone(),

@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -179,6 +182,39 @@ pub struct PreparedContext {
     pub requires_new_native_session: bool,
     pub camp_message_boundary_sequence: i64,
     pub collaboration_state_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PiRuntimeAttachment {
+    pub attachment_id: String,
+    pub path: String,
+    pub content_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiRuntimeInputProjection {
+    pub invocation_kind: String,
+    pub attachments: Vec<PiRuntimeAttachment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PiPromptImageEvidence {
+    pub image_index: usize,
+    pub mime_type: String,
+    pub content_digest: String,
+    pub byte_length: usize,
+}
+
+pub struct PersistPiPromptEvidence<'a> {
+    pub delivery_id: &'a str,
+    pub original_payload: &'a str,
+    pub runtime_payload: &'a str,
+    pub transform: &'a Value,
+    pub source_path: Option<&'a str>,
+    pub source_content: Option<&'a [u8]>,
+    pub expanded_content: Option<&'a [u8]>,
+    pub images: &'a [PiPromptImageEvidence],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1463,6 +1499,301 @@ impl ContextService {
         )
     }
 
+    pub fn pi_runtime_input_projection(
+        &self,
+        database: &Database,
+        delivery_id: &str,
+        original_payload: &str,
+    ) -> Result<PiRuntimeInputProjection> {
+        let (
+            invocation_kind,
+            attachment_refs_json,
+            attachment_digest,
+            dynamic_payload_digest,
+            status,
+            dispatch_started_at,
+        ): (String, String, String, String, String, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT run.invocation_kind, manifest.attachment_refs_json,
+                       manifest.attachment_digest, delivery.dynamic_payload_digest,
+                       delivery.status, delivery.dispatch_started_at
+                FROM runtime_input_delivery AS delivery
+                JOIN context_manifest AS manifest
+                  ON manifest.id = delivery.context_manifest_id
+                JOIN agent_run AS run ON run.id = delivery.agent_run_id
+                WHERE delivery.id = ?1
+                "#,
+                [delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .context("Pi Runtime Input Delivery projection is unavailable")?;
+        if status != "prepared" || dispatch_started_at.is_some() {
+            anyhow::bail!("Pi input evidence must be prepared before dispatch");
+        }
+        if dynamic_payload_digest != sha256_text(original_payload) {
+            anyhow::bail!("Pi original Dynamic Context changed after Delivery preparation");
+        }
+        let attachment_value: Value = serde_json::from_str(&attachment_refs_json)
+            .context("Pi ContextManifest attachment refs are invalid")?;
+        if canonical_json_digest(&attachment_value)? != attachment_digest {
+            anyhow::bail!("Pi ContextManifest attachment refs digest is invalid");
+        }
+        let attachments: Vec<PiRuntimeAttachment> = serde_json::from_value(attachment_value)
+            .context("Pi ContextManifest attachment refs have an invalid shape")?;
+        let current_input = payload_current_input(original_payload)?;
+        let projected_paths = current_input
+            .get("attachments")
+            .map(|attachments| {
+                attachments
+                    .as_array()
+                    .context("Pi CURRENT_INPUT attachments are not an array")?
+                    .iter()
+                    .map(|path| {
+                        path.as_str()
+                            .map(str::to_string)
+                            .context("Pi CURRENT_INPUT attachment path is invalid")
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        if projected_paths
+            != attachments
+                .iter()
+                .map(|attachment| attachment.path.clone())
+                .collect::<Vec<_>>()
+        {
+            anyhow::bail!("Pi CURRENT_INPUT attachment projection changed after materialization");
+        }
+        Ok(PiRuntimeInputProjection {
+            invocation_kind,
+            attachments,
+        })
+    }
+
+    pub fn persist_pi_prompt_evidence(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        evidence: PersistPiPromptEvidence<'_>,
+    ) -> Result<()> {
+        validate_pi_prompt_transform(
+            evidence.transform,
+            evidence.original_payload,
+            evidence.runtime_payload,
+            evidence.source_path,
+            evidence.source_content,
+            evidence.expanded_content,
+        )?;
+        let runtime_blob = blob_store.put_bytes(
+            database,
+            evidence.runtime_payload.as_bytes(),
+            "text/plain; charset=utf-8",
+            "sensitive",
+        )?;
+        let source_blob = evidence
+            .source_content
+            .map(|bytes| {
+                blob_store.put_bytes(database, bytes, "text/plain; charset=utf-8", "sensitive")
+            })
+            .transpose()?;
+        let expanded_blob = evidence
+            .expanded_content
+            .map(|bytes| {
+                blob_store.put_bytes(database, bytes, "text/plain; charset=utf-8", "sensitive")
+            })
+            .transpose()?;
+        let original_digest = raw_sha256(evidence.original_payload.as_bytes());
+        let runtime_digest = raw_sha256(evidence.runtime_payload.as_bytes());
+        if runtime_blob.sha256 != runtime_digest {
+            anyhow::bail!("Pi Runtime payload Blob digest changed before persistence");
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        let (status, dispatch_started_at, stored_dynamic_digest): (
+            String,
+            Option<String>,
+            String,
+        ) = transaction
+            .query_row(
+                "SELECT status, dispatch_started_at, dynamic_payload_digest FROM runtime_input_delivery WHERE id = ?1",
+                [evidence.delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .context("Pi Runtime Input Delivery disappeared before evidence persistence")?;
+        if status != "prepared"
+            || dispatch_started_at.is_some()
+            || stored_dynamic_digest != format!("sha256:{original_digest}")
+        {
+            anyhow::bail!("Pi input evidence was fenced before dispatch");
+        }
+        for (expected_index, image) in evidence.images.iter().enumerate() {
+            if image.image_index != expected_index
+                || !matches!(
+                    image.mime_type.as_str(),
+                    "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+                )
+                || !is_raw_sha256(&image.content_digest)
+                || image.byte_length == 0
+            {
+                anyhow::bail!("Pi Prompt image evidence is invalid");
+            }
+        }
+        let image_set_digest = canonical_json_digest(&Value::Array(
+            evidence
+                .images
+                .iter()
+                .map(|image| {
+                    json!({
+                        "imageIndex": image.image_index,
+                        "mimeType": image.mime_type,
+                        "contentDigest": image.content_digest,
+                        "byteLength": image.byte_length,
+                    })
+                })
+                .collect(),
+        ))?;
+        let transform_json = serde_json::to_string(evidence.transform)?;
+        let existing: Option<(
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+            String,
+        )> = transaction
+            .query_row(
+                r#"
+                SELECT transform_json, original_payload_digest,
+                       runtime_payload_digest, runtime_payload_blob_id,
+                       source_path, source_content_blob_id,
+                       expanded_content_blob_id, image_count,
+                       image_set_digest
+                FROM pi_runtime_prompt_transform
+                WHERE runtime_input_delivery_id = ?1
+                "#,
+                [evidence.delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let expected = (
+            transform_json.clone(),
+            original_digest.clone(),
+            runtime_digest.clone(),
+            runtime_blob.id.clone(),
+            evidence.source_path.map(str::to_string),
+            source_blob.as_ref().map(|blob| blob.id.clone()),
+            expanded_blob.as_ref().map(|blob| blob.id.clone()),
+            evidence.images.len() as i64,
+            image_set_digest.clone(),
+        );
+        if let Some(existing) = existing {
+            if existing != expected {
+                anyhow::bail!("Pi Runtime Prompt Transform changed after persistence");
+            }
+        } else {
+            transaction.execute(
+                r#"
+                INSERT INTO pi_runtime_prompt_transform(
+                    id, runtime_input_delivery_id, transform_version,
+                    transform_json, original_payload_digest,
+                    runtime_payload_digest, runtime_payload_blob_id,
+                    source_path, source_content_blob_id,
+                    expanded_content_blob_id, image_count,
+                    image_set_digest, created_at
+                ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    evidence.delivery_id,
+                    transform_json,
+                    original_digest,
+                    runtime_digest,
+                    runtime_blob.id,
+                    evidence.source_path,
+                    source_blob.as_ref().map(|blob| blob.id.as_str()),
+                    expanded_blob.as_ref().map(|blob| blob.id.as_str()),
+                    evidence.images.len() as i64,
+                    image_set_digest,
+                    now,
+                ],
+            )?;
+        }
+        let existing_images = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT image_index, mime_type, content_digest, byte_length
+                FROM pi_prompt_image_evidence
+                WHERE runtime_input_delivery_id = ?1
+                ORDER BY image_index
+                "#,
+            )?;
+            statement
+                .query_map([evidence.delivery_id], |row| {
+                    Ok(PiPromptImageEvidence {
+                        image_index: row.get::<_, i64>(0)? as usize,
+                        mime_type: row.get(1)?,
+                        content_digest: row.get(2)?,
+                        byte_length: row.get::<_, i64>(3)? as usize,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if !existing_images.is_empty() {
+            if existing_images != evidence.images {
+                anyhow::bail!("Pi Prompt image evidence changed after persistence");
+            }
+        } else {
+            for image in evidence.images {
+                transaction.execute(
+                    r#"
+                    INSERT INTO pi_prompt_image_evidence(
+                        id, runtime_input_delivery_id, image_index, mime_type,
+                        content_digest, byte_length, evidence_version, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)
+                    "#,
+                    params![
+                        Uuid::new_v4().to_string(),
+                        evidence.delivery_id,
+                        image.image_index as i64,
+                        image.mime_type,
+                        image.content_digest,
+                        image.byte_length as i64,
+                        now,
+                    ],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn prepare_input_delivery_inner(
         &self,
         database: &mut Database,
@@ -1921,7 +2252,7 @@ impl ContextService {
                     native_binding_id, native_binding_generation, native_session_id,
                     native_prompt_id, receipt_version, receipt_json, receipt_digest,
                     commit_nonce, committed_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?11, ?12)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 2, ?9, ?10, ?11, ?12)
                 "#,
                 params![
                     Uuid::new_v4().to_string(),
@@ -2117,7 +2448,7 @@ fn acknowledge_input_delivery_transaction(
     )?;
     if managed_system_prompt {
         let receipt_present: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pi_managed_input_receipt WHERE runtime_input_delivery_id = ?1 AND receipt_version = 1)",
+            "SELECT EXISTS(SELECT 1 FROM pi_managed_input_receipt WHERE runtime_input_delivery_id = ?1 AND receipt_version IN (1, 2))",
             [delivery_id],
             |query_row| query_row.get(0),
         )?;
@@ -6605,6 +6936,133 @@ fn load_accepted_delivery_for_current_binding(
 
 fn sha256_text(value: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
+}
+
+fn raw_sha256(value: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(value))
+}
+
+fn is_raw_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn payload_current_input(payload: &str) -> Result<Value> {
+    let json = payload
+        .rsplit_once("[CURRENT_INPUT]\n")
+        .map(|(_, suffix)| suffix)
+        .and_then(|suffix| {
+            suffix
+                .split_once("\n[/CURRENT_INPUT]")
+                .map(|(json, _)| json)
+        })
+        .context("Pi Dynamic Context has no complete CURRENT_INPUT section")?;
+    serde_json::from_str(json).context("Pi Dynamic Context CURRENT_INPUT is invalid")
+}
+
+fn exact_object_keys(value: &Value, expected: &[&str]) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
+}
+
+fn validate_pi_prompt_transform(
+    transform: &Value,
+    original_payload: &str,
+    runtime_payload: &str,
+    source_path: Option<&str>,
+    source_content: Option<&[u8]>,
+    expanded_content: Option<&[u8]>,
+) -> Result<()> {
+    if !exact_object_keys(
+        transform,
+        &[
+            "schemaVersion",
+            "mode",
+            "originalDynamicPayloadDigest",
+            "runtimePayloadDigest",
+            "command",
+        ],
+    ) || transform.get("schemaVersion").and_then(Value::as_i64) != Some(1)
+        || transform
+            .get("originalDynamicPayloadDigest")
+            .and_then(Value::as_str)
+            != Some(raw_sha256(original_payload.as_bytes()).as_str())
+        || transform
+            .get("runtimePayloadDigest")
+            .and_then(Value::as_str)
+            != Some(raw_sha256(runtime_payload.as_bytes()).as_str())
+    {
+        anyhow::bail!("Pi Runtime Prompt Transform evidence is invalid");
+    }
+    match transform.get("mode").and_then(Value::as_str) {
+        Some("verbatim") => {
+            if !transform.get("command").is_some_and(Value::is_null)
+                || original_payload != runtime_payload
+                || source_path.is_some()
+                || source_content.is_some()
+                || expanded_content.is_some()
+            {
+                anyhow::bail!("Pi verbatim Prompt Transform evidence is inconsistent");
+            }
+        }
+        Some("file_command") => {
+            let command = transform
+                .get("command")
+                .context("Pi file command Transform omitted command evidence")?;
+            if !exact_object_keys(
+                command,
+                &[
+                    "name",
+                    "source",
+                    "location",
+                    "sourcePathDigest",
+                    "sourceContentDigest",
+                    "argumentsDigest",
+                    "expandedContentDigest",
+                ],
+            ) || command
+                .get("name")
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty)
+                || !matches!(
+                    command.get("source").and_then(Value::as_str),
+                    Some("prompt" | "skill")
+                )
+                || !matches!(
+                    command.get("location").and_then(Value::as_str),
+                    Some("user" | "project" | "path")
+                )
+            {
+                anyhow::bail!("Pi file command Transform command evidence is invalid");
+            }
+            let source_path =
+                source_path.context("Pi file command source path was not retained")?;
+            let source_content =
+                source_content.context("Pi file command source bytes were not retained")?;
+            let expanded_content =
+                expanded_content.context("Pi expanded command bytes were not retained")?;
+            if !Path::new(source_path).is_absolute()
+                || command.get("sourcePathDigest").and_then(Value::as_str)
+                    != Some(raw_sha256(source_path.as_bytes()).as_str())
+                || command.get("sourceContentDigest").and_then(Value::as_str)
+                    != Some(raw_sha256(source_content).as_str())
+                || command.get("expandedContentDigest").and_then(Value::as_str)
+                    != Some(raw_sha256(expanded_content).as_str())
+                || !command
+                    .get("argumentsDigest")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_raw_sha256)
+            {
+                anyhow::bail!("Pi file command retained evidence digest is invalid");
+            }
+        }
+        _ => anyhow::bail!("Pi Runtime Prompt Transform mode is invalid"),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -11739,6 +12197,141 @@ mod slow_tests {
             .unwrap();
         assert_eq!(binding.result.payload["nativeBindingGeneration"], 1);
         execution
+    }
+
+    #[test]
+    fn pi_prompt_transform_is_persisted_before_dispatch_with_private_payload_blob() {
+        let mut fixture = fixture();
+        bind_fixture_native_session(&mut fixture, "pi-transform-session");
+        let service = ContextService;
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let ContextMaterialization::Ready(prepared) = service
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("Pi context must be ready");
+        };
+        let delivery = service
+            .prepare_input_delivery_for_context(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared,
+            )
+            .unwrap();
+        let projection = service
+            .pi_runtime_input_projection(
+                &fixture.database,
+                &delivery.id,
+                &prepared.rendered_payload,
+            )
+            .unwrap();
+        assert_eq!(projection.invocation_kind, "direct");
+        let digest = raw_sha256(prepared.rendered_payload.as_bytes());
+        let transform = json!({
+            "schemaVersion": 1,
+            "mode": "verbatim",
+            "originalDynamicPayloadDigest": digest,
+            "runtimePayloadDigest": digest,
+            "command": Value::Null,
+        });
+        service
+            .persist_pi_prompt_evidence(
+                &mut fixture.database,
+                &store,
+                PersistPiPromptEvidence {
+                    delivery_id: &delivery.id,
+                    original_payload: &prepared.rendered_payload,
+                    runtime_payload: &prepared.rendered_payload,
+                    transform: &transform,
+                    source_path: None,
+                    source_content: None,
+                    expanded_content: None,
+                    images: &[],
+                },
+            )
+            .unwrap();
+        let (stored_transform, runtime_blob_id, image_count, image_set_digest, dispatch_started): (
+            String,
+            String,
+            i64,
+            String,
+            Option<String>,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                    SELECT transform.transform_json,
+                           transform.runtime_payload_blob_id,
+                           transform.image_count,
+                           transform.image_set_digest,
+                           delivery.dispatch_started_at
+                    FROM pi_runtime_prompt_transform AS transform
+                    JOIN runtime_input_delivery AS delivery
+                      ON delivery.id = transform.runtime_input_delivery_id
+                    WHERE transform.runtime_input_delivery_id = ?1
+                    "#,
+                [&delivery.id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&stored_transform).unwrap(),
+            transform
+        );
+        assert_eq!(image_count, 0);
+        assert_eq!(
+            image_set_digest,
+            canonical_json_digest(&Value::Array(Vec::new())).unwrap()
+        );
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM pi_prompt_image_evidence WHERE runtime_input_delivery_id = ?1",
+                    [&delivery.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .read_text(&fixture.database, &runtime_blob_id)
+                .unwrap(),
+            prepared.rendered_payload
+        );
+        assert!(dispatch_started.is_none());
+        assert!(
+            service
+                .begin_runtime_input_dispatch(
+                    &mut fixture.database,
+                    &delivery.id,
+                    &fixture.run_id,
+                    fixture.execution_epoch,
+                )
+                .unwrap()
+        );
+        fixture.cleanup();
     }
 
     // Owns the transaction ordering across Runtime Input and cancellation.
