@@ -46,11 +46,17 @@ git diff --check
 - [x] Main Store 与 Renderer 纯投影定向测试通过：2 files / 17 tests。
 - [x] `pnpm typecheck` 通过。
 - [x] 扩展定向回归通过：3 files / 173 tests。
-- [x] 完整 `pnpm test` 通过：146 个 Vitest 文件 / 1538 tests；221 个 Node tests 中 220 个通过、
-  1 个既定 Windows test skipped。
+- [x] 完整 `pnpm test` 通过：macOS sandbox 能力分类 7 tests；146 个 Vitest 文件 /
+  1539 tests；221 个其余 Node tests 中 220 个通过、1 个既定 Windows test skipped。
 - [x] `pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check`、固定 base 的
   `docs:check:ci` 与 `git diff --check` 通过。
 - [x] `test:desktop-bridge`、`test:startup-presentation` 与 `test:camp-open-projection` 均使用脚本创建的
   临时隔离 `userData` 启动，但宿主在业务断言前返回 `sandbox initialization failed: Operation not permitted`，
   随后 Chromium GPU 进程终止；该结果只记录为环境阻断，不关闭 sandbox、不改写产品代码，也不宣称
   Electron 组合断言通过。
+- [x] 后续回归将上述嵌套 macOS sandbox 拒绝收敛为所有真实 Electron fixture 共享的
+  启动前能力预检：当前 Rovai Agent Runtime 中稳定输出 `BLOCKED` / skipped 且不启动 Chromium；
+  `ROVAI_REQUIRE_ELECTRON_INTEGRATION=1` 下同一条件明确失败。两种结果都不代表业务断言通过，
+  真实组合验收仍由可启动 Chromium sandbox 的普通 macOS Terminal 或 Linux Full check 执行。
+- [x] 当前 Runtime 内 `pnpm test:desktop:integration` 稳定收敛为 10 tests skipped，其余 3 个 Electron
+  fixture 也全部 skipped；强制模式的 `test:desktop-bridge` 以明确环境原因非零退出。

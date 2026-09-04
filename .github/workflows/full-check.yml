@@ -43,6 +43,8 @@ jobs:
           pnpm test
 
       - name: Run real Electron integration suite
+        env:
+          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
         run: xvfb-run -a pnpm test:desktop:integration
 
   rust-full:

@@ -8,10 +8,12 @@ import test from 'node:test'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { build } from 'vite'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/channel-camp-naming')
-test('channel Camp labels stay display-only through native rename input', { timeout: 60_000 }, async () => {
+test('channel Camp labels stay display-only through native rename input', { timeout: 60_000 }, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-channel-naming-test-'))
   let child
   let closed
