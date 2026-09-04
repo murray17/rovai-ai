@@ -7,6 +7,7 @@ import {
   $getSelection,
   $isElementNode,
   $isLineBreakNode,
+  $isNodeSelection,
   $isRangeSelection,
   $isTextNode,
   type EditorState,
@@ -22,28 +23,24 @@ import {
   normalizeComposerDocument
 } from './composer-document'
 
-export type ComposerAtomFallback = (atom: ComposerAtom) => string | undefined
-
 export function $replaceEditorWithComposerDocument(
-  document: ComposerDocument,
-  fallbackForAtom?: ComposerAtomFallback
+  document: ComposerDocument
 ): void {
   const root = $getRoot()
   root.clear()
   const paragraph = $createParagraphNode()
   root.append(paragraph)
-  for (const node of $composerNodesFromDocument(document, fallbackForAtom)) paragraph.append(node)
+  for (const node of $composerNodesFromDocument(document)) paragraph.append(node)
 }
 
 export function composerDocumentToEditorState(
   editor: LexicalEditor,
-  document: ComposerDocument,
-  fallbackForAtom?: ComposerAtomFallback
+  document: ComposerDocument
 ): EditorState {
   const previous = editor.getEditorState()
   let next = previous
   editor.update(() => {
-    $replaceEditorWithComposerDocument(document, fallbackForAtom)
+    $replaceEditorWithComposerDocument(document)
   }, {
     discrete: true,
     onUpdate: () => { next = editor.getEditorState() }
@@ -71,6 +68,13 @@ export function $rootToComposerDocument(): ComposerDocument {
 
 export function $selectedComposerDocument(): ComposerDocument {
   const selection = $getSelection()
+  if ($isNodeSelection(selection)) {
+    const segments: ComposerSegment[] = []
+    for (const node of selection.getNodes()) {
+      if (!$isElementNode(node)) appendNodeSegment(segments, node)
+    }
+    return normalizeComposerDocument({ version: COMPOSER_DOCUMENT_VERSION, segments })
+  }
   if (!$isRangeSelection(selection) || selection.isCollapsed()) return emptyComposerDocument()
   const selectedNodes = selection.getNodes()
   const orderedPoints = selection.isBackward()
@@ -110,21 +114,19 @@ export function $selectedComposerDocument(): ComposerDocument {
 }
 
 export function $insertComposerDocument(
-  document: ComposerDocument,
-  fallbackForAtom?: ComposerAtomFallback
+  document: ComposerDocument
 ): void {
   const selection = $getSelection()
   if (!$isRangeSelection(selection)) return
-  selection.insertNodes($composerNodesFromDocument(document, fallbackForAtom))
+  selection.insertNodes($composerNodesFromDocument(document))
 }
 
 export function $insertComposerAtomWithTrailingSpace(
   queryNode: TextNode,
-  atom: ComposerAtom,
-  fallbackLabel?: string
+  atom: ComposerAtom
 ): void {
   const nextSibling = queryNode.getNextSibling()
-  const atomNode = $createComposerAtomNode(atom, fallbackLabel)
+  const atomNode = $createComposerAtomNode(atom)
   queryNode.replace(atomNode)
 
   if ($isTextNode(nextSibling) && !$isComposerAtomNode(nextSibling)) {
@@ -144,13 +146,12 @@ export function $insertComposerAtomWithTrailingSpace(
 }
 
 function $composerNodesFromDocument(
-  document: ComposerDocument,
-  fallbackForAtom?: ComposerAtomFallback
+  document: ComposerDocument
 ): LexicalNode[] {
   const nodes: LexicalNode[] = []
   for (const segment of normalizeComposerDocument(document).segments) {
     if (segment.kind === 'atom') {
-      nodes.push($createComposerAtomNode(segment.atom, fallbackForAtom?.(segment.atom)))
+      nodes.push($createComposerAtomNode(segment.atom))
       continue
     }
     const text = segment.text.replace(/\r\n?/gu, '\n')

@@ -216,7 +216,7 @@ app.whenReady().then(async () => {
       ])
     })
 
-    await run('Backspace deletes a token-mode Atom as one unit', async () => {
+    await run('Backspace deletes an inline Decorator Atom as one unit', async () => {
       await reset({
         version: 2,
         segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent-a' } }]

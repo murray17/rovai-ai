@@ -118,7 +118,7 @@ last_updated: 2026-09-04
 ## Camp 连续消息
 
 - 当前规范：[Pending Camp Input v3](../contracts/pending-camp-input-v3.md)、[Camp Composer Draft v8](../contracts/camp-composer-draft-v8.md)、[Composer 架构](../architecture/camp-composer-draft.md)。
-- 私有准入、单编辑占用和显式恢复的理由：[V1.33-D01](../versions/v1.33/decisions.md#v1-33-d01)；source refs、排队附件与 Runtime 适配理由：[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)；V2 content 与低频 flush 理由：[V1.43-D01](../versions/v1.43/decisions.md#v1-43-d01)、[V1.43-D02](../versions/v1.43/decisions.md#v1-43-d02)。
+- 私有准入、单编辑占用和显式恢复的理由：[V1.33-D01](../versions/v1.33/decisions.md#v1-33-d01)；source refs、排队附件与 Runtime 适配理由：[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)；V2 content 与低频 flush 理由：[V1.43-D01](../versions/v1.43/decisions.md#v1-43-d01)、[V1.43-D02](../versions/v1.43/decisions.md#v1-43-d02)；唯一 Draft authority、inline Decorator Atom 与统一有界 Trigger 理由：[V1.45-D01](../versions/v1.45/decisions.md#v1-45-d01)、[V1.45-D02](../versions/v1.45/decisions.md#v1-45-d02)、[V1.45-D03](../versions/v1.45/decisions.md#v1-45-d03)。
 
 ## 取消事务与 Runtime 清理
 

@@ -49,10 +49,14 @@ import {
 } from './StructuredMentionComposer'
 import {
   composerDocumentFromText,
-  composerDocumentsEqual,
   emptyComposerDocument,
   type ComposerLocalStatus
 } from './composer-document'
+import {
+  DraftMutationCoordinator,
+  type DraftMutation
+} from './draft-mutation-coordinator'
+import type { ComposerDraftPersistenceStatus } from './composer-draft-sync'
 import { PendingCampInputs } from './PendingCampInputs'
 import {
   activityStatusForAgentRun,
@@ -387,6 +391,54 @@ export function composerDraftNeedsContinuationRepair(
   const member = members.find(({ agentId }) => agentId === intent.recipient.agentId)
   const available = member?.membershipStatus === 'active' && member.profilePresence === 'present'
   return intent.recipientSelectionRequired || !available
+}
+
+async function mutateComposerDraft(
+  draft: CampComposerDraftView,
+  mutation: DraftMutation
+): Promise<CampComposerDraftView> {
+  const common = { campId: draft.campId, expectedRevision: draft.revision }
+  switch (mutation.kind) {
+    case 'save_content':
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
+        ...common,
+        content: mutation.content,
+        continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
+      })
+    case 'add_source_attachment':
+      return window.rovai.composerAttachments.prepare(
+        draft.campId,
+        draft.revision,
+        mutation.file
+      )
+    case 'remove_source_attachment':
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.removeAttachment', {
+        ...common,
+        attachmentId: mutation.attachmentId
+      })
+    case 'start_reply':
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.startReply', {
+        ...common,
+        replyToCampMessageId: mutation.replyToCampMessageId
+      })
+    case 'cancel_reply':
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.cancelReply', common)
+    case 'resolve_reply_recipient':
+      return window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.resolveReplyRecipient',
+        { ...common, recipient: mutation.recipient }
+      )
+    case 'dismiss_continuation':
+      return window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.dismissContinuation',
+        { ...common, sourceCampMessageId: mutation.sourceCampMessageId }
+      )
+    case 'resolve_continuation_recipient':
+      return window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.resolveContinuationRecipient',
+        { ...common, agentId: mutation.agentId }
+      )
+  }
 }
 
 export function composerRecipientSummary(
@@ -1388,7 +1440,9 @@ export function CampWorkspace({
   onNotify?(message: string): void
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
-  const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
+  const [, setComposerDraftProjectionVersion] = useState(0)
+  const [composerPersistenceStatus, setComposerPersistenceStatus] =
+    useState<ComposerDraftPersistenceStatus>({ state: 'saved' })
   const [composerLocalStatus, setComposerLocalStatus] = useState<ComposerLocalStatus>({
     hasContent: false,
     hasExplicitRecipient: false,
@@ -1417,12 +1471,37 @@ export function CampWorkspace({
   const composerFileInputRef = useRef<HTMLInputElement>(null)
   const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
   const draftCampId = useRef<string | null>(null)
-  const composerDraftRef = useRef<CampComposerDraftView | null>(null)
   const initializedComposerRoute = useRef<{
-    draft: CampComposerDraftView
+    revision: number
     publishedMessageSequence: number
   } | null>(null)
-  const draftMutationQueues = useRef(new Map<string, Promise<CampComposerDraftView>>())
+  const activeCampIdRef = useRef(snapshot.camp.id)
+  const activationStateRef = useRef(snapshot.camp.activationState)
+  const pendingDraftPersistedRef = useRef(onPendingDraftPersisted)
+  activeCampIdRef.current = snapshot.camp.id
+  activationStateRef.current = snapshot.camp.activationState
+  pendingDraftPersistedRef.current = onPendingDraftPersisted
+  const draftCoordinatorRef = useRef<DraftMutationCoordinator | null>(null)
+  if (!draftCoordinatorRef.current) {
+    draftCoordinatorRef.current = new DraftMutationCoordinator({
+      load: (campId) => window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.get',
+        { campId }
+      ),
+      mutate: async (draft, mutation) => {
+        const next = await mutateComposerDraft(draft, mutation)
+        if (
+          activeCampIdRef.current === draft.campId
+          && activationStateRef.current === 'pending'
+        ) pendingDraftPersistedRef.current?.()
+        return next
+      },
+      onChange: () => setComposerDraftProjectionVersion((version) => version + 1)
+    })
+  }
+  const draftCoordinator = draftCoordinatorRef.current
+  const coordinatorDraft = draftCoordinator.getCurrentDraft()
+  const composerDraft = coordinatorDraft?.campId === snapshot.camp.id ? coordinatorDraft : null
   const dragLeaveTimer = useRef<number | null>(null)
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
@@ -1953,61 +2032,15 @@ export function CampWorkspace({
     return counts
   }, [snapshot.executionEvidence])
 
-  const applyComposerDraft = (campId: string, draft: CampComposerDraftView): void => {
-    if (draftCampId.current !== campId) return
-    composerDraftRef.current = draft
-    setComposerDraft(draft)
-  }
-
-  const queueDraftMutation = (
-    campId: string,
-    mutate: (draft: CampComposerDraftView) => Promise<CampComposerDraftView>
-  ): Promise<CampComposerDraftView> => {
-    const current = composerDraftRef.current
-    const initial = current?.campId === campId
-      ? Promise.resolve(current)
-      : window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
-    const previous = draftMutationQueues.current.get(campId) ?? initial
-    const mutation = previous
-      .catch(() => window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId }))
-      .then(mutate)
-    const next = mutation.catch(async (error: unknown) => {
-      const refreshed = await window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.get',
-        { campId }
-      )
-      applyComposerDraft(campId, refreshed)
-      throw error
-    })
-    draftMutationQueues.current.set(campId, next)
-    void next.then((draft) => {
-      if (draftMutationQueues.current.get(campId) === next) {
-        draftMutationQueues.current.delete(campId)
-      }
-      applyComposerDraft(campId, draft)
-      if (snapshot.camp.activationState === 'pending') onPendingDraftPersisted?.()
-    }, () => {
-      if (draftMutationQueues.current.get(campId) === next) {
-        draftMutationQueues.current.delete(campId)
-      }
-    })
-    return next
-  }
-
-  const saveStructuredDraft = (
+  const saveStructuredDraft = async (
     campId: string,
     content: ComposerDocument
-  ): Promise<CampComposerDraftView> => queueDraftMutation(
-    campId,
-    (draft) => composerDocumentsEqual(draft.content, content)
-      ? Promise.resolve(draft)
-      : window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
-        campId,
-        expectedRevision: draft.revision,
-        content,
-        continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
-      })
-  )
+  ): Promise<void> => {
+    if (draftCoordinator.getCurrentDraft()?.campId !== campId) {
+      throw new Error('Composer Draft context changed before content persistence.')
+    }
+    await draftCoordinator.saveContent(content)
+  }
 
   const loadReplyAnchorWindow = useCallback((messageId: string): Promise<CampMessageView[] | null> => {
     const existing = replyAnchorLoads.current.get(messageId)
@@ -2043,25 +2076,23 @@ export function CampWorkspace({
   useEffect(() => {
     if (!composerDraft || hasLocalDraftPayload || composerSubmitting || routingMutating) return
     const initializedRoute = initializedComposerRoute.current
-    if (initializedRoute && initializedRoute.draft === composerDraftRef.current
+    if (initializedRoute && initializedRoute.revision === composerDraft.revision
       && initializedRoute.publishedMessageSequence >= publishedMessageSequence) return
     const campId = snapshot.camp.id
     let cancelled = false
     // Pending publication bypasses submitMessage. Refresh Core's route projection
     // when a message enters the conversation, without replacing the local editor.
     void (async () => {
-      await draftMutationQueues.current.get(campId)
-      if (cancelled) return
-      const current = composerDraftRef.current
+      const epoch = draftCoordinator.getEpoch()
+      await draftCoordinator.waitForIdle()
+      if (cancelled || epoch !== draftCoordinator.getEpoch()) return
       const localVersion = composerHandleRef.current?.getLocalVersion() ?? 0
-      const refreshed = await window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+      const refreshed = await draftCoordinator.load()
       if (cancelled || draftCampId.current !== campId
-        || composerDraftRef.current !== current
+        || epoch !== draftCoordinator.getEpoch()
         || composerHandleRef.current?.getLocalVersion() !== localVersion
-        || composerHandleRef.current?.isDirty()
-        || draftMutationQueues.current.has(campId)) return
-      initializedComposerRoute.current = { draft: refreshed, publishedMessageSequence }
-      applyComposerDraft(campId, refreshed)
+        || composerHandleRef.current?.isDirty()) return
+      initializedComposerRoute.current = { revision: refreshed.revision, publishedMessageSequence }
     })().catch(() => { /* Keep the current Draft; the next publication or Draft mutation refreshes it. */ })
     return () => { cancelled = true }
   }, [snapshot.camp.id, publishedMessageSequence, composerDraft !== null, hasLocalDraftPayload, composerSubmitting, routingMutating])
@@ -2422,12 +2453,6 @@ export function CampWorkspace({
     visibleCampMessages
   ])
 
-  const syncReplyDraft = (draft: CampComposerDraftView): CampComposerDraftView => {
-    applyComposerDraft(draft.campId, draft)
-    composerHandleRef.current?.replaceDocument(draft.content, draft)
-    return draft
-  }
-
   const mutateRoutingDraft = (
     method:
       | 'camp.composerDraft.startReply'
@@ -2436,17 +2461,16 @@ export function CampWorkspace({
       | 'camp.composerDraft.resolveContinuationRecipient',
     params: Record<string, unknown>
   ): Promise<CampComposerDraftView> => {
-    const campId = snapshot.camp.id
     return (async () => {
-      const flushed = await composerHandleRef.current?.flush()
-      if (flushed?.result) applyComposerDraft(campId, flushed.result)
-      return queueDraftMutation(campId, (draft) =>
-        window.rovai.request<CampComposerDraftView>(method, {
-        campId,
-        expectedRevision: draft.revision,
-        ...params
-        })
-      ).then(syncReplyDraft)
+      await composerHandleRef.current?.flush()
+      if (method === 'camp.composerDraft.startReply') {
+        return draftCoordinator.startReply(String(params.replyToCampMessageId))
+      }
+      if (method === 'camp.composerDraft.cancelReply') return draftCoordinator.cancelReply()
+      if (method === 'camp.composerDraft.resolveReplyRecipient') {
+        return draftCoordinator.resolveReplyRecipient(params.recipient as CampComposerReplyRecipient)
+      }
+      return draftCoordinator.resolveContinuationRecipient(String(params.agentId))
     })()
   }
 
@@ -2519,25 +2543,13 @@ export function CampWorkspace({
   }
 
   const dismissContinuation = async (restoreFocus = true): Promise<void> => {
-    const intent = composerDraftRef.current?.continuationIntent
+    const intent = draftCoordinator.getCurrentDraft()?.continuationIntent
     if (!intent || routingMutating) return
     setRoutingMutating(true)
     setReplyInteractionError(null)
     try {
-      const campId = snapshot.camp.id
-      const flushed = await composerHandleRef.current?.flush()
-      if (flushed?.result) applyComposerDraft(campId, flushed.result)
-      await queueDraftMutation(
-        campId,
-        (draft) => window.rovai.request<CampComposerDraftView>(
-          'camp.composerDraft.dismissContinuation',
-          {
-            campId,
-            expectedRevision: draft.revision,
-            sourceCampMessageId: intent.sourceCampMessageId
-          }
-        )
-      )
+      await composerHandleRef.current?.flush()
+      await draftCoordinator.dismissContinuation(intent.sourceCampMessageId)
       if (restoreFocus) focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
@@ -2641,8 +2653,8 @@ export function CampWorkspace({
       window.clearTimeout(campLeaveTimer.current.timer)
       campLeaveTimer.current = null
     }
-    setComposerDraft(null)
-    composerDraftRef.current = null
+    draftCoordinator.beginEpoch(campId)
+    setComposerPersistenceStatus({ state: 'saved' })
     setComposerLocalStatus({
       hasContent: false,
       hasExplicitRecipient: false,
@@ -2659,14 +2671,9 @@ export function CampWorkspace({
     setSuppressPointerFocusRing(false)
     autoSuppressedContinuationSourceRef.current = null
     draftCampId.current = campId
-    const pendingDraft = draftMutationQueues.current.get(campId)
-    void (pendingDraft ?? window.rovai.request<CampComposerDraftView>(
-      'camp.composerDraft.get',
-      { campId }
-    ))
-      .then((draft) => {
+    void draftCoordinator.load()
+      .then(() => {
         if (cancelled || draftCampId.current !== campId) return
-        applyComposerDraft(campId, draft)
       })
       .catch(() => {
         if (!cancelled && draftCampId.current === campId) {
@@ -2681,16 +2688,19 @@ export function CampWorkspace({
             updatedAt: null,
             expiresAt: null
           }
-          composerDraftRef.current = emptyDraft
-          setComposerDraft(emptyDraft)
+          draftCoordinator.acceptAuthoritativeDraft(emptyDraft)
         }
       })
     return () => {
       cancelled = true
       if (draftCampId.current === campId) {
         const persistedDraft = composerHandleRef.current?.flush()
-          .then(({ result, document }) => result ?? saveStructuredDraft(campId, document))
-          ?? Promise.resolve(composerDraftRef.current)
+          .then(async ({ draft, document }) => {
+            if (draft) return draft
+            await saveStructuredDraft(campId, document)
+            return draftCoordinator.getCurrentDraft()
+          })
+          ?? draftCoordinator.waitForIdle().catch(() => draftCoordinator.getCurrentDraft())
         const timer = window.setTimeout(() => {
           if (campLeaveTimer.current?.timer === timer) campLeaveTimer.current = null
           if (snapshot.camp.activationState === 'pending' && onPendingCampLeave) {
@@ -3158,9 +3168,8 @@ export function CampWorkspace({
       persistenceHeld = composerHandle !== null
       const flushed = await composerHandle?.flush({ holdPersistence: true })
       sentLocalVersion = flushed?.localVersion ?? null
-      const frozenDraft = flushed?.result ?? composerDraftRef.current
+      const frozenDraft = flushed?.draft ?? draftCoordinator.getCurrentDraft()
       if (!frozenDraft) throw new Error('Composer Draft 尚未就绪。')
-      applyComposerDraft(campId, frozenDraft)
       sendAttempted = true
       const sendReceipt = await onSend(frozenDraft)
       if (sendReceipt?.agentRunIds.length || sendReceipt?.campTurnId) {
@@ -3172,20 +3181,20 @@ export function CampWorkspace({
         'camp.composerDraft.get', { campId }
       )
       if (draftCampId.current === campId) {
+        draftCoordinator.acceptAuthoritativeDraft(nextDraft, true)
         initializedComposerRoute.current = {
-          draft: nextDraft,
+          revision: nextDraft.revision,
           publishedMessageSequence: Math.max(publishedMessageSequence, sendReceipt?.publishedMessageSequence ?? 0)
         }
-        applyComposerDraft(campId, nextDraft)
         const cleared = sentLocalVersion !== null
           && composerHandleRef.current?.clearIfVersion(
             sentLocalVersion,
-            nextDraft.content,
-            nextDraft
+            nextDraft.content
           ) === true
         if (cleared) {
           persistenceHeld = false
         } else {
+          composerHandleRef.current?.advancePersistenceEpoch(sentLocalVersion ?? undefined)
           composerHandleRef.current?.resumePersistence()
           persistenceHeld = false
           await composerHandleRef.current?.flush()
@@ -3199,16 +3208,16 @@ export function CampWorkspace({
             { campId }
           )
           if (draftCampId.current === campId) {
-            applyComposerDraft(campId, draft)
+            draftCoordinator.acceptAuthoritativeDraft(draft, true)
             const replaced = sentLocalVersion !== null
               && composerHandleRef.current?.clearIfVersion(
                 sentLocalVersion,
-                draft.content,
-                draft
+                draft.content
               ) === true
             if (replaced) {
               persistenceHeld = false
             } else {
+              composerHandleRef.current?.advancePersistenceEpoch(sentLocalVersion ?? undefined)
               composerHandleRef.current?.resumePersistence()
               persistenceHeld = false
               await composerHandleRef.current?.flush().catch(() => undefined)
@@ -3263,16 +3272,8 @@ export function CampWorkspace({
     const preparePending = async (): Promise<void> => {
       for (const item of pending) {
         try {
-          const flushed = await composerHandleRef.current?.flush()
-          if (flushed?.result) applyComposerDraft(campId, flushed.result)
-          await queueDraftMutation(
-            campId,
-            (draft) => window.rovai.composerAttachments.prepare(
-              campId,
-              draft.revision,
-              item.file
-            )
-          )
+          await composerHandleRef.current?.flush()
+          await draftCoordinator.addSourceAttachment(item.file)
         } catch (error) {
           if (draftCampId.current === campId) {
             setFailedAttachments((current) => [
@@ -3389,16 +3390,8 @@ export function CampWorkspace({
   }, [])
 
   const removePreparedAttachment = async (attachmentId: string): Promise<void> => {
-    const campId = snapshot.camp.id
-    const flushed = await composerHandleRef.current?.flush()
-    if (flushed?.result) applyComposerDraft(campId, flushed.result)
-    await queueDraftMutation(
-      campId,
-      (draft) => window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.removeAttachment',
-        { campId, expectedRevision: draft.revision, attachmentId }
-      )
-    )
+    await composerHandleRef.current?.flush()
+    await draftCoordinator.removeSourceAttachment(attachmentId)
   }
 
   const copyMessage = (
@@ -4674,10 +4667,11 @@ export function CampWorkspace({
                 ? composerDraft.content
                 : emptyComposerDocument()}
               ready={composerDraft?.campId === snapshot.camp.id}
-              authoritativeResult={composerDraft}
+              getAuthoritativeDraft={() => draftCoordinator.getCurrentDraft()}
               persistDocument={(content) => saveStructuredDraft(snapshot.camp.id, content)}
-              onDraftSaved={(draft) => applyComposerDraft(snapshot.camp.id, draft)}
+              waitForDraftAuthority={() => draftCoordinator.waitForIdle().then(() => undefined)}
               onLocalStatusChange={setComposerLocalStatus}
+              onPersistenceStatusChange={setComposerPersistenceStatus}
               onBackspaceAtStart={composerDraft?.replyIntent
                 ? () => cancelReply('start')
                 : undefined}
@@ -4709,6 +4703,11 @@ export function CampWorkspace({
             {!composerDraft?.replyIntent && replyInteractionError && (
               <span className="composer-reply-status" role="status" aria-live="polite">
                 {replyInteractionError}
+              </span>
+            )}
+            {composerPersistenceStatus.state === 'error' && (
+              <span className="composer-reply-status" role="status" aria-live="polite">
+                草稿尚未保存；发送时会重试。{composerPersistenceStatus.error.message}
               </span>
             )}
           </div>

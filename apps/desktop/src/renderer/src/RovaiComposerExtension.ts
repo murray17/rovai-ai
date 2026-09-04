@@ -6,6 +6,7 @@ import {
   $createLineBreakNode,
   $getNearestNodeFromDOMNode,
   $getSelection,
+  $isNodeSelection,
   $isParagraphNode,
   $isRangeSelection,
   CLICK_COMMAND,
@@ -154,6 +155,7 @@ export const ComposerClipboardExtension = defineExtension({
         $addUpdateTag(CUT_TAG)
         const selection = $getSelection()
         if ($isRangeSelection(selection)) selection.removeText()
+        else if ($isNodeSelection(selection)) selection.deleteNodes()
       }
       return true
     }

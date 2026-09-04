@@ -11,7 +11,9 @@ import {
 import { ComposerAtomNode } from './ComposerAtomNode'
 import {
   ComposerDraftSync,
-  ROVAI_ATOM_PRESENTATION_TAG
+  COMPOSER_DRAFT_RETRY_DELAYS_MS,
+  ROVAI_ATOM_PRESENTATION_TAG,
+  StaleComposerSyncEpochError
 } from './composer-draft-sync'
 import {
   $replaceEditorWithComposerDocument
@@ -50,11 +52,10 @@ describe('ComposerDraftSync', () => {
     const editor = createComposerEditor()
     const persisted: string[] = []
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
-      currentResult: () => ({ revision: 0 }),
+      currentDraft: () => ({ revision: 0 }),
       atomIsAvailable: () => true,
       persist: async (document) => {
         persisted.push(editorStateText(document))
-        return { revision: persisted.length }
       }
     })
     const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
@@ -80,12 +81,11 @@ describe('ComposerDraftSync', () => {
     let releaseFirst!: () => void
     const firstSave = new Promise<void>((resolve) => { releaseFirst = resolve })
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
-      currentResult: () => ({ revision: 0 }),
+      currentDraft: () => ({ revision: 0 }),
       atomIsAvailable: () => true,
       persist: async (document) => {
         persisted.push(editorStateText(document))
         if (persisted.length === 1) await firstSave
-        return { revision: persisted.length }
       }
     })
     const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
@@ -119,7 +119,7 @@ describe('ComposerDraftSync', () => {
     let concurrent = 0
     let maxConcurrent = 0
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
-      currentResult: () => ({ revision: 0 }),
+      currentDraft: () => ({ revision: 0 }),
       atomIsAvailable: () => true,
       persist: async (document) => {
         persisted.push(editorStateText(document))
@@ -127,7 +127,6 @@ describe('ComposerDraftSync', () => {
         maxConcurrent = Math.max(maxConcurrent, concurrent)
         await new Promise<void>((resolve) => releases.push(resolve))
         concurrent -= 1
-        return { revision: persisted.length }
       }
     })
     const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
@@ -154,11 +153,10 @@ describe('ComposerDraftSync', () => {
     const editor = createComposerEditor()
     const persisted: string[] = []
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
-      currentResult: () => ({ revision: 0 }),
+      currentDraft: () => ({ revision: 0 }),
       atomIsAvailable: () => true,
       persist: async (document) => {
         persisted.push(editorStateText(document))
-        return { revision: persisted.length }
       }
     })
     const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
@@ -178,11 +176,10 @@ describe('ComposerDraftSync', () => {
     const editor = createComposerEditor()
     const persisted: string[] = []
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
-      currentResult: () => ({ revision: 0 }),
+      currentDraft: () => ({ revision: 0 }),
       atomIsAvailable: () => true,
       persist: async (document) => {
         persisted.push(editorStateText(document))
-        return { revision: persisted.length }
       }
     })
     const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
@@ -215,7 +212,7 @@ describe('ComposerDraftSync', () => {
     let available = true
     const statuses: boolean[] = []
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
-      currentResult: () => ({ revision: 1 }),
+      currentDraft: () => ({ revision: 1 }),
       atomIsAvailable: () => available,
       onStatusChange: (status) => statuses.push(status.hasUnavailableAtom)
     })
@@ -223,7 +220,7 @@ describe('ComposerDraftSync', () => {
 
     available = false
     sync.updateBindings({
-      currentResult: () => ({ revision: 1 }),
+      currentDraft: () => ({ revision: 1 }),
       atomIsAvailable: () => available,
       onStatusChange: (status) => statuses.push(status.hasUnavailableAtom)
     })
@@ -237,6 +234,81 @@ describe('ComposerDraftSync', () => {
     expect(sync.isDirty()).toBe(false)
 
     unregister()
+    sync.destroy()
+  })
+
+  it('keeps a failed autosave dirty, exposes an error, and retries with a finite backoff', async () => {
+    vi.useFakeTimers()
+    const editor = createComposerEditor()
+    const statuses: string[] = []
+    let attempts = 0
+    const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
+      atomIsAvailable: () => true,
+      persist: async () => {
+        attempts += 1
+        if (attempts < 3) throw new Error(`save ${attempts} failed`)
+      },
+      onPersistenceStatusChange: (status) => statuses.push(status.state)
+    })
+    const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
+
+    replaceText(editor, '需要重试')
+    await vi.advanceTimersByTimeAsync(350)
+    expect(attempts).toBe(1)
+    expect(sync.isDirty()).toBe(true)
+    expect(sync.getPersistenceStatus()).toMatchObject({ state: 'error' })
+
+    await vi.advanceTimersByTimeAsync(COMPOSER_DRAFT_RETRY_DELAYS_MS[0])
+    expect(attempts).toBe(2)
+    await vi.advanceTimersByTimeAsync(COMPOSER_DRAFT_RETRY_DELAYS_MS[1])
+    expect(attempts).toBe(3)
+    expect(sync.isDirty()).toBe(false)
+    expect(sync.getPersistenceStatus()).toEqual({ state: 'saved' })
+    expect(statuses).toContain('error')
+
+    unregister()
+    sync.destroy()
+  })
+
+  it('does not let an old epoch save completion mark replacement content as saved', async () => {
+    const editor = createComposerEditor()
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
+      atomIsAvailable: () => true,
+      persist: async () => pending
+    })
+    const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
+
+    replaceText(editor, 'old draft')
+    const oldFlush = sync.flush()
+    await Promise.resolve()
+    const replacement = createComposerEditor('new draft').getEditorState()
+    sync.acceptAuthoritativeState(replacement)
+    release()
+    await expect(oldFlush).rejects.toBeInstanceOf(StaleComposerSyncEpochError)
+
+    expect(sync.getLocalVersion()).toBe(0)
+    expect(sync.getSavedVersion()).toBe(0)
+    expect(sync.isDirty()).toBe(false)
+    expect(sync.getPersistenceStatus()).toEqual({ state: 'saved' })
+
+    unregister()
+    sync.destroy()
+  })
+
+  it('returns the authoritative value read after the captured snapshot is persisted', async () => {
+    const editor = createComposerEditor()
+    let authority = { revision: 3 }
+    const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
+      atomIsAvailable: () => true,
+      currentDraft: () => authority,
+      waitForAuthority: async () => { authority = { revision: 4 } }
+    })
+
+    const flushed = await sync.flush()
+
+    expect(flushed.draft).toEqual({ revision: 4 })
     sync.destroy()
   })
 })
