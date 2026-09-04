@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use anyhow::Result;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -9,17 +11,27 @@ use crate::{
     collaboration::{append_domain_event, build_effective_config},
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
-        DomainCommandGateway, EntityReference, sealed,
+        DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     db::Database,
     execution_budget::freeze_camp_turn_execution_budget,
     read_model::{AgentRunExecutionEvidenceView, public_execution_evidence_for_agent_run},
     runtime::{recompute_camp_turn, settle_abortive_agent_run_in_tx},
+    skill::bundled_skill_source_identity,
+    skill_projection::PreparedSkillExposure,
 };
 
 pub const SINGLE_CHAT_OPERATION_POLICY: &str = "single_chat_v1";
 pub const SINGLE_CHAT_OPERATION_POLICY_VERSION: i64 = 1;
 pub const SINGLE_CHAT_RESPONSE_DELIVERY: &str = "conversation_message";
+pub const SINGLE_CHAT_HISTORY_TOOL_NAME: &str = "single_chat.history";
+
+const SINGLE_CHAT_HISTORY_DEFAULT_LIMIT: usize = 20;
+const SINGLE_CHAT_HISTORY_MAX_LIMIT: usize = 50;
+const SINGLE_CHAT_FILTERED_BUNDLED_SKILL_SOURCE_IDENTITIES: [&str; 2] = [
+    "rovai://bundled/cli-operations",
+    "rovai://bundled/memory-stewardship",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +68,30 @@ pub struct EndSingleChatCommand {
     pub camp_id: String,
     pub conversation_id: String,
     pub expected_conversation_version: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SingleChatHistoryInput {
+    pub before_sequence: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SingleChatHistoryMessage {
+    pub sequence: i64,
+    pub role: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SingleChatHistoryOutput {
+    pub schema_version: i64,
+    pub messages: Vec<SingleChatHistoryMessage>,
+    pub has_more: bool,
+    pub next_before_sequence: Option<i64>,
 }
 
 impl sealed::Sealed for EndSingleChatCommand {}
@@ -123,6 +159,116 @@ pub struct SingleChatService {
 }
 
 impl SingleChatService {
+    pub fn history_input_schema() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "beforeSequence": {"type": "integer", "minimum": 1},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": SINGLE_CHAT_HISTORY_MAX_LIMIT
+                }
+            }
+        })
+    }
+
+    pub fn history_output_schema() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "schemaVersion", "messages", "hasMore", "nextBeforeSequence"
+            ],
+            "properties": {
+                "schemaVersion": {"const": 1},
+                "messages": {
+                    "type": "array",
+                    "maxItems": SINGLE_CHAT_HISTORY_MAX_LIMIT,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["sequence", "role", "body"],
+                        "properties": {
+                            "sequence": {"type": "integer", "minimum": 1},
+                            "role": {"type": "string", "enum": ["user", "assistant"]},
+                            "body": {"type": "string"}
+                        }
+                    }
+                },
+                "hasMore": {"type": "boolean"},
+                "nextBeforeSequence": {"type": ["integer", "null"], "minimum": 1}
+            }
+        })
+    }
+
+    pub fn history(
+        &self,
+        database: &Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        input: &SingleChatHistoryInput,
+    ) -> Result<SingleChatHistoryOutput> {
+        let limit = input.limit.unwrap_or(SINGLE_CHAT_HISTORY_DEFAULT_LIMIT);
+        if limit == 0 || limit > SINGLE_CHAT_HISTORY_MAX_LIMIT {
+            anyhow::bail!("Single Chat history limit is invalid");
+        }
+        if input.before_sequence.is_some_and(|sequence| sequence < 1) {
+            anyhow::bail!("Single Chat history beforeSequence is invalid");
+        }
+        let (conversation_id, current_input_sequence) =
+            load_single_chat_history_target(database, agent_run_id, execution_epoch)?
+                .ok_or_else(|| anyhow::anyhow!("Single Chat history target is unavailable"))?;
+        let before_sequence = input
+            .before_sequence
+            .unwrap_or(current_input_sequence)
+            .min(current_input_sequence);
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT sequence, author_type, body
+            FROM conversation_message
+            WHERE conversation_id = ?1
+              AND sequence < ?2
+              AND author_type IN ('user', 'agent')
+            ORDER BY sequence DESC, id DESC
+            LIMIT ?3
+            "#,
+        )?;
+        let mut messages = statement
+            .query_map(
+                params![conversation_id, before_sequence, (limit + 1) as i64],
+                |row| {
+                    let author_type = row.get::<_, String>(1)?;
+                    Ok(SingleChatHistoryMessage {
+                        sequence: row.get(0)?,
+                        role: if author_type == "user" {
+                            "user".to_string()
+                        } else {
+                            "assistant".to_string()
+                        },
+                        body: row.get(2)?,
+                    })
+                },
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let has_more = messages.len() > limit;
+        messages.truncate(limit);
+        messages.reverse();
+        let next_before_sequence = has_more.then(|| {
+            messages
+                .first()
+                .expect("a paginated Single Chat history page is non-empty")
+                .sequence
+        });
+        Ok(SingleChatHistoryOutput {
+            schema_version: 1,
+            messages,
+            has_more,
+            next_before_sequence,
+        })
+    }
+
     pub fn open(
         &self,
         database: &mut Database,
@@ -724,6 +870,45 @@ impl SingleChatService {
     }
 }
 
+pub fn filter_single_chat_skill_exposure(
+    database: &Database,
+    mut exposure: PreparedSkillExposure,
+) -> Result<PreparedSkillExposure> {
+    let mut statement = database.connection().prepare(
+        r#"
+        SELECT skill.id, revision.name
+        FROM skill
+        JOIN skill_revision AS revision ON revision.id = skill.current_revision_id
+        WHERE skill.origin = 'official'
+          AND revision.source_type = 'bundled'
+          AND json_extract(revision.source_metadata_json, '$.bundled') = 1
+        "#,
+    )?;
+    let filtered_skill_ids = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .filter_map(|row| match row {
+            Ok((skill_id, canonical_name))
+                if bundled_skill_source_identity(&canonical_name).is_some_and(|identity| {
+                    SINGLE_CHAT_FILTERED_BUNDLED_SKILL_SOURCE_IDENTITIES
+                        .contains(&identity.as_str())
+                }) =>
+            {
+                Some(Ok(skill_id))
+            }
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+    exposure
+        .snapshot
+        .skills
+        .retain(|entry| !filtered_skill_ids.contains(&entry.skill_id));
+    exposure.digest = canonical_json_digest(&serde_json::to_value(&exposure.snapshot)?)?;
+    Ok(exposure)
+}
+
 #[derive(Debug)]
 struct ActiveTarget {
     conversation_id: String,
@@ -855,6 +1040,15 @@ pub fn authorize_builtin_operation(
     let Some((camp_id, response_delivery, operation_policy, policy_version)) =
         single_chat_run_policy(database, agent_run_id, execution_epoch)?
     else {
+        if operation == SINGLE_CHAT_HISTORY_TOOL_NAME {
+            return Ok(Some(CommandHandlerResult::rejected(
+                "single_chat.history_unavailable",
+                json!({
+                    "message": "Current Single Chat history is unavailable.",
+                    "operation": operation,
+                }),
+            )));
+        }
         return Ok(None);
     };
     if response_delivery != SINGLE_CHAT_RESPONSE_DELIVERY
@@ -865,13 +1059,7 @@ pub fn authorize_builtin_operation(
     }
     let allowed = matches!(
         operation,
-        "camp.search"
-            | "camp.read"
-            | "team.get_task"
-            | "team.list_tasks"
-            | "memory.view"
-            | "memory.search"
-            | "memory.read"
+        "camp.search" | "camp.read" | SINGLE_CHAT_HISTORY_TOOL_NAME
     );
     if !allowed {
         return Ok(Some(CommandHandlerResult::rejected(
@@ -899,7 +1087,59 @@ pub fn authorize_builtin_operation(
             )));
         }
     }
+    if operation == SINGLE_CHAT_HISTORY_TOOL_NAME
+        && load_single_chat_history_target(database, agent_run_id, execution_epoch)?.is_none()
+    {
+        return Ok(Some(CommandHandlerResult::rejected(
+            "single_chat.history_unavailable",
+            json!({
+                "message": "Current Single Chat history is unavailable.",
+                "operation": operation,
+            }),
+        )));
+    }
     Ok(None)
+}
+
+fn load_single_chat_history_target(
+    database: &Database,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) -> Result<Option<(String, i64)>> {
+    Ok(database
+        .connection()
+        .query_row(
+            r#"
+            SELECT conversation.id, current_input.sequence
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            JOIN conversation
+              ON conversation.id = agent_run.destination_conversation_id
+             AND conversation.id = agent_run.conversation_id
+             AND conversation.camp_id = camp_turn.camp_id
+            JOIN conversation_message AS current_input
+              ON current_input.id = agent_run.trigger_conversation_message_id
+             AND current_input.conversation_id = conversation.id
+            WHERE agent_run.id = ?1
+              AND agent_run.execution_epoch = ?2
+              AND agent_run.invocation_kind = 'single_chat'
+              AND agent_run.response_delivery = 'conversation_message'
+              AND agent_run.operation_policy = 'single_chat_v1'
+              AND agent_run.operation_policy_version = 1
+              AND agent_run.status = 'running'
+              AND agent_run.cancel_requested_at IS NULL
+              AND camp_turn.kind = 'single_chat'
+              AND camp_turn.status IN ('running', 'waiting')
+              AND camp_turn.cancel_requested_at IS NULL
+              AND conversation.kind = 'single_chat'
+              AND conversation.ended_at IS NULL
+              AND current_input.author_type = 'user'
+              AND current_input.sequence = agent_run.initial_conversation_context_through_sequence
+            "#,
+            params![agent_run_id, execution_epoch],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
 }
 
 #[cfg(test)]
@@ -907,8 +1147,9 @@ mod tests {
     use super::*;
     use crate::{
         collaboration::{CollaborationService, CreateCampCommand},
-        command::CommandResultStatus,
+        command::{CommandResultStatus, canonical_json_digest},
         runtime::{ExecutionRuntimeService, SucceedAgentRunCommand},
+        skill_projection::{SkillExposureEntry, SkillExposureSnapshot},
     };
 
     fn user_envelope<P>(command_id: &str, camp_id: Option<&str>, payload: P) -> CommandEnvelope<P> {
@@ -1283,31 +1524,55 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'running', execution_epoch = 1, started_at = updated_at WHERE id = ?1",
+                [&run_id],
+            )
+            .unwrap();
         assert!(
             authorize_builtin_operation(
                 &database,
                 &run_id,
-                0,
+                1,
                 "camp.read",
                 &json!({"campId": camp_id}),
             )
             .unwrap()
             .is_none()
         );
-        let send_denial = authorize_builtin_operation(
-            &database,
-            &run_id,
-            0,
+        assert!(
+            authorize_builtin_operation(
+                &database,
+                &run_id,
+                1,
+                SINGLE_CHAT_HISTORY_TOOL_NAME,
+                &json!({}),
+            )
+            .unwrap()
+            .is_none()
+        );
+        for denied_operation in [
             "camp.message.send",
-            &json!({"body": "leak"}),
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(send_denial.code, "single_chat.operation_denied");
+            "team.gather",
+            "team.get_task",
+            "team.list_tasks",
+            "memory.view",
+            "memory.search",
+            "memory.read",
+            "memory.write",
+        ] {
+            let denial =
+                authorize_builtin_operation(&database, &run_id, 1, denied_operation, &json!({}))
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(denial.code, "single_chat.operation_denied");
+        }
         let cross_camp = authorize_builtin_operation(
             &database,
             &run_id,
-            0,
+            1,
             "camp.search",
             &json!({"campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}),
         )
@@ -1318,7 +1583,17 @@ mod tests {
         let cancelled = ExecutionRuntimeService::default()
             .cancel_interrupted_single_chat_runs(&mut database)
             .unwrap();
-        assert_eq!(cancelled, vec![run_id]);
+        assert_eq!(cancelled, vec![run_id.clone()]);
+        let unavailable = authorize_builtin_operation(
+            &database,
+            &run_id,
+            1,
+            SINGLE_CHAT_HISTORY_TOOL_NAME,
+            &json!({}),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(unavailable.code, "single_chat.history_unavailable");
         let snapshot = service
             .snapshot(&database, &conversation_id)
             .unwrap()
@@ -1334,5 +1609,263 @@ mod tests {
             "single-chat-send-after-restart",
         );
         assert_eq!(next.result.status, CommandResultStatus::Accepted);
+    }
+
+    #[test]
+    fn history_reads_only_messages_before_current_input_with_exclusive_pagination() {
+        let (mut database, camp_id) = fixture();
+        let service = SingleChatService::default();
+        let runtime = ExecutionRuntimeService::default();
+        let (conversation_id, version) = open(
+            &service,
+            &mut database,
+            &camp_id,
+            "single-chat-open-history",
+        );
+        let first = send(
+            &service,
+            &mut database,
+            &camp_id,
+            &conversation_id,
+            version,
+            "single-chat-send-history-first",
+        );
+        let first_run_id = first.result.payload["agentRunId"].as_str().unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'running', execution_epoch = 1, started_at = updated_at WHERE id = ?1",
+                [first_run_id],
+            )
+            .unwrap();
+        let completed = runtime
+            .succeed_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "single-chat-history-first-final".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:test".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SucceedAgentRunCommand {
+                        agent_run_id: first_run_id.to_string(),
+                        expected_version: 1,
+                        execution_epoch: 1,
+                        native_turn_id: "single-chat-history-first-turn".to_string(),
+                        final_output: "第一轮回答".to_string(),
+                        missing_send_recovery_candidate: None,
+                        ending_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(completed.result.status, CommandResultStatus::Applied);
+        let second = send(
+            &service,
+            &mut database,
+            &camp_id,
+            &conversation_id,
+            version + 2,
+            "single-chat-send-history-current",
+        );
+        let current_run_id = second.result.payload["agentRunId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'running', execution_epoch = 1, started_at = updated_at WHERE id = ?1",
+                [&current_run_id],
+            )
+            .unwrap();
+
+        let state_before: (i64, i64, i64) = database
+            .connection()
+            .query_row(
+                "SELECT version, last_accepted_public_boundary_sequence, last_message_sequence FROM conversation WHERE id = ?1",
+                [&conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let newest = service
+            .history(
+                &database,
+                &current_run_id,
+                1,
+                &SingleChatHistoryInput {
+                    before_sequence: Some(999),
+                    limit: Some(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            newest,
+            SingleChatHistoryOutput {
+                schema_version: 1,
+                messages: vec![SingleChatHistoryMessage {
+                    sequence: 2,
+                    role: "assistant".to_string(),
+                    body: "第一轮回答".to_string(),
+                }],
+                has_more: true,
+                next_before_sequence: Some(2),
+            }
+        );
+        let older = service
+            .history(
+                &database,
+                &current_run_id,
+                1,
+                &SingleChatHistoryInput {
+                    before_sequence: newest.next_before_sequence,
+                    limit: Some(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(older.messages.len(), 1);
+        assert_eq!(older.messages[0].sequence, 1);
+        assert_eq!(older.messages[0].role, "user");
+        assert!(!older.has_more);
+        assert_eq!(older.next_before_sequence, None);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT version, last_accepted_public_boundary_sequence, last_message_sequence FROM conversation WHERE id = ?1",
+                    [&conversation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap(),
+            state_before,
+            "history must not mutate the Conversation or its public watermark"
+        );
+    }
+
+    #[test]
+    fn single_chat_skill_filter_uses_official_bundled_source_identity() {
+        let (database, _) = fixture();
+        let insert_skill = |database: &Database,
+                            skill_id: &str,
+                            revision_id: &str,
+                            skill_name: &str,
+                            revision_name: &str,
+                            origin: &str,
+                            source_type: &str,
+                            bundled: bool| {
+            database
+                .connection()
+                .execute(
+                    "INSERT INTO skill(id, name, origin, enabled, lifecycle_status, current_revision_id, version, created_at, updated_at) VALUES (?1, ?2, ?3, 1, 'active', NULL, 1, '2026-09-04', '2026-09-04')",
+                    params![skill_id, skill_name, origin],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "INSERT INTO skill_revision(id, skill_id, revision, name, description, source_type, source_metadata_json, content_digest, risk_summary_json, file_count, total_bytes, installed_at) VALUES (?1, ?2, 1, ?3, 'test', ?4, ?5, ?6, '{\"executableFileCount\":0,\"scriptFileCount\":0,\"binaryCandidateCount\":0,\"declaredTools\":[]}', 1, 1, '2026-09-04')",
+                    params![
+                        revision_id,
+                        skill_id,
+                        revision_name,
+                        source_type,
+                        serde_json::to_string(&json!({"bundled": bundled})).unwrap(),
+                        format!("sha256:{skill_id}"),
+                    ],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE skill SET current_revision_id = ?2 WHERE id = ?1",
+                    params![skill_id, revision_id],
+                )
+                .unwrap();
+        };
+        insert_skill(
+            &database,
+            "skill-cli",
+            "revision-cli",
+            "cli-operations",
+            "cli-operations",
+            "official",
+            "bundled",
+            true,
+        );
+        insert_skill(
+            &database,
+            "skill-memory",
+            "revision-memory",
+            "memory-stewardship",
+            "memory-stewardship",
+            "official",
+            "bundled",
+            true,
+        );
+        insert_skill(
+            &database,
+            "skill-retained",
+            "revision-retained",
+            "analyze-agent-codebase",
+            "analyze-agent-codebase",
+            "official",
+            "bundled",
+            true,
+        );
+        insert_skill(
+            &database,
+            "skill-lookalike",
+            "revision-lookalike",
+            "imported-cli-lookalike",
+            "cli-operations",
+            "imported",
+            "local_folder",
+            false,
+        );
+        let entry = |skill_id: &str, name: &str, revision_id: &str| SkillExposureEntry {
+            skill_id: skill_id.to_string(),
+            name: name.to_string(),
+            revision_id: revision_id.to_string(),
+            content_digest: format!("sha256:{skill_id}"),
+            group_key: "codex".to_string(),
+            delivered_via_group_key: Some("codex".to_string()),
+            status: "ready".to_string(),
+            entry_path: Some(format!("/workspace/.codex/skills/{name}")),
+            reason_code: None,
+            conflict_statuses: Vec::new(),
+        };
+        let snapshot = SkillExposureSnapshot {
+            schema_version: 2,
+            skills: vec![
+                entry("skill-cli", "exposure-label-cli", "revision-cli"),
+                entry("skill-memory", "exposure-label-memory", "revision-memory"),
+                entry(
+                    "skill-retained",
+                    "analyze-agent-codebase",
+                    "revision-retained",
+                ),
+                entry("skill-lookalike", "cli-operations", "revision-lookalike"),
+            ],
+        };
+        let exposure = PreparedSkillExposure {
+            digest: canonical_json_digest(&serde_json::to_value(&snapshot).unwrap()).unwrap(),
+            snapshot,
+        };
+        let filtered = filter_single_chat_skill_exposure(&database, exposure).unwrap();
+        assert_eq!(
+            filtered
+                .snapshot
+                .skills
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>(),
+            ["analyze-agent-codebase", "cli-operations"]
+        );
+        assert_eq!(
+            filtered.digest,
+            canonical_json_digest(&serde_json::to_value(&filtered.snapshot).unwrap()).unwrap()
+        );
     }
 }

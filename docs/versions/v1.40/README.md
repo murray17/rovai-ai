@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
 model_context_change: true
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Rovai-ai v1.40：Camp 内单聊与私有回复路由
@@ -36,8 +36,11 @@ implementation-ready = yes
 - `singleChat.send` 在一个事务内写用户 `conversation_message`、`CampTurn(kind=single_chat)` 和唯一
   `AgentRun(invocation_kind=single_chat)`，同时冻结私有输出路由和 `single_chat_v1` Built-in 策略。同一段
   Conversation 只允许一个非终态回复，不增加 Camp 全局回复槽。
-- Single Chat 使用专用 Session Charter 和每轮 Guidance。新增公共消息只在下一次用户发送时按该私有
-  Conversation 的 accepted watermark 增量投递，并包含目标队员自己的公屏消息；ACK 不推进普通成员会话水位。
+- Single Chat Bootstrap 只投递专用 Charter 与 Member Identity，不读取或渲染 Memory Entrypoint。Dynamic Context 保持
+  固定顺序；新增公共消息只在下一次发送时按私有 watermark 增量投递，并包含目标队员自己的公屏消息。
+- `single_chat_v1` 只允许当前 Camp search/read 与 `single_chat.history`。历史操作从当前有效 Run 推导 Conversation，
+  只读 `CURRENT_INPUT` 之前的单聊正文；Task/Memory 和其他 Rovai operation 均不可用。既有 Skill/MCP exposure 保持，
+  仅按 official bundled source identity 过滤 `cli-operations` 与 `memory-stewardship`。
 - Runtime final 成功时只追加一条 agent `conversation_message`，不创建 CampMessage、不运行 Missing-Send
   Recovery、不投递外部 Channel。流式和执行证据按 Conversation、Run 与 execution epoch 精确归属。
 - App/Core/Runtime Host 重启时，非终态 Single Chat Run 沿用既有取消结算并按普通取消呈现，不展示重启原因；
@@ -66,10 +69,10 @@ implementation-ready = yes
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.39 冻结为 historical；本概览、决定、实施计划与版本索引建立唯一 current v1.40 |
 | Decisions | 已更新 | [V1.40-D01](decisions.md#v1-40-d01)固定复用现有执行体系与封闭私有路由；[V1.40-D02](decisions.md#v1-40-d02)固定取消、结束和 successor 并发语义 |
-| Contracts | 已更新 | [Single Chat v1](../../contracts/single-chat-v1.md)拥有领域、命令、策略、上下文、终态路由和迟到事件合同 |
+| Contracts | 已更新 | [Single Chat v1](../../contracts/single-chat-v1.md)拥有领域、命令、策略、上下文、终态路由和迟到事件合同；[Built-in Tool Transport v22](../../contracts/builtin-tool-transport-v22.md)拥有新增 history operation 与 CLI transport |
 | Architecture | 已更新 | [Single Chat Architecture](../../architecture/single-chat.md)拥有 Core、Runtime、Context 与 Renderer 数据流；[AgentRun Recovery](../../architecture/agent-run-recovery.md)排除 Single Chat 的专用恢复推断 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#camp-内单聊)拥有对象选择、左右消息、执行折叠、停止和结束确认 |
 | Runtime Activity | 确认无需更新 | Single Chat 复用现有 AgentRun Execution Evidence 和分组语义，不增加 Canonical Activity 类型或映射 |
-| Runtime compatibility | 确认无需更新 | 不改变 Runtime 准入、版本、模型、Provider delegation 或工具兼容性承诺 |
+| Runtime compatibility | 确认无需更新 | v22 只扩展 Core/CLI catalog；不改变 Runtime 准入、Provider delegation、模型或外部工具兼容性承诺 |
 | Documentation routing | 已更新 | 文档导航、Architecture/Contract/UI 索引和当前决定导航均增加 Single Chat 当前入口 |
 | Root README | 确认无需更新 | 项目定位、安装方式和稳定公开能力清单不因当前版本局部功能改变 |

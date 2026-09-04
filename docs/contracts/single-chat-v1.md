@@ -5,7 +5,7 @@ authority: single-chat-domain-context-operation-and-output-routing
 status: accepted
 version: 1
 source_version: v1.40
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Single Chat v1
@@ -93,6 +93,7 @@ single_chat.runtime_not_ready
 single_chat.reply_in_progress
 single_chat.operation_denied
 single_chat.cross_camp_denied
+single_chat.history_unavailable
 ```
 
 ## 4. 冻结路由与 Built-in policy
@@ -115,17 +116,21 @@ CLI 参数或 terminal payload 都不能覆盖冻结路由。
 ```text
 camp.search       current Camp only
 camp.read         current Camp only
-team.get_task     read only
-team.list_tasks   read only
-memory.view       authorized read only
-memory.search     authorized read only
-memory.read       authorized read only
+single_chat.history current active Single Chat only
 ```
 
 所有其他 Rovai Built-in operation 一律返回 `single_chat.operation_denied`，包括 `rovai send`、Gather、Rovai A2A、
-Member mutation/scheduling、Task create/update、Memory write、History 和未列出的未来 operation。`camp.search/read`
+Member mutation/scheduling、Task read/create/update、全部 Memory operation、跨 Camp History 和未列出的未来 operation。`camp.search/read`
 的 Camp 参数必须等于冻结当前 Camp，否则返回 `single_chat.cross_camp_denied`。Router 在输入 schema 验证后、以及已认证
 Native Binding 的通用 operation 执行边界都重新检查策略；Prompt 不是授权边界。
+
+`single_chat.history` 对应 `rovai single-chat history`，输入只接受 optional exclusive `beforeSequence` 和 optional
+`limit`；limit 默认 20、最大 50，不接受 `conversationId/campId/agentId`。Core 从已认证当前 Run 的
+`destination_conversation_id` 推导目标，并要求该 Run 仍为当前有效 `single_chat_v1` 执行、destination 仍为 active
+Single Chat。默认边界为当前触发 user message 的 sequence；显式更大值仍 clamp 到该 sequence。结果只包含当前输入前的
+`sequence/role/body`，按 sequence 正序排列，并用 `hasMore/nextBeforeSequence` 向更早正文分页。该读取不返回 Run、Turn、
+Binding 或 Evidence，不写 Conversation、不推进公共水位，也不创建 Message。非 Single Chat 或失效目标返回
+`single_chat.history_unavailable`。
 
 ## 5. Context 与公共水位
 
@@ -134,8 +139,11 @@ Single Chat Native Session Bootstrap 固定为：
 ```text
 [SESSION_CHARTER]    Single Chat Charter；不得拼接普通 CLI Charter
 [MEMBER_IDENTITY]
-[MEMORY_ENTRYPOINT]
 ```
+
+Single Chat Bootstrap 不调用 Memory Entrypoint builder；`observed_memory_revisions=[]`，不写
+`memory_access_evidence`。现有 evidence 字段仍保存空 payload 及其 digest，但 formatter 不渲染空
+`[MEMORY_ENTRYPOINT]` section。普通 Camp Bootstrap 继续包含 Memory Entrypoint。
 
 每轮 Dynamic Context 固定顺序为：
 
@@ -147,7 +155,14 @@ Single Chat Native Session Bootstrap 固定为：
 [CURRENT_INPUT]        required and last
 ```
 
-不得投影 `[SELF_ACTIVE_TASKS]`、`[A2A_GUIDANCE]`、普通 Member Skills 或 Member-assigned MCP。
+不得投影 `[SELF_ACTIVE_TASKS]` 或 `[A2A_GUIDANCE]`。现有 Member Skill exposure 与 MCP projection 继续沿用；仅在
+Single Chat Skill exposure 写入 ContextManifest、交给 Runtime Adapter 之前，按 official bundled source identity 排除
+`cli-operations` 和 `memory-stewardship`。不得按 exposure 显示名、描述或数据库生成 ID 判断；ContextManifest 与 Runtime
+实际接收的 exposure 必须是同一份过滤后 snapshot/digest。其他 Member Skills 与 MCP 不作 Single Chat 特化。
+
+Dynamic Context 不增加 `sessionContinuity`、continuity-lost、replacement Session、`privateHistoryAvailable`、Native
+Binding 或 Native Session 恢复原因，也不自动重放 transcript。每个有效 Single Chat Run 都可使用
+`single_chat.history`；只有当前问题依赖且当前上下文缺少此前单聊内容时，模型才按需读取。
 
 每次 send 冻结 `previousBoundary = conversation.lastAcceptedPublicBoundarySequence` 与当时 Camp public boundary；
 `SHARED_CONVERSATION` 只从 `(previousBoundary, currentBoundary]` 选择有权读取且未 tombstone 的公共消息，并继续遵守
