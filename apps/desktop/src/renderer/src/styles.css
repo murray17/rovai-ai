@@ -2835,7 +2835,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   max-width: 100%;
   padding: 9px 12px 10px;
   border: 1px solid var(--conversation-user-message-line);
-  border-radius: 12px 12px 4px 12px;
+  border-radius: 12px;
   background: var(--conversation-user-message-surface);
   text-align: left;
 }
