@@ -14,13 +14,17 @@ import {
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
 const previewOnly = process.argv.includes('--preview')
-const fixtureRoot = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_FIXTURE_ROOT
-  ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-accept-'))
+const fixtureRoot = await realpath(
+  process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_FIXTURE_ROOT
+    ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-accept-'))
+)
 const dataDir = join(fixtureRoot, 'user-data')
 const runtimeTempDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RUNTIME_TMP
   ?? tmpdir()
-const outputDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_OUTPUT_DIR
-  ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-captures-'))
+const outputDir = await realpath(
+  process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_OUTPUT_DIR
+    ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-captures-'))
+)
 const recoveryBlockerOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RECOVERY_BLOCKER_ONLY === '1'
 const conversationDropZoneOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DROP_ZONE_ONLY === '1'
 const worldMapOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_WORLD_MAP_ONLY === '1'
@@ -132,6 +136,16 @@ const runtimes = [
 
 await mkdir(dataDir, { recursive: true })
 seedCompletedOnboardingForAcceptance(dataDir)
+await writeFile(join(dataDir, 'general-preferences.json'), `${JSON.stringify({
+  schemaVersion: 4,
+  startupLocationMode: 'last_location',
+  lastSettingsSection: 'general',
+  executionConsolePlacement: 'inspector',
+  newConversationDefaults: null,
+  newConversationDefaultsRequireConfirmation: false,
+  oneClickNewConversationEnabled: false,
+  worldMapEnabled: true
+}, null, 2)}\n`, { mode: 0o600 })
 await mkdir(outputDir, { recursive: true })
 await mkdir(fixtureExecutionRoot, { recursive: true })
 await mkdir(join(directoryAttachmentSource, 'docs', 'empty'), { recursive: true })
@@ -254,12 +268,17 @@ try {
     `Agent messages did not share one conversation surface: ${JSON.stringify(conversationPresentation)}`)
   assert(conversationPresentation.copyButtonPlacements.length === runtimes.length
     && conversationPresentation.copyButtonPlacements.every((placement) =>
-      placement.position === 'static'
+      placement.actionRowPosition === 'static'
         && placement.insideActionRow
-        && placement.iconOnly
+        && placement.copyIconOnly
+        && placement.replyIconOnly
+        && placement.replyAccessibleName === '回复这条消息'
+        && placement.copyAccessibleName === '复制这条消息'
+        && placement.messageTurnReplyIcon
         && placement.belowContent
-        && Math.abs(placement.rightOffset) <= 0.75),
-  `Message copy buttons did not share one bottom-right icon action row: ${JSON.stringify(conversationPresentation.copyButtonPlacements)}`)
+        && placement.belowFooter
+        && Math.abs(placement.actionLeftOffset) <= 0.75),
+  `Agent message actions did not share one bottom-left icon row after the complete output: ${JSON.stringify(conversationPresentation.copyButtonPlacements)}`)
   assert(conversationPresentation.dayLabels.length > 0
     && conversationPresentation.dayLabels.every((label) => /^\d{4}年\d{1,2}月\d{1,2}日$/.test(label))
     && conversationPresentation.dayLabels.every((label) => !label.includes('今天') && !label.includes('发布准备')),
@@ -336,10 +355,17 @@ try {
   }
 
   await evaluate(app.cdp, `(() => {
-    const copyButton = document.querySelector('.message-surface.has-delivery .message-copy-button')
+    const copyButton = document.querySelector('.message-delivery-footer + .message-actions .message-copy-button')
     copyButton?.focus({ preventScroll: true })
     return document.activeElement === copyButton
   })()`)
+  await evaluate(app.cdp, `document.querySelector(
+    '.message-delivery-footer + .message-actions .message-copy-button'
+  )?.click()`)
+  clipboardTouched = true
+  await waitForExpression(app.cdp, `document.querySelector(
+    '.message-delivery-footer + .message-actions .copy-feedback'
+  )?.textContent === '已复制'`)
   await wait(250)
   const handoffFooter = await collectHandoffFooter(app.cdp)
   assert(handoffFooter.count === 1,
@@ -365,15 +391,18 @@ try {
     `Recipient-only footer geometry mismatch: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.contentGap >= 0 && handoffFooter.contentGap <= 4,
     `Recipient-only footer must stay visually attached to the message: ${JSON.stringify(handoffFooter)}`)
-  assert(handoffFooter.surfaceReserve >= 28
-    && handoffFooter.copyButtonPosition === 'static'
+  assert(handoffFooter.actionRowPosition === 'static'
     && handoffFooter.copyButtonInsideActionRow
-    && handoffFooter.copyButtonIconOnly,
-    `Message actions must occupy the dedicated bottom row: ${JSON.stringify(handoffFooter)}`)
+    && handoffFooter.copyButtonIconOnly
+    && handoffFooter.replyButtonIconOnly
+    && handoffFooter.messageTurnReplyIcon
+    && handoffFooter.copyFeedbackText === '已复制'
+    && handoffFooter.copyFeedbackOpacity === '1',
+    `Message actions must occupy the dedicated bottom-left row: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.copyButtonFocused && handoffFooter.copyButtonOpacity === '1'
     && handoffFooter.messageBodyFocusWithin
-    && Math.abs(handoffFooter.copyButtonRightOffset) <= 0.75
-    && handoffFooter.copyButtonFooterGap >= 0,
+    && Math.abs(handoffFooter.actionLeftOffset) <= 0.75
+    && handoffFooter.footerToActionGap >= 0,
     `Focused copy affordance must stay visible without covering recipients: ${JSON.stringify(handoffFooter)}`)
   await evaluate(app.cdp, `document.activeElement?.blur()`)
 
@@ -1455,16 +1484,23 @@ async function collectHandoffFooter(cdp) {
     const rail = footer?.querySelector('.message-delivery-handoff-rail')
     const messageSurface = footer?.previousElementSibling
     const messageBody = footer?.closest('.message-body')
+    const actionRow = footer?.nextElementSibling?.classList.contains('message-actions')
+      ? footer.nextElementSibling
+      : null
     const messageContent = messageSurface?.querySelector(':scope > .final-copy, :scope > .message-bubble')
-    const copyButton = messageSurface?.querySelector('.message-copy-button')
+    const copyButton = actionRow?.querySelector('.message-copy-button')
+    const replyButton = actionRow?.querySelector('.message-reply-button')
+    const copyFeedback = actionRow?.querySelector('.copy-feedback')
     const footerStyle = footer ? getComputedStyle(footer) : null
     const railStyle = rail ? getComputedStyle(rail) : null
+    const actionRowStyle = actionRow ? getComputedStyle(actionRow) : null
     const copyButtonStyle = copyButton ? getComputedStyle(copyButton) : null
+    const copyFeedbackStyle = copyFeedback ? getComputedStyle(copyFeedback) : null
     const footerRect = footer?.getBoundingClientRect()
     const surfaceRect = messageSurface?.getBoundingClientRect()
     const bodyRect = messageBody?.getBoundingClientRect()
     const contentRect = messageContent?.getBoundingClientRect()
-    const copyButtonRect = copyButton?.getBoundingClientRect()
+    const actionRowRect = actionRow?.getBoundingClientRect()
     const recipientMentions = [...(footer?.querySelectorAll('.message-delivery-recipient-name') ?? [])]
       .map((mention) => ({
         text: mention.textContent?.trim() ?? '',
@@ -1481,17 +1517,21 @@ async function collectHandoffFooter(cdp) {
       railBorderLeftWidth: railStyle?.borderLeftWidth ?? null,
       railBorderBottomWidth: railStyle?.borderBottomWidth ?? null,
       contentGap: footerRect && surfaceRect ? footerRect.top - surfaceRect.bottom : null,
-      surfaceReserve: surfaceRect && contentRect ? surfaceRect.bottom - contentRect.bottom : null,
-      copyButtonPosition: copyButtonStyle?.position ?? null,
+      contentReserve: surfaceRect && contentRect ? surfaceRect.bottom - contentRect.bottom : null,
+      actionRowPosition: actionRowStyle?.position ?? null,
       copyButtonOpacity: copyButtonStyle?.opacity ?? null,
       copyButtonFocused: document.activeElement === copyButton,
       copyButtonInsideActionRow: copyButton?.parentElement?.classList.contains('message-actions') ?? false,
       copyButtonIconOnly: Boolean(copyButton?.querySelector('svg')) && !(copyButton?.textContent ?? '').trim(),
+      replyButtonIconOnly: Boolean(replyButton?.querySelector('svg')) && !(replyButton?.textContent ?? '').trim(),
+      messageTurnReplyIcon: Boolean(replyButton?.querySelector('path[d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"]')),
+      copyFeedbackText: copyFeedback?.textContent ?? '',
+      copyFeedbackOpacity: copyFeedbackStyle?.opacity ?? null,
       surfaceFocusWithin: messageSurface?.matches(':focus-within') ?? false,
       messageBodyFocusWithin: messageBody?.matches(':focus-within') ?? false,
       documentHasFocus: document.hasFocus(),
-      copyButtonRightOffset: copyButtonRect && bodyRect ? bodyRect.right - copyButtonRect.right : null,
-      copyButtonFooterGap: copyButtonRect && footerRect ? footerRect.top - copyButtonRect.bottom : null,
+      actionLeftOffset: actionRowRect && bodyRect ? actionRowRect.left - bodyRect.left : null,
+      footerToActionGap: actionRowRect && footerRect ? actionRowRect.top - footerRect.bottom : null,
       recipientMentions,
       stateLabelCount: footer?.querySelectorAll('.message-delivery-state').length ?? 0,
       legacyOriginCount: document.querySelectorAll('.message-run-origin').length,
@@ -1596,16 +1636,25 @@ async function collectConversationPresentation(cdp) {
         const body = article.querySelector('.message-body')
         const surface = article.querySelector('.message-surface')
         const content = surface?.querySelector(':scope > .final-copy, :scope > .message-bubble')
-        const button = article.querySelector('.message-copy-button')
+        const footer = article.querySelector('.message-delivery-footer')
+        const actionRow = article.querySelector('.message-actions')
+        const copyButton = actionRow?.querySelector('.message-copy-button')
+        const replyButton = actionRow?.querySelector('.message-reply-button')
         const bodyRect = body?.getBoundingClientRect()
         const contentRect = content?.getBoundingClientRect()
-        const buttonRect = button?.getBoundingClientRect()
+        const footerRect = footer?.getBoundingClientRect()
+        const actionRowRect = actionRow?.getBoundingClientRect()
         return {
-          position: button ? getComputedStyle(button).position : null,
-          insideActionRow: button?.parentElement?.classList.contains('message-actions') ?? false,
-          iconOnly: Boolean(button?.querySelector('svg')) && !(button?.textContent ?? '').trim(),
-          belowContent: Boolean(contentRect && buttonRect && buttonRect.top >= contentRect.bottom),
-          rightOffset: bodyRect && buttonRect ? bodyRect.right - buttonRect.right : null
+          actionRowPosition: actionRow ? getComputedStyle(actionRow).position : null,
+          insideActionRow: copyButton?.parentElement === actionRow,
+          copyIconOnly: Boolean(copyButton?.querySelector('svg')) && !(copyButton?.textContent ?? '').trim(),
+          replyIconOnly: Boolean(replyButton?.querySelector('svg')) && !(replyButton?.textContent ?? '').trim(),
+          replyAccessibleName: replyButton?.getAttribute('aria-label') ?? null,
+          copyAccessibleName: copyButton?.getAttribute('aria-label') ?? null,
+          messageTurnReplyIcon: Boolean(replyButton?.querySelector('path[d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"]')),
+          belowContent: Boolean(contentRect && actionRowRect && actionRowRect.top >= contentRect.bottom),
+          belowFooter: !footerRect || Boolean(actionRowRect && actionRowRect.top >= footerRect.bottom),
+          actionLeftOffset: bodyRect && actionRowRect ? actionRowRect.left - bodyRect.left : null
         }
       }),
       dayLabels: [...document.querySelectorAll('.timeline-day')]
@@ -4362,6 +4411,9 @@ async function launchApp(port, width, height) {
   const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   const stderr = []
   const child = spawn(executable, [
+    ...(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DISABLE_SANDBOX === '1'
+      ? ['--no-sandbox']
+      : []),
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${dataDir}`
   ], {

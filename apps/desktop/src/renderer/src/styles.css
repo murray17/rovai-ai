@@ -2733,6 +2733,18 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 }
 .conversation-bubble:has(+ .conversation-bubble.same-author) { margin-bottom: 8px; }
 .conversation-bubble.same-author { margin-top: 8px; }
+.agent-message-output {
+  position: relative;
+  display: flow-root;
+  width: 100%;
+  margin: 14px 0;
+}
+.agent-message-output > .timeline-node { margin-top: 0; margin-bottom: 0; }
+.agent-message-output > .run-file-changes-card { margin-top: 14px; }
+.agent-message-output.same-author { margin-top: 8px; }
+.conversation-bubble:has(+ .agent-message-output.same-author),
+.agent-message-output:has(+ .conversation-bubble.same-author),
+.agent-message-output:has(+ .agent-message-output.same-author) { margin-bottom: 8px; }
 .conversation-bubble:is(.user, .external_principal) {
   margin-left: auto;
   grid-template-columns: minmax(0, 1fr) 32px;
@@ -3190,8 +3202,23 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   transform: translateY(-2px);
   transition: opacity 120ms ease, transform 120ms ease;
 }
+.conversation-bubble.agent .message-actions {
+  width: fit-content;
+  align-self: flex-start;
+  justify-content: flex-start;
+}
+.agent-message-output > .agent-message-output-actions {
+  width: fit-content;
+  align-self: auto;
+  justify-content: flex-start;
+  margin: 3px 0 0 42px;
+}
+.conversation-bubble.agent .message-actions .copy-feedback,
+.agent-message-output > .agent-message-output-actions .copy-feedback { order: 3; }
 .conversation-bubble:hover .message-actions,
-.conversation-bubble:focus-within .message-actions {
+.conversation-bubble:focus-within .message-actions,
+.agent-message-output:hover > .message-actions,
+.agent-message-output:focus-within > .message-actions {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
@@ -3215,10 +3242,10 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 }
 .message-copy-button svg,
 .message-reply-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
-.message-reply-button .message-reply-dot { fill: currentColor; stroke: none; }
 .message-copy-button:hover,
 .message-reply-button:hover { border-color: var(--line); color: var(--brand-ink); background: var(--surface-hover); }
-.message-surface.copied .message-copy-button { color: var(--success); background: var(--success-soft); }
+.message-surface.copied .message-copy-button,
+.message-actions.copied .message-copy-button { color: var(--success); background: var(--success-soft); }
 .message-copy-button:focus-visible,
 .message-reply-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 @media (hover: none), (pointer: coarse) {
@@ -3241,7 +3268,8 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   transition: opacity 120ms ease, transform 120ms ease;
 }
 .copy-feedback:empty { display: none; }
-.message-surface.copied .copy-feedback { opacity: 1; transform: translateY(0); }
+.message-surface.copied .copy-feedback,
+.message-actions.copied .copy-feedback { opacity: 1; transform: translateY(0); }
 .message-long-copy { min-width: 0; }
 .message-long-toggle {
   display: inline-flex;
@@ -8092,6 +8120,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .timeline-scroll { padding-right: 12px; padding-left: 12px; }
   .task-event-card,
   .run-file-changes-card { width: 100%; margin-left: 0; }
+  .agent-message-output > .agent-message-output-actions { margin-left: 0; }
   .task-event-card { grid-template-columns: 26px minmax(0, 1fr); gap: 8px; padding: 10px; }
   .task-card-glyph { width: 26px; height: 26px; border-radius: 7px; }
   .task-card-glyph svg { width: 17px; height: 17px; }
