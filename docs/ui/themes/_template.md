@@ -2,7 +2,7 @@
 document_type: ui-theme-template
 authority: renderer-theme-process
 status: template
-last_updated: 2026-08-13
+last_updated: 2026-09-03
 ---
 
 # Theme display name
@@ -33,6 +33,7 @@ Describe Canvas, surface, raised/input, conversation, Inspector and rail levels.
 
 Provide every canonical theme token: surfaces, text, structure, brand, mention, supporting accents,
 semantic states and contrasts, focus, overlay/shadow, eight identity colors, evidence/diff and lightbox.
+Include all ten Agent artifact-family colors; they identify file formats and must remain separate from semantic state and identity.
 
 ## Brand, semantic, identity, and evidence color rules
 
@@ -40,7 +41,7 @@ Explain their separation and any theme-specific accessibility constraint.
 
 ## Contrast requirements
 
-Record measured WCAG 2.2 AA results for text, controls, focus, semantic labels and all identity colors
+Record measured WCAG 2.2 AA results for text, controls, focus, semantic labels, all identity colors and artifact-family icons
 on their actual surfaces.
 
 ## Prohibited substitutions

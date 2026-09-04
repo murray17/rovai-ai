@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-09-01
+last_updated: 2026-09-04
 ---
 
 # Steel Night
@@ -122,11 +122,26 @@ Dark. `color-scheme: dark`.
 | `--identity-3` | `#a89ac8` | `--identity-7` | `#89a878` |
 | `--identity-4` | `#d0a46c` | `--identity-8` | `#b58b68` |
 
+### Agent artifact families
+
+Night 为相同十个格式家族提供独立亮度值；它们只表达文件类别，不复用状态色或成员身份色。
+
+| Token | Value | Token | Value |
+|---|---:|---|---:|
+| `--attachment-web` | `#d0a46c` | `--attachment-code` | `#8fadc0` |
+| `--attachment-notes` | `#abb5bc` | `--attachment-pdf` | `#dc8b85` |
+| `--attachment-word` | `#80abd1` | `--attachment-sheet` | `#82b695` |
+| `--attachment-slide` | `#d2aa72` | `--attachment-image` | `#aa9bc6` |
+| `--attachment-archive` | `#bea773` | `--attachment-generic` | `#abb5bc` |
+
 ### Evidence and diff
 
 | Token | Value |
 |---|---:|
 | `--inline-code-canvas` | `#353b3f` |
+| `--conversation-inline-code-canvas` | `#30373b` |
+| `--conversation-code-block-canvas` | `#252c30` |
+| `--conversation-code-line` | `#3e494f` |
 | `--shell-result-canvas` | `#373f43` |
 | `--code-block-canvas` | `#1d252b` |
 | `--evidence-canvas` | `#12191d` |
@@ -176,6 +191,9 @@ they do not become statuses. Evidence and diffs remain neutral and structurally 
 inline code uses the borderless `--inline-code-canvas`; Shell command results use
 `--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence border,
 while other evidence surfaces continue to use `--evidence-canvas`.
+Camp message prose uses the dedicated `--conversation-inline-code-canvas`,
+`--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer; file previews,
+release notes and Runtime process copy keep the shared defaults.
 
 ## Contrast requirements
 

@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.39
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # v1.39 实施与验收
@@ -27,17 +27,25 @@ last_updated: 2026-09-03
 - [x] `ManagedSystemPrompt` 与 revision 1 收据；完整 session locator 只在 Core 私有状态，公开面仅有不可逆 digest。
 - [x] Shell Approval 使用 Pi 实际 shell path/args/transport；read/write/edit/bash 与未知 mutation fail-closed。
 - [x] `.pi/skills` delivery group；managed extension 每 Session 重新发现并验证 exact Skill catalog。
-- [x] External MCP `AdditivePerRun / RovaiWins / CoreManaged`；Core-owned stdio/Streamable HTTP transport、取消和清理。
+- [x] External MCP `AdditivePerRun / RovaiWins / CoreManaged`；Core-owned stdio/Streamable HTTP transport、取消和清理；
+  bare/relative/absolute stdio command 每轮按 Runtime PATH/cwd 解析且不写回配置，单个用户 Server 激活失败只降级该
+  Server，不阻断 Pi Session/AgentRun；Ready Server 以独立 60 秒 activation budget 并发启动，超时显式回收，结果按
+  projection index 稳定合并。
+- [x] ACP Client Terminal 使用单一 derived-child API，在 request 最终 cwd/env 生效后解析 bare/relative command；
+  Windows 派生 `.cmd/.bat` 继续进入 CommandShim identity 与原子 Job 链。
 - [x] `agent_settled` 唯一成功终点、assistant snapshot 去重、Missing-Send gate、Cancellation Settlement v2 与迟到
   epoch/binding fence。
 - [x] Activity v2、terminal write/edit path、Pi assistant model-call Usage、稀疏 cache/cost 与 source digest 去重。
-- [x] 三 shipped platform 均显式 NotQualified；release build 忽略本地 qualification override。
+- [x] 三 shipped platform 均显式 `preview`：开放 discovery、检查、队员选择、Diagnostics 与 AgentRun 供主动测试，
+  同时保留 `qualification_evidence_missing`、空 evidence revision 和实验性 UI disclosure；release 不使用本地 override。
 - [x] 活动 Tool 组在底部执行台、Inspector 与局域网只读执行台优先展示已有公开证据中的具体当前指令；
   稳定 Tool 行、渠道卡片、Activity 分类及文件/Web typed Evidence 边界保持不变。
 - [x] 消息完整 inline-code 文件候选通过 Core 来源与 Main `realpath + stat` 证明为现存普通文件后才生成链接；共享资源
   类型定义统一 inline-code 已知类型、会话链接与普通文件 Tab 图标，Main classifier 与不支持类型的系统打开路径不变。
 - [x] 不存在通用偏好文件的新 profile 默认关闭世界地图；schema v4 保存值原样保留，schema v1–v3 继续迁移为开启，
   设置页未完成加载时也不短暂显示为开启。
+- [x] Renderer 附件展示统一：集中分类、Composer 48px 单排、用户 72px 图片与 46px 文件、Agent 正文后图片区和
+  两列文件区；Runtime 图片并入来源消息，两个主题共用组件树并提供十类 artifact token。
 
 ## 已取得的本机证据
 
@@ -56,7 +64,8 @@ last_updated: 2026-09-03
   多 Tool 后 final。
 - [x] Pi 0.84.4 当前 Built-in CLI 15-operation full Run 与 resumed/new-lease Run。
 - [x] deterministic tests：A→B→A exact switch、并发独立 Host、receipt 全字段/nonce mismatch、协议重放/迟到、
-  stdio/HTTP MCP bridge、Usage dedupe、Unknown mutation、cleanup 和 platform matrix。
+  stdio/HTTP MCP bridge、portable/derived command、并发 MCP activation、activation timeout process-tree reap、单 Server
+  unavailable 后其余 Server 继续、Usage dedupe、Unknown mutation、cleanup 和 platform matrix。
 - [x] Migration 135 专项：无 receipt acceptance 拒绝、错 binding 拒绝、合法原子接受、receipt 不可直接改删、父
   Delivery 与 Camp 永久删除可合法 cascade、FK=0，reopen 只保留一条 migration marker。
 
@@ -68,8 +77,8 @@ last_updated: 2026-09-03
 - [ ] macOS arm64 通过后生成 Pi 专属 immutable qualification artifact，并单独审查是否晋升该平台。
 - [ ] 在真实 macOS x64 与 Windows x64 分别重复完整矩阵；Windows 额外验证 npm `.cmd/.bat` locator、System32
   interpreter、resolved target、fingerprint 与执行期 identity。
-- [ ] 只有精确平台证据完成后才把对应 Pi Admission 行改为 `qualified`；不得从本机 debug smoke 或其他 Runtime
-  evidence 外推。
+- [ ] 只有精确平台证据完成后才把对应 Pi Admission 从 `preview` 改为 `qualified`；不得从本机 smoke 或其他 Runtime
+  evidence 外推，Preview 的可运行性也不替代该证据。
 
 ## 必跑命令
 
@@ -124,3 +133,29 @@ DOCS_BASE_REF=aae13734669c363e7b307a6407e6868eda1e6b8e pnpm docs:check:ci
 - `pnpm docs:test`、`pnpm docs:check`、
   `DOCS_BASE_REF=c6098169943471bacead4ab04cc1bbce24394ff3 pnpm docs:check:ci`：通过；
 - Impeccable changed-target detector：无发现。
+
+## Pi 三平台实验性开放验证（2026-09-03）
+
+- Runtime Platform Admission 矩阵断言 Pi 在 macOS arm64、macOS x64、Windows x64 均为 `preview`，
+  `allows_runtime_use=true`、`is_qualified=false`、`evidenceRevision=null`；Cursor 继续被阻断。
+- Core 定向测试证明 Pi 进入 discovery/Diagnostics/Dispatch 且没有平台 blocker；Renderer 182 项定向测试证明
+  Runtime 检查、队员 selector 与 onboarding 接受 Preview，并显示实验性 disclosure。
+- `pnpm check:rust`、Rust lib 484 项、CLI 32 项、Core 208 项通过，5 项 manual Runtime smoke 按设计忽略；
+  `pnpm typecheck` 通过。
+- `pnpm test`：140 个 Vitest 文件、1477 项测试通过，后续 Node suites 220 项通过、1 项 Windows-only skip；
+  `pnpm build:desktop` 通过。
+- `pnpm docs:test`、`pnpm docs:check` 与
+  `DOCS_BASE_REF=5cfbce5ff8d734fb84b46fddacd91d011898cf85 pnpm docs:check:ci` 通过；Impeccable
+  changed-target detector 无发现。
+
+## 附件分区展示验证（2026-09-03）
+
+- `pnpm typecheck`：通过；
+- `pnpm test`：141 个 Vitest 文件、1490 项测试通过，后续 Node suites 220 项通过、1 项平台条件跳过；
+- `pnpm build:desktop`：Main、Preload 与 Renderer production build 通过；
+- production `runtime-image-gallery` fixture：Day/Night、1040/1440/2560 三档窗口、Agent 原比例图片区、
+  用户 72px 方形预览、键盘焦点与 Lightbox 验证通过；
+- production `camp-open-projection` fixture：用户/Agent/Composer 三种附件样式、Agent 十类文件、
+  560px 阈值下两列/一列切换、48px 单排滚动、方向键/Home/End、鼠标滚轮横移及无页面横向溢出验证通过；
+- `pnpm docs:test`、`pnpm docs:check`、
+  `DOCS_BASE_REF=5cfbce5ff8d734fb84b46fddacd91d011898cf85 pnpm docs:check:ci`：通过。

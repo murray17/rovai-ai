@@ -592,7 +592,6 @@ function startCore(dataDirectory, piAgentDir = null) {
       ...(selected.has('pi')
         ? {
             ...(piAgentDir ? { PI_CODING_AGENT_DIR: piAgentDir } : {}),
-            ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
           }
         : {})
     },

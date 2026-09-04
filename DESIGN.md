@@ -153,9 +153,10 @@ only boundary of an input or control.
   accent. Semantic danger or attention may replace the accent when meaning requires it.
 - **Evidence:** uses the dedicated evidence and diff tokens, monospaced type where appropriate, and
   structural `+`/`-`, line numbers or labels in addition to color.
-- **Code:** narrative inline code uses its dedicated quiet canvas with `0 2px` padding and a `3px`
-  radius; fenced code uses the matching block canvas with an evidence border, while other bounded
-  evidence surfaces keep the stronger evidence canvas.
+- **Code:** shared SafeMarkdown surfaces use a quiet inline canvas with `0 2px` padding and a `3px`
+  radius; fenced code uses the matching block canvas with an evidence border. Camp message prose
+  applies its component-owned Mist Gray treatment without changing file previews, release notes or
+  Runtime process copy. Other bounded evidence surfaces keep the stronger evidence canvas.
 - **Identity:** portraits and eight stable identity tokens are a narrow exception to the neutral
   workspace. Identity treatments do not spread into background decoration.
 

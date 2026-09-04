@@ -63,6 +63,7 @@ import {
 } from './MemberRuntimeParameters'
 import {
   memberRuntimePresentation,
+  runtimePlatformAdmissionAllowsUse,
   runtimePlatformAdmissionFor,
   runtimeProductPresentation,
 } from './runtime-status'
@@ -998,10 +999,10 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   const runtimeMutationAdmission = selectedKind ? selectedAdmission : persistedAdmission
   const persistedRuntimeLocked = hostPlatform !== null
     && agent.runtimeConfiguration !== null
-    && persistedAdmission?.status !== 'qualified'
+    && !runtimePlatformAdmissionAllowsUse(persistedAdmission)
   const runtimeMutationAllowed = hostPlatform === null
     || (!selectedKind && agent.runtimeConfiguration === null)
-    || runtimeMutationAdmission?.status === 'qualified'
+    || runtimePlatformAdmissionAllowsUse(runtimeMutationAdmission)
   const canSave = dirty
     && !conflict
     && (!selectedKind || draft !== null)
@@ -1127,12 +1128,10 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
               <option
                 key={kind}
                 value={kind}
-                disabled={hostPlatform !== null && runtimePlatformAdmissionFor(
-                  hostPlatform,
-                  runtimePlatformAdmission,
-                  kind
-                )?.status !== 'qualified'}
-              >{adapterLabel(kind)}</option>
+                disabled={hostPlatform !== null && !runtimePlatformAdmissionAllowsUse(
+                  runtimePlatformAdmissionFor(hostPlatform, runtimePlatformAdmission, kind)
+                )}
+              >{adapterLabel(kind)}{kind === 'pi' ? '（实验性）' : ''}</option>
             ))}
           </select>
           </label>
@@ -1544,8 +1543,8 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const availability = health?.runtimeAvailability ?? []
-  const hasQualifiedRuntime = health?.runtimePlatformAdmission.some((row) => (
-    row.platform === health.hostPlatform && row.status === 'qualified'
+  const hasEnabledRuntime = health?.runtimePlatformAdmission.some((row) => (
+    row.platform === health.hostPlatform && runtimePlatformAdmissionAllowsUse(row)
   )) ?? false
 
   const checkProduct = async (runtimeKind: AdapterKind): Promise<void> => {
@@ -1581,12 +1580,12 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
         title="运行时"
         description="管理本机 Agent 运行时及其可用状态。"
         aside={(
-          <button className="quiet-button" disabled={busy !== null || (health !== null && !hasQualifiedRuntime)} onClick={() => void rescan()}>
+          <button className="quiet-button" disabled={busy !== null || (health !== null && !hasEnabledRuntime)} onClick={() => void rescan()}>
             {busy === 'rescan'
               ? '正在重新检测…'
               : health === null
                 ? '重新检测全部'
-                : hasQualifiedRuntime ? '重新检测全部' : '当前平台尚无可检测 Runtime'}
+                : hasEnabledRuntime ? '重新检测全部' : '当前平台尚无可检测 Runtime'}
           </button>
         )}
       />
@@ -1635,17 +1634,19 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
                 </span>
                 <div className="runtime-product-copy">
                   <strong>{adapterLabel(runtimeKind)}</strong>
-                  <small>{admission?.status !== 'qualified'
+                  <small>{admission?.status === 'preview'
+                    ? `实验性开放 · ${item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}`
+                    : admission?.status !== 'qualified'
                     ? presentation.detail
                     : item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</small>
                 </div>
                 <span className={`runtime-snapshot-badge runtime-product-status status-${presentation.status}`}>
                   {presentation.label}
                 </span>
-                <button className="quiet-button runtime-product-check" disabled={busy !== null || admission?.status !== 'qualified'} onClick={() => void checkProduct(runtimeKind)}>
+                <button className="quiet-button runtime-product-check" disabled={busy !== null || !runtimePlatformAdmissionAllowsUse(admission)} onClick={() => void checkProduct(runtimeKind)}>
                   {busy === `check-${runtimeKind}`
                     ? '正在检查…'
-                    : admission?.status === 'qualified' ? '检查可用性' : '不可检查'}
+                    : runtimePlatformAdmissionAllowsUse(admission) ? '检查可用性' : '不可检查'}
                 </button>
                 {item?.failure && <RuntimeFailureNotice failure={item.failure} />}
               </article>

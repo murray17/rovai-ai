@@ -786,7 +786,6 @@ function startCore() {
       ...(requestedAdapters.includes('pi')
         ? {
             PI_CODING_AGENT_DIR: piAgentDir,
-            ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
           }
         : {})
     },

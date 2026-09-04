@@ -96,6 +96,11 @@ provider credentials remain private Core configuration and never appear in this 
 text is not provider-cleaned: when an upstream Runtime emits thinking tags as ordinary assistant text, process
 detail and the resulting final candidate retain that text exactly like every other ACP Runtime.
 
+Pi Coding Agent is a Product Runtime with `preview` admission on macOS arm64, macOS x64 and Windows x64. Keep it
+selectable and editable on all three platforms, append `（实验性）` to the selector label, and show the real machine
+availability independently. Preview permits normal checks and AgentRun but retains missing qualification evidence;
+do not describe it as First-Class or qualified, and do not weaken installation, model, permission or Dispatch checks.
+
 ## Removal
 
 Permanent removal is blocked while the teammate owns a non-terminal AgentRun. Otherwise the Chinese

@@ -31,7 +31,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Cancellation Settlement v2（当前）](cancellation-settlement-v2.md) | 取消 Run 统一为 cancelled；效果证据保留但不产生公共待确认提示，清理与后续调度边界不变 |
 | [Cancellation Settlement v1（历史）](cancellation-settlement-v1.md) | 取消事务按发送/效果证据区分 cancelled 与 failed/accepted_input_outcome_unknown 的旧规则 |
 | [Camp Member Fast v1（当前）](camp-member-fast-v1.md) | Camp/member/保存绑定代次的三态覆盖、原生订阅资格、执行冻结、观察与紧凑 UI |
-| [Runtime Images v3（当前）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示，共用内容列与贴合原比例的图片框 |
+| [Runtime Images v4（当前）](runtime-images-v4.md) | v3 来源/读取/去重不变；Runtime 图片并入 Agent 图片区，按作者分区并采用 Agent 原比例与用户 72px 两种 Gallery variant |
+| [Runtime Images v3（历史）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示；统一图片几何与附件原序规则由 v4 替代 |
 | [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
 | [Camp Open Projection v14（当前）](camp-open-projection-v14.md) | v13 wire/修复不变；精确兼容投影旧取消失败行，不改写底层证据 |
 | [Camp Open Projection v13（历史）](camp-open-projection-v13.md) | Snapshot 34/Open 6 不变；service 先定向修复半取消，投影仍不读事件日志 |
@@ -40,7 +41,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v30（当前）](runtime-launch-and-verification-v30.md) | v29 保留；增加 Pi JSONL Host、专属 Ready/exact resume、managed receipt、动态 Skills/MCP、Action/Usage 与三平台未准入边界 |
+| [Runtime Launch and Verification v31（当前）](runtime-launch-and-verification-v31.md) | v30 的 Pi wire/安全语义不变；三平台改为明确的可运行 experimental preview，仍不宣称 qualified |
+| [Runtime Launch and Verification v30（历史）](runtime-launch-and-verification-v30.md) | v29 保留；增加 Pi JSONL Host、专属 Ready/exact resume、managed receipt、动态 Skills/MCP、Action/Usage 与三平台未准入边界 |
 | [Runtime Launch and Verification v29（历史）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
 | [Runtime Usage Monitoring v4（当前）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
 | [Pending Camp Input v1（当前）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
@@ -137,7 +139,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v9（历史）](runtime-launch-and-verification-v9.md) | v8 边界不变；增加 60 秒/24 小时模型目录 SWR、Picker-open、主动检查终态与真实 Session 显式模型校验；不含 Published View 授权 |
 | [Runtime Launch and Verification v8（历史）](runtime-launch-and-verification-v8.md) | v7 启动/恢复边界不变；增加 Claude Code/Antigravity 安全公开 failure、AgentRun/Probe 持久化、Availability 与内部诊断分离 |
 | [Runtime Launch and Verification v7（历史）](runtime-launch-and-verification-v7.md) | v6 加恢复 response exact-ID 校验；不同 ID 使 Host protocol-violated 并进入 continuity-lost fallback，禁止换绑返回 ID；不含公开 Runtime failure |
-| [Runtime Platform Admission v1（当前）](runtime-platform-admission-v1.md) | `AdapterKind × HostPlatformKey` 产品级准入、closed reason/evidence、现有配置保留与 execution blocker |
+| [Runtime Platform Admission v2（当前）](runtime-platform-admission-v2.md) | v1 不变；增加可 discovery/选择/执行但不伪造 qualification evidence 的 `preview` 状态 |
+| [Runtime Platform Admission v1（历史）](runtime-platform-admission-v1.md) | `AdapterKind × HostPlatformKey` 三态准入、closed reason/evidence、现有配置保留与 execution blocker |
 | [Managed Runtime Process v1（当前）](managed-runtime-process-v1.md) | 统一进程启动 interface、Windows 创建时 Job/handle list、native EXE/受控 `.cmd/.bat` identity、macOS User Automation protected-tree deny 与 descendant cleanup |
 | [Runtime Launch and Verification v6（历史）](runtime-launch-and-verification-v6.md) | v5 加 TRAE exact-ID Provider Resume Probe、受控 ACP HistoryRestore、replay quarantine、兼容性 fence 与 continuity-lost fallback；其接受不同 response ID 的语义已由 v7 替代 |
 | [Runtime Launch and Verification v5（历史）](runtime-launch-and-verification-v5.md) | v4 加 TRAE 有界启动轻检、用户授权快速 ACP Session Probe 与 Ready commit fence |

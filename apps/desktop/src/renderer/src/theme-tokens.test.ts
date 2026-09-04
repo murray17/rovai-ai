@@ -58,6 +58,9 @@ const requiredTokens = [
   '--focus',
   '--overlay',
   '--inline-code-canvas',
+  '--conversation-inline-code-canvas',
+  '--conversation-code-block-canvas',
+  '--conversation-code-line',
   '--shell-result-canvas',
   '--code-block-canvas',
   '--evidence-canvas',
@@ -68,7 +71,17 @@ const requiredTokens = [
   '--diff-add',
   '--diff-add-soft',
   '--diff-remove',
-  '--diff-remove-soft'
+  '--diff-remove-soft',
+  '--attachment-web',
+  '--attachment-code',
+  '--attachment-notes',
+  '--attachment-pdf',
+  '--attachment-word',
+  '--attachment-sheet',
+  '--attachment-slide',
+  '--attachment-image',
+  '--attachment-archive',
+  '--attachment-generic'
 ] as const
 
 function tokenBlock(selector: string): Record<string, string> {
@@ -114,6 +127,8 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--info', '--info-soft'],
     ['--neutral', '--neutral-soft'],
     ['--evidence-ink', '--inline-code-canvas'],
+    ['--evidence-ink', '--conversation-inline-code-canvas'],
+    ['--evidence-ink', '--conversation-code-block-canvas'],
     ['--evidence-muted', '--shell-result-canvas'],
     ['--evidence-ink', '--code-block-canvas'],
     ['--evidence-ink', '--evidence-surface'],
@@ -190,6 +205,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(day['--rail-logo']).toBe('#526f88')
     expect(day['--mention-ink']).toBe('#2f61c8')
     expect(day['--inline-code-canvas']).toBe('#e9eceb')
+    expect(day['--conversation-inline-code-canvas']).toBe('#eef0f1')
+    expect(day['--conversation-code-block-canvas']).toBe('#f4f5f5')
+    expect(day['--conversation-code-line']).toBe('#d9dee1')
     expect(day['--shell-result-canvas']).toBe('#f3f4f3')
     expect(day['--code-block-canvas']).toBe('#eef2f5')
     expect(day['--diff-add-soft']).toBe('#d9f1e2')
@@ -224,6 +242,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(night['--brand-soft']).toBe('#22303a')
     expect(night['--mention-ink']).toBe('#9cc7e2')
     expect(night['--inline-code-canvas']).toBe('#353b3f')
+    expect(night['--conversation-inline-code-canvas']).toBe('#30373b')
+    expect(night['--conversation-code-block-canvas']).toBe('#252c30')
+    expect(night['--conversation-code-line']).toBe('#3e494f')
     expect(night['--shell-result-canvas']).toBe('#373f43')
     expect(night['--code-block-canvas']).toBe('#1d252b')
     expect(night['--diff-add-soft']).toBe('#21412e')
@@ -249,6 +270,17 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(new Set(Array.from({ length: 8 }, (_, index) => night[`--identity-${index + 1}`])).size).toBe(8)
     expect(css).toMatch(/\.skill-identity-mark\s*\{[^}]*color:\s*var\(--skill-identity\)/)
     expect(css).toMatch(/\.mcp-assignment-option-mark, \.mcp-server-mark\s*\{[^}]*color:\s*var\(--mcp-identity\)/)
+  })
+
+  it('keeps every Agent artifact icon family distinguishable in both themes', () => {
+    const attachmentTokens = requiredTokens.filter((token) => token.startsWith('--attachment-'))
+    for (const tokens of [day, night]) {
+      for (const token of attachmentTokens) {
+        expect(contrast(tokens[token], tokens['--surface-raised']), token).toBeGreaterThanOrEqual(3)
+      }
+    }
+    expect(css).toMatch(/\.agent-artifact-icon\.type-generic\s*\{[^}]*color: var\(--attachment-generic\)/)
+    expect(css).toMatch(/\.agent-output-file-grid\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
   })
 
   it('uses quiet selected backgrounds for the active Camp and current Project', () => {
@@ -331,6 +363,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toMatch(/\.safe-markdown code\s*\{[^}]*\bborder\s*:/)
     expect(css).toMatch(/\.safe-markdown pre\s*\{[^}]*background:\s*var\(--code-block-canvas\)/)
     expect(css).toMatch(/\.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*background:\s*transparent/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown code\s*\{[^}]*padding:\s*1px 4px[^}]*border-radius:\s*6px[^}]*background:\s*var\(--conversation-inline-code-canvas\)[^}]*box-decoration-break:\s*clone/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre\s*\{[^}]*padding:\s*11px 12px[^}]*border-color:\s*var\(--conversation-code-line\)[^}]*border-radius:\s*8px[^}]*background:\s*var\(--conversation-code-block-canvas\)/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*border-radius:\s*0[^}]*background:\s*transparent/)
     expect(css).toContain('.conversation-bubble:hover .message-copy-button')
     expect(css).toContain('.conversation-bubble:hover .message-reply-button')
     expect(css).toContain('.composer-box:focus-within')

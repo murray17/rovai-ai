@@ -10,7 +10,7 @@ import {
   decodeImageUrl,
   fetchImagePayload,
   getOrLoadImagePayload,
-  groupMessageAttachments,
+  partitionMessageAttachments,
   type GalleryImage
 } from './ImageGallery'
 
@@ -25,13 +25,23 @@ afterEach(() => {
 })
 
 describe('shared image presentation', () => {
-  it('groups only contiguous images without changing the attachment order', () => {
+  it('partitions images and files while preserving order inside each display region', () => {
     const items = [attachment('A'), attachment('B'), attachment('report', false), attachment('C')]
-    expect(groupMessageAttachments(items)).toEqual([
-      { kind: 'images', attachments: items.slice(0, 2) },
-      { kind: 'file', attachment: items[2] },
-      { kind: 'images', attachments: [items[3]] }
-    ])
+    expect(partitionMessageAttachments(items)).toEqual({
+      images: [items[0], items[1], items[3]],
+      files: [items[2]]
+    })
+  })
+
+  it('marks user and Agent galleries as independent presentation variants', () => {
+    const source = [{ kind: 'attachment' as const, campId: 'camp', image: attachment('image.png') }]
+    const userHtml = renderToStaticMarkup(createElement(ImageGallery, {
+      images: source,
+      variant: 'user-attachment'
+    }))
+    const agentHtml = renderToStaticMarkup(createElement(ImageGallery, { images: source }))
+    expect(userHtml).toContain('class="image-gallery image-gallery-user-attachment"')
+    expect(agentHtml).toContain('class="image-gallery image-gallery-agent-output"')
   })
 
   it('keeps all Runtime images visible, with no attachment operations', () => {
