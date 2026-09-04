@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering as EpochOrdering,
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{BufRead as _, BufReader as StdBufReader, Read as _, Write as _},
@@ -219,6 +220,21 @@ fn switch_target_is_explicitly_unavailable(error: &anyhow::Error) -> bool {
     ]
     .iter()
     .any(|needle| message.contains(needle))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PiEpochDisposition {
+    ReuseOrRetireSame,
+    ReplaceOlder,
+    RejectStale,
+}
+
+fn pi_epoch_disposition(existing: i64, requested: i64) -> PiEpochDisposition {
+    match existing.cmp(&requested) {
+        EpochOrdering::Equal => PiEpochDisposition::ReuseOrRetireSame,
+        EpochOrdering::Less => PiEpochDisposition::ReplaceOlder,
+        EpochOrdering::Greater => PiEpochDisposition::RejectStale,
+    }
 }
 
 pub(crate) struct PiHost {
@@ -736,21 +752,14 @@ impl PiHost {
             })),
             Ok(Err(_)) => bail!("Pi RPC response channel closed: {command_type}"),
             Err(_) => {
-                self.pending.lock().await.remove(&id);
+                // Keep the correlation entry as a tombstone. A caller (or an
+                // outer cancellation deadline) may stop waiting before Pi
+                // writes its normal response; the stdout reader must still
+                // recognize and consume that late response without poisoning
+                // the Host as an unmatched frame.
                 bail!("Pi RPC command timed out: {command_type}")
             }
         }
-    }
-
-    async fn send_command_without_waiting(&self, command_type: &str, fields: Value) -> Result<()> {
-        if !self.is_alive() {
-            bail!("Pi RPC Host is not alive");
-        }
-        let id = format!("rovai-pi-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
-        let mut command = fields.as_object().cloned().unwrap_or_default();
-        command.insert("id".to_string(), Value::String(id));
-        command.insert("type".to_string(), Value::String(command_type.to_string()));
-        self.send(Value::Object(command)).await
     }
 
     async fn send(&self, message: Value) -> Result<()> {
@@ -1220,9 +1229,8 @@ impl PiRuntime {
     }
 
     pub async fn cancel(&self) -> Result<()> {
-        self.host
-            .send_command_without_waiting("abort", json!({}))
-            .await
+        self.host.command("abort", json!({})).await?;
+        Ok(())
     }
 
     pub(crate) async fn detach_and_flush_ingress(&self) -> bool {
@@ -1489,15 +1497,36 @@ impl PiRpcRuntimeAdapter {
         };
         let _creation = creation_gate.lock().await;
         if let Some(existing) = self.active.lock().await.get(request.agent_run_id).cloned() {
-            if existing.agent_run_epoch() == request.execution_epoch && existing.host.is_alive() {
-                return Ok(existing);
+            let existing_epoch = existing.agent_run_epoch();
+            match pi_epoch_disposition(existing_epoch, request.execution_epoch) {
+                PiEpochDisposition::RejectStale => {
+                    bail!(
+                        "stale Pi Runtime execution epoch {} cannot affect active epoch {}",
+                        request.execution_epoch,
+                        existing_epoch
+                    );
+                }
+                PiEpochDisposition::ReuseOrRetireSame if existing.host.is_alive() => {
+                    return Ok(existing);
+                }
+                PiEpochDisposition::ReuseOrRetireSame | PiEpochDisposition::ReplaceOlder => {}
             }
-            let epoch = existing.agent_run_epoch();
-            let _ = existing.cleanup_for_release().await;
-            self.active.lock().await.remove(request.agent_run_id);
-            self.fleet
-                .release(request.agent_run_id, epoch, FleetReleaseDisposition::Stop)
-                .await;
+            // Re-check the exact epoch while removing. Another creation gate
+            // may have committed a newer Runtime after the snapshot above;
+            // this request must never detach or stop that newer generation.
+            if let Some(retired) = self
+                .take_runtime(request.agent_run_id, existing_epoch)
+                .await
+            {
+                let _ = retired.cleanup_for_release().await;
+                self.fleet
+                    .release(
+                        request.agent_run_id,
+                        existing_epoch,
+                        FleetReleaseDisposition::Stop,
+                    )
+                    .await;
+            }
         }
         let bootstrap_payload_digest =
             format!("{:x}", Sha256::digest(request.bootstrap.payload.as_bytes()));
@@ -1516,6 +1545,12 @@ impl PiRpcRuntimeAdapter {
         let locator_root =
             session_locator_root(&self.private_runtime_dir, request.camp_id, request.agent_id)?;
         let workspace_key = canonical_workspace_key(request.cwd)?;
+        let spawn_executable = PathBuf::from(&request.frozen_runtime.executable_path);
+        let spawn_cwd = request.cwd.to_path_buf();
+        let spawn_private_runtime_dir = self.private_runtime_dir.clone();
+        let spawn_seed = seed.clone();
+        let spawn_incoming = self.incoming.clone();
+        let spawn_builtin_tools = request.builtin_tools.clone();
         let lease = self
             .fleet
             .acquire(
@@ -1530,16 +1565,16 @@ impl PiRpcRuntimeAdapter {
                         request.runtime_compatibility_digest,
                     ),
                 },
-                || async {
+                move || async move {
                     let host = PiHost::spawn(PiHostLaunch {
-                        executable: Path::new(&request.frozen_runtime.executable_path),
-                        cwd: request.cwd,
-                        private_runtime_dir: &self.private_runtime_dir,
+                        executable: &spawn_executable,
+                        cwd: &spawn_cwd,
+                        private_runtime_dir: &spawn_private_runtime_dir,
                         session_dir: None,
                         initial_session_file: None,
-                        initial_binding: &seed,
-                        incoming: self.incoming.clone(),
-                        builtin_tools: Some(request.builtin_tools.clone()),
+                        initial_binding: &spawn_seed,
+                        incoming: spawn_incoming,
+                        builtin_tools: Some(spawn_builtin_tools),
                     })
                     .await?;
                     Ok(RuntimeProcessHost::Pi(host))
@@ -2391,6 +2426,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn execution_epoch_fence_rejects_stale_before_runtime_retirement() {
+        assert_eq!(
+            pi_epoch_disposition(7, 7),
+            PiEpochDisposition::ReuseOrRetireSame
+        );
+        assert_eq!(pi_epoch_disposition(6, 7), PiEpochDisposition::ReplaceOlder);
+        assert_eq!(pi_epoch_disposition(8, 7), PiEpochDisposition::RejectStale);
+    }
+
+    #[test]
     fn exact_resume_fallback_accepts_only_explicit_unavailable_switch_targets() {
         for message in [
             "session file not found",
@@ -2589,6 +2634,118 @@ done
             "the private probe Session/config root must be removed"
         );
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn late_abort_response_remains_correlated_after_the_waiter_deadline() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-pi-abort-correlation-fixture-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("pi");
+        std::fs::write(
+            &executable,
+            r###"#!/bin/sh
+set -eu
+fixture_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+request_log="$fixture_dir/requests.jsonl"
+trap 'exit 0' TERM INT
+while IFS= read -r request; do
+  printf '%s\n' "$request" >> "$request_log"
+  request_id=$(printf '%s\n' "$request" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  request_type=$(printf '%s\n' "$request" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+  case "$request_type" in
+    get_state)
+      printf '{"type":"response","id":"%s","success":true,"command":"get_state","data":{}}\n' "$request_id"
+      ;;
+    abort)
+      sleep 0.15
+      printf '{"type":"response","id":"%s","success":true,"command":"abort","data":{}}\n' "$request_id"
+      ;;
+    *)
+      printf '{"type":"response","id":"%s","success":false,"command":"%s","error":"unexpected command"}\n' "$request_id" "$request_type"
+      ;;
+  esac
+done
+"###,
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let bootstrap = "managed bootstrap".to_string();
+        let seed = PiBindingSeed {
+            agent_run_id: "run-abort".to_string(),
+            execution_epoch: 1,
+            native_binding_id: "binding-abort".to_string(),
+            native_binding_generation: 1,
+            runtime_input_delivery_id: "delivery-abort".to_string(),
+            native_prompt_id: "prompt-abort".to_string(),
+            expected_native_session_id: None,
+            bootstrap_evidence_id: "evidence-abort".to_string(),
+            bootstrap_payload_digest: format!("{:x}", Sha256::digest(bootstrap.as_bytes())),
+            bootstrap,
+        };
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = PiHost::spawn(PiHostLaunch {
+            executable: &executable,
+            cwd: &root,
+            private_runtime_dir: &root.join("private"),
+            session_dir: None,
+            initial_session_file: None,
+            initial_binding: &seed,
+            incoming,
+            builtin_tools: None,
+        })
+        .await
+        .unwrap();
+        let runtime = PiRuntime::from_host(
+            PiRuntimeOwner {
+                agent_run_id: "run-abort".to_string(),
+                execution_epoch: 1,
+                native_prompt_id: "prompt-abort".to_string(),
+                delivery_id: "delivery-abort".to_string(),
+            },
+            "camp-abort".to_string(),
+            host.clone(),
+            ActivatedPiSession {
+                session_id: "session-abort".to_string(),
+                session_file: root.join("session.jsonl"),
+                model_fingerprint: "model-abort".to_string(),
+                binding_document: seed.document(host.host_instance_id(), 1),
+                model_supports_images: false,
+            },
+        );
+
+        assert!(
+            timeout(Duration::from_millis(20), runtime.cancel())
+                .await
+                .is_err(),
+            "the outer cancellation deadline should be allowed to stop waiting"
+        );
+        tokio::time::sleep(Duration::from_millis(220)).await;
+        assert!(
+            host.is_alive(),
+            "a late abort response must not poison the Host"
+        );
+        host.command("get_state", json!({})).await.unwrap();
+        assert!(host.pending.lock().await.is_empty());
+
+        let requests = std::fs::read_to_string(root.join("requests.jsonl")).unwrap();
+        let commands = requests
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<Value>(line).unwrap()["type"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(commands, ["get_state", "abort", "get_state"]);
+        host.shutdown_and_reap().await;
         std::fs::remove_dir_all(root).unwrap();
     }
 

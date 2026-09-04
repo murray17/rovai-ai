@@ -3825,6 +3825,15 @@ impl AcpCliRuntimeAdapter {
                 .await;
         }
         let execution_root = PathBuf::from(&workspace.execution_root);
+        let spawn_execution_root = execution_root.clone();
+        let spawn_workspace = workspace.clone();
+        let spawn_frozen_runtime = frozen_runtime.clone();
+        let spawn_builtin_tools = builtin_tools.clone();
+        let spawn_external_mcp_servers = external_mcp_servers.clone();
+        let spawn_attachment_access_root = attachment_access_root.to_path_buf();
+        let spawn_private_runtime_dir = self.private_runtime_dir.clone();
+        let spawn_incoming = self.incoming.clone();
+        let spawn_compaction_policy = self.compaction_detector_policy;
         let fleet_lease = self
             .fleet
             .acquire(
@@ -3838,19 +3847,19 @@ impl AcpCliRuntimeAdapter {
                         runtime_compatibility_digest,
                     ),
                 },
-                || async {
+                move || async move {
                     let host = AcpHost::spawn(
-                        &execution_root,
-                        workspace,
+                        &spawn_execution_root,
+                        &spawn_workspace,
                         permission_semantics,
-                        frozen_runtime,
-                        self.incoming.clone(),
-                        Some(builtin_tools.clone()),
-                        self.compaction_detector_policy,
+                        &spawn_frozen_runtime,
+                        spawn_incoming,
+                        Some(spawn_builtin_tools),
+                        spawn_compaction_policy,
                         true,
-                        external_mcp_servers,
-                        &self.private_runtime_dir,
-                        Some(attachment_access_root),
+                        &spawn_external_mcp_servers,
+                        &spawn_private_runtime_dir,
+                        Some(&spawn_attachment_access_root),
                     )
                     .await?;
                     Ok(RuntimeProcessHost::Acp(host))

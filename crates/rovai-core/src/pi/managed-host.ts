@@ -196,12 +196,10 @@ function validateSession(binding: any, ctx: any): { sessionId: string; cwd: stri
 
 export default function (pi: any) {
   let binding: any;
-  let approvedBindingDigest: string | undefined;
 
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
       binding = loadBinding();
-      approvedBindingDigest = undefined;
       ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
       publishManagedSessionState(ctx, binding);
     } catch (error) {
@@ -209,8 +207,35 @@ export default function (pi: any) {
     }
   });
 
-  pi.on("input", async (event: any, ctx: any) => {
-    if (event.source !== "rpc") return { action: "continue" };
+  pi.on("tool_call", async (event: any, ctx: any) => {
+    if (!GOVERNED_NATIVE_TOOLS.includes(event.toolName)) return undefined;
+    if (!ctx.hasUI || ctx.mode !== "rpc") {
+      return { block: true, reason: "Rovai partial approval channel is unavailable" };
+    }
+    try {
+      const current = loadBinding();
+      validateSession(current, ctx);
+      const allowed = await ctx.ui.confirm(
+        "Rovai partial approval",
+        JSON.stringify(
+          approvalEnvelope(
+            current,
+            event.toolCallId,
+            event.toolName,
+            event.input,
+            ctx.cwd,
+            ctx.isProjectTrusted(),
+          ),
+        ),
+      );
+      return allowed ? undefined : { block: true, reason: "Blocked by Rovai approval" };
+    } catch (error) {
+      publishFailure(ctx, binding, "tool_call", error);
+      return { block: true, reason: "Rovai partial approval failed closed" };
+    }
+  });
+
+  pi.on("before_agent_start", async (event: any, ctx: any) => {
     try {
       const current = loadBinding();
       const { sessionId, cwd } = validateSession(current, ctx);
@@ -250,52 +275,12 @@ export default function (pi: any) {
       );
       if (nonce !== expectedNonce) throw new Error("receipt commit nonce mismatch");
       binding = current;
-      approvedBindingDigest = receipt.bindingDocumentDigest;
-      return { action: "continue" };
+      ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
+      return { systemPrompt: `${event.systemPrompt}\n\n${current.bootstrap}` };
     } catch (error) {
-      approvedBindingDigest = undefined;
-      publishFailure(ctx, binding, "input", error);
-      return { action: "handled" };
-    }
-  });
-
-  pi.on("tool_call", async (event: any, ctx: any) => {
-    if (!GOVERNED_NATIVE_TOOLS.includes(event.toolName)) return undefined;
-    if (!ctx.hasUI || ctx.mode !== "rpc") {
-      return { block: true, reason: "Rovai partial approval channel is unavailable" };
-    }
-    try {
-      const current = loadBinding();
-      validateSession(current, ctx);
-      const allowed = await ctx.ui.confirm(
-        "Rovai partial approval",
-        JSON.stringify(
-          approvalEnvelope(
-            current,
-            event.toolCallId,
-            event.toolName,
-            event.input,
-            ctx.cwd,
-            ctx.isProjectTrusted(),
-          ),
-        ),
-      );
-      return allowed ? undefined : { block: true, reason: "Blocked by Rovai approval" };
-    } catch (error) {
-      publishFailure(ctx, binding, "tool_call", error);
-      return { block: true, reason: "Rovai partial approval failed closed" };
-    }
-  });
-
-  pi.on("before_agent_start", async (event: any, ctx: any) => {
-    const currentDigest = binding ? canonicalDigest(binding) : undefined;
-    if (!binding || approvedBindingDigest !== currentDigest) {
-      publishFailure(ctx, binding, "before_agent_start", new Error("managed input receipt was not committed"));
+      publishFailure(ctx, binding, "before_agent_start", error);
       ctx.abort();
       return undefined;
     }
-    approvedBindingDigest = undefined;
-    ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
-    return { systemPrompt: `${event.systemPrompt}\n\n${binding.bootstrap}` };
   });
 }

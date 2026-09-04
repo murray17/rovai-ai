@@ -373,6 +373,24 @@ pub fn rejection_response(request: &Value) -> Result<Value> {
     }))
 }
 
+pub fn unsupported_extension_ui_cancellation(request: &Value) -> Result<Value> {
+    if request.get("type").and_then(Value::as_str) != Some("extension_ui_request") {
+        bail!("Pi message is not an Extension UI request");
+    }
+    let id = request
+        .get("id")
+        .filter(|id| !id.is_null())
+        .cloned()
+        .context("Pi Extension UI request omitted id")?;
+    Ok(
+        if request.get("method").and_then(Value::as_str) == Some("confirm") {
+            json!({"type": "extension_ui_response", "id": id, "confirmed": false})
+        } else {
+            json!({"type": "extension_ui_response", "id": id, "cancelled": true})
+        },
+    )
+}
+
 pub fn normalize_event(message: &Value) -> (&'static str, Value) {
     match message.get("type").and_then(Value::as_str) {
         Some("message_update")
@@ -642,6 +660,15 @@ mod tests {
         assert!(source.contains("ctx.isProjectTrusted()"));
         assert!(source.contains("SettingsManager.create(cwd, getAgentDir(), { projectTrusted })"));
         assert!(source.contains("Rovai managed input receipt"));
+        assert!(!source.contains("pi.on(\"input\""));
+        assert!(!source.contains("approvedBindingDigest"));
+        let before_agent_start = source
+            .find("pi.on(\"before_agent_start\"")
+            .expect("managed receipt must run at the final pre-agent lifecycle seam");
+        let receipt = source
+            .find("Rovai managed input receipt")
+            .expect("managed receipt IPC must remain present");
+        assert!(receipt > before_agent_start);
     }
 
     #[test]
@@ -758,5 +785,39 @@ mod tests {
                 ..
             } if command == "pwd"
         ));
+    }
+
+    #[test]
+    fn unsupported_native_extension_ui_is_cancelled_without_managed_interpretation() {
+        for method in ["select", "input", "editor"] {
+            let request = json!({
+                "type": "extension_ui_request",
+                "method": method,
+                "id": format!("ui-{method}"),
+                "title": "Third-party Pi Extension",
+            });
+            assert_eq!(
+                unsupported_extension_ui_cancellation(&request).unwrap(),
+                json!({
+                    "type": "extension_ui_response",
+                    "id": format!("ui-{method}"),
+                    "cancelled": true,
+                })
+            );
+        }
+        let confirm = json!({
+            "type": "extension_ui_request",
+            "method": "confirm",
+            "id": "ui-confirm",
+            "title": "Third-party Pi Extension",
+        });
+        assert_eq!(
+            unsupported_extension_ui_cancellation(&confirm).unwrap(),
+            json!({
+                "type": "extension_ui_response",
+                "id": "ui-confirm",
+                "confirmed": false,
+            })
+        );
     }
 }
