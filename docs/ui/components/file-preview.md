@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Camp 文件预览区
@@ -10,15 +10,15 @@ last_updated: 2026-09-03
 ## 会话内的文件链接
 
 文件与 Web 链接统一使用独立的 `--resource-link`，Hover 使用 `--resource-link-hover`；色值由两套主题分别定义，
-不复用品牌或信息状态颜色。文件链接保持正文阅读感与原生链接语义，不呈现为按钮或 Badge。普通文件链接保留
-轻下划线，Hover 加强下划线；键盘焦点使用既有 focus token，长路径可自然换行，不让正文横向溢出。
+不复用品牌或信息状态颜色。文件链接保持正文阅读感与原生链接语义，不呈现为按钮或 Badge。文件与 Web 资源链接
+在默认、Hover、Active 与 Focus 状态均不显示下划线；Hover/Active 只加强链接色，键盘焦点使用既有 focus token，
+长路径可自然换行，不让正文横向溢出。
 
 - Markdown 文件链接 `[label](target)` 只显示可点击的 label；target 仅用于解析/打开，不在正文中重复常驻展示。
 - 整体为文件引用的 inline-code（如 `` `src/App.tsx:20` ``）只有在当前消息来源工作目录可解析为现存普通文件时
   才成为文件入口。相对路径使用来源 AgentRun 的工作目录、无来源 Run 时使用 directory Camp 项目目录；绝对路径
   直接解析。不存在、目录或解析失败时保持原生 `<code>`，不显示图标、链接或错误。成功入口的等宽文字移除灰底和嵌套
-  `<code>`，默认无下划线；Hover 加强链接色并只为文字显示 1px 点状下划线，按下或键盘焦点时不显示下划线。
-  普通 inline-code、代码块和混合正文保持原样。
+  `<code>`，所有交互状态都不显示下划线；Hover/Active 只加强链接色。普通 inline-code、代码块和混合正文保持原样。
 - 普通正文不扫描、不猜测本地路径。`src/App.tsx:20`、`/compact` 与 `docs/prototypes/demo/` 只有在显式
   Markdown 文件链接或整体 inline-code 中才可能成为文件入口；消息存储、整条消息复制与模型输入保持原文。
 - 每个文件入口在 label 前显示真实资源类型的 14px 单色线性 SVG，不再由 label 是否为 inline-code 决定是否显示。
@@ -90,9 +90,9 @@ last_updated: 2026-09-03
 ## 文件 Tabs
 
 Tabs 使用 Codex toolbar 语法：小间距、无逐项边框、当前项用次级 surface 和文字对比表达，不使用品牌下划线。
-普通文件 Tab 与会话文件链接按文件名共用相同资源视觉类型，不直接用 `FilePreviewKind` 选图标；左侧用统一 14px
-细线 SVG 区分 Markdown（书页）、代码（尖括号）、HTML（网页）、图片/SVG（图片）、
-文本/分页原文（文档）和 Diff/Patch/File Change（加减差异）。图标使用继承的中性色，作为装饰隐藏于辅助技术，
+普通文件 Tab 与会话文件链接按文件名共用相同资源视觉类型，不直接用 `FilePreviewKind` 选图标；左侧复用文件引用的
+同一套 14px、1.7px 描边单色 SVG Glyph，覆盖共享资源类型矩阵；File Change 固定复用 Diff/Patch Glyph。
+图标使用继承的中性色，作为装饰隐藏于辅助技术，
 文件名和 File Change 前缀继续提供可访问名称，不用颜色代替类型语义。
 文件名使用 UI 字体；同类 Tab 重名且存在安全父目录时显示 `父目录/文件名`；只有安全文件名的项目外文件、
 Attachment 或项目根目录文件使用当前同名组内的 `文件名 · 1/2` 序号区分，不回推或暴露绝对路径。

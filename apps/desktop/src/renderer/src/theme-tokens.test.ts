@@ -283,6 +283,15 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.agent-output-file-grid\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
   })
 
+  it('keeps file references underline-free and shared resource glyphs at one stroke weight', () => {
+    expect(css).toMatch(/\.safe-markdown \.markdown-file-reference,[\s\S]*?\.message-file-reference\s*\{[^}]*text-decoration: none/)
+    expect(css).toMatch(/\.safe-markdown \.markdown-file-reference:hover,[\s\S]*?\.message-file-reference:active\s*\{[^}]*text-decoration: none/)
+    expect(css).toMatch(/\.safe-markdown \.markdown-file-reference:focus-visible,[\s\S]*?\.message-file-reference:focus-visible\s*\{[^}]*text-decoration: none/)
+    expect(css).not.toMatch(/\.inline-code-file-reference:hover \.file-reference-label\s*\{[^}]*text-decoration-(?:line|style): underline/)
+    expect(css).toMatch(/\.file-preview-tab-icon\s*\{[^}]*stroke-width: 1\.7[^}]*opacity: \.9/)
+    expect(css).toMatch(/\.resource-reference-icon\s*\{[^}]*stroke-width: 1\.7/)
+  })
+
   it('uses quiet selected backgrounds for the active Camp and current Project', () => {
     expect(css).toMatch(/\.camp-nav-row\.selected\s*\{[^}]*background: var\(--surface-selected\)/)
     expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
