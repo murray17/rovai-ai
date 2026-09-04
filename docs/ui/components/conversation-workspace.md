@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Camp 会话工作区
@@ -177,6 +177,12 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 工件或 footer 漂移。用户消息保持
 精确纯文本，仅对[文件链接](file-preview.md#会话内的文件链接)做展示投影：Markdown label 替代其链接语法，
 文件代码路径保留等宽样式，原始消息及整条消息复制内容不改写；Agent 正文使用清洗后的 GFM；Tool 输出使用结构化证据组件。
+
+会话消息正文的 SafeMarkdown 使用 Mist Gray 分层：行内 code 以
+`--conversation-inline-code-canvas` 为底色，保留 `1px 4px` 留白、`6px` 圆角和跨行连续底色；围栏代码块使用
+`--conversation-code-block-canvas`、`--conversation-code-line`、`11px 12px` 留白与 `8px` 圆角。块内
+`pre code` 必须继续透明且不保留行内留白或圆角。该覆盖只属于用户/Agent 消息正文，不改变文件预览、更新说明、
+Runtime 过程正文、附件卡片或其他 SafeMarkdown 表面；Day 与 Night 分别使用主题文档给出的独立 token 值。
 
 当前可操作的队员头像、显示名和 Mention 可打开同一个锚定人物信息卡，不导航。已离开、移除或
 不可解析身份保持静态。精确 token 行为见[结构化 Mention](structured-mentions.md)。

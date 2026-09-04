@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Porcelain Day
@@ -139,6 +139,9 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 | Token | Value |
 |---|---:|
 | `--inline-code-canvas` | `#e9eceb` |
+| `--conversation-inline-code-canvas` | `#eef0f1` |
+| `--conversation-code-block-canvas` | `#f4f5f5` |
+| `--conversation-code-line` | `#d9dee1` |
 | `--shell-result-canvas` | `#f3f4f3` |
 | `--code-block-canvas` | `#eef2f5` |
 | `--evidence-canvas` | `#f4f6f3` |
@@ -187,6 +190,9 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 - Narrative inline code uses the borderless `--inline-code-canvas`; Shell command results use
   `--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence
   border, while other evidence surfaces continue to use `--evidence-canvas`.
+- Camp message prose uses the dedicated `--conversation-inline-code-canvas`,
+  `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer. These tokens do
+  not alter file previews, release notes or Runtime process copy.
 
 ## Contrast requirements
 
