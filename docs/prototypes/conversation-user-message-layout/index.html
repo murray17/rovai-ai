@@ -134,6 +134,7 @@
     html { min-width: 320px; background: var(--canvas); }
     body { margin: 0; overflow: hidden; background: var(--canvas); color: var(--ink); font-size: 13px; }
     button, textarea { font: inherit; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     button { color: inherit; }
     button:not(:disabled) { cursor: pointer; }
     button:disabled { cursor: default; opacity: .46; }
@@ -419,28 +420,17 @@
     }
     .message-copy { min-width: 0; white-space: normal; }
     .message-line { display: block; min-height: 20.8px; white-space: pre-wrap; }
-    .message-copy:not(.is-expanded) .message-line:nth-child(n+20) { display: none; }
+    .message-copy .message-line:nth-child(n+20) { display: none; }
     .ellipsis-row {
-      display: inline-flex;
+      display: block;
       width: 34px;
       height: 20.8px;
-      align-items: center;
-      justify-content: flex-start;
       margin: 0;
       padding: 0 4px 2px 0;
-      border: 0;
-      border-radius: 4px;
       color: var(--muted);
-      background: transparent;
       font: 700 17px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
       letter-spacing: 1px;
     }
-    .ellipsis-row:hover { color: var(--brand-ink); background: color-mix(in srgb, var(--brand) 7%, transparent); }
-    .message-copy.is-expanded .ellipsis-row { display: none; }
-    .collapse-row { display: none; margin-top: 5px; padding-top: 5px; border-top: 1px solid color-mix(in srgb, var(--ink) 8%, transparent); }
-    .message-copy.is-expanded .collapse-row { display: flex; }
-    .collapse-row button { min-height: 24px; padding: 2px 5px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; font-size: 10px; }
-    .collapse-row button:hover { color: var(--brand-ink); background: color-mix(in srgb, var(--brand) 7%, transparent); }
     .message-actions {
       position: absolute;
       z-index: 2;
@@ -459,6 +449,7 @@
       pointer-events: auto;
       transform: translateY(0);
     }
+    .message.agent .message-actions { right: auto; left: 0; }
     .message-action {
       position: relative;
       display: grid;
@@ -474,7 +465,6 @@
     .message-action:hover { border-color: var(--line); color: var(--brand-ink); background: var(--surface-hover); }
     .message-action.is-copied { color: var(--success); background: var(--success-soft); }
     .message-action svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
-    .message-action .reply-dots { fill: currentColor; stroke: none; }
     .message-action::after {
       position: absolute;
       z-index: 20;
@@ -659,7 +649,7 @@
           <div class="timeline-track" id="timeline-track">
             <div class="day-rule"><span>2026年9月4日</span></div>
 
-            <article class="message agent" data-author-name="洛可" data-message-text="我已按当前 Porcelain Day 会话区的尺寸和信息层级整理了这一版。队员消息仍使用开放阅读面，不增加角色气泡；你的消息则在右侧使用浅灰底，并把头像放到最右侧。">
+            <article class="message agent demo-actions" data-author-name="洛可" data-message-text="我已按当前 Porcelain Day 会话区的尺寸和信息层级整理了这一版。队员消息仍使用开放阅读面，不增加角色气泡；你的消息则在右侧使用浅灰底，并把头像放到最右侧。">
               <span class="avatar" aria-hidden="true"><img src="../../../apps/desktop/src/renderer/src/assets/characters/luoke/icon-192.png" alt=""></span>
               <div class="message-main">
                 <div class="message-meta"><strong>洛可</strong><span>Codex CLI</span><time>10:24</time></div>
@@ -670,7 +660,7 @@
                   </div>
                   <div class="message-actions" aria-label="消息操作">
                     <button class="message-action reply-action" type="button" aria-label="回复洛可的消息" data-tooltip="回复">
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z"></path><circle class="reply-dots" cx="8" cy="10.5" r="1"></circle><circle class="reply-dots" cx="12" cy="10.5" r="1"></circle><circle class="reply-dots" cx="16" cy="10.5" r="1"></circle></svg>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"></path><path d="m15.2 9.2-3.6 3.5 3.6 3.5"></path><path d="M11.8 12.7h8.7"></path></svg>
                     </button>
                     <button class="message-action copy-action" type="button" aria-label="复制洛可的消息" data-tooltip="复制">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
@@ -686,7 +676,7 @@
                 <div class="message-meta"><time>10:26</time><strong>你</strong></div>
                 <div class="message-content">
                   <div class="user-bubble">
-                    <div class="message-copy" data-collapsible="true">
+                    <div class="message-copy">
                       <span class="message-line">第 01 行　长消息从这里开始展示。</span>
                       <span class="message-line">第 02 行　你的消息整体移动到右侧。</span>
                       <span class="message-line">第 03 行　你的头像也固定在最右侧。</span>
@@ -697,7 +687,7 @@
                       <span class="message-line">第 08 行　正文继续使用 13px 系统字体。</span>
                       <span class="message-line">第 09 行　行高沿用当前会话区的 1.6。</span>
                       <span class="message-line">第 10 行　长行仍允许自然换行和选择。</span>
-                      <span class="message-line">第 11 行　回复按钮改为飞书对话框图标。</span>
+                      <span class="message-line">第 11 行　回复按钮使用对话回折图标。</span>
                       <span class="message-line">第 12 行　复制按钮改为双层纸张图标。</span>
                       <span class="message-line">第 13 行　两个操作位于消息框右下方。</span>
                       <span class="message-line">第 14 行　操作与底色框之间保留间距。</span>
@@ -705,19 +695,19 @@
                       <span class="message-line">第 16 行　图标按钮带有可访问名称。</span>
                       <span class="message-line">第 17 行　浅灰底色可在顶部即时切换。</span>
                       <span class="message-line">第 18 行　当前推荐 B · 瓷灰方案。</span>
-                      <span class="message-line">第 19 行　这是收起状态的最后一行正文。</span>
-                      <span class="message-line">第 20 行　这行正文在收起状态不展示。</span>
-                      <span class="message-line">第 21 行　展开后仍能读取完整消息。</span>
+                      <span class="message-line">第 19 行　这是静态截断的最后一行正文。</span>
+                      <span class="message-line">第 20 行　这行正文不会进入展示区域。</span>
+                      <span class="message-line">第 21 行　长消息不再提供展开或收起。</span>
                       <span class="message-line">第 22 行　复制动作始终复制完整原文。</span>
                       <span class="message-line">第 23 行　回复摘要同样基于完整原文。</span>
                       <span class="message-line">第 24 行　这里是完整消息的末尾。</span>
-                      <button class="ellipsis-row" type="button" aria-label="展开完整消息，共 24 行" aria-expanded="false" data-expand-message>…</button>
-                      <div class="collapse-row"><button type="button" data-collapse-message>收起长消息</button></div>
+                      <span class="ellipsis-row" aria-hidden="true">…</span>
+                      <span class="sr-only">其余内容已省略，共 24 行</span>
                     </div>
                   </div>
                   <div class="message-actions" aria-label="消息操作">
                     <button class="message-action reply-action" type="button" aria-label="回复你的消息" data-tooltip="回复">
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z"></path><circle class="reply-dots" cx="8" cy="10.5" r="1"></circle><circle class="reply-dots" cx="12" cy="10.5" r="1"></circle><circle class="reply-dots" cx="16" cy="10.5" r="1"></circle></svg>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"></path><path d="m15.2 9.2-3.6 3.5 3.6 3.5"></path><path d="M11.8 12.7h8.7"></path></svg>
                     </button>
                     <button class="message-action copy-action" type="button" aria-label="复制你的消息" data-tooltip="复制">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
@@ -755,7 +745,7 @@
   <template id="message-actions-template">
     <div class="message-actions" aria-label="消息操作">
       <button class="message-action reply-action" type="button" data-tooltip="回复">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z"></path><circle class="reply-dots" cx="8" cy="10.5" r="1"></circle><circle class="reply-dots" cx="12" cy="10.5" r="1"></circle><circle class="reply-dots" cx="16" cy="10.5" r="1"></circle></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"></path><path d="m15.2 9.2-3.6 3.5 3.6 3.5"></path><path d="M11.8 12.7h8.7"></path></svg>
       </button>
       <button class="message-action copy-action" type="button" data-tooltip="复制">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
@@ -819,26 +809,6 @@
       }
 
       document.addEventListener('click', async (event) => {
-        const expand = event.target.closest('[data-expand-message]');
-        if (expand) {
-          const copy = expand.closest('.message-copy');
-          copy.classList.add('is-expanded');
-          expand.setAttribute('aria-expanded', 'true');
-          liveStatus.textContent = '已展开完整消息';
-          return;
-        }
-
-        const collapse = event.target.closest('[data-collapse-message]');
-        if (collapse) {
-          const copy = collapse.closest('.message-copy');
-          const expandButton = copy.querySelector('[data-expand-message]');
-          copy.classList.remove('is-expanded');
-          expandButton.setAttribute('aria-expanded', 'false');
-          expandButton.focus();
-          liveStatus.textContent = '已收起长消息，显示前 19 行';
-          return;
-        }
-
         const reply = event.target.closest('.reply-action');
         if (reply) {
           const message = reply.closest('.message');
@@ -931,29 +901,21 @@
         bubble.className = 'user-bubble';
         const copy = document.createElement('div');
         copy.className = 'message-copy';
-        if (isLong) copy.dataset.collapsible = 'true';
-        lines.forEach((line) => {
+        lines.slice(0, isLong ? 19 : lines.length).forEach((line) => {
           const lineElement = document.createElement('span');
           lineElement.className = 'message-line';
           lineElement.textContent = line || '\u00a0';
           copy.appendChild(lineElement);
         });
         if (isLong) {
-          const expand = document.createElement('button');
-          expand.className = 'ellipsis-row';
-          expand.type = 'button';
-          expand.dataset.expandMessage = '';
-          expand.setAttribute('aria-label', `展开完整消息，共 ${lines.length} 行`);
-          expand.setAttribute('aria-expanded', 'false');
-          expand.textContent = '…';
-          const collapseRow = document.createElement('div');
-          collapseRow.className = 'collapse-row';
-          const collapse = document.createElement('button');
-          collapse.type = 'button';
-          collapse.dataset.collapseMessage = '';
-          collapse.textContent = '收起长消息';
-          collapseRow.appendChild(collapse);
-          copy.append(expand, collapseRow);
+          const ellipsis = document.createElement('span');
+          ellipsis.className = 'ellipsis-row';
+          ellipsis.setAttribute('aria-hidden', 'true');
+          ellipsis.textContent = '…';
+          const omittedStatus = document.createElement('span');
+          omittedStatus.className = 'sr-only';
+          omittedStatus.textContent = `其余内容已省略，共 ${lines.length} 行`;
+          copy.append(ellipsis, omittedStatus);
         }
         bubble.appendChild(copy);
         content.appendChild(bubble);
@@ -977,12 +939,15 @@
         resizeInput();
         requestAnimationFrame(() => timeline.scrollTo({ top: timeline.scrollHeight, behavior: 'smooth' }));
         liveStatus.textContent = text.split(/\r?\n/).length > 20
-          ? '消息已发送并收起为前 19 行和第 20 行省略号'
+          ? '消息已发送，展示前 19 行和第 20 行静态省略号'
           : '消息已发送';
       });
 
       document.querySelectorAll('.message.user').forEach((message) => {
         message.dataset.messageText = fullMessageText(message);
+        message.querySelectorAll('.message-line').forEach((line, index) => {
+          if (index >= 19) line.remove();
+        });
       });
       resizeInput();
       setShade('porcelain');

@@ -3979,7 +3979,8 @@ export function CampWorkspace({
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
                 let previousMessageAuthorKey: string | null = null
-                for (const timelineItem of conversationTimeline) {
+                for (let timelineIndex = 0; timelineIndex < conversationTimeline.length; timelineIndex += 1) {
+                  const timelineItem = conversationTimeline[timelineIndex]
                   const dayKey = localDayKey(timelineItem.createdAt)
                   if (dayKey && dayKey !== lastDayKey) {
                     lastDayKey = dayKey
@@ -4084,7 +4085,34 @@ export function CampWorkspace({
                   )
                   const isConversationFindCurrent = conversationFind.open
                     && conversationFind.snapshot?.match?.messageId === campMessage.id
-                  items.push(
+                  const trailingFileChangeItems: Extract<
+                    CampConversationTimelineItem,
+                    { kind: 'run_file_changes' }
+                  >[] = []
+                  if (campMessage.authorType === 'agent' && campMessage.sourceAgentRunId) {
+                    for (
+                      let nextIndex = timelineIndex + 1;
+                      nextIndex < conversationTimeline.length;
+                      nextIndex += 1
+                    ) {
+                      const candidate = conversationTimeline[nextIndex]
+                      if (
+                        candidate.kind !== 'run_file_changes'
+                        || candidate.changes.agentRunId !== campMessage.sourceAgentRunId
+                      ) break
+                      trailingFileChangeItems.push(candidate)
+                    }
+                  }
+                  const copied = copiedMessageId === campMessage.id
+                  const handleReply = campMessage.id.startsWith('optimistic:')
+                    ? undefined
+                    : (modality: ReplyFocusModality) => void startReply(campMessage, modality)
+                  const handleCopy = (): void => copyMessage(
+                    campMessage.id,
+                    displayBody,
+                    campMessage.content
+                  )
+                  const messageElement = (
                     <article
                       className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${isConversationFindCurrent ? ' conversation-find-current-message' : ''}`}
                       key={campMessage.id}
@@ -4146,16 +4174,11 @@ export function CampWorkspace({
                                 <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
                               </div>
                               <MessageSurface
-                                copied={copiedMessageId === campMessage.id}
+                                copied={copied}
                                 hasDelivery={campMessageDeliveries.length > 0}
-                                onReply={campMessage.id.startsWith('optimistic:')
-                                  ? undefined
-                                  : (modality) => void startReply(campMessage, modality)}
-                                onCopy={() => copyMessage(
-                                  campMessage.id,
-                                  displayBody,
-                                  campMessage.content
-                                )}
+                                showActions={campMessage.authorType !== 'agent'}
+                                onReply={handleReply}
+                                onCopy={handleCopy}
                               >
                                 {replyParentId && (
                                   <ReplyParentQuote
@@ -4209,11 +4232,11 @@ export function CampWorkspace({
                                       )
                                     : (
                                         <div className="message-bubble">
-                                          <CollapsibleStructuredMessageBody
+                                          <TruncatedStructuredMessageBody
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
-                                            collapsible={humanAuthored}
+                                            truncate={humanAuthored}
                                             forceExpanded={isConversationFindCurrent}
                                             fileReferenceSource={{
                                               campId: snapshot.camp.id,
@@ -4263,11 +4286,55 @@ export function CampWorkspace({
                                 memberById={memberById}
                                 onActivateMemberMention={openMemberProfilePopover}
                               />
+                              {campMessage.authorType === 'agent'
+                                && trailingFileChangeItems.length === 0
+                                && (
+                                  <MessageActions
+                                    copied={copied}
+                                    className="agent-message-actions"
+                                    onReply={handleReply}
+                                    onCopy={handleCopy}
+                                  />
+                                )}
                             </div>
                           )
                         : <p>{displayBody}</p>}
                     </article>
                   )
+                  if (trailingFileChangeItems.length > 0) {
+                    items.push(
+                      <div
+                        className={`agent-message-output${followsSameAuthor ? ' same-author' : ''}`}
+                        data-message-output-id={campMessage.id}
+                        key={`agent-message-output:${campMessage.id}`}
+                      >
+                        {messageElement}
+                        {trailingFileChangeItems.map((fileChangeItem) => (
+                          <AgentRunFileChangesTimelineCard
+                            key={fileChangeItem.id}
+                            changes={fileChangeItem.changes}
+                            onOpenReview={(selectedEvidenceFileId) => {
+                              filePreview?.openFileChanges(
+                                snapshot.camp.id,
+                                fileChangeItem.changes,
+                                selectedEvidenceFileId
+                              )
+                            }}
+                          />
+                        ))}
+                        <MessageActions
+                          copied={copied}
+                          className="agent-message-output-actions"
+                          onReply={handleReply}
+                          onCopy={handleCopy}
+                        />
+                      </div>
+                    )
+                    timelineIndex += trailingFileChangeItems.length
+                    previousMessageAuthorKey = null
+                    continue
+                  }
+                  items.push(messageElement)
                   previousMessageAuthorKey = messageAuthorKey
                 }
                 return items
@@ -4459,7 +4526,7 @@ export function CampWorkspace({
         <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
-          stopping={stopping} onStop={onStop} onQueueChange={setPendingQueue} onEditingChange={(editing) => {
+          onQueueChange={setPendingQueue} onEditingChange={(editing) => {
             setPendingEditing(editing)
             if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
           }} />
@@ -7164,12 +7231,14 @@ function ReplyMark(): JSX.Element {
 function MessageSurface({
   copied,
   hasDelivery,
+  showActions = true,
   onReply,
   onCopy,
   children
 }: {
   copied: boolean
   hasDelivery: boolean
+  showActions?: boolean
   onReply?(modality: ReplyFocusModality): void
   onCopy(): void
   children: React.ReactNode
@@ -7177,23 +7246,45 @@ function MessageSurface({
   return (
     <div className={`message-surface${hasDelivery ? ' has-delivery' : ''}${copied ? ' copied' : ''}`}>
       {children}
-      <div className="message-actions" role="group" aria-label="消息操作">
-        <span className="copy-feedback" role="status" aria-live="polite">
-          {copied ? '已复制' : ''}
-        </span>
-        {onReply && (
-          <button
-            className="message-reply-button"
-            type="button"
-            aria-label="回复这条消息"
-            title="回复"
-            onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
-          >
-            <MessageReplyIcon />
-          </button>
-        )}
-        <MessageCopyButton copied={copied} onCopy={onCopy} />
-      </div>
+      {showActions && (
+        <MessageActions copied={copied} onReply={onReply} onCopy={onCopy} />
+      )}
+    </div>
+  )
+}
+
+function MessageActions({
+  copied,
+  className,
+  onReply,
+  onCopy
+}: {
+  copied: boolean
+  className?: string
+  onReply?(modality: ReplyFocusModality): void
+  onCopy(): void
+}): JSX.Element {
+  return (
+    <div
+      className={`message-actions${copied ? ' copied' : ''}${className ? ` ${className}` : ''}`}
+      role="group"
+      aria-label="消息操作"
+    >
+      <span className="copy-feedback" role="status" aria-live="polite">
+        {copied ? '已复制' : ''}
+      </span>
+      {onReply && (
+        <button
+          className="message-reply-button"
+          type="button"
+          aria-label="回复这条消息"
+          title="回复"
+          onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
+        >
+          <MessageReplyIcon />
+        </button>
+      )}
+      <MessageCopyButton copied={copied} onCopy={onCopy} />
     </div>
   )
 }
@@ -7201,19 +7292,18 @@ function MessageSurface({
 function MessageReplyIcon(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z" />
-      <circle className="message-reply-dot" cx="8" cy="10.5" r="1" />
-      <circle className="message-reply-dot" cx="12" cy="10.5" r="1" />
-      <circle className="message-reply-dot" cx="16" cy="10.5" r="1" />
+      <path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2" />
+      <path d="m15.2 9.2-3.6 3.5 3.6 3.5" />
+      <path d="M11.8 12.7h8.7" />
     </svg>
   )
 }
 
-function CollapsibleStructuredMessageBody({
+function TruncatedStructuredMessageBody({
   body,
   content,
   members,
-  collapsible,
+  truncate,
   forceExpanded,
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
@@ -7224,7 +7314,7 @@ function CollapsibleStructuredMessageBody({
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
-  collapsible: boolean
+  truncate: boolean
   forceExpanded: boolean
   renderLeadingCurrentUserMarkdown?: boolean
   onActivateMemberMention?(
@@ -7236,13 +7326,11 @@ function CollapsibleStructuredMessageBody({
   onFileReference?: FileReferenceActivation
   fileReferenceSource?: MessageFileReferenceSource
 }): JSX.Element {
-  const [expanded, setExpanded] = useState(false)
-  const contentId = useId()
   const projection = useMemo(
-    () => collapsible ? collapsedMessageProjection(body, content) : null,
-    [body, collapsible, content]
+    () => truncate ? collapsedMessageProjection(body, content) : null,
+    [body, content, truncate]
   )
-  const displayFullMessage = expanded || forceExpanded || projection === null
+  const displayFullMessage = forceExpanded || projection === null
   const displayBody = displayFullMessage ? body : projection.body
   const displayContent = displayFullMessage ? content : projection.content
 
@@ -7258,25 +7346,13 @@ function CollapsibleStructuredMessageBody({
       fileReferenceSource={fileReferenceSource}
     />
   )
-  if (!projection) return messageBody
+  if (!projection || forceExpanded) return messageBody
 
   return (
-    <div className={`message-long-copy${displayFullMessage ? ' is-expanded' : ''}`}>
-      <div id={contentId}>{messageBody}</div>
-      {!forceExpanded && (
-        <button
-          className={`message-long-toggle ${expanded ? 'is-collapse' : 'is-expand'}`}
-          type="button"
-          aria-controls={contentId}
-          aria-expanded={expanded}
-          aria-label={expanded
-            ? `收起长消息，共 ${projection.lineCount} 行`
-            : `展开完整消息，共 ${projection.lineCount} 行`}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? '收起长消息' : '…'}
-        </button>
-      )}
+    <div className="message-long-copy">
+      <div>{messageBody}</div>
+      <span className="message-long-ellipsis" aria-hidden="true">…</span>
+      <span className="sr-only">其余内容已省略，共 {projection.lineCount} 行</span>
     </div>
   )
 }

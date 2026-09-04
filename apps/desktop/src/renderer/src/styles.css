@@ -2733,6 +2733,18 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 }
 .conversation-bubble:has(+ .conversation-bubble.same-author) { margin-bottom: 8px; }
 .conversation-bubble.same-author { margin-top: 8px; }
+.agent-message-output {
+  position: relative;
+  display: flow-root;
+  width: 100%;
+  margin: 14px 0;
+}
+.agent-message-output > .timeline-node { margin-top: 0; margin-bottom: 0; }
+.agent-message-output > .run-file-changes-card { margin-top: 14px; }
+.agent-message-output.same-author { margin-top: 8px; }
+.conversation-bubble:has(+ .agent-message-output.same-author),
+.agent-message-output:has(+ .conversation-bubble.same-author),
+.agent-message-output:has(+ .agent-message-output.same-author) { margin-bottom: 8px; }
 .conversation-bubble:is(.user, .external_principal) {
   margin-left: auto;
   grid-template-columns: minmax(0, 1fr) 32px;
@@ -3190,8 +3202,23 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   transform: translateY(-2px);
   transition: opacity 120ms ease, transform 120ms ease;
 }
+.conversation-bubble.agent .message-actions {
+  width: fit-content;
+  align-self: flex-start;
+  justify-content: flex-start;
+}
+.agent-message-output > .agent-message-output-actions {
+  width: fit-content;
+  align-self: auto;
+  justify-content: flex-start;
+  margin: 3px 0 0 42px;
+}
+.conversation-bubble.agent .message-actions .copy-feedback,
+.agent-message-output > .agent-message-output-actions .copy-feedback { order: 3; }
 .conversation-bubble:hover .message-actions,
-.conversation-bubble:focus-within .message-actions {
+.conversation-bubble:focus-within .message-actions,
+.agent-message-output:hover > .message-actions,
+.agent-message-output:focus-within > .message-actions {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
@@ -3215,10 +3242,10 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 }
 .message-copy-button svg,
 .message-reply-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
-.message-reply-button .message-reply-dot { fill: currentColor; stroke: none; }
 .message-copy-button:hover,
 .message-reply-button:hover { border-color: var(--line); color: var(--brand-ink); background: var(--surface-hover); }
-.message-surface.copied .message-copy-button { color: var(--success); background: var(--success-soft); }
+.message-surface.copied .message-copy-button,
+.message-actions.copied .message-copy-button { color: var(--success); background: var(--success-soft); }
 .message-copy-button:focus-visible,
 .message-reply-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 @media (hover: none), (pointer: coarse) {
@@ -3241,37 +3268,19 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   transition: opacity 120ms ease, transform 120ms ease;
 }
 .copy-feedback:empty { display: none; }
-.message-surface.copied .copy-feedback { opacity: 1; transform: translateY(0); }
+.message-surface.copied .copy-feedback,
+.message-actions.copied .copy-feedback { opacity: 1; transform: translateY(0); }
 .message-long-copy { min-width: 0; }
-.message-long-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  margin: 0;
-  border: 0;
-  border-radius: 4px;
-  color: var(--muted);
-  background: transparent;
-  cursor: pointer;
-}
-.message-long-toggle.is-expand {
+.message-long-ellipsis {
+  display: block;
   width: 34px;
   height: 20.8px;
+  margin: 0;
   padding: 0 4px 2px 0;
+  color: var(--muted);
   font: 700 17px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 1px;
 }
-.message-long-toggle.is-collapse {
-  width: 100%;
-  min-height: 25px;
-  margin-top: 5px;
-  padding: 5px 5px 0;
-  border-top: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
-  border-radius: 0 0 4px 4px;
-  font-size: 10px;
-}
-.message-long-toggle:hover { color: var(--brand-ink); background: color-mix(in srgb, var(--brand) 7%, transparent); }
-.message-long-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .run-stopped-event {
   display: grid;
@@ -4224,8 +4233,12 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 }
 .message-surface:has(.message-attachments),
 .message-surface:has(.image-gallery) { width: 100%; }
-.conversation-bubble:is(.user, .agent):has(.message-attachments) { width: 100%; max-width: none; }
-.conversation-bubble:is(.user, .agent):has(.message-attachments) .message-body { width: 100%; max-width: none; }
+.conversation-bubble:is(.user, .external_principal, .agent):has(.message-attachments) { width: 100%; max-width: none; }
+.conversation-bubble:is(.user, .external_principal, .agent):has(.message-attachments) .message-body { width: 100%; max-width: none; }
+.conversation-bubble:is(.user, .external_principal):has(.message-attachments) .message-surface {
+  width: 100%;
+  max-width: none;
+}
 .conversation-bubble:is(.user, .external_principal):has(.message-attachments) .message-bubble {
   width: fit-content;
   max-width: min(
@@ -4237,7 +4250,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .conversation-bubble.agent:has(.message-attachments) .final-copy { max-width: min(var(--conversation-prose-width), 100%); }
 .message-attachments { min-width: 0; }
 .user-message-attachments { display: grid; width: min(var(--conversation-artifact-width), 100%); gap: 8px; margin-bottom: 8px; }
-.user-message-files { display: flex; min-width: 0; flex-wrap: wrap; gap: 9px; }
+.user-message-files { display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 9px; }
 .agent-message-outputs { display: grid; width: min(var(--conversation-artifact-width), 100%); gap: 9px; margin-top: 9px; container: agent-outputs / inline-size; }
 .agent-output-images,
 .agent-output-files { display: grid; min-width: 0; }
@@ -4258,7 +4271,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .image-tile-preview:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .image-tile-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 240px; object-fit: contain; }
 .image-gallery-agent-output .image-gallery-grid.is-single .image-tile-preview img { max-height: min(520px, 58vh); }
-.image-gallery-user-attachment .image-gallery-grid { display: flex; min-width: 0; flex-wrap: wrap; gap: 8px; }
+.image-gallery-user-attachment .image-gallery-grid { display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .image-gallery-user-attachment .image-tile { width: 72px; height: 72px; flex: 0 0 72px; }
 .image-gallery-user-attachment .image-tile-preview { width: 72px; height: 72px; border-radius: 11px; background: var(--surface-muted); }
 .image-gallery-user-attachment .image-tile-preview:has(.image-tile-placeholder) { width: 72px; height: 72px; }
@@ -8092,6 +8105,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .timeline-scroll { padding-right: 12px; padding-left: 12px; }
   .task-event-card,
   .run-file-changes-card { width: 100%; margin-left: 0; }
+  .agent-message-output > .agent-message-output-actions { margin-left: 0; }
   .task-event-card { grid-template-columns: 26px minmax(0, 1fr); gap: 8px; padding: 10px; }
   .task-card-glyph { width: 26px; height: 26px; border-radius: 7px; }
   .task-card-glyph svg { width: 17px; height: 17px; }

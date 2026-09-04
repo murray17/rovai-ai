@@ -3531,7 +3531,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('集结队伍，写下这次冒险的目标…')
     expect(markup).toContain('title="复制"')
     expect(markup).not.toContain('>复制</button>')
-    expect(markup).toContain('class="message-reply-dot"')
+    expect(markup).toContain('d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"')
+    expect(markup).toContain('d="m15.2 9.2-3.6 3.5 3.6 3.5"')
     expect(markup).toContain('class="message-actions" role="group" aria-label="消息操作"')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
@@ -4302,6 +4303,25 @@ describe('task event projections', () => {
       targetAgentRunId: null,
       failureCode: 'runtime_unavailable'
     }
+    const fileChanges: CampSnapshot['agentRunFileChanges'][number] = {
+      schemaVersion: 2,
+      agentRunId: 'run-luoke',
+      executionEpoch: 1,
+      files: [{
+        evidenceFileId: 'ef-luoke-message',
+        path: 'src/message-actions.tsx',
+        changeKind: 'update',
+        presentationKind: 'full_net_diff',
+        operationCount: 1,
+        additions: 3,
+        deletions: 1
+      }],
+      fileCount: 1,
+      operationCount: 1,
+      additions: 3,
+      deletions: 1,
+      completedAt: '2026-07-30T03:00:03Z'
+    }
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
@@ -4334,7 +4354,7 @@ describe('task event projections', () => {
       agentRuns: [],
       contextManifests: [],
       executionEvidence: [],
-      agentRunFileChanges: [],
+      agentRunFileChanges: [fileChanges],
       approvals: [],
       actions: [],
       timeline: []
@@ -4372,6 +4392,14 @@ describe('task event projections', () => {
 
     expect(markup).not.toContain('<h2>会话</h2>')
     expect(markup).toContain('请检查 Downloads 目录里的页面。')
+    expect(markup).toContain('class="agent-message-output"')
+    expect(markup.indexOf('class="timeline-node conversation-bubble agent"'))
+      .toBeLessThan(markup.indexOf('class="timeline-node run-file-changes-card"'))
+    expect(markup.indexOf('class="timeline-node run-file-changes-card"'))
+      .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions"'))
+    expect(markup.indexOf('class="message-delivery-footer"'))
+      .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions"'))
+    expect((markup.match(/class="message-actions/g) ?? [])).toHaveLength(1)
     expect(markup).toContain('class="message-surface has-delivery"')
     expect(markup).toContain('class="message-delivery-footer"')
     expect(markup).toContain('class="message-delivery-handoff-rail"')

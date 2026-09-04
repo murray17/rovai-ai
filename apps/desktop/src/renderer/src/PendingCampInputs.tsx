@@ -59,7 +59,7 @@ function pendingError(code: string): string {
 }
 
 export function PendingCampInputs({
-  campId, refreshKey, executionActive, members, skills, skillCatalogStatus, stopping, onStop,
+  campId, refreshKey, executionActive, members, skills, skillCatalogStatus,
   onQueueChange, onEditingChange
 }: {
   campId: string
@@ -68,8 +68,6 @@ export function PendingCampInputs({
   members: readonly StructuredMentionMember[]
   skills: readonly ComposerSkillOption[]
   skillCatalogStatus: 'loading' | 'ready' | 'error'
-  stopping: boolean
-  onStop(): void
   onQueueChange(queue: CampPendingInputsView): void
   onEditingChange(editing: boolean): void
 }): JSX.Element {
@@ -248,16 +246,15 @@ export function PendingCampInputs({
         onPasteFiles={() => setError('待发送消息暂不支持附件。')}
         onBackspaceAtStart={() => { if (edit.replyToCampMessageId) setEdit({ ...edit, replyToCampMessageId: null, recipientSelectionRequired: false }) }}
         onSubmit={() => { if (!saveDisabled) return perform(() => finish(true)) }} />
-      <div className="composer-action-row">
-        <div className="composer-actions">
-          {queue?.executionActive && <button className="danger-button composer-stop" type="button" disabled={stopping} onClick={onStop}>{stopping ? '正在提交停止请求…' : '停止'}</button>}
-          <button type="button" className="quiet-button" disabled={busy} onClick={() => {
-            if (!ownsEdit) { setEdit(null); return }
-            requestClose()
-          }}>取消</button>
-          <button type="button" className="primary-button composer-send" disabled={saveDisabled} onClick={() => void perform(() => finish(true))}>{busy ? '处理中…' : '保存'}</button>
-        </div>
-      </div>
+      <PendingInputEditorActions
+        busy={busy}
+        saveDisabled={saveDisabled}
+        onCancel={() => {
+          if (!ownsEdit) { setEdit(null); return }
+          requestClose()
+        }}
+        onSave={() => void perform(() => finish(true))}
+      />
     </div>}
     <Dialog.Root open={switchTarget !== null} onOpenChange={(open) => { if (!open && !busy) setSwitchTarget(null) }}>
       <Dialog.Portal><Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
@@ -276,4 +273,34 @@ export function PendingCampInputs({
       </Dialog.Portal>
     </Dialog.Root>
   </>
+}
+
+export function PendingInputEditorActions({
+  busy,
+  saveDisabled,
+  onCancel,
+  onSave
+}: {
+  busy: boolean
+  saveDisabled: boolean
+  onCancel(): void
+  onSave(): void
+}): JSX.Element {
+  return (
+    <div className="composer-action-row">
+      <div className="composer-actions">
+        <button type="button" className="quiet-button" disabled={busy} onClick={onCancel}>
+          取消
+        </button>
+        <button
+          type="button"
+          className="primary-button composer-send"
+          disabled={saveDisabled}
+          onClick={onSave}
+        >
+          {busy ? '处理中…' : '保存'}
+        </button>
+      </div>
+    </div>
+  )
 }

@@ -56,7 +56,10 @@ last_updated: 2026-09-04
 - [x] 不存在通用偏好文件的新 profile 默认关闭世界地图；schema v4 保存值原样保留，schema v1–v3 继续迁移为开启，
   设置页未完成加载时也不短暂显示为开启。
 - [x] Renderer 附件展示统一：集中分类、Composer 48px 单排、用户 72px 图片与 46px 文件、Agent 正文后图片区和
-  两列文件区；Runtime 图片并入来源消息，两个主题共用组件树并提供十类 artifact token。
+  两列文件区；用户图片/文件拥有独立于正文宽度的右锚定工件轨，Runtime 图片并入来源消息，两个主题共用
+  组件树并提供十类 artifact token。
+- [x] 用户长消息超过 20 个显式文本行后只挂载前 19 行和第 20 行静态省略号，不提供展开/收起交互；待发送
+  队列编辑器仅保留取消与保存，不复制执行中的停止按钮。
 
 ## 已取得的本机证据
 
@@ -168,3 +171,19 @@ DOCS_BASE_REF=<merge-base-with-main> pnpm docs:check:ci
   560px 阈值下两列/一列切换、48px 单排滚动、方向键/Home/End、鼠标滚轮横移及无页面横向溢出验证通过；
 - `pnpm docs:test`、`pnpm docs:check`、
   `DOCS_BASE_REF=5cfbce5ff8d734fb84b46fddacd91d011898cf85 pnpm docs:check:ci`：通过。
+
+## 用户消息布局与队列编辑验证（2026-09-04）
+
+- 定向 red/green：用户长消息静态截断、20 行边界、附件 CSS 轨道和待发送编辑动作共 3 个 Vitest 文件、
+  47 项测试通过；`pnpm typecheck` 通过。
+- `pnpm test`：146 个 Vitest 文件、1534 项测试通过，后续 Node suites 220 项通过、1 项 Windows-only skip；
+  `pnpm build:desktop` 通过。
+- production `camp-open-projection` fixture 使用短正文证明附件宽度不受消息长度约束：1200px 下正文 78px、
+  附件轨 748px，左侧与队员头像轨道同位，右侧与正文同轴并距用户头像 10px；1040×700、1440×920、
+  Day/Night 与 200% zoom 均无页面横向溢出，截图已人工核对。
+- 当前宿主的 Chromium sandbox 在进入业务断言前拒绝初始化；夹具按已有受控回退
+  `ROVAI_CAMP_OPEN_ACCEPT_NO_SANDBOX=1` 重跑后全部业务断言通过，未启动 Core、SQLite、Skill Library 或 Runtime。
+- `docs/prototypes/conversation-user-message-layout/preview.png` 已从更新后的 HTML 重新生成，静态省略号无 hover、
+  展开或收起控件。
+- `pnpm docs:test`、`pnpm docs:check` 与
+  `DOCS_BASE_REF=934aa6f6f4b66919a6daced1c1a537c997507120 pnpm docs:check:ci`：通过。

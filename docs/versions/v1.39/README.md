@@ -21,8 +21,11 @@ last_updated: 2026-09-04
 - Product Runtime closed set、Migration 135/136、Core optional subsystem、Fleet、Desktop 配置、模型目录、Skill group、
   Activity、Usage 与 smoke 已加入 Pi；旧 Runtime、渠道、附件存储/发布、membership、取消和
   planned shutdown 分支保持原样。
-- 当前版本另收敛 Renderer 附件展示：用户消息按图片/文件/正文分区，Agent 按正文/图片/文件分区；Runtime 图片
-  并入来源 Agent 消息，Agent 文件使用十类主题 token。该项不改变附件数据、Open wire、读取授权或渠道发布。
+- 当前版本另收敛 Renderer 附件展示：用户消息按图片/文件/正文分区，图片与文件使用独立于短正文宽度的
+  右锚定工件轨道；Agent 按正文/图片/文件分区，Runtime 图片并入来源 Agent 消息，Agent 文件使用十类主题
+  token。该项不改变附件数据、Open wire、读取授权或渠道发布。
+- 当前用户消息超过 20 个显式文本行后只显示前 19 行与静态省略号，不再提供展开或收起；待发送队列编辑器
+  只保留取消与保存，不复制执行中的停止入口。这两项只收敛 Renderer 交互，不改变完整消息或停止命令语义。
 - Pi executable 不存在时只有 `runtime.pi` optional subsystem degraded；Core、Skills、MCP 与其他 Runtime 继续启动。
   安装存在性不替代独立的 version、Machine Ready、capability 与 platform admission。
 - 正式 AgentRun 继承 Pi 官方 `PI_CODING_AGENT_DIR`/原生默认配置；Core 不读取 Claude Home、不建立 Pi 私有
@@ -93,7 +96,7 @@ Schema 87`：receipt reader 接受历史 V1 与当前 V2、Writer 只写 V2；�
 | Decisions | 已更新 | [v1.39 决定](decisions.md)记录独立 JSONL Host、私有 exact-first/fallback、V2 最小 receipt、Pi 原生能力与部分审批、Pi MCP bridge 的撤销、ACP derived child command、消息文件存在性与视觉类型分离，以及 Pi 三平台可运行 Preview；CURRENT 已纳入导航 |
 | Contracts | 已更新 | [Runtime Launch and Verification v33](../../contracts/runtime-launch-and-verification-v33.md)冻结 Pi 原生环境、v5 薄扩展、partial approval、Prompt transform/images/diagnostics/singleflight，并继承 External MCP Unsupported 与 Preview；[Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)保留 ACP derived child 的最终 request cwd/PATH 解析；[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)拥有 Preview 准入语义；[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)拥有活动 Tool 组的具体当前指令；[File Preview v4](../../contracts/file-preview-v4.md)拥有消息文件存在性探测 wire；[Runtime Images v4](../../contracts/runtime-images-v4.md)拥有作者感知图片分区与几何 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)和[基础不变量](../../architecture/foundational-invariants.md)加入 Pi 的独立 transport、Fleet、隐私、managed input 与 External MCP Unsupported 边界；[File Preview](../../architecture/file-preview.md)拥有消息引用准入与既有 classifier 边界；[Runtime 图片](../../architecture/runtime-images.md)同步消息内来源合并与两种 Gallery variant |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组的具体当前指令、稳定 Tool 行、渠道边界和世界地图首次默认，定义 Composer、用户消息与 Agent 交付的附件分区；[Camp 文件预览区](../../ui/components/file-preview.md)拥有真实文件链接和共享图标语义；[Porcelain Day](../../ui/themes/porcelain-day.md)和[Steel Night](../../ui/themes/steel-night.md)加入十类 Agent artifact token；Pi 在既有 Runtime、成员与 onboarding 表面标记“实验性开放” |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)补充活动 Tool 组的具体当前指令、稳定 Tool 行、渠道边界和世界地图首次默认，定义 Composer、用户消息与 Agent 交付的附件分区、用户附件独立宽度、静态长消息截断与待发送编辑动作；[Camp 文件预览区](../../ui/components/file-preview.md)拥有真实文件链接和共享图标语义；[Porcelain Day](../../ui/themes/porcelain-day.md)和[Steel Night](../../ui/themes/steel-night.md)加入十类 Agent artifact token；Pi 在既有 Runtime、成员与 onboarding 表面标记“实验性开放” |
 | Runtime Activity | 已更新 | [Activity Registry](../../runtime-activity/registry.md)与维护指南加入 Pi verified tool lifecycle 映射，未知 shape 继续 fail closed；当前指令只改共享 presentation，不增加分类映射 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 Pi 0.84.4 本机证据、三平台实验性 Preview 与剩余 Golden Flow |
 | Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture 索引和当前决定导航指向 Runtime Launch v33、Platform Admission v2、File Preview v4、Runtime Images v4、Pi research 与 parity matrix |
