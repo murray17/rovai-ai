@@ -146,7 +146,7 @@ Renderer 不自行猜测。
 
 Viewer 不显示预览/源码切换、右上角复制按钮、整行工具栏或 `Ready` 状态。每个类型只有一个规范阅读视图：
 
-- Markdown 渲染安全 GFM；超出 4 MiB 显示分页原文；
+- Markdown 渲染安全 GFM；行内 code 与围栏代码块复用 Camp 工作区的 Mist Gray 分层，超出 4 MiB 显示分页原文；
 - HTML 在 sandbox iframe 中执行；超限或初始化失败回退只读原文；
 - 代码/文本只读显示行号、搜索、定位、选择与系统复制，大文件分页；
 - 图片/SVG 提供适应、原始尺寸、缩放和重置，不把 SVG 注入宿主 DOM；
