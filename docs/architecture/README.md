@@ -16,7 +16,7 @@ last_updated: 2026-09-04
 | [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting、Process/Outcome/Tool-Use Judge、Tool Interaction、typed Resource 与 paired counterfactual 模块 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
 | [Desktop App Updates](desktop-app-updates.md) | Main 单一更新快照、完成后递归调度、检查来源合并、提醒代次、显式下载/安装、Renderer 深链与 updater-first 受控退出边界 |
-| [Desktop Navigation Refresh](desktop-navigation-refresh.md) | Core 提交后失效提示、Renderer 全局 generation drain、失败退避、可见性与低频安全刷新边界 |
+| [Desktop Navigation Refresh](desktop-navigation-refresh.md) | Core 提交后失效提示、Renderer 全局 generation drain、Main-owned Sidecar Project 首次冻结/成员同步、失败退避、可见性与低频安全刷新边界 |
 | [Availability-first Runtime](availability-first-runtime.md) | Desktop bootstrap/full-core 分层、data-dir lease、SQLite 准入票据、copy migration、Supervisor generation/revision 与请求 fencing |
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | 十五项固定 Agent CLI operation、`camp.read` 安全 Timeline 默认、single-Camp History target、safe Agent output projection、Core Router、Runtime Fleet、精确 help、Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |

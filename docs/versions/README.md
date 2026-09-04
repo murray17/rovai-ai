@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.40
+current_version: v1.41
 last_updated: 2026-09-04
 ---
 
@@ -191,4 +191,5 @@ last_updated: 2026-09-04
 | v1.37 | `historical` | Runtime 图片、取消可用性、Agent 目标教学与飞书 LAN 只读执行台；部分真实 Runtime/渠道验收未完成即冻结 | [v1.37/README.md](v1.37/README.md) |
 | v1.38 | `historical` | 钉钉渠道管理入口重新开放；按飞书同等体验宗旨交付多 Bot durable 聚合、状态卡、永久摘要与安全诊断，未验收平台能力保持独立 Gate | [v1.38/README.md](v1.38/README.md) |
 | v1.39 | `historical` | Pi JSONL Runtime、原生能力加 v5 薄扩展、exact-first resume、追加 Skills、partial approval、Prompt images 与稀疏 Usage；External MCP 明确 Unsupported；三平台保持 Preview；Renderer 附件按作者分区展示 | [v1.39/README.md](v1.39/README.md) |
-| v1.40 | `current` | Desktop 新用户附件改为弱持久 source path refs，Pending 原生携带附件，Runtime 仅做 Run-local 适配 | [v1.40/README.md](v1.40/README.md) |
+| v1.40 | `historical` | Desktop 新用户附件改为弱持久 source path refs，Pending 原生携带附件，Runtime 仅做 Run-local 适配 | [v1.40/README.md](v1.40/README.md) |
+| v1.41 | `current` | Sidecar 首次冻结用户现有 Project 顺序，后续仅同步成员变化，不再按消息活动移动 Project | [v1.41/README.md](v1.41/README.md) |

@@ -2736,14 +2736,16 @@ export interface RemovedNavigationProject {
 }
 
 export interface NavigationPreferencesSnapshot {
-  schemaVersion: 2
+  schemaVersion: 3
   pins: NavigationPin[]
   removedProjects: RemovedNavigationProject[]
+  projectOrder: string[] | null
 }
 
 export interface NavigationPreferencesApi {
   get(): Promise<NavigationPreferencesSnapshot>
   replacePins(pins: NavigationPin[]): Promise<NavigationPreferencesSnapshot>
+  synchronizeProjectOrder(projectKeys: string[]): Promise<NavigationPreferencesSnapshot>
   removeProject(targetKey: string, relatedCampIds: string[]): Promise<NavigationPreferencesSnapshot>
   restoreProject(targetKey: string): Promise<NavigationPreferencesSnapshot>
 }

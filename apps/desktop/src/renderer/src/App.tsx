@@ -120,6 +120,7 @@ import {
   currentProjectWorkspace,
   navigationIncludingCurrentWorkspace,
   navigationWithProjectAuthority,
+  navigationWithProjectOrder,
   persistCurrentProject,
   projectTargetKey,
   readCurrentProject,
@@ -1004,6 +1005,7 @@ function AuthoritativeApp({
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
   const [removedProjectAuthorityReady, setRemovedProjectAuthorityReady] = useState(false)
+  const [projectOrder, setProjectOrder] = useState<string[] | null>(null)
   const [pinnedCampItems, setPinnedCampItems] = useState<NavigationCampItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryReviewNotice, setMemoryReviewNotice] = useState(false)
@@ -1086,6 +1088,7 @@ function AuthoritativeApp({
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const agentListRequest = useRef<Promise<AgentProfile[]> | null>(null)
   const navigationSnapshotRef = useRef<NavigationSnapshot | null>(null)
+  const projectOrderSyncGeneration = useRef(0)
   const overviewRequest = useRef<Promise<boolean> | null>(null)
   const startupSnapshotRequest = useRef<Promise<void> | null>(null)
   const onboardingSnapshotRequest = useRef<Promise<void> | null>(null)
@@ -1302,10 +1305,18 @@ function AuthoritativeApp({
               resolvedPins.pins
             )
           }
-          setNavigationPins(resolvedPins.pins)
-          setRemovedProjectKeys(new Set(
+          const removedProjectKeySet = new Set(
             resolvedNavigationPreferences.removedProjects.map((project) => project.targetKey)
-          ))
+          )
+          resolvedNavigationPreferences = await window.rovai.navigationPreferences
+            .synchronizeProjectOrder(
+              nextNavigation.projects
+                .map((project) => project.projectKey)
+                .filter((projectKey) => !removedProjectKeySet.has(projectKey))
+            )
+          setNavigationPins(resolvedPins.pins)
+          setRemovedProjectKeys(removedProjectKeySet)
+          setProjectOrder(resolvedNavigationPreferences.projectOrder)
           setRemovedProjectAuthorityReady(true)
           setPinnedCampItems(resolvedPins.camps)
         })()
@@ -1395,11 +1406,42 @@ function AuthoritativeApp({
     snapshot: NavigationPreferencesSnapshot
   ): void => {
     setNavigationPins(snapshot.pins)
-    setRemovedProjectKeys(new Set(
+    const nextRemovedProjectKeys = new Set(
       snapshot.removedProjects.map((project) => project.targetKey)
-    ))
+    )
+    setRemovedProjectKeys((current) => (
+      current.size === nextRemovedProjectKeys.size
+      && [...current].every((projectKey) => nextRemovedProjectKeys.has(projectKey))
+    ) ? current : nextRemovedProjectKeys)
+    setProjectOrder((current) => {
+      const next = snapshot.projectOrder
+      if (current === null || next === null) return current === next ? current : next
+      return current.length === next.length
+        && current.every((projectKey, index) => projectKey === next[index])
+        ? current
+        : next
+    })
     setRemovedProjectAuthorityReady(true)
   }, [])
+
+  useEffect(() => {
+    if (!navigation || !removedProjectAuthorityReady) return
+    const generation = ++projectOrderSyncGeneration.current
+    const projectKeys = navigation.projects
+      .map((project) => project.projectKey)
+      .filter((projectKey) => !removedProjectKeys.has(projectKey))
+    void window.rovai.navigationPreferences.synchronizeProjectOrder(projectKeys)
+      .then((snapshot) => {
+        if (generation === projectOrderSyncGeneration.current) {
+          applyNavigationPreferences(snapshot)
+        }
+      })
+      .catch((nextError) => {
+        if (generation === projectOrderSyncGeneration.current) {
+          setError(`项目顺序暂时无法保存：${errorMessage(nextError)}`)
+        }
+      })
+  }, [applyNavigationPreferences, navigation, removedProjectAuthorityReady, removedProjectKeys])
 
   const restoreNavigationProject = useCallback(async (projectPath: string): Promise<void> => {
     const targetKey = projectTargetKey(projectPath)
@@ -1736,12 +1778,15 @@ function AuthoritativeApp({
     ? currentProject.projectPath
     : null
   const visibleNavigation = useMemo(
-    () => navigationWithProjectAuthority(
-      navigation,
-      removedProjectKeys,
-      removedProjectAuthorityReady
+    () => navigationWithProjectOrder(
+      navigationWithProjectAuthority(
+        navigation,
+        removedProjectKeys,
+        removedProjectAuthorityReady
+      ),
+      projectOrder
     ),
-    [navigation, removedProjectAuthorityReady, removedProjectKeys]
+    [navigation, projectOrder, removedProjectAuthorityReady, removedProjectKeys]
   )
   const currentProjectAccess = currentProjectAccessDecision({
     currentProject,

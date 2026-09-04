@@ -1,7 +1,7 @@
 ---
 document_type: version-decisions
 version: v1.40
-lifecycle: current
+lifecycle: historical
 last_updated: 2026-09-04
 ---
 

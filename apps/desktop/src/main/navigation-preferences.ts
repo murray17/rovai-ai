@@ -9,9 +9,10 @@ import type {
 import { writePrivateJson } from './general-preferences'
 
 const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   pins: [],
-  removedProjects: []
+  removedProjects: [],
+  projectOrder: null
 }
 
 export async function readNavigationPreferences(
@@ -40,7 +41,7 @@ async function readNavigationPreferencesResult(filePath: string): Promise<{
   }
 
   const snapshot = sanitizeSnapshot(source)
-  const changed = JSON.stringify(source) !== JSON.stringify(snapshot)
+  const changed = !sourceMatchesSupportedSnapshot(source, snapshot)
   return {
     snapshot,
     degradation: changed
@@ -50,6 +51,21 @@ async function readNavigationPreferencesResult(filePath: string): Promise<{
         )
       : null
   }
+}
+
+function sourceMatchesSupportedSnapshot(
+  source: unknown,
+  snapshot: NavigationPreferencesSnapshot
+): boolean {
+  if (!isRecord(source)) return false
+  if (source.schemaVersion === 2) {
+    return JSON.stringify(source) === JSON.stringify({
+      schemaVersion: 2,
+      pins: snapshot.pins,
+      removedProjects: snapshot.removedProjects
+    })
+  }
+  return JSON.stringify(source) === JSON.stringify(snapshot)
 }
 
 export class NavigationPreferencesStore {
@@ -106,6 +122,33 @@ export class NavigationPreferencesStore {
     })
   }
 
+  synchronizeProjectOrder(projectKeys: string[]): Promise<NavigationPreferencesSnapshot> {
+    if (
+      !Array.isArray(projectKeys)
+      || !projectKeys.every(isProjectTargetKey)
+      || new Set(projectKeys).size !== projectKeys.length
+    ) {
+      return Promise.reject(new Error('Project navigation keys are invalid'))
+    }
+    return this.#enqueue(async () => {
+      const currentProjectKeys = new Set(projectKeys)
+      const retainedProjectKeys = this.#snapshot.projectOrder === null
+        ? []
+        : this.#snapshot.projectOrder.filter((projectKey) => currentProjectKeys.has(projectKey))
+      const retainedProjectKeySet = new Set(retainedProjectKeys)
+      const projectOrder = [
+        ...retainedProjectKeys,
+        ...projectKeys.filter((projectKey) => !retainedProjectKeySet.has(projectKey))
+      ]
+      const next = sanitizeSnapshot({
+        ...this.#snapshot,
+        projectOrder
+      })
+      await this.#commit(next)
+      return this.get()
+    })
+  }
+
   removeProject(
     targetKey: string,
     relatedCampIds: string[]
@@ -122,7 +165,7 @@ export class NavigationPreferencesStore {
         (project) => project.targetKey === targetKey
       )
       const next = sanitizeSnapshot({
-        schemaVersion: 2,
+        schemaVersion: 3,
         pins: this.#snapshot.pins.filter((pin) => !(
           (pin.kind === 'project' && pin.targetKey === targetKey)
           || (pin.kind === 'camp' && relatedCampIdSet.has(pin.targetKey))
@@ -132,7 +175,10 @@ export class NavigationPreferencesStore {
             (project) => project.targetKey !== targetKey
           ),
           existing ?? { targetKey, removedAt: this.#now() }
-        ]
+        ],
+        projectOrder: this.#snapshot.projectOrder?.filter(
+          (projectKey) => projectKey !== targetKey
+        ) ?? null
       })
       await this.#commit(next)
       return this.get()
@@ -199,15 +245,18 @@ function navigationDegradation(code: string, message: string): StructuredError {
 function sanitizeSnapshot(source: unknown): NavigationPreferencesSnapshot {
   if (!isRecord(source)) return structuredClone(EMPTY_SNAPSHOT)
   const pins = sanitizePins(source)
-  const removedProjects = source.schemaVersion === 2
+  const removedProjects = source.schemaVersion === 2 || source.schemaVersion === 3
     ? sanitizeRemovedProjects(source.removedProjects)
     : []
-  return { schemaVersion: 2, pins, removedProjects }
+  const projectOrder = source.schemaVersion === 3
+    ? sanitizeProjectOrder(source.projectOrder)
+    : null
+  return { schemaVersion: 3, pins, removedProjects, projectOrder }
 }
 
 function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
   if (
-    (source.schemaVersion !== 1 && source.schemaVersion !== 2)
+    (source.schemaVersion !== 1 && source.schemaVersion !== 2 && source.schemaVersion !== 3)
     || !Array.isArray(source.pins)
   ) return []
   const seen = new Set<string>()
@@ -238,6 +287,19 @@ function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
       || left.kind.localeCompare(right.kind)
       || left.targetKey.localeCompare(right.targetKey)
   )
+}
+
+function sanitizeProjectOrder(source: unknown): string[] | null {
+  if (source === null) return null
+  if (!Array.isArray(source)) return null
+  const seen = new Set<string>()
+  const projectOrder: string[] = []
+  for (const projectKey of source) {
+    if (!isProjectTargetKey(projectKey) || seen.has(projectKey)) continue
+    seen.add(projectKey)
+    projectOrder.push(projectKey)
+  }
+  return projectOrder
 }
 
 function sanitizeRemovedProjects(source: unknown): RemovedNavigationProject[] {

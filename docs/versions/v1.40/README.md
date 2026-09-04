@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.40
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -62,6 +62,7 @@ Migration 137 只接受 `Data Contract v1.46 / Projection Schema 87`，原子升
 
 ## References
 
+- 下一版本：[v1.41](../v1.41/README.md)
 - [实施与验收](implementation-plan.md)
 - [版本决定](decisions.md)
 - [Camp Attachment v8](../../contracts/camp-attachment-v8.md)

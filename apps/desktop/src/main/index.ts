@@ -1304,6 +1304,18 @@ ipcMain.handle('rovai:navigation-preferences-replace-pins', (_event, pins: Navig
 )
 
 ipcMain.handle(
+  'rovai:navigation-preferences-synchronize-project-order',
+  (_event, projectKeys: unknown) => {
+    if (!Array.isArray(projectKeys) || !projectKeys.every((projectKey) => typeof projectKey === 'string')) {
+      throw new Error('Invalid Project order synchronization request')
+    }
+    return projectAccessTransactions.run(() =>
+      requireNavigationPreferences().synchronizeProjectOrder(projectKeys)
+    )
+  }
+)
+
+ipcMain.handle(
   'rovai:navigation-preferences-remove-project',
   async (_event, targetKey: unknown, relatedCampIds: unknown) => {
     if (typeof targetKey !== 'string' || !Array.isArray(relatedCampIds)) {

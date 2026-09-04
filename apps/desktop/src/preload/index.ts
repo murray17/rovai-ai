@@ -264,6 +264,12 @@ const api: RovaiApi = {
     replacePins(pins: NavigationPin[]) {
       return ipcRenderer.invoke('rovai:navigation-preferences-replace-pins', pins) as Promise<NavigationPreferencesSnapshot>
     },
+    synchronizeProjectOrder(projectKeys: string[]) {
+      return ipcRenderer.invoke(
+        'rovai:navigation-preferences-synchronize-project-order',
+        projectKeys
+      ) as Promise<NavigationPreferencesSnapshot>
+    },
     removeProject(targetKey: string, relatedCampIds: string[]) {
       return ipcRenderer.invoke(
         'rovai:navigation-preferences-remove-project',
