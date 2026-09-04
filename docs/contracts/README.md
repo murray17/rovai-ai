@@ -41,7 +41,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v33（当前）](runtime-launch-and-verification-v33.md) | v32 的 External MCP Unsupported 不变；正式 Pi 恢复原生资源，Rovai v5 薄扩展只做绑定、Bootstrap、最小 receipt 与 `bash/edit/write` 部分审批，并加入 Prompt transform、图片、诊断与 keyed singleflight |
+| [Runtime Launch and Verification v34（当前）](runtime-launch-and-verification-v34.md) | v33 的 Pi 原生资源、External MCP Unsupported 与部分审批不变；删除资源二次发现、Slash/Prompt transform 和 extension fallback，精确限定 resume 降级并让 Fleet 在锁外并发启动 |
+| [Runtime Launch and Verification v33（历史）](runtime-launch-and-verification-v33.md) | v32 的 External MCP Unsupported 不变；正式 Pi 恢复原生资源，Rovai v5 薄扩展只做绑定、Bootstrap、最小 receipt 与 `bash/edit/write` 部分审批，并加入 Prompt transform、图片、诊断与 keyed singleflight；其资源追加、Slash transform 与启动 fallback 已由 v34 删除 |
 | [Runtime Launch and Verification v32（历史）](runtime-launch-and-verification-v32.md) | v31 的 Pi Runtime/preview 语义不变；删除 Pi Core-managed MCP bridge，Pi 静默忽略 Assignment且不依赖 MCP subsystem/config/projection |
 | [Runtime Launch and Verification v31（历史）](runtime-launch-and-verification-v31.md) | v30 的 Pi wire/安全语义不变；三平台改为明确的可运行 experimental preview，仍不宣称 qualified |
 | [Runtime Launch and Verification v30（历史）](runtime-launch-and-verification-v30.md) | v29 保留；增加 Pi JSONL Host、专属 Ready/exact resume、managed receipt、动态 Skills/MCP、Action/Usage 与三平台未准入边界 |

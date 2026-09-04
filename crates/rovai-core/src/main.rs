@@ -40,7 +40,7 @@ use core_subsystems::{
 };
 use pi::{
     PiAgentRunRuntimeRequest, PiIncoming, PiPromptImage, PiRpcRuntimeAdapter, PiRuntime,
-    PreparedPiPromptImage, PreparedPiPromptTransform, prepare_prompt_images,
+    PreparedPiPromptImage, prepare_prompt_images,
 };
 #[cfg(target_os = "macos")]
 use rovai_core::managed_process::configure_user_automation_denial_root;
@@ -141,7 +141,7 @@ use rovai_core::{
     },
     context::{
         CharterDeliveryMode, ContextMaterialization, ContextPayloadTooLarge, ContextService,
-        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PersistPiPromptEvidence,
+        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PersistPiPromptImageEvidence,
         PiPromptImageEvidence, PreparedContext, RuntimeInputDelivery,
         charter_delivery_mode_for_adapter,
     },
@@ -11217,13 +11217,16 @@ impl Core {
                 native_binding_id: &binding_credential.native_binding_id,
                 native_binding_generation: binding_credential.native_binding_generation,
                 bootstrap: &session_bootstrap,
-                skill_exposure,
                 builtin_tools: &builtin_tools,
             })
             .await;
         let runtime = match runtime_result {
             Ok(runtime) => runtime,
-            Err(error) if exact_resume => {
+            Err(error)
+                if exact_resume
+                    && pi::activation_failure_kind(&error)
+                        == Some(pi::PiActivationFailureKind::ResumeContinuityLost) =>
+            {
                 let failure = classify_native_resume_failure(&error);
                 {
                     let mut database = self.database.lock().await;
@@ -11278,7 +11281,6 @@ impl Core {
                         native_binding_id: &replacement_binding.native_binding_id,
                         native_binding_generation: replacement_binding.native_binding_generation,
                         bootstrap: &replacement_bootstrap,
-                        skill_exposure,
                         builtin_tools: &builtin_tools,
                     })
                     .await
@@ -11356,10 +11358,6 @@ impl Core {
                 &prepared_context.rendered_payload,
             )?
         };
-        let prompt_transform: PreparedPiPromptTransform = runtime.prepare_prompt_transform(
-            &prepared_context.rendered_payload,
-            &input_projection.invocation_kind,
-        )?;
         let image_sources = input_projection
             .attachments
             .iter()
@@ -11383,17 +11381,10 @@ impl Core {
             .collect::<Vec<_>>();
         {
             let mut database = self.database.lock().await;
-            ContextService.persist_pi_prompt_evidence(
+            ContextService.persist_pi_prompt_image_evidence(
                 &mut database,
-                &ManagedBlobStore::new(&self.data_dir),
-                PersistPiPromptEvidence {
+                PersistPiPromptImageEvidence {
                     delivery_id: &delivery.id,
-                    original_payload: &prepared_context.rendered_payload,
-                    runtime_payload: &prompt_transform.runtime_payload,
-                    transform: &prompt_transform.evidence,
-                    source_path: prompt_transform.source_path.as_deref(),
-                    source_content: prompt_transform.source_content.as_deref(),
-                    expanded_content: prompt_transform.expanded_content.as_deref(),
                     images: &image_evidence,
                 },
             )?;
@@ -11405,7 +11396,7 @@ impl Core {
             .map(|image| image.wire.clone())
             .collect::<Vec<_>>();
         if let Err(error) = runtime
-            .start_prompt(&prompt_transform.runtime_payload, &prompt_images)
+            .start_prompt(&prepared_context.rendered_payload, &prompt_images)
             .await
         {
             let mut database = self.database.lock().await;

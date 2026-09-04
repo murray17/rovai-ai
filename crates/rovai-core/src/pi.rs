@@ -19,14 +19,14 @@ use tokio::io::AsyncBufRead;
 
 use crate::acp::CompletedAcpAction;
 
-pub use host::{PiAgentRunRuntimeRequest, PiRpcRuntimeAdapter, PiRuntime};
 pub(crate) use host::{
-    PiHost, PiPromptImage, PreparedPiPromptImage, PreparedPiPromptTransform, machine_ready_probe,
-    prepare_prompt_images,
+    PiActivationFailureKind, PiHost, PiPromptImage, PreparedPiPromptImage, activation_failure_kind,
+    machine_ready_probe, prepare_prompt_images,
 };
+pub use host::{PiAgentRunRuntimeRequest, PiRpcRuntimeAdapter, PiRuntime};
 
 pub(crate) const PI_PROTOCOL_VERSION: &str = "pi-jsonl-rpc-v1";
-pub(crate) const PI_HOST_EXTENSION_VERSION: &str = "rovai-pi-host-v5";
+pub(crate) const PI_HOST_EXTENSION_VERSION: &str = "rovai-pi-host-v6";
 const PI_APPROVAL_SCHEMA_VERSION: i64 = 1;
 pub(super) const PI_MAX_JSONL_RECORD_BYTES: usize = 4 * 1024 * 1024;
 pub(super) const PI_COMMAND_TIMEOUT: Duration = Duration::from_secs(45);
@@ -443,7 +443,7 @@ pub(crate) fn runtime_compatibility_digest(
         .canonicalize()
         .context("failed to resolve qualified Pi executable")?;
     canonical_json_digest(&json!({
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "adapterKind": AdapterKind::Pi,
         "protocolVersion": PI_PROTOCOL_VERSION,
         "executionRoot": cwd,
@@ -634,6 +634,10 @@ mod tests {
         assert!(!source.contains("registerTool"));
         assert!(!source.contains("Rovai MCP bridge"));
         assert!(!source.contains("pi.setActiveTools"));
+        assert!(!source.contains("resources_discover"));
+        assert!(!source.contains("skillPaths"));
+        assert!(!source.contains("skillRoot"));
+        assert!(!source.contains("expectedManagedSkillExposureDigest"));
         assert!(source.contains("GOVERNED_NATIVE_TOOLS"));
         assert!(source.contains("ctx.isProjectTrusted()"));
         assert!(source.contains("SettingsManager.create(cwd, getAgentDir(), { projectTrusted })"));

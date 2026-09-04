@@ -27,8 +27,6 @@ use rovai_core::{
         ManagedWindowsArgvDialect,
     },
     runtime_discovery::configure_active_runtime_command,
-    skill::MAX_SKILL_FILE_BYTES,
-    skill_projection::PreparedSkillExposure,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -75,8 +73,6 @@ pub(crate) struct PiHostBindingDocument {
     pub bootstrap_evidence_id: String,
     pub bootstrap: String,
     pub bootstrap_payload_digest: String,
-    pub skill_root: String,
-    pub expected_managed_skill_exposure_digest: String,
 }
 
 #[derive(Debug, Clone)]
@@ -91,8 +87,6 @@ struct PiBindingSeed {
     bootstrap_evidence_id: String,
     bootstrap: String,
     bootstrap_payload_digest: String,
-    skill_root: PathBuf,
-    expected_managed_skill_exposure_digest: String,
 }
 
 impl PiBindingSeed {
@@ -102,7 +96,7 @@ impl PiBindingSeed {
         host_binding_generation: u64,
     ) -> PiHostBindingDocument {
         PiHostBindingDocument {
-            schema_version: 2,
+            schema_version: 3,
             extension_version: PI_HOST_EXTENSION_VERSION.to_string(),
             host_instance_id: host_instance_id.to_string(),
             host_binding_generation,
@@ -116,10 +110,6 @@ impl PiBindingSeed {
             bootstrap_evidence_id: self.bootstrap_evidence_id.clone(),
             bootstrap: self.bootstrap.clone(),
             bootstrap_payload_digest: self.bootstrap_payload_digest.clone(),
-            skill_root: self.skill_root.to_string_lossy().to_string(),
-            expected_managed_skill_exposure_digest: self
-                .expected_managed_skill_exposure_digest
-                .clone(),
         }
     }
 }
@@ -157,6 +147,80 @@ struct PendingPiCommand {
     sender: oneshot::Sender<std::result::Result<Value, String>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PiActivationFailureKind {
+    ResumeContinuityLost,
+    ActivationFailed,
+    HostFailed,
+    ConfigurationFailed,
+}
+
+#[derive(Debug)]
+struct PiActivationFailure {
+    kind: PiActivationFailureKind,
+    message: String,
+}
+
+impl std::fmt::Display for PiActivationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{:?}: {}", self.kind, self.message)
+    }
+}
+
+impl std::error::Error for PiActivationFailure {}
+
+fn activation_failure(
+    kind: PiActivationFailureKind,
+    error: impl std::fmt::Display,
+) -> anyhow::Error {
+    anyhow::Error::new(PiActivationFailure {
+        kind,
+        message: error.to_string(),
+    })
+}
+
+pub(crate) fn activation_failure_kind(error: &anyhow::Error) -> Option<PiActivationFailureKind> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<PiActivationFailure>())
+        .map(|failure| failure.kind)
+}
+
+#[derive(Debug)]
+struct PiRpcCommandRejected {
+    command: String,
+    message: String,
+}
+
+impl std::fmt::Display for PiRpcCommandRejected {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.command, self.message)
+    }
+}
+
+impl std::error::Error for PiRpcCommandRejected {}
+
+fn switch_target_is_explicitly_unavailable(error: &anyhow::Error) -> bool {
+    let Some(rejection) = error.downcast_ref::<PiRpcCommandRejected>() else {
+        return false;
+    };
+    if rejection.command != "switch_session" {
+        return false;
+    }
+    let message = rejection.message.to_ascii_lowercase();
+    [
+        "not found",
+        "does not exist",
+        "no such file",
+        "cannot read",
+        "can't read",
+        "unreadable",
+        "failed to read",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
+}
+
 pub(crate) struct PiHost {
     host_instance_id: String,
     child: Mutex<ManagedProcess>,
@@ -191,7 +255,6 @@ struct PiHostLaunch<'a> {
     initial_binding: &'a PiBindingSeed,
     incoming: mpsc::UnboundedSender<PiIncoming>,
     builtin_tools: Option<BuiltinToolProcessConfig>,
-    allow_auto_extensions: bool,
 }
 
 struct PiProbeRootCleanup(PathBuf);
@@ -207,41 +270,11 @@ struct ActivatedPiSession {
     session_file: PathBuf,
     model_fingerprint: String,
     binding_document: PiHostBindingDocument,
-    command_catalog: Vec<PiCommandCatalogEntry>,
     model_supports_images: bool,
 }
 
-const PI_COMMAND_FILE_MAX_BYTES: u64 = 2 * 1024 * 1024;
 pub(crate) const PI_PROMPT_IMAGE_MAX_BYTES: usize = 20 * 1024 * 1024;
 pub(crate) const PI_PROMPT_IMAGE_TOTAL_MAX_BYTES: usize = 80 * 1024 * 1024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PiCommandSource {
-    Extension,
-    Prompt,
-    Skill,
-}
-
-impl PiCommandSource {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Extension => "extension",
-            Self::Prompt => "prompt",
-            Self::Skill => "skill",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct PiCommandCatalogEntry {
-    name: String,
-    source: PiCommandSource,
-    location: Option<String>,
-    lexical_path: Option<PathBuf>,
-    canonical_path: Option<PathBuf>,
-    content_digest: Option<String>,
-    file_error: Option<String>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -256,15 +289,6 @@ pub(crate) struct PreparedPiPromptImage {
     pub(crate) wire: PiPromptImage,
     pub(crate) content_digest: String,
     pub(crate) byte_length: usize,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PreparedPiPromptTransform {
-    pub(crate) runtime_payload: String,
-    pub(crate) evidence: Value,
-    pub(crate) source_path: Option<String>,
-    pub(crate) source_content: Option<Vec<u8>>,
-    pub(crate) expanded_content: Option<Vec<u8>>,
 }
 
 pub(crate) fn prepare_prompt_images(
@@ -356,15 +380,8 @@ fn append_initial_session_argument(command: &mut Command, session_file: Option<&
     }
 }
 
-fn append_host_arguments(
-    command: &mut Command,
-    extension_path: &Path,
-    allow_auto_extensions: bool,
-) {
+fn append_host_arguments(command: &mut Command, extension_path: &Path) {
     command.args(["--mode", "rpc"]);
-    if !allow_auto_extensions {
-        command.arg("--no-extensions");
-    }
     command
         .args(["--no-themes", "--extension"])
         .arg(extension_path);
@@ -372,23 +389,6 @@ fn append_host_arguments(
 
 impl PiHost {
     async fn spawn(launch: PiHostLaunch<'_>) -> Result<Arc<Self>> {
-        match Self::spawn_once(&launch, launch.allow_auto_extensions).await {
-            Ok(host) => Ok(host),
-            Err(first_error) if launch.allow_auto_extensions => {
-                Self::spawn_once(&launch, false).await.with_context(|| {
-                    format!(
-                        "Pi native Extension startup failed before input; managed-only retry also failed: {first_error:#}"
-                    )
-                })
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    async fn spawn_once(
-        launch: &PiHostLaunch<'_>,
-        allow_auto_extensions: bool,
-    ) -> Result<Arc<Self>> {
         create_private_directory(launch.private_runtime_dir)?;
         if let Some(session_dir) = launch.session_dir {
             create_private_directory(session_dir)?;
@@ -410,7 +410,7 @@ impl PiHost {
         if let Some(config) = &launch.builtin_tools {
             config.configure_command(&mut command)?;
         }
-        append_host_arguments(&mut command, &extension_path, allow_auto_extensions);
+        append_host_arguments(&mut command, &extension_path);
         append_session_directory_argument(&mut command, launch.session_dir);
         append_initial_session_argument(&mut command, launch.initial_session_file);
         command
@@ -694,7 +694,7 @@ impl PiHost {
             .await
             .clone()
             .context("Pi managed Session state has no active binding")?;
-        if state.schema_version != 2
+        if state.schema_version != 3
             || state.extension_version != PI_HOST_EXTENSION_VERSION
             || state.host_instance_id != self.host_instance_id
             || state.host_binding_generation != binding.host_binding_generation
@@ -730,7 +730,10 @@ impl PiHost {
         }
         match timeout(PI_COMMAND_TIMEOUT, receiver).await {
             Ok(Ok(Ok(response))) => Ok(response),
-            Ok(Ok(Err(message))) => bail!("{command_type}: {message}"),
+            Ok(Ok(Err(message))) => Err(anyhow::Error::new(PiRpcCommandRejected {
+                command: command_type.to_string(),
+                message,
+            })),
             Ok(Err(_)) => bail!("Pi RPC response channel closed: {command_type}"),
             Err(_) => {
                 self.pending.lock().await.remove(&id);
@@ -767,33 +770,72 @@ impl PiHost {
         seed: &PiBindingSeed,
         locator_root: &Path,
         frozen_runtime: &FrozenAgentRuntimeConfig,
-        expected_managed_skills: &[(String, PathBuf)],
     ) -> Result<ActivatedPiSession> {
         if !self.is_quiescent().await {
-            bail!("Pi Host is not quiescent for Session activation");
+            return Err(activation_failure(
+                PiActivationFailureKind::ActivationFailed,
+                "Pi Host is not quiescent for Session activation",
+            ));
         }
         let generation = self.binding_generation.fetch_add(1, Ordering::AcqRel) + 1;
         let document = seed.document(&self.host_instance_id, generation);
-        write_private_json(&self.binding_path, &document)?;
+        write_private_json(&self.binding_path, &document).map_err(|error| {
+            activation_failure(PiActivationFailureKind::ActivationFailed, error)
+        })?;
         *self.binding_document.write().await = Some(document.clone());
         *self.managed_session_state.write().await = None;
 
         if let Some(expected_session_id) = seed.expected_native_session_id.as_deref() {
-            let locator = read_session_locator(locator_root, expected_session_id, &self.cwd)?;
-            let response = self
+            let locator = read_session_locator(locator_root, expected_session_id, &self.cwd)
+                .map_err(|error| {
+                    activation_failure(PiActivationFailureKind::ResumeContinuityLost, error)
+                })?;
+            let response = match self
                 .command(
                     "switch_session",
                     json!({"sessionPath": locator.session_file}),
                 )
-                .await?;
-            ensure_session_replacement_succeeded(&response, "switch_session")?;
+                .await
+            {
+                Ok(response) => response,
+                Err(error) if switch_target_is_explicitly_unavailable(&error) => {
+                    return Err(activation_failure(
+                        PiActivationFailureKind::ResumeContinuityLost,
+                        error,
+                    ));
+                }
+                Err(error) => {
+                    return Err(activation_failure(
+                        PiActivationFailureKind::ActivationFailed,
+                        error,
+                    ));
+                }
+            };
+            ensure_session_replacement_succeeded(&response, "switch_session").map_err(|error| {
+                activation_failure(PiActivationFailureKind::ActivationFailed, error)
+            })?;
         } else {
-            let response = self.command("new_session", json!({})).await?;
-            ensure_session_replacement_succeeded(&response, "new_session")?;
+            let response = self
+                .command("new_session", json!({}))
+                .await
+                .map_err(|error| {
+                    activation_failure(PiActivationFailureKind::ActivationFailed, error)
+                })?;
+            ensure_session_replacement_succeeded(&response, "new_session").map_err(|error| {
+                activation_failure(PiActivationFailureKind::ActivationFailed, error)
+            })?;
         }
-        let available_models = self.command("get_available_models", json!({})).await?;
+        let available_models = self
+            .command("get_available_models", json!({}))
+            .await
+            .map_err(|error| {
+                activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
+            })?;
         if frozen_runtime.model.model_id != PI_RUNTIME_DEFAULT_MODEL_ID {
-            let (provider, model_id) = parse_explicit_model_id(&frozen_runtime.model.model_id)?;
+            let (provider, model_id) = parse_explicit_model_id(&frozen_runtime.model.model_id)
+                .map_err(|error| {
+                    activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
+                })?;
             let found = available_models
                 .pointer("/data/models")
                 .and_then(Value::as_array)
@@ -804,13 +846,19 @@ impl PiHost {
                         && model.get("id").and_then(Value::as_str) == Some(model_id.as_str())
                 });
             if !found {
-                bail!("Pi explicit provider/model is unavailable");
+                return Err(activation_failure(
+                    PiActivationFailureKind::ConfigurationFailed,
+                    "Pi explicit provider/model is unavailable",
+                ));
             }
             self.command(
                 "set_model",
                 json!({"provider": provider, "modelId": model_id}),
             )
-            .await?;
+            .await
+            .map_err(|error| {
+                activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
+            })?;
         }
         if let Some(thinking_level) = frozen_runtime
             .model
@@ -819,43 +867,63 @@ impl PiHost {
             .and_then(Value::as_str)
         {
             self.command("set_thinking_level", json!({"level": thinking_level}))
-                .await?;
-        }
-        let state = self.command("get_state", json!({})).await?;
-        let (session_id, session_file, provider, model_id, thinking_level, model_supports_images) =
-            validate_host_state(
-                &state,
-                seed.expected_native_session_id.as_deref(),
-                locator_root,
-                &self.cwd,
-                &frozen_runtime.model.model_id,
-            )?;
-        validate_managed_session_state(
-            self.managed_session_state
-                .read()
                 .await
-                .as_ref()
-                .context("Pi managed Extension did not report Session state")?,
+                .map_err(|error| {
+                    activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
+                })?;
+        }
+        let state = self
+            .command("get_state", json!({}))
+            .await
+            .map_err(|error| {
+                activation_failure(PiActivationFailureKind::ActivationFailed, error)
+            })?;
+        let exact_resume = seed.expected_native_session_id.is_some();
+        let (session_id, session_file) = validate_host_session_state(
+            &state,
+            seed.expected_native_session_id.as_deref(),
+            locator_root,
+            &self.cwd,
+        )
+        .map_err(|error| {
+            activation_failure(
+                if exact_resume {
+                    PiActivationFailureKind::ResumeContinuityLost
+                } else {
+                    PiActivationFailureKind::ActivationFailed
+                },
+                error,
+            )
+        })?;
+        let (provider, model_id, thinking_level, model_supports_images) =
+            validate_host_model_state(&state, &frozen_runtime.model.model_id).map_err(|error| {
+                activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
+            })?;
+        let managed_session_state = self
+            .managed_session_state
+            .read()
+            .await
+            .clone()
+            .context("Pi managed Extension did not report Session state")
+            .map_err(|error| {
+                activation_failure(PiActivationFailureKind::ActivationFailed, error)
+            })?;
+        validate_managed_session_state(
+            &managed_session_state,
             &document,
             &session_id,
             &session_file,
             &self.cwd,
-        )?;
+        )
+        .map_err(|error| activation_failure(PiActivationFailureKind::ActivationFailed, error))?;
         write_session_locator(
             locator_root,
             &session_id,
             &session_file,
             &self.cwd,
             seed.expected_native_session_id.is_some(),
-        )?;
-        let commands = self.command("get_commands", json!({})).await?;
-        validate_skill_commands(
-            &commands,
-            &seed.skill_root,
-            &self.cwd,
-            expected_managed_skills,
-        )?;
-        let command_catalog = parse_command_catalog(&commands)?;
+        )
+        .map_err(|error| activation_failure(PiActivationFailureKind::ActivationFailed, error))?;
         let model_fingerprint =
             short_digest(format!("{provider}\0{model_id}\0{thinking_level}").as_bytes());
         *self.session_id.write().await = session_id.clone();
@@ -866,7 +934,6 @@ impl PiHost {
             session_file,
             model_fingerprint,
             binding_document: document,
-            command_catalog,
             model_supports_images,
         })
     }
@@ -989,7 +1056,6 @@ pub struct PiRuntime {
     camp_id: String,
     host: Arc<PiHost>,
     binding_document: PiHostBindingDocument,
-    command_catalog: Vec<PiCommandCatalogEntry>,
     model_supports_images: bool,
     final_message: RwLock<Option<String>>,
     final_stop_reason: RwLock<Option<String>>,
@@ -1012,7 +1078,6 @@ impl PiRuntime {
             camp_id,
             host,
             binding_document: activation.binding_document,
-            command_catalog: activation.command_catalog,
             model_supports_images: activation.model_supports_images,
             final_message: RwLock::new(None),
             final_stop_reason: RwLock::new(None),
@@ -1022,14 +1087,6 @@ impl PiRuntime {
             session_file: activation.session_file,
             model_fingerprint: activation.model_fingerprint,
         })
-    }
-
-    pub(crate) fn prepare_prompt_transform(
-        &self,
-        original_payload: &str,
-        invocation_kind: &str,
-    ) -> Result<PreparedPiPromptTransform> {
-        transform_pi_prompt(original_payload, invocation_kind, &self.command_catalog)
     }
 
     pub async fn start_prompt(&self, message: &str, images: &[PiPromptImage]) -> Result<()> {
@@ -1271,7 +1328,7 @@ impl PiRuntime {
     pub(crate) fn validate_managed_receipt(&self, receipt: &Value) -> Result<(String, String)> {
         let receipt: PiManagedInputReceipt = serde_json::from_value(receipt.clone())
             .context("Pi managed input receipt shape is invalid")?;
-        if receipt.schema_version != 2
+        if receipt.schema_version != 3
             || receipt.extension_version != PI_HOST_EXTENSION_VERSION
             || receipt.host_instance_id != self.host_instance_id()
             || receipt.host_binding_generation != self.host_binding_generation()
@@ -1361,18 +1418,12 @@ struct PiGovernedNativeTool {
     observable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PiReceiptSkill {
-    name: String,
-    description_digest: String,
-    entry_path: String,
-    model_visible: bool,
-}
+type PiRuntimeCreationKey = (String, i64);
+type PiRuntimeCreationGate = Weak<Mutex<()>>;
 
 pub struct PiRpcRuntimeAdapter {
     active: Mutex<HashMap<String, Arc<PiRuntime>>>,
-    runtime_creation: StdMutex<HashMap<(String, i64), Weak<Mutex<()>>>>,
+    runtime_creation: StdMutex<HashMap<PiRuntimeCreationKey, PiRuntimeCreationGate>>,
     incoming: mpsc::UnboundedSender<PiIncoming>,
     fleet: Arc<AgentRuntimeFleetManager>,
     private_runtime_dir: PathBuf,
@@ -1392,7 +1443,6 @@ pub struct PiAgentRunRuntimeRequest<'a> {
     pub native_binding_id: &'a str,
     pub native_binding_generation: i64,
     pub bootstrap: &'a PreparedSessionBootstrap,
-    pub skill_exposure: &'a PreparedSkillExposure,
     pub builtin_tools: &'a BuiltinToolProcessConfig,
 }
 
@@ -1449,9 +1499,6 @@ impl PiRpcRuntimeAdapter {
                 .release(request.agent_run_id, epoch, FleetReleaseDisposition::Stop)
                 .await;
         }
-        let skill_root = request.cwd.join(".pi/skills");
-        create_private_or_workspace_directory(&skill_root)?;
-        let expected_managed_skills = expected_managed_skills(request.skill_exposure)?;
         let bootstrap_payload_digest =
             format!("{:x}", Sha256::digest(request.bootstrap.payload.as_bytes()));
         let seed = PiBindingSeed {
@@ -1465,8 +1512,6 @@ impl PiRpcRuntimeAdapter {
             bootstrap_evidence_id: request.bootstrap.evidence_id.clone(),
             bootstrap: request.bootstrap.payload.clone(),
             bootstrap_payload_digest,
-            skill_root,
-            expected_managed_skill_exposure_digest: request.skill_exposure.digest.clone(),
         };
         let locator_root =
             session_locator_root(&self.private_runtime_dir, request.camp_id, request.agent_id)?;
@@ -1495,22 +1540,20 @@ impl PiRpcRuntimeAdapter {
                         initial_binding: &seed,
                         incoming: self.incoming.clone(),
                         builtin_tools: Some(request.builtin_tools.clone()),
-                        allow_auto_extensions: true,
                     })
                     .await?;
                     Ok(RuntimeProcessHost::Pi(host))
                 },
             )
             .await;
-        let lease = lease?;
-        let host = lease.host.into_pi()?;
+        let lease = lease
+            .map_err(|error| activation_failure(PiActivationFailureKind::HostFailed, error))?;
+        let host = lease
+            .host
+            .into_pi()
+            .map_err(|error| activation_failure(PiActivationFailureKind::HostFailed, error))?;
         let activation = match host
-            .activate(
-                &seed,
-                &locator_root,
-                request.frozen_runtime,
-                &expected_managed_skills,
-            )
+            .activate(&seed, &locator_root, request.frozen_runtime)
             .await
         {
             Ok(activation) => activation,
@@ -1539,7 +1582,10 @@ impl PiRpcRuntimeAdapter {
                     FleetReleaseDisposition::Stop,
                 )
                 .await;
-            return Err(error);
+            return Err(activation_failure(
+                PiActivationFailureKind::ActivationFailed,
+                error,
+            ));
         }
         let runtime = PiRuntime::from_host(owner, request.camp_id.to_string(), host, activation);
         let displaced = {
@@ -1716,12 +1762,10 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
     let _probe_root_cleanup = PiProbeRootCleanup(probe_root.clone());
     let private_runtime_dir = probe_root.join("private");
     let session_dir = probe_root.join("sessions");
-    let skill_root = probe_root.join(".pi/skills");
     create_private_directory(&private_runtime_dir)?;
     create_private_directory(&session_dir)?;
     let initial_session_file = session_dir.join("machine-ready-session.jsonl");
     write_private_file(&initial_session_file, b"")?;
-    std::fs::create_dir_all(&skill_root)?;
     let bootstrap = "Rovai Pi no-Prompt Machine Ready probe.".to_string();
     let seed = PiBindingSeed {
         agent_run_id: uuid::Uuid::new_v4().to_string(),
@@ -1734,11 +1778,6 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         bootstrap_evidence_id: uuid::Uuid::new_v4().to_string(),
         bootstrap_payload_digest: format!("{:x}", Sha256::digest(bootstrap.as_bytes())),
         bootstrap,
-        skill_root,
-        expected_managed_skill_exposure_digest: format!(
-            "{:x}",
-            Sha256::digest(b"pi-probe-empty-skills")
-        ),
     };
     let (incoming, _receiver) = mpsc::unbounded_channel();
     let host = PiHost::spawn(PiHostLaunch {
@@ -1750,7 +1789,6 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         initial_binding: &seed,
         incoming,
         builtin_tools: None,
-        allow_auto_extensions: false,
     })
     .await?;
     let result = async {
@@ -1944,557 +1982,8 @@ fn canonical_json(value: Value) -> Result<String> {
     Ok(serde_json::to_string(&canonicalize(value))?)
 }
 
-fn expected_managed_skills(exposure: &PreparedSkillExposure) -> Result<Vec<(String, PathBuf)>> {
-    let mut values = exposure
-        .snapshot
-        .skills
-        .iter()
-        .filter(|skill| skill.group_key == "pi" && skill.status == "ready")
-        .map(|skill| {
-            Ok((
-                skill.name.clone(),
-                PathBuf::from(
-                    skill
-                        .entry_path
-                        .as_deref()
-                        .context("ready Pi Skill has no entry path")?,
-                ),
-            ))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    values.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
-    Ok(values)
-}
-
-fn validate_skill_commands(
-    response: &Value,
-    skill_root: &Path,
-    workspace: &Path,
-    expected_managed_skills: &[(String, PathBuf)],
-) -> Result<Vec<PiReceiptSkill>> {
-    let commands = response
-        .pointer("/data/commands")
-        .and_then(Value::as_array)
-        .context("Pi get_commands omitted commands")?;
-    let mut receipt = Vec::new();
-    for command in commands
-        .iter()
-        .filter(|command| command.get("source").and_then(Value::as_str) == Some("skill"))
-    {
-        let name = command
-            .get("name")
-            .and_then(Value::as_str)
-            .and_then(|name| name.strip_prefix("skill:"))
-            .context("Pi Skill command has an invalid name")?;
-        let path = command_path(command).context("Pi Skill command omitted source path")?;
-        receipt.push(PiReceiptSkill {
-            name: name.to_string(),
-            description_digest: canonical_json_digest(&json!(
-                command
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-            ))?,
-            entry_path: path.to_string_lossy().to_string(),
-            model_visible: true,
-        });
-    }
-    receipt.sort_by(|left, right| {
-        left.name
-            .cmp(&right.name)
-            .then(left.entry_path.cmp(&right.entry_path))
-    });
-    validate_managed_skill_subset(&receipt, skill_root, workspace, expected_managed_skills)?;
-    for skill in &mut receipt {
-        if expected_managed_skills
-            .iter()
-            .any(|(name, _)| name == &skill.name)
-        {
-            skill.model_visible = pi_skill_model_visible(Path::new(&skill.entry_path))?;
-        }
-    }
-    Ok(receipt)
-}
-
-fn command_path(command: &Value) -> Option<PathBuf> {
-    command
-        .get("path")
-        .and_then(Value::as_str)
-        .or_else(|| command.pointer("/sourceInfo/path").and_then(Value::as_str))
-        .map(PathBuf::from)
-}
-
-fn command_location(command: &Value) -> Option<String> {
-    if let Some(location) = command
-        .get("location")
-        .and_then(Value::as_str)
-        .filter(|value| matches!(*value, "user" | "project" | "path"))
-    {
-        return Some(location.to_string());
-    }
-    match command.pointer("/sourceInfo/scope").and_then(Value::as_str) {
-        Some("user") => Some("user".to_string()),
-        Some("project") => Some("project".to_string()),
-        Some("temporary") => Some("path".to_string()),
-        _ => None,
-    }
-}
-
-fn parse_command_catalog(response: &Value) -> Result<Vec<PiCommandCatalogEntry>> {
-    let commands = response
-        .pointer("/data/commands")
-        .and_then(Value::as_array)
-        .context("Pi get_commands omitted commands")?;
-    let mut catalog = Vec::with_capacity(commands.len());
-    for command in commands {
-        let Some(name) = command
-            .get("name")
-            .and_then(Value::as_str)
-            .filter(|name| !name.trim().is_empty())
-        else {
-            continue;
-        };
-        let source = match command.get("source").and_then(Value::as_str) {
-            Some("extension") => PiCommandSource::Extension,
-            Some("prompt") => PiCommandSource::Prompt,
-            Some("skill") => PiCommandSource::Skill,
-            _ => continue,
-        };
-        let lexical_path = command_path(command);
-        let location = command_location(command);
-        let (canonical_path, content_digest, file_error) =
-            if matches!(source, PiCommandSource::Prompt | PiCommandSource::Skill) {
-                match lexical_path
-                    .as_deref()
-                    .context("Pi file command omitted its source path")
-                    .and_then(read_pi_command_source)
-                {
-                    Ok((canonical_path, bytes)) => (
-                        Some(canonical_path),
-                        Some(sha256_bytes(&bytes)),
-                        location
-                            .is_none()
-                            .then(|| "Pi file command omitted a supported location".to_string()),
-                    ),
-                    Err(error) => (None, None, Some(format!("{error:#}"))),
-                }
-            } else {
-                (None, None, None)
-            };
-        catalog.push(PiCommandCatalogEntry {
-            name: name.to_string(),
-            source,
-            location,
-            lexical_path,
-            canonical_path,
-            content_digest,
-            file_error,
-        });
-    }
-    Ok(catalog)
-}
-
-fn read_pi_command_source(path: &Path) -> Result<(PathBuf, Vec<u8>)> {
-    if !path.is_absolute() {
-        bail!("Pi command source path is not absolute");
-    }
-    let metadata =
-        std::fs::symlink_metadata(path).context("Pi command source metadata is unavailable")?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        bail!("Pi command source is not a non-symlink regular file");
-    }
-    if metadata.len() > PI_COMMAND_FILE_MAX_BYTES {
-        bail!("Pi command source exceeds the private command-file limit");
-    }
-    let canonical = path
-        .canonicalize()
-        .context("Pi command source cannot be canonicalized")?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    File::open(path)
-        .context("Pi command source cannot be opened")?
-        .take(PI_COMMAND_FILE_MAX_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .context("Pi command source cannot be read")?;
-    if bytes.len() as u64 > PI_COMMAND_FILE_MAX_BYTES {
-        bail!("Pi command source exceeds the private command-file limit");
-    }
-    Ok((canonical, bytes))
-}
-
 fn sha256_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
-}
-
-fn parse_current_input(payload: &str) -> Result<(usize, usize, Value)> {
-    const OPEN: &str = "[CURRENT_INPUT]\n";
-    const CLOSE: &str = "\n[/CURRENT_INPUT]";
-    let section_start = payload
-        .rfind(OPEN)
-        .context("Pi Dynamic Context has no CURRENT_INPUT section")?;
-    let json_start = section_start + OPEN.len();
-    let relative_end = payload[json_start..]
-        .find(CLOSE)
-        .context("Pi Dynamic Context has no closing CURRENT_INPUT section")?;
-    let json_end = json_start + relative_end;
-    let value = serde_json::from_str(&payload[json_start..json_end])
-        .context("Pi Dynamic Context CURRENT_INPUT is invalid")?;
-    Ok((json_start, json_end, value))
-}
-
-fn parse_slash_invocation(message: &str) -> Option<(&str, &str)> {
-    let trimmed = message.trim();
-    let command = trimmed.strip_prefix('/')?;
-    let token_end = command.find(char::is_whitespace).unwrap_or(command.len());
-    let name = &command[..token_end];
-    if name.is_empty() {
-        return None;
-    }
-    Some((name, command[token_end..].trim()))
-}
-
-fn parse_pi_command_args(arguments: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-    for character in arguments.chars() {
-        if let Some(expected) = quote {
-            if character == expected {
-                quote = None;
-            } else {
-                current.push(character);
-            }
-        } else if matches!(character, '\'' | '"') {
-            quote = Some(character);
-        } else if character.is_whitespace() {
-            if !current.is_empty() {
-                values.push(std::mem::take(&mut current));
-            }
-        } else {
-            current.push(character);
-        }
-    }
-    if !current.is_empty() {
-        values.push(current);
-    }
-    values
-}
-
-fn strip_pi_frontmatter(content: &str) -> String {
-    let normalized = content
-        .strip_prefix('\u{feff}')
-        .unwrap_or(content)
-        .replace("\r\n", "\n")
-        .replace('\r', "\n");
-    if !normalized.starts_with("---") {
-        return normalized;
-    }
-    let Some(relative_end) = normalized[3..].find("\n---") else {
-        return normalized;
-    };
-    let end = 3 + relative_end;
-    normalized[end + 4..].trim().to_string()
-}
-
-fn substitute_pi_prompt_arguments(content: &str, arguments: &[String]) -> String {
-    use std::sync::OnceLock;
-
-    static PATTERN: OnceLock<regex::Regex> = OnceLock::new();
-    let pattern = PATTERN.get_or_init(|| {
-        regex::Regex::new(
-            r"\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)",
-        )
-        .expect("Pi prompt placeholder regex is static")
-    });
-    let all_arguments = arguments.join(" ");
-    pattern
-        .replace_all(content, |captures: &regex::Captures<'_>| {
-            if let Some(target) = captures.get(1) {
-                let value = match target.as_str() {
-                    "@" | "ARGUMENTS" => Some(all_arguments.as_str()),
-                    index => index
-                        .parse::<usize>()
-                        .ok()
-                        .and_then(|index| index.checked_sub(1))
-                        .and_then(|index| arguments.get(index))
-                        .map(String::as_str),
-                };
-                return value
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or_else(|| captures.get(2).map_or("", |value| value.as_str()))
-                    .to_string();
-            }
-            if let Some(start) = captures.get(3) {
-                let start = start
-                    .as_str()
-                    .parse::<usize>()
-                    .unwrap_or(1)
-                    .saturating_sub(1);
-                let end = captures
-                    .get(4)
-                    .and_then(|length| length.as_str().parse::<usize>().ok())
-                    .map(|length| start.saturating_add(length))
-                    .unwrap_or(arguments.len())
-                    .min(arguments.len());
-                return arguments.get(start..end).unwrap_or_default().join(" ");
-            }
-            match captures.get(5).map(|value| value.as_str()) {
-                Some("@" | "ARGUMENTS") => all_arguments.clone(),
-                Some(index) => index
-                    .parse::<usize>()
-                    .ok()
-                    .and_then(|index| index.checked_sub(1))
-                    .and_then(|index| arguments.get(index))
-                    .cloned()
-                    .unwrap_or_default(),
-                None => String::new(),
-            }
-        })
-        .into_owned()
-}
-
-fn transform_pi_prompt(
-    original_payload: &str,
-    invocation_kind: &str,
-    command_catalog: &[PiCommandCatalogEntry],
-) -> Result<PreparedPiPromptTransform> {
-    let original_digest = sha256_bytes(original_payload.as_bytes());
-    let verbatim = || PreparedPiPromptTransform {
-        runtime_payload: original_payload.to_string(),
-        evidence: json!({
-            "schemaVersion": 1,
-            "mode": "verbatim",
-            "originalDynamicPayloadDigest": original_digest,
-            "runtimePayloadDigest": original_digest,
-            "command": Value::Null,
-        }),
-        source_path: None,
-        source_content: None,
-        expanded_content: None,
-    };
-    if invocation_kind != "direct" {
-        return Ok(verbatim());
-    }
-    let (json_start, json_end, mut current_input) = parse_current_input(original_payload)?;
-    if !matches!(
-        current_input
-            .pointer("/source/type")
-            .and_then(Value::as_str),
-        Some("user" | "external_principal")
-    ) {
-        return Ok(verbatim());
-    }
-    let Some(message) = current_input
-        .get("message")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-    else {
-        return Ok(verbatim());
-    };
-    let Some((command_name, raw_arguments)) = parse_slash_invocation(&message) else {
-        return Ok(verbatim());
-    };
-    let command_name = command_name.to_string();
-    let raw_arguments = raw_arguments.to_string();
-    let matching = command_catalog
-        .iter()
-        .filter(|entry| entry.name == command_name)
-        .collect::<Vec<_>>();
-    if matching.is_empty() {
-        return Ok(verbatim());
-    }
-    if matching.len() != 1 {
-        bail!("Pi command catalog contains an ambiguous exact-name match");
-    }
-    let command = matching[0];
-    if command.source == PiCommandSource::Extension {
-        bail!("pi_extension_command_unavailable_in_managed_agent_run");
-    }
-    if let Some(error) = command.file_error.as_deref() {
-        bail!("Pi file command source was invalid at activation: {error}");
-    }
-    let lexical_path = command
-        .lexical_path
-        .as_deref()
-        .context("Pi file command has no source path")?;
-    let expected_canonical = command
-        .canonical_path
-        .as_deref()
-        .context("Pi file command has no canonical source path")?;
-    let expected_digest = command
-        .content_digest
-        .as_deref()
-        .context("Pi file command has no source content digest")?;
-    let location = command
-        .location
-        .as_deref()
-        .context("Pi file command has no supported source location")?;
-    let (canonical_path, source_bytes) = read_pi_command_source(lexical_path)?;
-    if canonical_path != expected_canonical || sha256_bytes(&source_bytes) != expected_digest {
-        bail!("Pi file command source path or content changed after catalog capture");
-    }
-    let source_text = String::from_utf8(source_bytes.clone())
-        .context("Pi file command source must be UTF-8 text")?;
-    let expanded = match command.source {
-        PiCommandSource::Prompt => substitute_pi_prompt_arguments(
-            &strip_pi_frontmatter(&source_text),
-            &parse_pi_command_args(&raw_arguments),
-        ),
-        PiCommandSource::Skill => {
-            if raw_arguments.is_empty() {
-                source_text
-            } else {
-                format!("{source_text}\n\nUser: {raw_arguments}")
-            }
-        }
-        PiCommandSource::Extension => unreachable!("handled above"),
-    };
-    current_input
-        .as_object_mut()
-        .context("Pi CURRENT_INPUT must be an object")?
-        .insert("message".to_string(), Value::String(expanded.clone()));
-    let mut runtime_payload =
-        String::with_capacity(original_payload.len().saturating_add(expanded.len()));
-    runtime_payload.push_str(&original_payload[..json_start]);
-    runtime_payload.push_str(&serde_json::to_string(&current_input)?);
-    runtime_payload.push_str(&original_payload[json_end..]);
-    let runtime_digest = sha256_bytes(runtime_payload.as_bytes());
-    let evidence = json!({
-        "schemaVersion": 1,
-        "mode": "file_command",
-        "originalDynamicPayloadDigest": original_digest,
-        "runtimePayloadDigest": runtime_digest,
-        "command": {
-            "name": command.name,
-            "source": command.source.as_str(),
-            "location": location,
-            "sourcePathDigest": sha256_bytes(canonical_path.to_string_lossy().as_bytes()),
-            "sourceContentDigest": expected_digest,
-            "argumentsDigest": sha256_bytes(raw_arguments.as_bytes()),
-            "expandedContentDigest": sha256_bytes(expanded.as_bytes()),
-        },
-    });
-    Ok(PreparedPiPromptTransform {
-        runtime_payload,
-        evidence,
-        source_path: Some(canonical_path.to_string_lossy().into_owned()),
-        source_content: Some(source_bytes),
-        expanded_content: Some(expanded.into_bytes()),
-    })
-}
-
-fn pi_skill_model_visible(path: &Path) -> Result<bool> {
-    let path = path
-        .canonicalize()
-        .context("Pi Skill model visibility path cannot be resolved")?;
-    let metadata =
-        std::fs::metadata(&path).context("Pi Skill model visibility metadata is unavailable")?;
-    if !metadata.is_file() || metadata.len() > MAX_SKILL_FILE_BYTES {
-        bail!("Pi Skill model visibility source is not an admissible regular file");
-    }
-    let mut markdown = String::new();
-    File::open(&path)
-        .context("Pi Skill model visibility source cannot be opened")?
-        .take(MAX_SKILL_FILE_BYTES + 1)
-        .read_to_string(&mut markdown)
-        .context("Pi Skill model visibility source must be UTF-8 text")?;
-    if markdown.len() as u64 > MAX_SKILL_FILE_BYTES {
-        bail!("Pi Skill model visibility source exceeded the Skill file limit");
-    }
-    pi_skill_model_visible_from_markdown(&markdown)
-}
-
-fn pi_skill_model_visible_from_markdown(markdown: &str) -> Result<bool> {
-    let mut lines = markdown.lines();
-    if lines.next().map(str::trim) != Some("---") {
-        return Ok(true);
-    }
-    let mut disabled = false;
-    let mut found_end = false;
-    for line in lines {
-        if line.trim() == "---" {
-            found_end = true;
-            break;
-        }
-        if line.starts_with(' ') || line.starts_with('\t') {
-            continue;
-        }
-        let Some((key, raw_value)) = line.split_once(':') else {
-            continue;
-        };
-        if key.trim() != "disable-model-invocation" {
-            continue;
-        }
-        disabled = pi_yaml_boolean_is_true(raw_value);
-    }
-    if !found_end {
-        bail!("Pi Skill model visibility frontmatter has no closing delimiter");
-    }
-    Ok(!disabled)
-}
-
-fn pi_yaml_boolean_is_true(raw_value: &str) -> bool {
-    let comment = raw_value.char_indices().find_map(|(index, character)| {
-        (character == '#'
-            && raw_value[..index]
-                .chars()
-                .next_back()
-                .is_none_or(char::is_whitespace))
-        .then_some(index)
-    });
-    let value = raw_value[..comment.unwrap_or(raw_value.len())].trim();
-    let (value, explicitly_boolean) = value
-        .strip_prefix("!!bool")
-        .or_else(|| value.strip_prefix("!<tag:yaml.org,2002:bool>"))
-        .map_or((value, false), |value| (value.trim(), true));
-    let value = if explicitly_boolean {
-        value
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .or_else(|| {
-                value
-                    .strip_prefix('\'')
-                    .and_then(|value| value.strip_suffix('\''))
-            })
-            .unwrap_or(value)
-    } else {
-        value
-    };
-    matches!(value, "true" | "True" | "TRUE")
-}
-
-fn validate_managed_skill_subset(
-    skills: &[PiReceiptSkill],
-    skill_root: &Path,
-    workspace: &Path,
-    expected_managed_skills: &[(String, PathBuf)],
-) -> Result<()> {
-    let root = skill_root
-        .canonicalize()
-        .context("Pi Skill root cannot be resolved")?;
-    let workspace = workspace
-        .canonicalize()
-        .context("Pi Workspace cannot be resolved")?;
-    if !root.starts_with(&workspace) {
-        bail!("Pi managed Skill root escaped the Workspace");
-    }
-    for (name, expected) in expected_managed_skills {
-        if !expected.starts_with(skill_root) {
-            bail!("expected managed Pi Skill escaped its projection root");
-        }
-        let expected = expected
-            .canonicalize()
-            .context("managed Pi Skill target cannot be resolved")?;
-        let matches = skills
-            .iter()
-            .filter(|skill| &skill.name == name)
-            .filter_map(|skill| Path::new(&skill.entry_path).canonicalize().ok())
-            .filter(|observed| observed == &expected)
-            .count();
-        if matches != 1 {
-            bail!("expected managed Pi Skill is missing, duplicated, or changed");
-        }
-    }
-    Ok(())
 }
 
 fn ensure_session_replacement_succeeded(response: &Value, command: &str) -> Result<()> {
@@ -2528,7 +2017,7 @@ fn validate_managed_session_state(
     session_file: &Path,
     cwd: &Path,
 ) -> Result<()> {
-    if state.schema_version != 2
+    if state.schema_version != 3
         || state.extension_version != PI_HOST_EXTENSION_VERSION
         || state.host_instance_id != binding.host_instance_id
         || state.host_binding_generation != binding.host_binding_generation
@@ -2595,6 +2084,26 @@ fn validate_host_state(
     cwd: &Path,
     frozen_model_id: &str,
 ) -> Result<(String, PathBuf, String, String, String, bool)> {
+    let (session_id, session_file) =
+        validate_host_session_state(state, expected_session_id, locator_root, cwd)?;
+    let (provider, model_id, thinking, supports_images) =
+        validate_host_model_state(state, frozen_model_id)?;
+    Ok((
+        session_id,
+        session_file,
+        provider,
+        model_id,
+        thinking,
+        supports_images,
+    ))
+}
+
+fn validate_host_session_state(
+    state: &Value,
+    expected_session_id: Option<&str>,
+    locator_root: &Path,
+    cwd: &Path,
+) -> Result<(String, PathBuf)> {
     let data = state.get("data").context("Pi get_state omitted data")?;
     let session_id = data
         .get("sessionId")
@@ -2633,6 +2142,14 @@ fn validate_host_state(
             }
         }
     }
+    Ok((session_id, session_file))
+}
+
+fn validate_host_model_state(
+    state: &Value,
+    frozen_model_id: &str,
+) -> Result<(String, String, String, bool)> {
+    let data = state.get("data").context("Pi get_state omitted data")?;
     let provider = data
         .pointer("/model/provider")
         .and_then(Value::as_str)
@@ -2660,14 +2177,7 @@ fn validate_host_state(
         .pointer("/model/input")
         .and_then(Value::as_array)
         .is_some_and(|inputs| inputs.iter().any(|input| input.as_str() == Some("image")));
-    Ok((
-        session_id,
-        session_file,
-        provider,
-        model_id,
-        thinking,
-        supports_images,
-    ))
+    Ok((provider, model_id, thinking, supports_images))
 }
 
 fn parse_explicit_model_id(value: &str) -> Result<(String, String)> {
@@ -2808,11 +2318,6 @@ fn create_private_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn create_private_or_workspace_directory(path: &Path) -> Result<()> {
-    std::fs::create_dir_all(path)
-        .with_context(|| format!("failed to create Pi Skill root {}", path.display()))
-}
-
 fn write_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let mut bytes = serde_json::to_vec(value)?;
     bytes.push(b'\n');
@@ -2885,6 +2390,52 @@ fn redact_pi_diagnostic(message: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn exact_resume_fallback_accepts_only_explicit_unavailable_switch_targets() {
+        for message in [
+            "session file not found",
+            "target does not exist",
+            "cannot read session",
+            "session is unreadable",
+        ] {
+            let error = anyhow::Error::new(PiRpcCommandRejected {
+                command: "switch_session".to_string(),
+                message: message.to_string(),
+            });
+            assert!(switch_target_is_explicitly_unavailable(&error));
+        }
+        for error in [
+            anyhow::Error::new(PiRpcCommandRejected {
+                command: "switch_session".to_string(),
+                message: "internal RPC failure".to_string(),
+            }),
+            anyhow::Error::new(PiRpcCommandRejected {
+                command: "get_available_models".to_string(),
+                message: "model catalog not found".to_string(),
+            }),
+            anyhow::anyhow!("Pi RPC command timed out: switch_session"),
+        ] {
+            assert!(!switch_target_is_explicitly_unavailable(&error));
+        }
+    }
+
+    #[test]
+    fn activation_failure_taxonomy_is_stable_through_context() {
+        for kind in [
+            PiActivationFailureKind::ResumeContinuityLost,
+            PiActivationFailureKind::ActivationFailed,
+            PiActivationFailureKind::HostFailed,
+            PiActivationFailureKind::ConfigurationFailed,
+        ] {
+            let error = activation_failure(kind, "controlled failure").context("outer context");
+            assert_eq!(activation_failure_kind(&error), Some(kind));
+        }
+        assert_eq!(
+            activation_failure_kind(&anyhow::anyhow!("unclassified")),
+            None
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn machine_ready_probe_never_sends_a_prompt_or_waits_for_agent_events() {
@@ -2932,7 +2483,7 @@ write_session() {
 emit_managed_session_state() {
   host_instance_id=$(sed -n 's/.*"hostInstanceId":"\([^"]*\)".*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
   host_binding_generation=$(sed -n 's/.*"hostBindingGeneration":\([0-9][0-9]*\).*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
-  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":2,\\"extensionVersion\\":\\"rovai-pi-host-v5\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
+  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":3,\\"extensionVersion\\":\\"rovai-pi-host-v6\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
   printf '%s\n' "$event" >> "$event_log"
   printf '%s\n' "$event"
 }
@@ -2951,9 +2502,6 @@ while IFS= read -r request; do
       ;;
     get_available_models)
       printf '{"type":"response","id":"%s","success":true,"command":"get_available_models","data":{"models":[{"provider":"minimax","id":"MiniMax-M3","name":"MiniMax M3"}]}}\n' "$request_id"
-      ;;
-    get_commands)
-      printf '{"type":"response","id":"%s","success":true,"command":"get_commands","data":{"commands":[]}}\n' "$request_id"
       ;;
     new_session)
       session_number=$((session_number + 1))
@@ -3073,9 +2621,9 @@ done
 
     #[test]
     fn production_host_launch_preserves_pi_native_resources() {
-        let extension = Path::new("/private/rovai-pi-host-v5.ts");
+        let extension = Path::new("/private/rovai-pi-host-v6.ts");
         let mut production = Command::new("pi");
-        append_host_arguments(&mut production, extension, true);
+        append_host_arguments(&mut production, extension);
         let production_args = production
             .as_std()
             .get_args()
@@ -3088,7 +2636,7 @@ done
                 "rpc",
                 "--no-themes",
                 "--extension",
-                "/private/rovai-pi-host-v5.ts",
+                "/private/rovai-pi-host-v6.ts",
             ]
         );
         for forbidden in [
@@ -3102,150 +2650,6 @@ done
         ] {
             assert!(!production_args.iter().any(|argument| argument == forbidden));
         }
-
-        let mut fallback = Command::new("pi");
-        append_host_arguments(&mut fallback, extension, false);
-        assert_eq!(
-            fallback
-                .as_std()
-                .get_args()
-                .map(|argument| argument.to_string_lossy().into_owned())
-                .collect::<Vec<_>>(),
-            [
-                "--mode",
-                "rpc",
-                "--no-extensions",
-                "--no-themes",
-                "--extension",
-                "/private/rovai-pi-host-v5.ts",
-            ]
-        );
-    }
-
-    fn direct_payload(message: &str) -> String {
-        format!(
-            "[RUN_FACTS]\n{{}}\n[/RUN_FACTS]\n\n[CURRENT_INPUT]\n{}\n[/CURRENT_INPUT]\n\n",
-            serde_json::to_string(&json!({
-                "source": {"type": "user"},
-                "message": message,
-                "mentionsCurrentUser": false,
-            }))
-            .unwrap()
-        )
-    }
-
-    fn command_catalog(response: Value) -> Vec<PiCommandCatalogEntry> {
-        parse_command_catalog(&json!({"data": {"commands": response}})).unwrap()
-    }
-
-    #[test]
-    fn prompt_command_transform_matches_pi_argument_expansion() {
-        let root =
-            std::env::temp_dir().join(format!("rovai-pi-prompt-command-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let source = root.join("fix.md");
-        std::fs::write(
-            &source,
-            "---\ndescription: fixture\n---\nFirst=$1 Second=$2 All=$@ Default=${3:-fallback} Slice=${@:2:1}",
-        )
-        .unwrap();
-        let catalog = command_catalog(json!([{
-            "name": "fix",
-            "description": "fixture",
-            "source": "prompt",
-            "sourceInfo": {
-                "scope": "project",
-                "path": source,
-            },
-        }]));
-        let original = direct_payload("  /fix \"one two\" three  ");
-        let transformed = transform_pi_prompt(&original, "direct", &catalog).unwrap();
-        let (_, _, current_input) = parse_current_input(&transformed.runtime_payload).unwrap();
-        assert_eq!(
-            current_input["message"],
-            "First=one two Second=three All=one two three Default=fallback Slice=three"
-        );
-        assert_eq!(transformed.evidence["mode"], "file_command");
-        assert_eq!(transformed.evidence["command"]["source"], "prompt");
-        assert_eq!(transformed.evidence["command"]["location"], "project");
-        assert!(transformed.source_content.is_some());
-        assert!(transformed.expanded_content.is_some());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn skill_command_keeps_complete_file_and_appends_raw_arguments() {
-        let root =
-            std::env::temp_dir().join(format!("rovai-pi-skill-command-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let source = root.join("SKILL.md");
-        let skill = "---\nname: review\ndescription: review\n---\n# Exact skill\n";
-        std::fs::write(&source, skill).unwrap();
-        let catalog = command_catalog(json!([{
-            "name": "skill:review",
-            "source": "skill",
-            "sourceInfo": {
-                "scope": "temporary",
-                "path": source,
-            },
-        }]));
-        let transformed = transform_pi_prompt(
-            &direct_payload("/skill:review --deep now"),
-            "direct",
-            &catalog,
-        )
-        .unwrap();
-        let (_, _, current_input) = parse_current_input(&transformed.runtime_payload).unwrap();
-        assert_eq!(
-            current_input["message"],
-            format!("{skill}\n\nUser: --deep now")
-        );
-        assert_eq!(transformed.evidence["command"]["location"], "path");
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn unknown_and_non_direct_slash_inputs_are_verbatim_but_extension_commands_fail() {
-        let original = direct_payload("/native command");
-        let extension = command_catalog(json!([{
-            "name": "native",
-            "source": "extension",
-            "path": "/private/native.ts",
-        }]));
-        let unknown = transform_pi_prompt(&original, "direct", &[]).unwrap();
-        assert_eq!(unknown.runtime_payload, original);
-        assert_eq!(unknown.evidence["mode"], "verbatim");
-        let non_direct = transform_pi_prompt(&original, "a2a", &extension).unwrap();
-        assert_eq!(non_direct.runtime_payload, original);
-        assert!(
-            transform_pi_prompt(&original, "direct", &extension)
-                .unwrap_err()
-                .to_string()
-                .contains("pi_extension_command_unavailable_in_managed_agent_run")
-        );
-    }
-
-    #[test]
-    fn file_command_digest_drift_fails_instead_of_falling_back() {
-        let root =
-            std::env::temp_dir().join(format!("rovai-pi-command-drift-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let source = root.join("drift.md");
-        std::fs::write(&source, "before").unwrap();
-        let catalog = command_catalog(json!([{
-            "name": "drift",
-            "source": "prompt",
-            "location": "user",
-            "path": source,
-        }]));
-        std::fs::write(&source, "after").unwrap();
-        assert!(
-            transform_pi_prompt(&direct_payload("/drift"), "direct", &catalog)
-                .unwrap_err()
-                .to_string()
-                .contains("changed after catalog capture")
-        );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -3366,99 +2770,6 @@ done
                 },
             ]
         );
-    }
-
-    #[test]
-    fn pi_skill_visibility_matches_native_yaml_boolean_forms() {
-        for value in [
-            "true",
-            "True",
-            "TRUE",
-            "!!bool true",
-            "!!bool \"true\"",
-            "!<tag:yaml.org,2002:bool> true",
-            "true # command only",
-            "true\t# command only",
-        ] {
-            let markdown =
-                format!("---\ndescription: command only\ndisable-model-invocation: {value}\n---\n");
-            assert!(!pi_skill_model_visible_from_markdown(&markdown).unwrap());
-        }
-        for value in ["false", "yes", "\"true\"", "[true]"] {
-            let markdown = format!(
-                "---\ndescription: model visible\ndisable-model-invocation: {value}\n---\n"
-            );
-            assert!(pi_skill_model_visible_from_markdown(&markdown).unwrap());
-        }
-    }
-
-    #[test]
-    fn skill_command_validation_keeps_manual_only_skills_out_of_model_visibility() {
-        let workspace = std::env::temp_dir().join(format!(
-            "rovai-pi-skill-visibility-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let skill_root = workspace.join(".pi/skills");
-        let visible_path = skill_root.join("visible/SKILL.md");
-        let manual_path = skill_root.join("manual-only/SKILL.md");
-        std::fs::create_dir_all(visible_path.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(manual_path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &visible_path,
-            "---\nname: visible\ndescription: model visible\n---\n",
-        )
-        .unwrap();
-        std::fs::write(
-            &manual_path,
-            "---\nname: manual-only\ndescription: command only\ndisable-model-invocation: true\n---\n",
-        )
-        .unwrap();
-        let response = json!({
-            "data": {
-                "commands": [
-                    {
-                        "name": "skill:visible",
-                        "description": "model visible",
-                        "source": "skill",
-                        "sourceInfo": {"path": visible_path},
-                    },
-                    {
-                        "name": "skill:manual-only",
-                        "description": "command only",
-                        "source": "skill",
-                        "sourceInfo": {"path": manual_path},
-                    },
-                ]
-            }
-        });
-
-        let catalog = validate_skill_commands(
-            &response,
-            &skill_root,
-            &workspace,
-            &[
-                ("manual-only".to_string(), manual_path.clone()),
-                ("visible".to_string(), visible_path.clone()),
-            ],
-        )
-        .unwrap();
-        assert_eq!(catalog.len(), 2);
-        assert_eq!(
-            catalog
-                .iter()
-                .find(|skill| skill.name == "manual-only")
-                .map(|skill| skill.model_visible),
-            Some(false)
-        );
-        assert_eq!(
-            catalog
-                .iter()
-                .find(|skill| skill.name == "visible")
-                .map(|skill| skill.model_visible),
-            Some(true)
-        );
-
-        std::fs::remove_dir_all(workspace).unwrap();
     }
 
     #[tokio::test]

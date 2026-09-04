@@ -242,6 +242,9 @@ Agent 可控的 envelope output mode、环境变量、隐藏 flag 或 `--full`�
 
 每个受管 Runtime 根进程拥有稳定 process identity 和私有 CLI context path。Fleet acquire 为
 当前 `(agentRunId, executionEpoch)` 轮换 active lease，Core 在输入投递前完成绑定和 CLI preflight。
+Fleet 只在短临界区 Reserve/Commit；计入容量的 Starting reservation 将进程创建、协议 handshake 与必要
+health 检查移到锁外。相同 Run/epoch 等待同一 completion，不同 Run/Runtime 可并发启动；shutdown、Camp 删除或
+成员永久移除会先 fence 在途 reservation，迟到进程不能取得 lease。
 release 顺序固定为：
 
 ```text
