@@ -52,6 +52,8 @@ Light. `color-scheme: light`.
 | `--workspace-attention-soft` | `#f4ecdf` |
 | `--workspace-faint` | `#71808a` |
 | `--conversation-surface` | `#ffffff` |
+| `--conversation-user-message-surface` | `#f2f3f4` |
+| `--conversation-user-message-line` | `#e3e7e9` |
 | `--execution-running-surface` | `#fafafa` |
 | `--conversation-find-match` | `#f4e4c3` |
 | `--conversation-find-current` | `#edc66f` |
@@ -177,6 +179,8 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 | `--conversation-artifact-width` | `930px` |
 | `--conversation-wide-width` | `1040px` |
 | `--conversation-composer-width` | `1040px`; viewport `>= 1800px` 时为 `1440px` |
+| `--conversation-user-message-max-width` | `690px` |
+| `--conversation-user-message-width-offset` | `36px`; viewport `<= 1080px` 时为 `18.667px`，紧凑会话列为 `16px` |
 
 ## Brand, semantic, identity, and evidence color rules
 
@@ -193,6 +197,9 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 - Camp message prose uses the dedicated `--conversation-inline-code-canvas`,
   `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer. These tokens do
   not alter file previews, release notes or Runtime process copy.
+- Current-user message bubbles use the dedicated porcelain-gray
+  `--conversation-user-message-surface` and `--conversation-user-message-line`; Agent narrative
+  remains on the transparent conversation surface.
 
 ## Contrast requirements
 
