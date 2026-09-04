@@ -1,63 +1,70 @@
 ---
 document_type: version-overview
 version: v1.43
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: in_progress
-model_context_change: true
+implementation_status: complete
+model_context_change: false
 last_updated: 2026-09-04
 ---
 
-# Rovai-ai v1.43：Pi 原生输入边界与 Fleet 并发启动
+# Rovai-ai v1.43：Lexical Composer V2
 
-前置：[v1.42](../v1.42/README.md)。本版本收敛 Pi Coding Agent 的责任边界：Rovai 只投递普通 Agent
-Prompt、结构化图片、Bootstrap、最小 receipt 与部分审批，Pi 自己发现原生资源；同时把公共 Runtime Fleet 的
-耗时 spawn 移出全局锁，并精确限定 exact-resume replacement。
+前置：[v1.42](../v1.42/README.md)。本版本把 Desktop Camp Composer 从 React 全文受控
+`contenteditable` 收敛为 Lexical 驱动的结构化纯文本输入框，并把持久 Draft/Pending 内容统一为
+`ComposerDocument` V2 的 Text + Atom 领域协议。
 
 ## 范围与当前状态
 
-- 正式 Pi 永远以原生资源加 `rovai-pi-host-v6` 薄 extension 的一种模式启动；删除 `--no-extensions` fallback、
-  `resources_discover.skillPaths` 和 Runtime catalog attestation。
-- Rovai 不模拟 Pi TUI：不调用 `get_commands`，不解析或展开 `/command`；Formatter 22 的
-  `prepared_context.rendered_payload` 原样成为 `prompt.message`。
-- 图片继续由结构化 ContextManifest attachment refs 经过授权、MIME、digest 和大小复核后进入
-  `prompt.images`；私有证据直接绑定 Runtime Input Delivery，不再依赖 Prompt Transform。
-- exact resume 只有明确 `ResumeContinuityLost` 才创建一个 replacement；Host、RPC、model、thinking、binding、
-  receipt、diagnostic 与 Fleet 错误保持原错误并直接失败。
-- Fleet `acquire` 使用 `Reserve → Spawn outside lock → Commit`；`Starting` 计入容量，相同 Run 等待同一结果，
-  不同 Run/Runtime 可以并发启动，shutdown/删除 fencing 会退役在途 reservation。
-- Pi External MCP 仍为 `Unsupported`，平台仍为 Preview；设置页、Assignment、其他 Runtime 与 qualification
-  artifact 均不改变。
+- 输入期间由 Lexical `EditorState` 唯一拥有正文、selection、composition、局部 DOM reconciliation 与
+  undo/redo；React Shell 只保留 Catalog、Picker、发送编排和小型同步状态，不逐字符保存完整正文。
+- Lexical 内部树只允许单个 `ParagraphNode` 下的 `TextNode`、`LineBreakNode` 与一个
+  `ComposerAtomNode`。Atom 是 token、unmergeable 的 `TextNode` 子类，以简单 DOM 呈现，不为每个引用挂载
+  React Root。
+- Rovai 领域协议只包含 `text` 与 `atom`；Member、All Members、Skill 是 Atom payload。Lexical JSON、节点
+  key、selection、history、DOM 和 presentation state 都不进入 Core。
+- Member 以 `agentId`、Skill 以 `skillId` 为身份。Catalog 改名、头像和 available 状态只更新展示，不增加
+  local content version、不保存 Draft、不进入 history，也不按同名对象重绑。
+- `@` Member 与 `/` Skill Typeahead 只扫描光标附近最多 128 个字符，受换行、Atom、分隔符和 composition
+  边界限制。Composer 仍是纯文本输入框，Markdown、Rich Text 与 HTML identity 导入均未启用。
+- Clipboard 同时提供 `text/plain` 与 `application/x-rovai-composer+json`。私有 MIME 经 closed-schema 校验后
+  恢复有效 Atom；不可恢复引用转成可见文本，纯文本和外部 HTML 不反推 identity，文件优先进入附件入口。
+- 内容变更以 350ms debounce、1500ms max-wait、single-flight 保存 V2 Snapshot；发送、Draft/Camp 切换和
+  其他 revision-dependent mutation 前显式 flush。发送中产生的新 local version 不会被成功回执清空。
+- Core 兼容读取旧 Composer Segment 数组，但 Draft 与 Pending 后续只写 V2；`body` 始终从权威
+  `ComposerDocument` 派生。公共 Camp Message 的既有 Structured Content 和模型上下文 wire 不变。
 
 ## 数据合同
 
-Migration 138 只接受 `Data Contract v1.47 / Projection Schema 88`，原子升级为
-`Data Contract v1.48 / Projection Schema 89`。它把 `pi_prompt_image_evidence` 升为直接绑定 Delivery 的 schema 2，
-保留现有图片事实并删除 `pi_runtime_prompt_transform`。Pi receipt 与 Input accepted 的原子事务不变；Receipt 和
-Image 都随父 `runtime_input_delivery` 合法级联删除，迁移后执行 `PRAGMA foreign_key_check`。
+没有 SQLite Migration。既有 `content_json` 列通过严格 reader 接受旧用户可写 Segment 数组与
+`ComposerDocument` V2；任何成功 Draft/Pending mutation 都写回 V2 envelope。公开 Message 在发送事务中
+由 V2 转换为既有 Structured Camp Message Content，因此 Channel、History、Runtime 与
+`CURRENT_INPUT.skills` 的协议版本和语义不变。
 
-Pi binding/receipt 升为 closed schema 3，extension 版本为 `rovai-pi-host-v6`；删除 Skill root/exposure 与 command/
-transform identity，只证明 Host、Run/epoch、Native Binding、Delivery/Prompt/Session、Bootstrap 和三个 governed Tool。
+所有 `lexical` 与 `@lexical/*` 依赖锁定同一精确版本 `0.50.0`。Extension 配置保持稳定引用，普通 prop
+或 Catalog 更新不重建编辑器；只有 `campId:draftId` 身份切换或明确 authoritative replacement 才替换
+EditorState。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.42 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.43 |
-| Decisions | 已更新 | [V1.43-D01](decisions.md#v1-43-d01)记录 Pi 原生资源和普通 Prompt 边界；[V1.43-D02](decisions.md#v1-43-d02)记录 Fleet Reserve/Spawn/Commit；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Launch and Verification v34](../../contracts/runtime-launch-and-verification-v34.md)替代 v33，定义 Pi binding/receipt schema 3、图片 evidence 2、resume taxonomy 与 Fleet reservation |
-| Architecture | 已更新 | [Runtime 基础不变量](../../architecture/foundational-invariants.md#runtime-process-verification)与[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)同步原生资源、输入、恢复和锁外启动职责 |
-| UI | 确认无需更新 | Pi 继续开放 Preview 供主动测试，MCP 页面、Assignment、成员配置与显示文案均不改变 |
-| Runtime Activity | 确认无需更新 | Final、Action、Approval、Usage、diagnostic 与 Canonical Activity 映射没有字段或展示变化 |
-| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)把 Pi Skill 调整为 `DocumentationOnly`，并记录单一路径和普通 Prompt 的新证据边界 |
-| Documentation routing | 已更新 | 文档总导航、Contracts 索引、当前决定导航与 Pi research matrix 均指向 Runtime Launch v34/current v1.43 |
-| Root README | 确认无需更新 | 产品定位、安装方法和十四种 Runtime 公开支持范围不变；Pi 仍为 Preview |
+| Decisions | 已更新 | [V1.43-D01](decisions.md#v1-43-d01)记录 Text + Atom 与 Lexical/public-message 分层；[V1.43-D02](decisions.md#v1-43-d02)记录本地 EditorState、轻量 Atom 与低频 Snapshot；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Camp Composer Draft v8](../../contracts/camp-composer-draft-v8.md)和[Pending Camp Input v3](../../contracts/pending-camp-input-v3.md)拥有 V2 wire、旧读新写、派生 body 与 exact flush；公开 Message 合同不变 |
+| Architecture | 已更新 | [Camp Composer Draft](../../architecture/camp-composer-draft.md)拥有 Lexical/React/Core 三层权威、编辑树、同步与 replacement 边界；Architecture 索引已更新 |
+| UI | 已更新 | [结构化 Mention](../../ui/components/structured-mentions.md)扩展为 Composer Atom、局部 Member/Skill Typeahead、IME、键盘和 Clipboard 合同；既有视觉世界不变 |
+| Runtime Activity | 确认无需更新 | Composer 本地更新与 Draft Snapshot 不新增 Canonical Activity、Evidence 或运行状态展示 |
+| Runtime compatibility | 确认无需更新 | 公共 Message、Runtime 输入、Skill resolution 与 Adapter wire 不变，没有 Runtime-specific capability 或准入变化 |
+| Documentation routing | 已更新 | 文档总导航、Contracts/Architecture/UI 索引和 CURRENT 决定导航均指向 Composer V2 当前权威 |
+| Root README | 确认无需更新 | 本次重构输入内部所有权、持久协议与性能路径，不改变项目定位、安装方式或公开 Runtime 支持范围 |
 
 ## References
 
 - [实施与验收](implementation-plan.md)
 - [版本决定](decisions.md)
-- [核心模型上下文变更 revision 1](model-context-change-pi-native-prompt.md)
-- [Runtime Launch and Verification v34](../../contracts/runtime-launch-and-verification-v34.md)
-- [Pi parity matrix](../../research/pi-runtime-reintegration-parity-matrix.md)
+- [Camp Composer Draft v8](../../contracts/camp-composer-draft-v8.md)
+- [Pending Camp Input v3](../../contracts/pending-camp-input-v3.md)
+- [Composer 架构](../../architecture/camp-composer-draft.md)
+- [结构化 Mention 与 Atom](../../ui/components/structured-mentions.md)

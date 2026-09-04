@@ -1,74 +1,129 @@
 ---
 document_type: ui-component-contract
-authority: renderer-structured-mentions
+authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-09-04
 ---
 
-# 结构化 Mention
+# 结构化 Mention 与 Composer Atom
 
-## 不得回退的交互合同
+<a id="不得回退的交互合同"></a>
 
-可解析的队员 Mention 在 Composer 与历史消息中默认显示为无底色、无边框的蓝色行内文字；
-Hover、Focus 或信息卡打开时只使用 8% mention feedback。它是 Core Structured Content 的身份
-投影，不从普通 `@文字` 猜测身份。
+## 产品边界
 
-从候选选中队员或所有队员后，Composer 在 Mention 后补一个普通空格并把光标放到空格后；已有
-空白时复用，不重复插入。编辑时 Member Mention 是不可拆分的原子单元。`@所有队员` 的 Composer
-信息卡读取当前可提及队员，历史消息读取发送时冻结的收件人 ID。
+Composer 是结构化纯文本输入框，不是富文本、Markdown 或通用文档编辑器。`# title`、`**bold**`、
+`- list`、`[link](url)` 都保留为普通字符；不提供 heading、文本样式、代码、引用、列表、表格、链接、
+Markdown shortcut、HTML 富文本粘贴、Block 拖拽或协同文档编辑。
 
-点击当前可寻址 Agent 消息的“回复”是一个明确 Mention 来源：Core 在设置 Draft reply target 的同一
-revision mutation 中把该 Agent 的 canonical Member Mention 插入正文开头；已有相同 Mention 或
-`@所有队员` 时复用，不能重复。该规则只把用户手势转换为可见 Structured Content；reply relation
-本身永远不参与发送寻址。
+普通文本与不可拆分 Atom 是仅有的业务 primitive。Member、All Members 和 Skill 共用同一种 Atom 交互与
+DOM 形态，但 identity、候选来源、激活行为和发送校验保持强类型。
 
-原作者已 `away`、退出 Camp、被移除或不可解析时，不得生成该作者的 Mention lookalike 或失效 token。
-Composer 保留引用并要求用户显式选择新的有效 Mention；发送前后都不得把失败的显式意图忽略后回退
-Default Lead。Snapshot 后才失效的 token 使用既有 unavailable 样式与 Core error，替代选择移除原作者
-失效 occurrence 后再插入新 token。取消引用不删除已经可见的 Mention。
+## Atom 呈现与身份
 
-“继续发给”是第二个受控 Mention 来源：它只投影最近 accepted user message 的唯一非 Lead 显式接收者，
-不是正文 token 或 reply relation。只有发送事务确认 frozen source 与对象仍有效时，Core 才在消息开头物化
-canonical Member Mention；历史中看到的 Structured Content、address snapshot 与真实投递因此一致。
-continuation 对象失效且 Draft 已有正文/附件时，必须阻断并显式选择新成员，不能忽略失败来源后使用
-Default Lead。用户手动改址后，即使删除全部 Mention，也不再从同一来源自动生成 Mention。
+可解析 Member Atom 在 Composer 与历史消息中默认显示为无底色、无边框的蓝色行内文字；Hover、选中或
+信息卡打开时只使用既有 8% mention feedback。Skill 使用既有 Skill 行内语言。unavailable 状态保留可见标签，
+通过弱化样式和明确状态反馈表达，不消失、不变回可编辑文字。
 
-## 锚定人物信息卡
+每个 Composer Atom 只对应一个简单 span DOM；不得挂载独立 React Root、Portal 或 Catalog 订阅。Atom 内没有
+独立可聚焦按钮，光标不能进入其中，Backspace/Delete 一次删除整个 Atom。普通字符落在 Atom 前后的独立
+TextNode，不能与 Atom 合并。
 
-单击、Enter 或 Space 在原 token 附近打开非模态人物信息卡，并保持当前 Camp。信息卡宽 392px，
-采用“布局 2”：左侧 128px 受控 4:5 portrait，右侧依次显示名称、团队角色、Presence、Agent
-运行时、专业职责、工作准则和性格底色。它不是队员页链接、Dialog 或全局 Toast。
+Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp Catalog 解析；改名只刷新显示。离队或不可解析时
+保留 identity 和 fallback label，不按同名成员重新绑定。Skill 的唯一身份是 `skillId`，`nameAtSend` 保留发送时
+语义/显示快照；当前描述、图标和来源不进入 Draft。Catalog 展示刷新不产生 dirty、Draft save 或 undo item。
 
-点击外部或 Esc 关闭。键盘打开后，Esc 关闭必须把焦点返回原 Mention。Popover 不设 focus trap；
-人物卡内可操作项遵守自然 tab 顺序。拖选形成文本选区时不得误触发打开。
+## Member Typeahead
 
-已移除、离开或不可解析队员按复制时/消息中可见文字静态显示，不可打开信息卡。队员头像和显示名
-在身份仍可操作时可复用同一卡片，降级规则一致。
+`@`、`@a`、`@alice` 只在折叠光标、普通 TextNode、非 composition，且 `@` 位于文本开头或允许分隔符之后时
+打开。查询不得跨 Atom、换行或 Paragraph，最多读取光标左侧 128 个字符。方向键移动候选，Enter 选择，Esc
+关闭；菜单消费按键时不得触发发送。
 
-## 复制与粘贴
+选择 Member/All Members 后，匹配查询被一个 Atom 替换。右侧已有空白时复用；否则插入一个普通空格，并把
+光标放在空格之后。查询或显示文本都不构成 identity。
 
-整条用户消息的复制入口同时写入正文纯文本与 Rovai AI 私有结构化身份；[文件链接](file-preview.md#会话内的文件链接)
-保留原始 Markdown/代码路径，不能因显示 label 而丢掉 target。普通系统选区复制仍以实际选中的可见文字为准。粘贴回 Composer 时，
-只恢复目标 Camp 中当前仍可提及的 Member Mention；其他内容按可见文字降级。普通系统选区复制和
-外部纯文本 Paste 不反向猜测身份。
+## Skill Typeahead
 
-## Current User Mention
+`/`、`/rev`、`/review` 只在文本开头、空白、换行、中文标点或明确允许的命令边界之后打开，并使用同样的
+128 字符局部扫描。`https://example.com/a/b`、`src/components/a/b.ts` 和 `word/review` 不触发。
 
-只有 Core Structured Content 能生成历史消息中的 `@当前用户`。它与 Member Mention 使用相同
-行内色彩语言，但不可交互、不进入 tab 顺序、不打开信息卡；其可访问名称包含当前显示名称。
-Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内结构化前缀；其余权威
-Structured Content 继续通过 sanitized GFM 呈现。正文里的 Agent Mention 在该路径只投影可见文本，
-显示名必须先按 Markdown literal 转义并折叠换行，不能注入链接、标题、代码或表格结构。
+选择候选后用 `skillId + nameAtSend` Atom 替换查询并执行同样的尾随空格规则。`/review` 只是查询/显示形式，
+不是 Skill identity。Skill 不可用时保留 Atom，发送前由 Core 返回明确错误或既定降级结果；Composer 不重绑
+同名 Skill。
+
+## IME 与键盘
+
+中文、日文、韩文 composition 期间，Typeahead 暂停更新，Atom 不插入，EditorState 不替换，Enter 不发送，
+也不执行 DOM selection 恢复。compositionend 后基于最终普通文本重新计算查询。
+
+- Enter：非 Shift、非 composition、菜单未消费、Composer 非空且允许发送时提交；
+- Shift+Enter：插入 LineBreak，领域文档导出为 Text 中的 `\n`；
+- Escape：先关闭 Typeahead，再关闭 Atom 激活态，始终保留正文；
+- Arrow Up/Down：仅在 Typeahead 打开时改变候选，否则保留正常光标行为；
+- Backspace/Delete：普通文本遵循原生 Lexical 行为，Atom 整体删除；绝对起点保留 `onBackspaceAtStart`；
+- Undo/Redo：覆盖输入、删除、粘贴、换行、Atom 插入/删除和选区替换；Catalog 与保存状态不进入历史。
+
+<a id="锚定人物信息卡"></a>
+
+## Atom 激活与人物信息卡
+
+点击 Member Atom 时，编辑器从 DOM 定位 Lexical node，读取 `agentId` 并调用 Member 激活入口；点击 Skill Atom
+读取 `skillId` 并调用 Skill 详情入口。激活只改变 presentation，不修改 `ComposerDocument`。
+
+Member 人物信息卡保持非模态，宽 392px，采用“布局 2”：左侧 128px 受控 4:5 portrait，右侧依次显示名称、
+团队角色、Presence、Agent 运行时、专业职责、工作准则和性格底色。它不是队员页链接、Dialog 或全局 Toast。
+点击外部或 Esc 关闭，Popover 不设 focus trap；拖选文本不得误触打开。Atom 本身不进入独立 tab 顺序；需要
+键盘激活时由编辑器 command 统一处理。
+
+已移除、离开或不可解析队员按可见 fallback 静态显示，不能打开人物卡。队员头像和显示名在身份可操作时可复用
+同一卡片，降级规则一致。
+
+## Reply 与 Continuation
+
+点击当前可寻址 Agent 消息的“回复”仍是明确 Member Atom 来源：Core 在设置 Draft reply target 的同一 revision
+mutation 中把 canonical Member Atom 插入正文开头；已有相同 Atom 或 All Members 时复用。reply relation 本身
+不参与发送寻址。原作者失效时保留引用并要求用户显式换人，不生成 lookalike、不删除意图、不回退 Default Lead。
+
+“继续发给”仍只投影最近 accepted user message 的唯一非 Lead 显式接收者。第一次正文/附件 mutation 冻结后，
+Core 在发送前物化 canonical Member Atom；对象失效时阻断并要求显式换人。用户手动改址后，即使删除全部 Member
+Atom，也不从同一来源自动生成。
+
+## Clipboard
+
+Composer 选区 Copy/Cut 同时写：
+
+- `text/plain`：Member 使用当前名称或 fallback、All Members 为 `@所有队员`、Skill 为 `/<nameAtSend>`、
+  LineBreak 为 `\n`；
+- `application/x-rovai-composer+json`：选区对应的 `ComposerDocument` V2，不是 Lexical JSON；
+- `text/html`：仅兼容可见文本，不拥有 identity。
+
+粘贴时文件优先交给附件入口。没有文件时优先读取私有 MIME，严格校验 version、closed Segment/Atom shape 和
+identity；当前 Catalog 中可恢复的引用还原为 Atom，不可恢复引用转换为普通可见文本。没有合法私有 MIME 时只
+插入 `text/plain`，或把 HTML 解析为可见纯文本。
+
+不得从纯文本 `@Alice`、`/review-code` 或外部 HTML 的 `data-reference-id`、`data-atom-type`、`data-skill-id`
+猜测 identity。整条历史用户消息的专用复制入口继续保留文件链接原始 target，不因显示 label 丢失路径。
+
+<a id="current-user-mention"></a>
+
+## Current User Mention 与历史消息
+
+只有 Core Structured Content 能生成历史消息中的 `@当前用户`。它与 Member Mention 使用相同行内色彩语言，
+但不可交互、不进入 tab 顺序、不打开信息卡；可访问名称包含当前显示名称。它不是 Composer V2 Atom。
+
+Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内结构化前缀；其余权威 Structured Content
+继续通过 sanitized GFM 呈现。正文里的 Agent Mention 在该路径只投影可见文本，显示名先按 Markdown literal
+转义并折叠换行，不能注入链接、标题、代码或表格结构。
 
 ## Authority and regression
 
 | 层级 | 权威入口 |
-|---|---|
-| Core identity、耐久内容、失效校验与派生寻址 | [ADR-0096](../../versions/v0.33/decisions.md#adr-0096) |
-| Draft continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer)与[Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md) |
-| Renderer 视觉、Popover、键盘、拖选与复制粘贴 | 本文 |
+| --- | --- |
+| Draft/Pending V2、identity、旧读新写与 exact revision | [Camp Composer Draft v8](../../contracts/camp-composer-draft-v8.md)与[Pending Camp Input v3](../../contracts/pending-camp-input-v3.md) |
+| Lexical/React/Core 所有权、局部编辑、同步与 replacement | [Composer 架构](../../architecture/camp-composer-draft.md) |
+| Reply/Continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer) |
+| Renderer 视觉、Typeahead、Popover、IME、键盘与 Clipboard | 本文 |
 | 自动化与打包 App 回归 | [结构化 Mention 门禁](../../development/ui-acceptance.md#结构化-mention-门禁) |
 
-改为全局角色 Toast、页面跳转、模态 Dialog 或其他信息架构属于产品变更，必须同步更新本文、
-Renderer 测试和真实 App 验收。原型只记录已确认选型，不是生产真源：
-[Mention Popover 原型](../../prototypes/mention-popover/README.md)。
+改为富文本/Markdown编辑、全局角色 Toast、页面跳转、模态 Dialog、每 Atom React Root 或其他信息架构属于产品
+变更，必须同步更新本文、当前 Contracts/Architecture、Renderer 测试和真实 App 验收。历史原型只解释已确认的
+信息卡选型，不是生产真源：[Mention Popover 原型](../../prototypes/mention-popover/README.md)。

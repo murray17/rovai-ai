@@ -10,8 +10,9 @@ use uuid::Uuid;
 use crate::{
     camp_attachment::{CampComposerReplyIntentView, project_reply_intent},
     camp_content::{
-        StructuredCampMessageContent, normalize_content, render_plain_text,
-        validate_user_authored_content,
+        ComposerDocument, StructuredCampMessageContent, composer_document_from_content,
+        composer_document_to_content, normalize_composer_document, parse_composer_document_json,
+        render_composer_plain_text, serialize_composer_document, validate_composer_document,
     },
     collaboration::ExecutionRequest,
     command::{
@@ -33,7 +34,7 @@ pub struct PendingCampInputView {
     pub enqueue_sequence: i64,
     pub revision: i64,
     pub state: String,
-    pub content: StructuredCampMessageContent,
+    pub content: ComposerDocument,
     pub body: String,
     pub reply_intent: Option<CampComposerReplyIntentView>,
     pub recipient_selection_required: bool,
@@ -77,7 +78,7 @@ pub enum PendingInputEditAction {
     Begin,
     Takeover,
     Save {
-        content: StructuredCampMessageContent,
+        content: ComposerDocument,
         #[serde(rename = "replyToCampMessageId")]
         reply_to_camp_message_id: Option<String>,
         #[serde(rename = "recipientSelectionRequired")]
@@ -114,6 +115,7 @@ impl DomainCommand for SendPendingCampInputCommand {
 }
 
 pub(crate) struct StoredPendingInput {
+    pub document: ComposerDocument,
     pub content: StructuredCampMessageContent,
     pub reply_to_camp_message_id: Option<String>,
     pub recipient_selection_required: bool,
@@ -134,8 +136,11 @@ pub(crate) fn load_input(
         params![id, camp_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
     )?;
+    let document = parse_composer_document_json(&content)?;
+    let structured_content = composer_document_to_content(&document)?;
     Ok(StoredPendingInput {
-        content: serde_json::from_str(&content)?,
+        document,
+        content: structured_content,
         reply_to_camp_message_id: reply,
         recipient_selection_required: required,
         execution: serde_json::from_str(&execution)?,
@@ -199,14 +204,14 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
     let mut items = Vec::with_capacity(rows.len());
     for (id, enqueue_sequence, revision, state, last_attempt_error_code) in rows {
         let stored = load_input(connection, &id, camp_id)?;
-        let body = render_input_body(connection, &stored.content)?;
+        let body = render_input_body(connection, &stored.document)?;
         items.push(PendingCampInputView {
             id,
             camp_id: camp_id.to_string(),
             enqueue_sequence,
             revision,
             state,
-            content: stored.content,
+            content: stored.document,
             body,
             reply_intent: project_reply_intent(
                 database,
@@ -231,11 +236,8 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
     })
 }
 
-fn render_input_body(
-    connection: &Connection,
-    content: &StructuredCampMessageContent,
-) -> Result<String> {
-    render_plain_text(content, |agent_id| {
+fn render_input_body(connection: &Connection, content: &ComposerDocument) -> Result<String> {
+    render_composer_plain_text(content, |agent_id| {
         connection
             .query_row(
                 "SELECT display_name FROM agent_profile WHERE id = ?1",
@@ -412,8 +414,8 @@ pub fn edit_input(
                 if !owns_session || session.as_ref().is_some_and(|session| session.recovery_required) {
                     return Ok(reject("pending_input.edit_fenced", "The edit session changed; reopen it before saving"));
                 }
-                let content = normalize_content(content.clone());
-                validate_user_authored_content(&content)?;
+                let content = normalize_composer_document(content.clone());
+                validate_composer_document(&content)?;
                 let body = render_input_body(transaction, &content)?;
                 let working_source_attachments_json = transaction.query_row(
                     "SELECT working_source_attachments_json FROM pending_input_edit_session
@@ -435,7 +437,7 @@ pub fn edit_input(
                      recipient_selection_required = ?4, execution_json = ?5,
                      source_attachments_json = ?6, revision = revision + 1,
                      state = 'queued', last_attempt_error_code = NULL, updated_at = ?7 WHERE id = ?1",
-                    params![command.pending_input_id, serde_json::to_string(&content)?, reply_to_camp_message_id,
+                    params![command.pending_input_id, serialize_composer_document(&content)?, reply_to_camp_message_id,
                         recipient_selection_required, serde_json::to_string(&execution)?,
                         serialize_source_attachments(&working_source_attachments)?, chrono::Utc::now().to_rfc3339()],
                 )?;
@@ -497,6 +499,7 @@ pub(crate) fn insert_input(
     execution: &Option<ExecutionRequest>,
     user_id: &str,
 ) -> Result<CommandHandlerResult> {
+    let document = composer_document_from_content(content)?;
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     transaction.execute(
@@ -508,7 +511,7 @@ pub(crate) fn insert_input(
         params![
             id,
             camp_id,
-            serde_json::to_string(content)?,
+            serialize_composer_document(&document)?,
             serialize_source_attachments(source_attachments)?,
             reply_to,
             serde_json::to_string(execution)?,
@@ -636,7 +639,7 @@ mod tests {
     use super::*;
     use crate::{
         camp_attachment::CampAttachmentStore,
-        camp_content::StructuredCampMessageSegment as Segment,
+        camp_content::{ComposerAtom, ComposerSegment, StructuredCampMessageSegment as Segment},
         collaboration::{CollaborationService, CreateCampCommand, SendUserCampDraftCommand},
         command::CommandResultStatus,
         current_user::CURRENT_USER_ID,
@@ -687,6 +690,10 @@ mod tests {
         }]
     }
 
+    fn text_document(value: &str) -> ComposerDocument {
+        composer_document_from_content(&text(value)).unwrap()
+    }
+
     fn send(
         database: &mut Database,
         camp_id: &str,
@@ -694,8 +701,9 @@ mod tests {
     ) -> CommandExecution {
         let store = CampAttachmentStore::new(database.path().parent().unwrap());
         let draft = store.load_draft(database, camp_id).unwrap();
+        let document = composer_document_from_content(&content).unwrap();
         let draft = store
-            .save_content(database, camp_id, draft.revision, content)
+            .save_content(database, camp_id, draft.revision, document)
             .unwrap();
         send_draft(database, camp_id, draft.revision)
     }
@@ -948,7 +956,7 @@ mod tests {
                     &camp_id,
                     b,
                     Some(&old_token),
-                    saved(text("lost edits"))
+                    saved(text_document("lost edits"))
                 )
                 .result
                 .code,
@@ -979,9 +987,15 @@ mod tests {
                 "pending_input.edit_fenced"
             );
             assert_eq!(
-                edit(&mut reopened, &camp_id, b, Some(&token), saved(text("  ")))
-                    .result
-                    .code,
+                edit(
+                    &mut reopened,
+                    &camp_id,
+                    b,
+                    Some(&token),
+                    saved(text_document("  ")),
+                )
+                .result
+                .code,
                 "camp_message.empty_body"
             );
             assert!(ready_heads(&reopened).unwrap().is_empty());
@@ -990,7 +1004,7 @@ mod tests {
                 &camp_id,
                 b,
                 Some(&token),
-                saved(text("edited B")),
+                saved(text_document("edited B")),
             );
             assert_eq!(
                 publish(&mut reopened, &camp_id, &b.id, b.revision)
@@ -1195,14 +1209,15 @@ mod tests {
                 &mut database,
                 &camp_id,
                 0,
-                vec![
+                composer_document_from_content(&[
                     Segment::MemberMention {
                         agent_id: "agent_2".to_string(),
                     },
                     Segment::Text {
                         text: " original".to_string(),
                     },
-                ],
+                ])
+                .unwrap(),
             )
             .unwrap();
         let draft = store
@@ -1253,7 +1268,7 @@ mod tests {
             &item,
             Some(token),
             PendingInputEditAction::Save {
-                content: text("use current Lead"),
+                content: text_document("use current Lead"),
                 reply_to_camp_message_id: Some(parent.clone()),
                 recipient_selection_required: false,
             },
@@ -1293,15 +1308,18 @@ mod tests {
                 &mut database,
                 &camp_id,
                 draft.revision,
-                text("continue"),
+                text_document("continue"),
                 original.result.payload["campMessageId"].as_str(),
             )
             .unwrap();
         send_draft(&mut database, &camp_id, draft.revision);
         let continued = read_queue(&database, &camp_id).unwrap().items.remove(0);
-        assert!(
-            matches!(&continued.content[0], Segment::MemberMention { agent_id } if agent_id == "agent_2")
-        );
+        assert!(matches!(
+            &continued.content.segments[0],
+            ComposerSegment::Atom {
+                atom: ComposerAtom::Member { agent_id, .. }
+            } if agent_id == "agent_2"
+        ));
         edit(
             &mut database,
             &camp_id,
@@ -1572,7 +1590,7 @@ mod tests {
             &item,
             Some(&token),
             PendingInputEditAction::Save {
-                content: Vec::new(),
+                content: ComposerDocument::default(),
                 reply_to_camp_message_id: None,
                 recipient_selection_required: false,
             },

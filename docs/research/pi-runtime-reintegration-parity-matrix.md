@@ -9,7 +9,7 @@ last_updated: 2026-09-04
 
 # Pi Runtime 重新接入 Parity Matrix
 
-本矩阵记录重新接入后的实现与证据边界。v1.43 原生普通 Prompt 收敛的 implementation baseline 为
+本矩阵记录重新接入后的实现与证据边界。v1.44 原生普通 Prompt 收敛的 implementation baseline 为
 `main@81d209eab733ecd520ab016440609c1886788a24`；其前置 revision 3 baseline 为
 `main@72ecbce9f4892433727d01e348da9a56c5926863`。旧实现只读取
 `codex/pi-runtime-integration@3e04b4f3b2555bb488e1df37f306beaae52a8894` 的 Pi 专属协议与安全证据，

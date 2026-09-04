@@ -301,8 +301,8 @@ PR #92 的红绿证据只存在于作者本地。`accept:structured-mentions-ui`
 ## 参考资料
 
 - [Structured Mention Composer 实现](../../apps/desktop/src/renderer/src/StructuredMentionComposer.tsx)
-- [Structured Mention 模型与公共 helper](../../apps/desktop/src/renderer/src/structured-mention-model.ts)
-- [Structured Mention 模型单元测试](../../apps/desktop/src/renderer/src/structured-mention-model.test.ts)
+- [事故修复时的 Structured Mention 模型与公共 helper](https://github.com/murray17/rovai-ai/blob/5b03f56177426604780403d92d08a7456af6a1cf/apps/desktop/src/renderer/src/structured-mention-model.ts)
+- [事故修复时的 Structured Mention 模型单元测试](https://github.com/murray17/rovai-ai/blob/5b03f56177426604780403d92d08a7456af6a1cf/apps/desktop/src/renderer/src/structured-mention-model.test.ts)
 - [Structured Mention Electron UI 验收（含 `--cut-only`）](../../scripts/accept-structured-mentions-ui.mjs)
 - [前序复盘：Composer 行尾换行与 IME 首字符组合](2026-08-26-composer-ime-trailing-newline-caret-host.md)
 - [W3C Clipboard API：overriding the cut event](https://www.w3.org/TR/clipboard-apis/#overriding-the-cut-event)

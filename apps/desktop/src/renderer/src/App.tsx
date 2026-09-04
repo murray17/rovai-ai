@@ -66,6 +66,7 @@ import {
   type NotificationFocusTarget,
   type VisibleNotificationSources
 } from './CampWorkspace'
+import { composerDocumentToStructuredContent } from './composer-document'
 import {
   CampNavigation,
   type NavigationSettingsSection
@@ -4255,10 +4256,14 @@ export function optimisticCampMessage(
   createdAt = new Date().toISOString()
 ): CampMessageView {
   const defaultLeadId = snapshot?.members.find((member) => member.isDefaultLead)?.agentId
-  const explicitlyMentionedIds = [...new Set(draft.content.flatMap((segment) =>
-    segment.kind === 'member_mention' ? [segment.agentId] : []
+  const explicitlyMentionedIds = [...new Set(draft.content.segments.flatMap((segment) =>
+    segment.kind === 'atom' && segment.atom.type === 'member'
+      ? [segment.atom.agentId]
+      : []
   ))]
-  const broadcast = draft.content.some((segment) => segment.kind === 'all_members_mention')
+  const broadcast = draft.content.segments.some((segment) =>
+    segment.kind === 'atom' && segment.atom.type === 'all_members'
+  )
   const addressedAgentIds = broadcast
     ? snapshot?.members
         .filter((member) => member.membershipStatus === 'active' && member.profilePresence === 'present')
@@ -4275,7 +4280,7 @@ export function optimisticCampMessage(
     authorId: 'local_user',
     sourceAgentRunId: null,
     body: draft.body,
-    content: draft.content,
+    content: composerDocumentToStructuredContent(draft.content),
     attachments: draft.attachments,
     addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
     addressedAgentIds,

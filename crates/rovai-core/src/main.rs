@@ -93,7 +93,7 @@ use rovai_core::{
     camp_attachment_view::{
         CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, PreparedCampAttachmentCleanup,
     },
-    camp_content::StructuredCampMessageContent,
+    camp_content::ComposerDocument,
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
         CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
@@ -1181,7 +1181,7 @@ struct CampComposerDraftParams {
 struct SaveCampComposerDraftParams {
     camp_id: CampId,
     expected_revision: i64,
-    content: StructuredCampMessageContent,
+    content: ComposerDocument,
     continuation_source_message_id: Option<String>,
 }
 

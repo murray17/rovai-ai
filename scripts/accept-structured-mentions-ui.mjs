@@ -62,6 +62,8 @@ const expectedContent = [
   { kind: 'member_mention', agentId: 'agent_3' },
   { kind: 'text', text: ' ，请给出结论。' }
 ]
+const expectedComposerDocument = composerDocumentFromStructured(expectedContent)
+const emptyComposerDocument = { version: 2, segments: [] }
 const expectedBody = '请同时检查这条消息：@叮叮 @芝士 @咕咕 ，请给出结论。'
 const currentUserMentionMessageId = 'message-current-user-mention-accept'
 const currentUserMentionText = '请选择 v0.65 的方案，并逐项说明交互状态、接收者变化、异常分支、键盘焦点、发送前校验以及消息引用在窄窗口下的表现，最后给出可以直接进入开发的结论和风险清单。'
@@ -94,7 +96,6 @@ const agentMemberMentionContent = [
   { kind: 'text', text: agentMemberMentionText }
 ]
 const agentLiteralMentionBody = '@叮叮 是普通文字，不应打开人物信息卡。'
-const nativeDomRegressionBody = '原生输入回归'
 const acceptanceModelCatalog = JSON.stringify([{
   id: 'gpt-structured-mentions-accept',
   displayName: 'Structured Mentions Acceptance Runtime',
@@ -324,7 +325,7 @@ try {
   })()`)
   assert(
     skillPickerInspection
-      && skillPickerInspection.menuLabel === '选择当前负责人可用的 Skill'
+      && skillPickerInspection.menuLabel === '选择 Skill'
       && skillPickerInspection.menuRole === 'listbox'
       && skillPickerInspection.optionRole === 'option'
       && skillPickerInspection.optionName === selectableSkill.name
@@ -533,8 +534,7 @@ try {
       draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
         && draft.replyIntent.author?.authorId === targetMemberIds[0]
         && draft.replyIntent.recipientSelectionRequired === false
-        && draft.content.some((segment) =>
-          segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]), 10_000)
+        && composerHasMember(draft.content, targetMemberIds[0]), 10_000)
 
     await focusEditorAtStart(running.cdp)
     await pressKey(running.cdp, {
@@ -693,7 +693,7 @@ try {
     const continuationVisibleAfterAcceptedSendMs = Date.now() - continuationStartedAt
     const continuedDraft = await waitForValue(async () =>
       request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-      draft.content.length === 0
+      composerIsEmpty(draft.content)
         && draft.replyIntent === null
         && draft.continuationIntent?.recipient.agentId === targetMemberIds[1], 5_000)
     await focusEditorAtEnd(running.cdp)
@@ -756,22 +756,15 @@ try {
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.textContent === ''`)
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []), 10_000)
+    (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
 
-  // The first native character in an empty editor must stay inside the same
-  // contenteditable host. Remounting here resets the platform IME context, so
-  // the first Pinyin key after plain text can escape as a Latin character.
+  // Lexical owns the editing tree. Native input must update that tree without
+  // replacing the contenteditable host or moving the browser selection.
   await evaluate(running.cdp, `(() => {
     const editor = document.querySelector('#camp-message')
     if (!(editor instanceof HTMLDivElement)) return false
-    window.__structuredMentionFirstInputEditor = editor
+    window.__composerV2Editor = editor
     editor.focus()
-    const selection = window.getSelection()
-    const range = document.createRange()
-    range.selectNodeContents(editor)
-    range.collapse(false)
-    selection?.removeAllRanges()
-    selection?.addRange(range)
     return true
   })()`)
   await running.cdp.send('Input.insertText', { text: '1' })
@@ -787,10 +780,10 @@ try {
     beforeCaret.selectNodeContents(editor)
     beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset)
     return {
-      stayedMounted: editor === window.__structuredMentionFirstInputEditor,
+      stayedMounted: editor === window.__composerV2Editor,
       stayedFocused: document.activeElement === editor,
       text: editor.textContent,
-      textSegmentCount: editor.querySelectorAll(':scope > [data-editor-segment="text"]').length,
+      paragraphCount: editor.querySelectorAll(':scope > p').length,
       caretOffset: beforeCaret.toString().length
     }
   })()`)
@@ -798,257 +791,58 @@ try {
     firstNativeInputInspection?.stayedMounted
       && firstNativeInputInspection.stayedFocused
       && firstNativeInputInspection.text === '1'
-      && firstNativeInputInspection.textSegmentCount === 1
+      && firstNativeInputInspection.paragraphCount === 1
       && firstNativeInputInspection.caretOffset === 1,
-    `The first native character reset the IME editor host: ${JSON.stringify(firstNativeInputInspection)}`
+    `The first native character reset the Lexical editor host: ${JSON.stringify(firstNativeInputInspection)}`
   )
   await selectWholeEditor(running.cdp)
   await pressKey(running.cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []), 10_000)
+    (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
 
-  const firstNativeCompositionInspection = await evaluate(running.cdp, `(async () => {
+  await focusEditorAtEnd(running.cdp)
+  await running.cdp.send('Input.imeSetComposition', {
+    text: 'ni', selectionStart: 2, selectionEnd: 2
+  })
+  await running.cdp.send('Input.insertText', { text: '你' })
+  await waitForExpression(running.cdp,
+    `document.querySelector('#camp-message')?.textContent === '你'`)
+  const firstNativeCompositionInspection = await evaluate(running.cdp, `(() => {
     const editor = document.querySelector('#camp-message')
-    const segment = editor?.querySelector(':scope > [data-editor-segment="text"]')
-    if (!(editor instanceof HTMLDivElement) || !(segment instanceof HTMLElement)) return null
-    editor.focus()
     const selection = window.getSelection()
-    const initialRange = document.createRange()
-    initialRange.setStart(segment, 0)
-    initialRange.collapse(true)
-    selection?.removeAllRanges()
-    selection?.addRange(initialRange)
-    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
-    const text = document.createTextNode('你')
-    segment.replaceChildren(text)
-    const committedRange = document.createRange()
-    committedRange.setStart(text, text.data.length)
-    committedRange.collapse(true)
-    selection?.removeAllRanges()
-    selection?.addRange(committedRange)
-    editor.dispatchEvent(new InputEvent('input', {
-      bubbles: true,
-      inputType: 'insertCompositionText',
-      data: '你',
-      isComposing: true
-    }))
-    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '你' }))
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const reconciledEditor = document.querySelector('#camp-message')
-    const reconciledSelection = window.getSelection()
-    if (!(reconciledEditor instanceof HTMLDivElement) || !reconciledSelection?.anchorNode) return null
+    if (!(editor instanceof HTMLDivElement) || !selection?.anchorNode) return null
     const beforeCaret = document.createRange()
-    beforeCaret.selectNodeContents(reconciledEditor)
-    beforeCaret.setEnd(reconciledSelection.anchorNode, reconciledSelection.anchorOffset)
+    beforeCaret.selectNodeContents(editor)
+    beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset)
     return {
-      stayedMounted: reconciledEditor === editor,
-      stayedFocused: document.activeElement === reconciledEditor,
-      text: reconciledEditor.textContent,
+      stayedMounted: editor === window.__composerV2Editor,
+      stayedFocused: document.activeElement === editor,
+      text: editor.textContent,
+      paragraphCount: editor.querySelectorAll(':scope > p').length,
       caretOffset: beforeCaret.toString().length
     }
-  })()`, true)
+  })()`)
   assert(
     firstNativeCompositionInspection?.stayedMounted
       && firstNativeCompositionInspection.stayedFocused
       && firstNativeCompositionInspection.text === '你'
+      && firstNativeCompositionInspection.paragraphCount === 1
       && firstNativeCompositionInspection.caretOffset === 1,
-    `The first IME composition reset the editor host: ${JSON.stringify(firstNativeCompositionInspection)}`
+    `Native IME composition did not remain in Lexical: ${JSON.stringify(firstNativeCompositionInspection)}`
   )
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '你' }]), 10_000)
+    (draft) => deepEqual(draft.content,
+      composerDocumentFromStructured([{ kind: 'text', text: '你' }])), 10_000)
   await selectWholeEditor(running.cdp)
   await pressKey(running.cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []), 10_000)
+    (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
 
-  await acceptImeNewlineRegression(running.cdp, campId)
-
-  // A native contenteditable/IME edit may wrap a React-owned segment. The
-  // Composer must replace the editor host instead of imperatively removing the
-  // wrapper, otherwise the next controlled clear crashes React in removeChild
-  // and leaves the entire App root blank.
-  await focusEditorAtEnd(running.cdp)
-  await running.cdp.send('Input.insertText', { text: '原生输入' })
-  await waitForExpression(running.cdp, `(() => {
-    const editor = document.querySelector('#camp-message')
-    return editor?.textContent === '原生输入'
-      && editor.querySelectorAll(':scope > [data-editor-segment="text"]').length === 1
-  })()`)
-  const nativeMutationSetup = await evaluate(running.cdp, `(() => {
-    const editor = document.querySelector('#camp-message')
-    const segment = editor?.querySelector(':scope > [data-editor-segment="text"]')
-    if (!(editor instanceof HTMLDivElement) || !(segment instanceof HTMLElement)) return null
-    window.__structuredMentionOwnershipErrors = []
-    window.addEventListener('error', (event) => {
-      window.__structuredMentionOwnershipErrors.push({
-        message: event.message,
-        error: event.error instanceof Error ? event.error.message : null
-      })
-    })
-    window.__structuredMentionMutatedEditor = editor
-    const wrapper = document.createElement('div')
-    editor.insertBefore(wrapper, segment)
-    wrapper.appendChild(segment)
-    segment.textContent += '回归'
-    const selection = window.getSelection()
-    const range = document.createRange()
-    range.selectNodeContents(segment)
-    range.collapse(false)
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    editor.dispatchEvent(new InputEvent('input', {
-      bubbles: true,
-      inputType: 'insertCompositionText',
-      data: '回归'
-    }))
-    return { text: editor.textContent, wrapperCount: editor.querySelectorAll(':scope > div').length }
-  })()`)
-  assert(nativeMutationSetup?.text === nativeDomRegressionBody
-    && nativeMutationSetup.wrapperCount === 1,
-    `Could not prepare the native DOM ownership regression: ${JSON.stringify(nativeMutationSetup)}`)
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, [{ kind: 'text', text: nativeDomRegressionBody }]), 10_000)
-  await waitForExpression(running.cdp, `(() => {
-    const editor = document.querySelector('#camp-message')
-    return editor !== window.__structuredMentionMutatedEditor
-      && editor?.textContent === ${JSON.stringify(nativeDomRegressionBody)}
-      && editor.querySelectorAll(':scope > [data-editor-segment="text"]').length === 1
-      && !editor.querySelector(':scope > div')
-      && document.activeElement === editor
-  })()`)
-  await waitForExpression(running.cdp,
-    `document.querySelector('.composer .composer-send')?.disabled === false`)
-  await mouseClick(running.cdp, '.composer .composer-send')
-  await waitForValue(async () => {
-    const snapshot = await request(running.cdp, 'camps.snapshot', { campId })
-    return snapshot.messages.find((message) =>
-      message.authorType === 'user' && message.body === nativeDomRegressionBody) ?? null
-  }, Boolean, 30_000)
-  await waitForExpression(running.cdp, `(() => {
-    const root = document.querySelector('#root')
-    const editor = document.querySelector('#camp-message')
-    return Boolean(root?.firstElementChild) && editor?.textContent === ''
-  })()`, 10_000)
-  const nativeOwnershipErrors = await evaluate(running.cdp,
-    `window.__structuredMentionOwnershipErrors ?? []`)
-  assert(!nativeOwnershipErrors.some((error) =>
-    `${error.message}\n${error.error}`.includes('removeChild')),
-    `Native DOM ownership still crashed React: ${JSON.stringify(nativeOwnershipErrors)}`)
-
-  // A completed composition is reconciled on the next animation frame. A new
-  // composition that starts first must cancel that old reconciliation instead
-  // of letting it remount the editor underneath the new IME session.
-  const overlappingCompositionInspection = await evaluate(running.cdp, `(async () => {
-    const editor = document.querySelector('#camp-message')
-    if (!(editor instanceof HTMLDivElement)) return null
-    editor.focus()
-    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
-    const text = document.createTextNode('首')
-    editor.replaceChildren(text)
-    const range = document.createRange()
-    range.setStart(text, text.data.length)
-    range.collapse(true)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '首' }))
-    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const stayedMountedDuringNextComposition = document.querySelector('#camp-message') === editor
-    const stayedFocusedDuringNextComposition = document.activeElement === editor
-    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '首' }))
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const reconciledEditor = document.querySelector('#camp-message')
-    return {
-      stayedMountedDuringNextComposition,
-      stayedFocusedDuringNextComposition,
-      reconciledAfterNextComposition: reconciledEditor !== editor,
-      reconciledText: reconciledEditor?.textContent ?? null,
-      focusedAfterReconciliation: document.activeElement === reconciledEditor
-    }
-  })()`, true)
-  assert(
-    overlappingCompositionInspection?.stayedMountedDuringNextComposition
-      && overlappingCompositionInspection.stayedFocusedDuringNextComposition
-      && overlappingCompositionInspection.reconciledAfterNextComposition
-      && overlappingCompositionInspection.reconciledText === '首'
-      && overlappingCompositionInspection.focusedAfterReconciliation,
-    `A stale composition frame crossed into the next IME session: ${JSON.stringify(overlappingCompositionInspection)}`
-  )
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '首' }]), 10_000)
-  await selectWholeEditor(running.cdp)
-  await pressKey(running.cdp, {
-    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
-  })
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []), 10_000)
-
-  // If Shift+Enter arrives after compositionend but before its frame, settle
-  // the committed DOM first and apply exactly one newline to that fresh state.
-  const pendingCompositionShortcutInspection = await evaluate(running.cdp, `(async () => {
-    const editor = document.querySelector('#camp-message')
-    if (!(editor instanceof HTMLDivElement)) return null
-    editor.focus()
-    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
-    const text = document.createTextNode('123213213')
-    editor.replaceChildren(text)
-    const range = document.createRange()
-    range.setStart(text, text.data.length)
-    range.collapse(true)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    editor.dispatchEvent(new CompositionEvent('compositionend', {
-      bubbles: true,
-      data: '123213213'
-    }))
-    const shortcut = new KeyboardEvent('keydown', {
-      bubbles: true,
-      cancelable: true,
-      key: 'Enter',
-      code: 'Enter',
-      shiftKey: true
-    })
-    editor.dispatchEvent(shortcut)
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const reconciledEditor = document.querySelector('#camp-message')
-    const readDomText = (node) => {
-      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
-      if (!(node instanceof HTMLElement)) return ''
-      if (node.dataset.editorCaretHost === 'true') {
-        return (node.textContent ?? '').replaceAll('\\u200B', '')
-      }
-      if (node.tagName === 'BR') {
-        return node.dataset.editorCaretBreak === 'true'
-          || node.dataset.editorEmptyBreak === 'true' ? '' : '\\n'
-      }
-      return [...node.childNodes].map(readDomText).join('')
-    }
-    return {
-      defaultPrevented: shortcut.defaultPrevented,
-      text: reconciledEditor ? readDomText(reconciledEditor) : null,
-      focused: document.activeElement === reconciledEditor
-    }
-  })()`, true)
-  assert(
-    pendingCompositionShortcutInspection?.defaultPrevented
-      && pendingCompositionShortcutInspection.text === '123213213\n'
-      && pendingCompositionShortcutInspection.focused,
-    `Shift+Enter did not settle pending IME text before adding one newline: ${JSON.stringify(pendingCompositionShortcutInspection)}`
-  )
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '123213213\n' }]), 10_000)
-  await selectWholeEditor(running.cdp)
-  await pressKey(running.cdp, {
-    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
-  })
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []), 10_000)
+  const imeNewlineInspection = await acceptImeNewlineRegression(running.cdp, campId)
 
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: expectedContent[0].text })
@@ -1081,9 +875,8 @@ try {
   })()`)
 
   for (const [index, member] of targetMembers.entries()) {
-    // Wait for each controlled React render and restore the caret before the
-    // next native insertion. Sending consecutive CDP inserts into a stale DOM
-    // can duplicate the previous controlled value.
+    // Keep each native insertion at the committed Lexical selection while the
+    // Typeahead portal opens and closes around the same editor instance.
     await focusEditorAtEnd(running.cdp)
     await running.cdp.send('Input.insertText', { text: '@' })
     await waitForValue(async () => evaluate(running.cdp, `(() => {
@@ -1183,15 +976,15 @@ try {
         && style.color === 'rgb(47, 97, 200)'
         && Number(style.fontWeight) >= 600
         && style.userSelect === 'all'
-        && style.role === 'button'
-        && style.label?.endsWith('的基础信息')
-        && style.hasPopup === 'dialog'),
+        && style.role === null
+        && style.label?.startsWith('成员 ')
+        && style.hasPopup === null),
     `Structured mentions do not use the selected atomic inline style: ${JSON.stringify(composerInspection)}`
   )
 
   const durableDraft = await waitForValue(async () =>
     request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-    draft.revision >= 1 && deepEqual(draft.content, expectedContent), 10_000)
+    draft.revision >= 1 && deepEqual(draft.content, expectedComposerDocument), 10_000)
   assert(durableDraft.body === expectedBody,
     `Core did not project the current names into the Draft body: ${JSON.stringify(durableDraft)}`)
 
@@ -1216,14 +1009,14 @@ try {
   await pressEscape(running.cdp)
   await waitForExpression(running.cdp, `!document.querySelector('.mention-profile-popover')`)
   await waitForExpression(running.cdp,
-    `document.activeElement?.classList.contains('structured-mention-token') === true`, 3_000)
+    `document.activeElement?.id === 'camp-message'`, 3_000)
   const draftAfterPopover = await request(running.cdp, 'camp.composerDraft.get', { campId })
-  assert(deepEqual(draftAfterPopover.content, expectedContent),
+  assert(deepEqual(draftAfterPopover.content, expectedComposerDocument),
     `Opening the Composer popover changed the durable Draft: ${JSON.stringify(draftAfterPopover)}`)
 
-  // The native-DOM regression above also sends a message. Settle that safe
-  // Runtime before testing direct-send auto-open; a private queued publication
-  // has no synchronous Run receipt and intentionally does not move selection.
+  // Settle any earlier Runtime before testing direct-send auto-open; a private
+  // queued publication has no synchronous Run receipt and intentionally does
+  // not move selection.
   await waitForValue(() => request(running.cdp, 'camps.snapshot', { campId }),
     (snapshot) => snapshot.agentRuns.every((run) =>
       ['succeeded', 'failed', 'cancelled'].includes(run.status)), 30_000)
@@ -1573,8 +1366,7 @@ try {
       && draft.replyIntent.author?.authorId === targetMemberIds[0]
       && draft.replyIntent.author.recipientAvailability === 'available'
       && draft.replyIntent.recipientSelectionRequired === false
-      && draft.content.some((segment) =>
-        segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]), 10_000)
+      && composerHasMember(draft.content, targetMemberIds[0]), 10_000)
   await waitForExpression(running.cdp, `(() => (
     document.activeElement?.id === 'camp-message'
       && document.querySelector('.composer')?.classList.contains('suppress-pointer-focus-ring')
@@ -1670,8 +1462,7 @@ try {
       && draft.replyIntent.author?.authorId === targetMemberIds[0]
       && draft.replyIntent.author.recipientAvailability === 'unavailable'
       && draft.replyIntent.recipientSelectionRequired === true, 10_000)
-  assert(!unavailableReplyDraft.content.some((segment) =>
-    segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]),
+  assert(!composerHasMember(unavailableReplyDraft.content, targetMemberIds[0]),
   `Unavailable reply author leaked into the Draft: ${JSON.stringify(unavailableReplyDraft)}`)
   await waitForExpression(running.cdp, `(() => {
     const repair = document.querySelector('.reply-recipient-repair')
@@ -1713,10 +1504,8 @@ try {
     request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
     draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
       && draft.replyIntent.recipientSelectionRequired === false
-      && draft.content.some((segment) =>
-        segment.kind === 'member_mention' && segment.agentId === targetMemberIds[2])
-      && !draft.content.some((segment) =>
-        segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]), 10_000)
+      && composerHasMember(draft.content, targetMemberIds[2])
+      && !composerHasMember(draft.content, targetMemberIds[0]), 10_000)
   await waitForExpression(running.cdp, `(() => (
     !document.querySelector('.reply-recipient-repair')
       && document.querySelector('.composer-reply-line strong')?.textContent === '回复 叮叮'
@@ -1734,7 +1523,7 @@ try {
   const continuationVisibleAfterAcceptedSendMs = Date.now() - continuationStartedAt
   const continuedDraft = await waitForValue(async () =>
     request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-    draft.content.length === 0
+    composerIsEmpty(draft.content)
       && draft.replyIntent === null
       && draft.continuationIntent?.recipient.agentId === targetMemberIds[2], 5_000)
   const sentReplySnapshot = await waitForValue(async () =>
@@ -1922,6 +1711,9 @@ try {
     selectedSkillText,
     skillPickerInspection,
     inlineSkillInspection,
+    firstNativeInputInspection,
+    firstNativeCompositionInspection,
+    imeNewlineInspection,
     campMessageId: sent.message.id,
     campTurnId: sent.message.campTurnId,
     agentRunIds: sent.runs.map((run) => run.id),
@@ -2391,129 +2183,87 @@ async function acceptImeNewlineRegression(cdp, campId) {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []), 10_000)
+    (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
 
-  // A trailing model newline must have a real DOM line box. Chromium inserts
-  // the next native character before a terminal LF text character, which makes
-  // one Shift+Enter appear ineffective and breaks the next IME composition.
   await focusEditorAtEnd(cdp)
-  await cdp.send('Input.insertText', { text: '123213213' })
-  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '123213213' }]), 10_000)
-  const trailingNewlineInspection = await evaluate(cdp, `(async () => {
-    const editor = document.querySelector('#camp-message')
-    if (!(editor instanceof HTMLDivElement)) return null
-    const shortcut = new KeyboardEvent('keydown', {
-      bubbles: true,
-      cancelable: true,
-      key: 'Enter',
-      code: 'Enter',
-      shiftKey: true
-    })
-    editor.dispatchEvent(shortcut)
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const reconciledEditor = document.querySelector('#camp-message')
-    window.__structuredMentionPostNewlineEditor = reconciledEditor
-    window.__structuredMentionImeErrors = []
-    window.__structuredMentionImeInputEvents = []
-    window.addEventListener('error', (event) => {
-      window.__structuredMentionImeErrors.push({
-        message: event.message,
-        error: event.error instanceof Error ? event.error.stack : null
-      })
-    })
-    for (const type of ['beforeinput', 'input']) {
-      document.addEventListener(type, (event) => {
-        window.__structuredMentionImeInputEvents.push({
-          type,
-          inputType: event.inputType,
-          data: event.data,
-          isComposing: event.isComposing,
-          defaultPrevented: event.defaultPrevented,
-          targetHtml: event.target instanceof HTMLElement ? event.target.innerHTML : null
-        })
-      })
-    }
-    const readDomText = (node) => {
-      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
-      if (!(node instanceof HTMLElement)) return ''
-      if (node.dataset.editorCaretHost === 'true') {
-        return (node.textContent ?? '').replaceAll('\\u200B', '')
-      }
-      if (node.tagName === 'BR') {
-        return node.dataset.editorCaretBreak === 'true'
-          || node.dataset.editorEmptyBreak === 'true' ? '' : '\\n'
-      }
-      return [...node.childNodes].map(readDomText).join('')
-    }
-    return {
-      defaultPrevented: shortcut.defaultPrevented,
-      text: reconciledEditor ? readDomText(reconciledEditor) : null,
-      html: reconciledEditor?.innerHTML ?? null,
-      focused: document.activeElement === reconciledEditor
-    }
-  })()`, true)
-  assert(
-    trailingNewlineInspection?.defaultPrevented
-      && trailingNewlineInspection.text === '123213213\n'
-      && trailingNewlineInspection.focused,
-    `Shift+Enter did not create one trailing newline: ${JSON.stringify(trailingNewlineInspection)}`
+  await evaluate(cdp, `(() => {
+    window.__composerImeNewlineEditor = document.querySelector('#camp-message')
+  })()`)
+  await cdp.send('Input.imeSetComposition', {
+    text: 'nihao', selectionStart: 5, selectionEnd: 5
+  })
+  await cdp.send('Input.insertText', { text: '你好' })
+  const composedDraft = await waitForValue(
+    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content,
+      composerDocumentFromStructured([{ kind: 'text', text: '你好' }])),
+    10_000
   )
 
-  await cdp.send('Input.insertText', { text: 'n' })
-  await evaluate(cdp,
-    `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
-  const postNewlineInputInspection = await evaluate(cdp, `(() => {
+  await pressKey(cdp, {
+    key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36, modifiers: 8
+  })
+  const trailingNewlineDraft = await waitForValue(
+    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content,
+      composerDocumentFromStructured([{ kind: 'text', text: '你好\n' }])),
+    10_000
+  )
+  const trailingNewlineInspection = await evaluate(cdp, `(() => {
     const editor = document.querySelector('#camp-message')
-    if (!(editor instanceof HTMLDivElement)) return {
-      text: null,
-      html: null,
-      stayedMounted: false,
-      focused: false,
-      errors: window.__structuredMentionImeErrors ?? [],
-      inputEvents: window.__structuredMentionImeInputEvents ?? [],
-      bodyText: document.body.innerText.slice(0, 500)
-    }
-    const readDomText = (node) => {
-      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
-      if (!(node instanceof HTMLElement)) return ''
-      if (node.dataset.editorCaretHost === 'true') {
-        return (node.textContent ?? '').replaceAll('\\u200B', '')
-      }
-      if (node.tagName === 'BR') {
-        return node.dataset.editorCaretBreak === 'true'
-          || node.dataset.editorEmptyBreak === 'true' ? '' : '\\n'
-      }
-      return [...node.childNodes].map(readDomText).join('')
-    }
     return {
-      text: readDomText(editor),
-      html: editor.innerHTML,
-      stayedMounted: editor === window.__structuredMentionPostNewlineEditor,
+      stayedMounted: editor === window.__composerImeNewlineEditor,
       focused: document.activeElement === editor,
-      errors: window.__structuredMentionImeErrors ?? [],
-      inputEvents: window.__structuredMentionImeInputEvents ?? []
+      paragraphCount: editor?.querySelectorAll(':scope > p').length ?? -1,
+      lineBreakCount: editor?.querySelectorAll(':scope > p > br').length ?? -1
     }
   })()`)
   assert(
-    postNewlineInputInspection?.text === '123213213\nn'
-      && postNewlineInputInspection.stayedMounted
-      && postNewlineInputInspection.focused,
-    `The first native character landed before the trailing newline: ${JSON.stringify(postNewlineInputInspection)}`
+    trailingNewlineInspection.stayedMounted
+      && trailingNewlineInspection.focused
+      && trailingNewlineInspection.paragraphCount === 1
+      && trailingNewlineInspection.lineBreakCount >= 1,
+    `Shift+Enter did not create one Lexical line break: ${JSON.stringify(trailingNewlineInspection)}`
   )
-  const draft = await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (value) => deepEqual(value.content, [{ kind: 'text', text: '123213213\nn' }]), 10_000)
+
+  await cdp.send('Input.insertText', { text: 'n' })
+  const draft = await waitForValue(
+    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (value) => deepEqual(value.content,
+      composerDocumentFromStructured([{ kind: 'text', text: '你好\nn' }])),
+    10_000
+  )
+  const postNewlineInputInspection = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    return {
+      stayedMounted: editor === window.__composerImeNewlineEditor,
+      focused: document.activeElement === editor,
+      text: editor?.textContent ?? null,
+      paragraphCount: editor?.querySelectorAll(':scope > p').length ?? -1
+    }
+  })()`)
+  assert(
+    postNewlineInputInspection.stayedMounted
+      && postNewlineInputInspection.focused
+      && postNewlineInputInspection.paragraphCount === 1,
+    `The first native character after a line break left Lexical: ${JSON.stringify(postNewlineInputInspection)}`
+  )
 
   await selectWholeEditor(cdp)
   await pressKey(cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (value) => deepEqual(value.content, []), 10_000)
+    (value) => deepEqual(value.content, emptyComposerDocument), 10_000)
 
-  return { trailingNewlineInspection, postNewlineInputInspection, draft }
+  return {
+    composedDraft,
+    trailingNewlineDraft,
+    trailingNewlineInspection,
+    postNewlineInputInspection,
+    draft
+  }
 }
-
 async function acceptInlineSkillQueries(cdp, campId, skill) {
   const query = `/${skill.name.slice(0, 4)}`
   const optionSelector = `.skill-picker-menu [data-skill-name=${JSON.stringify(skill.name)}]`
@@ -2727,8 +2477,8 @@ async function acceptComposerCutRegression(cdp, campId) {
       editorFocused: document.activeElement === editor,
       editorText: editor?.textContent ?? null,
       editorHtml: editor?.innerHTML ?? null,
-      emptyBreakCount: editor?.querySelectorAll('[data-editor-empty-break="true"]').length ?? -1,
-      lineBreakCount: editor?.querySelectorAll('[data-editor-line-break="true"]').length ?? -1,
+      paragraphCount: editor?.querySelectorAll(':scope > p').length ?? -1,
+      breakCount: editor?.querySelectorAll(':scope > p > br').length ?? -1,
       errors: window.__composerCutErrors ?? []
     }
   })()`)
@@ -2738,8 +2488,8 @@ async function acceptComposerCutRegression(cdp, campId) {
       && afterCut.editorStayedMounted
       && afterCut.editorFocused
       && afterCut.editorText === ''
-      && afterCut.emptyBreakCount === 1
-      && afterCut.lineBreakCount === 0
+      && afterCut.paragraphCount === 1
+      && afterCut.breakCount === 1
       && afterCut.errors.length === 0,
     `Command+X did not leave one stable empty Composer: ${JSON.stringify(afterCut)}`
   )
@@ -2791,8 +2541,8 @@ async function acceptComposerCutRegression(cdp, campId) {
       editorFocused: document.activeElement === editor,
       editorText: editor?.textContent ?? null,
       editorHtml: editor?.innerHTML ?? null,
-      emptyBreakCount: editor?.querySelectorAll('[data-editor-empty-break="true"]').length ?? -1,
-      lineBreakCount: editor?.querySelectorAll('[data-editor-line-break="true"]').length ?? -1,
+      paragraphCount: editor?.querySelectorAll(':scope > p').length ?? -1,
+      breakCount: editor?.querySelectorAll(':scope > p > br').length ?? -1,
       errors: window.__composerCutErrors ?? []
     }
   })()`)
@@ -2801,8 +2551,8 @@ async function acceptComposerCutRegression(cdp, campId) {
       && afterNativeEmpty.workspaceStayedMounted
       && afterNativeEmpty.editorFocused
       && afterNativeEmpty.editorText === ''
-      && afterNativeEmpty.emptyBreakCount === 1
-      && afterNativeEmpty.lineBreakCount === 0
+      && afterNativeEmpty.paragraphCount === 1
+      && afterNativeEmpty.breakCount === 1
       && afterNativeEmpty.errors.length === 0,
     `A native empty filler became semantic content: ${JSON.stringify(afterNativeEmpty)}`
   )
@@ -3724,7 +3474,67 @@ function sameMembers(actual, expected) {
 }
 
 function deepEqual(left, right) {
+  if (isComposerDocument(left) && Array.isArray(right)) {
+    right = composerDocumentFromStructured(right)
+  } else if (Array.isArray(left) && isComposerDocument(right)) {
+    left = composerDocumentFromStructured(left)
+  }
+  if (isComposerDocument(left)) left = composerIdentityProjection(left)
+  if (isComposerDocument(right)) right = composerIdentityProjection(right)
   return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right))
+}
+
+function isComposerDocument(value) {
+  return value?.version === 2 && Array.isArray(value.segments)
+}
+
+function composerDocumentFromStructured(content) {
+  if (isComposerDocument(content)) return content
+  return {
+    version: 2,
+    segments: content.map((segment) => {
+      if (segment.kind === 'text' || segment.kind === 'atom') return segment
+      if (segment.kind === 'member_mention') {
+        const atom = { type: 'member', agentId: segment.agentId }
+        if (segment.fallbackText) atom.labelFallback = segment.fallbackText.replace(/^@/, '')
+        return { kind: 'atom', atom }
+      }
+      if (segment.kind === 'all_members_mention') {
+        return { kind: 'atom', atom: { type: 'all_members' } }
+      }
+      if (segment.kind === 'skill_mention') {
+        return {
+          kind: 'atom',
+          atom: { type: 'skill', skillId: segment.skillId, nameAtSend: segment.nameAtSend }
+        }
+      }
+      throw new Error(`Unsupported Composer fixture segment: ${JSON.stringify(segment)}`)
+    })
+  }
+}
+
+function composerIdentityProjection(document) {
+  return {
+    version: 2,
+    segments: document.segments.map((segment) => {
+      if (segment.kind !== 'atom' || segment.atom.type !== 'member') return segment
+      return {
+        kind: 'atom',
+        atom: { type: 'member', agentId: segment.atom.agentId }
+      }
+    })
+  }
+}
+
+function composerHasMember(document, agentId) {
+  return document.segments.some((segment) =>
+    segment.kind === 'atom'
+      && segment.atom.type === 'member'
+      && segment.atom.agentId === agentId)
+}
+
+function composerIsEmpty(document) {
+  return isComposerDocument(document) && document.segments.length === 0
 }
 
 function canonicalJson(value) {

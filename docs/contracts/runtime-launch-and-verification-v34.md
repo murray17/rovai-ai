@@ -3,7 +3,7 @@ document_type: contract
 name: Runtime Launch and Verification
 version: v34
 status: accepted
-source_version: v1.43
+source_version: v1.44
 last_updated: 2026-09-04
 ---
 
@@ -150,7 +150,7 @@ qualification artifact。
 ## References
 
 - [Runtime Launch and Verification v33（historical）](runtime-launch-and-verification-v33.md)
-- [V1.43-D01](../versions/v1.43/decisions.md#v1-43-d01)
-- [V1.43-D02](../versions/v1.43/decisions.md#v1-43-d02)
-- [Pi model-context change revision 1](../versions/v1.43/model-context-change-pi-native-prompt.md)
+- [V1.44-D01](../versions/v1.44/decisions.md#v1-44-d01)
+- [V1.44-D02](../versions/v1.44/decisions.md#v1-44-d02)
+- [Pi model-context change revision 1](../versions/v1.44/model-context-change-pi-native-prompt.md)
 - [Pi parity matrix](../research/pi-runtime-reintegration-parity-matrix.md)

@@ -1,63 +1,65 @@
 ---
 document_type: version-decisions
 version: v1.43
-lifecycle: current
+lifecycle: historical
 last_updated: 2026-09-04
 ---
 
 # v1.43 决定
 
 <a id="v1-43-d01"></a>
-## V1.43-D01：Rovai 投递普通 Pi Prompt，Pi 拥有原生资源解释
+## V1.43-D01：Composer 领域协议收敛为 Text + Atom，并与 Lexical 和公共消息分层
 
 ### 背景
 
-v33 同时恢复 Pi 原生 ResourceLoader，又由 managed extension 把相同 `.pi/skills` root 追加进
-`resources_discover`，并由 Core 读取 `get_commands`、解析 `/command`、读取 Skill/Prompt 文件并生成第二份
-Runtime payload。这让普通 Camp 消息意外继承 Pi TUI 命令框语义，也形成两条资源发现路径、重复 catalog 证明和
-Prompt Transform 数据合同。启动失败后的 `--no-extensions` fallback 还会让相同 Host identity 静默拥有不同能力。
+旧 Composer 把多个业务 Mention 类型直接当作编辑模型的一部分，并在每次输入后重建完整 Structured Content。
+直接持久化 Lexical JSON 会把 Paragraph、selection、node key 和编辑器版本细节扩散到 Core；直接复用公共消息
+Structured Content 又会让 Core-owned Current User Mention、渠道 External Quote 等不可编辑节点进入用户输入域。
 
 ### 决定
 
-正式 Pi 永远运行原生资源加必要 `rovai-pi-host-v6` 薄 extension。Rovai Skill projection 只负责把冻结 Revision 写入
-workspace `.pi/skills`；Pi 是否发现它由原生 ResourceLoader、workspace trust 和用户设置决定。extension 不返回
-`skillPaths`，Core 不读取或证明完整 catalog，Skill discovery 使用 `DocumentationOnly`。
+Draft 与 Pending 的唯一领域内容改为版本化 `ComposerDocument` V2，Segment 只包含普通文本或一个 Atom；
+Member、All Members 与 Skill 仅是 Atom 的强类型 payload。换行在领域层属于文本中的 `\n`，Paragraph 只存在于
+Lexical 内部。Core 兼容读取旧的用户可写 Segment 数组，但所有后续写入只产生 V2；发送时再转换成既有公共
+Structured Camp Message Content。
 
-Rovai 消息只是一条普通 Agent Prompt。Formatter 22 的 payload 不解析 `/command`，不读取资源文件，不产生 Runtime
-transform，逐字节发送为 `prompt.message`。图片独立从 ContextManifest attachment refs 与授权生成，直接留证到
-Delivery。只有明确 Session continuity failure 可以创建一次 replacement；其余 activation 错误保留真实分类。
-Pi External MCP 继续 `Unsupported`，部分审批和 managed receipt/accepted 原子性不变。字段合同由
-[Runtime Launch v34](../../contracts/runtime-launch-and-verification-v34.md)拥有。
+Member 身份只由 `agentId` 决定，Skill 身份只由 `skillId` 决定；显示名、头像、可用状态和 Lexical presentation
+字段都不是持久 identity。当前规范由 [Camp Composer Draft v8](../../contracts/camp-composer-draft-v8.md)与
+[Composer 架构](../../architecture/camp-composer-draft.md)拥有。
 
 ### 后果与被拒绝方案
 
-- 项目原生 Skill 与 Rovai 投递 Skill 只有 `.pi/skills → Pi ResourceLoader` 一条发现链，不绕过 Pi trust。
-- `/new`、`/compact`、template、Skill 和 Extension command 在 Rovai 消息中都是普通文本；这不禁用 Pi Extension
-  hooks、tools、resources 或其原生 lifecycle。
-- 不再证明完整 Skill/Tool/Extension catalog；Receipt 只证明本轮必要绑定、Bootstrap 和三个 governed Tool。
-- 拒绝保留 command expansion 作为“方便兼容”：它会重新引入文件读取、二次语义和不可见 payload 改写。
-- 拒绝 managed-only fallback：启动错误比能力静默降级更符合可诊断、同 identity 同语义的 Host 合同。
+- Core Draft 不保存 Lexical JSON，公共 Message/Channel/Runtime 合同也无需随编辑器迁移。
+- 无法从旧输入域表达的 Core-owned Segment 会被拒绝，不会静默丢失；纯文本粘贴不会猜测 identity。
+- 拒绝让每种业务引用成为独立领域节点：它会重新扩张编辑 Schema。拒绝把显示名称当身份或按同名重绑：
+  它会在重命名和离队后改变用户已选择的对象。拒绝持久化 Lexical tree：它会把第三方编辑器实现变成跨进程合同。
 
 <a id="v1-43-d02"></a>
-## V1.43-D02：Fleet 用 Starting reservation 把耗时启动移出全局锁
+## V1.43-D02：高频编辑留在 Lexical，本地版本以低频 single-flight Snapshot 接入 Core
 
 ### 背景
 
-Pi Adapter 的 per-Run gate 已允许不同 Run 独立创建，但公共 Fleet 仍在全局 operations mutex 内执行完整
-`spawn().await`。任何 Runtime 的进程创建、协议连接或 handshake 都会阻塞其他 Run，Adapter 私有 gate 也无法证明
-公共容量、LRU 和 shutdown 与在途创建之间的线性化。
+React 受控 `contenteditable` 使普通按键经过全文序列化、父组件 setState、完整子树 reconciliation、DOM selection
+映射和 Core Draft 保存。长输入、多个引用和 IME composition 因此共享同一条 O(N) 热路径。把完整内容迁到 React
+state 或只用另一种全文字符串模型都不能消除这条路径。
 
 ### 决定
 
-Fleet `acquire` 固定为 `Reserve → Spawn outside lock → Commit`。Reserve 在短锁内选择现有 lease/Idle Host、容量与
-eviction，并登记计入容量的 `Starting`；耗时 stop/spawn/handshake 在锁外执行；Commit 只允许仍未被 generation、
-shutdown 或 invalidation fence 退役的 reservation 进入 Busy。相同 Run/epoch 的请求等待同一 completion，不产生
-第二个进程；不同 Run 与不同 Runtime 可并发启动。所有删除、force stop 和 shutdown 都先退役 Starting，迟到进程
-必须关闭并 reap。
+输入期间由 Lexical `EditorState` 唯一拥有内容、selection、composition 与 history。内部仅使用 Plain Text、History、
+局部 Typeahead 和单一 token/unmergeable `ComposerAtomNode`；Atom 直接维护轻量 span DOM。React 只保存 Catalog、
+Picker、发送状态、local/saved version 等小型状态。
+
+真实内容更新增加 local version，并以 debounce/max-wait 形成 `ComposerDocument` Snapshot；同 Draft 保存 single-flight，
+在途版本完成后直接追赶最新版本。发送和 revision-dependent mutation 先 flush exact EditorState；成功发送只有在
+`currentLocalVersion === sentLocalVersion` 时清空。Catalog 展示更新使用专用 tag，不增加版本、不保存、不进入 undo。
+当前数据流由 [Composer 架构](../../architecture/camp-composer-draft.md)拥有，交互由
+[结构化 Mention](../../ui/components/structured-mentions.md)拥有。
 
 ### 后果与被拒绝方案
 
-- Resident 容量包括 Starting，避免并发 reservation 超配；LRU 选择仍在同一短锁下保持确定性。
-- spawn failure 原样通知全部同 Run waiter，并释放 reservation/capacity；成功 waiter 取得同一 lease identity。
-- Fleet 正确性不依赖 Pi 或任何 Adapter 的私有 singleflight，Adapter gate 可以保留为局部防重层。
-- 拒绝在全局锁内等待 spawn：它把单一 Runtime 延迟放大为全局队头阻塞，并妨碍可靠 shutdown fencing。
+- 普通字符输入不执行全文 serialize/normalize/plain-text projection、Core IPC 或 Draft persistence；完整遍历只在
+  初始化、authoritative replacement、低频保存和显式 flush 边界发生。
+- 同一 Draft 的普通 props 与 Catalog 更新不替换 EditorState；有未保存本地修改时，远端 props 不能覆盖输入。
+- 拒绝继续全文 React 受控模式、手工 DOM selection/ownership reset 和每字符 Core 同步：它们正是热路径来源。
+  拒绝每个 Atom 一个 React Root：大量引用会引入独立生命周期与 Portal。拒绝并发保存每个版本：乱序回执无法
+  安全表达 exact revision，也会制造无意义 IPC 压力。

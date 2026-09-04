@@ -4047,7 +4047,12 @@ mod slow_tests {
             },
         ];
         let draft = CampAttachmentStore::new(&directory)
-            .save_content(&mut database, &camp_id, 0, content.clone())
+            .save_content(
+                &mut database,
+                &camp_id,
+                0,
+                crate::camp_content::composer_document_from_content(&content).unwrap(),
+            )
             .unwrap();
         collaboration
             .send_test_camp_message(

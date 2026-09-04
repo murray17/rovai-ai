@@ -1,6 +1,6 @@
 ---
 document_type: model-context-change
-version: v1.43
+version: v1.44
 change_id: pi-native-prompt-boundary
 revision: 1
 confirmation_status: confirmed
@@ -10,11 +10,11 @@ confirmed_at: 2026-09-04
 authority: confirmed-model-input-change-statement
 implementation_baseline: 81d209eab733ecd520ab016440609c1886788a24
 implementation_status: implemented
-acceptance_status: pending_full_gate
+acceptance_status: verified
 last_updated: 2026-09-04
 ---
 
-# v1.43 核心模型上下文变更：Pi 原生普通 Prompt 边界
+# v1.44 核心模型上下文变更：Pi 原生普通 Prompt 边界
 
 本说明冻结开发者提供并确认的 revision 1：Rovai 不再模拟 Pi TUI Slash Command，Formatter 22 Dynamic Context
 不经二次解释或改写，直接成为 Pi `prompt.message`；图片仍走独立结构化通道。

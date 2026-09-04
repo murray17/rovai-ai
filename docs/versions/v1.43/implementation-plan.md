@@ -2,52 +2,60 @@
 document_type: implementation-plan
 version: v1.43
 authority: implementation-and-acceptance-status
-status: in_progress
+status: complete
 last_updated: 2026-09-04
 ---
 
 # v1.43 实施与验收
 
-## 实施范围
+## 已实现
 
-- [x] 删除 Pi `resources_discover` skill path、`get_commands` activation/catalog 与全部 Slash Command 展开。
-- [x] 把 Formatter 22 payload 原样发送为 Pi `prompt.message`，从 ContextManifest 结构化附件生成图片。
-- [x] 删除 Prompt Transform 运行时类型、Blob/数据库写入和正则依赖；Migration 138 保留图片行并移除旧表。
-- [x] 删除 `--no-extensions` 自动 fallback，升级薄 extension/binding/receipt 至 v6/schema 3。
-- [x] 为 activation 错误建立 `ResumeContinuityLost | ActivationFailed | HostFailed | ConfigurationFailed` 分类。
-- [x] 把 Fleet acquire 改为 Reserve/锁外 Spawn/Commit，并覆盖同 Run singleflight、容量、失败与 shutdown fencing。
-- [ ] 完成 Rust、文档、TypeScript、桌面构建和 staged PR 门禁。
+- [x] TypeScript/Rust `ComposerDocument` V2、严格校验、相邻文本归一、统一纯文本投影，以及旧 user-authored
+  Structured Content 单向读取转换；Draft/Pending 只写 V2。
+- [x] 全部 Lexical 包以精确 `0.50.0` 锁定；稳定 `RovaiComposerExtension` 组合 Plain Text、History、Atom、
+  command、clipboard、draft sync 与 React Typeahead。
+- [x] 单一 token/unmergeable `ComposerAtomNode` 支持 member、all_members、skill，轻量 DOM、不可拆分删除、
+  identity/presentation 分层及 Catalog 局部刷新。
+- [x] `@` Member 与 `/` Skill 局部 Typeahead，128 字符硬上限、命令边界、尾随空格复用和 composition guard。
+- [x] Plain Text/结构化 MIME/HTML 降级/File 优先 Clipboard，以及不可恢复引用转普通可见文本。
+- [x] local version、350ms debounce、1500ms max-wait、single-flight、explicit flush、send version hold 与
+  authoritative replacement 边界。
+- [x] Camp 与 Pending Composer 迁入非受控 Lexical owner；移除旧全文 transform、DOM ownership snapshot、
+  手工 selection mapping、逐字符 Core Draft 更新与常规 remount。
 
 ## 验收重点
 
-- 正式 Pi argv 只有 `--mode rpc --no-themes --extension`，不会静默禁用用户 Extension；
-- managed extension 不出现 `resources_discover`、`skillPaths`、Skill root/exposure 或完整 catalog 证明；
-- 任意以 `/` 开头的 Rovai 输入仍逐字节作为普通 Prompt，图片不从 Dynamic Context 文本反向解析；
-- 非 continuity activation error 不新建 replacement Session；explicit missing/unreadable locator 才允许一次 replacement；
-- 两个不同 Run 的慢 spawn 能并发，相同 Run 只启动一次；Starting 占用容量且被 shutdown/删除 fencing 退役；
-- Migration 138 后 Prompt Transform 表不存在，图片和 Receipt 的父 Delivery cascade 成功，foreign key check 为空；
-- Machine Ready 仍不发送 Prompt、不调用模型或 Tool/MCP，且 Probe session/config 能清理。
+- 普通按键路径不做 O(N) 全文操作、React 正文 state 更新或 Core IPC；Atom 数量不增加 React Root。
+- Markdown 字符保持普通文本；Shift+Enter 产生 `LineBreakNode` 并导出 `\n`，IME 中 Enter 不发送。
+- Atom 一次整体删除；Member/Skill trigger 不跨 Atom、换行、非法边界或 128 字符上限。
+- Catalog 重命名/失效只改展示，不增加 local version、Draft revision 或 undo item，且 identity 不重绑。
+- Clipboard closed schema 拒绝未知字段/非法 identity；纯文本与 HTML 不恢复 Atom；File 先进入附件入口。
+- save single-flight 不并发、max-wait 可达；发送期间新输入不会被旧发送成功清空。
+- 旧 Draft/Pending 数组可读，下一次写回 V2；`body` 与公开 Message 都从 V2 权威内容统一派生。
 
 ## 必跑命令
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p rovai-core pi::
-cargo test -p rovai-core runtime_fleet::tests
-cargo test -p rovai-core v135_through_v138_preserves_receipt_and_direct_image_cascades
-cargo test -p rovai-core pi_prompt_images_bind_directly_to_delivery_before_dispatch --features slow-tests
+cargo check --workspace --all-targets
+cargo test -p rovai-core --lib
 pnpm typecheck
+pnpm test:composer-input
+pnpm test:desktop:integration
 pnpm test
 pnpm build:desktop
 pnpm docs:test
 pnpm docs:check
 DOCS_BASE_REF=<merge-base-with-main> pnpm docs:check:ci
-pnpm test:rust:staged
 git diff --check
 ```
 
 ## 验证记录
 
-验证完成后在本节记录命令、用例数量和任何平台限定；真实 Provider/Prompt 不属于普通门禁，不得把 deterministic
-fixture 或本机 Preview 运行误记为 qualification evidence。
+- [x] Composer 文档、EditorState、Draft Sync 与组件定向 Vitest：4 files / 25 tests 通过。
+- [x] `pnpm test` 通过：147 个 Vitest 文件、1491 个用例；Node 套件 220 个通过、1 个 Windows-only 跳过。
+- [x] Rust format、workspace/all-targets check、CLI 32 项与 feature-gated slow-tests 300 项通过；默认库测试在排除下述宿主能力单例后 495/495 通过。
+- [x] `pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check`、以 `3d858d00deffe5bd1299846fd28df498d49af0b9` 为 merge-base 的 diff-aware 文档门禁及 `git diff --check` 通过。
+- [x] Impeccable changed-target 扫描未命中本次 Composer TSX/CSS 变更；报告项均位于未修改的既有全局 CSS 规则。
+- [ ] 当前受管执行环境禁止嵌套 macOS sandbox：`pnpm test:desktop:integration` 的 10 个 Electron 业务夹具均按统一预检明确标记为 `BLOCKED`，没有把 skip 计作通过；Rust `managed_process` sandbox 能力单例同因 `/usr/bin/sandbox-exec` exit 71 阻断。需由普通 Terminal 或 CI host 完成这两项宿主能力验收。
+- [ ] 严格 all-features Clippy 命中未修改基线：`context.rs:1715` 的 `type_complexity` 与 `db.rs:26063` 的 `no_effect_replace`；本版本未把无关基线整改混入 Composer 改动。

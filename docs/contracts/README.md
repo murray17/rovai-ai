@@ -48,7 +48,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v30（历史）](runtime-launch-and-verification-v30.md) | v29 保留；增加 Pi JSONL Host、专属 Ready/exact resume、managed receipt、动态 Skills/MCP、Action/Usage 与三平台未准入边界 |
 | [Runtime Launch and Verification v29（历史）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
 | [Runtime Usage Monitoring v4（当前）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
-| [Pending Camp Input v2（当前）](pending-camp-input-v2.md) | v1 FIFO/edit token 不变；原生保存 source refs，working refs 支持添加/删除/排序与附件-only，发布失败精确 needs-repair |
+| [Pending Camp Input v3（当前）](pending-camp-input-v3.md) | v2 FIFO、edit/source refs 与 repair 不变；canonical/edit content 改为 ComposerDocument V2，旧数组只读兼容、body 派生、发布时映射公共 Content |
+| [Pending Camp Input v2（历史）](pending-camp-input-v2.md) | v1 FIFO/edit token 不变；原生保存 source refs，working refs 支持添加/删除/排序与附件-only，发布失败精确 needs-repair；content wire 由 v3 替代 |
 | [Pending Camp Input v1（历史）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
 | [Desktop Runtime Availability v2（当前）](desktop-runtime-availability-v2.md) | 严格 lease/ticket 后原位逐版本事务、receipt 续跑、旧 manifest 恢复、独立瞬时重试与统一会话启动反馈；generation/capability 不变 |
@@ -231,7 +232,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v7（当前）](camp-composer-draft-v7.md) | exact Draft 保存 source refs，可直接发送或连同附件进入私有 FIFO；旧 Prepared Draft 互斥自然耗尽 |
+| [Camp Composer Draft v8（当前）](camp-composer-draft-v8.md) | v7 revision/附件语义不变；Draft 改用 Text + Atom ComposerDocument V2，旧数组只读兼容、body 派生、flush 后映射公共 Content |
+| [Camp Composer Draft v7（历史）](camp-composer-draft-v7.md) | exact Draft 保存 source refs，可直接发送或连同附件进入私有 FIFO；旧 Prepared Draft 互斥自然耗尽；content wire 由 v8 替代 |
 | [Camp Composer Draft v6（历史）](camp-composer-draft-v6.md) | exact Draft 经 Core 决定直接发送或私有 FIFO 入队；Pending 编辑独立于普通 Draft |
 | [Camp Composer Draft v5（历史）](camp-composer-draft-v5.md) | v4 Draft/revision 语义不变；Send 时 ingest Managed v2，最终事务原子提交 Message/ref/Delivery 且不等待 Run |
 | [Camp Composer Draft v4（历史）](camp-composer-draft-v4.md) | v3 sendability 不变；语义事务先提交并由持久 writer intent 阻断 Run，View 异步物化 |
