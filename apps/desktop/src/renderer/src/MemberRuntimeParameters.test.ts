@@ -206,7 +206,7 @@ describe('member runtime parameters', () => {
   })
 
   it.each([
-    ['pi', '审批模式', 'managed'],
+    ['pi', '审批模式', 'partial_managed'],
     ['opencode-cli', '工具权限', 'allow'],
     ['claude-code-cli', '权限模式', 'bypassPermissions'],
     ['qoder-cli', '权限模式', 'bypass_permissions'],
