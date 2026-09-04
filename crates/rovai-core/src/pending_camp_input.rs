@@ -431,7 +431,13 @@ pub fn edit_input(
                     return Ok(reject("camp_message.invalid_reply", "Pending input cannot change its Reply target"));
                 }
                 let mut execution = stored.execution;
-                if let Some(execution) = execution.as_mut() { execution.purpose = body.chars().take(200).collect(); }
+                if let Some(execution) = execution.as_mut() {
+                    execution.purpose = if body.trim().is_empty() {
+                        "Camp attachment-only message".to_string()
+                    } else {
+                        body.chars().take(200).collect()
+                    };
+                }
                 transaction.execute(
                     "UPDATE pending_camp_input SET structured_content_json = ?2, reply_to_camp_message_id = ?3,
                      recipient_selection_required = ?4, execution_json = ?5,
@@ -1497,7 +1503,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_edit_working_refs_cancel_or_save_as_an_attachment_only_intent() {
+    fn pending_edit_working_refs_cancel_or_save_and_publish_an_attachment_only_intent() {
         let (mut database, camp_id) = setup();
         send(&mut database, &camp_id, text("active"));
         send(&mut database, &camp_id, text("edit me"));
@@ -1601,6 +1607,15 @@ mod tests {
         assert_eq!(saved.attachments.len(), 1);
         assert_eq!(saved.attachments[0].id, working[1].id);
         assert_eq!(saved.revision, item.revision + 1);
+
+        complete_fixture_runs(&database);
+        assert_eq!(
+            ready_heads(&database).unwrap()[0].pending_input_id,
+            saved.id
+        );
+        let published = publish(&mut database, &camp_id, &saved.id, saved.revision);
+        assert_eq!(published.result.code, "camp_turn.queued");
+        assert!(read_queue(&database, &camp_id).unwrap().items.is_empty());
     }
 
     #[test]
