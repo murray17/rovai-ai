@@ -366,7 +366,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.settings-content \.settings-panel\s*\{[^}]*background: var\(--home-surface\)/)
   })
 
-  it('keeps Agent narrative open while giving right-aligned user messages a bounded Porcelain surface', () => {
+  it('keeps Agent narrative open while giving right-aligned user messages a fully rounded Porcelain surface', () => {
     expect(css).toMatch(/\.conversation-bubble\.agent\s*\{[^}]*--agent-accent: var\(--identity-1\)/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s*\{[^}]*background:/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s+\.final-copy\s*\{[^}]*background:/)
@@ -376,7 +376,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toContain('.conversation-bubble:is(.user, .agent):hover::before')
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\)\s*\{[^}]*margin-left: auto[^}]*grid-template-columns: minmax\(0, 1fr\) 32px/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.local-message-avatar\s*\{[^}]*grid-column: 2/)
-    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*border-radius: 12px 12px 4px 12px[^}]*background: var\(--conversation-user-message-surface\)/)
+    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*border-radius: 12px;[^}]*background: var\(--conversation-user-message-surface\)/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-surface\s*\{[^}]*width: fit-content[^}]*max-width: min\([^}]*var\(--conversation-user-message-max-width\)[^}]*66\.667cqw[^}]*align-items: flex-end/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*width: fit-content[^}]*max-width: 100%/)
     expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*display: flex/)
