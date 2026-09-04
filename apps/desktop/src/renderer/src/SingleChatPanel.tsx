@@ -16,6 +16,7 @@ import type {
 import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { SafeMarkdown } from './SafeMarkdown'
+import { shouldSubmitStructuredComposerOnEnter } from './StructuredMentionComposer'
 import { readErrorMessage } from './error-message'
 import {
   buildLiveExecutionProgress,
@@ -888,8 +889,8 @@ export function SingleChatPanel({
         </div>
       </section>
 
-      <form className="single-chat-composer" onSubmit={(event) => void send(event)}>
-        <div className={`single-chat-composer-box${activeRun ? ' is-running' : ''}`}>
+      <form className="composer single-chat-composer" onSubmit={(event) => void send(event)}>
+        <div className={`composer-box single-chat-composer-box${activeRun ? ' is-running' : ''}`}>
           <div className="composer-input">
             {((snapshot?.preparedAttachments.length ?? 0) > 0 || preparingAttachments.length > 0) && (
               <SingleChatAttachmentStrip>
@@ -926,7 +927,12 @@ export function SingleChatPanel({
                 void prepareFiles(files)
               }}
               onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing || event.key !== 'Enter' || event.shiftKey) return
+                if (!shouldSubmitStructuredComposerOnEnter({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  isComposing: event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229,
+                  suggestionMenuOpen: false
+                })) return
                 event.preventDefault()
                 event.currentTarget.form?.requestSubmit()
               }}
@@ -967,9 +973,9 @@ export function SingleChatPanel({
                 </span>
               )}
               {activeRun
-                ? <button className="danger-button single-chat-stop" type="button" disabled={cancelling} onClick={() => void stopCurrentRun()}>{cancelling ? '正在提交停止请求…' : '停止'}</button>
+                ? <button className="danger-button composer-stop single-chat-stop" type="button" disabled={cancelling} onClick={() => void stopCurrentRun()}>{cancelling ? '正在提交停止请求…' : '停止'}</button>
                 : <button
-                    className="primary-button single-chat-send"
+                    className="primary-button composer-send single-chat-send"
                     type="submit"
                     aria-busy={sending || preparingAttachments.some((item) => !item.error)}
                     disabled={(!draft.trim() && (snapshot?.preparedAttachments.length ?? 0) === 0) || !selectedMember || sending || ending || preparingAttachments.some((item) => !item.error)}

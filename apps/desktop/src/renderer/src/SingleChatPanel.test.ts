@@ -110,9 +110,12 @@ describe('Single Chat presentation', () => {
   })
 
   it('uses the Camp composer contract and keeps agent output unboxed', () => {
+    expect(source).toContain('className="composer single-chat-composer"')
+    expect(source).toContain('composer-box single-chat-composer-box')
     expect(source).toContain('className="composer-attachment-button"')
     expect(source).toContain('Enter 发送，Shift+Enter 换行')
-    expect(source).toContain("event.key !== 'Enter' || event.shiftKey")
+    expect(source).toContain('shouldSubmitStructuredComposerOnEnter({')
+    expect(source).toContain('suggestionMenuOpen: false')
     expect(source).toContain('attachmentIds,')
     expect(source).toContain('className="single-chat-agent-response"')
     expect(source).not.toContain('single-chat-agent-bubble')

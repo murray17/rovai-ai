@@ -1653,14 +1653,12 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 .single-chat-empty strong { color: var(--muted); font-size: 12px; }
 .single-chat-empty span:not(.single-chat-spinner) { max-width: 260px; font-size: 10.5px; line-height: 1.55; }
 
-.single-chat-composer { flex: 0 0 auto; padding: 10px 12px 11px; border-top: 1px solid var(--line); background: var(--inspector-surface); }
-.single-chat-composer-box { position: relative; display: grid; grid-template-rows: minmax(0, auto) auto; gap: 2px; padding: 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); overflow: visible; transition: border-color 120ms ease, box-shadow 120ms ease; }
-.single-chat-composer-box:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-soft); }
+.composer.single-chat-composer { flex: 0 0 auto; padding: 10px 12px 11px; border-top: 1px solid var(--line); background: var(--inspector-surface); }
+.single-chat-composer .composer-box { width: 100%; }
 .single-chat-composer-box.is-running { border-color: var(--line-strong); }
-.single-chat-composer textarea { width: 100%; min-height: 42px; max-height: min(180px, 26vh); padding: 5px 0 4px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; font-family: inherit; font-size: 13px; line-height: 1.5; }
+.single-chat-composer textarea { max-height: min(180px, 26vh); font-family: inherit; }
 .single-chat-composer textarea::placeholder { color: var(--faint); opacity: 1; }
 .single-chat-composer textarea:disabled { cursor: default; }
-.single-chat-composer .composer-action-row { background: var(--input); }
 .single-chat-composer .composer-attachment-strip { --user-composer-min-width: 154px; --user-composer-max-width: 278px; }
 .single-chat-error { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 7px; padding: 6px 7px 6px 9px; border-left: 2px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 10.5px; line-height: 1.45; }
 .single-chat-error button { min-width: 32px; min-height: 24px; padding: 0 5px; border: 0; border-radius: 4px; color: var(--danger); background: transparent; cursor: pointer; font-size: 10px; }

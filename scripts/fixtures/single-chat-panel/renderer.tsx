@@ -257,6 +257,10 @@ Object.assign(window, {
       const userMessage = document.querySelector<HTMLElement>('.single-chat-user-message')
       const agentResponse = document.querySelector<HTMLElement>('.single-chat-agent-response')
       const liveExecution = document.querySelector<HTMLElement>('.single-chat-run-history.is-live .single-chat-execution-content')
+      const composer = document.querySelector<HTMLElement>('.single-chat-composer .composer-box')
+      const composerTextarea = document.querySelector<HTMLTextAreaElement>('.single-chat-composer textarea')
+      const attachmentButton = document.querySelector<HTMLElement>('.single-chat-composer .composer-attachment-button')
+      const composerActions = document.querySelector<HTMLElement>('.single-chat-composer .composer-actions')
       const rect = panel?.getBoundingClientRect()
       return {
         body: document.body.textContent ?? '',
@@ -282,6 +286,11 @@ Object.assign(window, {
         messageAttachments: document.querySelectorAll('.single-chat-message-attachments .attachment-card').length,
         agentBackground: agentResponse ? getComputedStyle(agentResponse).backgroundColor : null,
         liveExecutionBackground: liveExecution ? getComputedStyle(liveExecution).backgroundColor : null,
+        liveExecutionBorderWidth: liveExecution ? getComputedStyle(liveExecution).borderTopWidth : null,
+        composer: composer?.getBoundingClientRect().toJSON() ?? null,
+        composerResize: composerTextarea ? getComputedStyle(composerTextarea).resize : null,
+        attachmentButtonBounds: attachmentButton?.getBoundingClientRect().toJSON() ?? null,
+        composerActionsBounds: composerActions?.getBoundingClientRect().toJSON() ?? null,
         sendRequests: requests.filter((request) => request.method === 'singleChat.send').length,
         cancelRequests: requests.filter((request) => request.method === 'agentRuns.cancel').length,
         background: panel ? getComputedStyle(panel).backgroundColor : null
