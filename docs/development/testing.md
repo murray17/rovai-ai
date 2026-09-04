@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # 测试与 Smoke Test
@@ -194,6 +194,23 @@ pnpm build:desktop
 ```
 
 ### Electron 隔离世界回归
+
+所有从 `scripts/lib` 启动真实 Electron 的回归，都在 macOS 启动 Chromium 前运行最小
+`sandbox-exec` 能力探针。探针可用时继续执行业务断言；只有命中已知的嵌套 macOS sandbox
+`sandbox_apply: Operation not permitted` 才在本地标记为 `BLOCKED` / skipped，输出必须明示
+业务断言未运行，不得将该结果声称为 Electron 验收通过。任意未知探针错误继续 fail closed，
+不得通过 macOS `--no-sandbox` 绕过产品安全边界。Linux 不运行该 macOS 探针。
+
+CI 和正式验收不允许嵌套 sandbox 被记为 skip；`CI=true` 或
+`ROVAI_REQUIRE_ELECTRON_INTEGRATION=1` 会将同一环境阻断升级为明确失败。在 macOS 普通 Terminal
+中执行强制验收示例：
+
+```bash
+ROVAI_REQUIRE_ELECTRON_INTEGRATION=1 pnpm test:desktop-bridge
+```
+
+能力分类由 `pnpm test:electron-sandbox-capability` 独立验证；手动 Full check 也显式启用
+required 模式，防止未来迁移到 macOS runner 时把环境阻断当成通过。
 
 执行台的头像轨道与协作投递收件人行运行 `pnpm test:execution-avatar-rail`。夹具挂载真实 CampWorkspace，
 用原生指针和键盘验证队员轨道、来源归属、重复投递去重、0 / 1 / 2 / 16 / 48 人的完整单行与溢出名单，

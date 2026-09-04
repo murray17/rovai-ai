@@ -8,11 +8,13 @@ import test from 'node:test'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { build } from 'vite'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/desktop-startup-presentation')
 
-test('the production App preserves route-local cold startup feedback and Core admission', { timeout: 60_000 }, async () => {
+test('the production App preserves route-local cold startup feedback and Core admission', { timeout: 60_000 }, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-startup-presentation-test-'))
   let child
   let closed
