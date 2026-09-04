@@ -9,6 +9,7 @@ import {
   structuredMentionOptions,
   structuredSkillOptions
 } from './StructuredMentionComposer'
+import { composerTypeaheadEnterAction } from './ComposerTypeaheadPlugin'
 import { RovaiComposerExtension } from './RovaiComposerExtension'
 import type { ComposerSkillOption } from './composer-skill-picker'
 
@@ -50,6 +51,7 @@ describe('StructuredMentionComposer V2', () => {
     expect(markup).toContain('class="structured-mention-composer"')
     expect(markup).toContain('class="structured-mention-editor"')
     expect(markup).toContain('contentEditable="true"')
+    expect(markup).toContain('spellCheck="false"')
     expect(markup).toContain('aria-label="写消息"')
     expect(markup).toContain('structured-mention-placeholder')
     expect(markup).not.toContain('data-editor-segment')
@@ -93,19 +95,31 @@ describe('StructuredMentionComposer V2', () => {
     expect(structuredSkillOptions(skills, '')).toEqual(skills)
   })
 
-  it('blocks submit while composition or a selectable Typeahead menu owns Enter', () => {
+  it('keeps the generic Enter handler limited to composition and line-break rules', () => {
     expect(shouldSubmitStructuredComposerOnEnter({
-      key: 'Enter', shiftKey: false, isComposing: true, suggestionMenuOpen: false
+      key: 'Enter', shiftKey: false, isComposing: true
     })).toBe(false)
     expect(shouldSubmitStructuredComposerOnEnter({
-      key: 'Enter', shiftKey: false, isComposing: false, suggestionMenuOpen: true
+      key: 'Enter', shiftKey: true, isComposing: false
     })).toBe(false)
     expect(shouldSubmitStructuredComposerOnEnter({
-      key: 'Enter', shiftKey: true, isComposing: false, suggestionMenuOpen: false
-    })).toBe(false)
-    expect(shouldSubmitStructuredComposerOnEnter({
-      key: 'Enter', shiftKey: false, isComposing: false, suggestionMenuOpen: false
+      key: 'Enter', shiftKey: false, isComposing: false
     })).toBe(true)
+  })
+
+  it('resolves Typeahead Enter synchronously from the current trigger catalog state', () => {
+    expect(composerTypeaheadEnterAction({
+      catalogStatus: 'ready', optionCount: 2
+    })).toBe('select')
+    expect(composerTypeaheadEnterAction({
+      catalogStatus: 'loading', optionCount: 0
+    })).toBe('consume')
+    expect(composerTypeaheadEnterAction({
+      catalogStatus: 'ready', optionCount: 0
+    })).toBe('pass')
+    expect(composerTypeaheadEnterAction({
+      catalogStatus: 'error', optionCount: 0
+    })).toBe('pass')
   })
 
   it('offers Backspace-at-start only for a collapsed caret outside composition', () => {

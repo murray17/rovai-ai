@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-attachments
 authority: user-source-refs-agent-managed-artifacts-and-legacy-view
 status: accepted
-last_updated: 2026-09-04
+last_updated: 2026-09-05
 ---
 
 # Camp Attachments：用户 Source Refs、Agent Managed Artifacts 与 Legacy View
@@ -121,7 +121,7 @@ monitor, Runtime policy, copy budget/quota or new cross-cutting security/redacti
 ## References
 
 - [Camp Attachment v8](../contracts/camp-attachment-v8.md)
-- [Camp Composer Draft v8](../contracts/camp-composer-draft-v8.md)
+- [Camp Composer Draft v9](../contracts/camp-composer-draft-v9.md)
 - [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)
 - [Camp Open Projection v15](../contracts/camp-open-projection-v15.md)
 - [File Preview v5](../contracts/file-preview-v5.md)

@@ -243,7 +243,7 @@ Agent 消息继续左对齐并保持透明开放阅读面，不添加身份色�
 一层紧凑父引用，作者与摘要同样只占一个可视行，超出显示省略号；点击通过 same-Camp anchor load 定位并
 聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
-[Camp Composer Draft v8](../../contracts/camp-composer-draft-v8.md)，评审方向见
+[Camp Composer Draft v9](../../contracts/camp-composer-draft-v9.md)，评审方向见
 [HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
 
 渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
@@ -276,7 +276,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 标签出现后对象在空白 Draft 失效时，标签消失并持久抑制该来源；正文或附件已经存在时，保留全部 Draft，
 展开“原接收者当前不可接收，请选择其他成员”，禁用发送并把焦点交给第一个有效替代选择。不得隐藏错误、
 自动插入失效 Mention 或改投 Lead。字段和竞态边界见
-[Camp Composer Draft v8](../../contracts/camp-composer-draft-v8.md)，交互探索见
+[Camp Composer Draft v9](../../contracts/camp-composer-draft-v9.md)，交互探索见
 [延续路由原型](../../prototypes/composer-continuation-routing/index.html)。
 
 ## Camp 执行过程
@@ -615,6 +615,12 @@ Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` �
 都不能建立第二份草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，
 不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入仍保留局部焦点提示。
 
+Draft 首次读取只有 loading、ready 和 error。loading 与 error 时正文、附件、Reply/Continuation 和发送不可操作；
+error 在 Composer 上方原位显示“草稿无法加载”、具体错误与“重新加载草稿”，不能渲染可编辑的 revision-zero 空
+Draft。发送和路由 mutation 在第一个异步等待前同步禁用编辑器；Core 路由 mutation 改变正文时在解除禁用前回写
+Lexical。发送失败保留正文并恢复交互，成功则读取下一 Draft 后清空/替换。切换到另一个 Camp 前同样禁用当前
+Composer 并 await flush；失败留在当前 Camp、显示保存错误并恢复交互。
+
 Composer 为空时根据当前用户可见的 Camp 会话/任务时间线选择输入提示：没有有效历史时显示
 “集结队伍，写下这次冒险的目标…”；已有历史时显示
 “和队伍继续前行：补充线索、调整方向或布置新任务…”。有效历史包括 user/agent 公共消息、Task 卡和
@@ -665,7 +671,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 长名称必须省略且可取得完整名称。拖放命中、反馈和卡片合同见
 [会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
 [Camp Attachment v8](../../contracts/camp-attachment-v8.md)，发送边界见
-[Camp Composer Draft v8](../../contracts/camp-composer-draft-v8.md)。
+[Camp Composer Draft v9](../../contracts/camp-composer-draft-v9.md)。
 
 准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
 独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除
@@ -756,7 +762,7 @@ Composer 输入和 Runtime 进度刷新不重新解析正文未变的历史 Mark
 
 执行期间 Composer 保持可输入，右侧主操作始终只有一个按钮：输入框没有正文（含仅空白字符）时显示“停止”，
 有正文时切换为“发送”，删空后恢复“停止”；空闲时只显示“发送”。空输入框按 Enter 不触发停止。
-发送动作的文字始终为“发送”，提交或准备附件期间仅禁用按钮并暴露 busy 状态，
+发送动作的文字始终为“发送”；提交期间禁用正文、附件、路由和发送并暴露 busy 状态，附件准备期间只禁用发送，
 不改成“加入待发送”或“提交中”。队列未空时，即使当前
 没有运行也继续入队。队列条位于 Composer 上方，与输入框同宽、同轴，按 FIFO 排列，不显示单条
 序号，不提供排序或合并；较长队列在有界区域滚动。Pending 不作为用户消息显示在公共时间线。

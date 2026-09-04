@@ -47,9 +47,7 @@ import {
   ROVAI_COMPOSER_INITIALIZE_TAG,
   ROVAI_COMPOSER_REPLACE_TAG,
   type ComposerFlushResult,
-  type ComposerFlushOptions,
-  type ComposerPersistContext,
-  type ComposerDraftPersistenceStatus
+  type ComposerPersistContext
 } from './composer-draft-sync'
 import {
   composerDocumentToPlainText,
@@ -71,18 +69,13 @@ export type StructuredMentionOption =
   | { kind: 'member'; member: StructuredMentionMember }
 
 export interface StructuredMentionComposerHandle {
-  flush(options?: ComposerFlushOptions): Promise<ComposerFlushResult<CampComposerDraftView>>
-  resumePersistence(): void
-  advancePersistenceEpoch(savedLocalVersion?: number): void
+  flush(): Promise<ComposerFlushResult<CampComposerDraftView>>
+  setInteractionLocked(locked: boolean): void
   replaceDocument(
     document: ComposerDocument,
     boundary?: 'start' | 'end'
   ): void
   setDocument(document: ComposerDocument, boundary?: 'start' | 'end'): void
-  clearIfVersion(
-    localVersion: number,
-    document: ComposerDocument
-  ): boolean
   focus(boundary?: 'start' | 'end'): void
   getLocalVersion(): number
   isDirty(): boolean
@@ -109,7 +102,7 @@ export interface StructuredMentionComposerProps {
   waitForDraftAuthority?(): Promise<void>
   onLocalStatusChange?(status: ComposerLocalStatus): void
   onDirtyChange?(dirty: boolean): void
-  onPersistenceStatusChange?(status: ComposerDraftPersistenceStatus): void
+  onPersistenceErrorChange?(error: Error | null): void
   onSubmit(): void | Promise<void>
   onBackspaceAtStart?(): void | Promise<void>
   onPasteFiles?(files: File[]): void
@@ -165,12 +158,10 @@ export function shouldSubmitStructuredComposerOnEnter(input: {
   key: string
   shiftKey: boolean
   isComposing: boolean
-  suggestionMenuOpen: boolean
 }): boolean {
   return input.key === 'Enter'
     && !input.shiftKey
     && !input.isComposing
-    && !input.suggestionMenuOpen
 }
 
 export function shouldHandleStructuredComposerBackspaceAtStart(input: {
@@ -213,7 +204,7 @@ function ComposerBridge({
   waitForDraftAuthority,
   onLocalStatusChange,
   onDirtyChange,
-  onPersistenceStatusChange,
+  onPersistenceErrorChange,
   onSubmit,
   onBackspaceAtStart,
   onPasteFiles,
@@ -229,15 +220,21 @@ function ComposerBridge({
   const syncRef = useRef<ComposerDraftSync<CampComposerDraftView> | null>(null)
   const initializedRef = useRef(false)
   const readyRef = useRef(ready)
+  const previousReadyRef = useRef(ready)
+  const disabledRef = useRef(disabled)
+  const interactionLockCountRef = useRef(0)
+  readyRef.current = ready
+  disabledRef.current = disabled
   const callbacks = useRef({
     getAuthoritativeDraft,
     members,
     skills: skills ?? [],
+    skillCatalogStatus,
     persistDocument,
     waitForDraftAuthority,
     onLocalStatusChange,
     onDirtyChange,
-    onPersistenceStatusChange,
+    onPersistenceErrorChange,
     onSubmit,
     onBackspaceAtStart,
     onPasteFiles,
@@ -249,11 +246,12 @@ function ComposerBridge({
     getAuthoritativeDraft,
     members,
     skills: skills ?? [],
+    skillCatalogStatus,
     persistDocument,
     waitForDraftAuthority,
     onLocalStatusChange,
     onDirtyChange,
-    onPersistenceStatusChange,
+    onPersistenceErrorChange,
     onSubmit,
     onBackspaceAtStart,
     onPasteFiles,
@@ -278,9 +276,6 @@ function ComposerBridge({
     () => skillQuery === null ? [] : structuredSkillOptions(skills ?? [], skillQuery),
     [skillQuery, skills]
   )
-  const menuState = useRef({ mentionOpen, skillOpen, mentionOptions, skillOptions })
-  menuState.current = { mentionOpen, skillOpen, mentionOptions, skillOptions }
-
   const bindings = useCallback(() => ({
     persist: callbacks.current.persistDocument,
     waitForAuthority: callbacks.current.waitForDraftAuthority,
@@ -290,8 +285,8 @@ function ComposerBridge({
     onStatusChange: (status: ComposerLocalStatus) =>
       callbacks.current.onLocalStatusChange?.(status),
     onDirtyChange: (dirty: boolean) => callbacks.current.onDirtyChange?.(dirty),
-    onPersistenceStatusChange: (status: ComposerDraftPersistenceStatus) =>
-      callbacks.current.onPersistenceStatusChange?.(status)
+    onPersistenceErrorChange: (error: Error | null) =>
+      callbacks.current.onPersistenceErrorChange?.(error)
   }), [])
 
   const replaceAuthoritativeDocument = useCallback((
@@ -325,11 +320,6 @@ function ComposerBridge({
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), bindings())
     const runtime: ComposerExtensionRuntime<CampComposerDraftView> = {
       sync,
-      menuHasSelectableOption: () => {
-        const state = menuState.current
-        return (state.mentionOpen && state.mentionOptions.length > 0)
-          || (state.skillOpen && state.skillOptions.length > 0)
-      },
       submit: () => { void callbacks.current.onSubmit() },
       backspaceAtStart: () => { void callbacks.current.onBackspaceAtStart?.() },
       pasteFiles: (files) => callbacks.current.onPasteFiles?.(files),
@@ -356,7 +346,6 @@ function ComposerBridge({
     initializedRef.current = true
     return () => {
       initializedRef.current = false
-      void sync.flush().catch(() => undefined)
       sync.destroy()
       syncRef.current = null
       setComposerExtensionRuntime(editor, null)
@@ -381,18 +370,20 @@ function ComposerBridge({
   }, [bindings, editor, members, skills])
 
   useLayoutEffect(() => {
-    if (!initializedRef.current || readyRef.current || !ready) {
-      readyRef.current = ready
+    if (!initializedRef.current || previousReadyRef.current || !ready) {
+      previousReadyRef.current = ready
       return
     }
-    readyRef.current = true
+    previousReadyRef.current = true
     replaceAuthoritativeDocument(document)
   }, [document, ready, replaceAuthoritativeDocument])
 
-  useEffect(() => { editor.setEditable(ready && !disabled) }, [disabled, editor, ready])
+  useEffect(() => {
+    editor.setEditable(ready && !disabled && interactionLockCountRef.current === 0)
+  }, [disabled, editor, ready])
 
   useImperativeHandle(forwardedRef, () => ({
-    flush: async (options) => {
+    flush: async () => {
       const sync = syncRef.current
       if (!sync) {
         return {
@@ -402,11 +393,19 @@ function ComposerBridge({
           draft: getAuthoritativeDraft?.() ?? null
         }
       }
-      return sync.flush(options)
+      return sync.flush()
     },
-    resumePersistence: () => syncRef.current?.resumePersistence(),
-    advancePersistenceEpoch: (savedLocalVersion) =>
-      syncRef.current?.advancePersistenceEpoch(savedLocalVersion),
+    setInteractionLocked(locked) {
+      interactionLockCountRef.current = locked
+        ? interactionLockCountRef.current + 1
+        : Math.max(0, interactionLockCountRef.current - 1)
+      if (locked) closeTypeaheads()
+      editor.setEditable(
+        readyRef.current
+          && !disabledRef.current
+          && interactionLockCountRef.current === 0
+      )
+    },
     replaceDocument: replaceAuthoritativeDocument,
     setDocument(nextDocument, boundary = 'end') {
       closeTypeaheads()
@@ -416,12 +415,6 @@ function ComposerBridge({
         else $getRoot().selectEnd()
       }, { discrete: true, tag: HISTORY_PUSH_TAG })
       editor.focus(undefined, { defaultSelection: boundary === 'start' ? 'rootStart' : 'rootEnd' })
-    },
-    clearIfVersion(localVersion, nextDocument) {
-      const sync = syncRef.current
-      if (!sync || sync.getLocalVersion() !== localVersion) return false
-      replaceAuthoritativeDocument(nextDocument)
-      return true
     },
     focus(boundary = 'end') {
       editor.update(() => {
@@ -448,17 +441,31 @@ function ComposerBridge({
     <ContentEditable id={id} ref={setEditorElement}
       className="structured-mention-editor" aria-label={ariaLabel}
       aria-expanded={menuOpen} aria-controls={skillOpen ? skillMenuId : mentionMenuId}
-      aria-disabled={disabled || !ready} spellCheck
+      aria-disabled={disabled || !ready} spellCheck={false}
       placeholder={<span className="structured-mention-placeholder">{placeholder}</span>}
       aria-placeholder={placeholder} />
     <ComposerTypeaheadPlugin match={triggerMatch}
       optionCount={mentionOpen ? mentionMenuOptions.length : skillMenuOptions.length}
+      getOptionState={(match) => match.kind === 'member'
+        ? {
+            catalogStatus: 'ready',
+            optionCount: structuredMentionOptions(callbacks.current.members, match.query)
+              .slice(0, 50).length
+          }
+        : {
+            catalogStatus: callbacks.current.skillCatalogStatus,
+            optionCount: structuredSkillOptions(callbacks.current.skills, match.query)
+              .slice(0, 50).length
+          }}
       onMatchChange={setTriggerMatch}
       onSelect={(index, match) => {
-        if (editor.isComposing()) return
+        if (editor.isComposing()) return false
         if (match.kind === 'member') {
-          const option = mentionMenuOptions[index]
-          if (!option) return
+          const option = structuredMentionOptions(
+            callbacks.current.members,
+            match.query
+          ).slice(0, 50)[index]
+          if (!option) return false
           const atom: ComposerAtom = option.kind === 'all_members'
             ? { type: 'all_members' }
             : {
@@ -466,22 +473,17 @@ function ComposerBridge({
                 agentId: option.member.agentId,
                 labelFallback: option.member.displayName
               }
-          editor.update(() => {
-            $replaceComposerTriggerWithAtom(
-              match,
-              atom
-            )
-          }, { tag: HISTORY_PUSH_TAG })
+          return $replaceComposerTriggerWithAtom(match, atom)
         } else {
-          const option = skillMenuOptions[index]
-          if (!option) return
-          editor.update(() => {
-            $replaceComposerTriggerWithAtom(match, {
-              type: 'skill', skillId: option.id, nameAtSend: option.name
-            })
-          }, { tag: HISTORY_PUSH_TAG })
+          const option = structuredSkillOptions(
+            callbacks.current.skills,
+            match.query
+          ).slice(0, 50)[index]
+          if (!option || callbacks.current.skillCatalogStatus !== 'ready') return false
+          return $replaceComposerTriggerWithAtom(match, {
+            type: 'skill', skillId: option.id, nameAtSend: option.name
+          })
         }
-        closeTypeaheads()
       }}
       renderMenu={({ selectedIndex, setHighlightedIndex, selectIndex }) => mentionOpen
         ? renderMentionMenu(

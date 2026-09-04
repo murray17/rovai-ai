@@ -48,15 +48,16 @@ import {
   type StructuredMentionComposerHandle
 } from './StructuredMentionComposer'
 import {
+  composerDocumentsEqualDirect,
   composerDocumentFromText,
   emptyComposerDocument,
   type ComposerLocalStatus
 } from './composer-document'
 import {
   DraftMutationCoordinator,
+  draftCoordinatorChangeRefreshesProjection,
   type DraftMutation
 } from './draft-mutation-coordinator'
-import type { ComposerDraftPersistenceStatus } from './composer-draft-sync'
 import { PendingCampInputs } from './PendingCampInputs'
 import {
   activityStatusForAgentRun,
@@ -258,6 +259,14 @@ export interface CampMemberRemoveOutcome {
 type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
 type AttachmentKind = 'file' | 'directory'
 type AttachmentDragKind = 'files' | 'directory'
+export interface CampLeavePreparation {
+  complete(didLeave: boolean): void
+}
+export type CampLeaveGuard = () => Promise<CampLeavePreparation>
+type DraftLoadState =
+  | { state: 'loading' }
+  | { state: 'ready' }
+  | { state: 'error'; error: Error }
 
 export function attachmentRevealLabel(platform: NodeJS.Platform): string {
   return platform === 'darwin'
@@ -1362,6 +1371,7 @@ export function CampWorkspace({
   onSend,
   onPendingDraftPersisted,
   onPendingCampLeave,
+  onCampLeaveGuardChange,
   onChangeLead,
   onAddMembers,
   onPreviewMemberRemoval,
@@ -1407,6 +1417,7 @@ export function CampWorkspace({
   onSend(draft: CampComposerDraftView): Promise<CampMessageSendReceipt | void>
   onPendingDraftPersisted?(): void
   onPendingCampLeave?(draft: CampComposerDraftView): Promise<void>
+  onCampLeaveGuardChange?(campId: string, guard: CampLeaveGuard | null): void
   onChangeLead(agentId: string): Promise<void>
   onAddMembers?(agentIds: string[]): Promise<CampMemberAddOutcome>
   onPreviewMemberRemoval?(agentId: string): Promise<CampMemberRemovalPreview>
@@ -1441,8 +1452,8 @@ export function CampWorkspace({
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
   const [, setComposerDraftProjectionVersion] = useState(0)
-  const [composerPersistenceStatus, setComposerPersistenceStatus] =
-    useState<ComposerDraftPersistenceStatus>({ state: 'saved' })
+  const [draftLoadState, setDraftLoadState] = useState<DraftLoadState>({ state: 'loading' })
+  const [composerPersistenceError, setComposerPersistenceError] = useState<Error | null>(null)
   const [composerLocalStatus, setComposerLocalStatus] = useState<ComposerLocalStatus>({
     hasContent: false,
     hasExplicitRecipient: false,
@@ -1456,6 +1467,9 @@ export function CampWorkspace({
   const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [routingMutating, setRoutingMutating] = useState(false)
+  const composerSubmittingRef = useRef(false)
+  const routingMutatingRef = useRef(false)
+  const composerLockAwaitingDisabledCommitRef = useRef(false)
   const [replyInteractionError, setReplyInteractionError] = useState<string | null>(null)
   const [suppressPointerFocusRing, setSuppressPointerFocusRing] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
@@ -1469,7 +1483,6 @@ export function CampWorkspace({
   const composerEditorRef = useRef<HTMLDivElement>(null)
   const composerHandleRef = useRef<StructuredMentionComposerHandle>(null)
   const composerFileInputRef = useRef<HTMLInputElement>(null)
-  const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
   const draftCampId = useRef<string | null>(null)
   const initializedComposerRoute = useRef<{
     revision: number
@@ -1478,9 +1491,11 @@ export function CampWorkspace({
   const activeCampIdRef = useRef(snapshot.camp.id)
   const activationStateRef = useRef(snapshot.camp.activationState)
   const pendingDraftPersistedRef = useRef(onPendingDraftPersisted)
+  const pendingCampLeaveRef = useRef(onPendingCampLeave)
   activeCampIdRef.current = snapshot.camp.id
   activationStateRef.current = snapshot.camp.activationState
   pendingDraftPersistedRef.current = onPendingDraftPersisted
+  pendingCampLeaveRef.current = onPendingCampLeave
   const draftCoordinatorRef = useRef<DraftMutationCoordinator | null>(null)
   if (!draftCoordinatorRef.current) {
     draftCoordinatorRef.current = new DraftMutationCoordinator({
@@ -1493,15 +1508,23 @@ export function CampWorkspace({
         if (
           activeCampIdRef.current === draft.campId
           && activationStateRef.current === 'pending'
+          && (mutation.kind !== 'save_content' || draft.revision === 0)
         ) pendingDraftPersistedRef.current?.()
         return next
       },
-      onChange: () => setComposerDraftProjectionVersion((version) => version + 1)
+      onChange: (_draft, _epoch, kind) => {
+        if (draftCoordinatorChangeRefreshesProjection(kind)) {
+          setComposerDraftProjectionVersion((version) => version + 1)
+        }
+      }
     })
   }
   const draftCoordinator = draftCoordinatorRef.current
   const coordinatorDraft = draftCoordinator.getCurrentDraft()
-  const composerDraft = coordinatorDraft?.campId === snapshot.camp.id ? coordinatorDraft : null
+  const composerDraft = draftLoadState.state === 'ready'
+    && coordinatorDraft?.campId === snapshot.camp.id
+    ? coordinatorDraft
+    : null
   const dragLeaveTimer = useRef<number | null>(null)
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
@@ -1980,6 +2003,9 @@ export function CampWorkspace({
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
   const showComposerStop = executionBlocked && !hasSendablePayload
+  const composerInteractionDisabled = draftLoadState.state !== 'ready'
+    || routingMutating
+    || composerSubmitting
   const composerSendDisabled = composerSendIsDisabled({
     hasSendablePayload,
     hasUnavailableMention,
@@ -2050,6 +2076,78 @@ export function CampWorkspace({
     }
     await draftCoordinator.saveContent(content)
   }
+
+  const retryComposerDraftLoad = async (): Promise<void> => {
+    if (draftLoadState.state === 'loading') return
+    const campId = snapshot.camp.id
+    const composerHandle = composerHandleRef.current
+    composerHandle?.setInteractionLocked(true)
+    setDraftLoadState({ state: 'loading' })
+    try {
+      await draftCoordinator.load()
+      if (draftCampId.current !== campId) return
+      setComposerPersistenceError(null)
+      setDraftLoadState({ state: 'ready' })
+    } catch (error) {
+      if (draftCampId.current !== campId) return
+      setDraftLoadState({
+        state: 'error',
+        error: error instanceof Error ? error : new Error(readErrorMessage(error))
+      })
+    } finally {
+      composerHandle?.setInteractionLocked(false)
+    }
+  }
+
+  const prepareForCampChange = useCallback(async (): Promise<CampLeavePreparation> => {
+    if (draftLoadState.state !== 'ready') {
+      return { complete: () => undefined }
+    }
+    if (composerSubmittingRef.current || routingMutatingRef.current) {
+      throw new Error('Composer 正在提交变更，请稍后再切换会话。')
+    }
+    const composerHandle = composerHandleRef.current
+    composerHandle?.setInteractionLocked(true)
+    try {
+      await attachmentPreparationQueue.current
+      const flushed = await composerHandle?.flush()
+      const draft = flushed?.draft ?? await draftCoordinator.waitForIdle()
+      const settlePending = activationStateRef.current === 'pending'
+        ? pendingCampLeaveRef.current
+        : undefined
+      let completed = false
+      return {
+        complete(didLeave) {
+          if (completed) return
+          completed = true
+          if (!didLeave) composerHandle?.setInteractionLocked(false)
+          if (didLeave && settlePending) {
+            void settlePending(draft).catch(() => undefined)
+          }
+        }
+      }
+    } catch (error) {
+      composerHandle?.setInteractionLocked(false)
+      const normalized = error instanceof Error ? error : new Error(readErrorMessage(error))
+      setComposerPersistenceError(normalized)
+      throw normalized
+    }
+  }, [draftCoordinator, draftLoadState.state])
+
+  useLayoutEffect(() => {
+    const campId = snapshot.camp.id
+    onCampLeaveGuardChange?.(campId, prepareForCampChange)
+    return () => onCampLeaveGuardChange?.(campId, null)
+  }, [onCampLeaveGuardChange, prepareForCampChange, snapshot.camp.id])
+
+  useLayoutEffect(() => {
+    if (
+      draftLoadState.state !== 'error'
+      || !composerLockAwaitingDisabledCommitRef.current
+    ) return
+    composerLockAwaitingDisabledCommitRef.current = false
+    composerHandleRef.current?.setInteractionLocked(false)
+  }, [draftLoadState.state])
 
   const loadReplyAnchorWindow = useCallback((messageId: string): Promise<CampMessageView[] | null> => {
     const existing = replyAnchorLoads.current.get(messageId)
@@ -2462,25 +2560,39 @@ export function CampWorkspace({
     visibleCampMessages
   ])
 
-  const mutateRoutingDraft = (
-    method:
-      | 'camp.composerDraft.startReply'
-      | 'camp.composerDraft.cancelReply'
-      | 'camp.composerDraft.resolveReplyRecipient'
-      | 'camp.composerDraft.resolveContinuationRecipient',
-    params: Record<string, unknown>
+  const mutateRoutingDraft = async (
+    mutation: () => Promise<CampComposerDraftView>
   ): Promise<CampComposerDraftView> => {
-    return (async () => {
-      await composerHandleRef.current?.flush()
-      if (method === 'camp.composerDraft.startReply') {
-        return draftCoordinator.startReply(String(params.replyToCampMessageId))
+    const composerHandle = composerHandleRef.current
+    if (!composerHandle || draftLoadState.state !== 'ready') {
+      throw new Error('Composer Draft 尚未就绪。')
+    }
+    routingMutatingRef.current = true
+    setRoutingMutating(true)
+    composerHandle.setInteractionLocked(true)
+    let before: Awaited<ReturnType<StructuredMentionComposerHandle['flush']>> | null = null
+    try {
+      before = await composerHandle.flush()
+      const nextDraft = await mutation()
+      if (!composerDocumentsEqualDirect(before.document, nextDraft.content)) {
+        composerHandle.replaceDocument(nextDraft.content, 'end')
       }
-      if (method === 'camp.composerDraft.cancelReply') return draftCoordinator.cancelReply()
-      if (method === 'camp.composerDraft.resolveReplyRecipient') {
-        return draftCoordinator.resolveReplyRecipient(params.recipient as CampComposerReplyRecipient)
+      return nextDraft
+    } catch (error) {
+      const refreshedDraft = draftCoordinator.getCurrentDraft()
+      if (
+        before
+        && refreshedDraft
+        && !composerDocumentsEqualDirect(before.document, refreshedDraft.content)
+      ) {
+        composerHandle.replaceDocument(refreshedDraft.content, 'end')
       }
-      return draftCoordinator.resolveContinuationRecipient(String(params.agentId))
-    })()
+      throw error
+    } finally {
+      composerHandle.setInteractionLocked(false)
+      routingMutatingRef.current = false
+      setRoutingMutating(false)
+    }
   }
 
   const focusComposerAtBoundary = (
@@ -2501,13 +2613,15 @@ export function CampWorkspace({
       onNotify?.('请先保存或取消待发送消息的编辑，再回复另一条消息。')
       return
     }
-    if (message.id.startsWith('optimistic:') || routingMutating) return
-    setRoutingMutating(true)
+    if (
+      message.id.startsWith('optimistic:')
+      || routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      const draft = await mutateRoutingDraft('camp.composerDraft.startReply', {
-        replyToCampMessageId: message.id
-      })
+      const draft = await mutateRoutingDraft(() => draftCoordinator.startReply(message.id))
       if (composerDraftNeedsReplyRepair(draft)) {
         setSuppressPointerFocusRing(false)
         window.requestAnimationFrame(() => {
@@ -2518,66 +2632,69 @@ export function CampWorkspace({
       }
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
   const cancelReply = async (focusBoundary: 'start' | 'end' = 'end'): Promise<void> => {
-    if (routingMutating) return
-    setRoutingMutating(true)
+    if (
+      routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      await mutateRoutingDraft('camp.composerDraft.cancelReply', {})
+      await mutateRoutingDraft(() => draftCoordinator.cancelReply())
       focusComposerAtBoundary('keyboard', focusBoundary)
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
   const resolveReplyRecipient = async (recipient: CampComposerReplyRecipient): Promise<void> => {
-    if (routingMutating) return
-    setRoutingMutating(true)
+    if (
+      routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      await mutateRoutingDraft('camp.composerDraft.resolveReplyRecipient', { recipient })
+      await mutateRoutingDraft(() => draftCoordinator.resolveReplyRecipient(recipient))
       focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
   const dismissContinuation = async (restoreFocus = true): Promise<void> => {
     const intent = draftCoordinator.getCurrentDraft()?.continuationIntent
-    if (!intent || routingMutating) return
-    setRoutingMutating(true)
+    if (
+      !intent
+      || routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      await composerHandleRef.current?.flush()
-      await draftCoordinator.dismissContinuation(intent.sourceCampMessageId)
+      await mutateRoutingDraft(() =>
+        draftCoordinator.dismissContinuation(intent.sourceCampMessageId))
       if (restoreFocus) focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
   const resolveContinuationRecipient = async (agentId: string): Promise<void> => {
-    if (routingMutating) return
-    setRoutingMutating(true)
+    if (
+      routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      await mutateRoutingDraft('camp.composerDraft.resolveContinuationRecipient', { agentId })
+      await mutateRoutingDraft(() => draftCoordinator.resolveContinuationRecipient(agentId))
       focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
@@ -2658,12 +2775,9 @@ export function CampWorkspace({
       snapshot: null,
       error: null
     })
-    if (campLeaveTimer.current?.campId === campId) {
-      window.clearTimeout(campLeaveTimer.current.timer)
-      campLeaveTimer.current = null
-    }
     draftCoordinator.beginEpoch(campId)
-    setComposerPersistenceStatus({ state: 'saved' })
+    setDraftLoadState({ state: 'loading' })
+    setComposerPersistenceError(null)
     setComposerLocalStatus({
       hasContent: false,
       hasExplicitRecipient: false,
@@ -2683,45 +2797,18 @@ export function CampWorkspace({
     void draftCoordinator.load()
       .then(() => {
         if (cancelled || draftCampId.current !== campId) return
+        setDraftLoadState({ state: 'ready' })
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled && draftCampId.current === campId) {
-          const emptyDraft: CampComposerDraftView = {
-            campId,
-            body: '',
-            content: emptyComposerDocument(),
-            revision: 0,
-            attachments: [],
-            replyIntent: null,
-            continuationIntent: null,
-            updatedAt: null,
-            expiresAt: null
-          }
-          draftCoordinator.acceptAuthoritativeDraft(emptyDraft)
+          setDraftLoadState({
+            state: 'error',
+            error: error instanceof Error ? error : new Error(readErrorMessage(error))
+          })
         }
       })
     return () => {
       cancelled = true
-      if (draftCampId.current === campId) {
-        const persistedDraft = composerHandleRef.current?.flush()
-          .then(async ({ draft, document }) => {
-            if (draft) return draft
-            await saveStructuredDraft(campId, document)
-            return draftCoordinator.getCurrentDraft()
-          })
-          ?? draftCoordinator.waitForIdle().catch(() => draftCoordinator.getCurrentDraft())
-        const timer = window.setTimeout(() => {
-          if (campLeaveTimer.current?.timer === timer) campLeaveTimer.current = null
-          if (snapshot.camp.activationState === 'pending' && onPendingCampLeave) {
-            void persistedDraft.then((draft) => {
-              if (draft) return onPendingCampLeave(draft)
-            }).catch(() => undefined)
-          } else {
-            void persistedDraft.catch(() => undefined)
-          }
-        }, 0)
-        campLeaveTimer.current = { campId, timer }
-      }
     }
   }, [snapshot.camp.id])
 
@@ -3162,95 +3249,61 @@ export function CampWorkspace({
 
   const submitMessage = async (): Promise<void> => {
     if (
-      pendingEditing || composerSendDisabled
+      pendingEditing
+      || composerSendDisabled
+      || composerSubmittingRef.current
+      || routingMutatingRef.current
     ) return
     const campId = snapshot.camp.id
+    const composerHandle = composerHandleRef.current
+    if (!composerHandle) return
     followTimelineAfterUserSend(campId)
+    composerSubmittingRef.current = true
     setComposerSubmitting(true)
-    let sendAttempted = false
     let restoreEditorFocus = true
-    let sentLocalVersion: number | null = null
-    let persistenceHeld = false
+    composerHandle.setInteractionLocked(true)
     try {
       await attachmentPreparationQueue.current
-      const composerHandle = composerHandleRef.current
-      persistenceHeld = composerHandle !== null
-      const flushed = await composerHandle?.flush({ holdPersistence: true })
-      sentLocalVersion = flushed?.localVersion ?? null
-      const frozenDraft = flushed?.draft ?? draftCoordinator.getCurrentDraft()
+      const flushed = await composerHandle.flush()
+      const frozenDraft = flushed.draft ?? draftCoordinator.getCurrentDraft()
       if (!frozenDraft) throw new Error('Composer Draft 尚未就绪。')
-      sendAttempted = true
       const sendReceipt = await onSend(frozenDraft)
       if (sendReceipt?.agentRunIds.length || sendReceipt?.campTurnId) {
         setSubmittedExecutionRequest(sendReceipt)
       }
-      // Finish initializing the next route before accepting another keystroke:
-      // otherwise a fast next Draft can freeze a null continuation source.
-      const nextDraft = await window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.get', { campId }
-      )
-      if (draftCampId.current === campId) {
-        draftCoordinator.acceptAuthoritativeDraft(nextDraft, true)
-        initializedComposerRoute.current = {
-          revision: nextDraft.revision,
-          publishedMessageSequence: Math.max(publishedMessageSequence, sendReceipt?.publishedMessageSequence ?? 0)
+      try {
+        const nextDraft = await draftCoordinator.load()
+        if (draftCampId.current === campId) {
+          initializedComposerRoute.current = {
+            revision: nextDraft.revision,
+            publishedMessageSequence: Math.max(
+              publishedMessageSequence,
+              sendReceipt?.publishedMessageSequence ?? 0
+            )
+          }
+          composerHandle.replaceDocument(nextDraft.content, 'end')
+          setComposerPersistenceError(null)
+          setDraftLoadState({ state: 'ready' })
         }
-        const cleared = sentLocalVersion !== null
-          && composerHandleRef.current?.clearIfVersion(
-            sentLocalVersion,
-            nextDraft.content
-          ) === true
-        if (cleared) {
-          persistenceHeld = false
-        } else {
-          composerHandleRef.current?.advancePersistenceEpoch(sentLocalVersion ?? undefined)
-          composerHandleRef.current?.resumePersistence()
-          persistenceHeld = false
-          await composerHandleRef.current?.flush()
+      } catch (error) {
+        if (draftCampId.current === campId) {
+          restoreEditorFocus = false
+          composerLockAwaitingDisabledCommitRef.current = true
+          setDraftLoadState({
+            state: 'error',
+            error: error instanceof Error ? error : new Error(readErrorMessage(error))
+          })
         }
+        throw error
       }
     } catch {
-      if (sendAttempted) {
-        try {
-          const draft = await window.rovai.request<CampComposerDraftView>(
-            'camp.composerDraft.get',
-            { campId }
-          )
-          if (draftCampId.current === campId) {
-            draftCoordinator.acceptAuthoritativeDraft(draft, true)
-            const replaced = sentLocalVersion !== null
-              && composerHandleRef.current?.clearIfVersion(
-                sentLocalVersion,
-                draft.content
-              ) === true
-            if (replaced) {
-              persistenceHeld = false
-            } else {
-              composerHandleRef.current?.advancePersistenceEpoch(sentLocalVersion ?? undefined)
-              composerHandleRef.current?.resumePersistence()
-              persistenceHeld = false
-              await composerHandleRef.current?.flush().catch(() => undefined)
-            }
-            if (
-              composerDraftNeedsReplyRepair(draft)
-              || composerDraftNeedsContinuationRepair(
-                draft,
-                snapshot.members,
-                Boolean(draft.body.trim() || draft.attachments.length > 0)
-              )
-            ) {
-              restoreEditorFocus = false
-              window.requestAnimationFrame(() => {
-                window.requestAnimationFrame(() => recipientRepairFirstOptionRef.current?.focus())
-              })
-            }
-          }
-        } catch {
-          // The App-level error remains visible; a later Camp refresh can recover the Draft.
-        }
-      }
+      // onSend owns send failure presentation. A post-send Draft load failure is
+      // represented by draftLoadState and recovered only through an explicit reload.
     } finally {
-      if (persistenceHeld) composerHandleRef.current?.resumePersistence()
+      if (!composerLockAwaitingDisabledCommitRef.current) {
+        composerHandle.setInteractionLocked(false)
+      }
+      composerSubmittingRef.current = false
       setComposerSubmitting(false)
       setPendingRefresh((value) => value + 1)
       if (restoreEditorFocus) {
@@ -3265,7 +3318,12 @@ export function CampWorkspace({
   }
 
   const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
-    if (pendingEditing) return
+    if (
+      pendingEditing
+      || draftLoadState.state !== 'ready'
+      || composerSubmittingRef.current
+      || routingMutatingRef.current
+    ) return
     const campId = snapshot.camp.id
     const pending = inputs.map(({ file, kindHint }, index) => ({
       id: crypto.randomUUID(),
@@ -3279,9 +3337,27 @@ export function CampWorkspace({
       ...pending.map(({ id, file, kind }) => ({ id, name: file.name, kind }))
     ])
     const preparePending = async (): Promise<void> => {
+      try {
+        await composerHandleRef.current?.flush()
+      } catch (error) {
+        if (draftCampId.current === campId) {
+          setFailedAttachments((current) => [
+            ...current,
+            ...pending.map((item) => ({
+              id: item.id,
+              name: item.file.name,
+              kind: item.kind,
+              error: attachmentErrorMessage(error)
+            }))
+          ])
+        }
+        setPreparingAttachments((current) => current.filter(
+          ({ id }) => !pending.some((item) => item.id === id)
+        ))
+        return
+      }
       for (const item of pending) {
         try {
-          await composerHandleRef.current?.flush()
           await draftCoordinator.addSourceAttachment(item.file)
         } catch (error) {
           if (draftCampId.current === campId) {
@@ -3330,7 +3406,7 @@ export function CampWorkspace({
   const attachmentDropBlocked = attachmentDropIsBlocked({
     executionDrawerPresent: Boolean(executionDrawerProcess),
     mentionPopoverPresent: Boolean(mentionPopover)
-  }) || pendingEditing
+  }) || pendingEditing || composerInteractionDisabled
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -3399,6 +3475,11 @@ export function CampWorkspace({
   }, [])
 
   const removePreparedAttachment = async (attachmentId: string): Promise<void> => {
+    if (
+      composerInteractionDisabled
+      || composerSubmittingRef.current
+      || routingMutatingRef.current
+    ) return
     await composerHandleRef.current?.flush()
     await draftCoordinator.removeSourceAttachment(attachmentId)
   }
@@ -4500,7 +4581,7 @@ export function CampWorkspace({
                           type="button"
                           aria-label={`取消继续发给 ${continuationIntent.recipient.displayName}`}
                           title="取消继续发送"
-                          disabled={routingMutating}
+                          disabled={composerInteractionDisabled}
                           onClick={() => void dismissContinuation()}
                         >
                           <svg aria-hidden="true" viewBox="0 0 12 12">
@@ -4584,7 +4665,7 @@ export function CampWorkspace({
                     className="composer-reply-cancel"
                     type="button"
                     aria-label="取消回复"
-                    disabled={routingMutating}
+                    disabled={composerInteractionDisabled}
                     onClick={() => void cancelReply()}
                   >
                     取消
@@ -4612,7 +4693,7 @@ export function CampWorkspace({
                                   className="quiet-button compact"
                                   type="button"
                                   key={member.agentId}
-                                  disabled={routingMutating}
+                                  disabled={composerInteractionDisabled}
                                   onClick={() => void resolveReplyRecipient({
                                     kind: 'member',
                                     agentId: member.agentId
@@ -4627,7 +4708,7 @@ export function CampWorkspace({
                                   : undefined}
                                 className="quiet-button compact"
                                 type="button"
-                                disabled={routingMutating}
+                                disabled={composerInteractionDisabled}
                                 onClick={() => void resolveReplyRecipient({ kind: 'all_members' })}
                               >
                                 @所有队员
@@ -4659,13 +4740,28 @@ export function CampWorkspace({
                         className="quiet-button compact"
                         type="button"
                         key={member.agentId}
-                        disabled={routingMutating}
+                        disabled={composerInteractionDisabled}
                         onClick={() => void resolveContinuationRecipient(member.agentId)}
                       >
                         @{member.displayName}
                       </button>
                     ))}
                 </div>
+              </div>
+            )}
+            {draftLoadState.state === 'error' && (
+              <div className="reply-recipient-repair composer-draft-load-error" role="alert">
+                <div className="reply-recipient-repair-copy">
+                  <strong>草稿无法加载</strong>
+                  <span>{draftLoadState.error.message}</span>
+                </div>
+                <button
+                  className="quiet-button compact"
+                  type="button"
+                  onClick={() => void retryComposerDraftLoad()}
+                >
+                  重新加载草稿
+                </button>
               </div>
             )}
             <StructuredMentionComposer
@@ -4675,12 +4771,13 @@ export function CampWorkspace({
               document={composerDraft?.campId === snapshot.camp.id
                 ? composerDraft.content
                 : emptyComposerDocument()}
-              ready={composerDraft?.campId === snapshot.camp.id}
+              ready={draftLoadState.state === 'ready'
+                && composerDraft?.campId === snapshot.camp.id}
               getAuthoritativeDraft={() => draftCoordinator.getCurrentDraft()}
               persistDocument={(content) => saveStructuredDraft(snapshot.camp.id, content)}
               waitForDraftAuthority={() => draftCoordinator.waitForIdle().then(() => undefined)}
               onLocalStatusChange={setComposerLocalStatus}
-              onPersistenceStatusChange={setComposerPersistenceStatus}
+              onPersistenceErrorChange={setComposerPersistenceError}
               onBackspaceAtStart={composerDraft?.replyIntent
                 ? () => cancelReply('start')
                 : undefined}
@@ -4692,10 +4789,12 @@ export function CampWorkspace({
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
               ariaLabel={`给 ${defaultLead?.displayName ?? '默认负责人'} 发消息`}
-              placeholder={isCampEmpty
-                ? '集结队伍，写下这次冒险的目标…'
-                : '和队伍继续前行：补充线索、调整方向或布置新任务…'}
-              disabled={routingMutating}
+              placeholder={draftLoadState.state === 'error'
+                ? '草稿暂不可用'
+                : isCampEmpty
+                  ? '集结队伍，写下这次冒险的目标…'
+                  : '和队伍继续前行：补充线索、调整方向或布置新任务…'}
+              disabled={composerInteractionDisabled}
               editorRef={composerEditorRef}
               onActivateMemberMention={(member, trigger, focusPanel) =>
                 openMemberProfilePopover(member.agentId, trigger, focusPanel)}
@@ -4714,9 +4813,9 @@ export function CampWorkspace({
                 {replyInteractionError}
               </span>
             )}
-            {composerPersistenceStatus.state === 'error' && (
+            {composerPersistenceError && (
               <span className="composer-reply-status" role="status" aria-live="polite">
-                草稿尚未保存；发送时会重试。{composerPersistenceStatus.error.message}
+                草稿尚未保存；发送或切换会先重试。{composerPersistenceError.message}
               </span>
             )}
           </div>
@@ -4728,6 +4827,7 @@ export function CampWorkspace({
                 type="file"
                 multiple
                 tabIndex={-1}
+                disabled={composerInteractionDisabled}
                 onChange={(event) => {
                   const files = Array.from(event.currentTarget.files ?? [])
                   event.currentTarget.value = ''
@@ -4741,7 +4841,7 @@ export function CampWorkspace({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={busy || composerSubmitting || routingMutating}
+                disabled={busy || composerInteractionDisabled}
                 onClick={() => composerFileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18">

@@ -90,6 +90,7 @@ function Harness() {
   )
   const [members, setMembers] = useState(initialMembers)
   const [skills, setSkills] = useState(fixtureSkills)
+  const [skillCatalogStatus, setSkillCatalogStatus] = useState<'loading' | 'ready' | 'error'>('ready')
   const [disabled, setDisabled] = useState(false)
   const [propRevision, setPropRevision] = useState(0)
 
@@ -105,6 +106,7 @@ function Harness() {
           pastedFileCount = 0
           setMembers(initialMembers)
           setSkills(fixtureSkills)
+          setSkillCatalogStatus('ready')
           setDisabled(false)
           composerRef.current?.replaceDocument(normalizeInput(value), 'end')
           composerRef.current?.focus('end')
@@ -128,7 +130,11 @@ function Harness() {
           })))
         },
         limitSkills(count: number) { setSkills(fixtureSkills.slice(0, count)) },
+        setSkillCatalogStatus,
         setDisabled,
+        setInteractionLocked(locked: boolean) {
+          composerRef.current?.setInteractionLocked(locked)
+        },
         focusEnd() { composerRef.current?.focus('end') },
         focusStart() { composerRef.current?.focus('start') },
         selectText,
@@ -242,6 +248,7 @@ function Harness() {
       document={initialDocument}
       members={members}
       skills={skills}
+      skillCatalogStatus={skillCatalogStatus}
       ariaLabel="Native Composer regression"
       placeholder={`结构化纯文本 ${propRevision}`}
       disabled={disabled}

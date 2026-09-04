@@ -75,43 +75,6 @@ describe('ComposerDraftSync', () => {
     sync.destroy()
   })
 
-  it('holds persistence at the send snapshot while later input stays local', async () => {
-    const editor = createComposerEditor('版本 0')
-    const persisted: string[] = []
-    let releaseFirst!: () => void
-    const firstSave = new Promise<void>((resolve) => { releaseFirst = resolve })
-    const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
-      currentDraft: () => ({ revision: 0 }),
-      atomIsAvailable: () => true,
-      persist: async (document) => {
-        persisted.push(editorStateText(document))
-        if (persisted.length === 1) await firstSave
-      }
-    })
-    const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
-
-    replaceText(editor, '发送版本')
-    const frozen = sync.flush({ holdPersistence: true })
-    await Promise.resolve()
-    expect(persisted).toEqual(['发送版本'])
-
-    replaceText(editor, '发送期间的新输入')
-    releaseFirst()
-    const frozenResult = await frozen
-    expect(frozenResult.localVersion).toBe(1)
-    expect(editorStateText(frozenResult.document)).toBe('发送版本')
-    expect(persisted).toEqual(['发送版本'])
-
-    sync.resumePersistence()
-    const current = await sync.flush()
-    expect(current.localVersion).toBe(2)
-    expect(editorStateText(current.document)).toBe('发送期间的新输入')
-    expect(persisted).toEqual(['发送版本', '发送期间的新输入'])
-
-    unregister()
-    sync.destroy()
-  })
-
   it('coalesces edits made during one save into the newest single-flight snapshot', async () => {
     const editor = createComposerEditor()
     const persisted: string[] = []
@@ -240,7 +203,7 @@ describe('ComposerDraftSync', () => {
   it('keeps a failed autosave dirty, exposes an error, and retries with a finite backoff', async () => {
     vi.useFakeTimers()
     const editor = createComposerEditor()
-    const statuses: string[] = []
+    const errors: Array<Error | null> = []
     let attempts = 0
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
       atomIsAvailable: () => true,
@@ -248,7 +211,7 @@ describe('ComposerDraftSync', () => {
         attempts += 1
         if (attempts < 3) throw new Error(`save ${attempts} failed`)
       },
-      onPersistenceStatusChange: (status) => statuses.push(status.state)
+      onPersistenceErrorChange: (error) => errors.push(error)
     })
     const unregister = editor.registerUpdateListener((payload) => sync.handleEditorUpdate(payload))
 
@@ -264,7 +227,9 @@ describe('ComposerDraftSync', () => {
     expect(attempts).toBe(3)
     expect(sync.isDirty()).toBe(false)
     expect(sync.getPersistenceStatus()).toEqual({ state: 'saved' })
-    expect(statuses).toContain('error')
+    expect(errors.map((error) => error?.message ?? null)).toEqual([
+      'save 1 failed', 'save 2 failed', null
+    ])
 
     unregister()
     sync.destroy()

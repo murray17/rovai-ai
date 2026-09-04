@@ -26,6 +26,7 @@ import type {
   SupervisorSnapshot
 } from '@contracts'
 import {
+  activeCampChangeNeedsDraftFlush,
   App,
   applyCancellationResult,
   AppHeader,
@@ -1895,6 +1896,13 @@ describe('task event projections', () => {
       hasSendablePayload: true,
       failedAttachmentCount: 1
     })).toBe(true)
+  })
+
+  it('flushes only when activation leaves the currently open Camp', () => {
+    expect(activeCampChangeNeedsDraftFlush('camp', 'camp-a', 'camp-b')).toBe(true)
+    expect(activeCampChangeNeedsDraftFlush('camp', 'camp-a', 'camp-a')).toBe(false)
+    expect(activeCampChangeNeedsDraftFlush('compose', 'camp-a', 'camp-b')).toBe(false)
+    expect(activeCampChangeNeedsDraftFlush('camp', null, 'camp-b')).toBe(false)
   })
 
   it('keeps attachment-only message bytes empty while supplying a non-empty execution purpose', () => {

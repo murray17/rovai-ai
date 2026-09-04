@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  composerDocumentsEqualDirect,
   composerDocumentFromLegacyContent,
   composerDocumentStatus,
   composerDocumentToPlainText,
@@ -19,6 +20,35 @@ const skills = [{
 }]
 
 describe('ComposerDocument V2', () => {
+  it('compares canonical documents directly without normalizing or stringifying them', () => {
+    const canonical = {
+      version: 2 as const,
+      segments: [
+        { kind: 'text' as const, text: '请 ' },
+        {
+          kind: 'atom' as const,
+          atom: { type: 'member' as const, agentId: 'agent-a', labelFallback: '洛可' }
+        }
+      ]
+    }
+
+    expect(composerDocumentsEqualDirect(canonical, canonical)).toBe(true)
+    expect(composerDocumentsEqualDirect(canonical, {
+      ...canonical,
+      segments: [
+        canonical.segments[0],
+        {
+          kind: 'atom',
+          atom: { type: 'member', agentId: 'agent-a', labelFallback: '新洛可' }
+        }
+      ]
+    })).toBe(false)
+    expect(composerDocumentsEqualDirect(canonical, {
+      version: 2,
+      segments: [{ kind: 'text', text: '请 ' }, { kind: 'text', text: '' }, canonical.segments[1]]
+    })).toBe(false)
+  })
+
   it('normalizes empty and adjacent text while preserving Atom identity', () => {
     expect(normalizeComposerDocument({
       version: 2,
