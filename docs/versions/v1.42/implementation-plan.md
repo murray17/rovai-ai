@@ -45,7 +45,7 @@ git diff --check
 - `pnpm test` 通过：145 个 Vitest 文件、1531 个用例；Node 套件 220 个通过、1 个 Windows-only 跳过。
 - 文件引用／资源图标定向测试通过：9 个文件、148 个用例。
 - 隔离 `userData` 的受控 Electron 文件引用夹具在显式 `--no-sandbox` 下 10/10 通过，阅读锚点最大漂移 0.25px；
-  标准启动方式在本机进入业务断言前被 Chromium sandbox 的 `Operation not permitted` 拦截。
+  标准命令按主线 sandbox 预检记录为 `BLOCKED` 跳过，明确没有把未执行的业务断言计为通过。
 - 生产 Camp 附件 Mock 截图确认长 HTML 名称在 220px 卡片内约显示为 `rovai-file-referen…`，完整名称仍由 `title` 暴露；
   组合夹具随后在既有图片解码门槛（1/6）提前退出，未把该环境失败误记为附件断言通过。
 - Impeccable 最终扫描对本次新增 Glyph 和宽度声明没有命中；报告的侧边强调线与宽度动画均位于未改动的既有 CSS。
