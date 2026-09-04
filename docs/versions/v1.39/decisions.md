@@ -74,7 +74,7 @@ Pi compaction 固定为 `native_system_prompt_preserved`，不加入 redelivery 
 进程级固定、普通用户消息注入或只信 prompt ACK；它们分别阻止多 Session、降低权限层或缺少实际投递证据。
 
 <a id="v1-39-d04"></a>
-## V1.39-D04：Pi Skills/MCP 动态兼容追加，mutation 由 Core 管理
+## V1.39-D04：Pi Skills/MCP 动态兼容追加，mutation 由 Core 管理（MCP 部分已由 D09 取代）
 
 ### 背景
 
@@ -151,7 +151,7 @@ override。Cursor 和其他 Runtime 的 admission 不变。
 - 拒绝继续使用 release 环境变量 override：隐藏开关不能成为可审计的产品准入合同。
 
 <a id="v1-39-d07"></a>
-## V1.39-D07：Runtime portable child command 与 Pi 外部 MCP 逐 Server 降级
+## V1.39-D07：Runtime portable child command 与 Pi 外部 MCP 逐 Server 降级（已由 D09 取代）
 
 ### 背景
 
@@ -184,7 +184,7 @@ epoch/binding 或 mutation safety 失败仍 fail closed。原始 `PreparedMcpPro
   单个 optional Server 失败清空全部 MCP/终止 AgentRun。
 
 <a id="v1-39-d08"></a>
-## V1.39-D08：派生子进程在最终请求上下文解析，Pi MCP 使用有界并发激活
+## V1.39-D08：派生子进程在最终请求上下文解析，Pi MCP 使用有界并发激活（Pi MCP 部分已由 D09 取代）
 
 ### 背景
 
@@ -213,3 +213,37 @@ Managed Process Drop 收口。结果按原 projection index 排序后合并，�
   顺序不会改变 active Tool、receipt/digest 或冲突赢家。
 - 拒绝在 ACP Bridge 外继续暴露分离的 resolve/derive API，因为调用顺序无法由类型保证；拒绝无界并发等待、取消 future
   后不清理 client、或按完成顺序合并，因为它们分别破坏启动上界、进程所有权和确定性。
+
+<a id="v1-39-d09"></a>
+## V1.39-D09：删除 Pi Core-managed MCP bridge，Assignment 保留但运行时静默忽略
+
+### 背景
+
+Pi 上游没有原生 MCP 投影面。D04、D07 与 D08 曾通过 managed extension 动态 Tool、Core-owned MCP client 和
+Managed Process Server 生命周期补齐该能力，但这条桥接同时引入投影读取、Server activation、catalog/receipt、
+Approval envelope、call forwarding、cancel/reap 与恢复兼容性等额外状态，显著放大 Pi Adapter 的复杂度。
+
+### 决定
+
+Pi 的 External MCP capability 改为项目既有 `Unsupported`。Pi dispatch 在 MCP projection 之前分流，不读取成员
+Assignment 或全局 MCP 配置，不依赖 `mcp` subsystem，不启动 Server，也不向 managed extension 投递 MCP Tool。
+Pi AgentRun request、Host binding、receipt、Runtime state、compatibility/reuse/resume 全部删除 MCP 字段与判断；旧
+ContextManifest 或诊断里的 MCP 字段作为历史数据保留并在无 MCP materialization 时忽略，不迁移、不重放。
+
+managed extension 升级为 `rovai-pi-host-v4`，active tools 只含既有 Pi native catalog；bash/write/edit 的 Core-managed
+Approval、Bootstrap、Skills、receipt 原子提交、exact resume、Fleet/LRU 与 platform preview 不变。MCP Library、成员
+Assignment、设置 UI 和其他 Runtime projection 完全不变，不为 Pi 增加提示或自动取消分配。
+
+普通 Managed Process capture 恢复 absolute application 边界，删除只为 Pi MCP portable Server command 存在的
+bare/cwd-relative 行为。D08 中 ACP Client Terminal 的 `derive_runtime_one_shot_command` 保留，因为它独立需要在最终
+request cwd/environment 中解析命令及 Windows shim。
+
+### 后果与被拒绝方案
+
+- Pi 启动与恢复不再受 `npx`、Server initialize、`tools/list`、transport 或 schema 故障影响；MCP 配置变化也不重建
+  Host、不失效 Session、不改变 LRU。
+- 使用 Pi 的成员仍可保存 Playwright、GitHub 等 Assignment；切换到支持 MCP 的 Runtime 后原分配继续生效。
+- 删除 Pi 专用 MCP 模块、测试、日志与文档宣称；历史真实 smoke 只证明被撤销实现，不再代表当前能力。
+- Runtime compatibility register 因当前 Pi 能力结论变化生成新的完整文件 digest；这不改变任何 Adapter 的平台
+  Admission status，也不为 Pi 生成 qualification artifact。
+- 拒绝保留空 bridge、空 projection 或 warning 路径；这些残留仍会让 Pi 依赖 MCP 状态并维持无意义的协议表面。

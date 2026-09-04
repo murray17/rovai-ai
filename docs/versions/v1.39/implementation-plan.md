@@ -27,10 +27,9 @@ last_updated: 2026-09-04
 - [x] `ManagedSystemPrompt` 与 revision 1 收据；完整 session locator 只在 Core 私有状态，公开面仅有不可逆 digest。
 - [x] Shell Approval 使用 Pi 实际 shell path/args/transport；read/write/edit/bash 与未知 mutation fail-closed。
 - [x] `.pi/skills` delivery group；managed extension 每 Session 重新发现并验证 exact Skill catalog。
-- [x] External MCP `AdditivePerRun / RovaiWins / CoreManaged`；Core-owned stdio/Streamable HTTP transport、取消和清理；
-  bare/relative/absolute stdio command 每轮按 Runtime PATH/cwd 解析且不写回配置，单个用户 Server 激活失败只降级该
-  Server，不阻断 Pi Session/AgentRun；Ready Server 以独立 60 秒 activation budget 并发启动，超时显式回收，结果按
-  projection index 稳定合并。
+- [x] 删除 Pi Core-managed MCP bridge；Pi capability 为 `Unsupported`，dispatch 不读取 MCP 配置/Assignment、不依赖
+  `mcp` subsystem、不生成 projection、不启动 Server 或 proxy Tool。已有 Assignment 与其他 Runtime projection 不变，
+  历史 ContextManifest MCP 字段在 Pi 无 MCP 恢复路径中忽略。
 - [x] ACP Client Terminal 使用单一 derived-child API，在 request 最终 cwd/env 生效后解析 bare/relative command；
   Windows 派生 `.cmd/.bat` 继续进入 CommandShim identity 与原子 Job 链。
 - [x] `agent_settled` 唯一成功终点、assistant snapshot 去重、Missing-Send gate、Cancellation Settlement v2 与迟到
@@ -53,19 +52,16 @@ last_updated: 2026-09-04
 - [x] 隔离开发 smoke：Probe 不污染 Session、First Run、Core/Host restart exact resume、warm LRU、allow-once、deny、
   cancel 无延迟文件副作用、公开 locator 隐私与结构化 Usage。
 - [x] Pi 0.84.4 真实 Skill 调用；导入、重启恢复、project-owned 同名 shadow 与删除产品流程。
-- [x] Pi 0.84.4 真实 External MCP 单 Run：RovaiWins、stdio、Streamable HTTP 三个 projected Tool。
 - [x] Pi 0.84.4 真实 workspace Resident：跨 Camp A→B→A exact Session switch、并发 Run 独立 Host、六类 Bash output
   与 Core planned shutdown 后完整 descendant/private Host config 回收。
 - [x] Pi 0.84.4 真实 Skill 动态矩阵：update、disable/re-enable、unassign/restore、hard delete、project-owned 同名
   shadow，以及同一 Host 相邻 Session 无旧 catalog/marker 泄漏。
-- [x] Pi 0.84.4 真实 MCP 动态矩阵：update、disable/re-enable、unassign/restore、delete、相邻 Session no-leak、
-  mutation deny-before-dispatch、cancelled settlement、stdio Server reap 与延迟副作用缺失。
 - [x] Pi 0.84.4 真实 Missing-Send zero-send、accepted-send suppression 与原生 Read tool→final；Bash matrix 另覆盖
   多 Tool 后 final。
 - [x] Pi 0.84.4 当前 Built-in CLI 15-operation full Run 与 resumed/new-lease Run。
 - [x] deterministic tests：A→B→A exact switch、并发独立 Host、receipt 全字段/nonce mismatch、协议重放/迟到、
-  stdio/HTTP MCP bridge、portable/derived command、并发 MCP activation、activation timeout process-tree reap、单 Server
-  unavailable 后其余 Server 继续、Usage dedupe、Unknown mutation、cleanup 和 platform matrix。
+  Pi dispatch 无 MCP subsystem 依赖、managed extension 无 MCP surface、历史 MCP manifest 忽略、ACP derived command、
+  Usage dedupe、Unknown mutation、cleanup 和 platform matrix。
 - [x] Migration 135 专项：无 receipt acceptance 拒绝、错 binding 拒绝、合法原子接受、receipt 不可直接改删、父
   Delivery 与 Camp 永久删除可合法 cascade、FK=0，reopen 只保留一条 migration marker。
 
@@ -97,7 +93,7 @@ pnpm smoke:missing-send-recovery
 ROVAI_PI_BIN=<pi-0.84.4> pnpm smoke:pi-runtime
 pnpm docs:test
 pnpm docs:check
-DOCS_BASE_REF=aae13734669c363e7b307a6407e6868eda1e6b8e pnpm docs:check:ci
+DOCS_BASE_REF=991d0cb24b3edc6dd67b823fdf11fe3caa7e2e17 pnpm docs:check:ci
 ```
 
 ## 活动组具体指令验证（2026-09-03）

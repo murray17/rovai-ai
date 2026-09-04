@@ -14,7 +14,7 @@ last_updated: 2026-09-04
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v31](../contracts/runtime-launch-and-verification-v31.md)。实测版本和能力只由
+[Runtime Launch and Verification v32](../contracts/runtime-launch-and-verification-v32.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -172,7 +172,7 @@ response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 f
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v31](../contracts/runtime-launch-and-verification-v31.md)。
+[Runtime Launch and Verification v32](../contracts/runtime-launch-and-verification-v32.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -237,7 +237,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v31](../contracts/runtime-launch-and-verification-v31.md)，
+字段级行为见 [Runtime Launch and Verification v32](../contracts/runtime-launch-and-verification-v32.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## ACP Client Terminal 边界
@@ -305,7 +305,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v31](../contracts/runtime-launch-and-verification-v31.md)，证据状态见
+[Runtime Launch and Verification v32](../contracts/runtime-launch-and-verification-v32.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -351,34 +351,31 @@ Pi 是独立 `pi-jsonl-rpc-v1` Product Runtime，不进入 ACP initialize/storag
 Pi Host 进入统一 Fleet，策略为 `resident_multi_session`：一个 Host 串行服务多个 Native Session，并发 Run 使用
 不同 Host。Pi 的复用 identity 是 canonical workspace + process digest；当前独占 lease 的 Camp/member invalidation
 scope 单独保存并随每次领取更新，因此允许同 workspace 跨 Camp 串行复用而不削弱删除失效。其他 Runtime 的
-Camp/member-scoped identity 不变。process key 不包含 Session、Bootstrap、Skills、MCP、model 或 Prompt。恢复只使用
+Camp/member-scoped identity 不变。process key 不包含 Session、Bootstrap、Skills、model 或 Prompt；MCP Assignment
+和配置完全不参与 Pi compatibility 或复用。恢复只使用
 Core 私有完整 canonical session file，实际调用 `switch_session` 后核对 full ID/file/cwd；公开 read/event/diagnostic
 只允许不可逆 digest。失败 Host 不进 LRU，continuity lost 后最多创建一个 replacement。Deep Probe 同样执行 exact
 switch，但用 `--session-dir <probe-root>/sessions` 隔离并清理测试 Session。
 
 Bootstrap 使用官方 managed extension 的 `before_agent_start`，在 Pi base system prompt 后追加当前完整 Bootstrap；
 Dynamic Context bytes 不变。extension 必须先提交绑定 Host/run/epoch/delivery/prompt/session、base/effective prompt、
-Bootstrap、Skill、MCP、active Tool 与 binding document 的 closed receipt；Core 验证 nonce 后在单一事务写入不可变
+Bootstrap、Skill、native active Tool 与 binding document 的 closed receipt；Core 验证 nonce 后在单一事务写入不可变
 receipt并接受 Input。Pi system prompt 不属于压缩的消息历史，compaction strategy 为
 `native_system_prompt_preserved`，因此不加入 redelivery requirement 或 observer lease。
 
-managed Skill target 为 `.pi/skills`，每次 Session activation 重新发现并把 exact catalog 写入 receipt。Pi 没有内建
-MCP，但官方 extension Tool API 可安全桥接，因此 External MCP 为
-`AdditivePerRun / RovaiWins / CoreManaged`：Core 持有 stdio/Streamable HTTP transport、secret、cancel 与 cleanup，
-Pi 只看当前 Run 成功激活的 proxy tools。stdio command 保留用户配置中的 bare/relative/absolute 结构，并在每次
-AgentRun/恢复时按当轮 Runtime PATH/cwd 重新解析，不写回设备路径、不经过 Shell。单个用户外部 Server 的解析、启动、
-initialize 或 Tool catalog 失败只将该 Server 标记 unavailable 并记录安全诊断；Pi Session 与其他 Server 继续。
-Ready Server 并发激活，每个 Server 的 process/open、initialize、initialized notification、`tools/list` 与 catalog validation
-共享独立 60 秒 deadline；失败或超时先显式 shutdown/reap。结果按原 projection index 合并后再建立稳定 Tool catalog，
-因此总等待由最慢 Server deadline 加有界 cleanup 决定，不随 Server 数量线性累加。投影身份损坏与调用期 bridge/fence
-失败仍 fail closed。Shell Approval 保存 Pi 实际解析的 shell path/args/argv-or-stdin transport，不伪造
+managed Skill target 为 `.pi/skills`，每次 Session activation 重新发现并把 exact catalog 写入 receipt。Pi External MCP
+固定为 `Unsupported`：成员已有 Assignment 与全局配置保留，但 Pi dispatch 在 projection 前分流并静默忽略，不读取
+server 定义、不启动 server、不注册 proxy Tool、不产生 MCP receipt/approval/diagnostic，也不依赖 `mcp` optional
+subsystem。历史 Pi ContextManifest/receipt 中的 MCP 字段只作历史事实保留；新 Run 与恢复路径不解析、比较或重新激活。
+MCP 配置变化不影响 Pi compatibility、Host reuse、LRU 或 exact resume，切换到支持 MCP 的 Runtime 后原 Assignment
+继续生效。Shell Approval 保存 Pi 实际解析的 shell path/args/argv-or-stdin transport，不伪造
 `/bin/zsh -lc`。`agent_settled` 是唯一成功边界；Usage 只读 terminal assistant `message_end.message.usage`，未知
 reasoning/cost 保持 NULL。
 
 Pi Images、结构化 Web Search 与 Camp Fast 当前 unsupported/hidden。macOS arm64、macOS x64 和 Windows x64 均为
 `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`；普通 discovery、检查、成员选择、
 Diagnostics 与 AgentRun 对三平台开放，UI 明确标记实验性，但不得称为 First-Class/qualified。字段级行为见
-[Runtime Launch and Verification v31](../contracts/runtime-launch-and-verification-v31.md)，
+[Runtime Launch and Verification v32](../contracts/runtime-launch-and-verification-v32.md)，
 证据状态见[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -405,7 +402,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `CoreEnforcedV1 + read_only Workspace` 恢复路径仍强制 `plan`。descriptor 的 `recommendedValue=default` 只是
 保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v31](../contracts/runtime-launch-and-verification-v31.md)。
+[Runtime Launch and Verification v32](../contracts/runtime-launch-and-verification-v32.md)。
 
 ACP Client FS 不把这些权限 descriptor 复制成 Core allowlist。`fs/read_text_file` / `fs/write_text_file` 对当前
 fenced Run 只作协议与参数校验，绝对路径按 Runtime 请求执行，相对路径以 execution root 解析；是否能读写、是否

@@ -419,11 +419,11 @@ try {
     deniedActionCount: deniedApprovals.filter((approval) => approval.status === 'denied').length,
     cancelStatus: cancelledResult.run.status,
     cancelledFileCreated: cancelledBody !== null,
-    externalMcpProjection: 'additive_per_run',
-    externalMcpSameNamePolicy: 'rovai_wins',
-    externalMcpApprovalControl: 'core_managed',
-    externalMcpStdio: true,
-    externalMcpStreamableHttp: true,
+    externalMcpProjection: 'unsupported',
+    externalMcpSameNamePolicy: null,
+    externalMcpApprovalControl: 'unsupported',
+    externalMcpStdio: false,
+    externalMcpStreamableHttp: false,
     managedSkillDelivery: '.pi/skills',
     structuredUsageObserved: true,
     plannedShutdown: {
@@ -458,9 +458,6 @@ function assertCapabilitySnapshot(snapshot) {
     'context.charter.managed_system_prompt',
     'context.compaction.native_system_prompt_preserved',
     'usage.model_call.structured',
-    'mcp.external_projection.additive_per_run',
-    'mcp.same_name_policy.rovai_wins',
-    'mcp.approval.core_managed',
     'builtin_cli.transport.v21'
   ]
   const approval = snapshot?.permissionOptions?.find((option) => option.key === 'approval_mode')
