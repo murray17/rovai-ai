@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.46
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -11,7 +11,7 @@ last_updated: 2026-09-05
 
 # Rovai-ai v1.46：Composer 事务边界与交互锁收口
 
-前置：[v1.45](../v1.45/README.md)。本版本保留 Lexical、Text + Atom `ComposerDocument` V2、唯一
+前置：[v1.45](../v1.45/README.md)。后续：[v1.47](../v1.47/README.md)。本版本保留 Lexical、Text + Atom `ComposerDocument` V2、唯一
 `DraftMutationCoordinator` 和 Core exact revision；只收紧 Core 正文回写、发送、Camp 切换、Draft 加载、
 Typeahead Enter 与 autosave 投影边界，不引入 Session Manager、双缓冲或新的完整 Draft 缓存。
 

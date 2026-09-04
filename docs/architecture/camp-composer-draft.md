@@ -10,7 +10,7 @@ last_updated: 2026-09-05
 
 Camp Composer 有三个互不替代的权威层：输入期间的 Lexical `EditorState`、稳定业务语义的
 `ComposerDocument` V2，以及持久化与 exact revision 的 Core Draft。已提交但尚未公开的下一轮输入由私有
-Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v9](../contracts/camp-composer-draft-v9.md)、
+Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v10](../contracts/camp-composer-draft-v10.md)、
 [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)，附件生命周期见
 [Camp Attachment v8](../contracts/camp-attachment-v8.md)。
 
@@ -119,10 +119,13 @@ Coordinator 的内部 authority/revision，不触发整个 Workspace projection 
 只有持久化 error 及其成功恢复向上报告。批量附件先 flush 一次正文，再顺序进入同一 revision queue。
 
 自动保存失败保持 dirty，记录 `error` persistence status，并只在当前 epoch 做有限退避重试；显式 flush/发送直接暴露
-失败。发送、Reply/Continuation、依赖 Draft revision 的 mutation 与 Camp 切换先同步锁定 Lexical，再停止 timer、
+失败。发送、Reply/Continuation、依赖 Draft revision 的 mutation，以及任何会卸载或替换当前 Camp Composer 的普通
+导航，先同步锁定 Lexical，再停止 timer、
 等待在途 save 与 Coordinator queue、读取最新已提交 EditorState、按需保存 exact V2 并取得 Coordinator 当前 Core
-revision。Camp 切换只有 flush 成功才继续；失败保留当前 Camp 和内容。组件 cleanup 只释放 listener、timer、Sync 与
-Lexical runtime，不承担异步保存。离散提交只用于显式更新后必须立即读取的边界，不用于普通输入。
+revision。App 只调用当前 `CampWorkspace` 注册的统一 leave guard，不复制附件、Pending 或 Draft 保存逻辑；Camp-to-Camp
+和 Camp-to-其他 Surface 只有 flush 成功才继续。失败保留当前 Camp 和内容；transition 失败或实际未卸载 Composer 时
+以 `complete(false)` 恢复交互。组件 cleanup 只释放 listener、timer、Sync 与 Lexical runtime，不承担异步保存。离散
+提交只用于显式更新后必须立即读取的边界，不用于普通输入。
 
 ## Initialization and authoritative replacement
 
@@ -199,7 +202,7 @@ pendingInputId、pending revision 与 editToken fencing，且不会消费或覆�
 
 ## References
 
-- [Camp Composer Draft v9](../contracts/camp-composer-draft-v9.md)
+- [Camp Composer Draft v10](../contracts/camp-composer-draft-v10.md)
 - [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)
 - [Camp Attachment v8](../contracts/camp-attachment-v8.md)
 - [结构化 Mention 与 Atom](../ui/components/structured-mentions.md)
