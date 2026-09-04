@@ -99,6 +99,9 @@
   --shadow-card: none;
   --approval-line: #d8bd87;
   --inline-code-canvas: #e9eceb;
+  --conversation-inline-code-canvas: #eef0f1;
+  --conversation-code-block-canvas: #f4f5f5;
+  --conversation-code-line: #d9dee1;
   --shell-result-canvas: #f3f4f3;
   --code-block-canvas: #eef2f5;
   --evidence-canvas: #f4f6f3;
@@ -233,6 +236,9 @@
   --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
   --approval-line: #8f7447;
   --inline-code-canvas: #353b3f;
+  --conversation-inline-code-canvas: #30373b;
+  --conversation-code-block-canvas: #252c30;
+  --conversation-code-line: #3e494f;
   --shell-result-canvas: #373f43;
   --code-block-canvas: #1d252b;
   --evidence-canvas: #12191d;
@@ -3146,6 +3152,9 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .safe-markdown code { padding: 0 2px; border-radius: 3px; color: var(--evidence-ink); background: var(--inline-code-canvas); font: .9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .safe-markdown .markdown-file-reference code { color: inherit; }
 .safe-markdown pre code { padding: 0; background: transparent; font-size: inherit; }
+.conversation-bubble :is(.final-copy, .message-bubble) .safe-markdown code { padding: 1px 4px; border-radius: 6px; background: var(--conversation-inline-code-canvas); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.conversation-bubble :is(.final-copy, .message-bubble) .safe-markdown pre { padding: 11px 12px; border-color: var(--conversation-code-line); border-radius: 8px; background: var(--conversation-code-block-canvas); }
+.conversation-bubble :is(.final-copy, .message-bubble) .safe-markdown pre code { padding: 0; border-radius: 0; background: transparent; }
 .safe-markdown table { display: block; width: 100%; margin: 9px 0; overflow-x: auto; border-spacing: 0; border-collapse: collapse; font-size: 11px; }
 .safe-markdown th, .safe-markdown td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .safe-markdown th { background: var(--surface-muted); font-weight: 700; }

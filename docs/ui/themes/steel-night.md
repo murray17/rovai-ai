@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Steel Night
@@ -139,6 +139,9 @@ Night 为相同十个格式家族提供独立亮度值；它们只表达文件�
 | Token | Value |
 |---|---:|
 | `--inline-code-canvas` | `#353b3f` |
+| `--conversation-inline-code-canvas` | `#30373b` |
+| `--conversation-code-block-canvas` | `#252c30` |
+| `--conversation-code-line` | `#3e494f` |
 | `--shell-result-canvas` | `#373f43` |
 | `--code-block-canvas` | `#1d252b` |
 | `--evidence-canvas` | `#12191d` |
@@ -188,6 +191,9 @@ they do not become statuses. Evidence and diffs remain neutral and structurally 
 inline code uses the borderless `--inline-code-canvas`; Shell command results use
 `--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence border,
 while other evidence surfaces continue to use `--evidence-canvas`.
+Camp message prose uses the dedicated `--conversation-inline-code-canvas`,
+`--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer; file previews,
+release notes and Runtime process copy keep the shared defaults.
 
 ## Contrast requirements
 
