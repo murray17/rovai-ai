@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import type {
   AgentProfile,
   CampComposerDraftView,
+  CampOpenMessageCoverage,
   CampOpenProjection,
   NavigationCampItem,
   NavigationSnapshot
@@ -87,6 +88,7 @@ const earlier = { ...campOpenProjectionAsSnapshot(projection(60)),
   messages: messages.slice(0, 40).map(message => ({ ...message, timelineGlobalSequence: message.sequence })) }
 let current = campOpenProjectionAsSnapshot(projection(60), earlier)
 let updateSnapshot: (snapshot: typeof current) => void
+let updateMessageHistory: (coverage: CampOpenMessageCoverage | null) => void
 let closeTask: () => void
 type FixtureImageResult = { displayName: string; mediaType: string; data: string }
 const mockImageResult = (
@@ -280,10 +282,12 @@ const navigation: NavigationSnapshot = {
 
 function Fixture(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState(current)
+  const [messageHistory, setMessageHistory] = useState<CampOpenMessageCoverage | null>(null)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<CampInspectorTab>(attachmentReviewMode ? 'members' : 'tasks')
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   updateSnapshot = setSnapshot
+  updateMessageHistory = setMessageHistory
   closeTask = () => setOpen(false)
   return <div className="app-shell app-shell-camp">
     <CampNavigation view="camp" state="ready" navigation={navigation} activeCampId={campId}
@@ -296,6 +300,16 @@ function Fixture(): React.JSX.Element {
       detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
       <CampWorkspace snapshot={snapshot} projectName="rovai-ai" agents={agents} busy={false} stopping={false}
+        messageHistory={messageHistory}
+        onLoadEarlierMessages={async () => {
+          current = { ...current, messages: [...current.messages, messages[60]] }
+          setSnapshot(current)
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+          current = { ...current, messages: [...messages.slice(0, 20), ...current.messages] }
+          setSnapshot(current)
+          setMessageHistory({ loadedCount: 61, totalCount: 61, omittedCount: 0, complete: true,
+            oldestLoadedSequence: 1, newestLoadedSequence: 61, hasEarlier: false })
+        }}
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}}
         onResolveApproval={() => {}} onStop={() => {}} worldMapEnabled={false} executionPlacement="bottom"
         inspectorVisible={open} inspectorTab={tab} detailEntryHost={entryHost}
@@ -319,6 +333,18 @@ Object.assign(window, { campOpenTest: {
   refresh: (append: boolean) => {
     current = campOpenProjectionAsSnapshot({ ...projection(append ? 61 : 60), throughGlobalSequence: append ? 101 : 100 }, current)
     updateSnapshot(current)
+  },
+  prepareHistoryLoad: () => {
+    current = { ...current, messages: messages.slice(20, 60) }
+    updateSnapshot(current)
+    updateMessageHistory({ loadedCount: 40, totalCount: 61, omittedCount: 21, complete: false,
+      oldestLoadedSequence: 21, newestLoadedSequence: 60, hasEarlier: true })
+  },
+  loadEarlier: async () => {
+    element('.camp-history-text-button').click()
+    for (let index = 0; index < 6; index += 1) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    }
   },
   showImages: (result: { displayName: string; mediaType: string; data: string }, count = 1) => {
     imageResult = result

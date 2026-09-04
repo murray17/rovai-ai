@@ -3558,6 +3558,7 @@ export function CampWorkspace({
     const timeline = timelineScrollRef.current
     if (!timeline) return
     const campId = snapshot.camp.id
+    const readingAnchor = captureTimelineReadingAnchor(timeline)
     const previousScrollHeight = timeline.scrollHeight
     const previousScrollTop = timeline.scrollTop
     earlierMessageLoadInFlightRef.current = true
@@ -3576,7 +3577,11 @@ export function CampWorkspace({
         && !timeline.hidden
         && !conversationFindOpenRef.current
       ) {
-        timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+        if (readingAnchor.source || readingAnchor.message) {
+          restoreTimelineReadingAnchor(timeline, readingAnchor)
+        } else {
+          timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+        }
         recordTimelineReadingPosition(campId, timeline)
       }
       setEarlierMessageStatus('idle')
