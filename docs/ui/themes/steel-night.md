@@ -52,6 +52,8 @@ Dark. `color-scheme: dark`.
 | `--workspace-attention-soft` | `#302617` |
 | `--workspace-faint` | `#8998a1` |
 | `--conversation-surface` | `#181d21` |
+| `--conversation-user-message-surface` | `#20272c` |
+| `--conversation-user-message-line` | `#2f3a41` |
 | `--execution-running-surface` | `#1b2024` |
 | `--conversation-find-match` | `#5a4725` |
 | `--conversation-find-current` | `#845f23` |
@@ -179,6 +181,8 @@ Night inherits the shared non-color structure from `:root`; aliases resolve agai
 | `--conversation-artifact-width` | `930px` |
 | `--conversation-wide-width` | `1040px` |
 | `--conversation-composer-width` | `1040px`; viewport `>= 1800px` 时为 `1440px` |
+| `--conversation-user-message-max-width` | `690px` |
+| `--conversation-user-message-width-offset` | `36px`; viewport `<= 1080px` 时为 `18.667px`，紧凑会话列为 `16px` |
 
 ## Brand, semantic, identity, and evidence color rules
 
@@ -194,6 +198,9 @@ while other evidence surfaces continue to use `--evidence-canvas`.
 Camp message prose uses the dedicated `--conversation-inline-code-canvas`,
 `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer; file previews,
 release notes and Runtime process copy keep the shared defaults.
+Current-user message bubbles use the dedicated neutral Steel pair
+`--conversation-user-message-surface` / `--conversation-user-message-line`; Agent narrative remains
+transparent.
 
 ## Contrast requirements
 

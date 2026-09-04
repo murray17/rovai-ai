@@ -1,4 +1,5 @@
 import { readErrorMessage } from './error-message'
+import { collapsedMessageProjection } from './conversation-message-collapse'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -4080,9 +4081,11 @@ export function CampWorkspace({
                     && replyAnchorWindows.has(replyParentId)
                     && replyAnchorWindows.get(replyParentId) === null
                   )
+                  const isConversationFindCurrent = conversationFind.open
+                    && conversationFind.snapshot?.match?.messageId === campMessage.id
                   items.push(
                     <article
-                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${conversationFind.open && conversationFind.snapshot?.match?.messageId === campMessage.id ? ' conversation-find-current-message' : ''}`}
+                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${isConversationFindCurrent ? ' conversation-find-current-message' : ''}`}
                       key={campMessage.id}
                       data-message-id={campMessage.id}
                       data-camp-turn-id={campMessage.campTurnId ?? sourceRun?.campTurnId}
@@ -4205,10 +4208,12 @@ export function CampWorkspace({
                                       )
                                     : (
                                         <div className="message-bubble">
-                                          <StructuredMessageBody
+                                          <CollapsibleStructuredMessageBody
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
+                                            collapsible={humanAuthored}
+                                            forceExpanded={isConversationFindCurrent}
                                             fileReferenceSource={{
                                               campId: snapshot.camp.id,
                                               messageId: campMessage.id
@@ -4546,7 +4551,6 @@ export function CampWorkspace({
                   className={`composer-reply-line${replyRepairRequired ? ' needs-repair' : ''}`}
                   title={`${composerDraft.replyIntent.author?.displayName ?? '引用消息'} · ${composerDraft.replyIntent.excerpt ?? '引用的消息当前不可用'}`}
                 >
-                  <ReplyMark />
                   <span className="composer-reply-copy">
                     <strong>回复 {composerDraft.replyIntent.author?.displayName ?? '引用消息'}</strong>
                     <span>{composerDraft.replyIntent.excerpt ?? '引用的消息当前不可用'}</span>
@@ -7172,20 +7176,106 @@ function MessageSurface({
   return (
     <div className={`message-surface${hasDelivery ? ' has-delivery' : ''}${copied ? ' copied' : ''}`}>
       {children}
-      {onReply && (
+      <div className="message-actions" role="group" aria-label="消息操作">
+        <span className="copy-feedback" role="status" aria-live="polite">
+          {copied ? '已复制' : ''}
+        </span>
+        {onReply && (
+          <button
+            className="message-reply-button"
+            type="button"
+            aria-label="回复这条消息"
+            title="回复"
+            onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
+          >
+            <MessageReplyIcon />
+          </button>
+        )}
+        <MessageCopyButton copied={copied} onCopy={onCopy} />
+      </div>
+    </div>
+  )
+}
+
+function MessageReplyIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z" />
+      <circle className="message-reply-dot" cx="8" cy="10.5" r="1" />
+      <circle className="message-reply-dot" cx="12" cy="10.5" r="1" />
+      <circle className="message-reply-dot" cx="16" cy="10.5" r="1" />
+    </svg>
+  )
+}
+
+function CollapsibleStructuredMessageBody({
+  body,
+  content,
+  members,
+  collapsible,
+  forceExpanded,
+  renderLeadingCurrentUserMarkdown = false,
+  onActivateMemberMention,
+  onActivateAllMembersMention,
+  onFileReference,
+  fileReferenceSource
+}: {
+  body: string
+  content: StructuredCampMessageContent | null
+  members: CampSnapshot['members']
+  collapsible: boolean
+  forceExpanded: boolean
+  renderLeadingCurrentUserMarkdown?: boolean
+  onActivateMemberMention?(
+    agentId: string,
+    trigger: HTMLElement,
+    focusPanel: boolean
+  ): void
+  onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
+  onFileReference?: FileReferenceActivation
+  fileReferenceSource?: MessageFileReferenceSource
+}): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const contentId = useId()
+  const projection = useMemo(
+    () => collapsible ? collapsedMessageProjection(body, content) : null,
+    [body, collapsible, content]
+  )
+  const displayFullMessage = expanded || forceExpanded || projection === null
+  const displayBody = displayFullMessage ? body : projection.body
+  const displayContent = displayFullMessage ? content : projection.content
+
+  const messageBody = (
+    <StructuredMessageBody
+      body={displayBody}
+      content={displayContent}
+      members={members}
+      renderLeadingCurrentUserMarkdown={renderLeadingCurrentUserMarkdown}
+      onActivateMemberMention={onActivateMemberMention}
+      onActivateAllMembersMention={onActivateAllMembersMention}
+      onFileReference={onFileReference}
+      fileReferenceSource={fileReferenceSource}
+    />
+  )
+  if (!projection) return messageBody
+
+  return (
+    <div className={`message-long-copy${displayFullMessage ? ' is-expanded' : ''}`}>
+      <div id={contentId}>{messageBody}</div>
+      {!forceExpanded && (
         <button
-          className="message-reply-button"
+          className={`message-long-toggle ${expanded ? 'is-collapse' : 'is-expand'}`}
           type="button"
-          aria-label="回复这条消息"
-          onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
+          aria-controls={contentId}
+          aria-expanded={expanded}
+          aria-label={expanded
+            ? `收起长消息，共 ${projection.lineCount} 行`
+            : `展开完整消息，共 ${projection.lineCount} 行`}
+          onClick={() => setExpanded((current) => !current)}
         >
-          回复
+          {expanded ? '收起长消息' : '…'}
         </button>
       )}
-      <MessageCopyButton copied={copied} onCopy={onCopy} />
-      <span className="copy-feedback" role="status" aria-live="polite">
-        {copied ? '已复制' : ''}
-      </span>
     </div>
   )
 }
@@ -7455,10 +7545,13 @@ function MessageCopyButton({
       className="message-copy-button"
       type="button"
       aria-label={copied ? '已复制这条消息' : '复制这条消息'}
-      title="复制这条消息"
+      title={copied ? '已复制' : '复制'}
       onClick={onCopy}
     >
-      复制
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="8" y="8" width="11" height="11" rx="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      </svg>
     </button>
   )
 }
