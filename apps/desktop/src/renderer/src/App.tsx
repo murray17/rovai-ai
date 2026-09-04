@@ -59,6 +59,7 @@ import {
   QuickChatWorkspace,
   composerHasSendablePayload,
   type CampMessageSendReceipt,
+  type CampLeaveGuard,
   type CampMemberAddOutcome,
   type CampMemberRemoveOutcome,
   type CampInspectorTab,
@@ -253,6 +254,14 @@ export type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export const STARTUP_FEEDBACK_DELAY_MS = 400
 export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
+
+export function activeCampChangeNeedsDraftFlush(
+  view: View,
+  activeCampId: string | null,
+  targetCampId: string
+): boolean {
+  return view === 'camp' && activeCampId !== null && activeCampId !== targetCampId
+}
 export type SettingsSection = NavigationSettingsSection
 export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
 
@@ -1102,6 +1111,7 @@ function AuthoritativeApp({
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runtimeHealthRefreshIncludesMembers = useRef(false)
   const membersViewRef = useRef<MembersViewHandle>(null)
+  const campLeaveGuardRef = useRef<{ campId: string; guard: CampLeaveGuard } | null>(null)
   const startupResolvedSessionId = useRef<string | null>(null)
   const pendingRestorableLocation = useRef<RestorableLocation | null>(null)
   const invalidatingNewConversationDefaults = useRef(false)
@@ -1131,6 +1141,17 @@ function AuthoritativeApp({
       campOpenFeedbackTimer.current = null
     }
     setOpeningCampId(null)
+  }, [])
+
+  const registerCampLeaveGuard = useCallback((
+    campId: string,
+    guard: CampLeaveGuard | null
+  ): void => {
+    if (guard) {
+      campLeaveGuardRef.current = { campId, guard }
+    } else if (campLeaveGuardRef.current?.campId === campId) {
+      campLeaveGuardRef.current = null
+    }
   }, [])
 
   const cancelPendingCampActivation = useCallback((): void => {
@@ -1541,6 +1562,30 @@ function AuthoritativeApp({
   ): Promise<boolean> => {
     const selectionGeneration = ++campSelectionGeneration.current
     clearCampOpenFeedback()
+    let campLeavePreparation: Awaited<ReturnType<CampLeaveGuard>> | null = null
+    const completeCampLeave = (didLeave: boolean): void => {
+      campLeavePreparation?.complete(didLeave)
+      campLeavePreparation = null
+    }
+    const previousCampId = activeCampIdRef.current
+    let campSurfaceCommitted = false
+    if (activeCampChangeNeedsDraftFlush(viewRef.current, previousCampId, campId)) {
+      const registration = campLeaveGuardRef.current
+      if (registration?.campId === previousCampId) {
+        try {
+          campLeavePreparation = await registration.guard()
+        } catch (nextError) {
+          if (selectionGeneration === campSelectionGeneration.current) {
+            setError(`离开当前会话前未能保存草稿：${errorMessage(nextError)}`)
+          }
+          return false
+        }
+        if (selectionGeneration !== campSelectionGeneration.current) {
+          completeCampLeave(false)
+          return false
+        }
+      }
+    }
     const cachedSnapshot = activeCampIdRef.current === campId
       ? null
       : recentCampSnapshot(campSnapshotCache.current, campId)
@@ -1554,6 +1599,7 @@ function AuthoritativeApp({
       snapshot: CampSurfaceSnapshot,
       entryPreview = false
     ): void => {
+      campSurfaceCommitted = true
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
       persistCurrentProject(snapshotProject)
@@ -1588,10 +1634,18 @@ function AuthoritativeApp({
         campId,
         options.reconcileDefaultLead === false ? 'open' : 'enter'
       )
-      if (selectionGeneration !== campSelectionGeneration.current) return false
+      if (selectionGeneration !== campSelectionGeneration.current) {
+        completeCampLeave(
+          campSurfaceCommitted && activeCampIdRef.current !== previousCampId
+        )
+        return false
+      }
       clearCampOpenFeedback()
       commitCampSurface(snapshot)
       await afterNextPaint()
+      completeCampLeave(
+        campSurfaceCommitted && activeCampIdRef.current !== previousCampId
+      )
       if (selectionGeneration !== campSelectionGeneration.current) return false
       console.info(
         `[camp-open] trace=${traceId} stage=renderer_meaningful_paint `
@@ -1611,16 +1665,18 @@ function AuthoritativeApp({
       })
       return true
     } catch (nextError) {
-      if (selectionGeneration === campSelectionGeneration.current) {
-        clearCampOpenFeedback()
-        if (options.suppressErrors) {
-          setActiveCampId(null)
-          setCampSnapshot(null)
-          lastMainView.current = 'compose'
-          setView('compose')
-        } else {
-          setError(errorMessage(nextError))
-        }
+      completeCampLeave(
+        campSurfaceCommitted && activeCampIdRef.current !== previousCampId
+      )
+      if (selectionGeneration !== campSelectionGeneration.current) return false
+      clearCampOpenFeedback()
+      if (options.suppressErrors) {
+        setActiveCampId(null)
+        setCampSnapshot(null)
+        lastMainView.current = 'compose'
+        setView('compose')
+      } else {
+        setError(errorMessage(nextError))
       }
       return false
     }
@@ -3691,6 +3747,7 @@ function AuthoritativeApp({
             onSend={sendCampMessage}
             onPendingDraftPersisted={refreshPendingCampNavigation}
             onPendingCampLeave={settlePendingCampOnLeave}
+            onCampLeaveGuardChange={registerCampLeaveGuard}
             onChangeLead={changeDefaultLead}
             onAddMembers={addCampMembers}
             onPreviewMemberRemoval={previewCampMemberRemoval}

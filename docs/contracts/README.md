@@ -233,7 +233,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v8（当前）](camp-composer-draft-v8.md) | v7 revision/附件语义不变；Draft 改用 Text + Atom ComposerDocument V2，旧数组只读兼容、body 派生、flush 后映射公共 Content |
+| [Camp Composer Draft v9（当前）](camp-composer-draft-v9.md) | v8 V2 wire/identity 不变；Core content 显式回写 Lexical，发送/路由/切换同步锁定，加载失败 fail closed，autosave 投影收窄 |
+| [Camp Composer Draft v8（历史）](camp-composer-draft-v8.md) | v7 revision/附件语义不变；Draft 改用 Text + Atom ComposerDocument V2，旧数组只读兼容、body 派生；发送中输入语义由 v9 替代 |
 | [Camp Composer Draft v7（历史）](camp-composer-draft-v7.md) | exact Draft 保存 source refs，可直接发送或连同附件进入私有 FIFO；旧 Prepared Draft 互斥自然耗尽；content wire 由 v8 替代 |
 | [Camp Composer Draft v6（历史）](camp-composer-draft-v6.md) | exact Draft 经 Core 决定直接发送或私有 FIFO 入队；Pending 编辑独立于普通 Draft |
 | [Camp Composer Draft v5（历史）](camp-composer-draft-v5.md) | v4 Draft/revision 语义不变；Send 时 ingest Managed v2，最终事务原子提交 Message/ref/Delivery 且不等待 Run |

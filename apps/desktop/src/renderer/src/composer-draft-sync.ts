@@ -33,10 +33,6 @@ export interface ComposerFlushResult<Draft = unknown> {
   draft: Draft | null
 }
 
-export interface ComposerFlushOptions {
-  holdPersistence?: boolean
-}
-
 export interface ComposerDraftSyncBindings<Draft = unknown> {
   persist?: (document: ComposerDocument, context: ComposerPersistContext) => Promise<void>
   waitForAuthority?: () => Promise<void>
@@ -45,7 +41,7 @@ export interface ComposerDraftSyncBindings<Draft = unknown> {
   onSaved?: (localVersion: number) => void
   onStatusChange?: (status: ComposerLocalStatus) => void
   onDirtyChange?: (dirty: boolean) => void
-  onPersistenceStatusChange?: (status: ComposerDraftPersistenceStatus) => void
+  onPersistenceErrorChange?: (error: Error | null) => void
 }
 
 export type ComposerDraftPersistenceStatus =
@@ -89,8 +85,8 @@ export class ComposerDraftSync<Draft = unknown> {
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
   private inFlight: { epoch: number; promise: Promise<void> } | null = null
-  private persistenceHeld = false
   private persistenceStatus: ComposerDraftPersistenceStatus = { state: 'saved' }
+  private persistenceError: Error | null = null
   private contributions = new Map<NodeKey, NodeContribution>()
   private totals: NodeContribution = { ...EMPTY_CONTRIBUTION }
   private lastStatus: ComposerLocalStatus | null = null
@@ -120,9 +116,9 @@ export class ComposerDraftSync<Draft = unknown> {
     this.savingVersion = null
     this.inFlight = null
     this.retryAttempt = 0
-    this.persistenceHeld = false
     this.setDirty(false)
     this.setPersistenceStatus({ state: 'saved' })
+    this.setPersistenceError(null)
     this.rebuildContributions(editorState)
   }
 
@@ -164,47 +160,29 @@ export class ComposerDraftSync<Draft = unknown> {
     return this.statusFromTotals()
   }
 
-  async flush(options: ComposerFlushOptions = {}): Promise<ComposerFlushResult<Draft>> {
-    if (options.holdPersistence) this.persistenceHeld = true
+  async flush(): Promise<ComposerFlushResult<Draft>> {
     this.clearTimers()
     const targetVersion = this.localVersion
     const targetEditorState = this.latestEditorState
     const targetEpoch = this.epoch
+    const document = editorStateToComposerDocument(targetEditorState)
     if (this.bindings.persist) {
       const preceding = this.inFlight?.epoch === targetEpoch ? this.inFlight.promise : null
       if (preceding) await preceding.catch(() => undefined)
       this.assertEpoch(targetEpoch)
       if (this.savedVersion < targetVersion) {
-        await this.startSave(targetEpoch, targetVersion, targetEditorState, false)
+        await this.startSave(targetEpoch, targetVersion, document, false)
       }
       this.assertEpoch(targetEpoch)
     }
     await this.bindings.waitForAuthority?.()
     this.assertEpoch(targetEpoch)
     return {
-      document: editorStateToComposerDocument(targetEditorState),
+      document,
       localVersion: targetVersion,
       savedVersion: this.savedVersion,
       draft: this.bindings.currentDraft?.() ?? null
     }
-  }
-
-  resumePersistence(): void {
-    if (!this.persistenceHeld) return
-    this.persistenceHeld = false
-    if (this.bindings.persist && this.savedVersion < this.localVersion) this.scheduleSave()
-  }
-
-  advancePersistenceEpoch(savedLocalVersion = this.savedVersion): void {
-    this.clearTimers()
-    this.epoch += 1
-    this.inFlight = null
-    this.savingVersion = null
-    this.savedVersion = Math.min(savedLocalVersion, this.localVersion)
-    this.retryAttempt = 0
-    const dirty = this.localVersion > this.savedVersion
-    this.setDirty(dirty)
-    this.setPersistenceStatus(dirty ? { state: 'dirty' } : { state: 'saved' })
   }
 
   destroy(): void {
@@ -214,7 +192,6 @@ export class ComposerDraftSync<Draft = unknown> {
   }
 
   private scheduleSave(): void {
-    if (this.persistenceHeld) return
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null
@@ -239,20 +216,24 @@ export class ComposerDraftSync<Draft = unknown> {
     const existing = this.inFlight?.epoch === this.epoch ? this.inFlight.promise : null
     if (existing) return existing
     if (this.savedVersion >= this.localVersion) return
-    return this.startSave(this.epoch, this.localVersion, this.latestEditorState, true)
+    return this.startSave(
+      this.epoch,
+      this.localVersion,
+      editorStateToComposerDocument(this.latestEditorState),
+      true
+    )
   }
 
   private startSave(
     epoch: number,
     version: number,
-    editorState: EditorState,
+    document: ComposerDocument,
     allowRetry: boolean
   ): Promise<void> {
     const persist = this.bindings.persist
     if (!persist) return Promise.resolve()
     const existing = this.inFlight?.epoch === epoch ? this.inFlight.promise : null
     if (existing) return existing
-    const document = editorStateToComposerDocument(editorState)
     this.savingVersion = version
     this.setPersistenceStatus({ state: 'saving' })
     const operation = persist(document, { localVersion: version })
@@ -260,6 +241,7 @@ export class ComposerDraftSync<Draft = unknown> {
         if (epoch !== this.epoch) return
         this.savedVersion = Math.max(this.savedVersion, version)
         this.retryAttempt = 0
+        this.setPersistenceError(null)
         this.bindings.onSaved?.(version)
         const clean = this.localVersion === version
         if (clean) this.setDirty(false)
@@ -277,11 +259,11 @@ export class ComposerDraftSync<Draft = unknown> {
         this.inFlight = null
         if (epoch !== this.epoch) return
         this.savingVersion = null
-        if (!this.persistenceHeld && this.localVersion > version && this.bindings.persist) {
+        if (this.localVersion > version && this.bindings.persist) {
           void this.startSave(
             epoch,
             this.localVersion,
-            this.latestEditorState,
+            editorStateToComposerDocument(this.latestEditorState),
             true
           ).catch(() => undefined)
         }
@@ -291,13 +273,13 @@ export class ComposerDraftSync<Draft = unknown> {
   }
 
   private scheduleRetry(epoch: number): void {
-    if (this.persistenceHeld || this.retryTimer || epoch !== this.epoch) return
+    if (this.retryTimer || epoch !== this.epoch) return
     const delay = COMPOSER_DRAFT_RETRY_DELAYS_MS[this.retryAttempt]
     if (delay === undefined) return
     this.retryAttempt += 1
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
-      if (epoch !== this.epoch || this.persistenceHeld) return
+      if (epoch !== this.epoch) return
       void this.saveLatest().catch(() => undefined)
     }, delay)
   }
@@ -329,7 +311,13 @@ export class ComposerDraftSync<Draft = unknown> {
           && this.persistenceStatus.error === status.error))
     ) return
     this.persistenceStatus = status
-    this.bindings.onPersistenceStatusChange?.(status)
+    if (status.state === 'error') this.setPersistenceError(status.error)
+  }
+
+  private setPersistenceError(error: Error | null): void {
+    if (this.persistenceError === error) return
+    this.persistenceError = error
+    this.bindings.onPersistenceErrorChange?.(error)
   }
 
   private assertEpoch(epoch: number): void {

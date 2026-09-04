@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.45
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -11,7 +11,7 @@ last_updated: 2026-09-05
 
 # Rovai-ai v1.45：Composer 权威、Atom 与 Runtime 生命周期收口
 
-前置：[v1.44](../v1.44/README.md)。本版本不改变 `ComposerDocument` V2、Core Draft wire、source attachment、
+前置：[v1.44](../v1.44/README.md)。后续：[v1.46](../v1.46/README.md)。本版本不改变 `ComposerDocument` V2、Core Draft wire、source attachment、
 Reply/Continuation 或 exact-revision send 合同；它收敛 Renderer 内部的权威与高频编辑路径，消除多份完整 Draft
 缓存、文本伪装 Atom 和 Typeahead 先取全文再截断的问题。本版本同时完成 v1.44 后续发现的 Pi 控制面与公共
 Runtime Fleet 生命周期收口，不改变 Pi 已确认的原生化方向。

@@ -58,7 +58,7 @@ test('Composer edits preserve text, structured tokens and Skill query interactio
     assert.ok(reportLine, `Native Composer fixture produced no report:\n${stdout}\n${stderr}`)
     const report = JSON.parse(reportLine)
     assert.equal(report.ok, true)
-    assert.equal(report.cases.length, 23)
+    assert.equal(report.cases.length, 26)
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')

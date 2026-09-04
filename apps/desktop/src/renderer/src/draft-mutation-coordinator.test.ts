@@ -2,6 +2,7 @@ import type { CampComposerDraftView, ComposerDocument } from '@contracts'
 import { describe, expect, it, vi } from 'vitest'
 import {
   DraftMutationCoordinator,
+  draftCoordinatorChangeRefreshesProjection,
   StaleDraftEpochError,
   type DraftMutation
 } from './draft-mutation-coordinator'
@@ -28,6 +29,12 @@ function draft(campId: string, revision: number, text = ''): CampComposerDraftVi
 }
 
 describe('DraftMutationCoordinator', () => {
+  it('keeps ordinary content-save acknowledgements out of Workspace projection renders', () => {
+    expect(draftCoordinatorChangeRefreshesProjection('save_content')).toBe(false)
+    expect(draftCoordinatorChangeRefreshesProjection('add_source_attachment')).toBe(true)
+    expect(draftCoordinatorChangeRefreshesProjection('load')).toBe(true)
+  })
+
   it('serializes every mutation against the latest authoritative revision', async () => {
     const calls: Array<{ kind: DraftMutation['kind']; revision: number }> = []
     let releaseAttachment!: () => void
@@ -62,12 +69,17 @@ describe('DraftMutationCoordinator', () => {
   })
 
   it('waits for earlier mutations before deciding that a content snapshot is unchanged', async () => {
+    const changes: string[] = []
     const mutate = vi.fn(async (current: CampComposerDraftView, mutation: DraftMutation) => ({
       ...current,
       revision: current.revision + 1,
       content: mutation.kind === 'save_content' ? mutation.content : current.content
     }))
-    const coordinator = new DraftMutationCoordinator({ load: async () => draft('camp-a', 1), mutate })
+    const coordinator = new DraftMutationCoordinator({
+      load: async () => draft('camp-a', 1),
+      mutate,
+      onChange: (_draft, _epoch, kind) => changes.push(kind)
+    })
     coordinator.beginEpoch('camp-a', draft('camp-a', 4, 'same'))
 
     const reply = coordinator.startReply('message-1')
@@ -77,6 +89,26 @@ describe('DraftMutationCoordinator', () => {
     expect(mutate).toHaveBeenCalledTimes(1)
     expect(mutate.mock.calls[0]?.[0].revision).toBe(4)
     expect(await coordinator.waitForIdle()).toMatchObject({ revision: 5 })
+    expect(changes).toEqual(['begin_epoch', 'start_reply'])
+  })
+
+  it('labels content saves separately from projection-changing mutations', async () => {
+    const changes: string[] = []
+    const coordinator = new DraftMutationCoordinator({
+      load: async () => draft('camp-a', 1),
+      mutate: async (current, mutation) => ({
+        ...current,
+        revision: current.revision + 1,
+        content: mutation.kind === 'save_content' ? mutation.content : current.content
+      }),
+      onChange: (_draft, _epoch, kind) => changes.push(kind)
+    })
+    coordinator.beginEpoch('camp-a', draft('camp-a', 3, 'old'))
+
+    await coordinator.saveContent(document('new'))
+    await coordinator.addSourceAttachment({ name: 'notes.txt' } as File)
+
+    expect(changes).toEqual(['begin_epoch', 'save_content', 'add_source_attachment'])
   })
 
   it('serializes an authoritative reload with mutations that arrive while it is pending', async () => {

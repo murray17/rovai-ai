@@ -178,6 +178,44 @@ app.whenReady().then(async () => {
       ])
     })
 
+    await run('Typeahead consumes Enter synchronously while the Skill Catalog is loading', async () => {
+      await reset('请 ')
+      await insert('/work')
+      await evaluate("window.composerTest.setSkillCatalogStatus('loading')")
+      await frames()
+      await key('Enter', 13)
+      const loading = await state(false)
+      assert.equal(loading.submitCount, 0)
+      assert.deepEqual(loading.atomTypes, [])
+      assert.equal(loading.text, '请 /work')
+
+      await evaluate("window.composerTest.setSkillCatalogStatus('ready')")
+      await frames()
+      await key('Enter', 13)
+      assert.deepEqual((await state(true)).atomTypes, ['skill'])
+    })
+
+    await run('Shift Enter keeps Typeahead text and inserts a plain line break', async () => {
+      await reset('请 ')
+      await insert('@甲')
+      await key('Enter', 13, 8)
+      const current = await expectSegments([{ kind: 'text', text: '请 @甲\n' }])
+      assert.equal(current.submitCount, 0)
+      assert.deepEqual(current.atomTypes, [])
+    })
+
+    await run('imperative interaction lock blocks edits before a React render', async () => {
+      await reset('')
+      await evaluate('window.composerTest.setInteractionLocked(true)')
+      assert.equal((await state(false)).disabled, true)
+      await insert('不得写入')
+      assert.deepEqual((await state(true)).content, { version: 2, segments: [] })
+
+      await evaluate('window.composerTest.setInteractionLocked(false)')
+      await insert('可以写入')
+      await expectSegments([{ kind: 'text', text: '可以写入' }])
+    })
+
     await run('Skill trigger rejects URLs, paths and ordinary word suffixes', async () => {
       for (const text of [
         'https://example.com/a/work',

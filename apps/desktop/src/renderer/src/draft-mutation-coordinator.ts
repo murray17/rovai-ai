@@ -3,7 +3,7 @@ import type {
   CampComposerReplyRecipient,
   ComposerDocument
 } from '@contracts'
-import { composerDocumentsEqual } from './composer-document'
+import { composerDocumentsEqualDirect } from './composer-document'
 
 export type DraftMutation =
   | { kind: 'save_content'; content: ComposerDocument }
@@ -15,13 +15,28 @@ export type DraftMutation =
   | { kind: 'dismiss_continuation'; sourceCampMessageId: string }
   | { kind: 'resolve_continuation_recipient'; agentId: string }
 
+export type DraftCoordinatorChangeKind = DraftMutation['kind']
+  | 'begin_epoch'
+  | 'load'
+  | 'authoritative_replacement'
+
+export function draftCoordinatorChangeRefreshesProjection(
+  kind: DraftCoordinatorChangeKind
+): boolean {
+  return kind !== 'save_content'
+}
+
 export interface DraftMutationCoordinatorBindings {
   load(campId: string): Promise<CampComposerDraftView>
   mutate(
     currentDraft: CampComposerDraftView,
     mutation: DraftMutation
   ): Promise<CampComposerDraftView>
-  onChange?(draft: CampComposerDraftView | null, epoch: number): void
+  onChange?(
+    draft: CampComposerDraftView | null,
+    epoch: number,
+    kind: DraftCoordinatorChangeKind
+  ): void
 }
 
 export class StaleDraftEpochError extends Error {
@@ -55,7 +70,7 @@ export class DraftMutationCoordinator {
     this.campId = campId
     this.currentDraft = draft
     this.queue = Promise.resolve()
-    this.bindings.onChange?.(draft, this.epoch)
+    this.bindings.onChange?.(draft, this.epoch, 'begin_epoch')
     return this.epoch
   }
 
@@ -74,7 +89,7 @@ export class DraftMutationCoordinator {
       this.assertActive(epoch, campId)
       const loaded = await this.bindings.load(campId)
       this.assertActive(epoch, campId)
-      return this.acceptDraft(loaded, epoch, campId)
+      return this.acceptDraft(loaded, epoch, campId, 'load')
     })
     this.queue = result.then(() => undefined, () => undefined)
     return result
@@ -85,58 +100,59 @@ export class DraftMutationCoordinator {
       return this.beginEpoch(draft.campId, draft)
     }
     this.currentDraft = draft
-    this.bindings.onChange?.(draft, this.epoch)
+    this.bindings.onChange?.(draft, this.epoch, 'authoritative_replacement')
     return this.epoch
   }
 
   saveContent(content: ComposerDocument): Promise<CampComposerDraftView> {
-    return this.enqueue(async (current) => {
-      if (composerDocumentsEqual(current.content, content)) return current
+    return this.enqueue('save_content', async (current) => {
+      if (composerDocumentsEqualDirect(current.content, content)) return current
       return this.bindings.mutate(current, { kind: 'save_content', content })
     })
   }
 
   addSourceAttachment(file: File): Promise<CampComposerDraftView> {
-    return this.enqueue((current) => this.bindings.mutate(
+    return this.enqueue('add_source_attachment', (current) => this.bindings.mutate(
       current,
       { kind: 'add_source_attachment', file }
     ))
   }
 
   removeSourceAttachment(attachmentId: string): Promise<CampComposerDraftView> {
-    return this.enqueue((current) => this.bindings.mutate(
+    return this.enqueue('remove_source_attachment', (current) => this.bindings.mutate(
       current,
       { kind: 'remove_source_attachment', attachmentId }
     ))
   }
 
   startReply(replyToCampMessageId: string): Promise<CampComposerDraftView> {
-    return this.enqueue((current) => this.bindings.mutate(
+    return this.enqueue('start_reply', (current) => this.bindings.mutate(
       current,
       { kind: 'start_reply', replyToCampMessageId }
     ))
   }
 
   cancelReply(): Promise<CampComposerDraftView> {
-    return this.enqueue((current) => this.bindings.mutate(current, { kind: 'cancel_reply' }))
+    return this.enqueue('cancel_reply', (current) =>
+      this.bindings.mutate(current, { kind: 'cancel_reply' }))
   }
 
   resolveReplyRecipient(recipient: CampComposerReplyRecipient): Promise<CampComposerDraftView> {
-    return this.enqueue((current) => this.bindings.mutate(
+    return this.enqueue('resolve_reply_recipient', (current) => this.bindings.mutate(
       current,
       { kind: 'resolve_reply_recipient', recipient }
     ))
   }
 
   dismissContinuation(sourceCampMessageId: string): Promise<CampComposerDraftView> {
-    return this.enqueue((current) => this.bindings.mutate(
+    return this.enqueue('dismiss_continuation', (current) => this.bindings.mutate(
       current,
       { kind: 'dismiss_continuation', sourceCampMessageId }
     ))
   }
 
   resolveContinuationRecipient(agentId: string): Promise<CampComposerDraftView> {
-    return this.enqueue((current) => this.bindings.mutate(
+    return this.enqueue('resolve_continuation_recipient', (current) => this.bindings.mutate(
       current,
       { kind: 'resolve_continuation_recipient', agentId }
     ))
@@ -151,6 +167,7 @@ export class DraftMutationCoordinator {
   }
 
   private enqueue(
+    kind: DraftMutation['kind'],
     operation: (current: CampComposerDraftView) => Promise<CampComposerDraftView>
   ): Promise<CampComposerDraftView> {
     const epoch = this.epoch
@@ -160,13 +177,13 @@ export class DraftMutationCoordinator {
       const current = this.currentDraft ?? await this.loadForOperation(epoch, campId)
       const next = await operation(current)
       this.assertActive(epoch, campId)
-      return this.acceptDraft(next, epoch, campId)
+      return next === current ? current : this.acceptDraft(next, epoch, campId, kind)
     }).catch(async (error: unknown) => {
       if (error instanceof StaleDraftEpochError) throw error
       if (this.isActive(epoch, campId)) {
         try {
           const refreshed = await this.bindings.load(campId)
-          if (this.isActive(epoch, campId)) this.acceptDraft(refreshed, epoch, campId)
+          if (this.isActive(epoch, campId)) this.acceptDraft(refreshed, epoch, campId, 'load')
         } catch {
           // Preserve the mutation error; an explicit later operation can reload.
         }
@@ -180,20 +197,21 @@ export class DraftMutationCoordinator {
   private async loadForOperation(epoch: number, campId: string): Promise<CampComposerDraftView> {
     const loaded = await this.bindings.load(campId)
     this.assertActive(epoch, campId)
-    return this.acceptDraft(loaded, epoch, campId)
+    return this.acceptDraft(loaded, epoch, campId, 'load')
   }
 
   private acceptDraft(
     draft: CampComposerDraftView,
     epoch: number,
-    campId: string
+    campId: string,
+    kind: DraftCoordinatorChangeKind
   ): CampComposerDraftView {
     this.assertActive(epoch, campId)
     if (draft.campId !== campId) {
       throw new Error('Core returned a Composer Draft for a different Camp.')
     }
     this.currentDraft = draft
-    this.bindings.onChange?.(draft, epoch)
+    this.bindings.onChange?.(draft, epoch, kind)
     return draft
   }
 

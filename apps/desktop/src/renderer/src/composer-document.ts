@@ -74,11 +74,39 @@ function cloneComposerAtom(atom: ComposerAtom): ComposerAtom {
   return { type: 'all_members' }
 }
 
-export function composerDocumentsEqual(
+export function composerDocumentsEqualDirect(
   left: ComposerDocument,
   right: ComposerDocument
 ): boolean {
-  return JSON.stringify(normalizeComposerDocument(left)) === JSON.stringify(normalizeComposerDocument(right))
+  if (left.version !== right.version || left.segments.length !== right.segments.length) {
+    return false
+  }
+  for (let index = 0; index < left.segments.length; index += 1) {
+    const leftSegment = left.segments[index]
+    const rightSegment = right.segments[index]
+    if (!leftSegment || !rightSegment || leftSegment.kind !== rightSegment.kind) return false
+    if (leftSegment.kind === 'text') {
+      if (rightSegment.kind !== 'text' || leftSegment.text !== rightSegment.text) return false
+      continue
+    }
+    if (rightSegment.kind !== 'atom' || !composerAtomsEqual(leftSegment.atom, rightSegment.atom)) {
+      return false
+    }
+  }
+  return true
+}
+
+function composerAtomsEqual(left: ComposerAtom, right: ComposerAtom): boolean {
+  if (left.type !== right.type) return false
+  if (left.type === 'all_members') return true
+  if (left.type === 'member') {
+    return right.type === 'member'
+      && left.agentId === right.agentId
+      && left.labelFallback === right.labelFallback
+  }
+  return right.type === 'skill'
+    && left.skillId === right.skillId
+    && left.nameAtSend === right.nameAtSend
 }
 
 export function validateComposerDocument(value: unknown): value is ComposerDocument {

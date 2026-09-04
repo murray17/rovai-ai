@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-09-04
+last_updated: 2026-09-05
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -37,7 +37,9 @@ Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp Catalog 
 `@`、`@a`、`@alice` 只在折叠光标、普通 TextNode、非 composition，且 `@` 位于文本开头或允许分隔符之后时
 打开。Member 与 Skill 共用一个 Trigger Plugin 和一个 Editor update listener；查询不得跨 Atom、换行或 Paragraph，
 从当前 TextNode 的 caret 位置只分配光标左侧最多 128 个字符。方向键移动候选，Enter 选择，Esc 关闭；菜单消费
-按键时不得触发发送。
+按键时不得触发发送。Enter/Tab 的归属不读取 React `menuOpen` 或渲染后的候选数组，而由 Typeahead 的 Lexical
+critical-priority command 从当前 selection 同步重算 trigger：Catalog loading 时消费按键但不选择，ready 且有候选时
+选择当前项，无 trigger 或 ready/error 且无候选时才交给普通发送行为。
 
 选择 Member/All Members 后，匹配查询被一个 Atom 替换。右侧已有空白时复用；否则插入一个普通空格，并把
 光标放在空格之后。查询或显示文本都不构成 identity。
@@ -56,7 +58,7 @@ Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp Catalog 
 中文、日文、韩文 composition 期间，Typeahead 暂停更新，Atom 不插入，EditorState 不替换，Enter 不发送，
 也不执行 DOM selection 恢复。compositionend 后基于最终普通文本重新计算查询。
 
-- Enter：非 Shift、非 composition、菜单未消费、Composer 非空且允许发送时提交；
+- Enter：Typeahead 先同步决定是否消费；其返回 false 后，非 Shift、非 composition、Composer 非空且允许发送时提交；
 - Shift+Enter：插入 LineBreak，领域文档导出为 Text 中的 `\n`；
 - Escape：先关闭 Typeahead，再关闭 Atom 激活态，始终保留正文；
 - Arrow Up/Down：仅在 Typeahead 打开时改变候选，否则保留正常光标行为；
@@ -106,7 +108,13 @@ identity；当前 Catalog 中可恢复的引用还原为 Atom，不可恢复引�
 猜测 identity。整条历史用户消息的专用复制入口继续保留文件链接原始 target，不因显示 label 丢失路径。
 
 Draft 自动保存失败时 Composer 保留内容与 dirty 状态，显示可恢复的保存错误；当前 epoch 内可有限退避重试，发送
-必须通过显式 flush 确认持久化后继续。保存状态反馈不进入 EditorState 或 undo history。
+和 Camp 切换必须通过显式 flush 确认持久化后继续。普通 dirty/saving/saved 不提升到 Workspace，保存状态反馈不进入
+EditorState 或 undo history。正文 autosave 回执不刷新整个 Workspace；批量附件只在批次开始前 flush 一次正文。
+
+Draft 加载失败显示原位“草稿无法加载”和重新加载入口；此时正文、附件、Reply/Continuation 与发送全部禁用，不能
+用 revision-zero 空 Draft 替代错误。ContentEditable 关闭浏览器 spellcheck。发送和路由 mutation 在第一个异步等待前
+同步锁定 Lexical；Core 路由 mutation 改变 content 时在解锁前 authoritative-replace，发送成功则加载下一 Draft 后
+replace。失败保留现有正文并恢复交互。
 
 <a id="current-user-mention"></a>
 
@@ -123,7 +131,7 @@ Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内
 
 | 层级 | 权威入口 |
 | --- | --- |
-| Draft/Pending V2、identity、旧读新写与 exact revision | [Camp Composer Draft v8](../../contracts/camp-composer-draft-v8.md)与[Pending Camp Input v3](../../contracts/pending-camp-input-v3.md) |
+| Draft/Pending V2、identity、旧读新写与 exact revision | [Camp Composer Draft v9](../../contracts/camp-composer-draft-v9.md)与[Pending Camp Input v3](../../contracts/pending-camp-input-v3.md) |
 | Lexical/React/Core 所有权、局部编辑、同步与 replacement | [Composer 架构](../../architecture/camp-composer-draft.md) |
 | Reply/Continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer) |
 | Renderer 视觉、Typeahead、Popover、IME、键盘与 Clipboard | 本文 |
