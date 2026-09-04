@@ -181,8 +181,9 @@ SVG 图标，位于正文右下方且在用户消息底色之外；按钮具有 
 文件代码路径保留等宽样式，原始消息及整条消息复制内容不改写；Agent 正文使用清洗后的 GFM；Tool 输出使用结构化证据组件。
 
 当前用户与通过 Owner 校验的外部 Principal 消息整体右对齐，头像位于消息右侧，作者与时间也在右侧收口；
-正文使用 `--conversation-user-message-surface` / `--conversation-user-message-line` 的浅灰圆角底面，最大宽度约为
-同列 Composer 的三分之二。宽屏仍受可读正文上限约束，紧凑会话列按 Composer 实际内边距等比例收窄。
+正文使用 `--conversation-user-message-surface` / `--conversation-user-message-line` 的浅灰圆角底面。底面按正文
+固有宽度自然收窄，只把同列 Composer 的约三分之二作为最大宽度；短消息不得被拉伸到该上限。宽屏仍受
+可读正文上限约束，紧凑会话列按 Composer 实际内边距等比例收窄。
 Agent 消息继续左对齐并保持透明开放阅读面，不添加身份色气泡或整条消息 hover 底色。
 
 当前用户消息正文超过 20 个显式文本行时，默认只挂载前 19 行，第 20 行显示左对齐省略号；点击省略号
@@ -576,7 +577,7 @@ Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery
 [文件预览](file-preview.md#结构与布局)拥有，不新增 Sidecar 或移动端导航模式。
 
 - 时间线与 Composer 左右边距缩至 12px。Task 与 Files Changed 取消 42px 额外左缩进，使用当前正文轨道的
-  可用宽度。当前用户消息底面继续约为 Composer 可用宽度的三分之二，头像留在右侧；普通消息自然换行，
+  可用宽度。当前用户消息底面继续按内容收窄，最大不超过 Composer 可用宽度的约三分之二，头像留在右侧；普通消息自然换行，
   Markdown 表格与代码块使用自己的横向滚动。
 - Task 状态图标缩至 26px，隐藏右侧 Chevron；标题自然换行，负责人、验收条件和更新时间继续 wrap。
   状态说明标题与正文改为上下排列，任务语义不删减。

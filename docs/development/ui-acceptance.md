@@ -353,7 +353,7 @@ pnpm accept:runtime-activity-ui
 footer 保持透明、零圆角，短转交折线使用 1px Porcelain/Steel 结构线，且 footer 边界与最后一个
 正文内容元素的垂直间距不超过 4px；验收必须同时证明回复/复制使用带可访问名称的线性 SVG，位于正文
 右下方的独立操作行，键盘聚焦后可见且不覆盖收件人。当前用户消息还须证明右对齐、头像位于右侧、
-浅灰底面约为 Composer 的三分之二、整条消息 hover 不增加底色，以及超过 20 行时只显示前 19 行与
+浅灰底面按短消息内容自然收窄且最大不超过 Composer 的约三分之二、整条消息 hover 不增加底色，以及超过 20 行时只显示前 19 行与
 第 20 行省略号；复制仍为完整原文。不能只测包含隐藏控件的外层 surface。验收还必须切换到 1040×700，证明 document、timeline
 和 footer 无横向溢出且 footer 留在时间线可视区内；2K 场景还须证明 Composer 扩展不改变 footer
 阅读宽度或复制按钮定位。Run stage 也不得重新显示这些 Delivery 状态标签；

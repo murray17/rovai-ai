@@ -395,7 +395,8 @@
     .message-meta span, .message-meta time { color: var(--faint); font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
     .message-content { position: relative; width: fit-content; max-width: 100%; min-width: 0; }
     .message.user .message-content {
-      width: min(100%, var(--user-message-max-width), calc(66.667cqw - var(--user-message-width-offset)));
+      width: fit-content;
+      max-width: min(100%, var(--user-message-max-width), calc(66.667cqw - var(--user-message-width-offset)));
     }
     .agent-copy { max-width: 76ch; color: var(--ink); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
     .agent-copy p { margin: 0 0 7px; }
@@ -403,7 +404,7 @@
     .mention { color: #2f61c8; font-weight: 650; }
     :root[data-theme="night"] .mention { color: #9cc7e2; }
     .user-bubble {
-      width: 100%;
+      width: fit-content;
       max-width: 100%;
       padding: 9px 12px 10px;
       border: 1px solid var(--user-message-line);
