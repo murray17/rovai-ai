@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-31
+last_updated: 2026-09-04
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -351,9 +351,10 @@ pnpm accept:runtime-activity-ui
 `aria-haspopup="dialog"`，并分别证明鼠标点击、Enter/Space 打开既有人物信息卡、`Esc` 的焦点返回及不导航边界；
 已离开、已移除或不可解析作者不得渲染这两个按钮。
 footer 保持透明、零圆角，短转交折线使用 1px Porcelain/Steel 结构线，且 footer 边界与最后一个
-正文内容元素的垂直间距不超过 4px；验收必须同时证明透明复制入口不占据文档流，且键盘聚焦后
-可见、不覆盖收件人，并与无 footer 消息共用消息内容列右上角锚点，不能只测
-包含隐藏控件的外层 surface。验收还必须切换到 1040×700，证明 document、timeline
+正文内容元素的垂直间距不超过 4px；验收必须同时证明回复/复制使用带可访问名称的线性 SVG，位于正文
+右下方的独立操作行，键盘聚焦后可见且不覆盖收件人。当前用户消息还须证明右对齐、头像位于右侧、
+浅灰底面约为 Composer 的三分之二、整条消息 hover 不增加底色，以及超过 20 行时只显示前 19 行与
+第 20 行省略号；复制仍为完整原文。不能只测包含隐藏控件的外层 surface。验收还必须切换到 1040×700，证明 document、timeline
 和 footer 无横向溢出且 footer 留在时间线可视区内；2K 场景还须证明 Composer 扩展不改变 footer
 阅读宽度或复制按钮定位。Run stage 也不得重新显示这些 Delivery 状态标签；
 底层 Delivery、失败码与恢复事实继续保留在原有 Core Read Side。

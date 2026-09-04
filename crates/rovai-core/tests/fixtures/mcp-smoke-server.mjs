@@ -1,5 +1,5 @@
 import readline from 'node:readline'
-import { appendFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 
 const lines = readline.createInterface({
@@ -13,6 +13,11 @@ function reply(id, result) {
 
 const source = process.env.ROVAI_MCP_SMOKE_SOURCE ?? 'rovai-mcp-smoke'
 const startupMarker = process.env.ROVAI_MCP_SMOKE_STARTUP_MARKER
+const waitForStartupMarker = process.env.ROVAI_MCP_SMOKE_WAIT_FOR_STARTUP_MARKER
+const waitForStartupTimeoutMs = Number.parseInt(
+  process.env.ROVAI_MCP_SMOKE_WAIT_FOR_STARTUP_TIMEOUT_MS ?? '2000',
+  10
+)
 const pidMarker = process.env.ROVAI_MCP_SMOKE_PID_MARKER
 const callLog = process.env.ROVAI_MCP_SMOKE_CALL_LOG
 const mutationRoot = process.env.ROVAI_MCP_SMOKE_MUTATION_ROOT
@@ -23,6 +28,17 @@ lines.on('line', async (line) => {
   if (message.method === 'initialize') {
     if (startupMarker) writeFileSync(startupMarker, `${source}\n`, { mode: 0o600 })
     if (pidMarker) writeFileSync(pidMarker, `${process.pid}\n`, { mode: 0o600 })
+    if (waitForStartupMarker) {
+      const deadline = Date.now() + waitForStartupTimeoutMs
+      while (!existsSync(waitForStartupMarker) && Date.now() < deadline) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 10))
+      }
+      if (!existsSync(waitForStartupMarker)) {
+        process.exitCode = 71
+        lines.close()
+        return
+      }
+    }
     reply(message.id, {
       protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
       capabilities: { tools: {} },

@@ -396,4 +396,20 @@ describe('Agent leading Member Mention Markdown rendering', () => {
     expect(separated).toContain('data-inline-body="false"')
     expect(separated).toContain('<p>另一段 <strong>正文</strong>。</p>')
   })
+
+  it('renders a user message over 20 explicit lines as 19 lines plus an expandable ellipsis', () => {
+    const body = Array.from(
+      { length: 21 },
+      (_, index) => `COLLAPSE-LINE-${String(index + 1).padStart(2, '0')}`
+    ).join('\n')
+    const markup = renderMessage([{ kind: 'text', text: body }], body, 'user')
+
+    expect(markup).toContain('COLLAPSE-LINE-19')
+    expect(markup).not.toContain('COLLAPSE-LINE-20')
+    expect(markup).not.toContain('COLLAPSE-LINE-21')
+    expect(markup).toContain('class="message-long-toggle is-expand"')
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).toContain('aria-label="展开完整消息，共 21 行"')
+    expect(markup).toContain('>…</button>')
+  })
 })

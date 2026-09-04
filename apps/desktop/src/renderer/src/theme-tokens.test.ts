@@ -58,6 +58,9 @@ const requiredTokens = [
   '--focus',
   '--overlay',
   '--inline-code-canvas',
+  '--conversation-inline-code-canvas',
+  '--conversation-code-block-canvas',
+  '--conversation-code-line',
   '--shell-result-canvas',
   '--code-block-canvas',
   '--evidence-canvas',
@@ -124,6 +127,8 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--info', '--info-soft'],
     ['--neutral', '--neutral-soft'],
     ['--evidence-ink', '--inline-code-canvas'],
+    ['--evidence-ink', '--conversation-inline-code-canvas'],
+    ['--evidence-ink', '--conversation-code-block-canvas'],
     ['--evidence-muted', '--shell-result-canvas'],
     ['--evidence-ink', '--code-block-canvas'],
     ['--evidence-ink', '--evidence-surface'],
@@ -200,6 +205,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(day['--rail-logo']).toBe('#526f88')
     expect(day['--mention-ink']).toBe('#2f61c8')
     expect(day['--inline-code-canvas']).toBe('#e9eceb')
+    expect(day['--conversation-inline-code-canvas']).toBe('#eef0f1')
+    expect(day['--conversation-code-block-canvas']).toBe('#f4f5f5')
+    expect(day['--conversation-code-line']).toBe('#d9dee1')
     expect(day['--shell-result-canvas']).toBe('#f3f4f3')
     expect(day['--code-block-canvas']).toBe('#eef2f5')
     expect(day['--diff-add-soft']).toBe('#d9f1e2')
@@ -234,6 +242,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(night['--brand-soft']).toBe('#22303a')
     expect(night['--mention-ink']).toBe('#9cc7e2')
     expect(night['--inline-code-canvas']).toBe('#353b3f')
+    expect(night['--conversation-inline-code-canvas']).toBe('#30373b')
+    expect(night['--conversation-code-block-canvas']).toBe('#252c30')
+    expect(night['--conversation-code-line']).toBe('#3e494f')
     expect(night['--shell-result-canvas']).toBe('#373f43')
     expect(night['--code-block-canvas']).toBe('#1d252b')
     expect(night['--diff-add-soft']).toBe('#21412e')
@@ -346,22 +357,32 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.settings-content \.settings-panel\s*\{[^}]*background: var\(--home-surface\)/)
   })
 
-  it('keeps user and Agent narrative on one open surface and widens only work artifacts at 2K', () => {
+  it('keeps Agent narrative open while giving right-aligned user messages a bounded Porcelain surface', () => {
     expect(css).toMatch(/\.conversation-bubble\.agent\s*\{[^}]*--agent-accent: var\(--identity-1\)/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s*\{[^}]*background:/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s+\.final-copy\s*\{[^}]*background:/)
     expect(css).toMatch(/\.final-copy\s*\{[^}]*color: var\(--ink\)[^}]*\}/)
     expect(css).toMatch(/\.message-bubble\s*\{[^}]*max-width: min\(var\(--conversation-prose-width\), 100%\)[^}]*background: transparent/)
     expect(css).not.toMatch(/\.message-bubble\s*\{[^}]*background: var\(--brand-soft\)/)
-    expect(css).toContain('.conversation-bubble:is(.user, .agent):hover::before')
-    expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*padding-right: 76px/)
-    expect(css).toMatch(/\.message-surface\s*\{[^}]*position: static/)
+    expect(css).not.toContain('.conversation-bubble:is(.user, .agent):hover::before')
+    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\)\s*\{[^}]*margin-left: auto[^}]*grid-template-columns: minmax\(0, 1fr\) 32px/)
+    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.local-message-avatar\s*\{[^}]*grid-column: 2/)
+    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*border-radius: 12px 12px 4px 12px[^}]*background: var\(--conversation-user-message-surface\)/)
+    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-surface\s*\{[^}]*var\(--conversation-user-message-max-width\)[^}]*66\.667cqw/)
+    expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*display: flex/)
+    expect(css).not.toMatch(/\.message-body\s*\{[^}]*padding-right:/)
+    expect(css).toMatch(/\.message-surface\s*\{[^}]*position: relative[^}]*display: flex/)
     expect(css).toMatch(/\.safe-markdown code\s*\{[^}]*padding:\s*0 2px[^}]*border-radius:\s*3px[^}]*background:\s*var\(--inline-code-canvas\)/)
     expect(css).not.toMatch(/\.safe-markdown code\s*\{[^}]*\bborder\s*:/)
     expect(css).toMatch(/\.safe-markdown pre\s*\{[^}]*background:\s*var\(--code-block-canvas\)/)
     expect(css).toMatch(/\.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*background:\s*transparent/)
-    expect(css).toContain('.conversation-bubble:hover .message-copy-button')
-    expect(css).toContain('.conversation-bubble:hover .message-reply-button')
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown code\s*\{[^}]*padding:\s*1px 4px[^}]*border-radius:\s*6px[^}]*background:\s*var\(--conversation-inline-code-canvas\)[^}]*box-decoration-break:\s*clone/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre\s*\{[^}]*padding:\s*11px 12px[^}]*border-color:\s*var\(--conversation-code-line\)[^}]*border-radius:\s*8px[^}]*background:\s*var\(--conversation-code-block-canvas\)/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*border-radius:\s*0[^}]*background:\s*transparent/)
+    expect(css).toContain('.conversation-bubble:hover .message-actions')
+    expect(css).toMatch(/\.message-actions\s*\{[^}]*align-self: flex-end[^}]*margin-top: 3px/)
+    expect(css).toMatch(/\.message-copy-button,\s*\.message-reply-button\s*\{[^}]*width: 28px[^}]*height: 28px/)
+    expect(css).toMatch(/\.message-long-toggle\.is-expand\s*\{[^}]*width: 34px[^}]*height: 20\.8px/)
     expect(css).toContain('.composer-box:focus-within')
     expect(css).toContain('.composer.suppress-pointer-focus-ring .composer-box:focus-within')
     expect(css).toMatch(/\.structured-mention-editor:focus-visible\s*\{[^}]*outline:\s*0/)
@@ -370,6 +391,8 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.composer-continuation\s*\{[^}]*background:\s*transparent|\.composer-continuation\s*\{[^}]*color:/)
     expect(css).toContain('--conversation-wide-width: 1040px;')
     expect(css).toContain('--conversation-composer-width: 1040px;')
+    expect(css).toContain('--conversation-user-message-surface: #f2f3f4;')
+    expect(css).toContain('--conversation-user-message-surface: #20272c;')
     expect(css).toMatch(/\.composer-route-rail\s*\{[^}]*width:\s*min\(var\(--conversation-composer-width\), 100%\)[^}]*min-height:\s*34px/)
     expect(css).not.toContain('.message-surface.has-delivery .message-copy-button')
     expect(css).toMatch(
