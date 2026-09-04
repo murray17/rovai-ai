@@ -2,7 +2,7 @@
 document_type: versions-index
 authority: version-lifecycle
 current_version: v1.45
-last_updated: 2026-09-04
+last_updated: 2026-09-05
 ---
 
 # Rovai-ai 版本记录
@@ -196,4 +196,4 @@ last_updated: 2026-09-04
 | v1.42 | `historical` | 只有显式 Markdown 链接产生消息资源入口；共享 Markdown/代码图标与用户附件卡宽度收敛 | [v1.42/README.md](v1.42/README.md) |
 | v1.43 | `historical` | Lexical 驱动的 Text + Atom 结构化纯文本 Composer、低频 Draft Snapshot 与 V2 领域协议 | [v1.43/README.md](v1.43/README.md) |
 | v1.44 | `historical` | Pi 原生输入边界、单一完整能力启动与 Fleet 并发创建 | [v1.44/README.md](v1.44/README.md) |
-| v1.45 | `current` | Composer 单一 Draft Authority、inline Decorator Atom 与源头有界 Typeahead | [v1.45/README.md](v1.45/README.md) |
+| v1.45 | `current` | Composer 单一 Draft Authority、inline Atom，以及 Pi/Fleet 生命周期收口 | [v1.45/README.md](v1.45/README.md) |

@@ -15092,7 +15092,10 @@ async fn process_agent_run_pi_message(
     if message_type == "extension_ui_request" {
         match message.get("method").and_then(Value::as_str) {
             Some("setStatus") => return Ok(()),
-            Some("confirm") => {
+            Some("confirm")
+                if message.get("title").and_then(Value::as_str)
+                    == Some("Rovai partial approval") =>
+            {
                 process_agent_run_pi_approval_request(
                     core,
                     output,
@@ -15126,17 +15129,29 @@ async fn process_agent_run_pi_message(
             }
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
             _ => {
-                runtime.mark_failed_closed();
-                let id = message.get("id").cloned().unwrap_or(Value::Null);
-                if !id.is_null() {
-                    runtime
-                        .respond(
-                            id.clone(),
-                            json!({"type":"extension_ui_response","id":id,"cancelled":true}),
-                        )
-                        .await?;
-                }
-                anyhow::bail!("Pi emitted an unsupported Extension UI request");
+                let response = match pi::unsupported_extension_ui_cancellation(&message) {
+                    Ok(response) => response,
+                    Err(error) => {
+                        runtime.mark_failed_closed();
+                        return Err(error).context("Pi Extension UI framing is invalid");
+                    }
+                };
+                let id = response["id"].clone();
+                runtime.respond(id, response).await?;
+                emit(
+                    output,
+                    "runtime.host.log",
+                    json!({
+                        "hostInstanceId": host_instance_id,
+                        "adapterKind": AdapterKind::Pi,
+                        "stream": "diagnostic",
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "phase": "extension_ui",
+                        "text": "Pi Extension UI request was cancelled because Rovai does not map this native interaction",
+                    }),
+                );
+                return Ok(());
             }
         }
     }

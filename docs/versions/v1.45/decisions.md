@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.45
 lifecycle: current
-last_updated: 2026-09-04
+last_updated: 2026-09-05
 ---
 
 # v1.45 决定
@@ -74,3 +74,54 @@ Rovai 使用一个 React Plugin 和一个 Lexical update listener。它只接受
 - 候选 UI 仍由一个 React Portal 呈现，键盘行为与现有视觉合同不变。
 - 拒绝在 trigger callback 内才截断：那无法撤销标准插件已经完成的 prefix 分配。
 - 拒绝两套自定义 listener：Member 与 Skill 的 selection、IME、键盘和关闭语义应共享一个 owner。
+
+<a id="v1-45-d04"></a>
+## V1.45-D04：Fleet 拥有 Starting 与 Stopping operation
+
+### 背景
+
+Reserve/锁外 Spawn/Commit 只移除了 spawn 时的全局锁，却仍让第一个 `acquire()` Future 隐式拥有 Starting；该
+waiter 被取消会把 reservation 永久留在容量表。另一方面，release、idle sweep、失效和 Camp fence 仍可能在
+global operations mutex 内等待慢 Host 退出，同一 Host 的并发 stop 还可能重复发起 shutdown/reap。
+
+### 决定
+
+Starting reservation 一经创建，Fleet 立即启动自身拥有的 Startup Operation，调用方只订阅 completion。取消
+Starting 通过 operation signal 使其拒绝 commit、清理已创建 Host 并精确释放 reservation。Stop 对称采用
+`Mark Stop → Reap outside lock → Commit Stop`，每个 ProcessEntry 同时最多一个 stop operation；所有停止入口共享
+其 completion。字段和并发行为由 [Runtime Launch v35](../../contracts/runtime-launch-and-verification-v35.md)拥有。
+
+### 后果与被拒绝方案
+
+- 丢弃任意 acquire waiter 不再影响 spawn，其他同 Run waiter 仍取得同一终态。
+- 慢 Host 只占自己的 operation，不再阻塞其他 Runtime 的 acquire/release/stop。
+- stop timeout 保留 Stopping、lease 和 capacity，后续可重试；只有 exact operation 确认 reap 才删除。
+- 拒绝让 Adapter 或首个 waiter 保存 task handle：这会把公共 capacity 与 cleanup 正确性重新分散到调用方。
+- 拒绝只把 operations mutex 改成更细的锁：await 进程 I/O 的所有权问题仍然存在，也不能完成失联 waiter。
+
+<a id="v1-45-d05"></a>
+## V1.45-D05：Pi 只在最终 pre-agent seam 接受输入，并把正常控制与协议损坏分离
+
+### 背景
+
+Pi 原生 `input` pipeline 允许后续 Extension transform 或 handled 输入；Rovai 若在自己的 `input` hook 先提交
+receipt，会把没有启动 Agent Turn 的 Delivery 误记为 accepted。与此同时，one-way `abort` 带 ID 却不登记 pending，
+其正常 response 会被 reader 当成 protocol corruption；普通第三方 Extension UI 请求也会被取消后继续 poison
+Host。不同 execution epoch 的 creation gate 独立，旧请求还可能在比较 epoch 前清理新 Runtime。
+
+### 决定
+
+Managed receipt 与 Bootstrap 注入合并到 Rovai 的 `before_agent_start` hook：重新读取并验证 binding/session、观察
+三个 governed Tool、等待 Core durable nonce，成功后才追加 Bootstrap。`abort` 使用完整 request correlation，等待者
+超时后保留可消费的 late-response correlation。Pi active Runtime 在任何副作用前执行 pre-create epoch fence，并保留
+commit fence 与所有 exact Run+epoch 删除 fence。非 Rovai Extension 的未映射交互只返回 cancelled/denied；只有
+framing 或 Rovai-owned identity/schema corruption 才 fail closed。完整行为由
+[Runtime Launch v35](../../contracts/runtime-launch-and-verification-v35.md)拥有。
+
+### 后果与被拒绝方案
+
+- 更早 Extension handled 输入时不产生 receipt，Input 不会错误进入 accepted。
+- 正常 cancel 和 UI capability mismatch 不再冒充 Host failure；迟到 abort response 仍保持 JSONL framing。
+- 旧 epoch 无权 cleanup、unbind、remove 或 stop 新 epoch，创建前和提交时形成双重 fence。
+- 拒绝保留 `approvedBindingDigest` 跨 hook 授权：它证明的是过早阶段，不能证明 Agent Turn 会启动。
+- 拒绝为所有 Pi Extension 重建通用 TUI：Rovai 只拥有自己的 identity、Bootstrap、receipt 和部分审批合同。

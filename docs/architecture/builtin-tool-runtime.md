@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-09-01
+last_updated: 2026-09-05
 ---
 
 # Built-in Tool Runtime Architecture
@@ -238,13 +238,16 @@ Agent 可控的 envelope output mode、环境变量、隐藏 flag 或 `--full`�
 受管 Run 临时目录的私有 local diagnostic。该分支不改变 receipt、Replay 或
 `builtin_tool.outcome_indeterminate / confirm_outcome`。
 
+<a id="runtime-process-lease-and-camp-scope"></a>
 ## Runtime process、Lease 与 Camp scope
 
 每个受管 Runtime 根进程拥有稳定 process identity 和私有 CLI context path。Fleet acquire 为
 当前 `(agentRunId, executionEpoch)` 轮换 active lease，Core 在输入投递前完成绑定和 CLI preflight。
 Fleet 只在短临界区 Reserve/Commit；计入容量的 Starting reservation 将进程创建、协议 handshake 与必要
-health 检查移到锁外。相同 Run/epoch 等待同一 completion，不同 Run/Runtime 可并发启动；shutdown、Camp 删除或
-成员永久移除会先 fence 在途 reservation，迟到进程不能取得 lease。
+health 检查移到锁外，并由 Fleet-owned Startup Operation 推进到唯一终态；任意 acquire waiter 被 drop 不影响
+operation。相同 Run/epoch 等待同一 completion，不同 Run/Runtime 可并发启动；shutdown、Camp 删除或成员永久移除
+会向在途 reservation 发取消，迟到进程不能取得 lease。停止路径使用短锁 Mark Stopping、锁外解除 Tool lease 与
+shutdown/reap、短锁 exact-operation Commit；同 Host 并发停止共享 completion，超时继续保留 Stopping 与容量。
 release 顺序固定为：
 
 ```text

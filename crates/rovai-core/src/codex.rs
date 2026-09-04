@@ -1462,6 +1462,10 @@ impl CodexCliRuntimeAdapter {
                 .release(agent_run_id, old_epoch, FleetReleaseDisposition::Stop)
                 .await;
         }
+        let spawn_executable = PathBuf::from(&frozen_runtime.executable_path);
+        let spawn_cwd = cwd.to_path_buf();
+        let spawn_incoming = self.incoming.clone();
+        let spawn_builtin_tools = builtin_tools.clone();
         let fleet_lease = self
             .fleet
             .acquire(
@@ -1475,12 +1479,12 @@ impl CodexCliRuntimeAdapter {
                         runtime_compatibility_digest,
                     ),
                 },
-                || async {
+                move || async move {
                     let host = CodexHost::spawn_with_executable(
-                        Path::new(&frozen_runtime.executable_path),
-                        cwd,
-                        self.incoming.clone(),
-                        Some(builtin_tools.clone()),
+                        &spawn_executable,
+                        &spawn_cwd,
+                        spawn_incoming,
+                        Some(spawn_builtin_tools),
                     )
                     .await?;
                     Ok(RuntimeProcessHost::Codex(host))
