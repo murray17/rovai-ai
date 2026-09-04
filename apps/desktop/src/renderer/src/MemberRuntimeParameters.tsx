@@ -236,7 +236,6 @@ function PiRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
       {modelFieldsFor('pi', props)}
-      <PermissionSelect {...props} fieldKey="approval_mode" label="审批模式" />
     </div>
   )
 }

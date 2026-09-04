@@ -1,5 +1,5 @@
 ---
-version: 5
+version: 6
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -100,6 +100,8 @@ Pi Coding Agent is a Product Runtime with `preview` admission on macOS arm64, ma
 selectable and editable on all three platforms, append `（实验性）` to the selector label, and show the real machine
 availability independently. Preview permits normal checks and AgentRun but retains missing qualification evidence;
 do not describe it as First-Class or qualified, and do not weaken installation, model, permission or Dispatch checks.
+Pi's fixed `partial_managed` value is an internal execution contract rather than a user-selectable native approval
+mode. Its member Runtime parameters show model fields only and do not expose that value as an approval control.
 
 ## Removal
 
