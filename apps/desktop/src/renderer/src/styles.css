@@ -1809,7 +1809,7 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   background: transparent;
   cursor: pointer;
 }
-.file-preview-tab-icon { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+.file-preview-tab-icon { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; opacity: .9; }
 .file-preview-tab-label {
   min-width: 0;
   flex: 1 1 0;
@@ -2065,20 +2065,20 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
   color: var(--resource-link);
   background: transparent;
   font: inherit;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
+  text-decoration: none;
   overflow-wrap: anywhere;
   vertical-align: baseline;
   cursor: pointer;
 }
 .safe-markdown .markdown-file-reference:hover,
 .safe-markdown .markdown-web-reference:hover,
-.message-file-reference:hover { color: var(--resource-link-hover); text-decoration-color: currentColor; }
+.message-file-reference:hover,
+.safe-markdown .markdown-file-reference:active,
+.safe-markdown .markdown-web-reference:active,
+.message-file-reference:active { color: var(--resource-link-hover); text-decoration: none; }
 .safe-markdown .markdown-file-reference:focus-visible,
 .safe-markdown .markdown-web-reference:focus-visible,
-.message-file-reference:focus-visible { border-radius: 2px; outline: 2px solid var(--focus); outline-offset: 2px; }
+.message-file-reference:focus-visible { border-radius: 2px; outline: 2px solid var(--focus); outline-offset: 2px; text-decoration: none; }
 .safe-markdown .markdown-file-reference.inline-code-file-reference,
 .message-file-reference.inline-code-file-reference {
   text-decoration: none;
@@ -2092,7 +2092,7 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.5;
+  stroke-width: 1.7;
   transform: translateY(2px);
   opacity: .84;
 }
@@ -2100,13 +2100,8 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .resource-reference-label { min-width: 0; overflow-wrap: anywhere; }
 .file-reference-label.is-code { font: .9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .inline-code-file-reference:hover,
-.inline-code-file-reference:active { color: var(--resource-link-hover); }
-.inline-code-file-reference:hover .file-reference-label {
-  text-decoration-line: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
+.inline-code-file-reference:active { color: var(--resource-link-hover); text-decoration: none; }
+.inline-code-file-reference:hover .file-reference-label,
 .inline-code-file-reference:active .file-reference-label,
 .inline-code-file-reference:focus-visible .file-reference-label { text-decoration: none; }
 .file-preview-inline-error { max-width: 780px; margin: 0 auto 12px; color: var(--danger); font-size: 10px; }
