@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import type { AgentRunImageContent, AgentRunImageView, CampMessageAttachmentView } from '@contracts'
+import type {
+  AgentRunImageContent,
+  AgentRunImageView,
+  CampMessageAttachmentView,
+  LocalAttachmentOwnerLocator
+} from '@contracts'
 
 export type GalleryImage = {
   kind: 'runtime'
@@ -9,6 +14,7 @@ export type GalleryImage = {
 } | {
   kind: 'attachment'
   campId: string
+  locator: LocalAttachmentOwnerLocator
   image: CampMessageAttachmentView
 }
 
@@ -25,6 +31,14 @@ export type ImagePayload = {
 }
 
 export const MAX_IMAGE_PAYLOAD_CACHE_BYTES = 128 * 1024 * 1024
+
+function attachmentOwnerKey(locator: LocalAttachmentOwnerLocator): string {
+  if (locator.owner === 'message') return `${locator.owner}:${locator.messageId}`
+  if (locator.owner === 'pending' || locator.owner === 'pending_edit') {
+    return `${locator.owner}:${locator.pendingInputId}`
+  }
+  return locator.owner
+}
 
 export class ImagePayloadCache {
   readonly #entries = new Map<string, ImagePayload>()
@@ -72,7 +86,7 @@ const imageLoadCache = new Map<string, Promise<ImagePayload | null>>()
 export function imageCacheKey(source: GalleryImage): string {
   return source.kind === 'runtime'
     ? `runtime:${source.campId}:${source.image.id}`
-    : `attachment:${source.campId}:${source.image.id}`
+    : `attachment:${source.campId}:${attachmentOwnerKey(source.locator)}:${source.image.id}`
 }
 
 /** Preserve order within each kind while giving images and files independent layout regions. */
@@ -108,12 +122,19 @@ export async function decodeImageUrl(bytes: Uint8Array, mediaType: string): Prom
   }
 }
 
-async function readImagePayload(source: GalleryImage): Promise<ImagePayload | null> {
+async function readImagePayload(
+  source: GalleryImage,
+  onAttachmentAvailability?: (availability: CampMessageAttachmentView['availability']) => void
+): Promise<ImagePayload | null> {
   let blob: Blob
   if (source.kind === 'attachment') {
-    const preview = await window.rovai.composerAttachments.preview(source.image.id)
-    if (!preview) return null
-    blob = new Blob([Uint8Array.from(preview.bytes).buffer], { type: preview.mediaType })
+    const result = await window.rovai.composerAttachments.preview(source.locator)
+    onAttachmentAvailability?.(result.availability)
+    if (!result.preview) return null
+    blob = new Blob(
+      [Uint8Array.from(result.preview.bytes).buffer],
+      { type: result.preview.mediaType }
+    )
   } else {
     const content = await window.rovai.request<AgentRunImageContent | null>('agentRunImages.read', {
       campId: source.campId, imageId: source.image.id
@@ -130,11 +151,14 @@ async function readImagePayload(source: GalleryImage): Promise<ImagePayload | nu
 }
 
 /** Always reaches the real source, while sharing an already-running read for the same image. */
-export function fetchImagePayload(source: GalleryImage): Promise<ImagePayload | null> {
+export function fetchImagePayload(
+  source: GalleryImage,
+  onAttachmentAvailability?: (availability: CampMessageAttachmentView['availability']) => void
+): Promise<ImagePayload | null> {
   const key = imageCacheKey(source)
   const loading = imageLoadCache.get(key)
   if (loading) return loading
-  const promise = readImagePayload(source).finally(() => {
+  const promise = readImagePayload(source, onAttachmentAvailability).finally(() => {
     if (imageLoadCache.get(key) === promise) imageLoadCache.delete(key)
   })
   imageLoadCache.set(key, promise)
@@ -142,9 +166,12 @@ export function fetchImagePayload(source: GalleryImage): Promise<ImagePayload | 
 }
 
 /** Uses a completed payload when available; cold callers otherwise share the real source read. */
-export function getOrLoadImagePayload(source: GalleryImage): Promise<ImagePayload | null> {
+export function getOrLoadImagePayload(
+  source: GalleryImage,
+  onAttachmentAvailability?: (availability: CampMessageAttachmentView['availability']) => void
+): Promise<ImagePayload | null> {
   const cached = imagePayloadCache.get(imageCacheKey(source))
-  return cached ? Promise.resolve(cached) : fetchImagePayload(source)
+  return cached ? Promise.resolve(cached) : fetchImagePayload(source, onAttachmentAvailability)
 }
 
 export function cacheDecodedImagePayload(source: GalleryImage, payload: ImagePayload): void {
@@ -178,8 +205,14 @@ export function ImageGallery({
 
 function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
   const cacheKey = imageCacheKey(source)
+  const requiresExplicitLoad = source.kind === 'attachment' && source.image.availability === 'unknown'
+  const initialAvailability: CampMessageAttachmentView['availability'] = source.kind === 'attachment'
+    ? source.image.availability
+    : 'available'
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  const [loadRequested, setLoadRequested] = useState(false)
+  const [availability, setAvailability] = useState<CampMessageAttachmentView['availability']>(initialAvailability)
   const [open, setOpen] = useState(false)
   const tile = useRef<HTMLElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -206,10 +239,12 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
 
   useLayoutEffect(() => {
     setFailed(false)
+    setLoadRequested(false)
+    setAvailability(initialAvailability)
     const cached = imagePayloadCache.get(cacheKey)
     hadCachedPayload.current = Boolean(cached)
     setUrl(cached ? createOwnedUrl(cached.blob) : null)
-  }, [cacheKey, createOwnedUrl])
+  }, [cacheKey, createOwnedUrl, initialAvailability])
 
   useLayoutEffect(() => {
     const previousUrl = committedUrl.current
@@ -227,41 +262,53 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
       setFailed(true)
     }
 
-    const install = async (payload: ImagePayload): Promise<void> => {
+    const install = async (payload: ImagePayload): Promise<boolean> => {
       const candidateUrl = createOwnedUrl(payload.blob)
       try {
         await decodeObjectUrl(candidateUrl)
       } catch {
         releaseOwnedUrl(candidateUrl)
         if (active) markUnavailable()
-        return
+        return false
       }
       if (!active) {
         releaseOwnedUrl(candidateUrl)
-        return
+        return false
       }
       imagePayloadCache.put(cacheKey, payload)
       setFailed(false)
       setUrl(candidateUrl)
+      return true
     }
 
     const load = (refresh: boolean): void => {
       if (started) return
       started = true
       const request = refresh
-        ? fetchImagePayload(source)
-        : getOrLoadImagePayload(source)
+        ? fetchImagePayload(source, (next) => { if (active) setAvailability(next) })
+        : getOrLoadImagePayload(source, (next) => { if (active) setAvailability(next) })
       void request.then((payload) => {
         if (!active) return
         if (!payload) { markUnavailable(); return }
-        return install(payload)
+        setAvailability('available')
+        return install(payload).then((installed) => {
+          if (active && installed && requiresExplicitLoad) setOpen(true)
+        })
       }).catch(() => {
         if (active && !hadCachedPayload.current) setFailed(true)
       })
     }
 
+    if (requiresExplicitLoad && !loadRequested) return () => { active = false }
+
     if (hadCachedPayload.current) {
-      if (source.kind === 'runtime') load(true)
+      if (requiresExplicitLoad) return () => { active = false }
+      load(true)
+      return () => { active = false }
+    }
+
+    if (requiresExplicitLoad) {
+      load(false)
       return () => { active = false }
     }
 
@@ -271,15 +318,29 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
     if (observer && tile.current) observer.observe(tile.current)
     else load(false)
     return () => { active = false; observer?.disconnect() }
-  }, [cacheKey, createOwnedUrl, releaseOwnedUrl, source.kind])
+  }, [cacheKey, createOwnedUrl, loadRequested, releaseOwnedUrl, requiresExplicitLoad, source.kind])
+
+  const unavailableLabel = availability === 'missing'
+    ? '图片已丢失'
+    : availability === 'unreadable'
+      ? '图片不可读'
+      : availability === 'kind_changed'
+        ? '文件类型已变化'
+        : '图片已不可用'
+  const waitingForAction = requiresExplicitLoad && !loadRequested && !url && !failed
+  const loading = !url && !failed && !waitingForAction
 
   return (
     <figure className="image-tile" ref={tile}>
-      <button type="button" ref={trigger} className="image-tile-preview" disabled={!url}
-        aria-label={`查看大图 ${source.image.displayName}`} aria-busy={!url && !failed}
-        onClick={() => setOpen(true)}>
+      <button type="button" ref={trigger} className="image-tile-preview"
+        disabled={!url && !waitingForAction}
+        aria-label={waitingForAction ? `预览图片 ${source.image.displayName}` : `查看大图 ${source.image.displayName}`}
+        aria-busy={loading}
+        onClick={() => { if (url) setOpen(true); else setLoadRequested(true) }}>
         {url ? <img src={url} alt={source.image.displayName} />
-          : <span className="image-tile-placeholder">{failed ? '图片已不可用' : '正在读取图片…'}</span>}
+          : <span className="image-tile-placeholder">
+              {failed ? unavailableLabel : waitingForAction ? '点击预览图片' : '正在读取图片…'}
+            </span>}
       </button>
       {url && (
         <Dialog.Root open={open} onOpenChange={setOpen}>

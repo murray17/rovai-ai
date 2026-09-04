@@ -208,8 +208,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.46";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 87;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.47";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 88;
+const V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.46";
+const V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 87;
 const V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.45";
 const V136_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 86;
 const V135_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.44";
@@ -598,6 +600,7 @@ struct CurrentMigrationState {
     v134: bool,
     v135: bool,
     v136: bool,
+    v137: bool,
 }
 
 impl CurrentMigrationState {
@@ -676,6 +679,26 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v137 {
+            return false;
+        }
+        if contract == V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v136
                 && self.v135
@@ -2176,6 +2199,7 @@ fn pending_fast_schema_matches(
 ) -> rusqlite::Result<bool> {
     let has_fast = source.has_fast();
     let has_lifetime = source == MainCampMigrationSource::FastLifetime;
+    let has_source_attachments = load_current_migration_state(connection)?.v137;
     let normalized = |sql: &str| {
         sql.split_whitespace()
             .collect::<String>()
@@ -2211,7 +2235,28 @@ fn pending_fast_schema_matches(
                 .iter()
                 .any(|(pending, _)| pending == name);
         if required {
-            if actual.as_deref().map(&normalized) != Some(normalized(expected)) {
+            let expected = if has_source_attachments && *name == "pending_camp_input" {
+                expected.replacen(
+                    "                UNIQUE(camp_id, enqueue_sequence)",
+                    "                source_attachments_json TEXT NOT NULL DEFAULT '[]'\n\
+                        CHECK(json_valid(source_attachments_json)\n\
+                            AND json_type(source_attachments_json) = 'array'),\n\
+                    UNIQUE(camp_id, enqueue_sequence)",
+                    1,
+                )
+            } else if has_source_attachments && *name == "pending_input_edit_session" {
+                expected.replacen(
+                    "                FOREIGN KEY(camp_id, pending_input_id)",
+                    "                working_source_attachments_json TEXT NOT NULL DEFAULT '[]'\n\
+                        CHECK(json_valid(working_source_attachments_json)\n\
+                            AND json_type(working_source_attachments_json) = 'array'),\n\
+                    FOREIGN KEY(camp_id, pending_input_id)",
+                    1,
+                )
+            } else {
+                (*expected).to_string()
+            };
+            if actual.as_deref().map(&normalized) != Some(normalized(&expected)) {
                 return Ok(false);
             }
         } else if actual.is_some() {
@@ -2423,6 +2468,7 @@ pub(crate) fn classify_database_contract(
         &marker.classifier_version,
     ) || (migrations.v135 && !pi_runtime_v135_schema_matches(connection)?)
         || (migrations.v136 && !pi_runtime_v136_schema_matches(connection)?)
+        || (migrations.v137 && !source_attachment_v137_schema_matches(connection)?)
     {
         if connection_has_legacy_feishu_migration_collision(connection)?
             || main_camp_migration_collision(connection)?.is_some()
@@ -2544,6 +2590,44 @@ fn pi_runtime_v136_schema_matches(connection: &Connection) -> rusqlite::Result<b
         && transform_sql.contains("image_set_digest"))
 }
 
+fn source_attachment_v137_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    for (table, column) in [
+        ("camp_composer_draft", "source_attachments_json"),
+        ("pending_camp_input", "source_attachments_json"),
+        (
+            "pending_input_edit_session",
+            "working_source_attachments_json",
+        ),
+        ("camp_message", "source_attachments_json"),
+    ] {
+        let admitted: bool = connection.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info(?1)
+                WHERE name = ?2 AND type = 'TEXT' AND [notnull] = 1 AND dflt_value = '''[]'''
+             )",
+            params![table, column],
+            |row| row.get(0),
+        )?;
+        if !admitted {
+            return Ok(false);
+        }
+        let table_sql = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if !table_sql.is_some_and(|sql| {
+            sql.contains(&format!("json_valid({column})"))
+                && sql.contains(&format!("json_type({column}) = 'array'"))
+        }) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     if !connection_has_admissible_data_contract(connection)? {
@@ -2554,7 +2638,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 136)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2638,7 +2722,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 133),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 134),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 135),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 136)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 136),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)
         "#,
         [],
         |row| {
@@ -2710,6 +2795,7 @@ fn load_current_migration_state(
                 v134: row.get(64)?,
                 v135: row.get(65)?,
                 v136: row.get(66)?,
+                v137: row.get(67)?,
             })
         },
     )
@@ -5186,6 +5272,12 @@ impl Database {
             if !self.schema_migration_applied(136)? {
                 migration_step!("migration_136", self.migrate_pi_native_capabilities_v136());
             }
+            if !self.schema_migration_applied(137)? {
+                migration_step!(
+                    "migration_137",
+                    self.migrate_source_path_user_attachments_v137()
+                );
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -5773,6 +5865,12 @@ impl Database {
         }
         if !self.schema_migration_applied(136)? {
             migration_step!("migration_136", self.migrate_pi_native_capabilities_v136());
+        }
+        if !self.schema_migration_applied(137)? {
+            migration_step!(
+                "migration_137",
+                self.migrate_source_path_user_attachments_v137()
+            );
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -21114,8 +21212,8 @@ impl Database {
              SET contract_version = ?1, projection_schema_version = ?2,
                  updated_at = datetime('now') WHERE singleton = 1",
             params![
-                CURRENT_DATA_CONTRACT_VERSION,
-                CURRENT_PROJECTION_SCHEMA_VERSION
+                V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             ],
         )?;
         transaction.execute(
@@ -21132,6 +21230,56 @@ impl Database {
         {
             anyhow::bail!("v136 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_source_path_user_attachments_v137(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if contract != V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || schema != V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
+        {
+            anyhow::bail!(
+                "Source-path User Attachment migration requires the exact preceding data contract"
+            );
+        }
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp_composer_draft
+                ADD COLUMN source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(source_attachments_json)
+                    AND json_type(source_attachments_json) = 'array');
+            ALTER TABLE pending_camp_input
+                ADD COLUMN source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(source_attachments_json)
+                    AND json_type(source_attachments_json) = 'array');
+            ALTER TABLE pending_input_edit_session
+                ADD COLUMN working_source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(working_source_attachments_json)
+                    AND json_type(working_source_attachments_json) = 'array');
+            ALTER TABLE camp_message
+                ADD COLUMN source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(source_attachments_json)
+                    AND json_type(source_attachments_json) = 'array');
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.47', projection_schema_version = 88,
+                updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES(137, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -25832,7 +25980,34 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v136_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            "ALTER TABLE camp_composer_draft DROP COLUMN source_attachments_json;
+             ALTER TABLE pending_camp_input DROP COLUMN source_attachments_json;
+             ALTER TABLE pending_input_edit_session DROP COLUMN working_source_attachments_json;
+             ALTER TABLE camp_message DROP COLUMN source_attachments_json;
+             DELETE FROM schema_migration WHERE version = 137;
+             UPDATE rovai_data_contract
+             SET contract_version = 'v1.46', projection_schema_version = 87
+             WHERE singleton = 1;",
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v136_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 136)",
@@ -28248,6 +28423,7 @@ mod tests {
             v134: version >= 134,
             v135: version >= 135,
             v136: version >= 136,
+            v137: version >= 137,
         }
     }
 
@@ -28353,6 +28529,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                137,
+            ),
+            (
+                "v1.46/schema-87 before Source-path User Attachments",
+                V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 136,
             ),
             (
@@ -28728,7 +28910,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(136);
+        let current = migration_state_through(137);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -28744,7 +28926,16 @@ mod tests {
         missing_pi_migration.v135 = false;
         let mut missing_pi_native_capabilities = current;
         missing_pi_native_capabilities.v136 = false;
+        let mut missing_source_attachments = current;
+        missing_source_attachments.v137 = false;
         let rejected = [
+            (
+                "current marker without Source Attachment migration",
+                missing_source_attachments,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Pi native-capabilities migration",
                 missing_pi_native_capabilities,
@@ -29012,7 +29203,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(136));
+        assert_eq!(state, migration_state_through(137));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -31437,7 +31628,34 @@ mod tests {
         database.migrate_pi_runtime_v135().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_pi_native_capabilities_v136().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_source_attachment_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 137 BEGIN SELECT RAISE(ABORT, 'Source Attachment receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_source_path_user_attachments_v137()
+                .unwrap_err()
+                .to_string()
+                .contains("Source Attachment receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(137).unwrap());
+        assert!(
+            database
+                .connection()
+                .prepare("SELECT source_attachments_json FROM camp_composer_draft")
+                .is_err()
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_source_attachment_receipt")
+            .unwrap();
+        database
+            .migrate_source_path_user_attachments_v137()
+            .unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        assert!(source_attachment_v137_schema_matches(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(before, after.0);
@@ -31468,6 +31686,52 @@ mod tests {
                 .prepare("SELECT observed_service_tier FROM runtime_usage_run_summary")
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn v137_adds_source_ref_owners_without_reclassifying_legacy_prepared_drafts() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        downgrade_current_schema_to_v136_source_for_test(database.connection());
+        let camp_id = "rvcamp_01m2j4wz7xn8q3k5s6t9v0abcd";
+        crate::camp_attachment::insert_test_camp(&database, camp_id);
+        database.connection().execute(
+            "INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
+             VALUES (?1, 'legacy draft', '2026-09-04T00:00:00Z', '2026-09-04T00:00:00Z', '2026-09-11T00:00:00Z')",
+            [camp_id],
+        ).unwrap();
+        database
+            .connection()
+            .execute(
+                "INSERT INTO prepared_attachment(
+                id, camp_id, ordinal, display_name, media_type, byte_size,
+                content_digest, storage_path, preview_kind, state, created_at, updated_at
+             ) VALUES (
+                '00000000-0000-4000-8000-000000000137', ?1, 0, 'legacy.txt',
+                'text/plain', 6, ?2, '/tmp/legacy-prepared-v137.txt', 'none', 'ready',
+                '2026-09-04T00:00:00Z', '2026-09-04T00:00:00Z'
+             )",
+                params![camp_id, "1".repeat(64)],
+            )
+            .unwrap();
+
+        database
+            .migrate_source_path_user_attachments_v137()
+            .unwrap();
+
+        let (source_json, prepared_path): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT draft.source_attachments_json, prepared.storage_path
+             FROM camp_composer_draft AS draft
+             JOIN prepared_attachment AS prepared ON prepared.camp_id = draft.camp_id
+             WHERE draft.camp_id = ?1",
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(source_json, "[]");
+        assert_eq!(prepared_path, "/tmp/legacy-prepared-v137.txt");
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
     }
 
     #[test]

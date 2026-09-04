@@ -38,7 +38,9 @@ export function parseDesktopAttachmentTarget(
   return target as DesktopAttachmentTarget
 }
 
-export function attachmentOpenResultFromNativeError(error: string): AttachmentOpenResult {
+export function attachmentOpenResultFromNativeError(
+  error: string
+): Omit<AttachmentOpenResult, 'availability'> {
   return error
     ? { opened: false, error: 'open_failed' }
     : { opened: true, error: null }
@@ -50,7 +52,7 @@ export async function openDesktopAttachmentTarget(
     confirm(displayName: string): Promise<boolean>
     openPath(path: string): Promise<string>
   }
-): Promise<AttachmentOpenResult> {
+): Promise<Omit<AttachmentOpenResult, 'availability'>> {
   try {
     if (target.openRisk === 'confirm' && !(await actions.confirm(target.displayName))) {
       return { opened: false, error: null }
@@ -67,7 +69,7 @@ export async function revealDesktopAttachmentTarget(
     canReveal(path: string): Promise<boolean>
     revealPath(path: string): void
   }
-): Promise<AttachmentRevealResult> {
+): Promise<Omit<AttachmentRevealResult, 'availability'>> {
   try {
     if (!(await actions.canReveal(target.path))) {
       return { revealed: false, error: 'reveal_failed' }

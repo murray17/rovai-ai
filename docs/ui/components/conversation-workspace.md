@@ -37,7 +37,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v15](../../contracts/camp-open-projection-v15.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -648,30 +648,35 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 
 ### Composer 附件
 
-文件和目录都进入当前 Draft。preparing/error 附件阻止发送；目录保存为一个只读快照附件，原文件
-不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
-视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
-占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v7](../../contracts/camp-attachment-v7.md)，发送边界见
-[Camp Composer Draft v4](../../contracts/camp-composer-draft-v4.md)。
+文件和目录都以原位置引用进入当前 Draft；只有没有本地路径的粘贴图片或 Blob 才先写入 OS Temp。
+短暂 preparing 表示 Core 正在接纳引用，不表示创建内容快照；preparing/error 附件阻止发送。正文非空或
+至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽视觉控件。纯附件消息
+保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成占位正文。原文件随后
+修改会影响后续读取，移动、删除或失去权限可以使引用不可用。拖放命中、反馈和卡片合同见
+[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
+[Camp Attachment v8](../../contracts/camp-attachment-v8.md)，发送边界见
+[Camp Composer Draft v7](../../contracts/camp-composer-draft-v7.md)。
 
 准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
 独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除
 按钮固定在每项右上角。超宽时隐藏视觉滚动条，保留触控板水平滚动；普通鼠标的主滚轮在附件带仍有可滚空间
 时转为横向浏览。附件带本身可聚焦，并以 Left/Right 分段浏览、Home/End 到首尾，不抢占移除按钮的键盘入口。
 
-Timeline Attachment Card 必须投影 `runtimeProjectionState`。`pending | recovery_required` 使用低强调的
-“正在准备供队员读取”，不得伪造百分比或进度；`failed` 明确显示“队员读取不可用”。该状态只描述队员
-Runtime View，不禁用用户对仍完整 Authority Attachment 的预览、打开或显示所在位置。状态使用既有
-Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不暴露 Authority/View 路径或内部 operation ID。
+Renderer 对新 source refs、Managed v2 和 legacy 附件只消费同一个无路径 View，不显示或分支判断底层
+storage model。历史加载时 `availability = unknown`，不得为了填充附件卡而批量 `stat`、启动 watcher 或
+持久化状态。用户执行预览、打开或显示所在位置后，当前卡片才按该次结果更新为 available、missing、
+unreadable 或 kind_changed；重新读取历史仍从 unknown 开始。状态使用既有 Porcelain Day / Steel Night
+语义 token，不引入新的视觉世界，也不暴露 source、Authority/View 路径或内部 operation ID。
 
 普通文件单击继续进入应用内文件预览或受控系统打开，目录单击在 Finder / 文件资源管理器中打开。Timeline
 文件项右键菜单提供同一
 主动作和“在 Finder / 文件资源管理器中显示”；菜单支持键盘循环、Escape 关闭、collision handling 与关闭后
 焦点回到真实卡片。执行中单卡防重复提交；目标 parent 不可枚举、target 消失或 native 请求失败时均显示固定
 的无路径提示，不把 best-effort Shell dispatch 当作文件管理器已确认选择。高风险文件由 Desktop Main 使用原生
-确认，不在 Renderer 判断。Composer Prepared Attachment 保持既有预览/移除交互，不复用 Timeline open API。
-精确安全与结果合同见 [Camp Attachment v7](../../contracts/camp-attachment-v7.md)。
+确认，不在 Renderer 判断。Composer 附件保持既有预览/移除交互；所有动作都提交 composer、pending、
+pending_edit 或 message 的精确 owner locator，不提交路径。
+精确动作与结果合同见 [File Preview v5](../../contracts/file-preview-v5.md)和
+[Camp Attachment v8](../../contracts/camp-attachment-v8.md)。
 
 ## 空 Camp 欢迎状态
 
@@ -755,7 +760,8 @@ Composer 输入和 Runtime 进度刷新不重新解析正文未变的历史 Mark
 
 队列正文和行背景仅展示，不响应编辑；只有右侧独立的 24px 小铅笔按钮在同一个输入位置打开编辑。
 普通草稿独立保留，结束编辑后恢复；删除使用相邻的独立按钮。编辑正文继续使用 StructuredMentionComposer，
-支持 @成员、@所有队员及取消已有 Reply。保存不能提交空消息，并保留原队列位置。切换编辑项或关闭编辑
+支持 @成员、@所有队员及取消已有 Reply。Pending 行展示附件；编辑时可继续选择、粘贴或拖入附件，并可
+预览、移除和调整顺序。正文和附件不能同时为空，纯附件保存有效并保留原队列位置。切换编辑项或关闭编辑
 遇到未保存修改时提供“保存 / 放弃修改 / 继续编辑”，不静默丢弃。
 
 Core 编辑占用跨重启保留，刷新或重新进入 Camp 不自动认领或释放；恢复条提供“重新编辑 / 放弃未保存修改 / 删除”。
@@ -767,5 +773,7 @@ Composer 点击一次“停止”后，必须等当前执行完全停止，才�
 仍等待现有编辑、审批、恢复或运行状态结算。队首发送失败时原位展示错误，用户编辑保存后自动再次准入，
 或删除后让下一条继续；不隐藏失败、不自动重试，也不让后续消息越过队首。
 
-普通草稿带有附件而需要排队时禁用提交并说明“暂不支持排队附件，草稿已保留”。待发送编辑禁用按钮、
-粘贴和拖放附件。持久化和原子发布由 [Pending Camp Input v1](../../contracts/pending-camp-input-v1.md) 拥有。
+需要排队时，正文、附件、Reply/Continuation intent 与 Execution Request 作为完整发送意图一起进入 Pending；
+文件不移动。Cancel 放弃 working refs 并保留 Pending canonical refs；Delete 取消整条 Pending 并释放编辑占用。
+队首发布前发现附件缺失、不可读或 kind 变化时进入 `needs_repair` 并继续阻塞 FIFO，编辑保存或删除后再推进。
+持久化和原子发布由 [Pending Camp Input v2](../../contracts/pending-camp-input-v2.md) 拥有。

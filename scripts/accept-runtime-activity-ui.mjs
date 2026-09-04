@@ -2419,8 +2419,8 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
   const dayPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
   assertConversationDropPresentation(dayPresentation, 'day 1440x920', 308)
   assert([
-    '文件夹将保存为只读快照，原文件不会移动',
-    '支持文件与文件夹 · 将安全复制到附件队列'
+    '将引用此文件夹的当前位置，不会移动原文件',
+    '支持文件与文件夹 · 原位置移动或删除后可能不可用'
   ].includes(dayPresentation.directoryCopy),
   `The drag affordance did not explain directory support: ${JSON.stringify(dayPresentation)}`)
   const dayDraggingCapture = join(capturesDirectory, 'conversation-drop-zone-day-1440x920.png')
@@ -2433,7 +2433,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     return !document.querySelector('.conversation-drop-layer')
       && Boolean(card?.querySelector('.attachment-folder-glyph'))
       && card?.textContent?.includes('3 个文件')
-      && card?.textContent?.includes('只读快照')
+      && !card?.textContent?.includes('只读快照')
   })()`, 30_000)
   const draft = await evaluate(cdp,
     `window.rovai.request('camp.composerDraft.get', { campId: ${JSON.stringify(campId)} })`,
@@ -2445,7 +2445,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     && directoryAttachment?.mediaType === 'inode/directory'
     && directoryAttachment?.previewKind === 'none'
     && directoryAttachment?.byteSize > 0,
-  `Prepared directory attachment did not preserve its explicit model: ${JSON.stringify(draft)}`)
+  `Source directory attachment did not preserve its display metadata: ${JSON.stringify(draft)}`)
   const readyCapture = join(capturesDirectory, 'conversation-drop-zone-ready-directory.png')
   await capture(cdp, readyCapture)
 

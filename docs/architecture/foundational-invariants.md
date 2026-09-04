@@ -112,22 +112,22 @@ last_updated: 2026-09-04
 
 ### Composer Draft 与用户发送
 
-- 每个 Camp 至多一个 Core-owned Composer Draft。Draft 保存 Structured Content、准备中的附件、reply intent、显式接收者修复状态和 recipient continuation，并以统一 revision、恢复、过期和消费边界保持用户私有编辑状态。
-- Composer 提交只能引用精确 Draft revision。Core 准入后直接物化 CampMessage、附件和执行意图，或原子转入私有 Pending Camp Input；两种成功都消费 Draft，冲突或拒绝不部分消费。用户消息、Agent 消息和系统来源都保存封闭、版本化的 Structured Content，而不是依赖 Renderer Markdown 推断身份。
-- 用户 Draft 的 rendered body 非空或至少一个 Prepared Attachment 为 `ready` 时才可发送；两者同时为空继续拒绝。纯附件 accepted 消息忠实保存空 body 与空 Structured Content，不生成占位正文，并沿用同一 publication、consume、CampTurn 与 AgentRun 原子边界。
+- 每个 Camp 至多一个 Core-owned Composer Draft。Draft 保存 Structured Content、用户 source attachment refs、reply intent、显式接收者修复状态和 recipient continuation，并以统一 revision、恢复、过期和消费边界保持用户私有编辑状态；升级前 Prepared rows 只作为互斥 legacy Draft 自然耗尽。
+- Composer 提交只能引用精确 Draft revision。Core 准入后直接物化 CampMessage、source refs 和执行意图，或把完整意图原子转入私有 Pending Camp Input；两种成功都消费 Draft，冲突或拒绝不部分消费。用户消息、Agent 消息和系统来源都保存封闭、版本化的 Structured Content，而不是依赖 Renderer Markdown 推断身份。
+- 用户 Draft 的 rendered body 非空或至少一个 source/legacy attachment 时才可发送；两者同时为空继续拒绝。纯附件 accepted 消息忠实保存空 body 与空 Structured Content，不生成占位正文，并沿用同一 consume、CampTurn 与 AgentRun 原子边界。
 - Reply 是持久双意图：引用同 Camp 可回复消息，并从其最终冻结寻址推导接收者；引用失效时必须显式修复，不能静默退回 Default Lead。单一非 Lead 显式收件人可形成下一空白 Draft 的 continuation，Agent 发言、Default、Broadcast、多收件人或 Lead 消息不会推进该候选。
-- 私有 Pending 不进入公共时间线、History 或 Runtime Context。Renderer 先等 Core 决定入队或发布；只有具有正式 Message 身份的输入才展示为消息。Pending 原子发布、FIFO、编辑占用与暂停见 [Pending Camp Input v1](../contracts/pending-camp-input-v1.md)。
+- 私有 Pending 不进入公共时间线、History 或 Runtime Context。Renderer 先等 Core 决定入队或发布；只有具有正式 Message 身份的输入才展示为消息。Pending 原子保存 source refs，working refs 受 edit token/revision 约束；FIFO、编辑与 needs-repair 见 [Pending Camp Input v2](../contracts/pending-camp-input-v2.md)。
 
 <a id="camp-resources"></a>
 
 ### 附件、首次运行与删除
 
-- Camp Attachment 是 `file | directory` 封闭联合。Core 负责分类、无 symlink 遍历、限制、复制、摘要和只读快照；一个目录作为一个层级附件全成全败，包含隐藏项和空目录。
-- Prepared Attachment、Agent workspace 与 `ROVAI_RUN_TMP` ingress 在发送前只供 Core 使用。所有新写入在 Send 时复制一次到 Camp-scoped Managed Attachment v2；commit 后的 `managed_attachment` 是 Camp 公共资源，`camp_message_attachment_ref` 只表达有序引用。消息寻址、Prompt、Run、Conversation 或 Session 都不把 Camp-public 资源变成 Context-private capability。
-- Managed v2 payload 是唯一长期物理副本，位于既有 Runtime Camp `attachments/.managed-v2/` 根并保存强制 digest/tree receipt。Runtime 被视为可信的同 UID 本地程序；只读 mode 防误写而非强隔离，没有第二份 Authority 自动重建。显式 preview/open/reveal 仍重验 exact Camp/Attachment、路径、类型与 receipt；Renderer 不接收本地路径或原始系统错误。
-- Managed v2 使用 durable ingest intent、quota reservation、私有同卷 staging、no-replace promote、final reverify/fsync 与最终 SQLite semantic commit。它不取得 legacy View write admission，不等待 quiescence/AgentRun，不推进 generation，不停止或 fence 已运行 Run，也不创建 `projection_blocked` Delivery；新 Delivery 直接进入普通 Dispatch Pump。
-- Context、Camp History 与 Camp Open 对 v2 只查持久 metadata 并组合路径，不 `stat/open/read_dir/digest` payload。文件后来不可读时由 Runtime 原生工具失败；Context 不生成 unavailable descriptor/Run Fact，也不据此改写全局附件状态。
-- 历史 `message_attachment`、Authority 与 Published Attachment View 保持只读兼容，不批量迁移、不双写。Legacy writer intent、generation、recovery 与 `projection_blocked` 只收口既有 v1 operation；View verifier 忽略 `.managed-v2` 保留子树。旧 Camp 无需转换历史附件即可发送新 v2 消息和继续运行。
+- 用户 Camp Attachment 是 owner JSON 内的 `file | directory` source path ref，不是附件实体或 Rovai 文件资产。Native File 直接保存绝对路径，pathless bytes/Blob 只写一次 OS Temp；Core 观察 kind/展示 metadata，但不复制到长期附件目录，不计算 digest，不冻结或监控内容。
+- Composer、Pending、Pending Edit 与 CampMessage 分别保存 source refs。成功入队/发布只复制 JSON；新用户输入不写 `prepared_attachment`、`managed_attachment`、`message_attachment`、`camp_message_attachment_ref`，也不进入 Managed v2 ingest、staging/promote、catalog 或 reconciler。
+- 用户 source ref 明确接受弱持久性：原文件修改会影响后续读取，移动、删除、失权或 OS Temp 清理可使访问失败，不同 Run 可以看到不同内容。发布前只检查 exists/readable/kind；历史读取统一投影 `availability = unknown`，只有 preview/open/reveal 按动作检查且不持久化状态。Renderer 从不接收本地路径或 storage-model discriminator。
+- Runtime source resolver 比较 canonical source 与 canonical executionRoot：contained 时返回原 path，其他来源普通复制到当前 `ROVAI_RUN_TMP/source-attachments`。该 copy 失败即使 AgentRun 失败，不回滚 Message、不回写数据库；不增加 Runtime policy、copy budget/quota、目录 catalog 或附件专属 Temp 生命周期。
+- Agent file ingress、Agent 产物和既有 compatible data继续使用 Managed v2 的 durable intent、digest/receipt、私有同卷 staging、no-replace promote 与长期 Camp payload；它们不得被误接回 Desktop 新用户输入链路。
+- 历史 `prepared_attachment`、`message_attachment`、Authority 与 Published Attachment View 不迁移、不双写。Legacy Prepared Draft 只能编辑正文、删除旧附件、直接发送或丢弃；不得新增 Prepared/source ref 或进入新附件 Pending flow，删除最后一个旧附件后自然转为 source-ref mode。
 - 首次安装训练进度由 Electron Main 的私有版本化 Desktop 状态拥有，但 fresh/existing admission 只使用 Full Core
   已准入的 authority origin：全新初始化进入训练，existing/migrated grandfather 为既有安装；文件名存在性、sidecar
   或探测失败都不能代替该结论。损坏偏好使用内存默认、告警并保留原文件。正常 Provisioning 通过可重试 checkpoint
@@ -263,7 +263,7 @@ last_updated: 2026-09-04
 - 完整可执行文件 hash 不在消息发送热路径。安装、更新、受管迁移、轻量身份变化或用户显式检查才使用标准 SHA-256；成功后保存路径、hash、size、mtime 和平台文件 ID。执行边界先比较轻量身份，未变则不重读文件；变化时完整 hash 仍匹配冻结 fingerprint 才可更新轻量身份并继续。校验失败是已持久消息之后的诚实执行结果，不撤销消息。
 - 每个正式 AgentRun 独占一个 Runtime 进程，内部作业使用临时独占进程；Adapter 明确声明哪些 Runtime 可进入 IdleWarm，one-shot/Burst 终态后关闭。Native Session 连续性不授予并行共享进程的资格。
 - `AgentRuntimeFleetManager` 是唯一正式进程所有者，内聚 spawn/reuse/stop/reap、唯一 lease、Resident accounting、TTL/LRU/Sweeper、Core generation 与崩溃清理。Adapter 生成 opaque compatibility digest 并证明 health/quiescence；Manager 不解析模型、权限、MCP 或 Runtime 私有字段。所有事件、释放、取消与迟到回调必须匹配不可复制的 `process_id + agent_run_id + execution_epoch + lease_generation`。
-- Reusable Host 的 `ROVAI_RUN_TMP` 使用进程稳定 exact path，但每次 bind 必须在 active lease/context 前 fail-closed 清空、重建并恢复私有权限；unbind/fence best-effort 清理不能替代下一 bind 重置。所有 Adapter 只把 execution workspace、当前 Camp exact attachment root 和该 exact writable Run tmp 交给 Runtime，不暴露 process root/父目录；file ingress 同时绑定 process、lease generation、Run、epoch 与 exact root。
+- Reusable Host 的 `ROVAI_RUN_TMP` 使用进程稳定 exact path，但每次 bind 必须在 active lease/context 前 fail-closed 清空、重建并恢复私有权限；unbind/fence best-effort 清理不能替代下一 bind 重置。所有 Adapter 只把 execution workspace、当前 Camp exact attachment root 和该 exact writable Run tmp 交给 Runtime，不暴露 process root/父目录；Core 把 executionRoot 外的用户 source attachment 临时复制到该 Run tmp 后只交付最终字符串路径，Adapter 不解析 source/Temp/Managed 差异。Agent file ingress 同时绑定 process、lease generation、Run、epoch 与 exact root。
 - IdleWarm 默认必须精确匹配 `camp_id + agent_profile_id + runtime_compatibility_digest`；只有能证明完整 Session teardown/rebind 和跨 scope 无泄漏的 Adapter 才可声明另一种复用 identity。此时 Fleet 必须把复用 identity、Resident quota bucket 与当前 Camp/member invalidation scope 分开，并在每次独占领取时更新 invalidation scope，不能以跨 scope 复用为由绕过 Camp 删除或成员永久移除。process digest 与 Native Session binding digest 是不同身份。Resident 的 scope/global 配额只约束跨 Run 保留的 IdleWarm/BusyResident/Stopping，不阻止无兼容 Resident 时创建本 Run 独占且终态即关闭的 Burst。acquire 在一个锁下原子选择兼容空闲进程、Resident 容量或 Burst，必要时按 LRU 淘汰空闲 Resident。
 - Runtime compatibility 必须绑定 Camp Published Attachment View contract 4、精确 `attachments` root 与 `live_append_v1` visibility mode；新 Run 不绑定 legacy generation，不取得 legacy read admission，也不因 unresolved publication/writer state触发 dispatch-time rebuild。Legacy View mutation gate/generation 仅收口升级前遗留 publication 与 cleanup。Runtime 不能收到 instance/Camps parent、其他 Camp 或 Authority attachment root。
 - Run 结束只有在输入结果已知、输出和 tool work 收敛、Team/Run lease 已解绑且 Adapter 能证明进程 quiescent/healthy 时才可进入 IdleWarm；否则必须关闭。Fleet 启动时必须同时启动单调时间 TTL 与 LRU Sweeper，配置变更、Camp 删除、成员永久移除、不健康和容量回收也会立即使精确 scope 失效/停止；已冻结活跃 Run 只标记 run 后退役，不被容量策略中断。
@@ -333,7 +333,7 @@ last_updated: 2026-09-04
 ### ContextManifest 与结构化 Run Facts
 
 - ContextManifest、模型输入 bytes、Runtime Input Delivery Evidence 和 Native Session/Run 状态是四个独立权威。Manifest 冻结模型实际可见选择、formatter/profile/section 版本、来源 digest、遗漏、水位和 exact compact payload digest；交付 evidence 记录 Runtime 实际接受。日志摘要、Run 状态或 Manifest 本身不能互相代替。
-- Manifest 的附件 receipt 对成功解析的 legacy v1 引用冻结 Camp ID、稳定相对 View path 与 attachment semantic identity；无成功 legacy 引用时使用 `catalogRevision = -1` 的 no-legacy sentinel，不读取当前 View。Managed v2 identity/path 由 attachment refs冻结，不进入 legacy catalog。inode/device/file ID、root/Entry identity、publication operation、physical generation 与 physical catalog 不进入模型或新的 dispatch 前置条件。
+- Manifest 的附件 receipt 对成功解析的 legacy v1 引用冻结 Camp ID、稳定相对 View path 与 attachment semantic identity；无成功 legacy 引用时使用 `catalogRevision = -1` 的 no-legacy sentinel，不读取当前 View。Managed v2 identity/path 由 attachment refs冻结，不进入 legacy catalog。新用户 source refs 不扩展该 receipt：Core 在每次 Run 解析触发 Message refs，把原路径或 Run-local 路径追加到既有 `CURRENT_INPUT.attachments: string[]`；公共 Context shape 和 Adapter contract 不变。inode/device/file ID、root/Entry identity、publication operation、physical generation 与 physical catalog 不进入模型或新的 dispatch 前置条件。
 - 模型投影可以 compact，但不得丢失、重命名或自由文本化 authoritative fact。稳定产品规则留在 Session Charter，per-Run 事实只出现一次；每个 schema/formatter/profile/manifest/section 版本跟随实际 owner 独立推进，不用一个全局数字伪造同步升级。
 - Shared Conversation 始终属于一个 Camp，动态 continuation 使用有界公共消息而不复制私有历史。每个新 Run 的 closed、typed `RUN_FACTS` 必须包含当前 Camp exact Published Attachment root、enumerate/read、scope 与 read-only 事实；Task reference、Session continuity、accepted-input/outcome uncertainty、Gather generation 和 delegation budget 继续作为可选事实。字段缺失与值 unknown 必须可区分。
 - Self-active Task snapshot 只选当前成员在当前 Camp 显式负责的非终态 Task，按 Profile 的稳定 order/limit/budget priority 冻结。真实空集合产生显式 empty snapshot；候选存在但被上限/预算全部排除时整段省略并记 aggregate omitted count，不泄露被排除 ID。Renderer/Skill 不得临时改排序。
@@ -540,6 +540,7 @@ last_updated: 2026-09-04
 
 - 正式产品名是 **Rovai-ai**，仓库/package slug 为 `rovai-ai`，普通内部命名使用 `rovai`，Rust package/crate/executable 使用 `rovai-core` / `rovai_core`。旧 namespace 只在受控迁移或外部兼容边界保留。
 - 普通导航使用“置顶 / 项目”投影：directory-backed Project 与 Quick Chat 分组来自 Camp workspace read model。设置在同一侧栏槽位以显式模式覆盖，不创造第二导航真源。
+- Core 拥有 Project 聚合、Project 内 Camp 最近活动顺序和活动字段；当前设备的 Sidecar Project 行顺序由 Main-owned `navigation.json` nullable `projectOrder` 拥有。schema 2 用户第一次进入时按当时 Core Project 数组冻结，之后只保留既有项相对顺序、追加新项并清理消失项；消息活动不得移动 Project。
 - Navigation 新鲜度采用事件驱动为主、前台约 20 秒安全刷新兜底；隐藏时暂停周期与后台 retry，focus 后立即重读。并发、trailing generation 与失败退避由 [Desktop Navigation Refresh](desktop-navigation-refresh.md) 统一拥有。
 - Sidebar wordmark 是展示资产，不定义产品领域身份；Core 健康和诊断只从诊断入口读取，不常驻普通导航制造伪状态。
 

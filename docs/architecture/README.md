@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # 长期系统架构
@@ -16,7 +16,7 @@ last_updated: 2026-09-03
 | [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting、Process/Outcome/Tool-Use Judge、Tool Interaction、typed Resource 与 paired counterfactual 模块 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
 | [Desktop App Updates](desktop-app-updates.md) | Main 单一更新快照、完成后递归调度、检查来源合并、提醒代次、显式下载/安装、Renderer 深链与 updater-first 受控退出边界 |
-| [Desktop Navigation Refresh](desktop-navigation-refresh.md) | Core 提交后失效提示、Renderer 全局 generation drain、失败退避、可见性与低频安全刷新边界 |
+| [Desktop Navigation Refresh](desktop-navigation-refresh.md) | Core 提交后失效提示、Renderer 全局 generation drain、Main-owned Sidecar Project 首次冻结/成员同步、失败退避、可见性与低频安全刷新边界 |
 | [Availability-first Runtime](availability-first-runtime.md) | Desktop bootstrap/full-core 分层、data-dir lease、SQLite 准入票据、copy migration、Supervisor generation/revision 与请求 fencing |
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | 十五项固定 Agent CLI operation、`camp.read` 安全 Timeline 默认、single-Camp History target、safe Agent output projection、Core Router、Runtime Fleet、精确 help、Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
@@ -33,9 +33,9 @@ last_updated: 2026-09-03
 | [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、durable shutdown cycle、退出时 AgentRun 全量取消、product fence 启动补偿、分层 deadline、route reap 与 Desktop child-exit 边界 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共 Structured Message、统一历史 publication seam、canonical/line-leading display-name addressing、正交 Current User Attention、forward/caller-return Delivery、原子通知、Context gate 与 UI projection 边界 |
 | [Camp Activation Lifecycle](camp-activation-lifecycle.md) | 一键 Pending、Composer Draft、Navigation、Restorable Location、首消息原子激活与启动清理的组件权威 |
-| [Camp Composer Draft](camp-composer-draft.md) | Structured Content、附件、持久 reply/continuation、显式接收者修复、发送物化、exact-revision user send 与 timeline projection 的组件权威 |
+| [Camp Composer Draft](camp-composer-draft.md) | Structured Content、source refs、Pending/working refs、持久 reply/continuation、显式接收者修复、exact-revision user send 与 timeline projection 的组件权威 |
 | [Camp Open Read Path](camp-open-read-path.md) | Desktop 两阶段冷启动壳层、enter/reconcile、不读 event_log 的业务 open projection、渐进消息、当前会话精确查找/anchored 定位、Run detail、high-water/cache 与 meaningful-paint 后台维护边界 |
-| [Camp Attachments 与 Legacy Published View](camp-published-attachment-view.md) | Managed v2 单副本 ingest、无 Run 等待的普通 Delivery、DB-only Context 路径，以及 legacy Authority/View 只读兼容与清理边界 |
+| [Camp Attachments：Source Refs、Agent Managed Artifacts 与 Legacy View](camp-published-attachment-view.md) | Desktop 用户 source refs、Pending 原生携带、Run-local resolver、Agent Managed v2 及 legacy Authority/View 兼容边界 |
 | [First-run Onboarding](first-run-onboarding.md) | Full Core authority-origin 首次安装 admission、schema 2 三页状态、无 Runtime 延后完成、幂等 provisioning 与 Draft-only 第四页边界 |
 | [File Preview](file-preview.md) | 消息引用存在性准入、共享资源视觉类型、Core 领域来源、Main 既有 classifier、具体文件能力/窗口句柄/重开、分页读取、显式目录 Root Grant、root watcher、HTML 文档目录协议与资源生命周期 |
 | [当前基础架构不变量](foundational-invariants.md) | Core、Camp、身份、协作、Runtime、Context、Memory、Skill、Evidence、Qualification 与 Renderer 的跨主题当前规范内核 |

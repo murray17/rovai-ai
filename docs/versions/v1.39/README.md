@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.39
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
@@ -104,6 +104,7 @@ Schema 87`：receipt reader 接受历史 V1 与当前 V2、Writer 只写 V2；�
 
 ## References
 
+- 下一版本：[v1.40](../v1.40/README.md)
 - [实施与验收](implementation-plan.md)
 - [模型上下文变更 revision 3](model-context-change-pi-managed-system-prompt.md)
 - [Parity Matrix](../../research/pi-runtime-reintegration-parity-matrix.md)

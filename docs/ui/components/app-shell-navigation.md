@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-08-31
+last_updated: 2026-09-04
 ---
 
 # App Shell 与统一侧栏
@@ -18,6 +18,12 @@ last_updated: 2026-08-31
 普通侧栏依次显示置顶内容和 Project。每个 Project 行负责展开/折叠，不显示独立折叠图标；
 右侧仅保留项目级 `＋` 与三点菜单。标题与“查看更多 / 收起”不显示 Camp 数量。当前 Project
 使用中性 `--surface-selected` 与短 Steel rail；Hover 不能是发现行操作的唯一方式。
+
+Sidecar Project 行在升级后保持稳定位置。合法旧偏好第一次进入时按用户当时看到的 Project 顺序冻结；
+之后现有 Project 保持原相对顺序，新发现或重新恢复的 Project 追加到末尾，已消失或从本机移除的
+Project 可以清理。老 Project 收到新消息、开始或结束 Run、更新活动时间或未读状态时都不能移动行。
+这些活动只继续影响该 Project 内 Camp 的最近活动排序、时间与状态反馈。刚选择且尚无 Camp 的空 Project
+同样追加到现有 Project 末尾。
 
 Camp 行显示稳定标题和必要状态。三点菜单是置顶/取消置顶、重命名、复制会话 ID 和删除的唯一
 入口；复制只写稳定 Camp ID 原文。Camp 顶栏不得重复这些操作。

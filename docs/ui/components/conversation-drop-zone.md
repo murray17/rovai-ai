@@ -4,7 +4,7 @@ authority: camp-conversation-drop-zone
 status: accepted
 design_direction: porcelain-day-steel-night
 implementation_status: complete
-last_updated: 2026-08-20
+last_updated: 2026-09-04
 ---
 
 # Camp 会话区文件与文件夹拖放
@@ -15,8 +15,9 @@ ordinary Camp 的附件放置命中面是主会话列的完整两行：消息时
 Approval/Runtime Recovery Dock 和 Composer。左侧导航、右侧 Inspector、Execution Drawer、Dialog、
 Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不因本功能改变。
 
-拖放只修改当前 Core-owned Draft，不发送消息、不移动宿主文件管理器中的原项目，也不改变光标、Mention/Skill
-候选或 Inspector 状态。可见 Execution Drawer 保持可读且不关闭当前消息的接收面；Popover 打开时底层接收面关闭。
+拖放只修改当前 Core-owned Draft，不发送消息、不移动或复制宿主文件管理器中的原项目，也不改变光标、
+Mention/Skill 候选或 Inspector 状态。运行中和已有 Pending 时仍可拖入；用户点击发送后，附件引用随完整
+意图进入 Pending。可见 Execution Drawer 保持可读且不关闭当前消息的接收面；Popover 打开时底层接收面关闭。
 
 ## Drag feedback
 
@@ -25,8 +26,8 @@ Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不�
   与导航保持原色。
 - 原时间线、Agent 执行台、Execution Drawer 与 Composer 输入内容保持可读，不 blur、不重排、不隐藏。居中浮层使用
   308×92px 紧凑卡，主文案固定为“松手添加到当前消息”。
-- 单个目录能由 Chromium entry 明确识别时，次文案为“文件夹将保存为只读快照，原文件不会移动”；
-  其他 payload 使用“支持文件与文件夹 · 将安全复制到附件队列”，不猜测。
+- 单个目录能由 Chromium entry 明确识别时，次文案为“将引用此文件夹的当前位置，不会移动原文件”；
+  其他 payload 使用“支持文件与文件夹 · 原位置移动或删除后可能不可用”，不猜测。
 - Composer 使用 Steel 边框和 focus ring，并在顶缘显示“将添加到这条消息”；Composer 整体不得浮在
   统一接收层之上而截断 wash 或虚线框，也不得用不透明遮罩覆盖正文、Mention 或已有附件。
 - 指针进入 Inspector 或其他非接收面时立即退出；主会话列子节点之间移动使用短延迟边界收敛，
@@ -34,13 +35,14 @@ Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不�
   drag-over 心跳超时后自行清除。Overlay 必须 `pointer-events: none`。
 - `aria-live="polite"` 宣告已进入当前消息附件区域；视觉状态不能只依赖颜色。
 
-## Prepared cards
+## Source-reference cards
 
-- 放下后 Drag feedback 立即消失，附件队列按宿主文件管理器提供的顺序出现 preparing 卡；任一 preparing/error
-  继续阻止发送。
-- 普通文件沿用现有文件/图片卡。目录卡使用文件夹图标，preparing 文案为“正在创建只读快照…”。
-- Ready 目录卡固定显示“`{fileCount} 个文件 · {byteSize} · 只读快照`”，计为一个顶层附件。
-- symlink、特殊节点及各类超限使用原位有界错误；不显示绝对路径，不用 Toast 代替附件卡状态。
+- 放下后 Drag feedback 立即消失，附件带按宿主文件管理器提供的顺序出现短暂 preparing 卡；任一
+  preparing/error 继续阻止发送。preparing 只表示 Core 正在接纳路径引用，不表示扫描或复制内容。
+- 普通文件沿用现有文件/图片卡。目录卡使用文件夹图标，preparing 文案为“正在添加文件夹…”，Ready 后
+  仍计为一个顶层附件，不展示快照、catalog 或复制进度。
+- Core 接纳失败使用原位有界错误；卡片不显示绝对路径，不用 Toast 代替附件卡状态。
+- Ready 引用不承诺文件永久可用。发送前和显式 preview/open/reveal 会重新检查；历史读取本身不访问文件系统。
 
 ## Layout and themes
 

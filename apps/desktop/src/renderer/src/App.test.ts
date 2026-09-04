@@ -1782,9 +1782,7 @@ describe('task event projections', () => {
           mediaType: 'text/plain',
           byteSize: 12,
           previewKind: 'none',
-          state: 'ready',
-          errorMessage: null,
-          createdAt: '2026-07-30T09:59:00Z'
+          availability: 'available'
         }],
         continuationIntent: null,
         replyIntent: {
@@ -1900,9 +1898,7 @@ describe('task event projections', () => {
         mediaType: 'text/plain',
         byteSize: 12,
         previewKind: 'none',
-        state: 'ready',
-        errorMessage: null,
-        createdAt: '2026-08-20T00:00:00Z'
+        availability: 'available'
       }],
       replyIntent: null,
       continuationIntent: null,
@@ -4119,17 +4115,17 @@ describe('task event projections', () => {
   it('keeps image and file regions separate and orders them by author intent', () => {
     const attachments: CampMessageView['attachments'] = [{
       id: 'file-first', displayName: 'report.pdf', kind: 'file', fileCount: 1,
-      mediaType: 'application/pdf', byteSize: 1200, previewKind: 'none', runtimeProjectionState: 'available'
+      mediaType: 'application/pdf', byteSize: 1200, previewKind: 'none', availability: 'available'
     }, {
       id: 'image-second', displayName: 'preview.png', kind: 'file', fileCount: 1,
-      mediaType: 'image/png', byteSize: 2400, previewKind: 'image', runtimeProjectionState: 'available'
+      mediaType: 'image/png', byteSize: 2400, previewKind: 'image', availability: 'available'
     }, {
       id: 'opaque-image', displayName: 'corrupt.webp', kind: 'file', fileCount: 1,
-      mediaType: 'image/webp', byteSize: 1800, previewKind: 'none', runtimeProjectionState: 'available'
+      mediaType: 'image/webp', byteSize: 1800, previewKind: 'none', availability: 'available'
     }]
     const renderGroups = (presentation: 'user' | 'agent') => renderToStaticMarkup(createElement(
       MessageAttachmentGroups,
-      { attachments, campId: 'camp', presentation, onNotify: vi.fn() }
+      { attachments, campId: 'camp', messageId: 'message-1', presentation, onNotify: vi.fn() }
     ))
 
     const userMarkup = renderGroups('user')
@@ -4165,7 +4161,7 @@ describe('task event projections', () => {
         mediaType: 'text/plain',
         byteSize: 12,
         previewKind: 'none',
-        runtimeProjectionState: 'pending'
+        availability: 'unknown'
       }, {
         id: 'attachment-timeline-failed',
         displayName: '不可用.txt',
@@ -4174,7 +4170,7 @@ describe('task event projections', () => {
         mediaType: 'text/plain',
         byteSize: 8,
         previewKind: 'none',
-        runtimeProjectionState: 'failed'
+        availability: 'unreadable'
       }],
       addressMode: 'default',
       addressedAgentIds: ['agent_1'],
@@ -4228,10 +4224,10 @@ describe('task event projections', () => {
     expect(markup).toContain('class="message-attachments user-message-attachments" aria-label="消息附件"')
     expect(markup).toContain('title="说明.txt">说明</strong>')
     expect(markup).toContain('>TXT</span>')
-    expect(markup).toContain('正在准备供队员读取')
-    expect(markup).toContain('队员读取不可用')
-    expect(markup).toContain('attachment-projection-pending')
-    expect(markup).toContain('attachment-projection-failed')
+    expect(markup).not.toContain('正在准备供队员读取')
+    expect(markup).toContain('文件无法读取')
+    expect(markup).not.toContain('attachment-projection-')
+    expect(markup).toContain('attachment-availability-unreadable')
     expect(markup).toContain('aria-label="使用系统应用打开 说明.txt"')
     expect(markup).toContain('aria-label="使用系统应用打开 不可用.txt"')
     expect(markup).not.toContain('aria-label="使用系统应用打开 不可用.txt" disabled=""')
