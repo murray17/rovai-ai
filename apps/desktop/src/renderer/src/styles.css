@@ -3191,7 +3191,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   align-self: flex-end;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
+  gap: 0;
   margin-top: 3px;
   opacity: 0;
   pointer-events: none;
@@ -3202,19 +3202,25 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   width: fit-content;
   align-self: flex-start;
   justify-content: flex-start;
+  margin-left: -5px;
 }
 .agent-message-output > .agent-message-output-actions {
   width: fit-content;
   align-self: auto;
   justify-content: flex-start;
-  margin: 3px 0 0 42px;
+  margin: 3px 0 0 37px;
 }
 .conversation-bubble.agent .message-actions .copy-feedback,
-.agent-message-output > .agent-message-output-actions .copy-feedback { order: 3; }
+.agent-message-output > .agent-message-output-actions .copy-feedback {
+  order: 3;
+  margin-right: 0;
+  margin-left: 3px;
+}
 .conversation-bubble:hover .message-actions,
 .conversation-bubble:focus-within .message-actions,
 .agent-message-output:hover > .message-actions,
-.agent-message-output:focus-within > .message-actions {
+.agent-message-output:focus-within > .message-actions,
+.message-actions.is-persistent {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
@@ -3237,7 +3243,8 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   user-select: none;
 }
 .message-copy-button svg,
-.message-reply-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
+.message-reply-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
+.message-copy-button + .message-reply-button { margin-left: 1px; }
 .message-copy-button:hover,
 .message-reply-button:hover { border-color: var(--line); color: var(--brand-ink); background: var(--surface-hover); }
 .message-surface.copied .message-copy-button,
@@ -3252,6 +3259,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   display: inline-flex;
   min-height: 22px;
   align-items: center;
+  margin-right: 3px;
   padding: 3px 6px;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -3267,16 +3275,25 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .message-surface.copied .copy-feedback,
 .message-actions.copied .copy-feedback { opacity: 1; transform: translateY(0); }
 .message-long-copy { min-width: 0; }
-.message-long-ellipsis {
-  display: block;
-  width: 34px;
-  height: 20.8px;
-  margin: 0;
-  padding: 0 4px 2px 0;
+.message-long-toggle {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 0 -4px -5px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 5px;
   color: var(--muted);
-  font: 700 17px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 1px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 680;
 }
+.message-long-toggle:hover { background: var(--surface-hover); }
+.message-long-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.message-long-toggle svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; transition: transform 120ms ease; }
+.message-long-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 
 .run-stopped-event {
   display: grid;
@@ -4238,6 +4255,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .message-actions,
   .message-copy-button,
   .message-reply-button,
+  .message-long-toggle svg,
   .copy-feedback { transition: none; }
 }
 @media (min-width: 1800px) {
@@ -8132,7 +8150,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .timeline-scroll { padding-right: 12px; padding-left: 12px; }
   .task-event-card,
   .run-file-changes-card { width: 100%; margin-left: 0; }
-  .agent-message-output > .agent-message-output-actions { margin-left: 0; }
+  .agent-message-output > .agent-message-output-actions { margin-left: -5px; }
   .task-event-card { grid-template-columns: 26px minmax(0, 1fr); gap: 8px; padding: 10px; }
   .task-card-glyph { width: 26px; height: 26px; border-radius: 7px; }
   .task-card-glyph svg { width: 17px; height: 17px; }
