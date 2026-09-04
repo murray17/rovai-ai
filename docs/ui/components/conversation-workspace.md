@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Camp 会话工作区
@@ -258,15 +258,20 @@ panel 顶部先显示标题，再显示单聊对象选择栏和直接“结束�
 Conversation、Binding 或 Session 状态。选择器和用户消息使用既有执行浮层的 `--execution-running-surface` 分层，
 不能新增主题专属色值。
 
-transcript 采用对话式双轨：用户纯文本消息居右，队员回复居左；正文区两侧都不显示头像。队员一次回复由“执行过程 +
+transcript 采用对话式双轨：用户正文与附件居右，队员回复居左；正文区两侧都不显示头像。用户正文继续使用既有执行
+浮层的 `--execution-running-surface`，队员消息容器不使用背景、边框或气泡，只以开放排版承载执行过程与 final。队员一次回复由“执行过程 +
 final message”组成。运行中过程复用当前执行台的 narration、plan、command/tool 与状态视觉；连续 Command 聚合为一个
 可展开的“已执行 x 项操作”，而不是平铺多个重边框卡片。运行中默认展开，用户仍可主动收起；Run 进入 terminal 后
 过程自动折叠，summary 使用中文：成功为“工作了 {时长}”，取消为“你在 {时长}后停止了运行”，失败保持明确失败语义。
 summary 下方以一条分隔线连接始终展开的 final message；不得把 final 收进执行 disclosure，也不得保留英文
 “Working for / You stopped after”。取消或失败没有 final 时只显示诚实终态，不合成队员答案。
 
+Single Chat Composer 与当前 Camp Composer 使用同一输入框风格和操作层级：输入区、附件入口、待发送附件卡片、
+“↵ 发送 · ⇧↵ 换行”提示与“发送”按钮。支持文件选择、粘贴文件和仅附件消息；附件暂存与已发送附件都只展示在
+当前私有 Conversation，不复用公屏 Draft。`Enter` 发送、`Shift+Enter` 换行，IME 合成期间不提交。
+
 同一段 Single Chat 有非终态 Run 时 Composer 禁止提交下一条，并把主要动作替换为“停止”；停止只结束当前回复，
-对话仍可继续。输入支持 `Command/Ctrl + Enter`，发送后回到最新；后台 Evidence 更新仅在用户原本接近底部时跟随，
+对话仍可继续。发送后回到最新；后台 Evidence 更新仅在用户原本接近底部时跟随，
 用户上滚阅读时不得抢走位置。选择另一个对象恢复其 active transcript 或创建新 transcript，UI 不区分这两种内部结果。
 
 “结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，

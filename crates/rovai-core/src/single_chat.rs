@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -6,6 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::resolve_frozen_runtime,
+    camp_attachment::PreparedAttachmentView,
     collaboration::{append_domain_event, build_effective_config},
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -13,7 +16,10 @@ use crate::{
     },
     db::Database,
     execution_budget::freeze_camp_turn_execution_budget,
-    read_model::{AgentRunExecutionEvidenceView, public_execution_evidence_for_agent_run},
+    read_model::{
+        AgentRunExecutionEvidenceView, CampMessageAttachmentView,
+        public_execution_evidence_for_agent_run,
+    },
     runtime::{recompute_camp_turn, settle_abortive_agent_run_in_tx},
 };
 
@@ -41,6 +47,8 @@ pub struct SendSingleChatMessageCommand {
     pub camp_id: String,
     pub conversation_id: String,
     pub body: String,
+    #[serde(default)]
+    pub attachment_ids: Vec<String>,
     pub expected_conversation_version: i64,
 }
 
@@ -79,7 +87,7 @@ pub struct SingleChatConversationView {
     pub ended_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatMessageView {
     pub id: String,
@@ -87,6 +95,7 @@ pub struct SingleChatMessageView {
     pub author_type: String,
     pub author_id: String,
     pub body: String,
+    pub attachments: Vec<CampMessageAttachmentView>,
     pub agent_run_id: Option<String>,
     pub created_at: String,
 }
@@ -113,6 +122,7 @@ pub struct SingleChatRunView {
 pub struct SingleChatSnapshot {
     pub conversation: SingleChatConversationView,
     pub messages: Vec<SingleChatMessageView>,
+    pub prepared_attachments: Vec<PreparedAttachmentView>,
     pub agent_runs: Vec<SingleChatRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
 }
@@ -222,8 +232,11 @@ impl SingleChatService {
         database: &mut Database,
         envelope: &CommandEnvelope<SendSingleChatMessageCommand>,
     ) -> Result<CommandExecution> {
-        if envelope.payload.body.trim().is_empty() {
-            anyhow::bail!("Single Chat body must not be empty");
+        if envelope.payload.body.trim().is_empty() && envelope.payload.attachment_ids.is_empty() {
+            anyhow::bail!("Single Chat body and attachments must not both be empty");
+        }
+        if envelope.payload.attachment_ids.len() > 10 {
+            anyhow::bail!("Single Chat accepts at most 10 attachments per message");
         }
         if envelope.payload.body.chars().count() > 100_000 {
             anyhow::bail!("Single Chat body exceeds the 100000-character limit");
@@ -262,6 +275,11 @@ impl SingleChatService {
                     "Single Chat target is not an active Camp member",
                 ));
             }
+            let prepared_attachments = load_prepared_attachment_rows(
+                transaction,
+                &target.conversation_id,
+                &envelope.payload.attachment_ids,
+            )?;
             let busy_run = transaction
                 .query_row(
                     "SELECT id, status FROM agent_run WHERE conversation_id = ?1 AND invocation_kind = 'single_chat' AND status IN ('queued', 'running', 'waiting') ORDER BY created_at, id LIMIT 1",
@@ -442,6 +460,13 @@ impl SingleChatService {
                     now,
                 ],
             )?;
+            consume_prepared_attachments(
+                transaction,
+                &target,
+                &conversation_message_id,
+                prepared_attachments,
+                &now,
+            )?;
             append_domain_event(
                 transaction,
                 "single_chat.message_sent",
@@ -455,6 +480,7 @@ impl SingleChatService {
                     "campTurnId": camp_turn_id,
                     "agentRunId": agent_run_id,
                     "publicBoundary": target.current_public_boundary_sequence,
+                    "attachmentIds": envelope.payload.attachment_ids,
                 }),
             )?;
             append_domain_event(
@@ -568,6 +594,10 @@ impl SingleChatService {
                 )?;
                 cancelled_agent_run_id = Some(agent_run_id);
             }
+            transaction.execute(
+                "DELETE FROM single_chat_prepared_attachment WHERE conversation_id = ?1",
+                [&target.conversation_id],
+            )?;
             append_domain_event(
                 transaction,
                 "single_chat.ended",
@@ -650,6 +680,37 @@ impl SingleChatService {
         let Some(conversation) = conversation else {
             return Ok(None);
         };
+        let mut attachments_by_message = {
+            let mut statement = database.connection().prepare(
+                r#"
+                SELECT conversation_message_id, id, display_name, kind, file_count,
+                       media_type, byte_size, preview_kind
+                FROM single_chat_message_attachment
+                WHERE conversation_id = ?1
+                ORDER BY conversation_message_id, position, id
+                "#,
+            )?;
+            let mut grouped: HashMap<String, Vec<CampMessageAttachmentView>> = HashMap::new();
+            for row in statement.query_map([conversation_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    CampMessageAttachmentView {
+                        id: row.get(1)?,
+                        display_name: row.get(2)?,
+                        kind: row.get(3)?,
+                        file_count: row.get::<_, i64>(4)?.max(0) as u64,
+                        media_type: row.get(5)?,
+                        byte_size: row.get(6)?,
+                        preview_kind: row.get(7)?,
+                        runtime_projection_state: "available".to_string(),
+                    },
+                ))
+            })? {
+                let (message_id, attachment) = row?;
+                grouped.entry(message_id).or_default().push(attachment);
+            }
+            grouped
+        };
         let messages = {
             let mut statement = database.connection().prepare(
                 r#"
@@ -667,8 +728,38 @@ impl SingleChatService {
                         author_type: row.get(2)?,
                         author_id: row.get(3)?,
                         body: row.get(4)?,
+                        attachments: attachments_by_message
+                            .remove(&row.get::<_, String>(0)?)
+                            .unwrap_or_default(),
                         agent_run_id: row.get(5)?,
                         created_at: row.get(6)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let prepared_attachments = {
+            let mut statement = database.connection().prepare(
+                r#"
+                SELECT id, display_name, kind, file_count, media_type,
+                       byte_size, preview_kind, created_at
+                FROM single_chat_prepared_attachment
+                WHERE conversation_id = ?1
+                ORDER BY ordinal, id
+                "#,
+            )?;
+            statement
+                .query_map([conversation_id], |row| {
+                    Ok(PreparedAttachmentView {
+                        id: row.get(0)?,
+                        display_name: row.get(1)?,
+                        kind: row.get(2)?,
+                        file_count: row.get::<_, i64>(3)?.max(0) as u64,
+                        media_type: row.get(4)?,
+                        byte_size: row.get::<_, i64>(5)?.max(0) as u64,
+                        preview_kind: row.get(6)?,
+                        state: "ready".to_string(),
+                        error_message: None,
+                        created_at: row.get(7)?,
                     })
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
@@ -718,6 +809,7 @@ impl SingleChatService {
         Ok(Some(SingleChatSnapshot {
             conversation,
             messages,
+            prepared_attachments,
             agent_runs,
             execution_evidence,
         }))
@@ -733,6 +825,100 @@ struct ActiveTarget {
     last_message_sequence: i64,
     current_public_boundary_sequence: i64,
     native_binding_generation: i64,
+}
+
+#[derive(Debug)]
+struct PreparedAttachmentRow {
+    id: String,
+    display_name: String,
+    kind: String,
+    file_count: i64,
+    media_type: String,
+    byte_size: i64,
+    content_digest: String,
+    storage_path: String,
+    preview_kind: String,
+}
+
+fn load_prepared_attachment_rows(
+    transaction: &Transaction<'_>,
+    conversation_id: &str,
+    requested_attachment_ids: &[String],
+) -> Result<Vec<PreparedAttachmentRow>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT id, display_name, kind, file_count, media_type, byte_size,
+               content_digest, storage_path, preview_kind
+        FROM single_chat_prepared_attachment
+        WHERE conversation_id = ?1
+        ORDER BY ordinal, id
+        "#,
+    )?;
+    let rows = statement
+        .query_map([conversation_id], |row| {
+            Ok(PreparedAttachmentRow {
+                id: row.get(0)?,
+                display_name: row.get(1)?,
+                kind: row.get(2)?,
+                file_count: row.get(3)?,
+                media_type: row.get(4)?,
+                byte_size: row.get(5)?,
+                content_digest: row.get(6)?,
+                storage_path: row.get(7)?,
+                preview_kind: row.get(8)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let stored = rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>();
+    let requested = requested_attachment_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if stored != requested {
+        anyhow::bail!("Single Chat attachments changed before send");
+    }
+    Ok(rows)
+}
+
+fn consume_prepared_attachments(
+    transaction: &Transaction<'_>,
+    target: &ActiveTarget,
+    conversation_message_id: &str,
+    rows: Vec<PreparedAttachmentRow>,
+    now: &str,
+) -> Result<()> {
+    for (position, row) in rows.into_iter().enumerate() {
+        transaction.execute(
+            r#"
+            INSERT INTO single_chat_message_attachment(
+                id, camp_id, conversation_id, conversation_message_id, position,
+                display_name, kind, file_count, media_type, byte_size,
+                content_digest, storage_path, preview_kind, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            "#,
+            params![
+                row.id,
+                target.camp_id,
+                target.conversation_id,
+                conversation_message_id,
+                position as i64,
+                row.display_name,
+                row.kind,
+                row.file_count,
+                row.media_type,
+                row.byte_size,
+                row.content_digest,
+                row.storage_path,
+                row.preview_kind,
+                now,
+            ],
+        )?;
+    }
+    transaction.execute(
+        "DELETE FROM single_chat_prepared_attachment WHERE conversation_id = ?1",
+        [&target.conversation_id],
+    )?;
+    Ok(())
 }
 
 fn load_active_target(
@@ -909,6 +1095,7 @@ mod tests {
         collaboration::{CollaborationService, CreateCampCommand},
         command::CommandResultStatus,
         runtime::{ExecutionRuntimeService, SucceedAgentRunCommand},
+        single_chat_attachment::SingleChatAttachmentStore,
     };
 
     fn user_envelope<P>(command_id: &str, camp_id: Option<&str>, payload: P) -> CommandEnvelope<P> {
@@ -995,6 +1182,7 @@ mod tests {
                         camp_id: camp_id.to_string(),
                         conversation_id: conversation_id.to_string(),
                         body: "请检查这一处设计".to_string(),
+                        attachment_ids: Vec::new(),
                         expected_conversation_version: version,
                     },
                 ),
@@ -1334,5 +1522,80 @@ mod tests {
             "single-chat-send-after-restart",
         );
         assert_eq!(next.result.status, CommandResultStatus::Accepted);
+    }
+
+    #[test]
+    fn private_attachments_are_consumed_by_one_message_and_projected_only_for_its_run() {
+        let (mut database, camp_id) = fixture();
+        let service = SingleChatService::default();
+        let (conversation_id, version) = open(
+            &service,
+            &mut database,
+            &camp_id,
+            "single-chat-open-attachment",
+        );
+        let store = SingleChatAttachmentStore::new(database.directory());
+        let source = database.directory().join("private-input.md");
+        std::fs::write(&source, b"private single chat attachment").unwrap();
+        let plan = store
+            .plan_prepare_from_path(
+                &database,
+                &conversation_id,
+                version,
+                &source,
+                "private-input.md",
+            )
+            .unwrap();
+        let prepared = store.prepare_from_path_filesystem(plan).unwrap();
+        store
+            .commit_prepared_attachment(&mut database, &prepared)
+            .unwrap();
+        let staged = service
+            .snapshot(&database, &conversation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(staged.prepared_attachments.len(), 1);
+        let attachment_id = staged.prepared_attachments[0].id.clone();
+
+        let sent = service
+            .send(
+                &mut database,
+                &user_envelope(
+                    "single-chat-send-attachment",
+                    Some(&camp_id),
+                    SendSingleChatMessageCommand {
+                        camp_id: camp_id.clone(),
+                        conversation_id: conversation_id.clone(),
+                        body: String::new(),
+                        attachment_ids: vec![attachment_id.clone()],
+                        expected_conversation_version: version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        let run_id = sent.result.payload["agentRunId"].as_str().unwrap();
+        let snapshot = service
+            .snapshot(&database, &conversation_id)
+            .unwrap()
+            .unwrap();
+        assert!(snapshot.prepared_attachments.is_empty());
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].body, "");
+        assert_eq!(snapshot.messages[0].attachments.len(), 1);
+        assert_eq!(snapshot.messages[0].attachments[0].id, attachment_id);
+
+        let run_tmp = database.directory().join("run-tmp-attachment-test");
+        std::fs::create_dir_all(&run_tmp).unwrap();
+        let projection = store
+            .plan_runtime_projection(&database, run_id, 0)
+            .and_then(|plan| store.project_runtime_attachments_filesystem(plan, &run_tmp))
+            .unwrap()
+            .expect("the current Single Chat input should have a private projection");
+        let projected = projection.join(&attachment_id).join("private-input.md");
+        assert_eq!(
+            std::fs::read(projected).unwrap(),
+            b"private single chat attachment"
+        );
     }
 }

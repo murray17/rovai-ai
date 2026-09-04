@@ -208,8 +208,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.46";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 87;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.47";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 88;
+const V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.46";
+const V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 87;
 const V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.45";
 const V136_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 86;
 const V135_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.44";
@@ -598,6 +600,7 @@ struct CurrentMigrationState {
     v134: bool,
     v135: bool,
     v136: bool,
+    v137: bool,
 }
 
 impl CurrentMigrationState {
@@ -676,6 +679,26 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v137 {
+            return false;
+        }
+        if contract == V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v136
                 && self.v135
@@ -2522,7 +2545,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 136)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2606,7 +2629,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 133),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 134),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 135),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 136)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 136),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)
         "#,
         [],
         |row| {
@@ -2678,6 +2702,7 @@ fn load_current_migration_state(
                 v134: row.get(64)?,
                 v135: row.get(65)?,
                 v136: row.get(66)?,
+                v137: row.get(67)?,
             })
         },
     )
@@ -5457,6 +5482,9 @@ impl Database {
             if !self.schema_migration_applied(136)? {
                 migration_step!("migration_136", self.migrate_single_chat_v136());
             }
+            if !self.schema_migration_applied(137)? {
+                migration_step!("migration_137", self.migrate_single_chat_attachments_v137());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -6044,6 +6072,9 @@ impl Database {
         }
         if !self.schema_migration_applied(136)? {
             migration_step!("migration_136", self.migrate_single_chat_v136());
+        }
+        if !self.schema_migration_applied(137)? {
+            migration_step!("migration_137", self.migrate_single_chat_attachments_v137());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -21218,8 +21249,8 @@ impl Database {
                  SET contract_version = ?1, projection_schema_version = ?2,
                      updated_at = datetime('now') WHERE singleton = 1",
                 params![
-                    CURRENT_DATA_CONTRACT_VERSION,
-                    CURRENT_PROJECTION_SCHEMA_VERSION
+                    V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                    V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
                 ],
             )?;
             transaction.execute(
@@ -21241,6 +21272,126 @@ impl Database {
         {
             anyhow::bail!("v136 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_single_chat_attachments_v137(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if contract != V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || schema != V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
+        {
+            anyhow::bail!(
+                "Single Chat Attachment migration requires the exact preceding data contract"
+            );
+        }
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE single_chat_prepared_attachment (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                conversation_id TEXT NOT NULL
+                    REFERENCES conversation(id) ON DELETE CASCADE,
+                ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+                display_name TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('file', 'directory')),
+                file_count INTEGER NOT NULL CHECK(file_count >= 0),
+                media_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                content_digest TEXT NOT NULL,
+                storage_path TEXT NOT NULL UNIQUE,
+                preview_kind TEXT NOT NULL CHECK(preview_kind IN ('image', 'none')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                UNIQUE(conversation_id, ordinal)
+            );
+            CREATE INDEX single_chat_prepared_attachment_conversation_idx
+                ON single_chat_prepared_attachment(conversation_id, ordinal);
+            CREATE INDEX single_chat_prepared_attachment_expiry_idx
+                ON single_chat_prepared_attachment(expires_at);
+
+            CREATE TABLE single_chat_message_attachment (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                conversation_id TEXT NOT NULL
+                    REFERENCES conversation(id) ON DELETE CASCADE,
+                conversation_message_id TEXT NOT NULL
+                    REFERENCES conversation_message(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL CHECK(position >= 0),
+                display_name TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('file', 'directory')),
+                file_count INTEGER NOT NULL CHECK(file_count >= 0),
+                media_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                content_digest TEXT NOT NULL,
+                storage_path TEXT NOT NULL UNIQUE,
+                preview_kind TEXT NOT NULL CHECK(preview_kind IN ('image', 'none')),
+                created_at TEXT NOT NULL,
+                UNIQUE(conversation_message_id, position)
+            );
+            CREATE INDEX single_chat_message_attachment_conversation_idx
+                ON single_chat_message_attachment(conversation_id, conversation_message_id, position);
+
+            CREATE TRIGGER single_chat_prepared_attachment_scope_insert
+            BEFORE INSERT ON single_chat_prepared_attachment
+            WHEN NOT EXISTS(
+                SELECT 1 FROM conversation
+                WHERE id = NEW.conversation_id
+                  AND camp_id = NEW.camp_id
+                  AND kind = 'single_chat'
+                  AND ended_at IS NULL
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Single Chat prepared attachment requires an active conversation');
+            END;
+
+            CREATE TRIGGER single_chat_message_attachment_scope_insert
+            BEFORE INSERT ON single_chat_message_attachment
+            WHEN NOT EXISTS(
+                SELECT 1
+                FROM conversation_message
+                JOIN conversation
+                  ON conversation.id = conversation_message.conversation_id
+                WHERE conversation_message.id = NEW.conversation_message_id
+                  AND conversation_message.conversation_id = NEW.conversation_id
+                  AND conversation_message.author_type = 'user'
+                  AND conversation.camp_id = NEW.camp_id
+                  AND conversation.kind = 'single_chat'
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Single Chat message attachment lineage is invalid');
+            END;
+
+            CREATE TRIGGER single_chat_message_attachment_immutable
+            BEFORE UPDATE ON single_chat_message_attachment
+            BEGIN
+                SELECT RAISE(ABORT, 'Single Chat message attachment is immutable');
+            END;
+            "#,
+        )?;
+        transaction.execute(
+            "UPDATE rovai_data_contract
+             SET contract_version = ?1, projection_schema_version = ?2,
+                 updated_at = datetime('now') WHERE singleton = 1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES(137, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -26003,6 +26154,13 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
         .execute_batch("PRAGMA foreign_keys = OFF;")
         .unwrap();
     let transaction = connection.unchecked_transaction().unwrap();
+    transaction
+        .execute_batch(
+            "DROP TABLE IF EXISTS single_chat_message_attachment;
+             DROP TABLE IF EXISTS single_chat_prepared_attachment;
+             DELETE FROM schema_migration WHERE version = 137;",
+        )
+        .unwrap();
 
     let agent_run_schema: String = transaction
         .query_row(
@@ -28506,6 +28664,7 @@ mod tests {
             v134: version >= 134,
             v135: version >= 135,
             v136: version >= 136,
+            v137: version >= 137,
         }
     }
 
@@ -28611,6 +28770,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                137,
+            ),
+            (
+                "v1.46/schema-87 before Single Chat Attachments",
+                V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 136,
             ),
             (
@@ -28986,7 +29151,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(136);
+        let current = migration_state_through(137);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -29002,7 +29167,16 @@ mod tests {
         missing_pi_migration.v135 = false;
         let mut missing_single_chat_migration = current;
         missing_single_chat_migration.v136 = false;
+        let mut missing_single_chat_attachment_migration = current;
+        missing_single_chat_attachment_migration.v137 = false;
         let rejected = [
+            (
+                "current marker without Single Chat Attachment migration",
+                missing_single_chat_attachment_migration,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Single Chat migration",
                 missing_single_chat_migration,
@@ -29270,7 +29444,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(136));
+        assert_eq!(state, migration_state_through(137));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -31738,7 +31912,58 @@ mod tests {
             .execute_batch("DROP TRIGGER reject_single_chat_receipt")
             .unwrap();
         database.migrate_single_chat_v136().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version
+                     FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            (
+                V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_string(),
+                V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+            )
+        );
+        database
+            .connection()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_single_chat_attachment_receipt
+                 BEFORE INSERT ON schema_migration
+                 WHEN NEW.version = 137
+                 BEGIN SELECT RAISE(ABORT, 'Single Chat Attachment receipt fixture failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            database
+                .migrate_single_chat_attachments_v137()
+                .unwrap_err()
+                .to_string()
+                .contains("Single Chat Attachment receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(137).unwrap());
+        assert!(
+            database
+                .connection()
+                .prepare("SELECT id FROM single_chat_prepared_attachment")
+                .is_err(),
+            "a rejected v137 migration must roll back private attachment tables"
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_single_chat_attachment_receipt")
+            .unwrap();
+        database.migrate_single_chat_attachments_v137().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        assert!(
+            database
+                .connection()
+                .prepare("SELECT id FROM single_chat_message_attachment")
+                .is_ok()
+        );
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(before, after.0);

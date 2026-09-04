@@ -48,10 +48,33 @@ app.whenReady().then(async () => {
     window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
     return settle()
   }
-  const key = async (keyCode) => {
-    window.webContents.sendInputEvent({ type: 'keyDown', keyCode })
-    window.webContents.sendInputEvent({ type: 'keyUp', keyCode })
+  const key = async (keyCode, modifiers = []) => {
+    window.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+    window.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
     return settle()
+  }
+  const fillComposer = async (value) => {
+    await run(`(() => {
+      const node = document.querySelector('.single-chat-composer textarea')
+      if (!node) throw new Error('Missing Single Chat composer')
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+      setter.call(node, ${JSON.stringify(value)})
+      node.dispatchEvent(new Event('input', { bubbles: true }))
+      node.focus()
+    })()`)
+    return settle()
+  }
+  const dispatchComposerEnter = async (shiftKey) => {
+    const defaultPrevented = await run(`(() => {
+      const node = document.querySelector('.single-chat-composer textarea')
+      if (!node) throw new Error('Missing Single Chat composer')
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter', shiftKey: ${Boolean(shiftKey)}, bubbles: true, cancelable: true
+      })
+      node.dispatchEvent(event)
+      return event.defaultPrevented
+    })()`)
+    return { defaultPrevented, state: await settle() }
   }
   const capture = async (name) => {
     const path = join(dirname(userData), `${name}.png`)
@@ -71,6 +94,10 @@ app.whenReady().then(async () => {
     assert.ok(Math.abs(state.userMessage.right - state.agentResponse.right) <= 1)
     assert.equal(state.terminalOpen, false)
     assert.equal(state.finalVisible, true)
+    assert.equal(state.attachmentButton, true)
+    assert.match(state.composerHint, /发送.*换行/)
+    assert.equal(state.messageAttachments, 1)
+    assert.equal(state.agentBackground, 'rgba(0, 0, 0, 0)')
     assert.match(state.body, /工作了 39 分 17 秒/)
     assert.match(state.body, /你在 5 分 38 秒后停止了运行/)
     assert.doesNotMatch(state.body, /Working for|You stopped after/)
@@ -93,17 +120,27 @@ app.whenReady().then(async () => {
     const dayDialog = await capture('single-chat-day-end-dialog-1180x800')
     await key('Escape')
 
+    state = await fillComposer('第一行')
+    assert.equal(state.composerValue, '第一行')
+    let composerEnter = await dispatchComposerEnter(true)
+    assert.equal(composerEnter.defaultPrevented, false)
+    assert.equal(composerEnter.state.sendRequests, 0)
+    composerEnter = await dispatchComposerEnter(false)
+    assert.equal(composerEnter.defaultPrevented, true)
+    assert.equal(composerEnter.state.sendRequests, 1)
+
     await run("document.documentElement.dataset.theme = 'night'; window.singleChatTest.setMode('running')")
     await wait(950)
     state = await settle()
     assert.equal(state.liveOpen, true)
+    assert.equal(state.liveExecutionBackground, 'rgba(0, 0, 0, 0)')
     assert.equal(state.composerDisabled, true)
     assert.equal(state.stopVisible, true)
     assert.match(state.body, /正在工作/)
     assert.equal(state.pageOverflow, false)
     const nightRunning = await capture('single-chat-night-running-1180x800')
 
-    state = await click('.single-chat-composer-actions .danger-button')
+    state = await click('.single-chat-composer .composer-actions .danger-button')
     assert.equal(state.cancelRequests, 1)
     assert.match(state.body, /你在 3 分 12 秒后停止了运行/)
     assert.match(state.body, /单聊正文不会进入 Camp 公屏/)
@@ -128,6 +165,10 @@ app.whenReady().then(async () => {
         groupedCommands: 3,
         finalMessageExpanded: true,
         directEndConfirmation: true,
+        campComposerParity: true,
+        composerKeyboardSemantics: true,
+        privateAttachments: true,
+        agentMessagesWithoutFill: true,
         runningStopAndComposerGate: true,
         dayAndNight: true,
         compactNoOverflow: true

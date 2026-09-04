@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -310,7 +313,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, None, None, request)
+        self.materialize_inner(database, blob_store, None, None, None, request)
     }
 
     pub fn materialize_with_skill_exposure(
@@ -320,7 +323,14 @@ impl ContextService {
         skill_exposure: &PreparedSkillExposure,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, Some(skill_exposure), None, request)
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
+            None,
+            None,
+            request,
+        )
     }
 
     pub fn materialize_with_exposures(
@@ -336,6 +346,26 @@ impl ContextService {
             blob_store,
             Some(skill_exposure),
             Some(mcp_projection),
+            None,
+            request,
+        )
+    }
+
+    pub fn materialize_with_exposures_and_attachment_projection(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
+        single_chat_attachment_root: Option<&Path>,
+        request: &MaterializeContextRequest<'_>,
+    ) -> Result<ContextMaterialization> {
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
+            Some(mcp_projection),
+            single_chat_attachment_root,
             request,
         )
     }
@@ -400,6 +430,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         prepared_skill_exposure: Option<&PreparedSkillExposure>,
         prepared_mcp_projection: Option<&PreparedMcpProjection>,
+        single_chat_attachment_root: Option<&Path>,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
         if request.execution_epoch < 1 {
@@ -559,7 +590,8 @@ impl ContextService {
             profile.max_public_history_chars,
         );
         let current_input = load_current_input(database, &snapshot)?;
-        let attachment_refs = load_current_attachment_refs(database, &current_input)?;
+        let attachment_refs =
+            load_current_attachment_refs(database, &current_input, single_chat_attachment_root)?;
         let attachment_paths = attachment_refs
             .iter()
             .map(|attachment| attachment.path.clone())
@@ -1096,7 +1128,7 @@ impl ContextService {
             profile.max_public_history_chars,
         );
         let current_input = load_current_input(transaction, &snapshot)?;
-        let attachment_refs = load_current_attachment_refs(transaction, &current_input)?;
+        let attachment_refs = load_current_attachment_refs(transaction, &current_input, None)?;
         let attachment_paths = attachment_refs
             .iter()
             .map(|attachment| attachment.path.clone())
@@ -4216,6 +4248,8 @@ fn project_shared_message<R: ContextReadConnection>(
             &camp_id,
             &attachment_id,
             &storage_model,
+            None,
+            None,
         )?
         else {
             continue;
@@ -4576,9 +4610,7 @@ impl CurrentInput {
         skill_links: &[CurrentInputSkillLink],
     ) -> Value {
         let mut payload = self.payload.clone();
-        if self.source_camp_message_id.is_some()
-            && let Some(payload) = payload.as_object_mut()
-        {
+        if let Some(payload) = payload.as_object_mut() {
             if !skill_links.is_empty() {
                 payload.insert("skills".to_string(), json!(skill_links));
             }
@@ -5170,6 +5202,8 @@ fn resolve_context_attachment_path(
     camp_id: &str,
     attachment_id: &str,
     storage_model: &str,
+    single_chat_attachment_root: Option<&Path>,
+    display_name: Option<&str>,
 ) -> Result<Option<(String, bool)>> {
     match storage_model {
         "legacy_v1" => {
@@ -5187,27 +5221,50 @@ fn resolve_context_attachment_path(
             resolve_managed_attachment_path(connection, camp_id, attachment_id)?,
             false,
         ))),
+        "single_chat_private_v1" => {
+            let root = single_chat_attachment_root
+                .context("Single Chat attachment projection root is unavailable")?;
+            let display_name =
+                display_name.context("Single Chat attachment projection has no display name")?;
+            if !root.is_absolute()
+                || !is_single_normal_path_component(attachment_id)
+                || !is_single_normal_path_component(display_name)
+            {
+                anyhow::bail!("Single Chat attachment projection identity is unsafe");
+            }
+            let path = root.join(attachment_id).join(display_name);
+            if !path.exists() {
+                anyhow::bail!("Single Chat attachment projection is unavailable");
+            }
+            Ok(Some((path.to_string_lossy().into_owned(), false)))
+        }
         _ => anyhow::bail!("Context Attachment has an unsupported storage model"),
     }
+}
+
+fn is_single_normal_path_component(value: &str) -> bool {
+    let mut components = Path::new(value).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
 }
 
 fn load_current_attachment_refs<R: ContextReadConnection>(
     database: &R,
     current_input: &CurrentInput,
+    single_chat_attachment_root: Option<&Path>,
 ) -> Result<Vec<CampAttachmentRef>> {
     let mut statement = database.context_connection().prepare(
         r#"
         WITH attachment AS (
             SELECT id, camp_id, content_digest, position AS ordinal,
-                   'legacy_v1' AS storage_model
+                   'legacy_v1' AS storage_model, NULL AS display_name
             FROM message_attachment
-            WHERE ((
-                ?1 IS NOT NULL AND camp_message_id = ?1
-            ) OR (?2 IS NOT NULL AND conversation_message_id = ?2))
+            WHERE ((?1 IS NOT NULL AND camp_message_id = ?1)
+                OR (?2 IS NOT NULL AND conversation_message_id = ?2))
               AND runtime_projection_state = 'available'
             UNION ALL
             SELECT managed.id, managed.camp_id, managed.content_digest,
-                   reference.ordinal, 'managed_v2'
+                   reference.ordinal, 'managed_v2', NULL
             FROM camp_message_attachment_ref AS reference
             JOIN managed_attachment AS managed
               ON managed.camp_id = reference.camp_id
@@ -5215,8 +5272,14 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
             WHERE ?1 IS NOT NULL
               AND reference.camp_message_id = ?1
               AND managed.state = 'available'
+            UNION ALL
+            SELECT private.id, private.camp_id, private.content_digest,
+                   private.position, 'single_chat_private_v1', private.display_name
+            FROM single_chat_message_attachment AS private
+            WHERE ?2 IS NOT NULL
+              AND private.conversation_message_id = ?2
         )
-        SELECT id, camp_id, content_digest, storage_model
+        SELECT id, camp_id, content_digest, storage_model, display_name
         FROM attachment
         ORDER BY ordinal, id
         "#,
@@ -5233,18 +5296,21 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
                 ))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
     let mut attachments = Vec::with_capacity(rows.len());
-    for (attachment_id, camp_id, content_digest, storage_model) in rows {
+    for (attachment_id, camp_id, content_digest, storage_model, display_name) in rows {
         let Some((path, legacy_view_backed)) = resolve_context_attachment_path(
             database.context_connection(),
             &camp_id,
             &attachment_id,
             &storage_model,
+            single_chat_attachment_root,
+            display_name.as_deref(),
         )?
         else {
             continue;
@@ -6733,6 +6799,58 @@ mod tests {
         );
         assert!(project_direct_current_input_source("system", None, None).is_err());
     }
+
+    #[test]
+    fn single_chat_attachment_path_requires_the_per_run_private_projection() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-single-chat-context-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let attachment_id = "2ee87bb1-5791-4e13-bb63-b168164bcd33";
+        let display_name = "private-input.md";
+        let projected = root.join(attachment_id).join(display_name);
+        std::fs::create_dir_all(projected.parent().unwrap()).unwrap();
+        std::fs::write(&projected, b"private input").unwrap();
+        let connection = Connection::open_in_memory().unwrap();
+
+        let resolved = resolve_context_attachment_path(
+            &connection,
+            "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+            attachment_id,
+            "single_chat_private_v1",
+            Some(&root),
+            Some(display_name),
+        )
+        .unwrap();
+        assert_eq!(
+            resolved,
+            Some((projected.to_string_lossy().into_owned(), false))
+        );
+        assert!(
+            resolve_context_attachment_path(
+                &connection,
+                "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+                attachment_id,
+                "single_chat_private_v1",
+                None,
+                Some(display_name),
+            )
+            .is_err(),
+            "Context must not fall back to the persistent private source"
+        );
+        assert!(
+            resolve_context_attachment_path(
+                &connection,
+                "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+                attachment_id,
+                "single_chat_private_v1",
+                Some(&root),
+                Some("../private-input.md"),
+            )
+            .is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
@@ -6876,6 +6994,8 @@ mod slow_tests {
             "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
             "6b756c5d-ed05-4a0c-b66e-611fa8e4a063",
             "legacy_v1",
+            None,
+            None,
         )
         .unwrap();
 

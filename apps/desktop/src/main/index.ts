@@ -1432,6 +1432,13 @@ function requireDraftRevision(value: unknown): number {
   return value as number
 }
 
+function requireConversationVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error('Conversation Version 无效。')
+  }
+  return value as number
+}
+
 ipcMain.handle(
   'rovai:composer-attachment-prepare-path',
   async (
@@ -1494,6 +1501,98 @@ ipcMain.handle(
       mediaType: string
       byteSize: number
     } | null>('camp.attachments.previewSource' as CoreMethod, {
+      attachmentId: requireIpcString(attachmentId, '附件 ID')
+    })
+    if (!source || source.byteSize > MAX_COMPOSER_PREVIEW_BYTES) return null
+    const bytes = await readFile(source.path)
+    if (bytes.byteLength !== source.byteSize || bytes.byteLength > MAX_COMPOSER_PREVIEW_BYTES) {
+      return null
+    }
+    return {
+      mediaType: source.mediaType,
+      bytes: new Uint8Array(bytes)
+    }
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-attachment-prepare-path',
+  async (
+    _event,
+    conversationId: unknown,
+    expectedConversationVersion: unknown,
+    sourcePath: unknown,
+    displayName: unknown
+  ) => {
+    return core.request('singleChat.attachments.prepareFromPath' as CoreMethod, {
+      conversationId: requireIpcString(conversationId, 'Conversation ID'),
+      expectedConversationVersion: requireConversationVersion(expectedConversationVersion),
+      sourcePath: requireIpcString(sourcePath, '附件路径'),
+      displayName: requireIpcString(displayName, '附件名称')
+    })
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-attachment-prepare-bytes',
+  async (
+    _event,
+    conversationId: unknown,
+    expectedConversationVersion: unknown,
+    displayName: unknown,
+    input: unknown
+  ) => {
+    const resolvedConversationId = requireIpcString(conversationId, 'Conversation ID')
+    const resolvedVersion = requireConversationVersion(expectedConversationVersion)
+    const resolvedDisplayName = requireIpcString(displayName, '附件名称')
+    if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
+      throw new Error('附件无效或超过 25 MiB。')
+    }
+    if (coreDataPath === null || !core.getSnapshot().capabilities.coreRequests) {
+      throw new Error('Core data directory is not available for attachment import')
+    }
+    const ingressDirectory = join(coreDataPath, 'attachment-ingress')
+    await mkdir(ingressDirectory, { recursive: true, mode: 0o700 })
+    await chmod(ingressDirectory, 0o700)
+    const temporaryPath = join(ingressDirectory, `${randomUUID()}.tmp`)
+    try {
+      await writeFile(temporaryPath, input, { flag: 'wx', mode: 0o600 })
+      return await core.request('singleChat.attachments.prepareFromPath' as CoreMethod, {
+        conversationId: resolvedConversationId,
+        expectedConversationVersion: resolvedVersion,
+        sourcePath: temporaryPath,
+        displayName: resolvedDisplayName
+      })
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined)
+    }
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-attachment-remove',
+  async (
+    _event,
+    conversationId: unknown,
+    expectedConversationVersion: unknown,
+    attachmentId: unknown
+  ) => {
+    return core.request('singleChat.attachments.remove' as CoreMethod, {
+      conversationId: requireIpcString(conversationId, 'Conversation ID'),
+      expectedConversationVersion: requireConversationVersion(expectedConversationVersion),
+      attachmentId: requireIpcString(attachmentId, '附件 ID')
+    })
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-attachment-preview',
+  async (_event, attachmentId: unknown) => {
+    const source = await core.request<{
+      path: string
+      mediaType: string
+      byteSize: number
+    } | null>('singleChat.attachments.previewSource' as CoreMethod, {
       attachmentId: requireIpcString(attachmentId, '附件 ID')
     })
     if (!source || source.byteSize > MAX_COMPOSER_PREVIEW_BYTES) return null

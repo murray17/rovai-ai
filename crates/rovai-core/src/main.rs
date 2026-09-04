@@ -235,6 +235,7 @@ use rovai_core::{
         EndSingleChatCommand, OpenSingleChatCommand, SendSingleChatMessageCommand,
         SingleChatService,
     },
+    single_chat_attachment::SingleChatAttachmentStore,
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
         SetSkillGroupAssignmentsCommand, SkillLibraryService,
@@ -599,6 +600,9 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "camp.attachments.desktopOpenTarget"
             | "campTurns.cancel"
             | "agentRuns.cancel"
+            | "singleChat.attachments.prepareFromPath"
+            | "singleChat.attachments.remove"
+            | "singleChat.attachments.previewSource"
             | "singleChat.send"
             | "singleChat.end"
             | "channels.executionConsole.agentRun.cancel"
@@ -891,6 +895,23 @@ struct CampIdParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SingleChatSnapshotParams {
     conversation_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrepareSingleChatAttachmentFromPathParams {
+    conversation_id: String,
+    expected_conversation_version: i64,
+    source_path: String,
+    display_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemoveSingleChatAttachmentParams {
+    conversation_id: String,
+    expected_conversation_version: i64,
+    attachment_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1283,6 +1304,60 @@ async fn prepare_composer_attachment_from_path(
         store.load_draft(&database, params.camp_id.as_str())?
     };
     Ok(serde_json::to_value(draft)?)
+}
+
+async fn prepare_single_chat_attachment_from_path(
+    database: &Mutex<Database>,
+    output: &mpsc::UnboundedSender<String>,
+    data_dir: &Path,
+    params: PrepareSingleChatAttachmentFromPathParams,
+) -> Result<Value> {
+    let store = SingleChatAttachmentStore::new(data_dir);
+    let plan = {
+        let database = database.lock().await;
+        store.plan_prepare_from_path(
+            &database,
+            &params.conversation_id,
+            params.expected_conversation_version,
+            Path::new(&params.source_path),
+            &params.display_name,
+        )?
+    };
+    let filesystem_store = store.clone();
+    let prepared =
+        tokio::task::spawn_blocking(move || filesystem_store.prepare_from_path_filesystem(plan))
+            .await
+            .context("Single Chat Attachment preparation task failed")??;
+
+    let commit = {
+        let mut database = database.lock().await;
+        store.commit_prepared_attachment(&mut database, &prepared)
+    };
+    if let Err(error) = commit {
+        let cleanup_store = store.clone();
+        if let Err(cleanup_error) =
+            tokio::task::spawn_blocking(move || cleanup_store.cleanup_uncommitted(prepared)).await
+        {
+            eprintln!("Uncommitted Single Chat Attachment cleanup task failed: {cleanup_error}");
+        }
+        return Err(error);
+    }
+
+    let snapshot = {
+        let database = database.lock().await;
+        SingleChatService::default()
+            .snapshot(&database, &params.conversation_id)?
+            .context("Single Chat disappeared after its attachment was prepared")?
+    };
+    emit(
+        output,
+        "single_chat.changed",
+        json!({
+            "campId": snapshot.conversation.camp_id,
+            "conversationId": params.conversation_id,
+        }),
+    );
+    Ok(serde_json::to_value(snapshot)?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1756,10 +1831,11 @@ struct PreparedRuntimeLaunch<'a> {
     launch_permit: &'a mut ExecutionLaunchPermit,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct CampAttachmentRunAccess<'a> {
     admission: &'a CampAttachmentReadAdmission,
     authorization: &'a CampAttachmentRuntimeAuthorization,
+    single_chat_attachment_root: Option<PathBuf>,
 }
 
 struct RuntimeInputPreparationRequest<'a> {
@@ -1768,7 +1844,12 @@ struct RuntimeInputPreparationRequest<'a> {
 }
 
 impl CampAttachmentRunAccess<'_> {
-    fn prove(self, execution: &AgentRunExecution) -> Result<()> {
+    fn with_single_chat_attachment_root(mut self, root: Option<PathBuf>) -> Self {
+        self.single_chat_attachment_root = root;
+        self
+    }
+
+    fn prove(&self, execution: &AgentRunExecution) -> Result<()> {
         self.admission.prove(&execution.camp_id)?;
         if self.authorization.camp_id != execution.camp_id {
             anyhow::bail!("Camp Attachment Runtime authorization does not match the AgentRun Camp");
@@ -6737,6 +6818,81 @@ impl Core {
                     SingleChatService::default().snapshot(&database, &params.conversation_id)?,
                 )?)
             }
+            "singleChat.attachments.prepareFromPath" => {
+                let params: PrepareSingleChatAttachmentFromPathParams =
+                    serde_json::from_value(request.params.clone())?;
+                prepare_single_chat_attachment_from_path(
+                    &self.database,
+                    &self.output,
+                    &self.data_dir,
+                    params,
+                )
+                .await
+            }
+            "singleChat.attachments.remove" => {
+                let params: RemoveSingleChatAttachmentParams =
+                    serde_json::from_value(request.params.clone())?;
+                let store = SingleChatAttachmentStore::new(&self.data_dir);
+                let (cleanup, snapshot) = {
+                    let mut database = self.database.lock().await;
+                    let cleanup = store.remove_prepared_from_database(
+                        &mut database,
+                        &params.conversation_id,
+                        params.expected_conversation_version,
+                        &params.attachment_id,
+                    )?;
+                    let snapshot = SingleChatService::default()
+                        .snapshot(&database, &params.conversation_id)?
+                        .context("Single Chat disappeared after its attachment was removed")?;
+                    (cleanup, snapshot)
+                };
+                let camp_id = snapshot.conversation.camp_id.clone();
+                let cleanup_store = store.clone();
+                if let Err(error) =
+                    tokio::task::spawn_blocking(move || cleanup_store.cleanup_detached(cleanup))
+                        .await
+                        .context("Single Chat Attachment cleanup task failed")?
+                {
+                    eprintln!(
+                        "Single Chat Attachment {} was removed, but its private file could not be cleaned immediately: {error:#}",
+                        params.attachment_id
+                    );
+                }
+                emit(
+                    &self.output,
+                    "single_chat.changed",
+                    json!({
+                        "campId": camp_id,
+                        "conversationId": params.conversation_id,
+                    }),
+                );
+                Ok(serde_json::to_value(snapshot)?)
+            }
+            "singleChat.attachments.previewSource" => {
+                let params: AttachmentPreviewSourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                let store = SingleChatAttachmentStore::new(&self.data_dir);
+                let candidate = {
+                    let database = self.database.lock().await;
+                    store.preview_candidate(&database, &params.attachment_id)?
+                };
+                let source = match candidate {
+                    Some(candidate) => tokio::task::spawn_blocking(move || {
+                        store.verify_preview_candidate(candidate)
+                    })
+                    .await
+                    .context("Single Chat Attachment preview verification task failed")??,
+                    None => None,
+                };
+                Ok(match source {
+                    Some(source) => json!({
+                        "path": source.path,
+                        "mediaType": source.media_type,
+                        "byteSize": source.byte_size,
+                    }),
+                    None => Value::Null,
+                })
+            }
             "singleChat.open" => {
                 let params: UserCommandParams<OpenSingleChatCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -6781,7 +6937,10 @@ impl Core {
                 let params: UserCommandParams<EndSingleChatCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
+                let conversation_id = params.command.conversation_id.clone();
+                let store = SingleChatAttachmentStore::new(&self.data_dir);
                 let mut database = self.database.lock().await;
+                let cleanup = store.prepared_cleanup_plan(&database, &conversation_id)?;
                 let execution = SingleChatService::default().end(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
@@ -6793,6 +6952,18 @@ impl Core {
                     .get("cancelledAgentRunId")
                     .is_some_and(|value| !value.is_null());
                 drop(database);
+                if changed {
+                    let cleanup_store = store.clone();
+                    if let Err(error) =
+                        tokio::task::spawn_blocking(move || cleanup_store.cleanup_detached(cleanup))
+                            .await
+                            .context("Ended Single Chat Attachment cleanup task failed")?
+                    {
+                        eprintln!(
+                            "Single Chat {conversation_id} ended, but its prepared attachments could not be cleaned immediately: {error:#}"
+                        );
+                    }
+                }
                 if cancelled {
                     self.agent_run_cancellation_notify.notify_one();
                 }
@@ -6970,6 +7141,13 @@ impl Core {
                             "Camp {camp_id} was deleted but managed attachment cleanup failed: {error:#}"
                         );
                     }
+                    if let Err(error) =
+                        SingleChatAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)
+                    {
+                        eprintln!(
+                            "Camp {camp_id} was deleted but private Single Chat attachment cleanup failed: {error:#}"
+                        );
+                    }
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -7032,6 +7210,7 @@ impl Core {
                     self.finish_camp_attachment_cleanup(cleanup.as_ref())
                         .await?;
                     CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
+                    SingleChatAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -9678,6 +9857,28 @@ impl Core {
         }
     }
 
+    async fn prepare_single_chat_attachment_projection(
+        &self,
+        execution: &AgentRunExecution,
+        run_tmp: &Path,
+    ) -> Result<Option<PathBuf>> {
+        let store = SingleChatAttachmentStore::new(&self.data_dir);
+        let plan = {
+            let database = self.database.lock().await;
+            store.plan_runtime_projection(
+                &database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )?
+        };
+        let run_tmp = run_tmp.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            store.project_runtime_attachments_filesystem(plan, &run_tmp)
+        })
+        .await
+        .context("Single Chat attachment projection task failed")?
+    }
+
     async fn materialize_agent_run_context(
         &self,
         execution: &AgentRunExecution,
@@ -9690,11 +9891,12 @@ impl Core {
         attachment_access.prove(execution)?;
         let materialization = {
             let mut database = self.database.lock().await;
-            ContextService.materialize_with_exposures(
+            ContextService.materialize_with_exposures_and_attachment_projection(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
                 skill_exposure,
                 mcp_projection,
+                attachment_access.single_chat_attachment_root.as_deref(),
                 &MaterializeContextRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
@@ -9737,18 +9939,20 @@ impl Core {
             // boundary. A Compaction Observer cannot commit between selecting
             // the pending revision and persisting RuntimeInputDelivery.prepared.
             let mut database = self.database.lock().await;
-            let materialization = ContextService.materialize_with_exposures(
-                &mut database,
-                &ManagedBlobStore::new(&self.data_dir),
-                skill_exposure,
-                mcp_projection,
-                &MaterializeContextRequest {
-                    agent_run_id: &execution.agent_run_id,
-                    execution_epoch: execution.execution_epoch,
-                    charter_delivery_mode: request.charter_delivery_mode,
-                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                },
-            )?;
+            let materialization = ContextService
+                .materialize_with_exposures_and_attachment_projection(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    skill_exposure,
+                    mcp_projection,
+                    attachment_access.single_chat_attachment_root.as_deref(),
+                    &MaterializeContextRequest {
+                        agent_run_id: &execution.agent_run_id,
+                        execution_epoch: execution.execution_epoch,
+                        charter_delivery_mode: request.charter_delivery_mode,
+                        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                    },
+                )?;
             match materialization {
                 ContextMaterialization::Ready(context) => {
                     let delivery = match request.proposed_delivery_id {
@@ -10716,6 +10920,7 @@ impl Core {
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
+            single_chat_attachment_root: None,
         };
         let attachment_access_root = attachment_authorization.attachment_root.clone();
         let resume_disposition = {
@@ -10964,10 +11169,17 @@ impl Core {
         };
         self.bind_prepared_native_session(execution, &binding_credential, &thread_id)
             .await?;
+        let active_builtin_tools = runtime
+            .builtin_tool_process_config()
+            .context("Codex Runtime has no Built-in Tool process context")?
+            .clone();
+        let single_chat_attachment_root = self
+            .prepare_single_chat_attachment_projection(execution, active_builtin_tools.run_tmp())
+            .await?;
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
-                attachment_access,
+                attachment_access.with_single_chat_attachment_root(single_chat_attachment_root),
                 &skill_exposure,
                 &mcp_projection,
                 CharterDeliveryMode::NativeAppend,
@@ -11124,6 +11336,7 @@ impl Core {
         CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
+            single_chat_attachment_root: None,
         }
         .prove(execution)?;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -11270,12 +11483,16 @@ impl Core {
             .await?;
         self.bind_prepared_native_session(execution, &binding_credential, runtime.session_id())
             .await?;
+        let single_chat_attachment_root = self
+            .prepare_single_chat_attachment_projection(execution, active_builtin_tools.run_tmp())
+            .await?;
         let prepared = self
             .materialize_and_prepare_agent_run_input(
                 execution,
                 CampAttachmentRunAccess {
                     admission: attachment_admission,
                     authorization: attachment_authorization,
+                    single_chat_attachment_root,
                 },
                 skill_exposure,
                 mcp_projection,
@@ -11387,6 +11604,7 @@ impl Core {
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
+            single_chat_attachment_root: None,
         };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -11407,18 +11625,57 @@ impl Core {
             .native_session_id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let Some(prepared_context) = self
+        let builtin_tools = self.prepare_builtin_tool_process_config()?;
+        self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
+            .await?;
+        let single_chat_attachment_root = match self
+            .prepare_single_chat_attachment_projection(execution, builtin_tools.run_tmp())
+            .await
+        {
+            Ok(root) => root,
+            Err(error) => {
+                self.builtin_tool_leases
+                    .unbind(
+                        builtin_tools.process_id(),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )
+                    .await;
+                return Err(error);
+            }
+        };
+        let prepared_context = match self
             .materialize_agent_run_context(
                 execution,
-                attachment_access,
+                attachment_access.with_single_chat_attachment_root(single_chat_attachment_root),
                 skill_exposure,
                 mcp_projection,
                 CharterDeliveryMode::NativeAppend,
                 output,
             )
-            .await?
-        else {
-            return Ok(());
+            .await
+        {
+            Ok(Some(context)) => context,
+            Ok(None) => {
+                self.builtin_tool_leases
+                    .unbind(
+                        builtin_tools.process_id(),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )
+                    .await;
+                return Ok(());
+            }
+            Err(error) => {
+                self.builtin_tool_leases
+                    .unbind(
+                        builtin_tools.process_id(),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )
+                    .await;
+                return Err(error);
+            }
         };
         let session_bootstrap = {
             let mut database = self.database.lock().await;
@@ -11487,9 +11744,6 @@ impl Core {
         );
         emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
         let prompt = prepared_context.rendered_payload.clone();
-        let builtin_tools = self.prepare_builtin_tool_process_config()?;
-        self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
-            .await?;
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
         let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
@@ -11951,6 +12205,7 @@ impl Core {
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
+            single_chat_attachment_root: None,
         };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -11964,18 +12219,57 @@ impl Core {
         let binding_credential = self
             .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
-        let Some(prepared_context) = self
+        let builtin_tools = self.prepare_builtin_tool_process_config()?;
+        self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
+            .await?;
+        let single_chat_attachment_root = match self
+            .prepare_single_chat_attachment_projection(execution, builtin_tools.run_tmp())
+            .await
+        {
+            Ok(root) => root,
+            Err(error) => {
+                self.builtin_tool_leases
+                    .unbind(
+                        builtin_tools.process_id(),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )
+                    .await;
+                return Err(error);
+            }
+        };
+        let prepared_context = match self
             .materialize_agent_run_context(
                 execution,
-                attachment_access,
+                attachment_access.with_single_chat_attachment_root(single_chat_attachment_root),
                 skill_exposure,
                 mcp_projection,
                 CharterDeliveryMode::FirstPayload,
                 output,
             )
-            .await?
-        else {
-            return Ok(());
+            .await
+        {
+            Ok(Some(context)) => context,
+            Ok(None) => {
+                self.builtin_tool_leases
+                    .unbind(
+                        builtin_tools.process_id(),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )
+                    .await;
+                return Ok(());
+            }
+            Err(error) => {
+                self.builtin_tool_leases
+                    .unbind(
+                        builtin_tools.process_id(),
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )
+                    .await;
+                return Err(error);
+            }
         };
         let prompt = prepared_context.runtime_payload.clone();
         let resumable_session_id = (resume_disposition != NativeSessionResumeDisposition::New)
@@ -12034,9 +12328,6 @@ impl Core {
             }),
         );
         emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
-        let builtin_tools = self.prepare_builtin_tool_process_config()?;
-        self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
-            .await?;
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
         let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
@@ -12340,6 +12631,7 @@ impl Core {
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
+            single_chat_attachment_root: None,
         };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -12556,10 +12848,17 @@ impl Core {
             .context("failed to bind ACP Native Session")?;
         self.establish_acp_compaction_observer_best_effort(execution, &runtime, &session_id)
             .await;
+        let active_builtin_tools = runtime
+            .builtin_tool_process_config()
+            .context("ACP Runtime has no Built-in Tool process context")?
+            .clone();
+        let single_chat_attachment_root = self
+            .prepare_single_chat_attachment_projection(execution, active_builtin_tools.run_tmp())
+            .await?;
         let Some((prepared_context, delivery)) = self
             .materialize_and_prepare_agent_run_input(
                 execution,
-                attachment_access,
+                attachment_access.with_single_chat_attachment_root(single_chat_attachment_root),
                 skill_exposure,
                 mcp_projection,
                 RuntimeInputPreparationRequest {
@@ -20535,6 +20834,7 @@ mod tests {
         let (runtime_check_requests, _runtime_check_rx) = mpsc::unbounded_channel();
         let (attachment_projection_requests, _attachment_projection_rx) = mpsc::unbounded_channel();
         let (codex_tx, _codex_rx) = mpsc::unbounded_channel();
+        let (pi_tx, _pi_rx) = mpsc::unbounded_channel();
         let (acp_tx, _acp_rx) = mpsc::unbounded_channel();
         let builtin_tool_leases = Arc::new(BuiltinToolLeaseRegistry::default());
         let runtime_fleet = Arc::new(AgentRuntimeFleetManager::new_with_builtin_tools(
@@ -20570,6 +20870,7 @@ mod tests {
             mcp_config: Ok(mcp_config),
             mcp_projection,
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
+            pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
             opencode_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::OpencodeCli,
                 acp_tx.clone(),

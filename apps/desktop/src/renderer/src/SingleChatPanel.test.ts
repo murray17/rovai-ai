@@ -108,4 +108,13 @@ describe('Single Chat presentation', () => {
     expect(source).not.toContain('aria-label="更多')
     expect(source).not.toContain('recovery_blocked')
   })
+
+  it('uses the Camp composer contract and keeps agent output unboxed', () => {
+    expect(source).toContain('className="composer-attachment-button"')
+    expect(source).toContain('Enter 发送，Shift+Enter 换行')
+    expect(source).toContain("event.key !== 'Enter' || event.shiftKey")
+    expect(source).toContain('attachmentIds,')
+    expect(source).toContain('className="single-chat-agent-response"')
+    expect(source).not.toContain('single-chat-agent-bubble')
+  })
 })

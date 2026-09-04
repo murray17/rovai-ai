@@ -314,6 +314,39 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:composer-attachment-preview', attachmentId)
     }
   },
+  singleChatAttachments: {
+    async prepare(conversationId, expectedConversationVersion, file) {
+      const sourcePath = webUtils.getPathForFile(file)
+      if (sourcePath) {
+        return ipcRenderer.invoke(
+          'rovai:single-chat-attachment-prepare-path',
+          conversationId,
+          expectedConversationVersion,
+          sourcePath,
+          file.name
+        )
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      return ipcRenderer.invoke(
+        'rovai:single-chat-attachment-prepare-bytes',
+        conversationId,
+        expectedConversationVersion,
+        file.name,
+        bytes
+      )
+    },
+    remove(conversationId, expectedConversationVersion, attachmentId) {
+      return ipcRenderer.invoke(
+        'rovai:single-chat-attachment-remove',
+        conversationId,
+        expectedConversationVersion,
+        attachmentId
+      )
+    },
+    preview(attachmentId) {
+      return ipcRenderer.invoke('rovai:single-chat-attachment-preview', attachmentId)
+    }
+  },
   attachments: {
     open(campId, attachmentId) {
       return ipcRenderer.invoke('rovai:attachment-open', campId, attachmentId)

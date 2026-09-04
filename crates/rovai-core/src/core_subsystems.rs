@@ -318,6 +318,11 @@ impl super::Core {
                 "attachment_cleanup",
                 attachments.cleanup_expired(&mut database)
             );
+            let single_chat_attachments = SingleChatAttachmentStore::new(&self.data_dir);
+            maintain!(
+                "single_chat_attachment_cleanup",
+                single_chat_attachments.cleanup_expired(&mut database)
+            );
             maintain!(
                 "pending_camp_cleanup",
                 (|| -> Result<()> {
@@ -331,13 +336,21 @@ impl super::Core {
                 })()
             );
             initialization.retired_camp_directories.retain(|camp| {
-                match attachments.remove_camp(camp) {
+                let camp_failed = match attachments.remove_camp(camp) {
                     Ok(()) => false,
                     Err(error) => {
                         errors.push(format!("pending_camp_directory: {error:#}"));
                         true
                     }
-                }
+                };
+                let single_chat_failed = match single_chat_attachments.remove_camp(camp) {
+                    Ok(()) => false,
+                    Err(error) => {
+                        errors.push(format!("pending_camp_single_chat_directory: {error:#}"));
+                        true
+                    }
+                };
+                camp_failed || single_chat_failed
             });
             maintain!(
                 "runtime_search_generation",

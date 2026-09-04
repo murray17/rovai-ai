@@ -802,6 +802,7 @@ export interface SendSingleChatMessageCommand {
   campId: string
   conversationId: string
   body: string
+  attachmentIds: string[]
   expectedConversationVersion: number
 }
 
@@ -831,6 +832,7 @@ export interface SingleChatMessageView {
   authorType: 'user' | 'agent' | 'system'
   authorId: string
   body: string
+  attachments: CampMessageAttachmentView[]
   agentRunId: string | null
   createdAt: string
 }
@@ -853,6 +855,7 @@ export interface SingleChatRunView {
 export interface SingleChatSnapshot {
   conversation: SingleChatConversationView
   messages: SingleChatMessageView[]
+  preparedAttachments: PreparedAttachmentView[]
   agentRuns: SingleChatRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
 }
@@ -3446,6 +3449,19 @@ export interface RovaiApi {
   memberAvatars: MemberAvatarsApi
   composerAttachments: {
     prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>
+    preview(attachmentId: string): Promise<AttachmentPreview | null>
+  }
+  singleChatAttachments: {
+    prepare(
+      conversationId: string,
+      expectedConversationVersion: number,
+      file: File
+    ): Promise<SingleChatSnapshot>
+    remove(
+      conversationId: string,
+      expectedConversationVersion: number,
+      attachmentId: string
+    ): Promise<SingleChatSnapshot>
     preview(attachmentId: string): Promise<AttachmentPreview | null>
   }
   attachments: {

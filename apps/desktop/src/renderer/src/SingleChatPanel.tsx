@@ -4,7 +4,9 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AgentRunExecutionEvidenceView,
+  CampMessageAttachmentView,
   CampMemberView,
+  PreparedAttachmentView,
   SingleChatConversationView,
   SingleChatMessageView,
   SingleChatRunView,
@@ -26,6 +28,12 @@ import {
   type GroupedExecutionProgressItem,
   type ToolProgressItem
 } from './execution-tool-grouping'
+import {
+  attachmentBaseName,
+  attachmentFormatLabel,
+  classifyAttachmentDisplay,
+  UserFileIcon
+} from './attachment-presentation'
 
 const NON_TERMINAL_RUNS = new Set<SingleChatRunView['status']>(['queued', 'running', 'waiting'])
 const END_CONFIRMATION_STORAGE_KEY = 'rovai.single-chat.skip-end-confirmation.v1'
@@ -56,6 +64,127 @@ function ToolGlyph(): React.JSX.Element {
 
 function CheckGlyph(): React.JSX.Element {
   return <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3.2 8.2 2.7 2.7 6.8-6.4" /></svg>
+}
+
+type SingleChatAttachment = CampMessageAttachmentView | PreparedAttachmentView
+
+type PreparingSingleChatAttachment = {
+  id: string
+  name: string
+  error: string | null
+}
+
+function formatAttachmentBytes(byteSize: number): string {
+  if (byteSize < 1_024) return `${byteSize} B`
+  if (byteSize < 1_048_576) return `${Math.max(1, Math.round(byteSize / 1_024))} KB`
+  return `${(byteSize / 1_048_576).toFixed(byteSize < 10_485_760 ? 1 : 0)} MB`
+}
+
+function SingleChatAttachmentCard({
+  attachment,
+  presentation,
+  onRemove
+}: {
+  attachment: SingleChatAttachment
+  presentation: 'composer' | 'user-timeline'
+  onRemove?: () => void
+}): React.JSX.Element {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const composerImage = presentation === 'composer' && attachment.previewKind === 'image'
+  const classification = classifyAttachmentDisplay(attachment)
+  const baseName = attachmentBaseName(attachment.displayName, attachment.kind)
+  const formatLabel = attachmentFormatLabel(attachment.displayName, attachment.kind)
+
+  useEffect(() => {
+    if (attachment.previewKind !== 'image') return
+    let active = true
+    let objectUrl: string | null = null
+    void window.rovai.singleChatAttachments.preview(attachment.id)
+      .then((preview) => {
+        if (!active || !preview) return
+        objectUrl = URL.createObjectURL(new Blob(
+          [Uint8Array.from(preview.bytes).buffer],
+          { type: preview.mediaType }
+        ))
+        setPreviewUrl(objectUrl)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [attachment.id, attachment.previewKind])
+
+  const content = composerImage
+    ? (
+        <span className="attachment-visual composer-image-preview" aria-hidden="true">
+          {previewUrl ? <img src={previewUrl} alt="" /> : <i className="attachment-loading" />}
+        </span>
+      )
+    : (
+        <>
+          <UserFileIcon
+            type={classification.userDisplayType === 'image'
+              ? 'document'
+              : classification.userDisplayType}
+          />
+          <span className="attachment-copy">
+            <span className="attachment-title-line">
+              <strong title={attachment.displayName}>{baseName}</strong>
+              <span className="file-extension-label">{formatLabel}</span>
+            </span>
+            <small>{attachment.kind === 'directory'
+              ? `${attachment.fileCount} 个文件 · ${formatAttachmentBytes(attachment.byteSize)}`
+              : formatAttachmentBytes(attachment.byteSize)}</small>
+          </span>
+        </>
+      )
+
+  return (
+    <div className={`attachment-card ${presentation === 'composer' ? 'composer-attachment-card' : presentation} ${composerImage ? 'composer-image-attachment' : ''} type-${classification.agentDisplayType}`}>
+      {previewUrl
+        ? <button className="attachment-open is-preview" type="button" aria-label={`预览附件 ${attachment.displayName}`} onClick={() => setPreviewOpen(true)}>{content}</button>
+        : <div className="attachment-open">{content}</div>}
+      {previewUrl && (
+        <Dialog.Root open={previewOpen} onOpenChange={setPreviewOpen}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="attachment-lightbox-overlay" />
+            <Dialog.Content className="attachment-lightbox" aria-describedby={undefined}>
+              <Dialog.Title>{attachment.displayName}</Dialog.Title>
+              <img src={previewUrl} alt={attachment.displayName} />
+              <Dialog.Close className="attachment-lightbox-close" aria-label="关闭附件预览">×</Dialog.Close>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+      {onRemove && (
+        <button className="attachment-remove" type="button" aria-label={`移除附件 ${attachment.displayName}`} onClick={onRemove}>×</button>
+      )}
+    </div>
+  )
+}
+
+function SingleChatAttachmentStrip({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return <div className="composer-attachment-strip" role="group" aria-label="待发送附件">{children}</div>
+}
+
+function SingleChatAttachmentPlaceholder({ item, onRemove }: {
+  item: PreparingSingleChatAttachment
+  onRemove?(): void
+}): React.JSX.Element {
+  return (
+    <div className={`attachment-card composer-attachment-card attachment-${item.error ? 'error' : 'preparing'}`}>
+      <span className="attachment-visual" aria-hidden="true">
+        {item.error ? '!' : <i className="attachment-loading" />}
+      </span>
+      <span className="attachment-copy">
+        <strong title={item.name}>{item.name}</strong>
+        <small>{item.error ?? '正在安全接入…'}</small>
+      </span>
+      {item.error && onRemove && <button className="attachment-remove" type="button" aria-label={`移除失败附件 ${item.name}`} onClick={onRemove}>×</button>}
+    </div>
+  )
 }
 
 function safeStoredBoolean(key: string): boolean {
@@ -295,7 +424,16 @@ function SingleChatTranscript({ snapshot, now }: { snapshot: SingleChatSnapshot;
       return (
         <div className="single-chat-turn" key={message.id}>
           <div className="single-chat-user-message">
-            <div className="single-chat-user-bubble">{message.body}</div>
+            <div className="single-chat-user-content">
+              {message.body && <div className="single-chat-user-bubble">{message.body}</div>}
+              {message.attachments.length > 0 && (
+                <div className="single-chat-message-attachments" role="group" aria-label={`附件 ${message.attachments.length} 个`}>
+                  {message.attachments.map((attachment) => (
+                    <SingleChatAttachmentCard attachment={attachment} presentation="user-timeline" key={attachment.id} />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           {run && (
             <SingleChatRunHistory
@@ -339,6 +477,7 @@ export function SingleChatPanel({
   const snapshotRef = useRef<SingleChatSnapshot | null>(null)
   const viewportRef = useRef<HTMLElement>(null)
   const viewportEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const followLatestRef = useRef(true)
   const [conversations, setConversations] = useState<SingleChatConversationView[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(initialAgentId)
@@ -348,6 +487,7 @@ export function SingleChatPanel({
   const [sending, setSending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [ending, setEnding] = useState(false)
+  const [preparingAttachments, setPreparingAttachments] = useState<PreparingSingleChatAttachment[]>([])
   const [error, setError] = useState<string | null>(null)
   const [endDialogOpen, setEndDialogOpen] = useState(false)
   const [skipEndConfirmation, setSkipEndConfirmation] = useState(false)
@@ -477,6 +617,7 @@ export function SingleChatPanel({
 
   const chooseTarget = async (agentId: string): Promise<void> => {
     followLatestRef.current = true
+    setPreparingAttachments([])
     selectedAgentIdRef.current = agentId
     setSelectedAgentId(agentId)
     setError(null)
@@ -491,11 +632,66 @@ export function SingleChatPanel({
     }
   }
 
+  const prepareFiles = async (files: File[]): Promise<void> => {
+    const agentId = selectedAgentIdRef.current
+    if (!agentId || activeRun || ending || files.length === 0) return
+    const pending = files.map((file) => ({ id: crypto.randomUUID(), name: file.name, error: null }))
+    setPreparingAttachments((current) => [...current, ...pending])
+    setError(null)
+    let current = snapshotRef.current?.conversation.agentId === agentId
+      ? snapshotRef.current
+      : null
+    try {
+      if (!current) current = await openConversation(agentId)
+      for (const [index, file] of files.entries()) {
+        const item = pending[index]
+        try {
+          const next = await window.rovai.singleChatAttachments.prepare(
+            current.conversation.id,
+            current.conversation.version,
+            file
+          )
+          current = next
+          snapshotRef.current = next
+          setSnapshot(next)
+          setPreparingAttachments((items) => items.filter(({ id }) => id !== item.id))
+        } catch (nextError) {
+          const message = readErrorMessage(nextError, '附件处理失败，请移除后重试。')
+          setPreparingAttachments((items) => items.map((candidate) => (
+            candidate.id === item.id ? { ...candidate, error: message } : candidate
+          )))
+        }
+      }
+    } catch (nextError) {
+      const message = readErrorMessage(nextError, '无法为这段单聊添加附件。')
+      setPreparingAttachments((items) => items.map((candidate) => (
+        pending.some(({ id }) => id === candidate.id) ? { ...candidate, error: message } : candidate
+      )))
+    }
+  }
+
+  const removePreparedAttachment = async (attachmentId: string): Promise<void> => {
+    const current = snapshotRef.current
+    if (!current || activeRun || ending) return
+    setError(null)
+    try {
+      const next = await window.rovai.singleChatAttachments.remove(
+        current.conversation.id,
+        current.conversation.version,
+        attachmentId
+      )
+      snapshotRef.current = next
+      setSnapshot(next)
+    } catch (nextError) {
+      setError(readErrorMessage(nextError, '附件未能移除，请重试。'))
+    }
+  }
+
   const send = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     const body = draft.trim()
     const agentId = selectedAgentIdRef.current
-    if (!body || !agentId || activeRun || sending) return
+    if (!agentId || activeRun || sending || preparingAttachments.some((item) => !item.error)) return
     followLatestRef.current = true
     setSending(true)
     setError(null)
@@ -504,17 +700,21 @@ export function SingleChatPanel({
         ? snapshotRef.current
         : await openConversation(agentId)
       if (!current) throw new Error('无法打开这段单聊。')
+      const attachmentIds = current.preparedAttachments.map((attachment) => attachment.id)
+      if (!body && attachmentIds.length === 0) return
       const result = await window.rovai.request<StoredCommandResult>('singleChat.send', {
         commandId: crypto.randomUUID(),
         command: {
           campId,
           conversationId: current.conversation.id,
           body,
+          attachmentIds,
           expectedConversationVersion: current.conversation.version
         }
       })
       if (result.status === 'rejected') throw new Error(resultMessage(result))
       setDraft('')
+      setPreparingAttachments([])
       await refresh(false)
     } catch (nextError) {
       setError(readErrorMessage(nextError, '消息未发送，请重试。'))
@@ -559,6 +759,7 @@ export function SingleChatPanel({
       if (result.status === 'rejected') throw new Error(resultMessage(result))
       if (skipEndConfirmation) storeBoolean(END_CONFIRMATION_STORAGE_KEY, true)
       setEndDialogOpen(false)
+      setPreparingAttachments([])
       snapshotRef.current = null
       setSnapshot(null)
       setConversations((currentConversations) => currentConversations.filter((conversation) => conversation.id !== current.conversation.id))
@@ -633,7 +834,7 @@ export function SingleChatPanel({
       <div className="single-chat-target-bar">
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button className={`single-chat-target-trigger${selectedMember ? '' : ' no-target'}`} type="button" disabled={activeMembers.length === 0 || ending}>
+            <button className={`single-chat-target-trigger${selectedMember ? '' : ' no-target'}`} type="button" disabled={activeMembers.length === 0 || ending || sending || preparingAttachments.some((item) => !item.error)}>
               {selectedMember && <MemberAvatar agentId={selectedMember.agentId} avatarRef={selectedMember.avatarRef} displayName={selectedMember.displayName} size="mention" decorative />}
               <span className="single-chat-target-copy">
                 <strong>{selectedMember?.displayName ?? '选择单聊对象'}</strong>
@@ -689,24 +890,91 @@ export function SingleChatPanel({
 
       <form className="single-chat-composer" onSubmit={(event) => void send(event)}>
         <div className={`single-chat-composer-box${activeRun ? ' is-running' : ''}`}>
-          <label className="sr-only" htmlFor={`${panelId}-composer`}>发送单聊消息</label>
-          <textarea
-            id={`${panelId}-composer`}
-            value={draft}
-            disabled={!selectedMember || Boolean(activeRun) || sending || ending}
-            placeholder={activeRun ? '队员正在回复…' : selectedMember ? `给 ${selectedMember.displayName} 发消息…` : '选择一位队员后开始单聊'}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.nativeEvent.isComposing || event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return
-              event.preventDefault()
-              event.currentTarget.form?.requestSubmit()
-            }}
-          />
-          <div className="single-chat-composer-actions">
-            <small>{activeRun ? '回复完成后可继续发送' : '⌘ Enter 发送'}</small>
-            {activeRun
-              ? <button className="danger-button compact" type="button" disabled={cancelling} onClick={() => void stopCurrentRun()}>{cancelling ? '停止中…' : '停止'}</button>
-              : <button className="primary-button compact" type="submit" disabled={!draft.trim() || !selectedMember || sending || ending}>{sending ? '发送中…' : '发送'}</button>}
+          <div className="composer-input">
+            {((snapshot?.preparedAttachments.length ?? 0) > 0 || preparingAttachments.length > 0) && (
+              <SingleChatAttachmentStrip>
+                {snapshot?.preparedAttachments.map((attachment) => (
+                  <SingleChatAttachmentCard
+                    attachment={attachment}
+                    presentation="composer"
+                    key={attachment.id}
+                    onRemove={() => void removePreparedAttachment(attachment.id)}
+                  />
+                ))}
+                {preparingAttachments.map((item) => (
+                  <SingleChatAttachmentPlaceholder
+                    item={item}
+                    key={item.id}
+                    onRemove={item.error
+                      ? () => setPreparingAttachments((current) => current.filter(({ id }) => id !== item.id))
+                      : undefined}
+                  />
+                ))}
+              </SingleChatAttachmentStrip>
+            )}
+            <label className="sr-only" htmlFor={`${panelId}-composer`}>发送单聊消息</label>
+            <textarea
+              id={`${panelId}-composer`}
+              value={draft}
+              disabled={!selectedMember || Boolean(activeRun) || sending || ending}
+              placeholder={activeRun ? '队员正在回复…' : selectedMember ? `给 ${selectedMember.displayName} 发消息…` : '选择一位队员后开始单聊'}
+              onChange={(event) => setDraft(event.target.value)}
+              onPaste={(event) => {
+                const files = Array.from(event.clipboardData.files)
+                if (files.length === 0) return
+                event.preventDefault()
+                void prepareFiles(files)
+              }}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.key !== 'Enter' || event.shiftKey) return
+                event.preventDefault()
+                event.currentTarget.form?.requestSubmit()
+              }}
+            />
+          </div>
+          <div className="composer-action-row">
+            <div className="composer-tools">
+              <input
+                ref={fileInputRef}
+                className="composer-file-input"
+                type="file"
+                multiple
+                tabIndex={-1}
+                onChange={(event) => {
+                  const files = Array.from(event.currentTarget.files ?? [])
+                  event.currentTarget.value = ''
+                  if (files.length > 0) void prepareFiles(files)
+                }}
+              />
+              <button
+                className="composer-attachment-button"
+                type="button"
+                aria-label="添加文件"
+                title="添加文件"
+                disabled={!selectedMember || Boolean(activeRun) || sending || ending || preparingAttachments.some((item) => !item.error)}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <svg aria-hidden="true" viewBox="0 0 18 18"><path d="m6.2 9.8 4.65-4.65a2.5 2.5 0 0 1 3.54 3.54l-6.1 6.1a4 4 0 0 1-5.66-5.66l6.1-6.1" /></svg>
+              </button>
+            </div>
+            <div className="composer-actions">
+              {!activeRun && (
+                <span className="composer-hint">
+                  <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
+                  <span className="composer-hint-visual" aria-hidden="true">
+                    <kbd>↵</kbd><span>发送</span><span className="composer-hint-separator">·</span><kbd>⇧↵</kbd><span>换行</span>
+                  </span>
+                </span>
+              )}
+              {activeRun
+                ? <button className="danger-button single-chat-stop" type="button" disabled={cancelling} onClick={() => void stopCurrentRun()}>{cancelling ? '正在提交停止请求…' : '停止'}</button>
+                : <button
+                    className="primary-button single-chat-send"
+                    type="submit"
+                    aria-busy={sending || preparingAttachments.some((item) => !item.error)}
+                    disabled={(!draft.trim() && (snapshot?.preparedAttachments.length ?? 0) === 0) || !selectedMember || sending || ending || preparingAttachments.some((item) => !item.error)}
+                  >发送</button>}
+            </div>
           </div>
         </div>
         {error && <div className="single-chat-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>关闭</button></div>}

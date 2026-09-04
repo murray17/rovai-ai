@@ -5,7 +5,7 @@ authority: single-chat-domain-context-operation-and-output-routing
 status: accepted
 version: 1
 source_version: v1.40
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Single Chat v1
@@ -63,20 +63,26 @@ Message 和私有执行证据。
 | `singleChat.list` | `{ campId }` | 返回当前 Camp 的 active Single Chat，不返回 ended |
 | `singleChat.get` | `{ conversationId }` | 返回 Conversation、Messages、Runs 与已授权 Execution Evidence；不存在返回 `null` |
 | `singleChat.open` | command envelope + `{ campId, agentId }` | 已有 active 会话则幂等返回；否则创建新 Conversation |
-| `singleChat.send` | command envelope + `{ campId, conversationId, body, expectedConversationVersion }` | 原子接收一条用户消息并创建一个 Turn/Run |
+| `singleChat.attachments.prepareFromPath` | `{ conversationId, expectedConversationVersion, sourcePath, displayName }` | 将本地文件或目录快照到该 active Conversation 的私有暂存区，返回新 Snapshot |
+| `singleChat.attachments.remove` | `{ conversationId, expectedConversationVersion, attachmentId }` | 从该 active Conversation 移除一个待发送私有附件，返回新 Snapshot |
+| `singleChat.attachments.previewSource` | `{ attachmentId }` | 仅为可预览的私有图片返回经 receipt 复核的本地来源；其他情况返回 `null` |
+| `singleChat.send` | command envelope + `{ campId, conversationId, body, attachmentIds, expectedConversationVersion }` | 原子接收一条用户消息及其附件并创建一个 Turn/Run |
 | `singleChat.end` | command envelope + `{ campId, conversationId, expectedConversationVersion }` | 原子结束 Conversation，并取消其中的非终态 Run |
 
 所有 mutation 使用既有 command idempotency。`open/send/end` 只接受 `ActorRef::User`，同时验证 envelope Camp、payload
 Camp 与目标 Conversation Camp 一致。目标 Agent 必须是 active、未请求离开、profile `present` 的当前 Camp Member，且
 Camp 必须 active。
 
-`send` 的正文 trim 后必须非空且最多 100,000 Unicode scalar。它在同一事务内：
+`send` 的 trim 后正文与 `attachmentIds` 不得同时为空；正文最多 100,000 Unicode scalar。单条消息最多 10 个附件，
+单个附件快照最多 25 MiB，待发送附件合计最多 64 MiB。`attachmentIds` 必须按当前私有暂存顺序精确列出全部待发送
+附件，不能跨 Conversation 引用、遗漏或重排。发送在同一事务内：
 
 1. 验证 active Conversation、版本、目标成员和 Runtime readiness；
 2. 拒绝同一 Conversation 中已有 `queued | running | waiting` 的 Single Chat Run；
 3. 冻结当前 Camp 公共边界、Runtime 配置、私有响应目标和 operation policy；
 4. 写一条 user `conversation_message`、一个 `CampTurn` 和一个 required `AgentRun`；
-5. 增加 Conversation version，并提交既有幂等 receipt。
+5. 将待发送附件原子转为该 ConversationMessage 的不可变附件记录，并清空暂存记录；
+6. 增加 Conversation version，并提交既有幂等 receipt。
 
 上述任一步失败都不得留下 Message、Turn、Run 或 version 增量。busy 只作用于同一 Conversation，错误为
 `single_chat.reply_in_progress`；不存在 Camp 全局 Single Chat 回复槽或隐式等待队列。
@@ -160,6 +166,19 @@ Single Chat Native Session Bootstrap 固定为：
 
 ## 6. 私有输出路由
 
+### 6.1 私有附件路由
+
+Single Chat 附件不得进入 `camp_composer_draft`、CampMessage 附件表或 Camp 公共附件根目录。Core 以
+`single-chat-attachments/<campId>/<conversationId>/<attachmentId>/...` 保存只读私有快照；暂存记录只属于一个 active
+Conversation，结束会话会移除未发送暂存。已发送附件成为 user ConversationMessage 的不可变组成，并随 Snapshot 返回。
+
+dispatch 对当前 Run/epoch 解析其 trigger ConversationMessage，将附件重新验证后复制到该 Run 的既有 `ROVAI_RUN_TMP`
+下；`CURRENT_INPUT.attachments` 只包含这份按 Run 隔离的临时投影路径。Runtime 不获得私有持久根目录，其他消息、Run、
+Conversation、Camp 公屏和 successor Single Chat 也不得消费该投影。复制、receipt 或 identity 验证失败时，不得降级暴露
+原路径或无附件继续执行。
+
+### 6.2 Final 与迟到事件
+
 Runtime stream 与 terminal 回调先按既有可信进程/Binding 鉴权，再至少按 `agentRunId + executionEpoch` 解析冻结
 Conversation 和 route。Renderer 订阅或轮询 Evidence 同样只合并 `conversationId + agentRunId + executionEpoch`
 匹配的记录，不能按 `campId + agentId` 串流。
@@ -193,10 +212,13 @@ cancelled 终态。
 
 ## 8. Renderer snapshot 与呈现最低合同
 
-`SingleChatSnapshot` 必须包含 typed `conversation/messages/agentRuns/executionEvidence`。每个 Run 投影
+`SingleChatSnapshot` 必须包含 typed `conversation/messages/preparedAttachments/agentRuns/executionEvidence`；每个 user
+Message 包含自己的 immutable `attachments`。每个 Run 投影
 `executionEpoch`、生命周期时间、终态、错误、final ConversationMessage ID 和 Evidence 数量。Renderer 不从公屏或
 Runtime 文案重建私有 transcript。
 
 终态执行过程默认折叠但可展开，final message 始终位于独立分隔线下且默认展开。取消显示
-“你在 {duration}后停止了运行”，成功显示“工作了 {duration}”；用户消息居右、队员响应居左，transcript 不显示头像。
+“你在 {duration}后停止了运行”，成功显示“工作了 {duration}”；用户消息与附件居右，队员响应居左且不使用消息底色框，
+transcript 不显示头像。Composer 与 Camp Composer 使用相同输入面：附件入口与卡片、发送/换行提示和“发送”按钮；
+`Enter` 发送、`Shift+Enter` 换行，IME 合成期间不得提交。
 完整组件规范见 [Camp 内单聊](../ui/components/conversation-workspace.md#camp-内单聊)。

@@ -97,19 +97,27 @@ const terminalSnapshot: SingleChatSnapshot = {
   messages: [
     {
       id: 'message-user-1', sequence: 1, authorType: 'user', authorId: 'local-user',
-      body: '帮我核对这份实现，重点看输出路由和结束后的迟到事件。', agentRunId: 'run-complete',
+      body: '帮我核对这份实现，重点看输出路由和结束后的迟到事件。',
+      attachments: [{
+        id: 'private-attachment-1', displayName: 'single-chat-contract.md', kind: 'file',
+        fileCount: 1, mediaType: 'text/markdown', byteSize: 18_432, previewKind: 'none',
+        runtimeProjectionState: 'available'
+      }],
+      agentRunId: 'run-complete',
       createdAt: '2026-09-03T10:00:00.000Z'
     },
     {
       id: 'message-agent-1', sequence: 2, authorType: 'agent', authorId: 'agent_1',
       body: '核心链路已经闭合：final 只进入当前单聊，旧 Run 的迟到事件不会进入后续 Conversation。',
-      agentRunId: 'run-complete', createdAt: '2026-09-03T10:39:17.000Z'
+      attachments: [], agentRunId: 'run-complete', createdAt: '2026-09-03T10:39:17.000Z'
     },
     {
       id: 'message-user-2', sequence: 3, authorType: 'user', authorId: 'local-user',
-      body: '再检查一下取消后的显示。', agentRunId: 'run-cancelled', createdAt: '2026-09-03T11:00:00.000Z'
+      body: '再检查一下取消后的显示。', attachments: [], agentRunId: 'run-cancelled',
+      createdAt: '2026-09-03T11:00:00.000Z'
     }
   ],
+  preparedAttachments: [],
   agentRuns: [
     {
       id: 'run-complete', triggerConversationMessageId: 'message-user-1', status: 'succeeded', version: 3,
@@ -145,7 +153,8 @@ function runningSnapshot(): SingleChatSnapshot {
     },
     messages: [...terminalSnapshot.messages, {
       id: 'message-user-3', sequence: 4, authorType: 'user', authorId: 'local-user',
-      body: '最后检查一下正在执行时的展示。', agentRunId: 'run-running', createdAt: '2026-09-03T12:00:00.000Z'
+      body: '最后检查一下正在执行时的展示。', attachments: [], agentRunId: 'run-running',
+      createdAt: '2026-09-03T12:00:00.000Z'
     }],
     agentRuns: [...terminalSnapshot.agentRuns, {
       id: 'run-running', triggerConversationMessageId: 'message-user-3', status: 'running', version: 2,
@@ -166,6 +175,11 @@ Object.assign(window, {
   rovai: {
     platform: 'darwin',
     onEvent: () => () => undefined,
+    singleChatAttachments: {
+      prepare: async () => currentSnapshot,
+      remove: async () => currentSnapshot,
+      preview: async () => null
+    },
     request: async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
       requests.push({ method, params })
       if (method === 'singleChat.list') return [currentSnapshot.conversation]
@@ -173,6 +187,15 @@ Object.assign(window, {
       if (method === 'singleChat.open') return {
         status: 'applied', code: 'single_chat.opened',
         payload: { conversationId, conversationVersion: currentSnapshot.conversation.version, created: false }
+      } satisfies StoredCommandResult
+      if (method === 'singleChat.send') return {
+        status: 'accepted', code: 'single_chat.reply_queued', payload: {
+          conversationId,
+          conversationVersion: currentSnapshot.conversation.version + 1,
+          conversationMessageId: 'message-keyboard-fixture',
+          campTurnId: 'turn-keyboard-fixture',
+          agentRunId: 'run-keyboard-fixture'
+        }
       } satisfies StoredCommandResult
       if (method === 'agentRuns.cancel') {
         const running = currentSnapshot.agentRuns.find((run) => run.id === 'run-running')
@@ -233,6 +256,7 @@ Object.assign(window, {
       const dialog = document.querySelector<HTMLElement>('.app-dialog')
       const userMessage = document.querySelector<HTMLElement>('.single-chat-user-message')
       const agentResponse = document.querySelector<HTMLElement>('.single-chat-agent-response')
+      const liveExecution = document.querySelector<HTMLElement>('.single-chat-run-history.is-live .single-chat-execution-content')
       const rect = panel?.getBoundingClientRect()
       return {
         body: document.body.textContent ?? '',
@@ -251,7 +275,14 @@ Object.assign(window, {
         checkbox: Boolean(dialog?.querySelector('input[type="checkbox"]')),
         endButtons: [...(dialog?.querySelectorAll('button') ?? [])].map((button) => button.textContent?.trim()),
         composerDisabled: document.querySelector<HTMLTextAreaElement>('.single-chat-composer textarea')?.disabled ?? null,
+        composerValue: document.querySelector<HTMLTextAreaElement>('.single-chat-composer textarea')?.value ?? null,
         stopVisible: [...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === '停止'),
+        attachmentButton: Boolean(document.querySelector('.single-chat-composer .composer-attachment-button')),
+        composerHint: document.querySelector('.single-chat-composer .composer-hint')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+        messageAttachments: document.querySelectorAll('.single-chat-message-attachments .attachment-card').length,
+        agentBackground: agentResponse ? getComputedStyle(agentResponse).backgroundColor : null,
+        liveExecutionBackground: liveExecution ? getComputedStyle(liveExecution).backgroundColor : null,
+        sendRequests: requests.filter((request) => request.method === 'singleChat.send').length,
         cancelRequests: requests.filter((request) => request.method === 'agentRuns.cancel').length,
         background: panel ? getComputedStyle(panel).backgroundColor : null
       }

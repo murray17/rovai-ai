@@ -59,6 +59,10 @@ test('production Single Chat panel preserves private conversation layout and ter
       groupedCommands: 3,
       finalMessageExpanded: true,
       directEndConfirmation: true,
+      campComposerParity: true,
+      composerKeyboardSemantics: true,
+      privateAttachments: true,
+      agentMessagesWithoutFill: true,
       runningStopAndComposerGate: true,
       dayAndNight: true,
       compactNoOverflow: true

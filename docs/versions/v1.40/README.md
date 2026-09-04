@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
 model_context_change: true
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Rovai-ai v1.40：Camp 内单聊与私有回复路由
@@ -36,6 +36,8 @@ implementation-ready = yes
 - `singleChat.send` 在一个事务内写用户 `conversation_message`、`CampTurn(kind=single_chat)` 和唯一
   `AgentRun(invocation_kind=single_chat)`，同时冻结私有输出路由和 `single_chat_v1` Built-in 策略。同一段
   Conversation 只允许一个非终态回复，不增加 Camp 全局回复槽。
+- Single Chat 附件使用独立的 Conversation-scoped 私有暂存与 immutable message attachment，不进入 Camp Composer
+  Draft 或公共附件根；当前消息附件经 receipt 复核后只投影到对应 Run 的 `ROVAI_RUN_TMP` 并进入 `CURRENT_INPUT`。
 - Single Chat 使用专用 Session Charter 和每轮 Guidance。新增公共消息只在下一次用户发送时按该私有
   Conversation 的 accepted watermark 增量投递，并包含目标队员自己的公屏消息；ACK 不推进普通成员会话水位。
 - Runtime final 成功时只追加一条 agent `conversation_message`，不创建 CampMessage、不运行 Missing-Send
@@ -44,9 +46,10 @@ implementation-ready = yes
   Conversation 保持 active，下一条输入创建新 Run，不新增恢复状态或旧输入重放。
 - 用户“结束”是 `active → ended` 的业务线性化点；旧 Run 进入取消/清理，私有输出路由立即关闭。用户可立即
   开始同一队员的新单聊，不等待旧 cleanup；旧迟到事件只能成为旧 Run 证据。
-- Renderer 在 Camp Header 提供单聊入口与带头像的对象选择器。用户消息居右、队员回复居左，正文不显示头像；
+- Renderer 在 Camp Header 提供单聊入口与带头像的对象选择器。用户消息居右、队员回复居左且没有消息底色框，正文不显示头像；
   执行过程复用执行台语义并把连续 Command 聚合为“已执行 x 项操作”，终态自动折叠过程，在分隔线下保持 final
-  message 展开。结束确认使用“这段对话将被删除且无法回复。”、“取消 / 结束”和“不再询问”。
+  message 展开。Composer 与群聊保持同一输入风格，提供私有附件、发送/换行提示与发送按钮；结束确认使用
+  “这段对话将被删除且无法回复。”、“取消 / 结束”和“不再询问”。
 
 正式字段、错误、并发、恢复和投递边界见 [Single Chat v1](../../contracts/single-chat-v1.md)，组件关系见
 [Single Chat Architecture](../../architecture/single-chat.md)，Renderer 规范见
