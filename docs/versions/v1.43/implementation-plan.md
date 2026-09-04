@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.43
 authority: implementation-and-acceptance-status
-status: in_progress
+status: complete
 last_updated: 2026-09-04
 ---
 
@@ -46,12 +46,16 @@ pnpm test
 pnpm build:desktop
 pnpm docs:test
 pnpm docs:check
-DOCS_BASE_REF=5b03f56177426604780403d92d08a7456af6a1cf pnpm docs:check:ci
+DOCS_BASE_REF=<merge-base-with-main> pnpm docs:check:ci
 git diff --check
 ```
 
 ## 验证记录
 
-- [x] Composer 文档、EditorState、Draft Sync 与组件定向 Vitest：4 files / 24 tests 通过。
-- [x] 隔离 Electron 原生输入 fixture：Member/Skill、IME、历史、Clipboard、HTML 降级和 File 优先共 23 项通过。
-- [ ] Rust/TypeScript/完整仓库、Desktop integration、build、文档治理与 UI changed-target detector 全量门禁待最终运行。
+- [x] Composer 文档、EditorState、Draft Sync 与组件定向 Vitest：4 files / 25 tests 通过。
+- [x] `pnpm test` 通过：147 个 Vitest 文件、1491 个用例；Node 套件 220 个通过、1 个 Windows-only 跳过。
+- [x] Rust format、workspace/all-targets check、CLI 32 项与 feature-gated slow-tests 300 项通过；默认库测试在排除下述宿主能力单例后 495/495 通过。
+- [x] `pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check`、以 `3d858d00deffe5bd1299846fd28df498d49af0b9` 为 merge-base 的 diff-aware 文档门禁及 `git diff --check` 通过。
+- [x] Impeccable changed-target 扫描未命中本次 Composer TSX/CSS 变更；报告项均位于未修改的既有全局 CSS 规则。
+- [ ] 当前受管执行环境禁止嵌套 macOS sandbox：`pnpm test:desktop:integration` 的 10 个 Electron 业务夹具均按统一预检明确标记为 `BLOCKED`，没有把 skip 计作通过；Rust `managed_process` sandbox 能力单例同因 `/usr/bin/sandbox-exec` exit 71 阻断。需由普通 Terminal 或 CI host 完成这两项宿主能力验收。
+- [ ] 严格 all-features Clippy 命中未修改基线：`context.rs:1715` 的 `type_complexity` 与 `db.rs:26063` 的 `no_effect_replace`；本版本未把无关基线整改混入 Composer 改动。
