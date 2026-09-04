@@ -92,10 +92,6 @@ import { useOptionalFilePreview } from './FilePreviewContext'
 import { agentRunFileChangesSummaryLabel, inlineDiffLines, exactMutationDiffLines } from './file-changes-presentation'
 import { FileReferenceText, type FileReferenceActivation } from './FileReferenceLink'
 import {
-  useResolvedMessageFileReferences,
-  type MessageFileReferenceSource
-} from './use-resolved-message-file-references'
-import {
   captureTimelineReadingAnchor,
   restoreTimelineReadingAnchor,
   visibleTimelineMessageAnchor,
@@ -4205,10 +4201,6 @@ export function CampWorkspace({
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
-                                            fileReferenceSource={{
-                                              campId: snapshot.camp.id,
-                                              messageId: campMessage.id
-                                            }}
                                             onActivateMemberMention={openMemberProfilePopover}
                                             onFileReference={(rawReference, source, target) => {
                                               if (!filePreview) return
@@ -4233,10 +4225,6 @@ export function CampWorkspace({
                                             members={snapshot.members}
                                             truncate={humanAuthored}
                                             forceExpanded={isConversationFindCurrent}
-                                            fileReferenceSource={{
-                                              campId: snapshot.camp.id,
-                                              messageId: campMessage.id
-                                            }}
                                             renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
                                             onActivateMemberMention={openMemberProfilePopover}
                                             onActivateAllMembersMention={(trigger, focusPanel) =>
@@ -7307,8 +7295,7 @@ function TruncatedStructuredMessageBody({
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
   onActivateAllMembersMention,
-  onFileReference,
-  fileReferenceSource
+  onFileReference
 }: {
   body: string
   content: StructuredCampMessageContent | null
@@ -7323,7 +7310,6 @@ function TruncatedStructuredMessageBody({
   ): void
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
   onFileReference?: FileReferenceActivation
-  fileReferenceSource?: MessageFileReferenceSource
 }): JSX.Element {
   const projection = useMemo(
     () => truncate ? collapsedMessageProjection(body, content) : null,
@@ -7342,7 +7328,6 @@ function TruncatedStructuredMessageBody({
       onActivateMemberMention={onActivateMemberMention}
       onActivateAllMembersMention={onActivateAllMembersMention}
       onFileReference={onFileReference}
-      fileReferenceSource={fileReferenceSource}
     />
   )
   if (!projection || forceExpanded) return messageBody
@@ -7361,15 +7346,13 @@ function AgentMessageMarkdownBody({
   content,
   members,
   onActivateMemberMention,
-  onFileReference,
-  fileReferenceSource
+  onFileReference
 }: {
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
   onActivateMemberMention(agentId: string, trigger: HTMLElement, focusPanel: boolean): void
   onFileReference?: FileReferenceActivation
-  fileReferenceSource?: MessageFileReferenceSource
 }): JSX.Element {
   // Only authoritative leading tokens form a recipient prefix. Literal @names
   // stay Markdown text; the Renderer never derives addressing from the body.
@@ -7381,20 +7364,8 @@ function AgentMessageMarkdownBody({
   const markdownBody = content && prefixLength > 0
     ? structuredCampContentMarkdownText(content.slice(prefixLength), members)
     : body
-  const resolvedInlineFileReferences = useResolvedMessageFileReferences(
-    fileReferenceSource,
-    markdownBody,
-    Boolean(onFileReference)
-  )
   if (!content || prefixLength === 0) {
-    return (
-      <SafeMarkdown
-        onFileReference={onFileReference}
-        resolvedInlineFileReferences={resolvedInlineFileReferences}
-      >
-        {body}
-      </SafeMarkdown>
-    )
+    return <SafeMarkdown onFileReference={onFileReference}>{body}</SafeMarkdown>
   }
 
   const hasBody = markdownBody.trim().length > 0
@@ -7416,7 +7387,6 @@ function AgentMessageMarkdownBody({
           leadingContent={prefix}
           inlineLeadingContent={inlineBody}
           onFileReference={onFileReference}
-          resolvedInlineFileReferences={resolvedInlineFileReferences}
         >
           {markdownBody}
         </SafeMarkdown>
@@ -7433,8 +7403,7 @@ function StructuredMessageBody({
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
   onActivateAllMembersMention,
-  onFileReference,
-  fileReferenceSource
+  onFileReference
 }: {
   body: string
   content: StructuredCampMessageContent | null
@@ -7448,22 +7417,12 @@ function StructuredMessageBody({
   ): void
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
   onFileReference?: FileReferenceActivation
-  fileReferenceSource?: MessageFileReferenceSource
 }): JSX.Element {
   const markdownBody = renderLeadingCurrentUserMarkdown && content !== null
     ? projectLeadingCurrentUserMentionMarkdownBody(content, members)
     : null
-  const referenceMarkdown = markdownBody ?? (content === null
-    ? body
-    : content.flatMap((segment) => segment.kind === 'text' ? [segment.text] : []).join('\n'))
-  const resolvedInlineFileReferences = useResolvedMessageFileReferences(
-    fileReferenceSource,
-    referenceMarkdown,
-    Boolean(onFileReference)
-  )
   if (content === null) {
-    return <p><FileReferenceText text={body} onActivate={onFileReference}
-      resolvedInlineFileReferences={resolvedInlineFileReferences} /></p>
+    return <p><FileReferenceText text={body} onActivate={onFileReference} /></p>
   }
   if (markdownBody !== null) {
     return (
@@ -7473,8 +7432,9 @@ function StructuredMessageBody({
           {markdownBody.length > 0 ? ' ' : ''}
         </span>
         {markdownBody.length > 0 && (
-          <SafeMarkdown className="current-user-markdown-content" onFileReference={onFileReference}
-            resolvedInlineFileReferences={resolvedInlineFileReferences}>{markdownBody}</SafeMarkdown>
+          <SafeMarkdown className="current-user-markdown-content" onFileReference={onFileReference}>
+            {markdownBody}
+          </SafeMarkdown>
         )}
       </div>
     )
@@ -7492,8 +7452,7 @@ function StructuredMessageBody({
             : segment.text
           return text ? (
             <span key={`text-${index}`}>
-              <FileReferenceText text={text} onActivate={onFileReference}
-                resolvedInlineFileReferences={resolvedInlineFileReferences} />
+              <FileReferenceText text={text} onActivate={onFileReference} />
             </span>
           ) : null
         }

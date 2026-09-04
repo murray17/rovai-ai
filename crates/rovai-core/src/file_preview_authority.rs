@@ -1,8 +1,4 @@
-use std::{
-    collections::HashSet,
-    path::{Component, Path},
-    sync::OnceLock,
-};
+use std::path::{Component, Path};
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, params};
@@ -153,123 +149,6 @@ fn plausible_file_reference(value: &str) -> bool {
         && !reference_has_disallowed_scheme(value)
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedResourceTypeDefinition {
-    extensions: Vec<String>,
-    #[serde(default)]
-    file_names: Vec<String>,
-    #[serde(default)]
-    file_name_prefixes: Vec<String>,
-}
-
-struct SharedResourceTypeRegistry {
-    extensions: HashSet<String>,
-    file_names: HashSet<String>,
-    file_name_prefixes: Vec<String>,
-}
-
-fn shared_resource_type_registry() -> &'static SharedResourceTypeRegistry {
-    static REGISTRY: OnceLock<SharedResourceTypeRegistry> = OnceLock::new();
-    REGISTRY.get_or_init(|| {
-        let definitions: Vec<SharedResourceTypeDefinition> = serde_json::from_str(include_str!(
-            "../../../apps/desktop/src/resource-type-registry.json"
-        ))
-        .expect("shared resource type registry must be valid JSON");
-        SharedResourceTypeRegistry {
-            extensions: definitions
-                .iter()
-                .flat_map(|definition| definition.extensions.iter().cloned())
-                .collect(),
-            file_names: definitions
-                .iter()
-                .flat_map(|definition| definition.file_names.iter().cloned())
-                .collect(),
-            file_name_prefixes: definitions
-                .into_iter()
-                .flat_map(|definition| definition.file_name_prefixes)
-                .collect(),
-        }
-    })
-}
-
-fn location_suffix(value: &str) -> bool {
-    let numeric = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
-    numeric(value)
-        || value
-            .split_once(':')
-            .is_some_and(|(line, column)| numeric(line) && numeric(column))
-        || value
-            .split_once('-')
-            .is_some_and(|(start, end)| numeric(start) && numeric(end))
-}
-
-fn path_without_location(value: &str) -> &str {
-    let path = value.split(['?', '#']).next().unwrap_or(value);
-    path.match_indices(':')
-        .find_map(|(offset, _)| location_suffix(&path[offset + 1..]).then_some(&path[..offset]))
-        .unwrap_or(path)
-}
-
-fn known_resource_type(value: &str) -> bool {
-    let registry = shared_resource_type_registry();
-    let path = path_without_location(value);
-    let file_name = path
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(path)
-        .to_ascii_lowercase();
-    if registry.file_names.contains(&file_name)
-        || registry
-            .file_name_prefixes
-            .iter()
-            .any(|prefix| file_name.starts_with(prefix))
-    {
-        return true;
-    }
-    file_name
-        .rfind('.')
-        .is_some_and(|offset| registry.extensions.contains(&file_name[offset..]))
-}
-
-fn high_confidence_bare_reference(value: &str) -> bool {
-    if !plausible_file_reference(value) {
-        return false;
-    }
-    let value = strip_balanced_reference_wrapper(value.trim());
-    let bytes = value.as_bytes();
-    let non_relative = value.starts_with('/')
-        || value.starts_with("~/")
-        || value.starts_with("~\\")
-        || value.starts_with("./")
-        || value.starts_with(".\\")
-        || value.starts_with("../")
-        || value.starts_with("..\\")
-        || value.starts_with("\\\\")
-        || value.starts_with("//")
-        || value.to_ascii_lowercase().starts_with("file:///")
-        || (bytes.len() >= 3
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-            && matches!(bytes[2], b'/' | b'\\'));
-    non_relative
-        || ((value.contains('/') || value.contains('\\'))
-            && (known_resource_type(value)
-                || value
-                    .rsplit_once(':')
-                    .is_some_and(|(_, line)| line.bytes().all(|byte| byte.is_ascii_digit()))))
-}
-
-fn path_boundary(character: Option<char>) -> bool {
-    character.is_none_or(|value| {
-        !(value.is_alphanumeric()
-            || matches!(
-                value,
-                '.' | '_' | '@' | '%' | '+' | '-' | '/' | '\\' | ':' | '#' | '?' | '~'
-            ))
-    })
-}
-
 fn visible_markdown_without_fences(body: &str) -> String {
     let mut result = String::with_capacity(body.len());
     let mut fence: Option<char> = None;
@@ -296,24 +175,95 @@ fn visible_markdown_without_fences(body: &str) -> String {
     result
 }
 
+fn markdown_without_inline_code(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut result = String::with_capacity(value.len());
+    let mut retained_from = 0_usize;
+    let mut offset = 0_usize;
+    while offset < bytes.len() {
+        if bytes[offset] != b'`' {
+            offset += 1;
+            continue;
+        }
+        let opener = offset;
+        while offset < bytes.len() && bytes[offset] == b'`' {
+            offset += 1;
+        }
+        let delimiter_length = offset - opener;
+        let mut candidate = offset;
+        let mut closing_end = None;
+        while candidate < bytes.len() {
+            if bytes[candidate] != b'`' {
+                candidate += 1;
+                continue;
+            }
+            let closing_start = candidate;
+            while candidate < bytes.len() && bytes[candidate] == b'`' {
+                candidate += 1;
+            }
+            if candidate - closing_start == delimiter_length {
+                closing_end = Some(candidate);
+                break;
+            }
+        }
+        let Some(end) = closing_end else {
+            continue;
+        };
+        result.push_str(&value[retained_from..opener]);
+        retained_from = end;
+        offset = end;
+    }
+    result.push_str(&value[retained_from..]);
+    result
+}
+
+fn byte_is_escaped(bytes: &[u8], offset: usize) -> bool {
+    bytes[..offset]
+        .iter()
+        .rev()
+        .take_while(|byte| **byte == b'\\')
+        .count()
+        % 2
+        == 1
+}
+
+fn markdown_destination_has_link_label(before: &str, marker: &str) -> bool {
+    let Some(label_end) = before.len().checked_sub(marker.len()) else {
+        return false;
+    };
+    let bytes = before.as_bytes();
+    let mut nested = 0_usize;
+    for offset in (0..label_end).rev() {
+        if byte_is_escaped(bytes, offset) {
+            continue;
+        }
+        match bytes[offset] {
+            b']' => nested += 1,
+            b'[' if nested > 0 => nested -= 1,
+            b'[' => {
+                return offset == 0
+                    || bytes[offset - 1] != b'!'
+                    || byte_is_escaped(bytes, offset - 1);
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn markdown_segment_authorizes_reference(segment: &str, raw_reference: &str) -> bool {
     for (offset, _) in segment.match_indices(raw_reference) {
         let before = &segment[..offset];
         let after = &segment[offset + raw_reference.len()..];
         let markdown_destination = if before.ends_with("](<") {
-            after.starts_with('>')
+            after.starts_with('>') && markdown_destination_has_link_label(before, "](<")
         } else if before.ends_with("](") {
-            after.starts_with(')') || after.starts_with(char::is_whitespace)
+            (after.starts_with(')') || after.starts_with(char::is_whitespace))
+                && markdown_destination_has_link_label(before, "](")
         } else {
             false
         };
         if markdown_destination {
-            return true;
-        }
-        if !high_confidence_bare_reference(raw_reference) {
-            continue;
-        }
-        if path_boundary(before.chars().next_back()) && path_boundary(after.chars().next()) {
             return true;
         }
     }
@@ -325,21 +275,7 @@ fn message_authorizes_reference(body: &str, raw_reference: &str) -> bool {
         return false;
     }
     let visible = visible_markdown_without_fences(body);
-    for (index, segment) in visible.split('`').enumerate() {
-        if index % 2 == 1 {
-            if segment.trim() == raw_reference
-                && (known_resource_type(raw_reference)
-                    || high_confidence_bare_reference(raw_reference))
-            {
-                return true;
-            }
-            continue;
-        }
-        if markdown_segment_authorizes_reference(segment, raw_reference) {
-            return true;
-        }
-    }
-    false
+    markdown_segment_authorizes_reference(&markdown_without_inline_code(&visible), raw_reference)
 }
 
 fn message_source(
@@ -561,26 +497,34 @@ mod tests {
     use super::message_authorizes_reference;
 
     #[test]
-    fn message_reference_requires_a_clickable_markdown_or_high_confidence_path_context() {
+    fn message_reference_requires_an_explicit_markdown_destination() {
         assert!(message_authorizes_reference(
             "请看 [说明](README.md) 和 `notes.txt`。",
             "README.md"
         ));
-        assert!(message_authorizes_reference(
+        assert!(!message_authorizes_reference(
             "请看 [说明](README.md) 和 `notes.txt`。",
             "notes.txt"
         ));
-        assert!(message_authorizes_reference(
+        assert!(!message_authorizes_reference(
             "修改位于 ./src/app.ts:42。",
             "./src/app.ts:42"
         ));
-        assert!(message_authorizes_reference(
+        assert!(!message_authorizes_reference(
             "查看 `notebook.ipynb` 与 `data.sqlite`。",
             "notebook.ipynb"
         ));
-        assert!(message_authorizes_reference(
+        assert!(!message_authorizes_reference(
             "查看 `notebook.ipynb` 与 `data.sqlite`。",
             "data.sqlite"
+        ));
+        assert!(message_authorizes_reference(
+            "查看 [代码](src/app.ts:42)。",
+            "src/app.ts:42"
+        ));
+        assert!(message_authorizes_reference(
+            "查看 [`代码`](src/app.ts:42)。",
+            "src/app.ts:42"
         ));
         assert!(!message_authorizes_reference(
             "普通文字里提到了 README.md，但没有可点击语法。",
@@ -606,6 +550,14 @@ mod tests {
         assert!(!message_authorizes_reference(
             "[网页](https://example.com/src/app.ts)",
             "src/app.ts"
+        ));
+        assert!(!message_authorizes_reference(
+            "![图片](src/image.png)",
+            "src/image.png"
+        ));
+        assert!(!message_authorizes_reference(
+            "查看 ``[伪链接](src/secret.ts)``。",
+            "src/secret.ts"
         ));
     }
 }

@@ -161,8 +161,16 @@ app.whenReady().then(async () => {
     assert.equal(attachmentState.composerImageCount, 3)
     assert.equal(attachmentState.userFileCount, 6)
     assert.deepEqual(attachmentState.userFileHeights, [46, 46, 46, 46, 46, 46])
-    assert.ok(attachmentState.userFileWidths.every(width => width <= 296))
+    assert.ok(attachmentState.userFileWidths.every(width => width <= 220))
     assert.ok(new Set(attachmentState.userFileWidths).size > 1, 'User files use content-sized widths')
+    assert.ok(attachmentState.longUserFile, 'Long user attachment fixture is present')
+    assert.equal(attachmentState.longUserFile.cardWidth, 220)
+    assert.equal(
+      attachmentState.longUserFile.title,
+      'rovai-file-reference-and-tab-icons-md-doc-code-larger.html'
+    )
+    assert.ok(attachmentState.longUserFile.nameScrollWidth > attachmentState.longUserFile.nameClientWidth,
+      'Long user attachment names are visibly truncated')
     assert.equal(attachmentState.userFileDetails, 0)
     assert.equal(attachmentState.agentFileCount, 10)
     assert.ok(attachmentState.agentOutputWidth > 650, 'Agent deliveries use the full artifact track')
@@ -177,7 +185,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(attachmentState.composerHeights, [48, 48, 48, 48, 48, 48, 48, 48, 48])
     assert.deepEqual(attachmentState.composerImageWidths, [48, 48, 48])
     assert.ok(attachmentState.composerFileWidths.every(width => width >= 172 && width <= 308))
-    assert.ok(attachmentState.composerFileWidths.some(width => width !== 208),
+    assert.ok(attachmentState.composerFileWidths.some(width => width !== 220),
       'Composer files no longer use the old fixed width')
     assert.equal(attachmentState.composerText, '请按交互稿核对附件尺寸、顺序、图标和视觉层级。')
     assert.equal(attachmentState.composerOverflow, true)

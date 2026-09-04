@@ -148,7 +148,11 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
     attachmentFile('user-sheet', '附件矩阵.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
     attachmentFile('user-image-two', '布局标注.svg', 'image/svg+xml', { previewKind: 'image' }),
     attachmentFile('user-notes', '展示规则.md', 'text/markdown'),
-    attachmentFile('user-json', 'icon-map.json', 'application/json'),
+    attachmentFile(
+      'user-long-html',
+      'rovai-file-reference-and-tab-icons-md-doc-code-larger.html',
+      'text/html'
+    ),
     attachmentFile('user-image-three', '交付样式.svg', 'image/svg+xml', { previewKind: 'image' }),
     attachmentFile('user-code', 'surface-spec.py', 'text/x-python'),
     attachmentFile('user-archive', '参考素材.zip', 'application/zip')
@@ -412,6 +416,8 @@ Object.assign(window, { campOpenTest: {
     const agentFiles = agent.querySelector('.agent-output-files')!
     const imageTile = user.querySelector<HTMLElement>('.image-tile-preview')!
     const userFileCards = Array.from(user.querySelectorAll<HTMLElement>('.user-timeline'))
+    const longUserFileCard = userFileCards.find((card) => card.textContent?.includes('rovai-file-reference'))
+    const longUserFileName = longUserFileCard?.querySelector<HTMLElement>('.attachment-title-line strong')
     const composerCards = Array.from(document.querySelectorAll<HTMLElement>('.composer-attachment-card'))
     const composerFileCards = composerCards.filter(card => !card.classList.contains('composer-image-attachment'))
     const heading = agent.querySelector<HTMLElement>('.agent-delivery-heading')!
@@ -448,6 +454,14 @@ Object.assign(window, { campOpenTest: {
       },
       userFileHeights: userFileCards.map(card => Math.round(card.getBoundingClientRect().height)),
       userFileWidths: userFileCards.map(card => Math.round(card.getBoundingClientRect().width)),
+      longUserFile: longUserFileCard && longUserFileName
+        ? {
+            cardWidth: Math.round(longUserFileCard.getBoundingClientRect().width),
+            nameClientWidth: Math.round(longUserFileName.clientWidth),
+            nameScrollWidth: Math.round(longUserFileName.scrollWidth),
+            title: longUserFileName.title
+          }
+        : null,
       userFileDetails: user.querySelectorAll('.user-timeline .attachment-copy small').length,
       agentFileCount: agent.querySelectorAll('.agent-timeline').length,
       agentIconTypes: Array.from(agent.querySelectorAll('.agent-artifact-icon')).map(icon =>

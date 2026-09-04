@@ -11,11 +11,11 @@ function ResourceReferenceGlyph({ kind }: { kind: ResourceReferenceVisualKind })
     case 'folder':
       return <><path d="M3.75 8.75a2 2 0 0 1 2-2H10l1.7 1.7h6.55a2 2 0 0 1 2 2v5.8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2Z" /><path d="M3.75 10.4h16.5" /></>
     case 'markdown':
-      return <><path d="M6.75 5.5h10.5a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6.75a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" /><path d="M8 14.8V9.2l2 2.45 2-2.45v5.6" /><path d="M15 9.4v4.1" /><path d="m13.8 12.3 1.2 1.3 1.2-1.3" /></>
+      return <g strokeWidth={1.65}><path d="M6.8 5.5h7.8l2.6 2.6v10.2a1.7 1.7 0 0 1-1.7 1.7H6.8a1.7 1.7 0 0 1-1.7-1.7V7.2a1.7 1.7 0 0 1 1.7-1.7Z" /><path d="M14.5 5.7v2.6h2.5M8.2 11.2h7.4M8.2 14.1h7.4M8.2 17h4.8" /></g>
     case 'html':
       return <><path d="M6.75 5.25h10.5a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H6.75a2 2 0 0 1-2-2v-9.5a2 2 0 0 1 2-2Z" /><path d="m9.2 9.25-2 2 2 2" /><path d="m14.8 9.25 2 2-2 2" /><path d="m13.1 8.7-2.2 5.1" /></>
     case 'code':
-      return <><path d="m9 8.5-3 3.5 3 3.5" /><path d="m15 8.5 3 3.5-3 3.5" /><path d="m13.1 6.75-2.2 10.5" /></>
+      return <g strokeWidth={1.65}><path d="m8.8 7.6-3.7 4.4 3.7 4.4" /><path d="m15.2 7.6 3.7 4.4-3.7 4.4" /><path d="m13.7 5.4-3.4 13.2" /></g>
     case 'config':
       return <><path d="M6.75 5.75h8.5l2 2v10.5a1.75 1.75 0 0 1-1.75 1.75h-8.75A1.75 1.75 0 0 1 5 18.25V7.5a1.75 1.75 0 0 1 1.75-1.75Z" /><path d="M15.2 5.9v2.35h2.35" /><path d="M8.35 12h7.3" /><path d="M8.35 15.2h5.1" /><circle cx="9.4" cy="9.2" r="1" /></>
     case 'text':

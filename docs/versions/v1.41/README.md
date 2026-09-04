@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.41
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -51,6 +51,7 @@ JSON 原子写入升级为 schema 3；畸形来源继续只做内存归一并保
 
 ## References
 
+- 下一版本：[v1.42](../v1.42/README.md)
 - [实施与验收](implementation-plan.md)
 - [版本决定](decisions.md)
 - [Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md)

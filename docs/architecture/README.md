@@ -37,7 +37,7 @@ last_updated: 2026-09-04
 | [Camp Open Read Path](camp-open-read-path.md) | Desktop 两阶段冷启动壳层、enter/reconcile、不读 event_log 的业务 open projection、渐进消息、当前会话精确查找/anchored 定位、Run detail、high-water/cache 与 meaningful-paint 后台维护边界 |
 | [Camp Attachments：Source Refs、Agent Managed Artifacts 与 Legacy View](camp-published-attachment-view.md) | Desktop 用户 source refs、Pending 原生携带、Run-local resolver、Agent Managed v2 及 legacy Authority/View 兼容边界 |
 | [First-run Onboarding](first-run-onboarding.md) | Full Core authority-origin 首次安装 admission、schema 2 三页状态、无 Runtime 延后完成、幂等 provisioning 与 Draft-only 第四页边界 |
-| [File Preview](file-preview.md) | 消息引用存在性准入、共享资源视觉类型、Core 领域来源、Main 既有 classifier、具体文件能力/窗口句柄/重开、分页读取、显式目录 Root Grant、root watcher、HTML 文档目录协议与资源生命周期 |
+| [File Preview](file-preview.md) | 显式 Markdown 消息资源入口、共享资源视觉类型、Core 领域来源、Main 既有 classifier、具体文件能力/窗口句柄/重开、分页读取、显式目录 Root Grant、root watcher、HTML 文档目录协议与资源生命周期 |
 | [当前基础架构不变量](foundational-invariants.md) | Core、Camp、身份、协作、Runtime、Context、Memory、Skill、Evidence、Qualification 与 Renderer 的跨主题当前规范内核 |
 | [Skill Projection Reconciliation](skill-projection-reconciliation.md) | Skill Library desired state、bundled bootstrap 快速路径、root access ledger、事件驱动 dirty、当前 Run 完整校验 preflight、start-time SkillExposureSnapshot 与无历史目录扫描边界 |
 | [Structured Current Input Skill Links](structured-current-input-skill-links.md) | Picker SkillMention、per-Run send snapshot、start-time desired state、verified Exposure、只读 Resolver、`CURRENT_INPUT.skills` 与 unchanged Adapter transport |

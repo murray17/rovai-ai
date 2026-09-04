@@ -338,7 +338,7 @@ Object.assign(window, { continuationTest: { async run() {
   flushSync(() => root!.unmount())
   root = createRoot(document.getElementById('root')!)
   const activations: string[] = []
-  const markdown = '# 标题\n\n[跳转](#标题)\n\n打开 `./README.md`\n\n![image](./image.png)'
+  const markdown = '# 标题\n\n[跳转](#标题)\n\n打开 [README](./README.md)\n\n![image](./image.png)'
   const asset = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>')
   const firstImage = () => `${asset}#first`
   const drawMarkdown = (label: string, localImageUrl = firstImage, content = markdown) => {
@@ -359,7 +359,7 @@ Object.assign(window, { continuationTest: { async run() {
   check(activations.join(',') === 'latest:./README.md,latest:heading:true', 'Cached links must invoke the latest file and heading callbacks')
   drawMarkdown('latest', () => `${asset}#second`)
   check(document.querySelector('img')?.getAttribute('src') === `${asset}#second`, 'A changed image projection must update cached Markdown')
-  drawMarkdown('latest', firstImage, 'Updated `src/app.ts`')
+  drawMarkdown('latest', firstImage, 'Updated [App](src/app.ts)')
   check(document.querySelector('.markdown-file-reference')?.getAttribute('title') === 'src/app.ts', 'Changed Markdown content must be reparsed')
   cases.push('Markdown caching preserves fresh callbacks, image authority and changed content')
   await flush()

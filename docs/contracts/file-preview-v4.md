@@ -2,7 +2,7 @@
 document_type: contract
 contract: file-preview
 version: 4
-status: accepted
+status: historical
 authority: desktop-file-preview-wire
 last_updated: 2026-09-03
 ---

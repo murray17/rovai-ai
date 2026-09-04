@@ -7,9 +7,9 @@ import type { ResourceReferenceVisualKind } from './file-reference-presentation'
 const approvedGlyphMarkers: ReadonlyArray<readonly [ResourceReferenceVisualKind, string]> = [
   ['web', 'r="8.25"'],
   ['folder', 'M3.75 8.75'],
-  ['markdown', 'M8 14.8V9.2'],
+  ['markdown', 'M6.8 5.5h7.8l2.6 2.6'],
   ['html', 'm9.2 9.25-2 2 2 2'],
-  ['code', 'm9 8.5-3 3.5 3 3.5'],
+  ['code', 'm8.8 7.6-3.7 4.4 3.7 4.4'],
   ['config', 'M6.75 5.75h8.5'],
   ['text', 'M6.8 5.5h10.4'],
   ['image', 'm7 16 3.2-3.4'],
@@ -49,5 +49,19 @@ describe('resource reference glyphs', () => {
     )).replace(/ data-resource-type="[^"]+"/u, ''))
 
     expect(new Set(glyphs).size).toBe(approvedGlyphMarkers.length)
+  })
+
+  it.each(['markdown', 'code'] as const)('uses the approved 1.65 stroke for %s only', (kind) => {
+    const markup = renderToStaticMarkup(createElement(ResourceReferenceIcon, {
+      kind,
+      className: 'resource-icon'
+    }))
+    expect(markup).toContain('<g stroke-width="1.65">')
+
+    const generic = renderToStaticMarkup(createElement(ResourceReferenceIcon, {
+      kind: 'file',
+      className: 'resource-icon'
+    }))
+    expect(generic).not.toContain('stroke-width="1.65"')
   })
 })
