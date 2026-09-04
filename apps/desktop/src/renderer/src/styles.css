@@ -2825,14 +2825,16 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   background: transparent;
 }
 .conversation-bubble:is(.user, .external_principal) .message-surface {
-  width: min(
+  width: fit-content;
+  max-width: min(
     100%,
     var(--conversation-user-message-max-width),
     calc(66.667cqw - var(--conversation-user-message-width-offset))
   );
+  align-items: flex-end;
 }
 .conversation-bubble:is(.user, .external_principal) .message-bubble {
-  width: 100%;
+  width: fit-content;
   max-width: 100%;
   padding: 9px 12px 10px;
   border: 1px solid var(--conversation-user-message-line);
@@ -4230,7 +4232,8 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .conversation-bubble:is(.user, .agent):has(.message-attachments) { width: 100%; max-width: none; }
 .conversation-bubble:is(.user, .agent):has(.message-attachments) .message-body { width: 100%; max-width: none; }
 .conversation-bubble:is(.user, .external_principal):has(.message-attachments) .message-bubble {
-  width: min(
+  width: fit-content;
+  max-width: min(
     100%,
     var(--conversation-user-message-max-width),
     calc(66.667cqw - var(--conversation-user-message-width-offset))

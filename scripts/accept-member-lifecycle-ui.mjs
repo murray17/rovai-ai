@@ -1067,11 +1067,13 @@ try {
   const userMessageCopyState = await evaluate(running.cdp, `(() => {
     const article = document.querySelector('.conversation-bubble.user')
     const body = article?.querySelector('.message-body')
+    const surface = article?.querySelector('.message-surface')
     const bubble = article?.querySelector('.message-bubble')
     const avatar = article?.querySelector('.local-message-avatar')
     const composer = document.querySelector('.composer-box')
     const button = article?.querySelector('.message-copy-button')
     const bodyRect = body?.getBoundingClientRect()
+    const surfaceRect = surface?.getBoundingClientRect()
     const bubbleRect = bubble?.getBoundingClientRect()
     const avatarRect = avatar?.getBoundingClientRect()
     const composerRect = composer?.getBoundingClientRect()
@@ -1085,6 +1087,8 @@ try {
       belowBubble: Boolean(bubbleRect && buttonRect && buttonRect.top >= bubbleRect.bottom),
       avatarOnRight: Boolean(bubbleRect && avatarRect && avatarRect.left >= bubbleRect.right),
       widthRatio: bubbleRect && composerRect ? bubbleRect.width / composerRect.width : null,
+      surfaceTracksBubble: Boolean(surfaceRect && bubbleRect
+        && Math.abs(surfaceRect.width - bubbleRect.width) <= 0.75),
       rightOffset: bodyRect && buttonRect ? bodyRect.right - buttonRect.right : null
     }
   })()`)
@@ -1096,8 +1100,9 @@ try {
       && userMessageCopyState.absentFromMetadata
       && userMessageCopyState.belowBubble
       && userMessageCopyState.avatarOnRight
-      && userMessageCopyState.widthRatio >= 0.62
-      && userMessageCopyState.widthRatio <= 0.69
+      && userMessageCopyState.widthRatio > 0
+      && userMessageCopyState.widthRatio < 0.4
+      && userMessageCopyState.surfaceTracksBubble
       && Math.abs(userMessageCopyState.rightOffset) <= 0.75,
     `User message is not selectable/copyable: ${JSON.stringify(userMessageCopyState)}`
   )
