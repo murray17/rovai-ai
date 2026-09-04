@@ -7,8 +7,8 @@ import {
   getShellConfig,
 } from "@earendil-works/pi-coding-agent";
 
-const SCHEMA_VERSION = 2;
-const EXTENSION_VERSION = "rovai-pi-host-v5";
+const SCHEMA_VERSION = 3;
+const EXTENSION_VERSION = "rovai-pi-host-v6";
 const GOVERNED_NATIVE_TOOLS = ["bash", "edit", "write"];
 const BINDING_KEYS = [
   "agentRunId",
@@ -16,7 +16,6 @@ const BINDING_KEYS = [
   "bootstrapEvidenceId",
   "bootstrapPayloadDigest",
   "executionEpoch",
-  "expectedManagedSkillExposureDigest",
   "expectedNativeSessionId",
   "extensionVersion",
   "hostBindingGeneration",
@@ -26,7 +25,6 @@ const BINDING_KEYS = [
   "nativePromptId",
   "runtimeInputDeliveryId",
   "schemaVersion",
-  "skillRoot",
 ];
 
 function sha256(value: string): string {
@@ -66,7 +64,7 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function loadBinding(cwd: string): any {
+function loadBinding(): any {
   const bindingPath = process.env.ROVAI_PI_HOST_BINDING_FILE;
   if (!bindingPath || !path.isAbsolute(bindingPath)) throw new Error("missing binding path");
   const metadata = lstatSync(bindingPath);
@@ -97,14 +95,9 @@ function loadBinding(cwd: string): any {
     !nonEmpty(binding.bootstrapEvidenceId) ||
     typeof binding.bootstrap !== "string" ||
     !/^[a-f0-9]{64}$/.test(binding.bootstrapPayloadDigest) ||
-    sha256(binding.bootstrap) !== binding.bootstrapPayloadDigest ||
-    !/^[a-f0-9]{64}$/.test(binding.expectedManagedSkillExposureDigest)
+    sha256(binding.bootstrap) !== binding.bootstrapPayloadDigest
   ) {
     throw new Error("binding evidence mismatch");
-  }
-  const expectedRoot = realpathSync(path.join(cwd, ".pi", "skills"));
-  if (!path.isAbsolute(binding.skillRoot) || realpathSync(binding.skillRoot) !== expectedRoot) {
-    throw new Error("binding skill root mismatch");
   }
   return binding;
 }
@@ -205,19 +198,9 @@ export default function (pi: any) {
   let binding: any;
   let approvedBindingDigest: string | undefined;
 
-  pi.on("resources_discover", async (event: any, ctx: any) => {
-    try {
-      binding = loadBinding(event.cwd);
-      return { skillPaths: [binding.skillRoot] };
-    } catch (error) {
-      publishFailure(ctx, binding, "resources_discover", error);
-      return {};
-    }
-  });
-
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
-      binding = loadBinding(ctx.cwd);
+      binding = loadBinding();
       approvedBindingDigest = undefined;
       ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
       publishManagedSessionState(ctx, binding);
@@ -229,7 +212,7 @@ export default function (pi: any) {
   pi.on("input", async (event: any, ctx: any) => {
     if (event.source !== "rpc") return { action: "continue" };
     try {
-      const current = loadBinding(ctx.cwd);
+      const current = loadBinding();
       const { sessionId, cwd } = validateSession(current, ctx);
       if (!ctx.hasUI || ctx.mode !== "rpc") throw new Error("managed receipt channel is unavailable");
       const availableTools = new Set(pi.getAllTools().map((tool: any) => tool.name));
@@ -282,7 +265,7 @@ export default function (pi: any) {
       return { block: true, reason: "Rovai partial approval channel is unavailable" };
     }
     try {
-      const current = loadBinding(ctx.cwd);
+      const current = loadBinding();
       validateSession(current, ctx);
       const allowed = await ctx.ui.confirm(
         "Rovai partial approval",

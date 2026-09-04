@@ -208,8 +208,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.47";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 88;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.48";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 89;
+const V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.47";
+const V138_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 88;
 const V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.46";
 const V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 87;
 const V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.45";
@@ -601,6 +603,7 @@ struct CurrentMigrationState {
     v135: bool,
     v136: bool,
     v137: bool,
+    v138: bool,
 }
 
 impl CurrentMigrationState {
@@ -679,6 +682,27 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v138
+                && self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v138 {
+            return false;
+        }
+        if contract == V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V138_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v137
                 && self.v136
@@ -2115,7 +2139,11 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
             if migrations.admits(&contract, schema, &classifier) =>
         {
             (!migrations.v135 || pi_runtime_v135_schema_matches(connection)?)
-                && (!migrations.v136 || pi_runtime_v136_schema_matches(connection)?)
+                && (!migrations.v136
+                    || migrations.v138
+                    || pi_runtime_v136_schema_matches(connection)?)
+                && (!migrations.v137 || source_attachment_v137_schema_matches(connection)?)
+                && (!migrations.v138 || pi_native_input_v138_schema_matches(connection)?)
         }
         _ => false,
     };
@@ -2467,8 +2495,9 @@ pub(crate) fn classify_database_contract(
         marker.projection_schema_version,
         &marker.classifier_version,
     ) || (migrations.v135 && !pi_runtime_v135_schema_matches(connection)?)
-        || (migrations.v136 && !pi_runtime_v136_schema_matches(connection)?)
+        || (migrations.v136 && !migrations.v138 && !pi_runtime_v136_schema_matches(connection)?)
         || (migrations.v137 && !source_attachment_v137_schema_matches(connection)?)
+        || (migrations.v138 && !pi_native_input_v138_schema_matches(connection)?)
     {
         if connection_has_legacy_feishu_migration_collision(connection)?
             || main_camp_migration_collision(connection)?.is_some()
@@ -2628,6 +2657,29 @@ fn source_attachment_v137_schema_matches(connection: &Connection) -> rusqlite::R
     Ok(true)
 }
 
+fn pi_native_input_v138_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    let transform_exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pi_runtime_prompt_transform')",
+        [],
+        |row| row.get(0),
+    )?;
+    if transform_exists {
+        return Ok(false);
+    }
+    let image_sql = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pi_prompt_image_evidence'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(image_sql.is_some_and(|sql| {
+        sql.contains("REFERENCES runtime_input_delivery(id) ON DELETE CASCADE")
+            && sql.contains("evidence_version = 2")
+            && sql.contains("UNIQUE(runtime_input_delivery_id, image_index)")
+    }))
+}
+
 #[cfg(test)]
 fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     if !connection_has_admissible_data_contract(connection)? {
@@ -2638,7 +2690,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 138)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2723,7 +2775,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 134),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 135),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 136),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 137),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 138)
         "#,
         [],
         |row| {
@@ -2796,6 +2849,7 @@ fn load_current_migration_state(
                 v135: row.get(65)?,
                 v136: row.get(66)?,
                 v137: row.get(67)?,
+                v138: row.get(68)?,
             })
         },
     )
@@ -5278,6 +5332,9 @@ impl Database {
                     self.migrate_source_path_user_attachments_v137()
                 );
             }
+            if !self.schema_migration_applied(138)? {
+                migration_step!("migration_138", self.migrate_pi_native_input_v138());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -5871,6 +5928,9 @@ impl Database {
                 "migration_137",
                 self.migrate_source_path_user_attachments_v137()
             );
+        }
+        if !self.schema_migration_applied(138)? {
+            migration_step!("migration_138", self.migrate_pi_native_input_v138());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -21283,6 +21343,77 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_pi_native_input_v138(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if contract != V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || schema != V138_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
+            || !pi_runtime_v136_schema_matches(&transaction)?
+            || !source_attachment_v137_schema_matches(&transaction)?
+        {
+            anyhow::bail!("Pi native-input migration requires the exact v1.47/schema 88 source");
+        }
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE pi_prompt_image_evidence
+                RENAME TO pi_prompt_image_evidence_v137;
+
+            CREATE TABLE pi_prompt_image_evidence (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL
+                    REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                image_index INTEGER NOT NULL CHECK(image_index >= 0),
+                mime_type TEXT NOT NULL CHECK(mime_type IN (
+                    'image/png', 'image/jpeg', 'image/gif', 'image/webp'
+                )),
+                content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
+                byte_length INTEGER NOT NULL CHECK(byte_length > 0),
+                evidence_version INTEGER NOT NULL CHECK(evidence_version = 2),
+                created_at TEXT NOT NULL,
+                UNIQUE(runtime_input_delivery_id, image_index)
+            );
+
+            INSERT INTO pi_prompt_image_evidence(
+                id, runtime_input_delivery_id, image_index, mime_type,
+                content_digest, byte_length, evidence_version, created_at
+            )
+            SELECT id, runtime_input_delivery_id, image_index, mime_type,
+                   content_digest, byte_length, 2, created_at
+            FROM pi_prompt_image_evidence_v137;
+
+            DROP TABLE pi_prompt_image_evidence_v137;
+            DROP TABLE pi_runtime_prompt_transform;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.48', projection_schema_version = 89,
+                updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES(138, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v138 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn reconcile_legacy_feishu_migration_collision(&mut self) -> Result<bool> {
         if self.reconcile_main_camp_migration_collision()? {
             return Ok(true);
@@ -25980,7 +26111,75 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v137_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 138)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            ALTER TABLE pi_prompt_image_evidence
+                RENAME TO pi_prompt_image_evidence_v138;
+            CREATE TABLE pi_prompt_image_evidence (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL
+                    REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                image_index INTEGER NOT NULL CHECK(image_index >= 0),
+                mime_type TEXT NOT NULL CHECK(mime_type IN (
+                    'image/png', 'image/jpeg', 'image/gif', 'image/webp'
+                )),
+                content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
+                byte_length INTEGER NOT NULL CHECK(byte_length > 0),
+                evidence_version INTEGER NOT NULL CHECK(evidence_version = 1),
+                created_at TEXT NOT NULL,
+                UNIQUE(runtime_input_delivery_id, image_index)
+            );
+            INSERT INTO pi_prompt_image_evidence(
+                id, runtime_input_delivery_id, image_index, mime_type,
+                content_digest, byte_length, evidence_version, created_at
+            )
+            SELECT id, runtime_input_delivery_id, image_index, mime_type,
+                   content_digest, byte_length, 1, created_at
+            FROM pi_prompt_image_evidence_v138;
+            DROP TABLE pi_prompt_image_evidence_v138;
+
+            CREATE TABLE pi_runtime_prompt_transform (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL UNIQUE
+                    REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                transform_version INTEGER NOT NULL CHECK(transform_version = 1),
+                transform_json TEXT NOT NULL
+                    CHECK(json_valid(transform_json) AND json_type(transform_json) = 'object'),
+                original_payload_digest TEXT NOT NULL CHECK(length(original_payload_digest) = 64),
+                runtime_payload_digest TEXT NOT NULL CHECK(length(runtime_payload_digest) = 64),
+                runtime_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                source_path TEXT,
+                source_content_blob_id TEXT REFERENCES managed_blob(id),
+                expanded_content_blob_id TEXT REFERENCES managed_blob(id),
+                image_count INTEGER NOT NULL CHECK(image_count >= 0),
+                image_set_digest TEXT NOT NULL CHECK(length(image_set_digest) = 64),
+                created_at TEXT NOT NULL
+            );
+
+            DELETE FROM schema_migration WHERE version = 138;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.47', projection_schema_version = 88
+            WHERE singleton = 1;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v136_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v137_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)",
@@ -26060,12 +26259,7 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
              ALTER TABLE pi_managed_input_receipt RENAME TO pi_managed_input_receipt_v136;",
         )
         .unwrap();
-    let source_sql = table_sql
-        .replace(
-            "CREATE TABLE pi_managed_input_receipt",
-            "CREATE TABLE pi_managed_input_receipt",
-        )
-        .replace("receipt_version IN (1, 2)", "receipt_version = 1");
+    let source_sql = table_sql.replace("receipt_version IN (1, 2)", "receipt_version = 1");
     transaction.execute_batch(&source_sql).unwrap();
     transaction
         .execute_batch(
@@ -28424,6 +28618,7 @@ mod tests {
             v135: version >= 135,
             v136: version >= 136,
             v137: version >= 137,
+            v138: version >= 138,
         }
     }
 
@@ -28529,6 +28724,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                138,
+            ),
+            (
+                "v1.47/schema-88 before Pi native input",
+                V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V138_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 137,
             ),
             (
@@ -28910,7 +29111,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(137);
+        let current = migration_state_through(138);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -28928,7 +29129,16 @@ mod tests {
         missing_pi_native_capabilities.v136 = false;
         let mut missing_source_attachments = current;
         missing_source_attachments.v137 = false;
+        let mut missing_pi_native_input = current;
+        missing_pi_native_input.v138 = false;
         let rejected = [
+            (
+                "current marker without Pi native-input migration",
+                missing_pi_native_input,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Source Attachment migration",
                 missing_source_attachments,
@@ -29203,7 +29413,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(137));
+        assert_eq!(state, migration_state_through(138));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -31654,8 +31864,28 @@ mod tests {
         database
             .migrate_source_path_user_attachments_v137()
             .unwrap();
-        assert!(connection_has_current_data_contract(database.connection()).unwrap());
         assert!(source_attachment_v137_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_pi_native_input_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 138 BEGIN SELECT RAISE(ABORT, 'Pi native input receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_pi_native_input_v138()
+                .unwrap_err()
+                .to_string()
+                .contains("Pi native input receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(138).unwrap());
+        assert!(pi_runtime_v136_schema_matches(database.connection()).unwrap());
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_pi_native_input_receipt")
+            .unwrap();
+        database.migrate_pi_native_input_v138().unwrap();
+        assert!(pi_native_input_v138_schema_matches(database.connection()).unwrap());
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(before, after.0);
@@ -31731,11 +31961,14 @@ mod tests {
             .unwrap();
         assert_eq!(source_json, "[]");
         assert_eq!(prepared_path, "/tmp/legacy-prepared-v137.txt");
-        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(_)
+        ));
     }
 
     #[test]
-    fn v135_v136_pi_receipt_is_preserved_immutable_and_cascade_safe() {
+    fn v135_through_v138_preserves_receipt_and_direct_image_cascades() {
         let (mut database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v134_source_for_test(database.connection());
         database.migrate_pi_runtime_v135().unwrap();
@@ -32008,6 +32241,65 @@ mod tests {
         database
             .connection()
             .execute(
+                r#"
+                INSERT INTO pi_runtime_prompt_transform(
+                    id, runtime_input_delivery_id, transform_version, transform_json,
+                    original_payload_digest, runtime_payload_digest, runtime_payload_blob_id,
+                    source_path, source_content_blob_id, expanded_content_blob_id,
+                    image_count, image_set_digest, created_at
+                ) VALUES (
+                    'transform-pi-v136', 'delivery-pi-v135', 1, '{}', ?1, ?1,
+                    'pi-v135-payload', NULL, NULL, NULL, 1, ?2,
+                    '2026-09-03T00:00:02Z'
+                )
+                "#,
+                params!["9".repeat(64), "8".repeat(64)],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO pi_prompt_image_evidence(
+                    id, runtime_input_delivery_id, image_index, mime_type,
+                    content_digest, byte_length, evidence_version, created_at
+                ) VALUES (
+                    'image-pi-v136', 'delivery-pi-v135', 0, 'image/png',
+                    ?1, 4, 1, '2026-09-03T00:00:02Z'
+                )
+                "#,
+                ["7".repeat(64)],
+            )
+            .unwrap();
+        database
+            .migrate_source_path_user_attachments_v137()
+            .unwrap();
+        database.migrate_pi_native_input_v138().unwrap();
+        assert!(pi_native_input_v138_schema_matches(database.connection()).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT evidence_version FROM pi_prompt_image_evidence WHERE id = 'image-pi-v136'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2
+        );
+        assert!(
+            !database
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pi_runtime_prompt_transform')",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap()
+        );
+        database
+            .connection()
+            .execute(
                 "DELETE FROM runtime_input_delivery WHERE id = 'delivery-pi-v135'",
                 [],
             )
@@ -32021,6 +32313,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remaining_receipts, 0);
+        let remaining_images: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM pi_prompt_image_evidence WHERE runtime_input_delivery_id = 'delivery-pi-v135'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining_images, 0);
         let foreign_key_violations: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -32105,7 +32406,7 @@ mod tests {
 
         drop(database);
         let reopened = Database::open(&directory).unwrap();
-        assert!(pi_runtime_v136_schema_matches(reopened.connection()).unwrap());
+        assert!(pi_native_input_v138_schema_matches(reopened.connection()).unwrap());
         let migration_receipts: i64 = reopened
             .connection()
             .query_row(

@@ -835,7 +835,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CodexCli => self.codex_cli.skill_discovery(),
             AdapterKind::Pi => native_skill_discovery(
                 [SkillDeliveryGroupKey::Pi],
-                SkillDiscoveryVerification::Verified,
+                SkillDiscoveryVerification::DocumentationOnly,
             ),
             AdapterKind::OpencodeCli => self.opencode_cli.skill_discovery(),
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
@@ -2651,7 +2651,7 @@ fn resolve_pi_runtime(
         "installationId": input.installation_id,
         "protocolVersion": protocol_version,
         "contextContract": native_binding_context_contract(),
-        "piBindingCompatibility": "native-capabilities-v1",
+        "piBindingCompatibility": "native-resources-v2",
     }))?;
     let host_config_digest = canonical_json_digest(&json!({
         "adapterKind": AdapterKind::Pi,
@@ -2665,7 +2665,7 @@ fn resolve_pi_runtime(
         "protocolVersion": protocol_version,
         "permissionSchemaVersion": input.permissions.schema_version,
         "approvalMode": approval_mode,
-        "managedExtension": "rovai-pi-host-v5",
+        "managedExtension": "rovai-pi-host-v6",
     }))?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
@@ -4139,7 +4139,7 @@ mod tests {
             (
                 AdapterKind::Pi,
                 &[SkillDeliveryGroupKey::Pi],
-                SkillDiscoveryVerification::Verified,
+                SkillDiscoveryVerification::DocumentationOnly,
             ),
             (
                 AdapterKind::OpencodeCli,

@@ -252,12 +252,6 @@ impl ManagedBlobStore {
                       SELECT 1 FROM agent_run_image
                       WHERE agent_run_image.content_blob_id = managed_blob.id
                   )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM pi_runtime_prompt_transform
-                      WHERE pi_runtime_prompt_transform.runtime_payload_blob_id = managed_blob.id
-                         OR pi_runtime_prompt_transform.source_content_blob_id = managed_blob.id
-                         OR pi_runtime_prompt_transform.expanded_content_blob_id = managed_blob.id
-                  )
                 ORDER BY managed_blob.id
                 "#,
             )?;
@@ -294,12 +288,6 @@ impl ManagedBlobStore {
                   )
                   AND NOT EXISTS (
                       SELECT 1 FROM agent_run_image WHERE content_blob_id = ?1
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM pi_runtime_prompt_transform
-                      WHERE runtime_payload_blob_id = ?1
-                         OR source_content_blob_id = ?1
-                         OR expanded_content_blob_id = ?1
                   )
                 "#,
                 [&blob_id],
