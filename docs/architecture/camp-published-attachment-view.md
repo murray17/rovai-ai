@@ -121,8 +121,8 @@ monitor, Runtime policy, copy budget/quota or new cross-cutting security/redacti
 ## References
 
 - [Camp Attachment v8](../contracts/camp-attachment-v8.md)
-- [Camp Composer Draft v7](../contracts/camp-composer-draft-v7.md)
-- [Pending Camp Input v2](../contracts/pending-camp-input-v2.md)
+- [Camp Composer Draft v8](../contracts/camp-composer-draft-v8.md)
+- [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)
 - [Camp Open Projection v15](../contracts/camp-open-projection-v15.md)
 - [File Preview v5](../contracts/file-preview-v5.md)
 - [Camp Published Attachment View v4](../contracts/camp-published-attachment-view-v4.md)

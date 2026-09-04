@@ -409,7 +409,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toContain('.composer-box:focus-within')
     expect(css).toContain('.composer.suppress-pointer-focus-ring .composer-box:focus-within')
     expect(css).toMatch(/\.structured-mention-editor:focus-visible\s*\{[^}]*outline:\s*0/)
-    expect(css).toMatch(/\.structured-mention-editor:not\(:has\(> \[data-editor-empty="true"\]:only-child > \[data-editor-empty-break="true"\]:only-child\)\) \+ \.structured-mention-placeholder\s*\{[^}]*visibility:\s*hidden/)
+    expect(css).toMatch(/\.structured-mention-placeholder\s*\{[^}]*position:\s*absolute[^}]*pointer-events:\s*none/)
     expect(css).not.toContain('.composer.suppress-reply-focus-ring')
     expect(css).toMatch(/\.composer-continuation\s*\{[^}]*background:\s*transparent|\.composer-continuation\s*\{[^}]*color:/)
     expect(css).toContain('--conversation-wide-width: 1040px;')

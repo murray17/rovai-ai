@@ -1,7 +1,17 @@
-import type { StructuredCampMessageContent } from '@contracts'
-import { useLayoutEffect, useState } from 'react'
+import type { CampComposerDraftView, ComposerDocument } from '@contracts'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { StructuredMentionComposer } from '../../../apps/desktop/src/renderer/src/StructuredMentionComposer'
+import {
+  StructuredMentionComposer,
+  type StructuredMentionComposerHandle,
+  type StructuredMentionMember
+} from '../../../apps/desktop/src/renderer/src/StructuredMentionComposer'
+import {
+  ROVAI_COMPOSER_CLIPBOARD_MIME,
+  cloneComposerDocument,
+  composerDocumentFromText,
+  composerDocumentToPlainText
+} from '../../../apps/desktop/src/renderer/src/composer-document'
 import type { ComposerSkillOption } from '../../../apps/desktop/src/renderer/src/composer-skill-picker'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
@@ -9,29 +19,41 @@ const fixtureSkills: ComposerSkillOption[] = [
   { id: 'skill-worktree', name: 'worktree', description: '管理并行工作树', origin: 'official' },
   { id: 'skill-analyze', name: 'analyze-agent-codebase', description: '分析 Agent 代码', origin: 'official' },
   ...Array.from({ length: 16 }, (_, index): ComposerSkillOption => ({
-    id: `skill-fixture-${index}`, name: `fixture-${index}`, description: `候选项 ${index}`, origin: 'imported'
+    id: `skill-fixture-${index}`,
+    name: `fixture-${index}`,
+    description: `候选项 ${index}`,
+    origin: 'imported'
   }))
 ]
 
+const initialMembers: StructuredMentionMember[] = [{
+  agentId: 'agent-a',
+  displayName: '队员甲',
+  mentionable: true
+}]
+
 const errors: string[] = []
-window.addEventListener('error', event => errors.push(String(event.error?.stack ?? event.message)))
-window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)))
+window.addEventListener('error', (event) => errors.push(String(event.error?.stack ?? event.message)))
+window.addEventListener('unhandledrejection', (event) => errors.push(String(event.reason)))
+
 let capturedEditor: HTMLElement | null = null
+let savedDocuments: ComposerDocument[] = []
+let submitCount = 0
+let backspaceAtStartCount = 0
+let activatedAtom: string | null = null
+let pastedFileCount = 0
+let localStatus = {
+  hasContent: false,
+  hasExplicitRecipient: false,
+  hasUnavailableAtom: false
+}
+let dirty = false
+let revision = 0
 
 function editor(): HTMLElement {
   const element = document.getElementById('composer')
   if (!element) throw new Error('The Composer disappeared')
   return element
-}
-
-function focusEnd(): void {
-  const element = editor()
-  element.focus()
-  const range = document.createRange()
-  range.selectNodeContents(element)
-  range.collapse(false)
-  window.getSelection()?.removeAllRanges()
-  window.getSelection()?.addRange(range)
 }
 
 function selectText(needle: string, anchor: number, focus = anchor): void {
@@ -40,8 +62,15 @@ function selectText(needle: string, anchor: number, focus = anchor): void {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
   let node = walker.nextNode()
   while (node) {
-    if (node.textContent?.includes(needle) && !node.parentElement?.closest('[data-editor-segment="token"]')) {
-      window.getSelection()?.setBaseAndExtent(node, anchor, node, focus)
+    const value = node.textContent ?? ''
+    const start = value.indexOf(needle)
+    if (start >= 0 && !node.parentElement?.closest('[data-composer-atom]')) {
+      window.getSelection()?.setBaseAndExtent(
+        node,
+        start + anchor,
+        node,
+        start + focus
+      )
       return
     }
     node = walker.nextNode()
@@ -49,86 +78,205 @@ function selectText(needle: string, anchor: number, focus = anchor): void {
   throw new Error(`Missing editable text: ${needle}`)
 }
 
+function normalizeInput(value: string | ComposerDocument): ComposerDocument {
+  return typeof value === 'string'
+    ? composerDocumentFromText(value)
+    : cloneComposerDocument(value)
+}
+
+function draftResult(document: ComposerDocument): CampComposerDraftView {
+  return {
+    campId: 'fixture-camp',
+    body: composerDocumentToPlainText(document, initialMembers),
+    content: cloneComposerDocument(document),
+    revision,
+    attachments: [],
+    replyIntent: null,
+    continuationIntent: null,
+    updatedAt: '2026-09-04T00:00:00Z',
+    expiresAt: '2026-09-11T00:00:00Z'
+  }
+}
+
 function Harness() {
-  const [content, setContent] = useState<StructuredCampMessageContent>([])
+  const composerRef = useRef<StructuredMentionComposerHandle>(null)
+  const [draftIdentity, setDraftIdentity] = useState('fixture-camp:draft-0')
+  const [initialDocument, setInitialDocument] = useState<ComposerDocument>(
+    composerDocumentFromText('')
+  )
+  const [members, setMembers] = useState(initialMembers)
   const [skills, setSkills] = useState(fixtureSkills)
-  const [generation, setGeneration] = useState(0)
+  const [disabled, setDisabled] = useState(false)
+  const [propRevision, setPropRevision] = useState(0)
+
   useLayoutEffect(() => {
     Object.assign(window, {
       composerTest: {
-        reset(value: string | StructuredCampMessageContent) {
+        reset(value: string | ComposerDocument) {
           errors.length = 0
-          setContent(typeof value === 'string' ? (value ? [{ kind: 'text', text: value }] : []) : value)
+          savedDocuments = []
+          submitCount = 0
+          backspaceAtStartCount = 0
+          activatedAtom = null
+          pastedFileCount = 0
+          revision = 0
+          setMembers(initialMembers)
           setSkills(fixtureSkills)
-          setGeneration(value => value + 1)
+          setDisabled(false)
+          composerRef.current?.replaceDocument(normalizeInput(value), null, 'end')
+          composerRef.current?.focus('end')
         },
-        refresh() { setContent([...content]) },
-        replaceContent: setContent,
+        setDocument(value: string | ComposerDocument, boundary: 'start' | 'end' = 'end') {
+          composerRef.current?.setDocument(normalizeInput(value), boundary)
+        },
+        switchDraft(value: string | ComposerDocument) {
+          setInitialDocument(normalizeInput(value))
+          setDraftIdentity((current) => `${current.split(':')[0]}:draft-${Number(current.split('-').at(-1)) + 1}`)
+        },
+        rerender() { setPropRevision((value) => value + 1) },
+        setMembers,
+        renameMember(displayName: string) {
+          setMembers((current) => current.map((member) => ({ ...member, displayName })))
+        },
+        setMemberAvailable(available: boolean) {
+          setMembers((current) => current.map((member) => ({
+            ...member,
+            mentionable: available
+          })))
+        },
         limitSkills(count: number) { setSkills(fixtureSkills.slice(0, count)) },
-        controlledInput(text: string) {
-          // React's before-input plugin consumes textInput on Chromium. Supply
-          // an InputEvent to exercise the controlled path without a DOM mutation.
-          const event = new InputEvent('textInput', {
-            bubbles: true, cancelable: true, inputType: 'insertText', data: text
-          })
-          editor().dispatchEvent(event)
-          if (!event.defaultPrevented) throw new Error('The controlled before-input path was not handled')
-        },
-        nativeText(text: string, inputType: string) {
-          editor().replaceChildren(document.createTextNode(text))
-          focusEnd()
-          editor().dispatchEvent(new InputEvent('input', { bubbles: true, inputType }))
-        },
-        paste(text: string, html = '') {
+        setDisabled,
+        focusEnd() { composerRef.current?.focus('end') },
+        focusStart() { composerRef.current?.focus('start') },
+        selectText,
+        captureEditor() { capturedEditor = editor() },
+        paste(text: string, structured = '', html = '') {
           const clipboardData = new DataTransfer()
           clipboardData.setData('text/plain', text)
+          if (structured) clipboardData.setData(ROVAI_COMPOSER_CLIPBOARD_MIME, structured)
           if (html) clipboardData.setData('text/html', html)
-          editor().dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }))
+          editor().dispatchEvent(new ClipboardEvent('paste', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData
+          }))
         },
-        selectText,
-        focusEnd,
-        captureEditor() { capturedEditor = editor() },
-        state() {
-          const element = document.getElementById('composer')
-          const menu = document.getElementById(element?.getAttribute('aria-controls') ?? '')
-          const selected = menu?.querySelector<HTMLElement>('[aria-selected="true"]')
-          const menuBounds = menu?.getBoundingClientRect()
-          const selectedBounds = selected?.getBoundingClientRect()
+        pasteFile() {
+          const clipboardData = new DataTransfer()
+          clipboardData.items.add(new File(['fixture'], 'fixture.txt', { type: 'text/plain' }))
+          clipboardData.setData('text/plain', 'must-not-enter-editor')
+          editor().dispatchEvent(new ClipboardEvent('paste', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData
+          }))
+        },
+        async copyAll() {
+          const element = editor()
+          element.focus()
+          const range = document.createRange()
+          range.selectNodeContents(element)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          document.dispatchEvent(new Event('selectionchange'))
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+          const clipboardData = new DataTransfer()
+          element.dispatchEvent(new ClipboardEvent('copy', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData
+          }))
           return {
-            content,
-            text: element?.innerText.replaceAll('\u200B', '') ?? null,
+            plain: clipboardData.getData('text/plain'),
+            structured: clipboardData.getData(ROVAI_COMPOSER_CLIPBOARD_MIME),
+            html: clipboardData.getData('text/html')
+          }
+        },
+        compositionStart() {
+          editor().dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+        },
+        compositionEnd(data = '') {
+          editor().dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data }))
+        },
+        clickFirstAtom() {
+          const atom = editor().querySelector<HTMLElement>('[data-composer-atom]')
+          atom?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        },
+        async state(flush = true) {
+          const flushed = flush ? await composerRef.current?.flush() : null
+          const element = editor()
+          const menu = document.getElementById(element.getAttribute('aria-controls') ?? '')
+          const selected = menu?.querySelector<HTMLElement>('[aria-selected="true"]')
+          const options = [...(menu?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])]
+          return {
+            content: flushed?.document ?? null,
+            text: element.innerText.replaceAll('\u200B', ''),
             errors: [...errors],
             focused: document.activeElement === element,
             sameEditor: capturedEditor === element,
-            linkCount: element?.querySelectorAll('a').length ?? 0,
-            menuKind: menu ? (menu.classList.contains('skill-picker-menu') ? 'skill' : 'mention') : null,
-            skillOptions: [...(menu?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])]
-              .map(option => option.dataset.skillName),
-            activeSkill: selected?.dataset.skillName ?? null,
-            activeCount: menu?.querySelectorAll('[aria-selected="true"]').length ?? 0,
-            activeId: element?.getAttribute('aria-activedescendant') ?? null,
-            selectedId: selected?.id ?? null,
-            activeVisible: Boolean(menuBounds && selectedBounds
-              && selectedBounds.top >= menuBounds.top && selectedBounds.bottom <= menuBounds.bottom),
-            menuScrollTop: menu?.scrollTop ?? 0,
-            editorScrollTop: element?.scrollTop ?? 0,
-            editorScrollHeight: element?.scrollHeight ?? 0,
-            editorClientHeight: element?.clientHeight ?? 0
+            linkCount: element.querySelectorAll('a').length,
+            headingCount: element.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
+            listCount: element.querySelectorAll('ul,ol').length,
+            boldCount: element.querySelectorAll('strong,b').length,
+            paragraphCount: element.querySelectorAll(':scope > p').length,
+            lineBreakCount: element.querySelectorAll('br').length,
+            atomTypes: [...element.querySelectorAll<HTMLElement>('[data-composer-atom]')]
+              .map((atom) => atom.dataset.composerAtom),
+            atomLabels: [...element.querySelectorAll<HTMLElement>('[data-composer-atom]')]
+              .map((atom) => atom.innerText),
+            ariaControls: element.getAttribute('aria-controls'),
+            menus: [...document.querySelectorAll<HTMLElement>('.structured-mention-menu')]
+              .map((candidate) => ({ id: candidate.id, className: candidate.className })),
+            menuKind: menu
+              ? options.some((option) => option.dataset.skillName) ? 'skill' : 'mention'
+              : null,
+            options: options
+              .map((option) => option.dataset.skillName ?? option.innerText),
+            activeOption: selected?.dataset.skillName ?? selected?.innerText ?? null,
+            localVersion: composerRef.current?.getLocalVersion() ?? -1,
+            dirty,
+            localStatus,
+            saveCount: savedDocuments.length,
+            savedDocuments: savedDocuments.map(cloneComposerDocument),
+            submitCount,
+            backspaceAtStartCount,
+            activatedAtom,
+            pastedFileCount,
+            disabled: element.getAttribute('contenteditable') !== 'true',
+            propRevision
           }
         }
       }
     })
   })
-  return <div style={{ position: 'absolute', left: 24, right: 24, bottom: 24 }}><StructuredMentionComposer
-    key={generation}
-    id="composer"
-    value={content}
-    members={[{ agentId: 'agent-a', displayName: '队员甲', mentionable: true }]}
-    skills={skills}
-    ariaLabel="Native Composer regression"
-    onChange={setContent}
-    onSubmit={() => { throw new Error('This fixture must never submit a message') }}
-  /></div>
+
+  return <div style={{ position: 'absolute', left: 24, right: 24, bottom: 24 }}>
+    <StructuredMentionComposer
+      ref={composerRef}
+      id="composer"
+      draftIdentity={draftIdentity}
+      document={initialDocument}
+      members={members}
+      skills={skills}
+      ariaLabel="Native Composer regression"
+      placeholder={`结构化纯文本 ${propRevision}`}
+      disabled={disabled}
+      persistDocument={async (document) => {
+        savedDocuments.push(cloneComposerDocument(document))
+        revision += 1
+        return draftResult(document)
+      }}
+      onLocalStatusChange={(status) => { localStatus = status }}
+      onDirtyChange={(value) => { dirty = value }}
+      onSubmit={() => { submitCount += 1 }}
+      onBackspaceAtStart={() => { backspaceAtStartCount += 1 }}
+      onPasteFiles={(files) => { pastedFileCount += files.length }}
+      onActivateMemberMention={(member) => { activatedAtom = `member:${member.agentId}` }}
+      onActivateAllMembersMention={() => { activatedAtom = 'all_members' }}
+      onActivateSkillMention={(skillId) => { activatedAtom = `skill:${skillId}` }}
+    />
+  </div>
 }
 
 createRoot(document.getElementById('root')!).render(<Harness />)

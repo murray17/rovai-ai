@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
-  CampPendingInputsView, LocalAttachmentAvailability, LocalAttachmentOwnerLocator,
+  CampPendingInputsView, ComposerDocument, LocalAttachmentAvailability, LocalAttachmentOwnerLocator,
   LocalAttachmentSourceView, PendingCampInputView, PendingInputEditAction,
-  StoredCommandResult, StructuredCampMessageContent
+  StoredCommandResult
 } from '@contracts'
-import { StructuredMentionComposer, type StructuredMentionMember } from './StructuredMentionComposer'
+import {
+  StructuredMentionComposer,
+  type StructuredMentionComposerHandle,
+  type StructuredMentionMember
+} from './StructuredMentionComposer'
 import type { ComposerSkillOption } from './composer-skill-picker'
+import { composerDocumentStatus, type ComposerLocalStatus } from './composer-document'
 import { AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { readErrorMessage } from './error-message'
 import { createPendingInputsRefresh, shouldRefreshPendingInputs } from './pending-input-refresh'
 import { useOptionalFilePreview } from './FilePreviewContext'
 
 export type PendingInputSnapshot = {
-  content: StructuredCampMessageContent
+  content: ComposerDocument
   replyToCampMessageId: string | null
   recipientSelectionRequired: boolean
   attachments: LocalAttachmentSourceView[]
@@ -42,8 +47,8 @@ export function pendingInputIsDirty(initial: PendingInputSnapshot, current: Pend
       !== JSON.stringify(current.attachments.map(({ id }) => id))
 }
 
-export function pendingInputHasContent(content: StructuredCampMessageContent): boolean {
-  return content.some((segment) => segment.kind !== 'text' || segment.text.trim().length > 0)
+export function pendingInputHasContent(content: ComposerDocument): boolean {
+  return content.segments.some((segment) => segment.kind !== 'text' || segment.text.trim().length > 0)
 }
 
 export function pendingQueueRequiresEnqueue(queue: CampPendingInputsView | null, executionActive: boolean): boolean {
@@ -95,10 +100,17 @@ export function PendingCampInputs({
   const [queue, setQueue] = useState<CampPendingInputsView | null>(null)
   const [edit, setEdit] = useState<LocalEdit | null>(null)
   const [busy, setBusy] = useState(false)
+  const [composerDirty, setComposerDirty] = useState(false)
+  const [composerStatus, setComposerStatus] = useState<ComposerLocalStatus>({
+    hasContent: false,
+    hasExplicitRecipient: false,
+    hasUnavailableAtom: false
+  })
   const [error, setError] = useState<string | null>(null)
   const [switchTarget, setSwitchTarget] = useState<PendingCampInputView | 'close' | null>(null)
   const [attachmentAvailability, setAttachmentAvailability] = useState<Record<string, LocalAttachmentAvailability>>({})
   const editorRef = useRef<HTMLDivElement>(null)
+  const composerHandleRef = useRef<StructuredMentionComposerHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mounted = useRef(true)
   const refreshReader = useRef<ReturnType<typeof createPendingInputsRefresh> | null>(null)
@@ -238,27 +250,41 @@ export function PendingCampInputs({
     if (typeof token !== 'string') throw new Error('无法确认编辑占用，请重新打开。')
     const initial = pendingInputSnapshot(item)
     if (!mounted.current) return
+    setComposerDirty(false)
+    setComposerStatus(composerDocumentStatus(initial.content, members, skills))
     setEdit({ ...initial, item, token, initial })
     requestAnimationFrame(() => editorRef.current?.focus())
   }
 
   const finish = async (save: boolean): Promise<void> => {
     if (!edit) return
+    const content = save
+      ? (await composerHandleRef.current?.flush())?.document ?? edit.content
+      : edit.content
     await mutate(edit.item, save ? {
-      type: 'save', content: edit.content, replyToCampMessageId: edit.replyToCampMessageId,
+      type: 'save', content, replyToCampMessageId: edit.replyToCampMessageId,
       recipientSelectionRequired: edit.recipientSelectionRequired
     } : { type: 'cancel' }, edit.token)
-    if (mounted.current) setEdit(null)
+    if (mounted.current) {
+      setEdit(null)
+      setComposerDirty(false)
+    }
   }
 
   const requestEdit = (item: PendingCampInputView): void => {
     if (edit?.item.id === item.id || busy) return
-    if (edit && pendingInputIsDirty(edit.initial, edit)) { setSwitchTarget(item); return }
+    if (edit && (composerDirty || pendingInputIsDirty(edit.initial, edit))) {
+      setSwitchTarget(item)
+      return
+    }
     void perform(async () => { if (edit) await finish(false); await begin(item) })
   }
 
   const requestClose = (): void => {
-    if (edit && pendingInputIsDirty(edit.initial, edit)) { setSwitchTarget('close'); return }
+    if (edit && (composerDirty || pendingInputIsDirty(edit.initial, edit))) {
+      setSwitchTarget('close')
+      return
+    }
     void perform(() => finish(false))
   }
 
@@ -277,8 +303,8 @@ export function PendingCampInputs({
     })
   }
 
-  const saveDisabled = !edit || busy || !ownsEdit
-    || (!pendingInputHasContent(edit.content) && edit.attachments.length === 0)
+  const saveDisabled = !edit || busy || !ownsEdit || composerStatus.hasUnavailableAtom
+    || (!composerStatus.hasContent && edit.attachments.length === 0)
   const visible = Boolean(queue && queue.items.length > 0)
 
   const acceptAttachmentDrag = (event: DragEvent<HTMLDivElement>): void => {
@@ -402,11 +428,25 @@ export function PendingCampInputs({
           </div>
         })}
       </div>}
-      <StructuredMentionComposer id="pending-camp-message" value={edit.content} members={members} skills={skills} skillCatalogStatus={skillCatalogStatus}
+      <StructuredMentionComposer ref={composerHandleRef} id="pending-camp-message"
+        draftIdentity={`${campId}:${edit.item.id}`} document={edit.content}
+        members={members} skills={skills} skillCatalogStatus={skillCatalogStatus}
         ariaLabel="编辑待发送消息" placeholder="修改这条待发送消息…" editorRef={editorRef} disabled={busy || !ownsEdit}
-        onChange={(content) => setEdit({ ...edit, content, recipientSelectionRequired: content.some((segment) => segment.kind === 'member_mention' || segment.kind === 'all_members_mention') ? false : edit.recipientSelectionRequired })}
+        onDirtyChange={setComposerDirty}
+        onLocalStatusChange={(status) => {
+          setComposerStatus(status)
+          if (status.hasExplicitRecipient) {
+            setEdit((current) => current
+              ? { ...current, recipientSelectionRequired: false }
+              : current)
+          }
+        }}
         onPasteFiles={prepareFiles}
-        onBackspaceAtStart={() => { if (edit.replyToCampMessageId) setEdit({ ...edit, replyToCampMessageId: null, recipientSelectionRequired: false }) }}
+        onBackspaceAtStart={() => {
+          setEdit((current) => current?.replyToCampMessageId
+            ? { ...current, replyToCampMessageId: null, recipientSelectionRequired: false }
+            : current)
+        }}
         onSubmit={() => { if (!saveDisabled) return perform(() => finish(true)) }} />
       <PendingInputEditorActions
         busy={busy}
