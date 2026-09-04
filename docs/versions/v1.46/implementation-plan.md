@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.46
 authority: implementation-and-acceptance-status
-status: in_progress
+status: complete
 last_updated: 2026-09-05
 ---
 
@@ -17,7 +17,7 @@ last_updated: 2026-09-05
 - [x] 让 Typeahead critical-priority Enter/Tab 从当前 Lexical selection 同步重算 bounded trigger。
 - [x] 关闭 Composer spellcheck；autosave 单次导出、直接线性比较、正文保存投影抑制、错误单独上报和附件批量单 flush。
 - [x] 完成全量 TypeScript、Vitest、桌面构建和本地文档治理门禁。
-- [ ] 完成 PR CI 并合入 `main`。
+- [x] 完成 PR #230 CI；本版本随该 PR 合入 `main`。
 
 ## 验收矩阵
 
@@ -27,7 +27,7 @@ last_updated: 2026-09-05
 | TypeScript、全仓 Vitest 与桌面构建 | `passed` | `pnpm typecheck`；`pnpm test` 中 149 files / 1508 Vitest tests 与 220 Node tests 通过、1 项既有 Windows-only skip；`pnpm build:desktop` 通过 |
 | Native Composer fixture | `environment-blocked` | fixture Vite production build 通过；本机 Electron assertion 被已识别的 macOS nested-sandbox capability gate 明确跳过，交由 PR CI 的可运行环境执行 |
 | 文档治理 | `passed` | `docs:test` 9 项、`docs:check` 与基于 `7b1d2b4b58afcde96553a87ac97a03793d31be08` 的 diff-aware `docs:check:ci` 通过 |
-| PR CI 与合入 | `pending` | 等待远端检查与合入结果 |
+| PR CI 与合入 | `passed` | PR #230 的 GitHub `gate` 首轮通过；本完成状态随该 PR 的最终检查与合并进入 `main` |
 
 ## 完成条件
 
