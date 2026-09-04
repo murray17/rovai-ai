@@ -397,7 +397,15 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.agent-message-output > \.agent-message-output-actions\s*\{[^}]*width: fit-content[^}]*justify-content: flex-start[^}]*margin: 3px 0 0 42px/)
     expect(css).toContain('.agent-message-output:hover > .message-actions')
     expect(css).toMatch(/\.message-copy-button,\s*\.message-reply-button\s*\{[^}]*width: 28px[^}]*height: 28px/)
-    expect(css).toMatch(/\.message-long-toggle\.is-expand\s*\{[^}]*width: 34px[^}]*height: 20\.8px/)
+    expect(css).toMatch(/\.message-long-ellipsis\s*\{[^}]*width: 34px[^}]*height: 20\.8px/)
+    expect(css).not.toContain('.message-long-toggle')
+    expect(css).toMatch(
+      /\.conversation-bubble:is\(\.user, \.external_principal\):has\(\.message-attachments\) \.message-surface\s*\{[^}]*width: 100%[^}]*max-width: none/
+    )
+    expect(css).toMatch(/\.user-message-files\s*\{[^}]*justify-content: flex-end/)
+    expect(css).toMatch(
+      /\.image-gallery-user-attachment \.image-gallery-grid\s*\{[^}]*justify-content: flex-end/
+    )
     expect(css).toContain('.composer-box:focus-within')
     expect(css).toContain('.composer.suppress-pointer-focus-ring .composer-box:focus-within')
     expect(css).toMatch(/\.structured-mention-editor:focus-visible\s*\{[^}]*outline:\s*0/)

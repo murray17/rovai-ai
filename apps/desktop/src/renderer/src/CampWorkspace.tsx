@@ -4232,11 +4232,11 @@ export function CampWorkspace({
                                       )
                                     : (
                                         <div className="message-bubble">
-                                          <CollapsibleStructuredMessageBody
+                                          <TruncatedStructuredMessageBody
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
-                                            collapsible={humanAuthored}
+                                            truncate={humanAuthored}
                                             forceExpanded={isConversationFindCurrent}
                                             fileReferenceSource={{
                                               campId: snapshot.camp.id,
@@ -4526,7 +4526,7 @@ export function CampWorkspace({
         <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
-          stopping={stopping} onStop={onStop} onQueueChange={setPendingQueue} onEditingChange={(editing) => {
+          onQueueChange={setPendingQueue} onEditingChange={(editing) => {
             setPendingEditing(editing)
             if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
           }} />
@@ -7299,11 +7299,11 @@ function MessageReplyIcon(): JSX.Element {
   )
 }
 
-function CollapsibleStructuredMessageBody({
+function TruncatedStructuredMessageBody({
   body,
   content,
   members,
-  collapsible,
+  truncate,
   forceExpanded,
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
@@ -7314,7 +7314,7 @@ function CollapsibleStructuredMessageBody({
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
-  collapsible: boolean
+  truncate: boolean
   forceExpanded: boolean
   renderLeadingCurrentUserMarkdown?: boolean
   onActivateMemberMention?(
@@ -7326,13 +7326,11 @@ function CollapsibleStructuredMessageBody({
   onFileReference?: FileReferenceActivation
   fileReferenceSource?: MessageFileReferenceSource
 }): JSX.Element {
-  const [expanded, setExpanded] = useState(false)
-  const contentId = useId()
   const projection = useMemo(
-    () => collapsible ? collapsedMessageProjection(body, content) : null,
-    [body, collapsible, content]
+    () => truncate ? collapsedMessageProjection(body, content) : null,
+    [body, content, truncate]
   )
-  const displayFullMessage = expanded || forceExpanded || projection === null
+  const displayFullMessage = forceExpanded || projection === null
   const displayBody = displayFullMessage ? body : projection.body
   const displayContent = displayFullMessage ? content : projection.content
 
@@ -7348,25 +7346,13 @@ function CollapsibleStructuredMessageBody({
       fileReferenceSource={fileReferenceSource}
     />
   )
-  if (!projection) return messageBody
+  if (!projection || forceExpanded) return messageBody
 
   return (
-    <div className={`message-long-copy${displayFullMessage ? ' is-expanded' : ''}`}>
-      <div id={contentId}>{messageBody}</div>
-      {!forceExpanded && (
-        <button
-          className={`message-long-toggle ${expanded ? 'is-collapse' : 'is-expand'}`}
-          type="button"
-          aria-controls={contentId}
-          aria-expanded={expanded}
-          aria-label={expanded
-            ? `收起长消息，共 ${projection.lineCount} 行`
-            : `展开完整消息，共 ${projection.lineCount} 行`}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? '收起长消息' : '…'}
-        </button>
-      )}
+    <div className="message-long-copy">
+      <div>{messageBody}</div>
+      <span className="message-long-ellipsis" aria-hidden="true">…</span>
+      <span className="sr-only">其余内容已省略，共 {projection.lineCount} 行</span>
     </div>
   )
 }
