@@ -310,7 +310,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.memory-library\s*\{[^}]*padding: 34px 28px 24px/)
     expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 17px[^}]*border-bottom: 0(?![^}]*-webkit-app-region: drag)/)
     expect(css).toMatch(/\.memory-header-actions\s*\{[^}]*position: relative[^}]*z-index: 3/)
-    expect(css).toMatch(/\.content\.memory-content\s*\{[^}]*border-top: 0[^}]*background: var\(--surface\)/)
+    expect(css).toMatch(/\.content\.memory-content\s*\{[^}]*border-top: 0[^}]*background: var\(--home-surface\)/)
     expect(css).toContain('.memory-library-header .eyebrow')
     expect(css).toContain('.memory-page-notices')
     expect(css).not.toContain('.memory-page-kicker')
@@ -337,7 +337,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   })
 
   it('uses solid, rule-free headers for the approved Memory, Appearance, and Reminder pages', () => {
-    expect(css).toMatch(/\.settings-content \.settings-panel:is\([^}]+\)\s*\{[^}]*border-top: 0[^}]*background: var\(--surface\)/)
+    expect(css).toMatch(/\.settings-content \.settings-panel:is\([^}]+\)\s*\{[^}]*border-top: 0[^}]*background: var\(--home-surface\)/)
     expect(css).toMatch(/\.settings-panel:is\([^}]+\) > \.settings-page-heading\s*\{[^}]*border-bottom: 0/)
     expect(css).toMatch(/\.memory-scope-tabs\s*\{[^}]*border: 0[^}]*background: var\(--workspace-surface-subtle\)/)
     expect(css).toMatch(/\.memory-catalog\s*\{[^}]*background: var\(--workspace-surface-subtle\)/)
@@ -347,6 +347,14 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.settings-panel-notifications \.notification-scenario\s*\{[^}]*background: var\(--workspace-surface-subtle\)/)
     expect(css).toMatch(/\.settings-panel-notifications \.notification-scenario \.notification-switch\s*\{[^}]*background: var\(--workspace-surface-raised\)/)
     expect(css).toMatch(/\.settings-panel-notifications \.notification-scenario-heading\s*\{[^}]*border-bottom: 0/)
+  })
+
+  it('uses the member workspace plane across Settings and Memory pages', () => {
+    expect(css).toMatch(/\.content\.members-content\s*\{[^}]*background: var\(--home-surface\)/)
+    expect(css).toMatch(/\.content\.memory-content\s*\{[^}]*background: var\(--home-surface\)/)
+    expect(css).toMatch(/\.content\.settings-content\s*\{[^}]*background: var\(--home-surface\)/)
+    expect(css).toMatch(/\.settings-workbench\s*\{[^}]*background: var\(--home-surface\)/)
+    expect(css).toMatch(/\.settings-content \.settings-panel\s*\{[^}]*background: var\(--home-surface\)/)
   })
 
   it('keeps Agent narrative open while giving right-aligned user messages a bounded Porcelain surface', () => {

@@ -1309,7 +1309,7 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 .memory-confirm-dialog { width: min(540px, calc(100vw - 48px)); }
 .memory-confirm-preview { max-height: 180px; overflow: auto; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; white-space: pre-wrap; color: var(--muted); background: var(--surface-subtle); font-size: 11px; line-height: 1.5; }
 /* Long-term memory workbench */
-.content.memory-content { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 0; border-top: 0; background: var(--surface); }
+.content.memory-content { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 0; border-top: 0; background: var(--home-surface); }
 .content.memory-content > * { max-width: none; }
 .content.memory-content > .memory-library { width: min(1136px, 100%); margin: 0 auto; }
 .memory-library { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 10px; overflow: hidden; padding: 34px 28px 24px; }
@@ -4431,9 +4431,9 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--home-surface);
 }
-.content.settings-content { display: flex; flex-direction: column; overflow: hidden; padding: 0; background: var(--surface-raised); }
+.content.settings-content { display: flex; flex-direction: column; overflow: hidden; padding: 0; background: var(--home-surface); }
 .content.settings-content > * { max-width: none; margin: 0; }
 .settings-content .settings-workbench { min-height: 0; flex: 1 1 auto; border: 0; border-radius: 0; }
 .settings-content .settings-panel {
@@ -4442,7 +4442,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   overflow-y: auto;
   padding: 27px 27px 48px;
   border-top: 3px solid var(--brand);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--brand-soft) 54%, var(--surface-raised)) 0, var(--surface-raised) 220px);
+  background: var(--home-surface);
 }
 .settings-panel { min-width: 0; padding: 20px 22px 36px; }
 .settings-panel > * { max-width: 980px; margin-right: auto; margin-left: auto; }
@@ -5287,7 +5287,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-page-note { border-color: color-mix(in srgb, var(--brand) 32%, var(--line)); color: var(--brand-ink); background: var(--brand-soft); }
 .settings-content .settings-panel:is(.settings-panel-general, .settings-panel-appearance, .settings-panel-notifications, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-channels, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) {
   border-top: 0;
-  background: var(--surface);
+  background: var(--home-surface);
 }
 .settings-panel-general > .general-settings,
 .settings-panel-skills > .skill-settings,
