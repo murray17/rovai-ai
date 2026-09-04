@@ -771,6 +771,10 @@ fn bundled_definition(name: &str) -> Option<&'static BundledDefinition> {
         .find(|definition| definition.name == name)
 }
 
+pub(crate) fn bundled_skill_source_identity(name: &str) -> Option<String> {
+    bundled_definition(name).map(|definition| format!("rovai://bundled/{}", definition.name))
+}
+
 fn skill_management_policy(origin: &SkillOrigin, name: &str) -> SkillManagementPolicy {
     if *origin != SkillOrigin::Official {
         return SkillManagementPolicy::UserManaged;

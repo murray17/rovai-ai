@@ -86,7 +86,7 @@ last_updated: 2026-09-03
 
 ## Skills、MCP 与 Built-ins
 
-- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
+- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
 - 理由来源：[v0.06](../versions/v0.06/decisions.md)、[v0.09](../versions/v0.09/decisions.md)、[v0.31](../versions/v0.31/decisions.md)、[v0.37](../versions/v0.37/decisions.md)、[v0.42](../versions/v0.42/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.82](../versions/v0.82/decisions.md)、[v0.85](../versions/v0.85/decisions.md)、[v0.91](../versions/v0.91/decisions.md)、[v0.92](../versions/v0.92/decisions.md)、[v0.93](../versions/v0.93/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.17-D02](../versions/v1.17/decisions.md#v1-17-d02)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.27-D04](../versions/v1.27/decisions.md#v1-27-d04)、[V1.28-D03](../versions/v1.28/decisions.md#v1-28-d03)。
 - Pi `.pi/skills` 动态 discovery 与 Core-owned MCP bridge 的理由：[V1.39-D04](../versions/v1.39/decisions.md#v1-39-d04)；portable MCP command 与逐 Server optional activation 的理由：[V1.39-D07](../versions/v1.39/decisions.md#v1-39-d07)；有界并发 activation、显式 timeout cleanup 与稳定合并理由：[V1.39-D08](../versions/v1.39/decisions.md#v1-39-d08)。
 
@@ -118,7 +118,7 @@ last_updated: 2026-09-03
 
 ## 外部附件 CLI 入口
 
-- 当前规范：[Camp Attachment v7](../contracts/camp-attachment-v7.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)及[附件架构](../architecture/camp-published-attachment-view.md)。
+- 当前规范：[Camp Attachment v7](../contracts/camp-attachment-v7.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)及[附件架构](../architecture/camp-published-attachment-view.md)。
 - 主要理由：[V1.32-D01](../versions/v1.32/decisions.md#v1-32-d01)：由 CLI 以 Runtime 权限适配外部路径，保持 Core 的读取根目录限制。
 
 ## Camp 连续消息

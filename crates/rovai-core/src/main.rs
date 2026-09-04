@@ -232,8 +232,8 @@ use rovai_core::{
     runtime_resolution::RuntimeResolutionService,
     runtime_search_operation,
     single_chat::{
-        EndSingleChatCommand, OpenSingleChatCommand, SendSingleChatMessageCommand,
-        SingleChatService,
+        EndSingleChatCommand, OpenSingleChatCommand, SINGLE_CHAT_HISTORY_TOOL_NAME,
+        SendSingleChatMessageCommand, SingleChatHistoryInput, SingleChatService,
     },
     single_chat_attachment::SingleChatAttachmentStore,
     skill::{
@@ -5050,6 +5050,17 @@ impl Core {
                     let input = serde_json::from_value::<CampReadInput>(request.input)
                         .map_err(|_| invalid_input_error("camp.read input is invalid"))?;
                     CampHistoryService.read(&mut database, &authenticated_run, &input)
+                }
+                SINGLE_CHAT_HISTORY_TOOL_NAME => {
+                    let input = serde_json::from_value::<SingleChatHistoryInput>(request.input)
+                        .map_err(|_| invalid_input_error("single_chat.history input is invalid"))?;
+                    let output = SingleChatService::default().history(
+                        &database,
+                        &authenticated_run.agent_run_id,
+                        authenticated_run.execution_epoch,
+                        &input,
+                    )?;
+                    serde_json::to_value(output).map_err(Into::into)
                 }
                 _ => Err(anyhow::anyhow!("private built-in operation is unsupported")),
             }?;

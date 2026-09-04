@@ -17,6 +17,7 @@ use crate::{
     },
     memory_tool::{MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput},
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
+    single_chat::{SINGLE_CHAT_HISTORY_TOOL_NAME, SingleChatHistoryInput, SingleChatService},
     team_tool::{
         CampMessageSendInput, GatherInput, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
         TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput,
@@ -59,6 +60,9 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
             serde_json::from_value::<HistorySearchInput>(input.clone()).map(|_| ())
         }
         CAMP_READ_TOOL_NAME => serde_json::from_value::<CampReadInput>(input.clone()).map(|_| ()),
+        SINGLE_CHAT_HISTORY_TOOL_NAME => {
+            serde_json::from_value::<SingleChatHistoryInput>(input.clone()).map(|_| ())
+        }
         MEMORY_SEARCH_TOOL_NAME => {
             serde_json::from_value::<MemorySearchInput>(input.clone()).map(|_| ())
         }
@@ -794,6 +798,13 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
             "outputSchema": camp_read_success_schema()
         }),
         json!({
+            "name": SINGLE_CHAT_HISTORY_TOOL_NAME,
+            "title": "Read current Single Chat history",
+            "description": "Read a bounded page of user and assistant messages before CURRENT_INPUT in the active Single Chat. Core derives the conversation from the authenticated current Run and caps every requested boundary at the current input sequence. This operation does not read execution evidence or mutate any Conversation state.",
+            "inputSchema": SingleChatService::history_input_schema(),
+            "outputSchema": SingleChatService::history_output_schema()
+        }),
+        json!({
             "name": MEMORY_VIEW_TOOL_NAME,
             "title": "View one complete Memory scope",
             "description": "Return the complete current applicable Memory set for Hearth, this Agent's Companion, or one exact Relationship pair. The result is never paginated or truncated; copy one returned target unchanged into memory.write revise.",
@@ -895,6 +906,22 @@ mod tests {
                 .iter()
                 .all(|name| !name.starts_with("context."))
         );
+    }
+
+    #[test]
+    fn single_chat_history_accepts_only_its_bounded_cursor_shape() {
+        for valid in [json!({}), json!({"beforeSequence": 12, "limit": 50})] {
+            validate_builtin_tool_input(SINGLE_CHAT_HISTORY_TOOL_NAME, &valid).unwrap();
+        }
+        for invalid in [
+            json!({"conversationId": "conversation-1"}),
+            json!({"campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}),
+            json!({"agentId": "agent_1"}),
+            json!({"beforeSequence": 0}),
+            json!({"limit": 51}),
+        ] {
+            assert!(validate_builtin_tool_input(SINGLE_CHAT_HISTORY_TOOL_NAME, &invalid).is_err());
+        }
     }
 
     #[test]

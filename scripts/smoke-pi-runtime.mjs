@@ -461,7 +461,7 @@ function assertCapabilitySnapshot(snapshot) {
     'mcp.external_projection.additive_per_run',
     'mcp.same_name_policy.rovai_wins',
     'mcp.approval.core_managed',
-    'builtin_cli.transport.v21'
+    'builtin_cli.transport.v22'
   ]
   const approval = snapshot?.permissionOptions?.find((option) => option.key === 'approval_mode')
   if (snapshot?.probeStatus !== 'ready'

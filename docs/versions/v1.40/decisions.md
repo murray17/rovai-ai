@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.40
 lifecycle: current
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # v1.40 决定
@@ -29,9 +29,13 @@ Prompt 只指导行为，不承担授权或路由安全。
 
 - 复用现有 AgentRun、Manifest、Delivery、Binding、Evidence 和 Cancellation，普通 Camp 投影显式排除 Single Chat。
 - `single_chat_v1` 是代码内封闭枚举；新增允许项必须修改合同、Core 与测试，不接受任意组合配置。
+- 最小 allowlist 只保留当前 Camp read/search 和 Core 从当前 Run 反向解析的按需私有历史；Single Chat Bootstrap 不投递
+  Memory，Skill exposure 按 official bundled source identity 排除会引导广泛协作或 Memory 操作的两个系统 Skill。
 - Runtime 原生 delegation、内部模型调用和 Provider 工具不属于 Rovai Built-in policy 的能力承诺。
-- 拒绝 Prompt-only 隔离，因为 Runtime 仍可直接调用普通 CLI；拒绝第二套执行聚合和通用 Policy DSL，因为两者都增加
-  不必要的恢复、迁移和一致性成本。
+- 私有历史采用只读、Run-derived 的显式查询，不自动 replay，也不向模型解释 Native Session 连续性；这样在保持最小
+  Context 的同时覆盖前文不在模型窗口的情况。
+- 拒绝 Prompt-only 隔离，因为 Runtime 仍可直接调用普通 CLI；拒绝第二套执行聚合、自动 transcript replay 和通用
+  Policy DSL，因为它们增加不必要的恢复、迁移和一致性成本。
 
 <a id="v1-40-d02"></a>
 ## V1.40-D02：重启取消当前回复，结束不建立 successor cleanup fence

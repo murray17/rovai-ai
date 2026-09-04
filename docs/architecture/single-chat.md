@@ -20,8 +20,8 @@ Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。
 | Desktop Main bridge | 五个会话 Core method、三个私有附件 method 的 allowlist、受限 bytes ingress 和事件转发 | 业务状态、目标选择、私有输出生成 |
 | SingleChatService | Conversation 生命周期、原子 open/send/end、snapshot | Runtime process、Prompt 执行、公共投影 |
 | SingleChatAttachmentStore | Conversation-scoped 私有快照、receipt、暂存清理与 per-Run 临时投影 | Camp 公共附件、Runtime 能力、消息/Run 调度 |
-| Context builder | 专用 Charter/Guidance、私有水位上的公共增量 | transcript 恢复、异步唤醒、授权替代 |
-| Built-in Router | `single_chat_v1` 固定 allowlist 与当前 Camp scope | Runtime 原生 delegation、通用 Capability DSL |
+| Context builder | 无 Memory 的专用 Bootstrap、专用 Charter/Guidance、过滤后 Skill exposure、私有水位上的公共增量 | transcript 自动重放、连续性解释、异步唤醒、授权替代 |
+| Built-in Router | `single_chat_v1` 固定三项 allowlist、当前 Camp scope 与当前单聊历史反向解析 | Runtime 原生 delegation、通用 Capability DSL |
 | Runtime terminal service | 冻结 route 复核、恰好一条私有 final、迟到事件 fence | Renderer 展示、跨 Conversation 排队 |
 | Existing Scheduler/Fleet | 普通 capacity/readiness、dispatch、Binding 与 cleanup | Single Chat 专用回复槽、successor cleanup fence |
 
@@ -41,6 +41,8 @@ Renderer singleChat.send(body, attachmentIds)
       → Single Chat Bootstrap + Dynamic Context
           → CURRENT_INPUT.attachments = per-Run private projection paths
       → authenticated Built-in operations under single_chat_v1
+          ├── camp.search/read within frozen public boundary
+          └── single_chat.history before CURRENT_INPUT
       → Execution Evidence
       → Runtime final
   → route-aware terminal transaction
@@ -57,9 +59,15 @@ CampMessage 或公共协作责任。普通 Camp read model 在 SQL 边界按 kin
 ## Context 分支
 
 普通 `camp_member` Conversation 与 Single Chat 使用独立 Native Binding 和 accepted public watermark。Context builder
-在同一 Manifest/Delivery 管线内根据 invocation 分支：Single Chat 选择专用 Charter/Guidance、排除普通 CLI/A2A/Task
-投影，并允许目标 Agent 自己的公屏输出进入新增公共窗口。Manifest 仍记录 exact bytes、digest、selection 与 omission；
-accepted ACK 仍是唯一水位推进点。
+在同一 Manifest/Delivery 管线内根据 invocation 分支：Single Chat Bootstrap 只渲染 Charter 与 Member Identity，不调用
+Memory Entrypoint；Dynamic Context 选择专用 Charter/Guidance，排除 Self Active Tasks 与 A2A Guidance，并允许目标 Agent
+自己的公屏输出进入新增公共窗口。Member Skill exposure 仍沿用既有投影，但在 Manifest 与 Adapter 共用的 snapshot/digest
+形成前按 official bundled source identity 排除 `cli-operations` 与 `memory-stewardship`；其余 Skills 和 MCP projection
+保持既有路径。Manifest 仍记录 exact bytes、digest、selection 与 omission；accepted ACK 仍是唯一水位推进点。
+
+模型不接收 Native Session 连续性或替换原因，也不接收自动私有 transcript replay。需要但缺少此前私聊正文时，Runtime
+通过始终可用的 `single_chat.history` 请求 Core；Router 只从已认证当前 Run 解析 active destination，并把读取上界锁在
+`CURRENT_INPUT` 之前。
 
 ## 输出与迟到事件
 
