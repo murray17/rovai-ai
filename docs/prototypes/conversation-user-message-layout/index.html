@@ -459,6 +459,7 @@
       pointer-events: auto;
       transform: translateY(0);
     }
+    .message.agent .message-actions { right: auto; left: 0; }
     .message-action {
       position: relative;
       display: grid;
@@ -474,7 +475,6 @@
     .message-action:hover { border-color: var(--line); color: var(--brand-ink); background: var(--surface-hover); }
     .message-action.is-copied { color: var(--success); background: var(--success-soft); }
     .message-action svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
-    .message-action .reply-dots { fill: currentColor; stroke: none; }
     .message-action::after {
       position: absolute;
       z-index: 20;
@@ -659,7 +659,7 @@
           <div class="timeline-track" id="timeline-track">
             <div class="day-rule"><span>2026年9月4日</span></div>
 
-            <article class="message agent" data-author-name="洛可" data-message-text="我已按当前 Porcelain Day 会话区的尺寸和信息层级整理了这一版。队员消息仍使用开放阅读面，不增加角色气泡；你的消息则在右侧使用浅灰底，并把头像放到最右侧。">
+            <article class="message agent demo-actions" data-author-name="洛可" data-message-text="我已按当前 Porcelain Day 会话区的尺寸和信息层级整理了这一版。队员消息仍使用开放阅读面，不增加角色气泡；你的消息则在右侧使用浅灰底，并把头像放到最右侧。">
               <span class="avatar" aria-hidden="true"><img src="../../../apps/desktop/src/renderer/src/assets/characters/luoke/icon-192.png" alt=""></span>
               <div class="message-main">
                 <div class="message-meta"><strong>洛可</strong><span>Codex CLI</span><time>10:24</time></div>
@@ -670,7 +670,7 @@
                   </div>
                   <div class="message-actions" aria-label="消息操作">
                     <button class="message-action reply-action" type="button" aria-label="回复洛可的消息" data-tooltip="回复">
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z"></path><circle class="reply-dots" cx="8" cy="10.5" r="1"></circle><circle class="reply-dots" cx="12" cy="10.5" r="1"></circle><circle class="reply-dots" cx="16" cy="10.5" r="1"></circle></svg>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"></path><path d="m15.2 9.2-3.6 3.5 3.6 3.5"></path><path d="M11.8 12.7h8.7"></path></svg>
                     </button>
                     <button class="message-action copy-action" type="button" aria-label="复制洛可的消息" data-tooltip="复制">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
@@ -697,7 +697,7 @@
                       <span class="message-line">第 08 行　正文继续使用 13px 系统字体。</span>
                       <span class="message-line">第 09 行　行高沿用当前会话区的 1.6。</span>
                       <span class="message-line">第 10 行　长行仍允许自然换行和选择。</span>
-                      <span class="message-line">第 11 行　回复按钮改为飞书对话框图标。</span>
+                      <span class="message-line">第 11 行　回复按钮使用对话回折图标。</span>
                       <span class="message-line">第 12 行　复制按钮改为双层纸张图标。</span>
                       <span class="message-line">第 13 行　两个操作位于消息框右下方。</span>
                       <span class="message-line">第 14 行　操作与底色框之间保留间距。</span>
@@ -717,7 +717,7 @@
                   </div>
                   <div class="message-actions" aria-label="消息操作">
                     <button class="message-action reply-action" type="button" aria-label="回复你的消息" data-tooltip="回复">
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z"></path><circle class="reply-dots" cx="8" cy="10.5" r="1"></circle><circle class="reply-dots" cx="12" cy="10.5" r="1"></circle><circle class="reply-dots" cx="16" cy="10.5" r="1"></circle></svg>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"></path><path d="m15.2 9.2-3.6 3.5 3.6 3.5"></path><path d="M11.8 12.7h8.7"></path></svg>
                     </button>
                     <button class="message-action copy-action" type="button" aria-label="复制你的消息" data-tooltip="复制">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
@@ -755,7 +755,7 @@
   <template id="message-actions-template">
     <div class="message-actions" aria-label="消息操作">
       <button class="message-action reply-action" type="button" data-tooltip="回复">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z"></path><circle class="reply-dots" cx="8" cy="10.5" r="1"></circle><circle class="reply-dots" cx="12" cy="10.5" r="1"></circle><circle class="reply-dots" cx="16" cy="10.5" r="1"></circle></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"></path><path d="m15.2 9.2-3.6 3.5 3.6 3.5"></path><path d="M11.8 12.7h8.7"></path></svg>
       </button>
       <button class="message-action copy-action" type="button" data-tooltip="复制">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
