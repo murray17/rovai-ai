@@ -10,13 +10,15 @@ import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import ts from 'typescript'
 import { build } from 'vite'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/dingtalk-login-presentation')
 const require = createRequire(import.meta.url)
 const esbuild = createRequire(require.resolve('vite'))('esbuild')
 
-test('DingTalk login uses the production Rovai dialog and a separate sandboxed native view', { timeout: 60_000 }, async () => {
+test('DingTalk login uses the production Rovai dialog and a separate sandboxed native view', { timeout: 60_000 }, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-dingtalk-login-presentation-'))
   let child
   let closed

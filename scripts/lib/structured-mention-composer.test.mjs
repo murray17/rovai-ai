@@ -8,13 +8,15 @@ import test from 'node:test'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { build } from 'vite'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/structured-mention-composer')
 
 test('Composer edits preserve text, structured tokens and Skill query interactions', {
   timeout: 60_000
-}, async () => {
+}, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-composer-input-test-'))
   let child
   let closed

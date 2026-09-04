@@ -7,12 +7,14 @@ import { join, resolve } from 'node:path'
 import test from 'node:test'
 import electron from 'electron'
 import ts from 'typescript'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 
 test('the production preload preserves structured rejections through a real contextBridge', {
   timeout: 30_000
-}, async () => {
+}, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-context-bridge-test-'))
   const preload = join(fixture, 'preload.cjs')
   let child
