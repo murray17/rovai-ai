@@ -195,9 +195,10 @@ they do not become statuses. Evidence and diffs remain neutral and structurally 
 inline code uses the borderless `--inline-code-canvas`; Shell command results use
 `--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence border,
 while other evidence surfaces continue to use `--evidence-canvas`.
-Camp message prose uses the dedicated `--conversation-inline-code-canvas`,
-`--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer; file previews,
-release notes and Runtime process copy keep the shared defaults.
+Camp message prose, Runtime process copy in the bottom and Inspector execution surfaces, and
+Markdown file previews use the dedicated `--conversation-inline-code-canvas`,
+`--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer; release notes,
+Tool results and other SafeMarkdown surfaces keep the shared defaults.
 Current-user message bubbles use the dedicated neutral Steel pair
 `--conversation-user-message-surface` / `--conversation-user-message-line`; Agent narrative remains
 transparent.

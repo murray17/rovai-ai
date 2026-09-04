@@ -196,11 +196,11 @@ Agent 消息继续左对齐并保持透明开放阅读面，不添加身份色�
 使用完整正文，不得复制截断投影；当前会话查找命中这类消息时临时挂载全文，使首尾 occurrence 都能被
 定位，关闭或切换查找后恢复静态截断。
 
-会话消息正文的 SafeMarkdown 使用 Mist Gray 分层：行内 code 以
+会话消息正文、底部与浮层执行台中的 Runtime 过程正文，以及 Markdown 文件预览共享 Mist Gray 分层：行内 code 以
 `--conversation-inline-code-canvas` 为底色，保留 `1px 4px` 留白、`6px` 圆角和跨行连续底色；围栏代码块使用
 `--conversation-code-block-canvas`、`--conversation-code-line`、`11px 12px` 留白与 `8px` 圆角。块内
-`pre code` 必须继续透明且不保留行内留白或圆角。该覆盖只属于用户/Agent 消息正文，不改变文件预览、更新说明、
-Runtime 过程正文、附件卡片或其他 SafeMarkdown 表面；Day 与 Night 分别使用主题文档给出的独立 token 值。
+`pre code` 必须继续透明且不保留行内留白或圆角。该覆盖不改变更新说明、附件卡片、Tool 结果、其他 Evidence
+或其他 SafeMarkdown 表面；Day 与 Night 分别使用主题文档给出的独立 token 值。
 
 当前可操作的队员头像、显示名和 Mention 可打开同一个锚定人物信息卡，不导航。已离开、移除或
 不可解析身份保持静态。精确 token 行为见[结构化 Mention](structured-mentions.md)。
@@ -280,6 +280,8 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 “会话 / 地图”视图按钮仍使用原有 `--brand-soft`。运行底色不随历史 Run 焦点切换而消失。选中态、状态形状、
 边框、焦点及工具结果的专用 Evidence 底色保持各自语义，不用背景分层改变执行状态或交互。
 两块着色区域将弱提示文字局部提升到 `--muted`，保证日夜主题的文字对比度，不改变历史 Run 与会话区文字层级。
+Runtime narration 与 plan explanation 的 SafeMarkdown 在底部和浮层复用上文的 Mist Gray 代码分层；Tool 行、
+Shell 结果、Diff 与其他结构化 Evidence 继续使用各自专用样式，不因承载位置改变。
 
 同一 Camp 中每个曾有 AgentRun 的队员只保留一个 Agent 过程入口。按需详情 surface 以时间顺序展示
 该 Agent 的独立 Run stage、状态、收件人与证据；这只是 Renderer grouping，不创建 Process

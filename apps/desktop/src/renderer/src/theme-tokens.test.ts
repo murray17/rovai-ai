@@ -386,9 +386,6 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toMatch(/\.safe-markdown code\s*\{[^}]*\bborder\s*:/)
     expect(css).toMatch(/\.safe-markdown pre\s*\{[^}]*background:\s*var\(--code-block-canvas\)/)
     expect(css).toMatch(/\.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*background:\s*transparent/)
-    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown code\s*\{[^}]*padding:\s*1px 4px[^}]*border-radius:\s*6px[^}]*background:\s*var\(--conversation-inline-code-canvas\)[^}]*box-decoration-break:\s*clone/)
-    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre\s*\{[^}]*padding:\s*11px 12px[^}]*border-color:\s*var\(--conversation-code-line\)[^}]*border-radius:\s*8px[^}]*background:\s*var\(--conversation-code-block-canvas\)/)
-    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*border-radius:\s*0[^}]*background:\s*transparent/)
     expect(css).toContain('.conversation-bubble:hover .message-actions')
     expect(css).toMatch(/\.message-actions\s*\{[^}]*align-self: flex-end[^}]*margin-top: 3px/)
     expect(css).toMatch(/\.conversation-bubble\.agent \.message-actions\s*\{[^}]*width: fit-content[^}]*align-self: flex-start[^}]*justify-content: flex-start/)
@@ -433,6 +430,12 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.runtime-recovery-dock\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), calc\(100% - 54px\)\)/
     )
+  })
+
+  it('shares Mist Gray Markdown code layers across Camp reading surfaces', () => {
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown code,\s*\.execution-drawer \.safe-markdown code,\s*\.file-preview-markdown \.safe-markdown code\s*\{[^}]*padding:\s*1px 4px[^}]*border-radius:\s*6px[^}]*background:\s*var\(--conversation-inline-code-canvas\)[^}]*box-decoration-break:\s*clone/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre,\s*\.execution-drawer \.safe-markdown pre,\s*\.file-preview-markdown \.safe-markdown pre\s*\{[^}]*padding:\s*11px 12px[^}]*border-color:\s*var\(--conversation-code-line\)[^}]*border-radius:\s*8px[^}]*background:\s*var\(--conversation-code-block-canvas\)/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre code,\s*\.execution-drawer \.safe-markdown pre code,\s*\.file-preview-markdown \.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*border-radius:\s*0[^}]*background:\s*transparent/)
   })
 
   it('keeps AgentRun disclosure in a fixed trailing SVG track', () => {

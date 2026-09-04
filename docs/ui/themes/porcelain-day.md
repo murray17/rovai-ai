@@ -194,9 +194,10 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 - Narrative inline code uses the borderless `--inline-code-canvas`; Shell command results use
   `--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence
   border, while other evidence surfaces continue to use `--evidence-canvas`.
-- Camp message prose uses the dedicated `--conversation-inline-code-canvas`,
-  `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer. These tokens do
-  not alter file previews, release notes or Runtime process copy.
+- Camp message prose, Runtime process copy in the bottom and Inspector execution surfaces, and
+  Markdown file previews use the dedicated `--conversation-inline-code-canvas`,
+  `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer. Release notes,
+  Tool results and other SafeMarkdown surfaces keep the shared defaults.
 - Current-user message bubbles use the dedicated porcelain-gray
   `--conversation-user-message-surface` and `--conversation-user-message-line`; Agent narrative
   remains on the transparent conversation surface.
