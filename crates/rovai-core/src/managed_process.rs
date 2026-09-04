@@ -153,6 +153,19 @@ impl ManagedProcessLaunchSpec {
     ) -> Result<Self> {
         let command = command.as_std();
         let requested_application = PathBuf::from(command.get_program());
+        if !requested_application.is_absolute() || !requested_application.is_file() {
+            bail!(
+                "managed_process.invalid_application: expected an absolute file, got {}",
+                requested_application.display()
+            );
+        }
+        #[cfg(windows)]
+        let (application, windows_entrypoint) =
+            capture_windows_runtime_entrypoint(&requested_application)?;
+        #[cfg(not(windows))]
+        let application = requested_application;
+        #[cfg(windows)]
+        let application_identity = windows::capture_application_identity(&application)?;
         let arguments = command.get_args().map(OsString::from).collect::<Vec<_>>();
         if arguments
             .iter()
@@ -189,17 +202,6 @@ impl ManagedProcessLaunchSpec {
                 }
             }
         }
-        #[cfg(windows)]
-        let (application, windows_entrypoint) =
-            capture_windows_runtime_entrypoint(&resolve_captured_application(
-                &requested_application,
-                &working_directory,
-                &environment,
-            )?)?;
-        #[cfg(not(windows))]
-        let application = prepare_unix_application(&requested_application, &working_directory)?;
-        #[cfg(windows)]
-        let application_identity = windows::capture_application_identity(&application)?;
         #[cfg(windows)]
         if let WindowsRuntimeEntrypoint::CommandShim {
             shim, interpreter, ..
@@ -467,26 +469,6 @@ fn resolve_captured_application(
         "managed_process.invalid_application: relative application is unavailable from the Runtime working directory: {}",
         requested.display()
     )
-}
-
-#[cfg(not(windows))]
-fn prepare_unix_application(requested: &Path, working_directory: &Path) -> Result<PathBuf> {
-    validate_requested_application(requested)?;
-    if requested.is_absolute() {
-        if !requested.is_file() {
-            bail!(
-                "managed_process.invalid_application: expected an absolute file, got {}",
-                requested.display()
-            );
-        }
-        return Ok(requested.to_path_buf());
-    }
-    let is_command_name =
-        requested.components().count() == 1 && requested.file_name() == Some(requested.as_os_str());
-    if is_command_name {
-        return Ok(requested.to_path_buf());
-    }
-    Ok(working_directory.join(requested))
 }
 
 #[cfg(not(windows))]
@@ -846,53 +828,19 @@ mod tests {
     const WINDOWS_HELPER_IDENTITY: &str = "ROVAI_MANAGED_PROCESS_HELPER_IDENTITY";
 
     #[test]
-    fn capture_accepts_structured_applications_and_requires_nonempty_owner() {
-        let current_executable = std::env::current_exe().unwrap().canonicalize().unwrap();
-        let executable_directory = current_executable.parent().unwrap();
-        let executable_name = current_executable.file_name().unwrap();
-        let runtime_path = std::env::join_paths([executable_directory]).unwrap();
-
-        let mut command_name = Command::new(executable_name);
-        command_name
-            .current_dir(executable_directory)
-            .env("PATH", &runtime_path);
-        let command_name_spec = ManagedProcessLaunchSpec::capture(
-            &command_name,
-            ManagedProcessPurpose::RuntimeOneShot,
-            ManagedStdinPolicy::Null,
-            ManagedWindowsArgvDialect::MicrosoftCrt,
-            "runtime-child:test-command-name",
-        )
-        .unwrap();
-        #[cfg(windows)]
-        assert_eq!(command_name_spec.application(), current_executable);
-        #[cfg(not(windows))]
-        assert_eq!(command_name_spec.application(), Path::new(executable_name));
-
-        let mut relative_path = Command::new(Path::new(".").join(executable_name));
-        relative_path.current_dir(executable_directory);
-        let relative_path_spec = ManagedProcessLaunchSpec::capture(
-            &relative_path,
-            ManagedProcessPurpose::RuntimeOneShot,
-            ManagedStdinPolicy::Null,
-            ManagedWindowsArgvDialect::MicrosoftCrt,
-            "runtime-child:test-relative-path",
-        )
-        .unwrap();
-        assert_eq!(relative_path_spec.application(), current_executable);
-
-        let empty = Command::new("");
+    fn capture_requires_absolute_application_and_nonempty_owner() {
+        let relative = Command::new("runtime");
         assert!(
             ManagedProcessLaunchSpec::capture(
-                &empty,
-                ManagedProcessPurpose::RuntimeOneShot,
+                &relative,
+                ManagedProcessPurpose::RuntimeProbe,
                 ManagedStdinPolicy::Null,
                 ManagedWindowsArgvDialect::MicrosoftCrt,
-                "runtime-child:test-empty-application",
+                "probe:test",
             )
             .unwrap_err()
             .to_string()
-            .contains("application must not be empty")
+            .contains("managed_process.invalid_application")
         );
 
         let absolute = Command::new(std::env::current_exe().unwrap());
@@ -908,84 +856,6 @@ mod tests {
             .to_string()
             .contains("managed_process.invalid_argument")
         );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn each_launch_resolves_a_bare_command_against_its_current_runtime_path() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let root = std::env::temp_dir().join(format!(
-            "rovai-managed-portable-command-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let first_directory = root.join("first");
-        let second_directory = root.join("second");
-        std::fs::create_dir_all(&first_directory).unwrap();
-        std::fs::create_dir_all(&second_directory).unwrap();
-        let first = first_directory.join("portable-runtime-child");
-        let second = second_directory.join("portable-runtime-child");
-        for (executable, marker) in [(&first, "first"), (&second, "second")] {
-            std::fs::write(executable, format!("#!/bin/sh\nprintf {marker}\n")).unwrap();
-            std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        }
-
-        for (directory, marker) in [
-            (&first_directory, &b"first"[..]),
-            (&second_directory, &b"second"[..]),
-        ] {
-            let mut command = Command::new("portable-runtime-child");
-            command
-                .current_dir(&root)
-                .env("PATH", std::env::join_paths([directory]).unwrap());
-            let spec = ManagedProcessLaunchSpec::capture(
-                &command,
-                ManagedProcessPurpose::RuntimeOneShot,
-                ManagedStdinPolicy::Null,
-                ManagedWindowsArgvDialect::MicrosoftCrt,
-                "runtime-child:test-current-path",
-            )
-            .unwrap();
-            assert_eq!(spec.application(), Path::new("portable-runtime-child"));
-            let mut process = ManagedProcess::spawn(spec).unwrap();
-            let mut stdout = process.take_stdout().unwrap();
-            let mut output = Vec::new();
-            tokio::io::AsyncReadExt::read_to_end(&mut stdout, &mut output)
-                .await
-                .unwrap();
-            assert!(process.wait().await.unwrap().success());
-            assert_eq!(&output, marker);
-            process.force_terminate_tree().unwrap();
-        }
-
-        let relative_directory = root.join("scripts");
-        std::fs::create_dir_all(&relative_directory).unwrap();
-        let relative_executable = relative_directory.join("start-mcp");
-        std::fs::write(&relative_executable, "#!/bin/sh\nprintf relative\n").unwrap();
-        std::fs::set_permissions(&relative_executable, std::fs::Permissions::from_mode(0o700))
-            .unwrap();
-        let mut relative_command = Command::new("scripts/start-mcp");
-        relative_command.current_dir(&root);
-        let relative_spec = ManagedProcessLaunchSpec::capture(
-            &relative_command,
-            ManagedProcessPurpose::RuntimeOneShot,
-            ManagedStdinPolicy::Null,
-            ManagedWindowsArgvDialect::MicrosoftCrt,
-            "runtime-child:test-current-cwd",
-        )
-        .unwrap();
-        assert_eq!(relative_spec.application(), relative_executable);
-        let mut relative_process = ManagedProcess::spawn(relative_spec).unwrap();
-        let mut relative_stdout = relative_process.take_stdout().unwrap();
-        let mut relative_output = Vec::new();
-        tokio::io::AsyncReadExt::read_to_end(&mut relative_stdout, &mut relative_output)
-            .await
-            .unwrap();
-        assert!(relative_process.wait().await.unwrap().success());
-        assert_eq!(relative_output, b"relative");
-        relative_process.force_terminate_tree().unwrap();
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

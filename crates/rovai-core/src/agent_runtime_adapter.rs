@@ -475,7 +475,6 @@ pub enum McpSameNamePolicy {
 #[serde(rename_all = "snake_case")]
 pub enum McpApprovalControl {
     RuntimeNative,
-    CoreManaged,
     Unsupported,
 }
 
@@ -506,16 +505,6 @@ fn unsupported_external_mcp_projection() -> McpProjectionCapability {
         external_mcp_projection: ExternalMcpProjection::Unsupported,
         same_name_policy: None,
         approval_control: McpApprovalControl::Unsupported,
-    }
-}
-
-fn pi_core_managed_mcp_projection() -> McpProjectionCapability {
-    McpProjectionCapability {
-        supports_stdio: true,
-        supports_streamable_http: true,
-        external_mcp_projection: ExternalMcpProjection::AdditivePerRun,
-        same_name_policy: Some(McpSameNamePolicy::RovaiWins),
-        approval_control: McpApprovalControl::CoreManaged,
     }
 }
 
@@ -890,7 +879,7 @@ impl AgentRuntimeAdapterRegistry {
     pub fn mcp_projection(&self, kind: AdapterKind) -> McpProjectionCapability {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
-            AdapterKind::Pi => pi_core_managed_mcp_projection(),
+            AdapterKind::Pi => unsupported_external_mcp_projection(),
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -2659,7 +2648,7 @@ fn resolve_pi_runtime(
         "installationId": input.installation_id,
         "protocolVersion": protocol_version,
         "contextContract": native_binding_context_contract(),
-        "managedSystemPrompt": "rovai-pi-host-v3",
+        "managedSystemPrompt": "rovai-pi-host-v4",
     }))?;
     let host_config_digest = canonical_json_digest(&json!({
         "adapterKind": AdapterKind::Pi,
@@ -2673,7 +2662,7 @@ fn resolve_pi_runtime(
         "protocolVersion": protocol_version,
         "permissionSchemaVersion": input.permissions.schema_version,
         "approvalMode": approval_mode,
-        "managedExtension": "rovai-pi-host-v3",
+        "managedExtension": "rovai-pi-host-v4",
     }))?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
@@ -3661,9 +3650,6 @@ mod tests {
             "context.compaction.native_system_prompt_preserved",
             "usage.model_call.structured",
             BUILTIN_TOOL_RUNTIME_CAPABILITY,
-            "mcp.external_projection.additive_per_run",
-            "mcp.same_name_policy.rovai_wins",
-            "mcp.approval.core_managed",
         ] {
             assert!(
                 !snapshot.capabilities.contains(&unobserved.to_string()),
@@ -4275,16 +4261,11 @@ mod tests {
                 McpApprovalControl::RuntimeNative
             );
         }
-        let pi = registry.mcp_projection(AdapterKind::Pi);
-        assert!(pi.supports_stdio);
-        assert!(pi.supports_streamable_http);
-        assert_eq!(
-            pi.external_mcp_projection,
-            ExternalMcpProjection::AdditivePerRun
-        );
-        assert_eq!(pi.same_name_policy, Some(McpSameNamePolicy::RovaiWins));
-        assert_eq!(pi.approval_control, McpApprovalControl::CoreManaged);
-        for kind in [AdapterKind::AntigravityApp, AdapterKind::CursorAgent] {
+        for kind in [
+            AdapterKind::Pi,
+            AdapterKind::AntigravityApp,
+            AdapterKind::CursorAgent,
+        ] {
             let capability = registry.mcp_projection(kind);
             assert!(!capability.supports_stdio);
             assert!(!capability.supports_streamable_http);

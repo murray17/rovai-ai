@@ -3,15 +3,17 @@ document_type: runtime-research
 runtime: pi
 upstream: earendil-works/pi
 authority: research-evidence-only
-status: proposed
-admission: not_qualified
-last_updated: 2026-08-20
+status: implementation-evidence
+admission: preview
+last_updated: 2026-09-04
 ---
 
 # Pi Runtime 接入研究
 
 > 本文按 [`runtime-integration-checklist.md`](https://github.com/murray17/rovai-ai/blob/main/docs/development/runtime-integration-checklist.md) 整理。
 > Pi 不是 ACP Runtime；应直接接入其官方 JSONL RPC，而不是通过 TUI 抓屏或把第三方 ACP shim 当作上游合同。
+> 当前产品决定已将 Pi External MCP 固定为 `Unsupported`：Rovai 不再为 Pi 自建 MCP bridge；Assignment 保留但在
+> Pi dispatch 中静默忽略。该决定不改变下方对上游原生能力的研究证据。
 
 ## 基本结论
 
@@ -45,7 +47,7 @@ Pi 的主要风险：
 1. 上游明确说明 **没有内建 sandbox 或权限系统**。
 2. 用户/项目 Extension 与 Skill 会在进程内执行，必须隔离受管扩展和用户资源。
 3. Session cumulative Usage 不能直接记为当前 AgentRun。
-4. Pi 没有原生 Built-in MCP；External MCP 若需要，只能另做受管 Extension，不能当作基础能力。
+4. Pi 没有原生 External MCP；当前产品接受 `Unsupported` 差异，不通过受管 Extension 补建 transport。
 5. Windows 依赖 Bash，进程树比单一 npm launcher 更复杂。
 
 ## 1. 证据边界

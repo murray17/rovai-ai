@@ -2,20 +2,21 @@
 document_type: model-context-change
 version: v1.39
 change_id: pi-managed-system-prompt
-revision: 1
+revision: 2
 confirmation_status: confirmed
-confirmed_revision: 1
+confirmed_revision: 2
 confirmed_by: murray17
-confirmed_at: 2026-09-03
+confirmed_at: 2026-09-04
 authority: confirmed-model-input-change-statement
 implementation_baseline: aae13734669c363e7b307a6407e6868eda1e6b8e
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # v1.39 核心模型上下文变更：Pi managed system prompt
 
-本说明冻结新 Pi Adapter 如何把既有 Session Bootstrap 与每轮 Dynamic Context 交给模型。开发者在看到
-revision 1 后明确回复“确认 model-context-change revision 1，按此实施”；本记录不授权任何其他模型上下文变化。
+本说明冻结新 Pi Adapter 如何把既有 Session Bootstrap 与每轮 Dynamic Context 交给模型。revision 1 确认 managed
+system prompt；revision 2 按开发者“彻底移除 Pi Core-managed MCP Bridge、一定要删干净”的明确指令删除 receipt 的
+MCP-only 字段，模型可见 Bootstrap 与 Dynamic Context bytes 不变。
 
 ## 变更前
 
@@ -68,7 +69,7 @@ promptInput           = exact Formatter-22 Dynamic Context bytes
 ```ts
 interface PiManagedInputReceiptV1 {
   schemaVersion: 1
-  extensionVersion: 'rovai-pi-host-v3'
+  extensionVersion: 'rovai-pi-host-v4'
   hostInstanceId: string
   hostBindingGeneration: integer
   agentRunId: string
@@ -93,16 +94,6 @@ interface PiManagedInputReceiptV1 {
   }>
   skillCatalogDigest: lowercaseSha256
   activeToolNames: string[]
-  mcpToolCatalog: Array<{
-    serverId: string
-    serverName: string
-    toolName: string
-    runtimeName: string
-    descriptionDigest: lowercaseSha256
-    inputSchemaDigest: lowercaseSha256
-  }>
-  mcpToolCatalogDigest: lowercaseSha256
-  mcpProjectionDigest: lowercaseSha256
   bindingDocumentDigest: lowercaseSha256
 }
 ```
@@ -118,7 +109,8 @@ delivery/prompt 全部匹配时 Core 才回传。SQLite receipt commit 与 `runt
 
 - Session Charter 文本、Member Identity 六字段、Memory Entrypoint、三段顺序和 Bootstrap Formatter 3 不变。
 - Formatter 22、ContextManifest 22、Profile 4、Run Facts 2 的 Dynamic Context bytes、section 顺序、预算、附件授权、
-  Skill links、MCP exposure 与 public-history 选择完全不变；共享 fixtures 不改。
+  Skill links 与 public-history 选择完全不变。Pi 新 materialization 使用空 MCP exposure；旧 manifest 的 MCP 字段只作
+  历史数据保留并忽略。
 - 既有 Runtime 的 `native_append`、`first_payload` 与 Bootstrap redelivery 行为不变。
 - Pi compaction 策略为 `native_system_prompt_preserved`；不把 Bootstrap 变成普通 first payload，也不新增 redelivery
   envelope。下一次 Prompt 仍用新 receipt 证明 effective system prompt。
@@ -134,10 +126,10 @@ Manifest/Run Facts 不推进，因为现有模型可见 bytes 与选择没有变
 ```yaml
 confirmation_status: confirmed
 confirmed_by: murray17
-confirmed_at: 2026-09-03
-revision: 1
-confirmed_revision: 1
-confirmation_text: "确认 model-context-change revision 1，按此实施"
+confirmed_at: 2026-09-04
+revision: 2
+confirmed_revision: 2
+confirmation_text: "彻底移除 Rovai 为 Pi 实现的 Core-managed MCP Bridge；现在做的太复杂了，一定要删干净！"
 ```
 
 任何改变 concat bytes、receipt shape/字段语义、Dynamic Context bytes、版本轴或 compaction 策略的后续修改都必须
@@ -146,10 +138,10 @@ confirmation_text: "确认 model-context-change revision 1，按此实施"
 ## 验证
 
 - exact fixtures 覆盖 receipt canonicalization、完整字段、nonce、Host/run/epoch/binding/session/delivery/prompt、Skill
-  catalog、MCP catalog、base/effective prompt digest 与未知字段拒绝。
+  catalog、active native Tool catalog、base/effective prompt digest 与未知字段拒绝。
 - Migration test 证明 managed delivery 未有 receipt 时不能 accepted，错 binding/generation 不能写入，合法 receipt
   与 acceptance 原子提交，receipt 不可 update/delete，重开幂等且 `foreign_key_check=0`。
 - Pi 0.84.4 隔离 smoke 证明首次 Session、Core/Host restart exact resume、warm reuse 的输入都获得匹配 receipt；公开
   trace 不含 `sessionFile`/`nativeSessionFile`。
-- deterministic A→B→A、并发 Host、late epoch/binding、compaction 后下一 Prompt、Skill/MCP 刷新和 receipt drift
+- deterministic A→B→A、并发 Host、late epoch/binding、compaction 后下一 Prompt、Skill 刷新和 receipt drift
   测试证明 Bootstrap 不重复、不丢失、不串 Session。

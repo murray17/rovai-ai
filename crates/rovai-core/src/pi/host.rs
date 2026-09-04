@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     fs::{File, OpenOptions},
     io::{BufRead as _, BufReader as StdBufReader, Read as _, Write as _},
     path::{Path, PathBuf},
@@ -25,7 +25,6 @@ use rovai_core::{
         ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
         ManagedWindowsArgvDialect,
     },
-    mcp_projection::PreparedMcpProjection,
     runtime_discovery::configure_active_runtime_command,
     skill::MAX_SKILL_FILE_BYTES,
     skill_projection::PreparedSkillExposure,
@@ -50,7 +49,6 @@ use crate::{
     },
 };
 
-use super::mcp::{PiMcpActivationFailure, PiMcpBridge, PiMcpToolDefinition};
 use super::{
     PI_COMMAND_TIMEOUT, PI_HOST_EXTENSION_VERSION, PI_MAX_JSONL_RECORD_BYTES, PI_PROTOCOL_VERSION,
     PiIncoming, assistant_message_text, completed_action, read_jsonl_record, value_id,
@@ -78,8 +76,6 @@ pub(crate) struct PiHostBindingDocument {
     pub bootstrap_payload_digest: String,
     pub skill_root: String,
     pub expected_managed_skill_exposure_digest: String,
-    pub mcp_projection_digest: String,
-    pub mcp_tools: Vec<PiMcpToolDefinition>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,8 +92,6 @@ struct PiBindingSeed {
     bootstrap_payload_digest: String,
     skill_root: PathBuf,
     expected_managed_skill_exposure_digest: String,
-    mcp_projection_digest: String,
-    mcp_tools: Vec<PiMcpToolDefinition>,
 }
 
 impl PiBindingSeed {
@@ -125,8 +119,6 @@ impl PiBindingSeed {
             expected_managed_skill_exposure_digest: self
                 .expected_managed_skill_exposure_digest
                 .clone(),
-            mcp_projection_digest: self.mcp_projection_digest.clone(),
-            mcp_tools: self.mcp_tools.clone(),
         }
     }
 }
@@ -707,27 +699,10 @@ impl PiHost {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct PiMcpAuthorization {
-    host_instance_id: String,
-    host_binding_generation: u64,
-    agent_run_id: String,
-    execution_epoch: i64,
-    native_binding_generation: i64,
-    mcp_projection_digest: String,
-    runtime_name: String,
-    server_id: String,
-    server_name: String,
-    tool_name: String,
-    tool_call_id: String,
-    arguments_digest: String,
-}
-
 pub struct PiRuntime {
     owner: PiRuntimeOwner,
     camp_id: String,
     host: Arc<PiHost>,
-    mcp: Arc<PiMcpBridge>,
     binding_document: PiHostBindingDocument,
     expected_managed_skills: Vec<(String, PathBuf)>,
     skill_command_catalog: Vec<PiReceiptSkill>,
@@ -735,8 +710,6 @@ pub struct PiRuntime {
     final_stop_reason: RwLock<Option<String>>,
     approval_handshake: AtomicBool,
     receipt_committed: AtomicBool,
-    pending_mcp_approvals: Mutex<HashMap<String, PiMcpAuthorization>>,
-    authorized_mcp_calls: Mutex<HashSet<PiMcpAuthorization>>,
     session_id: String,
     session_file: PathBuf,
     model_fingerprint: String,
@@ -747,7 +720,6 @@ impl PiRuntime {
         owner: PiRuntimeOwner,
         camp_id: String,
         host: Arc<PiHost>,
-        mcp: Arc<PiMcpBridge>,
         activation: ActivatedPiSession,
         expected_managed_skills: Vec<(String, PathBuf)>,
     ) -> Arc<Self> {
@@ -755,7 +727,6 @@ impl PiRuntime {
             owner,
             camp_id,
             host,
-            mcp,
             binding_document: activation.binding_document,
             expected_managed_skills,
             skill_command_catalog: activation.skill_command_catalog,
@@ -763,8 +734,6 @@ impl PiRuntime {
             final_stop_reason: RwLock::new(None),
             approval_handshake: AtomicBool::new(false),
             receipt_committed: AtomicBool::new(false),
-            pending_mcp_approvals: Mutex::new(HashMap::new()),
-            authorized_mcp_calls: Mutex::new(HashSet::new()),
             session_id: activation.session_id,
             session_file: activation.session_file,
             model_fingerprint: activation.model_fingerprint,
@@ -791,7 +760,6 @@ impl PiRuntime {
     }
 
     pub async fn cancel(&self) -> Result<()> {
-        self.mcp.shutdown().await;
         self.host
             .send_command_without_waiting("abort", json!({}))
             .await
@@ -806,12 +774,6 @@ impl PiRuntime {
             || response.get("id") != Some(&id)
         {
             bail!("Pi Extension response failed Native Request fencing");
-        }
-        if let Some(id) = value_id(&id)
-            && let Some(authorization) = self.pending_mcp_approvals.lock().await.remove(&id)
-            && response.get("confirmed").and_then(Value::as_bool) == Some(true)
-        {
-            self.authorized_mcp_calls.lock().await.insert(authorization);
         }
         self.host.send(response).await
     }
@@ -903,19 +865,6 @@ impl PiRuntime {
         self.host.builtin_tool_process_config()
     }
 
-    pub(crate) async fn register_mcp_approval(&self, ui_id: &str, envelope: &Value) -> Result<()> {
-        let authorization = self.validate_mcp_envelope(envelope)?;
-        let replaced = self
-            .pending_mcp_approvals
-            .lock()
-            .await
-            .insert(ui_id.to_string(), authorization);
-        if replaced.is_some() {
-            bail!("Pi MCP Approval UI identity was reused");
-        }
-        Ok(())
-    }
-
     pub(crate) fn validate_managed_receipt(&self, receipt: &Value) -> Result<(String, String)> {
         let receipt: PiManagedInputReceipt = serde_json::from_value(receipt.clone())
             .context("Pi managed input receipt shape is invalid")?;
@@ -936,7 +885,6 @@ impl PiRuntime {
             || receipt.bootstrap_payload_digest != self.binding_document.bootstrap_payload_digest
             || receipt.skill_exposure_digest
                 != self.binding_document.expected_managed_skill_exposure_digest
-            || receipt.mcp_projection_digest != self.mcp.projection_digest()
             || !is_hex_digest(&receipt.pi_base_system_prompt_digest)
             || !is_hex_digest(&receipt.effective_system_prompt_digest)
         {
@@ -945,27 +893,9 @@ impl PiRuntime {
         let expected_active_tools = NATIVE_TOOL_NAMES
             .into_iter()
             .map(str::to_string)
-            .chain(
-                self.mcp
-                    .tools()
-                    .iter()
-                    .map(|tool| tool.runtime_name.clone()),
-            )
             .collect::<Vec<_>>();
         if receipt.active_tool_names != expected_active_tools {
             bail!("Pi managed input receipt active Tool catalog is invalid");
-        }
-        let expected_mcp_catalog = self
-            .mcp
-            .tools()
-            .iter()
-            .map(PiReceiptMcpTool::from)
-            .collect::<Vec<_>>();
-        if receipt.mcp_tool_catalog != expected_mcp_catalog
-            || canonical_json_digest(&serde_json::to_value(&receipt.mcp_tool_catalog)?)?
-                != receipt.mcp_tool_catalog_digest
-        {
-            bail!("Pi managed input receipt MCP catalog is invalid");
         }
         if canonical_json_digest(&serde_json::to_value(&receipt.skill_catalog)?)?
             != receipt.skill_catalog_digest
@@ -996,78 +926,6 @@ impl PiRuntime {
         self.receipt_committed.store(true, Ordering::Release);
     }
 
-    pub(crate) fn mcp_activation_failures(&self) -> &[PiMcpActivationFailure] {
-        self.mcp.activation_failures()
-    }
-
-    pub(crate) async fn execute_mcp_bridge(&self, envelope: &Value) -> Result<Value> {
-        let result = async {
-            let authorization = self.validate_mcp_envelope(envelope)?;
-            if !self
-                .authorized_mcp_calls
-                .lock()
-                .await
-                .remove(&authorization)
-            {
-                bail!("Pi MCP call has no one-shot Durable Approval");
-            }
-            let arguments = envelope
-                .get("arguments")
-                .cloned()
-                .context("Pi MCP bridge omitted arguments")?;
-            self.mcp
-                .execute(&authorization.runtime_name, arguments)
-                .await
-        }
-        .await;
-        if result.is_err() {
-            self.mark_failed_closed();
-        }
-        result
-    }
-
-    fn validate_mcp_envelope(&self, envelope: &Value) -> Result<PiMcpAuthorization> {
-        let envelope: PiMcpEnvelope =
-            serde_json::from_value(envelope.clone()).context("Pi MCP envelope shape is invalid")?;
-        if envelope.schema_version != 1
-            || envelope.extension_version != PI_HOST_EXTENSION_VERSION
-            || envelope.kind != "mcp_tool"
-            || envelope.host_instance_id != self.host_instance_id()
-            || envelope.host_binding_generation != self.host_binding_generation()
-            || envelope.agent_run_id != self.owner.agent_run_id
-            || envelope.execution_epoch != self.owner.execution_epoch
-            || envelope.native_binding_generation != self.binding_document.native_binding_generation
-            || envelope.mcp_projection_digest != self.mcp.projection_digest()
-            || canonical_json_digest(&envelope.arguments)? != envelope.arguments_digest
-        {
-            bail!("Pi MCP envelope failed Run/Binding fencing");
-        }
-        let tool = self
-            .mcp
-            .tool(&envelope.runtime_name)
-            .context("Pi MCP envelope names an unknown Tool")?;
-        if tool.server_id != envelope.server_id
-            || tool.server_name != envelope.server_name
-            || tool.tool_name != envelope.tool_name
-        {
-            bail!("Pi MCP envelope source identity is invalid");
-        }
-        Ok(PiMcpAuthorization {
-            host_instance_id: envelope.host_instance_id,
-            host_binding_generation: envelope.host_binding_generation,
-            agent_run_id: envelope.agent_run_id,
-            execution_epoch: envelope.execution_epoch,
-            native_binding_generation: envelope.native_binding_generation,
-            mcp_projection_digest: envelope.mcp_projection_digest,
-            runtime_name: envelope.runtime_name,
-            server_id: envelope.server_id,
-            server_name: envelope.server_name,
-            tool_name: envelope.tool_name,
-            tool_call_id: envelope.tool_call_id,
-            arguments_digest: envelope.arguments_digest,
-        })
-    }
-
     fn belongs_to_camp(&self, camp_id: &str) -> bool {
         self.camp_id == camp_id
     }
@@ -1082,34 +940,10 @@ impl PiRuntime {
         if session_result.is_err() {
             self.mark_failed_closed();
         }
-        self.mcp.shutdown().await;
-        self.pending_mcp_approvals.lock().await.clear();
-        self.authorized_mcp_calls.lock().await.clear();
         let binding_result = self.host.unbind_and_clear(&self.owner).await;
         session_result?;
         binding_result
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PiMcpEnvelope {
-    schema_version: i64,
-    extension_version: String,
-    kind: String,
-    host_instance_id: String,
-    host_binding_generation: u64,
-    agent_run_id: String,
-    execution_epoch: i64,
-    native_binding_generation: i64,
-    mcp_projection_digest: String,
-    runtime_name: String,
-    server_id: String,
-    server_name: String,
-    tool_name: String,
-    tool_call_id: String,
-    arguments: Value,
-    arguments_digest: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1136,9 +970,6 @@ struct PiManagedInputReceipt {
     skill_catalog: Vec<PiReceiptSkill>,
     skill_catalog_digest: String,
     active_tool_names: Vec<String>,
-    mcp_tool_catalog: Vec<PiReceiptMcpTool>,
-    mcp_tool_catalog_digest: String,
-    mcp_projection_digest: String,
     binding_document_digest: String,
 }
 
@@ -1159,30 +990,6 @@ fn skill_catalogs_match(observed: &[PiReceiptSkill], expected: &[PiReceiptSkill]
                 && observed.entry_path == expected.entry_path
                 && observed.model_visible == expected.model_visible
         })
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PiReceiptMcpTool {
-    server_id: String,
-    server_name: String,
-    tool_name: String,
-    runtime_name: String,
-    description_digest: String,
-    input_schema_digest: String,
-}
-
-impl From<&PiMcpToolDefinition> for PiReceiptMcpTool {
-    fn from(value: &PiMcpToolDefinition) -> Self {
-        Self {
-            server_id: value.server_id.clone(),
-            server_name: value.server_name.clone(),
-            tool_name: value.tool_name.clone(),
-            runtime_name: value.runtime_name.clone(),
-            description_digest: value.description_digest.clone(),
-            input_schema_digest: value.input_schema_digest.clone(),
-        }
-    }
 }
 
 pub struct PiRpcRuntimeAdapter {
@@ -1208,7 +1015,6 @@ pub struct PiAgentRunRuntimeRequest<'a> {
     pub native_binding_generation: i64,
     pub bootstrap: &'a PreparedSessionBootstrap,
     pub skill_exposure: &'a PreparedSkillExposure,
-    pub mcp_projection: &'a PreparedMcpProjection,
     pub builtin_tools: &'a BuiltinToolProcessConfig,
 }
 
@@ -1253,7 +1059,6 @@ impl PiRpcRuntimeAdapter {
         let skill_root = request.cwd.join(".pi/skills");
         create_private_or_workspace_directory(&skill_root)?;
         let expected_managed_skills = expected_managed_skills(request.skill_exposure)?;
-        let mcp = PiMcpBridge::start(request.mcp_projection).await?;
         let bootstrap_payload_digest =
             format!("{:x}", Sha256::digest(request.bootstrap.payload.as_bytes()));
         let seed = PiBindingSeed {
@@ -1269,8 +1074,6 @@ impl PiRpcRuntimeAdapter {
             bootstrap_payload_digest,
             skill_root,
             expected_managed_skill_exposure_digest: request.skill_exposure.digest.clone(),
-            mcp_projection_digest: request.mcp_projection.projection_digest.clone(),
-            mcp_tools: mcp.tools().to_vec(),
         };
         let locator_root =
             session_locator_root(&self.private_runtime_dir, request.camp_id, request.agent_id)?;
@@ -1305,13 +1108,7 @@ impl PiRpcRuntimeAdapter {
                 },
             )
             .await;
-        let lease = match lease {
-            Ok(lease) => lease,
-            Err(error) => {
-                mcp.shutdown().await;
-                return Err(error);
-            }
-        };
+        let lease = lease?;
         let host = lease.host.into_pi()?;
         let activation = match host
             .activate(
@@ -1324,7 +1121,6 @@ impl PiRpcRuntimeAdapter {
         {
             Ok(activation) => activation,
             Err(error) => {
-                mcp.shutdown().await;
                 self.fleet
                     .release(
                         request.agent_run_id,
@@ -1342,7 +1138,6 @@ impl PiRpcRuntimeAdapter {
             delivery_id: request.delivery_id.to_string(),
         };
         if let Err(error) = host.bind(owner.clone()).await {
-            mcp.shutdown().await;
             self.fleet
                 .release(
                     request.agent_run_id,
@@ -1356,7 +1151,6 @@ impl PiRpcRuntimeAdapter {
             owner,
             request.camp_id.to_string(),
             host,
-            mcp,
             activation,
             expected_managed_skills,
         );
@@ -1527,8 +1321,6 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         bootstrap,
         skill_root,
         expected_managed_skill_exposure_digest: "pi-probe-empty-skills".to_string(),
-        mcp_projection_digest: "pi-probe-empty-mcp".to_string(),
-        mcp_tools: Vec::new(),
     };
     let (incoming, _receiver) = mpsc::unbounded_channel();
     let host = PiHost::spawn(PiHostLaunch {
@@ -2360,7 +2152,7 @@ write_session() {
 emit_managed_session_state() {
   host_instance_id=$(sed -n 's/.*"hostInstanceId":"\([^"]*\)".*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
   host_binding_generation=$(sed -n 's/.*"hostBindingGeneration":\([0-9][0-9]*\).*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
-  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":1,\\"extensionVersion\\":\\"rovai-pi-host-v3\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
+  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":1,\\"extensionVersion\\":\\"rovai-pi-host-v4\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
   printf '%s\n' "$event" >> "$event_log"
   printf '%s\n' "$event"
 }

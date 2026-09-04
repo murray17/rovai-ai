@@ -1744,6 +1744,16 @@ struct PreparedRuntimeLaunch<'a> {
     launch_permit: &'a mut ExecutionLaunchPermit,
 }
 
+struct PreparedPiRuntimeLaunch<'a> {
+    execution: &'a AgentRunExecution,
+    resume_disposition: NativeSessionResumeDisposition,
+    skill_exposure: &'a PreparedSkillExposure,
+    attachment_admission: &'a CampAttachmentReadAdmission,
+    attachment_authorization: &'a CampAttachmentRuntimeAuthorization,
+    output: &'a mpsc::UnboundedSender<String>,
+    launch_permit: &'a mut ExecutionLaunchPermit,
+}
+
 #[derive(Clone, Copy)]
 struct CampAttachmentRunAccess<'a> {
     admission: &'a CampAttachmentReadAdmission,
@@ -9590,7 +9600,7 @@ impl Core {
         execution: &AgentRunExecution,
         attachment_access: CampAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
-        mcp_projection: &PreparedMcpProjection,
+        mcp_projection: Option<&PreparedMcpProjection>,
         request: RuntimeInputPreparationRequest<'_>,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<(PreparedContext, RuntimeInputDelivery)>> {
@@ -9600,18 +9610,27 @@ impl Core {
             // boundary. A Compaction Observer cannot commit between selecting
             // the pending revision and persisting RuntimeInputDelivery.prepared.
             let mut database = self.database.lock().await;
-            let materialization = ContextService.materialize_with_exposures(
-                &mut database,
-                &ManagedBlobStore::new(&self.data_dir),
-                skill_exposure,
-                mcp_projection,
-                &MaterializeContextRequest {
-                    agent_run_id: &execution.agent_run_id,
-                    execution_epoch: execution.execution_epoch,
-                    charter_delivery_mode: request.charter_delivery_mode,
-                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                },
-            )?;
+            let materialize_request = MaterializeContextRequest {
+                agent_run_id: &execution.agent_run_id,
+                execution_epoch: execution.execution_epoch,
+                charter_delivery_mode: request.charter_delivery_mode,
+                max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+            };
+            let materialization = match mcp_projection {
+                Some(mcp_projection) => ContextService.materialize_with_exposures(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    skill_exposure,
+                    mcp_projection,
+                    &materialize_request,
+                )?,
+                None => ContextService.materialize_with_skill_exposure(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    skill_exposure,
+                    &materialize_request,
+                )?,
+            };
             match materialization {
                 ContextMaterialization::Ready(context) => {
                     let delivery = match request.proposed_delivery_id {
@@ -10572,6 +10591,37 @@ impl Core {
         else {
             return Ok(());
         };
+        if execution.runtime.adapter_kind == AdapterKind::Pi {
+            let resume_disposition = {
+                let mut database = self.database.lock().await;
+                ExecutionRuntimeService::default()
+                    .prepare_native_session_resume(&mut database, execution)
+                    .context("failed to prepare Native Session resume")?
+            };
+            if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                emit(
+                    output,
+                    "agent_run.native_session_resume_attempted",
+                    json!({
+                        "agentRunId": execution.agent_run_id,
+                        "conversationId": execution.conversation_id,
+                        "adapterInstallationId": execution.runtime.installation_id,
+                        "installationGeneration": execution.runtime.installation_generation,
+                    }),
+                );
+            }
+            return self
+                .launch_pi_agent_run(PreparedPiRuntimeLaunch {
+                    execution,
+                    resume_disposition,
+                    skill_exposure: &skill_exposure,
+                    attachment_admission,
+                    attachment_authorization,
+                    output,
+                    launch_permit,
+                })
+                .await;
+        }
         let mut mcp_projection = self
             .prepare_agent_run_mcp_projection(execution)
             .await
@@ -10617,20 +10667,6 @@ impl Core {
         if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::ClaudeCodeCli {
             return self
                 .launch_claude_code_agent_run(PreparedRuntimeLaunch {
-                    execution,
-                    resume_disposition,
-                    skill_exposure: &skill_exposure,
-                    mcp_projection: &mcp_projection,
-                    attachment_admission,
-                    attachment_authorization,
-                    output,
-                    launch_permit,
-                })
-                .await;
-        }
-        if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::Pi {
-            return self
-                .launch_pi_agent_run(PreparedRuntimeLaunch {
                     execution,
                     resume_disposition,
                     skill_exposure: &skill_exposure,
@@ -10973,12 +11009,11 @@ impl Core {
         Ok(())
     }
 
-    async fn launch_pi_agent_run(&self, launch: PreparedRuntimeLaunch<'_>) -> Result<()> {
-        let PreparedRuntimeLaunch {
+    async fn launch_pi_agent_run(&self, launch: PreparedPiRuntimeLaunch<'_>) -> Result<()> {
+        let PreparedPiRuntimeLaunch {
             execution,
             resume_disposition,
             skill_exposure,
-            mcp_projection,
             attachment_admission,
             attachment_authorization,
             output,
@@ -11047,7 +11082,6 @@ impl Core {
                 native_binding_generation: binding_credential.native_binding_generation,
                 bootstrap: &session_bootstrap,
                 skill_exposure,
-                mcp_projection,
                 builtin_tools: &builtin_tools,
             })
             .await;
@@ -11109,7 +11143,6 @@ impl Core {
                         native_binding_generation: replacement_binding.native_binding_generation,
                         bootstrap: &replacement_bootstrap,
                         skill_exposure,
-                        mcp_projection,
                         builtin_tools: &builtin_tools,
                     })
                     .await
@@ -11125,16 +11158,6 @@ impl Core {
             }
             Err(error) => return Err(error).context("Pi Native Session activation failed closed"),
         };
-        for failure in runtime.mcp_activation_failures() {
-            eprintln!(
-                "optional Pi MCP Server {} ({}) is unavailable for AgentRun {}: {} ({})",
-                failure.server_name,
-                failure.server_id,
-                execution.agent_run_id,
-                failure.diagnostic_code,
-                failure.reason,
-            );
-        }
         let active_builtin_tools = runtime
             .builtin_tool_process_config()
             .context("Pi Runtime has no Built-in Tool process context")?
@@ -11151,7 +11174,7 @@ impl Core {
                     authorization: attachment_authorization,
                 },
                 skill_exposure,
-                mcp_projection,
+                None,
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
                     proposed_delivery_id: Some(&delivery_id),
@@ -12434,7 +12457,7 @@ impl Core {
                 execution,
                 attachment_access,
                 skill_exposure,
-                mcp_projection,
+                Some(mcp_projection),
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode,
                     proposed_delivery_id: None,
@@ -14830,12 +14853,6 @@ async fn process_agent_run_pi_message(
                 process_pi_managed_input_receipt(core, &runtime, delivery_id, &message).await?;
                 return Ok(());
             }
-            Some("input")
-                if message.get("title").and_then(Value::as_str) == Some("Rovai MCP bridge") =>
-            {
-                process_pi_mcp_bridge_request(&runtime, &message).await?;
-                return Ok(());
-            }
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
             _ => {
                 runtime.mark_failed_closed();
@@ -14964,39 +14981,6 @@ async fn process_pi_managed_input_receipt(
         .await
 }
 
-async fn process_pi_mcp_bridge_request(runtime: &PiRuntime, request: &Value) -> Result<()> {
-    let id = request
-        .get("id")
-        .cloned()
-        .context("Pi MCP bridge request omitted id")?;
-    let envelope: Value = serde_json::from_str(
-        request
-            .get("placeholder")
-            .and_then(Value::as_str)
-            .context("Pi MCP bridge request omitted envelope")?,
-    )
-    .context("Pi MCP bridge request envelope is invalid")?;
-    let result = runtime
-        .execute_mcp_bridge(&envelope)
-        .await
-        .unwrap_or_else(|_| {
-            json!({
-                "content": [{"type":"text", "text": "Rovai MCP bridge rejected the call"}],
-                "isError": true,
-            })
-        });
-    runtime
-        .respond(
-            id.clone(),
-            json!({
-                "type":"extension_ui_response",
-                "id":id,
-                "value":serde_json::to_string(&result).unwrap_or_else(|_| "{\"content\":[],\"isError\":true}".to_string()),
-            }),
-        )
-        .await
-}
-
 async fn process_agent_run_pi_approval_request(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -15062,17 +15046,6 @@ async fn process_agent_run_pi_approval_request(
             return Ok(());
         }
     };
-    if let Some(envelope) = action_request.mcp_envelope.as_ref() {
-        runtime
-            .register_mcp_approval(
-                request
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .context("Pi MCP Approval request omitted UI identity")?,
-                envelope,
-            )
-            .await?;
-    }
     if execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
         && execution.workspace.access == "read_only"
         && matches!(

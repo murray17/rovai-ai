@@ -10627,7 +10627,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn context_manifest_freezes_actual_skill_exposure_across_library_changes() {
+    fn context_manifest_freezes_skills_and_ignores_unrequested_historical_mcp() {
         let mut fixture = fixture();
         let library =
             SkillLibraryService::new(fixture.directory.join("managed-skill-library")).unwrap();
@@ -10855,6 +10855,25 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(recovered_exposure, exposure);
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE context_manifest
+                SET mcp_exposure_json = ?2,
+                    mcp_exposure_digest = ?3,
+                    mcp_projection_digest = ?4
+                WHERE agent_run_id = ?1
+                "#,
+                params![
+                    fixture.run_id,
+                    r#"{"schemaVersion":1,"servers":[{"name":"historical-pi-mcp"}]}"#,
+                    "historical-pi-mcp-exposure",
+                    "historical-pi-mcp-projection",
+                ],
+            )
+            .unwrap();
         let recovered = ContextService
             .materialize_with_skill_exposure(
                 &mut fixture.database,
