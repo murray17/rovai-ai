@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Runtime Catalog Boundaries
@@ -250,7 +250,9 @@ Runtime 返回 `disabled` 或 `local_bridged`：只有后者才同时在 initial
 Bridge 只在当前 AgentRun owner、execution epoch、Session 与 Active Prompt fence 内创建本地进程。进程从已
 admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境、
 macOS protected-tree deny 和平台进程树所有权。省略 cwd 时使用 execution root；显式 cwd 只要求为已存在的绝对
-目录，不做 execution-root containment。Runtime 的 sandbox/permission mode 与操作系统拥有 Shell/文件权限，Core
+目录，不做 execution-root containment。原始 application 与结构化 argv 会和请求 cwd/env 一次性交给 Managed Process：
+先应用最终上下文，再解析 bare/relative command；Windows `.cmd/.bat` 重新进入 CommandShim identity，而不是 EXE-only
+派生路径。Runtime 的 sandbox/permission mode 与操作系统拥有 Shell/文件权限，Core
 不再通过 `scoped_path()` 建立第二层 Terminal cwd allowlist。Run cancel、detach、Host EOF/shutdown 与 fleet reap
 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr 使用有界私有 buffer，Terminal wire、
 output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
@@ -363,7 +365,13 @@ receipt并接受 Input。Pi system prompt 不属于压缩的消息历史，compa
 managed Skill target 为 `.pi/skills`，每次 Session activation 重新发现并把 exact catalog 写入 receipt。Pi 没有内建
 MCP，但官方 extension Tool API 可安全桥接，因此 External MCP 为
 `AdditivePerRun / RovaiWins / CoreManaged`：Core 持有 stdio/Streamable HTTP transport、secret、cancel 与 cleanup，
-Pi 只看当前 Run proxy tools。Shell Approval 保存 Pi 实际解析的 shell path/args/argv-or-stdin transport，不伪造
+Pi 只看当前 Run 成功激活的 proxy tools。stdio command 保留用户配置中的 bare/relative/absolute 结构，并在每次
+AgentRun/恢复时按当轮 Runtime PATH/cwd 重新解析，不写回设备路径、不经过 Shell。单个用户外部 Server 的解析、启动、
+initialize 或 Tool catalog 失败只将该 Server 标记 unavailable 并记录安全诊断；Pi Session 与其他 Server 继续。
+Ready Server 并发激活，每个 Server 的 process/open、initialize、initialized notification、`tools/list` 与 catalog validation
+共享独立 60 秒 deadline；失败或超时先显式 shutdown/reap。结果按原 projection index 合并后再建立稳定 Tool catalog，
+因此总等待由最慢 Server deadline 加有界 cleanup 决定，不随 Server 数量线性累加。投影身份损坏与调用期 bridge/fence
+失败仍 fail closed。Shell Approval 保存 Pi 实际解析的 shell path/args/argv-or-stdin transport，不伪造
 `/bin/zsh -lc`。`agent_settled` 是唯一成功边界；Usage 只读 terminal assistant `message_end.message.usage`，未知
 reasoning/cost 保持 NULL。
 

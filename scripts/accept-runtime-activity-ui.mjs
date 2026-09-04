@@ -254,13 +254,12 @@ try {
     `Agent messages did not share one conversation surface: ${JSON.stringify(conversationPresentation)}`)
   assert(conversationPresentation.copyButtonPlacements.length === runtimes.length
     && conversationPresentation.copyButtonPlacements.every((placement) =>
-      placement.position === 'absolute'
-        && placement.top === '-2px'
-        && placement.right === '0px'
-        && placement.topOffset >= -4.25
-        && placement.topOffset <= -1.75
+      placement.position === 'static'
+        && placement.insideActionRow
+        && placement.iconOnly
+        && placement.belowContent
         && Math.abs(placement.rightOffset) <= 0.75),
-  `Message copy buttons did not share one top-right action anchor: ${JSON.stringify(conversationPresentation.copyButtonPlacements)}`)
+  `Message copy buttons did not share one bottom-right icon action row: ${JSON.stringify(conversationPresentation.copyButtonPlacements)}`)
   assert(conversationPresentation.dayLabels.length > 0
     && conversationPresentation.dayLabels.every((label) => /^\d{4}年\d{1,2}月\d{1,2}日$/.test(label))
     && conversationPresentation.dayLabels.every((label) => !label.includes('今天') && !label.includes('发布准备')),
@@ -366,14 +365,15 @@ try {
     `Recipient-only footer geometry mismatch: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.contentGap >= 0 && handoffFooter.contentGap <= 4,
     `Recipient-only footer must stay visually attached to the message: ${JSON.stringify(handoffFooter)}`)
-  assert(handoffFooter.surfaceReserve >= 0 && handoffFooter.surfaceReserve <= 0.5
-    && handoffFooter.copyButtonPosition === 'absolute',
-    `Hidden copy affordance must not reserve a blank line: ${JSON.stringify(handoffFooter)}`)
+  assert(handoffFooter.surfaceReserve >= 28
+    && handoffFooter.copyButtonPosition === 'static'
+    && handoffFooter.copyButtonInsideActionRow
+    && handoffFooter.copyButtonIconOnly,
+    `Message actions must occupy the dedicated bottom row: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.copyButtonFocused && handoffFooter.copyButtonOpacity === '1'
     && handoffFooter.messageBodyFocusWithin
-    && Math.abs(handoffFooter.copyButtonTopOffset + 2) <= 0.75
     && Math.abs(handoffFooter.copyButtonRightOffset) <= 0.75
-    && handoffFooter.copyButtonHorizontalGap >= 0,
+    && handoffFooter.copyButtonFooterGap >= 0,
     `Focused copy affordance must stay visible without covering recipients: ${JSON.stringify(handoffFooter)}`)
   await evaluate(app.cdp, `document.activeElement?.blur()`)
 
@@ -1457,7 +1457,6 @@ async function collectHandoffFooter(cdp) {
     const messageBody = footer?.closest('.message-body')
     const messageContent = messageSurface?.querySelector(':scope > .final-copy, :scope > .message-bubble')
     const copyButton = messageSurface?.querySelector('.message-copy-button')
-    const recipients = footer?.querySelector('.message-delivery-recipients')
     const footerStyle = footer ? getComputedStyle(footer) : null
     const railStyle = rail ? getComputedStyle(rail) : null
     const copyButtonStyle = copyButton ? getComputedStyle(copyButton) : null
@@ -1466,7 +1465,6 @@ async function collectHandoffFooter(cdp) {
     const bodyRect = messageBody?.getBoundingClientRect()
     const contentRect = messageContent?.getBoundingClientRect()
     const copyButtonRect = copyButton?.getBoundingClientRect()
-    const recipientsRect = recipients?.getBoundingClientRect()
     const recipientMentions = [...(footer?.querySelectorAll('.message-delivery-recipient-name') ?? [])]
       .map((mention) => ({
         text: mention.textContent?.trim() ?? '',
@@ -1482,17 +1480,18 @@ async function collectHandoffFooter(cdp) {
       borderRadius: footerStyle?.borderRadius ?? null,
       railBorderLeftWidth: railStyle?.borderLeftWidth ?? null,
       railBorderBottomWidth: railStyle?.borderBottomWidth ?? null,
-      contentGap: footerRect && contentRect ? footerRect.top - contentRect.bottom : null,
+      contentGap: footerRect && surfaceRect ? footerRect.top - surfaceRect.bottom : null,
       surfaceReserve: surfaceRect && contentRect ? surfaceRect.bottom - contentRect.bottom : null,
       copyButtonPosition: copyButtonStyle?.position ?? null,
       copyButtonOpacity: copyButtonStyle?.opacity ?? null,
       copyButtonFocused: document.activeElement === copyButton,
+      copyButtonInsideActionRow: copyButton?.parentElement?.classList.contains('message-actions') ?? false,
+      copyButtonIconOnly: Boolean(copyButton?.querySelector('svg')) && !(copyButton?.textContent ?? '').trim(),
       surfaceFocusWithin: messageSurface?.matches(':focus-within') ?? false,
       messageBodyFocusWithin: messageBody?.matches(':focus-within') ?? false,
       documentHasFocus: document.hasFocus(),
-      copyButtonTopOffset: copyButtonRect && bodyRect ? copyButtonRect.top - bodyRect.top : null,
       copyButtonRightOffset: copyButtonRect && bodyRect ? bodyRect.right - copyButtonRect.right : null,
-      copyButtonHorizontalGap: copyButtonRect && recipientsRect ? copyButtonRect.left - recipientsRect.right : null,
+      copyButtonFooterGap: copyButtonRect && footerRect ? footerRect.top - copyButtonRect.bottom : null,
       recipientMentions,
       stateLabelCount: footer?.querySelectorAll('.message-delivery-state').length ?? 0,
       legacyOriginCount: document.querySelectorAll('.message-run-origin').length,
@@ -1595,14 +1594,17 @@ async function collectConversationPresentation(cdp) {
       })),
       copyButtonPlacements: articles.map((article) => {
         const body = article.querySelector('.message-body')
+        const surface = article.querySelector('.message-surface')
+        const content = surface?.querySelector(':scope > .final-copy, :scope > .message-bubble')
         const button = article.querySelector('.message-copy-button')
         const bodyRect = body?.getBoundingClientRect()
+        const contentRect = content?.getBoundingClientRect()
         const buttonRect = button?.getBoundingClientRect()
         return {
           position: button ? getComputedStyle(button).position : null,
-          top: button ? getComputedStyle(button).top : null,
-          right: button ? getComputedStyle(button).right : null,
-          topOffset: bodyRect && buttonRect ? buttonRect.top - bodyRect.top : null,
+          insideActionRow: button?.parentElement?.classList.contains('message-actions') ?? false,
+          iconOnly: Boolean(button?.querySelector('svg')) && !(button?.textContent ?? '').trim(),
+          belowContent: Boolean(contentRect && buttonRect && buttonRect.top >= contentRect.bottom),
           rightOffset: bodyRect && buttonRect ? bodyRect.right - buttonRect.right : null
         }
       }),

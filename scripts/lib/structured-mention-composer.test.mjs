@@ -53,7 +53,7 @@ test('Composer edits preserve text, structured tokens and Skill query interactio
     assert.equal(code, 0, `Native Composer regression failed (${signal}):\n${stdout}\n${stderr}`)
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
-    assert.equal(report.cases.length, 18)
+    assert.equal(report.cases.length, 19)
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')

@@ -1,4 +1,5 @@
 import { readErrorMessage } from './error-message'
+import { collapsedMessageProjection } from './conversation-message-collapse'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -116,14 +117,11 @@ import {
 } from './AppDialog'
 import { projectCampWorldMap } from './camp-world-map-model'
 import {
-  CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
   campTimelineContentChanged,
   campTimelineFollowingLatestAfterScroll,
   campTimelineIsNearBottom,
-  campTimelineReadingPositionFromStoredValue,
   followLatestCampTimeline,
   restoredCampTimelineScrollTop,
-  storedCampTimelineReadingPositionsWithUpdate,
   type CampTimelineReadingPosition,
   type CampTimelineViewportGeometry
 } from './camp-timeline-position'
@@ -154,6 +152,51 @@ const EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT = 112
 const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
+const CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX = 120
+const CAMP_TIMELINE_READING_POSITION_LIMIT = 50
+const campTimelineReadingPositions = new Map<string, CampTimelineReadingPosition>()
+
+if (typeof window !== 'undefined') {
+  try {
+    window.localStorage.removeItem('rovai.camp-timeline-reading-positions.v2')
+  } catch {
+    // Legacy cleanup is best effort; reading positions now live only in Renderer memory.
+  }
+}
+
+export function rememberedCampTimelineReadingPosition(
+  campId: string
+): CampTimelineReadingPosition | null {
+  const position = campTimelineReadingPositions.get(campId)
+  return position ? { ...position } : null
+}
+
+export function rememberCampTimelineReadingPosition(
+  campId: string,
+  position: CampTimelineReadingPosition
+): void {
+  campTimelineReadingPositions.delete(campId)
+  campTimelineReadingPositions.set(campId, {
+    scrollTop: Math.max(0, Number.isFinite(position.scrollTop) ? position.scrollTop : 0),
+    followingLatest: position.followingLatest
+  })
+
+  while (campTimelineReadingPositions.size > CAMP_TIMELINE_READING_POSITION_LIMIT) {
+    const oldestCampId = campTimelineReadingPositions.keys().next().value
+    if (!oldestCampId) break
+    campTimelineReadingPositions.delete(oldestCampId)
+  }
+}
+
+export function campHistoryKeyboardInputMovesEarlier(
+  key: string,
+  shiftKey: boolean
+): boolean {
+  return key === 'ArrowUp'
+    || key === 'PageUp'
+    || key === 'Home'
+    || (key === ' ' && shiftKey)
+}
 
 export function composerHasSendablePayload(
   message: string,
@@ -708,36 +751,6 @@ function persistExecutionDrawerHeight(height: number | null): void {
     }
   } catch {
     // Session persistence is an enhancement; resizing remains usable if storage is unavailable.
-  }
-}
-
-function storedCampTimelineReadingPosition(
-  campId: string
-): CampTimelineReadingPosition | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return campTimelineReadingPositionFromStoredValue(
-      window.localStorage.getItem(CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY),
-      campId
-    )
-  } catch {
-    return null
-  }
-}
-
-function persistCampTimelineReadingPosition(
-  campId: string,
-  position: CampTimelineReadingPosition
-): void {
-  if (typeof window === 'undefined') return
-  try {
-    const current = window.localStorage.getItem(CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY)
-    window.localStorage.setItem(
-      CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
-      storedCampTimelineReadingPositionsWithUpdate(current, campId, position)
-    )
-  } catch {
-    // Reading-position persistence is an enhancement; the timeline remains usable without it.
   }
 }
 
@@ -1409,6 +1422,7 @@ export function CampWorkspace({
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const earlierMessageLoadInFlightRef = useRef(false)
   const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
   const conversationFindRequestGeneration = useRef(0)
@@ -2822,7 +2836,7 @@ export function CampWorkspace({
     }
     const current = timelineReadingPosition.current
     if (!current || (campId && current.campId !== campId)) return
-    persistCampTimelineReadingPosition(current.campId, current.position)
+    rememberCampTimelineReadingPosition(current.campId, current.position)
   }, [])
 
   const recordTimelineReadingPosition = useCallback((
@@ -2875,7 +2889,7 @@ export function CampWorkspace({
     timelinePositionSaveTimer.current = window.setTimeout(() => {
       timelinePositionSaveTimer.current = null
       const current = timelineReadingPosition.current
-      if (current) persistCampTimelineReadingPosition(current.campId, current.position)
+      if (current) rememberCampTimelineReadingPosition(current.campId, current.position)
     }, 180)
   }, [conversationFind.open])
 
@@ -2936,7 +2950,7 @@ export function CampWorkspace({
       window.clearTimeout(timelinePositionSaveTimer.current)
       timelinePositionSaveTimer.current = null
     }
-    persistCampTimelineReadingPosition(campId, position)
+    rememberCampTimelineReadingPosition(campId, position)
   }, [])
 
   useLayoutEffect(() => {
@@ -2946,7 +2960,7 @@ export function CampWorkspace({
       if (scroll) {
         const current = timelineReadingPosition.current?.campId === campId
           ? timelineReadingPosition.current.position
-          : storedCampTimelineReadingPosition(campId)
+          : rememberedCampTimelineReadingPosition(campId)
         const scrollTop = restoredCampTimelineScrollTop(
           current,
           scroll.scrollHeight,
@@ -3545,23 +3559,64 @@ export function CampWorkspace({
   }
 
   const loadEarlierMessages = async (): Promise<void> => {
-    if (!onLoadEarlierMessages || earlierMessageStatus === 'loading') return
+    if (
+      !onLoadEarlierMessages
+      || !messageHistory?.hasEarlier
+      || earlierMessageLoadInFlightRef.current
+    ) return
     const timeline = timelineScrollRef.current
-    const previousScrollHeight = timeline?.scrollHeight ?? 0
-    const previousScrollTop = timeline?.scrollTop ?? 0
+    if (!timeline) return
+    const campId = snapshot.camp.id
+    const readingAnchor = captureTimelineReadingAnchor(timeline)
+    const previousScrollHeight = timeline.scrollHeight
+    const previousScrollTop = timeline.scrollTop
+    earlierMessageLoadInFlightRef.current = true
     setEarlierMessageStatus('loading')
     try {
       await onLoadEarlierMessages()
-      setEarlierMessageStatus('idle')
-      window.requestAnimationFrame(() => {
+      await new Promise<void>((resolve) => {
         window.requestAnimationFrame(() => {
-          if (!timeline) return
-          timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+          window.requestAnimationFrame(() => resolve())
         })
       })
+
+      if (
+        timelineScrollRef.current === timeline
+        && mountedCampId.current === campId
+        && !timeline.hidden
+        && !conversationFindOpenRef.current
+      ) {
+        if (readingAnchor.source || readingAnchor.message) {
+          restoreTimelineReadingAnchor(timeline, readingAnchor)
+        } else {
+          timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+        }
+        recordTimelineReadingPosition(campId, timeline)
+      }
+      setEarlierMessageStatus('idle')
     } catch {
-      setEarlierMessageStatus('error')
+      setEarlierMessageStatus(mountedCampId.current === campId ? 'error' : 'idle')
+    } finally {
+      earlierMessageLoadInFlightRef.current = false
     }
+  }
+
+  const maybeLoadEarlierFromUserInput = (): void => {
+    const timeline = timelineScrollRef.current
+    if (
+      !timeline
+      || conversationView !== 'conversation'
+      || conversationFindOpenRef.current
+      || earlierMessageStatus !== 'idle'
+      || !messageHistory?.hasEarlier
+      || timeline.scrollTop > CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX
+    ) return
+
+    void loadEarlierMessages()
+  }
+
+  const checkHistoryAfterUserInput = (): void => {
+    window.requestAnimationFrame(maybeLoadEarlierFromUserInput)
   }
 
   const openExecutionProcess = (
@@ -3863,11 +3918,17 @@ export function CampWorkspace({
               tabIndex={-1}
               aria-label="对话时间线"
               hidden={conversationView !== 'conversation'}
-              onWheelCapture={() => captureFilePreviewAnchor()}
+              onWheelCapture={(event) => {
+                captureFilePreviewAnchor()
+                if (event.deltaY < 0) checkHistoryAfterUserInput()
+              }}
               onTouchStartCapture={() => captureFilePreviewAnchor()}
               onKeyDownCapture={(event) => {
                 if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
                   captureFilePreviewAnchor()
+                }
+                if (campHistoryKeyboardInputMovesEarlier(event.key, event.shiftKey)) {
+                  checkHistoryAfterUserInput()
                 }
               }}
               onScroll={(event) => recordTimelineReadingPosition(
@@ -3877,26 +3938,48 @@ export function CampWorkspace({
             >
               <div className="timeline-track">
               {!conversationFind.open && messageHistory?.hasEarlier && (
-                <div className="camp-history-loader" role="status" aria-live="polite">
-                  <button
-                    className="quiet-button compact"
-                    type="button"
-                    disabled={earlierMessageStatus === 'loading'}
-                    onClick={() => void loadEarlierMessages()}
-                  >
-                    {earlierMessageStatus === 'loading' ? '正在加载更早消息…' : '加载更早消息'}
-                  </button>
-                  <span>
+                <div
+                  className={`camp-history-loader is-${earlierMessageStatus}`}
+                  role={earlierMessageStatus === 'error' ? 'alert' : 'status'}
+                  aria-live={earlierMessageStatus === 'error' ? 'assertive' : 'polite'}
+                  aria-atomic="true"
+                >
+                  {earlierMessageStatus === 'error' ? (
+                    <>
+                      <span className="camp-history-error-message">较早消息暂时没有加载</span>
+                      <span className="camp-history-separator" aria-hidden="true">·</span>
+                      <button
+                        className="camp-history-text-button"
+                        type="button"
+                        onClick={() => void loadEarlierMessages()}
+                      >
+                        重试
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="camp-history-text-button"
+                      type="button"
+                      disabled={earlierMessageStatus === 'loading'}
+                      onClick={() => void loadEarlierMessages()}
+                    >
+                      {earlierMessageStatus === 'loading' ? (
+                        <>
+                          <span className="camp-history-spinner" aria-hidden="true" />
+                          <span>正在加载更早消息…</span>
+                        </>
+                      ) : (
+                        <>
+                          <span aria-hidden="true">↑</span>
+                          <span>加载更早消息</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  <span className="camp-history-separator" aria-hidden="true">·</span>
+                  <span className="camp-history-count">
                     已显示 {messageHistory.loadedCount} / {messageHistory.totalCount} 条
                   </span>
-                </div>
-              )}
-              {!conversationFind.open && earlierMessageStatus === 'error' && messageHistory?.hasEarlier && (
-                <div className="camp-history-error" role="alert">
-                  <span>较早消息暂时没有加载。</span>
-                  <button className="quiet-button compact" type="button" onClick={() => void loadEarlierMessages()}>
-                    重试
-                  </button>
                 </div>
               )}
               {(() => {
@@ -4006,9 +4089,11 @@ export function CampWorkspace({
                     && replyAnchorWindows.has(replyParentId)
                     && replyAnchorWindows.get(replyParentId) === null
                   )
+                  const isConversationFindCurrent = conversationFind.open
+                    && conversationFind.snapshot?.match?.messageId === campMessage.id
                   items.push(
                     <article
-                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${conversationFind.open && conversationFind.snapshot?.match?.messageId === campMessage.id ? ' conversation-find-current-message' : ''}`}
+                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${isConversationFindCurrent ? ' conversation-find-current-message' : ''}`}
                       key={campMessage.id}
                       data-message-id={campMessage.id}
                       data-camp-turn-id={campMessage.campTurnId ?? sourceRun?.campTurnId}
@@ -4131,10 +4216,12 @@ export function CampWorkspace({
                                       )
                                     : (
                                         <div className="message-bubble">
-                                          <StructuredMessageBody
+                                          <CollapsibleStructuredMessageBody
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
+                                            collapsible={humanAuthored}
+                                            forceExpanded={isConversationFindCurrent}
                                             fileReferenceSource={{
                                               campId: snapshot.camp.id,
                                               messageId: campMessage.id
@@ -4483,7 +4570,6 @@ export function CampWorkspace({
                   className={`composer-reply-line${replyRepairRequired ? ' needs-repair' : ''}`}
                   title={`${composerDraft.replyIntent.author?.displayName ?? '引用消息'} · ${composerDraft.replyIntent.excerpt ?? '引用的消息当前不可用'}`}
                 >
-                  <ReplyMark />
                   <span className="composer-reply-copy">
                     <strong>回复 {composerDraft.replyIntent.author?.displayName ?? '引用消息'}</strong>
                     <span>{composerDraft.replyIntent.excerpt ?? '引用的消息当前不可用'}</span>
@@ -7109,20 +7195,106 @@ function MessageSurface({
   return (
     <div className={`message-surface${hasDelivery ? ' has-delivery' : ''}${copied ? ' copied' : ''}`}>
       {children}
-      {onReply && (
+      <div className="message-actions" role="group" aria-label="消息操作">
+        <span className="copy-feedback" role="status" aria-live="polite">
+          {copied ? '已复制' : ''}
+        </span>
+        {onReply && (
+          <button
+            className="message-reply-button"
+            type="button"
+            aria-label="回复这条消息"
+            title="回复"
+            onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
+          >
+            <MessageReplyIcon />
+          </button>
+        )}
+        <MessageCopyButton copied={copied} onCopy={onCopy} />
+      </div>
+    </div>
+  )
+}
+
+function MessageReplyIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z" />
+      <circle className="message-reply-dot" cx="8" cy="10.5" r="1" />
+      <circle className="message-reply-dot" cx="12" cy="10.5" r="1" />
+      <circle className="message-reply-dot" cx="16" cy="10.5" r="1" />
+    </svg>
+  )
+}
+
+function CollapsibleStructuredMessageBody({
+  body,
+  content,
+  members,
+  collapsible,
+  forceExpanded,
+  renderLeadingCurrentUserMarkdown = false,
+  onActivateMemberMention,
+  onActivateAllMembersMention,
+  onFileReference,
+  fileReferenceSource
+}: {
+  body: string
+  content: StructuredCampMessageContent | null
+  members: CampSnapshot['members']
+  collapsible: boolean
+  forceExpanded: boolean
+  renderLeadingCurrentUserMarkdown?: boolean
+  onActivateMemberMention?(
+    agentId: string,
+    trigger: HTMLElement,
+    focusPanel: boolean
+  ): void
+  onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
+  onFileReference?: FileReferenceActivation
+  fileReferenceSource?: MessageFileReferenceSource
+}): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const contentId = useId()
+  const projection = useMemo(
+    () => collapsible ? collapsedMessageProjection(body, content) : null,
+    [body, collapsible, content]
+  )
+  const displayFullMessage = expanded || forceExpanded || projection === null
+  const displayBody = displayFullMessage ? body : projection.body
+  const displayContent = displayFullMessage ? content : projection.content
+
+  const messageBody = (
+    <StructuredMessageBody
+      body={displayBody}
+      content={displayContent}
+      members={members}
+      renderLeadingCurrentUserMarkdown={renderLeadingCurrentUserMarkdown}
+      onActivateMemberMention={onActivateMemberMention}
+      onActivateAllMembersMention={onActivateAllMembersMention}
+      onFileReference={onFileReference}
+      fileReferenceSource={fileReferenceSource}
+    />
+  )
+  if (!projection) return messageBody
+
+  return (
+    <div className={`message-long-copy${displayFullMessage ? ' is-expanded' : ''}`}>
+      <div id={contentId}>{messageBody}</div>
+      {!forceExpanded && (
         <button
-          className="message-reply-button"
+          className={`message-long-toggle ${expanded ? 'is-collapse' : 'is-expand'}`}
           type="button"
-          aria-label="回复这条消息"
-          onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
+          aria-controls={contentId}
+          aria-expanded={expanded}
+          aria-label={expanded
+            ? `收起长消息，共 ${projection.lineCount} 行`
+            : `展开完整消息，共 ${projection.lineCount} 行`}
+          onClick={() => setExpanded((current) => !current)}
         >
-          回复
+          {expanded ? '收起长消息' : '…'}
         </button>
       )}
-      <MessageCopyButton copied={copied} onCopy={onCopy} />
-      <span className="copy-feedback" role="status" aria-live="polite">
-        {copied ? '已复制' : ''}
-      </span>
     </div>
   )
 }
@@ -7392,10 +7564,13 @@ function MessageCopyButton({
       className="message-copy-button"
       type="button"
       aria-label={copied ? '已复制这条消息' : '复制这条消息'}
-      title="复制这条消息"
+      title={copied ? '已复制' : '复制'}
       onClick={onCopy}
     >
-      复制
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="8" y="8" width="11" height="11" rx="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      </svg>
     </button>
   )
 }

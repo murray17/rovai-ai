@@ -78,6 +78,17 @@ app.whenReady().then(async () => {
     assert.ok(Math.abs(appended.anchorTop - before.anchorTop) <= 1, 'A background message cannot steal the reading position')
     assert.deepEqual(appended.cards, before.cards)
     assert.equal(appended.allEventSequencesNull, true)
+    await run('window.campOpenTest.prepareHistoryLoad()')
+    await state()
+    await run('window.campOpenTest.bookmark()')
+    const beforeHistoryLoad = await state()
+    await run('window.campOpenTest.loadEarlier()')
+    const afterHistoryLoad = await state()
+    assert.equal(afterHistoryLoad.messages.length, 61)
+    assert.equal(afterHistoryLoad.sameAnchorNode, true)
+    const historyLoadAnchorDelta = afterHistoryLoad.anchorTop - beforeHistoryLoad.anchorTop
+    assert.ok(Math.abs(historyLoadAnchorDelta) <= 1,
+      `Loading earlier messages cannot count a concurrent append as prepended height (${historyLoadAnchorDelta}px)`)
     await capture('refresh-day')
     await run("document.documentElement.dataset.theme = 'night'")
     await state()
@@ -196,7 +207,9 @@ app.whenReady().then(async () => {
     assert.deepEqual(errors, [], 'No React key, rendering or fixture API errors')
     console.log(JSON.stringify({ ok: true, messages: appended.messages.length,
       refreshAnchorDelta: refreshed.anchorTop - before.anchorTop,
-      appendAnchorDelta: appended.anchorTop - before.anchorTop, cards: appended.cards }))
+      appendAnchorDelta: appended.anchorTop - before.anchorTop,
+      historyLoadAnchorDelta,
+      cards: appended.cards }))
     window.destroy(); app.quit()
   } catch (error) {
     console.error(errors)

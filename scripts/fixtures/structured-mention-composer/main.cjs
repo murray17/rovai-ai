@@ -213,6 +213,34 @@ app.whenReady().then(async () => {
       await expectText('1、第一项\n2、第二项x\n3、另外')
     })
 
+    await run('long controlled input and paste keep the caret viewport at the end', async () => {
+      const text = '这是一段尚未发送的长消息。'.repeat(120)
+      const expectCaretViewportAtEnd = async () => {
+        const state = await expectText(text)
+        assert.ok(state.editorScrollHeight > state.editorClientHeight,
+          'The regression input must overflow the Composer editor')
+        assert.ok(state.editorScrollTop > 0,
+          'The Composer editor must scroll with its restored end caret')
+        assert.ok(
+          state.editorScrollHeight - state.editorClientHeight - state.editorScrollTop <= 2,
+          `The restored end caret must remain in the Composer viewport: ${JSON.stringify({
+            scrollTop: state.editorScrollTop,
+            scrollHeight: state.editorScrollHeight,
+            clientHeight: state.editorClientHeight
+          })}`
+        )
+      }
+
+      await reset('')
+      await insert(text)
+      await expectCaretViewportAtEnd()
+
+      await reset('')
+      await evaluate(`window.composerTest.paste(${JSON.stringify(text)})`)
+      await frames()
+      await expectCaretViewportAtEnd()
+    })
+
     await run('controlled slash input filters and replaces only the current query', async () => {
       const prefix = '请先检查模块，然后 '
       await reset(`${prefix}再继续`)

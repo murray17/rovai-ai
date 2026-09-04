@@ -110,7 +110,10 @@ function Harness() {
             selectedId: selected?.id ?? null,
             activeVisible: Boolean(menuBounds && selectedBounds
               && selectedBounds.top >= menuBounds.top && selectedBounds.bottom <= menuBounds.bottom),
-            menuScrollTop: menu?.scrollTop ?? 0
+            menuScrollTop: menu?.scrollTop ?? 0,
+            editorScrollTop: element?.scrollTop ?? 0,
+            editorScrollHeight: element?.scrollHeight ?? 0,
+            editorClientHeight: element?.clientHeight ?? 0
           }
         }
       }

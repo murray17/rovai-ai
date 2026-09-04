@@ -50,7 +50,7 @@ use crate::{
     },
 };
 
-use super::mcp::{PiMcpBridge, PiMcpToolDefinition};
+use super::mcp::{PiMcpActivationFailure, PiMcpBridge, PiMcpToolDefinition};
 use super::{
     PI_COMMAND_TIMEOUT, PI_HOST_EXTENSION_VERSION, PI_MAX_JSONL_RECORD_BYTES, PI_PROTOCOL_VERSION,
     PiIncoming, assistant_message_text, completed_action, read_jsonl_record, value_id,
@@ -994,6 +994,10 @@ impl PiRuntime {
 
     pub(crate) fn mark_receipt_committed(&self) {
         self.receipt_committed.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn mcp_activation_failures(&self) -> &[PiMcpActivationFailure] {
+        self.mcp.activation_failures()
     }
 
     pub(crate) async fn execute_mcp_bridge(&self, envelope: &Value) -> Result<Value> {
