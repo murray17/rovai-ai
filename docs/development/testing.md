@@ -93,7 +93,7 @@ pnpm test:camp-open-projection
 Electron 回归使用生产 adapter、CampWorkspace 与 CSS，验证空事件下的三类卡片、Task 业务原因、已加载
 旧页与 DOM 阅读锚点，以及后台新消息不抢位置。排序/时钟回拨输入矩阵由既有 `App.test.ts` owner 负责。
 夹具创建临时绝对 `userData`，不启动 Core/SQLite/Skill Library/Runtime；`ROVAI_KEEP_CAMP_OPEN_FIXTURE=1`
-保留测量和双主题截图。Linux CI 使用 `xvfb-run -a pnpm test:camp-open-projection`。这些分别是数据库边界
+保留测量和双主题截图。手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:camp-open-projection`。这些分别是数据库边界
 和生产组件组合测试，不冒充已安装 App 的真实会话端到端耗时。
 
 ### 日常 commit 验证
@@ -146,7 +146,7 @@ pnpm test:rust:slow
 pnpm test:rust:pr
 ```
 
-### 完整 PR 验证
+### PR 快速门禁与手动完整验证
 
 ```bash
 cargo fmt --all --check
@@ -154,13 +154,21 @@ cargo clippy --workspace --all-targets -- -D warnings
 pnpm test:rust:pr
 ```
 
-`.github/workflows/rust.yml` 在 pull request 时，对 Rust 源码、Cargo 文件和 Rust 构建/lint
-配置改动并行执行 lint、fast、database smoke 与 Windows x64 原生编译/验证 job；前三个基础命令为：
+`.github/workflows/ci.yml` 在 pull request 时只启动一个 Ubuntu `gate` job。Rust 源码、Cargo 文件和
+Rust 构建配置改动在自动门禁中执行：
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p rovai-core --lib
+cargo check --workspace --all-targets
+```
+
+Clippy、all-features 测试、database smoke 与 Windows x64 原生编译/验证只在手动
+`.github/workflows/full-check.yml` 中执行；Linux 深度命令为：
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
 cargo test -p rovai-core --features slow-tests --lib slow_tests::
 ```
 
@@ -169,8 +177,7 @@ route/epoch/session fencing、当前 schema 与受支持 migration smoke，以�
 E2E。`slow-tests` 承担需要完整 SQLite/Camp/Runtime fixture 的扩展场景；每个测试仍使用独立数据库
 clone，不共享可写状态。
 
-`legacy-migration-tests` 会隐式启用 `slow-tests`，只在 `.github/workflows/rust-nightly.yml` 的定时或
-手动全特性门禁中运行：
+`legacy-migration-tests` 会隐式启用 `slow-tests`，只在手动 `Full check` 的全特性门禁中运行：
 
 ```bash
 cargo fmt --all --check
@@ -178,10 +185,9 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 ```
 
-所有 feature-gated 测试因此都会在 nightly 中编译并执行；历史兼容覆盖只是移出 PR 关键路径，未被
-永久禁用。CI 使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中。各个 PR job 并行启动，
-各自恢复与其构建目标相容的既有 cache；不通过 job 间传递可写 `target` 目录制造顺序依赖。需要验证
-桌面构建时另行运行：
+所有 feature-gated 测试因此都会在手动完整验证中编译并执行；历史兼容覆盖只是移出 PR 关键路径，未被
+永久禁用。自动与手动 workflow 都使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中，也不在
+job 间传递可写 `target` 目录制造顺序依赖。需要验证桌面构建时另行运行：
 
 ```bash
 pnpm build:desktop
@@ -203,7 +209,7 @@ pnpm build:desktop
 
 夹具创建临时绝对 `userData`，不启动 Core/SQLite/Runtime，也不读取日常数据；它是生产组件组合测试，不冒充真实数据库
 迁移端到端验收。默认删除本次夹具，`ROVAI_KEEP_STARTUP_PRESENTATION_FIXTURE=1` 可保留 Day/Night、最小窗口与
-200%/reduced-motion 截图。Linux CI 通过 `xvfb-run -a pnpm test:startup-presentation` 执行。
+200%/reduced-motion 截图。手动 Full check 的 Linux job 通过 `xvfb-run -a pnpm test:startup-presentation` 执行。
 
 文件预览分栏交互运行 `pnpm test:file-preview-layout`。它在真实 Electron 中挂载生产 `FilePreviewProvider`、
 标题栏、分栏组件、文件 Tab 与 Viewer，以原生鼠标/键盘输入验证拖动提交、回弹、关闭与取消、焦点回退、
@@ -216,7 +222,7 @@ Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点
 静态 Markup/CSS 测试不能替代指针捕获、ResizeObserver 和浏览器布局组合。
 夹具只使用临时绝对 `userData` 与受控文件 API，不启动 Core/SQLite/Skill Library/Runtime，不读取真实 Camp。
 `ROVAI_KEEP_FILE_PREVIEW_FIXTURE=1` 保留双主题、宽/窄窗口、关闭提示和 200%/reduced-motion 截图；
-默认清理本次夹具。Linux CI 使用 `xvfb-run -a pnpm test:file-preview-layout`。
+默认清理本次夹具。手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:file-preview-layout`。
 
 消息文件引用运行 `pnpm test:file-reference-navigation`。它在同样隔离的真实 Electron 中挂载生产 Camp、Markdown 与预览，
 验证显式 Markdown 短文件名定位、行范围高亮、inline-code/正文不生成文件入口、字段误识别及 URL 中文尾部恢复；
@@ -224,7 +230,7 @@ Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点
 并逐帧检查打开/关闭、键盘调宽和持续拖动时
 阅读锚点偏移不超过 2px；还覆盖用户滚动后的可见消息回退、底部跟随、紧凑模式返回，以及旧
 `authorization_required` 结果不会调用目录选择器或泄露内部授权原因。相同环境变量可保留双主题截图
-和测量报告；Linux CI 使用 `xvfb-run -a pnpm test:file-reference-navigation`，不替代 Main 的来源、文件类型和系统动作测试。
+和测量报告；手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:file-reference-navigation`，不替代 Main 的来源、文件类型和系统动作测试。
 
 涉及 Preload 请求 transport 或 Renderer 错误读取时，除普通 Vitest 外还运行：
 
@@ -234,7 +240,8 @@ pnpm test:desktop-bridge
 
 该测试编译当前生产 Preload，并在真实 Electron `contextIsolation` 窗口中验证 Promise 成功值以及结构化拒绝的全部字段。
 它使用临时 `userData`，不启动 Core 或调用模型；不能用 Main 单测或 jsdom 代替。无显示器 Linux 使用
-`xvfb-run -a pnpm test:desktop-bridge`；[Desktop bridge CI](../../.github/workflows/desktop-bridge.yml)覆盖相关改动。
+`xvfb-run -a pnpm test:desktop-bridge`；手动 [Full check](../../.github/workflows/full-check.yml)通过统一的
+`test:desktop:integration` script 覆盖该测试与其余真实 Electron 回归。
 
 修改 Composer 的原生输入、IME、DOM 同步或光标恢复时，还运行：
 
@@ -244,12 +251,12 @@ pnpm test:composer-input
 
 该测试把生产 Composer 装入独立 Electron Renderer，用真实 Chromium IME/input 事件与受控原生节点变动
 验证可见正文、受控草稿值、焦点及页面存活。夹具隔离 `userData`，不启动 Core 或调用模型；不能用静态
-Markup 测试替代。无显示器 Linux 使用 `xvfb-run -a pnpm test:composer-input`，同一 CI 工作流覆盖相关改动。
+Markup 测试替代。无显示器 Linux 使用 `xvfb-run -a pnpm test:composer-input`，同一手动完整验证工作流覆盖相关改动。
 
 Composer 续发目标的发布时点与草稿保护运行 `pnpm test:composer-continuation`。夹具在隔离 Electron 中挂载生产
 `CampWorkspace`，提供受控 Core 投影，验证入队不改址、正式发布即刷新而不等待 Run 结束，以及迟到读取、
 已有正文/附件/显式接收者、冻结来源和切换 Camp 的保护。它不启动 Core 或真实 Runtime，不能代替 Core 路由
-计算与队列调度验收；Linux CI 使用 `xvfb-run -a pnpm test:composer-continuation`。
+计算与队列调度验收；手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:composer-continuation`。
 
 ### Core 可选功能启动回归
 
@@ -291,7 +298,7 @@ Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵�
 | `pnpm smoke:builtin-cli` | 默认十三种可执行实现；Cursor 未准入，Pi 仅 debug 验收 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖。选择 Pi 时复制官方配置到临时 Home，不污染用户 Session；通过不晋升平台资格 |
 | `pnpm smoke:skills` | Codex 默认；`all` 为十三种可执行实现 | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 逐一尝试十三组真实投递、发现与消息局部注意力；Cursor `.cursor/skills` 为 DocumentationOnly。Kimi `.kimi-code/skills`、Grok `.grok/skills` 与 Pi `.pi/skills` 进入矩阵；选择 Pi 时使用临时官方配置副本与 debug-only admission，结果不等于正式资格；`--to-user` 仅为隐藏兼容 alias |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
-| `pnpm smoke:mcp-projection` | Codex、Pi、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin并 `NativeWinsSkip`；Kimi/Pi 覆盖 stdio、Streamable HTTP 和第二个 stdio Server，Pi 为 `RovaiWins/CoreManaged` 且使用临时官方配置副本；默认十二种 |
+| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin 并 `NativeWinsSkip`；Kimi 覆盖 stdio、Streamable HTTP 和第二个 stdio Server；默认十一种。Pi 的 External MCP 为 `Unsupported`，不属于本 smoke，保存的 Assignment 在 Pi dispatch 时静默忽略 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
 | `pnpm smoke:missing-send-recovery` | 十三种可执行实现（含 Pi、Kimi、Grok）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture，Pi 额外执行原生 Read Tool→final 并验证 `agent_settled` 专属终点与 Tool Activity。Pi 官方配置与 Session root 同样逐 Runtime 临时复制；debug pass 不晋升正式资格 |
@@ -366,14 +373,14 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 `pnpm test:approval-dock` 使用生产 ApprovalDock/CSS 的独立 Electron fixture，验证原生顺序、标签与
 决定身份，翻页边界与摘要焦点、普通刷新不抢焦点、Reason 精确去重/按审批隔离及无重渲染的容器宽度变化，
 并覆盖双主题、最小窗口与 420px 会话列。临时 `userData` 与日常 App 隔离，不启动 Core 或 Runtime；
-`ROVAI_KEEP_APPROVAL_FIXTURE=1` 保留截图，默认清理。Linux CI 使用 `xvfb-run -a`。
+`ROVAI_KEEP_APPROVAL_FIXTURE=1` 保留截图，默认清理。手动 Full check 的 Linux job 使用 `xvfb-run -a`。
 
 `pnpm test:camp-fast-layout` 使用生产 CampWorkspace/CSS 的独立 Electron fixture，无需打包或 Core。
 关闭的模拟 API 只提供成员偏好与 Draft；临时 userData 与日常 App 完全分离，不调用模型。
 它拥有 Fast 的 1280×720/窄屏/大屏布局、日夜主题、键盘焦点、失败保留、直接静默切换、旧观测不影响偏好与初始默认。
 同一 owner 还验证打开队员浮层后的静默自动检测、正负结果复用、失败重开重试、同成员请求去重、切换绑定自动重测与旧响应隔离；
 其他 Runtime 不检测，非官方认证的拒绝结果不显示入口，菜单不再暴露手动检测。
-`ROVAI_KEEP_FAST_FIXTURE=1` 保留本次临时截图供排错；成功默认自动清理。Linux CI 通过 `xvfb-run -a` 执行。
+`ROVAI_KEEP_FAST_FIXTURE=1` 保留本次临时截图供排错；成功默认自动清理。手动 Full check 的 Linux job 通过 `xvfb-run -a` 执行。
 
 以下命令使用已打包 App 和隔离 `userData`，不调用模型：
 

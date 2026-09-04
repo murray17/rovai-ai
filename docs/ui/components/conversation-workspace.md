@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Camp 会话工作区
@@ -37,7 +37,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v15](../../contracts/camp-open-projection-v15.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -172,11 +172,37 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 显示简短转交轨迹“发送给 @队员”；底层 Delivery 状态、失败码和恢复事实仍由 Core Read Side
 拥有，不在 footer 或 Run stage 重复展示。
 
-用户、队员和已交付 A2A 正文支持原生鼠标拖选与系统复制。整条消息使用可见文字“复制”作为入口，固定在
-内容列右上角，只在悬停或键盘聚焦消息区域时显现；不能退回只有图标的含糊操作，也不能随正文、宽屏
-工件或 footer 漂移。用户消息保持
+用户、队员和已交付 A2A 正文支持原生鼠标拖选与系统复制。整条消息的回复与复制使用统一的 15px 线性
+SVG 图标；回复采用“消息气泡 + 回折箭头”的对话回折图形。用户操作行位于正文右下方且在消息底色之外；
+队员操作行位于整组公开输出左下方，须排在正文、父引用、图片、附件、转交 footer 和锚定的 `Files Changed` 卡片之后。
+`Files Changed` 仍是独立时间线卡片与 Evidence 入口，只在视觉布局上与来源消息组成同一操作范围。按钮具有 28×28px 点击区、动作名称和简短 tooltip，
+只在悬停或键盘聚焦消息区域时显现，粗指针环境下始终可见。复制成功在同一操作行以短暂文字状态反馈，
+不能只改变图标颜色。整条消息悬停或聚焦不增加背景洗色；单个图标按钮仍保留 hover 与 focus-visible 反馈。
+用户消息保持
 精确纯文本，仅对[文件链接](file-preview.md#会话内的文件链接)做展示投影：Markdown label 替代其链接语法，
 文件代码路径保留等宽样式，原始消息及整条消息复制内容不改写；Agent 正文使用清洗后的 GFM；Tool 输出使用结构化证据组件。
+
+当前用户与通过 Owner 校验的外部 Principal 消息整体右对齐，头像位于消息右侧，作者与时间也在右侧收口；
+正文使用 `--conversation-user-message-surface` / `--conversation-user-message-line` 的浅灰圆角底面。底面按正文
+固有宽度自然收窄，只把同列 Composer 的约三分之二作为最大宽度；短消息不得被拉伸到该上限。宽屏仍受
+可读正文上限约束，紧凑会话列按 Composer 实际内边距等比例收窄。
+用户消息的图片与文件区不继承正文底面的固有宽度或三分之二上限：它拥有独立工件轨道，右边缘与正文、
+头像间距保持同轴，内容增加时向左扩展，最远到同列队员头像或姓名轨道，不越出时间线。图片和文件在该
+轨道内从右侧开始排列；短正文不能把附件压成窄列，少量附件也不被强制拉伸。用户文件卡在 Composer 与
+Timeline 中的最大宽度均为 220px，长基础文件名使用单行省略号；完整 `displayName` 继续保留在 `title` 与
+操作按钮的可访问名称中。这个上限不改变图片附件或 Agent 交付文件卡。
+Agent 消息继续左对齐并保持透明开放阅读面，不添加身份色气泡或整条消息 hover 底色。
+
+当前用户消息正文超过 20 个显式文本行时，只挂载前 19 行，第 20 行显示左对齐静态省略号；省略号不是
+按钮，整块截断正文也不响应展开、收起或点击。恰好 20 行不截断。复制、回复摘要和 Core 中的原始消息始终
+使用完整正文，不得复制截断投影；当前会话查找命中这类消息时临时挂载全文，使首尾 occurrence 都能被
+定位，关闭或切换查找后恢复静态截断。
+
+会话消息正文、底部与浮层执行台中的 Runtime 过程正文，以及 Markdown 文件预览共享 Mist Gray 分层：行内 code 以
+`--conversation-inline-code-canvas` 为底色，保留 `1px 4px` 留白、`6px` 圆角和跨行连续底色；围栏代码块使用
+`--conversation-code-block-canvas`、`--conversation-code-line`、`11px 12px` 留白与 `8px` 圆角。块内
+`pre code` 必须继续透明且不保留行内留白或圆角。该覆盖不改变更新说明、附件卡片、Tool 结果、其他 Evidence
+或其他 SafeMarkdown 表面；Day 与 Night 分别使用主题文档给出的独立 token 值。
 
 当前可操作的队员头像、显示名和 Mention 可打开同一个锚定人物信息卡，不导航。已离开、移除或
 不可解析身份保持静态。精确 token 行为见[结构化 Mention](structured-mentions.md)。
@@ -187,10 +213,11 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 
 ## 消息回复与父引用
 
-稳定的 user/agent 公共消息在内容列右上角与“复制”并列提供“回复”；鼠标悬停、消息内键盘聚焦或
-粗指针环境下可见。optimistic message 在取得稳定 Message ID 前不提供回复入口。点击回复把同 Camp
+稳定的 user/agent 公共消息在角色对应的底部操作行与复制图标并列提供对话回折回复图标；鼠标悬停、消息内
+键盘聚焦或粗指针环境下可见，且按钮使用“回复这条消息”可访问名称。optimistic message 在取得稳定
+Message ID 前不提供回复入口。点击回复把同 Camp
 父消息写入 Core Composer Draft，并在 Composer 内显示轻量无框 reply dock：正常状态不绘制独立边框、
-底色或阴影；作者与有界摘要共用一个可视行，超出可用宽度显示省略号，末尾保留取消按钮。
+底色、阴影或回复图标；作者与有界摘要共用一个可视行，超出可用宽度显示省略号，末尾保留取消按钮。
 
 鼠标点击“回复”后正文编辑器获得焦点和插入光标，但不得因为程序化 focus 改变 Composer 的边框、阴影
 或增加包围框。键盘激活“回复”或通过 Tab 进入编辑器时，必须保留只作用于编辑器的可见
@@ -255,6 +282,8 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 “会话 / 地图”视图按钮仍使用原有 `--brand-soft`。运行底色不随历史 Run 焦点切换而消失。选中态、状态形状、
 边框、焦点及工具结果的专用 Evidence 底色保持各自语义，不用背景分层改变执行状态或交互。
 两块着色区域将弱提示文字局部提升到 `--muted`，保证日夜主题的文字对比度，不改变历史 Run 与会话区文字层级。
+Runtime narration 与 plan explanation 的 SafeMarkdown 在底部和浮层复用上文的 Mist Gray 代码分层；Tool 行、
+Shell 结果、Diff 与其他结构化 Evidence 继续使用各自专用样式，不因承载位置改变。
 
 同一 Camp 中每个曾有 AgentRun 的队员只保留一个 Agent 过程入口。按需详情 surface 以时间顺序展示
 该 Agent 的独立 Run stage、状态、收件人与证据；这只是 Renderer grouping，不创建 Process
@@ -477,17 +506,30 @@ summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开
 ## Runtime 图片与消息图片
 
 来源 Run 尚未产生公开消息且仍未终态时，Runtime 图片留在该 Run 内等待，不提前进入会话 Timeline。
-公开正文出现后先显示原有顺序的消息附件，再显示来源 Run 的本地图片，最后显示 `Files Changed`；
-每个 Run/epoch 的图片固定跟随该 Run 最后一条公开消息。只有 Run 已终态仍没有公开消息时，才按图片时间
-显示独立兜底，并保持在同 Run 文件变化卡之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
+公开正文出现后，每个 Run/epoch 的图片固定并入该 Run 最后一条公开消息的 Agent 图片区；`Files Changed`
+仍在整条消息之后。只有 Run 已终态仍没有公开消息时，才按图片时间显示独立兜底，并保持在同 Run 文件变化卡
+之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
 
-显式图片附件和 Runtime 图片共用 `ImageGallery` / `ImageTile` / Lightbox。一张单列，多张在正常宽度下
-双列、窄容器单列；全部展示，不增加四张上限或“查看全部”。使用 `object-fit: contain`，保留截图、文字和
-图表完整边界。只把连续图片附件组合成一段 Gallery；`image A / image B / PDF / image C` 的文件顺序不变。
-PDF、文档、压缩包和目录继续使用现有文件块。
+消息附件先按类型稳定分区，保留图片内部和文件内部的原顺序，不再让两类对象混排。用户消息顺序固定为
+“图片区 → 文件区 → 正文”，Agent 消息固定为“正文 → 图片区 → 文件区”；空区域不渲染。Agent 的显式图片
+附件与 Runtime 图片进入同一个 `agent-output-images`，同摘要过滤后显式附件在前、Runtime 图片在后；进入图片区
+的对象不再生成重复文件卡。两个区域必须是独立容器，不能因为横向空间充足而进入同一内容行。
 
-两种图片共用消息内容列及响应式宽度，发送图片区域不随正文长短收缩。预览框和大图窗口贴合原图比例，
-保留高度上限和既有细边框，不用固定宽高补黑边，不裁切或重编码图片；圆角、间距与焦点样式一致。
+Agent 图片继续共用 `ImageGallery` / `ImageTile` / Lightbox：单张按原比例、最大宽约 560px，多张只在图片区
+以 160–240px 单元响应式排列，窄容器退为单列。预览使用 `object-fit: contain`，保留截图、文字和图表完整边界；
+区域不随正文长度收缩，预览框和大图窗口贴合原图比例，不补黑边、不裁切或重编码。
+
+用户消息图片使用同一读取、decoder、Tile 和 Lightbox 基础能力，但时间线缩略图固定为 72×72px 圆角方块，
+多张只在图片区内换行；缩略图允许 `cover`，大图仍按原比例完整显示。该差异由显式 Gallery variant 表达，
+不能复制 decoder、缓存或 Lightbox 实现。
+用户图片区和文件区共用独立于正文宽度的右锚定工件轨道；内容向左增长至队员头像或姓名轨道，不能因为
+正文很短而收窄，也不能为了取得宽度改变图片、文件、正文的固定顺序。
+
+普通文件使用集中分类函数，不能在 Composer、用户消息和 Agent 消息分别维护扩展名判断。用户侧只用中性的
+文档、代码、文件夹三类图形，目录与压缩包共用文件夹，未知格式回退文档；文件项高 46px，显示文件名与独立
+格式标签，不显示大小。Agent 文件使用 Web、Code、Notes、PDF、Word、Sheet、Slide、Image、Archive、Generic
+十个主题 token 家族，未知格式回退 Generic；桌面两列、窄容器一列，并可保留大小和打开入口。`previewKind`
+不是图片的 image MIME/扩展名对象进入 Agent 文件区的 Image 家族。
 
 图片接近可视区域时读取，通过 Chromium 真实图片解码后展示；损坏/消失的 Runtime 图片显示“图片已不可用”，
 不影响其他图片或 AgentRun。稳定路径重开时可读取更新后的内容，不承诺历史不可变；临时路径和 inline 内容由
@@ -499,13 +541,13 @@ PDF、文档、压缩包和目录继续使用现有文件块。
 旧图；正常返回不可用或候选内容解码失败则清除缓存并显示失败；成功候选完成真实解码后无空白替换。
 不持久化缓存，不区分 Runtime 底层存储，也不保证 Chromium 不重新进行内部解码。
 
-Tool/Runtime 图片和发送图片均只显示图片，不显示文件名、来源/数量标题或 Runtime projection 说明；
+Tool/Runtime 图片和显式图片附件均只显示图片，不显示文件名、来源/数量标题或 Runtime projection 说明；
 移除附件操作菜单、右键菜单、系统打开和在 Finder/文件资源管理器中显示的入口。非图片附件不受影响。
 只保留点击或键盘查看大图及关闭；大图标题仅供辅助技术读取，不占据可见空间，关闭控件覆盖在图片角落。
 图片解码失败时显示“图片已不可用”并禁用点击，不回退到系统打开。
 同一 Run 的可用图片附件与 Runtime Blob 摘要完全相同时只显示显式附件；底层记录保留，失效附件不能
 隐藏 Runtime 图。不同 Run、不同内容和可变稳定路径不参与过滤。底层边界见
-[Runtime Images v3](../../contracts/runtime-images-v3.md)，不引入 File Preview 授权流程。
+[Runtime Images v4](../../contracts/runtime-images-v4.md)，不引入 File Preview 授权流程。
 
 ## Task、Approval 与停止
 
@@ -546,7 +588,9 @@ Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery
 [文件预览](file-preview.md#结构与布局)拥有，不新增 Sidecar 或移动端导航模式。
 
 - 时间线与 Composer 左右边距缩至 12px。Task 与 Files Changed 取消 42px 额外左缩进，使用当前正文轨道的
-  可用宽度。普通消息自然换行，Markdown 表格与代码块使用自己的横向滚动。
+  可用宽度。当前用户消息底面继续按内容收窄，最大不超过 Composer 可用宽度的约三分之二，头像留在右侧；
+  用户附件仍使用独立工件轨道并在可用宽度内向左扩展，不跟随正文底面变窄。普通消息自然换行，Markdown
+  表格与代码块使用自己的横向滚动。
 - Task 状态图标缩至 26px，隐藏右侧 Chevron；标题自然换行，负责人、验收条件和更新时间继续 wrap。
   状态说明标题与正文改为上下排列，任务语义不删减。
 - Files Changed 的 header 图标缩至 28px、间距收紧，标题与摘要允许单行省略，但保留“查看变化”文字。
@@ -608,25 +652,36 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 
 ### Composer 附件
 
-文件和目录都进入当前 Draft。preparing/error 附件阻止发送；目录保存为一个只读快照附件，原文件
-不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
-视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
-占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)，发送边界见
-[Camp Composer Draft v4](../../contracts/camp-composer-draft-v4.md)。
+文件和目录都以原位置引用进入当前 Draft；只有没有本地路径的粘贴图片或 Blob 才先写入 OS Temp。
+短暂 preparing 表示 Core 正在接纳引用，不表示创建内容快照；preparing/error 附件阻止发送。正文非空或
+至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽视觉控件。纯附件消息
+保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成占位正文。原文件随后
+修改会影响后续读取，移动、删除或失去权限可以使引用不可用。非图片文件卡按内容自然收窄但不超过 220px，
+长名称必须省略且可取得完整名称。拖放命中、反馈和卡片合同见
+[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
+[Camp Attachment v8](../../contracts/camp-attachment-v8.md)，发送边界见
+[Camp Composer Draft v7](../../contracts/camp-composer-draft-v7.md)。
 
-Timeline Attachment Card 必须投影 `runtimeProjectionState`。`pending | recovery_required` 使用低强调的
-“正在准备供队员读取”，不得伪造百分比或进度；`failed` 明确显示“队员读取不可用”。该状态只描述队员
-Runtime View，不禁用用户对仍完整 Authority Attachment 的预览、打开或显示所在位置。状态使用既有
-Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不暴露 Authority/View 路径或内部 operation ID。
+准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
+独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除
+按钮固定在每项右上角。超宽时隐藏视觉滚动条，保留触控板水平滚动；普通鼠标的主滚轮在附件带仍有可滚空间
+时转为横向浏览。附件带本身可聚焦，并以 Left/Right 分段浏览、Home/End 到首尾，不抢占移除按钮的键盘入口。
 
-图片单击继续打开会话内大图预览；图片 Authority preview 失败时，卡片退化为“使用系统应用打开”。普通
-文件单击交给系统默认应用，目录单击在 Finder / 文件资源管理器中打开。Timeline 卡片右键菜单提供同一
+Renderer 对新 source refs、Managed v2 和 legacy 附件只消费同一个无路径 View，不显示或分支判断底层
+storage model。历史加载时 `availability = unknown`，不得为了填充附件卡而批量 `stat`、启动 watcher 或
+持久化状态。用户执行预览、打开或显示所在位置后，当前卡片才按该次结果更新为 available、missing、
+unreadable 或 kind_changed；重新读取历史仍从 unknown 开始。状态使用既有 Porcelain Day / Steel Night
+语义 token，不引入新的视觉世界，也不暴露 source、Authority/View 路径或内部 operation ID。
+
+普通文件单击继续进入应用内文件预览或受控系统打开，目录单击在 Finder / 文件资源管理器中打开。Timeline
+文件项右键菜单提供同一
 主动作和“在 Finder / 文件资源管理器中显示”；菜单支持键盘循环、Escape 关闭、collision handling 与关闭后
 焦点回到真实卡片。执行中单卡防重复提交；目标 parent 不可枚举、target 消失或 native 请求失败时均显示固定
 的无路径提示，不把 best-effort Shell dispatch 当作文件管理器已确认选择。高风险文件由 Desktop Main 使用原生
-确认，不在 Renderer 判断。Composer Prepared Attachment 保持既有预览/移除交互，不复用 Timeline open API。
-精确安全与结果合同见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)。
+确认，不在 Renderer 判断。Composer 附件保持既有预览/移除交互；所有动作都提交 composer、pending、
+pending_edit 或 message 的精确 owner locator，不提交路径。
+精确动作与结果合同见 [File Preview v5](../../contracts/file-preview-v5.md)和
+[Camp Attachment v8](../../contracts/camp-attachment-v8.md)。
 
 ## 空 Camp 欢迎状态
 
@@ -701,7 +756,8 @@ Composer 输入和 Runtime 进度刷新不重新解析正文未变的历史 Mark
 没有运行也继续入队。队列条位于 Composer 上方，与输入框同宽、同轴，按 FIFO 排列，不显示单条
 序号，不提供排序或合并；较长队列在有界区域滚动。Pending 不作为用户消息显示在公共时间线。
 普通排队不额外显示自动续发说明；编辑时不再显示队首等待、编辑标题或本地草稿说明，
-仅保留当前编辑行的状态标识和保存、取消操作。发送失败或编辑占用失效等需要处理的情况仍显示错误提示。
+仅保留当前编辑行的状态标识和保存、取消操作。即使 CampTurn 正在执行，编辑器内也不复制 Composer 的
+“停止”入口。发送失败或编辑占用失效等需要处理的情况仍显示错误提示。
 
 队列继承现有系统字体栈，正文为 10.5px；普通行最小高度为 32px，以 6px 空心圆点起行。普通底色
 由 `--surface-subtle` 44% 与 `--conversation-surface` 混合，编辑底色由 `--brand-soft` 42% 与同一
@@ -709,7 +765,8 @@ Composer 输入和 Runtime 进度刷新不重新解析正文未变的历史 Mark
 
 队列正文和行背景仅展示，不响应编辑；只有右侧独立的 24px 小铅笔按钮在同一个输入位置打开编辑。
 普通草稿独立保留，结束编辑后恢复；删除使用相邻的独立按钮。编辑正文继续使用 StructuredMentionComposer，
-支持 @成员、@所有队员及取消已有 Reply。保存不能提交空消息，并保留原队列位置。切换编辑项或关闭编辑
+支持 @成员、@所有队员及取消已有 Reply。Pending 行展示附件；编辑时可继续选择、粘贴或拖入附件，并可
+预览、移除和调整顺序。正文和附件不能同时为空，纯附件保存有效并保留原队列位置。切换编辑项或关闭编辑
 遇到未保存修改时提供“保存 / 放弃修改 / 继续编辑”，不静默丢弃。
 
 Core 编辑占用跨重启保留，刷新或重新进入 Camp 不自动认领或释放；恢复条提供“重新编辑 / 放弃未保存修改 / 删除”。
@@ -721,5 +778,7 @@ Composer 点击一次“停止”后，必须等当前执行完全停止，才�
 仍等待现有编辑、审批、恢复或运行状态结算。队首发送失败时原位展示错误，用户编辑保存后自动再次准入，
 或删除后让下一条继续；不隐藏失败、不自动重试，也不让后续消息越过队首。
 
-普通草稿带有附件而需要排队时禁用提交并说明“暂不支持排队附件，草稿已保留”。待发送编辑禁用按钮、
-粘贴和拖放附件。持久化和原子发布由 [Pending Camp Input v1](../../contracts/pending-camp-input-v1.md) 拥有。
+需要排队时，正文、附件、Reply/Continuation intent 与 Execution Request 作为完整发送意图一起进入 Pending；
+文件不移动。Cancel 放弃 working refs 并保留 Pending canonical refs；Delete 取消整条 Pending 并释放编辑占用。
+队首发布前发现附件缺失、不可读或 kind 变化时进入 `needs_repair` 并继续阻塞 FIFO，编辑保存或删除后再推进。
+持久化和原子发布由 [Pending Camp Input v2](../../contracts/pending-camp-input-v2.md) 拥有。

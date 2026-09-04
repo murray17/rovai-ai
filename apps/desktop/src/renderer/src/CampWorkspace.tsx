@@ -1,5 +1,6 @@
 import { readErrorMessage } from './error-message'
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { collapsedMessageProjection } from './conversation-message-collapse'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -29,11 +30,12 @@ import type {
   CampOpenProjection,
   CampSnapshot,
   ExecutionConsolePlacement,
+  LocalAttachmentAvailability,
+  LocalAttachmentOwnerLocator,
   MessageDeliveryView,
   TaskStatus,
   TaskView,
   NavigationCampItem,
-  PreparedAttachmentView,
   SkillDeliveryGroupView,
   SkillView,
   StoredCommandResult,
@@ -41,7 +43,7 @@ import type {
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
-import { PendingCampInputs, pendingQueueRequiresEnqueue } from './PendingCampInputs'
+import { PendingCampInputs } from './PendingCampInputs'
 import {
   activityStatusForAgentRun,
   agentRunPresentation,
@@ -66,7 +68,15 @@ import {
   type RuntimeCompactionDisplayItem
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
-import { ImageGallery, groupMessageAttachments } from './ImageGallery'
+import { ImageGallery, partitionMessageAttachments, type GalleryImage } from './ImageGallery'
+import {
+  AgentArtifactIcon,
+  FileExtensionLabel,
+  UserFileIcon,
+  attachmentBaseName,
+  attachmentFormatLabel,
+  classifyAttachmentDisplay
+} from './attachment-presentation'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { AgentRunDeliveryRecipients } from './AgentRunDeliveryRecipients'
 import { MemberPortrait } from './MemberPortrait'
@@ -103,14 +113,11 @@ import {
 } from './AppDialog'
 import { projectCampWorldMap } from './camp-world-map-model'
 import {
-  CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
   campTimelineContentChanged,
   campTimelineFollowingLatestAfterScroll,
   campTimelineIsNearBottom,
-  campTimelineReadingPositionFromStoredValue,
   followLatestCampTimeline,
   restoredCampTimelineScrollTop,
-  storedCampTimelineReadingPositionsWithUpdate,
   type CampTimelineReadingPosition,
   type CampTimelineViewportGeometry
 } from './camp-timeline-position'
@@ -141,6 +148,51 @@ const EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT = 112
 const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
+const CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX = 120
+const CAMP_TIMELINE_READING_POSITION_LIMIT = 50
+const campTimelineReadingPositions = new Map<string, CampTimelineReadingPosition>()
+
+if (typeof window !== 'undefined') {
+  try {
+    window.localStorage.removeItem('rovai.camp-timeline-reading-positions.v2')
+  } catch {
+    // Legacy cleanup is best effort; reading positions now live only in Renderer memory.
+  }
+}
+
+export function rememberedCampTimelineReadingPosition(
+  campId: string
+): CampTimelineReadingPosition | null {
+  const position = campTimelineReadingPositions.get(campId)
+  return position ? { ...position } : null
+}
+
+export function rememberCampTimelineReadingPosition(
+  campId: string,
+  position: CampTimelineReadingPosition
+): void {
+  campTimelineReadingPositions.delete(campId)
+  campTimelineReadingPositions.set(campId, {
+    scrollTop: Math.max(0, Number.isFinite(position.scrollTop) ? position.scrollTop : 0),
+    followingLatest: position.followingLatest
+  })
+
+  while (campTimelineReadingPositions.size > CAMP_TIMELINE_READING_POSITION_LIMIT) {
+    const oldestCampId = campTimelineReadingPositions.keys().next().value
+    if (!oldestCampId) break
+    campTimelineReadingPositions.delete(oldestCampId)
+  }
+}
+
+export function campHistoryKeyboardInputMovesEarlier(
+  key: string,
+  shiftKey: boolean
+): boolean {
+  return key === 'ArrowUp'
+    || key === 'PageUp'
+    || key === 'Home'
+    || (key === ' ' && shiftKey)
+}
 
 export function composerHasSendablePayload(
   message: string,
@@ -467,6 +519,42 @@ export function executionDisclosureIsLiveOpen(
   return NON_TERMINAL_RUNS.has(status) && focused && !cancelling
 }
 
+export function groupExecutionEventsByRunId(
+  runs: readonly Pick<AgentRunView, 'id'>[],
+  executionEvidence: readonly AgentRunExecutionEvidenceView[],
+  liveRuntimeEvents: readonly LiveRuntimeEvent[]
+): Map<string, LiveRuntimeEvent[]> {
+  const currentRunIds = new Set(runs.map((run) => run.id))
+  const grouped = new Map<string, Map<string, LiveRuntimeEvent>>()
+
+  const append = (event: LiveRuntimeEvent, authoritative: boolean): void => {
+    if (!currentRunIds.has(event.agentRunId)) return
+
+    let eventsById = grouped.get(event.agentRunId)
+    if (!eventsById) {
+      eventsById = new Map<string, LiveRuntimeEvent>()
+      grouped.set(event.agentRunId, eventsById)
+    }
+
+    if (authoritative || !eventsById.has(event.id)) {
+      eventsById.set(event.id, event)
+    }
+  }
+
+  for (const evidence of executionEvidence) {
+    append(liveRuntimeEventFromExecutionEvidence(evidence), true)
+  }
+  for (const event of liveRuntimeEvents) {
+    append(event, false)
+  }
+
+  return new Map([...grouped.entries()].map(([runId, eventsById]) => {
+    const events = [...eventsById.values()]
+    events.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    return [runId, events]
+  }))
+}
+
 export function firstSubmittedAgentRun(
   receipt: CampMessageSendReceipt,
   runs: readonly AgentRunView[]
@@ -662,36 +750,6 @@ function persistExecutionDrawerHeight(height: number | null): void {
   }
 }
 
-function storedCampTimelineReadingPosition(
-  campId: string
-): CampTimelineReadingPosition | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return campTimelineReadingPositionFromStoredValue(
-      window.localStorage.getItem(CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY),
-      campId
-    )
-  } catch {
-    return null
-  }
-}
-
-function persistCampTimelineReadingPosition(
-  campId: string,
-  position: CampTimelineReadingPosition
-): void {
-  if (typeof window === 'undefined') return
-  try {
-    const current = window.localStorage.getItem(CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY)
-    window.localStorage.setItem(
-      CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
-      storedCampTimelineReadingPositionsWithUpdate(current, campId, position)
-    )
-  } catch {
-    // Reading-position persistence is an enhancement; the timeline remains usable without it.
-  }
-}
-
 function scrollExecutionDrawerToLatest(body: HTMLElement): void {
   body.scrollTop = body.scrollHeight
 }
@@ -875,6 +933,7 @@ export type CampConversationTimelineItem =
       id: string
       createdAt: string
       message: CampMessageView
+      runtimeImageGroups: AgentRunImagesView[]
     }
   | {
       kind: 'run_file_changes'
@@ -945,16 +1004,19 @@ export function campConversationTimeline(
       kind: 'camp_message',
       id: message.id,
       createdAt: message.createdAt,
-      message
+      message,
+      runtimeImageGroups: []
     }))
-  const publicMessageRunIds = new Set(
-    publicMessages.flatMap((item) => item.message.sourceAgentRunId ?? [])
+  const publicAgentMessageRunIds = new Set(
+    publicMessages.flatMap((item) => item.message.authorType === 'agent'
+      ? item.message.sourceAgentRunId ?? []
+      : [])
   )
   const runStatusById = new Map(agentRuns.map((run) => [run.id, run.status]))
   const runImageCards: CampConversationTimelineItem[] = agentRunImages
     .filter((images) => {
       if (images.images.length === 0) return false
-      if (publicMessageRunIds.has(images.agentRunId)) return true
+      if (publicAgentMessageRunIds.has(images.agentRunId)) return true
       const status = runStatusById.get(images.agentRunId)
       return status !== undefined && !NON_TERMINAL_RUNS.has(status)
     })
@@ -1001,7 +1063,9 @@ export function campConversationTimeline(
   sortedItems.push(...sortedMessages.slice(messageIndex), ...sortedCards.slice(cardIndex))
   const lastPublicMessageByRunId = new Map<string, CampConversationTimelineItem>()
   for (const item of sortedMessages) {
-    if (item.kind === 'camp_message' && item.message.sourceAgentRunId) {
+    if (item.kind === 'camp_message'
+      && item.message.authorType === 'agent'
+      && item.message.sourceAgentRunId) {
       lastPublicMessageByRunId.set(item.message.sourceAgentRunId, item)
     }
   }
@@ -1018,6 +1082,12 @@ export function campConversationTimeline(
     const anchor = lastPublicMessageByRunId.get(runId) ?? fileCard
     if (!anchor) continue
     anchoredCardIds.add(card.id)
+    if (card.kind === 'run_images' && anchor.kind === 'camp_message') {
+      anchor.runtimeImageGroups.push(card.images)
+      anchor.runtimeImageGroups.sort((left, right) => left.createdAt.localeCompare(right.createdAt)
+        || left.executionEpoch - right.executionEpoch)
+      continue
+    }
     cardsByAnchorMessageId.set(
       anchor.id,
       [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card].sort((left, right) =>
@@ -1342,6 +1412,7 @@ export function CampWorkspace({
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const earlierMessageLoadInFlightRef = useRef(false)
   const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
   const conversationFindRequestGeneration = useRef(0)
@@ -1818,11 +1889,7 @@ export function CampWorkspace({
   )
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
-  const showComposerStop = executionBlocked && message.trim().length === 0
-  const requiresQueue = pendingQueueRequiresEnqueue(
-    pendingQueue?.campId === snapshot.camp.id ? pendingQueue : null, executionBlocked
-  )
-  const queueAttachmentsBlocked = requiresQueue && hasReadyAttachment
+  const showComposerStop = executionBlocked && !hasSendablePayload
   const composerSendDisabled = composerSendIsDisabled({
     hasSendablePayload,
     hasUnavailableMention,
@@ -1834,7 +1901,7 @@ export function CampWorkspace({
     composerDraftAvailable: composerDraft !== null,
     preparingAttachmentCount: preparingAttachments.length,
     failedAttachmentCount: failedAttachments.length
-  }) || queueAttachmentsBlocked
+  })
   const executionDrawerProcess = executionDrawerAgentId
     ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
     : null
@@ -1849,22 +1916,20 @@ export function CampWorkspace({
     : null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
   const previousPendingApprovalCount = useRef(pendingApprovals.length)
-  const executionEvents = useMemo(() => {
-    const events = new Map<string, LiveRuntimeEvent>()
-    for (const evidence of snapshot.executionEvidence) {
-      events.set(evidence.id, liveRuntimeEventFromExecutionEvidence(evidence))
-    }
-    for (const event of liveRuntimeEvents) {
-      if (!events.has(event.id)) events.set(event.id, event)
-    }
-    return [...events.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-  }, [liveRuntimeEvents, snapshot.executionEvidence])
+  const executionEventsByRunId = useMemo(
+    () => groupExecutionEventsByRunId(
+      snapshot.agentRuns,
+      snapshot.executionEvidence,
+      liveRuntimeEvents
+    ),
+    [liveRuntimeEvents, snapshot.agentRuns, snapshot.executionEvidence]
+  )
   const executionProgressByRunId = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [
       run.id,
-      buildLiveExecutionProgress(executionEvents, run.id)
+      buildLiveExecutionProgress(executionEventsByRunId.get(run.id) ?? [], run.id)
     ])),
-    [executionEvents, snapshot.agentRuns]
+    [executionEventsByRunId, snapshot.agentRuns]
   )
   const worldMapProjection = useMemo(
     () => projectCampWorldMap(snapshot.members, snapshot.agentRuns, executionProgressByRunId),
@@ -2757,7 +2822,7 @@ export function CampWorkspace({
     }
     const current = timelineReadingPosition.current
     if (!current || (campId && current.campId !== campId)) return
-    persistCampTimelineReadingPosition(current.campId, current.position)
+    rememberCampTimelineReadingPosition(current.campId, current.position)
   }, [])
 
   const recordTimelineReadingPosition = useCallback((
@@ -2810,7 +2875,7 @@ export function CampWorkspace({
     timelinePositionSaveTimer.current = window.setTimeout(() => {
       timelinePositionSaveTimer.current = null
       const current = timelineReadingPosition.current
-      if (current) persistCampTimelineReadingPosition(current.campId, current.position)
+      if (current) rememberCampTimelineReadingPosition(current.campId, current.position)
     }, 180)
   }, [conversationFind.open])
 
@@ -2871,7 +2936,7 @@ export function CampWorkspace({
       window.clearTimeout(timelinePositionSaveTimer.current)
       timelinePositionSaveTimer.current = null
     }
-    persistCampTimelineReadingPosition(campId, position)
+    rememberCampTimelineReadingPosition(campId, position)
   }, [])
 
   useLayoutEffect(() => {
@@ -2881,7 +2946,7 @@ export function CampWorkspace({
       if (scroll) {
         const current = timelineReadingPosition.current?.campId === campId
           ? timelineReadingPosition.current.position
-          : storedCampTimelineReadingPosition(campId)
+          : rememberedCampTimelineReadingPosition(campId)
         const scrollTop = restoredCampTimelineScrollTop(
           current,
           scroll.scrollHeight,
@@ -3189,10 +3254,7 @@ export function CampWorkspace({
   }
 
   const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
-    if (pendingEditing || requiresQueue) {
-      onNotify?.('待发送消息暂不支持附件，请在队列结束后添加。')
-      return
-    }
+    if (pendingEditing) return
     const campId = snapshot.camp.id
     const pending = inputs.map(({ file, kindHint }, index) => ({
       id: crypto.randomUUID(),
@@ -3275,7 +3337,7 @@ export function CampWorkspace({
   const attachmentDropBlocked = attachmentDropIsBlocked({
     executionDrawerPresent: Boolean(executionDrawerProcess),
     mentionPopoverPresent: Boolean(mentionPopover)
-  }) || pendingEditing || requiresQueue
+  }) || pendingEditing
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -3480,23 +3542,64 @@ export function CampWorkspace({
   }
 
   const loadEarlierMessages = async (): Promise<void> => {
-    if (!onLoadEarlierMessages || earlierMessageStatus === 'loading') return
+    if (
+      !onLoadEarlierMessages
+      || !messageHistory?.hasEarlier
+      || earlierMessageLoadInFlightRef.current
+    ) return
     const timeline = timelineScrollRef.current
-    const previousScrollHeight = timeline?.scrollHeight ?? 0
-    const previousScrollTop = timeline?.scrollTop ?? 0
+    if (!timeline) return
+    const campId = snapshot.camp.id
+    const readingAnchor = captureTimelineReadingAnchor(timeline)
+    const previousScrollHeight = timeline.scrollHeight
+    const previousScrollTop = timeline.scrollTop
+    earlierMessageLoadInFlightRef.current = true
     setEarlierMessageStatus('loading')
     try {
       await onLoadEarlierMessages()
-      setEarlierMessageStatus('idle')
-      window.requestAnimationFrame(() => {
+      await new Promise<void>((resolve) => {
         window.requestAnimationFrame(() => {
-          if (!timeline) return
-          timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+          window.requestAnimationFrame(() => resolve())
         })
       })
+
+      if (
+        timelineScrollRef.current === timeline
+        && mountedCampId.current === campId
+        && !timeline.hidden
+        && !conversationFindOpenRef.current
+      ) {
+        if (readingAnchor.source || readingAnchor.message) {
+          restoreTimelineReadingAnchor(timeline, readingAnchor)
+        } else {
+          timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+        }
+        recordTimelineReadingPosition(campId, timeline)
+      }
+      setEarlierMessageStatus('idle')
     } catch {
-      setEarlierMessageStatus('error')
+      setEarlierMessageStatus(mountedCampId.current === campId ? 'error' : 'idle')
+    } finally {
+      earlierMessageLoadInFlightRef.current = false
     }
+  }
+
+  const maybeLoadEarlierFromUserInput = (): void => {
+    const timeline = timelineScrollRef.current
+    if (
+      !timeline
+      || conversationView !== 'conversation'
+      || conversationFindOpenRef.current
+      || earlierMessageStatus !== 'idle'
+      || !messageHistory?.hasEarlier
+      || timeline.scrollTop > CAMP_HISTORY_AUTOLOAD_THRESHOLD_PX
+    ) return
+
+    void loadEarlierMessages()
+  }
+
+  const checkHistoryAfterUserInput = (): void => {
+    window.requestAnimationFrame(maybeLoadEarlierFromUserInput)
   }
 
   const openExecutionProcess = (
@@ -3798,11 +3901,17 @@ export function CampWorkspace({
               tabIndex={-1}
               aria-label="对话时间线"
               hidden={conversationView !== 'conversation'}
-              onWheelCapture={() => captureFilePreviewAnchor()}
+              onWheelCapture={(event) => {
+                captureFilePreviewAnchor()
+                if (event.deltaY < 0) checkHistoryAfterUserInput()
+              }}
               onTouchStartCapture={() => captureFilePreviewAnchor()}
               onKeyDownCapture={(event) => {
                 if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
                   captureFilePreviewAnchor()
+                }
+                if (campHistoryKeyboardInputMovesEarlier(event.key, event.shiftKey)) {
+                  checkHistoryAfterUserInput()
                 }
               }}
               onScroll={(event) => recordTimelineReadingPosition(
@@ -3812,33 +3921,56 @@ export function CampWorkspace({
             >
               <div className="timeline-track">
               {!conversationFind.open && messageHistory?.hasEarlier && (
-                <div className="camp-history-loader" role="status" aria-live="polite">
-                  <button
-                    className="quiet-button compact"
-                    type="button"
-                    disabled={earlierMessageStatus === 'loading'}
-                    onClick={() => void loadEarlierMessages()}
-                  >
-                    {earlierMessageStatus === 'loading' ? '正在加载更早消息…' : '加载更早消息'}
-                  </button>
-                  <span>
+                <div
+                  className={`camp-history-loader is-${earlierMessageStatus}`}
+                  role={earlierMessageStatus === 'error' ? 'alert' : 'status'}
+                  aria-live={earlierMessageStatus === 'error' ? 'assertive' : 'polite'}
+                  aria-atomic="true"
+                >
+                  {earlierMessageStatus === 'error' ? (
+                    <>
+                      <span className="camp-history-error-message">较早消息暂时没有加载</span>
+                      <span className="camp-history-separator" aria-hidden="true">·</span>
+                      <button
+                        className="camp-history-text-button"
+                        type="button"
+                        onClick={() => void loadEarlierMessages()}
+                      >
+                        重试
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="camp-history-text-button"
+                      type="button"
+                      disabled={earlierMessageStatus === 'loading'}
+                      onClick={() => void loadEarlierMessages()}
+                    >
+                      {earlierMessageStatus === 'loading' ? (
+                        <>
+                          <span className="camp-history-spinner" aria-hidden="true" />
+                          <span>正在加载更早消息…</span>
+                        </>
+                      ) : (
+                        <>
+                          <span aria-hidden="true">↑</span>
+                          <span>加载更早消息</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  <span className="camp-history-separator" aria-hidden="true">·</span>
+                  <span className="camp-history-count">
                     已显示 {messageHistory.loadedCount} / {messageHistory.totalCount} 条
                   </span>
-                </div>
-              )}
-              {!conversationFind.open && earlierMessageStatus === 'error' && messageHistory?.hasEarlier && (
-                <div className="camp-history-error" role="alert">
-                  <span>较早消息暂时没有加载。</span>
-                  <button className="quiet-button compact" type="button" onClick={() => void loadEarlierMessages()}>
-                    重试
-                  </button>
                 </div>
               )}
               {(() => {
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
                 let previousMessageAuthorKey: string | null = null
-                for (const timelineItem of conversationTimeline) {
+                for (let timelineIndex = 0; timelineIndex < conversationTimeline.length; timelineIndex += 1) {
+                  const timelineItem = conversationTimeline[timelineIndex]
                   const dayKey = localDayKey(timelineItem.createdAt)
                   if (dayKey && dayKey !== lastDayKey) {
                     lastDayKey = dayKey
@@ -3920,6 +4052,9 @@ export function CampWorkspace({
                     ? runById.get(campMessage.sourceAgentRunId) ?? null
                     : null
                   const displayBody = campMessage.body
+                  const humanAuthored = campMessage.authorType === 'user'
+                    || campMessage.authorType === 'external_principal'
+                  const runtimeImages = timelineItem.runtimeImageGroups.flatMap((group) => group.images)
                   const messageAuthorKey = campMessage.authorType === 'user'
                     || campMessage.authorType === 'agent'
                     || campMessage.authorType === 'external_principal'
@@ -3938,9 +4073,38 @@ export function CampWorkspace({
                     && replyAnchorWindows.has(replyParentId)
                     && replyAnchorWindows.get(replyParentId) === null
                   )
-                  items.push(
+                  const isConversationFindCurrent = conversationFind.open
+                    && conversationFind.snapshot?.match?.messageId === campMessage.id
+                  const trailingFileChangeItems: Extract<
+                    CampConversationTimelineItem,
+                    { kind: 'run_file_changes' }
+                  >[] = []
+                  if (campMessage.authorType === 'agent' && campMessage.sourceAgentRunId) {
+                    for (
+                      let nextIndex = timelineIndex + 1;
+                      nextIndex < conversationTimeline.length;
+                      nextIndex += 1
+                    ) {
+                      const candidate = conversationTimeline[nextIndex]
+                      if (
+                        candidate.kind !== 'run_file_changes'
+                        || candidate.changes.agentRunId !== campMessage.sourceAgentRunId
+                      ) break
+                      trailingFileChangeItems.push(candidate)
+                    }
+                  }
+                  const copied = copiedMessageId === campMessage.id
+                  const handleReply = campMessage.id.startsWith('optimistic:')
+                    ? undefined
+                    : (modality: ReplyFocusModality) => void startReply(campMessage, modality)
+                  const handleCopy = (): void => copyMessage(
+                    campMessage.id,
+                    displayBody,
+                    campMessage.content
+                  )
+                  const messageElement = (
                     <article
-                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${conversationFind.open && conversationFind.snapshot?.match?.messageId === campMessage.id ? ' conversation-find-current-message' : ''}`}
+                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${isConversationFindCurrent ? ' conversation-find-current-message' : ''}`}
                       key={campMessage.id}
                       data-message-id={campMessage.id}
                       data-camp-turn-id={campMessage.campTurnId ?? sourceRun?.campTurnId}
@@ -4000,16 +4164,11 @@ export function CampWorkspace({
                                 <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
                               </div>
                               <MessageSurface
-                                copied={copiedMessageId === campMessage.id}
+                                copied={copied}
                                 hasDelivery={campMessageDeliveries.length > 0}
-                                onReply={campMessage.id.startsWith('optimistic:')
-                                  ? undefined
-                                  : (modality) => void startReply(campMessage, modality)}
-                                onCopy={() => copyMessage(
-                                  campMessage.id,
-                                  displayBody,
-                                  campMessage.content
-                                )}
+                                showActions={campMessage.authorType !== 'agent'}
+                                onReply={handleReply}
+                                onCopy={handleCopy}
                               >
                                 {replyParentId && (
                                   <ReplyParentQuote
@@ -4020,6 +4179,15 @@ export function CampWorkspace({
                                     unavailable={replyParentUnavailable}
                                     loading={!replyParent && !replyParentUnavailable}
                                     onReveal={() => void revealReplyParent(replyParentId)}
+                                  />
+                                )}
+                                {humanAuthored && (
+                                  <MessageAttachmentGroups
+                                    attachments={campMessage.attachments}
+                                    campId={snapshot.camp.id}
+                                    messageId={campMessage.id}
+                                    presentation="user"
+                                    onNotify={onNotify}
                                   />
                                 )}
                                 {displayBody.trim().length > 0 && (
@@ -4051,10 +4219,12 @@ export function CampWorkspace({
                                       )
                                     : (
                                         <div className="message-bubble">
-                                          <StructuredMessageBody
+                                          <TruncatedStructuredMessageBody
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
+                                            truncate={humanAuthored}
+                                            forceExpanded={isConversationFindCurrent}
                                             renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
                                             onActivateMemberMention={openMemberProfilePopover}
                                             onActivateAllMembersMention={(trigger, focusPanel) =>
@@ -4080,14 +4250,19 @@ export function CampWorkspace({
                                         </div>
                                       )
                                 )}
-                                {campMessage.attachments.length > 0 && (
-                                  <div className="timeline-attachments" aria-label="消息附件">
-                                    {groupMessageAttachments(campMessage.attachments).map((segment) => segment.kind === 'images'
-                                      ? <ImageGallery key={segment.attachments[0].id}
-                                          images={segment.attachments.map((image) => ({ kind: 'attachment', campId: snapshot.camp.id, image }))} />
-                                      : <AttachmentCard attachment={segment.attachment} campId={snapshot.camp.id}
-                                          key={segment.attachment.id} onNotify={onNotify} timeline />)}
-                                  </div>
+                                {!humanAuthored && (
+                                  <MessageAttachmentGroups
+                                    attachments={campMessage.attachments}
+                                    runtimeImages={runtimeImages.map((image) => ({
+                                      kind: 'runtime',
+                                      campId: snapshot.camp.id,
+                                      image
+                                    }))}
+                                    campId={snapshot.camp.id}
+                                    messageId={campMessage.id}
+                                    presentation="agent"
+                                    onNotify={onNotify}
+                                  />
                                 )}
                               </MessageSurface>
                               <CampMessageDeliveryFooter
@@ -4095,11 +4270,55 @@ export function CampWorkspace({
                                 memberById={memberById}
                                 onActivateMemberMention={openMemberProfilePopover}
                               />
+                              {campMessage.authorType === 'agent'
+                                && trailingFileChangeItems.length === 0
+                                && (
+                                  <MessageActions
+                                    copied={copied}
+                                    className="agent-message-actions"
+                                    onReply={handleReply}
+                                    onCopy={handleCopy}
+                                  />
+                                )}
                             </div>
                           )
                         : <p>{displayBody}</p>}
                     </article>
                   )
+                  if (trailingFileChangeItems.length > 0) {
+                    items.push(
+                      <div
+                        className={`agent-message-output${followsSameAuthor ? ' same-author' : ''}`}
+                        data-message-output-id={campMessage.id}
+                        key={`agent-message-output:${campMessage.id}`}
+                      >
+                        {messageElement}
+                        {trailingFileChangeItems.map((fileChangeItem) => (
+                          <AgentRunFileChangesTimelineCard
+                            key={fileChangeItem.id}
+                            changes={fileChangeItem.changes}
+                            onOpenReview={(selectedEvidenceFileId) => {
+                              filePreview?.openFileChanges(
+                                snapshot.camp.id,
+                                fileChangeItem.changes,
+                                selectedEvidenceFileId
+                              )
+                            }}
+                          />
+                        ))}
+                        <MessageActions
+                          copied={copied}
+                          className="agent-message-output-actions"
+                          onReply={handleReply}
+                          onCopy={handleCopy}
+                        />
+                      </div>
+                    )
+                    timelineIndex += trailingFileChangeItems.length
+                    previousMessageAuthorKey = null
+                    continue
+                  }
+                  items.push(messageElement)
                   previousMessageAuthorKey = messageAuthorKey
                 }
                 return items
@@ -4291,7 +4510,7 @@ export function CampWorkspace({
         <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
-          stopping={stopping} onStop={onStop} onQueueChange={setPendingQueue} onEditingChange={(editing) => {
+          onQueueChange={setPendingQueue} onEditingChange={(editing) => {
             setPendingEditing(editing)
             if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
           }} />
@@ -4346,12 +4565,18 @@ export function CampWorkspace({
               || preparingAttachments.length > 0
               || failedAttachments.length > 0
               ? (
-                  <div className="composer-attachment-strip" aria-label="待发送附件">
+                  <ComposerAttachmentStrip>
                     {composerDraft?.attachments.map((attachment) => (
                       <AttachmentCard
                         attachment={attachment}
+                        locator={{
+                          owner: 'composer',
+                          campId: snapshot.camp.id,
+                          attachmentRefId: attachment.id
+                        }}
                         key={attachment.id}
                         onRemove={() => void removePreparedAttachment(attachment.id)}
+                        presentation="composer"
                       />
                     ))}
                     {preparingAttachments.map((attachment) => (
@@ -4374,7 +4599,7 @@ export function CampWorkspace({
                         )}
                       />
                     ))}
-                  </div>
+                  </ComposerAttachmentStrip>
                 )
               : null}
             {composerDraft?.replyIntent && (
@@ -4383,7 +4608,6 @@ export function CampWorkspace({
                   className={`composer-reply-line${replyRepairRequired ? ' needs-repair' : ''}`}
                   title={`${composerDraft.replyIntent.author?.displayName ?? '引用消息'} · ${composerDraft.replyIntent.excerpt ?? '引用的消息当前不可用'}`}
                 >
-                  <ReplyMark />
                   <span className="composer-reply-copy">
                     <strong>回复 {composerDraft.replyIntent.author?.displayName ?? '引用消息'}</strong>
                     <span>{composerDraft.replyIntent.excerpt ?? '引用的消息当前不可用'}</span>
@@ -4538,7 +4762,7 @@ export function CampWorkspace({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={busy || composerSubmitting || routingMutating || requiresQueue}
+                disabled={busy || composerSubmitting || routingMutating}
                 onClick={() => composerFileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18">
@@ -4547,9 +4771,7 @@ export function CampWorkspace({
               </button>
             </div>
             <div className="composer-actions">
-              {queueAttachmentsBlocked
-                ? <span className="pending-input-attachment-notice">暂不支持排队附件，草稿已保留。</span>
-                : !executionBlocked && (
+              {!executionBlocked && (
                 <span className="composer-hint">
                   <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
                   <span className="composer-hint-visual" aria-hidden="true">
@@ -4601,8 +4823,8 @@ export function CampWorkspace({
                 <strong>松手添加到当前消息</strong>
                 <span>
                   {attachmentDragState === 'directory'
-                    ? '文件夹将保存为只读快照，原文件不会移动'
-                    : '支持文件与文件夹 · 将安全复制到附件队列'}
+                    ? '将引用此文件夹的当前位置，不会移动原文件'
+                    : '支持文件与文件夹 · 原位置移动或删除后可能不可用'}
                 </span>
               </span>
             </div>
@@ -6996,12 +7218,14 @@ function ReplyMark(): JSX.Element {
 function MessageSurface({
   copied,
   hasDelivery,
+  showActions = true,
   onReply,
   onCopy,
   children
 }: {
   copied: boolean
   hasDelivery: boolean
+  showActions?: boolean
   onReply?(modality: ReplyFocusModality): void
   onCopy(): void
   children: React.ReactNode
@@ -7009,20 +7233,110 @@ function MessageSurface({
   return (
     <div className={`message-surface${hasDelivery ? ' has-delivery' : ''}${copied ? ' copied' : ''}`}>
       {children}
+      {showActions && (
+        <MessageActions copied={copied} onReply={onReply} onCopy={onCopy} />
+      )}
+    </div>
+  )
+}
+
+function MessageActions({
+  copied,
+  className,
+  onReply,
+  onCopy
+}: {
+  copied: boolean
+  className?: string
+  onReply?(modality: ReplyFocusModality): void
+  onCopy(): void
+}): JSX.Element {
+  return (
+    <div
+      className={`message-actions${copied ? ' copied' : ''}${className ? ` ${className}` : ''}`}
+      role="group"
+      aria-label="消息操作"
+    >
+      <span className="copy-feedback" role="status" aria-live="polite">
+        {copied ? '已复制' : ''}
+      </span>
       {onReply && (
         <button
           className="message-reply-button"
           type="button"
           aria-label="回复这条消息"
+          title="回复"
           onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
         >
-          回复
+          <MessageReplyIcon />
         </button>
       )}
       <MessageCopyButton copied={copied} onCopy={onCopy} />
-      <span className="copy-feedback" role="status" aria-live="polite">
-        {copied ? '已复制' : ''}
-      </span>
+    </div>
+  )
+}
+
+function MessageReplyIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2" />
+      <path d="m15.2 9.2-3.6 3.5 3.6 3.5" />
+      <path d="M11.8 12.7h8.7" />
+    </svg>
+  )
+}
+
+function TruncatedStructuredMessageBody({
+  body,
+  content,
+  members,
+  truncate,
+  forceExpanded,
+  renderLeadingCurrentUserMarkdown = false,
+  onActivateMemberMention,
+  onActivateAllMembersMention,
+  onFileReference
+}: {
+  body: string
+  content: StructuredCampMessageContent | null
+  members: CampSnapshot['members']
+  truncate: boolean
+  forceExpanded: boolean
+  renderLeadingCurrentUserMarkdown?: boolean
+  onActivateMemberMention?(
+    agentId: string,
+    trigger: HTMLElement,
+    focusPanel: boolean
+  ): void
+  onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
+  onFileReference?: FileReferenceActivation
+}): JSX.Element {
+  const projection = useMemo(
+    () => truncate ? collapsedMessageProjection(body, content) : null,
+    [body, content, truncate]
+  )
+  const displayFullMessage = forceExpanded || projection === null
+  const displayBody = displayFullMessage ? body : projection.body
+  const displayContent = displayFullMessage ? content : projection.content
+
+  const messageBody = (
+    <StructuredMessageBody
+      body={displayBody}
+      content={displayContent}
+      members={members}
+      renderLeadingCurrentUserMarkdown={renderLeadingCurrentUserMarkdown}
+      onActivateMemberMention={onActivateMemberMention}
+      onActivateAllMembersMention={onActivateAllMembersMention}
+      onFileReference={onFileReference}
+    />
+  )
+  if (!projection || forceExpanded) return messageBody
+
+  return (
+    <div className="message-long-copy">
+      <div>{messageBody}</div>
+      <span className="message-long-ellipsis" aria-hidden="true">…</span>
+      <span className="sr-only">其余内容已省略，共 {projection.lineCount} 行</span>
     </div>
   )
 }
@@ -7266,10 +7580,13 @@ function MessageCopyButton({
       className="message-copy-button"
       type="button"
       aria-label={copied ? '已复制这条消息' : '复制这条消息'}
-      title="复制这条消息"
+      title={copied ? '已复制' : '复制'}
       onClick={onCopy}
     >
-      复制
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="8" y="8" width="11" height="11" rx="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      </svg>
     </button>
   )
 }
@@ -7283,41 +7600,146 @@ function AttachmentFolderGlyph(): JSX.Element {
   )
 }
 
+export function MessageAttachmentGroups({
+  attachments,
+  runtimeImages = [],
+  campId,
+  messageId,
+  presentation,
+  onNotify
+}: {
+  attachments: CampMessageAttachmentView[]
+  runtimeImages?: GalleryImage[]
+  campId: string
+  messageId: string
+  presentation: 'user' | 'agent'
+  onNotify: (message: string) => void
+}): JSX.Element | null {
+  const groups = partitionMessageAttachments(attachments)
+  const images: GalleryImage[] = [
+    ...groups.images.map((image): GalleryImage => ({
+      kind: 'attachment',
+      campId,
+      locator: { owner: 'message', campId, messageId, attachmentRefId: image.id },
+      image
+    })),
+    ...runtimeImages
+  ]
+  if (images.length === 0 && groups.files.length === 0) return null
+
+  if (presentation === 'user') {
+    return (
+      <section className="message-attachments user-message-attachments" aria-label="消息附件">
+        {images.length > 0 && (
+          <div className="user-message-images">
+            <ImageGallery images={images} variant="user-attachment" />
+          </div>
+        )}
+        {groups.files.length > 0 && (
+          <div className="user-message-files" role="group" aria-label="消息文件">
+            {groups.files.map((attachment) => (
+              <AttachmentCard
+                attachment={attachment}
+                locator={{ owner: 'message', campId, messageId, attachmentRefId: attachment.id }}
+                key={attachment.id}
+                onNotify={onNotify}
+                presentation="user-timeline"
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  return (
+    <section className="message-attachments agent-message-outputs" aria-label="Agent 交付">
+      {images.length > 0 && (
+        <div className="agent-output-images">
+          <ImageGallery images={images} variant="agent-output" />
+        </div>
+      )}
+      {groups.files.length > 0 && (
+        <div className="agent-output-files">
+          <div className="agent-delivery-heading">
+            <strong>交付文件</strong>
+            <span>{groups.files.length} 个</span>
+          </div>
+          <div className="agent-output-file-grid" role="group" aria-label={`Agent 交付文件：${groups.files.length} 个`}>
+            {groups.files.map((attachment) => (
+              <AttachmentCard
+                attachment={attachment}
+                locator={{ owner: 'message', campId, messageId, attachmentRefId: attachment.id }}
+                key={attachment.id}
+                onNotify={onNotify}
+                presentation="agent-timeline"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function localAttachmentLocatorKey(locator: LocalAttachmentOwnerLocator): string {
+  if (locator.owner === 'composer') {
+    return `composer:${locator.campId}:${locator.attachmentRefId}`
+  }
+  if (locator.owner === 'message') {
+    return `message:${locator.campId}:${locator.messageId}:${locator.attachmentRefId}`
+  }
+  if (locator.owner === 'pending') {
+    return `pending:${locator.campId}:${locator.pendingInputId}:${locator.attachmentRefId}`
+  }
+  return `pending-edit:${locator.campId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
+}
+
 function AttachmentCard({
   attachment,
   onRemove,
-  campId,
+  locator,
   onNotify = () => undefined,
-  timeline = false
+  presentation = 'composer'
 }: {
-  attachment: CampMessageAttachmentView | PreparedAttachmentView
+  attachment: CampMessageAttachmentView
   onRemove?: () => void
-  campId?: string
+  locator: LocalAttachmentOwnerLocator
   onNotify?: (message: string) => void
-  timeline?: boolean
+  presentation?: 'composer' | 'user-timeline' | 'agent-timeline'
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [attachmentAction, setAttachmentAction] = useState<'open' | 'reveal' | null>(null)
+  const [availability, setAvailability] = useState<LocalAttachmentAvailability>(attachment.availability)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [contextAnchor, setContextAnchor] = useState({ x: 0, y: 0 })
   const attachmentButtonRef = useRef<HTMLButtonElement>(null)
-  const runtimeProjectionState = 'runtimeProjectionState' in attachment
-    ? attachment.runtimeProjectionState
-    : 'available'
+  const locatorRef = useRef(locator)
+  locatorRef.current = locator
+  const timeline = presentation !== 'composer'
+  const agentPresentation = presentation === 'agent-timeline'
+  const composerImage = presentation === 'composer' && attachment.previewKind === 'image'
+  const displayClassification = classifyAttachmentDisplay(attachment)
+  const baseName = attachmentBaseName(attachment.displayName, attachment.kind)
+  const formatLabel = attachmentFormatLabel(attachment.displayName, attachment.kind)
   const rendererPlatform = typeof window === 'undefined' ? 'darwin' : window.rovai.platform
+  const locatorKey = localAttachmentLocatorKey(locator)
   useEffect(() => {
     if (attachment.previewKind !== 'image') return
+    if (timeline && attachment.availability === 'unknown') return
     let active = true
     let objectUrl: string | null = null
-    void window.rovai.composerAttachments.preview(attachment.id)
-      .then((preview) => {
-        if (!active || !preview) {
+    void window.rovai.composerAttachments.preview(locatorRef.current)
+      .then((result) => {
+        if (active) setAvailability(result.availability)
+        if (!active || !result.preview) {
           if (active) setPreviewFailed(true)
           return
         }
+        const preview = result.preview
         objectUrl = URL.createObjectURL(new Blob(
           [Uint8Array.from(preview.bytes).buffer],
           { type: preview.mediaType }
@@ -7331,30 +7753,37 @@ function AttachmentCard({
       active = false
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [attachment.id, attachment.previewKind])
+  }, [attachment.availability, attachment.id, attachment.previewKind, locatorKey, timeline])
 
   const runAttachmentAction = async (
     action: 'open' | 'reveal',
     forceSystem = false
   ): Promise<void> => {
-    if (!timeline || !campId || attachmentAction) return
+    if (!timeline || attachmentAction) return
     setAttachmentAction(action)
     try {
       if (action === 'open') {
         if (!forceSystem && attachment.kind === 'file' && filePreview) {
           const outcome = await filePreview.open({
             kind: 'attachment',
-            campId,
-            attachmentId: attachment.id
+            campId: locator.campId,
+            locator
           })
-          if (outcome.kind === 'error') onNotify(outcome.error.message)
+          if (outcome.kind === 'error') {
+            if (outcome.error.code === 'attachment_missing') setAvailability('missing')
+            else if (outcome.error.code === 'attachment_unreadable') setAvailability('unreadable')
+            else if (outcome.error.code === 'attachment_kind_changed') setAvailability('kind_changed')
+            onNotify(outcome.error.message)
+          } else setAvailability('available')
           return
         }
-        const result = await window.rovai.attachments.open(campId, attachment.id)
+        const result = await window.rovai.attachments.open(locator)
+        setAvailability(result.availability)
         if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
         else if (result.error) onNotify('无法使用系统应用打开此附件')
       } else {
-        const result = await window.rovai.attachments.reveal(campId, attachment.id)
+        const result = await window.rovai.attachments.reveal(locator)
+        setAvailability(result.availability)
         if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
         else if (result.error) {
           onNotify(rendererPlatform === 'darwin'
@@ -7387,39 +7816,64 @@ function AttachmentCard({
     showAttachmentContextMenu(bounds?.left ?? 8, bounds?.bottom ?? 8)
   }
 
-  const projectionLabel = runtimeProjectionState === 'failed'
-    ? '队员读取不可用'
-    : runtimeProjectionState === 'pending'
-      || runtimeProjectionState === 'recovery_required'
-      ? '正在准备供队员读取'
-      : null
+  const availabilityLabel = availability === 'missing'
+    ? '文件已不可用'
+    : availability === 'unreadable'
+      ? '文件无法读取'
+      : availability === 'kind_changed'
+        ? '文件类型已变化'
+        : null
 
-  const content = (
-    <>
-      <span className="attachment-visual" aria-hidden="true">
-        {attachment.kind === 'directory'
-          ? <AttachmentFolderGlyph />
-          : previewUrl
-          ? <img src={previewUrl} alt="" />
-          : attachment.previewKind === 'image' && !previewFailed ? <i className="attachment-loading" /> : '文'}
-      </span>
-      <span className="attachment-copy">
-        <strong title={attachment.displayName}>{attachment.displayName}</strong>
-        <small>
-          {projectionLabel ?? (attachment.kind === 'directory'
-            ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
-            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`)}
-        </small>
-      </span>
-    </>
-  )
+  const detailLabel = availabilityLabel ?? (agentPresentation
+    ? attachment.kind === 'directory'
+      ? `${attachment.fileCount === null ? '文件数未知' : `${attachment.fileCount} 个文件`} · ${attachment.byteSize === null ? '大小未知' : formatByteSize(attachment.byteSize)}`
+      : `${attachmentTypeLabel(attachment.mediaType)} · ${attachment.byteSize === null ? '大小未知' : formatByteSize(attachment.byteSize)}`
+    : null)
+
+  const content = composerImage
+    ? (
+        <span className="attachment-visual composer-image-preview" aria-hidden="true">
+          {previewUrl
+            ? <img src={previewUrl} alt="" />
+            : !previewFailed ? <i className="attachment-loading" /> : <b>!</b>}
+        </span>
+      )
+    : (
+        <>
+          {agentPresentation
+            ? <AgentArtifactIcon type={displayClassification.agentDisplayType} />
+            : (
+                <UserFileIcon
+                  type={displayClassification.userDisplayType === 'image'
+                    ? 'document'
+                    : displayClassification.userDisplayType}
+                />
+              )}
+          <span className="attachment-copy">
+            <span className="attachment-title-line">
+              <strong title={attachment.displayName}>{baseName}</strong>
+              <FileExtensionLabel>{formatLabel}</FileExtensionLabel>
+            </span>
+            {detailLabel && <small>{detailLabel}</small>}
+          </span>
+          {agentPresentation && (
+            <span className="agent-file-open-cue" aria-hidden="true">
+              <svg viewBox="0 0 18 18">
+                <path d="M10.3 3.3h4.4v4.4M14.5 3.5 8.6 9.4" />
+                <path d="M13.5 9.5v4.3H3.8v-9.7h4.3" />
+              </svg>
+              <span>打开</span>
+            </span>
+          )}
+        </>
+      )
 
   return (
     <div
-      className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''} ${projectionLabel ? `attachment-projection-${runtimeProjectionState}` : ''}`}
-      aria-label={projectionLabel ? `${attachment.displayName}：${projectionLabel}` : undefined}
+      className={`attachment-card ${presentation === 'composer' ? 'composer-attachment-card' : presentation} ${composerImage ? 'composer-image-attachment' : ''} type-${displayClassification.agentDisplayType} ${availabilityLabel ? `attachment-availability-${availability}` : ''}`}
+      aria-label={availabilityLabel ? `${attachment.displayName}：${availabilityLabel}` : undefined}
       data-context-open={contextMenuOpen ? 'true' : undefined}
-      onContextMenu={timeline && campId
+      onContextMenu={timeline
         ? (event) => {
             event.preventDefault()
             if (event.clientX === 0 && event.clientY === 0) showAttachmentKeyboardMenu()
@@ -7427,7 +7881,7 @@ function AttachmentCard({
           }
         : undefined}
     >
-      {timeline && campId
+      {timeline
         ? (
             <>
               <button
@@ -7566,6 +8020,51 @@ function AttachmentRevealGlyph(): JSX.Element {
   )
 }
 
+function ComposerAttachmentStrip({ children }: { children: ReactNode }): JSX.Element {
+  const stripRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+    const onWheel = (event: WheelEvent): void => scrollAttachmentStripOnWheel(strip, event)
+    strip.addEventListener('wheel', onWheel, { passive: false })
+    return () => strip.removeEventListener('wheel', onWheel)
+  }, [])
+  return (
+    <div
+      className="composer-attachment-strip"
+      role="group"
+      aria-label="待发送附件，使用左右方向键浏览"
+      tabIndex={0}
+      onKeyDown={scrollAttachmentStripOnKeyDown}
+      ref={stripRef}
+    >
+      {children}
+    </div>
+  )
+}
+
+function scrollAttachmentStripOnKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  const strip = event.currentTarget
+  const step = Math.max(144, Math.round(strip.clientWidth * 0.64))
+  if (event.key === 'ArrowLeft') strip.scrollBy({ left: -step })
+  else if (event.key === 'ArrowRight') strip.scrollBy({ left: step })
+  else if (event.key === 'Home') strip.scrollTo({ left: 0 })
+  else if (event.key === 'End') strip.scrollTo({ left: strip.scrollWidth })
+  else return
+  event.preventDefault()
+}
+
+function scrollAttachmentStripOnWheel(strip: HTMLDivElement, event: WheelEvent): void {
+  if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY) || event.deltaY === 0) return
+  const nextScrollLeft = Math.max(0, Math.min(
+    strip.scrollWidth - strip.clientWidth,
+    strip.scrollLeft + event.deltaY
+  ))
+  if (nextScrollLeft === strip.scrollLeft) return
+  strip.scrollLeft = nextScrollLeft
+  event.preventDefault()
+}
+
 function AttachmentPlaceholder({
   name,
   kind,
@@ -7580,7 +8079,7 @@ function AttachmentPlaceholder({
   onRemove?: () => void
 }): JSX.Element {
   return (
-    <div className={`attachment-card attachment-${state}`}>
+    <div className={`attachment-card composer-attachment-card attachment-${state}`}>
       <span className="attachment-visual" aria-hidden="true">
         {kind === 'directory'
           ? (
@@ -7597,7 +8096,7 @@ function AttachmentPlaceholder({
         <strong title={name}>{name}</strong>
         <small title={detail}>
           {state === 'preparing'
-            ? kind === 'directory' ? '正在创建只读快照…' : '正在安全接入…'
+            ? kind === 'directory' ? '正在添加文件夹…' : '正在添加…'
             : detail ?? '附件处理失败'}
         </small>
       </span>
@@ -7608,7 +8107,8 @@ function AttachmentPlaceholder({
   )
 }
 
-function attachmentTypeLabel(mediaType: string): string {
+function attachmentTypeLabel(mediaType: string | null): string {
+  if (!mediaType) return '文件'
   if (mediaType === 'inode/directory') return '文件夹'
   if (mediaType.startsWith('image/')) return '图片'
   if (mediaType === 'application/pdf') return 'PDF'
@@ -7620,12 +8120,9 @@ function attachmentTypeLabel(mediaType: string): string {
 function attachmentErrorMessage(error: unknown): string {
   const message = readErrorMessage(error)
   if (message.includes('25 MiB')) return '文件超过 25 MiB'
-  if (message.includes('count limit')) return '一条消息最多 10 个附件'
-  if (message.includes('total attachment') || message.includes('64 MiB')) return '附件总大小超过 64 MiB'
-  if (message.includes('2000-file')) return '文件夹内文件数量超过 2,000 个'
-  if (message.includes('4000-entry')) return '文件夹内项目数量超过 4,000 个'
-  if (message.includes('32-level')) return '文件夹层级超过 32 层'
-  if (message.includes('symbolic link') || message.includes('symlinks')) return '文件夹包含不支持的软链接'
+  if (message.includes('attachment_unreadable')) return '文件当前无法读取'
+  if (message.includes('attachment_kind_changed')) return '文件类型已变化'
+  if (message.includes('legacy_draft.attachments_locked')) return '请先发送或移除旧版草稿附件'
   if (message.includes('unsupported item')) return '文件夹包含不支持的项目'
   if (message.includes('regular files and directories')) return '仅支持普通文件或文件夹'
   return '安全接入失败，可移除后重试'
@@ -8398,46 +8895,36 @@ function RuntimeRetryNotice({ diagnostic }: {
   )
 }
 
-export function RunExecutionDisclosure({
+type RunExecutionHistoryStatus = 'idle' | 'loading' | 'ready' | 'failed'
+
+function RunExecutionContent({
   run,
   progress,
   campId,
-  truncatedEvidence = [],
-  loadedEvidenceCount = 0,
-  finalBody = null,
-  cancelling = false,
-  focused = false,
+  truncatedEvidence,
+  historicalEvidence,
+  historyStatus,
+  finalBody,
+  cancelling,
+  onLoadHistoricalEvidence,
   onResolveRecoveryBlocker,
-  resolvingRecoveryBlocker = false
+  resolvingRecoveryBlocker
 }: {
   run: AgentRunView
   progress?: LiveExecutionProgress
   campId: string
-  truncatedEvidence?: AgentRunExecutionEvidenceView[]
-  loadedEvidenceCount?: number
-  finalBody?: string | null
-  cancelling?: boolean
-  focused?: boolean
+  truncatedEvidence: AgentRunExecutionEvidenceView[]
+  historicalEvidence: AgentRunExecutionEvidenceView[] | null
+  historyStatus: RunExecutionHistoryStatus
+  finalBody: string | null
+  cancelling: boolean
+  onLoadHistoricalEvidence(): Promise<void>
   onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
-  resolvingRecoveryBlocker?: boolean
-}): JSX.Element | null {
+  resolvingRecoveryBlocker: boolean
+}): JSX.Element {
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
-  const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
-  const cancellingActive = nonTerminal && cancelling && focused
   const publicFailure = run.status === 'failed' ? run.failure : null
-  const hasPublicFailure = publicFailure !== null
-  const [open, setOpen] = useState(active || hasPublicFailure)
-  const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
-  const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
-  useEffect(() => {
-    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(
-      currentOpen,
-      active || cancellingActive || hasPublicFailure
-    ))
-  }, [active, cancellingActive, hasPublicFailure])
-
-  const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
-  const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
+  const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
   const historicalProgress = useMemo(() => historicalEvidence
     ? buildLiveExecutionProgress(
         historicalEvidence.map(liveRuntimeEventFromExecutionEvidence),
@@ -8473,32 +8960,8 @@ export function RunExecutionDisclosure({
         item.kind === 'diagnostic' ? item.diagnostic : latest, null)
     : null
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
-  const hasProgress = processItems.length > 0
-  const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
-  if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning && !hasPublicFailure) {
-    return null
-  }
 
-  const loadHistoricalEvidence = async (): Promise<void> => {
-    if (!historyNeeded || historyStatus === 'loading' || historyStatus === 'ready') return
-    setHistoryStatus('loading')
-    try {
-      const evidence = await loadCompleteAgentRunExecutionEvidence(
-        (params) => window.rovai.request<AgentRunExecutionEvidencePage>(
-          'agentRunEvidence.list',
-          params
-        ),
-        campId,
-        run.id
-      )
-      setHistoricalEvidence(evidence)
-      setHistoryStatus('ready')
-    } catch {
-      setHistoryStatus('failed')
-    }
-  }
-
-  const content = (
+  return (
     <div className="process-content">
       {publicFailure && <RuntimeFailureNotice failure={publicFailure} />}
       {showUnsettledWarning && (
@@ -8593,7 +9056,7 @@ export function RunExecutionDisclosure({
       {historyStatus === 'failed' && (
         <div className="process-action history-load-error" role="status">
           <span>完整执行过程读取失败。</span>
-          <button className="quiet-button compact" type="button" onClick={() => void loadHistoricalEvidence()}>
+          <button className="quiet-button compact" type="button" onClick={() => void onLoadHistoricalEvidence()}>
             重试
           </button>
         </div>
@@ -8642,6 +9105,102 @@ export function RunExecutionDisclosure({
       )}
     </div>
   )
+}
+
+export function RunExecutionDisclosure({
+  run,
+  progress,
+  campId,
+  truncatedEvidence = [],
+  loadedEvidenceCount = 0,
+  finalBody = null,
+  cancelling = false,
+  focused = false,
+  onResolveRecoveryBlocker,
+  resolvingRecoveryBlocker = false
+}: {
+  run: AgentRunView
+  progress?: LiveExecutionProgress
+  campId: string
+  truncatedEvidence?: AgentRunExecutionEvidenceView[]
+  loadedEvidenceCount?: number
+  finalBody?: string | null
+  cancelling?: boolean
+  focused?: boolean
+  onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
+  resolvingRecoveryBlocker?: boolean
+}): JSX.Element | null {
+  const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
+  const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
+  const cancellingActive = nonTerminal && cancelling && focused
+  const publicFailure = run.status === 'failed' ? run.failure : null
+  const hasPublicFailure = publicFailure !== null
+  const [open, setOpen] = useState(active || hasPublicFailure)
+  const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
+  const [historyStatus, setHistoryStatus] = useState<RunExecutionHistoryStatus>('idle')
+  const shouldActivateContent = open || focused || nonTerminal
+  const [contentMounted, setContentMounted] = useState(() => shouldActivateContent)
+  useEffect(() => {
+    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(
+      currentOpen,
+      active || cancellingActive || hasPublicFailure
+    ))
+  }, [active, cancellingActive, hasPublicFailure])
+  useEffect(() => {
+    if (shouldActivateContent) setContentMounted(true)
+  }, [shouldActivateContent])
+
+  const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
+  const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
+  const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
+  const hasDisclosureWithoutProgress = nonTerminal
+    || durableEvidenceCount > 0
+    || truncatedEvidence.length > 0
+    || showUnsettledWarning
+    || hasPublicFailure
+  if (!hasDisclosureWithoutProgress) {
+    const finalKey = finalBody ? comparableMessageText(finalBody) : null
+    const hasProgress = (progress?.items ?? []).some((item) =>
+      item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
+    )
+    if (!hasProgress) return null
+  }
+
+  const loadHistoricalEvidence = async (): Promise<void> => {
+    if (!historyNeeded || historyStatus === 'loading' || historyStatus === 'ready') return
+    setHistoryStatus('loading')
+    try {
+      const evidence = await loadCompleteAgentRunExecutionEvidence(
+        (params) => window.rovai.request<AgentRunExecutionEvidencePage>(
+          'agentRunEvidence.list',
+          params
+        ),
+        campId,
+        run.id
+      )
+      setHistoricalEvidence(evidence)
+      setHistoryStatus('ready')
+    } catch {
+      setHistoryStatus('failed')
+    }
+  }
+
+  const shouldMountContent = contentMounted || shouldActivateContent
+  const content = shouldMountContent ? (
+    <RunExecutionContent
+      run={run}
+      progress={progress}
+      campId={campId}
+      truncatedEvidence={truncatedEvidence}
+      historicalEvidence={historicalEvidence}
+      historyStatus={historyStatus}
+      finalBody={finalBody}
+      cancelling={cancelling}
+      onLoadHistoricalEvidence={loadHistoricalEvidence}
+      onResolveRecoveryBlocker={onResolveRecoveryBlocker}
+      resolvingRecoveryBlocker={resolvingRecoveryBlocker}
+    />
+  ) : null
 
   if (cancellingActive) {
     return <div className="execution-disclosure run-live is-cancelling">{content}</div>
@@ -8656,7 +9215,10 @@ export function RunExecutionDisclosure({
       onToggle={(event) => {
         const nextOpen = event.currentTarget.open
         setOpen(nextOpen)
-        if (nextOpen) void loadHistoricalEvidence()
+        if (nextOpen) {
+          setContentMounted(true)
+          void loadHistoricalEvidence()
+        }
       }}
     >
       <summary>

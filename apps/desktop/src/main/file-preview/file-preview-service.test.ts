@@ -243,7 +243,7 @@ describe('FilePreviewService', () => {
       rootPath: root, basePath: root, candidatePath: root, allowChildren: kind !== 'attachment'
     })
     const input: OpenFilePreviewRequest = kind === 'attachment'
-      ? { kind, campId: 'camp-1', attachmentId: 'attachment-1' }
+      ? { kind, campId: 'camp-1', locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
       : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
     expect(await service.open(1, input)).toMatchObject({ ok: false, error: { code: 'not_regular_file' } })
     expect(native.revealPath).not.toHaveBeenCalled()
@@ -473,7 +473,7 @@ describe('FilePreviewService', () => {
       rootPath: root, basePath: root, candidatePath: outsideFile, allowChildren: kind !== 'attachment'
     })
     const input: OpenFilePreviewRequest = kind === 'attachment'
-      ? { kind, campId: 'camp-1', attachmentId: 'attachment-1' }
+      ? { kind, campId: 'camp-1', locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
       : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
 
     const opened = await service.open(1, input)
@@ -594,7 +594,7 @@ describe('FilePreviewService', () => {
           kind: 'file_target',
           campId: input.campId,
           sourceKind: input.kind,
-          sourceIdentity: input.attachmentId,
+          sourceIdentity: input.locator.attachmentRefId,
           rootPath: root,
           basePath: root,
           candidatePath: file,
@@ -606,7 +606,8 @@ describe('FilePreviewService', () => {
     const service = new FilePreviewService(authority, native, registry)
     await service.bindCamp(1, 'camp-1')
     const opened = await service.open(1, {
-      kind: 'attachment', campId: 'camp-1', attachmentId: 'attachment-1'
+      kind: 'attachment', campId: 'camp-1',
+      locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' }
     })
     expect(opened.ok && opened.value.kind === 'file_preview'
       ? opened.value.file

@@ -1599,6 +1599,7 @@ try {
       && lightweightReplyInspection.lineBorderWidth === '0px'
       && lightweightReplyInspection.lineBackgroundColor === 'rgba(0, 0, 0, 0)'
       && lightweightReplyInspection.lineBoxShadow === 'none'
+      && lightweightReplyInspection.replyIconAbsent
       && lightweightReplyInspection.copyWhiteSpace === 'nowrap'
       && lightweightReplyInspection.copyOverflow === 'hidden'
       && lightweightReplyInspection.authorFlexShrink === '0'
@@ -3378,6 +3379,7 @@ async function inspectLightweightReply(cdp) {
       lineBorderWidth: lineStyle.borderTopWidth,
       lineBackgroundColor: lineStyle.backgroundColor,
       lineBoxShadow: lineStyle.boxShadow,
+      replyIconAbsent: !line.querySelector(':scope > svg'),
       copyWhiteSpace: copyStyle.whiteSpace,
       copyOverflow: copyStyle.overflow,
       authorFlexShrink: authorStyle.flexShrink,

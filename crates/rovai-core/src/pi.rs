@@ -1,5 +1,4 @@
 mod host;
-mod mcp;
 
 use std::{path::Path, time::Duration};
 
@@ -21,10 +20,13 @@ use tokio::io::AsyncBufRead;
 use crate::acp::CompletedAcpAction;
 
 pub use host::{PiAgentRunRuntimeRequest, PiRpcRuntimeAdapter, PiRuntime};
-pub(crate) use host::{PiHost, machine_ready_probe};
+pub(crate) use host::{
+    PiHost, PiPromptImage, PreparedPiPromptImage, PreparedPiPromptTransform, machine_ready_probe,
+    prepare_prompt_images,
+};
 
 pub(crate) const PI_PROTOCOL_VERSION: &str = "pi-jsonl-rpc-v1";
-pub(crate) const PI_HOST_EXTENSION_VERSION: &str = "rovai-pi-host-v3";
+pub(crate) const PI_HOST_EXTENSION_VERSION: &str = "rovai-pi-host-v5";
 const PI_APPROVAL_SCHEMA_VERSION: i64 = 1;
 pub(super) const PI_MAX_JSONL_RECORD_BYTES: usize = 4 * 1024 * 1024;
 pub(super) const PI_COMMAND_TIMEOUT: Duration = Duration::from_secs(45);
@@ -46,6 +48,13 @@ pub enum PiIncoming {
         agent_run_id: String,
         execution_epoch: i64,
     },
+    Diagnostic {
+        host_instance_id: String,
+        agent_run_id: Option<String>,
+        execution_epoch: Option<i64>,
+        phase: String,
+        message: String,
+    },
     IngressFlushed {
         acknowledgement: tokio::sync::oneshot::Sender<()>,
     },
@@ -58,7 +67,6 @@ pub struct InterceptedPiActionRequest {
     pub input: CanonicalActionInput,
     pub runtime_request: RuntimeActionRequestBinding,
     pub reason: Option<String>,
-    pub mcp_envelope: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -116,7 +124,7 @@ pub fn intercepted_action_request(
 ) -> Result<InterceptedPiActionRequest> {
     if request.get("type").and_then(Value::as_str) != Some("extension_ui_request")
         || request.get("method").and_then(Value::as_str) != Some("confirm")
-        || request.get("title").and_then(Value::as_str) != Some("Rovai managed approval")
+        || request.get("title").and_then(Value::as_str) != Some("Rovai partial approval")
     {
         bail!("Pi request is not a managed Approval confirmation");
     }
@@ -132,7 +140,7 @@ pub fn intercepted_action_request(
         .get("kind")
         .and_then(Value::as_str)
         .context("Pi Approval request omitted kind")?;
-    let (tool_call_id, reason, input, mcp_envelope) = if kind == "native_tool" {
+    let (tool_call_id, reason, input) = if kind == "native_tool" {
         let envelope: PiApprovalEnvelope = serde_json::from_value(envelope_value.clone())
             .context("Pi native Approval envelope is invalid")?;
         validate_common_envelope(
@@ -207,37 +215,6 @@ pub fn intercepted_action_request(
             envelope.tool_call_id,
             format!("Pi {} tool request", envelope.tool_name),
             input,
-            None,
-        )
-    } else if kind == "mcp_tool" {
-        validate_mcp_envelope_common(
-            &envelope_value,
-            agent_run_id,
-            execution_epoch,
-            host_instance_id,
-            host_binding_generation,
-            native_binding_generation,
-        )?;
-        let tool_call_id = required_string(&envelope_value, "toolCallId")?.to_string();
-        let server = required_string(&envelope_value, "serverName")?.to_string();
-        let tool = required_string(&envelope_value, "toolName")?.to_string();
-        let arguments = envelope_value
-            .get("arguments")
-            .cloned()
-            .context("Pi MCP Approval request omitted arguments")?;
-        let expected_arguments_digest = required_string(&envelope_value, "argumentsDigest")?;
-        if canonical_json_digest(&arguments)? != expected_arguments_digest {
-            bail!("Pi MCP Approval arguments digest is invalid");
-        }
-        (
-            tool_call_id,
-            format!("Pi MCP {server}/{tool} Tool request"),
-            CanonicalActionInput::McpTool {
-                server,
-                tool,
-                arguments,
-            },
-            Some(envelope_value.clone()),
         )
     } else {
         bail!("Pi Approval request names an unknown managed kind");
@@ -296,7 +273,6 @@ pub fn intercepted_action_request(
             options,
         },
         reason: Some(reason),
-        mcp_envelope,
     })
 }
 
@@ -387,44 +363,6 @@ fn validate_common_envelope(
         bail!("Pi managed Extension identity or binding is incompatible");
     }
     Ok(())
-}
-
-fn validate_mcp_envelope_common(
-    envelope: &Value,
-    agent_run_id: &str,
-    execution_epoch: i64,
-    host_instance_id: &str,
-    host_binding_generation: u64,
-    native_binding_generation: i64,
-) -> Result<()> {
-    validate_common_envelope(
-        envelope
-            .get("schemaVersion")
-            .and_then(Value::as_i64)
-            .context("Pi MCP envelope omitted schemaVersion")?,
-        required_string(envelope, "extensionVersion")?,
-        required_string(envelope, "kind")?,
-        "mcp_tool",
-        required_string(envelope, "hostInstanceId")?,
-        envelope
-            .get("hostBindingGeneration")
-            .and_then(Value::as_u64)
-            .context("Pi MCP envelope omitted hostBindingGeneration")?,
-        required_string(envelope, "agentRunId")?,
-        envelope
-            .get("executionEpoch")
-            .and_then(Value::as_i64)
-            .context("Pi MCP envelope omitted executionEpoch")?,
-        envelope
-            .get("nativeBindingGeneration")
-            .and_then(Value::as_i64)
-            .context("Pi MCP envelope omitted nativeBindingGeneration")?,
-        agent_run_id,
-        execution_epoch,
-        host_instance_id,
-        host_binding_generation,
-        native_binding_generation,
-    )
 }
 
 pub fn rejection_response(request: &Value) -> Result<Value> {
@@ -613,7 +551,6 @@ fn public_tool_kind(name: Option<&str>) -> Option<&'static str> {
         Some("bash") => Some("execute"),
         Some("write" | "edit") => Some("edit"),
         Some("read" | "grep" | "find" | "ls") => Some("read"),
-        Some(name) if name.starts_with("mcp_") => Some("mcp_tool"),
         _ => None,
     }
 }
@@ -688,10 +625,18 @@ mod tests {
     }
 
     #[test]
-    fn managed_extension_has_no_claude_provider_overlay() {
+    fn managed_extension_has_no_provider_overlay_or_mcp_bridge() {
         let source = include_str!("pi/managed-host.ts");
         assert!(!source.contains("PI_CODING_AGENT_DIR"));
         assert!(!source.contains("ANTHROPIC_AUTH_TOKEN"));
+        assert!(!source.contains("mcpTools"));
+        assert!(!source.contains("mcpProjectionDigest"));
+        assert!(!source.contains("registerTool"));
+        assert!(!source.contains("Rovai MCP bridge"));
+        assert!(!source.contains("pi.setActiveTools"));
+        assert!(source.contains("GOVERNED_NATIVE_TOOLS"));
+        assert!(source.contains("ctx.isProjectTrusted()"));
+        assert!(source.contains("SettingsManager.create(cwd, getAgentDir(), { projectTrusted })"));
         assert!(source.contains("Rovai managed input receipt"));
     }
 
@@ -721,7 +666,7 @@ mod tests {
         let request = json!({
             "type": "extension_ui_request",
             "method": "confirm",
-            "title": "Rovai managed approval",
+            "title": "Rovai partial approval",
             "id": "ui-1",
             "message": serde_json::to_string(&envelope).unwrap(),
         });
@@ -784,7 +729,7 @@ mod tests {
         let request = json!({
             "type": "extension_ui_request",
             "method": "confirm",
-            "title": "Rovai managed approval",
+            "title": "Rovai partial approval",
             "id": "ui-1",
             "message": serde_json::to_string(&envelope).unwrap(),
         });

@@ -620,55 +620,44 @@ async function seedHistoricalPublicA2a(coreClient, input) {
 
 async function createHistoricalAttachmentMessage(request, input) {
   const draft = await request('camp.composerDraft.get', { campId: input.campId })
-  const prepared = await request('camp.attachments.prepareFromPath', {
+  const referenced = await request('camp.sourceAttachments.addFromPath', {
     campId: input.campId,
     expectedRevision: draft.revision,
     sourcePath: input.sourcePath,
     displayName: 'historical-attachment.txt'
   })
-  const attachment = prepared.attachments?.[0]
-  if (prepared.attachments?.length !== 1
-      || attachment?.state !== 'ready'
-      || attachment?.previewKind !== 'none') {
-    throw new Error(`Historical attachment preparation failed: ${JSON.stringify(prepared)}`)
+  const attachment = referenced.attachments?.[0]
+  if (referenced.attachments?.length !== 1
+      || attachment?.previewKind !== 'none'
+      || attachment?.availability !== 'unknown') {
+    throw new Error(`Historical source attachment reference failed: ${JSON.stringify(referenced)}`)
   }
   const saved = await request('camp.composerDraft.save', {
     campId: input.campId,
-    expectedRevision: prepared.revision,
+    expectedRevision: referenced.revision,
     content: [{ kind: 'text', text: input.marker }]
   })
-  await request('camp.messages.send', {
+  const sent = await request('camp.messages.send', {
     commandId: crypto.randomUUID(),
     campId: input.campId,
     draftRevision: saved.revision,
     execution: null
   })
-  const deadline = Date.now() + 60_000
-  let message
-  let projectedAttachment
-  while (Date.now() < deadline) {
-    const snapshot = await request('camps.snapshot', { campId: input.campId })
-    message = snapshot.messages.find((candidate) =>
-      candidate.body === input.marker
-        && candidate.attachments?.some((candidateAttachment) => candidateAttachment.id === attachment.id)
-    )
-    projectedAttachment = message?.attachments?.find((candidate) => candidate.id === attachment.id)
-    if (projectedAttachment?.runtimeProjectionState === 'available') break
-    if (projectedAttachment?.runtimeProjectionState === 'failed') {
-      throw new Error(`Historical attachment Runtime projection failed: ${JSON.stringify(projectedAttachment)}`)
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100))
-  }
+  const messageId = sent.commandResult?.payload?.campMessageId
+  const snapshot = await request('camps.snapshot', { campId: input.campId })
+  const message = snapshot.messages.find((candidate) => candidate.id === messageId)
+  const projectedAttachment = message?.attachments?.find((candidate) => candidate.id === attachment.id)
   if (!message
-      || projectedAttachment?.runtimeProjectionState !== 'available'
+      || projectedAttachment?.availability !== 'unknown'
       || projectedAttachment?.kind !== 'file'
-      || projectedAttachment.fileCount !== 1) {
+      || projectedAttachment.fileCount !== 1
+      || JSON.stringify(message).includes(input.sourcePath)) {
     throw new Error(`Historical attachment message was not persisted with its public shape: ${JSON.stringify({
       attachment,
       message
     })}`)
   }
-  return { messageId: message.id, attachmentId: attachment.id }
+  return { messageId, attachmentId: attachment.id }
 }
 
 async function startVerificationRun(coreClient, specification, resumed) {
@@ -1634,7 +1623,6 @@ function startCore(dataDirectory) {
       ...(selectedAdapters.has('pi')
         ? {
             PI_CODING_AGENT_DIR: piAgentDir,
-            ROVAI_PI_RUNTIME_QUALIFICATION_ADAPTER: 'pi'
           }
         : {})
     },

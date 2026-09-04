@@ -396,4 +396,33 @@ describe('Agent leading Member Mention Markdown rendering', () => {
     expect(separated).toContain('data-inline-body="false"')
     expect(separated).toContain('<p>另一段 <strong>正文</strong>。</p>')
   })
+
+  it('renders a user message over 20 explicit lines as 19 lines plus a static ellipsis', () => {
+    const body = Array.from(
+      { length: 21 },
+      (_, index) => `COLLAPSE-LINE-${String(index + 1).padStart(2, '0')}`
+    ).join('\n')
+    const markup = renderMessage([{ kind: 'text', text: body }], body, 'user')
+
+    expect(markup).toContain('COLLAPSE-LINE-19')
+    expect(markup).not.toContain('COLLAPSE-LINE-20')
+    expect(markup).not.toContain('COLLAPSE-LINE-21')
+    expect(markup).toContain('class="message-long-ellipsis" aria-hidden="true"')
+    expect(markup).toContain('<span class="sr-only">其余内容已省略，共 21 行</span>')
+    expect(markup).toContain('>…</span>')
+    expect(markup).not.toContain('message-long-toggle')
+    expect(markup).not.toContain('aria-label="展开完整消息')
+    expect(markup).not.toContain('>…</button>')
+  })
+
+  it('keeps exactly 20 explicit user-message lines intact', () => {
+    const body = Array.from(
+      { length: 20 },
+      (_, index) => `BOUNDARY-LINE-${String(index + 1).padStart(2, '0')}`
+    ).join('\n')
+    const markup = renderMessage([{ kind: 'text', text: body }], body, 'user')
+
+    expect(markup).toContain('BOUNDARY-LINE-20')
+    expect(markup).not.toContain('message-long-ellipsis')
+  })
 })

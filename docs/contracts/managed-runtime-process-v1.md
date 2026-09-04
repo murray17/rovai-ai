@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v1
 status: accepted
 source_version: v1.05
-last_updated: 2026-08-25
+last_updated: 2026-09-04
 ---
 
 # Managed Runtime Process v1
@@ -12,7 +12,9 @@ last_updated: 2026-08-25
 [ADR-0211](../versions/v1.05/decisions.md#adr-0211)。Runtime terminal 与领域终态仍由既有 AgentRun、
 Fleet 与 Planned Shutdown 合同拥有；进程退出不是 Provider outcome。macOS User Automation credential 隔离的
 修正理由见[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)。Windows command shim 扩展见
-[V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)。
+[V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)。ACP Terminal derived child 的最终请求上下文解析理由见
+[V1.39-D08](../versions/v1.39/decisions.md#v1-39-d08)；旧 Pi MCP bridge 对普通 capture 的 portable command 扩展已由
+[V1.39-D09](../versions/v1.39/decisions.md#v1-39-d09)撤销。
 
 ## 1. Module interface
 
@@ -20,7 +22,7 @@ Fleet 与 Planned Shutdown 合同拥有；进程退出不是 Provider outcome。
 
 ```text
 purpose
-absolute application path
+absolute application file
 argv[]
 working directory
 explicit environment snapshot
@@ -35,11 +37,25 @@ Core 初始化时可以向 Managed Process 配置实例级 protected local trees
 冻结，路径必须是规范化绝对路径，且不会作为普通 Runtime environment 字段暴露。所有 purpose 和 Adapter 共享
 同一保护集，调用方不能选择性关闭。
 
+capture 先验证 application 是已存在的绝对文件，再冻结工作目录与显式环境。普通 capture 不按 PATH 或 cwd 解析 bare/
+relative application；调用方必须先完成自身已有的 Runtime discovery 与 entrypoint qualification。argv 始终保持结构化
+字段，不经 Shell 拼接。
+
+从已准入 Host 派生 `RuntimeOneShot` 时，调用方必须把原始 application、结构化 argv、请求 cwd 与环境覆盖一起交给
+`derive_runtime_one_shot_command`。Managed Process 先验证最终 cwd、在 Host 环境快照上应用覆盖，再按最终
+cwd/environment 处理 application；调用方不得先按 Host 模板 cwd/PATH 解析再套用请求覆盖。Unix bare command 保持
+bare 到 launch，relative path 以最终 cwd 锚定并验证；Windows 使用最终 cwd/PATH 解析后重新进入完整
+`NativeExecutable | CommandShim` capture、identity 与原子 Job 链路。
+
 Windows launch policy 只允许以下封闭 entrypoint：
 
 - 经 Runtime Platform Admission 的 native `.exe`；
 - 已知 npm/pnpm Codex `.cmd` locator，经验证后解析到 platform package 内真实 native `codex.exe`；
 - bounded regular `.cmd` / `.bat` `CommandShim`，以明确的 `windows_command_shim` identity 启动。
+
+只有 `derive_runtime_one_shot_command` 的普通命令名与 cwd-relative 输入会在最终 Runtime `PATH`/cwd 中处理；Windows
+按 `.exe → .cmd → .bat` 的封闭顺序解析，然后进入上述相同 entrypoint、identity 与 Job 流程；不读取 PATHEXT，也不把
+命令交给通用 Shell。
 
 `.com`、`.ps1`、PowerShell fallback、PATHEXT 全量扩展和调用方自行拼装的通用 Shell command 不属于 v1。
 用户 prompt 仍只能经 stdin 投递；command shim argv 只承载 Adapter 声明的控制参数。
@@ -82,6 +98,12 @@ SQLite、日志和 Core 内部 handles 必须不可继承且不在列表中。�
 attribute 不可用、嵌套 Job 不兼容或 handle policy 不能证明时，输入投递前 fail closed。
 
 ## 3. Application and argv
+
+普通 `ManagedProcessLaunchSpec::capture` 的 application 必须是已存在的绝对文件。只有从已准入 Host 派生的
+`RuntimeOneShot` 可以携带普通命令名或 cwd-relative path：Unix 普通命令名使用最终 Runtime `PATH` 交给 OS 启动，
+相对 application 先锚定到最终 working directory；Windows 以最终 working directory/PATH 为基准按封闭候选解析。
+找不到入口或 spawn 失败时返回稳定 Managed Process error，由拥有语义的调用方决定结果；恢复或新 AgentRun 必须重新
+derive，不能复用上一轮解析后的设备路径。
 
 native entrypoint 的 `lpApplicationName` 必须是已打开并验证身份的绝对 Runtime executable path；command shim
 的 `lpApplicationName` 必须是上述已验证 System32 `cmd.exe`，shim 同时保持打开并在 CreateProcess 前复核。
@@ -138,6 +160,9 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 - 子进程只继承声明的 stdio，不继承 Job、token 或无关文件 handle；
 - `.cmd/.bat` 的内容或 interpreter identity 变化使旧 capture 失效，timeout/cancel 清理完整 shim child tree；
 - Windows rescan 的 inherited/HKCU/HKLM/known PATH 快照同时进入 discovery、Probe 与正式 AgentRun；
+- 普通 capture 拒绝 bare command 与 cwd-relative application；
+- ACP derived child 的 bare/relative command 使用请求最终覆盖后的 PATH/cwd；Windows `.cmd/.bat` 保持
+  `CommandShim` identity，不退化为 EXE-only 派生入口；
 - macOS process-group 启动、终止和 Fleet 回归保持；
 - macOS 受管 shell 及其后代不能读取或写入 `automation-v1` credential/context，但仍能读取保护树外的 fixture。
 
@@ -145,5 +170,7 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 
 - [ADR-0211](../versions/v1.05/decisions.md#adr-0211)
 - [V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)
+- [V1.39-D08](../versions/v1.39/decisions.md#v1-39-d08)
+- [V1.39-D09](../versions/v1.39/decisions.md#v1-39-d09)
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
 - [Planned Shutdown](../architecture/planned-shutdown.md)

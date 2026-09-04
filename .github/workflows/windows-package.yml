@@ -1,20 +1,6 @@
 name: Windows x64 package
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "apps/desktop/**"
-      - "build/**"
-      - "crates/rovai-core/**"
-      - "resources/**"
-      - "scripts/**"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/windows-package.yml"
   workflow_dispatch:
 
 permissions:
@@ -65,6 +51,5 @@ jobs:
             dist/latest.yml
             dist/windows-release-manifest.json
             dist/windows-verification-report.txt
-            dist/win-unpacked/**
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 3

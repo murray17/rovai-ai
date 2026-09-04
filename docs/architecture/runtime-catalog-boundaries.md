@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Runtime Catalog Boundaries
@@ -11,10 +11,10 @@ last_updated: 2026-09-03
 本文件定义 Runtime 名称出现在产品中时的权威分层。Catalog、Installation 与机器状态的长期边界见
 [Runtime Catalog 与 Installation 不变量](foundational-invariants.md#runtime-catalog-installation)。主机平台准入由
 [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)与
-[Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
+[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v30](../contracts/runtime-launch-and-verification-v30.md)。实测版本和能力只由
+[Runtime Launch and Verification v33](../contracts/runtime-launch-and-verification-v33.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -32,8 +32,9 @@ Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的�
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
 selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
 
-`qualified` 是进入 Product Runtime Availability 的前置条件；`not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，
-`unsupported` 显示平台不支持。两者都不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
+`qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 必须标明实验性并保留缺失资格证据，
+`not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，`unsupported` 显示平台不支持。
+后两者不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
 可以原样读取并在修改无关队员字段时原样保留，但不能修改 Runtime 子对象、重新保存默认值或执行。
 
 ## 可执行准入
@@ -60,7 +61,7 @@ continuation、Built-in Tool、Approval、cancel、terminal、process cleanup �
 
 ## 浅检测与按需深检
 
-只有平台准入为 `qualified` 的 Adapter 才参加 Core 启动和 Runtime 重扫。它们只建立 executable path、权限、metadata/fingerprint 与 Adapter 声明为无副作用的
+只有平台准入为 `qualified` 或 `preview` 的 Adapter 才参加 Core 启动和 Runtime 重扫。它们只建立 executable path、权限、metadata/fingerprint 与 Adapter 声明为无副作用的
 有界 one-shot 身份证据。所有 Runtime 都只有在命令成功、输出未超限且识别到基础版本/身份时才写入 `light_ready`；
 `found_uninspected` 既不是 light-ready，也不是 checking。`light_ready` 可以驱动成员 Runtime-default 配置和
 “可用”主状态，但只表示 executable 已通过轻度启动验证、可选择和尝试运行。认证、协议、模型、Session 与
@@ -171,7 +172,7 @@ response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 f
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v30](../contracts/runtime-launch-and-verification-v30.md)。
+[Runtime Launch and Verification v33](../contracts/runtime-launch-and-verification-v33.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -236,7 +237,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v30](../contracts/runtime-launch-and-verification-v30.md)，
+字段级行为见 [Runtime Launch and Verification v33](../contracts/runtime-launch-and-verification-v33.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## ACP Client Terminal 边界
@@ -249,7 +250,9 @@ Runtime 返回 `disabled` 或 `local_bridged`：只有后者才同时在 initial
 Bridge 只在当前 AgentRun owner、execution epoch、Session 与 Active Prompt fence 内创建本地进程。进程从已
 admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境、
 macOS protected-tree deny 和平台进程树所有权。省略 cwd 时使用 execution root；显式 cwd 只要求为已存在的绝对
-目录，不做 execution-root containment。Runtime 的 sandbox/permission mode 与操作系统拥有 Shell/文件权限，Core
+目录，不做 execution-root containment。原始 application 与结构化 argv 会和请求 cwd/env 一次性交给 Managed Process：
+先应用最终上下文，再解析 bare/relative command；Windows `.cmd/.bat` 重新进入 CommandShim identity，而不是 EXE-only
+派生路径。Runtime 的 sandbox/permission mode 与操作系统拥有 Shell/文件权限，Core
 不再通过 `scoped_path()` 建立第二层 Terminal cwd allowlist。Run cancel、detach、Host EOF/shutdown 与 fleet reap
 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr 使用有界私有 buffer，Terminal wire、
 output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
@@ -302,7 +305,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v30](../contracts/runtime-launch-and-verification-v30.md)，证据状态见
+[Runtime Launch and Verification v33](../contracts/runtime-launch-and-verification-v33.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -345,30 +348,44 @@ Pi 是独立 `pi-jsonl-rpc-v1` Product Runtime，不进入 ACP initialize/storag
 显式模型来自 `get_available_models`，经 `set_model` 后由 `get_state` 精确核对。Pi 0.84.4 是当前最低兼容版本；
 这只定义 identity/version gate，不构成平台资格。
 
-Pi Host 进入统一 Fleet，策略为 `resident_multi_session`：一个 Host 串行服务多个 Native Session，并发 Run 使用
+正式 Pi Host 以 `pi --mode rpc --no-themes --extension <rovai-pi-host-v5>` 保留 Pi 原生 Built-in tools、Extensions、
+Skills、Context files、Prompt templates 与用户 Settings；自动 Extension 阻断 pre-input RPC 初始化时只允许一次
+`--no-extensions` 降级，显式 Rovai extension 仍加载。Pi Host 进入统一 Fleet，策略为 `resident_multi_session`：一个 Host 串行服务多个 Native Session，并发 Run 使用
 不同 Host。Pi 的复用 identity 是 canonical workspace + process digest；当前独占 lease 的 Camp/member invalidation
 scope 单独保存并随每次领取更新，因此允许同 workspace 跨 Camp 串行复用而不削弱删除失效。其他 Runtime 的
-Camp/member-scoped identity 不变。process key 不包含 Session、Bootstrap、Skills、MCP、model 或 Prompt。恢复只使用
+Camp/member-scoped identity 不变。创建 gate 按 `(agent_run_id, execution_epoch)` singleflight，registry 锁不跨 IO。
+process key 不包含 Session、Bootstrap、Skills、model 或 Prompt；MCP Assignment
+和配置完全不参与 Pi compatibility 或复用。恢复只使用
 Core 私有完整 canonical session file，实际调用 `switch_session` 后核对 full ID/file/cwd；公开 read/event/diagnostic
 只允许不可逆 digest。失败 Host 不进 LRU，continuity lost 后最多创建一个 replacement。Deep Probe 同样执行 exact
 switch，但用 `--session-dir <probe-root>/sessions` 隔离并清理测试 Session。
 
-Bootstrap 使用官方 managed extension 的 `before_agent_start`，在 Pi base system prompt 后追加当前完整 Bootstrap；
-Dynamic Context bytes 不变。extension 必须先提交绑定 Host/run/epoch/delivery/prompt/session、base/effective prompt、
-Bootstrap、Skill、MCP、active Tool 与 binding document 的 closed receipt；Core 验证 nonce 后在单一事务写入不可变
-receipt并接受 Input。Pi system prompt 不属于压缩的消息历史，compaction strategy 为
+Bootstrap 使用官方 managed extension 的 `before_agent_start`，在该 hook 位置的 Pi system prompt 后追加当前完整
+Bootstrap；后加载的原生 extension 仍可继续改写最终 provider payload，Rovai 不声明完整 attestation。V2 receipt 只
+验证 Host/run/epoch/binding/delivery/prompt/session/cwd、Bootstrap/binding digest 与 `bash/edit/write` 三个 governed
+Tool 可观察；不包含 Session file、完整 Tool/Skill catalog 或 system-prompt digest。Core 验证 nonce 后在单一事务写入
+不可变 receipt 并接受 Input。Pi system prompt 不属于压缩的消息历史，compaction strategy 为
 `native_system_prompt_preserved`，因此不加入 redelivery requirement 或 observer lease。
 
-managed Skill target 为 `.pi/skills`，每次 Session activation 重新发现并把 exact catalog 写入 receipt。Pi 没有内建
-MCP，但官方 extension Tool API 可安全桥接，因此 External MCP 为
-`AdditivePerRun / RovaiWins / CoreManaged`：Core 持有 stdio/Streamable HTTP transport、secret、cancel 与 cleanup，
-Pi 只看当前 Run proxy tools。Shell Approval 保存 Pi 实际解析的 shell path/args/argv-or-stdin transport，不伪造
-`/bin/zsh -lc`。`agent_settled` 是唯一成功边界；Usage 只读 terminal assistant `message_end.message.usage`，未知
+managed Skill target 为 `.pi/skills`，每次 Session activation 只证明本轮分配的 managed Skill 是实际 catalog 子集，
+Pi 原生与项目 Skill 可以共存。v5 extension 不固定 Active Tools；Rovai 只对 `bash/edit/write` 做 best-effort durable
+Approval，permission 为 `partial_managed`，未知 extension Tool 按 Pi 原生语义执行，这不是 sandbox。直接 human input
+的 prompt/skill slash command 由 Core 按 `get_commands` 显式展开并私有保存 transform evidence；当前已授权图片以
+exact bytes/MIME/order 经 `prompt.images` 发送并保存私有集合证据。Pi External MCP
+固定为 `Unsupported`：成员已有 Assignment 与全局配置保留，但 Pi dispatch 在 projection 前分流并静默忽略，不读取
+server 定义、不启动 server、不注册 proxy Tool、不产生 MCP receipt/approval/diagnostic，也不依赖 `mcp` optional
+subsystem。历史 Pi ContextManifest/receipt 中的 MCP 字段只作历史事实保留；新 Run 与恢复路径不解析、比较或重新激活。
+MCP 配置变化不影响 Pi compatibility、Host reuse、LRU 或 exact resume，切换到支持 MCP 的 Runtime 后原 Assignment
+继续生效。Shell Approval 保存 Pi 在当前 project trust 下实际解析的 shell path/args/argv-or-stdin transport，不伪造
+`/bin/zsh -lc`。stderr、startup prelude 与可恢复单条 malformed stdout 进入脱敏 Runtime diagnostic；持续 framing 或
+response identity 冲突才 poison Host。`agent_settled` 是唯一成功边界；Usage 只读 terminal assistant `message_end.message.usage`，未知
 reasoning/cost 保持 NULL。
 
-Pi Images、结构化 Web Search 与 Camp Fast 当前 unsupported/hidden。macOS arm64、macOS x64 和 Windows x64 均为
-`not_qualified / runtime_platform.qualification_evidence_missing`；本机 debug smoke 不进入正式 discovery、成员选择
-或 AgentRun。字段级行为见 [Runtime Launch and Verification v30](../contracts/runtime-launch-and-verification-v30.md)，
+Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Camp Fast 当前仍 unsupported/hidden。macOS arm64、
+macOS x64 和 Windows x64 均为
+`preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`；普通 discovery、检查、成员选择、
+Diagnostics 与 AgentRun 对三平台开放，UI 明确标记实验性，但不得称为 First-Class/qualified。字段级行为见
+[Runtime Launch and Verification v33](../contracts/runtime-launch-and-verification-v33.md)，
 证据状态见[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -395,7 +412,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `CoreEnforcedV1 + read_only Workspace` 恢复路径仍强制 `plan`。descriptor 的 `recommendedValue=default` 只是
 保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v30](../contracts/runtime-launch-and-verification-v30.md)。
+[Runtime Launch and Verification v33](../contracts/runtime-launch-and-verification-v33.md)。
 
 ACP Client FS 不把这些权限 descriptor 复制成 Core allowlist。`fs/read_text_file` / `fs/write_text_file` 对当前
 fenced Run 只作协议与参数校验，绝对路径按 Runtime 请求执行，相对路径以 execution root 解析；是否能读写、是否

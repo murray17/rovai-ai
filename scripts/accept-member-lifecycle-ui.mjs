@@ -1044,14 +1044,16 @@ try {
         controls: 'rgb(24, 29, 33)',
         inspector: 'rgb(23, 29, 33)',
         divider: 'rgb(83, 97, 107)',
-        rail: 'rgb(17, 22, 26)'
+        rail: 'rgb(17, 22, 26)',
+        userMessage: 'rgb(32, 39, 44)'
       }
     : {
         conversation: 'rgb(255, 255, 255)',
         controls: 'rgb(255, 255, 255)',
         inspector: 'rgb(255, 255, 255)',
         divider: 'rgb(199, 207, 214)',
-        rail: 'rgb(243, 244, 244)'
+        rail: 'rgb(243, 244, 244)',
+        userMessage: 'rgb(242, 243, 244)'
       }
   assert(
     campColorState.conversation === expectedCampColors.conversation
@@ -1059,36 +1061,57 @@ try {
       && campColorState.inspector === expectedCampColors.inspector
       && campColorState.divider === expectedCampColors.divider
       && campColorState.rail === expectedCampColors.rail
-      && campColorState.userMessage === 'rgba(0, 0, 0, 0)',
+      && campColorState.userMessage === expectedCampColors.userMessage,
     `Camp color scope drifted: ${JSON.stringify(campColorState)}`
   )
   const userMessageCopyState = await evaluate(running.cdp, `(() => {
     const article = document.querySelector('.conversation-bubble.user')
     const body = article?.querySelector('.message-body')
+    const surface = article?.querySelector('.message-surface')
+    const bubble = article?.querySelector('.message-bubble')
+    const avatar = article?.querySelector('.local-message-avatar')
+    const composer = document.querySelector('.composer-box')
     const button = article?.querySelector('.message-copy-button')
     const bodyRect = body?.getBoundingClientRect()
+    const surfaceRect = surface?.getBoundingClientRect()
+    const bubbleRect = bubble?.getBoundingClientRect()
+    const avatarRect = avatar?.getBoundingClientRect()
+    const composerRect = composer?.getBoundingClientRect()
     const buttonRect = button?.getBoundingClientRect()
     return {
       selectable: article ? getComputedStyle(article).userSelect === 'text' : false,
       label: button?.getAttribute('aria-label'),
-      insideContent: Boolean(article?.querySelector('.message-surface > .message-copy-button')),
+      insideActionRow: button?.parentElement?.classList.contains('message-actions') ?? false,
+      iconOnly: Boolean(button?.querySelector('svg')) && !(button?.textContent ?? '').trim(),
       absentFromMetadata: !article?.querySelector('.bubble-meta .message-copy-button'),
-      top: button ? getComputedStyle(button).top : null,
-      right: button ? getComputedStyle(button).right : null,
-      topOffset: bodyRect && buttonRect ? buttonRect.top - bodyRect.top : null,
+      belowBubble: Boolean(bubbleRect && buttonRect && buttonRect.top >= bubbleRect.bottom),
+      avatarOnRight: Boolean(bubbleRect && avatarRect && avatarRect.left >= bubbleRect.right),
+      widthRatio: bubbleRect && composerRect ? bubbleRect.width / composerRect.width : null,
+      surfaceTracksBubble: Boolean(surfaceRect && bubbleRect
+        && Math.abs(surfaceRect.width - bubbleRect.width) <= 0.75),
       rightOffset: bodyRect && buttonRect ? bodyRect.right - buttonRect.right : null
     }
   })()`)
   assert(
     userMessageCopyState.selectable
       && userMessageCopyState.label === '复制这条消息'
-      && userMessageCopyState.insideContent
+      && userMessageCopyState.insideActionRow
+      && userMessageCopyState.iconOnly
       && userMessageCopyState.absentFromMetadata
-      && userMessageCopyState.top === '-2px'
-      && userMessageCopyState.right === '0px'
+      && userMessageCopyState.belowBubble
+      && userMessageCopyState.avatarOnRight
+      && userMessageCopyState.widthRatio > 0
+      && userMessageCopyState.widthRatio < 0.4
+      && userMessageCopyState.surfaceTracksBubble
       && Math.abs(userMessageCopyState.rightOffset) <= 0.75,
     `User message is not selectable/copyable: ${JSON.stringify(userMessageCopyState)}`
   )
+  captures.userMessagePresentation = join(
+    outputDir,
+    'conversation-user-message-day-1440x920.png'
+  )
+  await focusElement(running.cdp, '.conversation-bubble.user .message-copy-button')
+  await capture(running.cdp, captures.userMessagePresentation)
   await mouseClick(running.cdp, '.conversation-bubble.user .message-copy-button')
   let snapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(

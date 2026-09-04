@@ -7,47 +7,47 @@ import {
 function ResourceReferenceGlyph({ kind }: { kind: ResourceReferenceVisualKind }): React.JSX.Element {
   switch (kind) {
     case 'web':
-      return <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.5 3.5 5.5 3.5 9S14.4 18.5 12 21M12 3C9.6 5.5 8.5 8.5 8.5 12S9.6 18.5 12 21" /></>
-    case 'markdown':
-      return <><path d="M4 4.5h7a3 3 0 0 1 3 3v12a4 4 0 0 0-4-2.5H4zM20 4.5h-3.5A2.5 2.5 0 0 0 14 7" /><path d="M7 9.5v4m0-4 2 2 2-2v4" /></>
-    case 'html':
-      return <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 8.5h18M6 6.2h.01M9 6.2h.01m1 6-2 2 2 2m4-4 2 2-2 2" /></>
-    case 'code':
-      return <><path d="m8 6-5 6 5 6m8-12 5 6-5 6m-3-15-2 18" /></>
-    case 'config':
-      return <><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h8" /><circle cx="11" cy="8" r="1.2" /><circle cx="14" cy="12" r="1.2" /><circle cx="10" cy="16" r="1.2" /></>
-    case 'text':
-      return <><path d="M6 3.5h8l4 4V20H6zM14 3.5v4h4M9 12h6m-6 3h6m-6 3h4" /></>
-    case 'image':
-      return <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8" cy="8" r="1.5" /><path d="m3 17 5-5 4 4 3-3 6 6" /></>
-    case 'svg':
-      return <><path d="M7 5h10v4H7zM5 15h4v4H5zm10 0h4v4h-4zM12 9v4m-5 2v-2h10v2" /><circle cx="12" cy="13" r="1" /></>
-    case 'patch':
-      return <><path d="M6 3.5h8l4 4V20H6zM14 3.5v4h4M9 11h6m-3-3v6m-3 4h6" /></>
+      return <><circle cx="12" cy="12" r="8.25" /><path d="M3.9 12h16.2" /><path d="M12 3.75c2.45 2.35 3.85 5.15 3.85 8.25S14.45 17.9 12 20.25c-2.45-2.35-3.85-5.15-3.85-8.25S9.55 6.1 12 3.75Z" /></>
     case 'folder':
-      return <><path d="M3 6.5h7l2 2h9v10.5H3z" /></>
+      return <><path d="M3.75 8.75a2 2 0 0 1 2-2H10l1.7 1.7h6.55a2 2 0 0 1 2 2v5.8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2Z" /><path d="M3.75 10.4h16.5" /></>
+    case 'markdown':
+      return <g strokeWidth={1.65}><path d="M6.8 5.5h7.8l2.6 2.6v10.2a1.7 1.7 0 0 1-1.7 1.7H6.8a1.7 1.7 0 0 1-1.7-1.7V7.2a1.7 1.7 0 0 1 1.7-1.7Z" /><path d="M14.5 5.7v2.6h2.5M8.2 11.2h7.4M8.2 14.1h7.4M8.2 17h4.8" /></g>
+    case 'html':
+      return <><path d="M6.75 5.25h10.5a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H6.75a2 2 0 0 1-2-2v-9.5a2 2 0 0 1 2-2Z" /><path d="m9.2 9.25-2 2 2 2" /><path d="m14.8 9.25 2 2-2 2" /><path d="m13.1 8.7-2.2 5.1" /></>
+    case 'code':
+      return <g strokeWidth={1.65}><path d="m8.8 7.6-3.7 4.4 3.7 4.4" /><path d="m15.2 7.6 3.7 4.4-3.7 4.4" /><path d="m13.7 5.4-3.4 13.2" /></g>
+    case 'config':
+      return <><path d="M6.75 5.75h8.5l2 2v10.5a1.75 1.75 0 0 1-1.75 1.75h-8.75A1.75 1.75 0 0 1 5 18.25V7.5a1.75 1.75 0 0 1 1.75-1.75Z" /><path d="M15.2 5.9v2.35h2.35" /><path d="M8.35 12h7.3" /><path d="M8.35 15.2h5.1" /><circle cx="9.4" cy="9.2" r="1" /></>
+    case 'text':
+      return <><path d="M6.8 5.5h10.4a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6.8a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" /><path d="M8.4 9.3h7.2" /><path d="M8.4 12.1h7.2" /><path d="M8.4 14.9h4.8" /></>
+    case 'image':
+      return <><rect x="4.75" y="5.5" width="14.5" height="13" rx="2" /><circle cx="9.2" cy="10.1" r="1.25" /><path d="m7 16 3.2-3.4 2.5 2.5 1.8-1.9 2.5 2.8" /></>
+    case 'svg':
+      return <><rect x="4.75" y="5.5" width="14.5" height="13" rx="2" /><path d="m9 15 2.5-5.5 2.5 5.5" /><path d="M10 13.2h3" /><path d="M14.8 15h2.2" /><path d="M15.9 13.9v2.2" /></>
+    case 'patch':
+      return <><path d="M8 6.5h8a2 2 0 0 1 2 2v2.5" /><path d="M16 17.5H8a2 2 0 0 1-2-2V13" /><path d="M12 9v6" /><path d="M9 12h6" /></>
     case 'pdf':
-      return <><path d="M6 3.5h8l4 4V20H6zM14 3.5v4h4" /><path d="M8 16v-4h1.6a1.4 1.4 0 0 1 0 2.8H8m5.2 1.2v-4h1.2c1.6 0 2.6.8 2.6 2s-1 2-2.6 2h-1.2" /></>
+      return <><path d="M7 5.5h7.7l2.3 2.35v10.4a1.75 1.75 0 0 1-1.75 1.75H7a1.75 1.75 0 0 1-1.75-1.75V7.25A1.75 1.75 0 0 1 7 5.5Z" /><path d="M14.6 5.75V8h2.2" /><path d="M8.2 15.2v-4.4h1.7a1.25 1.25 0 1 1 0 2.5H8.2" /><path d="M12.2 15.2v-4.4h1.1c1.55 0 2.45.8 2.45 2.2 0 1.45-.9 2.2-2.45 2.2z" /></>
     case 'document':
-      return <><path d="M6 3.5h8l4 4V20H6zM14 3.5v4h4M9 11h6M9 14h6M9 17h4" /></>
+      return <><path d="M7 5.5h7.7l2.3 2.35v10.4a1.75 1.75 0 0 1-1.75 1.75H7a1.75 1.75 0 0 1-1.75-1.75V7.25A1.75 1.75 0 0 1 7 5.5Z" /><path d="M14.6 5.75V8h2.2" /><path d="M8.4 11h6.4" /><path d="M8.4 14h6.4" /><path d="M8.4 17h4.2" /></>
     case 'spreadsheet':
-      return <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M4 9h16M4 14h16M10 4v16M15 4v16" /></>
+      return <><rect x="5" y="5.5" width="14" height="13" rx="2" /><path d="M9.7 5.8v12.4" /><path d="M14.3 5.8v12.4" /><path d="M5.3 10.1h13.4" /><path d="M5.3 14.3h13.4" /></>
     case 'presentation':
-      return <><rect x="4" y="4" width="16" height="13" rx="2" /><path d="M8 20h8M12 17v3M8 8h8M8 11h5" /></>
+      return <><rect x="5" y="6" width="14" height="10.5" rx="2" /><path d="M12 16.5v2.7" /><path d="M9.2 19.2h5.6" /><path d="m9.1 13.3 2.1-3.1 1.6 1.95 1.95-2.7" /></>
     case 'notebook':
-      return <><path d="M6 4h12v16H6zM9 4v16M3.5 7H6M3.5 11H6M3.5 15H6" /><path d="m12 9-2 2 2 2m3-4 2 2-2 2" /></>
+      return <><path d="M8 5.5h8.3a1.8 1.8 0 0 1 1.8 1.8v9.4a1.8 1.8 0 0 1-1.8 1.8H8" /><path d="M8 5.5v13" /><path d="M5.3 8.6h2" /><path d="M5.3 12h2" /><path d="M5.3 15.4h2" /><path d="M10.5 9.8h4.5" /><path d="M10.5 13.1h4.5" /></>
     case 'archive':
-      return <><path d="M6 3.5h12V20H6zM9 3.5v3h3v3H9v3h3v3H9v3h3" /><path d="M12 16h3v3h-3z" /></>
+      return <><rect x="5" y="7" width="14" height="11" rx="2" /><path d="M5 10h14" /><path d="M10.4 5.5h3.2" /><path d="M12 10.2v4.2" /><path d="M10.6 12.1H13.4" /></>
     case 'audio':
-      return <><path d="M9 18V7l9-2v11" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="15.5" cy="16" r="2.5" /></>
+      return <><path d="M9.2 16.5a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8Z" /><path d="M16.1 14.6a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8Z" /><path d="M11.1 18.3V8.2l6-1.4v9.7" /></>
     case 'video':
-      return <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></>
+      return <><rect x="4.75" y="6.2" width="12" height="11.6" rx="2" /><path d="m12.2 12-3 1.85V10.15Z" /><path d="m16.75 10.2 2.7-1.5v6.6l-2.7-1.5" /></>
     case 'database':
-      return <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></>
+      return <><ellipse cx="12" cy="7.25" rx="5.8" ry="2.35" /><path d="M6.2 7.25v8.9c0 1.3 2.6 2.35 5.8 2.35s5.8-1.05 5.8-2.35v-8.9" /><path d="M6.2 11.7c0 1.3 2.6 2.35 5.8 2.35s5.8-1.05 5.8-2.35" /></>
     case 'executable':
-      return <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M8 9h8M8 15h8M9 8v8M15 8v8" /><circle cx="12" cy="12" r="2" /></>
+      return <><rect x="5" y="5.5" width="14" height="13" rx="2" /><path d="M9.2 9.6h5.6" /><path d="M9.2 12h3.6" /><path d="M9.2 14.4h5.6" /><path d="m16.4 7.9 1.4 1.4" /></>
     case 'file':
-      return <><path d="M6 3.5h8l4 4V20H6zM14 3.5v4h4" /></>
+      return <><path d="M7 5.5h7.7l2.3 2.35v10.4a1.75 1.75 0 0 1-1.75 1.75H7a1.75 1.75 0 0 1-1.75-1.75V7.25A1.75 1.75 0 0 1 7 5.5Z" /><path d="M14.6 5.75V8h2.2" /></>
   }
 }
 

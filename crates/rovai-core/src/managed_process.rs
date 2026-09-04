@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     io,
     path::{Path, PathBuf},
     process::ExitStatus,
@@ -241,65 +241,18 @@ impl ManagedProcessLaunchSpec {
         })
     }
 
-    /// Resolves a child command against the exact environment snapshot used by
-    /// this managed Runtime process. Relative paths and shell command strings
-    /// are deliberately rejected: the returned path is always a canonical
-    /// executable identity suitable for the managed launch boundary.
-    pub fn resolve_child_application(&self, command: &str) -> Result<PathBuf> {
-        if command.is_empty() || command.contains('\0') {
-            bail!("managed_process.invalid_application: command is empty or contains NUL");
-        }
-        let command_path = Path::new(command);
-        if command_path.is_absolute() {
-            return canonical_managed_application(command_path);
-        }
-        if command_path.components().count() != 1
-            || command_path.file_name() != Some(std::ffi::OsStr::new(command))
-        {
-            bail!(
-                "managed_process.invalid_application: expected an absolute path or command name, got {}",
-                command_path.display()
-            );
-        }
-        let path = environment_value(&self.environment, std::ffi::OsStr::new("PATH"))
-            .context("managed_process.invalid_application: Runtime PATH is unavailable")?;
-        for directory in env::split_paths(path) {
-            if !directory.is_absolute() {
-                continue;
-            }
-            #[cfg(windows)]
-            let candidates = {
-                let mut candidates = vec![directory.join(command)];
-                if !command.to_ascii_lowercase().ends_with(".exe") {
-                    candidates.push(directory.join(format!("{command}.exe")));
-                }
-                candidates
-            };
-            #[cfg(not(windows))]
-            let candidates = [directory.join(command)];
-            for candidate in candidates {
-                if let Ok(application) = canonical_managed_application(&candidate) {
-                    return Ok(application);
-                }
-            }
-        }
-        bail!(
-            "managed_process.invalid_application: command is not available on Runtime PATH: {command}"
-        )
-    }
-
-    /// Derives a one-shot child from an already-admitted Runtime launch. This
-    /// preserves the Runtime's explicit environment and protected local trees
-    /// while giving the child its own process-group/Job ownership boundary.
-    pub fn derive_runtime_one_shot(
+    /// Derives a one-shot child from an already-admitted Runtime launch. The
+    /// requested application is resolved only after the request's final cwd and
+    /// environment overlay are known, so portable commands use the exact child
+    /// context without introducing a shell command string.
+    pub fn derive_runtime_one_shot_command(
         &self,
-        application: PathBuf,
+        requested_application: &OsStr,
         arguments: Vec<OsString>,
         working_directory: PathBuf,
         environment_overrides: BTreeMap<OsString, OsString>,
         ownership: impl Into<String>,
     ) -> Result<Self> {
-        let application = canonical_managed_application(&application)?;
         if arguments
             .iter()
             .any(|argument| argument.to_string_lossy().contains('\0'))
@@ -322,16 +275,36 @@ impl ManagedProcessLaunchSpec {
             }
             insert_environment(&mut environment, key, value);
         }
+        let requested_application = Path::new(requested_application);
+        #[cfg(windows)]
+        let (application, windows_entrypoint) = capture_windows_runtime_entrypoint(
+            &resolve_captured_application(requested_application, &working_directory, &environment)?,
+        )?;
+        #[cfg(not(windows))]
+        let application =
+            prepare_unix_derived_application(requested_application, &working_directory)?;
+        #[cfg(windows)]
+        let application_identity = windows::capture_application_identity(&application)?;
+        #[cfg(windows)]
+        if let WindowsRuntimeEntrypoint::CommandShim {
+            shim, interpreter, ..
+        } = &windows_entrypoint
+        {
+            insert_environment(
+                &mut environment,
+                OsString::from("ComSpec"),
+                interpreter.as_os_str().to_os_string(),
+            );
+            insert_environment(
+                &mut environment,
+                OsString::from(WINDOWS_COMMAND_SHIM_PATH_ENVIRONMENT_KEY),
+                shim.as_os_str().to_os_string(),
+            );
+        }
         let ownership = ownership.into();
         if ownership.trim().is_empty() {
             bail!("managed_process.invalid_argument: ownership identity is empty");
         }
-        #[cfg(windows)]
-        let application_identity = windows::capture_application_identity(&application)?;
-        #[cfg(windows)]
-        let windows_entrypoint = WindowsRuntimeEntrypoint::NativeExecutable {
-            executable: application.clone(),
-        };
         Ok(Self {
             purpose: ManagedProcessPurpose::RuntimeOneShot,
             application,
@@ -432,6 +405,7 @@ fn capture_windows_runtime_entrypoint(
     )
 }
 
+#[cfg(windows)]
 fn environment_value<'a>(
     environment: &'a BTreeMap<OsString, OsString>,
     key: &std::ffi::OsStr,
@@ -446,7 +420,99 @@ fn environment_value<'a>(
     value.map(OsString::as_os_str)
 }
 
-fn canonical_managed_application(path: &Path) -> Result<PathBuf> {
+#[cfg(windows)]
+fn resolve_captured_application(
+    requested: &Path,
+    working_directory: &Path,
+    environment: &BTreeMap<OsString, OsString>,
+) -> Result<PathBuf> {
+    validate_requested_application(requested)?;
+    if requested.is_absolute() {
+        if !requested.is_file() {
+            bail!(
+                "managed_process.invalid_application: expected an absolute file, got {}",
+                requested.display()
+            );
+        }
+        return Ok(requested.to_path_buf());
+    }
+
+    let is_command_name =
+        requested.components().count() == 1 && requested.file_name() == Some(requested.as_os_str());
+    if is_command_name {
+        let path = environment_value(environment, std::ffi::OsStr::new("PATH"))
+            .context("managed_process.invalid_application: Runtime PATH is unavailable")?;
+        for directory in env::split_paths(path) {
+            let directory = if directory.is_absolute() {
+                directory
+            } else {
+                working_directory.join(directory)
+            };
+            for candidate in platform_application_candidates(&directory.join(requested)) {
+                if let Ok(application) = canonical_launch_candidate(&candidate) {
+                    return Ok(application);
+                }
+            }
+        }
+        bail!(
+            "managed_process.invalid_application: command is not available on Runtime PATH: {}",
+            requested.display()
+        );
+    }
+
+    for candidate in platform_application_candidates(&working_directory.join(requested)) {
+        if let Ok(application) = canonical_launch_candidate(&candidate) {
+            return Ok(application);
+        }
+    }
+    bail!(
+        "managed_process.invalid_application: relative application is unavailable from the Runtime working directory: {}",
+        requested.display()
+    )
+}
+
+#[cfg(not(windows))]
+fn prepare_unix_derived_application(requested: &Path, working_directory: &Path) -> Result<PathBuf> {
+    validate_requested_application(requested)?;
+    let is_command_name =
+        requested.components().count() == 1 && requested.file_name() == Some(requested.as_os_str());
+    if is_command_name {
+        return Ok(requested.to_path_buf());
+    }
+    let candidate = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        working_directory.join(requested)
+    };
+    canonical_launch_candidate(&candidate)
+}
+
+fn validate_requested_application(requested: &Path) -> Result<()> {
+    if requested.as_os_str().is_empty() || requested.as_os_str().to_string_lossy().contains('\0') {
+        bail!("managed_process.invalid_application: application must not be empty or contain NUL");
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn platform_application_candidates(path: &Path) -> Vec<PathBuf> {
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase());
+    if matches!(extension.as_deref(), Some("exe" | "cmd" | "bat")) {
+        return vec![path.to_path_buf()];
+    }
+    [".exe", ".cmd", ".bat"]
+        .into_iter()
+        .map(|suffix| {
+            let mut candidate = path.as_os_str().to_os_string();
+            candidate.push(suffix);
+            PathBuf::from(candidate)
+        })
+        .collect()
+}
+
+fn canonical_launch_candidate(path: &Path) -> Result<PathBuf> {
     let application = path.canonicalize().with_context(|| {
         format!(
             "managed_process.invalid_application: executable is unavailable: {}",
@@ -456,16 +522,6 @@ fn canonical_managed_application(path: &Path) -> Result<PathBuf> {
     if !application.is_file() {
         bail!(
             "managed_process.invalid_application: expected a file, got {}",
-            application.display()
-        );
-    }
-    #[cfg(windows)]
-    if !application
-        .extension()
-        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
-    {
-        bail!(
-            "managed_process.invalid_application: expected a native Windows EXE, got {}",
             application.display()
         );
     }
@@ -802,6 +858,95 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn derived_runtime_one_shot_resolves_against_the_final_request_context() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-managed-derived-command-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let host_cwd = root.join("host");
+        let request_cwd = root.join("request");
+        let request_bin = root.join("request-bin");
+        std::fs::create_dir_all(&host_cwd).unwrap();
+        std::fs::create_dir_all(request_cwd.join("scripts")).unwrap();
+        std::fs::create_dir_all(&request_bin).unwrap();
+
+        let bare = request_bin.join("terminal-context-tool");
+        std::fs::write(&bare, "#!/bin/sh\nprintf 'request-path:%s' \"$PWD\"\n").unwrap();
+        std::fs::set_permissions(&bare, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let relative = request_cwd.join("scripts/build");
+        std::fs::write(&relative, "#!/bin/sh\nprintf relative-cwd\n").unwrap();
+        std::fs::set_permissions(&relative, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut host = Command::new("/bin/sh");
+        host.current_dir(&host_cwd).env("PATH", "/usr/bin:/bin");
+        let template = ManagedProcessLaunchSpec::capture(
+            &host,
+            ManagedProcessPurpose::RuntimeHost,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "runtime-host:derived-command-test",
+        )
+        .unwrap();
+
+        let bare_spec = template
+            .derive_runtime_one_shot_command(
+                OsStr::new("terminal-context-tool"),
+                Vec::new(),
+                request_cwd.clone(),
+                BTreeMap::from([(
+                    OsString::from("PATH"),
+                    std::env::join_paths([&request_bin]).unwrap(),
+                )]),
+                "runtime-child:derived-bare-command-test",
+            )
+            .unwrap();
+        assert_eq!(bare_spec.application(), Path::new("terminal-context-tool"));
+        let mut bare_process = ManagedProcess::spawn(bare_spec).unwrap();
+        let mut bare_stdout = bare_process.take_stdout().unwrap();
+        let mut bare_output = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut bare_stdout, &mut bare_output)
+            .await
+            .unwrap();
+        assert!(bare_process.wait().await.unwrap().success());
+        assert_eq!(
+            String::from_utf8(bare_output).unwrap(),
+            format!(
+                "request-path:{}",
+                request_cwd.canonicalize().unwrap().display()
+            )
+        );
+        bare_process.force_terminate_tree().unwrap();
+
+        let relative_spec = template
+            .derive_runtime_one_shot_command(
+                OsStr::new("scripts/build"),
+                Vec::new(),
+                request_cwd,
+                BTreeMap::new(),
+                "runtime-child:derived-relative-command-test",
+            )
+            .unwrap();
+        assert_eq!(
+            relative_spec.application(),
+            relative.canonicalize().unwrap()
+        );
+        let mut relative_process = ManagedProcess::spawn(relative_spec).unwrap();
+        let mut relative_stdout = relative_process.take_stdout().unwrap();
+        let mut relative_output = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut relative_stdout, &mut relative_output)
+            .await
+            .unwrap();
+        assert!(relative_process.wait().await.unwrap().success());
+        assert_eq!(relative_output, b"relative-cwd");
+        relative_process.force_terminate_tree().unwrap();
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn runtime_entrypoints_have_no_direct_command_spawn() {
         for (name, source) in [
@@ -845,6 +990,55 @@ mod tests {
             environment.get(&OsString::from("PATH")),
             Some(&OsString::from("current"))
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_derived_runtime_one_shot_uses_final_path_and_command_shim_identity() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-derived-command-shim-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let shim = directory.join("terminal-context-tool.cmd");
+        std::fs::write(&shim, "@echo off\r\nexit /b 0\r\n").unwrap();
+
+        let host = Command::new(std::env::current_exe().unwrap());
+        let template = ManagedProcessLaunchSpec::capture(
+            &host,
+            ManagedProcessPurpose::RuntimeHost,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "runtime-host:derived-command-shim-test",
+        )
+        .unwrap();
+        let spec = template
+            .derive_runtime_one_shot_command(
+                OsStr::new("terminal-context-tool"),
+                Vec::new(),
+                directory.clone(),
+                BTreeMap::from([(
+                    OsString::from("PATH"),
+                    std::env::join_paths([&directory]).unwrap(),
+                )]),
+                "runtime-child:derived-command-shim-test",
+            )
+            .unwrap();
+
+        assert!(matches!(
+            spec.windows_entrypoint(),
+            WindowsRuntimeEntrypoint::CommandShim { shim: captured, .. }
+                if captured == &shim.canonicalize().unwrap()
+        ));
+        assert_eq!(
+            environment_value(spec.environment(), std::ffi::OsStr::new("ComSpec")),
+            Some(
+                crate::windows_runtime_entrypoint::system_cmd_executable()
+                    .unwrap()
+                    .as_os_str()
+            )
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(unix)]

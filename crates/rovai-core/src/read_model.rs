@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::{
     agent_run_file_change::{AgentRunFileChangesView, list_completed_run_file_changes},
     agent_run_image::{AgentRunImagesView, list_camp_images},
-    camp_attachment::{DIRECTORY_MEDIA_TYPE, managed_attachment_summary},
+    camp_attachment::DIRECTORY_MEDIA_TYPE,
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     camp_message_publication::{
         public_camp_message_event_predicate, public_camp_message_publication_cte,
@@ -18,6 +18,9 @@ use crate::{
     current_input_skill::CurrentInputSkillResolution,
     db::Database,
     git::{GitCapabilityState, GitObservation},
+    local_attachment_source::{
+        LocalAttachmentAvailability, LocalAttachmentSourceView, parse_source_attachments,
+    },
     mcp_projection::McpExposureSnapshot,
     runtime_failure::RuntimeFailureView,
     skill_projection::SkillExposureSnapshot,
@@ -249,18 +252,7 @@ pub struct CampMessageView {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CampMessageAttachmentView {
-    pub id: String,
-    pub display_name: String,
-    pub kind: String,
-    pub file_count: u64,
-    pub media_type: String,
-    pub byte_size: i64,
-    pub preview_kind: String,
-    pub runtime_projection_state: String,
-}
+pub type CampMessageAttachmentView = LocalAttachmentSourceView;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2147,6 +2139,7 @@ struct CampMessageRow {
     source_agent_run_id: Option<String>,
     _stored_body: String,
     structured_content_json: String,
+    source_attachments_json: String,
     address_mode: String,
     addressed_agent_ids_json: String,
     reply_to_camp_message_id: Option<String>,
@@ -2165,12 +2158,13 @@ fn camp_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CampMessageRow>
         source_agent_run_id: row.get(5)?,
         _stored_body: row.get(6)?,
         structured_content_json: row.get(7)?,
-        address_mode: row.get(8)?,
-        addressed_agent_ids_json: row.get(9)?,
-        reply_to_camp_message_id: row.get(10)?,
-        camp_turn_id: row.get(11)?,
-        presentation_json: row.get(12)?,
-        created_at: row.get(13)?,
+        source_attachments_json: row.get(8)?,
+        address_mode: row.get(9)?,
+        addressed_agent_ids_json: row.get(10)?,
+        reply_to_camp_message_id: row.get(11)?,
+        camp_turn_id: row.get(12)?,
+        presentation_json: row.get(13)?,
+        created_at: row.get(14)?,
     })
 }
 
@@ -2185,7 +2179,8 @@ fn load_open_messages(
         r#"
         SELECT id, sequence, NULL AS timeline_global_sequence,
                author_type, author_id,
-               source_agent_run_id, body, structured_content_json, address_mode,
+               source_agent_run_id, body, structured_content_json,
+               source_attachments_json, address_mode,
                addressed_agent_ids_json, reply_to_camp_message_id, camp_turn_id,
                CASE WHEN author_type = 'agent'
                     THEN recipient_presentation_json
@@ -2217,7 +2212,8 @@ fn load_messages(
         SELECT camp_message.id, camp_message.sequence,
                publication.global_sequence,
                author_type, author_id,
-               source_agent_run_id, body, structured_content_json, address_mode,
+               source_agent_run_id, body, structured_content_json,
+               source_attachments_json, address_mode,
                addressed_agent_ids_json,
                reply_to_camp_message_id, camp_turn_id,
                CASE WHEN author_type = 'agent'
@@ -2254,7 +2250,8 @@ fn load_messages_before(
         SELECT camp_message.id, camp_message.sequence,
                publication.global_sequence,
                author_type, author_id,
-               source_agent_run_id, body, structured_content_json, address_mode,
+               source_agent_run_id, body, structured_content_json,
+               source_attachments_json, address_mode,
                addressed_agent_ids_json,
                reply_to_camp_message_id, camp_turn_id,
                CASE WHEN author_type = 'agent'
@@ -2322,7 +2319,8 @@ fn load_messages_around(
                publication.global_sequence,
                camp_message.author_type, camp_message.author_id,
                camp_message.source_agent_run_id, camp_message.body,
-               camp_message.structured_content_json, camp_message.address_mode,
+               camp_message.structured_content_json,
+               camp_message.source_attachments_json, camp_message.address_mode,
                camp_message.addressed_agent_ids_json,
                camp_message.reply_to_camp_message_id, camp_message.camp_turn_id,
                CASE WHEN camp_message.author_type = 'agent'
@@ -2354,6 +2352,19 @@ fn hydrate_message_views(
 ) -> Result<Vec<CampMessageView>> {
     let requested_message_ids = rows.iter().map(|row| &row.id).collect::<Vec<_>>();
     let requested_message_ids_json = serde_json::to_string(&requested_message_ids)?;
+    let mut attachments_by_message_id = BTreeMap::<String, Vec<CampMessageAttachmentView>>::new();
+    for row in &rows {
+        let source_attachments = parse_source_attachments(&row.source_attachments_json)?;
+        if !source_attachments.is_empty() {
+            attachments_by_message_id.insert(
+                row.id.clone(),
+                source_attachments
+                    .iter()
+                    .map(|source_ref| source_ref.view(LocalAttachmentAvailability::Unknown))
+                    .collect(),
+            );
+        }
+    }
     let mut attachment_statement = transaction.prepare(
         r#"
         WITH requested AS (
@@ -2362,12 +2373,10 @@ fn hydrate_message_views(
         )
         SELECT attachment.camp_message_id, attachment.id, attachment.display_name,
                attachment.media_type, attachment.byte_size, attachment.preview_kind,
-               attachment.storage_path, attachment.runtime_projection_state,
                attachment.kind, attachment.file_count, attachment.storage_model
         FROM (
             SELECT legacy.camp_message_id, legacy.id, legacy.display_name,
                    legacy.media_type, legacy.byte_size, legacy.preview_kind,
-                   legacy.storage_path, legacy.runtime_projection_state,
                    NULL AS kind, NULL AS file_count,
                    'legacy_v1' AS storage_model, legacy.position AS ordinal
             FROM requested
@@ -2377,7 +2386,6 @@ fn hydrate_message_views(
             SELECT reference.camp_message_id, managed.id,
                    reference.display_name_snapshot, managed.media_type,
                    managed.byte_size, managed.preview_kind,
-                   managed.root_relative_payload_path, managed.state,
                    managed.kind, managed.file_count,
                    'managed_v2', reference.ordinal
             FROM requested
@@ -2399,15 +2407,12 @@ fn hydrate_message_views(
                 row.get::<_, String>(3)?,
                 row.get::<_, i64>(4)?,
                 row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, Option<i64>>(9)?,
-                row.get::<_, String>(10)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, String>(8)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut attachments_by_message_id = BTreeMap::<String, Vec<CampMessageAttachmentView>>::new();
     for (
         message_id,
         id,
@@ -2415,8 +2420,6 @@ fn hydrate_message_views(
         media_type,
         byte_size,
         preview_kind,
-        storage_path,
-        runtime_projection_state,
         persisted_kind,
         persisted_file_count,
         storage_model,
@@ -2430,13 +2433,7 @@ fn hydrate_message_views(
                         .context("Managed Attachment has no persisted file count")?,
                 )?,
             )
-        } else if runtime_projection_state == "available" {
-            let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
-            (summary.kind, summary.file_count)
         } else if media_type == DIRECTORY_MEDIA_TYPE {
-            // Pending/recovery/failed cards are a semantic projection. Their Authority source
-            // may be unavailable (and can be the reason for a terminal tombstone), so Camp
-            // reads must not traverse it merely to render a status card.
             ("directory".to_string(), 0)
         } else {
             ("file".to_string(), 1)
@@ -2445,11 +2442,11 @@ fn hydrate_message_views(
             id,
             display_name,
             kind,
-            file_count,
-            media_type,
-            byte_size,
+            file_count: Some(file_count),
+            media_type: Some(media_type),
+            byte_size: Some(byte_size.max(0) as u64),
             preview_kind,
-            runtime_projection_state,
+            availability: LocalAttachmentAvailability::Unknown,
         };
         attachments_by_message_id
             .entry(message_id)
@@ -4302,6 +4299,22 @@ mod slow_tests {
             }
         }
         let attachment_path = directory.join("anchor-attachment.txt");
+        let missing_source_path = directory.join("missing-history-source.txt");
+        let source_attachments_json = json!([{
+            "id": "00000000-0000-4000-8000-000000000001",
+            "sourcePath": missing_source_path,
+            "displayName": "source.txt",
+            "kind": "file",
+            "mediaType": "text/plain",
+            "observedByteSize": 17
+        }])
+        .to_string();
+        transaction
+            .execute(
+                "UPDATE camp_message SET source_attachments_json = ?2 WHERE camp_id = ?1 AND id = 'around-message-25'",
+                params![camp_id, source_attachments_json],
+            )
+            .unwrap();
         transaction
             .execute(
                 r#"
@@ -4410,10 +4423,15 @@ mod slow_tests {
             .iter()
             .find(|message| message.id == around.anchor_message_id)
             .unwrap();
-        assert_eq!(anchor.attachments.len(), 1);
-        assert_eq!(anchor.attachments[0].display_name, "anchor.txt");
+        assert_eq!(anchor.attachments.len(), 2);
+        assert_eq!(anchor.attachments[0].display_name, "source.txt");
         assert_eq!(anchor.attachments[0].kind, "file");
-        assert_eq!(anchor.attachments[0].file_count, 1);
+        assert_eq!(anchor.attachments[0].file_count, Some(1));
+        assert_eq!(
+            anchor.attachments[0].availability,
+            LocalAttachmentAvailability::Unknown
+        );
+        assert_eq!(anchor.attachments[1].display_name, "anchor.txt");
 
         database
             .connection()
@@ -4436,10 +4454,13 @@ mod slow_tests {
             .iter()
             .find(|message| message.id == failed_projection.anchor_message_id)
             .unwrap()
-            .attachments[0];
+            .attachments[1];
         assert_eq!(failed_attachment.kind, "directory");
-        assert_eq!(failed_attachment.file_count, 0);
-        assert_eq!(failed_attachment.runtime_projection_state, "failed");
+        assert_eq!(failed_attachment.file_count, Some(0));
+        assert_eq!(
+            failed_attachment.availability,
+            LocalAttachmentAvailability::Unknown
+        );
 
         for (requested_camp, requested_message) in [
             (other_camp_id.as_str(), "around-message-25"),

@@ -1,6 +1,6 @@
 import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { dirname, extname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, protocol, screen, shell } from 'electron'
 import { isCampId } from '@contracts'
 import type {
@@ -10,6 +10,8 @@ import type {
   ExecutionWebSettingsSnapshot,
   ExecutionConsolePlacement,
   MonitoringFilter,
+  LocalAttachmentAvailability,
+  LocalAttachmentOwnerLocator,
   RuntimeUsageSnapshot,
   NavigationPin,
   SaveMemberAvatarAssetInput,
@@ -1295,6 +1297,18 @@ ipcMain.handle('rovai:navigation-preferences-replace-pins', (_event, pins: Navig
 )
 
 ipcMain.handle(
+  'rovai:navigation-preferences-synchronize-project-order',
+  (_event, projectKeys: unknown) => {
+    if (!Array.isArray(projectKeys) || !projectKeys.every((projectKey) => typeof projectKey === 'string')) {
+      throw new Error('Invalid Project order synchronization request')
+    }
+    return projectAccessTransactions.run(() =>
+      requireNavigationPreferences().synchronizeProjectOrder(projectKeys)
+    )
+  }
+)
+
+ipcMain.handle(
   'rovai:navigation-preferences-remove-project',
   async (_event, targetKey: unknown, relatedCampIds: unknown) => {
     if (typeof targetKey !== 'string' || !Array.isArray(relatedCampIds)) {
@@ -1391,19 +1405,71 @@ const MAX_COMPOSER_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const MAX_COMPOSER_PREVIEW_BYTES = 8 * 1024 * 1024
 
 async function resolveDesktopAttachmentTarget(
-  campId: unknown,
-  attachmentId: unknown
-): Promise<DesktopAttachmentTarget | null> {
-  if (!isCampId(campId) || !isAttachmentId(attachmentId)) return null
+  locator: LocalAttachmentOwnerLocator
+): Promise<{ target: DesktopAttachmentTarget | null; availability: LocalAttachmentAvailability }> {
   try {
     const value = await core.request<unknown>(
       'camp.attachments.desktopOpenTarget' as CoreMethod,
-      { campId, attachmentId }
+      locator
     )
-    return parseDesktopAttachmentTarget(value, attachmentId)
-  } catch {
-    return null
+    const target = parseDesktopAttachmentTarget(value, locator.attachmentRefId)
+    return { target, availability: target ? 'available' : 'missing' }
+  } catch (error) {
+    return { target: null, availability: attachmentAvailabilityFromError(error) }
   }
+}
+
+function attachmentAvailabilityFromError(error: unknown): LocalAttachmentAvailability {
+  if (error instanceof RovaiRequestError) {
+    if (error.code === 'attachment_missing') return 'missing'
+    if (error.code === 'attachment_unreadable') return 'unreadable'
+    if (error.code === 'attachment_kind_changed') return 'kind_changed'
+  }
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'ENOENT') return 'missing'
+    if (typeof error.code === 'string') return 'unreadable'
+  }
+  return 'unknown'
+}
+
+function requireAttachmentOwnerLocator(value: unknown): LocalAttachmentOwnerLocator {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Attachment Owner 无效。')
+  }
+  const input = value as Record<string, unknown>
+  const owner = input.owner
+  const campId = requireIpcString(input.campId, 'Camp ID')
+  const attachmentRefId = requireIpcString(input.attachmentRefId, '附件 ID')
+  if (!isCampId(campId) || !isAttachmentId(attachmentRefId)) {
+    throw new Error('Attachment Owner 无效。')
+  }
+  if (owner === 'composer') return { owner, campId, attachmentRefId }
+  if (owner === 'pending') {
+    return {
+      owner,
+      campId,
+      pendingInputId: requireIpcString(input.pendingInputId, 'Pending Input ID'),
+      attachmentRefId
+    }
+  }
+  if (owner === 'pending_edit') {
+    return {
+      owner,
+      campId,
+      pendingInputId: requireIpcString(input.pendingInputId, 'Pending Input ID'),
+      editToken: requireIpcString(input.editToken, 'Edit Token'),
+      attachmentRefId
+    }
+  }
+  if (owner === 'message') {
+    return {
+      owner,
+      campId,
+      messageId: requireIpcString(input.messageId, 'Message ID'),
+      attachmentRefId
+    }
+  }
+  throw new Error('Attachment Owner 无效。')
 }
 
 function requireIpcString(value: unknown, label: string): string {
@@ -1420,6 +1486,34 @@ function requireDraftRevision(value: unknown): number {
   return value as number
 }
 
+type PendingAttachmentOwner = {
+  campId: string
+  pendingInputId: string
+  expectedRevision: number
+  editToken: string
+}
+
+function requirePendingAttachmentOwner(value: unknown): PendingAttachmentOwner {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Pending Attachment Owner 无效。')
+  }
+  const input = value as Record<string, unknown>
+  return {
+    campId: requireIpcString(input.campId, 'Camp ID'),
+    pendingInputId: requireIpcString(input.pendingInputId, 'Pending Input ID'),
+    expectedRevision: requireDraftRevision(input.expectedRevision),
+    editToken: requireIpcString(input.editToken, 'Edit Token')
+  }
+}
+
+function temporarySourceAttachmentPath(displayName: string): string {
+  const requestedExtension = extname(displayName).toLocaleLowerCase()
+  const safeExtension = /^\.[a-z0-9]{1,16}$/.test(requestedExtension)
+    ? requestedExtension
+    : ''
+  return join(app.getPath('temp'), `rovai-${randomUUID()}${safeExtension}`)
+}
+
 ipcMain.handle(
   'rovai:composer-attachment-prepare-path',
   async (
@@ -1427,13 +1521,15 @@ ipcMain.handle(
     campId: unknown,
     expectedRevision: unknown,
     sourcePath: unknown,
-    displayName: unknown
+    displayName: unknown,
+    mediaType: unknown
   ) => {
-    return core.request('camp.attachments.prepareFromPath' as CoreMethod, {
+    return core.request('camp.sourceAttachments.addFromPath' as CoreMethod, {
       campId: requireIpcString(campId, 'Camp ID'),
       expectedRevision: requireDraftRevision(expectedRevision),
       sourcePath: requireIpcString(sourcePath, '附件路径'),
-      displayName: requireIpcString(displayName, '附件名称')
+      displayName: requireIpcString(displayName, '附件名称'),
+      mediaType: typeof mediaType === 'string' && mediaType.trim() ? mediaType : null
     })
   }
 )
@@ -1445,6 +1541,7 @@ ipcMain.handle(
     campId: unknown,
     expectedRevision: unknown,
     displayName: unknown,
+    mediaType: unknown,
     input: unknown
   ) => {
     const resolvedCampId = requireIpcString(campId, 'Camp ID')
@@ -1453,55 +1550,129 @@ ipcMain.handle(
     if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
       throw new Error('附件无效或超过 25 MiB。')
     }
-    if (coreDataPath === null || !core.getSnapshot().capabilities.coreRequests) {
-      throw new Error('Core data directory is not available for attachment import')
+    if (!core.getSnapshot().capabilities.coreRequests) {
+      throw new Error('Core is not available for attachment references')
     }
-    const ingressDirectory = join(coreDataPath, 'attachment-ingress')
-    await mkdir(ingressDirectory, { recursive: true, mode: 0o700 })
-    await chmod(ingressDirectory, 0o700)
-    const temporaryPath = join(ingressDirectory, `${randomUUID()}.tmp`)
+    const temporaryPath = temporarySourceAttachmentPath(resolvedDisplayName)
+    let referenced = false
     try {
       await writeFile(temporaryPath, input, { flag: 'wx', mode: 0o600 })
-      return await core.request('camp.attachments.prepareFromPath' as CoreMethod, {
+      const draft = await core.request('camp.sourceAttachments.addFromPath' as CoreMethod, {
         campId: resolvedCampId,
         expectedRevision: resolvedRevision,
         sourcePath: temporaryPath,
-        displayName: resolvedDisplayName
+        displayName: resolvedDisplayName,
+        mediaType: typeof mediaType === 'string' && mediaType.trim() ? mediaType : null
       })
+      referenced = true
+      return draft
     } finally {
-      await unlink(temporaryPath).catch(() => undefined)
+      if (!referenced) await unlink(temporaryPath).catch(() => undefined)
+    }
+  }
+)
+
+ipcMain.handle(
+  'rovai:pending-attachment-prepare-path',
+  async (
+    _event,
+    owner: unknown,
+    sourcePath: unknown,
+    displayName: unknown,
+    mediaType: unknown
+  ) => {
+    const resolvedOwner = requirePendingAttachmentOwner(owner)
+    return core.request('camp.pendingInputs.addSourceAttachmentFromPath' as CoreMethod, {
+      ...resolvedOwner,
+      sourcePath: requireIpcString(sourcePath, '附件路径'),
+      displayName: requireIpcString(displayName, '附件名称'),
+      mediaType: typeof mediaType === 'string' && mediaType.trim() ? mediaType : null
+    })
+  }
+)
+
+ipcMain.handle(
+  'rovai:pending-attachment-prepare-bytes',
+  async (
+    _event,
+    owner: unknown,
+    displayName: unknown,
+    mediaType: unknown,
+    input: unknown
+  ) => {
+    const resolvedOwner = requirePendingAttachmentOwner(owner)
+    const resolvedDisplayName = requireIpcString(displayName, '附件名称')
+    if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
+      throw new Error('附件无效或超过 25 MiB。')
+    }
+    if (!core.getSnapshot().capabilities.coreRequests) {
+      throw new Error('Core is not available for attachment references')
+    }
+    const temporaryPath = temporarySourceAttachmentPath(resolvedDisplayName)
+    let referenced = false
+    try {
+      await writeFile(temporaryPath, input, { flag: 'wx', mode: 0o600 })
+      const queue = await core.request(
+        'camp.pendingInputs.addSourceAttachmentFromPath' as CoreMethod,
+        {
+          ...resolvedOwner,
+          sourcePath: temporaryPath,
+          displayName: resolvedDisplayName,
+          mediaType: typeof mediaType === 'string' && mediaType.trim() ? mediaType : null
+        }
+      )
+      referenced = true
+      return queue
+    } finally {
+      if (!referenced) await unlink(temporaryPath).catch(() => undefined)
     }
   }
 )
 
 ipcMain.handle(
   'rovai:composer-attachment-preview',
-  async (_event, attachmentId: unknown) => {
-    const source = await core.request<{
-      path: string
-      mediaType: string
-      byteSize: number
-    } | null>('camp.attachments.previewSource' as CoreMethod, {
-      attachmentId: requireIpcString(attachmentId, '附件 ID')
-    })
-    if (!source || source.byteSize > MAX_COMPOSER_PREVIEW_BYTES) return null
-    const bytes = await readFile(source.path)
-    if (bytes.byteLength !== source.byteSize || bytes.byteLength > MAX_COMPOSER_PREVIEW_BYTES) {
-      return null
-    }
-    return {
-      mediaType: source.mediaType,
-      bytes: new Uint8Array(bytes)
+  async (_event, value: unknown) => {
+    const locator = requireAttachmentOwnerLocator(value)
+    try {
+      const source = await core.request<{
+        path: string
+        mediaType: string
+        byteSize: number
+      } | null>('camp.attachments.previewSource' as CoreMethod, locator)
+      if (!source) return { preview: null, availability: 'missing' as const }
+      if (source.byteSize > MAX_COMPOSER_PREVIEW_BYTES) {
+        return { preview: null, availability: 'available' as const }
+      }
+      const bytes = await readFile(source.path)
+      if (bytes.byteLength !== source.byteSize || bytes.byteLength > MAX_COMPOSER_PREVIEW_BYTES) {
+        return { preview: null, availability: 'unreadable' as const }
+      }
+      return {
+        preview: {
+          mediaType: source.mediaType,
+          bytes: new Uint8Array(bytes)
+        },
+        availability: 'available' as const
+      }
+    } catch (error) {
+      return { preview: null, availability: attachmentAvailabilityFromError(error) }
     }
   }
 )
 
 ipcMain.handle(
   'rovai:attachment-open',
-  async (_event, campId: unknown, attachmentId: unknown) => {
-    const target = await resolveDesktopAttachmentTarget(campId, attachmentId)
-    if (!target) return { opened: false, error: 'target_unavailable' as const }
-    return openDesktopAttachmentTarget(target, {
+  async (_event, value: unknown) => {
+    const locator = requireAttachmentOwnerLocator(value)
+    const resolved = await resolveDesktopAttachmentTarget(locator)
+    if (!resolved.target) {
+      return {
+        opened: false,
+        error: 'target_unavailable' as const,
+        availability: resolved.availability
+      }
+    }
+    const result = await openDesktopAttachmentTarget(resolved.target, {
       async confirm(displayName) {
         const options = {
           type: 'warning' as const,
@@ -1521,15 +1692,23 @@ ipcMain.handle(
         return shell.openPath(path)
       }
     })
+    return { ...result, availability: 'available' as const }
   }
 )
 
 ipcMain.handle(
   'rovai:attachment-reveal',
-  async (_event, campId: unknown, attachmentId: unknown) => {
-    const target = await resolveDesktopAttachmentTarget(campId, attachmentId)
-    if (!target) return { revealed: false, error: 'target_unavailable' as const }
-    return revealDesktopAttachmentTarget(target, {
+  async (_event, value: unknown) => {
+    const locator = requireAttachmentOwnerLocator(value)
+    const resolved = await resolveDesktopAttachmentTarget(locator)
+    if (!resolved.target) {
+      return {
+        revealed: false,
+        error: 'target_unavailable' as const,
+        availability: resolved.availability
+      }
+    }
+    const result = await revealDesktopAttachmentTarget(resolved.target, {
       async canReveal(path) {
         await readdir(dirname(path))
         await lstat(path)
@@ -1539,6 +1718,7 @@ ipcMain.handle(
         shell.showItemInFolder(path)
       }
     })
+    return { ...result, availability: 'available' as const }
   }
 )
 

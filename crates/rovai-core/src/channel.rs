@@ -14267,7 +14267,9 @@ mod tests {
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .unwrap()
                     .into_iter()
-                    .filter(|column| column != "retry_suppression_json")
+                    .filter(|column| {
+                        column != "retry_suppression_json" && column != "source_attachments_json"
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 let mut statement = connection

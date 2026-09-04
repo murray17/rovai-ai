@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.39
-last_updated: 2026-09-03
+current_version: v1.42
+last_updated: 2026-09-04
 ---
 
 # Rovai-ai 版本记录
@@ -190,4 +190,7 @@ last_updated: 2026-09-03
 | v1.36 | `historical` | 共享 SQLite、飞书终态卡与钉钉 Web Session；钉钉单应用发布已隔离验证，Core/收发/群卡片与 packaged 验收未闭环 | [v1.36/README.md](v1.36/README.md) |
 | v1.37 | `historical` | Runtime 图片、取消可用性、Agent 目标教学与飞书 LAN 只读执行台；部分真实 Runtime/渠道验收未完成即冻结 | [v1.37/README.md](v1.37/README.md) |
 | v1.38 | `historical` | 钉钉渠道管理入口重新开放；按飞书同等体验宗旨交付多 Bot durable 聚合、状态卡、永久摘要与安全诊断，未验收平台能力保持独立 Gate | [v1.38/README.md](v1.38/README.md) |
-| v1.39 | `current` | Pi JSONL Runtime、managed system prompt、exact resume、动态 Skills/MCP、Core Approval 与稀疏 Usage；三平台保持未准入 | [v1.39/README.md](v1.39/README.md) |
+| v1.39 | `historical` | Pi JSONL Runtime、原生能力加 v5 薄扩展、exact-first resume、追加 Skills、partial approval、Prompt images 与稀疏 Usage；External MCP 明确 Unsupported；三平台保持 Preview；Renderer 附件按作者分区展示 | [v1.39/README.md](v1.39/README.md) |
+| v1.40 | `historical` | Desktop 新用户附件改为弱持久 source path refs，Pending 原生携带附件，Runtime 仅做 Run-local 适配 | [v1.40/README.md](v1.40/README.md) |
+| v1.41 | `historical` | Sidecar 首次冻结用户现有 Project 顺序，后续仅同步成员变化，不再按消息活动移动 Project | [v1.41/README.md](v1.41/README.md) |
+| v1.42 | `current` | 只有显式 Markdown 链接产生消息资源入口；共享 Markdown/代码图标与用户附件卡宽度收敛 | [v1.42/README.md](v1.42/README.md) |

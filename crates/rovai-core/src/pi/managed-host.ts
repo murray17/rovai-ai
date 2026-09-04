@@ -7,9 +7,9 @@ import {
   getShellConfig,
 } from "@earendil-works/pi-coding-agent";
 
-const SCHEMA_VERSION = 1;
-const EXTENSION_VERSION = "rovai-pi-host-v3";
-const NATIVE_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+const SCHEMA_VERSION = 2;
+const EXTENSION_VERSION = "rovai-pi-host-v5";
+const GOVERNED_NATIVE_TOOLS = ["bash", "edit", "write"];
 const BINDING_KEYS = [
   "agentRunId",
   "bootstrap",
@@ -21,8 +21,6 @@ const BINDING_KEYS = [
   "extensionVersion",
   "hostBindingGeneration",
   "hostInstanceId",
-  "mcpProjectionDigest",
-  "mcpTools",
   "nativeBindingGeneration",
   "nativeBindingId",
   "nativePromptId",
@@ -68,24 +66,6 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function canonicalSessionFilePath(sessionFile: string): string {
-  if (!path.isAbsolute(sessionFile)) throw new Error("non-absolute Session file");
-  try {
-    const metadata = lstatSync(sessionFile);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new Error("invalid Session file");
-    }
-    return realpathSync(sessionFile);
-  } catch (error: any) {
-    if (error?.code !== "ENOENT") throw error;
-    return path.join(realpathSync(path.dirname(sessionFile)), path.basename(sessionFile));
-  }
-}
-
-function failClosed(): Promise<never> {
-  return new Promise(() => undefined);
-}
-
 function loadBinding(cwd: string): any {
   const bindingPath = process.env.ROVAI_PI_HOST_BINDING_FILE;
   if (!bindingPath || !path.isAbsolute(bindingPath)) throw new Error("missing binding path");
@@ -118,9 +98,7 @@ function loadBinding(cwd: string): any {
     typeof binding.bootstrap !== "string" ||
     !/^[a-f0-9]{64}$/.test(binding.bootstrapPayloadDigest) ||
     sha256(binding.bootstrap) !== binding.bootstrapPayloadDigest ||
-    !nonEmpty(binding.expectedManagedSkillExposureDigest) ||
-    !nonEmpty(binding.mcpProjectionDigest) ||
-    !Array.isArray(binding.mcpTools)
+    !/^[a-f0-9]{64}$/.test(binding.expectedManagedSkillExposureDigest)
   ) {
     throw new Error("binding evidence mismatch");
   }
@@ -128,45 +106,11 @@ function loadBinding(cwd: string): any {
   if (!path.isAbsolute(binding.skillRoot) || realpathSync(binding.skillRoot) !== expectedRoot) {
     throw new Error("binding skill root mismatch");
   }
-  let previousName = "";
-  const sources = new Set<string>();
-  for (const tool of binding.mcpTools) {
-    if (
-      !exactKeys(tool, [
-        "description",
-        "descriptionDigest",
-        "inputSchema",
-        "inputSchemaDigest",
-        "runtimeName",
-        "serverId",
-        "serverName",
-        "toolName",
-      ]) ||
-      !nonEmpty(tool.serverId) ||
-      !nonEmpty(tool.serverName) ||
-      !nonEmpty(tool.toolName) ||
-      !/^[a-z0-9_]{1,64}$/.test(tool.runtimeName) ||
-      NATIVE_TOOLS.includes(tool.runtimeName) ||
-      typeof tool.description !== "string" ||
-      canonicalDigest(tool.description) !== tool.descriptionDigest ||
-      tool.inputSchema === null ||
-      typeof tool.inputSchema !== "object" ||
-      Array.isArray(tool.inputSchema) ||
-      canonicalDigest(tool.inputSchema) !== tool.inputSchemaDigest ||
-      tool.runtimeName <= previousName
-    ) {
-      throw new Error("MCP catalog mismatch");
-    }
-    const source = `${tool.serverName}\0${tool.toolName}`;
-    if (sources.has(source)) throw new Error("duplicate MCP source identity");
-    sources.add(source);
-    previousName = tool.runtimeName;
-  }
   return binding;
 }
 
-function resolvedShell(cwd: string): any {
-  const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted: false });
+function resolvedShell(cwd: string, projectTrusted: boolean): any {
+  const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted });
   const resolved = getShellConfig(settings.getShellPath());
   if (
     !nonEmpty(resolved.shell) ||
@@ -204,9 +148,35 @@ function publishManagedSessionState(ctx: any, current: any): void {
   );
 }
 
-function approvalEnvelope(binding: any, toolCallId: string, toolName: string, input: any, cwd: string): any {
+function publishFailure(ctx: any, binding: any, phase: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  ctx.ui.setStatus(
+    "rovai-managed-failure",
+    canonicalJson({
+      schemaVersion: 1,
+      extensionVersion: EXTENSION_VERSION,
+      hostInstanceId: binding?.hostInstanceId ?? null,
+      agentRunId: binding?.agentRunId ?? null,
+      executionEpoch: binding?.executionEpoch ?? null,
+      hostBindingGeneration: binding?.hostBindingGeneration ?? null,
+      nativeSessionId: ctx.sessionManager?.getSessionId?.() ?? null,
+      phase,
+      code: "pi_managed_extension_failure",
+      message: message.slice(0, 2000),
+    }),
+  );
+}
+
+function approvalEnvelope(
+  binding: any,
+  toolCallId: string,
+  toolName: string,
+  input: any,
+  cwd: string,
+  projectTrusted: boolean,
+): any {
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: 1,
     extensionVersion: EXTENSION_VERSION,
     kind: "native_tool",
     hostInstanceId: binding.hostInstanceId,
@@ -217,140 +187,59 @@ function approvalEnvelope(binding: any, toolCallId: string, toolName: string, in
     toolCallId,
     toolName,
     input,
-    shell: toolName === "bash" ? resolvedShell(cwd) : null,
+    shell: toolName === "bash" ? resolvedShell(cwd, projectTrusted) : null,
   };
 }
 
-function mcpEnvelope(binding: any, tool: any, toolCallId: string, argumentsValue: any): any {
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    extensionVersion: EXTENSION_VERSION,
-    kind: "mcp_tool",
-    hostInstanceId: binding.hostInstanceId,
-    hostBindingGeneration: binding.hostBindingGeneration,
-    agentRunId: binding.agentRunId,
-    executionEpoch: binding.executionEpoch,
-    nativeBindingGeneration: binding.nativeBindingGeneration,
-    mcpProjectionDigest: binding.mcpProjectionDigest,
-    runtimeName: tool.runtimeName,
-    serverId: tool.serverId,
-    serverName: tool.serverName,
-    toolName: tool.toolName,
-    toolCallId,
-    arguments: argumentsValue,
-    argumentsDigest: canonicalDigest(argumentsValue),
-  };
+function validateSession(binding: any, ctx: any): { sessionId: string; cwd: string } {
+  const sessionId = ctx.sessionManager.getSessionId();
+  const cwd = realpathSync(ctx.sessionManager.getCwd());
+  if (!nonEmpty(sessionId) || !nonEmpty(cwd)) throw new Error("Pi managed Session identity is incomplete");
+  if (binding.expectedNativeSessionId !== null && binding.expectedNativeSessionId !== sessionId) {
+    throw new Error("Pi managed Session identity mismatch");
+  }
+  return { sessionId, cwd };
 }
 
 export default function (pi: any) {
   let binding: any;
+  let approvedBindingDigest: string | undefined;
 
-  pi.on("resources_discover", async (event: any) => {
+  pi.on("resources_discover", async (event: any, ctx: any) => {
     try {
       binding = loadBinding(event.cwd);
       return { skillPaths: [binding.skillRoot] };
-    } catch (_) {
-      return await failClosed();
+    } catch (error) {
+      publishFailure(ctx, binding, "resources_discover", error);
+      return {};
     }
   });
 
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
       binding = loadBinding(ctx.cwd);
-      for (const tool of binding.mcpTools) {
-        pi.registerTool({
-          name: tool.runtimeName,
-          label: `MCP ${tool.serverName}/${tool.toolName}`,
-          description:
-            `Rovai external MCP tool ${tool.serverName}/${tool.toolName}.` +
-            (tool.description.length > 0 ? `\n\n${tool.description}` : ""),
-          promptSnippet: `MCP ${tool.serverName}/${tool.toolName} (Core-managed approval)`,
-          promptGuidelines: [],
-          parameters: tool.inputSchema,
-          async execute(toolCallId: string, params: any, _signal: any, _onUpdate: any, toolCtx: any) {
-            try {
-              const current = loadBinding(toolCtx.cwd);
-              const currentTool = current.mcpTools.find((entry: any) => entry.runtimeName === tool.runtimeName);
-              if (!currentTool) throw new Error("stale MCP proxy");
-              const envelope = mcpEnvelope(current, currentTool, toolCallId, params);
-              const allowed = await toolCtx.ui.confirm(
-                "Rovai managed approval",
-                JSON.stringify(envelope),
-              );
-              if (!allowed) {
-                return { content: [{ type: "text", text: "Blocked by Rovai approval" }], isError: true };
-              }
-              const response = await toolCtx.ui.input(
-                "Rovai MCP bridge",
-                JSON.stringify(envelope),
-              );
-              if (!response) throw new Error("missing MCP bridge response");
-              const result = JSON.parse(response);
-              if (
-                !exactKeys(result, ["content", "isError"]) ||
-                !Array.isArray(result.content) ||
-                typeof result.isError !== "boolean"
-              ) {
-                throw new Error("invalid MCP bridge response");
-              }
-              return result;
-            } catch (_) {
-              return { content: [{ type: "text", text: "Rovai MCP bridge failed closed" }], isError: true };
-            }
-          },
-        });
-      }
-      pi.setActiveTools([...NATIVE_TOOLS, ...binding.mcpTools.map((tool: any) => tool.runtimeName)]);
+      approvedBindingDigest = undefined;
       ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
       publishManagedSessionState(ctx, binding);
-    } catch (_) {
-      return await failClosed();
+    } catch (error) {
+      publishFailure(ctx, binding, "session_start", error);
     }
   });
 
-  pi.on("tool_call", async (event: any, ctx: any) => {
-    if (["read", "grep", "find", "ls"].includes(event.toolName)) return undefined;
-    if (binding?.mcpTools?.some((tool: any) => tool.runtimeName === event.toolName)) return undefined;
-    if (!["bash", "write", "edit"].includes(event.toolName) || !ctx.hasUI || ctx.mode !== "rpc") {
-      return { block: true, reason: "Rovai managed Host blocks unknown mutating tools" };
-    }
+  pi.on("input", async (event: any, ctx: any) => {
+    if (event.source !== "rpc") return { action: "continue" };
     try {
       const current = loadBinding(ctx.cwd);
-      const allowed = await ctx.ui.confirm(
-        "Rovai managed approval",
-        JSON.stringify(approvalEnvelope(current, event.toolCallId, event.toolName, event.input, ctx.cwd)),
-      );
-      return allowed ? undefined : { block: true, reason: "Blocked by Rovai approval" };
-    } catch (_) {
-      return { block: true, reason: "Rovai managed approval failed closed" };
-    }
-  });
-
-  pi.on("before_agent_start", async (event: any, ctx: any) => {
-    try {
-      const current = loadBinding(ctx.cwd);
-      ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
-      const effectiveSystemPrompt = `${event.systemPrompt}\n\n${current.bootstrap}`;
-      const skillCatalog = [...(event.systemPromptOptions.skills ?? [])]
-        .map((skill: any) => ({
-          name: skill.name,
-          descriptionDigest: canonicalDigest(skill.description ?? ""),
-          entryPath: skill.filePath,
-          modelVisible: !skill.disableModelInvocation,
-        }))
-        .sort((left: any, right: any) =>
-          left.name === right.name
-            ? Buffer.from(left.entryPath).compare(Buffer.from(right.entryPath))
-            : Buffer.from(left.name).compare(Buffer.from(right.name)),
-        );
-      const mcpToolCatalog = current.mcpTools.map((tool: any) => ({
-        serverId: tool.serverId,
-        serverName: tool.serverName,
-        toolName: tool.toolName,
-        runtimeName: tool.runtimeName,
-        descriptionDigest: tool.descriptionDigest,
-        inputSchemaDigest: tool.inputSchemaDigest,
+      const { sessionId, cwd } = validateSession(current, ctx);
+      if (!ctx.hasUI || ctx.mode !== "rpc") throw new Error("managed receipt channel is unavailable");
+      const availableTools = new Set(pi.getAllTools().map((tool: any) => tool.name));
+      const governedNativeTools = GOVERNED_NATIVE_TOOLS.map((name) => ({
+        name,
+        observable: availableTools.has(name),
       }));
+      if (governedNativeTools.some((tool) => !tool.observable)) {
+        throw new Error("a governed native Tool is not observable");
+      }
       const receipt = {
         schemaVersion: SCHEMA_VERSION,
         extensionVersion: EXTENSION_VERSION,
@@ -362,33 +251,68 @@ export default function (pi: any) {
         nativeBindingGeneration: current.nativeBindingGeneration,
         runtimeInputDeliveryId: current.runtimeInputDeliveryId,
         nativePromptId: current.nativePromptId,
-        nativeSessionId: ctx.sessionManager.getSessionId(),
-        nativeSessionFileDigest: sha256(canonicalSessionFilePath(ctx.sessionManager.getSessionFile())),
-        cwd: realpathSync(ctx.sessionManager.getCwd()),
+        nativeSessionId: sessionId,
+        cwd,
         bootstrapEvidenceId: current.bootstrapEvidenceId,
         bootstrapPayloadDigest: current.bootstrapPayloadDigest,
-        skillExposureDigest: current.expectedManagedSkillExposureDigest,
-        piBaseSystemPromptDigest: sha256(event.systemPrompt),
-        effectiveSystemPromptDigest: sha256(effectiveSystemPrompt),
-        skillCatalog,
-        skillCatalogDigest: canonicalDigest(skillCatalog),
-        activeToolNames: pi.getActiveTools(),
-        mcpToolCatalog,
-        mcpToolCatalogDigest: canonicalDigest(mcpToolCatalog),
-        mcpProjectionDigest: current.mcpProjectionDigest,
+        governedNativeTools,
         bindingDocumentDigest: canonicalDigest(current),
       };
       const expectedNonce = sha256(
-        `rovai-pi-managed-input-receipt-v1\n${canonicalJson(receipt)}`,
+        `rovai-pi-managed-input-receipt-v2\n${canonicalJson(receipt)}`,
       );
       const nonce = await ctx.ui.input(
         "Rovai managed input receipt",
         JSON.stringify(receipt),
       );
       if (nonce !== expectedNonce) throw new Error("receipt commit nonce mismatch");
-      return { systemPrompt: effectiveSystemPrompt };
-    } catch (_) {
-      return await failClosed();
+      binding = current;
+      approvedBindingDigest = receipt.bindingDocumentDigest;
+      return { action: "continue" };
+    } catch (error) {
+      approvedBindingDigest = undefined;
+      publishFailure(ctx, binding, "input", error);
+      return { action: "handled" };
     }
+  });
+
+  pi.on("tool_call", async (event: any, ctx: any) => {
+    if (!GOVERNED_NATIVE_TOOLS.includes(event.toolName)) return undefined;
+    if (!ctx.hasUI || ctx.mode !== "rpc") {
+      return { block: true, reason: "Rovai partial approval channel is unavailable" };
+    }
+    try {
+      const current = loadBinding(ctx.cwd);
+      validateSession(current, ctx);
+      const allowed = await ctx.ui.confirm(
+        "Rovai partial approval",
+        JSON.stringify(
+          approvalEnvelope(
+            current,
+            event.toolCallId,
+            event.toolName,
+            event.input,
+            ctx.cwd,
+            ctx.isProjectTrusted(),
+          ),
+        ),
+      );
+      return allowed ? undefined : { block: true, reason: "Blocked by Rovai approval" };
+    } catch (error) {
+      publishFailure(ctx, binding, "tool_call", error);
+      return { block: true, reason: "Rovai partial approval failed closed" };
+    }
+  });
+
+  pi.on("before_agent_start", async (event: any, ctx: any) => {
+    const currentDigest = binding ? canonicalDigest(binding) : undefined;
+    if (!binding || approvedBindingDigest !== currentDigest) {
+      publishFailure(ctx, binding, "before_agent_start", new Error("managed input receipt was not committed"));
+      ctx.abort();
+      return undefined;
+    }
+    approvedBindingDigest = undefined;
+    ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
+    return { systemPrompt: `${event.systemPrompt}\n\n${binding.bootstrap}` };
   });
 }

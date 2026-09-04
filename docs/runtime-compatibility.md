@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Agent Runtime 兼容性清单
@@ -23,7 +23,7 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 当前 closed `AdapterKind` 包含十四种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
 Grok Build 与 Pi Coding Agent。
-Cursor 与 Pi 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
+Cursor 在三个目标平台均为 `not_qualified`；Pi 在三个目标平台均为可运行但未正式资格化的 `preview`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。
 Grok Build 在 adapter-scoped 证据分别覆盖的 macOS arm64、macOS x64 与 Windows x64 均为 `qualified`；
 三个宿主平台各自绑定独立 evidence digest，不互相外推。
@@ -32,7 +32,7 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
-### 2026-09-03 Pi 0.84.4 macOS arm64 开发证据与未准入记录
+### 2026-09-03 Pi 0.84.4 macOS arm64 开发证据与实验性开放记录
 
 本机把 `@earendil-works/pi-coding-agent@0.84.4` 安装到一次性目录，未替换 PATH 上的 0.84.2。Pi 官方
 `auth.json/settings.json` 使用 `minimax-cn / MiniMax-M3`，直接官方 Pi 请求返回固定 marker；凭据值没有进入仓库、
@@ -44,9 +44,9 @@ Probe、成员选择、诊断或 AgentRun 语义。
 | Ready / Probe | managed extension handshake；创建 Session 后取得 full UUID/canonical file；创建 replacement；实际 `switch_session(exact file)`；`get_state` 核对 ID/file/cwd；Probe session root 未污染 | Pi 专属 Machine Ready 已实现；这些行为仍不是平台 qualification |
 | Auth / Model | 官方 native default MiniMax M3 请求成功；Core catalog/default 与 explicit set/get validator 有 deterministic coverage | 正式 Run 只继承 Pi 官方配置；不借 Claude provider/Home |
 | Session / Host | First Run 后停止 Core，重启后同 full Native Session ID cold exact resume；下一 Run 复用同 Host/Session；跨 Camp A→B→A 使用同 workspace Host、两个 full Session ID 严格分离并准确切回；两个并发 Run 使用不同 Host | `resident_multi_session` 实现成立；复用 identity 是 workspace/process，当前 Camp/member invalidation scope 单独更新；Core planned shutdown 后 descendant 与 Host config 为零 |
-| Bootstrap / receipt | 首次、cold resume、warm reuse 均通过 managed-input receipt；公开 events/stderr 不含 `sessionFile` 或 `nativeSessionFile` | `managed_system_prompt`；locator Core-private；receipt mismatch 全矩阵由 fixture 与 Migration guard 覆盖 |
-| Action / cancel | 单一真实 Run 覆盖 stdout、stderr、mixed、empty、exit 7 与 >50KB/2500 行；每个 Tool ID 一个 terminal Action，command 在 `runtime.action`，完整大输出由 Blob evidence 取回；write allow-once 只产生一次文件，deny 不建文件，sleep cancel 严格结算 `cancelled` 且不建延迟文件 | Core-managed Approval；shell path/args/transport 来自 Pi 实际配置，不伪造 zsh argv；Windows shell identity 仍待目标机验证 |
-| MCP | Pi+MiniMax 真实调用三个 projected Tool，覆盖 same-name `RovaiWins`、stdio 与 Streamable HTTP；随后覆盖 update、disable/re-enable、unassign/restore、delete 和同 Host 相邻 Session no-leak；mutation deny 未到 Server，cancel 严格 `cancelled`、Server PID 回收、无延迟文件 | 上游无内建 MCP，但官方 Tool API 可桥接，不能标记 Unsupported；本机实现轴已闭合，其他平台与网络故障注入仍待验 |
+| Bootstrap / receipt | 首次、cold resume、warm reuse 均通过 managed-input receipt；公开 events/stderr 不含 `sessionFile` 或 `nativeSessionFile` | v5 在自身 hook 位置追加 `managed_system_prompt`；locator Core-private；V2 receipt 只证明最小 binding/Bootstrap/三个 governed Tool，不声明后加载 Extension 未改写最终输入 |
+| Action / cancel | 单一真实 Run 覆盖 stdout、stderr、mixed、empty、exit 7 与 >50KB/2500 行；每个 Tool ID 一个 terminal Action，command 在 `runtime.action`，完整大输出由 Blob evidence 取回；write allow-once 只产生一次文件，deny 不建文件，sleep cancel 严格结算 `cancelled` 且不建延迟文件 | `partial_managed` 只审批 bash/edit/write；shell path/args/transport 来自 Pi 当前 project trust 下实际配置，不伪造 zsh argv；未知 Extension Tool 按 Pi 原生语义执行，Windows shell identity 仍待目标机验证 |
+| MCP | 上游没有原生 External MCP；通用 Extension Tool API 不作为产品 MCP transport | `Unsupported`；Pi 静默忽略已保存 Assignment，不读取配置、不投影或启动 Server、不注册 proxy Tool，MCP 变化不参与 Host/LRU/resume |
 | Skills / Built-in | 真实调用 `.pi/skills` projected Skill；导入、Revision update、disable/re-enable、unassign/restore、hard delete、重启、project-owned 同名 shadow 与同 Host 相邻 Session no-leak 全部通过；Built-in CLI 15-operation full Run 与 resumed/new-lease Run 通过 | 本机两项均为 Verified + Implemented；compaction 后 catalog 连续性与另外两个平台仍待验 |
 | Final / Usage | `agent_settled` 后唯一成功；terminal assistant `message_end.message.usage` 在 Monitoring 得到 input/output；cancel 不触发成功 | streamed update/session totals 不计量；reasoning/cost 缺失保持 unknown |
 | Compaction | 上游源码与 wire 定义显示 system prompt 独立于被压缩 message history，且有结构化 compaction lifecycle | 策略为 `native_system_prompt_preserved`；manual/threshold/overflow+retry/cancel 的完整真实产品 smoke 待完成 |
@@ -55,10 +55,11 @@ Pi executable 缺失时，独立 optional subsystem 只把 `runtime.pi` 标成 d
 仍可用。这个安装存在性检查不等于 Ready 或平台资格。
 
 本记录只形成 `macos-arm64` 开发证据，不是 `Runtime Platform Admission` artifact。Pi 在 macOS arm64、macOS x64、
-Windows x64 均保持 `not_qualified / runtime_platform.qualification_evidence_missing`；普通 discovery、成员选择与
-AgentRun 不可达。Images、Pi-specific structured Web Search 与 Camp Fast 当前明确 unsupported/hidden。完整差异和
+Windows x64 均为 `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`；普通 discovery、
+检查、成员选择、Diagnostics 与 AgentRun 已开放供主动测试，但不宣称 First-Class/qualified。Pi Prompt images 已接入
+原生 RPC；Pi-specific structured Web Search 与 Camp Fast 当前明确 unsupported/hidden。完整差异和
 未闭合项见 [Pi Parity Matrix](research/pi-runtime-reintegration-parity-matrix.md)与
-[Runtime Launch v30](contracts/runtime-launch-and-verification-v30.md)。
+[Runtime Launch v33](contracts/runtime-launch-and-verification-v33.md)。
 
 ### 2026-08-31 Camp Fast metadata 边界
 
@@ -249,14 +250,15 @@ implementation `Disabled`，不是 `Unsupported`；usage/token 变化、历史�
 
 v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
 Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。2026-08-23 复核既有 Windows 证据并在当前源码树完成
-逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已准入；明确不在本轮设置页范围的
-`cursor-agent` 仍不准入。下表是当前资格状态，不是本机
+逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已资格化；Pi 另以实验性 Preview 开放，明确不在本轮设置页范围的
+`cursor-agent` 仍不准入。下表是当前准入状态，不是本机
 `not_installed`、Probe 失败、上游不支持或 Renderer allowlist；唯一产品真源是 Rust Registry 的
-[Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)投影。
+[Runtime Platform Admission v2](contracts/runtime-platform-admission-v2.md)投影。
 
 | AdapterKind | `windows-x64` admission | evidence revision | 说明 |
 | --- | --- | --- | --- |
 | `codex-cli` | `qualified` | `sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054` | 两轮纯消息与 Native Session 延续通过 |
+| `pi` | `preview` | — | 实验性开放供主动测试；Windows 专属 qualification evidence 仍缺失 |
 | `opencode-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
 | `copilot-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
 | `claude-code-cli` | `qualified` | 同上 | 两轮、取消与 packaged planned-shutdown 证据通过 |
@@ -292,7 +294,8 @@ terminal。凭据、原始 Prompt、本机用户路径、Session/Run ID 均未�
 Codex、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen、TRAE 与 Kimi 都在各自隔离 Rovai Camp 完成两轮；
 第二轮与第一轮绑定同一 Native Session。除 Codex、Kimi 使用两轮纯消息外，其余当前可重复 Runtime 还确认了
 终端输出投影。Antigravity 按操作员明确确认复用此前成功运行，本次 companion 在当前额度状态下未返回模型
-输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，仍为唯一 Windows `not_qualified` 行。
+输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，仍为唯一 Windows `not_qualified` 行；Pi 是唯一
+Windows `preview` 行。
 
 ### 2026-08-21 Windows 10 22H2 本机实施复核
 
@@ -858,6 +861,7 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 | TRAE CLI CN | `AdditivePerRun` / `RovaiWins` | 首次 ACP `session/new.mcpServers`；后续只有 compatibility digest 相同时复用 warm Host/Session | `0.120.52` 原生 Session A/B 追加与不泄漏 Probe、正式 Core smoke 均通过 |
 | Antigravity | `Unsupported` | 无不修改 Global/Workspace 文件的逐 Run 动态通道 | 诊断披露；配置页保持中立 |
 | Cursor Agent | `Unsupported` | 当前未准入，不注入 External MCP | 完整 authenticated Session 与 same-name matrix 前保持 Disabled |
+| Pi Coding Agent | `Unsupported` | 不读取或投影 Assignment；不启动 Server、不注册 proxy Tool；MCP 不参与 compatibility、LRU 或 exact resume | 当前产品接受差异；配置与 Assignment 保留，切换到支持 Runtime 后继续生效 |
 | Kimi Code | `AdditivePerRun` / `RovaiWins` | ACP `session/new/resume/load.mcpServers`，不写用户级配置 | `0.32.0` + MiniMax M3 真实 Core smoke 已通过 stdio、Streamable HTTP、同名整项优先与三项 `ready` Manifest exposure |
 | Grok Build | `AdditivePerRun` / `NativeWinsSkip` | `0.2.118` 忽略 ACP Session `mcpServers`；Core 使用权限收窄的临时 Plugin 与 process `--plugin-dir`，不写 project/user config | MiniMax-M3 产品 smoke 保留两个原生同名 Server、skip 两个冲突 Assignment，并真实调用第三个不同名 Rovai stdio Server；三项 Manifest exposure 与 cleanup 通过 |
 

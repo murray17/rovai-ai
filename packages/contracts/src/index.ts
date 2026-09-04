@@ -386,7 +386,7 @@ export interface ProductRuntimeCatalogEntry {
 
 export type HostPlatformKey = 'macos-arm64' | 'macos-x64' | 'windows-x64'
 
-export type RuntimePlatformAdmissionStatus = 'qualified' | 'not_qualified' | 'unsupported'
+export type RuntimePlatformAdmissionStatus = 'qualified' | 'preview' | 'not_qualified' | 'unsupported'
 
 export type RuntimePlatformAdmissionReasonCode =
   | 'runtime_platform.qualification_evidence_missing'
@@ -1059,26 +1059,40 @@ export interface CampMessageAttachmentView {
   id: string
   displayName: string
   kind: 'file' | 'directory'
-  fileCount: number
-  mediaType: string
-  byteSize: number
+  fileCount: number | null
+  mediaType: string | null
+  byteSize: number | null
   previewKind: 'image' | 'none'
-  runtimeProjectionState: 'pending' | 'available' | 'recovery_required' | 'failed'
+  availability: LocalAttachmentAvailability
 }
 
-export interface PreparedAttachmentView
-  extends Omit<CampMessageAttachmentView, 'runtimeProjectionState'> {
-  state: 'ready' | 'error'
-  errorMessage: string | null
-  createdAt: string
-}
+export type LocalAttachmentAvailability =
+  | 'unknown'
+  | 'available'
+  | 'missing'
+  | 'unreadable'
+  | 'kind_changed'
+
+export type LocalAttachmentSourceView = CampMessageAttachmentView
+
+export type LocalAttachmentOwnerLocator =
+  | { owner: 'composer'; campId: string; attachmentRefId: string }
+  | { owner: 'pending'; campId: string; pendingInputId: string; attachmentRefId: string }
+  | {
+      owner: 'pending_edit'
+      campId: string
+      pendingInputId: string
+      editToken: string
+      attachmentRefId: string
+    }
+  | { owner: 'message'; campId: string; messageId: string; attachmentRefId: string }
 
 export interface CampComposerDraftView {
   campId: string
   body: string
   content: StructuredCampMessageContent
   revision: number
-  attachments: PreparedAttachmentView[]
+  attachments: LocalAttachmentSourceView[]
   replyIntent: CampComposerReplyIntentView | null
   continuationIntent: CampComposerContinuationIntentView | null
   updatedAt: string | null
@@ -1096,6 +1110,7 @@ export interface PendingCampInputView {
   replyIntent: CampComposerReplyIntentView | null
   recipientSelectionRequired: boolean
   lastAttemptErrorCode: string | null
+  attachments: LocalAttachmentSourceView[]
 }
 
 export interface PendingInputEditSession {
@@ -1103,6 +1118,7 @@ export interface PendingInputEditSession {
   editToken: string
   basePendingRevision: number
   recoveryRequired: boolean
+  workingAttachments: LocalAttachmentSourceView[]
 }
 
 export interface CampPendingInputsView {
@@ -1120,6 +1136,8 @@ export type PendingInputEditAction =
       replyToCampMessageId: string | null
       recipientSelectionRequired: boolean
     }
+  | { type: 'remove_attachment'; attachmentRefId: string }
+  | { type: 'reorder_attachments'; attachmentRefIds: string[] }
 
 export interface CampComposerContinuationIntentView {
   sourceCampMessageId: string
@@ -1153,16 +1171,23 @@ export interface AttachmentPreview {
   bytes: Uint8Array
 }
 
+export interface AttachmentPreviewResult {
+  preview: AttachmentPreview | null
+  availability: LocalAttachmentAvailability
+}
+
 export type AttachmentActionError = 'target_unavailable' | 'open_failed' | 'reveal_failed'
 
 export interface AttachmentOpenResult {
   opened: boolean
   error: AttachmentActionError | null
+  availability: LocalAttachmentAvailability
 }
 
 export interface AttachmentRevealResult {
   revealed: boolean
   error: AttachmentActionError | null
+  availability: LocalAttachmentAvailability
 }
 
 export type OpenFilePreviewRequest =
@@ -1180,7 +1205,7 @@ export type OpenFilePreviewRequest =
   | {
       kind: 'attachment'
       campId: string
-      attachmentId: string
+      locator: LocalAttachmentOwnerLocator
     }
   | {
       kind: 'run_evidence'
@@ -1301,6 +1326,9 @@ export type FilePreviewErrorCode =
   | 'read_failed'
   | 'open_failed'
   | 'reveal_failed'
+  | 'attachment_missing'
+  | 'attachment_unreadable'
+  | 'attachment_kind_changed'
 
 export interface FilePreviewErrorPayload {
   code: FilePreviewErrorCode
@@ -2697,14 +2725,16 @@ export interface RemovedNavigationProject {
 }
 
 export interface NavigationPreferencesSnapshot {
-  schemaVersion: 2
+  schemaVersion: 3
   pins: NavigationPin[]
   removedProjects: RemovedNavigationProject[]
+  projectOrder: string[] | null
 }
 
 export interface NavigationPreferencesApi {
   get(): Promise<NavigationPreferencesSnapshot>
   replacePins(pins: NavigationPin[]): Promise<NavigationPreferencesSnapshot>
+  synchronizeProjectOrder(projectKeys: string[]): Promise<NavigationPreferencesSnapshot>
   removeProject(targetKey: string, relatedCampIds: string[]): Promise<NavigationPreferencesSnapshot>
   restoreProject(targetKey: string): Promise<NavigationPreferencesSnapshot>
 }
@@ -3365,11 +3395,17 @@ export interface RovaiApi {
   memberAvatars: MemberAvatarsApi
   composerAttachments: {
     prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>
-    preview(attachmentId: string): Promise<AttachmentPreview | null>
+    preparePending(input: {
+      campId: string
+      pendingInputId: string
+      expectedRevision: number
+      editToken: string
+    }, file: File): Promise<CampPendingInputsView>
+    preview(locator: LocalAttachmentOwnerLocator): Promise<AttachmentPreviewResult>
   }
   attachments: {
-    open(campId: string, attachmentId: string): Promise<AttachmentOpenResult>
-    reveal(campId: string, attachmentId: string): Promise<AttachmentRevealResult>
+    open(locator: LocalAttachmentOwnerLocator): Promise<AttachmentOpenResult>
+    reveal(locator: LocalAttachmentOwnerLocator): Promise<AttachmentRevealResult>
   }
   filePreview: FilePreviewApi
   clipboard: {

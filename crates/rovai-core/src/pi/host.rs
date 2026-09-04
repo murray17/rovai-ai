@@ -1,16 +1,17 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::HashMap,
     fs::{File, OpenOptions},
     io::{BufRead as _, BufReader as StdBufReader, Read as _, Write as _},
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex as StdMutex, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use rovai_core::{
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     agent_runtime_adapter::{
@@ -25,7 +26,6 @@ use rovai_core::{
         ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
         ManagedWindowsArgvDialect,
     },
-    mcp_projection::PreparedMcpProjection,
     runtime_discovery::configure_active_runtime_command,
     skill::MAX_SKILL_FILE_BYTES,
     skill_projection::PreparedSkillExposure,
@@ -50,14 +50,13 @@ use crate::{
     },
 };
 
-use super::mcp::{PiMcpBridge, PiMcpToolDefinition};
 use super::{
     PI_COMMAND_TIMEOUT, PI_HOST_EXTENSION_VERSION, PI_MAX_JSONL_RECORD_BYTES, PI_PROTOCOL_VERSION,
     PiIncoming, assistant_message_text, completed_action, read_jsonl_record, value_id,
 };
 
 const MANAGED_HOST_EXTENSION: &str = include_str!("managed-host.ts");
-const NATIVE_TOOL_NAMES: [&str; 7] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+const GOVERNED_NATIVE_TOOL_NAMES: [&str; 3] = ["bash", "edit", "write"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -78,8 +77,6 @@ pub(crate) struct PiHostBindingDocument {
     pub bootstrap_payload_digest: String,
     pub skill_root: String,
     pub expected_managed_skill_exposure_digest: String,
-    pub mcp_projection_digest: String,
-    pub mcp_tools: Vec<PiMcpToolDefinition>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,8 +93,6 @@ struct PiBindingSeed {
     bootstrap_payload_digest: String,
     skill_root: PathBuf,
     expected_managed_skill_exposure_digest: String,
-    mcp_projection_digest: String,
-    mcp_tools: Vec<PiMcpToolDefinition>,
 }
 
 impl PiBindingSeed {
@@ -107,7 +102,7 @@ impl PiBindingSeed {
         host_binding_generation: u64,
     ) -> PiHostBindingDocument {
         PiHostBindingDocument {
-            schema_version: 1,
+            schema_version: 2,
             extension_version: PI_HOST_EXTENSION_VERSION.to_string(),
             host_instance_id: host_instance_id.to_string(),
             host_binding_generation,
@@ -125,8 +120,6 @@ impl PiBindingSeed {
             expected_managed_skill_exposure_digest: self
                 .expected_managed_skill_exposure_digest
                 .clone(),
-            mcp_projection_digest: self.mcp_projection_digest.clone(),
-            mcp_tools: self.mcp_tools.clone(),
         }
     }
 }
@@ -160,6 +153,7 @@ struct PiRuntimeOwner {
 }
 
 struct PendingPiCommand {
+    command_type: String,
     sender: oneshot::Sender<std::result::Result<Value, String>>,
 }
 
@@ -197,6 +191,7 @@ struct PiHostLaunch<'a> {
     initial_binding: &'a PiBindingSeed,
     incoming: mpsc::UnboundedSender<PiIncoming>,
     builtin_tools: Option<BuiltinToolProcessConfig>,
+    allow_auto_extensions: bool,
 }
 
 struct PiProbeRootCleanup(PathBuf);
@@ -212,7 +207,141 @@ struct ActivatedPiSession {
     session_file: PathBuf,
     model_fingerprint: String,
     binding_document: PiHostBindingDocument,
-    skill_command_catalog: Vec<PiReceiptSkill>,
+    command_catalog: Vec<PiCommandCatalogEntry>,
+    model_supports_images: bool,
+}
+
+const PI_COMMAND_FILE_MAX_BYTES: u64 = 2 * 1024 * 1024;
+pub(crate) const PI_PROMPT_IMAGE_MAX_BYTES: usize = 20 * 1024 * 1024;
+pub(crate) const PI_PROMPT_IMAGE_TOTAL_MAX_BYTES: usize = 80 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PiCommandSource {
+    Extension,
+    Prompt,
+    Skill,
+}
+
+impl PiCommandSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Extension => "extension",
+            Self::Prompt => "prompt",
+            Self::Skill => "skill",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PiCommandCatalogEntry {
+    name: String,
+    source: PiCommandSource,
+    location: Option<String>,
+    lexical_path: Option<PathBuf>,
+    canonical_path: Option<PathBuf>,
+    content_digest: Option<String>,
+    file_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PiPromptImage {
+    pub(crate) r#type: String,
+    pub(crate) data: String,
+    pub(crate) mime_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PreparedPiPromptImage {
+    pub(crate) wire: PiPromptImage,
+    pub(crate) content_digest: String,
+    pub(crate) byte_length: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedPiPromptTransform {
+    pub(crate) runtime_payload: String,
+    pub(crate) evidence: Value,
+    pub(crate) source_path: Option<String>,
+    pub(crate) source_content: Option<Vec<u8>>,
+    pub(crate) expanded_content: Option<Vec<u8>>,
+}
+
+pub(crate) fn prepare_prompt_images(
+    attachments: &[(PathBuf, String)],
+) -> Result<Vec<PreparedPiPromptImage>> {
+    let mut images = Vec::new();
+    let mut total_bytes = 0usize;
+    for (path, expected_digest) in attachments {
+        if !path.is_absolute() {
+            bail!("Pi attachment path is not absolute");
+        }
+        let metadata = std::fs::symlink_metadata(path).with_context(|| {
+            format!("Pi attachment metadata is unavailable: {}", path.display())
+        })?;
+        if metadata.file_type().is_symlink() {
+            bail!("Pi attachment is not a non-symlink regular file");
+        }
+        if metadata.is_dir() {
+            continue;
+        }
+        if !metadata.is_file() {
+            bail!("Pi attachment is not a non-symlink regular file");
+        }
+        let mut prefix = [0u8; 12];
+        let mut file = File::open(path)
+            .with_context(|| format!("Pi attachment cannot be opened: {}", path.display()))?;
+        let prefix_len = file
+            .read(&mut prefix)
+            .context("Pi attachment MIME prefix cannot be read")?;
+        let Some(mime_type) = sniff_pi_image_mime(&prefix[..prefix_len]) else {
+            continue;
+        };
+        let byte_length = usize::try_from(metadata.len())
+            .context("Pi prompt image size cannot be represented")?;
+        if byte_length == 0 || byte_length > PI_PROMPT_IMAGE_MAX_BYTES {
+            bail!("Pi prompt image exceeds its per-image limit");
+        }
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("Pi prompt image cannot be read: {}", path.display()))?;
+        if bytes.len() != byte_length || sniff_pi_image_mime(&bytes) != Some(mime_type) {
+            bail!("Pi prompt image changed during MIME validation");
+        }
+        let digest = sha256_bytes(&bytes);
+        if expected_digest != &format!("sha256:{digest}") {
+            bail!("Pi prompt image bytes differ from the authorized attachment digest");
+        }
+        total_bytes = total_bytes
+            .checked_add(byte_length)
+            .context("Pi prompt image aggregate size overflow")?;
+        if total_bytes > PI_PROMPT_IMAGE_TOTAL_MAX_BYTES {
+            bail!("Pi prompt images exceed their aggregate limit");
+        }
+        images.push(PreparedPiPromptImage {
+            wire: PiPromptImage {
+                r#type: "image".to_string(),
+                data: BASE64_STANDARD.encode(&bytes),
+                mime_type: mime_type.to_string(),
+            },
+            content_digest: digest,
+            byte_length,
+        });
+    }
+    Ok(images)
+}
+
+fn sniff_pi_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
 }
 
 fn append_session_directory_argument(command: &mut Command, session_dir: Option<&Path>) {
@@ -227,8 +356,39 @@ fn append_initial_session_argument(command: &mut Command, session_file: Option<&
     }
 }
 
+fn append_host_arguments(
+    command: &mut Command,
+    extension_path: &Path,
+    allow_auto_extensions: bool,
+) {
+    command.args(["--mode", "rpc"]);
+    if !allow_auto_extensions {
+        command.arg("--no-extensions");
+    }
+    command
+        .args(["--no-themes", "--extension"])
+        .arg(extension_path);
+}
+
 impl PiHost {
     async fn spawn(launch: PiHostLaunch<'_>) -> Result<Arc<Self>> {
+        match Self::spawn_once(&launch, launch.allow_auto_extensions).await {
+            Ok(host) => Ok(host),
+            Err(first_error) if launch.allow_auto_extensions => {
+                Self::spawn_once(&launch, false).await.with_context(|| {
+                    format!(
+                        "Pi native Extension startup failed before input; managed-only retry also failed: {first_error:#}"
+                    )
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn spawn_once(
+        launch: &PiHostLaunch<'_>,
+        allow_auto_extensions: bool,
+    ) -> Result<Arc<Self>> {
         create_private_directory(launch.private_runtime_dir)?;
         if let Some(session_dir) = launch.session_dir {
             create_private_directory(session_dir)?;
@@ -250,20 +410,7 @@ impl PiHost {
         if let Some(config) = &launch.builtin_tools {
             config.configure_command(&mut command)?;
         }
-        command
-            .args([
-                "--mode",
-                "rpc",
-                "--no-extensions",
-                "--no-skills",
-                "--no-context-files",
-                "--no-prompt-templates",
-                "--no-themes",
-                "--no-approve",
-                "--no-builtin-tools",
-                "--extension",
-            ])
-            .arg(&extension_path);
+        append_host_arguments(&mut command, &extension_path, allow_auto_extensions);
         append_session_directory_argument(&mut command, launch.session_dir);
         append_initial_session_argument(&mut command, launch.initial_session_file);
         command
@@ -292,13 +439,13 @@ impl PiHost {
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             owner: RwLock::new(None),
-            incoming: launch.incoming,
+            incoming: launch.incoming.clone(),
             alive: AtomicBool::new(true),
             poisoned: AtomicBool::new(false),
             streaming: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
             executable_path: launch.executable.to_path_buf(),
-            builtin_tools: launch.builtin_tools,
+            builtin_tools: launch.builtin_tools.clone(),
             config_root,
             binding_path,
             binding_generation: AtomicU64::new(1),
@@ -310,7 +457,7 @@ impl PiHost {
             cwd: launch.cwd.to_path_buf(),
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
-        Self::spawn_stderr_reader(stderr);
+        Self::spawn_stderr_reader(host.clone(), stderr);
         if let Err(error) = host.command("get_state", json!({})).await {
             host.shutdown_and_reap().await;
             return Err(error.context("Pi get_state failed during Host startup"));
@@ -321,34 +468,111 @@ impl PiHost {
     fn spawn_stdout_reader(host: Arc<Self>, stdout: ManagedChildStdout) {
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
+            let mut protocol_started = false;
+            let mut startup_prelude_lines = 0usize;
+            let mut startup_prelude_bytes = 0usize;
+            let mut consecutive_malformed = 0usize;
             loop {
                 let record = match read_jsonl_record(&mut reader, PI_MAX_JSONL_RECORD_BYTES).await {
                     Ok(Some(record)) => record,
-                    _ => break,
+                    Ok(None) => break,
+                    Err(error) => {
+                        host.emit_diagnostic(
+                            if protocol_started {
+                                "running"
+                            } else {
+                                "startup"
+                            },
+                            &format!("Pi stdout framing error: {error:#}"),
+                        )
+                        .await;
+                        host.poisoned.store(true, Ordering::Release);
+                        break;
+                    }
                 };
                 let message = match serde_json::from_slice::<Value>(&record) {
                     Ok(message) if message.is_object() => message,
-                    _ => break,
+                    _ => {
+                        if !protocol_started {
+                            startup_prelude_lines += 1;
+                            startup_prelude_bytes =
+                                startup_prelude_bytes.saturating_add(record.len());
+                            host.emit_diagnostic(
+                                "startup",
+                                &format!(
+                                    "Pi stdout startup prelude: {}",
+                                    String::from_utf8_lossy(&record)
+                                ),
+                            )
+                            .await;
+                            if startup_prelude_lines > 32 || startup_prelude_bytes > 64 * 1024 {
+                                host.poisoned.store(true, Ordering::Release);
+                                break;
+                            }
+                        } else {
+                            consecutive_malformed += 1;
+                            host.emit_diagnostic(
+                                "running",
+                                &format!(
+                                    "Pi stdout skipped malformed record: {}",
+                                    String::from_utf8_lossy(&record)
+                                ),
+                            )
+                            .await;
+                            if consecutive_malformed >= 3 {
+                                host.poisoned.store(true, Ordering::Release);
+                                break;
+                            }
+                        }
+                        continue;
+                    }
                 };
+                protocol_started = true;
+                consecutive_malformed = 0;
                 if message.get("type").and_then(Value::as_str) == Some("response") {
                     let Some(id) = message.get("id").and_then(value_id) else {
-                        continue;
+                        host.emit_diagnostic("running", "Pi RPC response omitted its request id")
+                            .await;
+                        host.poisoned.store(true, Ordering::Release);
+                        break;
                     };
-                    if let Some(pending) = host.pending.lock().await.remove(&id) {
-                        let response =
-                            if message.get("success").and_then(Value::as_bool) == Some(true) {
-                                Ok(message)
-                            } else {
-                                Err(message
-                                    .get("error")
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("Pi RPC command failed")
-                                    .chars()
-                                    .take(2_000)
-                                    .collect())
-                            };
-                        let _ = pending.sender.send(response);
+                    let Some(pending) = host.pending.lock().await.remove(&id) else {
+                        host.emit_diagnostic(
+                            "running",
+                            "Pi RPC response did not match a pending request",
+                        )
+                        .await;
+                        host.poisoned.store(true, Ordering::Release);
+                        break;
+                    };
+                    if message.get("command").and_then(Value::as_str)
+                        != Some(pending.command_type.as_str())
+                    {
+                        let _ = pending.sender.send(Err(format!(
+                            "Pi RPC response command identity mismatch: expected {}",
+                            pending.command_type
+                        )));
+                        host.emit_diagnostic(
+                            "running",
+                            "Pi RPC response command identity mismatch",
+                        )
+                        .await;
+                        host.poisoned.store(true, Ordering::Release);
+                        break;
                     }
+                    let response = if message.get("success").and_then(Value::as_bool) == Some(true)
+                    {
+                        Ok(message)
+                    } else {
+                        Err(message
+                            .get("error")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Pi RPC command failed")
+                            .chars()
+                            .take(2_000)
+                            .collect())
+                    };
+                    let _ = pending.sender.send(response);
                     continue;
                 }
                 match message.get("type").and_then(Value::as_str) {
@@ -372,14 +596,62 @@ impl PiHost {
         });
     }
 
-    fn spawn_stderr_reader(stderr: ManagedChildStderr) {
+    fn spawn_stderr_reader(host: Arc<Self>, stderr: ManagedChildStderr) {
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
-            while let Ok(Some(_)) = read_jsonl_record(&mut reader, 64 * 1024).await {}
+            loop {
+                match read_jsonl_record(&mut reader, 64 * 1024).await {
+                    Ok(Some(record)) => {
+                        host.emit_diagnostic(
+                            if host.owner.read().await.is_some() {
+                                "running"
+                            } else {
+                                "startup"
+                            },
+                            &format!("Pi stderr: {}", String::from_utf8_lossy(&record)),
+                        )
+                        .await;
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        host.emit_diagnostic(
+                            "running",
+                            &format!("Pi stderr framing error: {error:#}"),
+                        )
+                        .await;
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    async fn emit_diagnostic(&self, phase: &str, message: &str) {
+        let owner = self.owner.read().await.clone();
+        let _ = self.incoming.send(PiIncoming::Diagnostic {
+            host_instance_id: self.host_instance_id.clone(),
+            agent_run_id: owner.as_ref().map(|value| value.agent_run_id.clone()),
+            execution_epoch: owner.as_ref().map(|value| value.execution_epoch),
+            phase: phase.to_string(),
+            message: redact_pi_diagnostic(message),
         });
     }
 
     async fn route_message(&self, message: Value) {
+        if message.get("type").and_then(Value::as_str) == Some("extension_ui_request")
+            && message.get("method").and_then(Value::as_str) == Some("setStatus")
+            && message.get("statusKey").and_then(Value::as_str) == Some("rovai-managed-failure")
+        {
+            self.emit_diagnostic(
+                "activation",
+                message
+                    .get("statusText")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Pi managed extension reported a failure"),
+            )
+            .await;
+            return;
+        }
         if message.get("type").and_then(Value::as_str) == Some("extension_ui_request")
             && message.get("method").and_then(Value::as_str) == Some("setStatus")
             && message.get("statusKey").and_then(Value::as_str)
@@ -422,7 +694,7 @@ impl PiHost {
             .await
             .clone()
             .context("Pi managed Session state has no active binding")?;
-        if state.schema_version != 1
+        if state.schema_version != 2
             || state.extension_version != PI_HOST_EXTENSION_VERSION
             || state.host_instance_id != self.host_instance_id
             || state.host_binding_generation != binding.host_binding_generation
@@ -445,10 +717,13 @@ impl PiHost {
         command.insert("id".to_string(), Value::String(id.clone()));
         command.insert("type".to_string(), Value::String(command_type.to_string()));
         let (sender, receiver) = oneshot::channel();
-        self.pending
-            .lock()
-            .await
-            .insert(id.clone(), PendingPiCommand { sender });
+        self.pending.lock().await.insert(
+            id.clone(),
+            PendingPiCommand {
+                command_type: command_type.to_string(),
+                sender,
+            },
+        );
         if let Err(error) = self.send(Value::Object(command)).await {
             self.pending.lock().await.remove(&id);
             return Err(error);
@@ -459,7 +734,6 @@ impl PiHost {
             Ok(Err(_)) => bail!("Pi RPC response channel closed: {command_type}"),
             Err(_) => {
                 self.pending.lock().await.remove(&id);
-                self.poisoned.store(true, Ordering::Release);
                 bail!("Pi RPC command timed out: {command_type}")
             }
         }
@@ -548,13 +822,14 @@ impl PiHost {
                 .await?;
         }
         let state = self.command("get_state", json!({})).await?;
-        let (session_id, session_file, provider, model_id, thinking_level) = validate_host_state(
-            &state,
-            seed.expected_native_session_id.as_deref(),
-            locator_root,
-            &self.cwd,
-            &frozen_runtime.model.model_id,
-        )?;
+        let (session_id, session_file, provider, model_id, thinking_level, model_supports_images) =
+            validate_host_state(
+                &state,
+                seed.expected_native_session_id.as_deref(),
+                locator_root,
+                &self.cwd,
+                &frozen_runtime.model.model_id,
+            )?;
         validate_managed_session_state(
             self.managed_session_state
                 .read()
@@ -574,12 +849,13 @@ impl PiHost {
             seed.expected_native_session_id.is_some(),
         )?;
         let commands = self.command("get_commands", json!({})).await?;
-        let skill_command_catalog = validate_skill_commands(
+        validate_skill_commands(
             &commands,
             &seed.skill_root,
             &self.cwd,
             expected_managed_skills,
         )?;
+        let command_catalog = parse_command_catalog(&commands)?;
         let model_fingerprint =
             short_digest(format!("{provider}\0{model_id}\0{thinking_level}").as_bytes());
         *self.session_id.write().await = session_id.clone();
@@ -590,7 +866,8 @@ impl PiHost {
             session_file,
             model_fingerprint,
             binding_document: document,
-            skill_command_catalog,
+            command_catalog,
+            model_supports_images,
         })
     }
 
@@ -707,36 +984,17 @@ impl PiHost {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct PiMcpAuthorization {
-    host_instance_id: String,
-    host_binding_generation: u64,
-    agent_run_id: String,
-    execution_epoch: i64,
-    native_binding_generation: i64,
-    mcp_projection_digest: String,
-    runtime_name: String,
-    server_id: String,
-    server_name: String,
-    tool_name: String,
-    tool_call_id: String,
-    arguments_digest: String,
-}
-
 pub struct PiRuntime {
     owner: PiRuntimeOwner,
     camp_id: String,
     host: Arc<PiHost>,
-    mcp: Arc<PiMcpBridge>,
     binding_document: PiHostBindingDocument,
-    expected_managed_skills: Vec<(String, PathBuf)>,
-    skill_command_catalog: Vec<PiReceiptSkill>,
+    command_catalog: Vec<PiCommandCatalogEntry>,
+    model_supports_images: bool,
     final_message: RwLock<Option<String>>,
     final_stop_reason: RwLock<Option<String>>,
     approval_handshake: AtomicBool,
     receipt_committed: AtomicBool,
-    pending_mcp_approvals: Mutex<HashMap<String, PiMcpAuthorization>>,
-    authorized_mcp_calls: Mutex<HashSet<PiMcpAuthorization>>,
     session_id: String,
     session_file: PathBuf,
     model_fingerprint: String,
@@ -747,51 +1005,164 @@ impl PiRuntime {
         owner: PiRuntimeOwner,
         camp_id: String,
         host: Arc<PiHost>,
-        mcp: Arc<PiMcpBridge>,
         activation: ActivatedPiSession,
-        expected_managed_skills: Vec<(String, PathBuf)>,
     ) -> Arc<Self> {
         Arc::new(Self {
             owner,
             camp_id,
             host,
-            mcp,
             binding_document: activation.binding_document,
-            expected_managed_skills,
-            skill_command_catalog: activation.skill_command_catalog,
+            command_catalog: activation.command_catalog,
+            model_supports_images: activation.model_supports_images,
             final_message: RwLock::new(None),
             final_stop_reason: RwLock::new(None),
             approval_handshake: AtomicBool::new(false),
             receipt_committed: AtomicBool::new(false),
-            pending_mcp_approvals: Mutex::new(HashMap::new()),
-            authorized_mcp_calls: Mutex::new(HashSet::new()),
             session_id: activation.session_id,
             session_file: activation.session_file,
             model_fingerprint: activation.model_fingerprint,
         })
     }
 
-    pub async fn start_prompt(&self, message: &str) -> Result<()> {
+    pub(crate) fn prepare_prompt_transform(
+        &self,
+        original_payload: &str,
+        invocation_kind: &str,
+    ) -> Result<PreparedPiPromptTransform> {
+        transform_pi_prompt(original_payload, invocation_kind, &self.command_catalog)
+    }
+
+    pub async fn start_prompt(&self, message: &str, images: &[PiPromptImage]) -> Result<()> {
         *self.final_message.write().await = None;
         *self.final_stop_reason.write().await = None;
         self.approval_handshake.store(false, Ordering::Release);
         self.receipt_committed.store(false, Ordering::Release);
-        let response = self
-            .host
-            .command("prompt", json!({"message": message}))
-            .await?;
+        if !images.is_empty() && !self.model_supports_images {
+            bail!("Pi selected model does not advertise image input support");
+        }
+        let mut fields = json!({"message": message});
+        if !images.is_empty() {
+            let mut total_bytes = 0usize;
+            for image in images {
+                if image.r#type != "image"
+                    || !matches!(
+                        image.mime_type.as_str(),
+                        "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+                    )
+                {
+                    bail!("Pi prompt image has an invalid wire shape");
+                }
+                let byte_length = BASE64_STANDARD
+                    .decode(&image.data)
+                    .context("Pi prompt image data is not valid base64")?
+                    .len();
+                if byte_length == 0 || byte_length > PI_PROMPT_IMAGE_MAX_BYTES {
+                    bail!("Pi prompt image exceeds its per-image limit");
+                }
+                total_bytes = total_bytes
+                    .checked_add(byte_length)
+                    .context("Pi prompt image total size overflow")?;
+            }
+            if total_bytes > PI_PROMPT_IMAGE_TOTAL_MAX_BYTES {
+                bail!("Pi prompt images exceed their aggregate limit");
+            }
+            fields
+                .as_object_mut()
+                .expect("prompt fields are an object")
+                .insert("images".to_string(), serde_json::to_value(images)?);
+        }
+        let response = self.host.command("prompt", fields).await?;
         if response.get("command").and_then(Value::as_str) != Some("prompt") {
             bail!("Pi prompt response has the wrong command identity");
         }
         if !self.receipt_committed() {
-            self.host.poisoned.store(true, Ordering::Release);
-            bail!("Pi prompt returned without a committed managed input receipt");
+            bail!("Pi managed extension rejected the input before provider dispatch");
         }
         Ok(())
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn clear_queue(&self) -> Result<Value> {
+        self.host.command("clear_queue", json!({})).await
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn set_steering_mode(&self, mode: &str) -> Result<()> {
+        if !matches!(mode, "all" | "one-at-a-time") {
+            bail!("Pi steering mode is invalid");
+        }
+        self.host
+            .command("set_steering_mode", json!({"mode": mode}))
+            .await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn set_follow_up_mode(&self, mode: &str) -> Result<()> {
+        if !matches!(mode, "all" | "one-at-a-time") {
+            bail!("Pi follow-up mode is invalid");
+        }
+        self.host
+            .command("set_follow_up_mode", json!({"mode": mode}))
+            .await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn get_messages(&self) -> Result<Value> {
+        self.host.command("get_messages", json!({})).await
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn get_entries(&self, since: Option<&str>) -> Result<Value> {
+        let fields = since.map_or_else(|| json!({}), |since| json!({"since": since}));
+        self.host.command("get_entries", fields).await
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn get_session_stats(&self) -> Result<Value> {
+        self.host.command("get_session_stats", json!({})).await
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn set_session_name(&self, name: &str) -> Result<()> {
+        self.host
+            .command("set_session_name", json!({"name": name}))
+            .await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn compact(&self, custom_instructions: Option<&str>) -> Result<Value> {
+        let fields = custom_instructions.map_or_else(
+            || json!({}),
+            |instructions| json!({"customInstructions": instructions}),
+        );
+        self.host.command("compact", fields).await
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn set_auto_compaction(&self, enabled: bool) -> Result<()> {
+        self.host
+            .command("set_auto_compaction", json!({"enabled": enabled}))
+            .await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn export_html(&self, output_path: &Path) -> Result<Value> {
+        if !output_path.is_absolute() {
+            bail!("Pi export path must be absolute");
+        }
+        self.host
+            .command(
+                "export_html",
+                json!({"outputPath": output_path.to_string_lossy()}),
+            )
+            .await
+    }
+
     pub async fn cancel(&self) -> Result<()> {
-        self.mcp.shutdown().await;
         self.host
             .send_command_without_waiting("abort", json!({}))
             .await
@@ -806,12 +1177,6 @@ impl PiRuntime {
             || response.get("id") != Some(&id)
         {
             bail!("Pi Extension response failed Native Request fencing");
-        }
-        if let Some(id) = value_id(&id)
-            && let Some(authorization) = self.pending_mcp_approvals.lock().await.remove(&id)
-            && response.get("confirmed").and_then(Value::as_bool) == Some(true)
-        {
-            self.authorized_mcp_calls.lock().await.insert(authorization);
         }
         self.host.send(response).await
     }
@@ -903,23 +1268,10 @@ impl PiRuntime {
         self.host.builtin_tool_process_config()
     }
 
-    pub(crate) async fn register_mcp_approval(&self, ui_id: &str, envelope: &Value) -> Result<()> {
-        let authorization = self.validate_mcp_envelope(envelope)?;
-        let replaced = self
-            .pending_mcp_approvals
-            .lock()
-            .await
-            .insert(ui_id.to_string(), authorization);
-        if replaced.is_some() {
-            bail!("Pi MCP Approval UI identity was reused");
-        }
-        Ok(())
-    }
-
     pub(crate) fn validate_managed_receipt(&self, receipt: &Value) -> Result<(String, String)> {
         let receipt: PiManagedInputReceipt = serde_json::from_value(receipt.clone())
             .context("Pi managed input receipt shape is invalid")?;
-        if receipt.schema_version != 1
+        if receipt.schema_version != 2
             || receipt.extension_version != PI_HOST_EXTENSION_VERSION
             || receipt.host_instance_id != self.host_instance_id()
             || receipt.host_binding_generation != self.host_binding_generation()
@@ -930,57 +1282,22 @@ impl PiRuntime {
             || receipt.runtime_input_delivery_id != self.binding_document.runtime_input_delivery_id
             || receipt.native_prompt_id != self.binding_document.native_prompt_id
             || receipt.native_session_id != self.session_id
-            || receipt.native_session_file_digest != session_file_path_digest(&self.session_file)?
             || Path::new(&receipt.cwd).canonicalize()? != self.host.cwd.canonicalize()?
             || receipt.bootstrap_evidence_id != self.binding_document.bootstrap_evidence_id
             || receipt.bootstrap_payload_digest != self.binding_document.bootstrap_payload_digest
-            || receipt.skill_exposure_digest
-                != self.binding_document.expected_managed_skill_exposure_digest
-            || receipt.mcp_projection_digest != self.mcp.projection_digest()
-            || !is_hex_digest(&receipt.pi_base_system_prompt_digest)
-            || !is_hex_digest(&receipt.effective_system_prompt_digest)
         {
             bail!("Pi managed input receipt failed Host/Run/Binding validation");
         }
-        let expected_active_tools = NATIVE_TOOL_NAMES
+        let expected_governed_tools = GOVERNED_NATIVE_TOOL_NAMES
             .into_iter()
-            .map(str::to_string)
-            .chain(
-                self.mcp
-                    .tools()
-                    .iter()
-                    .map(|tool| tool.runtime_name.clone()),
-            )
+            .map(|name| PiGovernedNativeTool {
+                name: name.to_string(),
+                observable: true,
+            })
             .collect::<Vec<_>>();
-        if receipt.active_tool_names != expected_active_tools {
-            bail!("Pi managed input receipt active Tool catalog is invalid");
+        if receipt.governed_native_tools != expected_governed_tools {
+            bail!("Pi managed input receipt governed Tool subset is invalid");
         }
-        let expected_mcp_catalog = self
-            .mcp
-            .tools()
-            .iter()
-            .map(PiReceiptMcpTool::from)
-            .collect::<Vec<_>>();
-        if receipt.mcp_tool_catalog != expected_mcp_catalog
-            || canonical_json_digest(&serde_json::to_value(&receipt.mcp_tool_catalog)?)?
-                != receipt.mcp_tool_catalog_digest
-        {
-            bail!("Pi managed input receipt MCP catalog is invalid");
-        }
-        if canonical_json_digest(&serde_json::to_value(&receipt.skill_catalog)?)?
-            != receipt.skill_catalog_digest
-        {
-            bail!("Pi managed input receipt Skill catalog digest is invalid");
-        }
-        if !skill_catalogs_match(&receipt.skill_catalog, &self.skill_command_catalog) {
-            bail!("Pi managed input receipt Skill catalog changed after get_commands");
-        }
-        validate_receipt_skills(
-            &receipt.skill_catalog,
-            Path::new(&self.binding_document.skill_root),
-            &self.host.cwd,
-            &self.expected_managed_skills,
-        )?;
         let expected_binding_digest =
             canonical_json_digest(&serde_json::to_value(&self.binding_document)?)?;
         if receipt.binding_document_digest != expected_binding_digest {
@@ -994,74 +1311,6 @@ impl PiRuntime {
 
     pub(crate) fn mark_receipt_committed(&self) {
         self.receipt_committed.store(true, Ordering::Release);
-    }
-
-    pub(crate) async fn execute_mcp_bridge(&self, envelope: &Value) -> Result<Value> {
-        let result = async {
-            let authorization = self.validate_mcp_envelope(envelope)?;
-            if !self
-                .authorized_mcp_calls
-                .lock()
-                .await
-                .remove(&authorization)
-            {
-                bail!("Pi MCP call has no one-shot Durable Approval");
-            }
-            let arguments = envelope
-                .get("arguments")
-                .cloned()
-                .context("Pi MCP bridge omitted arguments")?;
-            self.mcp
-                .execute(&authorization.runtime_name, arguments)
-                .await
-        }
-        .await;
-        if result.is_err() {
-            self.mark_failed_closed();
-        }
-        result
-    }
-
-    fn validate_mcp_envelope(&self, envelope: &Value) -> Result<PiMcpAuthorization> {
-        let envelope: PiMcpEnvelope =
-            serde_json::from_value(envelope.clone()).context("Pi MCP envelope shape is invalid")?;
-        if envelope.schema_version != 1
-            || envelope.extension_version != PI_HOST_EXTENSION_VERSION
-            || envelope.kind != "mcp_tool"
-            || envelope.host_instance_id != self.host_instance_id()
-            || envelope.host_binding_generation != self.host_binding_generation()
-            || envelope.agent_run_id != self.owner.agent_run_id
-            || envelope.execution_epoch != self.owner.execution_epoch
-            || envelope.native_binding_generation != self.binding_document.native_binding_generation
-            || envelope.mcp_projection_digest != self.mcp.projection_digest()
-            || canonical_json_digest(&envelope.arguments)? != envelope.arguments_digest
-        {
-            bail!("Pi MCP envelope failed Run/Binding fencing");
-        }
-        let tool = self
-            .mcp
-            .tool(&envelope.runtime_name)
-            .context("Pi MCP envelope names an unknown Tool")?;
-        if tool.server_id != envelope.server_id
-            || tool.server_name != envelope.server_name
-            || tool.tool_name != envelope.tool_name
-        {
-            bail!("Pi MCP envelope source identity is invalid");
-        }
-        Ok(PiMcpAuthorization {
-            host_instance_id: envelope.host_instance_id,
-            host_binding_generation: envelope.host_binding_generation,
-            agent_run_id: envelope.agent_run_id,
-            execution_epoch: envelope.execution_epoch,
-            native_binding_generation: envelope.native_binding_generation,
-            mcp_projection_digest: envelope.mcp_projection_digest,
-            runtime_name: envelope.runtime_name,
-            server_id: envelope.server_id,
-            server_name: envelope.server_name,
-            tool_name: envelope.tool_name,
-            tool_call_id: envelope.tool_call_id,
-            arguments_digest: envelope.arguments_digest,
-        })
     }
 
     fn belongs_to_camp(&self, camp_id: &str) -> bool {
@@ -1078,34 +1327,10 @@ impl PiRuntime {
         if session_result.is_err() {
             self.mark_failed_closed();
         }
-        self.mcp.shutdown().await;
-        self.pending_mcp_approvals.lock().await.clear();
-        self.authorized_mcp_calls.lock().await.clear();
         let binding_result = self.host.unbind_and_clear(&self.owner).await;
         session_result?;
         binding_result
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PiMcpEnvelope {
-    schema_version: i64,
-    extension_version: String,
-    kind: String,
-    host_instance_id: String,
-    host_binding_generation: u64,
-    agent_run_id: String,
-    execution_epoch: i64,
-    native_binding_generation: i64,
-    mcp_projection_digest: String,
-    runtime_name: String,
-    server_id: String,
-    server_name: String,
-    tool_name: String,
-    tool_call_id: String,
-    arguments: Value,
-    arguments_digest: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1122,20 +1347,18 @@ struct PiManagedInputReceipt {
     runtime_input_delivery_id: String,
     native_prompt_id: String,
     native_session_id: String,
-    native_session_file_digest: String,
     cwd: String,
     bootstrap_evidence_id: String,
     bootstrap_payload_digest: String,
-    skill_exposure_digest: String,
-    pi_base_system_prompt_digest: String,
-    effective_system_prompt_digest: String,
-    skill_catalog: Vec<PiReceiptSkill>,
-    skill_catalog_digest: String,
-    active_tool_names: Vec<String>,
-    mcp_tool_catalog: Vec<PiReceiptMcpTool>,
-    mcp_tool_catalog_digest: String,
-    mcp_projection_digest: String,
+    governed_native_tools: Vec<PiGovernedNativeTool>,
     binding_document_digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PiGovernedNativeTool {
+    name: String,
+    observable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1147,43 +1370,9 @@ struct PiReceiptSkill {
     model_visible: bool,
 }
 
-fn skill_catalogs_match(observed: &[PiReceiptSkill], expected: &[PiReceiptSkill]) -> bool {
-    observed.len() == expected.len()
-        && observed.iter().zip(expected).all(|(observed, expected)| {
-            observed.name == expected.name
-                && observed.description_digest == expected.description_digest
-                && observed.entry_path == expected.entry_path
-                && observed.model_visible == expected.model_visible
-        })
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PiReceiptMcpTool {
-    server_id: String,
-    server_name: String,
-    tool_name: String,
-    runtime_name: String,
-    description_digest: String,
-    input_schema_digest: String,
-}
-
-impl From<&PiMcpToolDefinition> for PiReceiptMcpTool {
-    fn from(value: &PiMcpToolDefinition) -> Self {
-        Self {
-            server_id: value.server_id.clone(),
-            server_name: value.server_name.clone(),
-            tool_name: value.tool_name.clone(),
-            runtime_name: value.runtime_name.clone(),
-            description_digest: value.description_digest.clone(),
-            input_schema_digest: value.input_schema_digest.clone(),
-        }
-    }
-}
-
 pub struct PiRpcRuntimeAdapter {
     active: Mutex<HashMap<String, Arc<PiRuntime>>>,
-    runtime_creation: Mutex<()>,
+    runtime_creation: StdMutex<HashMap<(String, i64), Weak<Mutex<()>>>>,
     incoming: mpsc::UnboundedSender<PiIncoming>,
     fleet: Arc<AgentRuntimeFleetManager>,
     private_runtime_dir: PathBuf,
@@ -1204,7 +1393,6 @@ pub struct PiAgentRunRuntimeRequest<'a> {
     pub native_binding_generation: i64,
     pub bootstrap: &'a PreparedSessionBootstrap,
     pub skill_exposure: &'a PreparedSkillExposure,
-    pub mcp_projection: &'a PreparedMcpProjection,
     pub builtin_tools: &'a BuiltinToolProcessConfig,
 }
 
@@ -1216,7 +1404,7 @@ impl PiRpcRuntimeAdapter {
     ) -> Self {
         Self {
             active: Mutex::new(HashMap::new()),
-            runtime_creation: Mutex::new(()),
+            runtime_creation: StdMutex::new(HashMap::new()),
             incoming,
             fleet,
             private_runtime_dir: data_dir.join("runtime/pi"),
@@ -1234,7 +1422,22 @@ impl PiRpcRuntimeAdapter {
         if request.frozen_runtime.adapter_kind != AdapterKind::Pi {
             bail!("Pi Runtime received a non-Pi AgentRun");
         }
-        let _creation = self.runtime_creation.lock().await;
+        let creation_key = (request.agent_run_id.to_string(), request.execution_epoch);
+        let creation_gate = {
+            let mut gates = self
+                .runtime_creation
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Pi Runtime creation gate registry is poisoned"))?;
+            gates.retain(|_, gate| gate.strong_count() > 0);
+            if let Some(gate) = gates.get(&creation_key).and_then(Weak::upgrade) {
+                gate
+            } else {
+                let gate = Arc::new(Mutex::new(()));
+                gates.insert(creation_key.clone(), Arc::downgrade(&gate));
+                gate
+            }
+        };
+        let _creation = creation_gate.lock().await;
         if let Some(existing) = self.active.lock().await.get(request.agent_run_id).cloned() {
             if existing.agent_run_epoch() == request.execution_epoch && existing.host.is_alive() {
                 return Ok(existing);
@@ -1249,7 +1452,6 @@ impl PiRpcRuntimeAdapter {
         let skill_root = request.cwd.join(".pi/skills");
         create_private_or_workspace_directory(&skill_root)?;
         let expected_managed_skills = expected_managed_skills(request.skill_exposure)?;
-        let mcp = PiMcpBridge::start(request.mcp_projection).await?;
         let bootstrap_payload_digest =
             format!("{:x}", Sha256::digest(request.bootstrap.payload.as_bytes()));
         let seed = PiBindingSeed {
@@ -1265,8 +1467,6 @@ impl PiRpcRuntimeAdapter {
             bootstrap_payload_digest,
             skill_root,
             expected_managed_skill_exposure_digest: request.skill_exposure.digest.clone(),
-            mcp_projection_digest: request.mcp_projection.projection_digest.clone(),
-            mcp_tools: mcp.tools().to_vec(),
         };
         let locator_root =
             session_locator_root(&self.private_runtime_dir, request.camp_id, request.agent_id)?;
@@ -1295,19 +1495,14 @@ impl PiRpcRuntimeAdapter {
                         initial_binding: &seed,
                         incoming: self.incoming.clone(),
                         builtin_tools: Some(request.builtin_tools.clone()),
+                        allow_auto_extensions: true,
                     })
                     .await?;
                     Ok(RuntimeProcessHost::Pi(host))
                 },
             )
             .await;
-        let lease = match lease {
-            Ok(lease) => lease,
-            Err(error) => {
-                mcp.shutdown().await;
-                return Err(error);
-            }
-        };
+        let lease = lease?;
         let host = lease.host.into_pi()?;
         let activation = match host
             .activate(
@@ -1320,7 +1515,6 @@ impl PiRpcRuntimeAdapter {
         {
             Ok(activation) => activation,
             Err(error) => {
-                mcp.shutdown().await;
                 self.fleet
                     .release(
                         request.agent_run_id,
@@ -1338,7 +1532,6 @@ impl PiRpcRuntimeAdapter {
             delivery_id: request.delivery_id.to_string(),
         };
         if let Err(error) = host.bind(owner.clone()).await {
-            mcp.shutdown().await;
             self.fleet
                 .release(
                     request.agent_run_id,
@@ -1348,18 +1541,38 @@ impl PiRpcRuntimeAdapter {
                 .await;
             return Err(error);
         }
-        let runtime = PiRuntime::from_host(
-            owner,
-            request.camp_id.to_string(),
-            host,
-            mcp,
-            activation,
-            expected_managed_skills,
-        );
-        self.active
-            .lock()
-            .await
-            .insert(request.agent_run_id.to_string(), runtime.clone());
+        let runtime = PiRuntime::from_host(owner, request.camp_id.to_string(), host, activation);
+        let displaced = {
+            let mut active = self.active.lock().await;
+            if let Some(existing) = active.get(request.agent_run_id)
+                && existing.agent_run_epoch() > request.execution_epoch
+            {
+                drop(active);
+                let _ = runtime.cleanup_for_release().await;
+                self.fleet
+                    .release(
+                        request.agent_run_id,
+                        request.execution_epoch,
+                        FleetReleaseDisposition::Stop,
+                    )
+                    .await;
+                bail!("late Pi Runtime creation cannot replace a newer execution epoch");
+            }
+            active.insert(request.agent_run_id.to_string(), runtime.clone())
+        };
+        if let Some(displaced) = displaced
+            && displaced.agent_run_epoch() != request.execution_epoch
+        {
+            let displaced_epoch = displaced.agent_run_epoch();
+            let _ = displaced.cleanup_for_release().await;
+            self.fleet
+                .release(
+                    request.agent_run_id,
+                    displaced_epoch,
+                    FleetReleaseDisposition::Stop,
+                )
+                .await;
+        }
         Ok(runtime)
     }
 
@@ -1522,9 +1735,10 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         bootstrap_payload_digest: format!("{:x}", Sha256::digest(bootstrap.as_bytes())),
         bootstrap,
         skill_root,
-        expected_managed_skill_exposure_digest: "pi-probe-empty-skills".to_string(),
-        mcp_projection_digest: "pi-probe-empty-mcp".to_string(),
-        mcp_tools: Vec::new(),
+        expected_managed_skill_exposure_digest: format!(
+            "{:x}",
+            Sha256::digest(b"pi-probe-empty-skills")
+        ),
     };
     let (incoming, _receiver) = mpsc::unbounded_channel();
     let host = PiHost::spawn(PiHostLaunch {
@@ -1536,6 +1750,7 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         initial_binding: &seed,
         incoming,
         builtin_tools: None,
+        allow_auto_extensions: false,
     })
     .await?;
     let result = async {
@@ -1562,7 +1777,7 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         }
         let state = host.command("get_state", json!({})).await?;
         let locator_root = private_runtime_dir.join("probe-locator");
-        let (session_id, session_file, provider, model, thinking) = validate_host_state(
+        let (session_id, session_file, provider, model, thinking, _) = validate_host_state(
             &state,
             None,
             &locator_root,
@@ -1608,7 +1823,7 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         let replacement = host.command("new_session", json!({})).await?;
         ensure_session_replacement_succeeded(&replacement, "new_session")?;
         let replacement_state = host.command("get_state", json!({})).await?;
-        let (replacement_id, replacement_file, _, _, _) = validate_host_state(
+        let (replacement_id, replacement_file, _, _, _, _) = validate_host_state(
             &replacement_state,
             None,
             &locator_root,
@@ -1646,7 +1861,7 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         // Pi get_state reports the Session identity and file, but not cwd.
         // validate_host_state therefore verifies cwd against the restored
         // Session file header while also matching the private exact locator.
-        let (restored_id, restored_file, _, _, _) = validate_host_state(
+        let (restored_id, restored_file, _, _, _, _) = validate_host_state(
             &restored_state,
             Some(&session_id),
             &locator_root,
@@ -1705,7 +1920,7 @@ pub(crate) fn managed_receipt_nonce(receipt: &Value) -> Result<String> {
     let canonical = canonical_json(receipt.clone())?;
     Ok(format!(
         "{:x}",
-        Sha256::digest(format!("rovai-pi-managed-input-receipt-v1\n{canonical}").as_bytes())
+        Sha256::digest(format!("rovai-pi-managed-input-receipt-v2\n{canonical}").as_bytes())
     ))
 }
 
@@ -1771,11 +1986,7 @@ fn validate_skill_commands(
             .and_then(Value::as_str)
             .and_then(|name| name.strip_prefix("skill:"))
             .context("Pi Skill command has an invalid name")?;
-        let path = command
-            .pointer("/sourceInfo/path")
-            .and_then(Value::as_str)
-            .map(PathBuf::from)
-            .context("Pi Skill command omitted source path")?;
+        let path = command_path(command).context("Pi Skill command omitted source path")?;
         receipt.push(PiReceiptSkill {
             name: name.to_string(),
             description_digest: canonical_json_digest(&json!(
@@ -1793,11 +2004,382 @@ fn validate_skill_commands(
             .cmp(&right.name)
             .then(left.entry_path.cmp(&right.entry_path))
     });
-    validate_receipt_skills(&receipt, skill_root, workspace, expected_managed_skills)?;
+    validate_managed_skill_subset(&receipt, skill_root, workspace, expected_managed_skills)?;
     for skill in &mut receipt {
-        skill.model_visible = pi_skill_model_visible(Path::new(&skill.entry_path))?;
+        if expected_managed_skills
+            .iter()
+            .any(|(name, _)| name == &skill.name)
+        {
+            skill.model_visible = pi_skill_model_visible(Path::new(&skill.entry_path))?;
+        }
     }
     Ok(receipt)
+}
+
+fn command_path(command: &Value) -> Option<PathBuf> {
+    command
+        .get("path")
+        .and_then(Value::as_str)
+        .or_else(|| command.pointer("/sourceInfo/path").and_then(Value::as_str))
+        .map(PathBuf::from)
+}
+
+fn command_location(command: &Value) -> Option<String> {
+    if let Some(location) = command
+        .get("location")
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "user" | "project" | "path"))
+    {
+        return Some(location.to_string());
+    }
+    match command.pointer("/sourceInfo/scope").and_then(Value::as_str) {
+        Some("user") => Some("user".to_string()),
+        Some("project") => Some("project".to_string()),
+        Some("temporary") => Some("path".to_string()),
+        _ => None,
+    }
+}
+
+fn parse_command_catalog(response: &Value) -> Result<Vec<PiCommandCatalogEntry>> {
+    let commands = response
+        .pointer("/data/commands")
+        .and_then(Value::as_array)
+        .context("Pi get_commands omitted commands")?;
+    let mut catalog = Vec::with_capacity(commands.len());
+    for command in commands {
+        let Some(name) = command
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+        else {
+            continue;
+        };
+        let source = match command.get("source").and_then(Value::as_str) {
+            Some("extension") => PiCommandSource::Extension,
+            Some("prompt") => PiCommandSource::Prompt,
+            Some("skill") => PiCommandSource::Skill,
+            _ => continue,
+        };
+        let lexical_path = command_path(command);
+        let location = command_location(command);
+        let (canonical_path, content_digest, file_error) =
+            if matches!(source, PiCommandSource::Prompt | PiCommandSource::Skill) {
+                match lexical_path
+                    .as_deref()
+                    .context("Pi file command omitted its source path")
+                    .and_then(read_pi_command_source)
+                {
+                    Ok((canonical_path, bytes)) => (
+                        Some(canonical_path),
+                        Some(sha256_bytes(&bytes)),
+                        location
+                            .is_none()
+                            .then(|| "Pi file command omitted a supported location".to_string()),
+                    ),
+                    Err(error) => (None, None, Some(format!("{error:#}"))),
+                }
+            } else {
+                (None, None, None)
+            };
+        catalog.push(PiCommandCatalogEntry {
+            name: name.to_string(),
+            source,
+            location,
+            lexical_path,
+            canonical_path,
+            content_digest,
+            file_error,
+        });
+    }
+    Ok(catalog)
+}
+
+fn read_pi_command_source(path: &Path) -> Result<(PathBuf, Vec<u8>)> {
+    if !path.is_absolute() {
+        bail!("Pi command source path is not absolute");
+    }
+    let metadata =
+        std::fs::symlink_metadata(path).context("Pi command source metadata is unavailable")?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("Pi command source is not a non-symlink regular file");
+    }
+    if metadata.len() > PI_COMMAND_FILE_MAX_BYTES {
+        bail!("Pi command source exceeds the private command-file limit");
+    }
+    let canonical = path
+        .canonicalize()
+        .context("Pi command source cannot be canonicalized")?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    File::open(path)
+        .context("Pi command source cannot be opened")?
+        .take(PI_COMMAND_FILE_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .context("Pi command source cannot be read")?;
+    if bytes.len() as u64 > PI_COMMAND_FILE_MAX_BYTES {
+        bail!("Pi command source exceeds the private command-file limit");
+    }
+    Ok((canonical, bytes))
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn parse_current_input(payload: &str) -> Result<(usize, usize, Value)> {
+    const OPEN: &str = "[CURRENT_INPUT]\n";
+    const CLOSE: &str = "\n[/CURRENT_INPUT]";
+    let section_start = payload
+        .rfind(OPEN)
+        .context("Pi Dynamic Context has no CURRENT_INPUT section")?;
+    let json_start = section_start + OPEN.len();
+    let relative_end = payload[json_start..]
+        .find(CLOSE)
+        .context("Pi Dynamic Context has no closing CURRENT_INPUT section")?;
+    let json_end = json_start + relative_end;
+    let value = serde_json::from_str(&payload[json_start..json_end])
+        .context("Pi Dynamic Context CURRENT_INPUT is invalid")?;
+    Ok((json_start, json_end, value))
+}
+
+fn parse_slash_invocation(message: &str) -> Option<(&str, &str)> {
+    let trimmed = message.trim();
+    let command = trimmed.strip_prefix('/')?;
+    let token_end = command.find(char::is_whitespace).unwrap_or(command.len());
+    let name = &command[..token_end];
+    if name.is_empty() {
+        return None;
+    }
+    Some((name, command[token_end..].trim()))
+}
+
+fn parse_pi_command_args(arguments: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    for character in arguments.chars() {
+        if let Some(expected) = quote {
+            if character == expected {
+                quote = None;
+            } else {
+                current.push(character);
+            }
+        } else if matches!(character, '\'' | '"') {
+            quote = Some(character);
+        } else if character.is_whitespace() {
+            if !current.is_empty() {
+                values.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(character);
+        }
+    }
+    if !current.is_empty() {
+        values.push(current);
+    }
+    values
+}
+
+fn strip_pi_frontmatter(content: &str) -> String {
+    let normalized = content
+        .strip_prefix('\u{feff}')
+        .unwrap_or(content)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    if !normalized.starts_with("---") {
+        return normalized;
+    }
+    let Some(relative_end) = normalized[3..].find("\n---") else {
+        return normalized;
+    };
+    let end = 3 + relative_end;
+    normalized[end + 4..].trim().to_string()
+}
+
+fn substitute_pi_prompt_arguments(content: &str, arguments: &[String]) -> String {
+    use std::sync::OnceLock;
+
+    static PATTERN: OnceLock<regex::Regex> = OnceLock::new();
+    let pattern = PATTERN.get_or_init(|| {
+        regex::Regex::new(
+            r"\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)",
+        )
+        .expect("Pi prompt placeholder regex is static")
+    });
+    let all_arguments = arguments.join(" ");
+    pattern
+        .replace_all(content, |captures: &regex::Captures<'_>| {
+            if let Some(target) = captures.get(1) {
+                let value = match target.as_str() {
+                    "@" | "ARGUMENTS" => Some(all_arguments.as_str()),
+                    index => index
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|index| index.checked_sub(1))
+                        .and_then(|index| arguments.get(index))
+                        .map(String::as_str),
+                };
+                return value
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| captures.get(2).map_or("", |value| value.as_str()))
+                    .to_string();
+            }
+            if let Some(start) = captures.get(3) {
+                let start = start
+                    .as_str()
+                    .parse::<usize>()
+                    .unwrap_or(1)
+                    .saturating_sub(1);
+                let end = captures
+                    .get(4)
+                    .and_then(|length| length.as_str().parse::<usize>().ok())
+                    .map(|length| start.saturating_add(length))
+                    .unwrap_or(arguments.len())
+                    .min(arguments.len());
+                return arguments.get(start..end).unwrap_or_default().join(" ");
+            }
+            match captures.get(5).map(|value| value.as_str()) {
+                Some("@" | "ARGUMENTS") => all_arguments.clone(),
+                Some(index) => index
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|index| index.checked_sub(1))
+                    .and_then(|index| arguments.get(index))
+                    .cloned()
+                    .unwrap_or_default(),
+                None => String::new(),
+            }
+        })
+        .into_owned()
+}
+
+fn transform_pi_prompt(
+    original_payload: &str,
+    invocation_kind: &str,
+    command_catalog: &[PiCommandCatalogEntry],
+) -> Result<PreparedPiPromptTransform> {
+    let original_digest = sha256_bytes(original_payload.as_bytes());
+    let verbatim = || PreparedPiPromptTransform {
+        runtime_payload: original_payload.to_string(),
+        evidence: json!({
+            "schemaVersion": 1,
+            "mode": "verbatim",
+            "originalDynamicPayloadDigest": original_digest,
+            "runtimePayloadDigest": original_digest,
+            "command": Value::Null,
+        }),
+        source_path: None,
+        source_content: None,
+        expanded_content: None,
+    };
+    if invocation_kind != "direct" {
+        return Ok(verbatim());
+    }
+    let (json_start, json_end, mut current_input) = parse_current_input(original_payload)?;
+    if !matches!(
+        current_input
+            .pointer("/source/type")
+            .and_then(Value::as_str),
+        Some("user" | "external_principal")
+    ) {
+        return Ok(verbatim());
+    }
+    let Some(message) = current_input
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return Ok(verbatim());
+    };
+    let Some((command_name, raw_arguments)) = parse_slash_invocation(&message) else {
+        return Ok(verbatim());
+    };
+    let command_name = command_name.to_string();
+    let raw_arguments = raw_arguments.to_string();
+    let matching = command_catalog
+        .iter()
+        .filter(|entry| entry.name == command_name)
+        .collect::<Vec<_>>();
+    if matching.is_empty() {
+        return Ok(verbatim());
+    }
+    if matching.len() != 1 {
+        bail!("Pi command catalog contains an ambiguous exact-name match");
+    }
+    let command = matching[0];
+    if command.source == PiCommandSource::Extension {
+        bail!("pi_extension_command_unavailable_in_managed_agent_run");
+    }
+    if let Some(error) = command.file_error.as_deref() {
+        bail!("Pi file command source was invalid at activation: {error}");
+    }
+    let lexical_path = command
+        .lexical_path
+        .as_deref()
+        .context("Pi file command has no source path")?;
+    let expected_canonical = command
+        .canonical_path
+        .as_deref()
+        .context("Pi file command has no canonical source path")?;
+    let expected_digest = command
+        .content_digest
+        .as_deref()
+        .context("Pi file command has no source content digest")?;
+    let location = command
+        .location
+        .as_deref()
+        .context("Pi file command has no supported source location")?;
+    let (canonical_path, source_bytes) = read_pi_command_source(lexical_path)?;
+    if canonical_path != expected_canonical || sha256_bytes(&source_bytes) != expected_digest {
+        bail!("Pi file command source path or content changed after catalog capture");
+    }
+    let source_text = String::from_utf8(source_bytes.clone())
+        .context("Pi file command source must be UTF-8 text")?;
+    let expanded = match command.source {
+        PiCommandSource::Prompt => substitute_pi_prompt_arguments(
+            &strip_pi_frontmatter(&source_text),
+            &parse_pi_command_args(&raw_arguments),
+        ),
+        PiCommandSource::Skill => {
+            if raw_arguments.is_empty() {
+                source_text
+            } else {
+                format!("{source_text}\n\nUser: {raw_arguments}")
+            }
+        }
+        PiCommandSource::Extension => unreachable!("handled above"),
+    };
+    current_input
+        .as_object_mut()
+        .context("Pi CURRENT_INPUT must be an object")?
+        .insert("message".to_string(), Value::String(expanded.clone()));
+    let mut runtime_payload =
+        String::with_capacity(original_payload.len().saturating_add(expanded.len()));
+    runtime_payload.push_str(&original_payload[..json_start]);
+    runtime_payload.push_str(&serde_json::to_string(&current_input)?);
+    runtime_payload.push_str(&original_payload[json_end..]);
+    let runtime_digest = sha256_bytes(runtime_payload.as_bytes());
+    let evidence = json!({
+        "schemaVersion": 1,
+        "mode": "file_command",
+        "originalDynamicPayloadDigest": original_digest,
+        "runtimePayloadDigest": runtime_digest,
+        "command": {
+            "name": command.name,
+            "source": command.source.as_str(),
+            "location": location,
+            "sourcePathDigest": sha256_bytes(canonical_path.to_string_lossy().as_bytes()),
+            "sourceContentDigest": expected_digest,
+            "argumentsDigest": sha256_bytes(raw_arguments.as_bytes()),
+            "expandedContentDigest": sha256_bytes(expanded.as_bytes()),
+        },
+    });
+    Ok(PreparedPiPromptTransform {
+        runtime_payload,
+        evidence,
+        source_path: Some(canonical_path.to_string_lossy().into_owned()),
+        source_content: Some(source_bytes),
+        expanded_content: Some(expanded.into_bytes()),
+    })
 }
 
 fn pi_skill_model_visible(path: &Path) -> Result<bool> {
@@ -1880,7 +2462,7 @@ fn pi_yaml_boolean_is_true(raw_value: &str) -> bool {
     matches!(value, "true" | "True" | "TRUE")
 }
 
-fn validate_receipt_skills(
+fn validate_managed_skill_subset(
     skills: &[PiReceiptSkill],
     skill_root: &Path,
     workspace: &Path,
@@ -1892,51 +2474,25 @@ fn validate_receipt_skills(
     let workspace = workspace
         .canonicalize()
         .context("Pi Workspace cannot be resolved")?;
-    let mut names = BTreeSet::new();
-    let mut real_files = BTreeSet::new();
-    let mut previous: Option<(&str, &str)> = None;
-    for skill in skills {
-        if !names.insert(skill.name.clone()) || !is_hex_digest(&skill.description_digest) {
-            bail!("Pi Skill receipt contains a duplicate or invalid identity");
-        }
-        let path = PathBuf::from(&skill.entry_path);
-        if !path.is_absolute() || !path.starts_with(skill_root) {
-            bail!("Pi Skill receipt path escaped the lexical Skill root");
-        }
-        let real = path
-            .canonicalize()
-            .context("Pi Skill receipt path cannot be resolved")?;
-        if !real_files.insert(real.clone()) {
-            bail!("Pi Skill receipt contains a duplicate real file");
-        }
-        let managed = expected_managed_skills
-            .iter()
-            .find(|(name, _)| name == &skill.name);
-        if let Some((_, expected)) = managed {
-            let expected = expected
-                .canonicalize()
-                .context("managed Pi Skill target cannot be resolved")?;
-            if !real.starts_with(&expected) && expected != real {
-                bail!("managed Pi Skill receipt target changed");
-            }
-        } else if !real.starts_with(&workspace) {
-            bail!("project-owned Pi Skill escaped the Workspace");
-        }
-        if let Some((previous_name, previous_path)) = previous
-            && (previous_name, previous_path) >= (skill.name.as_str(), skill.entry_path.as_str())
-        {
-            bail!("Pi Skill receipt is not bytewise sorted");
-        }
-        previous = Some((&skill.name, &skill.entry_path));
+    if !root.starts_with(&workspace) {
+        bail!("Pi managed Skill root escaped the Workspace");
     }
     for (name, expected) in expected_managed_skills {
-        let count = skills.iter().filter(|skill| &skill.name == name).count();
-        if count != 1 || !expected.starts_with(skill_root) {
-            bail!("expected managed Pi Skill is missing or duplicated");
+        if !expected.starts_with(skill_root) {
+            bail!("expected managed Pi Skill escaped its projection root");
         }
-    }
-    if !root.starts_with(&workspace) {
-        bail!("Pi Skill root escaped the Workspace");
+        let expected = expected
+            .canonicalize()
+            .context("managed Pi Skill target cannot be resolved")?;
+        let matches = skills
+            .iter()
+            .filter(|skill| &skill.name == name)
+            .filter_map(|skill| Path::new(&skill.entry_path).canonicalize().ok())
+            .filter(|observed| observed == &expected)
+            .count();
+        if matches != 1 {
+            bail!("expected managed Pi Skill is missing, duplicated, or changed");
+        }
     }
     Ok(())
 }
@@ -1972,7 +2528,7 @@ fn validate_managed_session_state(
     session_file: &Path,
     cwd: &Path,
 ) -> Result<()> {
-    if state.schema_version != 1
+    if state.schema_version != 2
         || state.extension_version != PI_HOST_EXTENSION_VERSION
         || state.host_instance_id != binding.host_instance_id
         || state.host_binding_generation != binding.host_binding_generation
@@ -2025,15 +2581,6 @@ fn canonical_or_future_session_path(path: &Path) -> Result<PathBuf> {
     }
 }
 
-fn session_file_path_digest(path: &Path) -> Result<String> {
-    let canonical = canonical_or_future_session_path(path)
-        .context("Pi Native Session file cannot be resolved for digest")?;
-    Ok(format!(
-        "{:x}",
-        Sha256::digest(canonical.to_string_lossy().as_bytes())
-    ))
-}
-
 fn canonical_workspace_key(cwd: &Path) -> Result<String> {
     let cwd = cwd
         .canonicalize()
@@ -2047,7 +2594,7 @@ fn validate_host_state(
     locator_root: &Path,
     cwd: &Path,
     frozen_model_id: &str,
-) -> Result<(String, PathBuf, String, String, String)> {
+) -> Result<(String, PathBuf, String, String, String, bool)> {
     let data = state.get("data").context("Pi get_state omitted data")?;
     let session_id = data
         .get("sessionId")
@@ -2109,7 +2656,18 @@ fn validate_host_state(
         .and_then(Value::as_str)
         .unwrap_or("off")
         .to_string();
-    Ok((session_id, session_file, provider, model_id, thinking))
+    let supports_images = data
+        .pointer("/model/input")
+        .and_then(Value::as_array)
+        .is_some_and(|inputs| inputs.iter().any(|input| input.as_str() == Some("image")));
+    Ok((
+        session_id,
+        session_file,
+        provider,
+        model_id,
+        thinking,
+        supports_images,
+    ))
 }
 
 fn parse_explicit_model_id(value: &str) -> Result<(String, String)> {
@@ -2212,14 +2770,20 @@ fn validate_native_session_file(path: &Path, id: &str, cwd: &Path, must_exist: b
         }
     }
     let file = File::open(path)?;
-    let mut line = String::new();
-    StdBufReader::new(file)
-        .take(64 * 1024)
-        .read_line(&mut line)?;
-    let header: Value = serde_json::from_str(&line).context("Pi Session header is invalid")?;
-    if header.get("type").and_then(Value::as_str) != Some("session")
-        || header.get("id").and_then(Value::as_str) != Some(id)
-    {
+    let mut reader = StdBufReader::new(file).take(64 * 1024);
+    let header = loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            bail!("Pi Session has no parseable Session header within the scan limit");
+        }
+        let Ok(candidate) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if candidate.get("type").and_then(Value::as_str) == Some("session") {
+            break candidate;
+        }
+    };
+    if header.get("id").and_then(Value::as_str) != Some(id) {
         bail!("Pi Session header identity is invalid");
     }
     let header_cwd = header
@@ -2298,11 +2862,23 @@ fn short_digest(bytes: &[u8]) -> String {
     digest[..12].to_string()
 }
 
-fn is_hex_digest(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+fn redact_pi_diagnostic(message: &str) -> String {
+    let truncated = message.chars().take(4_000).collect::<String>();
+    let lowercase = truncated.to_ascii_lowercase();
+    if [
+        "api_key",
+        "apikey",
+        "authorization",
+        "bearer ",
+        "auth token",
+    ]
+    .iter()
+    .any(|marker| lowercase.contains(marker))
+    {
+        "[redacted Pi diagnostic: sensitive marker detected]".to_string()
+    } else {
+        truncated
+    }
 }
 
 #[cfg(test)]
@@ -2356,7 +2932,7 @@ write_session() {
 emit_managed_session_state() {
   host_instance_id=$(sed -n 's/.*"hostInstanceId":"\([^"]*\)".*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
   host_binding_generation=$(sed -n 's/.*"hostBindingGeneration":\([0-9][0-9]*\).*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
-  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":1,\\"extensionVersion\\":\\"rovai-pi-host-v3\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
+  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":2,\\"extensionVersion\\":\\"rovai-pi-host-v5\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
   printf '%s\n' "$event" >> "$event_log"
   printf '%s\n' "$event"
 }
@@ -2496,6 +3072,235 @@ done
     }
 
     #[test]
+    fn production_host_launch_preserves_pi_native_resources() {
+        let extension = Path::new("/private/rovai-pi-host-v5.ts");
+        let mut production = Command::new("pi");
+        append_host_arguments(&mut production, extension, true);
+        let production_args = production
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            production_args,
+            [
+                "--mode",
+                "rpc",
+                "--no-themes",
+                "--extension",
+                "/private/rovai-pi-host-v5.ts",
+            ]
+        );
+        for forbidden in [
+            "--no-skills",
+            "--no-context-files",
+            "--no-prompt-templates",
+            "--no-builtin-tools",
+            "--approve",
+            "--no-approve",
+            "--no-extensions",
+        ] {
+            assert!(!production_args.iter().any(|argument| argument == forbidden));
+        }
+
+        let mut fallback = Command::new("pi");
+        append_host_arguments(&mut fallback, extension, false);
+        assert_eq!(
+            fallback
+                .as_std()
+                .get_args()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            [
+                "--mode",
+                "rpc",
+                "--no-extensions",
+                "--no-themes",
+                "--extension",
+                "/private/rovai-pi-host-v5.ts",
+            ]
+        );
+    }
+
+    fn direct_payload(message: &str) -> String {
+        format!(
+            "[RUN_FACTS]\n{{}}\n[/RUN_FACTS]\n\n[CURRENT_INPUT]\n{}\n[/CURRENT_INPUT]\n\n",
+            serde_json::to_string(&json!({
+                "source": {"type": "user"},
+                "message": message,
+                "mentionsCurrentUser": false,
+            }))
+            .unwrap()
+        )
+    }
+
+    fn command_catalog(response: Value) -> Vec<PiCommandCatalogEntry> {
+        parse_command_catalog(&json!({"data": {"commands": response}})).unwrap()
+    }
+
+    #[test]
+    fn prompt_command_transform_matches_pi_argument_expansion() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-pi-prompt-command-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("fix.md");
+        std::fs::write(
+            &source,
+            "---\ndescription: fixture\n---\nFirst=$1 Second=$2 All=$@ Default=${3:-fallback} Slice=${@:2:1}",
+        )
+        .unwrap();
+        let catalog = command_catalog(json!([{
+            "name": "fix",
+            "description": "fixture",
+            "source": "prompt",
+            "sourceInfo": {
+                "scope": "project",
+                "path": source,
+            },
+        }]));
+        let original = direct_payload("  /fix \"one two\" three  ");
+        let transformed = transform_pi_prompt(&original, "direct", &catalog).unwrap();
+        let (_, _, current_input) = parse_current_input(&transformed.runtime_payload).unwrap();
+        assert_eq!(
+            current_input["message"],
+            "First=one two Second=three All=one two three Default=fallback Slice=three"
+        );
+        assert_eq!(transformed.evidence["mode"], "file_command");
+        assert_eq!(transformed.evidence["command"]["source"], "prompt");
+        assert_eq!(transformed.evidence["command"]["location"], "project");
+        assert!(transformed.source_content.is_some());
+        assert!(transformed.expanded_content.is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn skill_command_keeps_complete_file_and_appends_raw_arguments() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-pi-skill-command-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("SKILL.md");
+        let skill = "---\nname: review\ndescription: review\n---\n# Exact skill\n";
+        std::fs::write(&source, skill).unwrap();
+        let catalog = command_catalog(json!([{
+            "name": "skill:review",
+            "source": "skill",
+            "sourceInfo": {
+                "scope": "temporary",
+                "path": source,
+            },
+        }]));
+        let transformed = transform_pi_prompt(
+            &direct_payload("/skill:review --deep now"),
+            "direct",
+            &catalog,
+        )
+        .unwrap();
+        let (_, _, current_input) = parse_current_input(&transformed.runtime_payload).unwrap();
+        assert_eq!(
+            current_input["message"],
+            format!("{skill}\n\nUser: --deep now")
+        );
+        assert_eq!(transformed.evidence["command"]["location"], "path");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unknown_and_non_direct_slash_inputs_are_verbatim_but_extension_commands_fail() {
+        let original = direct_payload("/native command");
+        let extension = command_catalog(json!([{
+            "name": "native",
+            "source": "extension",
+            "path": "/private/native.ts",
+        }]));
+        let unknown = transform_pi_prompt(&original, "direct", &[]).unwrap();
+        assert_eq!(unknown.runtime_payload, original);
+        assert_eq!(unknown.evidence["mode"], "verbatim");
+        let non_direct = transform_pi_prompt(&original, "a2a", &extension).unwrap();
+        assert_eq!(non_direct.runtime_payload, original);
+        assert!(
+            transform_pi_prompt(&original, "direct", &extension)
+                .unwrap_err()
+                .to_string()
+                .contains("pi_extension_command_unavailable_in_managed_agent_run")
+        );
+    }
+
+    #[test]
+    fn file_command_digest_drift_fails_instead_of_falling_back() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-pi-command-drift-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("drift.md");
+        std::fs::write(&source, "before").unwrap();
+        let catalog = command_catalog(json!([{
+            "name": "drift",
+            "source": "prompt",
+            "location": "user",
+            "path": source,
+        }]));
+        std::fs::write(&source, "after").unwrap();
+        assert!(
+            transform_pi_prompt(&direct_payload("/drift"), "direct", &catalog)
+                .unwrap_err()
+                .to_string()
+                .contains("changed after catalog capture")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn prompt_images_keep_authorized_order_mime_and_exact_bytes() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-pi-prompt-images-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let png = root.join("one.bin");
+        let text = root.join("notes.txt");
+        let gif = root.join("two.bin");
+        let png_bytes = b"\x89PNG\r\n\x1a\nfixture";
+        let gif_bytes = b"GIF89afixture";
+        std::fs::write(&png, png_bytes).unwrap();
+        std::fs::write(&text, b"ordinary file").unwrap();
+        std::fs::write(&gif, gif_bytes).unwrap();
+        let images = prepare_prompt_images(&[
+            (png, format!("sha256:{}", sha256_bytes(png_bytes))),
+            (text, format!("sha256:{}", sha256_bytes(b"ordinary file"))),
+            (gif, format!("sha256:{}", sha256_bytes(gif_bytes))),
+        ])
+        .unwrap();
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0].wire.mime_type, "image/png");
+        assert_eq!(images[1].wire.mime_type, "image/gif");
+        assert_eq!(
+            BASE64_STANDARD.decode(&images[0].wire.data).unwrap(),
+            png_bytes
+        );
+        assert_eq!(
+            BASE64_STANDARD.decode(&images[1].wire.data).unwrap(),
+            gif_bytes
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn session_header_scan_skips_malformed_and_unknown_records() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-pi-session-scan-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let id = "00000000-0000-4000-8000-000000000077";
+        let session = root.join("session.jsonl");
+        std::fs::write(
+            &session,
+            format!(
+                "not-json\n{{\"type\":\"future_record\"}}\n{}\n",
+                serde_json::to_string(&json!({"type":"session", "id":id, "cwd":root})).unwrap()
+            ),
+        )
+        .unwrap();
+        validate_native_session_file(&session, id, &root, true).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn managed_session_path_comparison_accepts_a_future_regular_file() {
         let root =
             std::env::temp_dir().join(format!("rovai-pi-future-session-{}", uuid::Uuid::new_v4()));
@@ -2530,24 +3335,37 @@ done
         let canonical = "{\"a\":[true,{\"b\":\"x\"}],\"z\":1}";
         let expected = format!(
             "{:x}",
-            Sha256::digest(format!("rovai-pi-managed-input-receipt-v1\n{canonical}").as_bytes())
+            Sha256::digest(format!("rovai-pi-managed-input-receipt-v2\n{canonical}").as_bytes())
         );
         assert_eq!(managed_receipt_nonce(&value).unwrap(), expected);
     }
 
     #[test]
-    fn managed_skill_catalog_rejects_a_model_visibility_change() {
-        let expected = vec![PiReceiptSkill {
-            name: "manual-only".to_string(),
-            description_digest: "a".repeat(64),
-            entry_path: "/workspace/.pi/skills/manual-only/SKILL.md".to_string(),
-            model_visible: false,
-        }];
-        let mut observed = expected.clone();
-        observed[0].model_visible = true;
-
-        assert!(!skill_catalogs_match(&observed, &expected));
-        assert!(skill_catalogs_match(&expected, &expected));
+    fn governed_native_tool_receipt_is_a_closed_minimum_subset() {
+        let governed = GOVERNED_NATIVE_TOOL_NAMES
+            .into_iter()
+            .map(|name| PiGovernedNativeTool {
+                name: name.to_string(),
+                observable: true,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            governed,
+            vec![
+                PiGovernedNativeTool {
+                    name: "bash".to_string(),
+                    observable: true,
+                },
+                PiGovernedNativeTool {
+                    name: "edit".to_string(),
+                    observable: true,
+                },
+                PiGovernedNativeTool {
+                    name: "write".to_string(),
+                    observable: true,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -2614,7 +3432,16 @@ done
             }
         });
 
-        let catalog = validate_skill_commands(&response, &skill_root, &workspace, &[]).unwrap();
+        let catalog = validate_skill_commands(
+            &response,
+            &skill_root,
+            &workspace,
+            &[
+                ("manual-only".to_string(), manual_path.clone()),
+                ("visible".to_string(), visible_path.clone()),
+            ],
+        )
+        .unwrap();
         assert_eq!(catalog.len(), 2);
         assert_eq!(
             catalog

@@ -475,7 +475,6 @@ pub enum McpSameNamePolicy {
 #[serde(rename_all = "snake_case")]
 pub enum McpApprovalControl {
     RuntimeNative,
-    CoreManaged,
     Unsupported,
 }
 
@@ -506,16 +505,6 @@ fn unsupported_external_mcp_projection() -> McpProjectionCapability {
         external_mcp_projection: ExternalMcpProjection::Unsupported,
         same_name_policy: None,
         approval_control: McpApprovalControl::Unsupported,
-    }
-}
-
-fn pi_core_managed_mcp_projection() -> McpProjectionCapability {
-    McpProjectionCapability {
-        supports_stdio: true,
-        supports_streamable_http: true,
-        external_mcp_projection: ExternalMcpProjection::AdditivePerRun,
-        same_name_policy: Some(McpSameNamePolicy::RovaiWins),
-        approval_control: McpApprovalControl::CoreManaged,
     }
 }
 
@@ -693,8 +682,15 @@ impl AgentRuntimeAdapterRegistry {
         kind: AdapterKind,
         platform: HostPlatformKey,
     ) -> RuntimePlatformAdmission {
-        if matches!(kind, AdapterKind::CursorAgent | AdapterKind::Pi) {
+        if kind == AdapterKind::CursorAgent {
             return RuntimePlatformAdmission::not_qualified(
+                kind,
+                platform,
+                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+            );
+        }
+        if kind == AdapterKind::Pi {
+            return RuntimePlatformAdmission::preview(
                 kind,
                 platform,
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
@@ -767,7 +763,7 @@ impl AgentRuntimeAdapterRegistry {
                 "approval_policy": "never",
             }),
             AdapterKind::Pi => json!({
-                "approval_mode": "managed",
+                "approval_mode": "partial_managed",
             }),
             AdapterKind::OpencodeCli => json!({
                 "permission": "allow",
@@ -883,7 +879,7 @@ impl AgentRuntimeAdapterRegistry {
     pub fn mcp_projection(&self, kind: AdapterKind) -> McpProjectionCapability {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
-            AdapterKind::Pi => pi_core_managed_mcp_projection(),
+            AdapterKind::Pi => unsupported_external_mcp_projection(),
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -1798,15 +1794,15 @@ pub fn validate_machine_ready_snapshot(
             snapshot.executable_fingerprint.as_deref(),
             &snapshot.capabilities,
         )?;
-        let managed_approval = snapshot.permission_options.iter().any(|option| {
+        let partial_managed_approval = snapshot.permission_options.iter().any(|option| {
             option.key == "approval_mode"
                 && option.required
                 && option.supported
-                && option.recommended_value == json!("managed")
+                && option.recommended_value == json!("partial_managed")
                 && option
                     .choices
                     .iter()
-                    .any(|choice| choice.value == "managed")
+                    .any(|choice| choice.value == "partial_managed")
         });
         let complete = snapshot.authentication_status == "authenticated"
             && snapshot
@@ -1817,7 +1813,7 @@ pub fn validate_machine_ready_snapshot(
                 .models
                 .iter()
                 .any(|model| model.id == PI_RUNTIME_DEFAULT_MODEL_ID && model.is_default)
-            && managed_approval
+            && partial_managed_approval
             && snapshot.native_session_compatibility_key.as_deref()
                 == Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY);
         if !complete {
@@ -2541,10 +2537,13 @@ fn pi_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "approval_mode".to_string(),
         label: "approval-mode".to_string(),
-        description: "Pi has no native sandbox or permission callback. Rovai's explicitly loaded extension gates every mutating Tool through durable Approval.".to_string(),
+        description: "Rovai provides best-effort durable approval for the known Pi bash, write, and edit tools. This is partial governance, not a sandbox, and does not cover arbitrary Extension tools.".to_string(),
         value_type: "enum".to_string(),
-        choices: vec![choice("managed", "managed (Rovai approval)")],
-        recommended_value: json!("managed"),
+        choices: vec![choice(
+            "partial_managed",
+            "partial_managed (Rovai approval for bash/write/edit)",
+        )],
+        recommended_value: json!("partial_managed"),
         scope: RuntimeOptionScope::Host,
         risk: "elevated".to_string(),
         supported: true,
@@ -2644,15 +2643,15 @@ fn resolve_pi_runtime(
         .get("approval_mode")
         .and_then(Value::as_str)
         .context("Pi permission configuration requires approval_mode")?;
-    if approval_mode != "managed" {
-        anyhow::bail!("Pi only supports the Rovai managed approval mode");
+    if approval_mode != "partial_managed" {
+        anyhow::bail!("Pi only supports the Rovai partial_managed approval mode");
     }
     let binding_compatibility_digest = canonical_json_digest(&json!({
         "adapterKind": AdapterKind::Pi,
         "installationId": input.installation_id,
         "protocolVersion": protocol_version,
         "contextContract": native_binding_context_contract(),
-        "managedSystemPrompt": "rovai-pi-host-v3",
+        "piBindingCompatibility": "native-capabilities-v1",
     }))?;
     let host_config_digest = canonical_json_digest(&json!({
         "adapterKind": AdapterKind::Pi,
@@ -2666,7 +2665,7 @@ fn resolve_pi_runtime(
         "protocolVersion": protocol_version,
         "permissionSchemaVersion": input.permissions.schema_version,
         "approvalMode": approval_mode,
-        "managedExtension": "rovai-pi-host-v3",
+        "managedExtension": "rovai-pi-host-v5",
     }))?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
@@ -3654,9 +3653,6 @@ mod tests {
             "context.compaction.native_system_prompt_preserved",
             "usage.model_call.structured",
             BUILTIN_TOOL_RUNTIME_CAPABILITY,
-            "mcp.external_projection.additive_per_run",
-            "mcp.same_name_policy.rovai_wins",
-            "mcp.approval.core_managed",
         ] {
             assert!(
                 !snapshot.capabilities.contains(&unobserved.to_string()),
@@ -4268,16 +4264,11 @@ mod tests {
                 McpApprovalControl::RuntimeNative
             );
         }
-        let pi = registry.mcp_projection(AdapterKind::Pi);
-        assert!(pi.supports_stdio);
-        assert!(pi.supports_streamable_http);
-        assert_eq!(
-            pi.external_mcp_projection,
-            ExternalMcpProjection::AdditivePerRun
-        );
-        assert_eq!(pi.same_name_policy, Some(McpSameNamePolicy::RovaiWins));
-        assert_eq!(pi.approval_control, McpApprovalControl::CoreManaged);
-        for kind in [AdapterKind::AntigravityApp, AdapterKind::CursorAgent] {
+        for kind in [
+            AdapterKind::Pi,
+            AdapterKind::AntigravityApp,
+            AdapterKind::CursorAgent,
+        ] {
             let capability = registry.mcp_projection(kind);
             assert!(!capability.supports_stdio);
             assert!(!capability.supports_streamable_http);

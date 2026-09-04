@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -15,7 +15,6 @@ const dataDir = join(fixtureRoot, 'data')
 const sourcePath = join(fixtureRoot, 'public-attachment.txt')
 const token = `PUBLIC_ATTACHMENT_TOKEN_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
 const firstAgents = ['agent_1', 'agent_2']
-const laterAgent = 'agent_4'
 const contextFormatterVersion = 14
 let core = null
 
@@ -31,7 +30,7 @@ try {
   const installation = await configureCodexRuntime(
     core.request,
     health,
-    [...firstAgents, laterAgent]
+    firstAgents
   )
   const preflight = await core.request('camps.creationPreflight')
   if (!preflight.admissible) {
@@ -51,29 +50,29 @@ try {
   }
 
   const initialDraft = await core.request('camp.composerDraft.get', { campId })
-  const preparedDraft = await core.request('camp.attachments.prepareFromPath', {
+  const referencedDraft = await core.request('camp.sourceAttachments.addFromPath', {
     campId,
     expectedRevision: initialDraft.revision,
     sourcePath,
     displayName: 'Runtime 公共附件.txt'
   })
-  const attachment = preparedDraft.attachments?.[0]
-  if (preparedDraft.attachments?.length !== 1
-      || attachment?.state !== 'ready'
+  const attachment = referencedDraft.attachments?.[0]
+  if (referencedDraft.attachments?.length !== 1
+      || attachment?.availability !== 'unknown'
       || attachment?.previewKind !== 'none') {
-    throw new Error(`Attachment preparation failed: ${JSON.stringify(preparedDraft)}`)
+    throw new Error(`Source Attachment reference failed: ${JSON.stringify(referencedDraft)}`)
   }
 
   const firstDraft = await core.request('camp.composerDraft.save', {
     campId,
-    expectedRevision: preparedDraft.revision,
+    expectedRevision: referencedDraft.revision,
     content: [
       { kind: 'member_mention', agentId: firstAgents[0] },
       { kind: 'text', text: ' ' },
       { kind: 'member_mention', agentId: firstAgents[1] },
       { kind: 'text', text: ` ${[
-        '读取本条消息携带的公共附件，不要猜测内容。',
-        '必须使用文件读取工具打开 Current Input 给出的 Camp Attachment Path。',
+        '读取本条消息携带的本地附件引用，不要猜测内容。',
+        '必须使用文件读取工具打开 Current Input 给出的附件路径。',
         '只回复附件中 TOKEN= 后面的完整值，不要添加其他文字。'
       ].join('\n')}` }
     ]
@@ -84,7 +83,7 @@ try {
     draftRevision: firstDraft.revision,
     execution: {
       taskId: null,
-      purpose: 'Verify two addressed Camp members can read the same public attachment path.',
+      purpose: 'Verify two addressed Camp members can read their resolved source attachment path.',
       completionRole: 'required'
     }
   })
@@ -93,7 +92,7 @@ try {
     throw new Error(`Two-member attachment message was not accepted: ${JSON.stringify(firstSent)}`)
   }
 
-  let snapshot = await waitFor(async () => {
+  const snapshot = await waitFor(async () => {
     const candidate = await core.request('camps.snapshot', { campId })
     const runs = candidate.agentRuns.filter((run) => firstRunIds.includes(run.id))
     failOnTerminalError(runs, candidate)
@@ -103,65 +102,28 @@ try {
   }, 'two addressed members to read the public attachment', 300_000)
   assertRunRepliesContain(snapshot, firstRunIds, token, 'addressed members')
 
-  const laterDraft = await core.request('camp.composerDraft.get', { campId })
-  const savedLaterDraft = await core.request('camp.composerDraft.save', {
-    campId,
-    expectedRevision: laterDraft.revision,
-    content: [
-      { kind: 'member_mention', agentId: laterAgent },
-      { kind: 'text', text: ` ${[
-        '读取上一条用户消息携带的公共附件，不要依赖其他队员的回答。',
-        '必须使用文件读取工具打开 Shared Conversation 给出的 Camp Attachment Path。',
-        '只回复附件中 TOKEN= 后面的完整值，不要添加其他文字。'
-      ].join('\n')}` }
-    ]
-  })
-  const laterSent = await core.request('camp.messages.send', {
-    commandId: crypto.randomUUID(),
-    campId,
-    draftRevision: savedLaterDraft.revision,
-    execution: {
-      taskId: null,
-      purpose: 'Verify a later Camp member can discover the earlier public attachment path.',
-      completionRole: 'required'
-    }
-  })
-  const laterRunId = laterSent.commandResult?.payload?.agentRunIds?.[0]
-  if (laterSent.commandResult?.status !== 'accepted' || !laterRunId) {
-    throw new Error(`Later-member attachment message was not accepted: ${JSON.stringify(laterSent)}`)
-  }
-
-  snapshot = await waitFor(async () => {
-    const candidate = await core.request('camps.snapshot', { campId })
-    const run = candidate.agentRuns.find((item) => item.id === laterRunId)
-    failOnTerminalError(run ? [run] : [], candidate)
-    return run?.status === 'succeeded' ? candidate : null
-  }, 'later member to discover and read the earlier public attachment', 300_000)
-  assertRunRepliesContain(snapshot, [laterRunId], token, 'later member')
-
   const firstMessage = snapshot.messages.find((message) =>
     message.attachments?.some((item) => item.id === attachment.id)
   )
   const firstManifests = snapshot.contextManifests.filter((manifest) =>
     firstRunIds.includes(manifest.agentRunId)
   )
-  const laterManifest = snapshot.contextManifests.find(
-    (manifest) => manifest.agentRunId === laterRunId
-  )
   if (firstMessage?.attachments?.length !== 1
+      || firstMessage.attachments[0]?.availability !== 'unknown'
+      || JSON.stringify(firstMessage).includes(sourcePath)
       || firstManifests.length !== 2
       || firstManifests.some((manifest) =>
         manifest.formatterVersion !== contextFormatterVersion
-        || manifest.attachmentRefs?.length !== 1
-        || manifest.attachmentRefs[0]?.attachmentId !== attachment.id
-      )
-      || laterManifest?.formatterVersion !== contextFormatterVersion
-      || laterManifest.attachmentRefs?.length !== 0) {
-    throw new Error(`Frozen attachment context evidence is invalid: ${JSON.stringify({
+        || manifest.attachmentRefs?.length !== 0
+      )) {
+    throw new Error(`Source attachment public projection is invalid: ${JSON.stringify({
       firstMessage,
-      firstManifests,
-      laterManifest
+      firstManifests
     })}`)
+  }
+  const dataEntries = await readdir(dataDir)
+  if (dataEntries.includes('camp-attachments')) {
+    throw new Error(`New source attachment created a persistent camp-attachments directory: ${JSON.stringify(dataEntries)}`)
   }
 
   console.log(JSON.stringify({
@@ -170,16 +132,14 @@ try {
     campId,
     attachmentId: attachment.id,
     addressedMemberRunIds: firstRunIds,
-    laterMemberRunId: laterRunId,
-    tokenVerifiedByRunCount: 3,
-    sameStablePathVerifiedByRuntimeReads: true,
-    laterSharedConversationDiscoveryVerified: true,
+    tokenVerifiedByRunCount: 2,
+    runLocalResolutionVerified: true,
+    persistentAttachmentDirectoryAbsent: true,
     contextFormatterVersion
   }, null, 2))
 } finally {
   if (core) await core.stop()
   await removeEphemeralRuntimeCampFilesRoot(dataDir)
-  await makeAttachmentTreeRemovable(dataDir)
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
@@ -271,17 +231,4 @@ async function waitFor(probe, label, timeoutMs) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 250))
   }
   throw new Error(`Timed out waiting for ${label}`)
-}
-
-async function makeAttachmentTreeRemovable(dataDirectory) {
-  const rootDirectory = join(dataDirectory, 'camp-attachments')
-  await makeDirectoryTreeRemovable(rootDirectory)
-}
-
-async function makeDirectoryTreeRemovable(directory) {
-  await chmod(directory, 0o700).catch(() => undefined)
-  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
-  await Promise.all(entries
-    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
-    .map((entry) => makeDirectoryTreeRemovable(join(directory, entry.name))))
 }

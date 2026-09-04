@@ -70,8 +70,9 @@ pnpm docs:check
 DOCS_BASE_REF=<目标分支 base SHA> pnpm docs:check:ci
 ```
 
-PR CI 必须提供真实 base SHA；`docs:check:ci` 以它验证 historical
-`decisions.md` 未被静默改写，本地普通 `docs:check` 不伪造或推测 base。
+PR 快速门禁必须提供真实 base SHA；`docs:check:ci` 以它验证 historical
+`decisions.md` 未被静默改写，本地普通 `docs:check` 不伪造或推测 base。合并到 `main` 后不再自动重复
+执行该门禁。
 
 push / PR 前运行完整 Rust 验证：
 
@@ -82,7 +83,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 `test:rust:pr` 明确串行执行 fast library、`rovai` CLI 和 slow integration 三个范围。
 `test:rust:workspace-default` 只运行 default-feature workspace；旧 `test:rust:full` 是该范围的
-兼容 alias，不代表 PR 或 all-features 门禁。Rust CI 还会执行 `cargo fmt --all --check` 和 Clippy。
+兼容 alias，不代表 PR 或 all-features 门禁。PR 的 `CI / gate` 仅执行 `cargo fmt --all --check` 和
+`cargo check --workspace --all-targets`；Clippy、all-features 测试、数据库 slow tests 与 Windows 专项测试
+由手动 `Full check` workflow 承接。
 涉及桌面构建或跨边界改动时继续运行：
 
 ```bash

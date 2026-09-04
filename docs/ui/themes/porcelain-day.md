@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-09-01
+last_updated: 2026-09-04
 ---
 
 # Porcelain Day
@@ -52,6 +52,8 @@ Light. `color-scheme: light`.
 | `--workspace-attention-soft` | `#f4ecdf` |
 | `--workspace-faint` | `#71808a` |
 | `--conversation-surface` | `#ffffff` |
+| `--conversation-user-message-surface` | `#f2f3f4` |
+| `--conversation-user-message-line` | `#e3e7e9` |
 | `--execution-running-surface` | `#fafafa` |
 | `--conversation-find-match` | `#f4e4c3` |
 | `--conversation-find-current` | `#edc66f` |
@@ -122,11 +124,26 @@ Light. `color-scheme: light`.
 | `--identity-3` | `#74628f` | `--identity-7` | `#547245` |
 | `--identity-4` | `#9a6a32` | `--identity-8` | `#8c6146` |
 
+### Agent artifact families
+
+Agent 交付文件的图形色只表达格式家族，不表达状态、身份或可写权限；用户附件继续使用中性单色图形。
+
+| Token | Value | Token | Value |
+|---|---:|---|---:|
+| `--attachment-web` | `#8a5f35` | `--attachment-code` | `#476b85` |
+| `--attachment-notes` | `#626b72` | `--attachment-pdf` | `#9a4f49` |
+| `--attachment-word` | `#3f6991` | `--attachment-sheet` | `#3f7559` |
+| `--attachment-slide` | `#956b38` | `--attachment-image` | `#74628f` |
+| `--attachment-archive` | `#7d6840` | `--attachment-generic` | `#616a73` |
+
 ### Evidence and diff
 
 | Token | Value |
 |---|---:|
 | `--inline-code-canvas` | `#e9eceb` |
+| `--conversation-inline-code-canvas` | `#eef0f1` |
+| `--conversation-code-block-canvas` | `#f4f5f5` |
+| `--conversation-code-line` | `#d9dee1` |
 | `--shell-result-canvas` | `#f3f4f3` |
 | `--code-block-canvas` | `#eef2f5` |
 | `--evidence-canvas` | `#f4f6f3` |
@@ -162,6 +179,8 @@ Light. `color-scheme: light`.
 | `--conversation-artifact-width` | `930px` |
 | `--conversation-wide-width` | `1040px` |
 | `--conversation-composer-width` | `1040px`; viewport `>= 1800px` 时为 `1440px` |
+| `--conversation-user-message-max-width` | `690px` |
+| `--conversation-user-message-width-offset` | `36px`; viewport `<= 1080px` 时为 `18.667px`，紧凑会话列为 `16px` |
 
 ## Brand, semantic, identity, and evidence color rules
 
@@ -175,6 +194,13 @@ Light. `color-scheme: light`.
 - Narrative inline code uses the borderless `--inline-code-canvas`; Shell command results use
   `--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence
   border, while other evidence surfaces continue to use `--evidence-canvas`.
+- Camp message prose, Runtime process copy in the bottom and Inspector execution surfaces, and
+  Markdown file previews use the dedicated `--conversation-inline-code-canvas`,
+  `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer. Release notes,
+  Tool results and other SafeMarkdown surfaces keep the shared defaults.
+- Current-user message bubbles use the dedicated porcelain-gray
+  `--conversation-user-message-surface` and `--conversation-user-message-line`; Agent narrative
+  remains on the transparent conversation surface.
 
 ## Contrast requirements
 

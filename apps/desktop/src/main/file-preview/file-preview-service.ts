@@ -1219,6 +1219,17 @@ export class FilePreviewService {
     if (error instanceof FilePreviewAccessError) {
       return failed(error.code, error.message, error.code === 'read_failed')
     }
+    if (error && typeof error === 'object' && 'code' in error) {
+      if (error.code === 'attachment_missing') {
+        return failed('attachment_missing', '找不到这个附件。')
+      }
+      if (error.code === 'attachment_unreadable') {
+        return failed('attachment_unreadable', '无法读取这个附件。')
+      }
+      if (error.code === 'attachment_kind_changed') {
+        return failed('attachment_kind_changed', '附件类型已经变化。')
+      }
+    }
     if (error instanceof TypeError) return failed('decode_failed', '这个文件不是有效的 UTF-8 文本。')
     return failed(defaultCode, '无法打开文件。', true)
   }

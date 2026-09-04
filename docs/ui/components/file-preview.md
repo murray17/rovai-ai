@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # Camp 文件预览区
@@ -10,8 +10,9 @@ last_updated: 2026-09-03
 ## 会话内的文件链接
 
 文件与 Web 链接统一使用独立的 `--resource-link`，Hover 使用 `--resource-link-hover`；色值由两套主题分别定义，
-不复用品牌或信息状态颜色。文件链接保持正文阅读感与原生链接语义，不呈现为按钮或 Badge。普通文件链接保留
-轻下划线，Hover 加强下划线；键盘焦点使用既有 focus token，长路径可自然换行，不让正文横向溢出。
+不复用品牌或信息状态颜色。文件链接保持正文阅读感与原生链接语义，不呈现为按钮或 Badge。文件与 Web 资源链接
+在默认、Hover、Active 与 Focus 状态均不显示下划线；Hover/Active 只加强链接色，键盘焦点使用既有 focus token，
+长路径可自然换行，不让正文横向溢出。
 
 - Markdown 文件链接 `[label](target)` 只显示可点击的 label；target 仅用于解析/打开，不在正文中重复常驻展示。
 - inline-code 永远保持原生 `<code>`。`` `config.toml` ``、`` `src/App.tsx:20` ``、相对路径和绝对路径都不显示
@@ -21,7 +22,8 @@ last_updated: 2026-09-03
 - 每个文件入口在 label 前显示真实资源类型的 14px 单色线性 SVG，不再由 label 是否为 inline-code 决定是否显示。
   类型至少区分 Markdown、HTML、代码、配置/数据、文本、图片、SVG、Diff/Patch、目录、PDF、文档、表格、
   演示文稿、Notebook、压缩包、音频、视频、数据库、可执行/安装包和未知文件。不支持应用内预览的格式仍保留
-  真实类型图标，再交给系统默认应用打开。
+  真实类型图标，再交给系统默认应用打开。Markdown Glyph 使用折角文档轮廓与三条正文线，代码 Glyph 使用
+  占满 24px viewBox 主要视觉区的 `</>`；两者与对应 Preview Tab 精确复用同一 SVG 几何。
 - HTTPS Markdown 链接与 GFM 自动链接都在 label 前显示统一网页图标；inline-code 中的 `https://` 仍是普通代码。
   文件与网页图标均为装饰元素，对辅助技术隐藏，使用 `currentColor` 与链接文字同步变色，不用颜色区分资源类别。
 - 普通 Markdown label 使用 UI 字体。显式链接 label 自身包含 Markdown inline-code 时保留其代码样式；
@@ -87,9 +89,9 @@ last_updated: 2026-09-03
 ## 文件 Tabs
 
 Tabs 使用 Codex toolbar 语法：小间距、无逐项边框、当前项用次级 surface 和文字对比表达，不使用品牌下划线。
-普通文件 Tab 与会话文件链接按文件名共用相同资源视觉类型，不直接用 `FilePreviewKind` 选图标；左侧用统一 14px
-细线 SVG 区分 Markdown（书页）、代码（尖括号）、HTML（网页）、图片/SVG（图片）、
-文本/分页原文（文档）和 Diff/Patch/File Change（加减差异）。图标使用继承的中性色，作为装饰隐藏于辅助技术，
+普通文件 Tab 与会话文件链接按文件名共用相同资源视觉类型，不直接用 `FilePreviewKind` 选图标；左侧复用文件引用的
+同一套 14px、1.7px 描边单色 SVG Glyph，覆盖共享资源类型矩阵；File Change 固定复用 Diff/Patch Glyph。
+图标使用继承的中性色，作为装饰隐藏于辅助技术，
 文件名和 File Change 前缀继续提供可访问名称，不用颜色代替类型语义。
 文件名使用 UI 字体；同类 Tab 重名且存在安全父目录时显示 `父目录/文件名`；只有安全文件名的项目外文件、
 Attachment 或项目根目录文件使用当前同名组内的 `文件名 · 1/2` 序号区分，不回推或暴露绝对路径。
@@ -134,8 +136,9 @@ Alt+Shift+左右重排。关闭后优先激活右侧，再回到左侧；最后�
 
 Tabs 下只在项目内普通文件具有目录层级时显示一行只读项目相对路径，格式为
 `apps > desktop > … > filename`。项目根目录文件、项目外文件与 Attachment 不显示路径行，Viewer 直接紧接 Tabs；
-Attachment 即使原始文件来自项目内也按 Attachment 处理，不从 managed storage 或文件名回推原路径。项目内判定只信
-Main 在 canonical 文件仍位于当前 Camp 项目根目录后签发的呈现语义，Renderer 不自行猜测。
+Attachment 即使引用的 source 当前位于项目内也按 Attachment 处理，不从卡片 metadata、Managed storage 或文件名
+回推原路径或 storage model。项目内判定只信 Main 在 canonical 文件仍位于当前 Camp 项目根目录后签发的呈现语义，
+Renderer 不自行猜测。
 
 显示路径时整体从左侧自然排列，文件名紧跟最后一个可见目录，不固定到最右侧。空间不足时从目录中部省略，
 优先完整保留文件名；无水平滚动。完整相对路径进入 title 与可访问名称。路径与 Tabs 间无线，路径与正文间一条
@@ -164,6 +167,8 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 首次打开只有 opening/ready/error；快速成功直接显示正文，耗时后才显示轻量 Loading。只有文件确实无法定位或读取时
 才显示“无法打开文件 / 文件可能已被移动或删除 / 重试”；工作区外、未授权目录、Root Grant、handle 或 capability
 不足不得成为用户文案，也不得触发 Modal。
+历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、
+unreadable 或 kind_changed，不写回历史，也不启动后台监控。
 外部变化只显示 Tab 圆点与当前 Viewer 的“有更新 / 重新加载”。主动刷新期间旧内容继续显示；失败显示
 “重新加载失败 / 重试”且不销毁 Tab。句柄、Grant、token、watcher 和 generation 永远不是用户文案。
 

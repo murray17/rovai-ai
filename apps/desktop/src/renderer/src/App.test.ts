@@ -122,8 +122,10 @@ import {
   executionDisclosureIsLiveOpen,
   firstSubmittedAgentRun,
   formatStopElapsed,
+  groupExecutionEventsByRunId,
   isViewingNonTerminalAgentRun,
   loadCompleteAgentRunExecutionEvidence,
+  MessageAttachmentGroups,
   memberRuntimeConfigurationPresentation,
   preferredAgentProcessRun,
   rectanglesOverlap,
@@ -1392,12 +1394,28 @@ describe('task event projections', () => {
       message('kiro-message', 2, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
     ], [], [run('running')], [], [changes('run-claude', '2026-08-28T06:49:40.554605Z')], images)
     expect(imageTimeline.map((item) => item.id)).toEqual([
-      'claude-message', 'run-images:run-claude:1', 'run-file-changes:run-claude:1', 'kiro-message'
+      'claude-message', 'run-file-changes:run-claude:1', 'kiro-message'
     ])
+    expect(imageTimeline[0]).toMatchObject({ kind: 'camp_message', runtimeImageGroups: images })
+    const imageTimelineWithEpochs = campConversationTimeline([
+      message('claude-message', 1, 'run-claude', 'agent-claude', '2026-08-28T06:49:36.444822Z')
+    ], [], [run('running')], [], [], [{
+      ...images[0], executionEpoch: 2, createdAt: '2026-08-28T06:50:00.000000Z',
+      images: [{ ...images[0].images[0], id: 'runtime-image-2' }]
+    }, images[0]])
+    expect(imageTimelineWithEpochs[0]).toMatchObject({
+      kind: 'camp_message',
+      runtimeImageGroups: [{ executionEpoch: 1 }, { executionEpoch: 2 }]
+    })
     expect(campConversationTimeline([
       message('kiro-message', 1, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
     ], [], [run('running')], [], [], images)
       .map((item) => item.id)).toEqual(['kiro-message'])
+    expect(campConversationTimeline([{
+      ...message('invalid-user-source', 1, 'run-claude', 'local_user', '2026-08-28T06:49:40.099875Z'),
+      authorType: 'user'
+    }], [], [run('running')], [], [], images)
+      .map((item) => item.id)).toEqual(['invalid-user-source'])
     expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images)
       .map((item) => item.kind)).toEqual(['run_images', 'run_file_changes'])
   })
@@ -1764,9 +1782,7 @@ describe('task event projections', () => {
           mediaType: 'text/plain',
           byteSize: 12,
           previewKind: 'none',
-          state: 'ready',
-          errorMessage: null,
-          createdAt: '2026-07-30T09:59:00Z'
+          availability: 'available'
         }],
         continuationIntent: null,
         replyIntent: {
@@ -1882,9 +1898,7 @@ describe('task event projections', () => {
         mediaType: 'text/plain',
         byteSize: 12,
         previewKind: 'none',
-        state: 'ready',
-        errorMessage: null,
-        createdAt: '2026-08-20T00:00:00Z'
+        availability: 'available'
       }],
       replyIntent: null,
       continuationIntent: null,
@@ -3511,7 +3525,11 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="复制这条消息"')
     expect(markup).toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
     expect(markup).not.toContain('集结队伍，写下这次冒险的目标…')
-    expect(markup).toContain('>复制</button>')
+    expect(markup).toContain('title="复制"')
+    expect(markup).not.toContain('>复制</button>')
+    expect(markup).toContain('d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"')
+    expect(markup).toContain('d="m15.2 9.2-3.6 3.5 3.6 3.5"')
+    expect(markup).toContain('class="message-actions" role="group" aria-label="消息操作"')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
     expect(markup).toContain('data-agent-id="agent_2"')
@@ -4094,6 +4112,37 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
   })
 
+  it('keeps image and file regions separate and orders them by author intent', () => {
+    const attachments: CampMessageView['attachments'] = [{
+      id: 'file-first', displayName: 'report.pdf', kind: 'file', fileCount: 1,
+      mediaType: 'application/pdf', byteSize: 1200, previewKind: 'none', availability: 'available'
+    }, {
+      id: 'image-second', displayName: 'preview.png', kind: 'file', fileCount: 1,
+      mediaType: 'image/png', byteSize: 2400, previewKind: 'image', availability: 'available'
+    }, {
+      id: 'opaque-image', displayName: 'corrupt.webp', kind: 'file', fileCount: 1,
+      mediaType: 'image/webp', byteSize: 1800, previewKind: 'none', availability: 'available'
+    }]
+    const renderGroups = (presentation: 'user' | 'agent') => renderToStaticMarkup(createElement(
+      MessageAttachmentGroups,
+      { attachments, campId: 'camp', messageId: 'message-1', presentation, onNotify: vi.fn() }
+    ))
+
+    const userMarkup = renderGroups('user')
+    expect(userMarkup.indexOf('user-message-images')).toBeLessThan(userMarkup.indexOf('user-message-files'))
+    expect(userMarkup).toContain('image-gallery-user-attachment')
+    expect(userMarkup).toContain('class="attachment-card user-timeline')
+    expect(userMarkup).not.toContain('PDF · 1.2 KB')
+
+    const agentMarkup = renderGroups('agent')
+    expect(agentMarkup.indexOf('agent-output-images')).toBeLessThan(agentMarkup.indexOf('agent-output-files'))
+    expect(agentMarkup).toContain('class="agent-output-file-grid"')
+    expect(agentMarkup).toContain('agent-artifact-icon type-pdf')
+    expect(agentMarkup).toContain('agent-artifact-icon type-image')
+    expect(agentMarkup).toContain('交付文件')
+    expect(agentMarkup).toContain('>2 个</span>')
+  })
+
   it('renders an attachment-only message shell without an empty body bubble', () => {
     const attachmentOnlyMessage: CampMessageView = {
       id: 'message-attachment-only',
@@ -4112,7 +4161,7 @@ describe('task event projections', () => {
         mediaType: 'text/plain',
         byteSize: 12,
         previewKind: 'none',
-        runtimeProjectionState: 'pending'
+        availability: 'unknown'
       }, {
         id: 'attachment-timeline-failed',
         displayName: '不可用.txt',
@@ -4121,7 +4170,7 @@ describe('task event projections', () => {
         mediaType: 'text/plain',
         byteSize: 8,
         previewKind: 'none',
-        runtimeProjectionState: 'failed'
+        availability: 'unreadable'
       }],
       addressMode: 'default',
       addressedAgentIds: ['agent_1'],
@@ -4172,12 +4221,13 @@ describe('task event projections', () => {
     expect(markup).toContain('class="timeline-node conversation-bubble user"')
     expect(markup).toContain('<strong>你</strong>')
     expect(markup).toContain('aria-label="回复这条消息"')
-    expect(markup).toContain('class="timeline-attachments" aria-label="消息附件"')
-    expect(markup).toContain('说明.txt')
-    expect(markup).toContain('正在准备供队员读取')
-    expect(markup).toContain('队员读取不可用')
-    expect(markup).toContain('attachment-projection-pending')
-    expect(markup).toContain('attachment-projection-failed')
+    expect(markup).toContain('class="message-attachments user-message-attachments" aria-label="消息附件"')
+    expect(markup).toContain('title="说明.txt">说明</strong>')
+    expect(markup).toContain('>TXT</span>')
+    expect(markup).not.toContain('正在准备供队员读取')
+    expect(markup).toContain('文件无法读取')
+    expect(markup).not.toContain('attachment-projection-')
+    expect(markup).toContain('attachment-availability-unreadable')
     expect(markup).toContain('aria-label="使用系统应用打开 说明.txt"')
     expect(markup).toContain('aria-label="使用系统应用打开 不可用.txt"')
     expect(markup).not.toContain('aria-label="使用系统应用打开 不可用.txt" disabled=""')
@@ -4249,6 +4299,25 @@ describe('task event projections', () => {
       targetAgentRunId: null,
       failureCode: 'runtime_unavailable'
     }
+    const fileChanges: CampSnapshot['agentRunFileChanges'][number] = {
+      schemaVersion: 2,
+      agentRunId: 'run-luoke',
+      executionEpoch: 1,
+      files: [{
+        evidenceFileId: 'ef-luoke-message',
+        path: 'src/message-actions.tsx',
+        changeKind: 'update',
+        presentationKind: 'full_net_diff',
+        operationCount: 1,
+        additions: 3,
+        deletions: 1
+      }],
+      fileCount: 1,
+      operationCount: 1,
+      additions: 3,
+      deletions: 1,
+      completedAt: '2026-07-30T03:00:03Z'
+    }
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
@@ -4281,7 +4350,7 @@ describe('task event projections', () => {
       agentRuns: [],
       contextManifests: [],
       executionEvidence: [],
-      agentRunFileChanges: [],
+      agentRunFileChanges: [fileChanges],
       approvals: [],
       actions: [],
       timeline: []
@@ -4319,6 +4388,14 @@ describe('task event projections', () => {
 
     expect(markup).not.toContain('<h2>会话</h2>')
     expect(markup).toContain('请检查 Downloads 目录里的页面。')
+    expect(markup).toContain('class="agent-message-output"')
+    expect(markup.indexOf('class="timeline-node conversation-bubble agent"'))
+      .toBeLessThan(markup.indexOf('class="timeline-node run-file-changes-card"'))
+    expect(markup.indexOf('class="timeline-node run-file-changes-card"'))
+      .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions"'))
+    expect(markup.indexOf('class="message-delivery-footer"'))
+      .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions"'))
+    expect((markup.match(/class="message-actions/g) ?? [])).toHaveLength(1)
     expect(markup).toContain('class="message-surface has-delivery"')
     expect(markup).toContain('class="message-delivery-footer"')
     expect(markup).toContain('class="message-delivery-handoff-rail"')
@@ -4514,6 +4591,68 @@ describe('task event projections', () => {
       if (event !== null) accepted += 1
     }
     expect(accepted).toBe(0)
+  })
+
+  it('groups execution events by current Run while preserving snapshot authority and stable time order', () => {
+    const evidence = (
+      id: string,
+      agentRunId: string,
+      sequence: number,
+      occurredAt: string,
+      source: string
+    ): AgentRunExecutionEvidenceView => ({
+      id,
+      agentRunId,
+      executionEpoch: 1,
+      sequence,
+      eventType: 'agent.text.delta',
+      kind: 'narration',
+      phase: 'updated',
+      payload: { source },
+      canonical: null,
+      contentBlobId: null,
+      contentByteCount: 0,
+      isTruncated: false,
+      occurredAt
+    })
+    const sharedTime = '2026-09-03T08:00:01Z'
+    const buckets = groupExecutionEventsByRunId(
+      [{ id: 'run-a' }, { id: 'run-b' }, { id: 'run-empty' }],
+      [
+        evidence('snapshot-z', 'run-a', 2, sharedTime, 'snapshot-z'),
+        evidence('snapshot-a', 'run-a', 3, sharedTime, 'snapshot-a'),
+        evidence('snapshot-b', 'run-b', 1, sharedTime, 'snapshot-b')
+      ],
+      [{
+        id: 'snapshot-z',
+        agentRunId: 'run-a',
+        eventType: 'agent.text.delta',
+        payload: { source: 'live-duplicate' },
+        createdAt: '2026-09-03T08:00:00Z'
+      }, {
+        id: 'live-y',
+        agentRunId: 'run-a',
+        eventType: 'agent.text.delta',
+        payload: { source: 'live-y' },
+        createdAt: sharedTime
+      }, {
+        id: 'outside-camp',
+        agentRunId: 'run-outside',
+        eventType: 'agent.text.delta',
+        payload: { source: 'outside' },
+        createdAt: sharedTime
+      }]
+    )
+
+    expect(buckets.get('run-a')?.map((event) => event.id)).toEqual([
+      'snapshot-z',
+      'snapshot-a',
+      'live-y'
+    ])
+    expect(buckets.get('run-a')?.[0]?.payload).toEqual({ source: 'snapshot-z' })
+    expect(buckets.get('run-b')?.map((event) => event.id)).toEqual(['snapshot-b'])
+    expect(buckets.has('run-empty')).toBe(false)
+    expect(buckets.has('run-outside')).toBe(false)
   })
 
   it('omits live reasoning summaries while projecting narration, plans and execution steps', () => {
@@ -5034,6 +5173,59 @@ describe('task event projections', () => {
     expect(markup).toContain('请求受到速率限制')
     expect(markup).toContain('请稍后重试。')
     expect(markup).not.toContain('Rovai 内部错误')
+  })
+
+  it('mounts Run details only after a terminal Run is focused while keeping non-terminal details immediate', () => {
+    const run: AgentRunView = {
+      id: 'run-lazy-history', campTurnId: 'turn-1', conversationId: 'conversation-lazy',
+      agentId: 'agent-lazy', taskId: null, responsibilityKey: 'direct:agent-lazy',
+      responsibilityGeneration: 0, purpose: '检查懒挂载', completionRole: 'required',
+      status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: null,
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-09-03T08:00:00Z', startedAt: '2026-09-03T08:00:01Z',
+      endedAt: '2026-09-03T08:00:02Z', updatedAt: '2026-09-03T08:00:02Z'
+    }
+    const progress = {
+      items: [{
+        key: 'narration:lazy',
+        kind: 'narration' as const,
+        body: '仅在详情激活后渲染'
+      }]
+    }
+
+    const collapsedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1'
+    }))
+    expect(collapsedMarkup).toContain('<details class="execution-disclosure worked is-terminal">')
+    expect(collapsedMarkup).toContain('class="process-disclosure-label"')
+    expect(collapsedMarkup).not.toContain('class="process-content"')
+    expect(collapsedMarkup).not.toContain('仅在详情激活后渲染')
+
+    const focusedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(focusedMarkup).toContain('class="process-content"')
+    expect(focusedMarkup).toContain('仅在详情激活后渲染')
+
+    const waitingMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run: {
+        ...run,
+        id: 'run-lazy-waiting',
+        status: 'waiting' as const,
+        waitReason: 'recovery_blocked' as const,
+        endedAt: null
+      },
+      progress,
+      campId: 'camp-1'
+    }))
+    expect(waitingMarkup).toContain('class="process-content"')
+    expect(waitingMarkup).toContain('仅在详情激活后渲染')
+    expect(waitingMarkup).toContain('无法安全自动恢复')
   })
 
   it('does not present an ACP protocol kind as Copilot execution detail', () => {
@@ -6585,6 +6777,24 @@ describe('task event projections', () => {
     expect(markup).not.toContain('前往 Agent 运行时')
   })
 
+  it('keeps Pi selectable on a platform preview row and labels it experimental', () => {
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
+      agent: agentProfile(),
+      installations: [],
+      runtimeAvailability: [],
+      hostPlatform: 'macos-arm64',
+      runtimePlatformAdmission: runtimeAdmissionRows('macos-arm64', 'qualified'),
+      busy: null,
+      onSave: async () => undefined,
+      onClear: async () => undefined,
+      onReload: async () => undefined,
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('<option value="pi">Pi Coding Agent（实验性）</option>')
+    expect(markup).not.toContain('<option value="pi" disabled="">')
+  })
+
   it('keeps all product checks visible without discovery diagnostics', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
@@ -6651,7 +6861,8 @@ describe('task event projections', () => {
     expect(markup).toContain('实验性')
     expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(14)
     expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(14)
-    expect(markup.match(/检查可用性/g)).toHaveLength(12)
+    expect(markup.match(/检查可用性/g)).toHaveLength(13)
+    expect(markup).toContain('实验性开放 ·')
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
     expect(markup).not.toContain('来源 inherited_path')
@@ -6832,12 +7043,11 @@ function runtimeAdmissionRows(
     'antigravity-app'
   ]
   return runtimeKinds.map((runtimeKind) => {
-    const requiresQualification = runtimeKind === 'cursor-agent'
-      || runtimeKind === 'pi'
-      || (runtimeKind === 'grok-build' && platform !== 'macos-arm64')
-    const effectiveStatus = requiresQualification && status === 'qualified'
-      ? 'not_qualified'
-      : status
+    const effectiveStatus = runtimeKind === 'pi' && status === 'qualified'
+      ? 'preview'
+      : runtimeKind === 'cursor-agent' && status === 'qualified'
+        ? 'not_qualified'
+        : status
     return {
       runtimeKind,
       platform,

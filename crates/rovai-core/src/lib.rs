@@ -40,6 +40,7 @@ pub mod file_preview_authority;
 pub mod gather;
 pub mod git;
 pub mod local_attachment_snapshot;
+pub mod local_attachment_source;
 pub mod managed_attachment;
 pub mod managed_blob;
 pub mod managed_process;

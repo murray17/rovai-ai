@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # File Preview Architecture
@@ -35,7 +35,7 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v5](../contracts/file-preview-v5.md) 的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v6](../contracts/file-preview-v6.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有当前 Camp 的 Tab、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web 入口；
   inline-code 和正文不进入文件识别，也不读取磁盘。
 
@@ -48,6 +48,10 @@ Main 对 root 和目标分别 realpath，拒绝特殊文件，并把一次可信
 该能力不要求 canonical file 位于 Camp/project root：外部文件使用 `dirname(canonicalFile)` 作为临时 watcher、相对子链接
 和资源边界，但不创建、持久化或公开 Root Grant。Message、Camp Workspace、Attachment、Run Evidence `open_current`
 及 `child_of_handle` 使用同一规则；绝对路径、Home 相对路径、file URI 与 symlink 最终指向的具体文件没有第二次授权交互。
+
+附件入口使用 composer、pending、pending_edit 或 message 的 exact owner locator。Core 在每次显式
+preview/open/reveal 时解析私有 source path 或既有 Managed/legacy path，并返回当前 availability；Renderer 不提交、
+接收或推断绝对路径。SQLite 历史读取不预先 stat 附件，动作结果只更新当前 Renderer 卡片且不持久化。
 
 目录不取得文件读取能力：仅在来源已校验的明确用户激活中交给系统文件管理器显示，不创建 Tab、handle 或 watcher。
 消息/工作区中的显式绝对路径、Home 相对路径或本机 file URI 若直接指向项目外目录，可只执行系统显示；相对路径或

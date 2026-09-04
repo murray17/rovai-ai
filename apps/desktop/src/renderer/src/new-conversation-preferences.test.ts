@@ -12,6 +12,7 @@ import {
   defaultsNeedInvalidation,
   navigationIncludingCurrentWorkspace,
   navigationWithProjectAuthority,
+  navigationWithProjectOrder,
   navigationWithoutRemovedProjects,
   parseCurrentProject,
   projectTargetKey,
@@ -88,6 +89,43 @@ describe('new conversation preferences', () => {
     expect(displayed?.quickChat).toBe(navigation.quickChat)
     expect(displayed?.projects.map((candidate) => candidate.projectPath)).toEqual(['/repo/b'])
     expect(navigation.projects).toHaveLength(2)
+  })
+
+  it('projects the persisted Project order without mutating the activity-sorted snapshot', () => {
+    const navigation: NavigationSnapshot = {
+      schemaVersion: 3,
+      throughGlobalSequence: 7,
+      quickChat: { totalCount: 0, recentCamps: [] },
+      projects: [project('/repo/c'), project('/repo/a'), project('/repo/b')]
+    }
+
+    const displayed = navigationWithProjectOrder(navigation, [
+      projectTargetKey('/repo/b'),
+      projectTargetKey('/repo/a')
+    ])
+
+    expect(displayed?.projects.map((candidate) => candidate.projectPath))
+      .toEqual(['/repo/b', '/repo/a', '/repo/c'])
+    expect(navigation.projects.map((candidate) => candidate.projectPath))
+      .toEqual(['/repo/c', '/repo/a', '/repo/b'])
+    expect(navigationWithProjectOrder(navigation, null)).toBe(navigation)
+  })
+
+  it('appends a newly selected empty Project after the existing Project order', () => {
+    const navigation: NavigationSnapshot = {
+      schemaVersion: 3,
+      throughGlobalSequence: 7,
+      quickChat: { totalCount: 0, recentCamps: [] },
+      projects: [project('/repo/existing')]
+    }
+    const displayed = navigationIncludingCurrentWorkspace(
+      navigation,
+      { kind: 'directory', projectPath: '/repo/new' },
+      { name: 'new', projectPath: '/repo/new' }
+    )
+
+    expect(displayed?.projects.map((candidate) => candidate.projectPath))
+      .toEqual(['/repo/existing', '/repo/new'])
   })
 
   it('keeps Project navigation hidden until removed authority is ready', () => {
