@@ -206,7 +206,6 @@ describe('member runtime parameters', () => {
   })
 
   it.each([
-    ['pi', '审批模式', 'partial_managed'],
     ['opencode-cli', '工具权限', 'allow'],
     ['claude-code-cli', '权限模式', 'bypassPermissions'],
     ['qoder-cli', '权限模式', 'bypass_permissions'],
@@ -227,6 +226,22 @@ describe('member runtime parameters', () => {
 
     expect(markup).toContain(label)
     expect(markup).toContain(`value="${value}" selected`)
+  })
+
+  it('does not present Pi fixed managed approval as a configurable Runtime mode', () => {
+    const installation = runtimeInstallation('pi')
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
+      adapterKind: 'pi',
+      installation,
+      draft: draftFromDefaults(installation.memberRuntimeDefaults!),
+      disabled: false,
+      onChange: () => undefined
+    }))
+
+    expect(markup).toContain('模型、模型参数与 Agent 运行时原生权限。')
+    expect(markup).toContain('模型策略')
+    expect(markup).not.toContain('审批模式')
+    expect(markup).not.toContain('partial_managed')
   })
 
   it('uses switches for Copilot, Kiro, and Antigravity on/off fields', () => {
