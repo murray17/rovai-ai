@@ -3410,6 +3410,9 @@ export type CoreMethod =
 export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
+  appLifecycle: {
+    onPrepareQuit(listener: () => void | Promise<void>): () => void
+  }
   supervisor: SupervisorApi
   userAutomation: {
     onOpenCamp(listener: (request: { campId: string }) => void): () => void

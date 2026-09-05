@@ -57,8 +57,8 @@ electron-builder 默认的 1 秒等待或仅按相同路径前缀批量结束进
 
 正式打包 App 主动检查该发布集合，但不自动下载；用户显式“下载更新”后才进入一轮互斥下载，并在
 `ready_to_install` 再确认“安装并重启”。Updater 必须先同步 stage/启动 silent installer，Main 随后在其
-`before-quit` 中完成同一 Planned Shutdown；同步 stage 失败时 App/Core 保持运行并允许重试。检查来源、
-提示代次、状态与 fallback 由 [App Update v1](../contracts/app-update-v1.md)统一约束。
+`before-quit` 中先完成 active Composer Draft fence，再进入同一 Planned Shutdown；同步 stage 或 Draft 保存失败时
+不得预先关闭 Core。检查来源、提示代次、状态与 fallback 由 [App Update v2](../contracts/app-update-v2.md)统一约束。
 
 ## Target-isolated staging
 

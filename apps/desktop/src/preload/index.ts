@@ -1,4 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import {
+  APP_PREPARE_QUIT_CHANNEL,
+  type AppQuitPreparationResponse
+} from '../shared/app-lifecycle'
 import type {
   AppearanceSnapshot,
   AppUpdateSnapshot,
@@ -18,6 +22,32 @@ import type {
   ThemePreference
 } from '@contracts'
 
+let appQuitPreparationListener: (() => void | Promise<void>) | null = null
+
+ipcRenderer.on(APP_PREPARE_QUIT_CHANNEL, (event) => {
+  const port = event.ports[0]
+  if (!port) return
+  void (async () => {
+    let response: AppQuitPreparationResponse
+    try {
+      await appQuitPreparationListener?.()
+      response = { status: 'prepared' }
+    } catch (error) {
+      response = {
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error)
+      }
+    }
+    try {
+      port.postMessage(response)
+    } finally {
+      port.close()
+    }
+  })().catch(() => {
+    port.close()
+  })
+})
+
 const api: RovaiApi = {
   async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
     const transport = await ipcRenderer.invoke(
@@ -36,6 +66,14 @@ const api: RovaiApi = {
     const handler = (_event: Electron.IpcRendererEvent, value: CoreEvent): void => listener(value)
     ipcRenderer.on('rovai:event', handler)
     return () => ipcRenderer.removeListener('rovai:event', handler)
+  },
+  appLifecycle: {
+    onPrepareQuit(listener) {
+      appQuitPreparationListener = listener
+      return () => {
+        if (appQuitPreparationListener === listener) appQuitPreparationListener = null
+      }
+    }
   },
   supervisor: {
     getSnapshot() {

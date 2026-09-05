@@ -243,7 +243,7 @@ Agent 消息继续左对齐并保持透明开放阅读面，不添加身份色�
 一层紧凑父引用，作者与摘要同样只占一个可视行，超出显示省略号；点击通过 same-Camp anchor load 定位并
 聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
-[Camp Composer Draft v10](../../contracts/camp-composer-draft-v10.md)，评审方向见
+[Camp Composer Draft v11](../../contracts/camp-composer-draft-v11.md)，评审方向见
 [HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
 
 渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
@@ -276,7 +276,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 标签出现后对象在空白 Draft 失效时，标签消失并持久抑制该来源；正文或附件已经存在时，保留全部 Draft，
 展开“原接收者当前不可接收，请选择其他成员”，禁用发送并把焦点交给第一个有效替代选择。不得隐藏错误、
 自动插入失效 Mention 或改投 Lead。字段和竞态边界见
-[Camp Composer Draft v10](../../contracts/camp-composer-draft-v10.md)，交互探索见
+[Camp Composer Draft v11](../../contracts/camp-composer-draft-v11.md)，交互探索见
 [延续路由原型](../../prototypes/composer-continuation-routing/index.html)。
 
 ## Camp 执行过程
@@ -672,7 +672,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 长名称必须省略且可取得完整名称。拖放命中、反馈和卡片合同见
 [会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
 [Camp Attachment v8](../../contracts/camp-attachment-v8.md)，发送边界见
-[Camp Composer Draft v10](../../contracts/camp-composer-draft-v10.md)。
+[Camp Composer Draft v11](../../contracts/camp-composer-draft-v11.md)。
 
 准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
 独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除
@@ -741,12 +741,14 @@ Approval/Recovery Dock、Composer 或文件预览，不改变会话网格列宽�
 不使用等宽字体、星期或 `DAY N`。消息时间戳、详情入口、消息、任务卡片、文件变化卡片和 Composer 保持既有呈现。
 
 Camp Header 显示会话定位、待审批摘要和详情直接入口；文件 Tabs 占据独立文件列。不增加 Stop、分享或 `•••`。主动退出、
-重启或更新立即阻止新的界面交互；400ms 内完成则直接退出，超过门槛才显示无操作按钮的 modal 关闭等待面。
+重启或更新先锁定当前 Composer，并用既有 Camp leave guard 保存最新 Draft；失败保留当前 Camp、显示保存错误并恢复
+交互，不进入 Core shutdown。准备成功并收到 `runtime.state = shutting_down` 后才阻止全局新交互；400ms 内完成则直接
+退出，超过门槛才显示无操作按钮的 modal 关闭等待面。
 标题为“正在安全退出”，正文说明正在保存本地状态并关闭后台服务，并以条件文案说明尚未完成的 AgentRun
 会一并取消。关闭开始后不再刷新 Camp 投影，取消结算产生的晚到请求拒绝也不显示为错误横幅或 Toast。
 业务事务将所有目标 Run 结算为已取消，Input/Action 不确定证据留在底层审计并继续进入 shutdown report，
 但不产生公共“外部效果待确认”。普通 CampTurn Stop 同样显示“已取消”。精确边界见
-[Planned Shutdown v5](../../contracts/planned-shutdown-v5.md)。
+[Planned Shutdown v6](../../contracts/planned-shutdown-v6.md)。
 
 ## Theme, keyboard and failure states
 
