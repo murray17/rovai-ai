@@ -11,9 +11,25 @@ export function runtimeFailureTitle(failure: RuntimeFailureView): string {
   } as const)[failure.origin]
 }
 
-export function RuntimeFailureNotice({ failure }: {
+export function RuntimeFailureNotice({
+  failure,
+  presentation = 'default'
+}: {
   failure: RuntimeFailureView
+  presentation?: 'default' | 'agent-run'
 }): React.JSX.Element {
+  if (presentation === 'agent-run') {
+    const message = runtimeFailureMessage(failure)
+    return (
+      <section
+        className="runtime-failure-notice agent-run-runtime-failure"
+        aria-label={message}
+        role="status"
+      >
+        <p>{message}</p>
+      </section>
+    )
+  }
   const title = runtimeFailureTitle(failure)
   const detail = failure.detail?.trim()
   return (
@@ -27,6 +43,10 @@ export function RuntimeFailureNotice({ failure }: {
       {detail && detail !== failure.summary && <p className="runtime-failure-detail">{detail}</p>}
     </section>
   )
+}
+
+export function runtimeFailureMessage(failure: RuntimeFailureView): string {
+  return failure.detail?.trim() || failure.summary
 }
 
 function publicRuntimeLabel(runtimeKind: RuntimeFailureView['runtimeKind']): string {

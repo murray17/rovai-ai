@@ -554,11 +554,11 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 凭证、用户名或绝对路径。精确合同见
 [Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
 
-failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
-summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
-`origin` 固定为 Runtime 返回错误、与当前 Rovai 版本不兼容、本机运行环境不可用、Rovai 内部错误或
-未能完成运行。只有 `origin=rovai` 可以显示“Rovai 内部错误”；Renderer 不读取或展示原始 stderr、私有
-日志、内部 error chain 或 digest，也不从公开文本重新猜归因。
+failed AgentRun 的公开 `failure` 必须在对应 Run stage 显示 Core 已脱敏并限长的 Runtime 原始错误文本；
+非空 `detail` 优先，否则回退 `summary`。即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑
+隐藏。AgentRun 不增加 Runtime 名称或 `origin` 标题，不翻译错误文本，所有 `origin` 统一使用 danger
+错误底色；成员管理等非 AgentRun surface 继续使用各自既有标题与语义色。Renderer 不读取或展示原始
+stderr、私有日志、内部 error chain 或 digest，也不从公开文本重新猜归因。
 
 `waiting/recovery_blocked` 显示“结果待确认”，不得显示 spinner 或“恢复中”。Recovery Blocker
 必须说明 Runtime 已接受任务、重启后最终结果未知、原请求不会自动重发，并提供唯一“结束此运行”

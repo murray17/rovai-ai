@@ -3732,6 +3732,7 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .runtime-failure-notice.origin-compatibility,
 .runtime-failure-notice.origin-environment { color: var(--attention); background: var(--attention-soft); }
 .runtime-failure-notice.origin-unknown { color: var(--muted); background: var(--neutral-soft); }
+.runtime-failure-notice.agent-run-runtime-failure { color: var(--danger); background: var(--danger-soft); }
 .runtime-failure-notice > strong { color: inherit; font-size: 11.5px; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
 .runtime-failure-notice > p { margin: 0; color: var(--ink); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-line; }
 .runtime-failure-notice > .runtime-failure-detail { color: var(--muted); }

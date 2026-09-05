@@ -9077,10 +9077,25 @@ impl Core {
                         .unwrap_or_else(|| "runtime_launch_failed".to_string())
                 };
                 let public_failure = public_failure.or_else(|| {
-                    unknown_one_shot_runtime_failure(
+                    let raw_detail = error.root_cause().to_string();
+                    let sensitive_paths = [
+                        (Path::new(&execution.project_path), "<project>"),
+                        (
+                            Path::new(&execution.workspace.execution_root),
+                            "<execution-root>",
+                        ),
+                        (
+                            Path::new(&execution.runtime.executable_path),
+                            "<runtime-executable>",
+                        ),
+                        (core.data_dir.as_path(), "<data-dir>"),
+                    ];
+                    Some(agent_run_public_failure(
                         execution.runtime.adapter_kind,
                         &error_code,
-                    )
+                        &raw_detail,
+                        &sensitive_paths,
+                    ))
                 });
                 if let Some((native_turn_id, delivered_error_code, delivered_failure)) =
                     delivered_one_shot_failure
@@ -9265,7 +9280,7 @@ impl Core {
         error_code: &str,
         error: &anyhow::Error,
     ) {
-        let public_failure = dispatch_public_failure(candidate, error_code);
+        let public_failure = dispatch_public_failure(candidate, error_code, error);
         let rejection = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default().reject_agent_run_dispatch(
@@ -13320,6 +13335,8 @@ impl Core {
         execution_epoch: i64,
         error: &anyhow::Error,
     ) {
+        let public_failure =
+            dispatch_public_failure(candidate, "runtime_configuration_invalid", error);
         let ending_git_observation = self
             .observe_run_git(&candidate.project_binding_kind, &candidate.project_path)
             .await;
@@ -13341,7 +13358,7 @@ impl Core {
                         execution_epoch,
                         error_code: "runtime_configuration_invalid".to_string(),
                         error_detail: Some(format!("{error:#}")),
-                        failure: None,
+                        failure: public_failure,
                         manual_retry_allowed: true,
                         ending_git_observation,
                     },
@@ -17859,14 +17876,14 @@ async fn persist_acp_prompt_completion(
     let error_detail = response_error
         .map(str::to_string)
         .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}"));
-    let mut public_failure = response_error.map(|detail| {
+    let mut public_failure = (planned_outcome == RuntimeTerminalOutcome::Failed).then(|| {
         public_runtime_failure_from_output(
             adapter_kind,
             RuntimeFailureOrigin::Runtime,
             RuntimeFailurePhase::Execution,
             &base_error_code,
             &format!("{} 未能完成运行", runtime_display_name(adapter_kind)),
-            Some(detail),
+            Some(&error_detail),
             &[(&core.data_dir, "<data-dir>")],
             manual_retry_allowed,
         )
@@ -18828,6 +18845,40 @@ async fn process_agent_run_codex_message(
     } else {
         RuntimeTerminalOutcome::Failed
     };
+    let base_error_code = match completed.status.as_str() {
+        "completed" => "runtime_missing_final_output".to_string(),
+        "interrupted" => "runtime_interrupted".to_string(),
+        status => format!("runtime_turn_{status}"),
+    };
+    let error_detail = match &completed.error {
+        Some(error) => format!(
+            "Codex Native Turn {} ended as {}: {}",
+            completed.turn_id, completed.status, error
+        ),
+        None if completed.status == "completed" => {
+            "Codex completed the Turn without an Agent message".to_string()
+        }
+        None => format!(
+            "Codex Native Turn {} ended as {}",
+            completed.turn_id, completed.status
+        ),
+    };
+    let public_failure = (planned_outcome == RuntimeTerminalOutcome::Failed).then(|| {
+        public_runtime_failure_from_output(
+            AdapterKind::CodexCli,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            &base_error_code,
+            "Codex CLI 未能完成运行",
+            Some(completed.error_message().unwrap_or(&error_detail)),
+            &[(&core.data_dir, "<data-dir>")],
+            true,
+        )
+    });
+    let error_code = public_failure
+        .as_ref()
+        .map(|failure| failure.code.clone())
+        .unwrap_or_else(|| base_error_code.clone());
     let terminal_discriminator = canonical_json_digest(&params)
         .unwrap_or_else(|_| format!("{}:{}", completed.turn_id, completed.status));
     let mut terminal_admission = match core
@@ -18863,24 +18914,6 @@ async fn process_agent_run_codex_message(
                 .flatten()
                 .map(|execution| execution.workspace.execution_root)
         };
-        let error_code = match completed.status.as_str() {
-            "completed" => "runtime_missing_final_output".to_string(),
-            "interrupted" => "runtime_interrupted".to_string(),
-            status => format!("runtime_turn_{status}"),
-        };
-        let error_detail = Some(match &completed.error {
-            Some(error) => format!(
-                "Codex Native Turn {} ended as {}: {}",
-                completed.turn_id, completed.status, error
-            ),
-            None if completed.status == "completed" => {
-                "Codex completed the Turn without an Agent message".to_string()
-            }
-            None => format!(
-                "Codex Native Turn {} ended as {}",
-                completed.turn_id, completed.status
-            ),
-        });
         match core
             .settle_planned_shutdown_abortive_terminal(
                 permit,
@@ -18888,9 +18921,9 @@ async fn process_agent_run_codex_message(
                     agent_run_id: agent_run_id.to_string(),
                     execution_epoch,
                     outcome: planned_outcome,
-                    error_code,
-                    error_detail,
-                    failure: None,
+                    error_code: error_code.clone(),
+                    error_detail: Some(error_detail.clone()),
+                    failure: public_failure.clone(),
                     manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
                 },
             )
@@ -18996,11 +19029,9 @@ async fn process_agent_run_codex_message(
                             agent_run_id: agent_run_id.to_string(),
                             expected_version: execution.version,
                             execution_epoch,
-                            error_code: "runtime_missing_final_output".to_string(),
-                            error_detail: Some(
-                                "Codex completed the Turn without an Agent message".to_string(),
-                            ),
-                            failure: None,
+                            error_code: error_code.clone(),
+                            error_detail: Some(error_detail.clone()),
+                            failure: public_failure.clone(),
                             manual_retry_allowed: true,
                             ending_git_observation: ending_git_observation.clone(),
                         },
@@ -19023,22 +19054,9 @@ async fn process_agent_run_codex_message(
                         agent_run_id: agent_run_id.to_string(),
                         expected_version: execution.version,
                         execution_epoch,
-                        error_code: if completed.status == "interrupted" {
-                            "runtime_interrupted".to_string()
-                        } else {
-                            format!("runtime_turn_{}", completed.status)
-                        },
-                        error_detail: Some(match &completed.error {
-                            Some(error) => format!(
-                                "Codex Native Turn {} ended as {}: {}",
-                                completed.turn_id, completed.status, error
-                            ),
-                            None => format!(
-                                "Codex Native Turn {} ended as {}",
-                                completed.turn_id, completed.status
-                            ),
-                        }),
-                        failure: None,
+                        error_code: error_code.clone(),
+                        error_detail: Some(error_detail.clone()),
+                        failure: public_failure.clone(),
                         manual_retry_allowed: true,
                         ending_git_observation,
                     },
@@ -19963,75 +19981,20 @@ fn runtime_check_has_capacity(active_count: usize) -> bool {
     active_count < RUNTIME_CHECK_MAX_CONCURRENCY
 }
 
-fn unknown_one_shot_runtime_failure(
+fn agent_run_public_failure(
     runtime_kind: AdapterKind,
     error_code: &str,
-) -> Option<RuntimeFailureView> {
-    let runtime_name = match runtime_kind {
-        AdapterKind::ClaudeCodeCli => "Claude Code",
-        AdapterKind::AntigravityApp => "Antigravity",
-        _ => return None,
-    };
-    let (origin, summary, retryable) = if error_code == "context_payload_too_large" {
-        (
+    raw_detail: &str,
+    sensitive_paths: &[(&Path, &str)],
+) -> RuntimeFailureView {
+    let runtime_name = runtime_display_name(runtime_kind);
+    let (origin, phase, summary, retryable) = match error_code {
+        "context_payload_too_large" => (
             RuntimeFailureOrigin::Rovai,
+            RuntimeFailurePhase::Execution,
             "Rovai 无法安全生成本次 Runtime 输入".to_string(),
             false,
-        )
-    } else {
-        (
-            RuntimeFailureOrigin::Unknown,
-            format!("{runtime_name} 未能完成运行"),
-            true,
-        )
-    };
-    Some(RuntimeFailureView::new(
-        runtime_kind,
-        origin,
-        RuntimeFailurePhase::Execution,
-        error_code,
-        summary,
-        None,
-        retryable,
-    ))
-}
-
-fn availability_environment_failure(
-    runtime_kind: AdapterKind,
-    error_code: &str,
-    summary: &str,
-) -> Option<RuntimeFailureView> {
-    let runtime_name = match runtime_kind {
-        AdapterKind::ClaudeCodeCli => "Claude Code",
-        AdapterKind::AntigravityApp => "Antigravity",
-        _ => return None,
-    };
-    Some(RuntimeFailureView::new(
-        runtime_kind,
-        RuntimeFailureOrigin::Environment,
-        RuntimeFailurePhase::Spawn,
-        error_code,
-        summary.replace("Runtime", runtime_name),
-        None,
-        true,
-    ))
-}
-
-fn dispatch_public_failure(
-    candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
-    error_code: &str,
-) -> Option<RuntimeFailureView> {
-    let runtime_kind = candidate
-        .effective_config
-        .get("adapterKind")
-        .cloned()
-        .and_then(|value| serde_json::from_value::<AdapterKind>(value).ok())?;
-    let runtime_name = match runtime_kind {
-        AdapterKind::ClaudeCodeCli => "Claude Code",
-        AdapterKind::AntigravityApp => "Antigravity",
-        _ => return None,
-    };
-    let (origin, phase, summary, retryable) = match error_code {
+        ),
         "workspace_unavailable" => (
             RuntimeFailureOrigin::Environment,
             RuntimeFailurePhase::Spawn,
@@ -20069,19 +20032,60 @@ fn dispatch_public_failure(
         ),
         _ => (
             RuntimeFailureOrigin::Unknown,
-            RuntimeFailurePhase::Spawn,
-            format!("{runtime_name} 未能开始运行"),
+            RuntimeFailurePhase::Execution,
+            format!("{runtime_name} 未能完成运行"),
             true,
         ),
     };
-    Some(RuntimeFailureView::new(
+    public_runtime_failure_from_output(
         runtime_kind,
         origin,
         phase,
         error_code,
-        summary,
-        None,
+        &summary,
+        Some(raw_detail),
+        sensitive_paths,
         retryable,
+    )
+}
+
+fn availability_environment_failure(
+    runtime_kind: AdapterKind,
+    error_code: &str,
+    summary: &str,
+) -> Option<RuntimeFailureView> {
+    let runtime_name = match runtime_kind {
+        AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::AntigravityApp => "Antigravity",
+        _ => return None,
+    };
+    Some(RuntimeFailureView::new(
+        runtime_kind,
+        RuntimeFailureOrigin::Environment,
+        RuntimeFailurePhase::Spawn,
+        error_code,
+        summary.replace("Runtime", runtime_name),
+        None,
+        true,
+    ))
+}
+
+fn dispatch_public_failure(
+    candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+    error_code: &str,
+    error: &anyhow::Error,
+) -> Option<RuntimeFailureView> {
+    let runtime_kind = candidate
+        .effective_config
+        .get("adapterKind")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<AdapterKind>(value).ok())?;
+    let raw_detail = error.root_cause().to_string();
+    Some(agent_run_public_failure(
+        runtime_kind,
+        error_code,
+        &raw_detail,
+        &[(Path::new(&candidate.project_path), "<project>")],
     ))
 }
 
@@ -20610,6 +20614,22 @@ mod tests {
     use super::*;
     #[cfg(feature = "slow-tests")]
     use std::fs;
+
+    #[test]
+    fn agent_run_failure_preserves_safe_runtime_detail_for_every_adapter() {
+        for runtime_kind in AdapterKind::ALL {
+            let failure = agent_run_public_failure(
+                runtime_kind,
+                "runtime_launch_failed",
+                "select model xxx",
+                &[],
+            );
+
+            assert_eq!(failure.runtime_kind, runtime_kind);
+            assert_eq!(failure.detail.as_deref(), Some("select model xxx"));
+            failure.validate().unwrap();
+        }
+    }
 
     #[test]
     fn acp_prompt_failure_is_retryable_only_when_input_was_not_accepted() {
