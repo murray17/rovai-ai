@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
-  CampPendingInputsView, ComposerDocument, LocalAttachmentAvailability, LocalAttachmentOwnerLocator,
+  CampPendingInputsView, ComposerDocument,
   LocalAttachmentSourceView, PendingCampInputView, PendingInputEditAction,
   StoredCommandResult
 } from '@contracts'
@@ -15,7 +16,9 @@ import { composerDocumentStatus, type ComposerLocalStatus } from './composer-doc
 import { AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { readErrorMessage } from './error-message'
 import { createPendingInputsRefresh, shouldRefreshPendingInputs } from './pending-input-refresh'
-import { useOptionalFilePreview } from './FilePreviewContext'
+import { AttachmentCard, AttachmentPlaceholder, ComposerAttachmentStrip } from './AttachmentCard'
+
+export type PendingAttachmentDropTarget = ((files: File[]) => void) | null
 
 export type PendingInputSnapshot = {
   content: ComposerDocument
@@ -72,20 +75,9 @@ function pendingError(code: string): string {
   return `发送未完成（${code}），消息已保留。请检查后编辑并保存，或删除这条消息。`
 }
 
-function availabilityFromPreviewError(code: string): LocalAttachmentAvailability | null {
-  if (code === 'attachment_missing') return 'missing'
-  if (code === 'attachment_unreadable') return 'unreadable'
-  if (code === 'attachment_kind_changed') return 'kind_changed'
-  return null
-}
-
-function attachmentLocatorKey(locator: LocalAttachmentOwnerLocator): string {
-  return `${locator.owner}:${locator.campId}:${'pendingInputId' in locator ? locator.pendingInputId : ''}:${locator.attachmentRefId}`
-}
-
 export function PendingCampInputs({
   campId, refreshKey, executionActive, members, skills, skillCatalogStatus,
-  onQueueChange, onEditingChange
+  onQueueChange, onEditingChange, onAttachmentDropTargetChange, attachmentDragActive
 }: {
   campId: string
   refreshKey: number
@@ -95,11 +87,13 @@ export function PendingCampInputs({
   skillCatalogStatus: 'loading' | 'ready' | 'error'
   onQueueChange(queue: CampPendingInputsView): void
   onEditingChange(editing: boolean): void
+  onAttachmentDropTargetChange(target: PendingAttachmentDropTarget): void
+  attachmentDragActive: boolean
 }): JSX.Element {
-  const filePreview = useOptionalFilePreview()
   const [queue, setQueue] = useState<CampPendingInputsView | null>(null)
   const [edit, setEdit] = useState<LocalEdit | null>(null)
   const [busy, setBusy] = useState(false)
+  const [preparingAttachments, setPreparingAttachments] = useState<File[]>([])
   const [composerDirty, setComposerDirty] = useState(false)
   const [composerStatus, setComposerStatus] = useState<ComposerLocalStatus>({
     hasContent: false,
@@ -108,11 +102,11 @@ export function PendingCampInputs({
   })
   const [error, setError] = useState<string | null>(null)
   const [switchTarget, setSwitchTarget] = useState<PendingCampInputView | 'close' | null>(null)
-  const [attachmentAvailability, setAttachmentAvailability] = useState<Record<string, LocalAttachmentAvailability>>({})
   const editorRef = useRef<HTMLDivElement>(null)
   const composerHandleRef = useRef<StructuredMentionComposerHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mounted = useRef(true)
+  const prepareFilesRef = useRef<(files: File[]) => void>(() => undefined)
   const refreshReader = useRef<ReturnType<typeof createPendingInputsRefresh> | null>(null)
   const callbacks = useRef({ onQueueChange, onEditingChange })
   callbacks.current = { onQueueChange, onEditingChange }
@@ -164,6 +158,11 @@ export function PendingCampInputs({
   const ownsEdit = Boolean(edit && queue?.editSession?.pendingInputId === edit.item.id
     && queue.editSession.editToken === edit.token && !queue.editSession.recoveryRequired)
 
+  useEffect(() => {
+    onAttachmentDropTargetChange(ownsEdit && !busy ? (files) => prepareFilesRef.current(files) : null)
+    return () => onAttachmentDropTargetChange(null)
+  }, [ownsEdit, busy, onAttachmentDropTargetChange])
+
   const mutate = async (item: PendingCampInputView, action: PendingInputEditAction, token: string | null): Promise<StoredCommandResult> => {
     const result = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.edit', {
       commandId: crypto.randomUUID(),
@@ -185,8 +184,9 @@ export function PendingCampInputs({
   }
 
   const prepareFiles = (files: File[]): void => {
-    if (!edit || !ownsEdit || files.length === 0) return
+    if (!edit || !ownsEdit || busy || files.length === 0) return
     void perform(async () => {
+      setPreparingAttachments(files)
       let nextQueue: CampPendingInputsView | null = null
       const failures: string[] = []
       for (const [index, original] of files.entries()) {
@@ -210,36 +210,17 @@ export function PendingCampInputs({
         const working = nextQueue.editSession?.workingAttachments
         if (working) setEdit((current) => current ? { ...current, attachments: working } : current)
       }
+      if (mounted.current) setPreparingAttachments([])
       if (failures.length > 0) throw new Error(failures.join('\n'))
     })
   }
+  prepareFilesRef.current = prepareFiles
 
   const mutateAttachments = (action: PendingInputEditAction): void => {
     if (!edit || !ownsEdit) return
     void perform(async () => {
       await mutate(edit.item, action, edit.token)
     })
-  }
-
-  const openAttachment = async (
-    attachment: LocalAttachmentSourceView,
-    locator: LocalAttachmentOwnerLocator
-  ): Promise<void> => {
-    const key = attachmentLocatorKey(locator)
-    if (attachment.kind === 'file' && filePreview) {
-      const outcome = await filePreview.open({ kind: 'attachment', campId, locator })
-      if (outcome.kind === 'error') {
-        const availability = availabilityFromPreviewError(outcome.error.code)
-        if (availability) setAttachmentAvailability((current) => ({ ...current, [key]: availability }))
-        throw new Error(outcome.error.message)
-      }
-      setAttachmentAvailability((current) => ({ ...current, [key]: 'available' }))
-      return
-    }
-    const result = await window.rovai.attachments.open(locator)
-    setAttachmentAvailability((current) => ({ ...current, [key]: result.availability }))
-    if (result.error === 'target_unavailable') throw new Error('此附件当前不可用。')
-    if (result.error) throw new Error('无法使用系统应用打开此附件。')
   }
 
   const begin = async (item: PendingCampInputView): Promise<void> => {
@@ -307,19 +288,6 @@ export function PendingCampInputs({
     || (!composerStatus.hasContent && edit.attachments.length === 0)
   const visible = Boolean(queue && queue.items.length > 0)
 
-  const acceptAttachmentDrag = (event: DragEvent<HTMLDivElement>): void => {
-    if (!ownsEdit || !Array.from(event.dataTransfer.types).includes('Files')) return
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
-  }
-
-  const dropAttachmentFiles = (event: DragEvent<HTMLDivElement>): void => {
-    if (!ownsEdit || !Array.from(event.dataTransfer.types).includes('Files')) return
-    event.preventDefault()
-    event.stopPropagation()
-    prepareFiles(Array.from(event.dataTransfer.files))
-  }
-
   return <>
     {visible && queue && <section className="pending-input-queue" aria-label="待发送消息">
       <div className="pending-input-heading">
@@ -330,7 +298,8 @@ export function PendingCampInputs({
           const openSession = queue.editSession?.pendingInputId === item.id
           const selected = edit?.item.id === item.id
           const recovery = openSession && !selected
-          const itemLabel = item.body.trim() || `${item.attachments.length} 个附件`
+          const itemLabel = item.body.trim()
+          const actionLabel = itemLabel || `第 ${item.enqueueSequence} 条消息`
           return <li className={`pending-input-row${selected ? ' is-editing' : ''}`} key={item.id}>
             <div className="pending-input-preview" title={itemLabel}>
               <span className="pending-input-mark" aria-hidden="true" />
@@ -339,34 +308,16 @@ export function PendingCampInputs({
                 {selected ? '正在编辑' : recovery ? '未完成的编辑 · 重新编辑' : '需要处理'}
               </small>}
             </div>
-            {item.attachments.length > 0 && <div className="pending-input-attachments" aria-label="待发送附件">
-              {item.attachments.map((attachment) => {
-                const locator: LocalAttachmentOwnerLocator = {
-                  owner: 'pending', campId, pendingInputId: item.id, attachmentRefId: attachment.id
-                }
-                const availability = attachmentAvailability[attachmentLocatorKey(locator)] ?? attachment.availability
-                return <button key={attachment.id} type="button" disabled={busy}
-                  className={`pending-input-attachment availability-${availability}`}
-                  title={`打开 ${attachment.displayName}`}
-                  onClick={() => void perform(() => openAttachment(attachment, locator))}>
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 2.5h6l3.6 3.6v7.4H3.2Z" /><path d="M9.2 2.5v3.7h3.6" /></svg>
-                  <span>{attachment.displayName}</span>
-                  {availability !== 'unknown' && availability !== 'available'
-                    ? <small>{availability === 'missing' ? '已丢失' : availability === 'kind_changed' ? '类型已变化' : '不可读'}</small>
-                    : null}
-                </button>
-              })}
-            </div>}
             {recovery && <button type="button" className="quiet-button compact" disabled={busy} onClick={() => void perform(async () => {
               await mutate(item, { type: 'cancel' }, queue.editSession?.editToken ?? null)
             })}>放弃未保存修改</button>}
             <span className="pending-input-actions">
               <button type="button" className="pending-input-edit" disabled={busy} onClick={() => requestEdit(item)}
-                aria-label={`${recovery ? '重新编辑' : '编辑待发送消息'}：${itemLabel}`} aria-pressed={selected}
+                aria-label={`${recovery ? '重新编辑' : '编辑待发送消息'}：${actionLabel}`} aria-pressed={selected}
                 title={selected ? '正在输入框中编辑' : recovery ? '重新编辑' : '编辑'}>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.2 11.9.7-3.2 6.8-6.8a1.25 1.25 0 0 1 1.8 0l1.6 1.6a1.25 1.25 0 0 1 0 1.8L6.3 12l-3.1.7Z" /><path d="m9.8 2.8 3.4 3.4" /></svg>
               </button>
-              <button type="button" className="pending-input-delete" aria-label={`删除待发送消息：${itemLabel}`} title="删除" disabled={busy} onClick={() => deleteItem(item)}>
+              <button type="button" className="pending-input-delete" aria-label={`删除待发送消息：${actionLabel}`} title="删除" disabled={busy} onClick={() => deleteItem(item)}>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
               </button>
             </span>
@@ -380,74 +331,67 @@ export function PendingCampInputs({
     </section>}
     {error && <p className="pending-input-notice" role="alert">{error}</p>}
     {edit && <div className="composer-box pending-input-editor"
-      onDragEnter={acceptAttachmentDrag} onDragOver={acceptAttachmentDrag} onDrop={dropAttachmentFiles}
       onKeyDown={(event) => {
       if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); requestClose() }
     }}>
-      {!ownsEdit && <p role="alert" className="pending-input-error">编辑占用已变化。未保存的修改只在本窗口；关闭后可重新编辑。</p>}
-      {edit.replyToCampMessageId && <div className="composer-reply-line">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3-4 4 4 4M2 7h8c3 0 4 2 4 5" /></svg>
-        <span className="composer-reply-copy"><strong>回复 {edit.item.replyIntent?.author?.displayName ?? '引用消息'}</strong><span>{edit.item.replyIntent?.excerpt ?? '引用的消息当前不可用'}</span></span>
-        <button type="button" className="composer-reply-cancel" aria-label="取消待发送消息的回复" disabled={busy} onClick={() => setEdit({ ...edit, replyToCampMessageId: null, recipientSelectionRequired: false })}>取消</button>
-      </div>}
-      {edit.recipientSelectionRequired && <p className="pending-input-error" role="alert">请在正文中选择 @成员；引用会继续保留。</p>}
-      {edit.attachments.length > 0 && <div className="pending-edit-attachments" role="list" aria-label="编辑中的附件">
-        {edit.attachments.map((attachment, index) => {
-          const locator: LocalAttachmentOwnerLocator = {
-            owner: 'pending_edit', campId, pendingInputId: edit.item.id,
-            editToken: edit.token, attachmentRefId: attachment.id
-          }
-          const availability = attachmentAvailability[attachmentLocatorKey(locator)] ?? attachment.availability
-          const order = edit.attachments.map(({ id }) => id)
-          return <div className={`pending-edit-attachment availability-${availability}`} role="listitem" key={attachment.id}>
-            <button type="button" className="pending-edit-attachment-open" disabled={busy || !ownsEdit}
-              title={`打开 ${attachment.displayName}`}
-              onClick={() => void perform(() => openAttachment(attachment, locator))}>
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 2.5h6l3.6 3.6v7.4H3.2Z" /><path d="M9.2 2.5v3.7h3.6" /></svg>
-              <span>{attachment.displayName}</span>
-              {availability !== 'unknown' && availability !== 'available'
-                ? <small>{availability === 'missing' ? '已丢失' : availability === 'kind_changed' ? '类型已变化' : '不可读'}</small>
-                : null}
-            </button>
-            <span className="pending-edit-attachment-actions">
-              <button type="button" disabled={busy || !ownsEdit || index === 0} aria-label={`上移 ${attachment.displayName}`}
-                onClick={() => {
-                  const next = [...order]
-                  ;[next[index - 1], next[index]] = [next[index], next[index - 1]]
-                  mutateAttachments({ type: 'reorder_attachments', attachmentRefIds: next })
-                }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 9.5 3.5-3 3.5 3" /></svg></button>
-              <button type="button" disabled={busy || !ownsEdit || index === order.length - 1} aria-label={`下移 ${attachment.displayName}`}
-                onClick={() => {
-                  const next = [...order]
-                  ;[next[index], next[index + 1]] = [next[index + 1], next[index]]
-                  mutateAttachments({ type: 'reorder_attachments', attachmentRefIds: next })
-                }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6.5 3.5 3 3.5-3" /></svg></button>
-              <button type="button" disabled={busy || !ownsEdit} aria-label={`移除 ${attachment.displayName}`}
-                onClick={() => mutateAttachments({ type: 'remove_attachment', attachmentRefId: attachment.id })}>移除</button>
-            </span>
-          </div>
-        })}
-      </div>}
-      <StructuredMentionComposer ref={composerHandleRef} id="pending-camp-message"
-        draftIdentity={`${campId}:${edit.item.id}`} document={edit.content}
-        members={members} skills={skills} skillCatalogStatus={skillCatalogStatus}
-        ariaLabel="编辑待发送消息" placeholder="修改这条待发送消息…" editorRef={editorRef} disabled={busy || !ownsEdit}
-        onDirtyChange={setComposerDirty}
-        onLocalStatusChange={(status) => {
-          setComposerStatus(status)
-          if (status.hasExplicitRecipient) {
-            setEdit((current) => current
-              ? { ...current, recipientSelectionRequired: false }
+      {attachmentDragActive && <span className="composer-destination">将添加到这条消息</span>}
+      <div className="composer-input">
+        {!ownsEdit && <p role="alert" className="pending-input-error">编辑占用已变化。未保存的修改只在本窗口；关闭后可重新编辑。</p>}
+        {edit.replyToCampMessageId && <div className="composer-reply-line">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3-4 4 4 4M2 7h8c3 0 4 2 4 5" /></svg>
+          <span className="composer-reply-copy"><strong>回复 {edit.item.replyIntent?.author?.displayName ?? '引用消息'}</strong><span>{edit.item.replyIntent?.excerpt ?? '引用的消息当前不可用'}</span></span>
+          <button type="button" className="composer-reply-cancel" aria-label="取消待发送消息的回复" disabled={busy} onClick={() => setEdit({ ...edit, replyToCampMessageId: null, recipientSelectionRequired: false })}>取消</button>
+        </div>}
+        {edit.recipientSelectionRequired && <p className="pending-input-error" role="alert">请在正文中选择 @成员；引用会继续保留。</p>}
+        {(edit.attachments.length > 0 || preparingAttachments.length > 0) && <ComposerAttachmentStrip>
+          {edit.attachments.map((attachment, index) => {
+            const moveAttachment = (offset: -1 | 1): void => {
+              const order = edit.attachments.map(({ id }) => id)
+              ;[order[index], order[index + offset]] = [order[index + offset], order[index]]
+              mutateAttachments({ type: 'reorder_attachments', attachmentRefIds: order })
+            }
+            return <AttachmentCard key={attachment.id} attachment={attachment}
+              locator={{ owner: 'pending_edit', campId, pendingInputId: edit.item.id,
+                editToken: edit.token, attachmentRefId: attachment.id }}
+              disabled={busy || !ownsEdit}
+              onNotify={setError}
+              onRemove={() => mutateAttachments({ type: 'remove_attachment', attachmentRefId: attachment.id })}
+              menuItems={<>
+                <DropdownMenu.Item className="attachment-context-menu-item"
+                  disabled={busy || !ownsEdit || index === 0} onSelect={() => moveAttachment(-1)}>
+                  前移
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="attachment-context-menu-item"
+                  disabled={busy || !ownsEdit || index === edit.attachments.length - 1} onSelect={() => moveAttachment(1)}>
+                  后移
+                </DropdownMenu.Item>
+              </>}
+            />
+          })}
+          {preparingAttachments.map((file, index) => <AttachmentPlaceholder
+            key={`preparing-${index}`} name={file.name || '粘贴图片'} kind="file" state="preparing" />)}
+        </ComposerAttachmentStrip>}
+        <StructuredMentionComposer ref={composerHandleRef} id="pending-camp-message"
+          draftIdentity={`${campId}:${edit.item.id}`} document={edit.content}
+          members={members} skills={skills} skillCatalogStatus={skillCatalogStatus}
+          ariaLabel="编辑待发送消息" placeholder="修改这条待发送消息…" editorRef={editorRef} disabled={busy || !ownsEdit}
+          onDirtyChange={setComposerDirty}
+          onLocalStatusChange={(status) => {
+            setComposerStatus(status)
+            if (status.hasExplicitRecipient) {
+              setEdit((current) => current
+                ? { ...current, recipientSelectionRequired: false }
+                : current)
+            }
+          }}
+          onPasteFiles={prepareFiles}
+          onBackspaceAtStart={() => {
+            setEdit((current) => current?.replyToCampMessageId
+              ? { ...current, replyToCampMessageId: null, recipientSelectionRequired: false }
               : current)
-          }
-        }}
-        onPasteFiles={prepareFiles}
-        onBackspaceAtStart={() => {
-          setEdit((current) => current?.replyToCampMessageId
-            ? { ...current, replyToCampMessageId: null, recipientSelectionRequired: false }
-            : current)
-        }}
-        onSubmit={() => { if (!saveDisabled) return perform(() => finish(true)) }} />
+          }}
+          onSubmit={() => { if (!saveDisabled) return perform(() => finish(true)) }} />
+      </div>
       <PendingInputEditorActions
         busy={busy}
         saveDisabled={saveDisabled}

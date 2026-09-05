@@ -3,7 +3,7 @@ const { mkdirSync } = require('node:fs')
 const { isAbsolute, join } = require('node:path')
 const { app, BrowserWindow } = require('electron')
 
-const [renderer, userData] = process.argv.slice(2)
+const [renderer, userData, mode] = process.argv.slice(2)
 assert.ok(isAbsolute(renderer) && isAbsolute(userData), 'The Composer fixture requires isolated absolute paths')
 mkdirSync(userData, { recursive: true })
 app.setPath('userData', userData)
@@ -18,7 +18,9 @@ app.whenReady().then(async () => {
   })
   window.webContents.on('console-message', event => console.error(event.message))
   await window.loadFile(renderer)
-  const report = await window.webContents.executeJavaScript('window.continuationTest.run()', true)
+  const report = await window.webContents.executeJavaScript(mode === '--pending-attachments'
+    ? 'window.continuationTest.pendingAttachments()'
+    : 'window.continuationTest.run()', true)
   console.log(JSON.stringify(report))
   app.exit(report.ok ? 0 : 1)
 }).catch(error => { console.error(error); app.exit(1) })
