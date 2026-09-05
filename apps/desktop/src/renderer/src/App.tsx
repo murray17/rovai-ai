@@ -99,6 +99,7 @@ import { ChannelSettings } from './ChannelSettings'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { GeneralSettings } from './GeneralSettings'
 import { MemoryLibrary } from './MemoryLibrary'
+import { AutomationWorkspace } from './AutomationWorkspace'
 import { DiagnosticsCenter } from './DiagnosticsCenter'
 import { RuntimeMonitoring } from './RuntimeMonitoring'
 import { localizeExecutionEngineTerms } from './product-copy'
@@ -256,7 +257,7 @@ type LoadState = 'loading' | 'ready' | 'error'
 export type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export const STARTUP_FEEDBACK_DELAY_MS = 400
 export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
-export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
+export type View = 'compose' | 'camp' | 'members' | 'automations' | 'memory' | 'settings'
 type ActivateCampOptions = {
   reconcileDefaultLead?: boolean
   preserveNotificationFocus?: boolean
@@ -311,11 +312,12 @@ export async function prepareActiveCampForAppQuit(
 }
 
 export type SettingsSection = NavigationSettingsSection
-export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
+export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'automations' | 'memory' | 'settings'>
 
 export function windowDragStripPage(view: View): WindowDragStripPage | null {
   return view === 'compose'
     || view === 'members'
+    || view === 'automations'
     || view === 'memory'
     || view === 'settings'
     ? view
@@ -874,6 +876,7 @@ function StartupWorkspace({
         pendingMemoryCount={0}
         onNewConversation={ignore}
         onMembers={ignore}
+        onAutomations={ignore}
         onMemory={ignore}
         onSettings={ignore}
         onOpenProject={ignore}
@@ -3692,6 +3695,7 @@ function AuthoritativeApp({
     compose: 'task-content compose-content',
     camp: 'task-content camp-content',
     members: 'members-content',
+    automations: 'automation-content',
     memory: 'memory-content',
     settings: 'settings-content'
   }
@@ -3826,6 +3830,7 @@ function AuthoritativeApp({
         updateSnapshot={appUpdates.snapshot}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
+        onAutomations={() => chooseView('automations')}
         onMemory={() => chooseView('memory', () => setMemoryFocusId(null))}
         pendingMemoryCount={pendingMemoryCount}
         onSettings={openSettings}
@@ -3878,7 +3883,7 @@ function AuthoritativeApp({
             onRetry={retryStartup}
           />
         )}
-        {!startupGateVisible && view !== 'members' && view !== 'memory' && inlineNotices}
+        {!startupGateVisible && view !== 'members' && view !== 'automations' && view !== 'memory' && inlineNotices}
         {!startupGateVisible && !shuttingDown && toast && (
           <AppToast toast={toast} onClose={() => setToast(null)} />
         )}
@@ -3959,6 +3964,19 @@ function AuthoritativeApp({
             recentCamps={visibleNavigation ? allNavigationCamps(visibleNavigation).slice(0, 5) : []}
             onOpenCamp={chooseCamp}
             onNewConversation={beginNewConversation}
+          />
+        )}
+
+        {!startupGateVisible && view === 'automations' && (
+          <AutomationWorkspace
+            agents={agents}
+            projects={displayNavigation?.projects ?? []}
+            defaultMemberId={campSnapshot?.camp.defaultLeadAgentId
+              ?? agents.find((agent) => agent.presence === 'present')?.agentId
+              ?? ''}
+            topNotices={inlineNotices}
+            onOpenCamp={(campId) => void activateCamp(campId, { reconcileDefaultLead: false })}
+            onNotify={setToast}
           />
         )}
 

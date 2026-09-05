@@ -2250,7 +2250,10 @@ export class ChannelSettingsService {
           chatId: delivery.chatId,
           topicKey: delivery.topicKey,
           payload: delivery.payload,
-          ownerOpenId: delivery.recipientOpenId
+          ownerOpenId: delivery.recipientOpenId,
+          receiveIdType: delivery.payload.deliveryScope === 'automation_owner'
+            ? 'open_id'
+            : 'chat_id'
         })
       } else if (delivery.deliveryKind === 'agent_attachment') {
         const campId = requiredPayloadString(delivery.payload, 'campId')

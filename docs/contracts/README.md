@@ -28,6 +28,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | 合同 | 权威范围 |
 | --- | --- |
 | [Domain Command Result v1（当前）](domain-command-result-v1.md) | Domain Command 结果的事务、幂等回放、专用列唯一正文、内部 marker、新旧事件双读与 schema 95 回退边界 |
+| [Scheduled Automation v1（当前）](scheduled-automation-v1.md) | Desktop/Core 本机计划、冻结快照、原子 Camp 派发、恢复收口、唯一公共结果与独立 Owner 通知 |
 | [Single Chat v2（当前）](single-chat-v2.md) | v1 私有路由、Source Ref、Pending、Context 与 policy 不变；结束改为 exact Conversation ID 无 version CAS，Renderer 拆分目标 loading 与串行后台刷新 |
 | [Single Chat v1（历史）](single-chat-v1.md) | Camp 内本地单聊的领域复用、Source Ref Draft/Runtime 解析、Conversation-local Pending FIFO、封闭 Built-in policy、公共水位、私有 terminal 路由与迟到 fence |
 | [Cancellation Settlement v2（当前）](cancellation-settlement-v2.md) | 取消 Run 统一为 cancelled；效果证据保留但不产生公共待确认提示，清理与后续调度边界不变 |
@@ -185,7 +186,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Memory Capture v3（当前）](memory-capture-v3.md) | v2 边界加 complete exact-Scope View、copyable Revision target、active body aggregate quota、64 KiB production projection limit 与 Memory-domain clean break |
 | [Memory Capture v2 (historical)](memory-capture-v2.md) | v1 捕获/Review/Forget 边界加 flat Agent-relative Scope identity、revise target assertion、durable domain rejection 与 Supersession 原子顺序 |
 | [Memory Capture v1 (historical)](memory-capture-v1.md) | 初版 best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除与 Forget safeguard；不含 Scope-identified revise |
-| [Built-in Tool Transport v22（当前）](builtin-tool-transport-v22.md) | v21 transport 不变；新增只在当前有效 Single Chat Run 可用的 `single_chat.history`，catalog 扩为十六项 |
+| [Built-in Tool Transport v23（当前）](builtin-tool-transport-v23.md) | v22 transport 与 Single Chat history 不变；新增七项 Scheduled Automation 操作，catalog 扩为二十三项 |
+| [Built-in Tool Transport v22（历史）](builtin-tool-transport-v22.md) | v21 transport 不变；新增只在当前有效 Single Chat Run 可用的 `single_chat.history`，catalog 扩为十六项 |
 | [Built-in Tool Transport v21（历史）](builtin-tool-transport-v21.md) | v20 IPC/Envelope 不变；当前 lease 根目录与 CLI 外部附件快照 |
 | [Built-in Tool Transport v20（历史）](builtin-tool-transport-v20.md) | v19 transport/Send v12 不变；Charter 按需复用 help 并精简 Principal/catalog 指导，`sessionCharterRevision: 2` 轮换旧 Native Session Binding |
 | [Built-in Tool Transport v19（历史）](builtin-tool-transport-v19.md) | v18 IPC/Output 不变；Send v12 支持纯附件，Run tmp 在每次 lease 前重置并由 Runtime 精确准入 |

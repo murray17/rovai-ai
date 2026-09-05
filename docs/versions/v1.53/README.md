@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.53
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in-progress
@@ -11,7 +11,7 @@ last_updated: 2026-09-07
 
 # Rovai-ai v1.53：Runtime 图片、工具一致性、正文块、命令回执、网络恢复与创建性能
 
-前置：[v1.52](../v1.52/README.md)。本版本保留 Runtime 结构化图片观察、混合存储、按需读取和既有图片
+前置：[v1.52](../v1.52/README.md)。 下一版本：[v1.54](../v1.54/README.md)。本版本保留 Runtime 结构化图片观察、混合存储、按需读取和既有图片
 Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
 
 ## 范围与当前状态

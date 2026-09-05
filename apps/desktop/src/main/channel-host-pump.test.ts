@@ -39,6 +39,21 @@ describe('AdaptiveChannelHostPump', () => {
     pump.stop()
   })
 
+  it('wakes a dormant provider when an Automation notification becomes available', async () => {
+    vi.useFakeTimers()
+    const run = vi.fn().mockResolvedValue(false)
+    const pump = new AdaptiveChannelHostPump({ run, onError: vi.fn() })
+
+    pump.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledOnce()
+
+    pump.handleCoreEvent({ method: 'automation.notification.available', params: {} })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledTimes(2)
+    pump.stop()
+  })
+
   it('supports a provider-specific Core event wake scope', async () => {
     vi.useFakeTimers()
     const run = vi.fn(async () => true)

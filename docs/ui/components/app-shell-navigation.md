@@ -10,7 +10,7 @@ last_updated: 2026-09-04
 ## 统一侧栏结构
 
 所有一级页面共享固定 270px rail 和 50px 顶行。侧栏品牌字标为 `Rovai AI`，不带副标题或通知铃铛；
-普通侧栏底部以“设置”为主入口；存在可操作 App 新版本时，其右侧可以出现独立的紧凑更新状态徽标。
+普通侧栏在“新对话”后依次提供“队员”“定时任务”“记忆”一级入口，底部以“设置”为主入口；存在可操作 App 新版本时，其右侧可以出现独立的紧凑更新状态徽标。
 徽标只深链到“关于与更新”，不改变“设置”主入口恢复最后设置分类的语义。应用内普通提醒只在新动态
 到达时临时呈现，偏好位于“设置 → 提醒”。设置
 分类覆盖同一个 270px 槽位，不在内容区再增加第二列导航。
@@ -105,13 +105,16 @@ App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；
 设置、记忆、队员、其他 Camp 或因移除当前 Project 返回快速对话。只打开新会话 Dialog、选择/展开 Project 而未
 卸载 Composer 时不构成已完成 leave；创建结果真正激活另一 Camp 时复用同一 guard。组件 cleanup 不承担这次保存。
 
+Automation 工作区即将因全局导航卸载时，App 同样等待该工作区的当前自动保存 flush；失败则保留草稿与当前页面，
+成功后才提交目标页面。
+
 正常 App 退出也复用该 guard，但由 Main quit coordinator 在 Core shutdown 前请求；App Shell 不增加退出状态或 Draft
 保存实现。保存失败时 Main 放弃本次退出，当前 Camp 保持可见且 Composer 恢复交互；成功后才进入既有
 `runtime.state = shutting_down` 全局等待面。
 
 ## 宿主平台交互
 
-macOS 保留 hidden title bar 与受控 drag region；新对话、设置、队员和记忆页使用同一个内容列全宽、
+macOS 保留 hidden title bar 与受控 drag region；新对话、设置、队员、定时任务和记忆页使用同一个内容列全宽、
 固定 50px 的透明拖拽带，位于顶部的交互控件保留明确的 `no-drag` 点击区域。Windows 隐去包含 App 图标与
 `Rovai AI` 的系统标题文字层和系统 menu bar 呈现，只以 Renderer 投影 `File / Edit / View / Window` 顶层入口；
 入口经受限 IPC 打开既有 Electron 原生 submenu，不重建 command 或 accelerator。顶层菜单行与 Window Controls Overlay
