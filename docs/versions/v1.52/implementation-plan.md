@@ -73,15 +73,31 @@ last_updated: 2026-09-06
 
 ## 检查与完成条件
 
-文档准备已运行 `pnpm docs:test`、`pnpm docs:check`、基于原 worktree Base 的 `docs:check:ci`、HTML 脚本语法与 `git diff --check`。实施阶段按实际改动运行定向 Renderer/Core 回归、Typecheck、桌面构建及隔离真实 App 验收；Rust 测试的新增与退役遵守[测试准入规则](../../development/testing.md#rust-测试准入与退役门槛)。
+最终验证以合并后的 `origin/main` 为基线执行：
 
-已知基线：第三版各终态组摘要和内联脚本语法已验证；前版双主题、文件预览、Diff 和键盘返回已有原型核对。第三版 Toast 的浏览器点击实测因控制连接失效未完成。所有生产 UI 和本版本 Runtime 矩阵均为待验收，不沿用旧 smoke 标为通过。真实 App/Runtime 验收遵守[本地隔离流程](../../development/local-workflow.md)，不使用日常 App 数据目录。
+- `pnpm test` 通过：Vitest 154 个文件、1568 个用例通过；Node 协议套件 221 个用例中 220 个通过，1 个仅限
+  Windows 的用例按条件跳过；文档治理子套件同时通过。
+- 文件预览、执行展示和 Main 快照 11 个定向文件共 295 个用例通过；成功后提交重构后又运行相关 3 个文件、
+  188 个用例并通过。
+- `pnpm typecheck`、`pnpm build:desktop`、`cargo fmt --all --check` 与
+  `cargo check --workspace --all-targets` 通过。
+- `rovai-core --lib` 在命令环境中 510 个用例通过，唯一受嵌套 macOS sandbox 阻断的隔离用例在本机原生终端
+  单独运行通过；`rovai-core --bin rovai-core` 为 225 个通过、5 个需显式本机条件的用例按设计忽略。
+- 生产 Electron `file-preview-layout` 与 `file-reference-navigation` 均在本机原生终端通过；前者还以挂起首屏读取
+  证明成功前不出现 provisional Tab，失败不切换页面、Tab 或 Pane，且释放 handle 后可重试。
+- 第三版 HTML 的内联脚本语法、`pnpm docs:test`、`pnpm docs:check`、基于下列 Base 的
+  `docs:check:ci` 与 `git diff --check` 通过。
+- 14 个 Runtime 均使用本机真实安装、账号、Provider 与默认模型执行；逐项结果、诚实回退、模型执行失败和准入
+  阻断见[真实文件操作验收](runtime-acceptance.md)，没有用共享 fixture 代替真实矩阵。
+
+真实 App/Runtime 验收遵守[本地隔离流程](../../development/local-workflow.md)，使用独立临时 Core data root、Git
+workspace 与 Camp，不读写日常 App 数据目录；运行产生的 ID、绝对临时路径与原始输出未进入仓库。
 
 ## Worktree 交接
 
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-tool-call-consistency`
 - Branch：`rovai/tool-call-consistency`
-- Base：`origin/main` 的 `42f94fcfc7281cd1cec219d11d6d3d2f146f980b`
-- Governance：无主线治理提交；本版本记录与交互稿位于任务分支。
-- Status：`active`；已同步主干并开始生产实现。
-- Next：从可靠文件阅读引用和新增／编辑事件投影开始实施。
+- Base：`origin/main` 的 `91af2eeebd7ebfb581820c2f68d259ff51497199`
+- Governance：已合并主干既有 v1.52 子文件恢复范围；本次版本记录、真实验收和交互稿均位于任务分支。
+- Status：`complete`；生产实现、真实 Runtime 矩阵和验证证据已完成。
+- Next：提交评审并由 CI 复核，不再补造未观察到的 Runtime 事件。

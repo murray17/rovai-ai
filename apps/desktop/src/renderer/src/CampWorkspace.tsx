@@ -8241,6 +8241,7 @@ function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError }: {
           <button
             className="tool-file-link"
             type="button"
+            aria-label={`打开文件预览：${change.path}`}
             title={`${change.path} · 打开文件预览`}
             onClick={() => void openFile()}
           >
@@ -8335,6 +8336,7 @@ function FileOperationRow({ campId, step, runStatus, onFileOpenError }: {
         <button
           className="tool-file-link"
           type="button"
+          aria-label={`打开文件预览：${path}`}
           title={`${path} · 打开文件预览`}
           onClick={() => void openFile()}
         >
