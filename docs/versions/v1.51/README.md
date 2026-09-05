@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.51
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -11,7 +11,7 @@ last_updated: 2026-09-06
 
 # Rovai-ai v1.51：Camp 文件预览会话恢复
 
-前置：[v1.50](../v1.50/README.md)。本版本保留既有文件来源、具体文件能力、Viewer、布局和显式打开分类；只增加
+前置：[v1.50](../v1.50/README.md)；后续：[v1.52](../v1.52/README.md)。本版本保留既有文件来源、具体文件能力、Viewer、布局和显式打开分类；只增加
 窗口生命周期内按 Camp 隔离的 Tab 会话恢复、自动恢复的无副作用边界，以及文件不可读时的单句内容状态。
 
 ## 范围与当前状态
