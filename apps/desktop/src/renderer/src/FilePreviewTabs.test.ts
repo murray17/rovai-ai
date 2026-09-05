@@ -13,34 +13,58 @@ import { FilePreviewTabs } from './FilePreviewTabs'
 vi.mock('./FilePreviewContext', () => ({ useFilePreview: vi.fn() }))
 
 function tab(id: string): FilePreviewTabModel {
+  const file = {
+    previewKey: id,
+    handleId: `handle-${id}`,
+    reopenToken: `reopen-${id}`,
+    displayPath: `src/${id}.ts`,
+    pathPresentation: 'project_relative' as const,
+    fileName: `${id}.ts`,
+    size: 10,
+    mime: 'text/plain',
+    extension: '.ts',
+    kind: 'code' as const,
+    hasExternalUpdate: false,
+    contentVersion: { size: 10, mtimeMs: 1 },
+    contentGeneration: 'generation-1',
+    capabilities: ['read' as const]
+  }
   return {
     kind: 'file',
     id,
-    file: {
-      previewKey: id,
-      handleId: `handle-${id}`,
-      reopenToken: `reopen-${id}`,
-      displayPath: `src/${id}.ts`,
-      pathPresentation: 'project_relative',
-      fileName: `${id}.ts`,
-      size: 10,
-      mime: 'text/plain',
-      extension: '.ts',
-      kind: 'code',
-      hasExternalUpdate: false,
-      contentVersion: { size: 10, mtimeMs: 1 },
-      contentGeneration: 'generation-1',
-      capabilities: ['read']
+    sourceKey: `workspace:camp-1:src/${id}.ts`,
+    sourceRequest: { kind: 'camp_workspace', campId: 'camp-1', rawReference: `src/${id}.ts` },
+    previewKey: id,
+    presentation: {
+      fileName: file.fileName,
+      displayPath: file.displayPath,
+      pathPresentation: file.pathPresentation
     },
+    file,
     loadState: 'ready',
     content: { kind: 'code', text: 'const a = 1' },
     error: null,
+    requestGeneration: 1,
     hasExternalUpdate: false,
     externalUpdateVersion: 0,
     isRefreshing: false,
     refreshError: null,
     pageOffsets: [],
     pageIndex: 0
+  }
+}
+
+function updateFile(
+  target: FilePreviewTabModel,
+  update: Partial<NonNullable<FilePreviewTabModel['file']>>
+): void {
+  if (!target.file) throw new Error('Expected an open file')
+  target.file = { ...target.file, ...update }
+  target.previewKey = target.file.previewKey
+  target.presentation = {
+    fileName: target.file.fileName,
+    displayPath: target.file.displayPath,
+    pathPresentation: target.file.pathPresentation
   }
 }
 
@@ -77,21 +101,37 @@ beforeEach(() => {
     revealInFolder: vi.fn(),
     copyDisplayPath: vi.fn(),
     reload: vi.fn(),
+    reopen: vi.fn(),
     retry: vi.fn(),
     changePage: vi.fn()
   }
 })
 
 describe('FilePreviewTabs open feedback', () => {
+  it('does not announce a lazy background tab as actively opening', () => {
+    const cold = tab('background')
+    cold.file = null
+    cold.previewKey = null
+    cold.loadState = 'cold'
+    cold.content = null
+    preview.tabs = [cold]
+    preview.activeTab = cold
+    preview.activeTabId = cold.id
+
+    const markup = renderTabs()
+
+    expect(markup).toContain('aria-label="background.ts"')
+    expect(markup).not.toContain('background.ts，正在打开')
+  })
+
   it('uses the shared filename visual instead of the preview classifier kind', () => {
     const config = tab('config')
-    config.file = {
-      ...config.file,
+    updateFile(config, {
       fileName: 'config.toml',
       displayPath: 'config.toml',
       extension: '.toml',
       kind: 'text'
-    }
+    })
     preview.tabs = [config]
     preview.activeTab = config
     preview.activeTabId = config.id
@@ -104,7 +144,7 @@ describe('FilePreviewTabs open feedback', () => {
 
   it('distinguishes a historical review from the same current file without changing accessible tab names', () => {
     const currentFile = tab('readme')
-    currentFile.file = { ...currentFile.file, kind: 'markdown', fileName: 'readme.md', displayPath: 'docs/readme.md' }
+    updateFile(currentFile, { kind: 'markdown', fileName: 'readme.md', displayPath: 'docs/readme.md' })
     const review = {
       kind: 'file_change' as const, id: 'review-1', campId: 'camp-1', selectedEvidenceFileId: 'evidence-1',
       changes: {
@@ -162,8 +202,8 @@ describe('FilePreviewTabs open feedback', () => {
   it('uses safe ordinals when same-name files have no parent path to disclose', () => {
     const first = tab('external-first')
     const second = tab('external-second')
-    first.file = { ...first.file, fileName: 'hui.html', displayPath: 'hui.html', pathPresentation: 'file_name_only' }
-    second.file = { ...second.file, fileName: 'hui.html', displayPath: 'hui.html', pathPresentation: 'file_name_only' }
+    updateFile(first, { fileName: 'hui.html', displayPath: 'hui.html', pathPresentation: 'file_name_only' })
+    updateFile(second, { fileName: 'hui.html', displayPath: 'hui.html', pathPresentation: 'file_name_only' })
     preview.tabs = [first, second]
     preview.activeTab = second
     preview.activeTabId = second.id
@@ -179,8 +219,8 @@ describe('FilePreviewTabs open feedback', () => {
   it('keeps parent-qualified labels for same-name project files', () => {
     const docs = tab('docs')
     const prototypes = tab('prototypes')
-    docs.file = { ...docs.file, fileName: 'hui.html', displayPath: 'docs/hui.html' }
-    prototypes.file = { ...prototypes.file, fileName: 'hui.html', displayPath: 'prototypes/hui.html' }
+    updateFile(docs, { fileName: 'hui.html', displayPath: 'docs/hui.html' })
+    updateFile(prototypes, { fileName: 'hui.html', displayPath: 'prototypes/hui.html' })
     preview.tabs = [docs, prototypes]
     preview.activeTab = prototypes
     preview.activeTabId = prototypes.id
@@ -195,12 +235,11 @@ describe('FilePreviewTabs open feedback', () => {
 describe('FilePreviewPane path presentation', () => {
   it('shows a path row for a nested project file', () => {
     const projectFile = tab('project-file')
-    projectFile.file = {
-      ...projectFile.file,
+    updateFile(projectFile, {
       fileName: 'hui.html',
       displayPath: 'docs/prototypes/hui.html',
       kind: 'html'
-    }
+    })
     preview.tabs = [projectFile]
     preview.activeTab = projectFile
     preview.activeTabId = projectFile.id
@@ -216,7 +255,7 @@ describe('FilePreviewPane path presentation', () => {
     ['an external file or attachment', 'file_name_only' as const]
   ])('omits the path row for %s', (_label, pathPresentation) => {
     const file = tab('filename-only')
-    file.file = { ...file.file, fileName: 'hui.html', displayPath: 'hui.html', pathPresentation }
+    updateFile(file, { fileName: 'hui.html', displayPath: 'hui.html', pathPresentation })
     preview.tabs = [file]
     preview.activeTab = file
     preview.activeTabId = file.id
@@ -229,12 +268,11 @@ describe('FilePreviewPane path presentation', () => {
 
   it('keeps reload available in a transient update row when the path is hidden', () => {
     const external = tab('updated-external')
-    external.file = {
-      ...external.file,
+    updateFile(external, {
       fileName: 'hui.html',
       displayPath: 'hui.html',
       pathPresentation: 'file_name_only'
-    }
+    })
     external.hasExternalUpdate = true
     preview.tabs = [external]
     preview.activeTab = external
@@ -245,5 +283,35 @@ describe('FilePreviewPane path presentation', () => {
     expect(markup).not.toContain('file-preview-path-row')
     expect(markup).toContain('class="file-preview-update-row"')
     expect(markup).toContain('>有更新</button>')
+  })
+})
+
+describe('FilePreviewPane recovery state', () => {
+  it('shows only the generic file outline and one-line missing copy in the content area', () => {
+    const missing = tab('missing-report')
+    missing.file = null
+    missing.loadState = 'missing'
+    missing.content = null
+    missing.error = {
+      code: 'file_not_found',
+      message: '找不到这个文件',
+      retryable: false
+    }
+    preview.tabs = [missing]
+    preview.activeTab = missing
+    preview.activeTabId = missing.id
+
+    const paneMarkup = renderPane()
+    const tabsMarkup = renderTabs()
+
+    expect(paneMarkup).toContain('class="file-preview-recovery" role="status" aria-live="polite"')
+    expect(paneMarkup).toContain('class="file-preview-recovery-icon" data-resource-type="file"')
+    expect(paneMarkup).toContain('<p>找不到这个文件</p>')
+    expect(paneMarkup.match(/找不到这个文件/gu)).toHaveLength(1)
+    expect(paneMarkup).not.toContain('<strong>')
+    expect(paneMarkup).not.toContain('>重试</button>')
+    expect(paneMarkup).not.toContain('file-preview-path-row')
+    expect(tabsMarkup).toContain('aria-label="missing-report.ts，找不到文件"')
+    expect(tabsMarkup).not.toContain('file-preview-tab-error')
   })
 })

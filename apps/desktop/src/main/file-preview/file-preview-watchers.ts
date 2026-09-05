@@ -6,12 +6,14 @@ export interface RootWatchSubscription {
   handleId: string
   webContentsId: number
   campId: string
+  bindingGeneration: number
   previewKey: string
   canonicalFilePath: string
 }
 
 export interface RootWatchNotification extends FilePreviewExternalUpdateEvent {
   webContentsId: number
+  bindingGeneration: number
 }
 
 type WatchFactory = (
@@ -115,6 +117,30 @@ export class RootWatchRegistry {
       }
     }
     for (const handleId of handles) this.unsubscribe(handleId)
+    for (const entry of this.#entries.values()) {
+      for (const key of entry.pending.keys()) {
+        const [pendingWebContentsId, pendingCampId] = key.split('\0')
+        if (Number(pendingWebContentsId) === webContentsId && pendingCampId === campId) {
+          entry.pending.delete(key)
+        }
+      }
+    }
+  }
+
+  releaseBinding(webContentsId: number, campId: string, bindingGeneration: number): void {
+    const handles: string[] = []
+    for (const entry of this.#entries.values()) {
+      for (const subscription of entry.subscriptions.values()) {
+        if (
+          subscription.webContentsId === webContentsId
+          && subscription.campId === campId
+          && subscription.bindingGeneration === bindingGeneration
+        ) handles.push(subscription.handleId)
+      }
+    }
+    for (const handleId of handles) this.unsubscribe(handleId)
+    const pendingKey = `${webContentsId}\0${campId}\0${bindingGeneration}`
+    for (const entry of this.#entries.values()) entry.pending.delete(pendingKey)
   }
 
   releaseWindow(webContentsId: number): void {
@@ -147,7 +173,7 @@ export class RootWatchRegistry {
         : null
     for (const subscription of entry.subscriptions.values()) {
       if (!pathEventMatches(decoded, subscription.relativeIdentity)) continue
-      const key = `${subscription.webContentsId}\0${subscription.campId}`
+      const key = `${subscription.webContentsId}\0${subscription.campId}\0${subscription.bindingGeneration}`
       const previewKeys = entry.pending.get(key) ?? new Set<string>()
       previewKeys.add(subscription.previewKey)
       entry.pending.set(key, previewKeys)
@@ -163,10 +189,11 @@ export class RootWatchRegistry {
     const pending = entry.pending
     entry.pending = new Map()
     for (const [key, previewKeys] of pending) {
-      const [webContentsId, campId] = key.split('\0')
+      const [webContentsId, campId, bindingGeneration] = key.split('\0')
       this.#notify({
         webContentsId: Number(webContentsId),
         campId,
+        bindingGeneration: Number(bindingGeneration),
         previewKeys: [...previewKeys]
       })
     }

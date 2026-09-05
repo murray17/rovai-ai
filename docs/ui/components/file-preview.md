@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-09-04
+last_updated: 2026-09-06
 ---
 
 # Camp 文件预览区
@@ -55,6 +55,8 @@ last_updated: 2026-09-04
 最右侧常驻文件预览按钮，左侧用 18px 竖线与其他入口分隔；选中态和 `aria-expanded` 表达预览是否展开。
 按钮收起/恢复整个预览区，保留所有 Tab、当前选择、阅读位置与稳定比例。尚无 Tab 时展开空预览，提示从会话
 文件链接或 File Change 卡片选择内容，不伪造默认文件；关闭最后一个 Tab 仍自动收起预览。
+切换 Camp 时，各 Camp 的 Tab 顺序、当前 Tab 与 Pane 可见性在本窗口内独立记忆；关闭 App 后不恢复。返回 Camp
+先显示安全 Tab shell，只有 Pane 可见时才恢复 active 文件，其他普通文件首次激活时再加载，不用旧正文制造即时假象。
 
 预览顶栏空白处与会话顶栏共用原生窗口拖拽和双击行为（遵循平台标题栏设置），不另造全屏状态。
 标签、关闭、返回和预览按钮使用 `no-drag`；即使标签溢出横向滚动，也在最右按钮前保留窗口拖拽空白。
@@ -117,6 +119,10 @@ Alt+Shift+左右重排。关闭后优先激活右侧，再回到左侧；最后�
 后台打开不抢焦点，只用 polite live region 宣布；紧凑替换后把焦点移到当前 Tab。
 从预览内部打开另一个文件时，在新标签挂载后交接键盘焦点；等待期间用户已把焦点移到会话输入等其他区域时不抢回。
 
+恢复中的普通 Tab 保留原文件图标、文件名和关闭按钮，不增加可见 Loading／错误 Badge；`opening`、`missing`、
+`unavailable` 与 `error` 只追加到 Tab 的可访问名称。恢复 shell 没有当前 handle 时，默认应用、显示所在位置与复制路径
+操作禁用；有稳定业务 source 时菜单提供明确的“重新打开”，临时 child/root source 不伪造该动作。
+
 ### File Change 标签页
 
 会话中的 Files Changed 卡片仍保留原位入口，点击后在同一预览区打开 `File Change·文件名` Tab，不再用
@@ -130,7 +136,9 @@ Alt+Shift+左右重排。关闭后优先激活右侧，再回到左侧；最后�
 “打开当前文件”继续使用 `run_evidence / open_current` 的来源与授权校验，成功后激活独立普通文件 Tab；
 历史变更 Tab 保留，可以直接切回。历史 Tab 的右键菜单只包含关闭/关闭右侧/关闭其他/全部关闭，不能将
 不可变历史误当成当前文件执行重新加载或系统文件操作。详情加载、错误与重试均留在预览区，不遮挡会话。
-普通文件和历史 Tab 在切换、缩放与收起过程中保留各自的 Viewer 实例和阅读位置；关闭或切换 Camp 才释放。
+普通文件和历史 Tab 在同一 Camp 内切换、缩放与收起时保留各自的 Viewer 实例和阅读位置。切换 Camp 释放当前文件
+能力和 Viewer 内容，但在窗口 session 中保留无能力 shell；返回后 File Change 仍按 AgentRun/epoch/evidence ID 读取
+不可变 detail，不从当前工作区推测历史。
 
 ## 路径与 Viewer
 
@@ -143,6 +151,7 @@ Renderer 不自行猜测。
 显示路径时整体从左侧自然排列，文件名紧跟最后一个可见目录，不固定到最右侧。空间不足时从目录中部省略，
 优先完整保留文件名；无水平滚动。完整相对路径进入 title 与可访问名称。路径与 Tabs 间无线，路径与正文间一条
 语义 divider。路径隐藏时同时移除高度、分隔线和空占位；若文件发生外部更新，只按需出现独立更新操作行。
+文件处于 missing、unavailable 或 error 时同样隐藏路径行，避免把上次成功呈现重复为当前文件事实。
 
 Viewer 不显示预览/源码切换、右上角复制按钮、整行工具栏或 `Ready` 状态。每个类型只有一个规范阅读视图：
 
@@ -164,13 +173,15 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 
 ## 更新与错误
 
-首次打开只有 opening/ready/error；快速成功直接显示正文，耗时后才显示轻量 Loading。只有文件确实无法定位或读取时
-才显示“无法打开文件 / 文件可能已被移动或删除 / 重试”；工作区外、未授权目录、Root Grant、handle 或 capability
-不足不得成为用户文案，也不得触发 Modal。
+首次打开与恢复使用 cold/opening/ready/missing/unavailable/error；快速成功直接显示正文，耗时后才显示轻量 Loading。
+无法形成当前可读内容时，正文只显示水平、垂直居中的 32px 通用文件轮廓，图标下方相隔 12px 显示一句 13px 常规
+公开文案。错误码到文案的 closed mapping 由 [File Preview v7](../../contracts/file-preview-v7.md#失败呈现) 拥有。
+该状态不显示路径、尺寸、标题、卡片、边框、按钮、技术详情或内部能力名称；错误内容区之外的 Tabs、Viewer 布局和
+其他 Camp 界面沿用既有视觉，不以本状态为理由重做。
 历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、
 unreadable 或 kind_changed，不写回历史，也不启动后台监控。
 外部变化只显示 Tab 圆点与当前 Viewer 的“有更新 / 重新加载”。主动刷新期间旧内容继续显示；失败显示
-“重新加载失败 / 重试”且不销毁 Tab。句柄、Grant、token、watcher 和 generation 永远不是用户文案。
+“重新加载失败 / 重试”且不销毁仍可读的旧内容。句柄、Grant、token、watcher 和 generation 永远不是用户文案。
 
 ## 平台
 

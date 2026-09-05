@@ -76,6 +76,7 @@ import {
 import { NewConversationDialog } from './NewConversationDialog'
 import { openRuntimeModelCatalog } from './runtime-check'
 import { FilePreviewProvider, useOptionalFilePreview } from './FilePreviewContext'
+import { forgetFilePreviewSession } from './file-preview-session'
 import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { FilePreviewTabs } from './FilePreviewTabs'
 import { AppearanceSettings } from './AppearanceSettings'
@@ -3029,6 +3030,7 @@ function AuthoritativeApp({
         command: campDeleteCommand(camp)
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+      forgetFilePreviewSession(camp.id, activeCampId === camp.id)
       campSnapshotCache.current.delete(camp.id)
       if (activeCampId === camp.id) {
         cancelPendingCampActivation()
