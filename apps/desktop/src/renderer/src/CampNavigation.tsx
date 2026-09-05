@@ -275,7 +275,7 @@ export function CampNavigation({
     [navigation]
   )
   const campById = useMemo(() => new Map(
-    [...navigationCamps, ...pinnedCampItems].map((camp) => [camp.id, camp])
+    [...pinnedCampItems, ...navigationCamps].map((camp) => [camp.id, camp])
   ), [navigationCamps, pinnedCampItems])
   const projectByKey = useMemo(
     () => new Map((navigation?.projects ?? []).map((project) => [project.projectKey, project])),
