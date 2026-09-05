@@ -3,7 +3,7 @@ document_type: contract
 name: Runtime Launch and Verification
 version: v36
 status: accepted
-source_version: v1.46
+source_version: v1.48
 last_updated: 2026-09-05
 ---
 
@@ -83,5 +83,5 @@ capability snapshot 的 permission options 归一为空列表、profile 与非�
 ## References
 
 - [Runtime Launch and Verification v35（historical）](runtime-launch-and-verification-v35.md)
-- [V1.46-D02](../versions/v1.46/decisions.md#v1-46-d02)
+- [V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01)
 - [Pi Runtime 重新接入 Parity Matrix](../research/pi-runtime-reintegration-parity-matrix.md)

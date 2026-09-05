@@ -2099,12 +2099,12 @@ export function CampWorkspace({
     }
   }
 
-  const prepareForCampChange = useCallback(async (): Promise<CampLeavePreparation> => {
+  const prepareForCampLeave = useCallback(async (): Promise<CampLeavePreparation> => {
     if (draftLoadState.state !== 'ready') {
       return { complete: () => undefined }
     }
     if (composerSubmittingRef.current || routingMutatingRef.current) {
-      throw new Error('Composer 正在提交变更，请稍后再切换会话。')
+      throw new Error('Composer 正在提交变更，请稍后再离开当前会话。')
     }
     const composerHandle = composerHandleRef.current
     composerHandle?.setInteractionLocked(true)
@@ -2136,9 +2136,9 @@ export function CampWorkspace({
 
   useLayoutEffect(() => {
     const campId = snapshot.camp.id
-    onCampLeaveGuardChange?.(campId, prepareForCampChange)
+    onCampLeaveGuardChange?.(campId, prepareForCampLeave)
     return () => onCampLeaveGuardChange?.(campId, null)
-  }, [onCampLeaveGuardChange, prepareForCampChange, snapshot.camp.id])
+  }, [onCampLeaveGuardChange, prepareForCampLeave, snapshot.camp.id])
 
   useLayoutEffect(() => {
     if (

@@ -95,6 +95,11 @@ App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；
 “返回对话 / 返回 App”控件。队员名册位于内容区左侧；用户通过全局侧栏切换页面或会话，所有切换
 继续遵守未保存 Runtime 草稿保护。
 
+当前 Camp Composer 即将因普通导航卸载或被另一 Camp 替换时，App 必须先调用同一个 Camp leave guard，等待附件
+准备、Draft flush 与 mutation queue 完成后再提交目标页面。保存失败保持当前 Camp、正文和可重试交互，不切换到
+设置、记忆、队员、其他 Camp 或因移除当前 Project 返回快速对话。只打开新会话 Dialog、选择/展开 Project 而未
+卸载 Composer 时不构成已完成 leave；创建结果真正激活另一 Camp 时复用同一 guard。组件 cleanup 不承担这次保存。
+
 ## 宿主平台交互
 
 macOS 保留 hidden title bar 与受控 drag region；新对话、设置、队员和记忆页使用同一个内容列全宽、

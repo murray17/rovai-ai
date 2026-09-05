@@ -60,6 +60,7 @@ import {
   composerHasSendablePayload,
   type CampMessageSendReceipt,
   type CampLeaveGuard,
+  type CampLeavePreparation,
   type CampMemberAddOutcome,
   type CampMemberRemoveOutcome,
   type CampInspectorTab,
@@ -254,13 +255,40 @@ export type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export const STARTUP_FEEDBACK_DELAY_MS = 400
 export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
+type ActivateCampOptions = {
+  reconcileDefaultLead?: boolean
+  preserveNotificationFocus?: boolean
+  suppressErrors?: boolean
+  anchoredMessages?: readonly CampMessageView[]
+}
 
 export function activeCampChangeNeedsDraftFlush(
   view: View,
   activeCampId: string | null,
   targetCampId: string
 ): boolean {
-  return view === 'camp' && activeCampId !== null && activeCampId !== targetCampId
+  return activeCampSurfaceNeedsLeaveGuard(view, activeCampId) && activeCampId !== targetCampId
+}
+
+export function activeCampSurfaceNeedsLeaveGuard(
+  view: View,
+  activeCampId: string | null
+): activeCampId is string {
+  return view === 'camp' && activeCampId !== null
+}
+
+export async function runPreparedCampLeaveTransition(
+  preparation: CampLeavePreparation,
+  transition: () => void | Promise<void>,
+  didLeave: () => boolean
+): Promise<void> {
+  try {
+    await transition()
+    preparation.complete(didLeave())
+  } catch (error) {
+    preparation.complete(false)
+    throw error
+  }
 }
 export type SettingsSection = NavigationSettingsSection
 export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
@@ -1154,6 +1182,38 @@ function AuthoritativeApp({
     }
   }, [])
 
+  const leaveActiveCamp = useCallback(async (
+    transition: () => void | Promise<void>
+  ): Promise<boolean> => {
+    const leavingCampId = activeCampIdRef.current
+    const registration = campLeaveGuardRef.current
+    if (
+      !activeCampSurfaceNeedsLeaveGuard(viewRef.current, leavingCampId)
+      || registration?.campId !== leavingCampId
+    ) {
+      await transition()
+      return true
+    }
+
+    let preparation: CampLeavePreparation
+    try {
+      preparation = await registration.guard()
+    } catch (nextError) {
+      setError(`离开当前会话前未能保存草稿：${errorMessage(nextError)}`)
+      return false
+    }
+
+    await runPreparedCampLeaveTransition(
+      preparation,
+      async () => {
+        await transition()
+        await afterNextPaint()
+      },
+      () => viewRef.current !== 'camp' || activeCampIdRef.current !== leavingCampId
+    )
+    return true
+  }, [])
+
   const cancelPendingCampActivation = useCallback((): void => {
     campSelectionGeneration.current += 1
     clearCampOpenFeedback()
@@ -1551,41 +1611,12 @@ function AuthoritativeApp({
     }
   }, [])
 
-  const activateCamp = useCallback(async (
+  const activateCampWithoutLeaveGuard = useCallback(async (
     campId: string,
-    options: {
-      reconcileDefaultLead?: boolean
-      preserveNotificationFocus?: boolean
-      suppressErrors?: boolean
-      anchoredMessages?: readonly CampMessageView[]
-    } = {}
+    options: ActivateCampOptions,
+    selectionGeneration: number
   ): Promise<boolean> => {
-    const selectionGeneration = ++campSelectionGeneration.current
-    clearCampOpenFeedback()
-    let campLeavePreparation: Awaited<ReturnType<CampLeaveGuard>> | null = null
-    const completeCampLeave = (didLeave: boolean): void => {
-      campLeavePreparation?.complete(didLeave)
-      campLeavePreparation = null
-    }
-    const previousCampId = activeCampIdRef.current
-    let campSurfaceCommitted = false
-    if (activeCampChangeNeedsDraftFlush(viewRef.current, previousCampId, campId)) {
-      const registration = campLeaveGuardRef.current
-      if (registration?.campId === previousCampId) {
-        try {
-          campLeavePreparation = await registration.guard()
-        } catch (nextError) {
-          if (selectionGeneration === campSelectionGeneration.current) {
-            setError(`离开当前会话前未能保存草稿：${errorMessage(nextError)}`)
-          }
-          return false
-        }
-        if (selectionGeneration !== campSelectionGeneration.current) {
-          completeCampLeave(false)
-          return false
-        }
-      }
-    }
+    if (selectionGeneration !== campSelectionGeneration.current) return false
     const cachedSnapshot = activeCampIdRef.current === campId
       ? null
       : recentCampSnapshot(campSnapshotCache.current, campId)
@@ -1599,7 +1630,6 @@ function AuthoritativeApp({
       snapshot: CampSurfaceSnapshot,
       entryPreview = false
     ): void => {
-      campSurfaceCommitted = true
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
       persistCurrentProject(snapshotProject)
@@ -1635,17 +1665,11 @@ function AuthoritativeApp({
         options.reconcileDefaultLead === false ? 'open' : 'enter'
       )
       if (selectionGeneration !== campSelectionGeneration.current) {
-        completeCampLeave(
-          campSurfaceCommitted && activeCampIdRef.current !== previousCampId
-        )
         return false
       }
       clearCampOpenFeedback()
       commitCampSurface(snapshot)
       await afterNextPaint()
-      completeCampLeave(
-        campSurfaceCommitted && activeCampIdRef.current !== previousCampId
-      )
       if (selectionGeneration !== campSelectionGeneration.current) return false
       console.info(
         `[camp-open] trace=${traceId} stage=renderer_meaningful_paint `
@@ -1665,9 +1689,6 @@ function AuthoritativeApp({
       })
       return true
     } catch (nextError) {
-      completeCampLeave(
-        campSurfaceCommitted && activeCampIdRef.current !== previousCampId
-      )
       if (selectionGeneration !== campSelectionGeneration.current) return false
       clearCampOpenFeedback()
       if (options.suppressErrors) {
@@ -1681,6 +1702,28 @@ function AuthoritativeApp({
       return false
     }
   }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, setCampSnapshot])
+
+  const activateCamp = useCallback(async (
+    campId: string,
+    options: ActivateCampOptions = {}
+  ): Promise<boolean> => {
+    const selectionGeneration = ++campSelectionGeneration.current
+    clearCampOpenFeedback()
+    let activated = false
+    const transition = async (): Promise<void> => {
+      activated = await activateCampWithoutLeaveGuard(campId, options, selectionGeneration)
+    }
+    if (activeCampChangeNeedsDraftFlush(
+      viewRef.current,
+      activeCampIdRef.current,
+      campId
+    )) {
+      const transitioned = await leaveActiveCamp(transition)
+      return transitioned && activated
+    }
+    await transition()
+    return activated
+  }, [activateCampWithoutLeaveGuard, clearCampOpenFeedback, leaveActiveCamp])
 
   useEffect(() => window.rovai.userAutomation.onOpenCamp(({ campId }) => {
     void activateCamp(campId, { reconcileDefaultLead: false })
@@ -2504,15 +2547,21 @@ function AuthoritativeApp({
     return membersViewRef.current?.requestTransition(action) ?? Promise.resolve(false)
   }, [])
 
-  const chooseView = (nextView: View): void => {
+  const chooseView = (nextView: View, beforeCommit?: () => void): void => {
     const commit = (): void => {
+      beforeCommit?.()
       if (nextView !== 'camp') cancelPendingCampActivation()
       if (nextView !== 'settings') lastMainView.current = nextView
       if (nextView !== 'camp') setNotificationFocus(null)
       setView(nextView)
     }
-    if (nextView === 'members') commit()
-    else void requestMemberTransition(commit)
+    if (nextView === viewRef.current) {
+      beforeCommit?.()
+      return
+    }
+    void requestMemberTransition(async () => {
+      await leaveActiveCamp(commit)
+    })
   }
 
   const chooseMember = (
@@ -2530,24 +2579,27 @@ function AuthoritativeApp({
   }
 
   const configureMemberRuntime = (agentId: string): void => {
-    setRuntimeRecovery(null)
-    setSelectedMemberId(agentId)
-    setMemberTab('runtime')
-    setMemberRuntimeFocusRequest((request) => request + 1)
-    chooseView('members')
+    chooseView('members', () => {
+      setRuntimeRecovery(null)
+      setSelectedMemberId(agentId)
+      setMemberTab('runtime')
+      setMemberRuntimeFocusRequest((request) => request + 1)
+    })
   }
 
   const openMemoryReviews = (): void => {
-    setMemoryReviewNotice(false)
-    setMemoryFocusId(null)
-    setMemoryReviewDrawerSignal((current) => current + 1)
-    chooseView('memory')
+    chooseView('memory', () => {
+      setMemoryReviewNotice(false)
+      setMemoryFocusId(null)
+      setMemoryReviewDrawerSignal((current) => current + 1)
+    })
   }
 
   const openAutomaticMemory = (): void => {
-    setMemoryFocusId(memoryAutoNotice.memoryId)
-    setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })
-    chooseView('memory')
+    chooseView('memory', () => {
+      setMemoryFocusId(memoryAutoNotice.memoryId)
+      setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })
+    })
   }
 
   const closeSettings = (): void => {
@@ -2569,9 +2621,17 @@ function AuthoritativeApp({
     setView('settings')
   }
 
+  const navigateToSettings = async (section: SettingsSection): Promise<boolean> => {
+    let campTransitioned = false
+    const memberTransitioned = await requestMemberTransition(async () => {
+      campTransitioned = await leaveActiveCamp(() => commitSettingsSurface(section))
+    })
+    return memberTransitioned && campTransitioned
+  }
+
   const openSettings = (): void => {
     const rememberedSection = generalPreferences?.lastSettingsSection ?? 'general'
-    void requestMemberTransition(() => commitSettingsSurface(rememberedSection))
+    void navigateToSettings(rememberedSection)
   }
 
   const openUpdateSettings = async (
@@ -2580,7 +2640,7 @@ function AuthoritativeApp({
     const expectedVersion = prompt?.version ?? appUpdates.snapshot?.availableRelease?.version
     if (!expectedVersion) return false
     try {
-      const transitioned = await requestMemberTransition(() => commitSettingsSurface('about'))
+      const transitioned = await navigateToSettings('about')
       if (!transitioned) return false
       await afterNextPaint()
       const releaseSection = document.querySelector<HTMLElement>('.about-release-section')
@@ -2839,50 +2899,61 @@ function AuthoritativeApp({
   const removeNavigationProject = async (
     project: ProjectNavigationGroup
   ): Promise<void> => {
-    setBusy(`remove-project-${project.projectKey}`)
-    setError(null)
-    try {
-      const relatedPinnedCampIds = pinnedCampItems
-        .filter((camp) => (
+    const activeSnapshot = campSnapshotRef.current
+    const removingActiveCamp = activeSnapshot?.camp.id === activeCampIdRef.current
+      && activeSnapshot.camp.projectBindingKind === 'directory'
+      && activeSnapshot.camp.projectPath === project.projectPath
+    const remove = async (): Promise<void> => {
+      setBusy(`remove-project-${project.projectKey}`)
+      setError(null)
+      try {
+        const relatedPinnedCampIds = pinnedCampItems
+          .filter((camp) => (
+            camp.projectBindingKind === 'directory'
+            && camp.projectPath === project.projectPath
+          ))
+          .map((camp) => camp.id)
+        const snapshot = await window.rovai.navigationPreferences.removeProject(
+          project.projectKey,
+          relatedPinnedCampIds
+        )
+        applyNavigationPreferences(snapshot)
+        setPinnedCampItems((current) => current.filter((camp) => !(
           camp.projectBindingKind === 'directory'
           && camp.projectPath === project.projectPath
-        ))
-        .map((camp) => camp.id)
-      const snapshot = await window.rovai.navigationPreferences.removeProject(
-        project.projectKey,
-        relatedPinnedCampIds
-      )
-      applyNavigationPreferences(snapshot)
-      setPinnedCampItems((current) => current.filter((camp) => !(
-        camp.projectBindingKind === 'directory'
-        && camp.projectPath === project.projectPath
-      )))
+        )))
 
-      const removingCurrent = currentProject.kind === 'directory'
-        && currentProject.projectPath === project.projectPath
-      const removingActiveCamp = campSnapshot?.camp.id === activeCampId
-        && campSnapshot.camp.projectBindingKind === 'directory'
-        && campSnapshot.camp.projectPath === project.projectPath
-      if (removingCurrent) {
-        const fallback: CurrentProject = { kind: 'quick_chat' }
-        setCurrentProject(fallback)
-        setCurrentWorkspaceHint(null)
-        persistCurrentProject(fallback)
+        const removingCurrent = currentProject.kind === 'directory'
+          && currentProject.projectPath === project.projectPath
+        if (removingCurrent) {
+          const fallback: CurrentProject = { kind: 'quick_chat' }
+          setCurrentProject(fallback)
+          setCurrentWorkspaceHint(null)
+          persistCurrentProject(fallback)
+        }
+        if (removingActiveCamp) {
+          cancelPendingCampActivation()
+          setActiveCampId(null)
+          setCampSnapshot(null)
+          setNotificationFocus(null)
+          lastMainView.current = 'compose'
+          setView('compose')
+        }
+        if (removingCurrent || removingActiveCamp) {
+          await commitRestorableLocation({ kind: 'quick_chat' })
+        }
+        setToast(`已从侧栏移除“${project.name}”`)
+      } finally {
+        setBusy(null)
       }
-      if (removingActiveCamp) {
-        cancelPendingCampActivation()
-        setActiveCampId(null)
-        setCampSnapshot(null)
-        setNotificationFocus(null)
-        lastMainView.current = 'compose'
-        setView('compose')
+    }
+    if (removingActiveCamp) {
+      const transitioned = await leaveActiveCamp(remove)
+      if (!transitioned) {
+        throw new Error('当前草稿尚未保存，项目未从侧栏移除。请重试。')
       }
-      if (removingCurrent || removingActiveCamp) {
-        await commitRestorableLocation({ kind: 'quick_chat' })
-      }
-      setToast(`已从侧栏移除“${project.name}”`)
-    } finally {
-      setBusy(null)
+    } else {
+      await remove()
     }
   }
 
@@ -3655,10 +3726,7 @@ function AuthoritativeApp({
         updateSnapshot={appUpdates.snapshot}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
-        onMemory={() => {
-          setMemoryFocusId(null)
-          chooseView('memory')
-        }}
+        onMemory={() => chooseView('memory', () => setMemoryFocusId(null))}
         pendingMemoryCount={pendingMemoryCount}
         onSettings={openSettings}
         onOpenUpdates={() => void openUpdateSettings()}
@@ -3873,7 +3941,7 @@ function AuthoritativeApp({
                     onReload={loadMemberData}
                     onOpenRuntimeSettings={() => {
                       chooseSettingsSection('runtime')
-                      chooseView('settings')
+                      void navigateToSettings('runtime')
                     }}
                   />
                 </div>
