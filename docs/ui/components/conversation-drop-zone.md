@@ -4,7 +4,7 @@ authority: camp-conversation-drop-zone
 status: accepted
 design_direction: porcelain-day-steel-night
 implementation_status: complete
-last_updated: 2026-09-04
+last_updated: 2026-09-05
 ---
 
 # Camp 会话区文件与文件夹拖放
@@ -15,9 +15,11 @@ ordinary Camp 的附件放置命中面是主会话列的完整两行：消息时
 Approval/Runtime Recovery Dock 和 Composer。左侧导航、右侧 Inspector、Execution Drawer、Dialog、
 Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不因本功能改变。
 
-拖放只修改当前 Core-owned Draft，不发送消息、不移动或复制宿主文件管理器中的原项目，也不改变光标、
+拖放只修改当前 Core-owned Draft；编辑 Pending 时改为修改该编辑会话的 working attachments，
+不触碰隐藏的普通草稿。不发送消息、不移动或复制宿主文件管理器中的原项目，也不改变光标、
 Mention/Skill 候选或 Inspector 状态。运行中和已有 Pending 时仍可拖入；用户点击发送后，附件引用随完整
 意图进入 Pending。可见 Execution Drawer 保持可读且不关闭当前消息的接收面；Popover 打开时底层接收面关闭。
+Pending 编辑器复用同一接收面、Drag feedback 和附件卡；准备中或编辑占用失效时暂停接收。
 
 ## Drag feedback
 
