@@ -125,6 +125,34 @@ app.whenReady().then(async () => {
     await capture('preview-day-1440x920')
   })
 
+  await check('tool file links commit only after content is readable and preserve the current preview on failure', async () => {
+    const before = await reviewSnapshot()
+    const beforeLayout = await snapshot()
+    const failed = await run('window.previewTest.openToolPreview(true)')
+    const afterFailure = await reviewSnapshot()
+    const afterFailureLayout = await snapshot()
+    assert.equal(failed.kind, 'error')
+    assert.equal(afterFailure.selectedTab, before.selectedTab)
+    assert.equal(afterFailureLayout.visible, beforeLayout.visible)
+    assert.equal(afterFailureLayout.tabCount, beforeLayout.tabCount)
+    assert.equal((await run('window.previewTest.recoverySnapshot()')).text, undefined,
+      'A failed tool link must not replace the current file with a preview error page')
+    assert.equal(afterFailure.fileRestores.length, before.fileRestores.length + 1)
+    assert.equal(afterFailure.fileReads, before.fileReads + 1)
+    assert.equal(afterFailure.releases.length, before.releases.length + 1)
+
+    const opened = await run('window.previewTest.openToolPreview(false)')
+    const afterSuccess = await reviewSnapshot()
+    const afterSuccessLayout = await snapshot()
+    assert.equal(opened.kind, 'preview')
+    assert.equal(afterSuccess.selectedTab, 'tool-link-preview.ts')
+    assert.equal(afterSuccessLayout.tabCount, beforeLayout.tabCount + 1)
+    assert.equal(afterSuccess.fileRestores.length, before.fileRestores.length + 2)
+    assert.equal(afterSuccess.fileReads, before.fileReads + 2)
+    await run('window.previewTest.closeExtraTabs()')
+    await open()
+  })
+
   await check('Camp sessions restore the visible active file first and keep hidden or background files lazy', async () => {
     await run('window.previewTest.openTab(0)')
     const before = await reviewSnapshot()

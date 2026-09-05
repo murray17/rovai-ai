@@ -5707,6 +5707,7 @@ pub struct CompletedAcpAction {
     pub native_kind: String,
     pub public_command: Option<String>,
     pub public_search_operation_candidate: Option<Value>,
+    pub public_file_operation_kind: Option<String>,
     pub public_file_operation_path: Option<String>,
     pub public_file_changes: Option<Value>,
     pub observation_digest: String,
@@ -5781,14 +5782,23 @@ pub fn completed_action(
         .then(|| public_acp_file_changes(update.get("content")))
         .flatten();
     let public_file_operation_path = (succeeded
-        && matches!(native_kind.as_str(), "edit" | "write"))
+        && matches!(native_kind.as_str(), "read" | "edit" | "write"))
     .then(|| single_public_acp_location_path(update.get("locations")))
     .flatten();
+    let public_file_operation_kind = public_file_operation_path.as_ref().map(|_| {
+        if native_kind == "read" {
+            "read"
+        } else {
+            "write"
+        }
+        .to_string()
+    });
     Ok(Some(CompletedAcpAction {
         native_item_id: native_item_id.clone(),
         native_kind,
         public_command,
         public_search_operation_candidate,
+        public_file_operation_kind,
         public_file_operation_path,
         public_file_changes,
         observation_digest,
@@ -5880,18 +5890,27 @@ fn reconcile_completed_action(
         &completion.native_kind,
     )
     .to_string();
-    completion.public_file_operation_path =
-        (matches!(completion.outcome, ActionResultOutcome::Succeeded)
-            && matches!(completion.native_kind.as_str(), "edit" | "write"))
-        .then(|| {
-            completion
+    let file_operation = matches!(completion.outcome, ActionResultOutcome::Succeeded)
+        .then(|| match completion.native_kind.as_str() {
+            "read" => completion
+                .public_file_operation_path
+                .clone()
+                .or(observed_file_operation_path)
+                .map(|path| ("read".to_string(), path)),
+            "edit" | "write" => completion
                 .public_file_operation_path
                 .clone()
                 .or(observed_file_operation_path)
                 .or(observed_raw_input_path)
                 .or(observed_meta_path)
+                .map(|path| ("write".to_string(), path)),
+            _ => None,
         })
         .flatten();
+    completion.public_file_operation_kind = file_operation
+        .as_ref()
+        .map(|(operation_kind, _)| operation_kind.clone());
+    completion.public_file_operation_path = file_operation.map(|(_, path)| path);
     if matches!(completion.outcome, ActionResultOutcome::Succeeded)
         && completion.public_file_changes.is_none()
         && completion.native_kind == "edit"
@@ -10865,7 +10884,57 @@ while IFS= read -r ignored; do :; done
             completion.public_file_operation_path.as_deref(),
             Some("/repo/src/app.ts")
         );
+        assert_eq!(
+            completion.public_file_operation_kind.as_deref(),
+            Some("write")
+        );
         assert!(completion.public_file_changes.is_none());
+    }
+
+    #[test]
+    fn successful_terminal_acp_read_requires_one_structured_location() {
+        let completion = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-read",
+                    "status": "completed",
+                    "kind": "read",
+                    "locations": [{"path": "/repo/docs/README.md"}]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("terminal ACP read should complete");
+        assert_eq!(
+            completion.public_file_operation_kind.as_deref(),
+            Some("read")
+        );
+        assert_eq!(
+            completion.public_file_operation_path.as_deref(),
+            Some("/repo/docs/README.md")
+        );
+
+        let ambiguous = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-read-many",
+                    "status": "completed",
+                    "kind": "read",
+                    "locations": [
+                        {"path": "/repo/docs/README.md"},
+                        {"path": "/repo/docs/ui/README.md"}
+                    ]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("terminal ACP read should still complete");
+        assert!(ambiguous.public_file_operation_kind.is_none());
+        assert!(ambiguous.public_file_operation_path.is_none());
     }
 
     #[test]
@@ -10902,6 +10971,10 @@ while IFS= read -r ignored; do :; done
             reconciled.public_file_operation_path.as_deref(),
             Some("/repo/src/app.ts")
         );
+        assert_eq!(
+            reconciled.public_file_operation_kind.as_deref(),
+            Some("write")
+        );
 
         let read_completion = completed_action(
             AdapterKind::QoderCli,
@@ -10924,7 +10997,14 @@ while IFS= read -r ignored; do :; done
         )
         .unwrap();
         assert_eq!(reconciled_read.native_kind, "read");
-        assert!(reconciled_read.public_file_operation_path.is_none());
+        assert_eq!(
+            reconciled_read.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+        assert_eq!(
+            reconciled_read.public_file_operation_kind.as_deref(),
+            Some("read")
+        );
     }
 
     #[test]

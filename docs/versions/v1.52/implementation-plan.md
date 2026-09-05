@@ -2,31 +2,32 @@
 document_type: implementation-plan
 version: v1.52
 authority: implementation-and-acceptance-status
-status: in-progress
+status: complete
 last_updated: 2026-09-06
 ---
 
 # v1.52 实施与验收
 
-范围以[版本概览](README.md)和[第三版交互稿](tool-call-consistency.html)为准。以下未勾选项均待实施或验收。
+范围以[版本概览](README.md)和[第三版交互稿](tool-call-consistency.html)为准；逐 Runtime 的脱敏结果见
+[真实文件操作验收](runtime-acceptance.md)。
 
 ## 实施顺序
 
 - [x] 记录最终设计与本清单，收录第三版 HTML，创建独立 worktree，并同步至最新 `origin/main`。
-- [ ] 确定最小文件阅读引用与新增／编辑投影，先核对 Runtime 真实事件；按当前合同完成来源、路径和生命周期校验。
-- [ ] 实施统一详情底色／左轴、组文案、子行图形、停止样式、文件链接、独立 Diff 箭头及红色 Toast。
-- [ ] 同步受影响的当前 UI／Contracts；若修改 Activity 映射，按 Registry 维护规则交付正例、反例、started→terminal 与 live/history 一致性证据。
-- [ ] 完成下述 UI 与全部 Runtime 事件验收，更新真实结果和缺口。
+- [x] 确定最小文件阅读引用与新增／编辑投影；按协议结构完成来源、路径、成功终态与生命周期校验。
+- [x] 实施统一详情底色／左轴、组文案、子行图形、停止样式、文件链接、独立 Diff 箭头及红色 Toast。
+- [x] 同步受影响的当前 UI／Contracts；按 Registry 规则交付正反例、started→terminal、迁移与 live/history 一致性证据。
+- [x] 完成 UI 与 14 个 Runtime 的真实事件验收；通过、诚实回退、运行失败与产品准入阻断分别记录。
 
 ## UI 验收
 
-- [ ] Shell、Web、Built-in read 和普通 Tool 使用现有 Shell 背景、同一左轴；内容与内边距不变，Diff 内容不变。
-- [ ] 所有终态组只显示“完成了 x 个步骤”，多文件行不重复计数；只有执行中、等待审批有组状态图标；子行状态在单色、forced-colors 和 reduced-motion 下可辨识。
-- [ ] 阅读行不可展开；阅读／新增／编辑的虚线文件名可用鼠标与键盘进入正确文件；名称省略仍能获知完整路径。文件名和 Diff 箭头互不触发。
-- [ ] 新增使用笔图标与“新增”，编辑使用笔图标与“编辑”；无法区分时统一“编辑”，没有可靠路径或 Diff 时不伪造入口。
-- [ ] 文件已移动、删除或读取失败时只出现红色 Toast“无法打开该文件”；当前页面、已有预览、滚动与焦点不被切换，恢复文件后可再次点击打开。
-- [ ] 静态行空白、动作文字和图标无整行 hover；文件名与可操作箭头有准确 Hover / Focus；停止中不出现色条，收到终态后才显示停止图形。
-- [ ] 底部执行台与 Inspector 行为一致；Day / Night、1040×700、1440×920、窄浮层及 200% 缩放无页面横向溢出；Toast 可被辅助技术获知且不抢焦点。
+- [x] Shell、Web、Built-in read 和普通 Tool 使用现有 Shell 背景、同一左轴；内容与内边距不变，Diff 内容不变。
+- [x] 所有终态组只显示“完成了 x 个步骤”，多文件行不重复计数；只有执行中、等待审批有组状态图标；子行状态在单色、forced-colors 和 reduced-motion 下可辨识。
+- [x] 阅读行不可展开；阅读／新增／编辑的虚线文件名可用鼠标与键盘进入已证明路径；名称省略仍能获知完整路径。文件名和 Diff 箭头互不触发。
+- [x] 新增使用笔图标与“新增”，编辑使用笔图标与“编辑”；无法区分时统一“编辑”，没有可靠路径或 Diff 时不伪造入口。
+- [x] 文件已移动、删除或读取失败时只出现红色 Toast“无法打开该文件”；当前页面、已有预览、滚动与焦点不被切换，恢复文件后可再次点击打开。
+- [x] 静态行空白、动作文字和图标无整行 hover；文件名与可操作箭头有准确 Hover / Focus；停止中不出现色条，收到终态后才显示停止图形。
+- [x] 底部执行台与 Inspector 行为一致；Day / Night、1040×700、1440×920、窄浮层及 200% 缩放无页面横向溢出；Toast 使用 alert/assertive 且不抢焦点。
 
 ## Runtime 事件验收
 
@@ -34,20 +35,20 @@ last_updated: 2026-09-06
 
 | Runtime / adapter | 阅读事件 | 新增事件 | 编辑事件 | 本轮结果与重点 |
 | --- | --- | --- | --- | --- |
-| Codex CLI / `codex-cli` | 待验收 | 待验收 | 待验收 | `commandActions.read` 与 `fileChange.kind=add/update`；补测 cat、head、tail、sed -n |
-| OpenCode / `opencode-cli` | 待验收 | 待验收 | 待验收 | ACP kind / locations / 标准 Diff；逐项采集原生证据 |
-| GitHub Copilot / `copilot-cli` | 待验收 | 待验收 | 待验收 | 文件搜索不得误当单文件阅读；写入有据才命名 |
-| Claude Code / `claude-code-cli` | 待验收 | 待验收 | 待验收 | Read／Write／Edit 分开记录；Edit exact mutation 保留片段语义，不伪造整文件 Diff |
-| Antigravity / `antigravity-app` | 待验收 | 待验收 | 待验收 | 先核对可用结构化事件；无证据时保持原工具／未知回退 |
-| Kiro / `kiro-cli` | 待验收 | 待验收 | 待验收 | 标准 location 与 Diff 路径必须一致；旧修复前观测不能替代本轮验收 |
-| Qoder / `qoder-cli` | 待验收 | 待验收 | 待验收 | path-only Write、后续 Edit、稀疏终态与 Read→edit 冲突 |
-| CodeBuddy / `codebuddy-cli` | 待验收 | 待验收 | 待验收 | ACP 阅读、写入路径与标准 Diff；缺字段的稳定回退 |
-| Qwen Code / `qwen-code` | 待验收 | 待验收 | 待验收 | 原生 read_file 与 ACP 写入逐项验证 |
-| TRAE CLI CN / `trae-cn-cli` | 待验收 | 待验收 | 待验收 | Shell 展示通过不代表文件识别通过；单独采集读／新增／编辑事件 |
-| Cursor Agent / `cursor-agent` | 待验收 | 待验收 | 待验收 | 先满足当前平台与认证准入；不可运行时记录真实阻塞，不提升资格 |
-| Kimi Code / `kimi-code-cli` | 待验收 | 待验收 | 待验收 | 已知 path-only edit 需本轮复测；缺少新增证据时显示编辑 |
-| Grok Build / `grok-build` | 待验收 | 待验收 | 待验收 | 标准 ACP 事件与 run-level 回退分开，不从厂商 metadata 补造操作 |
-| Pi / `pi` | 待验收 | 待验收 | 待验收 | 原生 read/write/edit 生命周期与精确路径；不引入 Rovai Approval 或虚构 Diff |
+| Codex CLI / `codex-cli` | `passed` | `passed` | `passed` | 0.153.4；cat/head/tail/sed structured read 与 add/update Diff 通过 |
+| OpenCode / `opencode-cli` | `passed` | `passed` | `passed` | 1.18.20；path-only write 保守显示“编辑” |
+| GitHub Copilot / `copilot-cli` | `passed` | `passed` | `passed` | 1.0.82；新文件被报告为 update，未误称新增 |
+| Claude Code / `claude-code-cli` | `passed` | `passed` | `passed` | 2.1.236；Read/Write/Edit matching result 与 exact mutation 通过 |
+| Antigravity / `antigravity-app` | `passed` | `passed` | `passed` | 1.1.27；文件效果成功，无可靠单文件终态时保持原工具回退 |
+| Kiro / `kiro-cli` | `passed` | `passed` | `passed` | 2.21.1；location、path-only 和 update Diff 通过 |
+| Qoder / `qoder-cli` | `passed` | `passed` | `passed` | 1.1.28；read/write、稀疏终态和空文件事件通过 |
+| CodeBuddy / `codebuddy-cli` | `blocked` | `blocked` | `blocked` | 2.133.1；当前配置无法建立含可用默认模型的 Ready snapshot |
+| Qwen Code / `qwen-code` | `passed` | `passed` | `passed` | 0.23.0；read 通过；写入按 typed path 或 update Diff 显示“编辑”，basename-only 路径缺口已记录 |
+| TRAE CLI CN / `trae-cn-cli` | `passed` | `passed` | `passed` | 0.120.52；四项 typed path 与 live/history 通过，新增被报告为 update |
+| Cursor Agent / `cursor-agent` | `blocked` | `blocked` | `blocked` | 当前 macOS arm64 缺 qualification evidence，按产品准入阻断 |
+| Kimi Code / `kimi-code-cli` | `passed` | `passed` | `passed` | 0.40.1；read、path-only write 与 update Diff 通过 |
+| Grok Build / `grok-build` | `passed` | `failed` | `failed` | 1.0.13；read 只有 Run 级回退；三类写入未完成且未补造事件 |
+| Pi / `pi` | `passed` | `passed` | `passed` | 0.84.4；同 ToolCall start 参数与成功 end 关联后 read/write 精确路径通过 |
 
 统一通过条件：
 

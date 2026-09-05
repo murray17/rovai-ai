@@ -69,7 +69,7 @@ export function relativeTimeLabel(iso: string, now: Date = new Date()): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`
 }
 
-export type ActivityStatus = 'running' | 'completed' | 'failed' | 'waiting' | 'stopped' | 'recorded'
+export type ActivityStatus = 'running' | 'completed' | 'failed' | 'waiting' | 'stopped' | 'skipped' | 'recorded'
 
 export type LiveRuntimeEvent = {
   id: string
@@ -85,7 +85,7 @@ export type ExecutionPlanStep = {
   status: 'pending' | 'inProgress' | 'completed'
 }
 
-export type ActivityIconKind = 'terminal' | 'file' | 'web' | 'tool' | 'rovai' | 'runtime' | 'unknown'
+export type ActivityIconKind = 'terminal' | 'file' | 'file-read' | 'file-write' | 'web' | 'tool' | 'rovai' | 'runtime' | 'unknown'
 
 export type ExecutionStep = {
   id: string
@@ -109,6 +109,10 @@ export type ExecutionStep = {
   iconKind: ActivityIconKind
   toolName: string | null
   credibility: string
+  fileOperation?: {
+    operationKind: 'read' | 'write'
+    path: string
+  }
   fileChanges?: Array<{
     path: string
     changeKind: 'add' | 'delete' | 'update'
@@ -644,6 +648,7 @@ export function buildLiveExecutionProgress(
       const status = canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType))
       const fileChanges = canonicalFileChanges(canonical)
       const fileChangeSemantics = fileChanges ? canonical?.diffProjection?.semanticKind : undefined
+      const fileOperation = reliableRuntimeFileOperation(payload)
       if (nativeType === 'fileChange' && !fileChanges) continue
       if (!fileChanges && isApplyPatchPresentation(canonical, payload)) continue
       const command = stringField(item, 'command')
@@ -669,7 +674,9 @@ export function buildLiveExecutionProgress(
           ?? runtimeToolDetail(item, nativeType)
           ?? nativeStatus
           ?? ''
-      const detail = searchEvidenceText(typedSearchQuery(payload, canonical), evidenceDetail) ?? ''
+      const detail = fileOperation?.operationKind === 'read'
+        ? ''
+        : searchEvidenceText(typedSearchQuery(payload, canonical), evidenceDetail) ?? ''
       if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
         id: itemId,
@@ -683,6 +690,7 @@ export function buildLiveExecutionProgress(
         iconKind: activityIconKind(canonical),
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown',
+        fileOperation,
         fileChanges,
         fileChangeSemantics
       })
@@ -699,6 +707,7 @@ export function buildLiveExecutionProgress(
       const status = canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType))
       const fileChanges = canonicalFileChanges(canonical)
       const fileChangeSemantics = fileChanges ? canonical?.diffProjection?.semanticKind : undefined
+      const fileOperation = reliableRuntimeFileOperation(payload)
       if (!fileChanges && isApplyPatchPresentation(canonical, payload)) continue
       if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
@@ -709,12 +718,15 @@ export function buildLiveExecutionProgress(
           ? publicShellCommandPresentation(payload)
           : null,
         publicResult: null,
-        detail: runtimeActionEvidenceText(payload, canonical) ?? '',
+        detail: fileOperation?.operationKind === 'read'
+          ? ''
+          : runtimeActionEvidenceText(payload, canonical) ?? '',
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
         iconKind: activityIconKind(canonical),
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown',
+        fileOperation,
         fileChanges,
         fileChangeSemantics
       })
@@ -1100,6 +1112,7 @@ export function executionActivityTitle(
   if (domain === 'file') {
     const fileTitle = reliableFileActivityTitle(canonical, payload)
     if (fileTitle) return fileTitle
+    if (canonical?.semanticKind === 'file.read') return '阅读文件'
     if (canonical?.toolName) return canonical.toolName
     if (runtimeTitle) return runtimeTitle
     return '文件操作'
@@ -1205,7 +1218,11 @@ export function activityIconKind(
   canonical: CanonicalRuntimeActivityView | null | undefined
 ): ActivityIconKind {
   if (canonical?.activityDomain === 'shell') return 'terminal'
-  if (canonical?.activityDomain === 'file') return 'file'
+  if (canonical?.activityDomain === 'file') {
+    if (canonical.semanticKind === 'file.read') return 'file-read'
+    if (canonical.semanticKind === 'file.write') return 'file-write'
+    return 'file'
+  }
   if (canonical?.activityDomain === 'tool') {
     if (canonical.semanticKind === 'tool.web.search') return 'web'
     if (
@@ -1223,10 +1240,8 @@ function reliableFileActivityTitle(
   canonical: CanonicalRuntimeActivityView | null | undefined,
   payload: unknown
 ): string | null {
-  const operation = asRecord(asRecord(payload).runtimeFileOperation)
-  const operationPath = stringField(operation, 'status') === 'available'
-    ? stringField(operation, 'path')
-    : null
+  const operation = reliableRuntimeFileOperation(payload)
+  const operationPath = operation?.path ?? null
   const diffEntries = canonical?.diffProjection?.status === 'available'
     && Array.isArray(canonical.diffProjection.entries)
     ? canonical.diffProjection.entries
@@ -1234,7 +1249,22 @@ function reliableFileActivityTitle(
   const path = operationPath ?? (diffEntries.length === 1 ? diffEntries[0]?.path : null)
   if (!path) return null
   const fileName = path.split(/[\\/]/u).filter(Boolean).at(-1)
-  return fileName ? `修改 ${fileName}` : null
+  if (!fileName) return null
+  if (operation?.operationKind === 'read') return `阅读 ${fileName}`
+  const changeKind = diffEntries.length === 1 ? diffEntries[0]?.changeKind : null
+  return `${changeKind === 'add' ? '新增' : '编辑'} ${fileName}`
+}
+
+function reliableRuntimeFileOperation(payload: unknown): ExecutionStep['fileOperation'] {
+  const operation = asRecord(asRecord(payload).runtimeFileOperation)
+  if (numberField(operation, 'schemaVersion') !== 2 || stringField(operation, 'status') !== 'available') {
+    return undefined
+  }
+  const operationKind = stringField(operation, 'operationKind')
+  const path = stringField(operation, 'path')?.trim()
+  return path && (operationKind === 'read' || operationKind === 'write')
+    ? { operationKind, path }
+    : undefined
 }
 
 function reliableFileActivityInstruction(
@@ -1790,6 +1820,7 @@ function canonicalActivityStatus(
   if (canonical.outcome === 'failed') return 'failed'
   if (canonical.outcome === 'succeeded') return 'completed'
   if (canonical.outcome === 'cancelled') return 'stopped'
+  if (canonical.outcome === 'not_executed' || canonical.outcome === 'denied') return 'skipped'
   if (canonical.phase === 'terminal' && fallback === 'stopped') return 'stopped'
   if (canonical.outcome !== 'unknown') return 'recorded'
   if (canonical.phase === 'started' || canonical.phase === 'progress') return 'running'

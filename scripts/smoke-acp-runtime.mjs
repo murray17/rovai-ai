@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { isDeepStrictEqual } from 'node:util'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 import {
@@ -17,6 +18,7 @@ const dataDir = join(fixtureRoot, 'data')
 const commandOutputOnly = process.env.ROVAI_ACP_COMMAND_OUTPUT_ONLY === '1'
 const keepFixture = process.env.ROVAI_KEEP_ACP_RUNTIME_FIXTURE === '1'
 const fullCommandOutputMatrix = process.env.ROVAI_ACP_FULL_COMMAND_MATRIX === '1'
+const fileOperationMatrix = process.env.ROVAI_ACP_FILE_OPERATION_MATRIX === '1'
 const useProductPermissionDefaults = process.env.ROVAI_ACP_USE_PRODUCT_PERMISSION_DEFAULTS === '1'
 const plainTwoTurn = process.env.ROVAI_ACP_PLAIN_TWO_TURN === '1'
 const cancelRunningTool = process.env.ROVAI_ACP_CANCEL_RUNNING_TOOL === '1'
@@ -72,7 +74,7 @@ try {
     if (!request) return
     clearTimeout(request.timer)
     pending.delete(message.id)
-    if (message.error) request.reject(new Error(message.error.message))
+    if (message.error) request.reject(new Error(`${request.method}: ${message.error.message}`))
     else request.resolve(message.result)
   })
   const request = (method, params = {}) => new Promise((resolveRequest, rejectRequest) => {
@@ -81,7 +83,7 @@ try {
       pending.delete(id)
       rejectRequest(new Error(`Timed out waiting for ${method}`))
     }, 90_000)
-    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
+    pending.set(id, { method, resolve: resolveRequest, reject: rejectRequest, timer })
     core.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
 
@@ -233,8 +235,10 @@ try {
         actual: profile.runtimeConfiguration?.model
       })}`)
     }
-    if (JSON.stringify(profile.runtimeConfiguration?.permissions?.values)
-        !== JSON.stringify(permissionValues)) {
+    if (!isDeepStrictEqual(
+      profile.runtimeConfiguration?.permissions?.values,
+      permissionValues
+    )) {
       throw new Error(`ACP smoke permissions drifted: ${JSON.stringify({
         adapterKind: specification.adapterKind,
         expected: permissionValues,
@@ -282,7 +286,14 @@ try {
     if (agentRun?.status !== 'succeeded' || !output?.body.includes(specification.token)) {
       throw new Error(`${specification.adapterKind} output failed: ${JSON.stringify({ agentRun, output })}`)
     }
-    if (start?.params?.adapterKind !== specification.adapterKind || !start.params.nativeThreadId) {
+    const nativeSessionBound = events.find((event) =>
+      event.method === 'agent_run.native_session_bound'
+        && event.params?.agentRunId === agentRunId
+    )
+    const nativeThreadId = start?.params?.nativeThreadId
+      ?? nativeSessionBound?.params?.nativeThreadId
+      ?? null
+    if (start?.params?.adapterKind !== specification.adapterKind || !nativeThreadId) {
       throw new Error(`${specification.adapterKind} did not expose its Native Session: ${JSON.stringify(start)}`)
     }
     let verifiedInstallation = installation
@@ -306,9 +317,20 @@ try {
       modelCount: verifiedInstallation.snapshot.models.length,
       model: start.params.modelId,
       hostInstanceId: start.params.hostInstanceId,
-      nativeSessionId: start.params.nativeThreadId,
+      nativeSessionId: nativeThreadId,
       output: output.body
     })
+
+    if (fileOperationMatrix) {
+      results.at(-1).fileOperations = await runFileOperationMatrix({
+        request,
+        events,
+        campId: camp.id,
+        adapterKind: specification.adapterKind,
+        projectRoot
+      })
+      continue
+    }
 
     if (specifications.some(({ adapterKind }) => adapterKind === specification.adapterKind)) {
       const commandMarker = `ROVAI_${specification.adapterKind.replaceAll('-', '_').toUpperCase()}_PRINTF_OK`
@@ -787,7 +809,7 @@ async function sendExistingCampMessage(request, campId, body, execution) {
   const saved = await request('camp.composerDraft.save', {
     campId,
     expectedRevision: draft.revision,
-    content: [{ kind: 'text', text: body }]
+    content: { version: 2, segments: [{ kind: 'text', text: body }] }
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),
@@ -795,6 +817,261 @@ async function sendExistingCampMessage(request, campId, body, execution) {
     draftRevision: saved.revision,
     execution
   })
+}
+
+async function runFileOperationMatrix({ request, events, campId, adapterKind, projectRoot }) {
+  const stem = adapterKind.replaceAll('-', '_').toUpperCase()
+  const directory = join(projectRoot, 'runtime-file-operation-matrix', stem)
+  const existingPath = join(directory, 'existing.txt')
+  const emptyPath = join(directory, 'empty.txt')
+  const createdPath = join(directory, 'created.txt')
+  const originalText = `RUNTIME_FILE_${stem}_ORIGINAL\n`
+  const editedText = `RUNTIME_FILE_${stem}_EDITED\n`
+  const createdText = `RUNTIME_FILE_${stem}_CREATED\n`
+  const emptyEditedText = `RUNTIME_FILE_${stem}_EMPTY_EDITED\n`
+  await mkdir(directory, { recursive: true })
+  await writeFile(existingPath, originalText)
+  await writeFile(emptyPath, '')
+
+  const cases = [
+    {
+      name: 'read',
+      path: existingPath,
+      prompt: adapterKind === 'codex-cli'
+        ? [
+            'This is an isolated local file-operation acceptance test.',
+            'Use the terminal tool exactly four times and run each command below as a separate command without combining or changing it:',
+            `cat '${existingPath}'`,
+            `head -n 1 '${existingPath}'`,
+            `tail -n 1 '${existingPath}'`,
+            `sed -n '1p' '${existingPath}'`,
+            'Do not modify files and do not call another tool. Then reply exactly FILE_READ_DONE.'
+          ].join('\n')
+        : [
+            'This is an isolated local file-operation acceptance test.',
+            `Use the native file Read tool exactly once to read ${existingPath}.`,
+            'Do not use shell, search, list, or another tool. Then reply exactly FILE_READ_DONE.'
+          ].join('\n'),
+      expectedText: originalText,
+      expectedOperation: 'read'
+    },
+    {
+      name: 'add',
+      path: createdPath,
+      prompt: [
+        'This is an isolated local file-operation acceptance test.',
+        `Use the native file Write or file editing tool exactly once to create the new file ${createdPath} with exactly ${createdText.trimEnd()} and a trailing newline.`,
+        'Do not read, list, search, use shell, or call another tool. Then reply exactly FILE_ADD_DONE.'
+      ].join('\n'),
+      expectedText: createdText,
+      expectedOperation: 'write'
+    },
+    {
+      name: 'edit',
+      path: existingPath,
+      prompt: [
+        'This is an isolated local file-operation acceptance test.',
+        `Use the native file tools to edit ${existingPath}; replace the exact text ${originalText.trimEnd()} with ${editedText.trimEnd()}.`,
+        'If your native Edit tool requires reading the file first, use the native file Read tool once before editing.',
+        'Do not list, search, use shell, or call unrelated tools. Then reply exactly FILE_EDIT_DONE.'
+      ].join('\n'),
+      expectedText: editedText,
+      expectedOperation: 'write'
+    },
+    {
+      name: 'edit_empty',
+      path: emptyPath,
+      prompt: [
+        'This is an isolated local file-operation acceptance test.',
+        `The file ${emptyPath} already exists and is empty. Use native file tools to set it to exactly ${emptyEditedText.trimEnd()} and a trailing newline.`,
+        'If your native Write or Edit tool requires reading the file first, use the native file Read tool once before writing.',
+        'Do not list, search, use shell, or call unrelated tools. Then reply exactly FILE_EMPTY_EDIT_DONE.'
+      ].join('\n'),
+      expectedText: emptyEditedText,
+      expectedOperation: 'write'
+    }
+  ]
+
+  const results = []
+  for (const testCase of cases) {
+    const eventStart = events.length
+    const sent = await sendExistingCampMessage(request, campId, testCase.prompt, {
+      taskId: null,
+      purpose: `Verify ${adapterKind} ${testCase.name} file-operation Evidence`,
+      completionRole: 'required'
+    })
+    const agentRunId = sent.commandResult?.payload?.agentRunIds?.[0]
+    if (!agentRunId) {
+      throw new Error(`${adapterKind} ${testCase.name} file-operation Run was not accepted: ${JSON.stringify(sent)}`)
+    }
+    const { snapshot, run, approvalCount } = await waitForFileOperationRun({
+      request,
+      campId,
+      agentRunId,
+      adapterKind,
+      name: testCase.name
+    })
+    const evidencePage = await request('agentRunEvidence.list', {
+      campId,
+      agentRunId,
+      afterSequence: 0,
+      limit: 1_000
+    })
+    const actualText = await readFile(testCase.path, 'utf8').catch((error) => {
+      if (error?.code === 'ENOENT') return null
+      throw error
+    })
+    const pathSuffix = testCase.path.slice(projectRoot.length + 1)
+    const summarizeEvidence = (entry) => {
+      const operation = entry.payload?.runtimeFileOperation
+      const entries = entry.canonical?.diffProjection?.status === 'available'
+        ? entry.canonical.diffProjection.entries ?? []
+        : []
+      return {
+        evidenceId: entry.id,
+        sequence: entry.sequence,
+        eventType: entry.eventType,
+        operationId: entry.canonical?.operationId ?? null,
+        phase: entry.canonical?.phase ?? entry.phase,
+        outcome: entry.canonical?.outcome ?? null,
+        classifierVersion: entry.canonical?.classifierVersion ?? null,
+        activityDomain: entry.canonical?.activityDomain ?? null,
+        semanticKind: entry.canonical?.semanticKind ?? null,
+        operation: operation?.schemaVersion === 2
+          ? {
+              schemaVersion: operation.schemaVersion,
+              status: operation.status,
+              operationKind: operation.operationKind ?? null,
+              path: operation.path ?? null,
+              safeReasonCode: operation.safeReasonCode ?? null,
+              sourceEventKind: operation.sourceMetadata?.sourceEventKind ?? null
+            }
+          : null,
+        diffEntries: entries.map((entry) => ({
+          path: entry.path,
+          changeKind: entry.changeKind,
+          additions: entry.additions,
+          deletions: entry.deletions
+        }))
+      }
+    }
+    const history = evidencePage.evidence.map(summarizeEvidence)
+    const relevantHistory = history.filter((entry) => entry.operation || entry.diffEntries.length > 0)
+    const live = events.slice(eventStart)
+      .filter((event) => event.params?.agentRunId === agentRunId)
+      .map((event) => ({
+        id: event.params?.evidenceId ?? null,
+        method: event.method,
+        canonical: event.params?.canonical
+          ? {
+              operationId: event.params.canonical.operationId,
+              classifierVersion: event.params.canonical.classifierVersion,
+              activityDomain: event.params.canonical.activityDomain,
+              semanticKind: event.params.canonical.semanticKind,
+              phase: event.params.canonical.phase,
+              outcome: event.params.canonical.outcome
+            }
+          : null,
+        operation: event.params?.payload?.runtimeFileOperation?.schemaVersion === 2
+          ? {
+              status: event.params.payload.runtimeFileOperation.status,
+              operationKind: event.params.payload.runtimeFileOperation.operationKind ?? null,
+              path: event.params.payload.runtimeFileOperation.path ?? null
+            }
+          : null
+      }))
+      .filter((entry) => entry.operation || entry.canonical?.semanticKind?.startsWith('file.'))
+    const matchingOperations = relevantHistory.filter((entry) =>
+      entry.operation?.status === 'available'
+        && entry.operation.operationKind === testCase.expectedOperation
+        && entry.operation.path === pathSuffix
+    )
+    const matchingOperation = matchingOperations[0]
+    const typedOperationCount = new Set(matchingOperations
+      .map((entry) => entry.operationId ?? entry.evidenceId)).size
+    const expectedTypedOperationCount = adapterKind === 'codex-cli' && testCase.name === 'read' ? 4 : 1
+    const typedProjectionObserved = typedOperationCount >= expectedTypedOperationCount
+    const reportedDiffs = relevantHistory.flatMap((entry) => entry.diffEntries)
+      .filter((entry, index, entries) => entries.findIndex((candidate) =>
+        candidate.path === entry.path
+          && candidate.changeKind === entry.changeKind
+          && candidate.additions === entry.additions
+          && candidate.deletions === entry.deletions
+      ) === index)
+    const matchingDiff = reportedDiffs.find((entry) => entry.path === pathSuffix)
+    const reportedDiff = reportedDiffs.length === 1 ? reportedDiffs[0] : matchingDiff
+    const fileChanges = snapshot.agentRunFileChanges.filter((entry) => entry.agentRunId === agentRunId)
+    const output = snapshot.messages.find((message) => message.sourceAgentRunId === agentRunId)?.body ?? null
+    const presentation = testCase.name === 'read'
+      ? matchingOperation ? '阅读' : '保持原工具回退'
+      : reportedDiff?.changeKind === 'add'
+        ? '新增'
+        : matchingOperation || reportedDiff
+          ? '编辑'
+          : '保持原工具回退'
+    const fileLinkTarget = matchingOperation?.operation?.path ?? reportedDiff?.path ?? null
+    results.push({
+      name: testCase.name,
+      agentRunId,
+      runStatus: run?.status ?? 'missing',
+      approvalCount,
+      expectedPath: pathSuffix,
+      fileEffect: actualText === testCase.expectedText ? 'passed' : 'failed',
+      observedText: actualText,
+      output,
+      typedProjection: typedProjectionObserved ? 'passed' : 'not_observed',
+      typedOperationCount,
+      expectedTypedOperationCount,
+      diffChangeKind: reportedDiff?.changeKind ?? null,
+      fileLinkTarget,
+      fileLinkMatchesExpected: fileLinkTarget === pathSuffix,
+      presentation: testCase.name === 'read' && !typedProjectionObserved
+        ? '保持原工具回退'
+        : presentation,
+      filesChangedCount: fileChanges.length,
+      live,
+      history: relevantHistory
+    })
+  }
+  return results
+}
+
+async function waitForFileOperationRun({ request, campId, agentRunId, adapterKind, name }) {
+  const resolvedApprovals = new Set()
+  const deadline = Date.now() + 300_000
+  let snapshot
+  let run
+  while (Date.now() < deadline) {
+    snapshot = await request('camps.snapshot', { campId })
+    const actions = snapshot.actions.filter((action) => action.agentRunId === agentRunId)
+    for (const approval of snapshot.approvals.filter((candidate) =>
+      candidate.status === 'pending'
+        && !resolvedApprovals.has(candidate.id)
+        && actions.some((action) => action.id === candidate.actionId)
+    )) {
+      const option = approval.options.find((candidate) => candidate.kind === 'allow_session')
+        ?? approval.options.find((candidate) => candidate.kind === 'allow_once')
+      if (!option) throw new Error(`${adapterKind} ${name} has no bounded allow option: ${JSON.stringify(approval)}`)
+      const resolution = await request('action.approvals.resolve', {
+        commandId: crypto.randomUUID(),
+        campId,
+        approvalId: approval.id,
+        expectedVersion: approval.version,
+        optionId: option.optionId,
+        reason: `v1.52 ${adapterKind} file-operation acceptance`
+      })
+      if (resolution.status === 'rejected') {
+        throw new Error(`${adapterKind} ${name} approval was rejected: ${JSON.stringify(resolution)}`)
+      }
+      resolvedApprovals.add(approval.id)
+    }
+    run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+    if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
+      return { snapshot, run, approvalCount: resolvedApprovals.size }
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+  }
+  throw new Error(`${adapterKind} ${name} file-operation Run timed out: ${JSON.stringify(run)}`)
 }
 
 async function cancelAgentRun(request, campId, agentRunId) {

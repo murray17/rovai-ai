@@ -111,16 +111,30 @@ pub fn normalize_event(message: &Value) -> (&'static str, Value) {
                 "output": public_content_text(message.pointer("/partialResult/content")),
             }),
         ),
-        Some("tool_execution_end") => (
-            "runtime.action",
-            json!({
+        Some("tool_execution_end") => {
+            let is_error = message.get("isError").and_then(Value::as_bool) == Some(true);
+            let tool_name = message.get("toolName").and_then(Value::as_str);
+            let mut payload = json!({
                 "toolCallId": message.get("toolCallId"),
                 "toolName": message.get("toolName"),
-                "status": if message.get("isError").and_then(Value::as_bool) == Some(true) { "failed" } else { "completed" },
-                "kind": public_tool_kind(message.get("toolName").and_then(Value::as_str)),
+                "status": if is_error { "failed" } else { "completed" },
+                "kind": public_tool_kind(tool_name),
                 "output": public_content_text(message.pointer("/result/content")),
-            }),
-        ),
+            });
+            if !is_error
+                && let Some(tool_name) = tool_name
+                && let Some((operation_kind, path)) = terminal_file_operation(message, tool_name)
+            {
+                payload["runtimeFileOperation"] = json!({
+                    "adapterKind": "pi",
+                    "protocolFamily": PI_PROTOCOL_VERSION,
+                    "sourceEventKind": "tool_execution_end.completed",
+                    "operationKind": operation_kind,
+                    "path": path,
+                });
+            }
+            ("runtime.action", payload)
+        }
         Some("agent_settled") => ("runtime.turn.completed", json!({"status": "settled"})),
         Some("compaction_start" | "compaction_end") => (
             "runtime.event",
@@ -173,6 +187,9 @@ pub(super) fn completed_action(message: &Value) -> Result<Option<CompletedAcpAct
         "resultDigest": result_digest.as_deref(),
         "isError": is_error,
     }))?;
+    let file_operation = (!is_error)
+        .then(|| terminal_file_operation(message, &tool_name))
+        .flatten();
     Ok(Some(CompletedAcpAction {
         native_item_id,
         native_kind: public_tool_kind(Some(&tool_name))
@@ -180,7 +197,10 @@ pub(super) fn completed_action(message: &Value) -> Result<Option<CompletedAcpAct
             .to_string(),
         public_command: None,
         public_search_operation_candidate: None,
-        public_file_operation_path: terminal_file_operation_path(message, &tool_name),
+        public_file_operation_kind: file_operation
+            .as_ref()
+            .map(|(operation_kind, _)| operation_kind.clone()),
+        public_file_operation_path: file_operation.map(|(_, path)| path),
         public_file_changes: None,
         observation_digest,
         outcome: if is_error {
@@ -206,12 +226,45 @@ pub(super) fn completed_action(message: &Value) -> Result<Option<CompletedAcpAct
     }))
 }
 
-fn terminal_file_operation_path(message: &Value, tool_name: &str) -> Option<String> {
-    matches!(tool_name, "write" | "edit")
-        .then(|| message.pointer("/args/path").and_then(Value::as_str))
-        .flatten()
-        .filter(|path| !path.trim().is_empty())
-        .map(str::to_string)
+fn terminal_file_operation(message: &Value, tool_name: &str) -> Option<(String, String)> {
+    let operation_kind = match tool_name {
+        "read" => "read",
+        "write" | "edit" => "write",
+        _ => return None,
+    };
+    let path = message
+        .pointer("/args/path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.trim().is_empty())?;
+    Some((operation_kind.to_string(), path.to_string()))
+}
+
+fn reconcile_terminal_tool_message(message: &mut Value, observed: &Value) {
+    let Some(message) = message.as_object_mut() else {
+        return;
+    };
+    if !message
+        .get("toolName")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+        && let Some(value) = observed
+            .get("toolName")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        message.insert("toolName".to_string(), Value::String(value.to_string()));
+    }
+    if let Some(observed_args) = observed.get("args").and_then(Value::as_object) {
+        if let Some(current_args) = message.get_mut("args").and_then(Value::as_object_mut) {
+            for (key, value) in observed_args {
+                current_args
+                    .entry(key.clone())
+                    .or_insert_with(|| value.clone());
+            }
+        } else {
+            message.insert("args".to_string(), Value::Object(observed_args.clone()));
+        }
+    }
 }
 
 pub(super) fn assistant_message_text(message: &Value) -> Option<String> {
@@ -355,6 +408,65 @@ mod tests {
         assert!(source.contains("pi.on(\"before_agent_start\""));
         assert!(source.contains("const current = loadBinding()"));
         assert!(source.contains("`${event.systemPrompt}\\n\\n${current.bootstrap}`"));
+    }
+
+    #[test]
+    fn terminal_file_tools_emit_bounded_read_and_write_operations() {
+        for (tool_name, operation_kind) in [("read", "read"), ("write", "write"), ("edit", "write")]
+        {
+            let (_, payload) = normalize_event(&json!({
+                "type": "tool_execution_end",
+                "toolCallId": format!("tool-{tool_name}"),
+                "toolName": tool_name,
+                "args": {"path": "/repo/src/app.ts"},
+                "isError": false,
+                "result": {"content": [{"type":"text","text":"done"}]}
+            }));
+            assert_eq!(
+                payload["runtimeFileOperation"]["operationKind"],
+                operation_kind
+            );
+            assert_eq!(payload["runtimeFileOperation"]["path"], "/repo/src/app.ts");
+        }
+        for tool_name in ["grep", "find", "ls"] {
+            let (_, payload) = normalize_event(&json!({
+                "type": "tool_execution_end",
+                "toolCallId": format!("tool-{tool_name}"),
+                "toolName": tool_name,
+                "args": {"path": "/repo/src/app.ts"},
+                "isError": false
+            }));
+            assert!(payload.get("runtimeFileOperation").is_none());
+        }
+    }
+
+    #[test]
+    fn terminal_file_tools_reuse_start_arguments_when_pi_omits_them_at_end() {
+        let start = json!({
+            "type": "tool_execution_start",
+            "toolCallId": "tool-read",
+            "toolName": "read",
+            "args": {"path": "/repo/src/app.ts"}
+        });
+        let mut update = json!({
+            "type": "tool_execution_update",
+            "toolCallId": "tool-read",
+            "toolName": "read",
+            "args": {"line": 10}
+        });
+        reconcile_terminal_tool_message(&mut update, &start);
+        let mut terminal = json!({
+            "type": "tool_execution_end",
+            "toolCallId": "tool-read",
+            "isError": false,
+            "result": {"content": [{"type":"text","text":"done"}]}
+        });
+
+        reconcile_terminal_tool_message(&mut terminal, &update);
+        let (_, payload) = normalize_event(&terminal);
+
+        assert_eq!(payload["runtimeFileOperation"]["operationKind"], "read");
+        assert_eq!(payload["runtimeFileOperation"]["path"], "/repo/src/app.ts");
     }
 
     #[test]

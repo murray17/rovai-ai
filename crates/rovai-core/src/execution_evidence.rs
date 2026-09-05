@@ -244,6 +244,16 @@ impl ExecutionEvidenceService {
                 &evidence.phase,
                 &evidence.payload,
             );
+            let previous_facts = canonical_activity::classify_evidence_with_version(
+                canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
+                agent_run_id,
+                execution_epoch,
+                &id,
+                &evidence.event_type,
+                &evidence.kind,
+                &evidence.phase,
+                &evidence.payload,
+            );
             let legacy_facts = canonical_activity::classify_evidence_with_version(
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
                 agent_run_id,
@@ -263,6 +273,7 @@ impl ExecutionEvidenceService {
                 &evidence.occurred_at,
                 EvidenceActivityClassifications {
                     current: &facts,
+                    previous: &previous_facts,
                     legacy: &legacy_facts,
                 },
             )?;
@@ -537,6 +548,12 @@ impl ExecutionEvidenceService {
         let source_event_key = source_event_key(event_type, payload);
         let source_payload = payload;
         let mut payload = normalize_public_payload(event_type, source_payload);
+        insert_codex_command_read_candidate(
+            &mut payload,
+            event_type,
+            source_payload,
+            runtime_adapter_kind.as_deref(),
+        );
         normalize_runtime_search_operation_evidence(
             &mut payload,
             event_type,
@@ -676,6 +693,16 @@ impl ExecutionEvidenceService {
             phase,
             &payload,
         );
+        let previous_facts = canonical_activity::classify_evidence_with_version(
+            canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
+            agent_run_id,
+            execution_epoch,
+            &id,
+            event_type,
+            kind,
+            phase,
+            &payload,
+        );
         let legacy_facts = canonical_activity::classify_evidence_with_version(
             canonical_activity::LEGACY_CLASSIFIER_VERSION,
             agent_run_id,
@@ -695,6 +722,7 @@ impl ExecutionEvidenceService {
             &occurred_at,
             EvidenceActivityClassifications {
                 current: &facts,
+                previous: &previous_facts,
                 legacy: &legacy_facts,
             },
         )?;
@@ -1109,6 +1137,61 @@ fn normalize_runtime_file_operation_evidence(
     };
 }
 
+fn insert_codex_command_read_candidate(
+    payload: &mut Value,
+    event_type: &str,
+    source_payload: &Value,
+    frozen_adapter_kind: Option<&str>,
+) {
+    if frozen_adapter_kind != Some("codex-cli") {
+        return;
+    }
+    if let Some(object) = payload.as_object_mut() {
+        object.remove("runtimeFileOperation");
+    }
+    if !matches!(event_type, "activity.started" | "activity.completed")
+        || source_payload.pointer("/item/type").and_then(Value::as_str) != Some("commandExecution")
+    {
+        return;
+    }
+    let Some(actions) = source_payload
+        .pointer("/item/commandActions")
+        .and_then(Value::as_array)
+        .filter(|actions| !actions.is_empty())
+    else {
+        return;
+    };
+    let mut unique_path: Option<&str> = None;
+    for action in actions {
+        if action.get("type").and_then(Value::as_str) != Some("read") {
+            return;
+        }
+        let Some(path) = action
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        else {
+            return;
+        };
+        match unique_path {
+            Some(existing) if existing != path => return,
+            None => unique_path = Some(path),
+            _ => {}
+        }
+    }
+    let Some(path) = unique_path else {
+        return;
+    };
+    payload["runtimeFileOperation"] = serde_json::json!({
+        "adapterKind": "codex-cli",
+        "protocolFamily": "codex-app-server",
+        "sourceEventKind": "activity.commandExecution.read",
+        "operationKind": "read",
+        "path": path,
+    });
+}
+
 fn normalize_runtime_run_diff_evidence(
     payload: &mut Value,
     workspace_json: Option<&str>,
@@ -1353,6 +1436,7 @@ fn load_by_source_key(
 
 struct EvidenceActivityClassifications<'a> {
     current: &'a EvidenceActivityFacts,
+    previous: &'a EvidenceActivityFacts,
     legacy: &'a EvidenceActivityFacts,
 }
 
@@ -1382,8 +1466,12 @@ fn upsert_canonical_activity(
             WHERE agent_run_id = ?1
               AND execution_epoch = ?2
               AND operation_id = ?3
-              AND classifier_version IN (?4, ?5)
-            ORDER BY CASE classifier_version WHEN ?4 THEN 0 ELSE 1 END
+              AND classifier_version IN (?4, ?5, ?6)
+            ORDER BY CASE classifier_version
+                WHEN ?4 THEN 0
+                WHEN ?5 THEN 1
+                ELSE 2
+            END
             LIMIT 1
             "#,
             params![
@@ -1391,17 +1479,19 @@ fn upsert_canonical_activity(
                 execution_epoch,
                 facts.operation_id,
                 canonical_activity::CLASSIFIER_VERSION,
+                canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
             ],
             canonical_activity_row,
         )
         .optional()?;
-    let selected_facts = if existing.as_ref().is_some_and(|projection| {
-        projection.classifier_version == canonical_activity::LEGACY_CLASSIFIER_VERSION
-    }) {
-        classifications.legacy
-    } else {
-        facts
+    let selected_facts = match existing
+        .as_ref()
+        .map(|projection| projection.classifier_version.as_str())
+    {
+        Some(canonical_activity::PREVIOUS_CLASSIFIER_VERSION) => classifications.previous,
+        Some(canonical_activity::LEGACY_CLASSIFIER_VERSION) => classifications.legacy,
+        _ => facts,
     };
     let projection = match existing {
         Some(existing) => canonical_activity::merge_projection(
@@ -1509,18 +1599,23 @@ fn load_canonical_for_evidence(
               ON evidence.agent_run_id = activity.agent_run_id
              AND evidence.execution_epoch = activity.execution_epoch
             WHERE evidence.id = ?1
-              AND activity.classifier_version IN (?2, ?3)
+              AND activity.classifier_version IN (?2, ?3, ?4)
               AND EXISTS (
                   SELECT 1
                   FROM json_each(activity.source_evidence_ids_json)
                   WHERE json_each.value = evidence.id
               )
-            ORDER BY CASE activity.classifier_version WHEN ?2 THEN 0 ELSE 1 END
+            ORDER BY CASE activity.classifier_version
+                WHEN ?2 THEN 0
+                WHEN ?3 THEN 1
+                ELSE 2
+            END
             LIMIT 1
             "#,
             params![
                 evidence_id,
                 canonical_activity::CLASSIFIER_VERSION,
+                canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
             ],
             canonical_activity_row,
@@ -1752,6 +1847,16 @@ mod tests {
             "terminal",
             &payload,
         );
+        let previous_facts = canonical_activity::classify_evidence_with_version(
+            canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
+            "run-v1",
+            1,
+            "terminal-evidence",
+            "runtime.action",
+            "tool_call",
+            "terminal",
+            &payload,
+        );
         let legacy_facts = canonical_activity::classify_evidence_with_version(
             canonical_activity::LEGACY_CLASSIFIER_VERSION,
             "run-v1",
@@ -1804,6 +1909,7 @@ mod tests {
             "2026-08-29T00:00:00Z",
             EvidenceActivityClassifications {
                 current: &current_facts,
+                previous: &previous_facts,
                 legacy: &legacy_facts,
             },
         )
@@ -1833,6 +1939,108 @@ mod tests {
             .unwrap();
         assert_eq!(versions, (1, 0));
 
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn an_inflight_v2_command_read_keeps_settling_without_switching_to_v3() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-execution-evidence-v2-continuity-test-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        let payload = json!({
+            "item": {"id":"read-1","type":"commandExecution","status":"completed"},
+            "runtimeFileOperation": {
+                "schemaVersion": 2,
+                "source": "runtime_reported",
+                "status": "available",
+                "operationKind": "read",
+                "path": "docs/README.md"
+            }
+        });
+        let current = canonical_activity::classify_evidence(
+            "run-v2",
+            1,
+            "terminal",
+            "activity.completed",
+            "command",
+            "terminal",
+            &payload,
+        );
+        let previous = canonical_activity::classify_evidence_with_version(
+            canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
+            "run-v2",
+            1,
+            "terminal",
+            "activity.completed",
+            "command",
+            "terminal",
+            &payload,
+        );
+        let legacy = canonical_activity::classify_evidence_with_version(
+            canonical_activity::LEGACY_CLASSIFIER_VERSION,
+            "run-v2",
+            1,
+            "terminal",
+            "activity.completed",
+            "command",
+            "terminal",
+            &payload,
+        );
+        assert_eq!(current.semantic_kind.as_deref(), Some("file.read"));
+        assert_eq!(previous.semantic_kind.as_deref(), Some("shell.execute"));
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"INSERT INTO canonical_runtime_activity(
+                agent_run_id, execution_epoch, operation_id, classifier_version,
+                activity_domain, semantic_kind, tool_name, presentation_hint,
+                phase, outcome, credibility, coverage_level, source_authority,
+                source_evidence_ids_json, first_evidence_sequence,
+                last_evidence_sequence, revision, created_at, updated_at
+            ) VALUES (
+                'run-v2', 1, ?1, 'activity-v2', 'shell', 'shell.execute', NULL, NULL,
+                'started', 'unknown', 'runtime_structured', 'fine_grained', 'runtime',
+                '["started"]', 1, 1, 1, datetime('now'), datetime('now')
+            )"#,
+                [current.operation_id.as_str()],
+            )
+            .unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        let projection = upsert_canonical_activity(
+            &transaction,
+            "run-v2",
+            1,
+            2,
+            "terminal",
+            "2026-09-06T00:00:00Z",
+            EvidenceActivityClassifications {
+                current: &current,
+                previous: &previous,
+                legacy: &legacy,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            projection.classifier_version,
+            canonical_activity::PREVIOUS_CLASSIFIER_VERSION
+        );
+        assert_eq!(projection.semantic_kind.as_deref(), Some("shell.execute"));
+        assert_eq!(projection.phase, "terminal");
+        transaction.commit().unwrap();
+        let count: i64 = database.connection().query_row(
+            "SELECT COUNT(*) FROM canonical_runtime_activity WHERE agent_run_id='run-v2' AND operation_id=?1",
+            [current.operation_id.as_str()],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -2005,6 +2213,72 @@ mod tests {
             runtime_file_operation::path_from_evidence(&managed_payload).is_none(),
             "managed output must not create a Command file row or Run-card path"
         );
+    }
+
+    #[test]
+    fn codex_read_projection_uses_only_one_structured_read_path() {
+        for command in [
+            "cat docs/README.md",
+            "head -n 20 docs/README.md",
+            "tail -n 20 docs/README.md",
+            "sed -n '1,20p' docs/README.md",
+        ] {
+            let source = json!({
+                "item": {
+                    "id": "read-1",
+                    "type": "commandExecution",
+                    "status": "completed",
+                    "command": command,
+                    "commandActions": [{
+                        "type": "read",
+                        "name": "read",
+                        "path": "/repo/docs/README.md"
+                    }]
+                }
+            });
+            let mut payload = normalize_public_payload("activity.completed", &source);
+            insert_codex_command_read_candidate(
+                &mut payload,
+                "activity.completed",
+                &source,
+                Some("codex-cli"),
+            );
+            normalize_runtime_file_operation_evidence(
+                &mut payload,
+                Some(r#"{"executionRoot":"/repo"}"#),
+                Some("codex-cli"),
+                Some("codex-test"),
+                None,
+            );
+            assert_eq!(payload["runtimeFileOperation"]["schemaVersion"], 2);
+            assert_eq!(payload["runtimeFileOperation"]["status"], "available");
+            assert_eq!(payload["runtimeFileOperation"]["operationKind"], "read");
+            assert_eq!(payload["runtimeFileOperation"]["path"], "docs/README.md");
+        }
+
+        for actions in [
+            json!([]),
+            json!([{"type":"read","path":"/repo/a"},{"type":"read","path":"/repo/b"}]),
+            json!([{"type":"read","path":"/repo/a"},{"type":"search","query":"needle"}]),
+            json!([{"type":"read","path":""}]),
+        ] {
+            let source = json!({
+                "item": {
+                    "id": "not-one-read",
+                    "type": "commandExecution",
+                    "status": "completed",
+                    "commandActions": actions
+                }
+            });
+            let mut payload = normalize_public_payload("activity.completed", &source);
+            insert_codex_command_read_candidate(
+                &mut payload,
+                "activity.completed",
+                &source,
+                Some("codex-cli"),
+            );
+            assert!(payload.get("runtimeFileOperation").is_none());
+        }
     }
 
     #[test]

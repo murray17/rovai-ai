@@ -88,6 +88,11 @@ interface FilePreviewViewRollback {
   paneVisible: boolean
 }
 
+export interface FilePreviewOpenOptions {
+  commitOnSuccess?: boolean
+  previewOnly?: boolean
+}
+
 export interface FilePreviewContextValue {
   tabs: PreviewTabModel[]
   activeTab: PreviewTabModel | null
@@ -97,7 +102,8 @@ export interface FilePreviewContextValue {
   open(
     request: OpenFilePreviewRequest,
     target?: FileLocationTarget,
-    presentation?: FilePreviewPresentationHint
+    presentation?: FilePreviewPresentationHint,
+    options?: FilePreviewOpenOptions
   ): Promise<FilePreviewOpenOutcome>
   openFileChanges(campId: string, changes: AgentRunFileChangesView, evidenceFileId?: string): void
   selectChangedFile(tabId: string, evidenceFileId: string): void
@@ -197,6 +203,12 @@ function restoredTab(snapshot: FilePreviewTabSnapshot): PreviewTabModel {
     pageOffsets: [],
     pageIndex: 0
   }
+}
+
+type LoadedFilePreviewContent = {
+  content: FilePreviewContent
+  pageOffsets: number[]
+  pageIndex: number
 }
 
 export function FilePreviewProvider({
@@ -455,7 +467,8 @@ export function FilePreviewProvider({
     requestGeneration: number,
     isNew: boolean,
     focusTab: boolean,
-    showFeedback: boolean
+    showFeedback: boolean,
+    preloaded: LoadedFilePreviewContent | null = null
   ): FilePreviewOpenOutcome => {
     const requestedTab = tabsRef.current.find((tab) => tab.id === requestedTabId)
     if (
@@ -463,6 +476,7 @@ export function FilePreviewProvider({
       || requestedTab?.kind !== 'file'
       || requestedTab.requestGeneration !== requestGeneration
     ) {
+      if (preloaded) revokeContent(preloaded.content)
       void window.rovai.filePreview.release({ handleId: file.handleId })
       return { kind: 'error', error: unavailableSourceError() }
     }
@@ -503,16 +517,16 @@ export function FilePreviewProvider({
             previewKey: file.previewKey,
             presentation: filePreviewPresentationFromFile(file),
             file,
-            loadState: 'opening',
-            content: null,
+            loadState: preloaded ? 'ready' : 'opening',
+            content: preloaded?.content ?? null,
             error: null,
             requestGeneration: targetRequestGeneration,
             hasExternalUpdate: file.hasExternalUpdate,
             externalUpdateVersion: file.hasExternalUpdate ? tab.externalUpdateVersion + 1 : tab.externalUpdateVersion,
             isRefreshing: false,
             refreshError: null,
-            pageOffsets: [],
-            pageIndex: 0
+            pageOffsets: preloaded?.pageOffsets ?? [],
+            pageIndex: preloaded?.pageIndex ?? 0
           }
         : tab))
     if (showFeedback) showOpenedTab(targetTabId, isNew && !duplicate, focusTab)
@@ -520,27 +534,32 @@ export function FilePreviewProvider({
       setActiveTabId(targetTabId)
       setPaneVisible(true)
     }
-    void finishOpening(targetTabId, file, scopeGeneration, targetRequestGeneration)
+    if (!preloaded) {
+      void finishOpening(targetTabId, file, scopeGeneration, targetRequestGeneration)
+    }
     return { kind: 'preview', tabId: targetTabId }
   }, [finishOpening, revokeContent, setTabs, showOpenedTab])
 
   const beginFileTabRequest = useCallback((
     tabId: string,
-    request: OpenFilePreviewRequest
+    request: OpenFilePreviewRequest,
+    preserveVisibleState = false
   ): number | null => {
     const tab = tabsRef.current.find((entry) => entry.id === tabId)
     if (tab?.kind !== 'file') return null
     const requestGeneration = tab.requestGeneration + 1
     setTabs((entries) => entries.map((entry) => entry.kind === 'file' && entry.id === tabId
-      ? {
-          ...entry,
-          sourceRequest: request,
-          loadState: 'opening',
-          error: null,
-          requestGeneration,
-          isRefreshing: false,
-          refreshError: null
-        }
+      ? preserveVisibleState
+        ? { ...entry, requestGeneration }
+        : {
+            ...entry,
+            sourceRequest: request,
+            loadState: 'opening',
+            error: null,
+            requestGeneration,
+            isRefreshing: false,
+            refreshError: null
+          }
       : entry))
     return requestGeneration
   }, [setTabs])
@@ -570,19 +589,51 @@ export function FilePreviewProvider({
     if (wasVisible) setPaneVisible(rollback?.paneVisible ?? remaining.length > 0)
   }, [setActiveTabId, setPaneVisible, setTabs])
 
+  const settleOpenFailure = useCallback((
+    tabId: string,
+    scopeGeneration: number,
+    requestGeneration: number,
+    rawError: FilePreviewErrorPayload,
+    isNew: boolean,
+    discardOnFailure: boolean,
+    rollback?: FilePreviewViewRollback
+  ): FilePreviewErrorPayload => {
+    const error = safeOpenError(rawError)
+    if (discardOnFailure && isNew) {
+      removeProvisionalTab(tabId, scopeGeneration, requestGeneration, rollback)
+      return error
+    }
+    const current = tabsRef.current.find((entry) => entry.id === tabId)
+    if (
+      discardOnFailure
+      && !isNew
+      && scopeGenerationRef.current === scopeGeneration
+      && current?.kind === 'file'
+      && current.requestGeneration === requestGeneration
+    ) {
+      return error
+    }
+    return failTabRequest(tabId, scopeGeneration, requestGeneration, error)
+  }, [failTabRequest, removeProvisionalTab])
+
   const performOpen = useCallback(async (
     tabId: string,
     request: OpenFilePreviewRequest,
     target: FileLocationTarget | undefined,
-    mode: 'interactive' | 'restore',
+    mode: 'interactive' | 'restore' | 'preview_only',
     isNew: boolean,
     focusTab: boolean,
     showFeedback = true,
+    discardOnFailure = false,
     rollback?: FilePreviewViewRollback
   ): Promise<FilePreviewOpenOutcome> => {
     const sourceKey = filePreviewSourceKey(request)
     const scopeGeneration = scopeGenerationRef.current
-    const requestGeneration = beginFileTabRequest(tabId, request)
+    const requestGeneration = beginFileTabRequest(
+      tabId,
+      request,
+      discardOnFailure && !isNew
+    )
     if (requestGeneration === null) return { kind: 'error', error: unavailableSourceError() }
     try {
       await bindingPromiseRef.current
@@ -590,12 +641,20 @@ export function FilePreviewProvider({
         return { kind: 'error', error: unavailableSourceError() }
       }
       let result: FilePreviewOperationResult<OpenFilePreviewResult>
-      if (mode === 'restore') {
+      if (mode === 'restore' || mode === 'preview_only') {
         const restoreRequest = restorableFilePreviewRequest(request)
         if (!restoreRequest) {
           return {
             kind: 'error',
-            error: failTabRequest(tabId, scopeGeneration, requestGeneration, unavailableSourceError())
+            error: settleOpenFailure(
+              tabId,
+              scopeGeneration,
+              requestGeneration,
+              unavailableSourceError(),
+              isNew,
+              discardOnFailure,
+              rollback
+            )
           }
         }
         result = await window.rovai.filePreview.restore(restoreRequest)
@@ -603,10 +662,41 @@ export function FilePreviewProvider({
         result = await window.rovai.filePreview.open(request)
       }
       if (!result.ok) {
-        return { kind: 'error', error: failTabRequest(tabId, scopeGeneration, requestGeneration, result.error) }
+        return {
+          kind: 'error',
+          error: settleOpenFailure(
+            tabId,
+            scopeGeneration,
+            requestGeneration,
+            result.error,
+            isNew,
+            discardOnFailure,
+            rollback
+          )
+        }
       }
       if (result.value.kind === 'file_preview') {
         const file = target ? { ...result.value.file, target } : result.value.file
+        let preloaded: LoadedFilePreviewContent | null = null
+        if (discardOnFailure) {
+          const loaded = await loadContent(file)
+          if (!loaded.ok) {
+            void window.rovai.filePreview.release({ handleId: file.handleId })
+            return {
+              kind: 'error',
+              error: settleOpenFailure(
+                tabId,
+                scopeGeneration,
+                requestGeneration,
+                loaded.error,
+                isNew,
+                discardOnFailure,
+                rollback
+              )
+            }
+          }
+          preloaded = loaded
+        }
         return installResolvedFile(
           tabId,
           request,
@@ -616,18 +706,19 @@ export function FilePreviewProvider({
           requestGeneration,
           isNew,
           focusTab,
-          showFeedback
+          showFeedback,
+          preloaded
         )
       }
       if (result.value.kind === 'opened_in_system') {
         if (isNew) {
           removeProvisionalTab(tabId, scopeGeneration, requestGeneration, rollback)
         } else {
-          failTabRequest(tabId, scopeGeneration, requestGeneration, {
+          settleOpenFailure(tabId, scopeGeneration, requestGeneration, {
             code: 'reference_not_clickable',
             message: '无法在这里预览这个文件',
             retryable: false
-          })
+          }, isNew, discardOnFailure, rollback)
         }
         return { kind: 'system' }
       }
@@ -636,15 +727,24 @@ export function FilePreviewProvider({
       }
       return { kind: 'evidence_review', result: result.value }
     } catch {
-      const error = failTabRequest(tabId, scopeGeneration, requestGeneration, errorFromUnknown())
+      const error = settleOpenFailure(
+        tabId,
+        scopeGeneration,
+        requestGeneration,
+        errorFromUnknown(),
+        isNew,
+        discardOnFailure,
+        rollback
+      )
       return { kind: 'error', error }
     }
-  }, [beginFileTabRequest, failTabRequest, installResolvedFile, removeProvisionalTab])
+  }, [beginFileTabRequest, failTabRequest, installResolvedFile, loadContent, removeProvisionalTab, settleOpenFailure])
 
   const open = useCallback(async (
     request: OpenFilePreviewRequest,
     target?: FileLocationTarget,
-    presentationHint?: FilePreviewPresentationHint
+    presentationHint?: FilePreviewPresentationHint,
+    options?: FilePreviewOpenOptions
   ): Promise<FilePreviewOpenOutcome> => {
     if (request.kind === 'run_evidence' && request.action === 'review') {
       try {
@@ -663,7 +763,8 @@ export function FilePreviewProvider({
     const existing = tabsRef.current.find((tab) => tab.kind === 'file' && tab.sourceKey === sourceKey)
     const isNew = !existing
     const tabId = existing?.id ?? `file-preview-${crypto.randomUUID()}`
-    const rollback = isNew
+    const commitOnSuccess = options?.commitOnSuccess === true
+    const rollback = commitOnSuccess && isNew
       ? { activeTabId: activeTabIdRef.current, paneVisible: paneVisibleRef.current }
       : undefined
     if (!existing) {
@@ -690,8 +791,18 @@ export function FilePreviewProvider({
       setTabs((entries) => [...entries, tab])
     }
     const focusTab = Boolean(document.activeElement?.closest('.file-preview-pane'))
-    showOpenedTab(tabId, isNew, focusTab)
-    return performOpen(tabId, request, target, 'interactive', isNew, focusTab, true, rollback)
+    if (!commitOnSuccess) showOpenedTab(tabId, isNew, focusTab)
+    return performOpen(
+      tabId,
+      request,
+      target,
+      options?.previewOnly === true ? 'preview_only' : 'interactive',
+      isNew,
+      focusTab,
+      true,
+      commitOnSuccess,
+      rollback
+    )
   }, [performOpen, setTabs, showOpenedTab])
 
   const restoreTab = useCallback((tabId: string, automatic: boolean): void => {

@@ -445,16 +445,16 @@ last_updated: 2026-09-05
 - Canonical Runtime Activity 是 Core 从不可变 Evidence 构建、持久但可重建的版本化投影，不是新的效果真源。Lifecycle/Read Side 只从选定的 canonical projection 派生，不跳过它直接从 Runtime 标题或 evidence payload 猜状态。
 - `source_event_key` 与 Core-scoped `operationId` 是严格分离的身份：前者只在一个已声明 observation scope 内去重单个来源事件，后者才能跨 phase/evidence 合并同一操作。Core 只接受协议原生 ID、自有调用/receipt 关联或 Adapter 按封闭规则构造的可证明身份；不用时间、文本、路径或顺序相似性聚合。重放使用同一规则得到同一 identity/归约结果。
 - Activity Domain（历史字段名 `capabilityKind`）是稳定顶层观测域；可选 `semanticKind` 只能在 Evidence 支持时细分，`presentationHint` 永不成为 canonical semantics。Domain/kind 词汇扩展必须在 Mapping Registry 注册、版本化并提供 replay fixture；无证据时保留已有域或 `unknown`。
-- `activity-v2` 的 Core 只保留 Runtime 明确 title，不生成本地化默认标题、Codex commandActions 标题或文件
-  basename 标题；中文 fallback 与可靠 typed path 的 `修改 <basename>` 由 Renderer 拥有。Rovai 类型图标只由
+- `activity-v3` 的 Core 只保留 Runtime 明确 title，不生成本地化默认标题、Codex commandActions 标题或文件
+  basename 标题；中文 fallback 与可靠 typed path 的阅读／编辑标题由 Renderer 拥有。Rovai 类型图标只由
   Core Catalog 验证后的 `sourceAuthority=core + credibility=core_verified + toolName` 证明，不能从标题或 Shell
   command 中的 `rovai` 字样识别。
 - `phase` 只表示 started/progress/terminal 位置，`outcome` 独立表示证据支持的结果。乱序、冲突、waiting、Run 终态和 recovery 使用同一 reducer，不能从进程退出或 UI 消失猜 success/cancelled。Runtime 明确报告连续性中断时，未结算 operation 使用 `phase=terminal / outcome=unsettled / reasonCode=runtime_interrupted`；只有 Runtime 的权威取消终态才能写成 `cancelled`，仍可恢复的 Host 失联继续属于 recovery 而不是 interruption terminal。
 - 每个 operation 的 classifier/version 首次建立后固定。分类升级必须显式选择“只切换新 operation”或“建立平行
-  reprojection”；无论哪种都不得静默改写历史或让 live operation 中途换语义。当前 `activity-v2` 采用前者：
-  Migration 116 只切换 current marker，既有 v1 operation 继续用 v1 结算，新 operation 才建立 v2。
+  reprojection”；无论哪种都不得静默改写历史或让 live operation 中途换语义。当前 `activity-v3` 采用前者：
+  Migration 141 原子切换 current marker 和 receipt，既有 v1/v2 operation 继续用原版本结算，新 operation 才建立 v3。
 - Read Side 可以按已声明的兼容窗口同时读取多个 classifier version，但必须有确定性优先级且不把双读冒充历史
-  replay。当前 v2/v1 双读仅让原有 row 与新 row 都可见；没有批量回填、平行 projection、mapping digest 或任意
+  replay。当前 v3/v2/v1 读取仅让原有 row 与新 row 都可见；没有批量回填、平行 projection、mapping digest 或任意
   Evidence replay 基础设施，因而不得声称这些能力已经存在。
 - Runtime-reported Command Diff 只能由 Adapter/version 明确声明为完整 snapshot、exact mutation 或完整
   before/after 的结构化字段进入 append-only Evidence，并归约为既有 Canonical Activity 的 typed
@@ -466,6 +466,10 @@ last_updated: 2026-09-05
   时序，链断裂或 operation-only 只保留操作历史。只有所有文件都是完整净差异时才能显示全局增删计数。
 - 文件变化观察不执行 Git、filesystem scan 或当前文件读取，不解析 shell 命令，也不跨 Run 合并。失败或取消 Run
   可以展示此前已成功报告的文件变化；failed/cancelled Operation 自身不得进入。没有可靠 Evidence 时不生成卡片。
+- `runtimeFileOperation schemaVersion=2` 只接受 allowlisted Runtime 的 typed `read | write` 和可靠单文件路径。
+  v3 把 available read 归类为 `file.read`，但它只是过程事实，明确排除在 AgentRun `Files Changed` 之外。Codex
+  只接纳非空、全为 read 且唯一 path 的 `commandActions`，不解析 cat/head/tail/sed 等命令前缀；ACP、Claude 与 Pi
+  也只按各自成功终态的封闭结构化字段准入。
 - managed `ROVAI_RUN_TMP` exclusion 只作用于新进入 Core 的 Evidence。历史 Evidence、Canonical Activity 与
   AgentRun projection 不重写、不回填；通过临时区发布出的 Managed Attachment 继续由 Attachment 合同独立拥有。
 - 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `fine_grained | run_level | unknown`，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。

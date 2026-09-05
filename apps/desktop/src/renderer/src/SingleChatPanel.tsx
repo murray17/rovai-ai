@@ -329,16 +329,25 @@ function ToolGroup({
   items: ToolProgressItem[]
   runStatus: SingleChatRunView['status']
 }): React.JSX.Element {
-  const running = NON_TERMINAL_RUNS.has(runStatus)
-    && items.some((item) => item.step.status === 'running' || item.step.status === 'waiting')
-  const stopped = runStatus === 'cancelled'
-  const label = running ? '正在执行' : `已执行 ${items.length} 项操作`
+  const activeStatus = NON_TERMINAL_RUNS.has(runStatus)
+    ? [...items].reverse().find((item) => item.step.status === 'running' || item.step.status === 'waiting')?.step.status ?? null
+    : null
+  const running = activeStatus !== null
+  const label = running
+    ? activeStatus === 'waiting' ? '等待审批' : '正在执行'
+    : `完成了 ${items.length} 个步骤`
   return (
     <details className="single-chat-tool-group" open={running || undefined}>
       <summary aria-label={`${label}；展开操作详情`}>
         <span className="single-chat-tool-icon"><ToolGlyph /></span>
         <span>{label}</span>
-        <span className={`single-chat-tool-state${running ? ' is-running' : stopped ? ' is-stopped' : ''}`} aria-hidden="true" />
+        <span className={`single-chat-tool-state${activeStatus ? ` is-${activeStatus}` : ' is-placeholder'}`} aria-hidden="true">
+          {activeStatus === 'waiting'
+            ? <svg viewBox="0 0 16 16"><path d="m8 2.5 5.5 5.5L8 13.5 2.5 8z" /></svg>
+            : activeStatus === 'running'
+              ? <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" /><path d="M8 3a5 5 0 0 1 4.7 3.3" /></svg>
+              : null}
+        </span>
         <span className="single-chat-disclosure"><ChevronGlyph /></span>
       </summary>
       <div className="single-chat-tool-items">

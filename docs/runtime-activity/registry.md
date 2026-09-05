@@ -1,8 +1,8 @@
 ---
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
-classifier_version: activity-v2
-last_updated: 2026-09-04
+classifier_version: activity-v3
+last_updated: 2026-09-06
 ---
 
 # Runtime Activity Mapping Registry
@@ -11,17 +11,17 @@ last_updated: 2026-09-04
 
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
-| `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；Core v2 不把 commandActions 翻译成标题，Renderer 从公开 command 生成去 wrapper、保留完整序列并脱敏的标题；只有 `item.type=webSearch` 可把 `item.query` 投影为 Search Operation | 受控 fixture、Renderer 跨 Runtime 命令/脱敏/详情、typed query 与普通 query 排除回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；`0.147.0` WebSearch wire 实证通过 |
-| `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；update 作为累计预览，唯一 terminal 结算 Action；所有 Built-in/Extension Tool 按 Pi 原生语义执行，Rovai 不审批或阻断，不从正文或路径猜 Search/Image | Tool started→terminal、累计输出、重放去重和未知 Tool shape fixture 已建立；Pi 无 Rovai Approval、sandbox 或 MCP proxy | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；完整 Rovai smoke 结果由当前版本验收记录维护，未形成的平台证据不提升正式准入 |
+| `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；Core v3 不生成 commandActions 标题，但非空、全 read、唯一 path 的 `commandActions` 可形成 typed read；Renderer 从公开 command 生成去 wrapper、保留完整序列并脱敏的 Shell 标题；只有 `item.type=webSearch` 可把 `item.query` 投影为 Search Operation | structured read 正反例、Renderer 跨 Runtime 命令/脱敏/详情、typed query 与普通 query 排除回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；`0.147.0` WebSearch wire 实证通过；[`0.153.4` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
+| `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；同一 ToolCall 的 start/update 精确 `read/write/edit + args.path` 与成功 terminal 可形成 typed read/write；update 作为累计预览，唯一 terminal 结算 Action；所有 Built-in/Extension Tool 按 Pi 原生语义执行，Rovai 不审批或阻断 | Tool started→terminal、结束事件省略参数、read/write/edit、累计输出、重放去重和未知 Tool shape fixture 已建立；Pi 无 Rovai Approval、sandbox 或 MCP proxy | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；[v1.52 read/write 真实结果](../versions/v1.52/runtime-acceptance.md)已通过，未形成的平台证据不提升正式准入 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text` | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；`1.18.15` 真实 command-output 与完整 allow/deny smoke 通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；`1.0.79 kind=search + query-only rawInput` 可投影 Web 搜索，`kind=read + pattern` 文件搜索不得准入；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | query-only positive、文件搜索 negative、固定 `printf` fixture 已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 Web/file search 与 command-output wire 已核验 |
-| `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；`2.18.1 kind=search + query-only rawInput` 可投影 Web 搜索，`{path,pattern}` 内容搜索与 pattern-only glob 不得准入；成功 Edit/Write 的唯一标准 location 可独立命名文件操作；单 entry Diff 的 rooted-relative path 只在与同 ToolCall location 完全对应时纠正；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | Search Operation positive/negative、path-only、标准 Diff、精确路径对齐与 mismatch fail-closed fixture 通过 | ACP session + Skill turn + MCP projection 通过；`2.18.1` 真实 Web/file search 与 pre-fix file-change wire 已核验，post-fix App smoke 待补 |
-| `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同；`1.1.28 kind=search + query-only rawInput` 可投影 Web 搜索，`{output_mode,path,pattern}` 内容搜索不得准入；成功 Edit/Write 可从同 ToolCall 先前唯一标准 location 生成文件操作行，terminal kind 冲突不覆盖首次可信 kind | Search Operation positive/negative、path-only、sparse terminal location 与 Read→edit 冲突 fixture 通过 | Skill turn 通过；`1.1.28` 真实 Web/file search 与 pre-fix Edit wire 已核验，post-fix App smoke 待补 |
-| `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同；`2.133.1` 只在 terminal `kind=fetch + query-only rawInput` 投影 Web 搜索，started `kind=other`、WebFetch 非 query 输入与 Grep `kind=search` 均不得准入 | terminal fetch positive、started/WebFetch/Grep negative fixture 通过 | Skill turn 通过；`2.133.1` 真实 WebSearch/WebFetch/Grep wire 已核验 |
-| `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
-| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；标准 `rawInput.command` 与 TRAE Bash 实测 `rawInput.Command` 的非空字符串进入公开 input，`Description` 等相邻字段保持私有；命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 实测 `Command + Description` started、相邻 raw 字段排除、非 TRAE 大写字段 fail-closed、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；六类 command 的 started/terminal 展示通过；正式 full matrix 仍被既有 nonzero status 漂移阻断 |
+| `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；`2.18.1 kind=search + query-only rawInput` 可投影 Web 搜索，`{path,pattern}` 内容搜索与 pattern-only glob 不得准入；成功 Edit/Write 的唯一标准 location 可独立命名文件操作；单 entry Diff 的 rooted-relative path 只在与同 ToolCall location 完全对应时纠正；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | Search Operation positive/negative、path-only、标准 Diff、精确路径对齐与 mismatch fail-closed fixture 通过 | ACP session + Skill turn + MCP projection 通过；[`2.21.1` post-fix 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
+| `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同；`1.1.28 kind=search + query-only rawInput` 可投影 Web 搜索，`{output_mode,path,pattern}` 内容搜索不得准入；成功 Edit/Write 可从同 ToolCall 先前唯一标准 location 生成文件操作行，terminal kind 冲突不覆盖首次可信 kind | Search Operation positive/negative、path-only、sparse terminal location 与 Read→edit 冲突 fixture 通过 | Skill turn 通过；[`1.1.28` post-fix 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
+| `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同；`2.133.1` 只在 terminal `kind=fetch + query-only rawInput` 投影 Web 搜索，started `kind=other`、WebFetch 非 query 输入与 Grep `kind=search` 均不得准入 | terminal fetch positive、started/WebFetch/Grep negative fixture 通过 | Skill turn 与既有 Web wire 通过；[v1.52 本机文件矩阵](../versions/v1.52/runtime-acceptance.md)被可用默认模型 Ready 准入阻断 |
+| `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过；[`0.23.0` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过并记录 basename-only Diff 边界 |
+| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；标准 `rawInput.command` 与 TRAE Bash 实测 `rawInput.Command` 的非空字符串进入公开 input，`Description` 等相邻字段保持私有；命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 实测 `Command + Description` started、相邻 raw 字段排除、非 TRAE 大写字段 fail-closed、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；[v1.52 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过；完整 command-output 矩阵仍保留既有 nonzero status 漂移 |
 | `cursor-agent` | Cursor Agent | ACP v1 | `run_level` | 仅采用 ACP 标准 Session/Prompt 终态；`cursor/update_todos`、`cursor/task`、`cursor/generate_image` 保持私有且不生成 Activity，未知 Cursor 扩展 fail closed；认证和结构化工具事件尚未完成真实 admission | 私有 request 路由、私有 notification 隔离与 Runtime-level unknown fallback fixture 已建立 | `2026.08.11-e8db854` 隔离探测通过 initialize；authenticate 超时且未取得 authenticated Session，因此无 completion/tool smoke，不声明细粒度 coverage |
-| `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；成功 Edit/Write terminal 的唯一标准 location 可独立生成文件操作行；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi path-only、run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | `kimi 0.32.0` + MiniMax M3 真实 prompt、Shell allow/deny、固定 `printf` output、cancel、cleanup 与完整十五项 Built-in CLI matrix 通过；`0.38.0` pre-fix Edit wire 已核验，post-fix App smoke 待补；`run_level` 只表示缺少结构化事件时不补造细粒度 Activity |
+| `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；成功 Edit/Write terminal 的唯一标准 location 可独立生成文件操作行；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi path-only、run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | 既有 prompt/Shell/cancel/Built-in 矩阵通过；[`0.40.1` post-fix 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过；`run_level` 只表示缺事件时不补造细粒度 Activity |
 | `grok-build` | Grok Build | ACP v1 | `run_level` | 标准 ACP tool update 按既有安全归一；`_x.ai/*` notification 保持 metadata，普通 assistant text 原样进入 agent text Evidence；缺少结构化 Tool 事件时不补造细粒度 Activity | Grok run-level mapping、官方 config、generic agent-text 与 Missing-Send fixture 已建立 | macOS arm64 与 Windows x64 已分别用 `grok 1.0.5` + MiniMax-M3 通过真实 Deep Probe、AgentRun 与 cold resume；`0.2.118` 原始矩阵保留为历史证据，macOS x64 待补；Usage/Cost 不从 vendor metadata 推断 |
 | `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Grep/WebSearch 分别映射 file_search/web_search；只把名称精确为 WebSearch 的 `input.query` 投影为 Search Operation，started→terminal 自包含；ToolSearch 不是 WebSearch；成功 matching Edit 仍形成同 Activity 的 `exact_mutation` | partial + complete message 去重、command、WebSearch/ToolSearch 边界、Edit、narration/retry 与私有相邻字段排除 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` WebSearch、ToolSearch、Bash、narration、Session、retry 与 Edit 已实证 |
 | `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index`；`grep_search/search/search_web` 分别映射 file_search/search/web_search；只公开 Shell CommandLine，当前无准入的公开 query wire；旧版 text 保持 run-level | stream-json command/lifecycle/output、三种 search kind、非 Shell 输入排除与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.22` 真实 `search_web`/`grep_search` wire 已核验；`1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
@@ -31,15 +31,16 @@ Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。�
 
 ## Classifier cutover
 
-Migration 116 把新 operation 的 current classifier 切换到 `activity-v2`，Data Contract 为
-`v1.29 / projection schema 70`。已有 `activity-v1` row 不回填、不重分类、不删除；同一 operation 已有 v1
-projection 时，后续 phase 继续用 v1 结算。Read Side 接受 v2 与 v1，并在同一 Evidence 异常出现两版时优先 v2。
-此切换不声称已经实现任意历史 Evidence replay 或平行 reprojection。
+Migration 141 把新 operation 的 current classifier 原子切换到 `activity-v3`，Data Contract 为
+`v1.52 / projection schema 92`。已有 `activity-v1` 或 `activity-v2` row 不回填、不重分类、不删除；同一
+operation 已有旧 projection 时，后续 phase 继续用原 classifier 结算。Read Side 依次接受 v3、v2、v1。
+marker 与 migration receipt 必须在同一事务提交，启动 reconciler 只有在 receipt 141 存在时才接受 v3。
 
-`activity-v2` 的新写入顶层域只包含 `shell | file | tool | runtime | unknown`。Git、Network、Permission 与
-Plan 不再作为新 Canonical 顶层域；历史 v1 值仍可只读展示，并由 Renderer 收敛到 Unknown presentation。
+`activity-v3` 继续只写 `shell | file | tool | runtime | unknown` 顶层域，并新增一条窄规则：available typed
+read 强制为 `file / file.read`。Git、Network、Permission 与 Plan 仍不作为新 Canonical 顶层域；历史 v1 值
+继续只读展示。此切换不声称实现历史 Evidence replay 或平行 reprojection。
 
-## Terminal file-change Evidence matrix
+## Terminal file-operation and file-change Evidence matrix
 
 此矩阵分别描述 v1.29 的“可靠终态文件操作路径”与“可靠终态文件内容”准入，不改变上表的整体 Tool coverage。
 `protocol-supported` 只表示 Adapter 能消费协议标准事件；ACP 运行没有发送 Diff 时仍可显示已证明的单文件操作，
@@ -47,17 +48,17 @@ Plan 不再作为新 Canonical 顶层域；历史 v1 值仍可只读展示，并
 
 | 协议族与适用 Adapter | 过去/当前实际接入事件 | 可靠文件操作 path | 可靠终态内容 | Command file rows |
 | --- | --- | --- | --- | --- |
-| Codex app-server（`codex-cli`） | Codex `item/completed`，`item.type=fileChange`、`status=completed` | `changes[].path` | `changes[] { path, kind, diff }`；update 为 unified diff，add/delete 为完整新/旧内容 | 支持；Core 统一规范化后逐 change 显示 `修改 xxx +A −D` |
-| Pi JSONL RPC（`pi`） | `tool_execution_start/update/end` 的原生结构化 input 与成功 terminal result | Runtime event 中可归因的 exact path；未知 shape 保持未知，不以 Rovai Approval envelope 补证 | 当前不把 Pi Tool result 推断成完整 before/after diff | 有可靠 path 时显示普通文件操作；没有可靠内容时不补造增删计数或 inline diff |
-| ACP v1（`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build`） | ACP `session/update.tool_call_update`；私有 Cursor/Kimi/Grok extension 与 run-level fallback 不补造文件操作或 diff | 成功 terminal `edit | write` + 同 ToolCall 累计唯一标准 `locations[].path`；不读取 rawInput/title/output | terminal 累计 `content.type=diff { path, oldText?, newText }`；只接纳标准 ACP terminal Diff | 有 path 即显示普通 `修改 xxx`；另有 Diff 才显示计数并展开。Kiro 单 entry rooted-relative path 只按同 ToolCall 唯一 location 精确对齐 |
-| Claude stream-json（`claude-code-cli`） | 完整 assistant `tool_use(name=Edit)` + 相同 ID 的非错误 user `tool_result` | 完整 `file_path` | `file_path/old_string/new_string` 证明单次 `exact_mutation`，不证明文件行号或完整文件 before/after | 支持 Edit 片段行；不读文件、不生成 `@@`，失败/缺失/取消/`replace_all` 与其他 Tool 不准入 |
+| Codex app-server（`codex-cli`） | `commandExecution` started/completed structured read；成功 terminal `fileChange` | read 只接纳非空、全 read 且唯一 `commandActions[].path`；write 使用 `changes[].path` | `changes[] { path, kind, diff }`；update 为 unified diff，add/delete 为完整新/旧内容 | read 为不可展开“阅读”；add 显示“新增”，其他 write 显示“编辑”并保留 Diff |
+| Pi JSONL RPC（`pi`） | `tool_execution_start/update/end`，只在非错误 terminal 发布 operation | 同 `toolCallId` 的 start/update 中 toolName 精确 `read/write/edit` 且 `args.path` 非空；terminal 可省略参数 | 当前不把 Pi Tool result 推断成完整 before/after diff | read 显示“阅读”；write/edit 保守显示“编辑”，无内容时无计数或 Diff |
+| ACP v1（`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build`） | ACP `session/update.tool_call_update`；私有 extension 与 run-level fallback 不补造 operation 或 Diff | 成功 terminal native kind 精确 `read | edit | write`；read 要求同 ToolCall 唯一标准 location，write 沿用保守兼容路径准入 | terminal 累计 `content.type=diff { path, oldText?, newText }`；只接纳标准 ACP terminal Diff | read 显示“阅读”；明确 add 显示“新增”，其他 write 显示“编辑”；有 Diff 才显示计数并展开 |
+| Claude stream-json（`claude-code-cli`） | 完整 assistant `tool_use(name=Read|Write|Edit)` + 相同 ID 的非错误 user `tool_result` | 完整 `file_path` 形成 typed read/write | 只有 Edit 的 `file_path/old_string/new_string` 证明单次 `exact_mutation` | Read 显示“阅读”；Write 保守显示“编辑”；Edit 保留片段 Diff，不生成 `@@` |
 | Antigravity stream-json（`antigravity-app`） | `step_update` terminal state | 无等价可靠单文件终态 path | step/tool 名与公开 payload 没有可证明完整的 terminal patch | 不支持；不按 edit/write 名称推测 |
 
 Codex `item/started`、`item/fileChange/patchUpdated`、`turn/diff/updated` 和原始 Tool 名 `apply_patch` 均不进入
 Command Diff。ACP `content` collection 按协议 update 的 replace 语义累计；只有成功 terminal Tool 状态才把标准
 Diff blocks 送入 append-only Evidence。ACP file-operation path 与 Diff 是同一 terminal Evidence 的独立子投影；
-Renderer 只消费 Canonical presentation/diffProjection，不含 Runtime 分支。Claude 不解析 Bash/shell、Write、
-NotebookEdit 或 ApplyPatch 输入；Edit 的 exact mutation 也只在 matching result 后发布。
+Renderer 只消费 Canonical presentation/diffProjection，不含 Runtime 分支。Claude 的 Read/Write/Edit operation
+只在 matching result 后发布；只有 Edit 进入 exact mutation，NotebookEdit 与 ApplyPatch 不准入该通道。
 
 ## 2026-08-24 TRAE command display 真实 smoke 记录
 
@@ -107,7 +108,7 @@ command output 与生命周期投影，不把一次 pass 扩大为所有模型�
 
 | Runtime item type | activityDomain | semanticKind | toolName | presentationHint |
 |---|---|---|---|---|
-| `commandExecution` | `shell` | `shell.execute` | 无结构化名称时为空 | 只保留 Runtime 明确 `item.title`；Core v2 不翻译 commandActions、不生成默认中文 hint |
+| `commandExecution` | 默认 `shell`；v3 typed read 为 `file` | 默认 `shell.execute`；v3 typed read 为 `file.read` | 无结构化名称时为空 | Core 不把 commandActions 翻译成标题；只有非空、全 read、唯一 path 的 actions 形成 typed read |
 | `fileChange` | `file` | `file.write` | 空 | 只保留 Runtime 明确 `item.title`；可靠 basename 标题由 Renderer 从 typed file operation/diff 生成 |
 | `webSearch` | `tool` | `tool.web.search` | 有结构化名称时保留 | Runtime title；`item.query` 只经内部 candidate 进入 typed Search Operation，不保留通用 item 字段 |
 | `imageGeneration` | `tool` | `tool.image.generate` | 有结构化名称时保留 | Runtime title |
@@ -122,9 +123,15 @@ Canonical 分类或 identity。Renderer 对所有有公开 command 的 Shell Act
 均证明 `commandExecution.title` 可以为空，而 `commandActions` 是协议必填字段；修复 fixture 使用该真实
 wire shape，Core post-fix live smoke 仍需单独运行。
 
+Codex 的 `cat`、`head`、`tail`、`sed` 没有命令名白名单。它们只有在 app-server 同一 item 报告的
+`commandActions` 非空、每项 `type=read`、所有 path 相同且非空时才产生 schema 2 read；纯命令文本、复合
+read/write action、多文件或缺 path 时仍为 Shell。started 和 completed 各自携带候选，同一 operation 按冻结的
+classifier 归约；v1/v2 in-flight activity 不会中途切成 read。
+
 ### Command output durability audit
 
-2026-08-26 对全部 13 个 Adapter 的归一化路径逐项核验后，terminal output 权威如下：
+2026-08-26 对当时全部 13 个 Adapter 的归一化路径逐项核验后，terminal output 权威如下；Pi 后续成为第 14 个
+Adapter，其 terminal output 由独立 JSONL 合同拥有：
 
 | 协议路径 | Adapter identities | terminal semantic output | 临时输出片段 |
 |---|---|---|---|
@@ -183,11 +190,12 @@ tuple 不匹配时写 unavailable projection（不含 query），并保留原生
 有序 `queries`，`query` 固定为第一项。数组为空、元素为空或类型混合时不形成 candidate。query 不做敏感词过滤
 或去重，其他 rawInput 邻接字段仍保持私有。
 
-文件操作 presentation 使用更窄的终态合同：只有成功 `completed`、累计 native kind 精确为 `edit | write`，且同一
-`toolCallId` 的标准 `locations[].path` 能确定唯一规范化路径时，才在同一 Canonical Activity 上生成
-`修改 <basename>`。terminal 省略或清空 locations 时保留先前非空累计值；首次可信结构化 kind 不被后续冲突值
-覆盖。该路径不来自 rawInput/title/output，也不自动生成 `diffProjection`。`write_file`、`apply_patch` 等普通分类
-仍可属于 file domain，但不因名称获得这条文件操作 Evidence。
+文件操作 presentation 使用更窄的终态合同：只有成功 `completed`、累计 native kind 精确为
+`read | edit | write` 且能证明唯一规范化路径时，才生成 schema 2 typed operation。read 只接纳同 ToolCall
+标准 `locations[].path`；write 保留当前受控兼容来源。terminal 省略字段时可保留当前 Prompt 对相同 ToolCall 的
+可信观察；冲突 kind 不覆盖首次可信 kind。路径不从 title/output 猜测，typed operation 也不自动生成
+`diffProjection`。`read_file`、`write_file`、`apply_patch` 等普通分类仍可属于 file domain，但不因名称获得该
+operation Evidence。
 
 Tool output 先读取 `ToolCallContent.type = content` 包裹的公开 text Content block，并兼容旧 adapter 的
 直接 text block。`diff`、image/audio/resource 与 `type = terminal` 都不被解释为命令输出；标准 `diff` 只在
@@ -195,6 +203,15 @@ Tool output 先读取 `ToolCallContent.type = content` 包裹的公开 text Cont
 Terminal 不可用，因此不会读取 `terminalId` 或从私有 terminal 猜测 stdout。只有 Content 没有
 公开文本时，才从 `rawOutput` 的顶层 `stdout`、`stderr`、`output`、`text` 字符串白名单回退；其他键只
 参与原有 digest，不进入公开 payload。
+
+### Pi JSONL RPC
+
+Pi 的 `tool_execution_start/update/end` 以原生 `toolCallId` 合并。只有同一 ToolCall 的 start/update toolName
+精确为小写 `read | write | edit`、`args.path` 是非空字符串，并最终收到非错误 `tool_execution_end` 时，才发布
+schema 2 operation；真实 `0.84.4` 的结束事件会省略 toolName/args，因此只从该 ToolCall 的已观察开始参数补齐，
+不会跨 Tool 关联。read 映射 read，write/edit 映射 write。大小写不同、grep/find/ls、失败终态、缺 path 和未知
+shape 都不准入；不得从 result 文本、Rovai Approval 或当前磁盘补证。Pi result 当前不证明完整 before/after，
+因此 path-only write 只显示“编辑”且没有虚构 Diff。
 
 ### Core Team Tool
 
@@ -214,6 +231,10 @@ tool-use ID 同时放入 started 与 terminal Evidence，使没有 stdout/stderr
 `runtimeSearchOperation.query` 保存首项，多项时另存有序 `queries`；每项原样保存、不做敏感词过滤或去重。
 ToolSearch 只是工具发现，不获得这条准入。其它工具输入、
 文件内容和 provider metadata 不进入普通 Tool input/output。
+
+完整 assistant `tool_use` 名称精确为 `Read | Write | Edit` 且 `input.file_path` 非空时，Adapter 按 tool-use ID
+暂存 schema 2 operation candidate；matching `tool_result` 明确非错误后才发布。Read 映射 read，Write/Edit 映射
+write。失败、缺失、取消、Glob/Grep、NotebookEdit 与 ApplyPatch 不进入 typed operation。
 
 唯一例外是内部 Command Diff 通道：完整 assistant `tool_use` 的名称精确为 `Edit`、`file_path/old_string/new_string`
 类型完整且 `replace_all` 缺失或为 false 时，Adapter 按 tool-use ID 暂存 exact mutation；matching user
@@ -255,8 +276,8 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。`grep_sea
 
 - Core Action ID → Runtime native ID → Evidence ID；
 - 只有相同 operationId 合并；
-- operation 首次创建的 classifier/version 固定；已有 v1 projection 的 live operation 不切到 v2，新 operation
-  才使用 current v2；历史 v1 与新 v2 都可读取，不做批量重投影；
+- operation 首次创建的 classifier/version 固定；已有 v1/v2 projection 的 live operation 不切到 v3，新
+  operation 才使用 current v3；历史 v1/v2 与新 v3 都可读取，不做批量重投影；
 - lifecycle completion 可以只报告 identity/status；这类稀疏更新只推进 phase/outcome，不得用 Evidence-kind fallback 覆盖同一 operation 已报告的结构化 domain、semantic kind 或 title；
 - terminal 冲突为 `unsettled`；
 - Runtime 明确报告 interruption 时，已 started 且尚未结算的 operation 归约为

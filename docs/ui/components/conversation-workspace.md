@@ -293,7 +293,7 @@ Conversation、Binding 或 Session 状态。选择器和用户消息使用既有
 transcript 采用对话式双轨：用户正文与附件居右，队员回复居左；正文区两侧都不显示头像。用户正文继续使用既有执行
 浮层的 `--execution-running-surface`，队员消息容器不使用背景、边框或气泡，只以开放排版承载执行过程与 final。队员一次回复由“执行过程 +
 final message”组成。运行中过程复用当前执行台的 narration、plan、command/tool 与状态视觉；连续 Command 聚合为一个
-可展开的“已执行 x 项操作”，而不是平铺多个重边框卡片。运行中默认展开，用户仍可主动收起；Run 进入 terminal 后
+可展开的“完成了 x 个步骤”，而不是平铺多个重边框卡片。运行中默认展开，用户仍可主动收起；Run 进入 terminal 后
 过程自动折叠，summary 使用中文：成功为“工作了 {时长}”，取消为“你在 {时长}后停止了运行”，失败保持明确失败语义。
 summary 下方以一条分隔线连接始终展开的 final message；不得把 final 收进执行 disclosure，也不得保留英文
 “Working for / You stopped after”。取消或失败没有 final 时只显示诚实终态，不合成队员答案。
@@ -424,18 +424,17 @@ Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` �
 同一 Run 内最大连续的 Tool items 默认收成一条可展开组摘要；narration、plan 与 diagnostic 都会截断
 分组，不能跨 Run 或跨队员合并。有 running/waiting 操作时，活动组只显示“执行中/等待审批 · 当前操作”，
 不再同时追加累计数。当前操作优先展示已有公开证据中的具体指令：Shell 使用完整脱敏 command，File 使用
-可靠 `修改 <basename>` 或多文件数量，Web 搜索使用 typed query，其他操作使用非通用 Runtime title/toolName；
+可靠阅读／编辑文件名或多文件数量，Web 搜索使用 typed query，其他操作使用非通用 Runtime title/toolName；
 没有具体值时回退稳定 Tool 行标题，不从 raw input/output 猜测。当前 Tool 已结算但尾组尚未收口时，继续显示
-“执行中 · <最近一条指令>”，不回退为
-“已执行/已汇总 N 项操作”；成功、失败、停止和仅记录仍只在展开后的精确 Tool 行表达。终态同样只保留
-一段主文案。
+“执行中 · <最近一条指令>”。真正收口后，无论成功、失败、停止、跳过或混合结果，摘要只显示
+`完成了 x 个步骤`，不追加各状态数量。`x` 按 Canonical Activity 计数；一个 Activity 的多文件行不重复计数。
 
-Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 分组，但不进入“已执行/已汇总 N 项操作”。
+Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 分组，但不进入“完成了 x 个步骤”。
 它复用普通 command 的 28px 四轨行、状态点、disclosure 与结果文本框，并使用独立 16px SVG；同一
 `compactionId` 的 started/completed 在当前 Run 原位更新。只有明确 token 字段或非空 summary 才可展开；message count、
 elapsed、Runtime/事件/Session identity、trigger 与 phase 单独存在时保持无箭头、不可点击的静态单行。summary 的完整内容
 沿用本地 Managed Blob 惰性读取，不投影到渠道、局域网执行台、世界地图或公开 Evidence。精确归属、协议和失败关闭边界见
-[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
+[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
 独立图标沿用普通 command 的 muted 色，不使用品牌色。`imminent` 是一次性 `recorded` 记录，不压掉 Run 的“正在处理”；只有
 非终态 Run 的 `started` 显示 running 状态并暂停重复的底部进行中提示，`completed` 使用完成状态。
 
@@ -444,33 +443,35 @@ provisional 活动态，显示“执行中 · <最近一条指令>”，也不�
 仍在运行，不改写上一条 Tool 的真实终态；下一条连续 Tool 到达后只在同一组原位替换为新指令。
 narration、plan、diagnostic、waiting/cancelling 或 Run 终态才构成真实收口边界。该规则按 process/Run 事实
 判断，不使用时间防抖。
-组内只要有一项成功，真正收口后的组使用绿色实心圆点；只有全部失败才使用红色失败菱形，其他无成功的
-混合结果使用中性状态。绿色只表示“含成功操作”，不表示全部成功；完整状态仍由辅助名称和展开后的每条
-Tool 行表达。组 summary 的左侧 16px 图标与摘要文字共享 16px 中心线，底部和窄 Inspector 使用同一结构。
+组 summary 的左侧 16px 图标与摘要文字共享 16px 中心线，底部和窄 Inspector 使用同一结构。右侧状态槽只有
+执行中和等待审批显示图形；终态保留等宽空槽，不显示成功、失败、停止、跳过或未知图形，也不生成对应 tooltip
+或辅助名称。完整结果由展开后的精确 Tool 行表达。
 
 用户展开后保持展开，新 Tool 与组终态只原位更新，不自动收起或抢焦点。展开组只显示全部 Tool summary，
 完整结果仍须再展开精确 Tool；结果 region 在首次展开前不进入 DOM，Managed Blob 也不提前读取。收起组时
 其后代不参与布局，底部与 Inspector 移动同一 Drawer DOM 时保留组、Tool 与已经读取的结果状态。
 
-`activity-v2` 的 Tool 行由 Renderer 统一生成中文 presentation，Core 不再生成本地化默认标题或 Codex
+`activity-v3` 的 Tool 行由 Renderer 统一生成中文 presentation，Core 不再生成本地化默认标题或 Codex
 `commandActions` 中文标题。Shell 行只要同一公开 payload 有 command，就优先使用完整脱敏预览：去掉外层
 Shell `-c/-lc` 包装，保留参数、Node inline/heredoc 代码开头、全部子命令及
 `&&`、`||`、`|`、`;`、`&`。已知 token、password、
 Authorization、API key 与 `rovai send` 正文值替换为脱敏占位。标题值不做固定字符截断，由名称轨在真实
 宽度内单行视觉省略；完整脱敏值仍可通过 `title` 与辅助技术读取。没有公开 command 的 Runtime 继续使用
-非通用 title/toolName 与“终端操作”。File 行在 typed `runtimeFileOperation` 或单文件 available Canonical
-Diff 有可靠 path 时显示 `修改 <basename>`，否则使用 toolName/title/“文件操作”；`tool.web.search` 固定为“Web 搜索”，普通 Tool
+非通用 title/toolName 与“终端操作”。available typed read 显示 `阅读 <basename>`；文件 Diff 明确 add 时显示
+`新增 <basename>`，update、path-only write 或无法可靠区分时显示 `编辑 <basename>`，否则使用 toolName/title/“文件操作”；`tool.web.search` 固定为“Web 搜索”，普通 Tool
 使用 canonical toolName/title/“工具调用”，Runtime 与 Unknown 使用对应中文 fallback。命令展示只改变
 presentation，不得参与 identity 或 lifecycle 合并；ACP 仅由 Adapter 白名单的 command shape 在原生 kind
 缺失时证明 execute。上述稳定 Tool 行标题不因活动组的具体当前指令而改变，渠道卡片也不读取该组摘要字段。
 
 Tool 行固定为 `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨`，不可展开行也保留末轨占位。
-类型图标收敛为 Terminal、File、Web、Tool、Rovai、Runtime 和 Unknown 七类统一 16px 单色 SVG，不代表状态。
+类型图标收敛为 Terminal、File Read、File Write、Web、Tool、Rovai、Runtime 和 Unknown 统一 16px 单色 SVG，不代表状态。
 Rovai 图标使用四向星与弧形地平线及 `--rail-logo` 色，只由 Core Catalog 验证后的
 `sourceAuthority=core + credibility=core_verified + toolName` 选择；Shell command 即使以 `rovai` 开头也仍用
 Terminal 图标，Web semantic kind 优先用 Web 图标。
-Tool 行尾状态仍只使用 7px 小点：运行蓝色、等待审批橙色、成功绿色、失败或停止红色，仅记录为中性色。
-普通 Tool 行不再重复显示“已完成”文字；状态仍须通过 `aria-label` 与 `title` 可读取。
+Tool 行尾状态同时用形状和颜色表达：执行中为空心环、等待审批为菱形、成功为带勾圆形、失败为带叉圆形、
+停止为方形、跳过为带横线圆形、结果未知为带问号圆形。forced-colors 保留形状，reduced-motion 下运行环不旋转。
+普通 Tool 行不再重复显示“已完成”文字；状态仍须通过 `aria-label` 与 `title` 可读取。取消请求等待终态时状态
+容器保持透明，不出现覆盖整轨的色条；不可展开静态行不提供整行 hover。
 
 Shell command Tool disclosure 展开后第一行显示 `$ ` 加完整脱敏 command；存在完整公开 output 时从第二行
 连续显示，不插入“命令 / 输出”标签或空白分隔行。两者的数据来源不得互相替代；Claude/ACP terminal
@@ -482,26 +483,32 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 对应 summary。Web 搜索 disclosure 只有在 `runtimeSearchOperation.status=available` 且 Canonical semantic 同时为
 `tool.web.search` 时，才在第一行以 `搜索 ` 紧接 typed 公共 query；多项 query 以中文逗号按原顺序连接。存在
 公开结果时从下一行连续显示，不插入“搜索词 / 结果”标签或空白分隔行。query 原样展示，不做敏感词过滤或去重，历史 Evidence 缺失 typed
-projection 时不显示空占位。Web 搜索仍是 Tool item，计入所在连续组的“已执行 N 项操作”，组内使用 Web 图标；
-Shell 结果面的左边界与 Tool 行 16px 类型图标的左边界同轴，不再缩进到标题文本轨；其他 Tool detail 保持
-既有对齐。底部和 Inspector 复用同一行为。仍不显示
+projection 时不显示空占位。Web 搜索仍是 Tool item，计入所在连续组的步骤数，组内使用 Web 图标；
+Shell、Web、Built-in 和普通 Tool detail 统一使用现有 Shell 详情底色与 2px 左外边距，同时保留各自内容、
+内边距、字号和换行；不增加标签、分隔线或额外空行。底部和 Inspector 复用同一行为。仍不显示
 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
+[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
-只有 [Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)准入的可靠终态
-Evidence 才进入文件变化呈现。成功 Edit/Write 的可靠单路径足以把原 Tool 行呈现为 `修改 <basename>`；没有
-可靠内容时不显示 `+A −D` 或空 disclosure。有完整 before/after、unified snapshot 或 exact mutation 时，每个
-文件作为同一 Canonical Activity 的 presentation row 独立展开。
+只有 [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)准入的可靠
+Evidence 才进入文件操作呈现。成功 read 的可靠单路径显示为不可展开的 `阅读 <basename>`；成功 write 的可靠
+单路径显示 `编辑 <basename>`。有完整 before/after、unified snapshot 或 exact mutation 时，每个文件作为同一
+Canonical Activity 的 presentation row，明确 add 显示“新增”，其他显示“编辑”；没有可靠内容时不显示
+`+A −D` 或空 disclosure。read 只属于过程事实，永不进入 AgentRun `Files Changed`。
 
 当前 Runtime Host 的精确 `ROVAI_RUN_TMP` 是 Rovai 可重置的临时交付区，不是用户文件面。其目录内的 HTML、
 图片或其他中间产物不显示为 `修改 <basename>`，也不进入 `Files Changed`；mixed 事件只展示其余普通文件。
 已经持久化的历史卡片不重算。临时文件经 `rovai send --file` 发布后，附件由独立的 Camp Attachment UI 呈现。
 
+文件操作使用阅读文件或笔形 16px 图标。文件名以虚线底线按钮展示，鼠标或键盘点击后用当前 Camp workspace
+来源打开文件预览；成功后才提交预览导航。失败只在当前页显示 danger Toast `无法打开该文件`，不创建或切换
+预览页。写入行最右侧箭头独立控制原有 Diff；文件名与箭头互不触发，动作文字和空白不可点击。缺少可靠路径
+不制造链接，缺少 Diff 不制造展开入口。
+
 Renderer 不显示 `apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 Tool 显示名、output、命令文本或当前文件
-推测变化，也不为逐文件行创建新的 Activity identity。文件行留在现有“已执行 N 项操作”集合内，集合计数仍按
+推测变化，也不为逐文件行创建新的 Activity identity。文件行留在现有“完成了 x 个步骤”集合内，集合计数仍按
 Canonical Activity 计算。每行复用既有 File Tool 图标，顶格占满现有 Tool list 横条，不增加结构缩进。
 
 Claude Code `Edit` 的 exact mutation 展开只显示 `− oldText / + newText` 片段，不显示 `@@`、旧/新文件行号或
@@ -544,7 +551,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不删除底层 Input/Action 审计；业务取消本身不产生外部效果待确认提示。明确 canonical cancelled 的 Tool Call
 同样显示“已停止”，其他非取消路径独立投影的待确认提示仍保留。精确合同见
-[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
+[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
 
 当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
 notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
@@ -552,7 +559,7 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
 下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
 凭证、用户名或绝对路径。精确合同见
-[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
+[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
 
 failed AgentRun 的公开 `failure` 必须在对应 Run stage 显示 Core 已脱敏并限长的 Runtime 原始错误文本；
 非空 `detail` 优先，否则回退 `summary`。即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑
@@ -641,7 +648,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
+[Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
 
 ## 会话 Pane 紧凑布局
 

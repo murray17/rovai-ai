@@ -4,15 +4,16 @@ version: v1.52
 lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: in-progress
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-09-06
 ---
 
 # Rovai-ai v1.52：工具调用一致性与文件操作入口
 
-前置：[v1.51](../v1.51/README.md)。本版本实现已确认的工具调用界面改动，真实 Runtime 验收尚未完成。
-[第三版 HTML 交互稿](tool-call-consistency.html)与[实施及验收清单](implementation-plan.md)一并保存。
+前置：[v1.51](../v1.51/README.md)。本版本已实现工具调用界面一致性、typed read/write 文件入口、文件打开
+成功后提交与 `activity-v3`；[第三版 HTML 交互稿](tool-call-consistency.html)、[实施及验收清单](implementation-plan.md)
+和[真实 Runtime 验收](runtime-acceptance.md)一并保存。
 
 ## 已确认范围
 
@@ -26,20 +27,35 @@ last_updated: 2026-09-06
 
 ## 当前状态与实施边界
 
-本版本已进入编码。第三版组摘要和脚本语法已核对；Toast 的浏览器点击验证因控制连接失效未完成。合成原型、共享 fixture 和旧版 Runtime smoke 均不代表本版本产品验收通过。
+Migration 141 已原子切换 `v1.52 / projection schema 92 / activity-v3`。Core 只从 Codex structured
+`commandActions.read`、ACP/Claude/Pi 的 matching 成功终态建立 typed read/write；Renderer 使用同一公开
+projection 命名文件行，read 不进入 `Files Changed`。文件入口在 Main 校验和 Renderer 首屏读取都成功后才激活
+预览；失败只显示红色 Toast，并保留原页面与已有预览。
 
-Runtime 缺少可靠新增证据时回退“编辑”；缺少可靠文件操作证据时保留原工具或未知展示，不补造文件事件。阅读路径、事件投影、标题和预览的实施必须遵守当前权威边界，并在同一实现变更中更新相关合同与 UI 规范。本版本不修改 Agent 模型上下文或扩大 Runtime 平台资格。
+本机真实矩阵覆盖 14 个 Runtime：12 个完成模型执行，其中可靠 typed read/write、保守“编辑”与无证据回退均按
+合同通过；Antigravity 缺少公开单文件终态而保持回退，Grok 的写入未完成，CodeBuddy 缺可用默认模型、Cursor 缺
+当前平台准入证据而阻断。具体版本、每项结果和 Qwen basename-only Diff 边界见[Runtime 验收](runtime-acceptance.md)。
+这些结果不改变 Runtime 平台资格。本版本不修改 Agent 模型上下文。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | [v1.51](../v1.51/README.md)冻结为 historical；本概览、[实施计划](implementation-plan.md)、[版本索引](../README.md)与前后链接建立本分支唯一 current v1.52 |
-| Decisions | 已更新 | [v1.51 决定](../v1.51/decisions.md)的生命周期元数据同步归档，保留原决定内容；本轮为局部可逆 UI 方案与实施，不新增重要决定 |
-| Contracts | 确认无需更新 | 编码开始前仍由[运行过程详情](../../contracts/run-process-detail-surface-v30.md)、[文件变化观测](../../contracts/runtime-file-change-observation-v2.md)、[文件预览](../../contracts/file-preview-v7.md)约束；实施时同步更新受影响条款 |
-| Architecture | 确认无需更新 | 当前准备不改变职责或授权；实现继续遵守 [Runtime 文件变化](../../architecture/runtime-file-change-observation.md)和[文件预览](../../architecture/file-preview.md)边界 |
-| UI | 确认无需更新 | 第三版是版本内已确认设计，尚未替换生产规范；实施时同步[会话工作区](../../ui/components/conversation-workspace.md)、[文件预览](../../ui/components/file-preview.md)及[无障碍反馈](../../ui/qa/accessibility.md)的相关条款 |
-| Runtime Activity | 确认无需更新 | 编码开始前尚未修改分类或投影；实现涉及映射时按[维护指南](../../runtime-activity/README.md)同步 Registry、正反例与生命周期 fixture |
-| Runtime compatibility | 确认无需更新 | 未运行本版本真实 Runtime 测试，不修改[兼容性结论](../../runtime-compatibility.md)；逐 Runtime 结果进入实施计划 |
-| Documentation routing | 确认无需更新 | 通用入口已动态跟随版本索引，不增加顶层路由或新的文档职责 |
+| Decisions | 已更新 | [v1.51 决定](../v1.51/decisions.md)保持 historical；本轮不新增重要决定，[CURRENT](../../decisions/CURRENT.md)只把当前规范路由切到新合同 |
+| Contracts | 已更新 | [运行过程详情 v31](../../contracts/run-process-detail-surface-v31.md)、[文件变化观测 v3](../../contracts/runtime-file-change-observation-v3.md)与[文件预览 v8](../../contracts/file-preview-v8.md)分别冻结展示、typed operation 与成功后提交边界 |
+| Architecture | 已更新 | [Runtime 文件变化](../../architecture/runtime-file-change-observation.md)、[文件预览](../../architecture/file-preview.md)及基础 Evidence/Activity 不变量同步新的职责与迁移边界 |
+| UI | 已更新 | [会话工作区](../../ui/components/conversation-workspace.md)与[文件预览](../../ui/components/file-preview.md)记录统一状态、文件名／Diff 双入口和失败 Toast 行为 |
+| Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)切换 `activity-v3`，列出各协议的 typed read/write 准入、正反例和真实验收链接 |
+| Runtime compatibility | 确认无需更新 | [真实 Runtime 验收](runtime-acceptance.md)是版本功能证据，不改变 Adapter 支持级别、模型合同或平台资格 |
+| Documentation routing | 已更新 | 文档任务导航、Contracts 索引与当前权威导航已指向 v31/v3/v8；版本索引保留 v1.52 为唯一 current |
 | Root README | 确认无需更新 | 项目定位、常青能力和支持范围未改变，实施中的 UI 范围不进入项目主页 |
+
+## References
+
+- [实施与验收清单](implementation-plan.md)
+- [真实 Runtime 文件操作验收](runtime-acceptance.md)
+- [第三版 HTML 交互稿](tool-call-consistency.html)
+- [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)
+- [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)
+- [File Preview v8](../../contracts/file-preview-v8.md)
