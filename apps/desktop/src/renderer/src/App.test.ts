@@ -2887,6 +2887,63 @@ describe('task event projections', () => {
     expect(createStart).toBeGreaterThan(menuStart)
   })
 
+  it('prefers fresh navigation markers over stale pinned Camp fallbacks', () => {
+    const makeCamp = (marker: 'none' | 'loading') => ({
+      id: 'pinned-camp',
+      title: '置顶对话',
+      activationState: 'active' as const,
+      projectPath: '/repo',
+      projectBindingKind: 'directory' as const,
+      defaultLead: null,
+      marker,
+      lastActivityAt: '2026-09-05T00:00:00Z',
+      lastActivityGlobalSequence: 1,
+      latestCompletionGlobalSequence: 0,
+      version: 1
+    })
+    const renderMarkers = (
+      navigationMarker: 'none' | 'loading',
+      pinnedMarker: 'none' | 'loading'
+    ): string => renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'camp',
+      state: 'ready',
+      navigation: {
+        schemaVersion: 3,
+        throughGlobalSequence: 1,
+        quickChat: { totalCount: 0, recentCamps: [] },
+        projects: [{
+          projectKey: 'directory:/repo',
+          name: 'rovai-ai',
+          projectPath: '/repo',
+          lastActivityAt: '2026-09-05T00:00:00Z',
+          lastActivityGlobalSequence: 1,
+          totalCount: 1,
+          recentCamps: [makeCamp(navigationMarker)]
+        }]
+      },
+      activeCampId: null,
+      pins: [{ kind: 'camp', targetKey: 'pinned-camp', pinnedAt: '2026-09-05T00:00:00Z' }],
+      pinnedCampItems: [makeCamp(pinnedMarker)],
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 0,
+      onSettings: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => undefined,
+      onError: () => undefined
+    }))
+
+    const running = renderMarkers('loading', 'none')
+    expect(running.match(/camp-loading-spinner camp-marker-loading/g) ?? []).toHaveLength(1)
+
+    const completed = renderMarkers('none', 'loading')
+    expect(completed).not.toContain('camp-loading-spinner camp-marker-loading')
+  })
+
   it('keeps project disclosure state stable without coupling it to Camp pagination', () => {
     const collapsed = toggleNavigationGroup(new Set<string>(), 'directory:/repo')
     expect(collapsed.has('directory:/repo')).toBe(true)
