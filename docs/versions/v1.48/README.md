@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.48
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -11,7 +11,7 @@ last_updated: 2026-09-05
 
 # Rovai-ai v1.48：Pi 原生执行边界收口
 
-前置：[v1.47](../v1.47/README.md)。本版本保留 Pi JSONL RPC Host、Native Session、exact resume、结构化图片、
+前置：[v1.47](../v1.47/README.md)。后续：[v1.49](../v1.49/README.md)。本版本保留 Pi JSONL RPC Host、Native Session、exact resume、结构化图片、
 Fleet/LRU、correlated abort、无模型调用 Machine Ready 与 Preview/NotQualified 资格边界；只删除 Rovai 对 Pi 原生
 Tool/Approval 的不完整再实现，并把 Runtime Input acceptance 收敛到 Pi 实际开始本轮的 `agent_start` 事件。
 

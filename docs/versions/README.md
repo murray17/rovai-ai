@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.48
+current_version: v1.49
 last_updated: 2026-09-05
 ---
 
@@ -199,4 +199,5 @@ last_updated: 2026-09-05
 | v1.45 | `historical` | Composer 单一 Draft Authority、inline Atom，以及 Pi/Fleet 生命周期收口 | [v1.45/README.md](v1.45/README.md) |
 | v1.46 | `historical` | Composer Core 正文回写、同步交互锁、Draft 加载与 autosave 性能收口 | [v1.46/README.md](v1.46/README.md) |
 | v1.47 | `historical` | Camp Composer 在所有实际卸载导航前统一完成 Draft leave guard | [v1.47/README.md](v1.47/README.md) |
-| v1.48 | `current` | Pi 原生执行、Rovai Approval/Receipt 退役与 `agent_start` 输入准入收口 | [v1.48/README.md](v1.48/README.md) |
+| v1.48 | `historical` | Pi 原生执行、Rovai Approval/Receipt 退役与 `agent_start` 输入准入收口 | [v1.48/README.md](v1.48/README.md) |
+| v1.49 | `current` | 正常退出前持久化最新 Camp Composer Draft，再进入既有 Planned Shutdown | [v1.49/README.md](v1.49/README.md) |

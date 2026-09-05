@@ -11,7 +11,7 @@ last_updated: 2026-09-01
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)。受控关闭后的 product
 fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；字段级状态与命令见
 [Accepted Input Recovery v5](../contracts/accepted-input-recovery-v5.md)与
-[Planned Shutdown v5](../contracts/planned-shutdown-v5.md)。
+[Planned Shutdown v6](../contracts/planned-shutdown-v6.md)。
 
 ## 1. 三个独立恢复对象
 

@@ -290,6 +290,24 @@ export async function runPreparedCampLeaveTransition(
     throw error
   }
 }
+
+export async function prepareActiveCampForAppQuit(
+  view: View,
+  activeCampId: string | null,
+  registration: { campId: string; guard: CampLeaveGuard } | null
+): Promise<void> {
+  if (
+    view !== 'camp'
+    || !activeCampId
+    || registration?.campId !== activeCampId
+  ) {
+    return
+  }
+
+  const preparation = await registration.guard()
+  preparation.complete(true)
+}
+
 export type SettingsSection = NavigationSettingsSection
 export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
 
@@ -1213,6 +1231,24 @@ function AuthoritativeApp({
     )
     return true
   }, [])
+
+  const prepareForAppQuit = useCallback(async (): Promise<void> => {
+    try {
+      await prepareActiveCampForAppQuit(
+        viewRef.current,
+        activeCampIdRef.current,
+        campLeaveGuardRef.current
+      )
+    } catch (nextError) {
+      setError(`退出应用前未能保存草稿：${errorMessage(nextError)}`)
+      throw nextError
+    }
+  }, [])
+
+  useEffect(
+    () => window.rovai.appLifecycle.onPrepareQuit(prepareForAppQuit),
+    [prepareForAppQuit]
+  )
 
   const cancelPendingCampActivation = useCallback((): void => {
     campSelectionGeneration.current += 1

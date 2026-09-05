@@ -14,11 +14,11 @@ last_updated: 2026-08-26
 | Release packaging pipeline | Owns one version-bound Markdown source, embeds it into every platform update manifest and fails release verification when source and manifest differ. |
 | Electron Main update service | Owns the single snapshot, check source coalescing, timers, release normalization, prompt generations, download/install mutexes and updater degradation. |
 | `electron-updater` adapter | Reads packaged channel configuration, performs provider checks/downloads and synchronously stages the platform installer; it never decides Renderer presentation. |
-| Preload bridge | Exposes the closed App Update v1 API to the current Main Window and forwards typed snapshots; no provider object, installer path or credential crosses the bridge. |
+| Preload bridge | Exposes the closed App Update v2 API to the current Main Window, forwards typed snapshots and carries the private quit-preparation request; no provider object, installer path or credential crosses the bridge. |
 | Renderer update controller | Hydrates with `get`, subscribes once, shares the same snapshot across Shell and About, and reports action-call failures without replacing Main facts. |
 | App Shell prompt/badges | Projects Main-owned prompt generation and actionable release states without reusing Notification Episode authority. |
 | About & Updates | Projects all operation/result states, explicit actions, safe release notes and the narrowly admitted fallback links. |
-| Main quit coordinator | Freezes the first native quit reason, runs one controlled Core drain and completes an updater-accepted or ordinary exit. |
+| Main quit coordinator | Freezes the first native quit reason, waits for the Renderer Draft fence, runs one controlled Core drain and completes an updater-accepted or ordinary exit. |
 
 ## Release metadata flow
 
@@ -86,7 +86,7 @@ ready_to_install
   -> installing
   -> updater synchronously stages installer
      -> rejected/error -> install_failed; App/Core stay usable
-     -> accepted -> native before-quit -> one controlled Core drain -> app.exit(0)
+     -> accepted -> native before-quit -> Renderer Draft fence -> one controlled Core drain -> app.exit(0)
 ```
 
 The updater event stream and command Promise can report the same failure. The Main service settles by current state, so
@@ -94,9 +94,10 @@ only the first terminal observation changes the snapshot. Download and install a
 button; Main checks the current release/status again.
 
 The install order is deliberately updater-first. On Windows the updater can launch the staged installer before calling
-`app.quit`; on macOS the native updater owns replacement. Main then intercepts the resulting `before-quit` long enough to
-finish the same bounded Planned Shutdown used by ordinary quit. It does not ask Core to shut down before knowing the
-installer accepted the request.
+`app.quit`; on macOS the native updater owns replacement. Main then intercepts the resulting `before-quit`, waits for the
+active Composer's existing leave guard, and finishes the same bounded Planned Shutdown used by ordinary quit. It does
+not ask Core to shut down before knowing the installer accepted the request. A Draft preparation failure keeps the
+App/Core running and allows a later quit retry.
 
 ## Renderer coordination
 
@@ -128,7 +129,7 @@ updater-unavailable or download-failed states.
 
 ## References
 
-- [App Update v1](../contracts/app-update-v1.md)
+- [App Update v2](../contracts/app-update-v2.md)
 - [Planned Shutdown](planned-shutdown.md)
 - [App Shell navigation](../ui/components/app-shell-navigation.md)
 - [macOS packaging](../development/packaging.md)

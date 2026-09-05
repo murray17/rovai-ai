@@ -100,6 +100,10 @@ App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；
 设置、记忆、队员、其他 Camp 或因移除当前 Project 返回快速对话。只打开新会话 Dialog、选择/展开 Project 而未
 卸载 Composer 时不构成已完成 leave；创建结果真正激活另一 Camp 时复用同一 guard。组件 cleanup 不承担这次保存。
 
+正常 App 退出也复用该 guard，但由 Main quit coordinator 在 Core shutdown 前请求；App Shell 不增加退出状态或 Draft
+保存实现。保存失败时 Main 放弃本次退出，当前 Camp 保持可见且 Composer 恢复交互；成功后才进入既有
+`runtime.state = shutting_down` 全局等待面。
+
 ## 宿主平台交互
 
 macOS 保留 hidden title bar 与受控 drag region；新对话、设置、队员和记忆页使用同一个内容列全宽、

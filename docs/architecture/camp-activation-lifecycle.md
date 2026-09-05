@@ -54,5 +54,5 @@ forced window termination.
 ## References
 
 - [Camp 生命周期不变量](foundational-invariants.md#camp-lifecycle)
-- [Camp Composer Draft v10](../contracts/camp-composer-draft-v10.md)
+- [Camp Composer Draft v11](../contracts/camp-composer-draft-v11.md)
 - [Pending Camp Activation v1](../contracts/pending-camp-activation-v1.md)
