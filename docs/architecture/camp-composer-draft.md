@@ -10,7 +10,7 @@ last_updated: 2026-09-05
 
 Camp Composer 有三个互不替代的权威层：输入期间的 Lexical `EditorState`、稳定业务语义的
 `ComposerDocument` V2，以及持久化与 exact revision 的 Core Draft。已提交但尚未公开的下一轮输入由私有
-Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v11](../contracts/camp-composer-draft-v11.md)、
+Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v12](../contracts/camp-composer-draft-v12.md)、
 [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)，附件生命周期见
 [Camp Attachment v8](../contracts/camp-attachment-v8.md)。
 
@@ -132,6 +132,9 @@ revision。App 只调用当前 `CampWorkspace` 注册的统一 leave guard，不
 时调用 guard 并在成功后 `complete(true)`。guard 失败由原路径恢复 Composer 交互并显示保存错误，Main 放弃本次退出且
 允许下一次 quit 重试。此阶段早于 `runtime.state = shutting_down`，不改变既有关闭 overlay。
 
+macOS 红色关闭 / Cmd+W 复用同一 Renderer preparation，成功后只关闭主窗口，App、Core 与 Runtime 继续运行。
+失败不关闭窗口，沿用保存错误与重试行为；连续关窗或关窗与 Cmd+Q 重叠时，共享该窗口进行中的一次 preparation。
+
 ## Initialization and authoritative replacement
 
 首次创建时把 Core V2 转为单 Paragraph EditorState。`draftIdentity = campId:draftId` 是编辑上下文身份；切换
@@ -207,7 +210,7 @@ pendingInputId、pending revision 与 editToken fencing，且不会消费或覆�
 
 ## References
 
-- [Camp Composer Draft v11](../contracts/camp-composer-draft-v11.md)
+- [Camp Composer Draft v12](../contracts/camp-composer-draft-v12.md)
 - [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)
 - [Camp Attachment v8](../contracts/camp-attachment-v8.md)
 - [结构化 Mention 与 Atom](../ui/components/structured-mentions.md)
