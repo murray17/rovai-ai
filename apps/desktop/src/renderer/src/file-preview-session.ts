@@ -173,12 +173,45 @@ export function filePreviewSourceKey(request: OpenFilePreviewRequest): string {
   }
 }
 
+export function stableFilePreviewSourceKey(
+  request: OpenFilePreviewRequest,
+  presentation: Pick<FilePreviewPresentation, 'displayPath' | 'pathPresentation'>
+): string {
+  if ('campId' in request && presentation.pathPresentation === 'project_relative') {
+    return `workspace:${request.campId}:${presentation.displayPath}`
+  }
+  return filePreviewSourceKey(request)
+}
+
 export function restorableFilePreviewRequest(
   request: OpenFilePreviewRequest
 ): RestorableFilePreviewRequest | null {
   return request.kind === 'child_of_handle' || request.kind === 'authorized_root'
     ? null
     : request
+}
+
+export function resolvedFilePreviewSource(
+  request: OpenFilePreviewRequest,
+  file: Pick<ResolvedFilePreview, 'displayPath' | 'pathPresentation' | 'restoreRequest'>,
+  fallbackRequest?: OpenFilePreviewRequest | null
+): { sourceRequest: OpenFilePreviewRequest; sourceKey: string } {
+  const sourceRequest = file.restoreRequest
+    ?? restorableFilePreviewRequest(request)
+    ?? (fallbackRequest ? restorableFilePreviewRequest(fallbackRequest) : null)
+    ?? request
+  return {
+    sourceRequest,
+    sourceKey: stableFilePreviewSourceKey(sourceRequest, file)
+  }
+}
+
+export function filePreviewTabMatchesResolvedFile(
+  tab: { previewKey: string | null; sourceKey: string },
+  file: Pick<ResolvedFilePreview, 'previewKey'>,
+  resolvedSourceKey: string
+): boolean {
+  return tab.previewKey === file.previewKey || tab.sourceKey === resolvedSourceKey
 }
 
 export function filePreviewPresentationFromRequest(

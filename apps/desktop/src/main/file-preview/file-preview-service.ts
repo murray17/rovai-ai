@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { basename, dirname, extname, isAbsolute, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { FileHandle } from 'node:fs/promises'
 import type {
   FileContentVersion,
@@ -18,6 +18,7 @@ import type {
   OpenFilePreviewRequest,
   OpenFilePreviewResult,
   ParsedFileReference,
+  RestoreFilePreviewRequest,
   ResolvedFilePreview
 } from '@contracts'
 import { parseFileReference } from '../../file-preview-reference'
@@ -133,6 +134,7 @@ interface PreviewHandleRecord {
   version: FileContentVersion
   classification: SupportedClassification
   previewKey: string
+  restoreRequest?: RestoreFilePreviewRequest
   reopenToken: string
   generation: string
   target?: FileLocationTarget
@@ -228,6 +230,36 @@ async function fileHandleVersion(file: FileHandle): Promise<FileContentVersion> 
 function safeDisplayReference(value: string): string {
   const normalized = value.replace(/[\r\n\0]/gu, ' ').trim()
   return Array.from(normalized).slice(0, 180).join('')
+}
+
+function workspaceRelativeReference(root: string, candidate: string): string | null {
+  if (!pathIsWithin(root, candidate)) return null
+  const path = relative(root, candidate)
+  if (!path || path.length > 4_096 || /[\0\r\n]/u.test(path)) return null
+  try {
+    const encoded = path
+      .split(sep)
+      .map((segment) => encodeURIComponent(segment).replace(/[!'()*]/gu, (character) =>
+        `%${character.charCodeAt(0).toString(16).toUpperCase()}`))
+      .join('/')
+    if (!encoded || encoded.length > 4_096) return null
+    const resolvesCandidate = (reference: string): boolean => {
+      const parsed = parseFileReference(reference)
+      return parsed?.pathKind === 'relative'
+        && parsed.query === undefined
+        && parsed.fragment === undefined
+        && parsed.target === undefined
+        && resolve(root, parsed.pathPart) === candidate
+    }
+    if (resolvesCandidate(encoded)) return encoded
+    const explicitlyRelative = `./${encoded}`
+    return explicitlyRelative.length <= 4_096
+      && resolvesCandidate(explicitlyRelative)
+      ? explicitlyRelative
+      : null
+  } catch {
+    return null
+  }
 }
 
 function strictDecode(bytes: Uint8Array): string {
@@ -938,10 +970,6 @@ export class FilePreviewService {
       await opened.file.close().catch(() => undefined)
       throw error
     }
-    if (this.#windowHandleCount(webContentsId) >= MAX_HANDLES_PER_WINDOW) {
-      await opened.file.close().catch(() => undefined)
-      return failed('too_many_open_files', '打开的文件较多，请先关闭一些标签页。')
-    }
     const handleId = randomUUID()
     const previewKey = createHash('sha256')
       .update(`${webContentsId}\0${target.campId}\0${opened.canonicalPath}`)
@@ -953,11 +981,16 @@ export class FilePreviewService {
       capabilities.push('preview_asset')
     }
     const pathProjection = await this.#pathProjection(target, opened)
+    const restoreRequest = await this.#independentRestoreRequest(request, target.campId, opened.canonicalPath)
     try {
       this.#requireBinding(webContentsId, binding, target.campId)
     } catch (error) {
       await opened.file.close().catch(() => undefined)
       throw error
+    }
+    if (this.#windowHandleCount(webContentsId) >= MAX_HANDLES_PER_WINDOW) {
+      await opened.file.close().catch(() => undefined)
+      return failed('too_many_open_files', '打开的文件较多，请先关闭一些标签页。')
     }
     const record: PreviewHandleRecord = {
       handleId,
@@ -984,6 +1017,7 @@ export class FilePreviewService {
       version: opened.version,
       classification: supportedClassification,
       previewKey,
+      restoreRequest,
       reopenToken: randomUUID(),
       generation: generation(),
       target: parsed.target,
@@ -1032,6 +1066,35 @@ export class FilePreviewService {
     }
   }
 
+  async #independentRestoreRequest(
+    request: OpenFilePreviewRequest,
+    campId: string,
+    canonicalPath: string
+  ): Promise<RestoreFilePreviewRequest | undefined> {
+    if (request.kind !== 'child_of_handle') return undefined
+    try {
+      const workspace = await this.#authority.resolve({
+        kind: 'camp_workspace',
+        campId,
+        rawReference: '.'
+      })
+      if (
+        !workspace
+        || workspace.kind !== 'file_target'
+        || workspace.campId !== campId
+        || workspace.sourceKind !== 'camp_workspace'
+        || workspace.allowChildren !== true
+      ) return undefined
+      const canonicalWorkspaceRoot = await canonicalizeExistingPath(workspace.rootPath)
+      const rawReference = workspaceRelativeReference(canonicalWorkspaceRoot, canonicalPath)
+      return rawReference
+        ? { kind: 'camp_workspace', campId, rawReference }
+        : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   #fileAccessOptions(target: { sourceKind: OpenFilePreviewRequest['kind'] }): { allowExternalFile: boolean } {
     return { allowExternalFile: target.sourceKind !== 'authorized_root' }
   }
@@ -1071,6 +1134,7 @@ export class FilePreviewService {
       handleId: record.handleId,
       reopenToken: record.reopenToken,
       previewKey: record.previewKey,
+      ...(record.restoreRequest ? { restoreRequest: { ...record.restoreRequest } } : {}),
       displayPath: record.displayPath,
       pathPresentation: record.pathPresentation,
       fileName: record.fileName,

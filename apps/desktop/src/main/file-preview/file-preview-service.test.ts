@@ -704,6 +704,144 @@ describe('FilePreviewService', () => {
     await service.closeAll()
   })
 
+  it('restores a project child independently after its parent is deleted and the Camp changes', async () => {
+    const { root, service, authority } = await fixture()
+    const docs = join(root, 'docs')
+    await mkdir(docs)
+    const parentPath = join(docs, 'README.md')
+    await writeFile(parentPath, '[设计说明](./design.md)')
+    await writeFile(join(docs, 'design.md'), '# Design')
+    const resolveSource = vi.spyOn(authority, 'resolve')
+    const parent = await service.open(1, request('docs/README.md'))
+    expect(parent).toMatchObject({ ok: true, value: { kind: 'file_preview' } })
+    if (!parent.ok || parent.value.kind !== 'file_preview') return
+
+    const child = await service.open(1, {
+      kind: 'child_of_handle',
+      parentHandleId: parent.value.file.handleId,
+      rawReference: './design.md',
+      allowSystemOpen: true
+    })
+    expect(child).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
+      restoreRequest: { kind: 'camp_workspace', campId: 'camp-1', rawReference: 'docs/design.md' }
+    } } })
+    if (!child.ok || child.value.kind !== 'file_preview' || !child.value.file.restoreRequest) {
+      throw new Error('Expected an independently restorable child')
+    }
+    expect(resolveSource).toHaveBeenCalledWith({
+      kind: 'camp_workspace', campId: 'camp-1', rawReference: '.'
+    })
+
+    await service.release(1, { handleId: parent.value.file.handleId })
+    await rm(parentPath)
+    await service.bindCamp(1, 'camp-2')
+    await service.bindCamp(1, 'camp-1')
+    const restored = await service.restore(1, child.value.file.restoreRequest)
+    expect(restored).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
+      displayPath: 'docs/design.md', pathPresentation: 'project_relative', fileName: 'design.md'
+    } } })
+    if (!restored.ok || restored.value.kind !== 'file_preview') return
+    expect(await service.readText(1, {
+      handleId: restored.value.file.handleId,
+      expectedGeneration: restored.value.file.contentGeneration
+    })).toMatchObject({ ok: true, value: { text: '# Design' } })
+
+    await rm(join(docs, 'design.md'))
+    await service.bindCamp(1, 'camp-2')
+    await service.bindCamp(1, 'camp-1')
+    expect(await service.restore(1, child.value.file.restoreRequest)).toMatchObject({
+      ok: false,
+      error: { code: 'file_not_found' }
+    })
+  })
+
+  it('gives each link in a project child chain its own workspace restore source', async () => {
+    const { root, service } = await fixture()
+    await mkdir(join(root, 'docs'))
+    await writeFile(join(root, 'A.md'), '[B](docs/B.md)')
+    await writeFile(join(root, 'docs', 'B.md'), '[C](C.md)')
+    await writeFile(join(root, 'docs', 'C.md'), '# C')
+    const parent = await service.open(1, request('A.md'))
+    if (!parent.ok || parent.value.kind !== 'file_preview') throw new Error('Expected A preview')
+    const child = await service.open(1, {
+      kind: 'child_of_handle', parentHandleId: parent.value.file.handleId,
+      rawReference: 'docs/B.md', allowSystemOpen: true
+    })
+    if (!child.ok || child.value.kind !== 'file_preview') throw new Error('Expected B preview')
+    const grandchild = await service.open(1, {
+      kind: 'child_of_handle', parentHandleId: child.value.file.handleId,
+      rawReference: 'C.md', allowSystemOpen: true
+    })
+    if (!grandchild.ok || grandchild.value.kind !== 'file_preview') throw new Error('Expected C preview')
+
+    expect(child.value.file.restoreRequest).toEqual({
+      kind: 'camp_workspace', campId: 'camp-1', rawReference: 'docs/B.md'
+    })
+    expect(grandchild.value.file.restoreRequest).toEqual({
+      kind: 'camp_workspace', campId: 'camp-1', rawReference: 'docs/C.md'
+    })
+  })
+
+  it('encodes a project child restore reference without changing its file identity', async () => {
+    const { root, service } = await fixture()
+    await mkdir(join(root, 'docs'))
+    await writeFile(join(root, 'docs', 'README.md'), '[Draft](./design%20%28draft%29%231.md)')
+    await writeFile(join(root, 'docs', 'design (draft)#1.md'), '# Draft')
+    const parent = await service.open(1, request('docs/README.md'))
+    if (!parent.ok || parent.value.kind !== 'file_preview') throw new Error('Expected parent preview')
+    const child = await service.open(1, {
+      kind: 'child_of_handle', parentHandleId: parent.value.file.handleId,
+      rawReference: './design%20%28draft%29%231.md', allowSystemOpen: true
+    })
+    if (!child.ok || child.value.kind !== 'file_preview' || !child.value.file.restoreRequest) {
+      throw new Error('Expected an independently restorable child')
+    }
+
+    expect(child.value.file.restoreRequest).toEqual({
+      kind: 'camp_workspace',
+      campId: 'camp-1',
+      rawReference: 'docs/design%20%28draft%29%231.md'
+    })
+    await service.bindCamp(1, 'camp-2')
+    await service.bindCamp(1, 'camp-1')
+    expect(await service.restore(1, child.value.file.restoreRequest)).toMatchObject({
+      ok: true,
+      value: { kind: 'file_preview', file: { displayPath: 'docs/design (draft)#1.md' } }
+    })
+  })
+
+  it('rechecks the Camp generation after resolving a child workspace restore source', async () => {
+    const { root, service, authority } = await fixture()
+    await writeFile(join(root, 'README.md'), '[Notes](notes.md)')
+    await writeFile(join(root, 'notes.md'), 'notes')
+    const parent = await service.open(1, request('README.md'))
+    if (!parent.ok || parent.value.kind !== 'file_preview') throw new Error('Expected parent preview')
+    type AuthorityResult = Awaited<ReturnType<FilePreviewSourceAuthority['resolve']>>
+    let completeAuthority!: (result: AuthorityResult) => void
+    const delayedAuthority = new Promise<AuthorityResult>((resolveResult) => {
+      completeAuthority = resolveResult
+    })
+    const resolveSource = vi.spyOn(authority, 'resolve').mockReturnValueOnce(delayedAuthority)
+
+    const opening = service.open(1, {
+      kind: 'child_of_handle', parentHandleId: parent.value.file.handleId,
+      rawReference: 'notes.md', allowSystemOpen: true
+    })
+    await vi.waitFor(() => expect(resolveSource).toHaveBeenCalledWith({
+      kind: 'camp_workspace', campId: 'camp-1', rawReference: '.'
+    }))
+    await service.bindCamp(1, 'camp-2')
+    await service.bindCamp(1, 'camp-1')
+    completeAuthority({
+      kind: 'file_target', campId: 'camp-1', sourceKind: 'camp_workspace',
+      sourceIdentity: 'camp:camp-1', rootPath: root, basePath: root,
+      rawReference: '.', allowChildren: true
+    })
+
+    expect(await opening).toMatchObject({ ok: false, error: { code: 'read_failed' } })
+    expect(service.handleCount).toBe(0)
+  })
+
   it('opens a Markdown relative link next to an external parent without a root grant', async () => {
     const { service, native } = await fixture()
     const outside = await mkdtemp(join(tmpdir(), 'rovai-file-preview-markdown-outside-'))
@@ -725,6 +863,7 @@ describe('FilePreviewService', () => {
       displayPath: 'design.md', pathPresentation: 'file_name_only', fileName: 'design.md'
     } } })
     if (!child.ok || child.value.kind !== 'file_preview') return
+    expect(child.value.file).not.toHaveProperty('restoreRequest')
     expect(await service.readText(1, {
       handleId: child.value.file.handleId,
       expectedGeneration: child.value.file.contentGeneration

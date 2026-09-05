@@ -1463,6 +1463,7 @@ export interface ResolvedFilePreview {
   handleId: string
   reopenToken: string
   previewKey: string
+  restoreRequest?: RestoreFilePreviewRequest
   displayPath: string
   pathPresentation: FilePreviewPathPresentation
   fileName: string
