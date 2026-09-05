@@ -4,6 +4,9 @@ import {
   type AppQuitPreparationResponse
 } from '../shared/app-lifecycle'
 
+// Cmd+Q can arrive while a macOS close-only request is still saving the same Draft.
+const pendingPreparations = new WeakMap<BrowserWindow, Promise<void>>()
+
 function rendererPreparationResponse(value: unknown): AppQuitPreparationResponse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('Renderer returned an invalid App quit preparation response')
@@ -30,8 +33,11 @@ export function requestRendererQuitPreparation(
     return Promise.resolve()
   }
 
+  const pending = pendingPreparations.get(window)
+  if (pending) return pending
+
   const { port1, port2 } = createChannel()
-  return new Promise<void>((resolve, reject) => {
+  const preparation = new Promise<void>((resolve, reject) => {
     let settled = false
     const cleanup = (): void => {
       port1.removeListener('message', onMessage)
@@ -76,4 +82,8 @@ export function requestRendererQuitPreparation(
       fail(error)
     }
   })
+  pendingPreparations.set(window, preparation)
+  const clear = (): void => { pendingPreparations.delete(window) }
+  void preparation.then(clear, clear)
+  return preparation
 }
