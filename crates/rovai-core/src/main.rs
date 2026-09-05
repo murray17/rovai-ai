@@ -9912,6 +9912,49 @@ impl Core {
         Ok(())
     }
 
+    async fn acknowledge_pi_agent_start(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        delivery_id: &str,
+        native_input_id: &str,
+    ) -> Result<Option<AgentRunExecution>> {
+        let mut database = self.database.lock().await;
+        let Some(execution) = ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            agent_run_id,
+            execution_epoch,
+        )?
+        else {
+            return Ok(None);
+        };
+        match ContextService.acknowledge_input_delivery_transition(
+            &mut database,
+            delivery_id,
+            native_input_id,
+        ) {
+            Ok((_, true)) => Ok(Some(execution)),
+            Ok((_, false)) => Ok(None),
+            Err(error) => {
+                let acknowledgement_error = format!("{error:#}");
+                if let Err(mark_error) = ContextService.mark_input_delivery_unknown(
+                    &mut database,
+                    delivery_id,
+                    &format!(
+                        "Runtime returned a Native Input ID, but Rovai-ai could not persist its acknowledgement: {acknowledgement_error}"
+                    ),
+                ) {
+                    anyhow::bail!(
+                        "failed to persist Runtime Input acknowledgement ({acknowledgement_error}) and failed to mark it unknown ({mark_error:#})"
+                    );
+                }
+                anyhow::bail!(
+                    "Runtime Input acknowledgement could not be persisted: {acknowledgement_error}"
+                );
+            }
+        }
+    }
+
     async fn bind_active_runtime_route(
         &self,
         execution: &AgentRunExecution,
@@ -11417,37 +11460,6 @@ impl Core {
             launch_permit,
         )
         .await?;
-        emit(
-            output,
-            "agent_run.started",
-            json!({
-                "campId": execution.camp_id,
-                "campTurnId": execution.camp_turn_id,
-                "agentRunId": execution.agent_run_id,
-                "agentId": execution.agent_id,
-                "executionEpoch": execution.execution_epoch,
-                "adapterKind": execution.runtime.adapter_kind,
-                "adapterInstallationId": execution.runtime.installation_id,
-                "runtimeVersion": execution.runtime.reported_version,
-                "modelId": execution.runtime.model.model_id,
-                "modelOptions": execution.runtime.model.options,
-                "hostInstanceId": runtime.host_instance_id(),
-                "nativeThreadId": runtime.session_id(),
-                "nativeTurnId": native_prompt_id,
-                "providerModelFingerprint": runtime.model_fingerprint(),
-            }),
-        );
-        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
-        record_available_runtime_model(
-            self,
-            output,
-            AdapterKind::Pi,
-            &execution.camp_id,
-            &execution.agent_run_id,
-            execution.execution_epoch,
-            Some(execution.runtime.model.model_id.clone()),
-        )
-        .await;
         Ok(())
     }
 
@@ -15092,41 +15104,6 @@ async fn process_agent_run_pi_message(
     if message_type == "extension_ui_request" {
         match message.get("method").and_then(Value::as_str) {
             Some("setStatus") => return Ok(()),
-            Some("confirm")
-                if message.get("title").and_then(Value::as_str)
-                    == Some("Rovai partial approval") =>
-            {
-                process_agent_run_pi_approval_request(
-                    core,
-                    output,
-                    &runtime,
-                    agent_run_id,
-                    execution_epoch,
-                    &message,
-                )
-                .await?;
-                return Ok(());
-            }
-            Some("input")
-                if message.get("title").and_then(Value::as_str)
-                    == Some("Rovai managed input receipt") =>
-            {
-                if let Err(error) =
-                    process_pi_managed_input_receipt(core, &runtime, delivery_id, &message).await
-                {
-                    runtime.mark_failed_closed();
-                    if let Some(id) = message.get("id").cloned() {
-                        runtime
-                            .respond(
-                                id.clone(),
-                                json!({"type":"extension_ui_response", "id":id, "cancelled":true}),
-                            )
-                            .await?;
-                    }
-                    return Err(error).context("Pi managed input receipt was rejected");
-                }
-                return Ok(());
-            }
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
             _ => {
                 let response = match pi::unsupported_extension_ui_cancellation(&message) {
@@ -15154,6 +15131,48 @@ async fn process_agent_run_pi_message(
                 return Ok(());
             }
         }
+    }
+    if message_type == "agent_start"
+        && let Some(execution) = core
+            .acknowledge_pi_agent_start(
+                agent_run_id,
+                execution_epoch,
+                delivery_id,
+                native_prompt_id,
+            )
+            .await?
+    {
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "campId": execution.camp_id,
+                "campTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentId": execution.agent_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
+                "hostInstanceId": runtime.host_instance_id(),
+                "nativeThreadId": runtime.session_id(),
+                "nativeTurnId": native_prompt_id,
+                "providerModelFingerprint": runtime.model_fingerprint(),
+            }),
+        );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
+        record_available_runtime_model(
+            core,
+            output,
+            AdapterKind::Pi,
+            &execution.camp_id,
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            Some(execution.runtime.model.model_id.clone()),
+        )
+        .await;
     }
     let (event_type, payload) = pi::normalize_event(&message);
     if event_type != "runtime.usage" {
@@ -15220,234 +15239,6 @@ async fn process_agent_run_pi_message(
         )
         .await?;
     }
-    Ok(())
-}
-
-async fn process_pi_managed_input_receipt(
-    core: &Arc<Core>,
-    runtime: &PiRuntime,
-    delivery_id: &str,
-    request: &Value,
-) -> Result<()> {
-    let id = request
-        .get("id")
-        .cloned()
-        .context("Pi managed input receipt request omitted id")?;
-    let receipt: Value = serde_json::from_str(
-        request
-            .get("placeholder")
-            .and_then(Value::as_str)
-            .context("Pi managed input receipt request omitted evidence")?,
-    )
-    .context("Pi managed input receipt request is invalid")?;
-    let (expected_digest, commit_nonce) = runtime.validate_managed_receipt(&receipt)?;
-    let committed = {
-        let mut database = core.database.lock().await;
-        ContextService.commit_pi_managed_input_receipt_and_accept(
-            &mut database,
-            delivery_id,
-            runtime.prompt_id(),
-            &receipt,
-            &commit_nonce,
-        )?
-    };
-    if committed.digest != expected_digest
-        || committed.commit_nonce != commit_nonce
-        || committed.delivery.status != "accepted"
-        || committed.delivery.native_input_id.as_deref() != Some(runtime.prompt_id())
-    {
-        anyhow::bail!("Pi managed input receipt commit evidence diverged");
-    }
-    runtime.mark_receipt_committed();
-    runtime
-        .respond(
-            id.clone(),
-            json!({"type":"extension_ui_response", "id":id, "value":commit_nonce}),
-        )
-        .await
-}
-
-async fn process_agent_run_pi_approval_request(
-    core: &Arc<Core>,
-    output: &mpsc::UnboundedSender<String>,
-    runtime: &PiRuntime,
-    agent_run_id: &str,
-    execution_epoch: i64,
-    request: &Value,
-) -> Result<()> {
-    if !runtime.approval_handshake_observed() {
-        reject_pi_approval_request(
-            output,
-            runtime,
-            agent_run_id,
-            execution_epoch,
-            request,
-            "Pi managed Approval Extension handshake is unavailable",
-        )
-        .await?;
-        return Ok(());
-    }
-    let execution = {
-        let database = core.database.lock().await;
-        ExecutionRuntimeService::default().load_agent_run_execution(
-            &database,
-            agent_run_id,
-            execution_epoch,
-        )
-    }?;
-    let Some(execution) = execution else {
-        reject_pi_approval_request(
-            output,
-            runtime,
-            agent_run_id,
-            execution_epoch,
-            request,
-            "AgentRun is unavailable or fenced",
-        )
-        .await?;
-        return Ok(());
-    };
-    let action_request = match pi::intercepted_action_request(
-        agent_run_id,
-        execution_epoch,
-        runtime.host_instance_id(),
-        runtime.host_binding_generation(),
-        runtime.native_binding_generation(),
-        runtime.session_id(),
-        runtime.prompt_id(),
-        Path::new(&execution.workspace.execution_root),
-        request,
-    ) {
-        Ok(request) => request,
-        Err(error) => {
-            reject_pi_approval_request(
-                output,
-                runtime,
-                agent_run_id,
-                execution_epoch,
-                request,
-                &format!("Pi Action request failed managed Extension validation: {error}"),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
-    if execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
-        && execution.workspace.access == "read_only"
-        && matches!(
-            &action_request.input,
-            rovai_core::action::CanonicalActionInput::FileWrite { .. }
-                | rovai_core::action::CanonicalActionInput::FileDelete { .. }
-                | rovai_core::action::CanonicalActionInput::ShellCommand { .. }
-                | rovai_core::action::CanonicalActionInput::GitMutation { .. }
-                | rovai_core::action::CanonicalActionInput::NetworkWrite { .. }
-        )
-    {
-        reject_pi_approval_request(
-            output,
-            runtime,
-            agent_run_id,
-            execution_epoch,
-            request,
-            "read-only AgentRun rejected a mutating Pi tool request",
-        )
-        .await?;
-        return Ok(());
-    }
-    let request_reason = action_request.reason.clone();
-    let preparation = {
-        let mut database = core.database.lock().await;
-        ActionSafetyService::default().prepare_action(
-            &mut database,
-            &CommandEnvelope {
-                command_id: format!("runtime-action-prepare:{}", action_request.action_id),
-                actor: ActorRef::Agent {
-                    agent_id: execution.agent_id.clone(),
-                    source_agent_run_id: agent_run_id.to_string(),
-                },
-                camp_id: Some(execution.camp_id.clone()),
-                expected_versions: Vec::new(),
-                execution_epoch: Some(execution_epoch),
-                payload: PrepareActionCommand {
-                    action_id: action_request.action_id,
-                    input: action_request.input,
-                    control_mode: ActionControlMode::Intercepted,
-                    native_action_id: Some(action_request.native_action_id),
-                    runtime_request: Some(action_request.runtime_request),
-                    reason: request_reason.clone(),
-                    execute_before: None,
-                    requested_for_user_id: CURRENT_USER_ID.to_string(),
-                },
-            },
-        )
-    };
-    match preparation {
-        Ok(preparation) if preparation.result.status != CommandResultStatus::Rejected => emit(
-            output,
-            "action.prepared",
-            json!({
-                "agentRunId": agent_run_id,
-                "executionEpoch": execution_epoch,
-                "nativeMethod": "pi/extension_ui/confirm",
-                "reason": request_reason,
-                "result": preparation.result,
-                "replayed": preparation.replayed,
-            }),
-        ),
-        Ok(preparation) => {
-            reject_pi_approval_request(
-                output,
-                runtime,
-                agent_run_id,
-                execution_epoch,
-                request,
-                &format!(
-                    "Action admission rejected: {} · {}",
-                    preparation.result.code, preparation.result.payload
-                ),
-            )
-            .await?;
-        }
-        Err(error) => {
-            reject_pi_approval_request(
-                output,
-                runtime,
-                agent_run_id,
-                execution_epoch,
-                request,
-                "Pi Action request could not be persisted safely",
-            )
-            .await?;
-            return Err(error);
-        }
-    }
-    Ok(())
-}
-
-async fn reject_pi_approval_request(
-    output: &mpsc::UnboundedSender<String>,
-    runtime: &PiRuntime,
-    agent_run_id: &str,
-    execution_epoch: i64,
-    request: &Value,
-    reason: &str,
-) -> Result<()> {
-    let id = request.get("id").cloned().unwrap_or(Value::Null);
-    if !id.is_null()
-        && let Ok(response) = pi::rejection_response(request)
-    {
-        runtime.respond(id, response).await?;
-    }
-    emit(
-        output,
-        "agent_run.request_rejected",
-        json!({
-            "agentRunId": agent_run_id,
-            "executionEpoch": execution_epoch,
-            "nativeMethod": "pi/extension_ui/confirm",
-            "reason": reason,
-        }),
-    );
     Ok(())
 }
 

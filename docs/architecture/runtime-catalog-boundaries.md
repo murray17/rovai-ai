@@ -14,7 +14,7 @@ last_updated: 2026-09-05
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v35](../contracts/runtime-launch-and-verification-v35.md)。实测版本和能力只由
+[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -172,7 +172,7 @@ response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 f
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v35](../contracts/runtime-launch-and-verification-v35.md)。
+[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -237,7 +237,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v35](../contracts/runtime-launch-and-verification-v35.md)，
+字段级行为见 [Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## ACP Client Terminal 边界
@@ -305,7 +305,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v35](../contracts/runtime-launch-and-verification-v35.md)，证据状态见
+[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -348,8 +348,9 @@ Pi 是独立 `pi-jsonl-rpc-v1` Product Runtime，不进入 ACP initialize/storag
 显式模型来自 `get_available_models`，经 `set_model` 后由 `get_state` 精确核对。Pi 0.84.4 是当前最低兼容版本；
 这只定义 identity/version gate，不构成平台资格。
 
-正式 Pi Host 只能以 `pi --mode rpc --no-themes --extension <rovai-pi-host-v6>` 保留 Pi 原生 Built-in tools、Extensions、
-Skills、Context files、Prompt templates 与用户 Settings；Rovai 不提供 `--no-extensions` fallback，任何 Extension
+正式 Pi Host 只能以 `pi --mode rpc --no-themes --approve --extension <rovai-pi-host-v7>` 保留 Pi 原生 Built-in tools、Extensions、
+Skills、Context files、Prompt templates 与用户 Settings；`--approve` 只信任当前项目，不是 Tool Approval，也不改写
+用户全局 trust。Rovai 不提供 `--no-extensions` fallback，任何 Extension
 启动错误都保留真实诊断并直接失败。Pi Host 进入统一 Fleet，策略为 `resident_multi_session`：一个 Host 串行服务多个 Native Session，并发 Run 使用
 不同 Host。Pi 的复用 identity 是 canonical workspace + process digest；当前独占 lease 的 Camp/member invalidation
 scope 单独保存并随每次领取更新，因此允许同 workspace 跨 Camp 串行复用而不削弱删除失效。其他 Runtime 的
@@ -364,27 +365,27 @@ Core 私有完整 canonical session file，实际调用 `switch_session` 后核�
 `ResumeContinuityLost` 才最多创建一个 replacement，Host/RPC/model/binding 等失败不降级。Deep Probe 同样执行 exact
 switch，但用 `--session-dir <probe-root>/sessions` 隔离并清理测试 Session。
 
-Bootstrap 使用官方 managed extension 的 `before_agent_start`，在该 hook 位置的 Pi system prompt 后追加当前完整
-Bootstrap。该 hook 先重新读取 binding、验证 Session、观察 governed Tools 并等待 Core durable receipt nonce；Pi 原生
-input hook 更早 handled 时不会提交 receipt。后加载的原生 extension 仍可继续改写最终 provider payload，Rovai 不声明完整 attestation。schema-3 receipt 只
-验证 Host/run/epoch/binding/delivery/prompt/session/cwd、Bootstrap/binding digest 与 `bash/edit/write` 三个 governed
-Tool 可观察；不包含 Session file、完整 Tool/Skill catalog 或 system-prompt digest。Core 验证 nonce 后在单一事务写入
-不可变 receipt 并接受 Input。Pi system prompt 不属于压缩的消息历史，compaction strategy 为
+Bootstrap 使用 managed extension 的 `before_agent_start`，在该 hook 位置的 Pi system prompt 后追加当前完整
+Bootstrap。该 hook 每轮重新读取 binding，只验证基本结构与 Bootstrap digest；失败只诊断并允许 Pi 继续，不重复
+Session/cwd activation，也不验证 Tool/Skill catalog、提交 Receipt 或 abort。Prompt RPC response 只证明 command round
+trip；当前 Host owner 精确绑定的第一个 `agent_start` 使用现有 Delivery transition 接受 Input 并只发布一次 started。
+Pi 原生 input hook 更早 handled 且没有产生 `agent_start` 时，Rovai 不伪造 started。后加载的原生 extension 仍可继续
+改写最终 provider payload，Rovai 不声明完整 attestation。历史 Receipt 表与数据保留，但新 Run 不读取或依赖。
+Pi system prompt 不属于压缩的消息历史，compaction strategy 为
 `native_system_prompt_preserved`，因此不加入 redelivery requirement 或 observer lease。
 
 managed Skill target 为 `.pi/skills`，但 extension 不再通过 `resources_discover` 追加路径，Core 也不读取
 `get_commands` 或证明 Runtime catalog；项目原生与 Rovai 投递 Skill 统一由 Pi ResourceLoader 按 workspace trust
-发现，因此 Pi Skill discovery 只声明 `DocumentationOnly`。v6 extension 不固定 Active Tools；Rovai 只对
-`bash/edit/write` 做 best-effort durable Approval，permission 为 `partial_managed`，未知 extension Tool 按 Pi 原生语义
-执行，这不是 sandbox。Rovai 消息不是 Pi TUI command input；Formatter 22 payload 不解析 `/...`，原样成为
+发现，因此 Pi Skill discovery 只声明 `DocumentationOnly`。v7 extension 不固定 Active Tools；所有 Built-in 与用户
+Extension Tool 都按 Pi 原生语义执行。Pi 没有 Rovai Approval、sandbox 或 permission option，公共 permission value
+为空对象且 compatibility digest 不含 approval mode。Rovai 消息不是 Pi TUI command input；Formatter 22 payload不解析 `/...`，原样成为
 `prompt.message`。当前已授权图片只从 ContextManifest 结构化 attachment refs 取得，以 exact bytes/MIME/order 经
 `prompt.images` 发送，schema-2 evidence 直接绑定 Delivery，不存在 Prompt Transform。Pi External MCP
 固定为 `Unsupported`：成员已有 Assignment 与全局配置保留，但 Pi dispatch 在 projection 前分流并静默忽略，不读取
 server 定义、不启动 server、不注册 proxy Tool、不产生 MCP receipt/approval/diagnostic，也不依赖 `mcp` optional
-subsystem。历史 Pi ContextManifest/receipt 中的 MCP 字段只作历史事实保留；新 Run 与恢复路径不解析、比较或重新激活。
+subsystem。历史 Pi ContextManifest/Receipt 中的 MCP 字段只作历史事实保留；新 Run 与恢复路径不解析、比较或重新激活。
 MCP 配置变化不影响 Pi compatibility、Host reuse、LRU 或 exact resume，切换到支持 MCP 的 Runtime 后原 Assignment
-继续生效。Shell Approval 保存 Pi 在当前 project trust 下实际解析的 shell path/args/argv-or-stdin transport，不伪造
-`/bin/zsh -lc`。`abort` 使用普通 pending RPC correlation，调用方超时后的合法迟到 response 仍被消费。第三方
+继续生效。`abort` 使用普通 pending RPC correlation，调用方超时后的合法迟到 response 仍被消费。第三方
 Extension 的未映射交互返回 cancelled/denied，不 poison Host。stderr、startup prelude 与可恢复单条 malformed stdout
 进入脱敏 Runtime diagnostic；持续 framing、response identity 或 Rovai-owned binding identity 冲突才 poison Host。
 `agent_settled` 是唯一成功边界；Usage 只读 terminal assistant `message_end.message.usage`，未知
@@ -394,7 +395,7 @@ Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Camp F
 macOS x64 和 Windows x64 均为
 `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`；普通 discovery、检查、成员选择、
 Diagnostics 与 AgentRun 对三平台开放，UI 明确标记实验性，但不得称为 First-Class/qualified。字段级行为见
-[Runtime Launch and Verification v35](../contracts/runtime-launch-and-verification-v35.md)，
+[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)，
 证据状态见[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -421,7 +422,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `CoreEnforcedV1 + read_only Workspace` 恢复路径仍强制 `plan`。descriptor 的 `recommendedValue=default` 只是
 保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v35](../contracts/runtime-launch-and-verification-v35.md)。
+[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)。
 
 ACP Client FS 不把这些权限 descriptor 复制成 Core allowlist。`fs/read_text_file` / `fs/write_text_file` 对当前
 fenced Run 只作协议与参数校验，绝对路径按 Runtime 请求执行，相对路径以 execution root 解析；是否能读写、是否

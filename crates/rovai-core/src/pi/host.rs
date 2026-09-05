@@ -55,7 +55,6 @@ use super::{
 };
 
 const MANAGED_HOST_EXTENSION: &str = include_str!("managed-host.ts");
-const GOVERNED_NATIVE_TOOL_NAMES: [&str; 3] = ["bash", "edit", "write"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -68,10 +67,7 @@ pub(crate) struct PiHostBindingDocument {
     pub execution_epoch: i64,
     pub native_binding_id: String,
     pub native_binding_generation: i64,
-    pub runtime_input_delivery_id: String,
-    pub native_prompt_id: String,
     pub expected_native_session_id: Option<String>,
-    pub bootstrap_evidence_id: String,
     pub bootstrap: String,
     pub bootstrap_payload_digest: String,
 }
@@ -82,10 +78,7 @@ struct PiBindingSeed {
     execution_epoch: i64,
     native_binding_id: String,
     native_binding_generation: i64,
-    runtime_input_delivery_id: String,
-    native_prompt_id: String,
     expected_native_session_id: Option<String>,
-    bootstrap_evidence_id: String,
     bootstrap: String,
     bootstrap_payload_digest: String,
 }
@@ -105,10 +98,7 @@ impl PiBindingSeed {
             execution_epoch: self.execution_epoch,
             native_binding_id: self.native_binding_id.clone(),
             native_binding_generation: self.native_binding_generation,
-            runtime_input_delivery_id: self.runtime_input_delivery_id.clone(),
-            native_prompt_id: self.native_prompt_id.clone(),
             expected_native_session_id: self.expected_native_session_id.clone(),
-            bootstrap_evidence_id: self.bootstrap_evidence_id.clone(),
             bootstrap: self.bootstrap.clone(),
             bootstrap_payload_digest: self.bootstrap_payload_digest.clone(),
         }
@@ -285,7 +275,6 @@ struct ActivatedPiSession {
     session_id: String,
     session_file: PathBuf,
     model_fingerprint: String,
-    binding_document: PiHostBindingDocument,
     model_supports_images: bool,
 }
 
@@ -399,7 +388,7 @@ fn append_initial_session_argument(command: &mut Command, session_file: Option<&
 fn append_host_arguments(command: &mut Command, extension_path: &Path) {
     command.args(["--mode", "rpc"]);
     command
-        .args(["--no-themes", "--extension"])
+        .args(["--no-themes", "--approve", "--extension"])
         .arg(extension_path);
 }
 
@@ -942,7 +931,6 @@ impl PiHost {
             session_id,
             session_file,
             model_fingerprint,
-            binding_document: document,
             model_supports_images,
         })
     }
@@ -1064,12 +1052,9 @@ pub struct PiRuntime {
     owner: PiRuntimeOwner,
     camp_id: String,
     host: Arc<PiHost>,
-    binding_document: PiHostBindingDocument,
     model_supports_images: bool,
     final_message: RwLock<Option<String>>,
     final_stop_reason: RwLock<Option<String>>,
-    approval_handshake: AtomicBool,
-    receipt_committed: AtomicBool,
     session_id: String,
     session_file: PathBuf,
     model_fingerprint: String,
@@ -1086,12 +1071,9 @@ impl PiRuntime {
             owner,
             camp_id,
             host,
-            binding_document: activation.binding_document,
             model_supports_images: activation.model_supports_images,
             final_message: RwLock::new(None),
             final_stop_reason: RwLock::new(None),
-            approval_handshake: AtomicBool::new(false),
-            receipt_committed: AtomicBool::new(false),
             session_id: activation.session_id,
             session_file: activation.session_file,
             model_fingerprint: activation.model_fingerprint,
@@ -1101,8 +1083,6 @@ impl PiRuntime {
     pub async fn start_prompt(&self, message: &str, images: &[PiPromptImage]) -> Result<()> {
         *self.final_message.write().await = None;
         *self.final_stop_reason.write().await = None;
-        self.approval_handshake.store(false, Ordering::Release);
-        self.receipt_committed.store(false, Ordering::Release);
         if !images.is_empty() && !self.model_supports_images {
             bail!("Pi selected model does not advertise image input support");
         }
@@ -1140,9 +1120,6 @@ impl PiRuntime {
         let response = self.host.command("prompt", fields).await?;
         if response.get("command").and_then(Value::as_str) != Some("prompt") {
             bail!("Pi prompt response has the wrong command identity");
-        }
-        if !self.receipt_committed() {
-            bail!("Pi managed extension rejected the input before provider dispatch");
         }
         Ok(())
     }
@@ -1248,15 +1225,6 @@ impl PiRuntime {
 
     pub async fn observe(&self, message: &Value) -> Result<Option<CompletedAcpAction>> {
         match message.get("type").and_then(Value::as_str) {
-            Some("extension_ui_request")
-                if message.get("method").and_then(Value::as_str) == Some("setStatus")
-                    && message.get("statusKey").and_then(Value::as_str)
-                        == Some("rovai-managed-host")
-                    && message.get("statusText").and_then(Value::as_str)
-                        == Some(PI_HOST_EXTENSION_VERSION) =>
-            {
-                self.approval_handshake.store(true, Ordering::Release);
-            }
             Some("message_end") => {
                 let Some(assistant) = message
                     .get("message")
@@ -1285,28 +1253,12 @@ impl PiRuntime {
         )
     }
 
-    pub fn approval_handshake_observed(&self) -> bool {
-        self.approval_handshake.load(Ordering::Acquire)
-    }
-
-    pub fn receipt_committed(&self) -> bool {
-        self.receipt_committed.load(Ordering::Acquire)
-    }
-
     pub(crate) fn mark_failed_closed(&self) {
         self.host.poisoned.store(true, Ordering::Release);
     }
 
     pub fn host_instance_id(&self) -> &str {
         self.host.host_instance_id()
-    }
-
-    pub fn host_binding_generation(&self) -> u64 {
-        self.binding_document.host_binding_generation
-    }
-
-    pub fn native_binding_generation(&self) -> i64 {
-        self.binding_document.native_binding_generation
     }
 
     pub fn session_id(&self) -> &str {
@@ -1333,51 +1285,6 @@ impl PiRuntime {
         self.host.builtin_tool_process_config()
     }
 
-    pub(crate) fn validate_managed_receipt(&self, receipt: &Value) -> Result<(String, String)> {
-        let receipt: PiManagedInputReceipt = serde_json::from_value(receipt.clone())
-            .context("Pi managed input receipt shape is invalid")?;
-        if receipt.schema_version != 3
-            || receipt.extension_version != PI_HOST_EXTENSION_VERSION
-            || receipt.host_instance_id != self.host_instance_id()
-            || receipt.host_binding_generation != self.host_binding_generation()
-            || receipt.agent_run_id != self.owner.agent_run_id
-            || receipt.execution_epoch != self.owner.execution_epoch
-            || receipt.native_binding_id != self.binding_document.native_binding_id
-            || receipt.native_binding_generation != self.binding_document.native_binding_generation
-            || receipt.runtime_input_delivery_id != self.binding_document.runtime_input_delivery_id
-            || receipt.native_prompt_id != self.binding_document.native_prompt_id
-            || receipt.native_session_id != self.session_id
-            || Path::new(&receipt.cwd).canonicalize()? != self.host.cwd.canonicalize()?
-            || receipt.bootstrap_evidence_id != self.binding_document.bootstrap_evidence_id
-            || receipt.bootstrap_payload_digest != self.binding_document.bootstrap_payload_digest
-        {
-            bail!("Pi managed input receipt failed Host/Run/Binding validation");
-        }
-        let expected_governed_tools = GOVERNED_NATIVE_TOOL_NAMES
-            .into_iter()
-            .map(|name| PiGovernedNativeTool {
-                name: name.to_string(),
-                observable: true,
-            })
-            .collect::<Vec<_>>();
-        if receipt.governed_native_tools != expected_governed_tools {
-            bail!("Pi managed input receipt governed Tool subset is invalid");
-        }
-        let expected_binding_digest =
-            canonical_json_digest(&serde_json::to_value(&self.binding_document)?)?;
-        if receipt.binding_document_digest != expected_binding_digest {
-            bail!("Pi managed input receipt binding document digest is invalid");
-        }
-        let receipt_value = serde_json::to_value(&receipt)?;
-        let receipt_digest = canonical_json_digest(&receipt_value)?;
-        let nonce = managed_receipt_nonce(&receipt_value)?;
-        Ok((receipt_digest, nonce))
-    }
-
-    pub(crate) fn mark_receipt_committed(&self) {
-        self.receipt_committed.store(true, Ordering::Release);
-    }
-
     fn belongs_to_camp(&self, camp_id: &str) -> bool {
         self.camp_id == camp_id
     }
@@ -1396,34 +1303,6 @@ impl PiRuntime {
         session_result?;
         binding_result
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PiManagedInputReceipt {
-    schema_version: i64,
-    extension_version: String,
-    host_instance_id: String,
-    host_binding_generation: u64,
-    agent_run_id: String,
-    execution_epoch: i64,
-    native_binding_id: String,
-    native_binding_generation: i64,
-    runtime_input_delivery_id: String,
-    native_prompt_id: String,
-    native_session_id: String,
-    cwd: String,
-    bootstrap_evidence_id: String,
-    bootstrap_payload_digest: String,
-    governed_native_tools: Vec<PiGovernedNativeTool>,
-    binding_document_digest: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PiGovernedNativeTool {
-    name: String,
-    observable: bool,
 }
 
 type PiRuntimeCreationKey = (String, i64);
@@ -1535,10 +1414,7 @@ impl PiRpcRuntimeAdapter {
             execution_epoch: request.execution_epoch,
             native_binding_id: request.native_binding_id.to_string(),
             native_binding_generation: request.native_binding_generation,
-            runtime_input_delivery_id: request.delivery_id.to_string(),
-            native_prompt_id: request.native_prompt_id.to_string(),
             expected_native_session_id: request.native_session_id.map(str::to_string),
-            bootstrap_evidence_id: request.bootstrap.evidence_id.clone(),
             bootstrap: request.bootstrap.payload.clone(),
             bootstrap_payload_digest,
         };
@@ -1807,10 +1683,7 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
         execution_epoch: 1,
         native_binding_id: uuid::Uuid::new_v4().to_string(),
         native_binding_generation: 1,
-        runtime_input_delivery_id: "pi-probe-delivery".to_string(),
-        native_prompt_id: "pi-probe-prompt".to_string(),
         expected_native_session_id: None,
-        bootstrap_evidence_id: uuid::Uuid::new_v4().to_string(),
         bootstrap_payload_digest: format!("{:x}", Sha256::digest(bootstrap.as_bytes())),
         bootstrap,
     };
@@ -1987,34 +1860,6 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
             Err(error)
         }
     }
-}
-
-pub(crate) fn managed_receipt_nonce(receipt: &Value) -> Result<String> {
-    let canonical = canonical_json(receipt.clone())?;
-    Ok(format!(
-        "{:x}",
-        Sha256::digest(format!("rovai-pi-managed-input-receipt-v2\n{canonical}").as_bytes())
-    ))
-}
-
-fn canonical_json(value: Value) -> Result<String> {
-    fn canonicalize(value: Value) -> Value {
-        match value {
-            Value::Array(values) => Value::Array(values.into_iter().map(canonicalize).collect()),
-            Value::Object(values) => {
-                let mut entries = values.into_iter().collect::<Vec<_>>();
-                entries.sort_by(|left, right| left.0.cmp(&right.0));
-                Value::Object(
-                    entries
-                        .into_iter()
-                        .map(|(key, value)| (key, canonicalize(value)))
-                        .collect(),
-                )
-            }
-            value => value,
-        }
-    }
-    Ok(serde_json::to_string(&canonicalize(value))?)
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
@@ -2528,7 +2373,7 @@ write_session() {
 emit_managed_session_state() {
   host_instance_id=$(sed -n 's/.*"hostInstanceId":"\([^"]*\)".*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
   host_binding_generation=$(sed -n 's/.*"hostBindingGeneration":\([0-9][0-9]*\).*/\1/p' "$ROVAI_PI_HOST_BINDING_FILE")
-  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":3,\\"extensionVersion\\":\\"rovai-pi-host-v6\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
+  event=$(printf '{"type":"extension_ui_request","method":"setStatus","statusKey":"rovai-managed-session-state","statusText":"{\\"schemaVersion\\":3,\\"extensionVersion\\":\\"rovai-pi-host-v7\\",\\"hostInstanceId\\":\\"%s\\",\\"hostBindingGeneration\\":%s,\\"sessionId\\":\\"%s\\",\\"sessionFile\\":\\"%s\\",\\"cwd\\":\\"%s\\"}"}' "$host_instance_id" "$host_binding_generation" "$session_id" "$session_file" "$PWD")
   printf '%s\n' "$event" >> "$event_log"
   printf '%s\n' "$event"
 }
@@ -2682,10 +2527,7 @@ done
             execution_epoch: 1,
             native_binding_id: "binding-abort".to_string(),
             native_binding_generation: 1,
-            runtime_input_delivery_id: "delivery-abort".to_string(),
-            native_prompt_id: "prompt-abort".to_string(),
             expected_native_session_id: None,
-            bootstrap_evidence_id: "evidence-abort".to_string(),
             bootstrap_payload_digest: format!("{:x}", Sha256::digest(bootstrap.as_bytes())),
             bootstrap,
         };
@@ -2715,7 +2557,6 @@ done
                 session_id: "session-abort".to_string(),
                 session_file: root.join("session.jsonl"),
                 model_fingerprint: "model-abort".to_string(),
-                binding_document: seed.document(host.host_instance_id(), 1),
                 model_supports_images: false,
             },
         );
@@ -2778,7 +2619,7 @@ done
 
     #[test]
     fn production_host_launch_preserves_pi_native_resources() {
-        let extension = Path::new("/private/rovai-pi-host-v6.ts");
+        let extension = Path::new("/private/rovai-pi-host-v7.ts");
         let mut production = Command::new("pi");
         append_host_arguments(&mut production, extension);
         let production_args = production
@@ -2792,8 +2633,9 @@ done
                 "--mode",
                 "rpc",
                 "--no-themes",
+                "--approve",
                 "--extension",
-                "/private/rovai-pi-host-v6.ts",
+                "/private/rovai-pi-host-v7.ts",
             ]
         );
         for forbidden in [
@@ -2801,7 +2643,6 @@ done
             "--no-context-files",
             "--no-prompt-templates",
             "--no-builtin-tools",
-            "--approve",
             "--no-approve",
             "--no-extensions",
         ] {
@@ -2887,45 +2728,6 @@ done
         assert_eq!(
             parse_explicit_model_id(value).unwrap(),
             ("openai-codex".to_string(), "gpt-5.6/special".to_string())
-        );
-    }
-
-    #[test]
-    fn managed_receipt_nonce_matches_extension_formula() {
-        let value = json!({"z": 1, "a": [true, {"b": "x"}]});
-        let canonical = "{\"a\":[true,{\"b\":\"x\"}],\"z\":1}";
-        let expected = format!(
-            "{:x}",
-            Sha256::digest(format!("rovai-pi-managed-input-receipt-v2\n{canonical}").as_bytes())
-        );
-        assert_eq!(managed_receipt_nonce(&value).unwrap(), expected);
-    }
-
-    #[test]
-    fn governed_native_tool_receipt_is_a_closed_minimum_subset() {
-        let governed = GOVERNED_NATIVE_TOOL_NAMES
-            .into_iter()
-            .map(|name| PiGovernedNativeTool {
-                name: name.to_string(),
-                observable: true,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            governed,
-            vec![
-                PiGovernedNativeTool {
-                    name: "bash".to_string(),
-                    observable: true,
-                },
-                PiGovernedNativeTool {
-                    name: "edit".to_string(),
-                    observable: true,
-                },
-                PiGovernedNativeTool {
-                    name: "write".to_string(),
-                    observable: true,
-                },
-            ]
         );
     }
 

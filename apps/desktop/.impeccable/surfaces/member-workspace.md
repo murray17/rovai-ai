@@ -99,9 +99,9 @@ detail and the resulting final candidate retain that text exactly like every oth
 Pi Coding Agent is a Product Runtime with `preview` admission on macOS arm64, macOS x64 and Windows x64. Keep it
 selectable and editable on all three platforms, append `（实验性）` to the selector label, and show the real machine
 availability independently. Preview permits normal checks and AgentRun but retains missing qualification evidence;
-do not describe it as First-Class or qualified, and do not weaken installation, model, permission or Dispatch checks.
-Pi's fixed `partial_managed` value is an internal execution contract rather than a user-selectable native approval
-mode. Its member Runtime parameters show model fields only and do not expose that value as an approval control.
+do not describe it as First-Class or qualified, and do not weaken installation, model or Dispatch checks. Pi tools
+follow native Pi semantics; Rovai exposes no Pi approval or sandbox configuration. Its member Runtime parameters
+therefore show model fields only.
 
 ## Removal
 

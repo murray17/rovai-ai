@@ -9,11 +9,12 @@ model_context_change: false
 last_updated: 2026-09-05
 ---
 
-# Rovai-ai v1.46：Composer 事务边界与交互锁收口
+# Rovai-ai v1.46：Composer 事务边界与 Pi 原生执行收口
 
 前置：[v1.45](../v1.45/README.md)。本版本保留 Lexical、Text + Atom `ComposerDocument` V2、唯一
 `DraftMutationCoordinator` 和 Core exact revision；只收紧 Core 正文回写、发送、Camp 切换、Draft 加载、
-Typeahead Enter 与 autosave 投影边界，不引入 Session Manager、双缓冲或新的完整 Draft 缓存。
+Typeahead Enter 与 autosave 投影边界，并把 Pi 接入收敛为原生执行生命周期；不引入 Session Manager、双缓冲、
+新的完整 Draft 缓存或 Pi 专属准入状态机。
 
 ## 范围与当前状态
 
@@ -30,25 +31,30 @@ Typeahead Enter 与 autosave 投影边界，不引入 Session Manager、双缓�
 - autosave 每轮只导出一个 `ComposerDocument`，使用线性直接比较；正文保存只更新 Coordinator 内部 authority，
   不刷新整个 Workspace。普通保存状态留在 Sync，只有错误/恢复向上投影；批量附件只 flush 一次。
 - Composer 关闭浏览器拼写检查，继续保持结构化纯文本、IME、inline Atom、Clipboard 与历史边界。
+- Pi 固定以 `--mode rpc --no-themes --approve --extension` 启动；project trust 只用于 Pi 原生资源加载，不映射为
+  Rovai Approval。薄 Extension 只上报 Session 状态并逐轮追加 Bootstrap。
+- Pi 不再提供 Rovai Tool Approval、sandbox 或 Managed Input Receipt。第一个精确匹配的 `agent_start` 使用既有
+  Delivery transition 原子接受输入并发布一次 started；`agent_settled` 继续拥有终态。
 
 ## 保留边界
 
-Core Draft wire 与 SQLite schema 不变；`body` 继续从 `ComposerDocument` 派生，Pending、source attachment、
+Core Draft wire 不变；`body` 继续从 `ComposerDocument` 派生，Pending、source attachment、
 Reply/Continuation 字段和公共 Structured Content 映射不变。Renderer 仍只有 `ComposerDraftSync` 与
 `DraftMutationCoordinator` 两类同步对象，不增加 per-Camp 后台编辑 Session、CRDT、Worker、fingerprint、
-generation A/B 或 React controlled editor。
+generation A/B 或 React controlled editor。Pi 数据 schema 只增加一次迁移：停止新 Input acceptance 对 Receipt 的
+依赖并归一旧 permission value；历史 Receipt 表、行、外键级联和 UPDATE 不可变保护保留。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.45 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.46 |
-| Decisions | 已更新 | [V1.46-D01](decisions.md#v1-46-d01)记录同步交互锁、Core content 回写、加载 fail-closed 与拒绝复杂发送并发；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Camp Composer Draft v9](../../contracts/camp-composer-draft-v9.md)替代 v8；wire 不变，明确路由/发送/导航/加载与 autosave transaction semantics |
-| Architecture | 已更新 | [Camp Composer Draft 架构](../../architecture/camp-composer-draft.md)、[Camp Activation Lifecycle](../../architecture/camp-activation-lifecycle.md)和[Composer 基础不变量](../../architecture/foundational-invariants.md#camp-composer)同步唯一 authority、显式 replacement、交互锁、切换保存与错误边界 |
+| Decisions | 已更新 | [V1.46-D01](decisions.md#v1-46-d01)记录 Composer 事务边界；[V1.46-D02](decisions.md#v1-46-d02)记录 Pi 原生执行与 Approval/Receipt 退役；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Camp Composer Draft v9](../../contracts/camp-composer-draft-v9.md)替代 v8；[Runtime Launch v36](../../contracts/runtime-launch-and-verification-v36.md)替代 v35 |
+| Architecture | 已更新 | Composer 架构同步唯一 Draft authority；Runtime 基础不变量与 Catalog 同步 Pi 原生 project trust、薄 Extension、`agent_start` admission 及无 Approval/Receipt 边界 |
 | UI | 已更新 | [结构化 Mention 与 Atom](../../ui/components/structured-mentions.md)及[Camp 会话工作区](../../ui/components/conversation-workspace.md)同步 Enter 优先级、加载重试、发送/路由锁定与导航保存反馈 |
-| Runtime Activity | 确认无需更新 | Runtime 输入、Canonical Activity、证据和执行台投影均未变化 |
-| Runtime compatibility | 确认无需更新 | Runtime 版本、能力、资格、平台证据和兼容性结论均未变化 |
+| Runtime Activity | 已更新 | Pi Tool 继续使用原生结构化 lifecycle，但不再宣称 bash/edit/write 由 Rovai 审批 |
+| Runtime compatibility | 已更新 | 真实历史证据保留；当前产品结论改为 native tools、无 permission options、无 active Receipt，平台仍 Preview/NotQualified |
 | Documentation routing | 已更新 | 文档任务导航、Contracts 索引、版本指针和当前决定导航均指向 v9 / v1.46 当前边界 |
 | Root README | 确认无需更新 | 产品定位、安装方式和公开能力范围未变化；本次是 Composer 已有能力的事务正确性与性能收口 |
 
@@ -57,6 +63,7 @@ generation A/B 或 React controlled editor。
 - [实施与验收](implementation-plan.md)
 - [版本决定](decisions.md)
 - [Camp Composer Draft v9](../../contracts/camp-composer-draft-v9.md)
+- [Runtime Launch and Verification v36](../../contracts/runtime-launch-and-verification-v36.md)
 - [Camp Composer Draft 架构](../../architecture/camp-composer-draft.md)
 - [结构化 Mention 与 Atom](../../ui/components/structured-mentions.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)

@@ -27,8 +27,7 @@ const piVersion = (await runCapture(piBinary, ['--version'], root)).trim()
 if (!piVersionAtLeast(piVersion, [0, 84, 4])) {
   throw new Error(`Pi Runtime smoke requires Pi >= 0.84.4; found ${JSON.stringify(piVersion)}`)
 }
-const approvedPath = join(projectRoot, 'PI_APPROVED_WRITE.txt')
-const deniedPath = join(projectRoot, 'PI_WRITE_ATTEMPT.txt')
+const nativeWritePath = join(projectRoot, 'PI_NATIVE_WRITE.txt')
 const cancelledPath = join(projectRoot, 'PI_CANCELLED_WRITE.txt')
 const bashOutputCases = [
   {
@@ -98,8 +97,8 @@ try {
 
   const profile = await client.request('members.get', { agentId })
   if (profile.runtimeConfiguration?.adapterKind !== 'pi'
-      || profile.runtimeConfiguration?.permissions?.values?.approval_mode !== 'managed') {
-    throw new Error(`Pi managed permissions were not frozen: ${JSON.stringify(profile)}`)
+      || JSON.stringify(profile.runtimeConfiguration?.permissions?.values) !== '{}') {
+    throw new Error(`Pi permission-free Runtime configuration was not frozen: ${JSON.stringify(profile)}`)
   }
 
   const first = await createConfiguredCampAndSend(client.request, {
@@ -113,9 +112,7 @@ try {
     purpose: 'Begin an ordinary conversation in the Pi Native Session before Core restart.'
   })
   const firstAccepted = acceptedRun(first)
-  const firstResult = await waitForRun(client, firstAccepted.campId, firstAccepted.agentRunId, {
-    approval: 'allow_once'
-  })
+  const firstResult = await waitForRun(client, firstAccepted.campId, firstAccepted.agentRunId)
   const firstOutput = outputForRun(firstResult.snapshot, firstAccepted.agentRunId)
   const firstStart = startForRun(client.events, firstAccepted.agentRunId)
   if (firstResult.run.status !== 'succeeded'
@@ -199,28 +196,27 @@ try {
     throw new Error(`Pi exact Session A→B→A switch failed: ${diagnostics(client, switchBackResult, switchBackAccepted.agentRunId)}`)
   }
 
-  const approvedRequest = await sendExistingCampMessage(
+  const nativeWriteRequest = await sendExistingCampMessage(
     client.request,
     firstAccepted.campId,
-    `Use the write tool exactly once to create ${approvedPath} with exactly PI_APPROVED_WRITE_OK and a trailing newline. Do not call another tool. Then reply exactly WRITE_DONE.`,
-    'Verify Pi managed Approval allow_once after cold resume.'
+    `Use the write tool exactly once to create ${nativeWritePath} with exactly PI_NATIVE_WRITE_OK and a trailing newline. Do not call another tool. Then reply exactly WRITE_DONE.`,
+    'Verify native Pi tool execution after cold resume.'
   )
-  const approvedAccepted = acceptedRun(approvedRequest, firstAccepted.campId)
-  const approvedResult = await waitForRun(
+  const nativeWriteAccepted = acceptedRun(nativeWriteRequest, firstAccepted.campId)
+  const nativeWriteResult = await waitForRun(
     client,
     firstAccepted.campId,
-    approvedAccepted.agentRunId,
-    { approval: 'allow_once' }
+    nativeWriteAccepted.agentRunId
   )
-  const approvedStart = startForRun(client.events, approvedAccepted.agentRunId)
-  const approvedActions = actionsForRun(approvedResult.snapshot, approvedAccepted.agentRunId)
-  const approvedBody = await readFile(approvedPath, 'utf8').catch(() => null)
-  if (approvedResult.run.status !== 'succeeded'
-      || approvedBody?.trim() !== 'PI_APPROVED_WRITE_OK'
-      || !approvedActions.some((action) => action.status === 'succeeded')
-      || approvedStart?.params?.hostInstanceId !== switchBackStart.params.hostInstanceId
-      || approvedStart?.params?.nativeThreadId !== switchBackStart.params.nativeThreadId) {
-    throw new Error(`Pi warm-LRU/approved-write failed: ${diagnostics(client, approvedResult, approvedAccepted.agentRunId)}`)
+  const nativeWriteStart = startForRun(client.events, nativeWriteAccepted.agentRunId)
+  const nativeWriteActions = actionsForRun(nativeWriteResult.snapshot, nativeWriteAccepted.agentRunId)
+  const nativeWriteBody = await readFile(nativeWritePath, 'utf8').catch(() => null)
+  if (nativeWriteResult.run.status !== 'succeeded'
+      || nativeWriteBody?.trim() !== 'PI_NATIVE_WRITE_OK'
+      || !nativeWriteActions.some((action) => action.status === 'succeeded')
+      || nativeWriteStart?.params?.hostInstanceId !== switchBackStart.params.hostInstanceId
+      || nativeWriteStart?.params?.nativeThreadId !== switchBackStart.params.nativeThreadId) {
+    throw new Error(`Pi warm-LRU/native-write failed: ${diagnostics(client, nativeWriteResult, nativeWriteAccepted.agentRunId)}`)
   }
 
   const concurrentOne = await createConfiguredCampAndSend(client.request, {
@@ -231,7 +227,7 @@ try {
     purpose: 'Hold one Pi Host busy while proving concurrent dispatch acquires another Host.'
   })
   const concurrentOneAccepted = acceptedRun(concurrentOne)
-  await waitForPendingApproval(client, concurrentOneAccepted.campId, concurrentOneAccepted.agentRunId)
+  await waitForRunStarted(client, concurrentOneAccepted.agentRunId)
   const concurrentOneStart = startForRun(client.events, concurrentOneAccepted.agentRunId)
 
   const concurrentTwo = await createConfiguredCampAndSend(client.request, {
@@ -242,7 +238,7 @@ try {
     purpose: 'Prove concurrent Pi work in one Workspace uses a distinct Host.'
   })
   const concurrentTwoAccepted = acceptedRun(concurrentTwo)
-  await waitForPendingApproval(client, concurrentTwoAccepted.campId, concurrentTwoAccepted.agentRunId)
+  await waitForRunStarted(client, concurrentTwoAccepted.agentRunId)
   const concurrentTwoStart = startForRun(client.events, concurrentTwoAccepted.agentRunId)
   if (!concurrentOneStart || !concurrentTwoStart
       || concurrentOneStart.params.hostInstanceId === concurrentTwoStart.params.hostInstanceId
@@ -255,14 +251,12 @@ try {
   const concurrentTwoResult = await waitForRun(
     client,
     concurrentTwoAccepted.campId,
-    concurrentTwoAccepted.agentRunId,
-    { approval: 'allow_once' }
+    concurrentTwoAccepted.agentRunId
   )
   const concurrentOneResult = await waitForRun(
     client,
     concurrentOneAccepted.campId,
-    concurrentOneAccepted.agentRunId,
-    { approval: 'allow_once' }
+    concurrentOneAccepted.agentRunId
   )
   if (concurrentOneResult.run.status !== 'succeeded'
       || concurrentTwoResult.run.status !== 'succeeded'
@@ -289,8 +283,7 @@ try {
   const bashMatrixResult = await waitForRun(
     client,
     bashMatrixAccepted.campId,
-    bashMatrixAccepted.agentRunId,
-    { approval: 'allow_once' }
+    bashMatrixAccepted.agentRunId
   )
   await assertBashOutputMatrix(
     client,
@@ -300,35 +293,12 @@ try {
     bashOutputCases
   )
 
-  const deniedRequest = await sendExistingCampMessage(
-    client.request,
-    firstAccepted.campId,
-    `This is a managed tool-routing test. You must invoke the write tool exactly once to create ${deniedPath} with exactly PI_WRITE_ATTEMPT_CONTENT and a trailing newline. Do not decide whether the operation should be allowed; the Host will decide. If the tool returns an error, do not retry. Then reply exactly ACTION_FINISHED.`,
-    'Verify Pi managed Approval denial is fail-closed.'
-  )
-  const deniedAccepted = acceptedRun(deniedRequest, firstAccepted.campId)
-  const deniedResult = await waitForRun(
-    client,
-    firstAccepted.campId,
-    deniedAccepted.agentRunId,
-    { approval: 'deny' }
-  )
-  const deniedActions = actionsForRun(deniedResult.snapshot, deniedAccepted.agentRunId)
-  const deniedApprovals = approvalsForRun(deniedResult.snapshot, deniedAccepted.agentRunId)
-  const deniedBody = await readFile(deniedPath, 'utf8').catch(() => null)
-  if (deniedBody !== null
-      || !deniedApprovals.some((approval) => approval.status === 'denied')
-      || deniedActions.some((action) => action.status === 'succeeded')) {
-    throw new Error(`Pi managed denial did not fail closed: ${diagnostics(client, deniedResult, deniedAccepted.agentRunId)}`)
-  }
-
   const cancelRequest = await sendExistingCampMessage(
     client.request,
     firstAccepted.campId,
     [
-      'This is a managed tool-routing test.',
+      'This is a native Pi tool cancellation test.',
       `You must invoke the Bash tool exactly once to run: sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelledPath}'.`,
-      'Do not decide whether the command should run; the Host will decide.',
       'Do not simulate the command. Do not call another tool. If the tool returns an error, do not retry.'
     ].join(' '),
     'Verify Pi abort and descendant cleanup.'
@@ -406,7 +376,7 @@ try {
     nativeSessionId: firstStart.params.nativeThreadId,
     firstHostInstanceId: firstStart.params.hostInstanceId,
     restoredHostInstanceId: restoredStart.params.hostInstanceId,
-    warmHostReused: approvedStart.params.hostInstanceId === restoredStart.params.hostInstanceId,
+    warmHostReused: nativeWriteStart.params.hostInstanceId === restoredStart.params.hostInstanceId,
     coldSessionResumed: restoredStart.params.nativeThreadId === firstStart.params.nativeThreadId,
     workspaceSessionSwitch: {
       hostReusedAcrossCamps: secondStart.params.hostInstanceId === restoredStart.params.hostInstanceId,
@@ -415,8 +385,8 @@ try {
     },
     concurrentHostsDistinct: concurrentOneStart.params.hostInstanceId !== concurrentTwoStart.params.hostInstanceId,
     bashOutputMatrix: bashOutputCases.map((testCase) => testCase.name),
-    approvedActionCount: approvedActions.filter((action) => action.status === 'succeeded').length,
-    deniedActionCount: deniedApprovals.filter((approval) => approval.status === 'denied').length,
+    nativeActionCount: nativeWriteActions.filter((action) => action.status === 'succeeded').length,
+    toolApproval: 'unsupported',
     cancelStatus: cancelledResult.run.status,
     cancelledFileCreated: cancelledBody !== null,
     externalMcpProjection: 'unsupported',
@@ -460,20 +430,19 @@ function assertCapabilitySnapshot(snapshot) {
     'usage.model_call.structured',
     'builtin_cli.transport.v21'
   ]
-  const approval = snapshot?.permissionOptions?.find((option) => option.key === 'approval_mode')
   if (snapshot?.probeStatus !== 'ready'
       || !snapshot.protocols?.includes('pi-jsonl-rpc-v1')
       || !snapshot.models?.some((model) => model.id === 'pi://runtime-default' && model.isDefault)
       || !requiredCapabilities.every((capability) => snapshot.capabilities?.includes(capability))
       || unobservedBehaviorCapabilities.some((capability) => snapshot.capabilities?.includes(capability))
-      || approval?.recommendedValue !== 'managed'
+      || snapshot.permissionOptions?.length !== 0
       || snapshot.nativeSessionCompatibilityKey !== 'pi-jsonl-rpc-v1:managed-system-prompt-v1') {
     throw new Error(`Pi capability snapshot is invalid: ${JSON.stringify({
       probeStatus: snapshot?.probeStatus,
       protocols: snapshot?.protocols,
       capabilities: snapshot?.capabilities,
       defaultModel: snapshot?.models?.find((model) => model.isDefault),
-      approval,
+      permissionOptions: snapshot?.permissionOptions,
       nativeSessionCompatibilityKey: snapshot?.nativeSessionCompatibilityKey
     })}`)
   }
@@ -604,36 +573,20 @@ function acceptedRun(result, knownCampId = null) {
   return { campId, agentRunId }
 }
 
-async function waitForRun(client, campId, agentRunId, options = {}) {
-  const resolved = new Set()
+async function waitForRun(client, campId, agentRunId) {
   const deadline = Date.now() + 300_000
   let snapshot
   let run
   while (Date.now() < deadline) {
     snapshot = await client.request('camps.snapshot', { campId })
     const actions = actionsForRun(snapshot, agentRunId)
-    for (const approval of approvalsForRun(snapshot, agentRunId).filter((candidate) =>
-      candidate.status === 'pending' && !resolved.has(candidate.id)
-    )) {
-      if (!options.approval) continue
-      const option = approval.options.find((candidate) => candidate.kind === options.approval)
-      if (!option) throw new Error(`Pi Approval has no ${options.approval}: ${JSON.stringify(approval)}`)
-      const resolution = await client.request('action.approvals.resolve', {
-        commandId: crypto.randomUUID(),
-        campId,
-        approvalId: approval.id,
-        expectedVersion: approval.version,
-        optionId: option.optionId,
-        reason: `Pi Runtime smoke ${options.approval}`
-      })
-      if (resolution.status === 'rejected') {
-        throw new Error(`Pi Approval resolution failed: ${JSON.stringify(resolution)}`)
-      }
-      resolved.add(approval.id)
+    const approvals = approvalsForRun(snapshot, agentRunId)
+    if (approvals.length > 0) {
+      throw new Error(`Native Pi execution unexpectedly created Rovai Approval state: ${JSON.stringify(approvals)}`)
     }
     run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
-      return { snapshot, run, actions, resolved }
+      return { snapshot, run, actions }
     }
     await delay(250)
   }
@@ -641,32 +594,25 @@ async function waitForRun(client, campId, agentRunId, options = {}) {
 }
 
 async function cancelRunningTool(client, campId, agentRunId) {
-  const resolved = new Set()
   let cancellationRequested = false
   const deadline = Date.now() + 240_000
   while (Date.now() < deadline) {
     const snapshot = await client.request('camps.snapshot', { campId })
-    for (const approval of approvalsForRun(snapshot, agentRunId).filter((candidate) =>
-      candidate.status === 'pending' && !resolved.has(candidate.id)
-    )) {
-      const option = approval.options.find((candidate) => candidate.kind === 'allow_once')
-      if (!option) throw new Error(`Pi cancel Approval has no allow_once: ${JSON.stringify(approval)}`)
-      const resolution = await client.request('action.approvals.resolve', {
-        commandId: crypto.randomUUID(),
-        campId,
-        approvalId: approval.id,
-        expectedVersion: approval.version,
-        optionId: option.optionId,
-        reason: 'Start bounded Pi command before cancellation.'
-      })
-      if (resolution.status === 'rejected') throw new Error(`Pi cancel Approval failed: ${JSON.stringify(resolution)}`)
-      resolved.add(approval.id)
+    const approvals = approvalsForRun(snapshot, agentRunId)
+    if (approvals.length > 0) {
+      throw new Error(`Native Pi cancellation unexpectedly created Rovai Approval state: ${JSON.stringify(approvals)}`)
     }
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (!cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
-      throw new Error(`Pi Run settled before its expected cancel Approval: ${diagnostics(client, { snapshot, run }, agentRunId)}`)
+      throw new Error(`Pi Run settled before its expected native Tool cancellation: ${diagnostics(client, { snapshot, run }, agentRunId)}`)
     }
-    if (!cancellationRequested && resolved.size > 0 && run) {
+    const nativeToolStarted = client.events.some((event) =>
+      event.method === 'runtime.action'
+        && event.params?.agentRunId === agentRunId
+        && event.params?.payload?.toolName === 'bash'
+        && event.params?.payload?.status === 'in_progress'
+    )
+    if (!cancellationRequested && nativeToolStarted && run) {
       const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
       const cancellation = await client.request('campTurns.cancel', {
         commandId: crypto.randomUUID(),
@@ -833,19 +779,14 @@ async function waitForEvent(client, method, timeoutMs) {
   throw new Error(`Timed out waiting for ${method}`)
 }
 
-async function waitForPendingApproval(client, campId, agentRunId) {
+async function waitForRunStarted(client, agentRunId) {
   const deadline = Date.now() + 300_000
   while (Date.now() < deadline) {
-    const snapshot = await client.request('camps.snapshot', { campId })
-    const approval = approvalsForRun(snapshot, agentRunId).find((candidate) => candidate.status === 'pending')
-    if (approval) return { snapshot, approval }
-    const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
-    if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
-      throw new Error(`Pi Run settled before its expected Approval: ${diagnostics(client, { snapshot, run }, agentRunId)}`)
-    }
-    await delay(250)
+    const started = startForRun(client.events, agentRunId)
+    if (started) return started
+    await delay(50)
   }
-  throw new Error(`Timed out waiting for Pi Approval in ${agentRunId}`)
+  throw new Error(`Timed out waiting for Pi agent_start admission in ${agentRunId}`)
 }
 
 function trace(message) {

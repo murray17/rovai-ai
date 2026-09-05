@@ -228,7 +228,7 @@ describe('member runtime parameters', () => {
     expect(markup).toContain(`value="${value}" selected`)
   })
 
-  it('does not present Pi fixed managed approval as a configurable Runtime mode', () => {
+  it('does not present an approval mode for native Pi tool execution', () => {
     const installation = runtimeInstallation('pi')
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
       adapterKind: 'pi',
@@ -415,7 +415,7 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
     case 'codex-cli':
       return { sandbox_mode: 'danger-full-access', approval_policy: 'never' }
     case 'pi':
-      return { approval_mode: 'partial_managed' }
+      return {}
     case 'opencode-cli':
       return { permission: 'allow' }
     case 'copilot-cli':

@@ -18,6 +18,11 @@ last_updated: 2026-09-05
 - [x] 关闭 Composer spellcheck；autosave 单次导出、直接线性比较、正文保存投影抑制、错误单独上报和附件批量单 flush。
 - [x] 完成全量 TypeScript、Vitest、桌面构建和本地文档治理门禁。
 - [x] 完成 PR #230 CI；本版本随该 PR 合入 `main`。
+- [x] Pi Host 固定加入进程级 `--approve`，保留原生 ResourceLoader，薄 Extension 仅做 Session 状态与逐轮 Bootstrap 注入。
+- [x] 删除 Pi `partial_managed`、bash/edit/write Approval、shell resolution、Managed Input Receipt 与 Core 专属路由。
+- [x] Prompt response 不再发布 started；首个精确匹配的 `agent_start` 原子接受 Delivery 并幂等发布 started。
+- [x] Migration 139 归一 Pi capability permission options 与 permission value、退役 Receipt acceptance guard，并保留历史 Receipt 数据和合法 cascade。
+- [x] 完成 Pi Host/Adapter/Context/数据库定向 Rust 回归、Renderer permission schema 回归与文档治理门禁。
 
 ## 验收矩阵
 
@@ -28,6 +33,7 @@ last_updated: 2026-09-05
 | Native Composer fixture | `environment-blocked` | fixture Vite production build 通过；本机 Electron assertion 被已识别的 macOS nested-sandbox capability gate 明确跳过，交由 PR CI 的可运行环境执行 |
 | 文档治理 | `passed` | `docs:test` 9 项、`docs:check` 与基于 `7b1d2b4b58afcde96553a87ac97a03793d31be08` 的 diff-aware `docs:check:ci` 通过 |
 | PR CI 与合入 | `passed` | PR #230 的 GitHub `gate` 首轮通过；本完成状态随该 PR 的最终检查与合并进入 `main` |
+| Pi 原生执行收口 | `passed` | thin-extension/source gates、Host launch/Ready、无 Receipt agent-start acceptance、migration 139/historical cascade、permission-options 与 smoke script syntax 定向回归通过 |
 
 ## 完成条件
 
@@ -37,3 +43,5 @@ last_updated: 2026-09-05
 - Typeahead Enter 不依赖 React menu render；loading/候选/空候选三条同步分支有回归证据。
 - save_content 不驱动 Workspace 投影 render，普通保存状态不提升到 Workspace，批量附件只做一次正文 flush。
 - 全量自动化、构建、文档治理和 PR CI 通过后才能把本版本标记 `complete`。
+- Pi Prompt response 不直接接受 Input；只有当前 owner-fenced `agent_start` 完成一次 Delivery transition。新路径不读取
+  Receipt，历史 Receipt 数据仍满足外键完整性与父级 cascade。

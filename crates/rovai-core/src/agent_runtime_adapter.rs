@@ -762,9 +762,7 @@ impl AgentRuntimeAdapterRegistry {
                 "sandbox_mode": "danger-full-access",
                 "approval_policy": "never",
             }),
-            AdapterKind::Pi => json!({
-                "approval_mode": "partial_managed",
-            }),
+            AdapterKind::Pi => json!({}),
             AdapterKind::OpencodeCli => json!({
                 "permission": "allow",
             }),
@@ -1080,7 +1078,7 @@ impl AgentRuntimeAdapterRegistry {
         let mut capabilities = observation.capabilities;
         capabilities.sort();
         capabilities.dedup();
-        let permission_options = ready.then(pi_permission_options).unwrap_or_default();
+        let permission_options = Vec::new();
         let permission_schema_digest =
             canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
         Ok(AdapterCapabilitySnapshot {
@@ -1794,16 +1792,6 @@ pub fn validate_machine_ready_snapshot(
             snapshot.executable_fingerprint.as_deref(),
             &snapshot.capabilities,
         )?;
-        let partial_managed_approval = snapshot.permission_options.iter().any(|option| {
-            option.key == "approval_mode"
-                && option.required
-                && option.supported
-                && option.recommended_value == json!("partial_managed")
-                && option
-                    .choices
-                    .iter()
-                    .any(|choice| choice.value == "partial_managed")
-        });
         let complete = snapshot.authentication_status == "authenticated"
             && snapshot
                 .protocols
@@ -1813,7 +1801,7 @@ pub fn validate_machine_ready_snapshot(
                 .models
                 .iter()
                 .any(|model| model.id == PI_RUNTIME_DEFAULT_MODEL_ID && model.is_default)
-            && partial_managed_approval
+            && snapshot.permission_options.is_empty()
             && snapshot.native_session_compatibility_key.as_deref()
                 == Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY);
         if !complete {
@@ -2534,22 +2522,7 @@ pub(crate) fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor
 }
 
 fn pi_permission_options() -> Vec<PermissionOptionDescriptor> {
-    vec![PermissionOptionDescriptor {
-        key: "approval_mode".to_string(),
-        label: "approval-mode".to_string(),
-        description: "Rovai provides best-effort durable approval for the known Pi bash, write, and edit tools. This is partial governance, not a sandbox, and does not cover arbitrary Extension tools.".to_string(),
-        value_type: "enum".to_string(),
-        choices: vec![choice(
-            "partial_managed",
-            "partial_managed (Rovai approval for bash/write/edit)",
-        )],
-        recommended_value: json!("partial_managed"),
-        scope: RuntimeOptionScope::Host,
-        risk: "elevated".to_string(),
-        supported: true,
-        required: true,
-        unsupported_reason: None,
-    }]
+    Vec::new()
 }
 
 fn claude_code_permission_options() -> Vec<PermissionOptionDescriptor> {
@@ -2637,15 +2610,6 @@ fn resolve_pi_runtime(
         .find(|protocol| protocol.as_str() == PI_MACHINE_PROTOCOL)
         .context("Pi installation does not advertise JSONL RPC v1")?
         .clone();
-    let approval_mode = input
-        .permissions
-        .values
-        .get("approval_mode")
-        .and_then(Value::as_str)
-        .context("Pi permission configuration requires approval_mode")?;
-    if approval_mode != "partial_managed" {
-        anyhow::bail!("Pi only supports the Rovai partial_managed approval mode");
-    }
     let binding_compatibility_digest = canonical_json_digest(&json!({
         "adapterKind": AdapterKind::Pi,
         "installationId": input.installation_id,
@@ -2663,9 +2627,7 @@ fn resolve_pi_runtime(
         "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
         "authScope": input.auth_scope,
         "protocolVersion": protocol_version,
-        "permissionSchemaVersion": input.permissions.schema_version,
-        "approvalMode": approval_mode,
-        "managedExtension": "rovai-pi-host-v6",
+        "managedExtension": "rovai-pi-host-v7",
     }))?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
@@ -2989,6 +2951,7 @@ mod tests {
                     "approval_policy": "never",
                 }),
             ),
+            (AdapterKind::Pi, json!({})),
             (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
             (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
             (
@@ -3667,6 +3630,7 @@ mod tests {
                 .collect::<std::collections::BTreeSet<_>>(),
             observed.into_iter().collect()
         );
+        assert!(snapshot.permission_options.is_empty());
         validate_machine_ready_snapshot(AdapterKind::Pi, &snapshot)
             .expect("the no-Prompt Pi evidence should satisfy Machine Ready");
     }
