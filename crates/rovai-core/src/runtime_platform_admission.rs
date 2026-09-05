@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:4bae559cf4ab0de8da494ebdb16e0a8e5008eaaded227251339f6b12a768c149";
+    "sha256:fa320352a45f8df0142109d712ac5f2b6c6b419a8bae26e354a36b549abc2620";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -23,6 +23,13 @@ pub const GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION: &str =
 
 pub const GROK_BUILD_MACOS_X64_EVIDENCE_REVISION: &str =
     "sha256:6ce70fc844ef6f18327e5a23396072566fd907c972f273aeccfd987c87398879";
+
+pub const PI_MACOS_ARM64_EVIDENCE_REVISION: &str =
+    "sha256:2e2055166f592a5e6fc6db6ac74b5f91315d0d01324f49ad71bd53e69d47b65c";
+pub const PI_MACOS_X64_EVIDENCE_REVISION: &str =
+    "sha256:5dc85386653d2170979d34b6c32bd3df72707b63deff394174775dd2eca64301";
+pub const PI_WINDOWS_X64_EVIDENCE_REVISION: &str =
+    "sha256:2dec32c61673793e06c80e9c55fb9631473a418cb773b309f9e075216b3362b8";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -206,6 +213,27 @@ mod tests {
             GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
             format!("sha256:{grok_x64_digest:x}")
         );
+        let pi_macos_arm64_digest = Sha256::digest(include_bytes!(
+            "../../../qualification/runtime-platform/macos-arm64-pi-v1.json"
+        ));
+        assert_eq!(
+            PI_MACOS_ARM64_EVIDENCE_REVISION,
+            format!("sha256:{pi_macos_arm64_digest:x}")
+        );
+        let pi_macos_x64_digest = Sha256::digest(include_bytes!(
+            "../../../qualification/runtime-platform/macos-x64-pi-v1.json"
+        ));
+        assert_eq!(
+            PI_MACOS_X64_EVIDENCE_REVISION,
+            format!("sha256:{pi_macos_x64_digest:x}")
+        );
+        let pi_windows_x64_digest = Sha256::digest(include_bytes!(
+            "../../../qualification/runtime-platform/windows-x64-pi-v1.json"
+        ));
+        assert_eq!(
+            PI_WINDOWS_X64_EVIDENCE_REVISION,
+            format!("sha256:{pi_windows_x64_digest:x}")
+        );
     }
 
     #[test]
@@ -239,14 +267,17 @@ mod tests {
         for runtime_kind in AdapterKind::ALL {
             let admission = registry.platform_admission(runtime_kind, HostPlatformKey::WindowsX64);
             if runtime_kind == AdapterKind::Pi {
-                assert_eq!(admission.status(), RuntimePlatformAdmissionStatus::Preview);
-                assert!(admission.allows_runtime_use());
-                assert!(!admission.is_qualified());
                 assert_eq!(
-                    admission.reason_code(),
-                    Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+                    admission.status(),
+                    RuntimePlatformAdmissionStatus::Qualified
                 );
-                assert_eq!(admission.evidence_revision(), None);
+                assert!(admission.allows_runtime_use());
+                assert!(admission.is_qualified());
+                assert_eq!(admission.reason_code(), None);
+                assert_eq!(
+                    admission.evidence_revision(),
+                    Some(PI_WINDOWS_X64_EVIDENCE_REVISION)
+                );
                 assert_eq!(admission.blocker_code(), None);
             } else if runtime_kind != AdapterKind::CursorAgent {
                 assert!(admission.is_qualified());
@@ -315,14 +346,18 @@ mod tests {
             assert_eq!(cursor.evidence_revision(), None);
 
             let pi = registry.platform_admission(AdapterKind::Pi, platform);
-            assert_eq!(pi.status(), RuntimePlatformAdmissionStatus::Preview);
+            assert_eq!(pi.status(), RuntimePlatformAdmissionStatus::Qualified);
             assert!(pi.allows_runtime_use());
-            assert!(!pi.is_qualified());
+            assert!(pi.is_qualified());
+            assert_eq!(pi.reason_code(), None);
             assert_eq!(
-                pi.reason_code(),
-                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+                pi.evidence_revision(),
+                Some(match platform {
+                    HostPlatformKey::MacosArm64 => PI_MACOS_ARM64_EVIDENCE_REVISION,
+                    HostPlatformKey::MacosX64 => PI_MACOS_X64_EVIDENCE_REVISION,
+                    HostPlatformKey::WindowsX64 => unreachable!(),
+                })
             );
-            assert_eq!(pi.evidence_revision(), None);
         }
         let grok_arm =
             registry.platform_admission(AdapterKind::GrokBuild, HostPlatformKey::MacosArm64);
@@ -356,18 +391,15 @@ mod tests {
         );
         assert!(blocked["evidenceRevision"].is_null());
 
-        let preview = serde_json::to_value(
+        let pi = serde_json::to_value(
             registry.platform_admission(AdapterKind::Pi, HostPlatformKey::WindowsX64),
         )
         .unwrap();
-        assert_eq!(preview["runtimeKind"], "pi");
-        assert_eq!(preview["platform"], "windows-x64");
-        assert_eq!(preview["status"], "preview");
-        assert_eq!(
-            preview["reasonCode"],
-            "runtime_platform.qualification_evidence_missing"
-        );
-        assert!(preview["evidenceRevision"].is_null());
+        assert_eq!(pi["runtimeKind"], "pi");
+        assert_eq!(pi["platform"], "windows-x64");
+        assert_eq!(pi["status"], "qualified");
+        assert!(pi["reasonCode"].is_null());
+        assert_eq!(pi["evidenceRevision"], PI_WINDOWS_X64_EVIDENCE_REVISION);
 
         let qualified = serde_json::to_value(
             registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),

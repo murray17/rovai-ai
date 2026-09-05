@@ -1028,7 +1028,7 @@ mod tests {
         assert!(matches!(
             spec.windows_entrypoint(),
             WindowsRuntimeEntrypoint::CommandShim { shim: captured, .. }
-                if captured == &shim.canonicalize().unwrap()
+                if captured.canonicalize().unwrap() == shim.canonicalize().unwrap()
         ));
         assert_eq!(
             environment_value(spec.environment(), std::ffi::OsStr::new("ComSpec")),
@@ -1149,6 +1149,8 @@ mod tests {
         std::fs::write(
             &javascript,
             concat!(
+                "var fs = new ActiveXObject('Scripting.FileSystemObject');\r\n",
+                "if (!fs.FileExists('cwd-marker')) WScript.Quit(8);\r\n",
                 "var args = WScript.Arguments;\r\n",
                 "for (var i = 0; i < args.length; i++) {\r\n",
                 "  WScript.StdOut.WriteLine(i + '=' + encodeURIComponent(args(i)));\r\n",
@@ -1156,6 +1158,8 @@ mod tests {
             ),
         )
         .unwrap();
+
+        std::fs::write(directory.join("cwd-marker"), b"workspace").unwrap();
         std::fs::write(
             &script,
             concat!(
@@ -1176,6 +1180,9 @@ mod tests {
         let mut command = Command::new(&script);
         command
             .args(arguments)
+            // Real workspace admission returns a verbatim local path. cmd.exe
+            // must not misclassify it as UNC and fall back to Windows/System32.
+            .current_dir(directory.canonicalize().unwrap())
             .env("ROVAI_SHIM_PATH", "must-not-rewrite-script-path");
         let spec = ManagedProcessLaunchSpec::capture(
             &command,

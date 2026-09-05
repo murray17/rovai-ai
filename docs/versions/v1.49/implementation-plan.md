@@ -19,6 +19,8 @@ last_updated: 2026-09-05
 - [x] 增加 quit 顺序、重复请求、准备失败重试、桥响应和 active-Camp guard 定向回归。
 - [x] 扩展 packaged Planned Shutdown 验收：最后一段 Lexical 输入后立即退出，重启读取完整 Core Draft。
 - [x] 完成 TypeScript、全仓 Vitest、桌面构建、脚本语法与文档治理门禁。
+- [x] 按维护者已完成的三平台目标主机验收与发布确认，把 Pi 的 macOS arm64、macOS x64、Windows x64 行分别
+  绑定 adapter-scoped immutable evidence 并晋升为 `qualified`；移除 Pi 专属实验性文案，保留通用 Preview 状态。
 
 ## 验收矩阵
 
@@ -28,6 +30,7 @@ last_updated: 2026-09-05
 | TypeScript | `passed` | `pnpm typecheck` 通过 |
 | 全仓 Vitest 与桌面构建 | `passed` | 150 files / 1516 tests 通过；`pnpm build:desktop` 的 Main、Preload、Renderer 三段构建通过 |
 | Packaged Planned Shutdown Draft 验收 | `not-run` | 脚本已扩展；需要本机 packaged App 与真实已认证 Runtime，不进入普通门禁 |
+| Pi 三平台准入 | `passed` | 维护者确认三平台目标主机验收完成；三份 platform-scoped evidence digest、Core closed matrix 与 Renderer projection 同步 |
 | 脚本、文档治理与 diff hygiene | `passed` | `node --check scripts/accept-planned-shutdown.mjs`、`docs:test` 9 项、`docs:check`、差异感知 `docs:check:ci` 与 `git diff --check` 通过 |
 
 ## 完成条件
@@ -49,3 +52,10 @@ last_updated: 2026-09-05
 - 无 active/matching Camp 时准备 no-op；重复 quit 不产生第二轮 preparation 或 drain。
 - 既有 shutdown overlay 的触发、延时、文案和视觉结构不变。
 - 自动化、构建与文档门禁通过；真实 packaged 验收若未运行必须明确记录，不能声称通过。
+
+### Pi 平台准入条件
+
+- 三个 shipped platform 均返回 `qualified / reasonCode=null`，且 evidence revision 分别绑定精确平台 artifact。
+- Pi 成员选项与 Settings 行不显示“实验性”或“实验性开放”；其他未来 `preview` Runtime 仍按通用合同披露。
+- 晋升不跳过安装、版本、认证、模型、Session、Deep Probe 或 Dispatch Preflight，也不新增 External MCP、Web Search、
+  Fast、Approval 或 sandbox 能力。

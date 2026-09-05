@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "macos-arm64-pi-v1",
+  "capturedAt": "2026-09-05",
+  "platform": "macos-arm64",
+  "baseRevision": "8c4f6e19185b6353d98353175d94fbff2f5d9530",
+  "qualifiedRuntimeKinds": [
+    "pi"
+  ],
+  "qualificationBasis": {
+    "type": "maintainer-target-host-acceptance",
+    "decision": "The maintainer confirmed that Pi was validated without blocking issues on macOS arm64 and approved its release without experimental disclosure.",
+    "repositoryEvidence": [
+      "docs/runtime-compatibility.md",
+      "docs/research/pi-runtime-reintegration-parity-matrix.md",
+      "scripts/smoke-pi-runtime.mjs"
+    ],
+    "rawEvidencePolicy": "Credentials, prompts, machine paths, Native Session identifiers, and raw target-host logs are intentionally excluded from the repository."
+  },
+  "runtimeEvidence": {
+    "minimumVersion": ">=0.84.4",
+    "protocol": "pi-jsonl-rpc-v1",
+    "launch": "pi --mode rpc --no-themes --approve --extension <rovai-pi-host-v7>",
+    "authentication": "Pi official configuration and provider credentials",
+    "sessionStrategy": "resident_multi_session with exact private Session-file switch and full-ID verification",
+    "bootstrapStrategy": "managed_system_prompt through before_agent_start",
+    "toolStrategy": "Pi-native tools and extension tools",
+    "externalMcp": "unsupported by accepted product decision"
+  },
+  "acceptance": {
+    "status": "qualified",
+    "targetHostValidation": "maintainer-confirmed",
+    "releaseApproval": "approved",
+    "platformScope": "macos-arm64 only",
+    "machineAndExecutionBoundary": "ordinary machine readiness, model, installation, session, and dispatch checks remain mandatory after platform admission"
+  },
+  "limitations": [
+    "This artifact records the maintainer's completed target-host acceptance and release decision; this promotion commit does not claim to rerun the private macOS arm64 model session.",
+    "External MCP, structured Web Search, and Camp Fast remain unsupported or hidden exactly as documented; platform qualification does not add those capabilities.",
+    "Pi skill discovery remains owned by the native ResourceLoader and workspace trust rather than a Rovai catalog attestation.",
+    "Usage retains only terminal assistant token evidence; unreported reasoning and cost remain unknown."
+  ]
+}

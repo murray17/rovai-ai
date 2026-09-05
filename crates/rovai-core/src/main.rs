@@ -22436,7 +22436,7 @@ while IFS= read -r _ignored; do :; done
     }
 
     #[test]
-    fn pi_preview_enters_discovery_and_dispatch_without_becoming_qualified() {
+    fn pi_qualified_platform_enters_discovery_and_dispatch_with_bound_evidence() {
         let enabled = current_platform_enabled_runtime_kinds();
         assert!(enabled.contains(&AdapterKind::Pi));
         assert!(!enabled.contains(&AdapterKind::CursorAgent));
@@ -22444,8 +22444,8 @@ while IFS= read -r _ignored; do :; done
 
         let admission = current_runtime_platform_admission(AdapterKind::Pi).unwrap();
         assert!(admission.allows_runtime_use());
-        assert!(!admission.is_qualified());
-        assert_eq!(admission.evidence_revision(), None);
+        assert!(admission.is_qualified());
+        assert!(admission.evidence_revision().is_some());
     }
 
     #[test]

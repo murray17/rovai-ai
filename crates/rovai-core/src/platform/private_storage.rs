@@ -124,7 +124,7 @@ fn prepare_windows_bootstrap_layout(root: &Path) -> Result<WindowsBootstrapLayou
 /// Windows uses native creation with a protected DACL and rejects an existing
 /// object that does not already satisfy the private-storage contract. Other
 /// platforms retain their established data-directory behavior.
-pub(crate) fn prepare_private_directory(path: &Path) -> Result<PathBuf> {
+pub fn prepare_private_directory(path: &Path) -> Result<PathBuf> {
     prepare_private_directory_platform(path)
 }
 
@@ -231,7 +231,9 @@ pub(crate) fn atomic_write_private_json<T: Serialize>(path: &Path, value: &T) ->
     atomic_write_private_bytes(path, &bytes)
 }
 
-pub(crate) fn atomic_write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+/// Atomically replaces a private file, including Windows DACL admission and
+/// write-through publication. Shared with binary-owned Runtime adapters.
+pub fn atomic_write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("private JSON path has no parent")?;
     prepare_private_directory(parent)?;
     if path.exists() {
@@ -380,14 +382,10 @@ fn commit_private_temporary(source: &Path, destination: &Path) -> Result<()> {
 #[cfg(windows)]
 mod windows {
     use std::{
-        ffi::OsStr,
         fs::File,
         io,
         mem::size_of,
-        os::windows::{
-            ffi::OsStrExt,
-            io::{AsRawHandle, FromRawHandle, OwnedHandle},
-        },
+        os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
         path::{Component, Path, PathBuf, Prefix},
         ptr::{null, null_mut},
     };
@@ -1038,21 +1036,14 @@ mod windows {
     }
 
     fn wide_path(path: &Path) -> Result<Vec<u16>> {
-        wide_os(path.as_os_str()).map_err(|error| {
+        // Private Runtime locators can exceed MAX_PATH even under a short data
+        // root. Reuse the local extended-length encoding used by file-tree IO.
+        crate::platform::windows_file_tree::wide_nul(path.as_os_str()).map_err(|error| {
             blocker(
                 HOST_UNSUPPORTED,
                 format!("invalid Windows storage path {}: {error:#}", path.display()),
             )
         })
-    }
-
-    fn wide_os(value: &OsStr) -> Result<Vec<u16>> {
-        let mut wide = value.encode_wide().collect::<Vec<_>>();
-        if wide.contains(&0) {
-            bail!("path contains an interior NUL");
-        }
-        wide.push(0);
-        Ok(wide)
     }
 
     fn utf16_until_nul(value: &[u16]) -> Result<String> {
