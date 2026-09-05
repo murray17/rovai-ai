@@ -2236,6 +2236,16 @@ pub struct CompletedTurn {
     pub error: Option<Value>,
 }
 
+impl CompletedTurn {
+    pub fn error_message(&self) -> Option<&str> {
+        self.error.as_ref().and_then(|error| {
+            error
+                .as_str()
+                .or_else(|| error.get("message").and_then(Value::as_str))
+        })
+    }
+}
+
 pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
     let turn = params
         .get("turn")
@@ -3253,6 +3263,7 @@ while IFS= read -r ignored; do :; done
                 "codexErrorInfo": "serverOverloaded"
             }))
         );
+        assert_eq!(completed.error_message(), Some("model unavailable"));
     }
 
     #[test]

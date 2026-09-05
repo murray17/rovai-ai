@@ -2,7 +2,11 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { RuntimeFailureOrigin, RuntimeFailureView } from '@contracts'
-import { RuntimeFailureNotice, runtimeFailureTitle } from './RuntimeFailureNotice'
+import {
+  RuntimeFailureNotice,
+  runtimeFailureMessage,
+  runtimeFailureTitle
+} from './RuntimeFailureNotice'
 
 describe('RuntimeFailureNotice', () => {
   it.each([
@@ -32,6 +36,28 @@ describe('RuntimeFailureNotice', () => {
   it('uses Rovai internal error only when Core explicitly attributes the origin to Rovai', () => {
     const failure = runtimeFailure('rovai')
     expect(runtimeFailureTitle(failure)).toBe('Rovai 内部错误')
+  })
+
+  it.each([
+    [
+      'Selected model is at capacity. Please try a different model.',
+      'Selected model is at capacity. Please try a different model.'
+    ],
+    [null, '模型额度不足']
+  ])('shows only the original safe error on AgentRun when detail is %s', (detail, message) => {
+    const failure = { ...runtimeFailure('compatibility', 'codex-cli'), detail }
+    const markup = renderToStaticMarkup(
+      createElement(RuntimeFailureNotice, { failure, presentation: 'agent-run' })
+    )
+
+    expect(runtimeFailureMessage(failure)).toBe(message)
+    expect(markup).toContain('agent-run-runtime-failure')
+    expect(markup).toContain(`>${message}</p>`)
+    expect(markup).not.toContain('Codex CLI')
+    expect(markup).not.toContain('与当前 Rovai 版本不兼容')
+    if (detail) {
+      expect(markup).not.toContain('模型额度不足')
+    }
   })
 })
 

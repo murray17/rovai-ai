@@ -5312,7 +5312,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('shows a failed Claude run public failure even when no execution evidence was recorded', () => {
+  it('shows only a failed AgentRun original error even when no execution evidence was recorded', () => {
     const run: AgentRunView = {
       id: 'run-claude-failed', campTurnId: 'turn-1', conversationId: 'conversation-claude',
       agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
@@ -5341,9 +5341,9 @@ describe('task event projections', () => {
     expect(markup).toContain('class="process-disclosure-slot"')
     expect(markup).toContain('<path d="m4.75 6.25 3.25 3.5 3.25-3.5"></path>')
     expect(markup).not.toContain('⌄')
-    expect(markup).toContain('Claude Code 返回错误')
-    expect(markup).toContain('请求受到速率限制')
     expect(markup).toContain('请稍后重试。')
+    expect(markup).not.toContain('Claude Code 返回错误')
+    expect(markup).not.toContain('请求受到速率限制')
     expect(markup).not.toContain('Rovai 内部错误')
   })
 

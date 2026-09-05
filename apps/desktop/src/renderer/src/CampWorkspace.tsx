@@ -8605,7 +8605,7 @@ function RunExecutionContent({
 
   return (
     <div className="process-content">
-      {publicFailure && <RuntimeFailureNotice failure={publicFailure} />}
+      {publicFailure && <RuntimeFailureNotice failure={publicFailure} presentation="agent-run" />}
       {showUnsettledWarning && (
         <p className="execution-uncertain" role="status">
           仍有外部效果待确认
