@@ -564,8 +564,7 @@ struct ObservedToolMetadata {
 struct AcpPromptObservation {
     prompt_id: String,
     delivery_id: String,
-    streamed_agent_text: String,
-    missing_send_recovery: AcpMissingSendRecoveryCollector,
+    assistant_suffix: AcpAssistantSuffixCollector,
     observed_tools: HashMap<String, ObservedToolMetadata>,
     images: AcpImageAccumulator,
 }
@@ -575,8 +574,7 @@ impl AcpPromptObservation {
         Self {
             prompt_id,
             delivery_id,
-            streamed_agent_text: String::new(),
-            missing_send_recovery: AcpMissingSendRecoveryCollector::default(),
+            assistant_suffix: AcpAssistantSuffixCollector::default(),
             observed_tools: HashMap::new(),
             images: AcpImageAccumulator::default(),
         }
@@ -2783,12 +2781,12 @@ fn parse_en_us_unsigned_integer(value: &str) -> Option<u64> {
 }
 
 #[derive(Debug, Default)]
-struct AcpMissingSendRecoveryCollector {
-    state: AcpMissingSendRecoveryState,
+struct AcpAssistantSuffixCollector {
+    state: AcpAssistantSuffixState,
 }
 
 #[derive(Debug, Default)]
-enum AcpMissingSendRecoveryState {
+enum AcpAssistantSuffixState {
     #[default]
     Empty,
     Anonymous(String),
@@ -2799,13 +2797,14 @@ enum AcpMissingSendRecoveryState {
     Ambiguous,
 }
 
-impl AcpMissingSendRecoveryCollector {
+impl AcpAssistantSuffixCollector {
     fn clear(&mut self) {
-        self.state = AcpMissingSendRecoveryState::Empty;
+        self.state = AcpAssistantSuffixState::Empty;
     }
 
     fn observe_tool_activity(&mut self) {
-        // Only assistant text after the latest tool boundary may be recovered.
+        // Only assistant text after the latest tool boundary can be the
+        // completed answer or a public recovery candidate.
         self.clear();
     }
 
@@ -2814,53 +2813,51 @@ impl AcpMissingSendRecoveryCollector {
             return;
         }
         self.state = match (std::mem::take(&mut self.state), message_id) {
-            (AcpMissingSendRecoveryState::Empty, Some(message_id)) => {
-                AcpMissingSendRecoveryState::Identified {
+            (AcpAssistantSuffixState::Empty, Some(message_id)) => {
+                AcpAssistantSuffixState::Identified {
                     message_id: message_id.to_string(),
                     text: text.to_string(),
                 }
             }
-            (AcpMissingSendRecoveryState::Empty, None) => {
-                AcpMissingSendRecoveryState::Anonymous(text.to_string())
+            (AcpAssistantSuffixState::Empty, None) => {
+                AcpAssistantSuffixState::Anonymous(text.to_string())
             }
-            (AcpMissingSendRecoveryState::Anonymous(mut current), None) => {
+            (AcpAssistantSuffixState::Anonymous(mut current), None) => {
                 current.push_str(text);
-                AcpMissingSendRecoveryState::Anonymous(current)
+                AcpAssistantSuffixState::Anonymous(current)
             }
-            (AcpMissingSendRecoveryState::Anonymous(_), Some(_)) => {
-                AcpMissingSendRecoveryState::Ambiguous
-            }
+            (AcpAssistantSuffixState::Anonymous(_), Some(_)) => AcpAssistantSuffixState::Ambiguous,
             (
-                AcpMissingSendRecoveryState::Identified {
+                AcpAssistantSuffixState::Identified {
                     message_id: current_id,
                     text: mut current,
                 },
                 Some(message_id),
             ) if current_id == message_id => {
                 current.push_str(text);
-                AcpMissingSendRecoveryState::Identified {
+                AcpAssistantSuffixState::Identified {
                     message_id: current_id,
                     text: current,
                 }
             }
-            (AcpMissingSendRecoveryState::Identified { .. }, Some(message_id)) => {
+            (AcpAssistantSuffixState::Identified { .. }, Some(message_id)) => {
                 // A new, explicit message identity is the latest assistant
                 // candidate and supersedes the earlier assistant message.
-                AcpMissingSendRecoveryState::Identified {
+                AcpAssistantSuffixState::Identified {
                     message_id: message_id.to_string(),
                     text: text.to_string(),
                 }
             }
-            (AcpMissingSendRecoveryState::Identified { .. }, None)
-            | (AcpMissingSendRecoveryState::Ambiguous, _) => AcpMissingSendRecoveryState::Ambiguous,
+            (AcpAssistantSuffixState::Identified { .. }, None)
+            | (AcpAssistantSuffixState::Ambiguous, _) => AcpAssistantSuffixState::Ambiguous,
         };
     }
 
     fn candidate(&self) -> Option<String> {
         let text = match &self.state {
-            AcpMissingSendRecoveryState::Anonymous(text)
-            | AcpMissingSendRecoveryState::Identified { text, .. } => text,
-            AcpMissingSendRecoveryState::Empty | AcpMissingSendRecoveryState::Ambiguous => {
+            AcpAssistantSuffixState::Anonymous(text)
+            | AcpAssistantSuffixState::Identified { text, .. } => text,
+            AcpAssistantSuffixState::Empty | AcpAssistantSuffixState::Ambiguous => {
                 return None;
             }
         };
@@ -3479,7 +3476,7 @@ impl AcpRuntime {
             bail!("ACP event targeted a stale Prompt observation");
         }
         if method == "session/request_permission" {
-            observation.missing_send_recovery.observe_tool_activity();
+            observation.assistant_suffix.observe_tool_activity();
             return Ok(None);
         }
         if method != "session/update" {
@@ -3492,18 +3489,17 @@ impl AcpRuntime {
         if session_update == Some("agent_message_chunk")
             && let Some(text) = update.pointer("/content/text").and_then(Value::as_str)
         {
-            observation.streamed_agent_text.push_str(text);
             let message_id = update
                 .get("messageId")
                 .or_else(|| update.pointer("/content/messageId"))
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty());
             observation
-                .missing_send_recovery
+                .assistant_suffix
                 .observe_assistant_chunk(message_id, text);
         }
         if matches!(session_update, Some("tool_call" | "tool_call_update")) {
-            observation.missing_send_recovery.observe_tool_activity();
+            observation.assistant_suffix.observe_tool_activity();
         }
         if !matches!(session_update, Some("tool_call" | "tool_call_update")) {
             return Ok(None);
@@ -3586,8 +3582,7 @@ impl AcpRuntime {
         let observation = observation
             .as_ref()
             .filter(|observation| observation.prompt_id == native_prompt_id)?;
-        let text = observation.streamed_agent_text.trim().to_string();
-        (!text.is_empty()).then_some(text)
+        observation.assistant_suffix.candidate()
     }
 
     pub async fn missing_send_recovery_candidate(&self, native_prompt_id: &str) -> Option<String> {
@@ -3597,7 +3592,7 @@ impl AcpRuntime {
             .await
             .as_ref()
             .filter(|observation| observation.prompt_id == native_prompt_id)
-            .and_then(|observation| observation.missing_send_recovery.candidate());
+            .and_then(|observation| observation.assistant_suffix.candidate());
         candidate.filter(|text| !text.is_empty())
     }
 
@@ -9342,6 +9337,120 @@ while IFS= read -r ignored; do :; done
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[tokio::test]
+    async fn final_agent_message_uses_complete_assistant_suffix_after_last_tool_activity() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-final-assistant-suffix-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        make_executable(
+            &executable,
+            r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
+while IFS= read -r ignored; do :; done
+"#,
+        );
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(exact_builtin_tools(&root)),
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-final-assistant-suffix".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "runtime_managed".to_string(),
+        );
+        let prompt_id = "prompt-final-assistant-suffix";
+        *runtime.active_observation.lock().await = Some(AcpPromptObservation::new(
+            prompt_id.to_string(),
+            "delivery-final-assistant-suffix".to_string(),
+        ));
+
+        runtime
+            .observe_message(
+                prompt_id,
+                "session/update",
+                &json!({
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "messageId": "process-message",
+                        "content": {"type": "text", "text": "I will inspect the send path."}
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+        runtime
+            .observe_message(
+                prompt_id,
+                "session/update",
+                &json!({
+                    "update": {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "tool-read",
+                        "kind": "read",
+                        "status": "in_progress"
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+        for text in ["The core issue is ", "the final-output source."] {
+            runtime
+                .observe_message(
+                    prompt_id,
+                    "session/update",
+                    &json!({
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": "final-message",
+                            "content": {"type": "text", "text": text}
+                        }
+                    }),
+                )
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            runtime
+                .missing_send_recovery_candidate(prompt_id)
+                .await
+                .as_deref(),
+            Some("The core issue is the final-output source.")
+        );
+        assert_eq!(
+            runtime.final_agent_message(prompt_id).await.as_deref(),
+            Some("The core issue is the final-output source.")
+        );
+
+        host.shutdown().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn completed_run_disposition_preserves_adapter_reuse_evidence() {
         assert_eq!(
@@ -9372,8 +9481,8 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn recovery_collector_uses_the_latest_identified_assistant_message() {
-        let mut collector = AcpMissingSendRecoveryCollector::default();
+    fn assistant_suffix_collector_uses_the_latest_identified_message() {
+        let mut collector = AcpAssistantSuffixCollector::default();
         collector.observe_assistant_chunk(Some("message-1"), "draft ");
         collector.observe_assistant_chunk(Some("message-1"), "continued");
         assert_eq!(collector.candidate().as_deref(), Some("draft continued"));
@@ -9384,8 +9493,8 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn recovery_collector_preserves_provider_text_without_reasoning_tag_cleanup() {
-        let mut collector = AcpMissingSendRecoveryCollector::default();
+    fn assistant_suffix_collector_preserves_provider_text_without_cleanup() {
+        let mut collector = AcpAssistantSuffixCollector::default();
         collector.observe_assistant_chunk(
             Some("message-1"),
             "<think>provider reasoning</think>\nPUBLIC",
@@ -9397,8 +9506,8 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn recovery_collector_accepts_anonymous_suffix_but_fails_closed_on_identity_mix() {
-        let mut collector = AcpMissingSendRecoveryCollector::default();
+    fn assistant_suffix_collector_fails_closed_on_anonymous_identity_mix() {
+        let mut collector = AcpAssistantSuffixCollector::default();
         collector.observe_assistant_chunk(None, "anonymous ");
         collector.observe_assistant_chunk(None, "suffix");
         assert_eq!(collector.candidate().as_deref(), Some("anonymous suffix"));
@@ -9410,8 +9519,8 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn recovery_collector_exposes_only_assistant_text_after_the_last_tool_activity() {
-        let mut collector = AcpMissingSendRecoveryCollector::default();
+    fn assistant_suffix_collector_exposes_only_text_after_last_tool_activity() {
+        let mut collector = AcpAssistantSuffixCollector::default();
         collector.observe_assistant_chunk(Some("message-1"), "before tool");
         collector.observe_tool_activity();
         assert!(collector.candidate().is_none());
