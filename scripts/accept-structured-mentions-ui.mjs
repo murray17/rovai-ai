@@ -168,6 +168,7 @@ try {
 
   running = await launchApp(dataDir, debugPort, 1440, 920)
   await setTheme(running.cdp, 'day')
+  await evaluate(running.cdp, 'window.rovai.generalPreferences.setWorldMapEnabled(true)')
   const freshAgents = await request(running.cdp, 'members.list')
   assert(
     targetMemberIds.every((id) => freshAgents.some((agent) =>
@@ -514,7 +515,7 @@ try {
       key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
     })
     await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-      (draft) => deepEqual(draft.content, []) && draft.replyIntent === null, 10_000)
+      (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.replyIntent === null, 10_000)
 
     await closeApp(running)
     running = null
@@ -598,7 +599,7 @@ try {
       key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
     })
     await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-      (draft) => deepEqual(draft.content, []), 10_000)
+      (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
     await waitForExpression(running.cdp, `(() => {
       const rail = document.querySelector('.composer-route-rail')
       const summary = rail?.querySelector('.mention-target-summary')
@@ -676,10 +677,10 @@ try {
     const addressedDraft = await waitForValue(async () =>
       request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
       draft.body === `@${targetMembers[1].displayName} ${continuationMessageText}`
-        && deepEqual(draft.content, [
+        && deepEqual(draft.content, composerDocumentFromStructured([
           { kind: 'member_mention', agentId: targetMemberIds[1] },
           { kind: 'text', text: ` ${continuationMessageText}` }
-        ]), 10_000)
+        ])), 10_000)
     await waitForExpression(running.cdp,
       `document.querySelector('.composer .composer-send')?.disabled === false`)
     const continuationStartedAt = Date.now()
@@ -890,6 +891,7 @@ try {
         options: [...(menu?.querySelectorAll('button[role="option"]') ?? [])]
           .map((button) => ({
             name: button.querySelector('strong')?.textContent ?? null,
+            description: button.querySelector('small')?.textContent ?? null,
             hasMemberAvatar: Boolean(button.querySelector('.member-avatar.mention-avatar')),
             hasImage: Boolean(button.querySelector('.member-avatar.mention-avatar .member-avatar-image'))
           })),
@@ -899,6 +901,7 @@ try {
       const option = projection.options.find((candidate) => candidate.name === member.displayName)
       return projection.text === `${expectedEditorText}@`
         && projection.menu
+        && option?.description === member.teamRole
         && option?.hasMemberAvatar
         && option.hasImage
     }, 10_000)
@@ -1325,7 +1328,8 @@ try {
   await pasteWithMetaV(running.cdp)
   const downgradedDraft = await waitForValue(async () =>
     request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-    deepEqual(draft.content, [{ kind: 'text', text: currentUserMentionBody }]), 10_000)
+    deepEqual(draft.content,
+      composerDocumentFromStructured([{ kind: 'text', text: currentUserMentionBody }])), 10_000)
   assert(downgradedDraft.body === currentUserMentionBody,
     `Composer paste did not downgrade Current User Mention to Text: ${JSON.stringify(downgradedDraft)}`)
   const downgradedComposer = await evaluate(running.cdp, `(() => {
@@ -1350,7 +1354,7 @@ try {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []) && draft.replyIntent === null, 10_000)
+    (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.replyIntent === null, 10_000)
   await reloadRenderer(running.cdp)
   await setTheme(running.cdp, 'day')
   await openCamp(running.cdp, campId)
@@ -1437,7 +1441,7 @@ try {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []) && draft.replyIntent === null, 10_000)
+    (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.replyIntent === null, 10_000)
   const originalAuthorProfile = await request(running.cdp, 'members.get', {
     agentId: targetMemberIds[0]
   })
@@ -2434,12 +2438,13 @@ async function acceptComposerCutRegression(cdp, campId) {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
   })
   await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []) && draft.body === '', 10_000)
+    (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.body === '', 10_000)
 
   await focusEditorAtEnd(cdp)
   await cdp.send('Input.insertText', { text: '123' })
   await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '123' }])
+    (draft) => deepEqual(draft.content,
+      composerDocumentFromStructured([{ kind: 'text', text: '123' }]))
       && draft.body === '123', 10_000)
   await evaluate(cdp, `(() => {
     window.__composerCutEditor = document.querySelector('#camp-message')
@@ -2463,7 +2468,7 @@ async function acceptComposerCutRegression(cdp, campId) {
   )
   const emptyDraft = await waitForValue(
     () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []) && draft.body === '',
+    (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.body === '',
     10_000
   )
   await evaluate(cdp,
@@ -2497,7 +2502,8 @@ async function acceptComposerCutRegression(cdp, campId) {
   await cdp.send('Input.insertText', { text: '7' })
   const nextDraft = await waitForValue(
     () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '7' }]) && draft.body === '7',
+    (draft) => deepEqual(draft.content,
+      composerDocumentFromStructured([{ kind: 'text', text: '7' }])) && draft.body === '7',
     10_000
   )
   await evaluate(cdp,
@@ -2524,16 +2530,17 @@ async function acceptComposerCutRegression(cdp, campId) {
   )
 
   await selectWholeEditor(cdp)
-  const nativeDeleteApplied = await evaluate(cdp, `document.execCommand('delete')`)
-  assert(nativeDeleteApplied, 'Chromium did not apply the native delete command')
-  const afterNativeEmptyDraft = await waitForValue(
+  await pressKey(cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  const afterKeyboardEmptyDraft = await waitForValue(
     () => request(cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => deepEqual(draft.content, []) && draft.body === '',
+    (draft) => deepEqual(draft.content, emptyComposerDocument) && draft.body === '',
     10_000
   )
   await evaluate(cdp,
     `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
-  const afterNativeEmpty = await evaluate(cdp, `(() => {
+  const afterKeyboardEmpty = await evaluate(cdp, `(() => {
     const editor = document.querySelector('#camp-message')
     return {
       appShellStayedMounted: document.querySelector('.app-shell') === window.__composerCutShell,
@@ -2547,14 +2554,14 @@ async function acceptComposerCutRegression(cdp, campId) {
     }
   })()`)
   assert(
-    afterNativeEmpty.appShellStayedMounted
-      && afterNativeEmpty.workspaceStayedMounted
-      && afterNativeEmpty.editorFocused
-      && afterNativeEmpty.editorText === ''
-      && afterNativeEmpty.paragraphCount === 1
-      && afterNativeEmpty.breakCount === 1
-      && afterNativeEmpty.errors.length === 0,
-    `A native empty filler became semantic content: ${JSON.stringify(afterNativeEmpty)}`
+    afterKeyboardEmpty.appShellStayedMounted
+      && afterKeyboardEmpty.workspaceStayedMounted
+      && afterKeyboardEmpty.editorFocused
+      && afterKeyboardEmpty.editorText === ''
+      && afterKeyboardEmpty.paragraphCount === 1
+      && afterKeyboardEmpty.breakCount === 1
+      && afterKeyboardEmpty.errors.length === 0,
+    `A Lexical empty filler became semantic content: ${JSON.stringify(afterKeyboardEmpty)}`
   )
 
   return {
@@ -2563,9 +2570,8 @@ async function acceptComposerCutRegression(cdp, campId) {
     afterCut,
     nextDraft,
     afterSingleInput,
-    nativeDeleteApplied,
-    afterNativeEmptyDraft,
-    afterNativeEmpty
+    afterKeyboardEmptyDraft,
+    afterKeyboardEmpty
   }
 }
 

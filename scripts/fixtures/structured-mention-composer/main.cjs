@@ -140,7 +140,9 @@ app.whenReady().then(async () => {
     await run('Member Typeahead replaces only the local query with one Atom', async () => {
       await reset('请 ')
       await insert('@甲')
-      assert.equal((await state(false)).menuKind, 'mention')
+      const open = await state(false)
+      assert.equal(open.menuKind, 'mention')
+      assert.ok(open.options.some((option) => option.endsWith('\n队员甲\n系统架构师')), JSON.stringify(open))
       await key('Enter', 13)
       const current = await expectSegments([
         { kind: 'text', text: '请 ' },

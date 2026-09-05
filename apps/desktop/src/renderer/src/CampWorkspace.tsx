@@ -1714,6 +1714,7 @@ export function CampWorkspace({
     () => snapshot.members.map((member) => ({
       agentId: member.agentId,
       displayName: member.displayName,
+      teamRole: member.teamRole,
       avatarRef: member.avatarRef,
       mentionable: member.membershipStatus === 'active' && member.profilePresence === 'present'
     })),

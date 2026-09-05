@@ -41,6 +41,9 @@ Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp Catalog 
 critical-priority command 从当前 selection 同步重算 trigger：Catalog loading 时消费按键但不选择，ready 且有候选时
 选择当前项，无 trigger 或 ready/error 且无候选时才交给普通发送行为。
 
+普通 Member 候选的主行显示当前 Camp Catalog 名称，副行显示同一 Catalog 的团队角色；团队角色为空时显示
+“团队角色未设置”。副行不得使用所有候选共享的“Camp 成员”等占位文案。All Members 候选继续显示广播说明。
+
 选择 Member/All Members 后，匹配查询被一个 Atom 替换。右侧已有空白时复用；否则插入一个普通空格，并把
 光标放在空格之后。查询或显示文本都不构成 identity。
 

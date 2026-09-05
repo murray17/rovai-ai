@@ -60,6 +60,7 @@ import {
 export interface StructuredMentionMember {
   agentId: string
   displayName: string
+  teamRole: string
   avatarRef?: string | null
   mentionable?: boolean
 }
@@ -128,6 +129,10 @@ export function structuredMentionOptions(
     options.push({ kind: 'member', member })
   }
   return options
+}
+
+export function structuredMentionMemberDescription(member: StructuredMentionMember): string {
+  return member.teamRole.trim() || '团队角色未设置'
 }
 
 export function structuredSkillOptions(
@@ -526,7 +531,9 @@ function renderMentionMenu(
           <StructuredMentionOptionAvatar option={option} />
           <span>
             <strong>{option.kind === 'all_members' ? '所有队员' : option.member.displayName}</strong>
-            <small>{option.kind === 'all_members' ? '广播给当前全部队员' : 'Camp 成员'}</small>
+            <small>{option.kind === 'all_members'
+              ? '广播给当前全部队员'
+              : structuredMentionMemberDescription(option.member)}</small>
           </span>
           <i aria-hidden="true" />
         </button>)}
