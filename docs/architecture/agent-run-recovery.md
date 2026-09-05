@@ -11,7 +11,7 @@ last_updated: 2026-09-01
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)。受控关闭后的 product
 fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；字段级状态与命令见
 [Accepted Input Recovery v5](../contracts/accepted-input-recovery-v5.md)与
-[Planned Shutdown v5](../contracts/planned-shutdown-v5.md)。
+[Planned Shutdown v6](../contracts/planned-shutdown-v6.md)。
 
 ## 1. 三个独立恢复对象
 
@@ -35,7 +35,7 @@ input 与 unknown external effects；它们不进入下面的普通分类，也�
 
 非终态 `invocation_kind=single_chat` Run 同样在普通分类前直接使用既有取消结算；它只取消当前回复，保持
 Single Chat Conversation active，并允许下一条用户消息建立新 Run。它不进入 accepted-input blocker、Native Turn
-reconcile、私有 transcript replay 或专用恢复状态。完整边界见 [Single Chat Architecture](single-chat.md#取消和并发)。
+reconcile、私有 transcript replay 或专用恢复状态。完整边界见 [Single Chat Architecture](single-chat.md#取消结束与并发)。
 
 没有 pending controlled-shutdown cycle 时，Startup Recovery Coordinator 在同一事务内先收敛 Action、
 Approval、Runtime Delivery 和 prepared input，再分类 AgentRun：

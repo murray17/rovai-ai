@@ -38,7 +38,10 @@ use codex::{
 use core_subsystems::{
     CoreSubsystems, SubsystemInitialization, SubsystemUnavailable, runtime_subsystem_id,
 };
-use pi::{PiAgentRunRuntimeRequest, PiIncoming, PiRpcRuntimeAdapter, PiRuntime};
+use pi::{
+    PiAgentRunRuntimeRequest, PiIncoming, PiPromptImage, PiRpcRuntimeAdapter, PiRuntime,
+    PreparedPiPromptImage, prepare_prompt_images,
+};
 #[cfg(target_os = "macos")]
 use rovai_core::managed_process::configure_user_automation_denial_root;
 use rovai_core::{
@@ -82,12 +85,15 @@ use rovai_core::{
         CompactionHookIpcRequest, CompactionHookIpcResponse, builtin_tool_catalog_digest,
         builtin_tool_description, recovery_for_error_code,
     },
-    camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
+    camp_attachment::{
+        CampAttachmentStore, CampComposerReplyRecipient, desktop_target_for_source_attachment,
+        legacy_attachment_belongs_to_owner, preview_source_attachment,
+    },
     camp_attachment_publication::{AuthorityAttachment, unresolved_publication_camp_ids},
     camp_attachment_view::{
         CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, PreparedCampAttachmentCleanup,
     },
-    camp_content::StructuredCampMessageContent,
+    camp_content::ComposerDocument,
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
         CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
@@ -135,8 +141,9 @@ use rovai_core::{
     },
     context::{
         CharterDeliveryMode, ContextMaterialization, ContextPayloadTooLarge, ContextService,
-        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
-        RuntimeInputDelivery, charter_delivery_mode_for_adapter,
+        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PersistPiPromptImageEvidence,
+        PiPromptImageEvidence, PreparedContext, RuntimeInputDelivery,
+        charter_delivery_mode_for_adapter,
     },
     core_data_dir_lock::{CoreDataDirLease, CoreDataDirLeaseAcquisition},
     current_user::CURRENT_USER_ID,
@@ -153,6 +160,10 @@ use rovai_core::{
     },
     file_preview_authority::{ResolveFilePreviewSourceParams, resolve_file_preview_source},
     git,
+    local_attachment_source::{
+        LocalAttachmentFailure, LocalAttachmentOwnerLocator, load_agent_run_source_attachments,
+        load_source_attachment, observe_source_attachment, resolve_source_attachments_for_run,
+    },
     managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
     mcp::{
@@ -232,10 +243,10 @@ use rovai_core::{
     runtime_resolution::RuntimeResolutionService,
     runtime_search_operation,
     single_chat::{
-        EndSingleChatCommand, OpenSingleChatCommand, SINGLE_CHAT_HISTORY_TOOL_NAME,
-        SendSingleChatMessageCommand, SingleChatHistoryInput, SingleChatService,
+        EditSingleChatPendingInputCommand, EndSingleChatCommand, OpenSingleChatCommand,
+        SINGLE_CHAT_HISTORY_TOOL_NAME, SendSingleChatMessageCommand, SingleChatHistoryInput,
+        SingleChatService,
     },
-    single_chat_attachment::SingleChatAttachmentStore,
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
         SetSkillGroupAssignmentsCommand, SkillLibraryService,
@@ -421,6 +432,15 @@ struct ErrorBody {
 }
 
 fn request_error_body(error: &anyhow::Error) -> ErrorBody {
+    if let Some(error) = error.downcast_ref::<LocalAttachmentFailure>() {
+        return ErrorBody {
+            kind: "domain_rejection",
+            code: error.code().as_str().to_string(),
+            message: error.to_string(),
+            retryable: false,
+            details: json!({}),
+        };
+    }
     if let Some(error) = error.downcast_ref::<SubsystemUnavailable>() {
         return ErrorBody {
             kind: "infrastructure_failure",
@@ -595,14 +615,16 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
             | "userAutomation.camp.send"
-            | "camp.attachments.prepareFromPath"
+            | "camp.sourceAttachments.addFromPath"
+            | "camp.pendingInputs.addSourceAttachmentFromPath"
             | "camp.attachments.previewSource"
             | "camp.attachments.desktopOpenTarget"
             | "campTurns.cancel"
             | "agentRuns.cancel"
-            | "singleChat.attachments.prepareFromPath"
-            | "singleChat.attachments.remove"
-            | "singleChat.attachments.previewSource"
+            | "singleChat.sourceAttachments.addFromPath"
+            | "singleChat.composerDraft.removeAttachment"
+            | "singleChat.pendingInputs.addSourceAttachmentFromPath"
+            | "singleChat.pendingInputs.edit"
             | "singleChat.send"
             | "singleChat.end"
             | "channels.executionConsole.agentRun.cancel"
@@ -659,7 +681,7 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "camp.composerDraft.resolveContinuationRecipient"
             | "camp.composerDraft.removeAttachment"
             | "camp.composerDraft.discard"
-            | "camp.attachments.prepareFromPath"
+            | "camp.sourceAttachments.addFromPath"
             | "camp.messages.send"
             | "userAutomation.camp.send"
             | "campTurns.cancel"
@@ -677,7 +699,7 @@ fn navigation_invalidation_emitted_at_commit_boundary(method: &str) -> bool {
             | "camps.discardPending"
             | "camp.composerDraft.removeAttachment"
             | "camp.composerDraft.discard"
-            | "camp.attachments.prepareFromPath"
+            | "camp.sourceAttachments.addFromPath"
             | "camp.messages.send"
     )
 }
@@ -693,7 +715,7 @@ fn navigation_invalidation_requires_pending_camp(method: &str) -> bool {
             | "camp.composerDraft.resolveContinuationRecipient"
             | "camp.composerDraft.removeAttachment"
             | "camp.composerDraft.discard"
-            | "camp.attachments.prepareFromPath"
+            | "camp.sourceAttachments.addFromPath"
     )
 }
 
@@ -899,19 +921,20 @@ struct SingleChatSnapshotParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PrepareSingleChatAttachmentFromPathParams {
+struct AddSingleChatSourceAttachmentFromPathParams {
     conversation_id: String,
-    expected_conversation_version: i64,
+    expected_draft_revision: i64,
     source_path: String,
     display_name: String,
+    media_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RemoveSingleChatAttachmentParams {
+struct RemoveSingleChatSourceAttachmentParams {
     conversation_id: String,
-    expected_conversation_version: i64,
-    attachment_id: String,
+    expected_draft_revision: i64,
+    attachment_ref_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1193,7 +1216,7 @@ struct CampComposerDraftParams {
 struct SaveCampComposerDraftParams {
     camp_id: CampId,
     expected_revision: i64,
-    content: StructuredCampMessageContent,
+    content: ComposerDocument,
     continuation_source_message_id: Option<String>,
 }
 
@@ -1246,114 +1269,180 @@ struct RemovePreparedAttachmentParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PrepareAttachmentFromPathParams {
+struct AddSourceAttachmentFromPathParams {
     camp_id: CampId,
     expected_revision: i64,
     source_path: String,
     display_name: String,
+    media_type: Option<String>,
 }
 
-async fn prepare_composer_attachment_from_path(
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AddPendingSourceAttachmentFromPathParams {
+    camp_id: CampId,
+    pending_input_id: String,
+    expected_revision: i64,
+    edit_token: String,
+    source_path: String,
+    display_name: String,
+    media_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AddSingleChatPendingSourceAttachmentFromPathParams {
+    camp_id: CampId,
+    conversation_id: String,
+    pending_input_id: String,
+    expected_revision: i64,
+    edit_token: String,
+    source_path: String,
+    display_name: String,
+    media_type: Option<String>,
+}
+
+async fn add_composer_source_attachment_from_path(
     database: &Mutex<Database>,
     output: &mpsc::UnboundedSender<String>,
     data_dir: &Path,
-    params: PrepareAttachmentFromPathParams,
+    params: AddSourceAttachmentFromPathParams,
 ) -> Result<Value> {
     let store = CampAttachmentStore::new(data_dir);
-    let plan = {
-        let database = database.lock().await;
-        store.plan_prepare_from_path(
-            &database,
+    let source_path = params.source_path.clone();
+    let display_name = params.display_name.clone();
+    let media_type = params.media_type.clone();
+    let source_ref = tokio::task::spawn_blocking(move || {
+        observe_source_attachment(
+            Path::new(&source_path),
+            &display_name,
+            media_type.as_deref(),
+        )
+    })
+    .await
+    .context("Source Attachment observation task failed")??;
+    let draft = {
+        let mut database = database.lock().await;
+        store.commit_source_attachment(
+            &mut database,
             params.camp_id.as_str(),
             params.expected_revision,
-            Path::new(&params.source_path),
-            &params.display_name,
+            source_ref,
         )?
     };
-    let filesystem_store = store.clone();
-    let prepared =
-        tokio::task::spawn_blocking(move || filesystem_store.prepare_from_path_filesystem(plan))
-            .await
-            .context("Camp Attachment preparation task failed")??;
-
-    let commit = {
-        let mut database = database.lock().await;
-        store.commit_prepared_attachment(&mut database, &prepared)
-    };
-    if let Err(error) = commit {
-        let cleanup_store = store.clone();
-        if let Err(cleanup_error) = tokio::task::spawn_blocking(move || {
-            cleanup_store.cleanup_uncommitted_prepared_attachment(prepared)
-        })
-        .await
-        {
-            eprintln!("Uncommitted Prepared Attachment cleanup task failed: {cleanup_error}");
-        }
-        return Err(error);
-    }
     emit_navigation_invalidated_for_pending_camp(
         database,
         output,
-        "camp.attachments.prepareFromPath",
+        "camp.sourceAttachments.addFromPath",
         params.camp_id.as_str(),
     )
     .await;
-
-    let draft = {
-        let database = database.lock().await;
-        store.load_draft(&database, params.camp_id.as_str())?
-    };
     Ok(serde_json::to_value(draft)?)
 }
 
-async fn prepare_single_chat_attachment_from_path(
+async fn add_pending_source_attachment_from_path(
     database: &Mutex<Database>,
     output: &mpsc::UnboundedSender<String>,
-    data_dir: &Path,
-    params: PrepareSingleChatAttachmentFromPathParams,
+    params: AddPendingSourceAttachmentFromPathParams,
 ) -> Result<Value> {
-    let store = SingleChatAttachmentStore::new(data_dir);
-    let plan = {
-        let database = database.lock().await;
-        store.plan_prepare_from_path(
-            &database,
-            &params.conversation_id,
-            params.expected_conversation_version,
-            Path::new(&params.source_path),
-            &params.display_name,
+    let source_path = params.source_path.clone();
+    let display_name = params.display_name.clone();
+    let media_type = params.media_type.clone();
+    let source_ref = tokio::task::spawn_blocking(move || {
+        observe_source_attachment(
+            Path::new(&source_path),
+            &display_name,
+            media_type.as_deref(),
+        )
+    })
+    .await
+    .context("Pending Source Attachment observation task failed")??;
+    let queue = {
+        let mut database = database.lock().await;
+        rovai_core::pending_camp_input::add_working_source_attachment(
+            &mut database,
+            params.camp_id.as_str(),
+            &params.pending_input_id,
+            params.expected_revision,
+            &params.edit_token,
+            source_ref,
         )?
     };
-    let filesystem_store = store.clone();
-    let prepared =
-        tokio::task::spawn_blocking(move || filesystem_store.prepare_from_path_filesystem(plan))
-            .await
-            .context("Single Chat Attachment preparation task failed")??;
+    emit_pending_inputs_changed(output, params.camp_id.as_str(), "edited");
+    Ok(serde_json::to_value(queue)?)
+}
 
-    let commit = {
-        let mut database = database.lock().await;
-        store.commit_prepared_attachment(&mut database, &prepared)
-    };
-    if let Err(error) = commit {
-        let cleanup_store = store.clone();
-        if let Err(cleanup_error) =
-            tokio::task::spawn_blocking(move || cleanup_store.cleanup_uncommitted(prepared)).await
-        {
-            eprintln!("Uncommitted Single Chat Attachment cleanup task failed: {cleanup_error}");
-        }
-        return Err(error);
-    }
-
+async fn add_single_chat_source_attachment_from_path(
+    database: &Mutex<Database>,
+    output: &mpsc::UnboundedSender<String>,
+    params: AddSingleChatSourceAttachmentFromPathParams,
+) -> Result<Value> {
+    let source_path = params.source_path.clone();
+    let display_name = params.display_name.clone();
+    let media_type = params.media_type.clone();
+    let source_ref = tokio::task::spawn_blocking(move || {
+        observe_source_attachment(
+            Path::new(&source_path),
+            &display_name,
+            media_type.as_deref(),
+        )
+    })
+    .await
+    .context("Single Chat Source Attachment observation task failed")??;
     let snapshot = {
-        let database = database.lock().await;
-        SingleChatService::default()
-            .snapshot(&database, &params.conversation_id)?
-            .context("Single Chat disappeared after its attachment was prepared")?
+        let mut database = database.lock().await;
+        SingleChatService::default().add_source_attachment(
+            &mut database,
+            &params.conversation_id,
+            params.expected_draft_revision,
+            source_ref,
+        )?
     };
     emit(
         output,
         "single_chat.changed",
         json!({
-            "campId": snapshot.conversation.camp_id,
+            "campId": snapshot.conversation.camp_id.clone(),
+            "conversationId": params.conversation_id,
+        }),
+    );
+    Ok(serde_json::to_value(snapshot)?)
+}
+
+async fn add_single_chat_pending_source_attachment_from_path(
+    database: &Mutex<Database>,
+    output: &mpsc::UnboundedSender<String>,
+    params: AddSingleChatPendingSourceAttachmentFromPathParams,
+) -> Result<Value> {
+    let source_path = params.source_path.clone();
+    let display_name = params.display_name.clone();
+    let media_type = params.media_type.clone();
+    let source_ref = tokio::task::spawn_blocking(move || {
+        observe_source_attachment(
+            Path::new(&source_path),
+            &display_name,
+            media_type.as_deref(),
+        )
+    })
+    .await
+    .context("Single Chat pending Source Attachment observation task failed")??;
+    let snapshot = {
+        let mut database = database.lock().await;
+        SingleChatService::default().add_pending_source_attachment(
+            &mut database,
+            params.camp_id.as_str(),
+            &params.conversation_id,
+            &params.pending_input_id,
+            params.expected_revision,
+            &params.edit_token,
+            source_ref,
+        )?
+    };
+    emit(
+        output,
+        "single_chat.changed",
+        json!({
+            "campId": params.camp_id,
             "conversationId": params.conversation_id,
         }),
     );
@@ -1362,15 +1451,16 @@ async fn prepare_single_chat_attachment_from_path(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AttachmentPreviewSourceParams {
+struct LegacyDesktopAttachmentTargetParams {
+    camp_id: CampId,
     attachment_id: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DesktopAttachmentTargetParams {
-    camp_id: CampId,
-    attachment_id: String,
+#[serde(untagged)]
+enum DesktopAttachmentTargetParams {
+    Owner(LocalAttachmentOwnerLocator),
+    Legacy(LegacyDesktopAttachmentTargetParams),
 }
 
 #[derive(Debug, Deserialize)]
@@ -1831,24 +1921,29 @@ struct PreparedRuntimeLaunch<'a> {
     launch_permit: &'a mut ExecutionLaunchPermit,
 }
 
-#[derive(Clone)]
+struct PreparedPiRuntimeLaunch<'a> {
+    execution: &'a AgentRunExecution,
+    resume_disposition: NativeSessionResumeDisposition,
+    skill_exposure: &'a PreparedSkillExposure,
+    attachment_admission: &'a CampAttachmentReadAdmission,
+    attachment_authorization: &'a CampAttachmentRuntimeAuthorization,
+    output: &'a mpsc::UnboundedSender<String>,
+    launch_permit: &'a mut ExecutionLaunchPermit,
+}
+
+#[derive(Clone, Copy)]
 struct CampAttachmentRunAccess<'a> {
     admission: &'a CampAttachmentReadAdmission,
     authorization: &'a CampAttachmentRuntimeAuthorization,
-    single_chat_attachment_root: Option<PathBuf>,
 }
 
 struct RuntimeInputPreparationRequest<'a> {
     charter_delivery_mode: CharterDeliveryMode,
     proposed_delivery_id: Option<&'a str>,
+    run_tmp: &'a Path,
 }
 
 impl CampAttachmentRunAccess<'_> {
-    fn with_single_chat_attachment_root(mut self, root: Option<PathBuf>) -> Self {
-        self.single_chat_attachment_root = root;
-        self
-    }
-
     fn prove(&self, execution: &AgentRunExecution) -> Result<()> {
         self.admission.prove(&execution.camp_id)?;
         if self.authorization.camp_id != execution.camp_id {
@@ -6829,80 +6924,67 @@ impl Core {
                     SingleChatService::default().snapshot(&database, &params.conversation_id)?,
                 )?)
             }
-            "singleChat.attachments.prepareFromPath" => {
-                let params: PrepareSingleChatAttachmentFromPathParams =
+            "singleChat.sourceAttachments.addFromPath" => {
+                let params: AddSingleChatSourceAttachmentFromPathParams =
                     serde_json::from_value(request.params.clone())?;
-                prepare_single_chat_attachment_from_path(
-                    &self.database,
-                    &self.output,
-                    &self.data_dir,
-                    params,
-                )
-                .await
+                add_single_chat_source_attachment_from_path(&self.database, &self.output, params)
+                    .await
             }
-            "singleChat.attachments.remove" => {
-                let params: RemoveSingleChatAttachmentParams =
+            "singleChat.composerDraft.removeAttachment" => {
+                let params: RemoveSingleChatSourceAttachmentParams =
                     serde_json::from_value(request.params.clone())?;
-                let store = SingleChatAttachmentStore::new(&self.data_dir);
-                let (cleanup, snapshot) = {
+                let snapshot = {
                     let mut database = self.database.lock().await;
-                    let cleanup = store.remove_prepared_from_database(
+                    SingleChatService::default().remove_source_attachment(
                         &mut database,
                         &params.conversation_id,
-                        params.expected_conversation_version,
-                        &params.attachment_id,
-                    )?;
-                    let snapshot = SingleChatService::default()
-                        .snapshot(&database, &params.conversation_id)?
-                        .context("Single Chat disappeared after its attachment was removed")?;
-                    (cleanup, snapshot)
+                        params.expected_draft_revision,
+                        &params.attachment_ref_id,
+                    )?
                 };
-                let camp_id = snapshot.conversation.camp_id.clone();
-                let cleanup_store = store.clone();
-                if let Err(error) =
-                    tokio::task::spawn_blocking(move || cleanup_store.cleanup_detached(cleanup))
-                        .await
-                        .context("Single Chat Attachment cleanup task failed")?
-                {
-                    eprintln!(
-                        "Single Chat Attachment {} was removed, but its private file could not be cleaned immediately: {error:#}",
-                        params.attachment_id
-                    );
-                }
                 emit(
                     &self.output,
                     "single_chat.changed",
                     json!({
-                        "campId": camp_id,
+                        "campId": snapshot.conversation.camp_id.clone(),
                         "conversationId": params.conversation_id,
                     }),
                 );
                 Ok(serde_json::to_value(snapshot)?)
             }
-            "singleChat.attachments.previewSource" => {
-                let params: AttachmentPreviewSourceParams =
+            "singleChat.pendingInputs.addSourceAttachmentFromPath" => {
+                let params: AddSingleChatPendingSourceAttachmentFromPathParams =
                     serde_json::from_value(request.params.clone())?;
-                let store = SingleChatAttachmentStore::new(&self.data_dir);
-                let candidate = {
-                    let database = self.database.lock().await;
-                    store.preview_candidate(&database, &params.attachment_id)?
-                };
-                let source = match candidate {
-                    Some(candidate) => tokio::task::spawn_blocking(move || {
-                        store.verify_preview_candidate(candidate)
-                    })
-                    .await
-                    .context("Single Chat Attachment preview verification task failed")??,
-                    None => None,
-                };
-                Ok(match source {
-                    Some(source) => json!({
-                        "path": source.path,
-                        "mediaType": source.media_type,
-                        "byteSize": source.byte_size,
-                    }),
-                    None => Value::Null,
-                })
+                add_single_chat_pending_source_attachment_from_path(
+                    &self.database,
+                    &self.output,
+                    params,
+                )
+                .await
+            }
+            "singleChat.pendingInputs.edit" => {
+                let params: UserCommandParams<EditSingleChatPendingInputCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let conversation_id = params.command.conversation_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = SingleChatService::default().edit_pending_input(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                drop(database);
+                if execution.result.status != CommandResultStatus::Rejected && !execution.replayed {
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({
+                            "campId": camp_id,
+                            "conversationId": conversation_id,
+                            "result": execution.result,
+                        }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
             }
             "singleChat.open" => {
                 let params: UserCommandParams<OpenSingleChatCommand> =
@@ -6948,10 +7030,7 @@ impl Core {
                 let params: UserCommandParams<EndSingleChatCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
-                let conversation_id = params.command.conversation_id.clone();
-                let store = SingleChatAttachmentStore::new(&self.data_dir);
                 let mut database = self.database.lock().await;
-                let cleanup = store.prepared_cleanup_plan(&database, &conversation_id)?;
                 let execution = SingleChatService::default().end(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
@@ -6963,18 +7042,6 @@ impl Core {
                     .get("cancelledAgentRunId")
                     .is_some_and(|value| !value.is_null());
                 drop(database);
-                if changed {
-                    let cleanup_store = store.clone();
-                    if let Err(error) =
-                        tokio::task::spawn_blocking(move || cleanup_store.cleanup_detached(cleanup))
-                            .await
-                            .context("Ended Single Chat Attachment cleanup task failed")?
-                    {
-                        eprintln!(
-                            "Single Chat {conversation_id} ended, but its prepared attachments could not be cleaned immediately: {error:#}"
-                        );
-                    }
-                }
                 if cancelled {
                     self.agent_run_cancellation_notify.notify_one();
                 }
@@ -7152,13 +7219,6 @@ impl Core {
                             "Camp {camp_id} was deleted but managed attachment cleanup failed: {error:#}"
                         );
                     }
-                    if let Err(error) =
-                        SingleChatAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)
-                    {
-                        eprintln!(
-                            "Camp {camp_id} was deleted but private Single Chat attachment cleanup failed: {error:#}"
-                        );
-                    }
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -7221,7 +7281,6 @@ impl Core {
                     self.finish_camp_attachment_cleanup(cleanup.as_ref())
                         .await?;
                     CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
-                    SingleChatAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -7612,10 +7671,10 @@ impl Core {
                     .context("Camp Composer Draft cleanup task failed")??;
                 Ok(json!({ "discarded": true }))
             }
-            "camp.attachments.prepareFromPath" => {
-                let params: PrepareAttachmentFromPathParams =
+            "camp.sourceAttachments.addFromPath" => {
+                let params: AddSourceAttachmentFromPathParams =
                     serde_json::from_value(request.params.clone())?;
-                prepare_composer_attachment_from_path(
+                add_composer_source_attachment_from_path(
                     &self.database,
                     &self.output,
                     &self.data_dir,
@@ -7623,23 +7682,43 @@ impl Core {
                 )
                 .await
             }
+            "camp.pendingInputs.addSourceAttachmentFromPath" => {
+                let params: AddPendingSourceAttachmentFromPathParams =
+                    serde_json::from_value(request.params.clone())?;
+                add_pending_source_attachment_from_path(&self.database, &self.output, params).await
+            }
             "camp.attachments.previewSource" => {
-                let params: AttachmentPreviewSourceParams =
+                let locator: LocalAttachmentOwnerLocator =
                     serde_json::from_value(request.params.clone())?;
                 let store = CampAttachmentStore::new(&self.data_dir);
-                let candidate = {
+                let (source_ref, legacy_allowed) = {
                     let database = self.database.lock().await;
-                    store.preview_candidate(&database, &params.attachment_id)?
+                    (
+                        load_source_attachment(&database, &locator)?,
+                        legacy_attachment_belongs_to_owner(&database, &locator)?,
+                    )
                 };
-                let source = match candidate {
-                    Some(candidate) => Some(
-                        tokio::task::spawn_blocking(move || {
-                            store.verify_preview_candidate(candidate)
-                        })
+                let source = if let Some(source_ref) = source_ref {
+                    tokio::task::spawn_blocking(move || preview_source_attachment(&source_ref))
                         .await
-                        .context("Attachment preview verification task failed")??,
-                    ),
-                    None => None,
+                        .context("Source Attachment preview verification task failed")??
+                } else if legacy_allowed {
+                    let candidate = {
+                        let database = self.database.lock().await;
+                        store.preview_candidate(&database, locator.attachment_ref_id())?
+                    };
+                    match candidate {
+                        Some(candidate) => Some(
+                            tokio::task::spawn_blocking(move || {
+                                store.verify_preview_candidate(candidate)
+                            })
+                            .await
+                            .context("Attachment preview verification task failed")??,
+                        ),
+                        None => None,
+                    }
+                } else {
+                    None
                 };
                 Ok(match source {
                     Some(source) => json!({
@@ -7654,13 +7733,37 @@ impl Core {
                 let params: DesktopAttachmentTargetParams =
                     serde_json::from_value(request.params.clone())?;
                 let store = CampAttachmentStore::new(&self.data_dir);
+                if let DesktopAttachmentTargetParams::Owner(locator) = &params {
+                    let (source_ref, legacy_allowed) = {
+                        let database = self.database.lock().await;
+                        (
+                            load_source_attachment(&database, locator)?,
+                            legacy_attachment_belongs_to_owner(&database, locator)?,
+                        )
+                    };
+                    if let Some(source_ref) = source_ref {
+                        let target = tokio::task::spawn_blocking(move || {
+                            desktop_target_for_source_attachment(&source_ref)
+                        })
+                        .await
+                        .context("Source Attachment target verification task failed")??;
+                        return Ok(serde_json::to_value(target)?);
+                    }
+                    if !legacy_allowed {
+                        return Ok(Value::Null);
+                    }
+                }
+                let (camp_id, attachment_id) = match &params {
+                    DesktopAttachmentTargetParams::Owner(locator) => {
+                        (locator.camp_id(), locator.attachment_ref_id())
+                    }
+                    DesktopAttachmentTargetParams::Legacy(params) => {
+                        (params.camp_id.as_str(), params.attachment_id.as_str())
+                    }
+                };
                 let candidate = {
                     let database = self.database.lock().await;
-                    store.desktop_open_candidate(
-                        &database,
-                        params.camp_id.as_str(),
-                        &params.attachment_id,
-                    )?
+                    store.desktop_open_candidate(&database, camp_id, attachment_id)?
                 };
                 let Some(candidate) = candidate else {
                     return Ok(Value::Null);
@@ -9868,50 +9971,31 @@ impl Core {
         }
     }
 
-    async fn prepare_single_chat_attachment_projection(
-        &self,
-        execution: &AgentRunExecution,
-        run_tmp: &Path,
-    ) -> Result<Option<PathBuf>> {
-        let store = SingleChatAttachmentStore::new(&self.data_dir);
-        let plan = {
-            let database = self.database.lock().await;
-            store.plan_runtime_projection(
-                &database,
-                &execution.agent_run_id,
-                execution.execution_epoch,
-            )?
-        };
-        let run_tmp = run_tmp.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            store.project_runtime_attachments_filesystem(plan, &run_tmp)
-        })
-        .await
-        .context("Single Chat attachment projection task failed")?
-    }
-
     async fn materialize_agent_run_context(
         &self,
         execution: &AgentRunExecution,
         attachment_access: CampAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
-        charter_delivery_mode: CharterDeliveryMode,
+        request: RuntimeInputPreparationRequest<'_>,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<PreparedContext>> {
         attachment_access.prove(execution)?;
+        let source_attachment_paths = self
+            .resolve_agent_run_source_attachment_paths(execution, request.run_tmp)
+            .await?;
         let materialization = {
             let mut database = self.database.lock().await;
-            ContextService.materialize_with_exposures_and_attachment_projection(
+            ContextService.materialize_with_exposures_and_source_attachments(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
                 skill_exposure,
                 mcp_projection,
-                attachment_access.single_chat_attachment_root.as_deref(),
+                &source_attachment_paths,
                 &MaterializeContextRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
-                    charter_delivery_mode,
+                    charter_delivery_mode: request.charter_delivery_mode,
                     max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
                 },
             )
@@ -9940,30 +10024,43 @@ impl Core {
         execution: &AgentRunExecution,
         attachment_access: CampAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
-        mcp_projection: &PreparedMcpProjection,
+        mcp_projection: Option<&PreparedMcpProjection>,
         request: RuntimeInputPreparationRequest<'_>,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<(PreparedContext, RuntimeInputDelivery)>> {
         attachment_access.prove(execution)?;
+        let source_attachment_paths = self
+            .resolve_agent_run_source_attachment_paths(execution, request.run_tmp)
+            .await?;
         let preparation = {
             // The Core database mutex is the logical Runtime Input preparation
             // boundary. A Compaction Observer cannot commit between selecting
             // the pending revision and persisting RuntimeInputDelivery.prepared.
             let mut database = self.database.lock().await;
-            let materialization = ContextService
-                .materialize_with_exposures_and_attachment_projection(
+            let materialize_request = MaterializeContextRequest {
+                agent_run_id: &execution.agent_run_id,
+                execution_epoch: execution.execution_epoch,
+                charter_delivery_mode: request.charter_delivery_mode,
+                max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+            };
+            let materialization = match mcp_projection {
+                Some(mcp_projection) => ContextService
+                    .materialize_with_exposures_and_source_attachments(
+                        &mut database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        skill_exposure,
+                        mcp_projection,
+                        &source_attachment_paths,
+                        &materialize_request,
+                    )?,
+                None => ContextService.materialize_with_skill_exposure_and_source_attachments(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
                     skill_exposure,
-                    mcp_projection,
-                    attachment_access.single_chat_attachment_root.as_deref(),
-                    &MaterializeContextRequest {
-                        agent_run_id: &execution.agent_run_id,
-                        execution_epoch: execution.execution_epoch,
-                        charter_delivery_mode: request.charter_delivery_mode,
-                        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                    },
-                )?;
+                    &source_attachment_paths,
+                    &materialize_request,
+                )?,
+            };
             match materialization {
                 ContextMaterialization::Ready(context) => {
                     let delivery = match request.proposed_delivery_id {
@@ -10005,6 +10102,31 @@ impl Core {
             }
             None => Ok(None),
         }
+    }
+
+    async fn resolve_agent_run_source_attachment_paths(
+        &self,
+        execution: &AgentRunExecution,
+        run_tmp: &Path,
+    ) -> Result<Vec<String>> {
+        let source_refs = {
+            let database = self.database.lock().await;
+            load_agent_run_source_attachments(
+                &database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )?
+        };
+        if source_refs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let execution_root = PathBuf::from(&execution.workspace.execution_root);
+        let run_tmp = run_tmp.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            resolve_source_attachments_for_run(&source_refs, &execution_root, &run_tmp)
+        })
+        .await
+        .context("Source Attachment Run resolver task failed")?
     }
 
     async fn prepare_agent_run_skill_exposure(
@@ -10111,6 +10233,49 @@ impl Core {
             );
         }
         Ok(())
+    }
+
+    async fn acknowledge_pi_agent_start(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        delivery_id: &str,
+        native_input_id: &str,
+    ) -> Result<Option<AgentRunExecution>> {
+        let mut database = self.database.lock().await;
+        let Some(execution) = ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            agent_run_id,
+            execution_epoch,
+        )?
+        else {
+            return Ok(None);
+        };
+        match ContextService.acknowledge_input_delivery_transition(
+            &mut database,
+            delivery_id,
+            native_input_id,
+        ) {
+            Ok((_, true)) => Ok(Some(execution)),
+            Ok((_, false)) => Ok(None),
+            Err(error) => {
+                let acknowledgement_error = format!("{error:#}");
+                if let Err(mark_error) = ContextService.mark_input_delivery_unknown(
+                    &mut database,
+                    delivery_id,
+                    &format!(
+                        "Runtime returned a Native Input ID, but Rovai-ai could not persist its acknowledgement: {acknowledgement_error}"
+                    ),
+                ) {
+                    anyhow::bail!(
+                        "failed to persist Runtime Input acknowledgement ({acknowledgement_error}) and failed to mark it unknown ({mark_error:#})"
+                    );
+                }
+                anyhow::bail!(
+                    "Runtime Input acknowledgement could not be persisted: {acknowledgement_error}"
+                );
+            }
+        }
     }
 
     async fn bind_active_runtime_route(
@@ -10924,6 +11089,37 @@ impl Core {
         else {
             return Ok(());
         };
+        if execution.runtime.adapter_kind == AdapterKind::Pi {
+            let resume_disposition = {
+                let mut database = self.database.lock().await;
+                ExecutionRuntimeService::default()
+                    .prepare_native_session_resume(&mut database, execution)
+                    .context("failed to prepare Native Session resume")?
+            };
+            if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                emit(
+                    output,
+                    "agent_run.native_session_resume_attempted",
+                    json!({
+                        "agentRunId": execution.agent_run_id,
+                        "conversationId": execution.conversation_id,
+                        "adapterInstallationId": execution.runtime.installation_id,
+                        "installationGeneration": execution.runtime.installation_generation,
+                    }),
+                );
+            }
+            return self
+                .launch_pi_agent_run(PreparedPiRuntimeLaunch {
+                    execution,
+                    resume_disposition,
+                    skill_exposure: &skill_exposure,
+                    attachment_admission,
+                    attachment_authorization,
+                    output,
+                    launch_permit,
+                })
+                .await;
+        }
         let mut mcp_projection = self
             .prepare_agent_run_mcp_projection(execution)
             .await
@@ -10931,7 +11127,6 @@ impl Core {
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
-            single_chat_attachment_root: None,
         };
         let attachment_access_root = attachment_authorization.attachment_root.clone();
         let resume_disposition = {
@@ -10970,20 +11165,6 @@ impl Core {
         if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::ClaudeCodeCli {
             return self
                 .launch_claude_code_agent_run(PreparedRuntimeLaunch {
-                    execution,
-                    resume_disposition,
-                    skill_exposure: &skill_exposure,
-                    mcp_projection: &mcp_projection,
-                    attachment_admission,
-                    attachment_authorization,
-                    output,
-                    launch_permit,
-                })
-                .await;
-        }
-        if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::Pi {
-            return self
-                .launch_pi_agent_run(PreparedRuntimeLaunch {
                     execution,
                     resume_disposition,
                     skill_exposure: &skill_exposure,
@@ -11184,16 +11365,17 @@ impl Core {
             .builtin_tool_process_config()
             .context("Codex Runtime has no Built-in Tool process context")?
             .clone();
-        let single_chat_attachment_root = self
-            .prepare_single_chat_attachment_projection(execution, active_builtin_tools.run_tmp())
-            .await?;
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
-                attachment_access.with_single_chat_attachment_root(single_chat_attachment_root),
+                attachment_access,
                 &skill_exposure,
                 &mcp_projection,
-                CharterDeliveryMode::NativeAppend,
+                RuntimeInputPreparationRequest {
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    proposed_delivery_id: None,
+                    run_tmp: active_builtin_tools.run_tmp(),
+                },
                 output,
             )
             .await?
@@ -11333,12 +11515,11 @@ impl Core {
         Ok(())
     }
 
-    async fn launch_pi_agent_run(&self, launch: PreparedRuntimeLaunch<'_>) -> Result<()> {
-        let PreparedRuntimeLaunch {
+    async fn launch_pi_agent_run(&self, launch: PreparedPiRuntimeLaunch<'_>) -> Result<()> {
+        let PreparedPiRuntimeLaunch {
             execution,
             resume_disposition,
             skill_exposure,
-            mcp_projection,
             attachment_admission,
             attachment_authorization,
             output,
@@ -11347,7 +11528,6 @@ impl Core {
         CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
-            single_chat_attachment_root: None,
         }
         .prove(execution)?;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -11407,14 +11587,16 @@ impl Core {
                 native_binding_id: &binding_credential.native_binding_id,
                 native_binding_generation: binding_credential.native_binding_generation,
                 bootstrap: &session_bootstrap,
-                skill_exposure,
-                mcp_projection,
                 builtin_tools: &builtin_tools,
             })
             .await;
         let runtime = match runtime_result {
             Ok(runtime) => runtime,
-            Err(error) if exact_resume => {
+            Err(error)
+                if exact_resume
+                    && pi::activation_failure_kind(&error)
+                        == Some(pi::PiActivationFailureKind::ResumeContinuityLost) =>
+            {
                 let failure = classify_native_resume_failure(&error);
                 {
                     let mut database = self.database.lock().await;
@@ -11469,8 +11651,6 @@ impl Core {
                         native_binding_id: &replacement_binding.native_binding_id,
                         native_binding_generation: replacement_binding.native_binding_generation,
                         bootstrap: &replacement_bootstrap,
-                        skill_exposure,
-                        mcp_projection,
                         builtin_tools: &builtin_tools,
                     })
                     .await
@@ -11486,16 +11666,6 @@ impl Core {
             }
             Err(error) => return Err(error).context("Pi Native Session activation failed closed"),
         };
-        for failure in runtime.mcp_activation_failures() {
-            eprintln!(
-                "optional Pi MCP Server {} ({}) is unavailable for AgentRun {}: {} ({})",
-                failure.server_name,
-                failure.server_id,
-                execution.agent_run_id,
-                failure.diagnostic_code,
-                failure.reason,
-            );
-        }
         let active_builtin_tools = runtime
             .builtin_tool_process_config()
             .context("Pi Runtime has no Built-in Tool process context")?
@@ -11504,22 +11674,19 @@ impl Core {
             .await?;
         self.bind_prepared_native_session(execution, &binding_credential, runtime.session_id())
             .await?;
-        let single_chat_attachment_root = self
-            .prepare_single_chat_attachment_projection(execution, active_builtin_tools.run_tmp())
-            .await?;
         let prepared = self
             .materialize_and_prepare_agent_run_input(
                 execution,
                 CampAttachmentRunAccess {
                     admission: attachment_admission,
                     authorization: attachment_authorization,
-                    single_chat_attachment_root,
                 },
                 skill_exposure,
-                mcp_projection,
+                None,
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
                     proposed_delivery_id: Some(&delivery_id),
+                    run_tmp: active_builtin_tools.run_tmp(),
                 },
                 output,
             )
@@ -11553,10 +11720,53 @@ impl Core {
         if delivery.status != "prepared" {
             anyhow::bail!("Pi Runtime Input Delivery is not ready to send");
         }
+        let input_projection = {
+            let database = self.database.lock().await;
+            ContextService.pi_runtime_input_projection(
+                &database,
+                &delivery.id,
+                &prepared_context.rendered_payload,
+            )?
+        };
+        let image_sources = input_projection
+            .attachments
+            .iter()
+            .map(|attachment| {
+                (
+                    PathBuf::from(&attachment.path),
+                    attachment.content_digest.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let prepared_images: Vec<PreparedPiPromptImage> = prepare_prompt_images(&image_sources)?;
+        let image_evidence = prepared_images
+            .iter()
+            .enumerate()
+            .map(|(image_index, image)| PiPromptImageEvidence {
+                image_index,
+                mime_type: image.wire.mime_type.clone(),
+                content_digest: image.content_digest.clone(),
+                byte_length: image.byte_length,
+            })
+            .collect::<Vec<_>>();
+        {
+            let mut database = self.database.lock().await;
+            ContextService.persist_pi_prompt_image_evidence(
+                &mut database,
+                PersistPiPromptImageEvidence {
+                    delivery_id: &delivery.id,
+                    images: &image_evidence,
+                },
+            )?;
+        }
         self.begin_agent_run_input_dispatch(execution, &delivery.id, launch_permit)
             .await?;
+        let prompt_images: Vec<PiPromptImage> = prepared_images
+            .iter()
+            .map(|image| image.wire.clone())
+            .collect::<Vec<_>>();
         if let Err(error) = runtime
-            .start_prompt(&prepared_context.rendered_payload)
+            .start_prompt(&prepared_context.rendered_payload, &prompt_images)
             .await
         {
             let mut database = self.database.lock().await;
@@ -11577,37 +11787,6 @@ impl Core {
             launch_permit,
         )
         .await?;
-        emit(
-            output,
-            "agent_run.started",
-            json!({
-                "campId": execution.camp_id,
-                "campTurnId": execution.camp_turn_id,
-                "agentRunId": execution.agent_run_id,
-                "agentId": execution.agent_id,
-                "executionEpoch": execution.execution_epoch,
-                "adapterKind": execution.runtime.adapter_kind,
-                "adapterInstallationId": execution.runtime.installation_id,
-                "runtimeVersion": execution.runtime.reported_version,
-                "modelId": execution.runtime.model.model_id,
-                "modelOptions": execution.runtime.model.options,
-                "hostInstanceId": runtime.host_instance_id(),
-                "nativeThreadId": runtime.session_id(),
-                "nativeTurnId": native_prompt_id,
-                "providerModelFingerprint": runtime.model_fingerprint(),
-            }),
-        );
-        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
-        record_available_runtime_model(
-            self,
-            output,
-            AdapterKind::Pi,
-            &execution.camp_id,
-            &execution.agent_run_id,
-            execution.execution_epoch,
-            Some(execution.runtime.model.model_id.clone()),
-        )
-        .await;
         Ok(())
     }
 
@@ -11625,7 +11804,6 @@ impl Core {
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
-            single_chat_attachment_root: None,
         };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -11649,34 +11827,22 @@ impl Core {
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
-        let single_chat_attachment_root = match self
-            .prepare_single_chat_attachment_projection(execution, builtin_tools.run_tmp())
-            .await
-        {
-            Ok(root) => root,
-            Err(error) => {
-                self.builtin_tool_leases
-                    .unbind(
-                        builtin_tools.process_id(),
-                        &execution.agent_run_id,
-                        execution.execution_epoch,
-                    )
-                    .await;
-                return Err(error);
-            }
-        };
-        let prepared_context = match self
+        let materialized = self
             .materialize_agent_run_context(
                 execution,
-                attachment_access.with_single_chat_attachment_root(single_chat_attachment_root),
+                attachment_access,
                 skill_exposure,
                 mcp_projection,
-                CharterDeliveryMode::NativeAppend,
+                RuntimeInputPreparationRequest {
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    proposed_delivery_id: None,
+                    run_tmp: builtin_tools.run_tmp(),
+                },
                 output,
             )
-            .await
-        {
-            Ok(Some(context)) => context,
+            .await;
+        let prepared_context = match materialized {
+            Ok(Some(prepared_context)) => prepared_context,
             Ok(None) => {
                 self.builtin_tool_leases
                     .unbind(
@@ -12226,7 +12392,6 @@ impl Core {
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
-            single_chat_attachment_root: None,
         };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -12243,34 +12408,22 @@ impl Core {
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
-        let single_chat_attachment_root = match self
-            .prepare_single_chat_attachment_projection(execution, builtin_tools.run_tmp())
-            .await
-        {
-            Ok(root) => root,
-            Err(error) => {
-                self.builtin_tool_leases
-                    .unbind(
-                        builtin_tools.process_id(),
-                        &execution.agent_run_id,
-                        execution.execution_epoch,
-                    )
-                    .await;
-                return Err(error);
-            }
-        };
-        let prepared_context = match self
+        let materialized = self
             .materialize_agent_run_context(
                 execution,
-                attachment_access.with_single_chat_attachment_root(single_chat_attachment_root),
+                attachment_access,
                 skill_exposure,
                 mcp_projection,
-                CharterDeliveryMode::FirstPayload,
+                RuntimeInputPreparationRequest {
+                    charter_delivery_mode: CharterDeliveryMode::FirstPayload,
+                    proposed_delivery_id: None,
+                    run_tmp: builtin_tools.run_tmp(),
+                },
                 output,
             )
-            .await
-        {
-            Ok(Some(context)) => context,
+            .await;
+        let prepared_context = match materialized {
+            Ok(Some(prepared_context)) => prepared_context,
             Ok(None) => {
                 self.builtin_tool_leases
                     .unbind(
@@ -12652,7 +12805,6 @@ impl Core {
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
             authorization: attachment_authorization,
-            single_chat_attachment_root: None,
         };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -12873,18 +13025,16 @@ impl Core {
             .builtin_tool_process_config()
             .context("ACP Runtime has no Built-in Tool process context")?
             .clone();
-        let single_chat_attachment_root = self
-            .prepare_single_chat_attachment_projection(execution, active_builtin_tools.run_tmp())
-            .await?;
         let Some((prepared_context, delivery)) = self
             .materialize_and_prepare_agent_run_input(
                 execution,
-                attachment_access.with_single_chat_attachment_root(single_chat_attachment_root),
+                attachment_access,
                 skill_exposure,
-                mcp_projection,
+                Some(mcp_projection),
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode,
                     proposed_delivery_id: None,
+                    run_tmp: active_builtin_tools.run_tmp(),
                 },
                 output,
             )
@@ -13898,6 +14048,7 @@ async fn run_core(
         DesiredCompactionDetectorPolicies::from_process_environment();
     let recovery = (|| -> Result<_> {
         rovai_core::pending_camp_input::recover_edit_sessions(&database)?;
+        rovai_core::single_chat::recover_pending_edit_sessions(&database)?;
         let controlled = ExecutionRuntimeService::default()
             .recover_interrupted_controlled_shutdowns(&mut database)?;
         // Preserve the existing best-effort observer semantics and ordering:
@@ -15191,6 +15342,33 @@ async fn process_pi_events(
                 )
                 .await;
             }
+            PiIncoming::Diagnostic {
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+                phase,
+                message,
+            } => {
+                emit(
+                    &output,
+                    "runtime.host.log",
+                    json!({
+                        "hostInstanceId": host_instance_id,
+                        "adapterKind": AdapterKind::Pi,
+                        "stream": "diagnostic",
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "phase": phase,
+                        "text": message,
+                    }),
+                );
+                eprintln!(
+                    "Pi Runtime diagnostic host={host_instance_id} run={} epoch={} phase={phase}: {message}",
+                    agent_run_id.as_deref().unwrap_or("unbound"),
+                    execution_epoch
+                        .map_or_else(|| "unbound".to_string(), |value| value.to_string()),
+                );
+            }
             PiIncoming::IngressFlushed { .. } => {
                 unreachable!("Pi ingress barriers are handled before Runtime routing")
             }
@@ -15259,46 +15437,75 @@ async fn process_agent_run_pi_message(
     if message_type == "extension_ui_request" {
         match message.get("method").and_then(Value::as_str) {
             Some("setStatus") => return Ok(()),
-            Some("confirm") => {
-                process_agent_run_pi_approval_request(
-                    core,
-                    output,
-                    &runtime,
-                    agent_run_id,
-                    execution_epoch,
-                    &message,
-                )
-                .await?;
-                return Ok(());
-            }
-            Some("input")
-                if message.get("title").and_then(Value::as_str)
-                    == Some("Rovai managed input receipt") =>
-            {
-                process_pi_managed_input_receipt(core, &runtime, delivery_id, &message).await?;
-                return Ok(());
-            }
-            Some("input")
-                if message.get("title").and_then(Value::as_str) == Some("Rovai MCP bridge") =>
-            {
-                process_pi_mcp_bridge_request(&runtime, &message).await?;
-                return Ok(());
-            }
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
             _ => {
-                runtime.mark_failed_closed();
-                let id = message.get("id").cloned().unwrap_or(Value::Null);
-                if !id.is_null() {
-                    runtime
-                        .respond(
-                            id.clone(),
-                            json!({"type":"extension_ui_response","id":id,"cancelled":true}),
-                        )
-                        .await?;
-                }
-                anyhow::bail!("Pi emitted an unsupported Extension UI request");
+                let response = match pi::unsupported_extension_ui_cancellation(&message) {
+                    Ok(response) => response,
+                    Err(error) => {
+                        runtime.mark_failed_closed();
+                        return Err(error).context("Pi Extension UI framing is invalid");
+                    }
+                };
+                let id = response["id"].clone();
+                runtime.respond(id, response).await?;
+                emit(
+                    output,
+                    "runtime.host.log",
+                    json!({
+                        "hostInstanceId": host_instance_id,
+                        "adapterKind": AdapterKind::Pi,
+                        "stream": "diagnostic",
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "phase": "extension_ui",
+                        "text": "Pi Extension UI request was cancelled because Rovai does not map this native interaction",
+                    }),
+                );
+                return Ok(());
             }
         }
+    }
+    if message_type == "agent_start"
+        && let Some(execution) = core
+            .acknowledge_pi_agent_start(
+                agent_run_id,
+                execution_epoch,
+                delivery_id,
+                native_prompt_id,
+            )
+            .await?
+    {
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "campId": execution.camp_id,
+                "campTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentId": execution.agent_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
+                "hostInstanceId": runtime.host_instance_id(),
+                "nativeThreadId": runtime.session_id(),
+                "nativeTurnId": native_prompt_id,
+                "providerModelFingerprint": runtime.model_fingerprint(),
+            }),
+        );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
+        record_available_runtime_model(
+            core,
+            output,
+            AdapterKind::Pi,
+            &execution.camp_id,
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            Some(execution.runtime.model.model_id.clone()),
+        )
+        .await;
     }
     let (event_type, payload) = pi::normalize_event(&message);
     if event_type != "runtime.usage" {
@@ -15365,278 +15572,6 @@ async fn process_agent_run_pi_message(
         )
         .await?;
     }
-    Ok(())
-}
-
-async fn process_pi_managed_input_receipt(
-    core: &Arc<Core>,
-    runtime: &PiRuntime,
-    delivery_id: &str,
-    request: &Value,
-) -> Result<()> {
-    let id = request
-        .get("id")
-        .cloned()
-        .context("Pi managed input receipt request omitted id")?;
-    let receipt: Value = serde_json::from_str(
-        request
-            .get("placeholder")
-            .and_then(Value::as_str)
-            .context("Pi managed input receipt request omitted evidence")?,
-    )
-    .context("Pi managed input receipt request is invalid")?;
-    let (expected_digest, commit_nonce) = runtime.validate_managed_receipt(&receipt)?;
-    let committed = {
-        let mut database = core.database.lock().await;
-        ContextService.commit_pi_managed_input_receipt_and_accept(
-            &mut database,
-            delivery_id,
-            runtime.prompt_id(),
-            &receipt,
-            &commit_nonce,
-        )?
-    };
-    if committed.digest != expected_digest
-        || committed.commit_nonce != commit_nonce
-        || committed.delivery.status != "accepted"
-        || committed.delivery.native_input_id.as_deref() != Some(runtime.prompt_id())
-    {
-        anyhow::bail!("Pi managed input receipt commit evidence diverged");
-    }
-    runtime.mark_receipt_committed();
-    runtime
-        .respond(
-            id.clone(),
-            json!({"type":"extension_ui_response", "id":id, "value":commit_nonce}),
-        )
-        .await
-}
-
-async fn process_pi_mcp_bridge_request(runtime: &PiRuntime, request: &Value) -> Result<()> {
-    let id = request
-        .get("id")
-        .cloned()
-        .context("Pi MCP bridge request omitted id")?;
-    let envelope: Value = serde_json::from_str(
-        request
-            .get("placeholder")
-            .and_then(Value::as_str)
-            .context("Pi MCP bridge request omitted envelope")?,
-    )
-    .context("Pi MCP bridge request envelope is invalid")?;
-    let result = runtime
-        .execute_mcp_bridge(&envelope)
-        .await
-        .unwrap_or_else(|_| {
-            json!({
-                "content": [{"type":"text", "text": "Rovai MCP bridge rejected the call"}],
-                "isError": true,
-            })
-        });
-    runtime
-        .respond(
-            id.clone(),
-            json!({
-                "type":"extension_ui_response",
-                "id":id,
-                "value":serde_json::to_string(&result).unwrap_or_else(|_| "{\"content\":[],\"isError\":true}".to_string()),
-            }),
-        )
-        .await
-}
-
-async fn process_agent_run_pi_approval_request(
-    core: &Arc<Core>,
-    output: &mpsc::UnboundedSender<String>,
-    runtime: &PiRuntime,
-    agent_run_id: &str,
-    execution_epoch: i64,
-    request: &Value,
-) -> Result<()> {
-    if !runtime.approval_handshake_observed() {
-        reject_pi_approval_request(
-            output,
-            runtime,
-            agent_run_id,
-            execution_epoch,
-            request,
-            "Pi managed Approval Extension handshake is unavailable",
-        )
-        .await?;
-        return Ok(());
-    }
-    let execution = {
-        let database = core.database.lock().await;
-        ExecutionRuntimeService::default().load_agent_run_execution(
-            &database,
-            agent_run_id,
-            execution_epoch,
-        )
-    }?;
-    let Some(execution) = execution else {
-        reject_pi_approval_request(
-            output,
-            runtime,
-            agent_run_id,
-            execution_epoch,
-            request,
-            "AgentRun is unavailable or fenced",
-        )
-        .await?;
-        return Ok(());
-    };
-    let action_request = match pi::intercepted_action_request(
-        agent_run_id,
-        execution_epoch,
-        runtime.host_instance_id(),
-        runtime.host_binding_generation(),
-        runtime.native_binding_generation(),
-        runtime.session_id(),
-        runtime.prompt_id(),
-        Path::new(&execution.workspace.execution_root),
-        request,
-    ) {
-        Ok(request) => request,
-        Err(error) => {
-            reject_pi_approval_request(
-                output,
-                runtime,
-                agent_run_id,
-                execution_epoch,
-                request,
-                &format!("Pi Action request failed managed Extension validation: {error}"),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
-    if let Some(envelope) = action_request.mcp_envelope.as_ref() {
-        runtime
-            .register_mcp_approval(
-                request
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .context("Pi MCP Approval request omitted UI identity")?,
-                envelope,
-            )
-            .await?;
-    }
-    if execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
-        && execution.workspace.access == "read_only"
-        && matches!(
-            &action_request.input,
-            rovai_core::action::CanonicalActionInput::FileWrite { .. }
-                | rovai_core::action::CanonicalActionInput::FileDelete { .. }
-                | rovai_core::action::CanonicalActionInput::ShellCommand { .. }
-                | rovai_core::action::CanonicalActionInput::GitMutation { .. }
-                | rovai_core::action::CanonicalActionInput::NetworkWrite { .. }
-        )
-    {
-        reject_pi_approval_request(
-            output,
-            runtime,
-            agent_run_id,
-            execution_epoch,
-            request,
-            "read-only AgentRun rejected a mutating Pi tool request",
-        )
-        .await?;
-        return Ok(());
-    }
-    let request_reason = action_request.reason.clone();
-    let preparation = {
-        let mut database = core.database.lock().await;
-        ActionSafetyService::default().prepare_action(
-            &mut database,
-            &CommandEnvelope {
-                command_id: format!("runtime-action-prepare:{}", action_request.action_id),
-                actor: ActorRef::Agent {
-                    agent_id: execution.agent_id.clone(),
-                    source_agent_run_id: agent_run_id.to_string(),
-                },
-                camp_id: Some(execution.camp_id.clone()),
-                expected_versions: Vec::new(),
-                execution_epoch: Some(execution_epoch),
-                payload: PrepareActionCommand {
-                    action_id: action_request.action_id,
-                    input: action_request.input,
-                    control_mode: ActionControlMode::Intercepted,
-                    native_action_id: Some(action_request.native_action_id),
-                    runtime_request: Some(action_request.runtime_request),
-                    reason: request_reason.clone(),
-                    execute_before: None,
-                    requested_for_user_id: CURRENT_USER_ID.to_string(),
-                },
-            },
-        )
-    };
-    match preparation {
-        Ok(preparation) if preparation.result.status != CommandResultStatus::Rejected => emit(
-            output,
-            "action.prepared",
-            json!({
-                "agentRunId": agent_run_id,
-                "executionEpoch": execution_epoch,
-                "nativeMethod": "pi/extension_ui/confirm",
-                "reason": request_reason,
-                "result": preparation.result,
-                "replayed": preparation.replayed,
-            }),
-        ),
-        Ok(preparation) => {
-            reject_pi_approval_request(
-                output,
-                runtime,
-                agent_run_id,
-                execution_epoch,
-                request,
-                &format!(
-                    "Action admission rejected: {} · {}",
-                    preparation.result.code, preparation.result.payload
-                ),
-            )
-            .await?;
-        }
-        Err(error) => {
-            reject_pi_approval_request(
-                output,
-                runtime,
-                agent_run_id,
-                execution_epoch,
-                request,
-                "Pi Action request could not be persisted safely",
-            )
-            .await?;
-            return Err(error);
-        }
-    }
-    Ok(())
-}
-
-async fn reject_pi_approval_request(
-    output: &mpsc::UnboundedSender<String>,
-    runtime: &PiRuntime,
-    agent_run_id: &str,
-    execution_epoch: i64,
-    request: &Value,
-    reason: &str,
-) -> Result<()> {
-    let id = request.get("id").cloned().unwrap_or(Value::Null);
-    if !id.is_null()
-        && let Ok(response) = pi::rejection_response(request)
-    {
-        runtime.respond(id, response).await?;
-    }
-    emit(
-        output,
-        "agent_run.request_rejected",
-        json!({
-            "agentRunId": agent_run_id,
-            "executionEpoch": execution_epoch,
-            "nativeMethod": "pi/extension_ui/confirm",
-            "reason": reason,
-        }),
-    );
     Ok(())
 }
 
@@ -19559,6 +19494,85 @@ async fn dispatch_pending_camp_inputs(core: &Core) {
     }
 }
 
+async fn dispatch_pending_single_chat_inputs(core: &Core) {
+    let candidates = {
+        let database = core.database.lock().await;
+        rovai_core::single_chat::ready_pending_inputs(&database)
+    };
+    let candidates = match candidates {
+        Ok(candidates) => candidates,
+        Err(error) => {
+            eprintln!("Single Chat pending input admission failed: {error:#}");
+            return;
+        }
+    };
+    for command in candidates {
+        let camp_id = command.camp_id.clone();
+        let conversation_id = command.conversation_id.clone();
+        let envelope = CommandEnvelope {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            actor: ActorRef::User {
+                user_id: command.user_id.clone(),
+            },
+            camp_id: Some(camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: command.clone(),
+        };
+        let result = {
+            let mut database = core.database.lock().await;
+            SingleChatService::default().publish_pending_input(&mut database, &envelope)
+        };
+        match result {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => emit(
+                &core.output,
+                "single_chat.changed",
+                json!({
+                    "campId": camp_id,
+                    "conversationId": conversation_id,
+                    "reason": "pending_input_published",
+                }),
+            ),
+            Ok(_) => emit(
+                &core.output,
+                "single_chat.changed",
+                json!({
+                    "campId": camp_id,
+                    "conversationId": conversation_id,
+                    "reason": "pending_input_publication_deferred",
+                }),
+            ),
+            Err(error) => {
+                let code = error
+                    .downcast_ref::<LocalAttachmentFailure>()
+                    .map(|failure| failure.code().as_str())
+                    .unwrap_or("single_chat.pending_input_send_failed");
+                let record_result = {
+                    let database = core.database.lock().await;
+                    rovai_core::single_chat::record_pending_publish_failure(
+                        &database, &command, code,
+                    )
+                };
+                if let Err(record_error) = record_result {
+                    eprintln!(
+                        "Single Chat pending input failure could not be recorded: {record_error:#}"
+                    );
+                }
+                emit(
+                    &core.output,
+                    "single_chat.changed",
+                    json!({
+                        "campId": camp_id,
+                        "conversationId": conversation_id,
+                        "reason": "pending_input_needs_repair",
+                    }),
+                );
+                eprintln!("Single Chat pending input publication paused: {error:#}");
+            }
+        }
+    }
+}
+
 async fn process_agent_run_scheduler(
     core: Arc<Core>,
     output: mpsc::UnboundedSender<String>,
@@ -19583,6 +19597,7 @@ async fn process_agent_run_scheduler(
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
                 dispatch_pending_camp_inputs(&core).await;
+                dispatch_pending_single_chat_inputs(&core).await;
                 core.dispatch_agent_runs(&output).await;
             },
             _ = core.agent_run_cancellation_notify.notified() => {
@@ -20673,7 +20688,7 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     #[tokio::test]
-    async fn composer_prepare_releases_database_mutex_during_authority_file_io() {
+    async fn composer_source_attachment_keeps_the_native_path_without_managed_storage() {
         let fixture = std::env::temp_dir().join(format!(
             "rovai-composer-database-lock-test-{}",
             uuid::Uuid::new_v4()
@@ -20690,53 +20705,49 @@ mod tests {
             rovai_core::camp_attachment::insert_test_camp(&database, camp_id);
         }
 
-        let pause =
-            rovai_core::camp_attachment::install_composer_prepare_test_pause(&data_dir, camp_id);
         let (output, _receiver) = mpsc::unbounded_channel();
-        let prepare = prepare_composer_attachment_from_path(
+        let attached = add_composer_source_attachment_from_path(
             &database,
             &output,
             &data_dir,
-            PrepareAttachmentFromPathParams {
+            AddSourceAttachmentFromPathParams {
                 camp_id: CampId::parse(camp_id).unwrap(),
                 expected_revision: 0,
                 source_path: source.to_string_lossy().into_owned(),
                 display_name: "source.txt".to_string(),
+                media_type: Some("text/plain".to_string()),
             },
-        );
-        let observe_database = async {
-            let filesystem_phase_started = tokio::time::timeout(Duration::from_secs(2), async {
-                while !pause.started() {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .is_ok();
-            let database_was_available = if filesystem_phase_started {
-                match tokio::time::timeout(Duration::from_secs(1), database.lock()).await {
-                    Ok(database) => {
-                        drop(database);
-                        true
-                    }
-                    Err(_) => false,
-                }
-            } else {
-                false
-            };
-            pause.release();
-            database_was_available
-        };
-
-        let (prepared, database_was_available) = tokio::join!(prepare, observe_database);
-        rovai_core::camp_attachment::remove_composer_prepare_test_pause(&data_dir, camp_id);
-        assert!(
-            database_was_available,
-            "Authority gate wait and file I/O must not retain the global Database mutex"
-        );
-        assert_eq!(
-            prepared.unwrap()["attachments"].as_array().unwrap().len(),
-            1
-        );
+        )
+        .await
+        .unwrap();
+        assert_eq!(attached["attachments"].as_array().unwrap().len(), 1);
+        let locked = database.lock().await;
+        let inspection = rusqlite::Connection::open(locked.path()).unwrap();
+        let stored: String = inspection
+            .query_row(
+                "SELECT source_attachments_json FROM camp_composer_draft WHERE camp_id = ?1",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(stored.contains(&source.to_string_lossy().to_string()));
+        for table in [
+            "prepared_attachment",
+            "managed_attachment",
+            "message_attachment",
+            "camp_message_attachment_ref",
+        ] {
+            assert_eq!(
+                inspection
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                0,
+                "Source Attachment unexpectedly wrote {table}"
+            );
+        }
+        assert!(!data_dir.join("camp-attachments").exists());
+        drop(locked);
 
         CampAttachmentStore::new(&data_dir)
             .remove_camp(camp_id)
@@ -21441,11 +21452,172 @@ while IFS= read -r _ignored; do :; done
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     #[tokio::test]
-    async fn v2_dispatch_admission_ignores_broken_legacy_view_and_managed_payload() {
+    async fn source_path_message_bypasses_managed_attachment_publication() {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
             "rovai-dispatch-attachment-degradation-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let core = runtime_resolution_test_core(&root).unwrap();
+        let source = root.join("published.txt");
+        fs::write(&source, b"referenced source").unwrap();
+
+        let camp_id = {
+            let mut database = core.database.lock().await;
+            let agent_id = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("the startup database should include a default member")
+                .agent_id;
+            let created = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: None,
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: CreateCampCommand {
+                            name: None,
+                            project_binding_kind: ProjectBindingKind::Directory,
+                            project_path: workspace.display().to_string(),
+                            member_agent_ids: vec![agent_id.clone()],
+                            default_lead_agent_id: agent_id,
+                            collaboration_mode: CampCollaborationMode::Peer,
+                            activation_state: CampActivationState::Active,
+                        },
+                    },
+                )
+                .unwrap();
+            let camp_id = created.result.payload["campId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            core.attachment_views
+                .ensure_empty_camp_ready(&mut database, &camp_id)
+                .unwrap();
+            CampAttachmentStore::new(&core.data_dir)
+                .save_body(&mut database, &camp_id, "Use the published attachment")
+                .unwrap();
+            camp_id
+        };
+        let prepared = add_composer_source_attachment_from_path(
+            &core.database,
+            &core.output,
+            &core.data_dir,
+            AddSourceAttachmentFromPathParams {
+                camp_id: CampId::parse(&camp_id).unwrap(),
+                expected_revision: 1,
+                source_path: source.display().to_string(),
+                display_name: "published.txt".to_string(),
+                media_type: Some("text/plain".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+        let draft_revision = prepared["revision"].as_i64().unwrap();
+        let attachment_id = prepared["attachments"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let sent = core
+            .send_test_camp_message_request(SendCampMessageParams {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                camp_id: CampId::parse(&camp_id).unwrap(),
+                draft_revision,
+                execution: None,
+            })
+            .await
+            .unwrap();
+        let message_id = sent["commandResult"]["payload"]["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let locator = LocalAttachmentOwnerLocator::Message {
+            camp_id: camp_id.clone(),
+            message_id: message_id.clone(),
+            attachment_ref_id: attachment_id,
+        };
+        let source_ref = {
+            let database = core.database.lock().await;
+            let inspection = rusqlite::Connection::open(database.path()).unwrap();
+            let json: String = inspection
+                .query_row(
+                    "SELECT source_attachments_json FROM camp_message WHERE id = ?1",
+                    [&message_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(json.contains(&source.to_string_lossy().to_string()));
+            for table in [
+                "prepared_attachment",
+                "managed_attachment",
+                "message_attachment",
+                "camp_message_attachment_ref",
+            ] {
+                assert_eq!(
+                    inspection
+                        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    0,
+                    "Source Attachment unexpectedly wrote {table}"
+                );
+            }
+            load_source_attachment(&database, &locator)
+                .unwrap()
+                .unwrap()
+        };
+        assert_eq!(Path::new(&source_ref.source_path), source);
+        assert_eq!(
+            desktop_target_for_source_attachment(&source_ref)
+                .unwrap()
+                .path,
+            source
+        );
+        assert!(!core.data_dir.join("camp-attachments").exists());
+        let initial_authorization = core
+            .verified_camp_runtime_authorization(&camp_id, &workspace)
+            .await
+            .unwrap();
+        assert!(initial_authorization.attachment_root.is_dir());
+
+        let view_attachment_root = initial_authorization.attachment_root;
+        CampAttachmentStore::new(&core.data_dir)
+            .remove_camp(&camp_id)
+            .unwrap();
+        drop(core);
+        fs::set_permissions(&view_attachment_root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            view_attachment_root.parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(
+            view_attachment_root.parent().unwrap().parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn v2_dispatch_admission_ignores_broken_legacy_view_and_managed_payload() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-dispatch-managed-attachment-degradation-test-{}",
             uuid::Uuid::new_v4()
         ));
         fs::create_dir_all(&root).unwrap();
@@ -21500,24 +21672,23 @@ while IFS= read -r _ignored; do :; done
                 .unwrap();
             camp_id
         };
-        let prepared = prepare_composer_attachment_from_path(
-            &core.database,
-            &core.output,
-            &core.data_dir,
-            PrepareAttachmentFromPathParams {
-                camp_id: CampId::parse(&camp_id).unwrap(),
-                expected_revision: 1,
-                source_path: source.display().to_string(),
-                display_name: "published.txt".to_string(),
-            },
-        )
-        .await
-        .unwrap();
-        let draft_revision = prepared["revision"].as_i64().unwrap();
-        let attachment_id = prepared["attachments"][0]["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let attachment_store = CampAttachmentStore::new(&core.data_dir);
+        let plan = {
+            let database = core.database.lock().await;
+            attachment_store
+                .plan_prepare_from_path(&database, &camp_id, 1, &source, "published.txt")
+                .unwrap()
+        };
+        let prepared_attachment = attachment_store.prepare_from_path_filesystem(plan).unwrap();
+        let prepared = {
+            let mut database = core.database.lock().await;
+            attachment_store
+                .commit_prepared_attachment(&mut database, &prepared_attachment)
+                .unwrap();
+            attachment_store.load_draft(&database, &camp_id).unwrap()
+        };
+        let draft_revision = prepared.revision;
+        let attachment_id = prepared.attachments[0].id.clone();
         core.send_test_camp_message_request(SendCampMessageParams {
             command_id: uuid::Uuid::new_v4().to_string(),
             camp_id: CampId::parse(&camp_id).unwrap(),
@@ -21526,7 +21697,6 @@ while IFS= read -r _ignored; do :; done
         })
         .await
         .unwrap();
-        let attachment_store = CampAttachmentStore::new(&core.data_dir);
         let managed_candidate = {
             let database = core.database.lock().await;
             attachment_store
@@ -22679,7 +22849,7 @@ while IFS= read -r _ignored; do :; done
     }
 
     #[test]
-    fn pi_preview_enters_discovery_and_dispatch_without_becoming_qualified() {
+    fn pi_qualified_platform_enters_discovery_and_dispatch_with_bound_evidence() {
         let enabled = current_platform_enabled_runtime_kinds();
         assert!(enabled.contains(&AdapterKind::Pi));
         assert!(!enabled.contains(&AdapterKind::CursorAgent));
@@ -22687,8 +22857,8 @@ while IFS= read -r _ignored; do :; done
 
         let admission = current_runtime_platform_admission(AdapterKind::Pi).unwrap();
         assert!(admission.allows_runtime_use());
-        assert!(!admission.is_qualified());
-        assert_eq!(admission.evidence_revision(), None);
+        assert!(admission.is_qualified());
+        assert!(admission.evidence_revision().is_some());
     }
 
     #[test]
@@ -22806,7 +22976,7 @@ while IFS= read -r _ignored; do :; done
             "camps.enter",
             "camps.delete",
             "camp.composerDraft.save",
-            "camp.attachments.prepareFromPath",
+            "camp.sourceAttachments.addFromPath",
             "camp.messages.send",
             "userAutomation.camp.send",
             "campTurns.cancel",
@@ -22829,7 +22999,7 @@ while IFS= read -r _ignored; do :; done
             "camps.discardPending",
             "camp.composerDraft.removeAttachment",
             "camp.composerDraft.discard",
-            "camp.attachments.prepareFromPath",
+            "camp.sourceAttachments.addFromPath",
             "camp.messages.send",
         ] {
             assert!(

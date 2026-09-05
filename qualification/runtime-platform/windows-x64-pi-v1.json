@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "windows-x64-pi-v1",
+  "capturedAt": "2026-09-05",
+  "platform": "windows-x64",
+  "baseRevision": "8c4f6e19185b6353d98353175d94fbff2f5d9530",
+  "qualifiedRuntimeKinds": [
+    "pi"
+  ],
+  "qualificationBasis": {
+    "type": "maintainer-target-host-acceptance",
+    "decision": "The maintainer confirmed that Pi was validated without blocking issues on Windows x64 and approved its release without experimental disclosure.",
+    "repositoryEvidence": [
+      "docs/runtime-compatibility.md",
+      "docs/research/pi-runtime-reintegration-parity-matrix.md",
+      "scripts/smoke-pi-runtime.mjs"
+    ],
+    "rawEvidencePolicy": "Credentials, prompts, machine paths, Native Session identifiers, and raw target-host logs are intentionally excluded from the repository."
+  },
+  "runtimeEvidence": {
+    "runtimeVersion": "0.84.4",
+    "minimumVersion": ">=0.84.4",
+    "protocol": "pi-jsonl-rpc-v1",
+    "launch": "pi --mode rpc --no-themes --approve --extension <rovai-pi-host-v7>",
+    "authentication": "Pi official minimax-cn configuration with MiniMax-M3",
+    "sessionStrategy": "resident_multi_session with exact private Session-file switch and full-ID verification",
+    "bootstrapStrategy": "managed_system_prompt through before_agent_start",
+    "toolStrategy": "Pi-native tools and extension tools",
+    "externalMcp": "unsupported by accepted product decision"
+  },
+  "acceptance": {
+    "status": "qualified",
+    "targetHostValidation": "maintainer-confirmed",
+    "releaseApproval": "approved",
+    "platformScope": "windows-x64 only",
+    "realModel": "MiniMax-M3 returned the expected answer through the installed Core",
+    "coldContinuation": "the exact Native Session was restored after Host restart and retained prior conversation facts",
+    "nativeTools": "file write and Bash output completed through native Pi tools",
+    "plannedShutdown": "the isolated Core shutdown completed and reaped its Pi host",
+    "machineAndExecutionBoundary": "ordinary machine readiness, model, installation, session, and dispatch checks remain mandatory after platform admission"
+  },
+  "limitations": [
+    "Credentials, prompts, machine paths, Native Session identifiers, Run identifiers, and raw host logs are intentionally excluded.",
+    "External MCP, structured Web Search, and Camp Fast remain unsupported or hidden exactly as documented; platform qualification does not add those capabilities.",
+    "Pi skill discovery remains owned by the native ResourceLoader and workspace trust rather than a Rovai catalog attestation.",
+    "Usage retains only terminal assistant token evidence; unreported reasoning and cost remain unknown."
+  ]
+}

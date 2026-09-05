@@ -802,8 +802,8 @@ export interface SendSingleChatMessageCommand {
   campId: string
   conversationId: string
   body: string
-  attachmentIds: string[]
   expectedConversationVersion: number
+  draftRevision: number
 }
 
 export interface EndSingleChatCommand {
@@ -855,9 +855,57 @@ export interface SingleChatRunView {
 export interface SingleChatSnapshot {
   conversation: SingleChatConversationView
   messages: SingleChatMessageView[]
-  preparedAttachments: PreparedAttachmentView[]
+  draft: SingleChatComposerDraftView
+  pendingInputs: SingleChatPendingInputsView
   agentRuns: SingleChatRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
+}
+
+export interface SingleChatComposerDraftView {
+  revision: number
+  attachments: LocalAttachmentSourceView[]
+  updatedAt: string | null
+}
+
+export interface SingleChatPendingInputView {
+  id: string
+  conversationId: string
+  enqueueSequence: number
+  revision: number
+  state: 'queued' | 'needs_repair'
+  body: string
+  lastAttemptErrorCode: string | null
+  attachments: LocalAttachmentSourceView[]
+}
+
+export interface SingleChatPendingInputEditSessionView {
+  pendingInputId: string
+  editToken: string
+  basePendingRevision: number
+  recoveryRequired: boolean
+  workingBody: string
+  workingAttachments: LocalAttachmentSourceView[]
+}
+
+export interface SingleChatPendingInputsView {
+  executionActive: boolean
+  items: SingleChatPendingInputView[]
+  editSession: SingleChatPendingInputEditSessionView | null
+}
+
+export type SingleChatPendingInputEditAction =
+  | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
+  | { type: 'save'; body: string }
+  | { type: 'remove_attachment'; attachmentRefId: string }
+  | { type: 'reorder_attachments'; attachmentRefIds: string[] }
+
+export interface EditSingleChatPendingInputCommand {
+  campId: string
+  conversationId: string
+  pendingInputId: string
+  expectedRevision: number
+  editToken: string | null
+  action: SingleChatPendingInputEditAction
 }
 
 export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
@@ -1050,6 +1098,36 @@ export type StructuredCampMessageSegment =
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
 
+export interface ComposerDocument {
+  version: 2
+  segments: ComposerSegment[]
+}
+
+export type ComposerSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'atom'; atom: ComposerAtom }
+
+export type ComposerAtom =
+  | MemberComposerAtom
+  | AllMembersComposerAtom
+  | SkillComposerAtom
+
+export interface MemberComposerAtom {
+  type: 'member'
+  agentId: string
+  labelFallback?: string
+}
+
+export interface AllMembersComposerAtom {
+  type: 'all_members'
+}
+
+export interface SkillComposerAtom {
+  type: 'skill'
+  skillId: string
+  nameAtSend: string
+}
+
 export type SkillSelectionOmissionReason =
   | 'missing_at_send'
   | 'inactive_at_send'
@@ -1126,26 +1204,68 @@ export interface CampMessageAttachmentView {
   id: string
   displayName: string
   kind: 'file' | 'directory'
-  fileCount: number
-  mediaType: string
-  byteSize: number
+  fileCount: number | null
+  mediaType: string | null
+  byteSize: number | null
   previewKind: 'image' | 'none'
-  runtimeProjectionState: 'pending' | 'available' | 'recovery_required' | 'failed'
+  availability: LocalAttachmentAvailability
 }
 
-export interface PreparedAttachmentView
-  extends Omit<CampMessageAttachmentView, 'runtimeProjectionState'> {
-  state: 'ready' | 'error'
-  errorMessage: string | null
-  createdAt: string
-}
+export type LocalAttachmentAvailability =
+  | 'unknown'
+  | 'available'
+  | 'missing'
+  | 'unreadable'
+  | 'kind_changed'
+
+export type LocalAttachmentSourceView = CampMessageAttachmentView
+
+export type LocalAttachmentOwnerLocator =
+  | { owner: 'composer'; campId: string; attachmentRefId: string }
+  | { owner: 'pending'; campId: string; pendingInputId: string; attachmentRefId: string }
+  | {
+      owner: 'pending_edit'
+      campId: string
+      pendingInputId: string
+      editToken: string
+      attachmentRefId: string
+    }
+  | { owner: 'message'; campId: string; messageId: string; attachmentRefId: string }
+  | {
+      owner: 'single_chat_composer'
+      campId: string
+      conversationId: string
+      attachmentRefId: string
+    }
+  | {
+      owner: 'single_chat_pending'
+      campId: string
+      conversationId: string
+      pendingInputId: string
+      attachmentRefId: string
+    }
+  | {
+      owner: 'single_chat_pending_edit'
+      campId: string
+      conversationId: string
+      pendingInputId: string
+      editToken: string
+      attachmentRefId: string
+    }
+  | {
+      owner: 'single_chat_message'
+      campId: string
+      conversationId: string
+      conversationMessageId: string
+      attachmentRefId: string
+    }
 
 export interface CampComposerDraftView {
   campId: string
   body: string
-  content: StructuredCampMessageContent
+  content: ComposerDocument
   revision: number
-  attachments: PreparedAttachmentView[]
+  attachments: LocalAttachmentSourceView[]
   replyIntent: CampComposerReplyIntentView | null
   continuationIntent: CampComposerContinuationIntentView | null
   updatedAt: string | null
@@ -1158,11 +1278,12 @@ export interface PendingCampInputView {
   enqueueSequence: number
   revision: number
   state: 'queued' | 'needs_repair'
-  content: StructuredCampMessageContent
+  content: ComposerDocument
   body: string
   replyIntent: CampComposerReplyIntentView | null
   recipientSelectionRequired: boolean
   lastAttemptErrorCode: string | null
+  attachments: LocalAttachmentSourceView[]
 }
 
 export interface PendingInputEditSession {
@@ -1170,6 +1291,7 @@ export interface PendingInputEditSession {
   editToken: string
   basePendingRevision: number
   recoveryRequired: boolean
+  workingAttachments: LocalAttachmentSourceView[]
 }
 
 export interface CampPendingInputsView {
@@ -1183,10 +1305,12 @@ export type PendingInputEditAction =
   | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
   | {
       type: 'save'
-      content: StructuredCampMessageContent
+      content: ComposerDocument
       replyToCampMessageId: string | null
       recipientSelectionRequired: boolean
     }
+  | { type: 'remove_attachment'; attachmentRefId: string }
+  | { type: 'reorder_attachments'; attachmentRefIds: string[] }
 
 export interface CampComposerContinuationIntentView {
   sourceCampMessageId: string
@@ -1220,16 +1344,23 @@ export interface AttachmentPreview {
   bytes: Uint8Array
 }
 
+export interface AttachmentPreviewResult {
+  preview: AttachmentPreview | null
+  availability: LocalAttachmentAvailability
+}
+
 export type AttachmentActionError = 'target_unavailable' | 'open_failed' | 'reveal_failed'
 
 export interface AttachmentOpenResult {
   opened: boolean
   error: AttachmentActionError | null
+  availability: LocalAttachmentAvailability
 }
 
 export interface AttachmentRevealResult {
   revealed: boolean
   error: AttachmentActionError | null
+  availability: LocalAttachmentAvailability
 }
 
 export type OpenFilePreviewRequest =
@@ -1247,7 +1378,7 @@ export type OpenFilePreviewRequest =
   | {
       kind: 'attachment'
       campId: string
-      attachmentId: string
+      locator: LocalAttachmentOwnerLocator
     }
   | {
       kind: 'run_evidence'
@@ -1269,16 +1400,6 @@ export type OpenFilePreviewRequest =
       rootGrantId: string
       rawReference: string
     }
-
-export interface ResolveMessageFileReferencesRequest {
-  campId: string
-  messageId: string
-  rawReferences: string[]
-}
-
-export interface ResolveMessageFileReferencesResult {
-  resolvedReferences: string[]
-}
 
 export interface ReopenFilePreviewRequest {
   campId: string
@@ -1378,6 +1499,9 @@ export type FilePreviewErrorCode =
   | 'read_failed'
   | 'open_failed'
   | 'reveal_failed'
+  | 'attachment_missing'
+  | 'attachment_unreadable'
+  | 'attachment_kind_changed'
 
 export interface FilePreviewErrorPayload {
   code: FilePreviewErrorCode
@@ -1441,7 +1565,6 @@ export interface FilePreviewExternalUpdateEvent {
 
 export interface FilePreviewApi {
   bindCamp(campId: string | null): Promise<void>
-  resolveMessageReferences(request: ResolveMessageFileReferencesRequest): Promise<ResolveMessageFileReferencesResult>
   open(request: OpenFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
   reopen(request: ReopenFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
   readText(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewTextContent>>
@@ -2776,14 +2899,16 @@ export interface RemovedNavigationProject {
 }
 
 export interface NavigationPreferencesSnapshot {
-  schemaVersion: 2
+  schemaVersion: 3
   pins: NavigationPin[]
   removedProjects: RemovedNavigationProject[]
+  projectOrder: string[] | null
 }
 
 export interface NavigationPreferencesApi {
   get(): Promise<NavigationPreferencesSnapshot>
   replacePins(pins: NavigationPin[]): Promise<NavigationPreferencesSnapshot>
+  synchronizeProjectOrder(projectKeys: string[]): Promise<NavigationPreferencesSnapshot>
   removeProject(targetKey: string, relatedCampIds: string[]): Promise<NavigationPreferencesSnapshot>
   restoreProject(targetKey: string): Promise<NavigationPreferencesSnapshot>
 }
@@ -3390,6 +3515,10 @@ export type CoreMethod =
   | 'singleChat.open'
   | 'singleChat.send'
   | 'singleChat.end'
+  | 'singleChat.sourceAttachments.addFromPath'
+  | 'singleChat.composerDraft.removeAttachment'
+  | 'singleChat.pendingInputs.addSourceAttachmentFromPath'
+  | 'singleChat.pendingInputs.edit'
   | 'campTurns.cancel'
   | 'agentRuns.cancel'
   | 'agentRuns.diagnostic.get'
@@ -3434,6 +3563,9 @@ export type CoreMethod =
 export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
+  appLifecycle: {
+    onPrepareQuit(listener: () => void | Promise<void>): () => void
+  }
   supervisor: SupervisorApi
   userAutomation: {
     onOpenCamp(listener: (request: { campId: string }) => void): () => void
@@ -3449,24 +3581,36 @@ export interface RovaiApi {
   memberAvatars: MemberAvatarsApi
   composerAttachments: {
     prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>
-    preview(attachmentId: string): Promise<AttachmentPreview | null>
+    preparePending(input: {
+      campId: string
+      pendingInputId: string
+      expectedRevision: number
+      editToken: string
+    }, file: File): Promise<CampPendingInputsView>
+    preview(locator: LocalAttachmentOwnerLocator): Promise<AttachmentPreviewResult>
   }
   singleChatAttachments: {
     prepare(
       conversationId: string,
-      expectedConversationVersion: number,
+      expectedDraftRevision: number,
       file: File
     ): Promise<SingleChatSnapshot>
+    preparePending(input: {
+      campId: string
+      conversationId: string
+      pendingInputId: string
+      expectedRevision: number
+      editToken: string
+    }, file: File): Promise<SingleChatSnapshot>
     remove(
       conversationId: string,
-      expectedConversationVersion: number,
-      attachmentId: string
+      expectedDraftRevision: number,
+      attachmentRefId: string
     ): Promise<SingleChatSnapshot>
-    preview(attachmentId: string): Promise<AttachmentPreview | null>
   }
   attachments: {
-    open(campId: string, attachmentId: string): Promise<AttachmentOpenResult>
-    reveal(campId: string, attachmentId: string): Promise<AttachmentRevealResult>
+    open(locator: LocalAttachmentOwnerLocator): Promise<AttachmentOpenResult>
+    reveal(locator: LocalAttachmentOwnerLocator): Promise<AttachmentRevealResult>
   }
   filePreview: FilePreviewApi
   clipboard: {

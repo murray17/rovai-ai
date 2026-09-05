@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 ---
 
 # 测试与 Smoke Test
@@ -195,6 +195,23 @@ pnpm build:desktop
 
 ### Electron 隔离世界回归
 
+所有从 `scripts/lib` 启动真实 Electron 的回归，都在 macOS 启动 Chromium 前运行最小
+`sandbox-exec` 能力探针。探针可用时继续执行业务断言；只有命中已知的嵌套 macOS sandbox
+`sandbox_apply: Operation not permitted` 才在本地标记为 `BLOCKED` / skipped，输出必须明示
+业务断言未运行，不得将该结果声称为 Electron 验收通过。任意未知探针错误继续 fail closed，
+不得通过 macOS `--no-sandbox` 绕过产品安全边界。Linux 不运行该 macOS 探针。
+
+CI 和正式验收不允许嵌套 sandbox 被记为 skip；`CI=true` 或
+`ROVAI_REQUIRE_ELECTRON_INTEGRATION=1` 会将同一环境阻断升级为明确失败。在 macOS 普通 Terminal
+中执行强制验收示例：
+
+```bash
+ROVAI_REQUIRE_ELECTRON_INTEGRATION=1 pnpm test:desktop-bridge
+```
+
+能力分类由 `pnpm test:electron-sandbox-capability` 独立验证；手动 Full check 也显式启用
+required 模式，防止未来迁移到 macOS runner 时把环境阻断当成通过。
+
 执行台的头像轨道与协作投递收件人行运行 `pnpm test:execution-avatar-rail`。夹具挂载真实 CampWorkspace，
 用原生指针和键盘验证队员轨道、来源归属、重复投递去重、0 / 1 / 2 / 16 / 48 人的完整单行与溢出名单，
 以及名单滚动、焦点返回、Escape 层级、承载位置切换和双主题尺寸适配。它只使用临时 `userData` 与封闭
@@ -225,8 +242,9 @@ Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点
 默认清理本次夹具。手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:file-preview-layout`。
 
 消息文件引用运行 `pnpm test:file-reference-navigation`。它在同样隔离的真实 Electron 中挂载生产 Camp、Markdown 与预览，
-验证有来源的短文件名定位、行范围高亮、字段误识别及 URL 中文尾部恢复；真实鼠标覆盖已有选区下的普通/inline-code
-文件链接点击、链接内拖选不打开及其后的再次单击，键盘激活保持可用。并逐帧检查打开/关闭、键盘调宽和持续拖动时
+验证显式 Markdown 短文件名定位、行范围高亮、inline-code/正文不生成文件入口、字段误识别及 URL 中文尾部恢复；
+真实鼠标覆盖已有选区下的普通/带位置 Markdown 文件链接点击、链接内拖选不打开及其后的再次单击，键盘激活保持可用。
+并逐帧检查打开/关闭、键盘调宽和持续拖动时
 阅读锚点偏移不超过 2px；还覆盖用户滚动后的可见消息回退、底部跟随、紧凑模式返回，以及旧
 `authorization_required` 结果不会调用目录选择器或泄露内部授权原因。相同环境变量可保留双主题截图
 和测量报告；手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:file-reference-navigation`，不替代 Main 的来源、文件类型和系统动作测试。
@@ -297,7 +315,7 @@ Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵�
 | `pnpm smoke:builtin-cli` | 默认十三种可执行实现；Cursor 未准入，Pi 仅 debug 验收 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖。选择 Pi 时复制官方配置到临时 Home，不污染用户 Session；通过不晋升平台资格 |
 | `pnpm smoke:skills` | Codex 默认；`all` 为十三种可执行实现 | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 逐一尝试十三组真实投递、发现与消息局部注意力；Cursor `.cursor/skills` 为 DocumentationOnly。Kimi `.kimi-code/skills`、Grok `.grok/skills` 与 Pi `.pi/skills` 进入矩阵；选择 Pi 时使用临时官方配置副本与 debug-only admission，结果不等于正式资格；`--to-user` 仅为隐藏兼容 alias |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
-| `pnpm smoke:mcp-projection` | Codex、Pi、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin并 `NativeWinsSkip`；Kimi/Pi 覆盖 stdio、Streamable HTTP 和第二个 stdio Server，Pi 为 `RovaiWins/CoreManaged` 且使用临时官方配置副本；默认十二种 |
+| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin 并 `NativeWinsSkip`；Kimi 覆盖 stdio、Streamable HTTP 和第二个 stdio Server；默认十一种。Pi 的 External MCP 为 `Unsupported`，不属于本 smoke，保存的 Assignment 在 Pi dispatch 时静默忽略 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
 | `pnpm smoke:missing-send-recovery` | 十三种可执行实现（含 Pi、Kimi、Grok）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture，Pi 额外执行原生 Read Tool→final 并验证 `agent_settled` 专属终点与 Tool Activity。Pi 官方配置与 Session root 同样逐 Runtime 临时复制；debug pass 不晋升正式资格 |

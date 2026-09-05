@@ -56,7 +56,9 @@ root.render(
     <ImageGallery images={['first', 'second', 'broken'].map(id => ({ kind: 'runtime', campId: 'fixture', image: image(id) }))} />
     <p style={{ margin: '24px 0 12px' }}>这张图片已作为消息附件发送。</p>
     <ImageGallery variant="user-attachment" images={['attachment', 'attachment-broken'].map(id => ({ kind: 'attachment', campId: 'fixture', image: {
-      ...image(id), kind: 'file', fileCount: 1, previewKind: 'image', runtimeProjectionState: 'available'
+      ...image(id), kind: 'file', fileCount: 1, previewKind: 'image', availability: 'unknown'
+    }, locator: {
+      owner: 'message', campId: 'fixture', messageId: `message-${id}`, attachmentRefId: id
     } }))} />
   </main>
 )
@@ -74,7 +76,9 @@ Object.assign(window, { imageGalleryTest: {
     const source = kind === 'runtime'
       ? { kind, campId: 'cache-fixture', image: runtimeImage }
       : { kind, campId: 'cache-fixture', image: {
-          ...runtimeImage, kind: 'file', fileCount: 1, previewKind: 'image', runtimeProjectionState: 'available'
+          ...runtimeImage, kind: 'file', fileCount: 1, previewKind: 'image', availability: 'unknown'
+        }, locator: {
+          owner: 'message', campId: 'cache-fixture', messageId: `message-${id}`, attachmentRefId: id
         } }
     flushSync(() => root.render(<StrictMode><main><ImageGallery images={[source]} /></main></StrictMode>))
     return {

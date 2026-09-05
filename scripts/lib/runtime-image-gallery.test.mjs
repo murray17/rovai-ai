@@ -8,10 +8,12 @@ import test from 'node:test'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { build } from 'vite'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/runtime-image-gallery')
-test('Runtime and attachment galleries use real decoding and a shared accessible lightbox', { timeout: 60_000 }, async () => {
+test('Runtime and attachment galleries use real decoding and a shared accessible lightbox', { timeout: 60_000 }, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-image-gallery-test-'))
   let child
   let closed

@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
     assert.equal(state.liveOpen, true)
     assert.equal(state.liveExecutionBackground, 'rgba(0, 0, 0, 0)')
     assert.equal(state.liveExecutionBorderWidth, '0px')
-    assert.equal(state.composerDisabled, true)
+    assert.equal(state.composerDisabled, false)
     assert.equal(state.stopVisible, true)
     assert.match(state.body, /正在工作/)
     assert.equal(state.pageOverflow, false)
@@ -174,7 +174,7 @@ app.whenReady().then(async () => {
         composerKeyboardSemantics: true,
         privateAttachments: true,
         agentMessagesWithoutFill: true,
-        runningStopAndComposerGate: true,
+        runningStopAndQueueComposer: true,
         dayAndNight: true,
         compactNoOverflow: true
       },

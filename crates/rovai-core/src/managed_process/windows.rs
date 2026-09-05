@@ -56,7 +56,8 @@ use super::{
     ManagedStdinPolicy, ManagedWindowsArgvDialect, WindowsRuntimeEntrypoint,
 };
 use crate::windows_runtime_entrypoint::{
-    capture_windows_command_shim, serialize_command_shim_command_line,
+    capture_windows_command_shim, command_shim_working_directory,
+    serialize_command_shim_command_line,
 };
 
 const WINDOWS_COMMAND_LINE_LIMIT: usize = 32_767;
@@ -86,8 +87,15 @@ pub(super) struct WindowsManagedProcess {
 impl WindowsManagedProcess {
     pub(super) fn spawn(spec: &ManagedProcessLaunchSpec) -> Result<Self> {
         let application = wide_nul(spec.application().as_os_str(), "application")?;
-        let working_directory =
-            wide_nul(spec.working_directory().as_os_str(), "working directory")?;
+        let working_directory = match spec.windows_entrypoint() {
+            WindowsRuntimeEntrypoint::CommandShim { .. } => {
+                command_shim_working_directory(spec.working_directory())?
+            }
+            WindowsRuntimeEntrypoint::NativeExecutable { .. } => {
+                spec.working_directory().to_path_buf()
+            }
+        };
+        let working_directory = wide_nul(working_directory.as_os_str(), "working directory")?;
         let mut command_line = match spec.windows_entrypoint() {
             WindowsRuntimeEntrypoint::NativeExecutable { .. } => serialize_command_line(
                 spec.windows_argv_dialect(),

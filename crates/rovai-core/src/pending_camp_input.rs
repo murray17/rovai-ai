@@ -10,8 +10,9 @@ use uuid::Uuid;
 use crate::{
     camp_attachment::{CampComposerReplyIntentView, project_reply_intent},
     camp_content::{
-        StructuredCampMessageContent, normalize_content, render_plain_text,
-        validate_user_authored_content,
+        ComposerDocument, StructuredCampMessageContent, composer_document_from_content,
+        composer_document_to_content, normalize_composer_document, parse_composer_document_json,
+        render_composer_plain_text, serialize_composer_document, validate_composer_document,
     },
     collaboration::ExecutionRequest,
     command::{
@@ -19,6 +20,10 @@ use crate::{
         DomainCommandGateway, sealed,
     },
     db::Database,
+    local_attachment_source::{
+        LocalAttachmentAvailability, LocalAttachmentSourceRef, LocalAttachmentSourceView,
+        parse_source_attachments, serialize_source_attachments,
+    },
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -29,11 +34,12 @@ pub struct PendingCampInputView {
     pub enqueue_sequence: i64,
     pub revision: i64,
     pub state: String,
-    pub content: StructuredCampMessageContent,
+    pub content: ComposerDocument,
     pub body: String,
     pub reply_intent: Option<CampComposerReplyIntentView>,
     pub recipient_selection_required: bool,
     pub last_attempt_error_code: Option<String>,
+    pub attachments: Vec<LocalAttachmentSourceView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -43,6 +49,7 @@ pub struct PendingInputEditSession {
     pub edit_token: String,
     pub base_pending_revision: i64,
     pub recovery_required: bool,
+    pub working_attachments: Vec<LocalAttachmentSourceView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,11 +78,19 @@ pub enum PendingInputEditAction {
     Begin,
     Takeover,
     Save {
-        content: StructuredCampMessageContent,
+        content: ComposerDocument,
         #[serde(rename = "replyToCampMessageId")]
         reply_to_camp_message_id: Option<String>,
         #[serde(rename = "recipientSelectionRequired")]
         recipient_selection_required: bool,
+    },
+    RemoveAttachment {
+        #[serde(rename = "attachmentRefId")]
+        attachment_ref_id: String,
+    },
+    ReorderAttachments {
+        #[serde(rename = "attachmentRefIds")]
+        attachment_ref_ids: Vec<String>,
     },
     Cancel,
     Delete,
@@ -100,11 +115,13 @@ impl DomainCommand for SendPendingCampInputCommand {
 }
 
 pub(crate) struct StoredPendingInput {
+    pub document: ComposerDocument,
     pub content: StructuredCampMessageContent,
     pub reply_to_camp_message_id: Option<String>,
     pub recipient_selection_required: bool,
     pub execution: Option<ExecutionRequest>,
     pub user_id: String,
+    pub source_attachments: Vec<LocalAttachmentSourceRef>,
 }
 
 pub(crate) fn load_input(
@@ -112,18 +129,23 @@ pub(crate) fn load_input(
     id: &str,
     camp_id: &str,
 ) -> Result<StoredPendingInput> {
-    let (content, reply, required, execution, user_id): (String, Option<String>, bool, String, String) = connection.query_row(
-        "SELECT structured_content_json, reply_to_camp_message_id, recipient_selection_required, execution_json, user_id
+    let (content, reply, required, execution, user_id, source_attachments): (String, Option<String>, bool, String, String, String) = connection.query_row(
+        "SELECT structured_content_json, reply_to_camp_message_id, recipient_selection_required, execution_json, user_id,
+                source_attachments_json
          FROM pending_camp_input WHERE id = ?1 AND camp_id = ?2",
         params![id, camp_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
     )?;
+    let document = parse_composer_document_json(&content)?;
+    let structured_content = composer_document_to_content(&document)?;
     Ok(StoredPendingInput {
-        content: serde_json::from_str(&content)?,
+        document,
+        content: structured_content,
         reply_to_camp_message_id: reply,
         recipient_selection_required: required,
         execution: serde_json::from_str(&execution)?,
         user_id,
+        source_attachments: parse_source_attachments(&source_attachments)?,
     })
 }
 
@@ -182,14 +204,14 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
     let mut items = Vec::with_capacity(rows.len());
     for (id, enqueue_sequence, revision, state, last_attempt_error_code) in rows {
         let stored = load_input(connection, &id, camp_id)?;
-        let body = render_input_body(connection, &stored.content)?;
+        let body = render_input_body(connection, &stored.document)?;
         items.push(PendingCampInputView {
             id,
             camp_id: camp_id.to_string(),
             enqueue_sequence,
             revision,
             state,
-            content: stored.content,
+            content: stored.document,
             body,
             reply_intent: project_reply_intent(
                 database,
@@ -199,6 +221,11 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
             )?,
             recipient_selection_required: stored.recipient_selection_required,
             last_attempt_error_code,
+            attachments: stored
+                .source_attachments
+                .iter()
+                .map(|source_ref| source_ref.view(LocalAttachmentAvailability::Unknown))
+                .collect(),
         });
     }
     Ok(CampPendingInputsView {
@@ -209,11 +236,8 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
     })
 }
 
-fn render_input_body(
-    connection: &Connection,
-    content: &StructuredCampMessageContent,
-) -> Result<String> {
-    render_plain_text(content, |agent_id| {
+fn render_input_body(connection: &Connection, content: &ComposerDocument) -> Result<String> {
+    render_composer_plain_text(content, |agent_id| {
         connection
             .query_row(
                 "SELECT display_name FROM agent_profile WHERE id = ?1",
@@ -231,12 +255,114 @@ fn load_edit_session(
     connection: &Connection,
     camp_id: &str,
 ) -> Result<Option<PendingInputEditSession>> {
-    Ok(connection.query_row(
-        "SELECT pending_input_id, edit_token, base_pending_revision, recovery_required FROM pending_input_edit_session WHERE camp_id = ?1",
-        [camp_id], |row| Ok(PendingInputEditSession {
-            pending_input_id: row.get(0)?, edit_token: row.get(1)?, base_pending_revision: row.get(2)?, recovery_required: row.get(3)?,
-        }),
-    ).optional()?)
+    let stored = connection
+        .query_row(
+            "SELECT pending_input_id, edit_token, base_pending_revision, recovery_required,
+                    working_source_attachments_json
+             FROM pending_input_edit_session WHERE camp_id = ?1",
+            [camp_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    stored
+        .map(
+            |(pending_input_id, edit_token, base_pending_revision, recovery_required, json)| {
+                Ok(PendingInputEditSession {
+                    pending_input_id,
+                    edit_token,
+                    base_pending_revision,
+                    recovery_required,
+                    working_attachments: parse_source_attachments(&json)?
+                        .iter()
+                        .map(|source_ref| source_ref.view(LocalAttachmentAvailability::Unknown))
+                        .collect(),
+                })
+            },
+        )
+        .transpose()
+}
+
+fn load_working_source_refs(
+    connection: &Connection,
+    camp_id: &str,
+    pending_input_id: &str,
+    edit_token: &str,
+) -> Result<Vec<LocalAttachmentSourceRef>> {
+    let json = connection.query_row(
+        "SELECT working_source_attachments_json FROM pending_input_edit_session
+         WHERE camp_id = ?1 AND pending_input_id = ?2 AND edit_token = ?3",
+        params![camp_id, pending_input_id, edit_token],
+        |row| row.get::<_, String>(0),
+    )?;
+    parse_source_attachments(&json)
+}
+
+fn store_working_source_refs(
+    connection: &Connection,
+    camp_id: &str,
+    pending_input_id: &str,
+    edit_token: &str,
+    refs: &[LocalAttachmentSourceRef],
+) -> Result<()> {
+    let updated = connection.execute(
+        "UPDATE pending_input_edit_session
+         SET working_source_attachments_json = ?4
+         WHERE camp_id = ?1 AND pending_input_id = ?2 AND edit_token = ?3",
+        params![
+            camp_id,
+            pending_input_id,
+            edit_token,
+            serialize_source_attachments(refs)?
+        ],
+    )?;
+    anyhow::ensure!(updated == 1, "pending_input.edit_fenced");
+    Ok(())
+}
+
+pub fn add_working_source_attachment(
+    database: &mut Database,
+    camp_id: &str,
+    pending_input_id: &str,
+    expected_revision: i64,
+    edit_token: &str,
+    source_ref: LocalAttachmentSourceRef,
+) -> Result<CampPendingInputsView> {
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let pending_revision = transaction
+        .query_row(
+            "SELECT revision FROM pending_camp_input
+             WHERE camp_id = ?1 AND id = ?2 AND state IN ('queued', 'needs_repair')",
+            params![camp_id, pending_input_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    anyhow::ensure!(
+        pending_revision == Some(expected_revision),
+        "pending_input.changed"
+    );
+    let session = load_edit_session(&transaction, camp_id)?;
+    let owns = session.as_ref().is_some_and(|session| {
+        session.pending_input_id == pending_input_id
+            && session.base_pending_revision == expected_revision
+            && session.edit_token == edit_token
+            && !session.recovery_required
+    });
+    anyhow::ensure!(owns, "pending_input.edit_fenced");
+    let mut refs = load_working_source_refs(&transaction, camp_id, pending_input_id, edit_token)?;
+    refs.push(source_ref);
+    store_working_source_refs(&transaction, camp_id, pending_input_id, edit_token, &refs)?;
+    transaction.commit()?;
+    read_queue(database, camp_id)
 }
 
 fn reject(code: &str, message: &str) -> CommandHandlerResult {
@@ -253,10 +379,10 @@ pub fn edit_input(
         }
         let command = &envelope.payload;
         let current = transaction.query_row(
-            "SELECT revision, state FROM pending_camp_input WHERE id = ?1 AND camp_id = ?2",
-            params![command.pending_input_id, command.camp_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            "SELECT revision, state, source_attachments_json FROM pending_camp_input WHERE id = ?1 AND camp_id = ?2",
+            params![command.pending_input_id, command.camp_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
         ).optional()?;
-        let Some((revision, state)) = current else { return Ok(reject("pending_input.not_found", "Pending input no longer exists")); };
+        let Some((revision, state, source_attachments_json)) = current else { return Ok(reject("pending_input.not_found", "Pending input no longer exists")); };
         if revision != command.expected_revision || !matches!(state.as_str(), "queued" | "needs_repair") {
             return Ok(reject("pending_input.changed", "Pending input changed or was already sent"));
         }
@@ -275,11 +401,12 @@ pub fn edit_input(
                 }
                 let token = Uuid::new_v4().to_string();
                 transaction.execute(
-                    "INSERT INTO pending_input_edit_session(camp_id, pending_input_id, edit_token, base_pending_revision, recovery_required)
-                     VALUES (?1, ?2, ?3, ?4, 0) ON CONFLICT(camp_id) DO UPDATE SET
+                    "INSERT INTO pending_input_edit_session(camp_id, pending_input_id, edit_token, base_pending_revision, recovery_required, working_source_attachments_json)
+                     VALUES (?1, ?2, ?3, ?4, 0, ?5) ON CONFLICT(camp_id) DO UPDATE SET
                      pending_input_id = excluded.pending_input_id, edit_token = excluded.edit_token,
-                     base_pending_revision = excluded.base_pending_revision, recovery_required = 0",
-                    params![command.camp_id, command.pending_input_id, token, revision],
+                     base_pending_revision = excluded.base_pending_revision, recovery_required = 0,
+                     working_source_attachments_json = excluded.working_source_attachments_json",
+                    params![command.camp_id, command.pending_input_id, token, revision, source_attachments_json],
                 )?;
                 return Ok(CommandHandlerResult::applied("pending_input.edit_started", json!({"editToken": token}), None));
             }
@@ -287,24 +414,68 @@ pub fn edit_input(
                 if !owns_session || session.as_ref().is_some_and(|session| session.recovery_required) {
                     return Ok(reject("pending_input.edit_fenced", "The edit session changed; reopen it before saving"));
                 }
-                let content = normalize_content(content.clone());
-                validate_user_authored_content(&content)?;
+                let content = normalize_composer_document(content.clone());
+                validate_composer_document(&content)?;
                 let body = render_input_body(transaction, &content)?;
-                if body.trim().is_empty() { return Ok(reject("camp_message.empty_body", "Pending input must not be empty")); }
+                let working_source_attachments_json = transaction.query_row(
+                    "SELECT working_source_attachments_json FROM pending_input_edit_session
+                     WHERE camp_id = ?1 AND pending_input_id = ?2 AND edit_token = ?3",
+                    params![command.camp_id, command.pending_input_id, command.edit_token],
+                    |row| row.get::<_, String>(0),
+                )?;
+                let working_source_attachments = parse_source_attachments(&working_source_attachments_json)?;
+                if body.trim().is_empty() && working_source_attachments.is_empty() { return Ok(reject("camp_message.empty_body", "Pending input must contain text or an attachment")); }
                 // Reply identity can only be retained or explicitly removed by this editor.
                 let stored = load_input(transaction, &command.pending_input_id, &command.camp_id)?;
                 if reply_to_camp_message_id.is_some() && *reply_to_camp_message_id != stored.reply_to_camp_message_id {
                     return Ok(reject("camp_message.invalid_reply", "Pending input cannot change its Reply target"));
                 }
                 let mut execution = stored.execution;
-                if let Some(execution) = execution.as_mut() { execution.purpose = body.chars().take(200).collect(); }
+                if let Some(execution) = execution.as_mut() {
+                    execution.purpose = if body.trim().is_empty() {
+                        "Camp attachment-only message".to_string()
+                    } else {
+                        body.chars().take(200).collect()
+                    };
+                }
                 transaction.execute(
                     "UPDATE pending_camp_input SET structured_content_json = ?2, reply_to_camp_message_id = ?3,
-                     recipient_selection_required = ?4, execution_json = ?5, revision = revision + 1,
-                     state = 'queued', last_attempt_error_code = NULL, updated_at = ?6 WHERE id = ?1",
-                    params![command.pending_input_id, serde_json::to_string(&content)?, reply_to_camp_message_id,
-                        recipient_selection_required, serde_json::to_string(&execution)?, chrono::Utc::now().to_rfc3339()],
+                     recipient_selection_required = ?4, execution_json = ?5,
+                     source_attachments_json = ?6, revision = revision + 1,
+                     state = 'queued', last_attempt_error_code = NULL, updated_at = ?7 WHERE id = ?1",
+                    params![command.pending_input_id, serialize_composer_document(&content)?, reply_to_camp_message_id,
+                        recipient_selection_required, serde_json::to_string(&execution)?,
+                        serialize_source_attachments(&working_source_attachments)?, chrono::Utc::now().to_rfc3339()],
                 )?;
+            }
+            PendingInputEditAction::RemoveAttachment { attachment_ref_id } => {
+                if !owns_session || session.as_ref().is_some_and(|session| session.recovery_required) {
+                    return Ok(reject("pending_input.edit_fenced", "The edit session changed; reopen it before editing attachments"));
+                }
+                let mut refs = load_working_source_refs(transaction, &command.camp_id, &command.pending_input_id, command.edit_token.as_deref().unwrap_or_default())?;
+                let previous_len = refs.len();
+                refs.retain(|source_ref| source_ref.id != *attachment_ref_id);
+                if refs.len() == previous_len {
+                    return Ok(reject("attachment_not_found", "Source Attachment no longer exists in this edit"));
+                }
+                store_working_source_refs(transaction, &command.camp_id, &command.pending_input_id, command.edit_token.as_deref().unwrap_or_default(), &refs)?;
+                return Ok(CommandHandlerResult::applied("pending_input.attachment_removed", json!({"pendingInputId": command.pending_input_id}), None));
+            }
+            PendingInputEditAction::ReorderAttachments { attachment_ref_ids } => {
+                if !owns_session || session.as_ref().is_some_and(|session| session.recovery_required) {
+                    return Ok(reject("pending_input.edit_fenced", "The edit session changed; reopen it before editing attachments"));
+                }
+                let refs = load_working_source_refs(transaction, &command.camp_id, &command.pending_input_id, command.edit_token.as_deref().unwrap_or_default())?;
+                let by_id = refs.into_iter().map(|source_ref| (source_ref.id.clone(), source_ref)).collect::<std::collections::HashMap<_, _>>();
+                if attachment_ref_ids.len() != by_id.len()
+                    || attachment_ref_ids.iter().collect::<std::collections::HashSet<_>>().len() != by_id.len()
+                    || attachment_ref_ids.iter().any(|id| !by_id.contains_key(id))
+                {
+                    return Ok(reject("attachment_order_changed", "Source Attachment order no longer matches this edit"));
+                }
+                let reordered = attachment_ref_ids.iter().map(|id| by_id.get(id).expect("validated Source Attachment ID").clone()).collect::<Vec<_>>();
+                store_working_source_refs(transaction, &command.camp_id, &command.pending_input_id, command.edit_token.as_deref().unwrap_or_default(), &reordered)?;
+                return Ok(CommandHandlerResult::applied("pending_input.attachments_reordered", json!({"pendingInputId": command.pending_input_id}), None));
             }
             PendingInputEditAction::Cancel => {
                 if !owns_session { return Ok(reject("pending_input.edit_fenced", "The edit session changed; reload it first")); }
@@ -329,17 +500,30 @@ pub(crate) fn insert_input(
     transaction: &Transaction<'_>,
     camp_id: &str,
     content: &StructuredCampMessageContent,
+    source_attachments: &[LocalAttachmentSourceRef],
     reply_to: Option<&str>,
     execution: &Option<ExecutionRequest>,
     user_id: &str,
 ) -> Result<CommandHandlerResult> {
+    let document = composer_document_from_content(content)?;
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     transaction.execute(
-        "INSERT INTO pending_camp_input(id, camp_id, enqueue_sequence, structured_content_json, reply_to_camp_message_id,
+        "INSERT INTO pending_camp_input(id, camp_id, enqueue_sequence, structured_content_json,
+         source_attachments_json, reply_to_camp_message_id,
          execution_json, user_id, created_at, updated_at) VALUES (?1, ?2,
-         (SELECT COALESCE(MAX(enqueue_sequence), 0) + 1 FROM pending_camp_input WHERE camp_id = ?2), ?3, ?4, ?5, ?6, ?7, ?7)",
-        params![id, camp_id, serde_json::to_string(content)?, reply_to, serde_json::to_string(execution)?, user_id, now],
+         (SELECT COALESCE(MAX(enqueue_sequence), 0) + 1 FROM pending_camp_input WHERE camp_id = ?2),
+         ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+        params![
+            id,
+            camp_id,
+            serialize_composer_document(&document)?,
+            serialize_source_attachments(source_attachments)?,
+            reply_to,
+            serde_json::to_string(execution)?,
+            user_id,
+            now
+        ],
     )?;
     transaction.execute(
         "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
@@ -461,10 +645,11 @@ mod tests {
     use super::*;
     use crate::{
         camp_attachment::CampAttachmentStore,
-        camp_content::StructuredCampMessageSegment as Segment,
+        camp_content::{ComposerAtom, ComposerSegment, StructuredCampMessageSegment as Segment},
         collaboration::{CollaborationService, CreateCampCommand, SendUserCampDraftCommand},
         command::CommandResultStatus,
         current_user::CURRENT_USER_ID,
+        local_attachment_source::observe_source_attachment,
         runtime::{CancelCampTurnCommand, ExecutionRuntimeService},
         test_support::{OwnedTestDatabase, seeded_runtime_database_owned},
     };
@@ -511,6 +696,10 @@ mod tests {
         }]
     }
 
+    fn text_document(value: &str) -> ComposerDocument {
+        composer_document_from_content(&text(value)).unwrap()
+    }
+
     fn send(
         database: &mut Database,
         camp_id: &str,
@@ -518,8 +707,9 @@ mod tests {
     ) -> CommandExecution {
         let store = CampAttachmentStore::new(database.path().parent().unwrap());
         let draft = store.load_draft(database, camp_id).unwrap();
+        let document = composer_document_from_content(&content).unwrap();
         let draft = store
-            .save_content(database, camp_id, draft.revision, content)
+            .save_content(database, camp_id, draft.revision, document)
             .unwrap();
         send_draft(database, camp_id, draft.revision)
     }
@@ -772,7 +962,7 @@ mod tests {
                     &camp_id,
                     b,
                     Some(&old_token),
-                    saved(text("lost edits"))
+                    saved(text_document("lost edits"))
                 )
                 .result
                 .code,
@@ -803,9 +993,15 @@ mod tests {
                 "pending_input.edit_fenced"
             );
             assert_eq!(
-                edit(&mut reopened, &camp_id, b, Some(&token), saved(text("  ")))
-                    .result
-                    .code,
+                edit(
+                    &mut reopened,
+                    &camp_id,
+                    b,
+                    Some(&token),
+                    saved(text_document("  ")),
+                )
+                .result
+                .code,
                 "camp_message.empty_body"
             );
             assert!(ready_heads(&reopened).unwrap().is_empty());
@@ -814,7 +1010,7 @@ mod tests {
                 &camp_id,
                 b,
                 Some(&token),
-                saved(text("edited B")),
+                saved(text_document("edited B")),
             );
             assert_eq!(
                 publish(&mut reopened, &camp_id, &b.id, b.revision)
@@ -1019,14 +1215,15 @@ mod tests {
                 &mut database,
                 &camp_id,
                 0,
-                vec![
+                composer_document_from_content(&[
                     Segment::MemberMention {
                         agent_id: "agent_2".to_string(),
                     },
                     Segment::Text {
                         text: " original".to_string(),
                     },
-                ],
+                ])
+                .unwrap(),
             )
             .unwrap();
         let draft = store
@@ -1077,7 +1274,7 @@ mod tests {
             &item,
             Some(token),
             PendingInputEditAction::Save {
-                content: text("use current Lead"),
+                content: text_document("use current Lead"),
                 reply_to_camp_message_id: Some(parent.clone()),
                 recipient_selection_required: false,
             },
@@ -1117,15 +1314,18 @@ mod tests {
                 &mut database,
                 &camp_id,
                 draft.revision,
-                text("continue"),
+                text_document("continue"),
                 original.result.payload["campMessageId"].as_str(),
             )
             .unwrap();
         send_draft(&mut database, &camp_id, draft.revision);
         let continued = read_queue(&database, &camp_id).unwrap().items.remove(0);
-        assert!(
-            matches!(&continued.content[0], Segment::MemberMention { agent_id } if agent_id == "agent_2")
-        );
+        assert!(matches!(
+            &continued.content.segments[0],
+            ComposerSegment::Atom {
+                atom: ComposerAtom::Member { agent_id, .. }
+            } if agent_id == "agent_2"
+        ));
         edit(
             &mut database,
             &camp_id,
@@ -1156,7 +1356,7 @@ mod tests {
     }
 
     #[test]
-    fn attachments_cannot_be_queued_and_rejection_keeps_exact_draft() {
+    fn source_attachments_queue_with_the_complete_intent_without_legacy_rows() {
         let (mut database, camp_id) = setup();
         send(&mut database, &camp_id, text("A"));
         let store = CampAttachmentStore::new(database.directory());
@@ -1166,20 +1366,255 @@ mod tests {
             .save_body(&mut database, &camp_id, "with attachment")
             .unwrap();
         let draft = store
-            .prepare_from_path(
+            .commit_source_attachment(
                 &mut database,
                 &camp_id,
                 draft.revision,
-                &source,
-                "attachment.txt",
+                observe_source_attachment(&source, "attachment.txt", Some("text/plain")).unwrap(),
             )
             .unwrap();
-        let rejected = send_draft(&mut database, &camp_id, draft.revision);
-        assert_eq!(
-            rejected.result.code,
-            "pending_input.attachments_unsupported"
+        let attachment_id = draft.attachments[0].id.clone();
+        let queued = send_draft(&mut database, &camp_id, draft.revision);
+        assert_eq!(queued.result.code, "pending_input.queued");
+        assert!(
+            store
+                .load_draft(&database, &camp_id)
+                .unwrap()
+                .attachments
+                .is_empty()
         );
+        let queue = read_queue(&database, &camp_id).unwrap();
+        assert_eq!(queue.items[0].attachments[0].id, attachment_id);
+        let source_json: String = database
+            .connection()
+            .query_row(
+                "SELECT source_attachments_json FROM pending_camp_input WHERE id = ?1",
+                [queue.items[0].id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(source_json.contains(&source.to_string_lossy().to_string()));
+        for table in [
+            "prepared_attachment",
+            "managed_attachment",
+            "message_attachment",
+            "camp_message_attachment_ref",
+        ] {
+            let count: i64 = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "source attachment unexpectedly wrote {table}");
+        }
+        complete_fixture_runs(&database);
+        let item = &queue.items[0];
+        let published = publish(&mut database, &camp_id, &item.id, item.revision);
+        let message_id = published.result.payload["campMessageId"].as_str().unwrap();
+        let message_json: String = database
+            .connection()
+            .query_row(
+                "SELECT source_attachments_json FROM camp_message WHERE id = ?1",
+                [message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(message_json, source_json);
+        for table in [
+            "prepared_attachment",
+            "managed_attachment",
+            "message_attachment",
+            "camp_message_attachment_ref",
+        ] {
+            let count: i64 = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "source publication unexpectedly wrote {table}");
+        }
+    }
+
+    #[test]
+    fn unavailable_source_preserves_immediate_draft_and_blocks_pending_fifo_for_repair() {
+        let (mut database, camp_id) = setup();
+        let store = CampAttachmentStore::new(database.directory());
+        let immediate_source = database.directory().join("missing-immediate.txt");
+        std::fs::write(&immediate_source, "immediate").unwrap();
+        let draft = store
+            .save_body(&mut database, &camp_id, "immediate")
+            .unwrap();
+        let draft = store
+            .commit_source_attachment(
+                &mut database,
+                &camp_id,
+                draft.revision,
+                observe_source_attachment(&immediate_source, "immediate.txt", Some("text/plain"))
+                    .unwrap(),
+            )
+            .unwrap();
+        std::fs::remove_file(&immediate_source).unwrap();
+        let rejected = send_draft(&mut database, &camp_id, draft.revision);
+        assert_eq!(rejected.result.code, "attachment_missing");
         assert_eq!(store.load_draft(&database, &camp_id).unwrap(), draft);
+        let message_count: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(message_count, 0);
+
+        store
+            .discard_draft_from_database(&mut database, &camp_id)
+            .unwrap();
+        send(&mut database, &camp_id, text("active"));
+        let pending_source = database.directory().join("missing-pending.txt");
+        std::fs::write(&pending_source, "pending").unwrap();
+        let draft = store
+            .save_body(&mut database, &camp_id, "pending head")
+            .unwrap();
+        let draft = store
+            .commit_source_attachment(
+                &mut database,
+                &camp_id,
+                draft.revision,
+                observe_source_attachment(&pending_source, "pending.txt", Some("text/plain"))
+                    .unwrap(),
+            )
+            .unwrap();
+        send_draft(&mut database, &camp_id, draft.revision);
+        send(&mut database, &camp_id, text("second pending"));
+        complete_fixture_runs(&database);
+        std::fs::remove_file(&pending_source).unwrap();
+
+        let head = read_queue(&database, &camp_id).unwrap().items.remove(0);
+        let rejected = publish(&mut database, &camp_id, &head.id, head.revision);
+        assert_eq!(rejected.result.code, "attachment_missing");
+        let queue = read_queue(&database, &camp_id).unwrap();
+        assert_eq!(queue.items[0].id, head.id);
+        assert_eq!(queue.items[0].state, "needs_repair");
+        assert_eq!(
+            queue.items[0].last_attempt_error_code.as_deref(),
+            Some("attachment_missing")
+        );
+        assert_eq!(queue.items.len(), 2);
+        assert!(ready_heads(&database).unwrap().is_empty());
+    }
+
+    #[test]
+    fn pending_edit_working_refs_cancel_or_save_and_publish_an_attachment_only_intent() {
+        let (mut database, camp_id) = setup();
+        send(&mut database, &camp_id, text("active"));
+        send(&mut database, &camp_id, text("edit me"));
+        let item = read_queue(&database, &camp_id).unwrap().items.remove(0);
+        let started = edit(
+            &mut database,
+            &camp_id,
+            &item,
+            None,
+            PendingInputEditAction::Begin,
+        );
+        let token = started.result.payload["editToken"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let first_path = database.directory().join("first.txt");
+        std::fs::write(&first_path, "first").unwrap();
+        add_working_source_attachment(
+            &mut database,
+            &camp_id,
+            &item.id,
+            item.revision,
+            &token,
+            observe_source_attachment(&first_path, "first.txt", Some("text/plain")).unwrap(),
+        )
+        .unwrap();
+        edit(
+            &mut database,
+            &camp_id,
+            &item,
+            Some(&token),
+            PendingInputEditAction::Cancel,
+        );
+        assert!(
+            read_queue(&database, &camp_id).unwrap().items[0]
+                .attachments
+                .is_empty()
+        );
+
+        let started = edit(
+            &mut database,
+            &camp_id,
+            &item,
+            None,
+            PendingInputEditAction::Begin,
+        );
+        let token = started.result.payload["editToken"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let second_path = database.directory().join("second.txt");
+        std::fs::write(&second_path, "second").unwrap();
+        for (path, name) in [(&first_path, "first.txt"), (&second_path, "second.txt")] {
+            add_working_source_attachment(
+                &mut database,
+                &camp_id,
+                &item.id,
+                item.revision,
+                &token,
+                observe_source_attachment(path, name, Some("text/plain")).unwrap(),
+            )
+            .unwrap();
+        }
+        let working = read_queue(&database, &camp_id)
+            .unwrap()
+            .edit_session
+            .unwrap()
+            .working_attachments;
+        edit(
+            &mut database,
+            &camp_id,
+            &item,
+            Some(&token),
+            PendingInputEditAction::ReorderAttachments {
+                attachment_ref_ids: vec![working[1].id.clone(), working[0].id.clone()],
+            },
+        );
+        edit(
+            &mut database,
+            &camp_id,
+            &item,
+            Some(&token),
+            PendingInputEditAction::RemoveAttachment {
+                attachment_ref_id: working[0].id.clone(),
+            },
+        );
+        let saved = edit(
+            &mut database,
+            &camp_id,
+            &item,
+            Some(&token),
+            PendingInputEditAction::Save {
+                content: ComposerDocument::default(),
+                reply_to_camp_message_id: None,
+                recipient_selection_required: false,
+            },
+        );
+        assert_eq!(saved.result.status, CommandResultStatus::Applied);
+        let saved = read_queue(&database, &camp_id).unwrap().items.remove(0);
+        assert!(saved.body.is_empty());
+        assert_eq!(saved.attachments.len(), 1);
+        assert_eq!(saved.attachments[0].id, working[1].id);
+        assert_eq!(saved.revision, item.revision + 1);
+
+        complete_fixture_runs(&database);
+        assert_eq!(
+            ready_heads(&database).unwrap()[0].pending_input_id,
+            saved.id
+        );
+        let published = publish(&mut database, &camp_id, &saved.id, saved.revision);
+        assert_eq!(published.result.code, "camp_turn.queued");
         assert!(read_queue(&database, &camp_id).unwrap().items.is_empty());
     }
 

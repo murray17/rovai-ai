@@ -136,6 +136,14 @@ pub(crate) fn runtime_subsystem_id(kind: AdapterKind) -> String {
     format!("runtime.{}", kind.as_str())
 }
 
+fn shared_execution_subsystem_ids(kind: AdapterKind) -> &'static [&'static str] {
+    if kind == AdapterKind::Pi {
+        &["skills", "attachments", "builtin-tools"]
+    } else {
+        &["skills", "mcp", "attachments", "builtin-tools"]
+    }
+}
+
 impl super::Core {
     pub(crate) fn mcp_config(&self) -> Result<&super::McpConfigStore> {
         self.mcp_config
@@ -144,7 +152,7 @@ impl super::Core {
     }
 
     pub(crate) fn require_execution_subsystems(&self, kind: AdapterKind) -> Result<()> {
-        for id in ["skills", "mcp", "attachments", "builtin-tools"] {
+        for id in shared_execution_subsystem_ids(kind) {
             self.subsystems.require(id)?;
         }
         self.subsystems.require(&runtime_subsystem_id(kind))
@@ -318,11 +326,6 @@ impl super::Core {
                 "attachment_cleanup",
                 attachments.cleanup_expired(&mut database)
             );
-            let single_chat_attachments = SingleChatAttachmentStore::new(&self.data_dir);
-            maintain!(
-                "single_chat_attachment_cleanup",
-                single_chat_attachments.cleanup_expired(&mut database)
-            );
             maintain!(
                 "pending_camp_cleanup",
                 (|| -> Result<()> {
@@ -343,14 +346,7 @@ impl super::Core {
                         true
                     }
                 };
-                let single_chat_failed = match single_chat_attachments.remove_camp(camp) {
-                    Ok(()) => false,
-                    Err(error) => {
-                        errors.push(format!("pending_camp_single_chat_directory: {error:#}"));
-                        true
-                    }
-                };
-                camp_failed || single_chat_failed
+                camp_failed
             });
             maintain!(
                 "runtime_search_generation",
@@ -421,6 +417,15 @@ impl super::Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pi_dispatch_does_not_depend_on_the_mcp_subsystem() {
+        assert!(!shared_execution_subsystem_ids(AdapterKind::Pi).contains(&"mcp"));
+        assert!(
+            shared_execution_subsystem_ids(AdapterKind::CodexCli).contains(&"mcp"),
+            "peer Runtime MCP gates must remain unchanged"
+        );
+    }
 
     #[test]
     fn pi_subsystem_failure_is_isolated_from_core_and_peer_runtimes() {

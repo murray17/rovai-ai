@@ -208,8 +208,14 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.47";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 88;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.50";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 91;
+const V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.49";
+const V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 90;
+const V139_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.48";
+const V139_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 89;
+const V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.47";
+const V138_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 88;
 const V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.46";
 const V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 87;
 const V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.45";
@@ -601,6 +607,9 @@ struct CurrentMigrationState {
     v135: bool,
     v136: bool,
     v137: bool,
+    v138: bool,
+    v139: bool,
+    v140: bool,
 }
 
 impl CurrentMigrationState {
@@ -679,6 +688,72 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v140
+                && self.v139
+                && self.v138
+                && self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v140 {
+            return false;
+        }
+        if contract == V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v139
+                && self.v138
+                && self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v139 {
+            return false;
+        }
+        if contract == V139_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V139_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v138
+                && self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v138 {
+            return false;
+        }
+        if contract == V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V138_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v137
                 && self.v136
@@ -2114,7 +2189,13 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
             if migrations.admits(&contract, schema, &classifier) =>
         {
-            !migrations.v135 || pi_runtime_v135_schema_matches(connection)?
+            (!migrations.v135 || migrations.v139 || pi_runtime_v135_schema_matches(connection)?)
+                && (!migrations.v136
+                    || migrations.v138
+                    || pi_runtime_v136_schema_matches(connection)?)
+                && (!migrations.v137 || source_attachment_v137_schema_matches(connection)?)
+                && (!migrations.v138 || pi_native_input_v138_schema_matches(connection)?)
+                && (!migrations.v139 || pi_native_execution_v139_schema_matches(connection)?)
         }
         _ => false,
     };
@@ -2198,6 +2279,7 @@ fn pending_fast_schema_matches(
 ) -> rusqlite::Result<bool> {
     let has_fast = source.has_fast();
     let has_lifetime = source == MainCampMigrationSource::FastLifetime;
+    let has_source_attachments = load_current_migration_state(connection)?.v137;
     let normalized = |sql: &str| {
         sql.split_whitespace()
             .collect::<String>()
@@ -2233,7 +2315,28 @@ fn pending_fast_schema_matches(
                 .iter()
                 .any(|(pending, _)| pending == name);
         if required {
-            if actual.as_deref().map(&normalized) != Some(normalized(expected)) {
+            let expected = if has_source_attachments && *name == "pending_camp_input" {
+                expected.replacen(
+                    "                UNIQUE(camp_id, enqueue_sequence)",
+                    "                source_attachments_json TEXT NOT NULL DEFAULT '[]'\n\
+                        CHECK(json_valid(source_attachments_json)\n\
+                            AND json_type(source_attachments_json) = 'array'),\n\
+                    UNIQUE(camp_id, enqueue_sequence)",
+                    1,
+                )
+            } else if has_source_attachments && *name == "pending_input_edit_session" {
+                expected.replacen(
+                    "                FOREIGN KEY(camp_id, pending_input_id)",
+                    "                working_source_attachments_json TEXT NOT NULL DEFAULT '[]'\n\
+                        CHECK(json_valid(working_source_attachments_json)\n\
+                            AND json_type(working_source_attachments_json) = 'array'),\n\
+                    FOREIGN KEY(camp_id, pending_input_id)",
+                    1,
+                )
+            } else {
+                (*expected).to_string()
+            };
+            if actual.as_deref().map(&normalized) != Some(normalized(&expected)) {
                 return Ok(false);
             }
         } else if actual.is_some() {
@@ -2443,7 +2546,12 @@ pub(crate) fn classify_database_contract(
         &marker.contract_version,
         marker.projection_schema_version,
         &marker.classifier_version,
-    ) || (migrations.v135 && !pi_runtime_v135_schema_matches(connection)?)
+    ) || (migrations.v135 && !migrations.v139 && !pi_runtime_v135_schema_matches(connection)?)
+        || (migrations.v136 && !migrations.v138 && !pi_runtime_v136_schema_matches(connection)?)
+        || (migrations.v137 && !source_attachment_v137_schema_matches(connection)?)
+        || (migrations.v138 && !pi_native_input_v138_schema_matches(connection)?)
+        || (migrations.v139 && !pi_native_execution_v139_schema_matches(connection)?)
+        || (migrations.v140 && !single_chat_v140_schema_matches(connection)?)
     {
         if connection_has_legacy_feishu_migration_collision(connection)?
             || main_camp_migration_collision(connection)?.is_some()
@@ -2535,6 +2643,190 @@ fn pi_runtime_v135_schema_matches(connection: &Connection) -> rusqlite::Result<b
     Ok(required_objects == 6)
 }
 
+fn pi_runtime_v136_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    if !pi_runtime_v135_schema_matches(connection)? {
+        return Ok(false);
+    }
+    let receipt_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pi_managed_input_receipt'",
+        [],
+        |row| row.get(0),
+    )?;
+    let evidence_tables: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN (
+            'pi_runtime_prompt_transform', 'pi_prompt_image_evidence'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let transform_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pi_runtime_prompt_transform'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(receipt_sql.contains("receipt_version IN (1, 2)")
+        && evidence_tables == 2
+        && transform_sql.contains("runtime_payload_blob_id")
+        && transform_sql.contains("source_content_blob_id")
+        && transform_sql.contains("expanded_content_blob_id")
+        && transform_sql.contains("image_count")
+        && transform_sql.contains("image_set_digest"))
+}
+
+fn source_attachment_v137_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    for (table, column) in [
+        ("camp_composer_draft", "source_attachments_json"),
+        ("pending_camp_input", "source_attachments_json"),
+        (
+            "pending_input_edit_session",
+            "working_source_attachments_json",
+        ),
+        ("camp_message", "source_attachments_json"),
+    ] {
+        let admitted: bool = connection.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info(?1)
+                WHERE name = ?2 AND type = 'TEXT' AND [notnull] = 1 AND dflt_value = '''[]'''
+             )",
+            params![table, column],
+            |row| row.get(0),
+        )?;
+        if !admitted {
+            return Ok(false);
+        }
+        let table_sql = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if !table_sql.is_some_and(|sql| {
+            sql.contains(&format!("json_valid({column})"))
+                && sql.contains(&format!("json_type({column}) = 'array'"))
+        }) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn pi_native_input_v138_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    let transform_exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pi_runtime_prompt_transform')",
+        [],
+        |row| row.get(0),
+    )?;
+    if transform_exists {
+        return Ok(false);
+    }
+    let image_sql = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pi_prompt_image_evidence'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(image_sql.is_some_and(|sql| {
+        sql.contains("REFERENCES runtime_input_delivery(id) ON DELETE CASCADE")
+            && sql.contains("evidence_version = 2")
+            && sql.contains("UNIQUE(runtime_input_delivery_id, image_index)")
+    }))
+}
+
+fn pi_native_execution_v139_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    if !pi_native_input_v138_schema_matches(connection)? {
+        return Ok(false);
+    }
+    let receipt_archive_objects: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN (
+            'pi_managed_input_receipt',
+            'pi_managed_input_receipt_run_idx',
+            'pi_managed_input_receipt_insert_guard',
+            'pi_managed_input_receipt_update_guard',
+            'pi_managed_input_receipt_delete_guard'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let acceptance_guard_exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master
+         WHERE type = 'trigger' AND name = 'pi_managed_input_acceptance_update_guard')",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(receipt_archive_objects == 5 && !acceptance_guard_exists)
+}
+
+fn single_chat_v140_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    for (table, column) in [
+        ("conversation", "kind"),
+        ("camp_turn", "kind"),
+        ("agent_run", "response_delivery"),
+        ("agent_run", "operation_policy"),
+        ("agent_run", "operation_policy_version"),
+        ("agent_run", "destination_conversation_id"),
+        ("conversation_message", "source_attachments_json"),
+    ] {
+        let admitted: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            params![table, column],
+            |row| row.get(0),
+        )?;
+        if !admitted {
+            return Ok(false);
+        }
+    }
+    let required_objects: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN (
+            'single_chat_composer_draft',
+            'single_chat_pending_input',
+            'single_chat_pending_input_queue_idx',
+            'single_chat_pending_input_edit_session',
+            'conversation_active_single_chat_unique',
+            'agent_run_active_single_chat_conversation_unique',
+            'agent_run_single_chat_route_update_guard',
+            'conversation_message_single_chat_attachment_insert_guard',
+            'conversation_message_single_chat_attachment_update_guard',
+            'single_chat_composer_draft_scope_insert',
+            'single_chat_pending_input_scope_insert'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let retired_objects: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN (
+            'single_chat_prepared_attachment',
+            'single_chat_message_attachment'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let conversation_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversation'",
+        [],
+        |row| row.get(0),
+    )?;
+    let camp_turn_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_turn'",
+        [],
+        |row| row.get(0),
+    )?;
+    let agent_run_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(required_objects == 11
+        && retired_objects == 0
+        && conversation_sql.contains("kind IN ('camp_member', 'single_chat')")
+        && camp_turn_sql.contains("kind IN ('camp', 'single_chat')")
+        && camp_turn_sql.contains("'conversation_message'")
+        && agent_run_sql.contains("'single_chat'")
+        && agent_run_sql.contains("response_delivery")
+        && agent_run_sql.contains("destination_conversation_id"))
+}
+
 #[cfg(test)]
 fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     if !connection_has_admissible_data_contract(connection)? {
@@ -2545,7 +2837,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2630,7 +2922,10 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 134),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 135),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 136),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 137),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 138),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 139),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)
         "#,
         [],
         |row| {
@@ -2703,6 +2998,9 @@ fn load_current_migration_state(
                 v135: row.get(65)?,
                 v136: row.get(66)?,
                 v137: row.get(67)?,
+                v138: row.get(68)?,
+                v139: row.get(69)?,
+                v140: row.get(70)?,
             })
         },
     )
@@ -3468,12 +3766,12 @@ fn restore_rebuild_schema_objects(
     for (_, name, sql) in objects {
         transaction
             .execute_batch(&sql)
-            .with_context(|| format!("v136 failed to restore {table} schema object {name}"))?;
+            .with_context(|| format!("v140 failed to restore {table} schema object {name}"))?;
     }
     Ok(())
 }
 
-fn rebuild_conversation_for_single_chat_v136(transaction: &Transaction<'_>) -> Result<()> {
+fn rebuild_conversation_for_single_chat_v140(transaction: &Transaction<'_>) -> Result<()> {
     if table_columns(transaction, "conversation")?
         .iter()
         .any(|column| column == "kind")
@@ -3489,12 +3787,12 @@ fn rebuild_conversation_for_single_chat_v136(transaction: &Transaction<'_>) -> R
     let mut target_schema = source_schema
         .replacen(
             "CREATE TABLE conversation",
-            "CREATE TABLE conversation_v136",
+            "CREATE TABLE conversation_v140",
             1,
         )
         .replacen(
             "CREATE TABLE \"conversation\"",
-            "CREATE TABLE conversation_v136",
+            "CREATE TABLE conversation_v140",
             1,
         )
         .replacen(
@@ -3523,14 +3821,14 @@ fn rebuild_conversation_for_single_chat_v136(transaction: &Transaction<'_>) -> R
                 )"#,
             1,
         );
-    if !target_schema.contains("CREATE TABLE conversation_v136")
+    if !target_schema.contains("CREATE TABLE conversation_v140")
         || !target_schema.contains("kind IN ('camp_member', 'single_chat')")
         || target_schema.contains("UNIQUE(camp_id, agent_id)")
     {
-        anyhow::bail!("v136 could not extend the Conversation schema");
+        anyhow::bail!("v140 could not extend the Conversation schema");
     }
     target_schema =
-        target_schema.replace("REFERENCES conversation(", "REFERENCES conversation_v136(");
+        target_schema.replace("REFERENCES conversation(", "REFERENCES conversation_v140(");
     transaction.execute_batch(&target_schema)?;
     let columns = table_columns(transaction, "conversation")?
         .into_iter()
@@ -3540,9 +3838,9 @@ fn rebuild_conversation_for_single_chat_v136(transaction: &Transaction<'_>) -> R
     drop_rebuild_triggers(transaction, &objects)?;
     transaction.execute_batch(&format!(
         r#"
-        INSERT INTO conversation_v136({columns}) SELECT {columns} FROM conversation;
+        INSERT INTO conversation_v140({columns}) SELECT {columns} FROM conversation;
         DROP TABLE conversation;
-        ALTER TABLE conversation_v136 RENAME TO conversation;
+        ALTER TABLE conversation_v140 RENAME TO conversation;
         "#,
     ))?;
     restore_rebuild_schema_objects(transaction, "conversation", objects)?;
@@ -3559,7 +3857,7 @@ fn rebuild_conversation_for_single_chat_v136(transaction: &Transaction<'_>) -> R
     Ok(())
 }
 
-fn rebuild_camp_turn_for_single_chat_v136(transaction: &Transaction<'_>) -> Result<()> {
+fn rebuild_camp_turn_for_single_chat_v140(transaction: &Transaction<'_>) -> Result<()> {
     if table_columns(transaction, "camp_turn")?
         .iter()
         .any(|column| column == "kind")
@@ -3575,12 +3873,12 @@ fn rebuild_camp_turn_for_single_chat_v136(transaction: &Transaction<'_>) -> Resu
     let target_schema = source_schema
         .replacen(
             "CREATE TABLE camp_turn",
-            "CREATE TABLE camp_turn_v136",
+            "CREATE TABLE camp_turn_v140",
             1,
         )
         .replacen(
             "CREATE TABLE \"camp_turn\"",
-            "CREATE TABLE camp_turn_v136",
+            "CREATE TABLE camp_turn_v140",
             1,
         )
         .replacen(
@@ -3599,11 +3897,11 @@ fn rebuild_camp_turn_for_single_chat_v136(transaction: &Transaction<'_>) -> Resu
                 )"#,
             1,
         );
-    if !target_schema.contains("CREATE TABLE camp_turn_v136")
+    if !target_schema.contains("CREATE TABLE camp_turn_v140")
         || !target_schema.contains("'conversation_message'")
         || !target_schema.contains("kind IN ('camp', 'single_chat')")
     {
-        anyhow::bail!("v136 could not extend the CampTurn schema");
+        anyhow::bail!("v140 could not extend the CampTurn schema");
     }
     transaction.execute_batch(&target_schema)?;
     let columns = table_columns(transaction, "camp_turn")?
@@ -3614,16 +3912,16 @@ fn rebuild_camp_turn_for_single_chat_v136(transaction: &Transaction<'_>) -> Resu
     drop_rebuild_triggers(transaction, &objects)?;
     transaction.execute_batch(&format!(
         r#"
-        INSERT INTO camp_turn_v136({columns}) SELECT {columns} FROM camp_turn;
+        INSERT INTO camp_turn_v140({columns}) SELECT {columns} FROM camp_turn;
         DROP TABLE camp_turn;
-        ALTER TABLE camp_turn_v136 RENAME TO camp_turn;
+        ALTER TABLE camp_turn_v140 RENAME TO camp_turn;
         "#,
     ))?;
     restore_rebuild_schema_objects(transaction, "camp_turn", objects)?;
     Ok(())
 }
 
-fn rebuild_agent_run_for_single_chat_v136(transaction: &Transaction<'_>) -> Result<()> {
+fn rebuild_agent_run_for_single_chat_v140(transaction: &Transaction<'_>) -> Result<()> {
     if table_columns(transaction, "agent_run")?
         .iter()
         .any(|column| column == "response_delivery")
@@ -3637,10 +3935,10 @@ fn rebuild_agent_run_for_single_chat_v136(transaction: &Transaction<'_>) -> Resu
     )?;
     let objects = migration_schema_objects(transaction, "agent_run", true)?;
     let mut target_schema = source_schema
-        .replacen("CREATE TABLE agent_run", "CREATE TABLE agent_run_v136", 1)
+        .replacen("CREATE TABLE agent_run", "CREATE TABLE agent_run_v140", 1)
         .replacen(
             "CREATE TABLE \"agent_run\"",
-            "CREATE TABLE agent_run_v136",
+            "CREATE TABLE agent_run_v140",
             1,
         )
         .replacen(
@@ -3648,11 +3946,11 @@ fn rebuild_agent_run_for_single_chat_v136(transaction: &Transaction<'_>) -> Resu
             "CHECK(invocation_kind IN ('direct', 'a2a', 'gather_completion', 'single_chat'))",
             1,
         )
-        .replace("REFERENCES agent_run(", "REFERENCES agent_run_v136(")
-        .replace("REFERENCES \"agent_run\"(", "REFERENCES agent_run_v136(");
+        .replace("REFERENCES agent_run(", "REFERENCES agent_run_v140(")
+        .replace("REFERENCES \"agent_run\"(", "REFERENCES agent_run_v140(");
     let constraint = target_schema
         .find("UNIQUE(camp_turn_id")
-        .context("v136 AgentRun schema has no table constraints")?;
+        .context("v140 AgentRun schema has no table constraints")?;
     target_schema.insert_str(
         constraint,
         r#"response_delivery TEXT NOT NULL DEFAULT 'camp_message'
@@ -3675,11 +3973,11 @@ fn rebuild_agent_run_for_single_chat_v136(transaction: &Transaction<'_>) -> Resu
                 ),
                 "#,
     );
-    if !target_schema.contains("CREATE TABLE agent_run_v136")
+    if !target_schema.contains("CREATE TABLE agent_run_v140")
         || !target_schema.contains("'single_chat'")
         || !target_schema.contains("response_delivery")
     {
-        anyhow::bail!("v136 could not extend the AgentRun schema");
+        anyhow::bail!("v140 could not extend the AgentRun schema");
     }
     transaction.execute_batch(&target_schema)?;
     let columns = table_columns(transaction, "agent_run")?
@@ -3690,9 +3988,9 @@ fn rebuild_agent_run_for_single_chat_v136(transaction: &Transaction<'_>) -> Resu
     drop_rebuild_triggers(transaction, &objects)?;
     transaction.execute_batch(&format!(
         r#"
-        INSERT INTO agent_run_v136({columns}) SELECT {columns} FROM agent_run;
+        INSERT INTO agent_run_v140({columns}) SELECT {columns} FROM agent_run;
         DROP TABLE agent_run;
-        ALTER TABLE agent_run_v136 RENAME TO agent_run;
+        ALTER TABLE agent_run_v140 RENAME TO agent_run;
         "#,
     ))?;
     restore_rebuild_schema_objects(transaction, "agent_run", objects)?;
@@ -5480,10 +5778,22 @@ impl Database {
                 migration_step!("migration_135", self.migrate_pi_runtime_v135());
             }
             if !self.schema_migration_applied(136)? {
-                migration_step!("migration_136", self.migrate_single_chat_v136());
+                migration_step!("migration_136", self.migrate_pi_native_capabilities_v136());
             }
             if !self.schema_migration_applied(137)? {
-                migration_step!("migration_137", self.migrate_single_chat_attachments_v137());
+                migration_step!(
+                    "migration_137",
+                    self.migrate_source_path_user_attachments_v137()
+                );
+            }
+            if !self.schema_migration_applied(138)? {
+                migration_step!("migration_138", self.migrate_pi_native_input_v138());
+            }
+            if !self.schema_migration_applied(139)? {
+                migration_step!("migration_139", self.migrate_pi_native_execution_v139());
+            }
+            if !self.schema_migration_applied(140)? {
+                migration_step!("migration_140", self.migrate_single_chat_v140());
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -6071,10 +6381,22 @@ impl Database {
             migration_step!("migration_135", self.migrate_pi_runtime_v135());
         }
         if !self.schema_migration_applied(136)? {
-            migration_step!("migration_136", self.migrate_single_chat_v136());
+            migration_step!("migration_136", self.migrate_pi_native_capabilities_v136());
         }
         if !self.schema_migration_applied(137)? {
-            migration_step!("migration_137", self.migrate_single_chat_attachments_v137());
+            migration_step!(
+                "migration_137",
+                self.migrate_source_path_user_attachments_v137()
+            );
+        }
+        if !self.schema_migration_applied(138)? {
+            migration_step!("migration_138", self.migrate_pi_native_input_v138());
+        }
+        if !self.schema_migration_applied(139)? {
+            migration_step!("migration_139", self.migrate_pi_native_execution_v139());
+        }
+        if !self.schema_migration_applied(140)? {
+            migration_step!("migration_140", self.migrate_single_chat_v140());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -21213,56 +21535,218 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_single_chat_v136(&mut self) -> Result<()> {
-        self.connection
-            .execute_batch("PRAGMA foreign_keys = OFF;")?;
-        let migration_result = (|| -> Result<()> {
-            let transaction = self
-                .connection
-                .transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
-                "SELECT contract_version, projection_schema_version, classifier_version
-                 FROM rovai_data_contract WHERE singleton = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )?;
-            if contract != V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-                || schema != V136_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
-                || !load_current_migration_state(&transaction)?.admits(
-                    &contract,
-                    schema,
-                    &classifier,
-                )
-            {
-                anyhow::bail!("Single Chat migration requires the exact preceding data contract");
-            }
+    fn migrate_pi_native_capabilities_v136(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if contract != V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || schema != V136_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
+            || !pi_runtime_v135_schema_matches(&transaction)?
+        {
+            anyhow::bail!(
+                "Pi native-capabilities migration requires the exact v1.45/schema 86 source"
+            );
+        }
 
-            rebuild_conversation_for_single_chat_v136(&transaction)?;
-            rebuild_camp_turn_for_single_chat_v136(&transaction)?;
-            rebuild_agent_run_for_single_chat_v136(&transaction)?;
-            validate_migration_foreign_keys(
-                &transaction,
-                &["conversation", "camp_turn", "agent_run"],
-            )?;
-            transaction.execute(
-                "UPDATE rovai_data_contract
-                 SET contract_version = ?1, projection_schema_version = ?2,
-                     updated_at = datetime('now') WHERE singleton = 1",
-                params![
-                    V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
-                    V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
-                ],
-            )?;
-            transaction.execute(
-                "INSERT INTO schema_migration(version, applied_at) VALUES(136, datetime('now'))",
-                [],
-            )?;
-            transaction.commit()?;
-            Ok(())
-        })();
-        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
-        migration_result?;
-        foreign_keys_result?;
+        transaction.execute_batch(
+            r#"
+            DROP TRIGGER pi_managed_input_acceptance_update_guard;
+            DROP TRIGGER pi_managed_input_receipt_delete_guard;
+            DROP TRIGGER pi_managed_input_receipt_update_guard;
+            DROP TRIGGER pi_managed_input_receipt_insert_guard;
+            DROP INDEX pi_managed_input_receipt_run_idx;
+
+            ALTER TABLE pi_managed_input_receipt RENAME TO pi_managed_input_receipt_v135;
+
+            CREATE TABLE pi_managed_input_receipt (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL UNIQUE,
+                agent_run_id TEXT NOT NULL,
+                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                native_binding_id TEXT NOT NULL,
+                native_binding_generation INTEGER NOT NULL
+                    CHECK(native_binding_generation >= 1),
+                native_session_id TEXT NOT NULL CHECK(length(trim(native_session_id)) > 0),
+                native_prompt_id TEXT NOT NULL CHECK(length(trim(native_prompt_id)) > 0),
+                receipt_version INTEGER NOT NULL CHECK(receipt_version IN (1, 2)),
+                receipt_json TEXT NOT NULL
+                    CHECK(json_valid(receipt_json) AND json_type(receipt_json) = 'object'),
+                receipt_digest TEXT NOT NULL CHECK(
+                    length(receipt_digest) = 64
+                    AND receipt_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                commit_nonce TEXT NOT NULL CHECK(
+                    length(commit_nonce) = 64
+                    AND commit_nonce NOT GLOB '*[^0-9a-f]*'
+                ),
+                committed_at TEXT NOT NULL,
+                FOREIGN KEY(
+                    runtime_input_delivery_id, agent_run_id, execution_epoch,
+                    native_binding_id, native_binding_generation
+                ) REFERENCES runtime_input_delivery(
+                    id, agent_run_id, execution_epoch,
+                    native_binding_id, native_binding_generation
+                ) ON DELETE CASCADE
+            );
+
+            INSERT INTO pi_managed_input_receipt(
+                id, runtime_input_delivery_id, agent_run_id, execution_epoch,
+                native_binding_id, native_binding_generation, native_session_id,
+                native_prompt_id, receipt_version, receipt_json, receipt_digest,
+                commit_nonce, committed_at
+            )
+            SELECT id, runtime_input_delivery_id, agent_run_id, execution_epoch,
+                   native_binding_id, native_binding_generation, native_session_id,
+                   native_prompt_id, receipt_version, receipt_json, receipt_digest,
+                   commit_nonce, committed_at
+            FROM pi_managed_input_receipt_v135;
+            DROP TABLE pi_managed_input_receipt_v135;
+
+            CREATE INDEX pi_managed_input_receipt_run_idx
+                ON pi_managed_input_receipt(agent_run_id, execution_epoch);
+
+            CREATE TRIGGER pi_managed_input_receipt_insert_guard
+            BEFORE INSERT ON pi_managed_input_receipt
+            WHEN NOT EXISTS(
+                SELECT 1
+                FROM runtime_input_delivery AS delivery
+                JOIN context_manifest AS manifest
+                  ON manifest.id = delivery.context_manifest_id
+                JOIN native_session_bootstrap_evidence AS bootstrap
+                  ON bootstrap.id = manifest.bootstrap_evidence_id
+                WHERE delivery.id = NEW.runtime_input_delivery_id
+                  AND delivery.agent_run_id = NEW.agent_run_id
+                  AND delivery.execution_epoch = NEW.execution_epoch
+                  AND delivery.native_binding_id = NEW.native_binding_id
+                  AND delivery.native_binding_generation = NEW.native_binding_generation
+                  AND delivery.status IN ('prepared', 'delivery_unknown')
+                  AND delivery.dispatch_started_at IS NOT NULL
+                  AND bootstrap.native_binding_id = delivery.native_binding_id
+                  AND bootstrap.native_binding_generation = delivery.native_binding_generation
+                  AND bootstrap.delivery_mode = 'managed_system_prompt'
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid Pi managed input receipt target');
+            END;
+
+            CREATE TRIGGER pi_managed_input_receipt_update_guard
+            BEFORE UPDATE ON pi_managed_input_receipt
+            BEGIN
+                SELECT RAISE(ABORT, 'Pi managed input receipt is immutable');
+            END;
+
+            CREATE TRIGGER pi_managed_input_receipt_delete_guard
+            BEFORE DELETE ON pi_managed_input_receipt
+            WHEN EXISTS(
+                SELECT 1 FROM runtime_input_delivery AS delivery
+                WHERE delivery.id = OLD.runtime_input_delivery_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Pi managed input receipt is immutable');
+            END;
+
+            CREATE TRIGGER pi_managed_input_acceptance_update_guard
+            BEFORE UPDATE OF status ON runtime_input_delivery
+            WHEN NEW.status = 'accepted'
+              AND EXISTS(
+                  SELECT 1
+                  FROM context_manifest AS manifest
+                  JOIN native_session_bootstrap_evidence AS bootstrap
+                    ON bootstrap.id = manifest.bootstrap_evidence_id
+                  WHERE manifest.id = NEW.context_manifest_id
+                    AND bootstrap.delivery_mode = 'managed_system_prompt'
+              )
+              AND NOT EXISTS(
+                  SELECT 1 FROM pi_managed_input_receipt AS receipt
+                  WHERE receipt.runtime_input_delivery_id = NEW.id
+                    AND receipt.agent_run_id = NEW.agent_run_id
+                    AND receipt.execution_epoch = NEW.execution_epoch
+                    AND receipt.native_binding_id = NEW.native_binding_id
+                    AND receipt.native_binding_generation = NEW.native_binding_generation
+                    AND receipt.receipt_version IN (1, 2)
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'Pi managed input receipt is required');
+            END;
+
+            CREATE TABLE pi_runtime_prompt_transform (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL UNIQUE
+                    REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                transform_version INTEGER NOT NULL CHECK(transform_version = 1),
+                transform_json TEXT NOT NULL
+                    CHECK(json_valid(transform_json) AND json_type(transform_json) = 'object'),
+                original_payload_digest TEXT NOT NULL CHECK(length(original_payload_digest) = 64),
+                runtime_payload_digest TEXT NOT NULL CHECK(length(runtime_payload_digest) = 64),
+                runtime_payload_blob_id TEXT NOT NULL
+                    REFERENCES managed_blob(id),
+                source_path TEXT,
+                source_content_blob_id TEXT REFERENCES managed_blob(id),
+                expanded_content_blob_id TEXT REFERENCES managed_blob(id),
+                image_count INTEGER NOT NULL CHECK(image_count >= 0),
+                image_set_digest TEXT NOT NULL CHECK(length(image_set_digest) = 64),
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE pi_prompt_image_evidence (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL
+                    REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                image_index INTEGER NOT NULL CHECK(image_index >= 0),
+                mime_type TEXT NOT NULL CHECK(mime_type IN (
+                    'image/png', 'image/jpeg', 'image/gif', 'image/webp'
+                )),
+                content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
+                byte_length INTEGER NOT NULL CHECK(byte_length > 0),
+                evidence_version INTEGER NOT NULL CHECK(evidence_version = 1),
+                created_at TEXT NOT NULL,
+                UNIQUE(runtime_input_delivery_id, image_index)
+            );
+            "#,
+        )?;
+
+        transaction.execute(
+            "UPDATE agent_profile
+             SET default_permission_config_json =
+                 json_set(default_permission_config_json, '$.values.approval_mode', 'partial_managed')
+             WHERE selected_runtime_adapter_kind = 'pi'
+               AND json_valid(default_permission_config_json)
+               AND json_extract(default_permission_config_json, '$.values.approval_mode') = 'managed'",
+            [],
+        )?;
+        transaction.execute(
+            "UPDATE agent_run
+             SET runtime_permission_config_json =
+                     json_set(runtime_permission_config_json, '$.values.approval_mode', 'partial_managed'),
+                 effective_config_json =
+                     json_set(effective_config_json, '$.runtime.permissions.values.approval_mode', 'partial_managed')
+             WHERE runtime_adapter_kind = 'pi'
+               AND json_valid(runtime_permission_config_json)
+               AND json_valid(effective_config_json)
+               AND json_extract(runtime_permission_config_json, '$.values.approval_mode') = 'managed'",
+            [],
+        )?;
+        transaction.execute(
+            "UPDATE rovai_data_contract
+             SET contract_version = ?1, projection_schema_version = ?2,
+                 updated_at = datetime('now') WHERE singleton = 1",
+            params![
+                V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES(136, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
         if let Some((table, row_id)) = self
             .connection
             .query_row("PRAGMA foreign_key_check", [], |row| {
@@ -21275,7 +21759,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_single_chat_attachments_v137(&mut self) -> Result<()> {
+    fn migrate_source_path_user_attachments_v137(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -21290,108 +21774,372 @@ impl Database {
             || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
         {
             anyhow::bail!(
-                "Single Chat Attachment migration requires the exact preceding data contract"
+                "Source-path User Attachment migration requires the exact preceding data contract"
             );
         }
         transaction.execute_batch(
             r#"
-            CREATE TABLE single_chat_prepared_attachment (
-                id TEXT PRIMARY KEY,
-                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
-                conversation_id TEXT NOT NULL
-                    REFERENCES conversation(id) ON DELETE CASCADE,
-                ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
-                display_name TEXT NOT NULL,
-                kind TEXT NOT NULL CHECK(kind IN ('file', 'directory')),
-                file_count INTEGER NOT NULL CHECK(file_count >= 0),
-                media_type TEXT NOT NULL,
-                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
-                content_digest TEXT NOT NULL,
-                storage_path TEXT NOT NULL UNIQUE,
-                preview_kind TEXT NOT NULL CHECK(preview_kind IN ('image', 'none')),
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                UNIQUE(conversation_id, ordinal)
-            );
-            CREATE INDEX single_chat_prepared_attachment_conversation_idx
-                ON single_chat_prepared_attachment(conversation_id, ordinal);
-            CREATE INDEX single_chat_prepared_attachment_expiry_idx
-                ON single_chat_prepared_attachment(expires_at);
+            ALTER TABLE camp_composer_draft
+                ADD COLUMN source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(source_attachments_json)
+                    AND json_type(source_attachments_json) = 'array');
+            ALTER TABLE pending_camp_input
+                ADD COLUMN source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(source_attachments_json)
+                    AND json_type(source_attachments_json) = 'array');
+            ALTER TABLE pending_input_edit_session
+                ADD COLUMN working_source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(working_source_attachments_json)
+                    AND json_type(working_source_attachments_json) = 'array');
+            ALTER TABLE camp_message
+                ADD COLUMN source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(source_attachments_json)
+                    AND json_type(source_attachments_json) = 'array');
 
-            CREATE TABLE single_chat_message_attachment (
-                id TEXT PRIMARY KEY,
-                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
-                conversation_id TEXT NOT NULL
-                    REFERENCES conversation(id) ON DELETE CASCADE,
-                conversation_message_id TEXT NOT NULL
-                    REFERENCES conversation_message(id) ON DELETE CASCADE,
-                position INTEGER NOT NULL CHECK(position >= 0),
-                display_name TEXT NOT NULL,
-                kind TEXT NOT NULL CHECK(kind IN ('file', 'directory')),
-                file_count INTEGER NOT NULL CHECK(file_count >= 0),
-                media_type TEXT NOT NULL,
-                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
-                content_digest TEXT NOT NULL,
-                storage_path TEXT NOT NULL UNIQUE,
-                preview_kind TEXT NOT NULL CHECK(preview_kind IN ('image', 'none')),
-                created_at TEXT NOT NULL,
-                UNIQUE(conversation_message_id, position)
-            );
-            CREATE INDEX single_chat_message_attachment_conversation_idx
-                ON single_chat_message_attachment(conversation_id, conversation_message_id, position);
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.47', projection_schema_version = 88,
+                updated_at = datetime('now')
+            WHERE singleton = 1;
 
-            CREATE TRIGGER single_chat_prepared_attachment_scope_insert
-            BEFORE INSERT ON single_chat_prepared_attachment
-            WHEN NOT EXISTS(
-                SELECT 1 FROM conversation
-                WHERE id = NEW.conversation_id
-                  AND camp_id = NEW.camp_id
-                  AND kind = 'single_chat'
-                  AND ended_at IS NULL
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'Single Chat prepared attachment requires an active conversation');
-            END;
-
-            CREATE TRIGGER single_chat_message_attachment_scope_insert
-            BEFORE INSERT ON single_chat_message_attachment
-            WHEN NOT EXISTS(
-                SELECT 1
-                FROM conversation_message
-                JOIN conversation
-                  ON conversation.id = conversation_message.conversation_id
-                WHERE conversation_message.id = NEW.conversation_message_id
-                  AND conversation_message.conversation_id = NEW.conversation_id
-                  AND conversation_message.author_type = 'user'
-                  AND conversation.camp_id = NEW.camp_id
-                  AND conversation.kind = 'single_chat'
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'Single Chat message attachment lineage is invalid');
-            END;
-
-            CREATE TRIGGER single_chat_message_attachment_immutable
-            BEFORE UPDATE ON single_chat_message_attachment
-            BEGIN
-                SELECT RAISE(ABORT, 'Single Chat message attachment is immutable');
-            END;
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES(137, datetime('now'));
             "#,
         )?;
-        transaction.execute(
-            "UPDATE rovai_data_contract
-             SET contract_version = ?1, projection_schema_version = ?2,
-                 updated_at = datetime('now') WHERE singleton = 1",
-            params![
-                CURRENT_DATA_CONTRACT_VERSION,
-                CURRENT_PROJECTION_SCHEMA_VERSION
-            ],
-        )?;
-        transaction.execute(
-            "INSERT INTO schema_migration(version, applied_at) VALUES(137, datetime('now'))",
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_pi_native_input_v138(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton = 1",
             [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if contract != V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || schema != V138_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
+            || !pi_runtime_v136_schema_matches(&transaction)?
+            || !source_attachment_v137_schema_matches(&transaction)?
+        {
+            anyhow::bail!("Pi native-input migration requires the exact v1.47/schema 88 source");
+        }
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE pi_prompt_image_evidence
+                RENAME TO pi_prompt_image_evidence_v137;
+
+            CREATE TABLE pi_prompt_image_evidence (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL
+                    REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                image_index INTEGER NOT NULL CHECK(image_index >= 0),
+                mime_type TEXT NOT NULL CHECK(mime_type IN (
+                    'image/png', 'image/jpeg', 'image/gif', 'image/webp'
+                )),
+                content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
+                byte_length INTEGER NOT NULL CHECK(byte_length > 0),
+                evidence_version INTEGER NOT NULL CHECK(evidence_version = 2),
+                created_at TEXT NOT NULL,
+                UNIQUE(runtime_input_delivery_id, image_index)
+            );
+
+            INSERT INTO pi_prompt_image_evidence(
+                id, runtime_input_delivery_id, image_index, mime_type,
+                content_digest, byte_length, evidence_version, created_at
+            )
+            SELECT id, runtime_input_delivery_id, image_index, mime_type,
+                   content_digest, byte_length, 2, created_at
+            FROM pi_prompt_image_evidence_v137;
+
+            DROP TABLE pi_prompt_image_evidence_v137;
+            DROP TABLE pi_runtime_prompt_transform;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.48', projection_schema_version = 89,
+                updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES(138, datetime('now'));
+            "#,
         )?;
         transaction.commit()?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v138 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_pi_native_execution_v139(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if contract != V139_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || schema != V139_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
+            || !pi_runtime_v135_schema_matches(&transaction)?
+            || !pi_native_input_v138_schema_matches(&transaction)?
+            || !source_attachment_v137_schema_matches(&transaction)?
+        {
+            anyhow::bail!(
+                "Pi native execution migration requires the exact v1.48/schema 89 source"
+            );
+        }
+        transaction.execute_batch(
+            r#"
+            DROP TRIGGER pi_managed_input_acceptance_update_guard;
+
+            UPDATE agent_profile
+            SET default_permission_config_json =
+                    json_set(default_permission_config_json, '$.values', json('{}'))
+            WHERE selected_runtime_adapter_kind = 'pi'
+              AND json_valid(default_permission_config_json);
+
+            UPDATE adapter_capability_snapshot
+            SET permission_schema_version = 1,
+                permission_schema_digest =
+                    '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+                permission_options_json = '[]'
+            WHERE installation_id IN (
+                SELECT id FROM adapter_installation WHERE adapter_kind = 'pi'
+            );
+
+            UPDATE agent_run
+            SET runtime_permission_config_json =
+                    json_set(runtime_permission_config_json, '$.values', json('{}')),
+                effective_config_json =
+                    json_set(effective_config_json, '$.runtime.permissions.values', json('{}'))
+            WHERE runtime_adapter_kind = 'pi'
+              AND status IN ('queued', 'running', 'waiting')
+              AND json_valid(runtime_permission_config_json)
+              AND json_valid(effective_config_json);
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.49', projection_schema_version = 90,
+                updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES(139, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v139 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_single_chat_v140(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+                "SELECT contract_version, projection_schema_version, classifier_version
+                 FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            if contract != V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                || schema != V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                || !load_current_migration_state(&transaction)?.admits(
+                    &contract,
+                    schema,
+                    &classifier,
+                )
+                || !source_attachment_v137_schema_matches(&transaction)?
+            {
+                anyhow::bail!("Single Chat migration requires the exact v1.49/schema 90 source");
+            }
+
+            rebuild_conversation_for_single_chat_v140(&transaction)?;
+            rebuild_camp_turn_for_single_chat_v140(&transaction)?;
+            rebuild_agent_run_for_single_chat_v140(&transaction)?;
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE conversation_message
+                    ADD COLUMN source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                    CHECK(json_valid(source_attachments_json)
+                        AND json_type(source_attachments_json) = 'array');
+
+                CREATE TABLE single_chat_composer_draft (
+                    conversation_id TEXT PRIMARY KEY
+                        REFERENCES conversation(id) ON DELETE CASCADE,
+                    revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+                    source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(source_attachments_json)
+                            AND json_type(source_attachments_json) = 'array'),
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE single_chat_pending_input (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL
+                        REFERENCES conversation(id) ON DELETE CASCADE,
+                    enqueue_sequence INTEGER NOT NULL CHECK(enqueue_sequence > 0),
+                    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+                    state TEXT NOT NULL DEFAULT 'queued'
+                        CHECK(state IN ('queued', 'needs_repair', 'published', 'cancelled')),
+                    body TEXT NOT NULL,
+                    source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(source_attachments_json)
+                            AND json_type(source_attachments_json) = 'array'),
+                    user_id TEXT NOT NULL,
+                    published_conversation_message_id TEXT
+                        REFERENCES conversation_message(id),
+                    published_camp_turn_id TEXT REFERENCES camp_turn(id),
+                    published_agent_run_id TEXT REFERENCES agent_run(id),
+                    published_at TEXT,
+                    last_attempt_error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(conversation_id, enqueue_sequence),
+                    UNIQUE(conversation_id, id),
+                    CHECK((state = 'published') =
+                        (published_conversation_message_id IS NOT NULL)),
+                    CHECK((state = 'published') = (published_camp_turn_id IS NOT NULL)),
+                    CHECK((state = 'published') = (published_agent_run_id IS NOT NULL))
+                );
+                CREATE INDEX single_chat_pending_input_queue_idx
+                    ON single_chat_pending_input(conversation_id, enqueue_sequence)
+                    WHERE state IN ('queued', 'needs_repair');
+
+                CREATE TABLE single_chat_pending_input_edit_session (
+                    conversation_id TEXT PRIMARY KEY
+                        REFERENCES conversation(id) ON DELETE CASCADE,
+                    pending_input_id TEXT NOT NULL UNIQUE,
+                    edit_token TEXT NOT NULL,
+                    base_pending_revision INTEGER NOT NULL CHECK(base_pending_revision > 0),
+                    recovery_required INTEGER NOT NULL DEFAULT 0
+                        CHECK(recovery_required IN (0, 1)),
+                    working_body TEXT NOT NULL,
+                    working_source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(working_source_attachments_json)
+                            AND json_type(working_source_attachments_json) = 'array'),
+                    FOREIGN KEY(conversation_id, pending_input_id)
+                        REFERENCES single_chat_pending_input(conversation_id, id)
+                        ON DELETE CASCADE
+                );
+
+                CREATE TRIGGER conversation_message_single_chat_attachment_insert_guard
+                BEFORE INSERT ON conversation_message
+                WHEN NEW.source_attachments_json <> '[]'
+                  AND NOT EXISTS(
+                      SELECT 1 FROM conversation
+                      WHERE conversation.id = NEW.conversation_id
+                        AND conversation.kind = 'single_chat'
+                        AND NEW.author_type = 'user'
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'Conversation Message Source Attachments require a Single Chat user message');
+                END;
+
+                CREATE TRIGGER conversation_message_single_chat_attachment_update_guard
+                BEFORE UPDATE OF source_attachments_json, conversation_id, author_type
+                ON conversation_message
+                WHEN NEW.source_attachments_json <> OLD.source_attachments_json
+                  OR (
+                      NEW.source_attachments_json <> '[]'
+                      AND NOT EXISTS(
+                          SELECT 1 FROM conversation
+                          WHERE conversation.id = NEW.conversation_id
+                            AND conversation.kind = 'single_chat'
+                            AND NEW.author_type = 'user'
+                      )
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'Conversation Message Source Attachments are immutable and require a Single Chat user message');
+                END;
+
+                CREATE TRIGGER single_chat_composer_draft_scope_insert
+                BEFORE INSERT ON single_chat_composer_draft
+                WHEN NOT EXISTS(
+                    SELECT 1 FROM conversation
+                    WHERE conversation.id = NEW.conversation_id
+                      AND conversation.kind = 'single_chat'
+                      AND conversation.ended_at IS NULL
+                )
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'Single Chat Composer Draft requires an active Single Chat');
+                END;
+
+                CREATE TRIGGER single_chat_pending_input_scope_insert
+                BEFORE INSERT ON single_chat_pending_input
+                WHEN NOT EXISTS(
+                    SELECT 1 FROM conversation
+                    WHERE conversation.id = NEW.conversation_id
+                      AND conversation.kind = 'single_chat'
+                      AND conversation.ended_at IS NULL
+                )
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'Single Chat Pending Input requires an active Single Chat');
+                END;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.50', projection_schema_version = 91,
+                    updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES(140, datetime('now'));
+                "#,
+            )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "conversation",
+                    "camp_turn",
+                    "agent_run",
+                    "conversation_message",
+                    "single_chat_composer_draft",
+                    "single_chat_pending_input",
+                    "single_chat_pending_input_edit_session",
+                ],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v140 migration left a foreign-key violation in {table} row {row_id}");
+        }
         Ok(())
     }
 
@@ -26125,10 +26873,10 @@ fn rebuild_table_to_v135_source_for_test(
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
+fn downgrade_current_schema_to_v139_source_for_test(connection: &Connection) {
     let applied: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 136)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)",
             [],
             |row| row.get(0),
         )
@@ -26136,7 +26884,7 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
     if !applied {
         return;
     }
-    let active_single_chat_rows: i64 = connection
+    let single_chat_rows: i64 = connection
         .query_row(
             "SELECT
                 (SELECT count(*) FROM conversation WHERE kind = 'single_chat')
@@ -26147,8 +26895,8 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
         )
         .unwrap();
     assert_eq!(
-        active_single_chat_rows, 0,
-        "the v135 source fixture cannot represent Single Chat rows"
+        single_chat_rows, 0,
+        "the v139 source fixture cannot represent Single Chat rows"
     );
     connection
         .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -26156,9 +26904,16 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
     let transaction = connection.unchecked_transaction().unwrap();
     transaction
         .execute_batch(
-            "DROP TABLE IF EXISTS single_chat_message_attachment;
-             DROP TABLE IF EXISTS single_chat_prepared_attachment;
-             DELETE FROM schema_migration WHERE version = 137;",
+            r#"
+            DROP TRIGGER IF EXISTS conversation_message_single_chat_attachment_insert_guard;
+            DROP TRIGGER IF EXISTS conversation_message_single_chat_attachment_update_guard;
+            DROP TRIGGER IF EXISTS single_chat_composer_draft_scope_insert;
+            DROP TRIGGER IF EXISTS single_chat_pending_input_scope_insert;
+            DROP TABLE IF EXISTS single_chat_pending_input_edit_session;
+            DROP TABLE IF EXISTS single_chat_pending_input;
+            DROP TABLE IF EXISTS single_chat_composer_draft;
+            ALTER TABLE conversation_message DROP COLUMN source_attachments_json;
+            "#,
         )
         .unwrap();
 
@@ -26169,15 +26924,15 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
             |row| row.get(0),
         )
         .unwrap();
-    let agent_run_v135 = agent_run_schema
+    let agent_run_v139 = agent_run_schema
         .replacen(
             "CREATE TABLE agent_run",
-            "CREATE TABLE agent_run_v135_source",
+            "CREATE TABLE agent_run_v139_source",
             1,
         )
         .replacen(
             "CREATE TABLE \"agent_run\"",
-            "CREATE TABLE agent_run_v135_source",
+            "CREATE TABLE agent_run_v139_source",
             1,
         )
         .replacen(
@@ -26208,13 +26963,13 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
             "",
             1,
         );
-    assert!(agent_run_v135.contains("CREATE TABLE agent_run_v135_source"));
-    assert!(!agent_run_v135.contains("response_delivery"));
+    assert!(agent_run_v139.contains("CREATE TABLE agent_run_v139_source"));
+    assert!(!agent_run_v139.contains("response_delivery"));
     rebuild_table_to_v135_source_for_test(
         &transaction,
         "agent_run",
-        "agent_run_v135_source",
-        &agent_run_v135,
+        "agent_run_v139_source",
+        &agent_run_v139,
         &[
             "agent_run_active_single_chat_conversation_unique",
             "agent_run_single_chat_route_update_guard",
@@ -26228,15 +26983,15 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
             |row| row.get(0),
         )
         .unwrap();
-    let camp_turn_v135 = camp_turn_schema
+    let camp_turn_v139 = camp_turn_schema
         .replacen(
             "CREATE TABLE camp_turn",
-            "CREATE TABLE camp_turn_v135_source",
+            "CREATE TABLE camp_turn_v139_source",
             1,
         )
         .replacen(
             "CREATE TABLE \"camp_turn\"",
-            "CREATE TABLE camp_turn_v135_source",
+            "CREATE TABLE camp_turn_v139_source",
             1,
         )
         .replacen(
@@ -26255,13 +27010,13 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
             "UNIQUE(camp_id, trigger_type, trigger_id)",
             1,
         );
-    assert!(camp_turn_v135.contains("CREATE TABLE camp_turn_v135_source"));
-    assert!(!camp_turn_v135.contains("conversation_message"));
+    assert!(camp_turn_v139.contains("CREATE TABLE camp_turn_v139_source"));
+    assert!(!camp_turn_v139.contains("conversation_message"));
     rebuild_table_to_v135_source_for_test(
         &transaction,
         "camp_turn",
-        "camp_turn_v135_source",
-        &camp_turn_v135,
+        "camp_turn_v139_source",
+        &camp_turn_v139,
         &[],
     );
 
@@ -26272,15 +27027,15 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
             |row| row.get(0),
         )
         .unwrap();
-    let conversation_v135 = conversation_schema
+    let conversation_v139 = conversation_schema
         .replacen(
             "CREATE TABLE conversation",
-            "CREATE TABLE conversation_v135_source",
+            "CREATE TABLE conversation_v139_source",
             1,
         )
         .replacen(
             "CREATE TABLE \"conversation\"",
-            "CREATE TABLE conversation_v135_source",
+            "CREATE TABLE conversation_v139_source",
             1,
         )
         .replacen(
@@ -26309,13 +27064,13 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
             "UNIQUE(camp_id, agent_id)",
             1,
         );
-    assert!(conversation_v135.contains("CREATE TABLE conversation_v135_source"));
-    assert!(!conversation_v135.contains("kind IN ('camp_member', 'single_chat')"));
+    assert!(conversation_v139.contains("CREATE TABLE conversation_v139_source"));
+    assert!(!conversation_v139.contains("kind IN ('camp_member', 'single_chat')"));
     rebuild_table_to_v135_source_for_test(
         &transaction,
         "conversation",
-        "conversation_v135_source",
-        &conversation_v135,
+        "conversation_v139_source",
+        &conversation_v139,
         &[
             "conversation_camp_member_unique",
             "conversation_active_single_chat_unique",
@@ -26324,24 +27079,263 @@ fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
 
     transaction
         .execute_batch(
-            "DELETE FROM schema_migration WHERE version = 136;
+            "DELETE FROM schema_migration WHERE version = 140;
              UPDATE rovai_data_contract
-             SET contract_version = 'v1.45', projection_schema_version = 86
+             SET contract_version = 'v1.49', projection_schema_version = 90
              WHERE singleton = 1;",
         )
         .unwrap();
-    validate_migration_foreign_keys(&transaction, &["agent_run", "camp_turn", "conversation"])
-        .unwrap();
+    validate_migration_foreign_keys(
+        &transaction,
+        &[
+            "agent_run",
+            "camp_turn",
+            "conversation",
+            "conversation_message",
+        ],
+    )
+    .unwrap();
     transaction.commit().unwrap();
     connection
         .execute_batch("PRAGMA foreign_keys = ON;")
         .unwrap();
-    assert_eq!(
-        connection
-            .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v138_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v139_source_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 139)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            CREATE TRIGGER pi_managed_input_acceptance_update_guard
+            BEFORE UPDATE OF status ON runtime_input_delivery
+            WHEN NEW.status = 'accepted'
+              AND EXISTS(
+                  SELECT 1
+                  FROM context_manifest AS manifest
+                  JOIN native_session_bootstrap_evidence AS bootstrap
+                    ON bootstrap.id = manifest.bootstrap_evidence_id
+                  WHERE manifest.id = NEW.context_manifest_id
+                    AND bootstrap.delivery_mode = 'managed_system_prompt'
+              )
+              AND NOT EXISTS(
+                  SELECT 1 FROM pi_managed_input_receipt AS receipt
+                  WHERE receipt.runtime_input_delivery_id = NEW.id
+                    AND receipt.agent_run_id = NEW.agent_run_id
+                    AND receipt.execution_epoch = NEW.execution_epoch
+                    AND receipt.native_binding_id = NEW.native_binding_id
+                    AND receipt.native_binding_generation = NEW.native_binding_generation
+                    AND receipt.receipt_version IN (1, 2)
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'Pi managed input receipt is required');
+            END;
+
+            DELETE FROM schema_migration WHERE version = 139;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.48', projection_schema_version = 89
+            WHERE singleton = 1;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v137_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v138_source_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 138)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            ALTER TABLE pi_prompt_image_evidence
+                RENAME TO pi_prompt_image_evidence_v138;
+            CREATE TABLE pi_prompt_image_evidence (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL
+                    REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                image_index INTEGER NOT NULL CHECK(image_index >= 0),
+                mime_type TEXT NOT NULL CHECK(mime_type IN (
+                    'image/png', 'image/jpeg', 'image/gif', 'image/webp'
+                )),
+                content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
+                byte_length INTEGER NOT NULL CHECK(byte_length > 0),
+                evidence_version INTEGER NOT NULL CHECK(evidence_version = 1),
+                created_at TEXT NOT NULL,
+                UNIQUE(runtime_input_delivery_id, image_index)
+            );
+            INSERT INTO pi_prompt_image_evidence(
+                id, runtime_input_delivery_id, image_index, mime_type,
+                content_digest, byte_length, evidence_version, created_at
+            )
+            SELECT id, runtime_input_delivery_id, image_index, mime_type,
+                   content_digest, byte_length, 1, created_at
+            FROM pi_prompt_image_evidence_v138;
+            DROP TABLE pi_prompt_image_evidence_v138;
+
+            CREATE TABLE pi_runtime_prompt_transform (
+                id TEXT PRIMARY KEY,
+                runtime_input_delivery_id TEXT NOT NULL UNIQUE
+                    REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                transform_version INTEGER NOT NULL CHECK(transform_version = 1),
+                transform_json TEXT NOT NULL
+                    CHECK(json_valid(transform_json) AND json_type(transform_json) = 'object'),
+                original_payload_digest TEXT NOT NULL CHECK(length(original_payload_digest) = 64),
+                runtime_payload_digest TEXT NOT NULL CHECK(length(runtime_payload_digest) = 64),
+                runtime_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                source_path TEXT,
+                source_content_blob_id TEXT REFERENCES managed_blob(id),
+                expanded_content_blob_id TEXT REFERENCES managed_blob(id),
+                image_count INTEGER NOT NULL CHECK(image_count >= 0),
+                image_set_digest TEXT NOT NULL CHECK(length(image_set_digest) = 64),
+                created_at TEXT NOT NULL
+            );
+
+            DELETE FROM schema_migration WHERE version = 138;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.47', projection_schema_version = 88
+            WHERE singleton = 1;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v136_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v137_source_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 137)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            "ALTER TABLE camp_composer_draft DROP COLUMN source_attachments_json;
+             ALTER TABLE pending_camp_input DROP COLUMN source_attachments_json;
+             ALTER TABLE pending_input_edit_session DROP COLUMN working_source_attachments_json;
+             ALTER TABLE camp_message DROP COLUMN source_attachments_json;
+             DELETE FROM schema_migration WHERE version = 137;
+             UPDATE rovai_data_contract
+             SET contract_version = 'v1.46', projection_schema_version = 87
+             WHERE singleton = 1;",
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v135_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v136_source_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 136)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    let transaction = connection.unchecked_transaction().unwrap();
+    let table_sql: String = transaction
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'table' AND name = 'pi_managed_input_receipt'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let dependent_schema = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT sql FROM sqlite_master
+                 WHERE tbl_name = 'pi_managed_input_receipt'
+                   AND type IN ('index', 'trigger') AND sql IS NOT NULL
+                 ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    let acceptance_trigger: String = transaction
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger'
+             AND name = 'pi_managed_input_acceptance_update_guard'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    transaction
+        .execute_batch(
+            "DROP TRIGGER pi_managed_input_acceptance_update_guard;
+             DROP TRIGGER pi_managed_input_receipt_delete_guard;
+             DROP TRIGGER pi_managed_input_receipt_update_guard;
+             DROP TRIGGER pi_managed_input_receipt_insert_guard;
+             DROP INDEX pi_managed_input_receipt_run_idx;
+             ALTER TABLE pi_managed_input_receipt RENAME TO pi_managed_input_receipt_v136;",
+        )
+        .unwrap();
+    let source_sql = table_sql.replace("receipt_version IN (1, 2)", "receipt_version = 1");
+    transaction.execute_batch(&source_sql).unwrap();
+    transaction
+        .execute_batch(
+            "INSERT INTO pi_managed_input_receipt
+             SELECT * FROM pi_managed_input_receipt_v136 WHERE receipt_version = 1;
+             DROP TABLE pi_managed_input_receipt_v136;
+             DROP TABLE pi_runtime_prompt_transform;
+             DROP TABLE pi_prompt_image_evidence;",
+        )
+        .unwrap();
+    for schema in dependent_schema {
+        transaction
+            .execute_batch(&schema.replace("receipt_version IN (1, 2)", "receipt_version = 1"))
+            .unwrap();
+    }
+    transaction
+        .execute_batch(
+            &acceptance_trigger.replace("receipt_version IN (1, 2)", "receipt_version = 1"),
+        )
+        .unwrap();
+    transaction
+        .execute(
+            "UPDATE rovai_data_contract
+             SET contract_version = ?1, projection_schema_version = ?2
+             WHERE singleton = 1",
+            params![
+                V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V136_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
+        )
+        .unwrap();
+    transaction
+        .execute("DELETE FROM schema_migration WHERE version = 136", [])
+        .unwrap();
+    transaction.commit().unwrap();
 }
 
 #[cfg(test)]
@@ -28665,6 +29659,9 @@ mod tests {
             v135: version >= 135,
             v136: version >= 136,
             v137: version >= 137,
+            v138: version >= 138,
+            v139: version >= 139,
+            v140: version >= 140,
         }
     }
 
@@ -28770,16 +29767,34 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                140,
+            ),
+            (
+                "v1.49/schema-90 before Single Chat",
+                V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                139,
+            ),
+            (
+                "v1.48/schema-89 before Pi native execution convergence",
+                V139_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V139_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                138,
+            ),
+            (
+                "v1.47/schema-88 before Pi native input",
+                V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V138_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 137,
             ),
             (
-                "v1.46/schema-87 before Single Chat Attachments",
+                "v1.46/schema-87 before Source-path User Attachments",
                 V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 136,
             ),
             (
-                "v1.45/schema-86 before Single Chat",
+                "v1.45/schema-86 before Pi native capabilities",
                 V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V136_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 135,
@@ -29151,7 +30166,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(137);
+        let current = migration_state_through(140);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -29165,21 +30180,48 @@ mod tests {
         missing_cancellation_migration.v134 = false;
         let mut missing_pi_migration = current;
         missing_pi_migration.v135 = false;
-        let mut missing_single_chat_migration = current;
-        missing_single_chat_migration.v136 = false;
-        let mut missing_single_chat_attachment_migration = current;
-        missing_single_chat_attachment_migration.v137 = false;
+        let mut missing_pi_native_capabilities = current;
+        missing_pi_native_capabilities.v136 = false;
+        let mut missing_source_attachments = current;
+        missing_source_attachments.v137 = false;
+        let mut missing_pi_native_input = current;
+        missing_pi_native_input.v138 = false;
+        let mut missing_pi_native_execution = current;
+        missing_pi_native_execution.v139 = false;
+        let mut missing_single_chat = current;
+        missing_single_chat.v140 = false;
         let rejected = [
             (
-                "current marker without Single Chat Attachment migration",
-                missing_single_chat_attachment_migration,
+                "current marker without Single Chat migration",
+                missing_single_chat,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
                 V116_CLASSIFIER_VERSION,
             ),
             (
-                "current marker without Single Chat migration",
-                missing_single_chat_migration,
+                "current marker without Pi native execution migration",
+                missing_pi_native_execution,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without Pi native-input migration",
+                missing_pi_native_input,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without Source Attachment migration",
+                missing_source_attachments,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without Pi native-capabilities migration",
+                missing_pi_native_capabilities,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
                 V116_CLASSIFIER_VERSION,
@@ -29444,7 +30486,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(137));
+        assert_eq!(state, migration_state_through(140));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -31867,103 +32909,102 @@ mod tests {
             .execute_batch("DROP TRIGGER reject_pi_receipt")
             .unwrap();
         database.migrate_pi_runtime_v135().unwrap();
-        assert_eq!(
-            database
-                .connection()
-                .query_row(
-                    "SELECT contract_version, projection_schema_version
-                     FROM rovai_data_contract WHERE singleton = 1",
-                    [],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .unwrap(),
-            (
-                V136_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_string(),
-                V136_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
-            )
-        );
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
-        database
-            .connection()
-            .execute_batch(
-                "CREATE TEMP TRIGGER reject_single_chat_receipt
-                 BEFORE INSERT ON schema_migration
-                 WHEN NEW.version = 136
-                 BEGIN SELECT RAISE(ABORT, 'Single Chat receipt fixture failure'); END;",
-            )
-            .unwrap();
+        database.migrate_pi_native_capabilities_v136().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_source_attachment_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 137 BEGIN SELECT RAISE(ABORT, 'Source Attachment receipt fixture failure'); END;"
+        ).unwrap();
         assert!(
             database
-                .migrate_single_chat_v136()
+                .migrate_source_path_user_attachments_v137()
                 .unwrap_err()
                 .to_string()
-                .contains("Single Chat receipt fixture failure")
-        );
-        assert!(!database.schema_migration_applied(136).unwrap());
-        assert!(
-            database
-                .connection()
-                .prepare("SELECT kind FROM conversation")
-                .is_err(),
-            "a rejected v136 migration must roll back its table rebuilds"
-        );
-        database
-            .connection()
-            .execute_batch("DROP TRIGGER reject_single_chat_receipt")
-            .unwrap();
-        database.migrate_single_chat_v136().unwrap();
-        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
-        assert_eq!(
-            database
-                .connection()
-                .query_row(
-                    "SELECT contract_version, projection_schema_version
-                     FROM rovai_data_contract WHERE singleton = 1",
-                    [],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .unwrap(),
-            (
-                V137_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_string(),
-                V137_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
-            )
-        );
-        database
-            .connection()
-            .execute_batch(
-                "CREATE TEMP TRIGGER reject_single_chat_attachment_receipt
-                 BEFORE INSERT ON schema_migration
-                 WHEN NEW.version = 137
-                 BEGIN SELECT RAISE(ABORT, 'Single Chat Attachment receipt fixture failure'); END;",
-            )
-            .unwrap();
-        assert!(
-            database
-                .migrate_single_chat_attachments_v137()
-                .unwrap_err()
-                .to_string()
-                .contains("Single Chat Attachment receipt fixture failure")
+                .contains("Source Attachment receipt fixture failure")
         );
         assert!(!database.schema_migration_applied(137).unwrap());
         assert!(
             database
                 .connection()
-                .prepare("SELECT id FROM single_chat_prepared_attachment")
-                .is_err(),
-            "a rejected v137 migration must roll back private attachment tables"
+                .prepare("SELECT source_attachments_json FROM camp_composer_draft")
+                .is_err()
         );
         database
             .connection()
-            .execute_batch("DROP TRIGGER reject_single_chat_attachment_receipt")
+            .execute_batch("DROP TRIGGER reject_source_attachment_receipt")
             .unwrap();
-        database.migrate_single_chat_attachments_v137().unwrap();
-        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        database
+            .migrate_source_path_user_attachments_v137()
+            .unwrap();
+        assert!(source_attachment_v137_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_pi_native_input_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 138 BEGIN SELECT RAISE(ABORT, 'Pi native input receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_pi_native_input_v138()
+                .unwrap_err()
+                .to_string()
+                .contains("Pi native input receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(138).unwrap());
+        assert!(pi_runtime_v136_schema_matches(database.connection()).unwrap());
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_pi_native_input_receipt")
+            .unwrap();
+        database.migrate_pi_native_input_v138().unwrap();
+        assert!(pi_native_input_v138_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_pi_native_execution_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 139 BEGIN SELECT RAISE(ABORT, 'Pi native execution receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_pi_native_execution_v139()
+                .unwrap_err()
+                .to_string()
+                .contains("Pi native execution receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(139).unwrap());
+        assert!(pi_runtime_v135_schema_matches(database.connection()).unwrap());
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_pi_native_execution_receipt")
+            .unwrap();
+        database.migrate_pi_native_execution_v139().unwrap();
+        assert!(pi_native_execution_v139_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_single_chat_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 140 BEGIN SELECT RAISE(ABORT, 'Single Chat receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_single_chat_v140()
+                .unwrap_err()
+                .to_string()
+                .contains("Single Chat receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(140).unwrap());
+        assert!(!single_chat_v140_schema_matches(database.connection()).unwrap());
         assert!(
             database
                 .connection()
                 .prepare("SELECT id FROM single_chat_message_attachment")
-                .is_ok()
+                .is_err()
         );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_single_chat_receipt")
+            .unwrap();
+        database.migrate_single_chat_v140().unwrap();
+        assert!(single_chat_v140_schema_matches(database.connection()).unwrap());
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(before, after.0);
@@ -31997,7 +33038,56 @@ mod tests {
     }
 
     #[test]
-    fn v135_pi_receipt_is_immutable_but_cascades_through_parent_and_camp_delete() {
+    fn v137_adds_source_ref_owners_without_reclassifying_legacy_prepared_drafts() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        downgrade_current_schema_to_v136_source_for_test(database.connection());
+        let camp_id = "rvcamp_01m2j4wz7xn8q3k5s6t9v0abcd";
+        crate::camp_attachment::insert_test_camp(&database, camp_id);
+        database.connection().execute(
+            "INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
+             VALUES (?1, 'legacy draft', '2026-09-04T00:00:00Z', '2026-09-04T00:00:00Z', '2026-09-11T00:00:00Z')",
+            [camp_id],
+        ).unwrap();
+        database
+            .connection()
+            .execute(
+                "INSERT INTO prepared_attachment(
+                id, camp_id, ordinal, display_name, media_type, byte_size,
+                content_digest, storage_path, preview_kind, state, created_at, updated_at
+             ) VALUES (
+                '00000000-0000-4000-8000-000000000137', ?1, 0, 'legacy.txt',
+                'text/plain', 6, ?2, '/tmp/legacy-prepared-v137.txt', 'none', 'ready',
+                '2026-09-04T00:00:00Z', '2026-09-04T00:00:00Z'
+             )",
+                params![camp_id, "1".repeat(64)],
+            )
+            .unwrap();
+
+        database
+            .migrate_source_path_user_attachments_v137()
+            .unwrap();
+
+        let (source_json, prepared_path): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT draft.source_attachments_json, prepared.storage_path
+             FROM camp_composer_draft AS draft
+             JOIN prepared_attachment AS prepared ON prepared.camp_id = draft.camp_id
+             WHERE draft.camp_id = ?1",
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(source_json, "[]");
+        assert_eq!(prepared_path, "/tmp/legacy-prepared-v137.txt");
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(_)
+        ));
+    }
+
+    #[test]
+    fn v135_through_v139_retires_receipt_admission_and_preserves_historical_cascades() {
         let (mut database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v134_source_for_test(database.connection());
         database.migrate_pi_runtime_v135().unwrap();
@@ -32023,6 +33113,33 @@ mod tests {
                      '3333333333333333333333333333333333333333333333333333333333333333',
                      1, 'text/plain', 'pi-v135/payload', 'present', 'normal',
                      '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z');
+
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'installation-pi-v135', 'pi', '/tmp/pi-v135', 'pi',
+                    'managed_default', 'manual', 'default', 1,
+                    1, 'valid', 1,
+                    '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z'
+                );
+                INSERT INTO adapter_capability_snapshot(
+                    installation_id, reported_version, executable_fingerprint,
+                    authentication_status, probe_status, permission_schema_version,
+                    permission_schema_digest, capabilities_json, protocols_json,
+                    model_catalog_json, permission_options_json, observed_at,
+                    last_attempted_at, last_successful_probe_at, stale_at, last_error,
+                    native_session_compatibility_key
+                ) VALUES (
+                    'installation-pi-v135', 'pi 0.84.4', 'sha256:pi-v135',
+                    'authenticated', 'ready', 1, 'legacy-pi-permission-digest',
+                    '[]', '["pi-jsonl-rpc-v1"]', '[]',
+                    '[{"key":"approval_mode"}]',
+                    '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z',
+                    '2026-09-03T00:00:00Z', NULL, NULL,
+                    'pi-jsonl-rpc-v1:managed-system-prompt-v1'
+                );
 
                 INSERT INTO camp(
                     id, title, project_binding_kind, project_path,
@@ -32226,6 +33343,165 @@ mod tests {
         database
             .connection()
             .execute(
+                r#"
+                UPDATE agent_run
+                SET runtime_permission_config_json =
+                        '{"adapterKind":"pi","schemaVersion":1,"values":{"approval_mode":"managed"}}',
+                    effective_config_json =
+                        '{"runtime":{"permissions":{"values":{"approval_mode":"managed"}}}}'
+                WHERE id = 'run-pi-v135'
+                "#,
+                [],
+            )
+            .unwrap();
+        database.migrate_pi_native_capabilities_v136().unwrap();
+        assert!(pi_runtime_v136_schema_matches(database.connection()).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT receipt_version FROM pi_managed_input_receipt WHERE id = 'receipt-pi-v135'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "Migration 136 must preserve historical V1 receipts"
+        );
+        let normalized_permissions: (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT json_extract(runtime_permission_config_json, '$.values.approval_mode'),
+                       json_extract(effective_config_json, '$.runtime.permissions.values.approval_mode')
+                FROM agent_run WHERE id = 'run-pi-v135'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            normalized_permissions,
+            ("partial_managed".to_string(), "partial_managed".to_string())
+        );
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO pi_runtime_prompt_transform(
+                    id, runtime_input_delivery_id, transform_version, transform_json,
+                    original_payload_digest, runtime_payload_digest, runtime_payload_blob_id,
+                    source_path, source_content_blob_id, expanded_content_blob_id,
+                    image_count, image_set_digest, created_at
+                ) VALUES (
+                    'transform-pi-v136', 'delivery-pi-v135', 1, '{}', ?1, ?1,
+                    'pi-v135-payload', NULL, NULL, NULL, 1, ?2,
+                    '2026-09-03T00:00:02Z'
+                )
+                "#,
+                params!["9".repeat(64), "8".repeat(64)],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO pi_prompt_image_evidence(
+                    id, runtime_input_delivery_id, image_index, mime_type,
+                    content_digest, byte_length, evidence_version, created_at
+                ) VALUES (
+                    'image-pi-v136', 'delivery-pi-v135', 0, 'image/png',
+                    ?1, 4, 1, '2026-09-03T00:00:02Z'
+                )
+                "#,
+                ["7".repeat(64)],
+            )
+            .unwrap();
+        database
+            .migrate_source_path_user_attachments_v137()
+            .unwrap();
+        database.migrate_pi_native_input_v138().unwrap();
+        assert!(pi_native_input_v138_schema_matches(database.connection()).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT evidence_version FROM pi_prompt_image_evidence WHERE id = 'image-pi-v136'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2
+        );
+        assert!(
+            !database
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pi_runtime_prompt_transform')",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap()
+        );
+        database.migrate_pi_native_execution_v139().unwrap();
+        assert!(pi_native_execution_v139_schema_matches(database.connection()).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM pi_managed_input_receipt WHERE id = 'receipt-pi-v135'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "v139 must preserve historical Receipt evidence"
+        );
+        assert!(
+            database
+                .connection()
+                .execute(
+                    "UPDATE pi_managed_input_receipt SET native_prompt_id = 'tampered'
+                     WHERE id = 'receipt-pi-v135'",
+                    [],
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("Pi managed input receipt is immutable")
+        );
+        let normalized_permissions: (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT json(runtime_permission_config_json -> '$.values'),
+                        json(effective_config_json -> '$.runtime.permissions.values')
+                 FROM agent_run WHERE id = 'run-pi-v135'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(normalized_permissions, ("{}".to_string(), "{}".to_string()));
+        let normalized_snapshot: (i64, String, String) = database
+            .connection()
+            .query_row(
+                "SELECT permission_schema_version, permission_schema_digest,
+                        json(permission_options_json)
+                 FROM adapter_capability_snapshot
+                 WHERE installation_id = 'installation-pi-v135'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            normalized_snapshot,
+            (
+                1,
+                "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945".to_string(),
+                "[]".to_string(),
+            )
+        );
+        database
+            .connection()
+            .execute(
                 "DELETE FROM runtime_input_delivery WHERE id = 'delivery-pi-v135'",
                 [],
             )
@@ -32239,6 +33515,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remaining_receipts, 0);
+        let remaining_images: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM pi_prompt_image_evidence WHERE runtime_input_delivery_id = 'delivery-pi-v135'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining_images, 0);
         let foreign_key_violations: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -32323,7 +33608,7 @@ mod tests {
 
         drop(database);
         let reopened = Database::open(&directory).unwrap();
-        assert!(pi_runtime_v135_schema_matches(reopened.connection()).unwrap());
+        assert!(pi_native_execution_v139_schema_matches(reopened.connection()).unwrap());
         let migration_receipts: i64 = reopened
             .connection()
             .query_row(
@@ -32333,6 +33618,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migration_receipts, 1, "reopen must not reapply v135");
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 136",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "reopen must not reapply v136"
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 139",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "reopen must not reapply v139"
+        );
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

@@ -8,80 +8,63 @@ last_updated: 2026-09-04
 
 # v1.40 实施与验收
 
-## 当前交付
+## 已实现
 
-- [x] Migration 136 / data contract v1.46 / projection schema 87 扩展 Conversation、CampTurn 与 AgentRun，并保留
-  普通会话条件唯一性、活动 Single Chat 条件唯一性、单 Conversation 非终态回复唯一性和冻结路由更新保护。
-- [x] Migration 137 / data contract v1.47 / projection schema 88 增加 Conversation-scoped 私有暂存附件和 immutable
-  ConversationMessage 附件，并保持 schema receipt 与当前 marker 原子提交。
-- [x] Core 增加 `singleChat.open/list/get/send/end` 及私有附件 prepare/remove/preview；发送在一个
-  command/idempotency 事务内完成消息、附件消费、Turn、Run、Runtime 配置、路由、策略和公共边界冻结。
-- [x] Core Built-in Router 实施固定 `single_chat_v1` 双层门禁；只允许当前 Camp search/read 和
-  `single_chat.history`，拒绝公开发送、A2A、Gather、成员、Task、Memory、跨 Camp History 和未列出的 Rovai 操作。
-- [x] 新增 `rovai single-chat history`：目标只从已认证当前 Run 推导，读取上界锁在 `CURRENT_INPUT` 之前，提供
-  exclusive cursor 和 20/50 有界分页，不返回执行元数据，也不修改 Conversation 或公共水位。
-- [x] Context 修复 Single Chat 被误判为 A2A；Bootstrap 仅含 Charter 与 Member Identity，不构建/渲染 Memory，也不写
-  Memory access evidence。Dynamic Context 保持原顺序，使用 revision 2 Guidance，不增加连续性字段或自动 transcript replay。
-- [x] 现有 Member Skill/MCP projection 保持；Single Chat exposure 在 Manifest/Adapter 之前仅按 official bundled source
-  identity 过滤 `cli-operations` 与 `memory-stewardship`，并重算唯一 snapshot digest。
-- [x] Runtime terminal 私有路由只创建一个 agent ConversationMessage；普通 Camp Snapshot、Timeline、Channel 和
-  Missing-Send Recovery 排除 Single Chat。启动/Host loss 只取消当前回复，结束事务关闭旧路由并允许立即 successor。
-- [x] 私有附件不进入 Camp Draft/公共附件根；dispatch 将当前 trigger message 附件复核后只复制到该 Run 的
-  `ROVAI_RUN_TMP`，Context 的 `CURRENT_INPUT.attachments` 不暴露持久私有路径。
-- [x] Renderer 接入真实 Core 方法，提供带头像的对象选择、右侧用户消息、左侧无头像且无底色框的队员回复、执行台式
-  过程、连续 Command 聚合、中文用时、终态自动折叠、停止、结束确认与“不再询问”；Composer 与群聊输入风格一致，
-  支持私有附件、Enter 发送、Shift+Enter 换行及可见操作提示。
-- [x] 原生 Electron 验收 fixture 完成 Porcelain Day / Steel Night、窄窗口、选择器、活动回复、终态折叠、停止和
-  结束确认的截图与几何断言验收。
-- [x] 完成本次差异的格式、Rust/CLI/合同与文档门禁，并记录当前环境基线例外。
+- [x] Migration 137 原子增加四个 source-ref JSON array owner 字段，不迁移旧 Prepared 数据。
+- [x] Core closed `LocalAttachmentSourceRef`、UUID identity、严格 UTF-8 absolute path、无路径 View 与 exact owner locator。
+- [x] native path 直接进入 Core；bytes/Blob 只写 OS Temp，Core 接受后不主动清理。
+- [x] Composer 新附件完全绕过 Prepared/Managed/Message Attachment 表与长期 attachment directory；支持纯附件。
+- [x] Composer 在执行中或队列非空时把完整 source-ref 意图原子写入 Pending 并消费 exact Draft。
+- [x] Pending View、working refs、添加/粘贴/拖放、删除、排序、Save/Cancel/Delete 和附件-only 保存。
+- [x] Pending 队首发布前 exact availability 检查、三种 `needs_repair` 错误和 FIFO 阻断。
+- [x] CampMessage 保存 source refs；Camp Open/History 使用 storage-blind View 且数据库读取不访问文件系统。
+- [x] preview/open/reveal 覆盖 Composer、Pending、Pending Edit 与 Message owner，只在动作时解析路径。
+- [x] Core Run resolver canonical containment：executionRoot 内直读，外部普通复制至当前 Run Temp；Adapters wire 不变。
+- [x] 旧 Prepared Draft 保持互斥 legacy 模式并自然耗尽；Agent ingress、Agent 产物和历史 Managed/legacy 继续兼容。
+- [x] Renderer 删除 queue 对选择、粘贴与拖放的附件阻断，增加 Pending 附件展示和编辑操作。
 
-最终判定：
+## 验收重点
 
-```text
-implementation-ready = yes
+- 新用户 source ref 从 Draft → Pending/Message 全程没有四类 legacy/Managed 表写入，也不创建 `camp-attachments`。
+- immediate source 不可用时不建 Message且保留 Draft；Pending head 写 exact repair code 并阻塞后继。
+- 旧 Prepared Draft 不迁移、不混用；删除最后一个旧附件后才可添加 source ref。
+- Message/Draft/Pending/History/View JSON 均不含 `sourcePath`；历史加载对不存在路径仍返回 `unknown`。
+- source bytes 修改后仍可发送，证明没有 digest/freeze；Run resolver 对 workspace symlink escape 使用 Run Temp，并拒绝
+  外部目录中的 nested symlink/special node。
+- `CURRENT_INPUT.attachments` 仍是字符串数组，外部路径在 Runtime 可读的 Run Temp 下，未增加 Adapter policy。
+
+## 必跑命令
+
+```bash
+cargo fmt --all -- --check
+cargo check --workspace --all-targets
+cargo check -p rovai-core --all-targets --features slow-tests
+cargo clippy -p rovai-core --all-targets --features slow-tests -- -D warnings
+cargo test -p rovai-core --lib
+pnpm typecheck
+pnpm test
+pnpm build:desktop
+pnpm docs:test
+pnpm docs:check
+DOCS_BASE_REF=d2a4967a60900f658d420430e50013f31eee8bd5 pnpm docs:check:ci
 ```
 
-## 验证 owner
+Electron production fixture tests仍使用隔离临时 `userData`。若宿主在 Chromium 启动阶段返回
+`sandbox initialization failed: Operation not permitted`，该结果只能记录为环境阻断，不能冒充业务断言失败或通过。
 
-- `crates/rovai-core/src/single_chat.rs`：原子 send、同 Conversation busy、无孤儿写入、私有 terminal、迟到 final、
-  三项 allowlist、history target/pagination/no-mutation、Skill source identity filter、私有附件消费与 per-Run 投影、
-  启动取消与 successor 不等待旧 Conversation cleanup。
-- `crates/rovai-core/src/db.rs`：v136 从 v1.45/schema 86 原子升级，v137 从 v1.46/schema 87 增加私有附件表并提交
-  v1.47/schema 88；Schema object、receipt 和当前 marker 保持原子。
-- `crates/rovai-core/src/context.rs`：Single Chat current input lineage、无 Memory Bootstrap/evidence、资源 bytes、专用 section
-  顺序、Skill exposure、目标 Agent 自身公屏增量、accepted ACK watermark 和 per-Run 私有附件路径。
-- `apps/desktop/src/renderer/src/SingleChatPanel.test.ts`：中文终态摘要、Run/epoch Evidence fence、选择器头像、正文无头像、
-  结束文案和无专用恢复状态。
-- `apps/desktop/src/renderer/src/App.test.ts` 与 `CampDetailPopover.test.ts`：Header 入口、Inspector 互斥和既有 Camp 详情回归。
-- `pnpm typecheck`、相关 Vitest、`pnpm build:desktop`、Rust fmt/check/clippy/test 与 Product Contract Fingerprint。
-- `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=5a56103ee56a0e4c3e7a4a4c05917dbd5e05c7c3 pnpm docs:check:ci`。
+## 验证记录
 
-## 已完成的定向证据（2026-09-04）
-
-- `single_chat::tests` 5/5、Built-in Evidence projection 13/13、CLI 33/33、真实 Single Chat 慢速 Context
-  materialization 1/1 通过；Context 场景同时证明 current input、无 Memory Bootstrap/evidence 和专用 Guidance。
-- `cargo test -p rovai-core --lib` 排除仓库已知 macOS sandbox 环境基线后 490/490 通过；未排除运行中，本次新增
-  Evidence owner 已修复并复测通过，唯一剩余失败仍是该 sandbox probe exit 71。Main binary 207/207 通过、5 项手工
-  Runtime smoke ignored。
-- `cargo clippy -p rovai-core --all-targets -- -D warnings`、Rustfmt、`git diff --check` 与 Product Contract Fingerprint
-  通过；Windows installer script tests 1/1 通过、1 项 Windows-only 跳过。
-- `pnpm docs:test` 9/9、`pnpm docs:check` 和
-  `DOCS_BASE_REF=4d81e19e5048b82f441853b953aee9969f0f7328 pnpm docs:check:ci` 通过。
-
-2026-09-03 的 v1.40 原始验收基线保留如下。
-
-- Single Chat service 与 Context 定向 Rust：新增私有附件闭环后 `single_chat::tests` 4/4 通过。
-- v136/v137 所属完整升级 owner：1/1 通过。
-- Renderer 相关 Vitest：158/158 通过；原生 Electron Single Chat 验收：1/1 通过；`pnpm typecheck` 与
-  `pnpm build:desktop` 通过。截图复核覆盖日/夜主题、1180×800 与 1040×700 紧凑布局。
-- `pnpm test` 通过：141 个 Vitest 文件、1479 项测试；汇总 Node suite 220 项通过、1 项 Windows-only 跳过；
-  文档决定测试 9/9、Skill 门禁与其余协议 suite 均通过。
-- Rust fmt/check/clippy `-D warnings` 通过。`cargo test --workspace` 在排除一项已于未改动主干复现的 macOS sandbox
-  环境基线后共 725 项通过、5 项既有 ignored；排除项
-  `managed_process::tests::macos_runtime_sandbox_denies_user_automation_root_but_keeps_other_files_visible` 在本机以
-  sandbox exit 71 失败，与 Single Chat 改动无关。
-- 2026-09-04 的输入框/附件增量已通过 TypeScript typecheck、Desktop production build、相关 Renderer Vitest
-  189/189、原生 Electron fixture 1/1、Product Contract Fingerprint 1/1，以及 Rust all-targets + slow-tests
-  Clippy `-D warnings`。合并该增量后的 `pnpm test` 共通过 142 个 Vitest 文件、1500 项测试及 220 项 Node
-  协议/验收用例，另有 1 项 Windows-only 用例按预期跳过；Single Chat service 4/4、私有 Context path 1/1、
-  v136/v137 升级 owner 1/1 均通过。
+- [x] Core source-ref、Pending、Message、History、resolver 与 migration 定向测试通过。
+- [x] Desktop Main/Renderer 定向 Vitest 3 files / 202 tests 通过；`pnpm typecheck` 通过。
+- [x] 变更 smoke/acceptance `.mjs` 均通过 Node syntax check。
+- [x] `cargo fmt --check`、workspace/all-target check、slow-feature check 与 Clippy `-D warnings` 通过；
+  `rovai-core` binary 212 tests 通过、5 个 manual Runtime smoke ignored；两条 source/legacy attachment slow test 通过。
+- [x] `pnpm typecheck`、`pnpm build:desktop` 与完整 `pnpm test` 通过：145 个 Vitest 文件 / 1532 tests，
+  220 个仓库 Node tests 通过、1 个既定 Windows test skipped。
+- [x] `pnpm docs:test`、`pnpm docs:check` 与带固定 base 的 `docs:check:ci` 通过。
+- [x] Impeccable changed-target detector 已在 UI 改动冻结后运行一次；结果只命中共享样式表既有的侧边强调线与
+  width transition 规则，没有命中新附件选择器，本版本不扩张为视觉系统重构。
+- [x] `cargo test -p rovai-core --lib` 的 494 项中 493 项通过；唯一失败为既有 macOS sandbox 探针，
+  `/usr/bin/sandbox-exec` 在当前宿主以 71 退出。Camp Open、File Preview 与 File Reference Electron fixtures
+  同样在 Chromium 业务断言前被宿主 `sandbox initialization failed: Operation not permitted` 阻断；均记录为
+  环境限制，不改写产品代码或宣称 E2E 通过。

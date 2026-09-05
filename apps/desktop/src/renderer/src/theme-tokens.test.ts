@@ -366,7 +366,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.settings-content \.settings-panel\s*\{[^}]*background: var\(--home-surface\)/)
   })
 
-  it('keeps Agent narrative open while giving right-aligned user messages a bounded Porcelain surface', () => {
+  it('keeps Agent narrative open while giving right-aligned user messages a fully rounded Porcelain surface', () => {
     expect(css).toMatch(/\.conversation-bubble\.agent\s*\{[^}]*--agent-accent: var\(--identity-1\)/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s*\{[^}]*background:/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s+\.final-copy\s*\{[^}]*background:/)
@@ -376,7 +376,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toContain('.conversation-bubble:is(.user, .agent):hover::before')
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\)\s*\{[^}]*margin-left: auto[^}]*grid-template-columns: minmax\(0, 1fr\) 32px/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.local-message-avatar\s*\{[^}]*grid-column: 2/)
-    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*border-radius: 12px 12px 4px 12px[^}]*background: var\(--conversation-user-message-surface\)/)
+    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*border-radius: 12px;[^}]*background: var\(--conversation-user-message-surface\)/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-surface\s*\{[^}]*width: fit-content[^}]*max-width: min\([^}]*var\(--conversation-user-message-max-width\)[^}]*66\.667cqw[^}]*align-items: flex-end/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*width: fit-content[^}]*max-width: 100%/)
     expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*display: flex/)
@@ -386,17 +386,35 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toMatch(/\.safe-markdown code\s*\{[^}]*\bborder\s*:/)
     expect(css).toMatch(/\.safe-markdown pre\s*\{[^}]*background:\s*var\(--code-block-canvas\)/)
     expect(css).toMatch(/\.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*background:\s*transparent/)
-    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown code\s*\{[^}]*padding:\s*1px 4px[^}]*border-radius:\s*6px[^}]*background:\s*var\(--conversation-inline-code-canvas\)[^}]*box-decoration-break:\s*clone/)
-    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre\s*\{[^}]*padding:\s*11px 12px[^}]*border-color:\s*var\(--conversation-code-line\)[^}]*border-radius:\s*8px[^}]*background:\s*var\(--conversation-code-block-canvas\)/)
-    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*border-radius:\s*0[^}]*background:\s*transparent/)
     expect(css).toContain('.conversation-bubble:hover .message-actions')
-    expect(css).toMatch(/\.message-actions\s*\{[^}]*align-self: flex-end[^}]*margin-top: 3px/)
+    expect(css).toMatch(/\.message-actions\s*\{[^}]*align-self: flex-end[^}]*gap: 0[^}]*margin-top: 3px/)
+    expect(css).toMatch(/\.conversation-bubble\.agent \.message-actions\s*\{[^}]*width: fit-content[^}]*align-self: flex-start[^}]*justify-content: flex-start[^}]*margin-left: -5px/)
+    expect(css).toContain('.conversation-bubble.agent .message-actions .copy-feedback')
+    expect(css).toContain('.message-actions.copied .copy-feedback')
+    expect(css).toMatch(/\.agent-message-output > \.agent-message-output-actions\s*\{[^}]*width: fit-content[^}]*justify-content: flex-start[^}]*margin: 3px 0 0 37px/)
+    expect(css).toContain('.agent-message-output:hover > .message-actions')
+    expect(css).toContain('.message-actions.is-persistent')
     expect(css).toMatch(/\.message-copy-button,\s*\.message-reply-button\s*\{[^}]*width: 28px[^}]*height: 28px/)
-    expect(css).toMatch(/\.message-long-toggle\.is-expand\s*\{[^}]*width: 34px[^}]*height: 20\.8px/)
+    expect(css).toMatch(/\.message-copy-button svg,\s*\.message-reply-button svg\s*\{[^}]*width: 17px[^}]*height: 17px/)
+    expect(css).toMatch(/\.message-copy-button \+ \.message-reply-button\s*\{[^}]*margin-left: 1px/)
+    expect(css).toMatch(/\.message-long-toggle\s*\{[^}]*min-height: 28px[^}]*margin: 3px 0 -4px -5px[^}]*color: var\(--muted\)/)
+    expect(css).toContain('.message-long-toggle:focus-visible')
+    expect(css).toContain('.message-long-toggle[aria-expanded="true"] svg')
+    expect(css).not.toContain('.message-long-ellipsis')
+    expect(css).toMatch(
+      /\.conversation-bubble:is\(\.user, \.external_principal\):has\(\.message-attachments\) \.message-surface\s*\{[^}]*width: 100%[^}]*max-width: none/
+    )
+    expect(css).toMatch(/\.user-message-files\s*\{[^}]*justify-content: flex-end/)
+    expect(css).toMatch(/\.attachment-card\s*\{[^}]*--user-file-card-max-width:\s*220px/)
+    expect(css).toMatch(/\.user-timeline\s*\{[^}]*max-width:\s*min\(var\(--user-file-card-max-width\), 100%\)/)
+    expect(css).toMatch(/\.composer-attachment-card\s*\{[^}]*max-width:\s*min\(var\(--user-composer-max-width\), var\(--user-file-card-max-width\)\)/)
+    expect(css).toMatch(
+      /\.image-gallery-user-attachment \.image-gallery-grid\s*\{[^}]*justify-content: flex-end/
+    )
     expect(css).toContain('.composer-box:focus-within')
     expect(css).toContain('.composer.suppress-pointer-focus-ring .composer-box:focus-within')
     expect(css).toMatch(/\.structured-mention-editor:focus-visible\s*\{[^}]*outline:\s*0/)
-    expect(css).toMatch(/\.structured-mention-editor:not\(:has\(> \[data-editor-empty="true"\]:only-child > \[data-editor-empty-break="true"\]:only-child\)\) \+ \.structured-mention-placeholder\s*\{[^}]*visibility:\s*hidden/)
+    expect(css).toMatch(/\.structured-mention-placeholder\s*\{[^}]*position:\s*absolute[^}]*pointer-events:\s*none/)
     expect(css).not.toContain('.composer.suppress-reply-focus-ring')
     expect(css).toMatch(/\.composer-continuation\s*\{[^}]*background:\s*transparent|\.composer-continuation\s*\{[^}]*color:/)
     expect(css).toContain('--conversation-wide-width: 1040px;')
@@ -420,6 +438,12 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.runtime-recovery-dock\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), calc\(100% - 54px\)\)/
     )
+  })
+
+  it('shares Mist Gray Markdown code layers across Camp reading surfaces', () => {
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown code,\s*\.execution-drawer \.safe-markdown code,\s*\.file-preview-markdown \.safe-markdown code\s*\{[^}]*padding:\s*1px 4px[^}]*border-radius:\s*6px[^}]*background:\s*var\(--conversation-inline-code-canvas\)[^}]*box-decoration-break:\s*clone/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre,\s*\.execution-drawer \.safe-markdown pre,\s*\.file-preview-markdown \.safe-markdown pre\s*\{[^}]*padding:\s*11px 12px[^}]*border-color:\s*var\(--conversation-code-line\)[^}]*border-radius:\s*8px[^}]*background:\s*var\(--conversation-code-block-canvas\)/)
+    expect(css).toMatch(/\.conversation-bubble :is\(\.final-copy, \.message-bubble\) \.safe-markdown pre code,\s*\.execution-drawer \.safe-markdown pre code,\s*\.file-preview-markdown \.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*border-radius:\s*0[^}]*background:\s*transparent/)
   })
 
   it('keeps AgentRun disclosure in a fixed trailing SVG track', () => {

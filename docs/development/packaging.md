@@ -94,7 +94,7 @@ App 的 `app-update.yml` 读取官方 `murray17/rovai-ai` GitHub Release 通道�
 
 本地隔离 packaged UI 验收可以在同时满足隔离实例 admission 时设置
 `ROVAI_DISABLE_AUTO_UPDATE_CHECKS=1`，避免访问真实 Release 通道。该变量不对日常实例生效，也不构成
-更新功能或签名连续性的发布证据。完整状态合同见 [App Update v1](../contracts/app-update-v1.md)。
+更新功能或签名连续性的发布证据。完整状态合同见 [App Update v2](../contracts/app-update-v2.md)。
 
 [`build/release-notes.md`](../../build/release-notes.md) 是 macOS 与 Windows 共用的唯一发布说明源；
 `package.json#build.releaseInfo.releaseNotesFile` 必须显式指向它。首个非空行必须是

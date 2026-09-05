@@ -564,7 +564,7 @@ fn ntstatus_error(status: i32) -> io::Error {
     io::Error::from_raw_os_error(code as i32)
 }
 
-fn wide_nul(value: &OsStr) -> Result<Vec<u16>> {
+pub(super) fn wide_nul(value: &OsStr) -> Result<Vec<u16>> {
     let path = Path::new(value);
     let mut wide = Vec::new();
     if matches!(

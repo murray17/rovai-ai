@@ -15,31 +15,30 @@ last_updated: 2026-09-04
 长路径可自然换行，不让正文横向溢出。
 
 - Markdown 文件链接 `[label](target)` 只显示可点击的 label；target 仅用于解析/打开，不在正文中重复常驻展示。
-- 整体为文件引用的 inline-code（如 `` `src/App.tsx:20` ``）只有在当前消息来源工作目录可解析为现存普通文件时
-  才成为文件入口。相对路径使用来源 AgentRun 的工作目录、无来源 Run 时使用 directory Camp 项目目录；绝对路径
-  直接解析。不存在、目录或解析失败时保持原生 `<code>`，不显示图标、链接或错误。成功入口的等宽文字移除灰底和嵌套
-  `<code>`，所有交互状态都不显示下划线；Hover/Active 只加强链接色。普通 inline-code、代码块和混合正文保持原样。
-- 普通正文不扫描、不猜测本地路径。`src/App.tsx:20`、`/compact` 与 `docs/prototypes/demo/` 只有在显式
-  Markdown 文件链接或整体 inline-code 中才可能成为文件入口；消息存储、整条消息复制与模型输入保持原文。
+- inline-code 永远保持原生 `<code>`。`` `config.toml` ``、`` `src/App.tsx:20` ``、相对路径和绝对路径都不显示
+  文件图标、不生成链接、不绑定点击，也不查询磁盘；代码块和混合正文同样保持原样。
+- 普通正文不扫描、不猜测本地路径。`src/App.tsx:20`、`/compact` 与 `docs/prototypes/demo/` 只有在显式 Markdown
+  文件链接 target 中才可能成为文件入口；消息存储、整条消息复制与模型输入保持原文。
 - 每个文件入口在 label 前显示真实资源类型的 14px 单色线性 SVG，不再由 label 是否为 inline-code 决定是否显示。
   类型至少区分 Markdown、HTML、代码、配置/数据、文本、图片、SVG、Diff/Patch、目录、PDF、文档、表格、
   演示文稿、Notebook、压缩包、音频、视频、数据库、可执行/安装包和未知文件。不支持应用内预览的格式仍保留
-  真实类型图标，再交给系统默认应用打开。
+  真实类型图标，再交给系统默认应用打开。Markdown Glyph 使用折角文档轮廓与三条正文线，代码 Glyph 使用
+  占满 24px viewBox 主要视觉区的 `</>`；两者与对应 Preview Tab 精确复用同一 SVG 几何。
 - HTTPS Markdown 链接与 GFM 自动链接都在 label 前显示统一网页图标；inline-code 中的 `https://` 仍是普通代码。
   文件与网页图标均为装饰元素，对辅助技术隐藏，使用 `currentColor` 与链接文字同步变色，不用颜色区分资源类别。
-- 普通 Markdown label 使用 UI 字体；文件 inline-code 使用等宽字体。所有资源链接使用相同的 icon + label DOM
-  顺序，不嵌套第二层代码背景块。
+- 普通 Markdown label 使用 UI 字体。显式链接 label 自身包含 Markdown inline-code 时保留其代码样式；
+  所有资源链接使用相同的 icon + label DOM 顺序。
 - 项目相对 target 可以通过 title 显示完整原始值（含行列或 fragment）；绝对 target 不增加 tooltip 或在正文中
   重复展示。复制路径与显示所在位置继续使用文件 Tab 的既有上下文菜单。
 - 普通点击与键盘激活不受页面已有选区影响；只有本次指针操作新产生或改变的文字选区才阻止文件打开。
   不主动清除用户选区，保留拖选与系统复制行为。
-- 文件引用只按 Markdown link 与整体 inline-code 语法节点识别，不拆开普通 URL、链接 label、图片、代码块或正文；
+- 文件引用只按显式 Markdown link 语法节点识别，不拆开普通 URL、链接 label、inline-code、图片、代码块或正文；
   用户消息其余文本、结构化 Mention/Skill、消息存储、整条消息复制与模型输入保持原合同。
-- `config.toml`、`demo.mp4` 等已知完整短文件名可以进入存在性探测，不在消息正文中猜测目录或搜索同名文件；只按
-  当前消息来源工作目录中的 exact relative path 判断。字段列表中的斜杠不作为绝对路径起点。显式 Markdown 文件链接
-  继续表达作者的链接意图，不以存在性探测决定是否显示；点击仍执行既有来源和文件校验。
-- 资源类型注册表只决定候选是否为已知类型及其图标；不得从图标推断 Preview 支持性。消息链接和普通文件 Tab 都按
-  文件名查询同一视觉类型，Main 仍以既有 classifier 的扩展名、大小、MIME 与内容规则决定 Preview、系统打开或失败。
+- 显式 Markdown 文件链接表达作者的导航意图，消息呈现阶段不检查目标是否存在。点击后才按消息来源工作目录解析
+  exact relative path，或直接解析绝对路径，并执行既有来源、文件身份和可访问性校验。
+- 资源类型注册表只决定显式文件链接和普通文件 Tab 的图标；不得从图标推断 Preview 支持性。两处都按文件名查询
+  同一视觉类型，未知类型使用通用文件图标。Main 仍以既有 classifier 的扩展名、大小、MIME 与内容规则决定
+  Preview、系统打开或失败。
 - 点击继续使用既有来源校验，打开/激活文件 Tab；同一文件去重，支持 `:44-46` 行范围，定位起始行并高亮范围。
   最终定位到具体普通文件后，无论位于 Camp 工作区内外，都直接进入相同 Preview；绝对路径、`~/`、本机 file URI、
   symlink、Attachment、Run Evidence 当前文件与预览内子链接都不弹目录授权选择器。不支持格式仍调用默认应用；
@@ -137,8 +136,9 @@ Alt+Shift+左右重排。关闭后优先激活右侧，再回到左侧；最后�
 
 Tabs 下只在项目内普通文件具有目录层级时显示一行只读项目相对路径，格式为
 `apps > desktop > … > filename`。项目根目录文件、项目外文件与 Attachment 不显示路径行，Viewer 直接紧接 Tabs；
-Attachment 即使原始文件来自项目内也按 Attachment 处理，不从 managed storage 或文件名回推原路径。项目内判定只信
-Main 在 canonical 文件仍位于当前 Camp 项目根目录后签发的呈现语义，Renderer 不自行猜测。
+Attachment 即使引用的 source 当前位于项目内也按 Attachment 处理，不从卡片 metadata、Managed storage 或文件名
+回推原路径或 storage model。项目内判定只信 Main 在 canonical 文件仍位于当前 Camp 项目根目录后签发的呈现语义，
+Renderer 不自行猜测。
 
 显示路径时整体从左侧自然排列，文件名紧跟最后一个可见目录，不固定到最右侧。空间不足时从目录中部省略，
 优先完整保留文件名；无水平滚动。完整相对路径进入 title 与可访问名称。路径与 Tabs 间无线，路径与正文间一条
@@ -146,7 +146,7 @@ Main 在 canonical 文件仍位于当前 Camp 项目根目录后签发的呈现�
 
 Viewer 不显示预览/源码切换、右上角复制按钮、整行工具栏或 `Ready` 状态。每个类型只有一个规范阅读视图：
 
-- Markdown 渲染安全 GFM；超出 4 MiB 显示分页原文；
+- Markdown 渲染安全 GFM；行内 code 与围栏代码块复用 Camp 工作区的 Mist Gray 分层，超出 4 MiB 显示分页原文；
 - HTML 在 sandbox iframe 中执行；超限或初始化失败回退只读原文；
 - 代码/文本只读显示行号、搜索、定位、选择与系统复制，大文件分页；
 - 图片/SVG 提供适应、原始尺寸、缩放和重置，不把 SVG 注入宿主 DOM；
@@ -167,6 +167,8 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 首次打开只有 opening/ready/error；快速成功直接显示正文，耗时后才显示轻量 Loading。只有文件确实无法定位或读取时
 才显示“无法打开文件 / 文件可能已被移动或删除 / 重试”；工作区外、未授权目录、Root Grant、handle 或 capability
 不足不得成为用户文案，也不得触发 Modal。
+历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、
+unreadable 或 kind_changed，不写回历史，也不启动后台监控。
 外部变化只显示 Tab 圆点与当前 Viewer 的“有更新 / 重新加载”。主动刷新期间旧内容继续显示；失败显示
 “重新加载失败 / 重试”且不销毁 Tab。句柄、Grant、token、watcher 和 generation 永远不是用户文案。
 

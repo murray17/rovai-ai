@@ -25,6 +25,19 @@ app.whenReady().then(async () => {
   const run = code => window.webContents.executeJavaScript(code, true)
   const state = async () => { await run('window.campOpenTest.settle()'); return run('window.campOpenTest.state()') }
   const capture = async name => writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage()).toPNG())
+  const assertUserAttachmentLayout = (attachmentState, label) => {
+    const layout = attachmentState.userLayout
+    assert.ok(layout.attachmentWidth > layout.messageWidth + 300,
+      `${label}: attachment width is independent from the short message bubble`)
+    assert.ok(Math.abs(layout.attachmentRight - layout.messageRight) <= 1,
+      `${label}: attachments and the message bubble share the user-side edge`)
+    assert.ok(Math.abs(layout.userAvatarLeft - layout.attachmentRight - 10) <= 1,
+      `${label}: attachments retain the avatar gutter`)
+    assert.ok(layout.attachmentLeft >= layout.agentAvatarLeft - 1,
+      `${label}: attachments do not extend past the agent identity track`)
+    assert.ok(layout.attachmentLeft <= layout.agentMessageBodyLeft + 32,
+      `${label}: attachments may extend left to the agent avatar or name track`)
+  }
   try {
     if (attachmentReview) {
       await run(`window.campOpenTest.setComposerText(${JSON.stringify('请按交互稿核对附件尺寸、顺序、图标和视觉层级。')})`)
@@ -148,8 +161,16 @@ app.whenReady().then(async () => {
     assert.equal(attachmentState.composerImageCount, 3)
     assert.equal(attachmentState.userFileCount, 6)
     assert.deepEqual(attachmentState.userFileHeights, [46, 46, 46, 46, 46, 46])
-    assert.ok(attachmentState.userFileWidths.every(width => width <= 296))
+    assert.ok(attachmentState.userFileWidths.every(width => width <= 220))
     assert.ok(new Set(attachmentState.userFileWidths).size > 1, 'User files use content-sized widths')
+    assert.ok(attachmentState.longUserFile, 'Long user attachment fixture is present')
+    assert.equal(attachmentState.longUserFile.cardWidth, 220)
+    assert.equal(
+      attachmentState.longUserFile.title,
+      'rovai-file-reference-and-tab-icons-md-doc-code-larger.html'
+    )
+    assert.ok(attachmentState.longUserFile.nameScrollWidth > attachmentState.longUserFile.nameClientWidth,
+      'Long user attachment names are visibly truncated')
     assert.equal(attachmentState.userFileDetails, 0)
     assert.equal(attachmentState.agentFileCount, 10)
     assert.ok(attachmentState.agentOutputWidth > 650, 'Agent deliveries use the full artifact track')
@@ -164,12 +185,13 @@ app.whenReady().then(async () => {
     assert.deepEqual(attachmentState.composerHeights, [48, 48, 48, 48, 48, 48, 48, 48, 48])
     assert.deepEqual(attachmentState.composerImageWidths, [48, 48, 48])
     assert.ok(attachmentState.composerFileWidths.every(width => width >= 172 && width <= 308))
-    assert.ok(attachmentState.composerFileWidths.some(width => width !== 208),
+    assert.ok(attachmentState.composerFileWidths.some(width => width !== 220),
       'Composer files no longer use the old fixed width')
     assert.equal(attachmentState.composerText, '请按交互稿核对附件尺寸、顺序、图标和视觉层级。')
     assert.equal(attachmentState.composerOverflow, true)
     assert.equal(attachmentState.composerScrollbar, 'none')
     assert.equal(attachmentState.overflow, false)
+    assertUserAttachmentLayout(attachmentState, '1200px Day')
     assert.ok(await run("window.campOpenTest.browseComposerAttachments('ArrowRight')") > 0)
     assert.ok(await run("window.campOpenTest.browseComposerAttachments('Home')") <= 2)
     const wheelResult = await run('window.campOpenTest.wheelComposerAttachments(120)')
@@ -179,6 +201,18 @@ app.whenReady().then(async () => {
     await run("window.campOpenTest.scrollAttachmentSurface('user')")
     await run('window.campOpenTest.settle()')
     await capture('attachments-day-user-composer')
+    for (const [width, height, theme] of [[1040, 700, 'day'], [1440, 920, 'night']]) {
+      window.setContentSize(width, height)
+      await run(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}`)
+      await run("window.campOpenTest.scrollAttachmentSurface('user')")
+      await run('window.campOpenTest.settle()')
+      const responsiveAttachmentState = await run('window.campOpenTest.attachmentSurfaceState()')
+      assert.equal(responsiveAttachmentState.overflow, false, `${width}px ${theme}: no document overflow`)
+      assertUserAttachmentLayout(responsiveAttachmentState, `${width}px ${theme}`)
+      await capture(`attachments-${theme}-user-layout-${width}`)
+    }
+    window.setContentSize(1200, 900)
+    await run("document.documentElement.dataset.theme = 'day'")
     await run("window.campOpenTest.scrollAttachmentSurface('agent')")
     await run('window.campOpenTest.settle()')
     await capture('attachments-day-agent')
@@ -209,6 +243,7 @@ app.whenReady().then(async () => {
       refreshAnchorDelta: refreshed.anchorTop - before.anchorTop,
       appendAnchorDelta: appended.anchorTop - before.anchorTop,
       historyLoadAnchorDelta,
+      userAttachmentLayout: attachmentState.userLayout,
       cards: appended.cards }))
     window.destroy(); app.quit()
   } catch (error) {

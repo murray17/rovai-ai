@@ -8,11 +8,13 @@ import test from 'node:test'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { build } from 'vite'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/camp-composer-continuation')
 
-test('the production Camp Composer refreshes continuation on publication without replacing a Draft', { timeout: 60_000 }, async () => {
+async function runFixture(t, mode, expectedCases) {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-composer-continuation-test-'))
   let child
   let closed
@@ -26,6 +28,7 @@ test('the production Camp Composer refreshes continuation on publication without
     delete environment.ELECTRON_RUN_AS_NODE
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
+      mode,
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])
     ], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')
@@ -39,7 +42,7 @@ test('the production Camp Composer refreshes continuation on publication without
     assert.equal(code, 0, `Camp Composer continuation regression failed:\n${stdout}\n${stderr}`)
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
-    assert.equal(report.cases.length, 11)
+    assert.equal(report.cases.length, expectedCases)
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')
@@ -47,4 +50,10 @@ test('the production Camp Composer refreshes continuation on publication without
     }
     await rm(fixture, { recursive: true, force: true })
   }
-})
+}
+
+test('the production Camp Composer refreshes continuation on publication without replacing a Draft', { timeout: 60_000 },
+  t => runFixture(t, '--continuation', 11))
+
+test('Pending attachments use Composer cards, body-only queue summaries and active-editor drag routing', { timeout: 60_000 },
+  t => runFixture(t, '--pending-attachments', 6))

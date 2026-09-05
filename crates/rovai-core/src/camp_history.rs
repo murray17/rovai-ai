@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    path::Path,
 };
 
 use anyhow::{Context, Result};
@@ -12,7 +11,6 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    camp_attachment::managed_attachment_summary,
     camp_content::{
         StructuredCampMessageContent, mentions_current_user, normalize_content,
         render_agent_plain_text, validate_content,
@@ -20,6 +18,8 @@ use crate::{
     camp_id::{CAMP_ID_PATTERN, CampId},
     camp_message_publication::public_camp_message_publication_cte,
     db::Database,
+    local_attachment_snapshot::DIRECTORY_MEDIA_TYPE,
+    local_attachment_source::parse_source_attachments,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{AuthenticatedTeamToolRun, TeamToolInvocationError},
 };
@@ -2038,7 +2038,13 @@ fn load_attachments(
     transaction: &Transaction<'_>,
     message_id: &str,
 ) -> Result<(Vec<Value>, usize)> {
-    let count = transaction.query_row(
+    let source_attachments_json = transaction.query_row(
+        "SELECT source_attachments_json FROM camp_message WHERE id = ?1",
+        [message_id],
+        |row| row.get::<_, String>(0),
+    )?;
+    let source_attachments = parse_source_attachments(&source_attachments_json)?;
+    let legacy_count = transaction.query_row(
         r#"
         SELECT
             (SELECT COUNT(*) FROM message_attachment WHERE camp_message_id = ?1)
@@ -2047,12 +2053,21 @@ fn load_attachments(
         [message_id],
         |row| row.get::<_, i64>(0),
     )? as usize;
+    let count = source_attachments.len() + legacy_count;
+    let mut attachments = source_attachments
+        .into_iter()
+        .take(MAX_ATTACHMENTS)
+        .map(|source_ref| json!(source_ref.history_view()))
+        .collect::<Vec<_>>();
+    let legacy_limit = MAX_ATTACHMENTS.saturating_sub(attachments.len());
+    if legacy_limit == 0 {
+        return Ok((attachments, count));
+    }
     let mut statement = transaction.prepare(
         r#"
-        SELECT id, display_name, media_type, byte_size, storage_path,
-               kind, file_count, storage_model
+        SELECT id, display_name, media_type, byte_size, kind, file_count, storage_model
         FROM (
-            SELECT id, display_name, media_type, byte_size, storage_path,
+            SELECT id, display_name, media_type, byte_size,
                    NULL AS kind, NULL AS file_count, 'legacy_v1' AS storage_model,
                    position AS ordinal
             FROM message_attachment
@@ -2060,8 +2075,7 @@ fn load_attachments(
             UNION ALL
             SELECT managed.id, reference.display_name_snapshot,
                    managed.media_type, managed.byte_size,
-                   managed.root_relative_payload_path, managed.kind,
-                   managed.file_count, 'managed_v2', reference.ordinal
+                   managed.kind, managed.file_count, 'managed_v2', reference.ordinal
             FROM camp_message_attachment_ref AS reference
             JOIN managed_attachment AS managed
               ON managed.camp_id = reference.camp_id
@@ -2072,21 +2086,20 @@ fn load_attachments(
         LIMIT ?2
         "#,
     )?;
-    let attachments = statement
-        .query_map(params![message_id, MAX_ATTACHMENTS as i64], |row| {
+    let legacy_rows = statement
+        .query_map(params![message_id, legacy_limit as i64], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, Option<i64>>(6)?,
-                row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+                row.get::<_, String>(6)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let attachments = attachments
+    let legacy_attachments = legacy_rows
         .into_iter()
         .map(
             |(
@@ -2094,7 +2107,6 @@ fn load_attachments(
                 name,
                 media_type,
                 byte_size,
-                storage_path,
                 persisted_kind,
                 persisted_file_count,
                 storage_model,
@@ -2105,10 +2117,10 @@ fn load_attachments(
                         persisted_file_count
                             .context("Managed Attachment has no persisted file count")?,
                     )
+                } else if media_type == DIRECTORY_MEDIA_TYPE {
+                    ("directory".to_string(), 0)
                 } else {
-                    let summary =
-                        managed_attachment_summary(Path::new(&storage_path), &media_type)?;
-                    (summary.kind, i64::try_from(summary.file_count)?)
+                    ("file".to_string(), 1)
                 };
                 Ok(json!({
                     "attachmentId": attachment_id,
@@ -2121,6 +2133,7 @@ fn load_attachments(
             },
         )
         .collect::<Result<Vec<_>>>()?;
+    attachments.extend(legacy_attachments);
     Ok((attachments, count))
 }
 
@@ -2129,7 +2142,8 @@ fn attachment_count(transaction: &Transaction<'_>, message_id: &str) -> Result<u
         .query_row(
             r#"
             SELECT
-                (SELECT COUNT(*) FROM message_attachment WHERE camp_message_id = ?1)
+                COALESCE(json_array_length((SELECT source_attachments_json FROM camp_message WHERE id = ?1)), 0)
+              + (SELECT COUNT(*) FROM message_attachment WHERE camp_message_id = ?1)
               + (SELECT COUNT(*) FROM camp_message_attachment_ref WHERE camp_message_id = ?1)
             "#,
             [message_id],
@@ -2291,6 +2305,7 @@ mod slow_tests {
                     reply_to_camp_message_id TEXT,
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL DEFAULT '[]',
+                    source_attachments_json TEXT NOT NULL DEFAULT '[]',
                     effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
@@ -2384,6 +2399,7 @@ mod slow_tests {
                     reply_to_camp_message_id TEXT,
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL,
+                    source_attachments_json TEXT NOT NULL DEFAULT '[]',
                     effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
@@ -2483,6 +2499,7 @@ mod slow_tests {
                     reply_to_camp_message_id TEXT,
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL,
+                    source_attachments_json TEXT NOT NULL DEFAULT '[]',
                     effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
@@ -2693,6 +2710,7 @@ mod slow_tests {
                     reply_to_camp_message_id TEXT,
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL DEFAULT '[]',
+                    source_attachments_json TEXT NOT NULL DEFAULT '[]',
                     effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
@@ -2731,10 +2749,12 @@ mod slow_tests {
                 );
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id, body,
-                    structured_content_json, effective_recipient_ids_json, created_at
+                    structured_content_json, source_attachments_json,
+                    effective_recipient_ids_json, created_at
                 ) VALUES (
                     'message-1', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 1, 'user', 'local_user', 'A😀中B',
                     '[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"A😀中B"}]',
+                    '[{"id":"00000000-0000-4000-8000-000000000001","sourcePath":"/private/definitely-missing-source.txt","displayName":"source.txt","kind":"file","mediaType":"text/plain","observedByteSize":17}]',
                     '["agent_5"]',
                     '2026-08-01T00:00:00Z'
                 );
@@ -2780,10 +2800,16 @@ mod slow_tests {
         assert_eq!(item["body"], "😀中");
         assert_eq!(item["bodyLength"], 15);
         assert_eq!(item["nextBodyOffset"], 14);
-        assert_eq!(item["attachmentCount"], 12);
+        assert_eq!(item["attachmentCount"], 13);
         assert_eq!(item["attachments"].as_array().unwrap().len(), 10);
         assert_eq!(item["attachmentsTruncated"], true);
-        assert_eq!(item["attachmentOmittedCount"], 2);
+        assert_eq!(item["attachmentOmittedCount"], 3);
+        assert_eq!(
+            item["attachments"][0]["attachmentId"],
+            "00000000-0000-4000-8000-000000000001"
+        );
+        assert_eq!(item["attachments"][0]["name"], "source.txt");
+        assert!(!item.to_string().contains("definitely-missing-source"));
         assert_eq!(
             item["addressing"],
             json!({

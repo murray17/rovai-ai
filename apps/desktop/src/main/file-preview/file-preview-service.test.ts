@@ -85,34 +85,6 @@ function request(rawReference: string): OpenFilePreviewRequest {
 }
 
 describe('FilePreviewService', () => {
-  it('resolves existing message files without classifying, opening, or creating preview state', async () => {
-    const { root, service, native, registry } = await fixture()
-    await writeFile(join(root, 'config.toml'), '[app]\nname = "rovai"')
-    await writeFile(join(root, 'demo.mp4'), new Uint8Array([0, 1, 2]))
-    await mkdir(join(root, 'folder.toml'))
-    const outside = await mkdtemp(join(tmpdir(), 'rovai-file-reference-outside-'))
-    directories.push(outside)
-    const absoluteReference = join(outside, 'outside.sqlite')
-    await writeFile(absoluteReference, new Uint8Array([1, 2, 3]))
-
-    await expect(service.resolveMessageReferences(1, {
-      campId: 'camp-1',
-      messageId: 'message-1',
-      rawReferences: [
-        'config.toml', 'config.toml:2', 'demo.mp4', absoluteReference,
-        'missing.toml', 'folder.toml'
-      ]
-    })).resolves.toEqual({
-      resolvedReferences: ['config.toml', 'config.toml:2', 'demo.mp4', absoluteReference]
-    })
-
-    expect(service.handleCount).toBe(0)
-    expect(registry.rootCount).toBe(0)
-    expect(native.openPath).not.toHaveBeenCalled()
-    expect(native.revealPath).not.toHaveBeenCalled()
-    expect(native.confirmOpen).not.toHaveBeenCalled()
-  })
-
   it('repairs a prose colon only after verifying the file and keeps the original message authority', async () => {
     vi.useFakeTimers()
     try {
@@ -271,7 +243,7 @@ describe('FilePreviewService', () => {
       rootPath: root, basePath: root, candidatePath: root, allowChildren: kind !== 'attachment'
     })
     const input: OpenFilePreviewRequest = kind === 'attachment'
-      ? { kind, campId: 'camp-1', attachmentId: 'attachment-1' }
+      ? { kind, campId: 'camp-1', locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
       : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
     expect(await service.open(1, input)).toMatchObject({ ok: false, error: { code: 'not_regular_file' } })
     expect(native.revealPath).not.toHaveBeenCalled()
@@ -501,7 +473,7 @@ describe('FilePreviewService', () => {
       rootPath: root, basePath: root, candidatePath: outsideFile, allowChildren: kind !== 'attachment'
     })
     const input: OpenFilePreviewRequest = kind === 'attachment'
-      ? { kind, campId: 'camp-1', attachmentId: 'attachment-1' }
+      ? { kind, campId: 'camp-1', locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' } }
       : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
 
     const opened = await service.open(1, input)
@@ -622,7 +594,7 @@ describe('FilePreviewService', () => {
           kind: 'file_target',
           campId: input.campId,
           sourceKind: input.kind,
-          sourceIdentity: input.attachmentId,
+          sourceIdentity: input.locator.attachmentRefId,
           rootPath: root,
           basePath: root,
           candidatePath: file,
@@ -634,7 +606,8 @@ describe('FilePreviewService', () => {
     const service = new FilePreviewService(authority, native, registry)
     await service.bindCamp(1, 'camp-1')
     const opened = await service.open(1, {
-      kind: 'attachment', campId: 'camp-1', attachmentId: 'attachment-1'
+      kind: 'attachment', campId: 'camp-1',
+      locator: { owner: 'message', campId: 'camp-1', messageId: 'message-1', attachmentRefId: 'attachment-1' }
     })
     expect(opened.ok && opened.value.kind === 'file_preview'
       ? opened.value.file

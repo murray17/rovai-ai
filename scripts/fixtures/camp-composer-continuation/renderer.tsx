@@ -1,8 +1,9 @@
-import type { AgentProfile, CampComposerDraftView, CampMessageView, CampPendingInputsView, CampSnapshot, CoreEvent, RovaiApi } from '@contracts'
+import type { AgentProfile, CampComposerDraftView, CampMessageView, CampPendingInputsView, CampSnapshot, CoreEvent, LocalAttachmentOwnerLocator, LocalAttachmentSourceView, PendingInputEditAction, RovaiApi } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { CampWorkspace, type CampMessageSendReceipt } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import { SafeMarkdown } from '../../../apps/desktop/src/renderer/src/SafeMarkdown'
+import { composerDocumentFromText, emptyComposerDocument } from '../../../apps/desktop/src/renderer/src/composer-document'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
@@ -12,6 +13,10 @@ window.addEventListener('error', event => errors.push(String(event.error?.stack 
 window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)))
 const calls: string[] = []
 const savedContinuationSources: unknown[] = []
+const attachmentCalls: { owner: string; file: string }[] = []
+const previewLocators: LocalAttachmentOwnerLocator[] = []
+let releasePreparation: (() => void) | null = null
+let pausePreparation = false
 const listeners = new Set<(event: CoreEvent) => void>()
 const emit = (method: string, params: Record<string, unknown>) => {
   for (const listener of listeners) listener({ method, params })
@@ -48,7 +53,7 @@ const continuation = () => document.querySelector('.composer-continuation')?.get
 const editor = () => document.getElementById('camp-message')!
 const draftReads = () => calls.filter(call => call === 'camp.composerDraft.get').length
 const emptyDraft = (id = campId): CampComposerDraftView => ({
-  campId: id, body: '', content: [], revision: 0, attachments: [], replyIntent: null,
+  campId: id, body: '', content: emptyComposerDocument(), revision: 0, attachments: [], replyIntent: null,
   continuationIntent: null, updatedAt: null, expiresAt: null
 })
 const continuedDraft = (messageId: string): CampComposerDraftView => ({
@@ -68,6 +73,36 @@ Object.assign(window, { rovai: {
     calls.push(method)
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.pendingInputs.get') return structuredClone({ ...queue, campId: params.campId })
+    if (method === 'camp.pendingInputs.edit') {
+      const command = params.command as {
+        pendingInputId: string; expectedRevision: number; editToken: string | null; action: PendingInputEditAction
+      }
+      const item = queue.items.find(item => item.id === command.pendingInputId)!
+      check(item?.revision === command.expectedRevision, 'Pending edit must use the canonical revision')
+      const action = command.action
+      if (action.type === 'begin') {
+        queue.editSession = { pendingInputId: item.id, editToken: 'fixture-edit-token', basePendingRevision: item.revision,
+          recoveryRequired: false, workingAttachments: structuredClone(item.attachments) }
+      } else {
+        check(command.editToken === queue.editSession?.editToken, 'Working attachments must use the edit token')
+        if (action.type === 'remove_attachment') {
+          queue.editSession!.workingAttachments = queue.editSession!.workingAttachments.filter(a => a.id !== action.attachmentRefId)
+        } else if (action.type === 'reorder_attachments') {
+          queue.editSession!.workingAttachments = action.attachmentRefIds.map(id => queue.editSession!.workingAttachments.find(a => a.id === id)!)
+        } else {
+          if (action.type === 'save') {
+            item.attachments = structuredClone(queue.editSession!.workingAttachments)
+            item.content = action.content
+            item.body = action.content.segments.map(segment => segment.kind === 'text' ? segment.text : '').join('')
+            item.revision += 1
+          } else if (action.type === 'delete') {
+            queue.items = queue.items.filter(candidate => candidate.id !== item.id)
+          } else check(action.type === 'cancel', 'Only the exercised edit actions are mocked')
+          queue.editSession = null
+        }
+      }
+      return { status: 'accepted', code: 'ok', payload: { editToken: queue.editSession?.editToken } }
+    }
     if (method === 'camp.composerDraft.get') {
       if (nextRead) { const held = nextRead; nextRead = null; return held.promise }
       return structuredClone(drafts.get(String(params.campId)))
@@ -76,15 +111,49 @@ Object.assign(window, { rovai: {
       savedContinuationSources.push(params.continuationSourceMessageId)
       const current = drafts.get(String(params.campId))!
       const content = params.content as CampComposerDraftView['content']
-      const saved = { ...current, content, body: content.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
+      const saved = { ...current, content, body: content.segments.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
         revision: current.revision + 1 }
       drafts.set(saved.campId, saved)
       return structuredClone(saved)
     }
     errors.push(`Unexpected RPC: ${method}`)
     throw new Error(`Unexpected RPC: ${method}`)
+  },
+  composerAttachments: {
+    async prepare(id: string, revision: number, file: File) {
+      const current = drafts.get(id)!
+      check(current.revision === revision, 'Ordinary attachment must use the current Draft revision')
+      attachmentCalls.push({ owner: 'composer', file: file.name })
+      const next = { ...current, revision: revision + 1, attachments: [...current.attachments, sourceAttachment(file)] }
+      drafts.set(id, next)
+      return structuredClone(next)
+    },
+    async preparePending(input: { pendingInputId: string; expectedRevision: number; editToken: string }, file: File) {
+      check(input.pendingInputId === queue.editSession?.pendingInputId && input.editToken === queue.editSession.editToken,
+        'Pending ingress must target the current working owner, not the hidden Draft')
+      check(input.expectedRevision === queue.items.find(item => item.id === input.pendingInputId)?.revision, 'Pending ingress revision')
+      attachmentCalls.push({ owner: 'pending_edit', file: file.name })
+      if (pausePreparation) await new Promise<void>(resolve => { releasePreparation = resolve })
+      if (file.name === 'unreadable.txt') throw new Error('文件当前无法读取')
+      queue.editSession!.workingAttachments.push(sourceAttachment(file))
+      return structuredClone(queue)
+    },
+    async preview(locator: LocalAttachmentOwnerLocator) {
+      previewLocators.push(locator)
+      return { availability: 'available', preview: { mediaType: 'image/svg+xml',
+        bytes: Array.from(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="160" height="120" fill="#49858b"/><circle cx="105" cy="40" r="20" fill="#f2cd81"/><path d="M0 120 55 50 110 120" fill="#d1e6da"/></svg>')) } }
+    }
+  },
+  attachments: {
+    async open(locator: LocalAttachmentOwnerLocator) { previewLocators.push(locator); return { availability: 'available', error: null } },
+    async reveal(locator: LocalAttachmentOwnerLocator) { previewLocators.push(locator); return { availability: 'available', error: null } }
   }
 } as unknown as RovaiApi })
+
+function sourceAttachment(file: File): LocalAttachmentSourceView {
+  return { id: crypto.randomUUID(), displayName: file.name, kind: 'file', mediaType: file.type || null,
+    byteSize: file.size, fileCount: null, previewKind: file.type.startsWith('image/') ? 'image' : 'none', availability: 'unknown' }
+}
 
 function message(sequence: number, agentId: string): CampMessageView {
   return { id: `message-${sequence}`, sequence, timelineGlobalSequence: sequence,
@@ -129,6 +198,10 @@ async function reset(draft = emptyDraft()) {
     await flush()
   }
   calls.length = 0
+  attachmentCalls.length = 0
+  previewLocators.length = 0
+  releasePreparation = null
+  pausePreparation = false
   savedContinuationSources.length = 0
   drafts.clear()
   drafts.set(campId, draft)
@@ -167,10 +240,144 @@ function holdRead() {
   return held
 }
 
+const pendingEditor = () => document.getElementById('pending-camp-message')!
+const pendingCards = () => document.querySelectorAll('.pending-input-editor .composer-attachment-card')
+const pendingButton = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>('.pending-input-editor button'))
+  .find(button => button.textContent?.trim() === label)!
+const pendingReady = () => pendingEditor()?.isContentEditable === true
+const imageFile = (name = '粘贴图片.png') => new File(['fixture image'], name, { type: 'image/png' })
+const textFile = (name: string) => new File(['fixture text'], name, { type: 'text/plain' })
+
+function dragFiles(target: Element, files: File[], drop = true): DragEvent {
+  const dataTransfer = new DataTransfer()
+  // Constructed DataTransfer has no native drag operation to retain dropEffect.
+  // Keep the handler's chosen cursor observable while using real FileList/items.
+  Object.defineProperty(dataTransfer, 'dropEffect', { value: 'none', writable: true })
+  files.forEach(file => dataTransfer.items.add(file))
+  target.dispatchEvent(new DragEvent('dragenter', { dataTransfer, bubbles: true, cancelable: true }))
+  const over = new DragEvent('dragover', { dataTransfer, bubbles: true, cancelable: true })
+  target.dispatchEvent(over)
+  if (drop) target.dispatchEvent(new DragEvent('drop', { dataTransfer, bubbles: true, cancelable: true }))
+  return over
+}
+
+async function beginPending(index = 0) {
+  document.querySelectorAll<HTMLButtonElement>('.pending-input-edit')[index].click()
+  await until(pendingReady, 'The Pending editor must own its edit session')
+}
+
+async function setupPendingAttachments() {
+  const draft = emptyDraft()
+  draft.body = '独立保留的普通草稿'
+  draft.content = composerDocumentFromText(draft.body)
+  draft.attachments = [sourceAttachment(imageFile('普通图片.png'))]
+  await reset(draft)
+  const attachments = [sourceAttachment(imageFile('原有图片.png')), sourceAttachment(textFile('设计说明.txt'))]
+  queue.items = [
+    { id: 'pending-with-body', campId, enqueueSequence: 1, revision: 1, state: 'queued',
+      content: composerDocumentFromText('请看这份设计说明'), body: '请看这份设计说明', attachments,
+      replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null },
+    { id: 'pending-attachment-only', campId, enqueueSequence: 2, revision: 1, state: 'queued',
+      content: emptyComposerDocument(), body: '', attachments: [sourceAttachment(imageFile('仅附件.png'))],
+      replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null }
+  ]
+  emit('camp.pendingInputs.changed', { campId, reason: 'enqueued' })
+  await until(() => document.querySelectorAll('.pending-input-row').length === 2, 'Both queued messages must appear')
+  return draft
+}
+
+async function runPendingAttachmentCases(): Promise<string[]> {
+  const cases: string[] = []
+  const draft = await setupPendingAttachments()
+  const summaries = document.querySelectorAll('.pending-input-copy')
+  check(summaries[0].textContent === '请看这份设计说明' && summaries[1].textContent === '', 'Queue summaries must contain only body, including an empty attachment-only body')
+  check(!document.querySelector('.pending-input-list .attachment-card, .pending-input-attachments'), 'Queue rows must not render attachment cards')
+  check(!previewLocators.some(locator => locator.owner === 'pending'), 'Queue display must not load attachment previews')
+  cases.push('queue rows show only body and leave attachment-only summaries blank')
+
+  await beginPending()
+  await until(() => Boolean(document.querySelector('.pending-input-editor .composer-image-preview img')), 'Existing Pending image must use the shared thumbnail')
+  const ordinaryImage = document.querySelector<HTMLElement>('.composer > [hidden] .composer-image-attachment')!
+  const pendingImage = document.querySelector<HTMLElement>('.pending-input-editor .composer-image-attachment')!
+  check(ordinaryImage && getComputedStyle(ordinaryImage).width === getComputedStyle(pendingImage).width, 'Pending and ordinary Composer thumbnails must share their dimensions')
+  pausePreparation = true
+  const clipboardData = new DataTransfer()
+  clipboardData.items.add(imageFile())
+  pendingEditor().dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }))
+  await until(() => releasePreparation !== null, 'Pasted image must reach Pending ingress')
+  check(document.querySelector('.pending-input-editor .attachment-preparing')
+    && document.querySelector<HTMLButtonElement>('.pending-input-editor .composer-send')!.disabled,
+    'Preparation uses shared loading cards and prevents premature Save')
+  const blocked = dragFiles(pendingEditor(), [textFile('blocked.txt')])
+  await flush()
+  check(blocked.dataTransfer?.dropEffect === 'none' && !attachmentCalls.some(call => call.file === 'blocked.txt'), 'Busy edit must reject further drops without routing to the hidden Draft')
+  pausePreparation = false
+  releasePreparation!()
+  await until(() => pendingReady() && document.querySelectorAll('.pending-input-editor .composer-image-preview img').length === 2, 'Pasted image must become a normal image thumbnail')
+  check(previewLocators.some(locator => locator.owner === 'pending_edit' && locator.editToken === 'fixture-edit-token'), 'Image preview must use the working owner and edit token')
+  cases.push('pasted Pending images share Composer thumbnails, loading and edit-scoped previews')
+
+  const over = dragFiles(pendingEditor(), [textFile('拖入文件.txt')], false)
+  await flush()
+  check(over.defaultPrevented && over.dataTransfer?.dropEffect === 'copy', 'Parent must not override Pending drag acceptance')
+  check(document.querySelector('.composer.is-dragging-attachments .pending-input-editor .composer-destination')?.textContent === '将添加到这条消息',
+    'Pending drop must show the ordinary destination feedback')
+  pendingEditor().dispatchEvent(new DragEvent('drop', { dataTransfer: over.dataTransfer, bubbles: true, cancelable: true }))
+  await until(() => pendingReady() && pendingCards().length === 4, 'Dropped file must join the current Pending editor')
+  check(!document.querySelector('.composer.is-dragging-attachments'), 'Drop must clear the feedback')
+  const timeline = document.querySelector('.conversation-main') ?? document.querySelector('.conversation-controls')!
+  dragFiles(timeline, [textFile('会话区拖入.txt'), textFile('多文件和很长的中文附件名称用于检查横向附件带不会撑破输入区域.md')])
+  await until(() => pendingReady() && pendingCards().length === 6, 'Conversation drop must accept multiple files for the active Pending editor')
+  check(attachmentCalls.every(call => call.owner === 'pending_edit'), 'Editing drops must never reach ordinary Draft ingress')
+  cases.push('Pending editor and conversation drops share feedback and route multiple files to working attachments')
+
+  const firstId = queue.editSession!.workingAttachments[0].id
+  const firstButton = document.querySelector<HTMLButtonElement>('.pending-input-editor .attachment-open')!
+  firstButton.focus()
+  firstButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }))
+  await until(() => Boolean(document.querySelector('.attachment-context-menu')), 'Keyboard must open attachment actions')
+  Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(item => item.textContent === '后移')!.click()
+  await until(() => pendingReady() && queue.editSession!.workingAttachments[1].id === firstId, 'Attachment menu must preserve reorder support')
+  document.querySelector<HTMLButtonElement>('.pending-input-editor [aria-label="移除附件 拖入文件.txt"]')!.click()
+  await until(() => pendingReady() && pendingCards().length === 5, 'Shared remove button must remove the selected working ref')
+  pendingButton('保存').click()
+  await until(() => !pendingEditor(), 'Save must close the edit')
+  check(queue.items[0].attachments.length === 5 && queue.items[0].revision === 2, 'Save must preserve working attachments in the same queued item')
+  check(document.querySelectorAll('.pending-input-copy')[0].textContent === '请看这份设计说明', 'Saved attachments must remain absent from the queue summary')
+  check(JSON.stringify(drafts.get(campId)) === JSON.stringify(draft), 'Editing must preserve the independent ordinary Draft')
+  cases.push('shared card removal and keyboard-menu reorder save only the edited Pending')
+
+  await beginPending()
+  dragFiles(pendingEditor(), [textFile('unreadable.txt')])
+  await until(() => pendingReady() && Boolean(document.querySelector('[role="alert"]')?.textContent?.includes('文件当前无法读取')), 'Failed ingress must retain an actionable error and recover controls')
+  dragFiles(pendingEditor(), [textFile('放弃的附件.txt')])
+  await until(() => pendingReady() && pendingCards().length === 6, 'Successful drop must work after an ingress failure')
+  pendingButton('取消').click()
+  await until(() => Boolean(document.querySelector('[role="dialog"]')), 'Cancel with changed attachments must confirm discard')
+  Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(button => button.textContent === '放弃修改')!.click()
+  await until(() => !pendingEditor(), 'Discard must close the edit')
+  check(queue.items[0].attachments.length === 5, 'Cancel must not change canonical Pending attachments')
+  cases.push('failed Pending ingress recovers and Cancel discards only working attachment changes')
+
+  await beginPending(1)
+  check(!pendingButton('保存').disabled && !pendingEditor().textContent?.trim(), 'Attachment-only Pending must remain saveable')
+  document.querySelector<HTMLButtonElement>('.pending-input-editor .attachment-remove')!.click()
+  await until(() => pendingReady() && pendingCards().length === 0, 'The last attachment can be removed')
+  check(pendingButton('保存').disabled, 'Empty body and empty attachments cannot be saved')
+  queue.editSession = { ...queue.editSession!, recoveryRequired: true }
+  emit('camp.pendingInputs.changed', { campId, reason: 'edit_changed' })
+  await until(() => !pendingReady(), 'Fenced edit must become read-only')
+  const fenced = dragFiles(pendingEditor(), [textFile('fenced.txt')])
+  await flush()
+  check(fenced.dataTransfer?.dropEffect === 'none' && !attachmentCalls.some(call => call.file === 'fenced.txt'), 'Fenced edit must reject drops, not fall back to the normal Draft')
+  check(JSON.stringify(drafts.get(campId)) === JSON.stringify(draft), 'Failure and fenced paths must leave the ordinary Draft intact')
+  cases.push('attachment-only Save and fenced-edit drag guards remain intact')
+  return cases
+}
+
 Object.assign(window, { continuationTest: { async run() {
   const cases: string[] = []
   await reset()
-  const initialReads = draftReads()
   const queueReads = () => calls.filter(call => call === 'camp.pendingInputs.get').length
   check(queueReads() === 1, 'Mount must read the queue once')
   await new Promise(resolve => setTimeout(resolve, 1_200))
@@ -181,9 +388,10 @@ Object.assign(window, { continuationTest: { async run() {
   check(queueReads() === 1, 'Unrelated public evidence must not reread the private queue')
   cases.push('idle queues do not poll or refresh for unrelated public evidence')
 
+  const initialReads = draftReads()
   queue.items = [{ id: 'pending-B', campId, enqueueSequence: 1, revision: 1, state: 'queued',
-    content: message(2, 'agent_2').content, body: '给芝士的 B', replyIntent: null,
-    recipientSelectionRequired: false, lastAttemptErrorCode: null }]
+    content: composerDocumentFromText('给芝士的 B'), body: '给芝士的 B', replyIntent: null,
+    recipientSelectionRequired: false, lastAttemptErrorCode: null, attachments: [] }]
   emit('camp.pendingInputs.changed', { campId, reason: 'enqueued' })
   await flush()
   check(document.querySelector('.pending-input-list'), 'B must be visible in the private queue')
@@ -215,21 +423,21 @@ Object.assign(window, { continuationTest: { async run() {
   cases.push('a late publication read cannot replace locally edited text or route')
 
   const explicit = emptyDraft()
-  explicit.content = [{ kind: 'member_mention', agentId: 'agent_1' }, { kind: 'text', text: '已有草稿' }]
+  explicit.content = { version: 2, segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent_1' } }, { kind: 'text', text: '已有草稿' }] }
   explicit.body = '@叮叮 已有草稿'
   explicit.attachments = [{ id: 'attachment-1', displayName: '验收文件.txt', kind: 'file', fileCount: 1,
-    mediaType: 'text/plain', byteSize: 42, previewKind: 'none', state: 'ready', errorMessage: null, createdAt: timestamp }]
+    mediaType: 'text/plain', byteSize: 42, previewKind: 'none', availability: 'unknown' }]
   await reset(explicit)
   const retainedEditor = editor()
   await publish('agent_2', explicit)
   check(editor() === retainedEditor && editor().textContent?.includes('已有草稿'), 'Publication must preserve the existing Draft text')
-  check(document.querySelector('.composer-attachment-strip')?.textContent?.includes('验收文件.txt'), 'Publication must preserve attachments')
+  check(document.querySelector('.composer-attachment-strip strong')?.getAttribute('title') === '验收文件.txt', 'Publication must preserve attachments')
   check(continuation() === null && editor().querySelector('[data-token-kind="member_mention"][data-agent-id="agent_1"]'), 'Explicit recipient must remain authoritative')
   cases.push('publication preserves an existing explicit recipient, text and attachment')
 
   const frozen = continuedDraft('older-message')
   frozen.body = '继续给芝士的草稿'
-  frozen.content = [{ kind: 'text', text: frozen.body }]
+  frozen.content = composerDocumentFromText(frozen.body)
   await reset(frozen)
   await publish('agent_1', frozen)
   check(continuation() === '继续发给 芝士' && editor().textContent?.includes(frozen.body), 'A started Draft must retain its frozen continuation')
@@ -261,7 +469,7 @@ Object.assign(window, { continuationTest: { async run() {
     submissions += 1
     drafts.set(campId, emptyDraft())
     queue = { ...queue, items: [{ id: 'pending-send', campId, enqueueSequence: 1, revision: 1, state: 'queued',
-      content: draft.content, body: draft.body, replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null }] }
+      content: draft.content, body: draft.body, replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null, attachments: draft.attachments }] }
     emit('camp.pendingInputs.changed', { campId, reason: 'enqueued' })
     return { pendingInputId: 'pending-send', agentRunIds: [], campTurnId: null, addressedAgentIds: ['agent_1'] }
   }
@@ -338,7 +546,7 @@ Object.assign(window, { continuationTest: { async run() {
   flushSync(() => root!.unmount())
   root = createRoot(document.getElementById('root')!)
   const activations: string[] = []
-  const markdown = '# 标题\n\n[跳转](#标题)\n\n打开 `./README.md`\n\n![image](./image.png)'
+  const markdown = '# 标题\n\n[跳转](#标题)\n\n打开 [README](./README.md)\n\n![image](./image.png)'
   const asset = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>')
   const firstImage = () => `${asset}#first`
   const drawMarkdown = (label: string, localImageUrl = firstImage, content = markdown) => {
@@ -359,9 +567,35 @@ Object.assign(window, { continuationTest: { async run() {
   check(activations.join(',') === 'latest:./README.md,latest:heading:true', 'Cached links must invoke the latest file and heading callbacks')
   drawMarkdown('latest', () => `${asset}#second`)
   check(document.querySelector('img')?.getAttribute('src') === `${asset}#second`, 'A changed image projection must update cached Markdown')
-  drawMarkdown('latest', firstImage, 'Updated `src/app.ts`')
+  drawMarkdown('latest', firstImage, 'Updated [App](src/app.ts)')
   check(document.querySelector('.markdown-file-reference')?.getAttribute('title') === 'src/app.ts', 'Changed Markdown content must be reparsed')
   cases.push('Markdown caching preserves fresh callbacks, image authority and changed content')
   await flush()
   return { ok: true, cases }
-} } })
+}, async pendingAttachments() { return { ok: true, cases: await runPendingAttachmentCases() } } } })
+
+// The same isolated production-Renderer fixture can also run in a browser when
+// the host cannot initialize a nested Electron sandbox. This is not native IPC coverage.
+const browserMode = new URLSearchParams(location.search)
+if (browserMode.has('browser')) {
+  const runBrowserFixture = async () => {
+    if (browserMode.get('browser') === 'review') {
+      document.documentElement.dataset.theme = browserMode.get('theme') === 'night' ? 'night' : 'day'
+      await setupPendingAttachments()
+      await beginPending()
+      dragFiles(pendingEditor(), [imageFile(), textFile('项目补充说明与下一轮排队消息需要使用的文件.txt')])
+      await until(() => pendingReady() && pendingCards().length === 4, 'Review attachments must be ready')
+      return
+    }
+    const report = document.createElement('pre')
+    document.body.append(report)
+    try {
+      const fixture = (window as unknown as { continuationTest: { run(): Promise<unknown>; pendingAttachments(): Promise<unknown> } }).continuationTest
+      const result = await (browserMode.get('browser') === 'pending' ? fixture.pendingAttachments() : fixture.run())
+      report.textContent = JSON.stringify(result, null, 2)
+    } catch (error) {
+      report.textContent = String(error instanceof Error ? error.stack : error)
+    }
+  }
+  void runBrowserFixture()
+}

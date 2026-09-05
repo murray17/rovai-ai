@@ -20,19 +20,6 @@ let chooseRootCalls = 0
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected navigation fixture operation') }
 const api: FilePreviewApi = {
   bindCamp: async () => {},
-  resolveMessageReferences: async (request) => {
-    const existing = new Set([
-      'src/report/run_report.py',
-      'run_report.py:44-46',
-      'config.toml',
-      'demo.mp4'
-    ])
-    return {
-      resolvedReferences: request.messageId === 'message-12'
-        ? request.rawReferences.filter((reference) => existing.has(reference))
-        : []
-    }
-  },
   open: async (request) => {
     opens.push(request)
     if (request.kind === 'message_reference' && request.rawReference === '../outside/config.toml') {
@@ -81,10 +68,10 @@ const targetBody = [
   '显式入口：[主实现](src/report/run_report.py)。',
   '普通正文 src/report/run_report.py 保持文本。',
   '外部配置：[config.toml](../outside/config.toml)。',
-  '定位 `run_report.py:44-46`，这里是当前阅读位置。',
-  '本地配置 `config.toml`；视频 `demo.mp4`；不存在 `missing.toml`。',
+  '定位入口：[对应代码](run_report.py:44-46)，这里是当前阅读位置。',
+  '本地配置 `config.toml`；视频 `demo.mp4`；绝对路径 `/Users/name/Downloads/demo.html`；不存在 `missing.toml`。',
   'WBS(外码)/WBS描述/成本中心/FBP/GR-手工金额；心/FBP）有值；`run_gr_reminder.py`。',
-  '已读取（https://example.com/wiki/spec）。文档中的改动：',
+  '网页入口：[网页 · GitHub](https://github.com/)。文档中的改动：',
   ...Array.from({ length: 4 }, () => prose)
 ].join('\n\n')
 const snapshot: CampSnapshot = {
@@ -168,12 +155,15 @@ Object.assign(window, { navigationTest: {
       draft: element('[contenteditable]')?.textContent,
       falseLinks: [...document.querySelectorAll<HTMLAnchorElement>('a[title]')]
         .filter((a) => /FBP|run_gr_reminder/u.test(a.title)).length,
-      inlineReferenceTypes: [...document.querySelectorAll<HTMLAnchorElement>(
-        '[data-message-id="message-12"] a.inline-code-file-reference'
+      explicitReferenceTypes: [...document.querySelectorAll<HTMLAnchorElement>(
+        '[data-message-id="message-12"] a.markdown-file-reference'
       )].map((anchor) => ({
         title: anchor.title,
         type: anchor.querySelector('svg')?.dataset.resourceType
       })),
+      inlineFileLinkCount: document.querySelectorAll(
+        '[data-message-id="message-12"] a.inline-code-file-reference'
+      ).length,
       inertInlineCodes: [...document.querySelectorAll<HTMLElement>(
         '[data-message-id="message-12"] code'
       )].map((code) => code.textContent),

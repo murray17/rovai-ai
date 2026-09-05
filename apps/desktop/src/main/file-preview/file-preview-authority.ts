@@ -86,11 +86,23 @@ function attachmentAuthorityTarget(
   request: Extract<OpenFilePreviewRequest, { kind: 'attachment' }>,
   target: DesktopAttachmentTarget
 ): FilePreviewAuthorityResult {
+  const locator = request.locator
+  const ownerIdentity = locator.owner === 'message'
+    ? `${locator.owner}:${locator.messageId}`
+    : locator.owner === 'pending' || locator.owner === 'pending_edit'
+      ? `${locator.owner}:${locator.pendingInputId}`
+      : locator.owner === 'single_chat_message'
+        ? `${locator.owner}:${locator.conversationId}:${locator.conversationMessageId}`
+        : locator.owner === 'single_chat_pending' || locator.owner === 'single_chat_pending_edit'
+          ? `${locator.owner}:${locator.conversationId}:${locator.pendingInputId}`
+          : locator.owner === 'single_chat_composer'
+            ? `${locator.owner}:${locator.conversationId}`
+            : locator.owner
   return {
     kind: 'file_target',
     campId: request.campId,
     sourceKind: request.kind,
-    sourceIdentity: `attachment:${target.attachmentId}`,
+    sourceIdentity: `attachment:${ownerIdentity}:${target.attachmentId}`,
     rootPath: dirname(target.path),
     basePath: dirname(target.path),
     candidatePath: target.path,
@@ -109,9 +121,9 @@ export class CoreFilePreviewSourceAuthority implements FilePreviewSourceAuthorit
     if (request.kind === 'attachment') {
       const value = await this.core.request<unknown>(
         'camp.attachments.desktopOpenTarget' as CoreMethod,
-        { campId: request.campId, attachmentId: request.attachmentId }
+        request.locator
       )
-      const target = parseDesktopAttachmentTarget(value, request.attachmentId)
+      const target = parseDesktopAttachmentTarget(value, request.locator.attachmentRefId)
       return target ? attachmentAuthorityTarget(request, target) : null
     }
     const value = await this.core.request<unknown>(

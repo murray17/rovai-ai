@@ -20,7 +20,6 @@ import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
 } from './lib/runtime-camp-files-root.mjs'
-import { prepareIsolatedPiAgentDir } from './lib/pi-smoke-config.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mcp-projection-smoke-')))
@@ -31,9 +30,6 @@ const grokSourceHome = process.env.GROK_HOME?.trim() || join(homedir(), '.grok')
 const grokNativeStdioMarker = join(fixtureRoot, 'grok-native-stdio-started')
 const grokNativeHttpNameMarker = join(fixtureRoot, 'grok-native-http-name-started')
 const mcpConfigPath = join(fixtureRoot, 'config', 'mcp.json')
-const mcpMutationRoot = join(fixtureRoot, 'mcp-mutations')
-const mcpCallLog = join(fixtureRoot, 'mcp-call-log.jsonl')
-const mcpPidMarker = join(fixtureRoot, 'mcp-server.pid')
 const fixture = join(root, 'crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs')
 const serverId = '6f589c15-bba8-42e5-a20a-cd6749824207'
 const serverName = 'rovai_smoke'
@@ -48,7 +44,6 @@ const selected = (process.env.ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS ?? 'all')
 const debugGrokProjection = process.env.ROVAI_MCP_PROJECTION_DEBUG_GROK === '1'
 const allAdapters = [
   'codex-cli',
-  'pi',
   'claude-code-cli',
   'opencode-cli',
   'copilot-cli',
@@ -66,14 +61,10 @@ const grokSelected = adapters.includes('grok-build')
 let core = null
 let projectedHttp = null
 let nativeHttp = null
-let piAgentDir = null
 
 try {
   for (const adapter of adapters) {
     if (!allAdapters.includes(adapter)) throw new Error(`Unsupported MCP Projection smoke Adapter: ${adapter}`)
-  }
-  if (adapters.includes('pi')) {
-    piAgentDir = await prepareIsolatedPiAgentDir(fixtureRoot)
   }
   projectedHttp = await startMcpHttpServer('rovai-projection-http')
   nativeHttp = await startMcpHttpServer('runtime-native-http')
@@ -84,7 +75,6 @@ try {
   await core.request('health.check')
   const workspace = await core.request('workspaces.inspect', { path: projectRoot })
   const results = []
-  let piLifecycle = null
 
   for (const adapterKind of adapters) {
     const runtime = await configureRuntime(core.request, adapterKind)
@@ -98,7 +88,7 @@ try {
         ]
       : adapterKind === 'grok-build'
         ? [`rovai-projection-stdio:${adapterMarker}-stdio`]
-      : ['pi', 'kimi-code-cli'].includes(adapterKind)
+      : adapterKind === 'kimi-code-cli'
         ? [
             `rovai-projection:${adapterMarker}`,
             `rovai-projection-http:${adapterMarker}-http`,
@@ -117,7 +107,7 @@ try {
             `rovai-projection-http:${adapterMarker}-http`,
             `runtime-native-http:${adapterMarker}-stdio`
           ]
-      : ['pi', 'kimi-code-cli'].includes(adapterKind)
+      : adapterKind === 'kimi-code-cli'
         ? [
             `runtime-native:${adapterMarker}`,
             `runtime-native:${adapterMarker}-http`,
@@ -143,7 +133,7 @@ try {
       assert(await pathExists(grokNativeHttpNameMarker), 'grok-build did not preserve the second native same-name MCP server')
     }
     const expectedServers = adapterKind === 'codex-cli'
-      || ['pi', 'kimi-code-cli', 'grok-build'].includes(adapterKind)
+      || ['kimi-code-cli', 'grok-build'].includes(adapterKind)
       ? [serverName, projectedHttpServerName, projectedStdioServerName]
       : [serverName]
     const exposures = expectedServers.map((name) => result.exposure?.servers?.find((server) => server.name === name))
@@ -169,16 +159,10 @@ try {
     })
   }
 
-  if (adapters.includes('pi')) {
-    await configureRuntime(core.request, 'pi')
-    piLifecycle = await runPiMcpLifecycle(core.request, workspace, core.events)
-  }
-
   console.log(JSON.stringify({
     ok: true,
     semantics: 'Runtime-native config is preserved; Codex skips collisions, Grok skips active native collisions and adds distinct per-Run servers, while other additive adapters give Rovai the whole-definition precedence',
-    results,
-    piLifecycle
+    results
   }, null, 2))
 } finally {
   if (core) await core.stop()
@@ -284,20 +268,13 @@ async function prepareGrokHome() {
 
 async function prepareRovaiConfig(projectedHttpUrl) {
   await mkdir(resolve(mcpConfigPath, '..'), { recursive: true, mode: 0o700 })
-  await mkdir(mcpMutationRoot, { recursive: true, mode: 0o700 })
   await chmod(resolve(mcpConfigPath, '..'), 0o700)
-  await chmod(mcpMutationRoot, 0o700)
   await writeFile(mcpConfigPath, `${JSON.stringify({
     mcpServers: {
       [serverName]: {
         command: process.execPath,
         args: [fixture],
-        env: {
-          ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection',
-          ROVAI_MCP_SMOKE_CALL_LOG: mcpCallLog,
-          ROVAI_MCP_SMOKE_PID_MARKER: mcpPidMarker,
-          ROVAI_MCP_SMOKE_MUTATION_ROOT: mcpMutationRoot
-        }
+        env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection' }
       },
       [projectedHttpServerName]: {
         url: projectedHttpUrl
@@ -374,7 +351,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
           `Call the assigned MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
           'Return exactly that tool result. The other two assigned definitions collide with active native servers and must remain skipped.'
         ]
-    : ['pi', 'kimi-code-cli'].includes(adapterKind)
+    : adapterKind === 'kimi-code-cli'
       ? [
           `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
           `Call the assigned HTTP MCP server named \`${projectedHttpServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-http\`.`,
@@ -457,342 +434,6 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
     hostInstanceId: started?.params?.hostInstanceId,
     nativeThreadId: started?.params?.nativeThreadId,
     lastState
-  }
-}
-
-async function runPiMcpLifecycle(request, workspace, events) {
-  let config = await request('mcp.config.get')
-  const currentServer = config.servers.find((server) => server.serverId === serverId)
-  assert(currentServer, `Pi MCP lifecycle could not find ${serverName}: ${JSON.stringify(config)}`)
-  const updatedDefinition = JSON.parse(currentServer.definitionJson)
-  updatedDefinition.mcpServers[serverName].env = {
-    ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection-updated',
-    ROVAI_MCP_SMOKE_CALL_LOG: mcpCallLog,
-    ROVAI_MCP_SMOKE_PID_MARKER: mcpPidMarker,
-    ROVAI_MCP_SMOKE_MUTATION_ROOT: mcpMutationRoot
-  }
-  config = await expectMcpMutationOk(request('mcp.servers.update', {
-    expectedConfigDigest: config.configDigest,
-    serverId,
-    definitionJson: JSON.stringify(updatedDefinition)
-  }), 'update')
-
-  const updated = await runProjectedTool(request, workspace, 'pi', 'pi-updated', events)
-  assert(
-    updated.output.includes('rovai-projection-updated:pi-updated'),
-    `Pi next Session did not use the updated MCP definition: ${JSON.stringify(updated)}`
-  )
-  assert(
-    !updated.output.includes('rovai-projection:pi-updated'),
-    `Pi next Session leaked the previous MCP definition: ${JSON.stringify(updated)}`
-  )
-  assert(
-    updated.exposure?.configDigest === config.configDigest,
-    `Pi ContextManifest did not freeze the updated MCP digest: ${JSON.stringify({ config, updated })}`
-  )
-
-  config = await expectMcpMutationOk(request('mcp.servers.setEnabled', {
-    expectedConfigDigest: config.configDigest,
-    serverId,
-    enabled: false,
-    acknowledgeHighRisk: false
-  }), 'disable')
-  const disabled = await runPiMcpAbsenceProbe(request, workspace, events, [
-    'rovai-projection:',
-    'rovai-projection-updated:'
-  ])
-  assertMcpExposureState(disabled, 'disabled')
-
-  config = await expectMcpMutationOk(request('mcp.servers.setEnabled', {
-    expectedConfigDigest: config.configDigest,
-    serverId,
-    enabled: true,
-    acknowledgeHighRisk: true
-  }), 're-enable')
-  config = await expectMcpMutationOk(request('mcp.assignments.set', {
-    expectedConfigDigest: config.configDigest,
-    serverId,
-    agentId: 'agent_1',
-    assigned: false,
-    acknowledgeHighRisk: false
-  }), 'unassign')
-  const unassigned = await runPiMcpAbsenceProbe(request, workspace, events, [
-    'rovai-projection:',
-    'rovai-projection-updated:'
-  ])
-  assertMcpExposureState(unassigned, 'unassigned')
-  assert(
-    updated.hostInstanceId === disabled.hostInstanceId
-      && disabled.hostInstanceId === unassigned.hostInstanceId,
-    `Pi MCP eligibility changes did not reuse the quiescent workspace Host: ${JSON.stringify({ updated, disabled, unassigned })}`
-  )
-  assert(
-    new Set([updated.nativeThreadId, disabled.nativeThreadId, unassigned.nativeThreadId]).size === 3,
-    `Pi MCP eligibility probes did not use isolated Native Sessions: ${JSON.stringify({ updated, disabled, unassigned })}`
-  )
-
-  config = await expectMcpMutationOk(request('mcp.assignments.set', {
-    expectedConfigDigest: config.configDigest,
-    serverId,
-    agentId: 'agent_1',
-    assigned: true,
-    acknowledgeHighRisk: true
-  }), 'restore assignment')
-
-  const denied = await runPiMcpMutation(request, workspace, events, {
-    fileName: 'denied.txt',
-    text: 'DENIED_MCP_SIDE_EFFECT',
-    mode: 'deny'
-  })
-  assert(!(await pathExists(join(mcpMutationRoot, 'denied.txt'))), 'Denied Pi MCP Tool created its target file')
-  assert(
-    !(await readMcpCalls()).some((call) => call.arguments?.fileName === 'denied.txt'),
-    `Denied Pi MCP Tool reached the Server process: ${JSON.stringify(await readMcpCalls())}`
-  )
-
-  const cancelled = await runPiMcpMutation(request, workspace, events, {
-    fileName: 'cancelled.txt',
-    text: 'CANCELLED_MCP_SIDE_EFFECT',
-    mode: 'cancel'
-  })
-  assert(!(await pathExists(join(mcpMutationRoot, 'cancelled.txt'))), 'Cancelled Pi MCP Tool created its target file')
-
-  config = await request('mcp.config.get')
-  config = await expectMcpMutationOk(request('mcp.servers.delete', {
-    expectedConfigDigest: config.configDigest,
-    serverId
-  }), 'delete')
-  const deleted = await runPiMcpAbsenceProbe(request, workspace, events, [
-    'rovai-projection:',
-    'rovai-projection-updated:'
-  ])
-  assert(
-    !deleted.exposure?.servers?.some((server) => server.serverId === serverId || server.name === serverName),
-    `Deleted Pi MCP Server remained in the next ContextManifest: ${JSON.stringify(deleted)}`
-  )
-  assert(
-    !config.servers.some((server) => server.serverId === serverId),
-    `Deleted Pi MCP Server remained in the public MCP config: ${JSON.stringify(config)}`
-  )
-
-  return {
-    updatedNextSession: true,
-    disabledNextSessionHidden: true,
-    unassignedNextSessionHidden: true,
-    residentHostNoCrossSessionLeak: true,
-    deniedBeforeServerDispatch: denied.deniedApprovalCount > 0,
-    cancelStatus: cancelled.runStatus,
-    cancelledServerReaped: cancelled.serverPidReaped,
-    delayedSideEffectAbsent: true,
-    deletedNextSessionHidden: true
-  }
-}
-
-async function expectMcpMutationOk(resultPromise, operation) {
-  const result = await resultPromise
-  if (result.status !== 'ok') {
-    throw new Error(`Pi MCP ${operation} mutation failed: ${JSON.stringify(result)}`)
-  }
-  return result.config
-}
-
-async function runPiMcpAbsenceProbe(request, workspace, events, forbiddenMarkers) {
-  const created = await createConfiguredCampAndSend(request, {
-    commandId: crypto.randomUUID(),
-    workspace,
-    body: [
-      `Report briefly whether the assigned MCP server named \`${serverName}\` is available in this new Session.`,
-      'Do not call any tool, do not use another conversation, and do not modify the workspace.'
-    ].join(' '),
-    address: { mode: 'explicit', agentIds: ['agent_1'] },
-    purpose: 'Verify an ineligible Pi MCP Server is absent from the next Native Session.'
-  })
-  if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
-    throw new Error(`Pi MCP absence Camp was not accepted: ${JSON.stringify(created)}`)
-  }
-  const campId = created.payload.campId
-  const agentRunId = created.payload.agentRunIds[0]
-  const resolvedApprovals = new Set()
-  const snapshot = await waitFor(async () => {
-    const candidate = await request('camps.snapshot', { campId })
-    for (const approval of pendingApprovalsForRun(candidate, agentRunId)
-      .filter((value) => !resolvedApprovals.has(value.id))) {
-      const option = approval.options.find((value) => value.kind === 'deny')
-      if (!option) throw new Error(`Pi MCP absence Approval has no deny option: ${JSON.stringify(approval)}`)
-      const resolution = await request('action.approvals.resolve', {
-        commandId: crypto.randomUUID(),
-        campId,
-        approvalId: approval.id,
-        expectedVersion: approval.version,
-        optionId: option.optionId,
-        reason: 'MCP absence probes never authorize a Tool.'
-      })
-      if (resolution.status === 'rejected') throw new Error(`Pi MCP absence denial failed: ${JSON.stringify(resolution)}`)
-      resolvedApprovals.add(approval.id)
-    }
-    const run = candidate.agentRuns.find((value) => value.id === agentRunId)
-    if (run && ['failed', 'cancelled'].includes(run.status)) {
-      throw new Error(`Pi MCP absence AgentRun failed: ${JSON.stringify({ run, timeline: candidate.timeline.slice(-12) })}`)
-    }
-    return run?.status === 'succeeded' ? candidate : null
-  }, 'Pi MCP absence probe', 360_000)
-  const output = outputForAgentRun(snapshot, agentRunId)
-  const leaked = forbiddenMarkers.find((marker) => output.includes(marker))
-  assert(!leaked, `Pi MCP absence probe leaked ${leaked}: ${JSON.stringify(output)}`)
-  const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
-  const started = events.find((event) =>
-    event.method === 'agent_run.started' && event.params?.agentRunId === agentRunId
-  )
-  return {
-    agentRunId,
-    output,
-    exposure: manifest?.mcpExposure,
-    hostInstanceId: started?.params?.hostInstanceId,
-    nativeThreadId: started?.params?.nativeThreadId
-  }
-}
-
-function assertMcpExposureState(result, expectedStatus) {
-  const exposure = result.exposure?.servers?.find((server) => server.serverId === serverId)
-  assert(
-    exposure?.status === expectedStatus,
-    `Pi MCP exposure was not ${expectedStatus}: ${JSON.stringify(result)}`
-  )
-  assert(
-    typeof result.hostInstanceId === 'string' && typeof result.nativeThreadId === 'string',
-    `Pi ${expectedStatus} MCP probe omitted Host/Session identity: ${JSON.stringify(result)}`
-  )
-}
-
-async function runPiMcpMutation(request, workspace, events, options) {
-  const created = await createConfiguredCampAndSend(request, {
-    commandId: crypto.randomUUID(),
-    workspace,
-    body: [
-      'This is a managed MCP Tool routing test.',
-      `Invoke the assigned MCP Server \`${serverName}\` Tool \`delayed_write\` exactly once with fileName \`${options.fileName}\`, text \`${options.text}\`, and delayMs 30000.`,
-      'Do not simulate it, do not call another tool, and do not retry if the Host rejects or interrupts the Tool.'
-    ].join(' '),
-    address: { mode: 'explicit', agentIds: ['agent_1'] },
-    purpose: `Verify Pi MCP ${options.mode} settlement and side-effect fencing.`
-  })
-  if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
-    throw new Error(`Pi MCP ${options.mode} Camp was not accepted: ${JSON.stringify(created)}`)
-  }
-  const campId = created.payload.campId
-  const agentRunId = created.payload.agentRunIds[0]
-  const resolvedApprovals = new Set()
-  let cancellationRequested = false
-  let serverPid = null
-  const snapshot = await waitFor(async () => {
-    const candidate = await request('camps.snapshot', { campId })
-    for (const approval of pendingApprovalsForRun(candidate, agentRunId)
-      .filter((value) => !resolvedApprovals.has(value.id))) {
-      const decision = options.mode === 'deny' ? 'deny' : 'allow_once'
-      const option = approval.options.find((value) => value.kind === decision)
-      if (!option) throw new Error(`Pi MCP ${options.mode} Approval has no ${decision}: ${JSON.stringify(approval)}`)
-      const resolution = await request('action.approvals.resolve', {
-        commandId: crypto.randomUUID(),
-        campId,
-        approvalId: approval.id,
-        expectedVersion: approval.version,
-        optionId: option.optionId,
-        reason: `Pi MCP ${options.mode} smoke test.`
-      })
-      if (resolution.status === 'rejected') throw new Error(`Pi MCP ${options.mode} Approval failed: ${JSON.stringify(resolution)}`)
-      resolvedApprovals.add(approval.id)
-    }
-    const run = candidate.agentRuns.find((value) => value.id === agentRunId)
-    if (options.mode === 'cancel' && !cancellationRequested && resolvedApprovals.size > 0) {
-      const callStarted = (await readMcpCalls()).some((call) => call.arguments?.fileName === options.fileName)
-      if (callStarted) {
-        serverPid = Number.parseInt((await readFile(mcpPidMarker, 'utf8')).trim(), 10)
-        assert(Number.isSafeInteger(serverPid) && serverPid > 0, `Pi MCP Server PID marker was invalid: ${serverPid}`)
-        const turn = candidate.turns.find((value) => value.id === run?.campTurnId)
-        assert(turn, `Pi MCP cancel could not find CampTurn: ${JSON.stringify(run)}`)
-        const cancellation = await request('campTurns.cancel', {
-          commandId: crypto.randomUUID(),
-          command: { campId, campTurnId: turn.id, expectedVersion: turn.version }
-        })
-        if (cancellation.status === 'rejected') throw new Error(`Pi MCP CampTurn cancel failed: ${JSON.stringify(cancellation)}`)
-        cancellationRequested = true
-      }
-    }
-    if (options.mode === 'cancel' && !cancellationRequested && run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
-      throw new Error(`Pi MCP mutation settled before cancellation: ${JSON.stringify({ run, calls: await readMcpCalls() })}`)
-    }
-    if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
-      if (options.mode === 'cancel' && !cancellationRequested) return null
-      return candidate
-    }
-    return null
-  }, `Pi MCP ${options.mode}`, 360_000)
-  const run = snapshot.agentRuns.find((value) => value.id === agentRunId)
-  const actions = actionsForAgentRun(snapshot, agentRunId)
-  const approvals = approvalsForAgentRun(snapshot, agentRunId)
-  if (options.mode === 'deny') {
-    assert(
-      approvals.some((approval) => approval.status === 'denied')
-        && !actions.some((action) => action.status === 'succeeded'),
-      `Pi denied MCP Action did not fail closed: ${JSON.stringify({ run, actions, approvals })}`
-    )
-  } else {
-    assert(run?.status === 'cancelled', `Pi cancelled MCP AgentRun settled as ${run?.status}: ${JSON.stringify({ run, actions, approvals })}`)
-    await waitFor(async () => !(await processExists(serverPid)), 'Pi cancelled MCP Server reap', 15_000)
-    await wait(1_500)
-  }
-  const started = events.find((event) =>
-    event.method === 'agent_run.started' && event.params?.agentRunId === agentRunId
-  )
-  return {
-    runStatus: run?.status,
-    deniedApprovalCount: approvals.filter((approval) => approval.status === 'denied').length,
-    serverPid,
-    serverPidReaped: serverPid === null || !(await processExists(serverPid)),
-    hostInstanceId: started?.params?.hostInstanceId,
-    nativeThreadId: started?.params?.nativeThreadId
-  }
-}
-
-function actionsForAgentRun(snapshot, agentRunId) {
-  return snapshot.actions.filter((action) => action.agentRunId === agentRunId)
-}
-
-function approvalsForAgentRun(snapshot, agentRunId) {
-  const actionIds = new Set(actionsForAgentRun(snapshot, agentRunId).map((action) => action.id))
-  return snapshot.approvals.filter((approval) => actionIds.has(approval.actionId))
-}
-
-function pendingApprovalsForRun(snapshot, agentRunId) {
-  return approvalsForAgentRun(snapshot, agentRunId).filter((approval) => approval.status === 'pending')
-}
-
-function outputForAgentRun(snapshot, agentRunId) {
-  return snapshot.messages
-    .filter((message) => message.authorType === 'agent' && message.sourceAgentRunId === agentRunId)
-    .map((message) => message.body)
-    .join('\n')
-}
-
-async function readMcpCalls() {
-  const text = await readFile(mcpCallLog, 'utf8').catch((error) => {
-    if (error?.code === 'ENOENT') return ''
-    throw error
-  })
-  return text
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-}
-
-async function processExists(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    if (error?.code === 'ESRCH') return false
-    throw error
   }
 }
 
@@ -885,15 +526,7 @@ function startCore() {
   const coreExecutable = process.env.ROVAI_CORE_EXECUTABLE
     ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
     : join(root, 'target', 'debug', 'rovai-core')
-  const coreEnvironment = {
-    ...process.env,
-    GROK_HOME: grokHome,
-    ...(adapters.includes('pi')
-      ? {
-          PI_CODING_AGENT_DIR: piAgentDir,
-        }
-      : {})
-  }
+  const coreEnvironment = { ...process.env, GROK_HOME: grokHome }
   const child = spawn(coreExecutable, [
     ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root', join(dataDir, 'managed-skill-library'),

@@ -1468,12 +1468,6 @@ impl AgentProfileService {
                     || runtime.model.model_id.trim().is_empty()
                     || runtime.permissions.adapter_kind != AdapterKind::Pi
                     || runtime.permissions.schema_version != 1
-                    || runtime
-                        .permissions
-                        .values
-                        .get("approval_mode")
-                        .and_then(Value::as_str)
-                        != Some("managed")
                     || runtime.native_session_compatibility_key.as_deref()
                         != Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY)
                 {
@@ -4881,6 +4875,9 @@ fn runtime_configuration_issue(
     let Some(values) = configuration.permissions.values.as_object() else {
         return Ok(issue("runtime_permission_values_invalid", json!({})));
     };
+    if configuration.adapter_kind == AdapterKind::Pi {
+        return Ok(None);
+    }
     for (key, value) in values {
         let Some(descriptor) = descriptor_by_key.get(key.as_str()) else {
             return Ok(issue(

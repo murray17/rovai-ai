@@ -2,59 +2,83 @@
 document_type: architecture
 architecture: single-chat
 authority: single-chat-component-boundaries-and-data-flow
-last_updated: 2026-09-04
+last_updated: 2026-09-05
 ---
 
 # Single Chat Architecture
 
 Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。字段级合同见
-[Single Chat v1](../contracts/single-chat-v1.md)，选择理由见
-[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)与
-[V1.40-D02](../versions/v1.40/decisions.md#v1-40-d02)。
+[Single Chat v1](../contracts/single-chat-v1.md)，当前选择理由见
+[V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)至
+[V1.50-D04](../versions/v1.50/decisions.md#v1-50-d04)。
 
 ## 组件职责
 
 | 组件 | 拥有 | 不拥有 |
 | --- | --- | --- |
-| Desktop Renderer | active 会话选择、私有 transcript、私有附件暂存意图、执行折叠、停止与结束意图 | 权限、持久附件路径、路由、恢复推断、公共水位 |
-| Desktop Main bridge | 五个会话 Core method、三个私有附件 method 的 allowlist、受限 bytes ingress 和事件转发 | 业务状态、目标选择、私有输出生成 |
-| SingleChatService | Conversation 生命周期、原子 open/send/end、snapshot | Runtime process、Prompt 执行、公共投影 |
-| SingleChatAttachmentStore | Conversation-scoped 私有快照、receipt、暂存清理与 per-Run 临时投影 | Camp 公共附件、Runtime 能力、消息/Run 调度 |
-| Context builder | 无 Memory 的专用 Bootstrap、专用 Charter/Guidance、过滤后 Skill exposure、私有水位上的公共增量 | transcript 自动重放、连续性解释、异步唤醒、授权替代 |
+| Desktop Renderer | active 会话选择、私有 transcript、Composer Draft 交互、Conversation-local 排队编辑、执行折叠、停止与结束意图 | 权限、原始附件路径、路由、恢复推断、公共水位 |
+| Desktop Main / Preload | Single Chat Core method allowlist、公共附件选择/预览/打开/Reveal bridge 和事件转发 | 业务状态、附件内容仓库、目标选择、私有输出生成 |
+| `SingleChatService` | Conversation 生命周期、原子 open/send/end、附件 Draft revision、Pending FIFO、Snapshot/History | Runtime process、Prompt 执行、公共投影 |
+| Source Attachment 基础设施 | `LocalAttachmentSourceRef` 观察/清洗/重检、owner 精确读取、Run-local 解析与公共 AttachmentCard 能力 | Source 永久可用性、Single Chat transcript、队列顺序 |
+| Context builder | 无 Memory 的专用 Bootstrap、专用 Charter/Guidance、过滤后 Skill exposure、私有水位上的公共增量和公共 resolved attachment paths | transcript 自动重放、连续性解释、异步唤醒、授权替代 |
 | Built-in Router | `single_chat_v1` 固定三项 allowlist、当前 Camp scope 与当前单聊历史反向解析 | Runtime 原生 delegation、通用 Capability DSL |
-| Runtime terminal service | 冻结 route 复核、恰好一条私有 final、迟到事件 fence | Renderer 展示、跨 Conversation 排队 |
-| Existing Scheduler/Fleet | 普通 capacity/readiness、dispatch、Binding 与 cleanup | Single Chat 专用回复槽、successor cleanup fence |
+| Runtime terminal service | 冻结 route 复核、恰好一条私有 final、迟到事件 fence | Renderer 展示、队列编辑 |
+| Existing Scheduler/Fleet | 普通 capacity/readiness、dispatch、Binding、cleanup 和空闲 Conversation 的 Pending 发布 | Single Chat 专用回复槽、跨 Conversation cleanup fence |
 
-## 主数据流
+## 直接发送与排队数据流
 
 ```text
-Renderer singleChat.attachments.prepareFromPath
-  → private Conversation-scoped snapshot + receipt
-  → SingleChatSnapshot.preparedAttachments
-Renderer singleChat.send(body, attachmentIds)
+用户选择、粘贴或拖入附件
+  → observe_source_attachment
+  → ordered LocalAttachmentSourceRef[]
+  → single_chat_composer_draft(revision)
+
+Renderer singleChat.send(body, draftRevision)
   → SingleChatService transaction
-      → user ConversationMessage + immutable private attachment refs
-      → CampTurn(kind=single_chat)
-      → AgentRun(invocation=single_chat, private route, fixed policy)
-  → existing Scheduler / Runtime Fleet
-      → verify + copy trigger-message attachments into this Run's ROVAI_RUN_TMP
-      → Single Chat Bootstrap + Dynamic Context
-          → CURRENT_INPUT.attachments = per-Run private projection paths
-      → authenticated Built-in operations under single_chat_v1
-          ├── camp.search/read within frozen public boundary
-          └── single_chat.history before CURRENT_INPUT
-      → Execution Evidence
-      → Runtime final
-  → route-aware terminal transaction
-      → agent ConversationMessage
-      → no CampMessage / no Channel / no Missing-Send Recovery
-  → SingleChatSnapshot
-      → private Renderer panel
+      ├── Conversation 无 active Run 且无 Pending
+      │     → user conversation_message + Source Refs
+      │     → CampTurn(kind=single_chat)
+      │     → AgentRun(invocation=single_chat, private route, fixed policy)
+      │     → 清空 Draft，并推进 Draft/Conversation revision
+      └── Conversation 有 active Run 或 Pending
+            → single_chat_pending_input + Source Refs
+            → 清空 Draft，并仅推进 Draft revision
+
+Scheduler 发现该 Conversation 空闲
+  → 选择 FIFO 队首
+  → 重检 Source Refs、成员和 Runtime readiness
+      ├── 成功：原子创建私有 Message/Turn/Run，Pending → published
+      └── 失败：队首 → needs_repair，阻塞同 Conversation 后项
+  → 用户可独占编辑、takeover、增删/重排附件、保存或删除
 ```
 
-单聊消息和 Run 仍然属于其 Camp，因而可以读取被冻结边界内的公共历史并复用 Camp workspace；它们并不因此成为
-CampMessage 或公共协作责任。普通 Camp read model 在 SQL 边界按 kind/invocation 排除 Single Chat，避免依赖 Renderer
-隐藏。
+队列以 `conversation_id + enqueue_sequence` 定序。Camp 公屏队列、其他 Single Chat、同一队员的 successor Conversation
+和普通 Scheduler capacity 都不共享这个顺序域。Pending 尚未发布时不占用 ConversationMessage sequence，不创建
+CampTurn/AgentRun，也不推进 Conversation version。
+
+## Runtime 与附件数据流
+
+```text
+AgentRun.trigger_conversation_message_id
+  → exact conversation/invocation/author/route fence
+  → conversation_message.source_attachments_json
+  → Vec<LocalAttachmentSourceRef>
+  → resolve_source_attachments_for_run
+      ├── executionRoot 内：使用原路径
+      └── executionRoot 外：复制到 ROVAI_RUN_TMP/source-attachments
+  → materialize_with_exposures_and_source_attachments
+  → CURRENT_INPUT.attachments
+  → 所有 Runtime Adapter 接收同一份 resolved paths
+```
+
+Single Chat 不拥有附件内容根、copy receipt、retention worker 或专用 Runtime projection。Source Ref 是 weakly durable：
+选择、发送和 dispatch 分别按公共规则观察或重检；原文件移动、删除、失去权限或改变类型时诚实失败，内容后来变化则读取
+执行时实际内容。只有 execution root 外的来源在本轮 dispatch 时复制到通用 Run Temp，并由通用 cleanup 回收。
+
+`LocalAttachmentOwnerLocator` 用四类 Single Chat owner 精确恢复 Source Ref：Composer、Pending canonical、Pending edit
+working copy 和已发送 Message。每次读取都校验 Camp、Conversation kind、Message/Pending 所属关系和 attachment ref id；
+Renderer 通过公共 `AttachmentCard`、Preview、Open、Reveal 与 FilePreview 使用这些 owner，不接收 `source_path` 或 Runtime
+临时路径。
 
 ## Context 分支
 
@@ -67,7 +91,7 @@ Memory Entrypoint；Dynamic Context 选择专用 Charter/Guidance，排除 Self 
 
 模型不接收 Native Session 连续性或替换原因，也不接收自动私有 transcript replay。需要但缺少此前私聊正文时，Runtime
 通过始终可用的 `single_chat.history` 请求 Core；Router 只从已认证当前 Run 解析 active destination，并把读取上界锁在
-`CURRENT_INPUT` 之前。
+`CURRENT_INPUT` 之前。History 的附件只提供清洗后的名称、类型、大小和 ref id 等元数据，不把旧附件自动注入当前 Run。
 
 ## 输出与迟到事件
 
@@ -76,19 +100,17 @@ Memory Entrypoint；Dynamic Context 选择专用 Charter/Guidance，排除 Self 
 cancelled、epoch 过期、Binding generation 不匹配或 route 不完整时，回调只能进入旧执行/清理证据，不得转投当前同 Agent
 的另一个 Conversation。
 
-Renderer 只读取 SingleChatSnapshot 中的私有 Messages 与精确 Run Evidence。运行时沿用执行台的 narration、plan、tool
-与 command 分组；终态自动折叠过程而不是删除 Evidence，final message 保持可读。
+Renderer 只读取 SingleChatSnapshot 中的私有 Messages、Pending 与精确 Run Evidence。运行时沿用执行台的 narration、plan、
+tool 与 command 分组；终态自动折叠过程而不是删除 Evidence，final message 保持可读。用户历史附件和 Composer/Pending
+附件都由清洗后的 View 加精确 owner locator 呈现。
 
-私有附件持久根与 Camp 公共附件根分离。Renderer 只能通过专用 bridge 暂存、移除和预览；Runtime 只接触当前 Run 临时
-投影，Context builder 不把持久来源路径直接写入 payload。附件发送与用户 ConversationMessage 在同一事务中绑定；
-successor Conversation 不能读取 predecessor 的暂存、已发送附件或临时投影。
-
-## 取消和并发
+## 取消、结束与并发
 
 启动协调在普通 AgentRun recovery 分类前先把非终态 Single Chat Run 交给既有 abortive cancellation。该规则只结束当前
-回复，不结束 Conversation，也不恢复旧 Native Turn。用户结束 Conversation 时使用同一取消结算，并在事务提交点关闭
-输出路由。
+回复，不结束 Conversation，也不恢复旧 Native Turn。用户结束 Conversation 时使用同一取消结算，在事务提交点关闭
+输出路由、删除 Composer Draft 与 Pending edit session，并把未发布 Pending 标为 cancelled；所有操作都只移除 Source Ref，
+不删除用户原始文件。
 
 predecessor ended 后 successor 使用全新 Conversation/Binding/Session，因此不会命中 predecessor 的 Conversation-local
-cleanup fence。两个 Runtime cleanup/dispatch 可以短暂重叠；底层无法并发时由现有 Scheduler/Fleet 报告 readiness 或
-failure，不在 Single Chat 领域中引入等待状态。
+队列或 cleanup fence。两个 Runtime cleanup/dispatch 可以短暂重叠；底层无法并发时由现有 Scheduler/Fleet 表达 readiness
+或 failure，不在 Single Chat 领域中引入跨 Conversation 等待状态。

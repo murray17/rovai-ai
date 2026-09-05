@@ -41,6 +41,6 @@ Renderer 在来源 Run 尚未公开发言且未终态时保留图片等待，不
 这次不扩展钉钉附件、登录、发布或 Stream 行为。
 
 接口与限额见 [Runtime Images v4](../contracts/runtime-images-v4.md)、投影见
-[Camp Open Projection v14](../contracts/camp-open-projection-v14.md)、展示见
+[Camp Open Projection v15](../contracts/camp-open-projection-v15.md)、展示见
 [Camp 会话工作区](../ui/components/conversation-workspace.md#runtime-图片与消息图片)。混合保存的理由见
 [V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)。

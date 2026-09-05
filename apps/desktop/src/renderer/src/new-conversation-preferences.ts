@@ -99,6 +99,31 @@ export function navigationWithoutRemovedProjects(
     : { ...navigation, projects }
 }
 
+export function navigationWithProjectOrder(
+  navigation: NavigationSnapshot | null,
+  projectOrder: readonly string[] | null
+): NavigationSnapshot | null {
+  if (!navigation || projectOrder === null || navigation.projects.length < 2) return navigation
+  const orderByProjectKey = new Map(
+    projectOrder.map((projectKey, index) => [projectKey, index])
+  )
+  const originalIndexByProjectKey = new Map(
+    navigation.projects.map((project, index) => [project.projectKey, index])
+  )
+  const projects = [...navigation.projects].sort((left, right) => {
+    const leftOrder = orderByProjectKey.get(left.projectKey)
+    const rightOrder = orderByProjectKey.get(right.projectKey)
+    if (leftOrder !== undefined && rightOrder !== undefined) return leftOrder - rightOrder
+    if (leftOrder !== undefined) return -1
+    if (rightOrder !== undefined) return 1
+    return (originalIndexByProjectKey.get(left.projectKey) ?? 0)
+      - (originalIndexByProjectKey.get(right.projectKey) ?? 0)
+  })
+  return projects.every((project, index) => project === navigation.projects[index])
+    ? navigation
+    : { ...navigation, projects }
+}
+
 export function navigationWithProjectAuthority(
   navigation: NavigationSnapshot | null,
   removedProjectKeys: ReadonlySet<string>,
@@ -175,7 +200,7 @@ export function navigationIncludingCurrentWorkspace(
   }
   return {
     ...navigation,
-    projects: [emptyProject, ...navigation.projects]
+    projects: [...navigation.projects, emptyProject]
   }
 }
 

@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashSet},
-    path::Path,
-};
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -187,6 +184,32 @@ pub struct PreparedContext {
     pub collaboration_state_digest: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PiRuntimeAttachment {
+    pub attachment_id: String,
+    pub path: String,
+    pub content_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiRuntimeInputProjection {
+    pub attachments: Vec<PiRuntimeAttachment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PiPromptImageEvidence {
+    pub image_index: usize,
+    pub mime_type: String,
+    pub content_digest: String,
+    pub byte_length: usize,
+}
+
+pub struct PersistPiPromptImageEvidence<'a> {
+    pub delivery_id: &'a str,
+    pub images: &'a [PiPromptImageEvidence],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedSessionBootstrap {
     pub evidence_id: String,
@@ -240,13 +263,6 @@ pub struct RuntimeInputDelivery {
     pub native_input_id: Option<String>,
     pub boundary_camp_message_sequence: i64,
     pub bootstrap_redelivery_revision: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommittedPiManagedInputReceipt {
-    pub digest: String,
-    pub commit_nonce: String,
-    pub delivery: RuntimeInputDelivery,
 }
 
 #[derive(Default)]
@@ -314,7 +330,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, None, None, None, request)
+        self.materialize_inner(database, blob_store, None, None, &[], request)
     }
 
     pub fn materialize_with_skill_exposure(
@@ -329,7 +345,25 @@ impl ContextService {
             blob_store,
             Some(skill_exposure),
             None,
+            &[],
+            request,
+        )
+    }
+
+    pub fn materialize_with_skill_exposure_and_source_attachments(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        skill_exposure: &PreparedSkillExposure,
+        source_attachment_paths: &[String],
+        request: &MaterializeContextRequest<'_>,
+    ) -> Result<ContextMaterialization> {
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
             None,
+            source_attachment_paths,
             request,
         )
     }
@@ -347,18 +381,18 @@ impl ContextService {
             blob_store,
             Some(skill_exposure),
             Some(mcp_projection),
-            None,
+            &[],
             request,
         )
     }
 
-    pub fn materialize_with_exposures_and_attachment_projection(
+    pub fn materialize_with_exposures_and_source_attachments(
         &self,
         database: &mut Database,
         blob_store: &ManagedBlobStore,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
-        single_chat_attachment_root: Option<&Path>,
+        source_attachment_paths: &[String],
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
         self.materialize_inner(
@@ -366,7 +400,7 @@ impl ContextService {
             blob_store,
             Some(skill_exposure),
             Some(mcp_projection),
-            single_chat_attachment_root,
+            source_attachment_paths,
             request,
         )
     }
@@ -435,7 +469,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         prepared_skill_exposure: Option<&PreparedSkillExposure>,
         prepared_mcp_projection: Option<&PreparedMcpProjection>,
-        single_chat_attachment_root: Option<&Path>,
+        source_attachment_paths: &[String],
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
         if request.execution_epoch < 1 {
@@ -595,12 +629,12 @@ impl ContextService {
             profile.max_public_history_chars,
         );
         let current_input = load_current_input(database, &snapshot)?;
-        let attachment_refs =
-            load_current_attachment_refs(database, &current_input, single_chat_attachment_root)?;
-        let attachment_paths = attachment_refs
+        let attachment_refs = load_current_attachment_refs(database, &current_input)?;
+        let mut attachment_paths = attachment_refs
             .iter()
             .map(|attachment| attachment.path.clone())
             .collect::<Vec<_>>();
+        attachment_paths.extend_from_slice(source_attachment_paths);
         if snapshot.invocation_kind != "direct"
             && !snapshot.skill_selection_snapshot.entries.is_empty()
         {
@@ -1133,7 +1167,7 @@ impl ContextService {
             profile.max_public_history_chars,
         );
         let current_input = load_current_input(transaction, &snapshot)?;
-        let attachment_refs = load_current_attachment_refs(transaction, &current_input, None)?;
+        let attachment_refs = load_current_attachment_refs(transaction, &current_input)?;
         let attachment_paths = attachment_refs
             .iter()
             .map(|attachment| attachment.path.clone())
@@ -1510,6 +1544,136 @@ impl ContextService {
         )
     }
 
+    pub fn pi_runtime_input_projection(
+        &self,
+        database: &Database,
+        delivery_id: &str,
+        original_payload: &str,
+    ) -> Result<PiRuntimeInputProjection> {
+        let (
+            attachment_refs_json,
+            attachment_digest,
+            dynamic_payload_digest,
+            status,
+            dispatch_started_at,
+        ): (String, String, String, String, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT manifest.attachment_refs_json, manifest.attachment_digest,
+                       delivery.dynamic_payload_digest,
+                       delivery.status, delivery.dispatch_started_at
+                FROM runtime_input_delivery AS delivery
+                JOIN context_manifest AS manifest
+                  ON manifest.id = delivery.context_manifest_id
+                WHERE delivery.id = ?1
+                "#,
+                [delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .context("Pi Runtime Input Delivery projection is unavailable")?;
+        if status != "prepared" || dispatch_started_at.is_some() {
+            anyhow::bail!("Pi input evidence must be prepared before dispatch");
+        }
+        if dynamic_payload_digest != sha256_text(original_payload) {
+            anyhow::bail!("Pi original Dynamic Context changed after Delivery preparation");
+        }
+        let attachment_value: Value = serde_json::from_str(&attachment_refs_json)
+            .context("Pi ContextManifest attachment refs are invalid")?;
+        if canonical_json_digest(&attachment_value)? != attachment_digest {
+            anyhow::bail!("Pi ContextManifest attachment refs digest is invalid");
+        }
+        let attachments: Vec<PiRuntimeAttachment> = serde_json::from_value(attachment_value)
+            .context("Pi ContextManifest attachment refs have an invalid shape")?;
+        Ok(PiRuntimeInputProjection { attachments })
+    }
+
+    pub fn persist_pi_prompt_image_evidence(
+        &self,
+        database: &mut Database,
+        evidence: PersistPiPromptImageEvidence<'_>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        let (status, dispatch_started_at): (String, Option<String>) = transaction
+            .query_row(
+                "SELECT status, dispatch_started_at FROM runtime_input_delivery WHERE id = ?1",
+                [evidence.delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .context("Pi Runtime Input Delivery disappeared before evidence persistence")?;
+        if status != "prepared" || dispatch_started_at.is_some() {
+            anyhow::bail!("Pi image evidence was fenced before dispatch");
+        }
+        for (expected_index, image) in evidence.images.iter().enumerate() {
+            if image.image_index != expected_index
+                || !matches!(
+                    image.mime_type.as_str(),
+                    "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+                )
+                || !is_raw_sha256(&image.content_digest)
+                || image.byte_length == 0
+            {
+                anyhow::bail!("Pi Prompt image evidence is invalid");
+            }
+        }
+        let existing_images = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT image_index, mime_type, content_digest, byte_length
+                FROM pi_prompt_image_evidence
+                WHERE runtime_input_delivery_id = ?1
+                ORDER BY image_index
+                "#,
+            )?;
+            statement
+                .query_map([evidence.delivery_id], |row| {
+                    Ok(PiPromptImageEvidence {
+                        image_index: row.get::<_, i64>(0)? as usize,
+                        mime_type: row.get(1)?,
+                        content_digest: row.get(2)?,
+                        byte_length: row.get::<_, i64>(3)? as usize,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if !existing_images.is_empty() {
+            if existing_images != evidence.images {
+                anyhow::bail!("Pi Prompt image evidence changed after persistence");
+            }
+        } else {
+            for image in evidence.images {
+                transaction.execute(
+                    r#"
+                    INSERT INTO pi_prompt_image_evidence(
+                        id, runtime_input_delivery_id, image_index, mime_type,
+                        content_digest, byte_length, evidence_version, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 2, ?7)
+                    "#,
+                    params![
+                        Uuid::new_v4().to_string(),
+                        evidence.delivery_id,
+                        image.image_index as i64,
+                        image.mime_type,
+                        image.content_digest,
+                        image.byte_length as i64,
+                        now,
+                    ],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn prepare_input_delivery_inner(
         &self,
         database: &mut Database,
@@ -1858,7 +2022,7 @@ impl ContextService {
         }
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction()?;
-        let delivery = acknowledge_input_delivery_transaction(
+        let (delivery, _) = acknowledge_input_delivery_transaction(
             &transaction,
             delivery_id,
             native_input_id,
@@ -1868,136 +2032,25 @@ impl ContextService {
         Ok(delivery)
     }
 
-    pub fn commit_pi_managed_input_receipt_and_accept(
+    pub fn acknowledge_input_delivery_transition(
         &self,
         database: &mut Database,
         delivery_id: &str,
-        native_prompt_id: &str,
-        receipt: &Value,
-        commit_nonce: &str,
-    ) -> Result<CommittedPiManagedInputReceipt> {
-        if native_prompt_id.trim().is_empty() {
-            anyhow::bail!("Pi Native Prompt ID must not be empty");
-        }
-        let receipt_bytes = serde_json::to_vec(receipt)?;
-        if receipt_bytes.len() > 2 * 1024 * 1024 {
-            anyhow::bail!("Pi managed input receipt exceeds the private evidence limit");
-        }
-        if commit_nonce.len() != 64
-            || !commit_nonce
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            anyhow::bail!("Pi managed input receipt commit nonce is invalid");
-        }
-        let receipt_digest = canonical_json_digest(receipt)?;
-        let receipt_delivery_id = required_receipt_string(receipt, "runtimeInputDeliveryId")?;
-        let receipt_prompt_id = required_receipt_string(receipt, "nativePromptId")?;
-        let receipt_agent_run_id = required_receipt_string(receipt, "agentRunId")?;
-        let receipt_native_binding_id = required_receipt_string(receipt, "nativeBindingId")?;
-        let receipt_native_session_id = required_receipt_string(receipt, "nativeSessionId")?;
-        let receipt_execution_epoch = receipt
-            .get("executionEpoch")
-            .and_then(Value::as_i64)
-            .context("Pi managed input receipt omitted executionEpoch")?;
-        let receipt_binding_generation = receipt
-            .get("nativeBindingGeneration")
-            .and_then(Value::as_i64)
-            .context("Pi managed input receipt omitted nativeBindingGeneration")?;
-        if receipt_delivery_id != delivery_id || receipt_prompt_id != native_prompt_id {
-            anyhow::bail!("Pi managed input receipt did not match its Delivery/Prompt route");
+        native_input_id: &str,
+    ) -> Result<(RuntimeInputDelivery, bool)> {
+        if native_input_id.trim().is_empty() {
+            anyhow::bail!("Native Input ID must not be empty");
         }
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction()?;
-        let row = load_delivery_target(&transaction, delivery_id)?
-            .context("Runtime Input Delivery does not exist")?;
-        let (dispatch_started_at, delivery_mode): (Option<String>, String) = transaction
-            .query_row(
-                r#"
-            SELECT delivery.dispatch_started_at, bootstrap.delivery_mode
-            FROM runtime_input_delivery AS delivery
-            JOIN context_manifest AS manifest ON manifest.id = delivery.context_manifest_id
-            JOIN native_session_bootstrap_evidence AS bootstrap
-              ON bootstrap.id = manifest.bootstrap_evidence_id
-            WHERE delivery.id = ?1
-            "#,
-                [delivery_id],
-                |query_row| Ok((query_row.get(0)?, query_row.get(1)?)),
-            )?;
-        if dispatch_started_at.is_none() || delivery_mode != "managed_system_prompt" {
-            anyhow::bail!("Pi managed input receipt is outside a dispatched managed prompt");
-        }
-        if row.agent_run_id != receipt_agent_run_id
-            || row.execution_epoch != receipt_execution_epoch
-            || row.native_binding_id != receipt_native_binding_id
-            || row.native_binding_generation != receipt_binding_generation
-        {
-            anyhow::bail!("Pi managed input receipt failed durable Run/Binding validation");
-        }
-        let stored = transaction
-            .query_row(
-                r#"
-                SELECT receipt_digest, commit_nonce, native_prompt_id, native_session_id
-                FROM pi_managed_input_receipt
-                WHERE runtime_input_delivery_id = ?1
-                "#,
-                [delivery_id],
-                |query_row| {
-                    Ok((
-                        query_row.get::<_, String>(0)?,
-                        query_row.get::<_, String>(1)?,
-                        query_row.get::<_, String>(2)?,
-                        query_row.get::<_, String>(3)?,
-                    ))
-                },
-            )
-            .optional()?;
-        if let Some((stored_digest, stored_nonce, stored_prompt, stored_session)) = stored {
-            if stored_digest != receipt_digest
-                || stored_nonce != commit_nonce
-                || stored_prompt != native_prompt_id
-                || stored_session != receipt_native_session_id
-            {
-                anyhow::bail!("Pi managed input receipt changed after commit");
-            }
-        } else {
-            transaction.execute(
-                r#"
-                INSERT INTO pi_managed_input_receipt(
-                    id, runtime_input_delivery_id, agent_run_id, execution_epoch,
-                    native_binding_id, native_binding_generation, native_session_id,
-                    native_prompt_id, receipt_version, receipt_json, receipt_digest,
-                    commit_nonce, committed_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?11, ?12)
-                "#,
-                params![
-                    Uuid::new_v4().to_string(),
-                    delivery_id,
-                    receipt_agent_run_id,
-                    receipt_execution_epoch,
-                    receipt_native_binding_id,
-                    receipt_binding_generation,
-                    receipt_native_session_id,
-                    native_prompt_id,
-                    serde_json::to_string(receipt)?,
-                    receipt_digest,
-                    commit_nonce,
-                    now,
-                ],
-            )?;
-        }
-        let delivery = acknowledge_input_delivery_transaction(
+        let result = acknowledge_input_delivery_transaction(
             &transaction,
             delivery_id,
-            native_prompt_id,
+            native_input_id,
             &now,
         )?;
         transaction.commit()?;
-        Ok(CommittedPiManagedInputReceipt {
-            digest: receipt_digest,
-            commit_nonce: commit_nonce.to_string(),
-            delivery,
-        })
+        Ok(result)
     }
 
     pub fn mark_input_delivery_unknown(
@@ -2132,53 +2185,19 @@ impl ContextService {
     }
 }
 
-fn required_receipt_string<'a>(receipt: &'a Value, key: &str) -> Result<&'a str> {
-    receipt
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .with_context(|| format!("Pi managed input receipt omitted {key}"))
-}
-
 fn acknowledge_input_delivery_transaction(
     transaction: &Transaction<'_>,
     delivery_id: &str,
     native_input_id: &str,
     now: &str,
-) -> Result<RuntimeInputDelivery> {
+) -> Result<(RuntimeInputDelivery, bool)> {
     let row = load_delivery_target(transaction, delivery_id)?
         .context("Runtime Input Delivery does not exist")?;
-    let managed_system_prompt: bool = transaction.query_row(
-        r#"
-        SELECT EXISTS(
-            SELECT 1
-            FROM runtime_input_delivery AS delivery
-            JOIN context_manifest AS manifest ON manifest.id = delivery.context_manifest_id
-            JOIN native_session_bootstrap_evidence AS bootstrap
-              ON bootstrap.id = manifest.bootstrap_evidence_id
-            WHERE delivery.id = ?1 AND bootstrap.delivery_mode = 'managed_system_prompt'
-        )
-        "#,
-        [delivery_id],
-        |query_row| query_row.get(0),
-    )?;
-    if managed_system_prompt {
-        let receipt_present: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pi_managed_input_receipt WHERE runtime_input_delivery_id = ?1 AND receipt_version = 1)",
-            [delivery_id],
-            |query_row| query_row.get(0),
-        )?;
-        if !receipt_present {
-            anyhow::bail!(
-                "Managed System Prompt input cannot be accepted without its committed receipt"
-            );
-        }
-    }
     if row.status == "accepted" {
         if row.native_input_id.as_deref() != Some(native_input_id) {
             anyhow::bail!("Runtime Input Delivery was accepted with another Native Input ID");
         }
-        return Ok(row.as_public(delivery_id));
+        return Ok((row.as_public(delivery_id), false));
     }
     if !matches!(row.status.as_str(), "prepared" | "delivery_unknown") {
         anyhow::bail!("Runtime Input Delivery is not acknowledgeable");
@@ -2301,13 +2320,16 @@ fn acknowledge_input_delivery_transaction(
             "collaborationStateIncluded": row.collaboration_state_included,
         }),
     )?;
-    Ok(RuntimeInputDelivery {
-        id: delivery_id.to_string(),
-        status: "accepted".to_string(),
-        native_input_id: Some(native_input_id.to_string()),
-        boundary_camp_message_sequence: row.boundary_camp_message_sequence,
-        bootstrap_redelivery_revision: row.bootstrap_redelivery_revision,
-    })
+    Ok((
+        RuntimeInputDelivery {
+            id: delivery_id.to_string(),
+            status: "accepted".to_string(),
+            native_input_id: Some(native_input_id.to_string()),
+            boundary_camp_message_sequence: row.boundary_camp_message_sequence,
+            bootstrap_redelivery_revision: row.bootstrap_redelivery_revision,
+        },
+        true,
+    ))
 }
 
 fn validate_manifest_view_receipt(
@@ -4270,8 +4292,6 @@ fn project_shared_message<R: ContextReadConnection>(
             &camp_id,
             &attachment_id,
             &storage_model,
-            None,
-            None,
         )?
         else {
             continue;
@@ -5234,8 +5254,6 @@ fn resolve_context_attachment_path(
     camp_id: &str,
     attachment_id: &str,
     storage_model: &str,
-    single_chat_attachment_root: Option<&Path>,
-    display_name: Option<&str>,
 ) -> Result<Option<(String, bool)>> {
     match storage_model {
         "legacy_v1" => {
@@ -5253,50 +5271,26 @@ fn resolve_context_attachment_path(
             resolve_managed_attachment_path(connection, camp_id, attachment_id)?,
             false,
         ))),
-        "single_chat_private_v1" => {
-            let root = single_chat_attachment_root
-                .context("Single Chat attachment projection root is unavailable")?;
-            let display_name =
-                display_name.context("Single Chat attachment projection has no display name")?;
-            if !root.is_absolute()
-                || !is_single_normal_path_component(attachment_id)
-                || !is_single_normal_path_component(display_name)
-            {
-                anyhow::bail!("Single Chat attachment projection identity is unsafe");
-            }
-            let path = root.join(attachment_id).join(display_name);
-            if !path.exists() {
-                anyhow::bail!("Single Chat attachment projection is unavailable");
-            }
-            Ok(Some((path.to_string_lossy().into_owned(), false)))
-        }
         _ => anyhow::bail!("Context Attachment has an unsupported storage model"),
     }
-}
-
-fn is_single_normal_path_component(value: &str) -> bool {
-    let mut components = Path::new(value).components();
-    matches!(components.next(), Some(std::path::Component::Normal(_)))
-        && components.next().is_none()
 }
 
 fn load_current_attachment_refs<R: ContextReadConnection>(
     database: &R,
     current_input: &CurrentInput,
-    single_chat_attachment_root: Option<&Path>,
 ) -> Result<Vec<CampAttachmentRef>> {
     let mut statement = database.context_connection().prepare(
         r#"
         WITH attachment AS (
             SELECT id, camp_id, content_digest, position AS ordinal,
-                   'legacy_v1' AS storage_model, NULL AS display_name
+                   'legacy_v1' AS storage_model
             FROM message_attachment
             WHERE ((?1 IS NOT NULL AND camp_message_id = ?1)
                 OR (?2 IS NOT NULL AND conversation_message_id = ?2))
               AND runtime_projection_state = 'available'
             UNION ALL
             SELECT managed.id, managed.camp_id, managed.content_digest,
-                   reference.ordinal, 'managed_v2', NULL
+                   reference.ordinal, 'managed_v2'
             FROM camp_message_attachment_ref AS reference
             JOIN managed_attachment AS managed
               ON managed.camp_id = reference.camp_id
@@ -5304,14 +5298,8 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
             WHERE ?1 IS NOT NULL
               AND reference.camp_message_id = ?1
               AND managed.state = 'available'
-            UNION ALL
-            SELECT private.id, private.camp_id, private.content_digest,
-                   private.position, 'single_chat_private_v1', private.display_name
-            FROM single_chat_message_attachment AS private
-            WHERE ?2 IS NOT NULL
-              AND private.conversation_message_id = ?2
         )
-        SELECT id, camp_id, content_digest, storage_model, display_name
+        SELECT id, camp_id, content_digest, storage_model
         FROM attachment
         ORDER BY ordinal, id
         "#,
@@ -5328,21 +5316,18 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
                 ))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
     let mut attachments = Vec::with_capacity(rows.len());
-    for (attachment_id, camp_id, content_digest, storage_model, display_name) in rows {
+    for (attachment_id, camp_id, content_digest, storage_model) in rows {
         let Some((path, legacy_view_backed)) = resolve_context_attachment_path(
             database.context_connection(),
             &camp_id,
             &attachment_id,
             &storage_model,
-            single_chat_attachment_root,
-            display_name.as_deref(),
         )?
         else {
             continue;
@@ -6782,6 +6767,18 @@ fn sha256_text(value: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
 }
 
+#[cfg(all(test, feature = "slow-tests"))]
+fn raw_sha256(value: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(value))
+}
+
+fn is_raw_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6830,58 +6827,6 @@ mod tests {
             project_direct_current_input_source("external_principal", Some("Alice"), None).is_err()
         );
         assert!(project_direct_current_input_source("system", None, None).is_err());
-    }
-
-    #[test]
-    fn single_chat_attachment_path_requires_the_per_run_private_projection() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-single-chat-context-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let attachment_id = "2ee87bb1-5791-4e13-bb63-b168164bcd33";
-        let display_name = "private-input.md";
-        let projected = root.join(attachment_id).join(display_name);
-        std::fs::create_dir_all(projected.parent().unwrap()).unwrap();
-        std::fs::write(&projected, b"private input").unwrap();
-        let connection = Connection::open_in_memory().unwrap();
-
-        let resolved = resolve_context_attachment_path(
-            &connection,
-            "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
-            attachment_id,
-            "single_chat_private_v1",
-            Some(&root),
-            Some(display_name),
-        )
-        .unwrap();
-        assert_eq!(
-            resolved,
-            Some((projected.to_string_lossy().into_owned(), false))
-        );
-        assert!(
-            resolve_context_attachment_path(
-                &connection,
-                "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
-                attachment_id,
-                "single_chat_private_v1",
-                None,
-                Some(display_name),
-            )
-            .is_err(),
-            "Context must not fall back to the persistent private source"
-        );
-        assert!(
-            resolve_context_attachment_path(
-                &connection,
-                "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
-                attachment_id,
-                "single_chat_private_v1",
-                Some(&root),
-                Some("../private-input.md"),
-            )
-            .is_err()
-        );
-        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -7027,8 +6972,6 @@ mod slow_tests {
             "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
             "6b756c5d-ed05-4a0c-b66e-611fa8e4a063",
             "legacy_v1",
-            None,
-            None,
         )
         .unwrap();
 
@@ -10947,7 +10890,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn context_manifest_freezes_actual_skill_exposure_across_library_changes() {
+    fn context_manifest_freezes_skills_and_ignores_unrequested_historical_mcp() {
         let mut fixture = fixture();
         let library =
             SkillLibraryService::new(fixture.directory.join("managed-skill-library")).unwrap();
@@ -11175,6 +11118,25 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(recovered_exposure, exposure);
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE context_manifest
+                SET mcp_exposure_json = ?2,
+                    mcp_exposure_digest = ?3,
+                    mcp_projection_digest = ?4
+                WHERE agent_run_id = ?1
+                "#,
+                params![
+                    fixture.run_id,
+                    r#"{"schemaVersion":1,"servers":[{"name":"historical-pi-mcp"}]}"#,
+                    "historical-pi-mcp-exposure",
+                    "historical-pi-mcp-projection",
+                ],
+            )
+            .unwrap();
         let recovered = ContextService
             .materialize_with_skill_exposure(
                 &mut fixture.database,
@@ -12040,6 +12002,186 @@ mod slow_tests {
             .unwrap();
         assert_eq!(binding.result.payload["nativeBindingGeneration"], 1);
         execution
+    }
+
+    #[test]
+    fn pi_prompt_images_bind_directly_to_delivery_before_dispatch() {
+        let mut fixture = fixture();
+        bind_fixture_native_session(&mut fixture, "pi-image-session");
+        let service = ContextService;
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let ContextMaterialization::Ready(prepared) = service
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("Pi context must be ready");
+        };
+        let delivery = service
+            .prepare_input_delivery_for_context(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared,
+            )
+            .unwrap();
+        let projection = service
+            .pi_runtime_input_projection(
+                &fixture.database,
+                &delivery.id,
+                &prepared.rendered_payload,
+            )
+            .unwrap();
+        assert!(projection.attachments.is_empty());
+        let images = [PiPromptImageEvidence {
+            image_index: 0,
+            mime_type: "image/png".to_string(),
+            content_digest: raw_sha256(b"exact-image-bytes"),
+            byte_length: 17,
+        }];
+        service
+            .persist_pi_prompt_image_evidence(
+                &mut fixture.database,
+                PersistPiPromptImageEvidence {
+                    delivery_id: &delivery.id,
+                    images: &images,
+                },
+            )
+            .unwrap();
+        let (mime_type, content_digest, byte_length, evidence_version, dispatch_started): (
+            String,
+            String,
+            i64,
+            i64,
+            Option<String>,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                    SELECT image.mime_type, image.content_digest,
+                           image.byte_length, image.evidence_version,
+                           delivery.dispatch_started_at
+                    FROM pi_prompt_image_evidence AS image
+                    JOIN runtime_input_delivery AS delivery
+                      ON delivery.id = image.runtime_input_delivery_id
+                    WHERE image.runtime_input_delivery_id = ?1
+                      AND image.image_index = 0
+                    "#,
+                [&delivery.id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(mime_type, "image/png");
+        assert_eq!(content_digest, raw_sha256(b"exact-image-bytes"));
+        assert_eq!(byte_length, 17);
+        assert_eq!(evidence_version, 2);
+        assert!(dispatch_started.is_none());
+        assert!(
+            service
+                .begin_runtime_input_dispatch(
+                    &mut fixture.database,
+                    &delivery.id,
+                    &fixture.run_id,
+                    fixture.execution_epoch,
+                )
+                .unwrap()
+        );
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn pi_agent_start_accepts_managed_prompt_without_receipt_once() {
+        let mut fixture = fixture();
+        bind_fixture_native_session(&mut fixture, "pi-agent-start-session");
+        let ContextMaterialization::Ready(prepared) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("Pi context must be ready");
+        };
+        let delivery = ContextService
+            .prepare_input_delivery_for_context(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared,
+            )
+            .unwrap();
+        assert!(
+            ContextService
+                .begin_runtime_input_dispatch(
+                    &mut fixture.database,
+                    &delivery.id,
+                    &fixture.run_id,
+                    fixture.execution_epoch,
+                )
+                .unwrap()
+        );
+
+        let (accepted, transitioned) = ContextService
+            .acknowledge_input_delivery_transition(
+                &mut fixture.database,
+                &delivery.id,
+                "pi-prompt-agent-start",
+            )
+            .unwrap();
+        assert!(transitioned);
+        assert_eq!(accepted.status, "accepted");
+        assert_eq!(
+            accepted.native_input_id.as_deref(),
+            Some("pi-prompt-agent-start")
+        );
+        let (_, duplicate_transitioned) = ContextService
+            .acknowledge_input_delivery_transition(
+                &mut fixture.database,
+                &delivery.id,
+                "pi-prompt-agent-start",
+            )
+            .unwrap();
+        assert!(!duplicate_transitioned);
+        let (receipt_count, acceptance_events): (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM pi_managed_input_receipt
+                     WHERE runtime_input_delivery_id = ?1),
+                    (SELECT COUNT(*) FROM event_log
+                     WHERE event_type = 'runtime.input_accepted'
+                       AND json_extract(payload_json, '$.runtimeInputDeliveryId') = ?1)",
+                [&delivery.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(receipt_count, 0);
+        assert_eq!(acceptance_events, 1);
+        fixture.cleanup();
     }
 
     // Owns the transaction ordering across Runtime Input and cancellation.

@@ -97,29 +97,38 @@ try {
   await writeFile(attachmentPath, `附件验收数据\n校验值：${attachmentToken}\n`, { mode: 0o600 })
   const attachmentBody = '读取本条消息附带的“附件验收.txt”，只回复文件中的校验值。不要修改文件。'
   const attachmentDraft = await saveDraft(campId, attachmentBody)
-  const preparedDraft = await core.request('camp.attachments.prepareFromPath', {
+  const referencedDraft = await core.request('camp.sourceAttachments.addFromPath', {
     campId, expectedRevision: attachmentDraft.revision, sourcePath: attachmentPath, displayName: '附件验收.txt'
   })
-  assert.equal(preparedDraft.attachments.length, 1)
-  assert.equal(preparedDraft.continuationIntent?.recipient.agentId, 'agent_2')
-  const rejectedAttachment = await sendDraft(preparedDraft)
-  assert.equal(rejectedAttachment.code, 'pending_input.attachments_unsupported')
-  assert.deepEqual(await core.request('camp.composerDraft.get', { campId }), preparedDraft)
-  assert.deepEqual((await queue(campId)).items.map((item) => item.id), queuedIds)
-  check('队列非空时附件发送被拒绝；正文、附件、接收者和草稿版本完整保留')
+  assert.equal(referencedDraft.attachments.length, 1)
+  assert.equal(referencedDraft.attachments[0].availability, 'unknown')
+  assert.equal(referencedDraft.continuationIntent?.recipient.agentId, 'agent_2')
+  const queuedAttachment = await sendDraft(referencedDraft)
+  assert.equal(queuedAttachment.code, 'pending_input.queued')
+  queuedIds.push(queuedAttachment.payload.pendingInputId)
+  const queueWithAttachment = await queue(campId)
+  assert.deepEqual(queueWithAttachment.items.map((item) => item.id), queuedIds)
+  const pendingAttachment = queueWithAttachment.items.at(-1)
+  assert.equal(pendingAttachment.attachments.length, 1)
+  assert.equal(pendingAttachment.attachments[0].displayName, '附件验收.txt')
+  assert.equal(pendingAttachment.attachments[0].availability, 'unknown')
+  assert.ok(!JSON.stringify(pendingAttachment).includes(attachmentPath))
+  assert.equal((await core.request('camp.composerDraft.get', { campId })).attachments.length, 0)
+  check('队列非空时正文与 source attachment 一起进入 Pending；队列 View 不暴露绝对路径')
   assert.equal((await edit(heldHead, { type: 'cancel' }, headEdit.payload.editToken)).status, 'applied')
 
   const completed = await waitFor(async () => {
     const value = await snapshot(campId)
     assertNoFailedRuns(value)
-    return value.agentRuns.length === 4 && value.agentRuns.every((run) => run.status === 'succeeded') ? value : null
-  }, 'four FIFO Runtime executions')
+    return value.agentRuns.length === 5 && value.agentRuns.every((run) => run.status === 'succeeded') ? value : null
+  }, 'five FIFO Runtime executions including the attachment input')
   const publicInputs = completed.messages.filter((message) => message.authorType === 'user').sort((a, b) => a.sequence - b.sequence)
-  assert.equal(publicInputs.length, 4)
-  publicInputs.forEach((message, index) => {
+  assert.equal(publicInputs.length, 5)
+  publicInputs.slice(0, 4).forEach((message, index) => {
     assert.ok(message.body.includes(bodies[index]))
-    assert.deepEqual(message.addressedAgentIds, ['agent_2'])
   })
+  assert.ok(publicInputs[4].body.includes(attachmentBody))
+  publicInputs.forEach((message) => assert.deepEqual(message.addressedAgentIds, ['agent_2']))
   const runs = publicInputs.map((message) => completed.agentRuns.find((run) => run.campTurnId === message.campTurnId))
   assert.ok(runs.every((run) => run.agentId === 'agent_2'))
   for (let index = 1; index < runs.length; index += 1) {
@@ -128,27 +137,19 @@ try {
   }
   assert.equal((await queue(campId)).items.length, 0)
   report.fifo = runs.map(({ id, status, startedAt, endedAt, runtimeModel }) => ({ id, status, startedAt, endedAt, runtimeModel }))
-  check('取消队首编辑后，芝士按 B → C → D 各执行一次；后条等待前条结束')
+  check('取消队首编辑后，芝士按 B → C → D → 附件消息各执行一次；后条等待前条结束')
 
-  const retainedDraft = await core.request('camp.composerDraft.get', { campId })
-  assert.deepEqual(retainedDraft, preparedDraft)
-  const attachmentSent = await sendDraft(retainedDraft)
-  assert.equal(attachmentSent.status, 'accepted')
-  const attachmentCompleted = await waitFor(async () => {
-    const value = await snapshot(campId)
-    assertNoFailedRuns(value)
-    const run = value.agentRuns.find((candidate) => candidate.campTurnId === attachmentSent.payload.campTurnId)
-    return run?.status === 'succeeded' ? value : null
-  }, 'Codex reads the retained file attachment')
-  const publishedAttachment = attachmentCompleted.messages.find((message) => message.id === attachmentSent.payload.campMessageId)
+  const publishedAttachment = publicInputs[4]
   assert.equal(publishedAttachment.attachments.length, 1)
   assert.equal(publishedAttachment.attachments[0].displayName, '附件验收.txt')
+  assert.equal(publishedAttachment.attachments[0].availability, 'unknown')
+  assert.ok(!JSON.stringify(publishedAttachment).includes(attachmentPath))
   assert.deepEqual(publishedAttachment.addressedAgentIds, ['agent_2'])
-  assert.ok(attachmentCompleted.messages.some((message) => message.authorType === 'agent'
-    && message.campTurnId === attachmentSent.payload.campTurnId && message.body.includes(attachmentToken)))
+  assert.ok(completed.messages.some((message) => message.authorType === 'agent'
+    && message.campTurnId === publishedAttachment.campTurnId && message.body.includes(attachmentToken)))
   assert.equal((await core.request('camp.composerDraft.get', { campId })).attachments.length, 0)
-  report.attachment = { campMessageId: attachmentSent.payload.campMessageId, campTurnId: attachmentSent.payload.campTurnId, receivedBy: 'agent_2', contentVerified: true }
-  check('队列发完后原附件草稿可直接发送；芝士实际读到文件内的随机校验值')
+  report.attachment = { campMessageId: publishedAttachment.id, campTurnId: publishedAttachment.campTurnId, receivedBy: 'agent_2', contentVerified: true }
+  check('Pending 附件发布为 Message source ref；Runtime resolver 让芝士实际读到文件内的随机校验值')
 
   // One Stop lets Core advance after cancellation settles; there is no queue mode to resume.
   const stopFirst = await createConfiguredCampAndSend(core.request, {

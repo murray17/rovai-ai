@@ -4,35 +4,39 @@ import { describe, expect, it } from 'vitest'
 import { SafeMarkdown } from './SafeMarkdown'
 
 describe('SafeMarkdown file preview references', () => {
-  it('links only inline-code references confirmed as existing files', () => {
+  it('turns only explicit Markdown file links into resource links', () => {
     const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
       onFileReference: () => undefined,
-      resolvedInlineFileReferences: new Set(['config.toml', 'demo.mp4']),
-      children: '打开 `config.toml` 和 `demo.mp4`；`missing.toml` 与 `Promise.all` 保持代码。'
+      children: [
+        '[配置](config.toml) [代码](src/App.tsx:20) [原型](docs/prototype.html)',
+        '`config.toml` `src/App.tsx:20` `./docs/prototype.html` `/Users/name/Downloads/demo.html`'
+      ].join('\n\n')
     }))
 
-    expect(markup.match(/inline-code-file-reference/gu)).toHaveLength(2)
+    expect(markup.match(/class="markdown-file-reference"/gu)).toHaveLength(3)
     expect(markup).toContain('data-resource-type="config"')
-    expect(markup).toContain('data-resource-type="video"')
-    expect(markup).toContain('<code>missing.toml</code>')
-    expect(markup).toContain('<code>Promise.all</code>')
+    expect(markup).toContain('data-resource-type="code"')
+    expect(markup).toContain('data-resource-type="html"')
+    expect(markup.match(/<code>/gu)).toHaveLength(4)
+    expect(markup).toContain('<code>config.toml</code>')
+    expect(markup).toContain('<code>src/App.tsx:20</code>')
+    expect(markup).toContain('<code>./docs/prototype.html</code>')
+    expect(markup).toContain('<code>/Users/name/Downloads/demo.html</code>')
+    expect(markup).not.toContain('inline-code-file-reference')
   })
 
-  it('enables only explicit Markdown links and whole inline-code file references in file contexts', () => {
+  it('keeps explicit web links clickable while prose and inline code remain inert', () => {
     const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
       onFileReference: () => undefined,
-      children: '打开 `README.md` 或 `./src/app.ts:42`。普通正文 ./src/bare.ts:42 保持文本。也可以点击 [`实现`](src/app.ts:4)。`Promise.all` 和 `sum()` 保持代码。\n\n```text\n./secret.txt\n```'
+      children: '[官网](https://example.com)；普通正文 src/App.tsx 和 /compact。`README.md` `Promise.all`。\n\n```text\n./secret.txt\n```'
     }))
-    expect(markup).not.toContain('title="README.md"')
-    expect(markup).toContain('title="./src/app.ts:42"')
-    expect(markup).not.toContain('title="./src/bare.ts:42"')
-    expect(markup).not.toContain('title="./secret.txt"')
+    expect(markup).toContain('class="markdown-web-reference"')
+    expect(markup).toContain('href="https://example.com"')
+    expect(markup).toContain('data-resource-type="web"')
     expect(markup).toContain('<code>README.md</code>')
-    expect(markup).toContain('<span class="file-reference-label is-code">实现</span>')
-    expect(markup).not.toContain('<code>实现</code>')
     expect(markup).toContain('<code>Promise.all</code>')
-    expect(markup).toContain('<code>sum()</code>')
-    expect(markup.match(/data-resource-type="code"/gu)).toHaveLength(2)
+    expect(markup).toContain('src/App.tsx 和 /compact')
+    expect(markup).not.toContain('markdown-file-reference')
   })
 
   it('repairs an autolink and an identical Markdown label without swallowing Chinese prose', () => {

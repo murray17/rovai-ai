@@ -2,8 +2,8 @@
 document_type: contract
 contract: builtin-tool-transport-v22
 status: accepted
-target_version: v1.40
-last_updated: 2026-09-04
+target_version: v1.50
+last_updated: 2026-09-05
 ---
 
 # Built-in Tool Transport v22
@@ -59,12 +59,14 @@ Conversation, ordered by ascending sequence:
     {
       "sequence": 1,
       "role": "user",
-      "body": "方案 A 和 B 哪个更好？"
+      "body": "方案 A 和 B 哪个更好？",
+      "attachments": []
     },
     {
       "sequence": 2,
       "role": "assistant",
-      "body": "我建议 B，因为……"
+      "body": "我建议 B，因为……",
+      "attachments": []
     }
   ],
   "hasMore": false,
@@ -98,4 +100,4 @@ introduced.
 
 - [Single Chat v1](single-chat-v1.md)
 - [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- [Confirmed Single Chat model-context revision 2](../versions/v1.40/model-context-change-single-chat.md)
+- [Confirmed Single Chat model-context revision 2](../versions/v1.50/model-context-change-single-chat.md)

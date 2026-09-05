@@ -4325,8 +4325,8 @@ fn persist_single_chat_success(
             id, conversation_id, sequence,
             author_type, author_id, source_agent_run_id, body,
             source_camp_message_id, source_inbox_message_id,
-            camp_turn_id, agent_run_id, created_at
-        ) VALUES (?1, ?2, ?3, 'agent', ?4, ?5, ?6, NULL, NULL, ?7, ?5, ?8)
+            camp_turn_id, agent_run_id, source_attachments_json, created_at
+        ) VALUES (?1, ?2, ?3, 'agent', ?4, ?5, ?6, NULL, NULL, ?7, ?5, '[]', ?8)
         "#,
         params![
             final_conversation_message_id,

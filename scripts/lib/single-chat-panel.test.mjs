@@ -8,11 +8,13 @@ import test from 'node:test'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { build } from 'vite'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/single-chat-panel')
 
-test('production Single Chat panel preserves private conversation layout and terminal disclosure', { timeout: 90_000 }, async () => {
+test('production Single Chat panel preserves private conversation layout and terminal disclosure', { timeout: 90_000 }, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-single-chat-panel-test-'))
   let child
   let closed
@@ -32,7 +34,7 @@ test('production Single Chat panel preserves private conversation layout and ter
       join(fixtureSource, 'main.cjs'),
       join(fixture, 'renderer/index.html'),
       join(fixture, 'user-data'),
-      '--no-sandbox'
+      ...(process.platform === 'linux' ? ['--no-sandbox'] : [])
     ], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')
     let output = ''
@@ -63,7 +65,7 @@ test('production Single Chat panel preserves private conversation layout and ter
       composerKeyboardSemantics: true,
       privateAttachments: true,
       agentMessagesWithoutFill: true,
-      runningStopAndComposerGate: true,
+      runningStopAndQueueComposer: true,
       dayAndNight: true,
       compactNoOverflow: true
     })

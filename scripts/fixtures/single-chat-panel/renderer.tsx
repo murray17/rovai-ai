@@ -101,7 +101,7 @@ const terminalSnapshot: SingleChatSnapshot = {
       attachments: [{
         id: 'private-attachment-1', displayName: 'single-chat-contract.md', kind: 'file',
         fileCount: 1, mediaType: 'text/markdown', byteSize: 18_432, previewKind: 'none',
-        runtimeProjectionState: 'available'
+        availability: 'available'
       }],
       agentRunId: 'run-complete',
       createdAt: '2026-09-03T10:00:00.000Z'
@@ -117,7 +117,8 @@ const terminalSnapshot: SingleChatSnapshot = {
       createdAt: '2026-09-03T11:00:00.000Z'
     }
   ],
-  preparedAttachments: [],
+  draft: { revision: 0, attachments: [], updatedAt: null },
+  pendingInputs: { executionActive: false, items: [], editSession: null },
   agentRuns: [
     {
       id: 'run-complete', triggerConversationMessageId: 'message-user-1', status: 'succeeded', version: 3,
@@ -162,6 +163,7 @@ function runningSnapshot(): SingleChatSnapshot {
       startedAt: '2026-09-03T12:00:00.000Z', endedAt: null, finalConversationMessageId: null,
       executionEvidenceCount: 2
     }],
+    pendingInputs: { ...terminalSnapshot.pendingInputs, executionActive: true },
     executionEvidence: [...terminalSnapshot.executionEvidence,
       narration('narration-running', 'run-running', 1, '我正在检查双主题、窄窗口和键盘焦点。'),
       command('visual-check', 'run-running', 2, 'pnpm run accept:single-chat-ui', true)]
@@ -177,8 +179,8 @@ Object.assign(window, {
     onEvent: () => () => undefined,
     singleChatAttachments: {
       prepare: async () => currentSnapshot,
-      remove: async () => currentSnapshot,
-      preview: async () => null
+      preparePending: async () => currentSnapshot,
+      remove: async () => currentSnapshot
     },
     request: async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
       requests.push({ method, params })

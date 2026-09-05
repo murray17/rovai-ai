@@ -18,11 +18,9 @@ import type {
   OpenFilePreviewRequest,
   OpenFilePreviewResult,
   ParsedFileReference,
-  ResolveMessageFileReferencesRequest,
-  ResolveMessageFileReferencesResult,
   ResolvedFilePreview
 } from '@contracts'
-import { isInlineFileReference, parseFileReference } from '../../file-preview-reference'
+import { parseFileReference } from '../../file-preview-reference'
 import { filePreviewAssetUrl, parseFilePreviewAssetUrl } from '../../file-preview-asset-url'
 import {
   canonicalizeExistingPath,
@@ -300,39 +298,6 @@ export class FilePreviewService {
     } catch (error) {
       return this.#errorResult(error)
     }
-  }
-
-  async resolveMessageReferences(
-    webContentsId: number,
-    request: ResolveMessageFileReferencesRequest
-  ): Promise<ResolveMessageFileReferencesResult> {
-    this.#prune()
-    this.#requireActiveCamp(webContentsId, request.campId)
-    const rawReferences = [...new Set(request.rawReferences)].filter(isInlineFileReference)
-    const resolved = await Promise.all(rawReferences.map(async (rawReference) => {
-      try {
-        const target = await this.#resolveTarget(webContentsId, {
-          kind: 'message_reference',
-          campId: request.campId,
-          messageId: request.messageId,
-          rawReference
-        })
-        if (!target || target.kind !== 'file_target') return null
-        const parsed = this.#parsedReference(target)
-        const candidatePath = await this.#candidatePath(target, parsed)
-        const inspected = await inspectPreviewPath(
-          target.rootPath,
-          candidatePath,
-          this.#fileAccessOptions(target)
-        )
-        return inspected.kind === 'file' ? rawReference : null
-      } catch {
-        // Resolution is presentation admission, so individual failures degrade
-        // to ordinary inline code. A later activation still revalidates fully.
-        return null
-      }
-    }))
-    return { resolvedReferences: resolved.filter((reference): reference is string => reference !== null) }
   }
 
   async reopen(
@@ -1253,6 +1218,17 @@ export class FilePreviewService {
   ): FilePreviewOperationResult<T> {
     if (error instanceof FilePreviewAccessError) {
       return failed(error.code, error.message, error.code === 'read_failed')
+    }
+    if (error && typeof error === 'object' && 'code' in error) {
+      if (error.code === 'attachment_missing') {
+        return failed('attachment_missing', '找不到这个附件。')
+      }
+      if (error.code === 'attachment_unreadable') {
+        return failed('attachment_unreadable', '无法读取这个附件。')
+      }
+      if (error.code === 'attachment_kind_changed') {
+        return failed('attachment_kind_changed', '附件类型已经变化。')
+      }
     }
     if (error instanceof TypeError) return failed('decode_failed', '这个文件不是有效的 UTF-8 文本。')
     return failed(defaultCode, '无法打开文件。', true)

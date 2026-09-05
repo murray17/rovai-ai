@@ -2,13 +2,18 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     future::Future,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
 use rovai_core::agent_profile::AdapterKind;
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::{
     sync::{Mutex, oneshot},
     task::JoinSet,
@@ -162,6 +167,7 @@ pub(crate) struct FakeRuntimeProcessHost {
     process_id: String,
     shutdown_delay: Duration,
     reaped: std::sync::atomic::AtomicBool,
+    shutdown_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl RuntimeProcessHost {
@@ -202,6 +208,8 @@ impl RuntimeProcessHost {
             Self::Pi(host) => host.shutdown_and_reap().await,
             #[cfg(test)]
             Self::Fake(host) => {
+                host.shutdown_calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 tokio::time::sleep(host.shutdown_delay).await;
                 host.reaped
                     .store(true, std::sync::atomic::Ordering::Release);
@@ -306,6 +314,7 @@ impl RuntimeFleetShutdownOutcome {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct FleetLease {
     pub process_id: String,
     pub host: RuntimeProcessHost,
@@ -327,13 +336,118 @@ enum FleetProcessState {
     BusyBurst,
 }
 
-impl FleetProcessState {
-    fn is_resident(self) -> bool {
-        matches!(
-            self,
-            Self::Starting | Self::BusyResident | Self::IdleWarm | Self::Stopping
-        )
+struct FleetStartupOperation {
+    outcome: tokio::sync::watch::Sender<Option<std::result::Result<FleetLease, String>>>,
+    cancelled: AtomicBool,
+}
+
+impl FleetStartupOperation {
+    fn new() -> Self {
+        let (outcome, _) = tokio::sync::watch::channel(None);
+        Self {
+            outcome,
+            cancelled: AtomicBool::new(false),
+        }
     }
+
+    fn complete(&self, outcome: std::result::Result<FleetLease, String>) {
+        self.outcome.send_replace(Some(outcome));
+    }
+
+    async fn wait(&self) -> Result<FleetLease> {
+        let mut outcome = self.outcome.subscribe();
+        loop {
+            if let Some(result) = outcome.borrow().clone() {
+                return result.map_err(anyhow::Error::msg);
+            }
+            outcome
+                .changed()
+                .await
+                .context("Fleet startup completion channel closed")?;
+        }
+    }
+
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
+
+struct FleetStopCompletion {
+    outcome: tokio::sync::watch::Sender<Option<bool>>,
+}
+
+impl FleetStopCompletion {
+    fn new() -> Self {
+        let (outcome, _) = tokio::sync::watch::channel(None);
+        Self { outcome }
+    }
+
+    fn complete(&self, reaped: bool) {
+        self.outcome.send_replace(Some(reaped));
+    }
+
+    fn result(&self) -> Option<bool> {
+        *self.outcome.borrow()
+    }
+
+    async fn wait(&self) -> bool {
+        let mut outcome = self.outcome.subscribe();
+        loop {
+            if let Some(reaped) = *outcome.borrow() {
+                return reaped;
+            }
+            if outcome.changed().await.is_err() {
+                return false;
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct FleetStopLaunch {
+    process_id: String,
+    host: RuntimeProcessHost,
+    completion: Arc<FleetStopCompletion>,
+}
+
+enum FleetStopPlan {
+    Absent,
+    Starting(Arc<FleetStartupOperation>),
+    Wait(Arc<FleetStopCompletion>),
+    Launch(FleetStopLaunch),
+}
+
+enum FleetStopWait {
+    Absent,
+    Starting(Arc<FleetStartupOperation>),
+    Process(Arc<FleetStopCompletion>),
+}
+
+impl FleetStopWait {
+    async fn wait(self) -> bool {
+        match self {
+            Self::Absent => true,
+            Self::Starting(startup) => startup.wait().await.is_err(),
+            Self::Process(stop) => stop.wait().await,
+        }
+    }
+}
+
+enum FleetAcquirePlan {
+    Ready(FleetLease),
+    Wait(Arc<FleetStartupOperation>),
+    Blocked(String),
+    Spawn {
+        reservation_id: String,
+        run_lease: RunLeaseKey,
+        residency: FleetResidency,
+        completion: Arc<FleetStartupOperation>,
+        eviction: Option<FleetStopLaunch>,
+    },
 }
 
 struct ProcessEntry {
@@ -341,7 +455,10 @@ struct ProcessEntry {
     adapter_kind: AdapterKind,
     compatibility: RuntimeCompatibilityKey,
     state: FleetProcessState,
+    residency: FleetResidency,
     host: Option<RuntimeProcessHost>,
+    startup: Option<Arc<FleetStartupOperation>>,
+    stop: Option<Arc<FleetStopCompletion>>,
     run_lease: Option<RunLeaseKey>,
     idle_since: Option<Instant>,
     last_used_sequence: u64,
@@ -350,6 +467,7 @@ struct ProcessEntry {
 
 #[derive(Default)]
 struct FleetState {
+    shutdown_started: bool,
     processes: HashMap<String, ProcessEntry>,
     process_by_run: HashMap<RunLeaseKey, String>,
     resident_processes: HashSet<String>,
@@ -380,14 +498,16 @@ impl FleetState {
                 < config.max_resident_processes_per_member
     }
 
-    fn insert_resident(&mut self, entry: ProcessEntry) {
+    fn insert_process(&mut self, entry: ProcessEntry) {
         let process_id = entry.process_id.clone();
-        let residency_bucket = entry.compatibility.residency_bucket.clone();
-        self.resident_processes.insert(process_id.clone());
-        self.resident_processes_by_bucket
-            .entry(residency_bucket)
-            .or_default()
-            .insert(process_id.clone());
+        if entry.residency == FleetResidency::Resident {
+            let residency_bucket = entry.compatibility.residency_bucket.clone();
+            self.resident_processes.insert(process_id.clone());
+            self.resident_processes_by_bucket
+                .entry(residency_bucket)
+                .or_default()
+                .insert(process_id.clone());
+        }
         self.processes.insert(process_id, entry);
     }
 
@@ -398,28 +518,102 @@ impl FleetState {
         if let Some(run_lease) = &entry.run_lease {
             self.process_by_run.remove(run_lease);
         }
-        if entry.state.is_resident() {
-            self.resident_processes.remove(process_id);
-            let residency_bucket = &entry.compatibility.residency_bucket;
-            if let Some(processes) = self.resident_processes_by_bucket.get_mut(residency_bucket) {
-                processes.remove(process_id);
-                if processes.is_empty() {
-                    self.resident_processes_by_bucket.remove(residency_bucket);
-                }
+        self.resident_processes.remove(process_id);
+        let residency_bucket = &entry.compatibility.residency_bucket;
+        if let Some(processes) = self.resident_processes_by_bucket.get_mut(residency_bucket) {
+            processes.remove(process_id);
+            if processes.is_empty() {
+                self.resident_processes_by_bucket.remove(residency_bucket);
             }
         }
         Some(entry)
     }
 
-    fn mark_stopping(&mut self, process_id: &str) -> Option<RuntimeProcessHost> {
-        let entry = self.processes.get_mut(process_id)?;
+    fn plan_stop(&mut self, process_id: &str) -> FleetStopPlan {
+        let Some(entry) = self.processes.get_mut(process_id) else {
+            return FleetStopPlan::Absent;
+        };
+        if entry.state == FleetProcessState::Starting {
+            entry.retire_after_run = true;
+            let Some(startup) = entry.startup.clone() else {
+                return FleetStopPlan::Absent;
+            };
+            startup.cancel();
+            return FleetStopPlan::Starting(startup);
+        }
+        if entry.state == FleetProcessState::Stopping
+            && let Some(completion) = entry.stop.clone()
+            && completion.result().is_none()
+        {
+            return FleetStopPlan::Wait(completion);
+        }
+        let Some(host) = entry.host.clone() else {
+            return FleetStopPlan::Absent;
+        };
         self.idle_lru
             .remove(&(entry.last_used_sequence, process_id.to_string()));
-        // Preserve the lease until a confirmed reap. A timeout must not make
-        // the next cleanup attempt mistake an owned process for an absent one.
+        // Preserve the lease and capacity until a confirmed reap. A timeout
+        // must not make the next cleanup attempt mistake an owned process for
+        // an absent one.
         entry.idle_since = None;
         entry.state = FleetProcessState::Stopping;
-        entry.host.clone()
+        let completion = Arc::new(FleetStopCompletion::new());
+        entry.stop = Some(completion.clone());
+        FleetStopPlan::Launch(FleetStopLaunch {
+            process_id: process_id.to_string(),
+            host,
+            completion,
+        })
+    }
+
+    fn reserve_idle_eviction(&mut self, process_id: &str) -> Option<FleetStopLaunch> {
+        let entry = self.processes.get_mut(process_id)?;
+        if entry.state != FleetProcessState::IdleWarm {
+            return None;
+        }
+        self.idle_lru
+            .remove(&(entry.last_used_sequence, process_id.to_string()));
+        self.resident_processes.remove(process_id);
+        let residency_bucket = entry.compatibility.residency_bucket.clone();
+        if let Some(processes) = self.resident_processes_by_bucket.get_mut(&residency_bucket) {
+            processes.remove(process_id);
+            if processes.is_empty() {
+                self.resident_processes_by_bucket.remove(&residency_bucket);
+            }
+        }
+        entry.idle_since = None;
+        entry.state = FleetProcessState::Stopping;
+        let host = entry.host.clone()?;
+        let completion = Arc::new(FleetStopCompletion::new());
+        entry.stop = Some(completion.clone());
+        Some(FleetStopLaunch {
+            process_id: process_id.to_string(),
+            host,
+            completion,
+        })
+    }
+
+    fn restore_stopping_resident_capacity(
+        &mut self,
+        process_id: &str,
+        completion: &Arc<FleetStopCompletion>,
+    ) {
+        let residency_bucket = self.processes.get(process_id).and_then(|entry| {
+            (entry.state == FleetProcessState::Stopping
+                && entry.residency == FleetResidency::Resident
+                && entry
+                    .stop
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, completion)))
+            .then(|| entry.compatibility.residency_bucket.clone())
+        });
+        if let Some(residency_bucket) = residency_bucket {
+            self.resident_processes.insert(process_id.to_string());
+            self.resident_processes_by_bucket
+                .entry(residency_bucket)
+                .or_default()
+                .insert(process_id.to_string());
+        }
     }
 
     fn oldest_idle_for_bucket(&self, residency_bucket: &str) -> Option<String> {
@@ -442,12 +636,142 @@ impl FleetState {
                 .map(|_| process_id.clone())
         })
     }
+
+    fn plan_acquire(
+        &mut self,
+        config: &AgentRuntimeFleetConfig,
+        request: &FleetAcquireRequest,
+    ) -> FleetAcquirePlan {
+        if self.shutdown_started {
+            return FleetAcquirePlan::Blocked("Runtime Fleet is shutting down".to_string());
+        }
+        let run_lease = request.run_lease();
+        if let Some(process_id) = self.process_by_run.get(&run_lease)
+            && let Some(entry) = self.processes.get(process_id)
+        {
+            if entry.state == FleetProcessState::Starting
+                && let Some(completion) = entry.startup.clone()
+            {
+                return FleetAcquirePlan::Wait(completion);
+            }
+            if matches!(
+                entry.state,
+                FleetProcessState::BusyResident | FleetProcessState::BusyBurst
+            ) && let Some(host) = entry.host.clone()
+            {
+                return FleetAcquirePlan::Ready(FleetLease {
+                    process_id: process_id.clone(),
+                    host,
+                    residency: entry.residency,
+                });
+            }
+            return FleetAcquirePlan::Blocked(
+                "Runtime lease is being retired for this AgentRun epoch".to_string(),
+            );
+        }
+
+        let compatible_idle = self.idle_lru.iter().find_map(|(_, process_id)| {
+            self.processes
+                .get(process_id)
+                .filter(|entry| {
+                    entry.state == FleetProcessState::IdleWarm
+                        && entry.adapter_kind == request.adapter_kind
+                        && entry
+                            .compatibility
+                            .is_process_compatible_with(&request.compatibility)
+                        && entry
+                            .host
+                            .as_ref()
+                            .is_some_and(RuntimeProcessHost::is_healthy)
+                })
+                .map(|_| process_id.clone())
+        });
+        if let Some(process_id) = compatible_idle {
+            let (last_used_sequence, host) = {
+                let entry = self
+                    .processes
+                    .get_mut(&process_id)
+                    .expect("Fleet compatible idle process disappeared");
+                let last_used_sequence = entry.last_used_sequence;
+                entry.state = FleetProcessState::BusyResident;
+                entry.run_lease = Some(run_lease.clone());
+                entry.idle_since = None;
+                entry.compatibility = request.compatibility.clone();
+                (
+                    last_used_sequence,
+                    entry
+                        .host
+                        .clone()
+                        .expect("Fleet compatible idle Host disappeared"),
+                )
+            };
+            self.idle_lru
+                .remove(&(last_used_sequence, process_id.clone()));
+            self.process_by_run.insert(run_lease, process_id.clone());
+            return FleetAcquirePlan::Ready(FleetLease {
+                process_id,
+                host,
+                residency: FleetResidency::Resident,
+            });
+        }
+
+        let mut eviction = None;
+        let residency =
+            if self.has_resident_capacity(config, &request.compatibility.residency_bucket) {
+                FleetResidency::Resident
+            } else {
+                let eviction_id = if self
+                    .resident_count_for_bucket(&request.compatibility.residency_bucket)
+                    >= config.max_resident_processes_per_member
+                {
+                    self.oldest_idle_for_bucket(&request.compatibility.residency_bucket)
+                } else {
+                    self.oldest_idle_for_bucket(&request.compatibility.residency_bucket)
+                        .or_else(|| self.oldest_idle_global())
+                };
+                if let Some(process_id) = eviction_id
+                    && let Some(stop) = self.reserve_idle_eviction(&process_id)
+                {
+                    eviction = Some(stop);
+                    FleetResidency::Resident
+                } else {
+                    FleetResidency::Burst
+                }
+            };
+
+        let reservation_id = uuid::Uuid::new_v4().to_string();
+        let completion = Arc::new(FleetStartupOperation::new());
+        let sequence = self.next_sequence();
+        self.insert_process(ProcessEntry {
+            process_id: reservation_id.clone(),
+            adapter_kind: request.adapter_kind,
+            compatibility: request.compatibility.clone(),
+            state: FleetProcessState::Starting,
+            residency,
+            host: None,
+            startup: Some(completion.clone()),
+            stop: None,
+            run_lease: Some(run_lease.clone()),
+            idle_since: None,
+            last_used_sequence: sequence,
+            retire_after_run: false,
+        });
+        self.process_by_run
+            .insert(run_lease.clone(), reservation_id.clone());
+        FleetAcquirePlan::Spawn {
+            reservation_id,
+            run_lease,
+            residency,
+            completion,
+            eviction,
+        }
+    }
 }
 
 pub(crate) struct AgentRuntimeFleetManager {
     config: AgentRuntimeFleetConfig,
-    operations: Mutex<()>,
-    state: Mutex<FleetState>,
+    operations: Arc<Mutex<()>>,
+    state: Arc<Mutex<FleetState>>,
     owner_records: Option<RuntimeOwnerRecordStore>,
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
 }
@@ -800,8 +1124,8 @@ impl AgentRuntimeFleetManager {
         assert!(config.max_resident_processes_global > 0);
         Self {
             config,
-            operations: Mutex::new(()),
-            state: Mutex::new(FleetState::default()),
+            operations: Arc::new(Mutex::new(())),
+            state: Arc::new(Mutex::new(FleetState::default())),
             owner_records,
             builtin_tool_leases,
         }
@@ -813,203 +1137,286 @@ impl AgentRuntimeFleetManager {
         spawn: F,
     ) -> Result<FleetLease>
     where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<RuntimeProcessHost>>,
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<RuntimeProcessHost>> + Send + 'static,
     {
-        let _operation = self.operations.lock().await;
-        self.reap_stale_idle_locked(Instant::now()).await;
-
-        let run_lease = request.run_lease();
-        if let Some(lease) = self.existing_lease(&run_lease).await {
-            return Ok(lease);
-        }
-
-        if let Some(lease) = self.acquire_compatible_idle(&request).await {
-            return Ok(lease);
-        }
-
-        let mut residency = FleetResidency::Resident;
-        let has_capacity = {
-            self.state
-                .lock()
-                .await
-                .has_resident_capacity(&self.config, &request.compatibility.residency_bucket)
+        let plan = {
+            let _operation = self.operations.lock().await;
+            self.state.lock().await.plan_acquire(&self.config, &request)
         };
-        if !has_capacity {
-            let eviction = {
-                let state = self.state.lock().await;
-                if state.resident_count_for_bucket(&request.compatibility.residency_bucket)
-                    >= self.config.max_resident_processes_per_member
-                {
-                    state.oldest_idle_for_bucket(&request.compatibility.residency_bucket)
-                } else {
-                    state
-                        .oldest_idle_for_bucket(&request.compatibility.residency_bucket)
-                        .or_else(|| state.oldest_idle_global())
-                }
-            };
-            let freed_slot = if let Some(process_id) = eviction {
-                self.stop_process_locked(&process_id).await
-            } else {
-                false
-            };
-            if !freed_slot
-                || !self
-                    .state
-                    .lock()
-                    .await
-                    .has_resident_capacity(&self.config, &request.compatibility.residency_bucket)
-            {
-                residency = FleetResidency::Burst;
-            }
-        }
+        let (reservation_id, run_lease, residency, completion, eviction) = match plan {
+            FleetAcquirePlan::Ready(lease) => return Ok(lease),
+            FleetAcquirePlan::Wait(completion) => return completion.wait().await,
+            FleetAcquirePlan::Blocked(message) => bail!(message),
+            FleetAcquirePlan::Spawn {
+                reservation_id,
+                run_lease,
+                residency,
+                completion,
+                eviction,
+            } => (reservation_id, run_lease, residency, completion, eviction),
+        };
 
-        let reservation_id = uuid::Uuid::new_v4().to_string();
-        if residency == FleetResidency::Resident {
-            let mut state = self.state.lock().await;
-            let sequence = state.next_sequence();
-            state.insert_resident(ProcessEntry {
-                process_id: reservation_id.clone(),
-                adapter_kind: request.adapter_kind,
-                compatibility: request.compatibility.clone(),
-                state: FleetProcessState::Starting,
-                host: None,
-                run_lease: Some(run_lease.clone()),
-                idle_since: None,
-                last_used_sequence: sequence,
-                retire_after_run: false,
-            });
-            state
-                .process_by_run
-                .insert(run_lease.clone(), reservation_id.clone());
+        // Once Reserve succeeds there are no further suspension points before
+        // the Fleet launches the operation that owns this reservation.
+        // Dropping any acquire waiter therefore cannot orphan Starting.
+        let eviction_completion = eviction.as_ref().map(|stop| stop.completion.clone());
+        if let Some(eviction) = eviction {
+            self.launch_stop(eviction);
         }
+        let startup_future = spawn();
+        tokio::spawn(Self::drive_startup(
+            self.config.clone(),
+            self.operations.clone(),
+            self.state.clone(),
+            self.owner_records.clone(),
+            reservation_id,
+            run_lease,
+            residency,
+            completion.clone(),
+            eviction_completion,
+            startup_future,
+        ));
+        completion.wait().await
+    }
 
-        let host = match spawn().await {
+    #[allow(clippy::too_many_arguments)]
+    async fn drive_startup<Fut>(
+        config: AgentRuntimeFleetConfig,
+        operations: Arc<Mutex<()>>,
+        state: Arc<Mutex<FleetState>>,
+        owner_records: Option<RuntimeOwnerRecordStore>,
+        reservation_id: String,
+        run_lease: RunLeaseKey,
+        residency: FleetResidency,
+        completion: Arc<FleetStartupOperation>,
+        eviction: Option<Arc<FleetStopCompletion>>,
+        startup: Fut,
+    ) where
+        Fut: Future<Output = Result<RuntimeProcessHost>> + Send + 'static,
+    {
+        if let Some(eviction) = eviction
+            && !eviction.wait().await
+        {
+            Self::fail_start_operation(
+                &operations,
+                &state,
+                &reservation_id,
+                &completion,
+                "Runtime capacity eviction could not be reaped",
+            )
+            .await;
+            return;
+        }
+        if completion.is_cancelled() {
+            Self::fail_start_operation(
+                &operations,
+                &state,
+                &reservation_id,
+                &completion,
+                "Fleet startup reservation was cancelled",
+            )
+            .await;
+            return;
+        }
+        let host = match startup.await {
             Ok(host) if host.is_healthy() => host,
             Ok(host) => {
                 host.shutdown_and_reap().await;
-                if residency == FleetResidency::Resident {
-                    self.state.lock().await.remove_process(&reservation_id);
-                }
-                bail!("Runtime process exited during startup");
+                Self::fail_start_operation(
+                    &operations,
+                    &state,
+                    &reservation_id,
+                    &completion,
+                    "Runtime process exited during startup",
+                )
+                .await;
+                return;
             }
             Err(error) => {
-                if residency == FleetResidency::Resident {
-                    self.state.lock().await.remove_process(&reservation_id);
-                }
-                return Err(error);
+                Self::fail_start_operation(
+                    &operations,
+                    &state,
+                    &reservation_id,
+                    &completion,
+                    &format!("{error:#}"),
+                )
+                .await;
+                return;
             }
         };
-        if let Some(owner_records) = &self.owner_records
-            && let Err(error) = owner_records.register(host.process_id(), &host)
+        if completion.is_cancelled() {
+            let _ = host
+                .shutdown_and_reap_until(Instant::now() + config.stop_timeout)
+                .await;
+            Self::fail_start_operation(
+                &operations,
+                &state,
+                &reservation_id,
+                &completion,
+                "Fleet startup reservation was cancelled",
+            )
+            .await;
+            return;
+        }
+        if let Some(records) = &owner_records
+            && let Err(error) = records.register(host.process_id(), &host)
         {
             host.shutdown_and_reap().await;
-            if residency == FleetResidency::Resident {
-                self.state.lock().await.remove_process(&reservation_id);
-            }
-            return Err(error).context("failed to persist Runtime process owner record");
+            Self::fail_start_operation(
+                &operations,
+                &state,
+                &reservation_id,
+                &completion,
+                &format!(
+                    "{:#}",
+                    error.context("failed to persist Runtime process owner record")
+                ),
+            )
+            .await;
+            return;
         }
-        let process_id = if residency == FleetResidency::Resident {
-            reservation_id
-        } else {
-            host.process_id().to_string()
-        };
-        {
-            let mut state = self.state.lock().await;
-            if residency == FleetResidency::Resident {
+        let commit = {
+            let _operation = operations.lock().await;
+            let mut state = state.lock().await;
+            (|| {
                 let entry = state
                     .processes
-                    .get_mut(&process_id)
-                    .expect("resident startup reservation disappeared");
+                    .get_mut(&reservation_id)
+                    .context("Fleet startup reservation disappeared before commit")?;
+                if entry.state != FleetProcessState::Starting
+                    || entry.run_lease.as_ref() != Some(&run_lease)
+                    || entry.retire_after_run
+                    || completion.is_cancelled()
+                    || !entry
+                        .startup
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(current, &completion))
+                {
+                    bail!("Fleet startup reservation was invalidated before commit");
+                }
                 entry.host = Some(host.clone());
-                entry.state = FleetProcessState::BusyResident;
-            } else {
-                let sequence = state.next_sequence();
-                state.processes.insert(
-                    process_id.clone(),
-                    ProcessEntry {
-                        process_id: process_id.clone(),
-                        adapter_kind: request.adapter_kind,
-                        compatibility: request.compatibility,
-                        state: FleetProcessState::BusyBurst,
-                        host: Some(host.clone()),
-                        run_lease: Some(run_lease.clone()),
-                        idle_since: None,
-                        last_used_sequence: sequence,
-                        retire_after_run: false,
-                    },
-                );
-                state.process_by_run.insert(run_lease, process_id.clone());
+                entry.startup = None;
+                entry.state = match residency {
+                    FleetResidency::Resident => FleetProcessState::BusyResident,
+                    FleetResidency::Burst => FleetProcessState::BusyBurst,
+                };
+                Ok(FleetLease {
+                    process_id: reservation_id.clone(),
+                    host: host.clone(),
+                    residency,
+                })
+            })()
+        };
+        match commit {
+            Ok(lease) => completion.complete(Ok(lease)),
+            Err(error) => {
+                let _ = host
+                    .shutdown_and_reap_until(Instant::now() + config.stop_timeout)
+                    .await;
+                if let Some(records) = &owner_records {
+                    records.remove(host.process_id());
+                }
+                Self::fail_start_operation(
+                    &operations,
+                    &state,
+                    &reservation_id,
+                    &completion,
+                    &format!("{error:#}"),
+                )
+                .await;
             }
         }
-        Ok(FleetLease {
-            process_id,
-            host,
-            residency,
-        })
     }
 
-    async fn existing_lease(&self, run_lease: &RunLeaseKey) -> Option<FleetLease> {
-        let state = self.state.lock().await;
-        let process_id = state.process_by_run.get(run_lease)?;
-        let entry = state.processes.get(process_id)?;
-        let host = entry.host.clone()?;
-        matches!(
-            entry.state,
-            FleetProcessState::BusyResident | FleetProcessState::BusyBurst
-        )
-        .then(|| FleetLease {
-            process_id: process_id.clone(),
-            host,
-            residency: if entry.state == FleetProcessState::BusyResident {
-                FleetResidency::Resident
-            } else {
-                FleetResidency::Burst
-            },
-        })
+    async fn fail_start_operation(
+        operations: &Mutex<()>,
+        state: &Mutex<FleetState>,
+        reservation_id: &str,
+        completion: &Arc<FleetStartupOperation>,
+        message: &str,
+    ) {
+        let _operation = operations.lock().await;
+        let mut state = state.lock().await;
+        let owns_reservation = state
+            .processes
+            .get(reservation_id)
+            .and_then(|entry| entry.startup.as_ref())
+            .is_some_and(|current| Arc::ptr_eq(current, completion));
+        if owns_reservation {
+            state.remove_process(reservation_id);
+        }
+        completion.complete(Err(message.to_string()));
     }
 
-    async fn acquire_compatible_idle(&self, request: &FleetAcquireRequest) -> Option<FleetLease> {
-        let mut state = self.state.lock().await;
-        let process_id = state.idle_lru.iter().find_map(|(_, process_id)| {
-            state
-                .processes
-                .get(process_id)
-                .filter(|entry| {
-                    entry.state == FleetProcessState::IdleWarm
-                        && entry.adapter_kind == request.adapter_kind
+    fn launch_stop(&self, launch: FleetStopLaunch) {
+        tokio::spawn(Self::drive_stop(
+            self.config.stop_timeout,
+            self.operations.clone(),
+            self.state.clone(),
+            self.owner_records.clone(),
+            self.builtin_tool_leases.clone(),
+            launch,
+        ));
+    }
+
+    async fn drive_stop(
+        stop_timeout: Duration,
+        operations: Arc<Mutex<()>>,
+        state: Arc<Mutex<FleetState>>,
+        owner_records: Option<RuntimeOwnerRecordStore>,
+        builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
+        launch: FleetStopLaunch,
+    ) {
+        if let Some(config) = launch.host.builtin_tool_process_config() {
+            builtin_tool_leases.unregister(config.process_id()).await;
+        }
+        let reaped = launch
+            .host
+            .shutdown_and_reap_until(Instant::now() + stop_timeout)
+            .await;
+        let committed = if reaped {
+            let _operation = operations.lock().await;
+            let mut state = state.lock().await;
+            match state.processes.get(&launch.process_id) {
+                Some(entry)
+                    if entry.state == FleetProcessState::Stopping
                         && entry
-                            .compatibility
-                            .is_process_compatible_with(&request.compatibility)
-                        && entry
-                            .host
+                            .stop
                             .as_ref()
-                            .is_some_and(RuntimeProcessHost::is_healthy)
-                })
-                .map(|_| process_id.clone())
-        })?;
-        let run_lease = request.run_lease();
-        let (last_used_sequence, host) = {
-            let entry = state.processes.get_mut(&process_id)?;
-            let last_used_sequence = entry.last_used_sequence;
-            entry.state = FleetProcessState::BusyResident;
-            entry.run_lease = Some(run_lease.clone());
-            entry.idle_since = None;
-            // Reusable workspace Hosts follow the Camp/member that currently owns
-            // their exclusive lease. This preserves precise deletion invalidation
-            // without putting those dynamic scopes into the process reuse key.
-            entry.compatibility = request.compatibility.clone();
-            (last_used_sequence, entry.host.clone()?)
+                            .is_some_and(|current| Arc::ptr_eq(current, &launch.completion)) =>
+                {
+                    state.remove_process(&launch.process_id);
+                    true
+                }
+                None => true,
+                _ => false,
+            }
+        } else {
+            let _operation = operations.lock().await;
+            state
+                .lock()
+                .await
+                .restore_stopping_resident_capacity(&launch.process_id, &launch.completion);
+            false
         };
-        state
-            .idle_lru
-            .remove(&(last_used_sequence, process_id.clone()));
-        state.process_by_run.insert(run_lease, process_id.clone());
-        Some(FleetLease {
-            process_id,
-            host,
-            residency: FleetResidency::Resident,
-        })
+        if committed && let Some(records) = &owner_records {
+            records.remove(launch.host.process_id());
+        }
+        launch.completion.complete(reaped && committed);
+    }
+
+    fn dispatch_stop_plan(&self, plan: FleetStopPlan) -> FleetStopWait {
+        match plan {
+            FleetStopPlan::Absent => FleetStopWait::Absent,
+            FleetStopPlan::Starting(startup) => FleetStopWait::Starting(startup),
+            FleetStopPlan::Wait(completion) => FleetStopWait::Process(completion),
+            FleetStopPlan::Launch(launch) => {
+                let completion = launch.completion.clone();
+                self.launch_stop(launch);
+                FleetStopWait::Process(completion)
+            }
+        }
     }
 
     pub(crate) async fn release(
@@ -1018,60 +1425,84 @@ impl AgentRuntimeFleetManager {
         execution_epoch: i64,
         disposition: FleetReleaseDisposition,
     ) -> bool {
-        let _operation = self.operations.lock().await;
         let run_lease = RunLeaseKey {
             agent_run_id: agent_run_id.to_string(),
             execution_epoch,
         };
-        let process_id = {
-            self.state
-                .lock()
-                .await
-                .process_by_run
-                .get(&run_lease)
-                .cloned()
-        };
-        let Some(process_id) = process_id else {
-            return true;
-        };
-        let (state_kind, retire_after_run, host) = {
-            let state = self.state.lock().await;
-            let Some(entry) = state.processes.get(&process_id) else {
+        enum ReleasePlan {
+            Stop(FleetStopPlan),
+            CheckReusable {
+                process_id: String,
+                host: RuntimeProcessHost,
+            },
+        }
+        let plan = {
+            let _operation = self.operations.lock().await;
+            let mut state = self.state.lock().await;
+            let Some(process_id) = state.process_by_run.get(&run_lease).cloned() else {
                 return true;
             };
-            (entry.state, entry.retire_after_run, entry.host.clone())
+            let Some(entry) = state.processes.get_mut(&process_id) else {
+                return true;
+            };
+            let should_stop = disposition == FleetReleaseDisposition::Stop
+                || entry.state != FleetProcessState::BusyResident
+                || entry.retire_after_run
+                || entry.host.is_none();
+            if should_stop {
+                ReleasePlan::Stop(state.plan_stop(&process_id))
+            } else {
+                ReleasePlan::CheckReusable {
+                    process_id,
+                    host: entry.host.clone().expect("checked above"),
+                }
+            }
         };
-        if let Some(config) = host
-            .as_ref()
-            .and_then(RuntimeProcessHost::builtin_tool_process_config)
-        {
+        let ReleasePlan::CheckReusable { process_id, host } = plan else {
+            let ReleasePlan::Stop(stop) = plan else {
+                unreachable!()
+            };
+            return self.dispatch_stop_plan(stop).wait().await;
+        };
+        if let Some(config) = host.builtin_tool_process_config() {
             self.builtin_tool_leases
                 .unbind(config.process_id(), agent_run_id, execution_epoch)
                 .await;
         }
-        let reusable = disposition == FleetReleaseDisposition::Reusable
-            && state_kind == FleetProcessState::BusyResident
-            && !retire_after_run
-            && host.as_ref().is_some_and(RuntimeProcessHost::is_healthy)
-            && match host.as_ref() {
-                Some(host) => host.is_quiescent().await,
-                None => false,
-            };
-        if reusable {
+        let quiescent = host.is_healthy() && host.is_quiescent().await;
+        let stop = {
+            let _operation = self.operations.lock().await;
             let mut state = self.state.lock().await;
-            let sequence = state.next_sequence();
-            state.process_by_run.remove(&run_lease);
-            let Some(entry) = state.processes.get_mut(&process_id) else {
-                return true;
-            };
-            entry.run_lease = None;
-            entry.state = FleetProcessState::IdleWarm;
-            entry.idle_since = Some(Instant::now());
-            entry.last_used_sequence = sequence;
-            state.idle_lru.insert((sequence, process_id));
-            true
-        } else {
-            self.stop_process_locked(&process_id).await
+            let reusable = quiescent
+                && state.process_by_run.get(&run_lease) == Some(&process_id)
+                && state.processes.get(&process_id).is_some_and(|entry| {
+                    entry.state == FleetProcessState::BusyResident
+                        && !entry.retire_after_run
+                        && entry.run_lease.as_ref() == Some(&run_lease)
+                        && entry.host.as_ref().is_some_and(|current| {
+                            current.process_id() == host.process_id() && current.is_healthy()
+                        })
+                });
+            if reusable {
+                let sequence = state.next_sequence();
+                state.process_by_run.remove(&run_lease);
+                let entry = state
+                    .processes
+                    .get_mut(&process_id)
+                    .expect("reusable Fleet entry disappeared");
+                entry.run_lease = None;
+                entry.state = FleetProcessState::IdleWarm;
+                entry.idle_since = Some(Instant::now());
+                entry.last_used_sequence = sequence;
+                state.idle_lru.insert((sequence, process_id.clone()));
+                None
+            } else {
+                Some(state.plan_stop(&process_id))
+            }
+        };
+        match stop {
+            None => true,
+            Some(stop) => self.dispatch_stop_plan(stop).wait().await,
         }
     }
 
@@ -1086,40 +1517,22 @@ impl AgentRuntimeFleetManager {
             agent_run_id: agent_run_id.to_string(),
             execution_epoch,
         };
-        {
-            let mut state = self.state.lock().await;
-            if let Some(id) = state.process_by_run.get(&key).cloned()
-                && let Some(entry) = state.processes.get_mut(&id)
-            {
-                entry.retire_after_run = true;
-            }
-        }
-        let Ok(_operation) = timeout_at(deadline, self.operations.lock()).await else {
-            return false;
-        };
-        let target = {
+        let plan = {
+            let Ok(_operation) = timeout_at(deadline, self.operations.lock()).await else {
+                return false;
+            };
             let mut state = self.state.lock().await;
             let Some(id) = state.process_by_run.get(&key).cloned() else {
                 return true;
             };
-            let Some(host) = state.mark_stopping(&id) else {
-                return false;
-            };
-            (id, host)
+            if let Some(entry) = state.processes.get_mut(&id) {
+                entry.retire_after_run = true;
+            }
+            state.plan_stop(&id)
         };
-        if let Some(config) = target.1.builtin_tool_process_config() {
-            self.builtin_tool_leases
-                .unregister(config.process_id())
-                .await;
-        }
-        if !target.1.force_reap_until(deadline).await {
-            return false;
-        }
-        self.state.lock().await.remove_process(&target.0);
-        if let Some(records) = &self.owner_records {
-            records.remove(target.1.process_id());
-        }
-        true
+        timeout_at(deadline, self.dispatch_stop_plan(plan).wait())
+            .await
+            .unwrap_or(false)
     }
 
     pub(crate) async fn invalidate_camp(&self, camp_id: &str) {
@@ -1128,9 +1541,9 @@ impl AgentRuntimeFleetManager {
     }
 
     pub(crate) async fn fence_camp_for_attachment_mutation(&self, camp_id: &str) -> Result<()> {
-        let _operation = self.operations.lock().await;
-        let process_ids = {
-            let state = self.state.lock().await;
+        let plans = {
+            let _operation = self.operations.lock().await;
+            let mut state = self.state.lock().await;
             let mut process_ids = Vec::new();
             for (process_id, entry) in &state.processes {
                 if !entry.compatibility.belongs_to_camp(camp_id) {
@@ -1145,9 +1558,16 @@ impl AgentRuntimeFleetManager {
                 process_ids.push(process_id.clone());
             }
             process_ids
+                .into_iter()
+                .map(|process_id| state.plan_stop(&process_id))
+                .collect::<Vec<_>>()
         };
-        for process_id in process_ids {
-            if !self.stop_process_locked(&process_id).await {
+        let waits = plans
+            .into_iter()
+            .map(|plan| self.dispatch_stop_plan(plan))
+            .collect::<Vec<_>>();
+        for wait in waits {
+            if !wait.wait().await {
                 bail!("camp_attachment_view_busy: Camp Runtime Host could not be fenced");
             }
         }
@@ -1165,19 +1585,28 @@ impl AgentRuntimeFleetManager {
     }
 
     pub(crate) async fn force_fence_camp_for_deletion(&self, camp_id: &str) -> Result<()> {
-        let _operation = self.operations.lock().await;
-        let process_ids = {
-            let state = self.state.lock().await;
-            state
+        let plans = {
+            let _operation = self.operations.lock().await;
+            let mut state = self.state.lock().await;
+            let process_ids = state
                 .processes
                 .iter()
                 .filter(|(_, entry)| entry.compatibility.belongs_to_camp(camp_id))
                 .map(|(process_id, _)| process_id.clone())
+                .collect::<Vec<_>>();
+            process_ids
+                .into_iter()
+                .map(|process_id| state.plan_stop(&process_id))
                 .collect::<Vec<_>>()
         };
-        for process_id in process_ids {
-            if !self.stop_process_locked(&process_id).await {
-                bail!("camp_attachment_view_busy: Camp Runtime Host could not be fenced");
+        let waits = plans
+            .into_iter()
+            .map(|plan| self.dispatch_stop_plan(plan))
+            .collect::<Vec<_>>();
+        let deadline = Instant::now() + self.config.stop_timeout;
+        for wait in waits {
+            if !timeout_at(deadline, wait.wait()).await.unwrap_or(false) {
+                bail!("camp_attachment_view_busy: Camp Runtime startup could not be fenced");
             }
         }
         if self
@@ -1208,47 +1637,45 @@ impl AgentRuntimeFleetManager {
     }
 
     async fn invalidate_matching(&self, predicate: impl Fn(&ProcessEntry) -> bool) {
-        let _operation = self.operations.lock().await;
-        let (idle, busy) = {
-            let state = self.state.lock().await;
-            let mut idle = Vec::new();
-            let mut busy = Vec::new();
-            for (process_id, entry) in &state.processes {
-                if predicate(entry) {
-                    if entry.state == FleetProcessState::IdleWarm {
-                        idle.push(process_id.clone());
-                    } else if matches!(
-                        entry.state,
-                        FleetProcessState::BusyResident | FleetProcessState::Starting
-                    ) {
-                        busy.push(process_id.clone());
-                    }
-                }
-            }
-            (idle, busy)
-        };
-        {
+        let plans = {
+            let _operation = self.operations.lock().await;
             let mut state = self.state.lock().await;
-            for process_id in busy {
-                if let Some(entry) = state.processes.get_mut(&process_id) {
+            let matches = state
+                .processes
+                .iter()
+                .filter(|(_, entry)| predicate(entry))
+                .map(|(process_id, entry)| (process_id.clone(), entry.state))
+                .collect::<Vec<_>>();
+            let mut plans = Vec::new();
+            for (process_id, process_state) in matches {
+                if matches!(
+                    process_state,
+                    FleetProcessState::IdleWarm
+                        | FleetProcessState::Stopping
+                        | FleetProcessState::Starting
+                ) {
+                    plans.push(state.plan_stop(&process_id));
+                } else if let Some(entry) = state.processes.get_mut(&process_id) {
                     entry.retire_after_run = true;
                 }
             }
-        }
-        for process_id in idle {
-            self.stop_process_locked(&process_id).await;
+            plans
+        };
+        let waits = plans
+            .into_iter()
+            .map(|plan| self.dispatch_stop_plan(plan))
+            .collect::<Vec<_>>();
+        for wait in waits {
+            let _ = wait.wait().await;
         }
     }
 
     pub(crate) async fn sweep_idle(&self) {
-        let _operation = self.operations.lock().await;
-        self.reap_stale_idle_locked(Instant::now()).await;
-    }
-
-    async fn reap_stale_idle_locked(&self, now: Instant) {
-        let process_ids = {
-            let state = self.state.lock().await;
-            state
+        let now = Instant::now();
+        let plans = {
+            let _operation = self.operations.lock().await;
+            let mut state = self.state.lock().await;
+            let process_ids = state
                 .processes
                 .iter()
                 .filter_map(|(process_id, entry)| {
@@ -1260,34 +1687,19 @@ impl AgentRuntimeFleetManager {
                         || entry.state == FleetProcessState::Stopping)
                         .then_some(process_id.clone())
                 })
+                .collect::<Vec<_>>();
+            process_ids
+                .into_iter()
+                .map(|process_id| state.plan_stop(&process_id))
                 .collect::<Vec<_>>()
         };
-        for process_id in process_ids {
-            self.stop_process_locked(&process_id).await;
+        let waits = plans
+            .into_iter()
+            .map(|plan| self.dispatch_stop_plan(plan))
+            .collect::<Vec<_>>();
+        for wait in waits {
+            let _ = wait.wait().await;
         }
-    }
-
-    async fn stop_process_locked(&self, process_id: &str) -> bool {
-        let host = self.state.lock().await.mark_stopping(process_id);
-        let Some(host) = host else {
-            return false;
-        };
-        if let Some(config) = host.builtin_tool_process_config() {
-            self.builtin_tool_leases
-                .unregister(config.process_id())
-                .await;
-        }
-        if !host
-            .shutdown_and_reap_until(Instant::now() + self.config.stop_timeout)
-            .await
-        {
-            return false;
-        }
-        self.state.lock().await.remove_process(process_id);
-        if let Some(owner_records) = &self.owner_records {
-            owner_records.remove(host.process_id());
-        }
-        true
     }
 
     /// Stops every process owned by this Fleet without allowing per-process
@@ -1305,39 +1717,16 @@ impl AgentRuntimeFleetManager {
             .unwrap_or(started_at);
         let mut deadline_expired = false;
 
-        let _operation = match timeout_at(graceful_deadline, self.operations.lock()).await {
-            Ok(operation) => operation,
-            Err(_) => {
-                let observed_processes = self
-                    .owner_records
-                    .as_ref()
-                    .map_or(0, |records| records.current_generation_records().len());
-                let force_kill_signals_sent = self
-                    .owner_records
-                    .as_ref()
-                    .map_or(0, RuntimeOwnerRecordStore::force_kill_current_generation);
-                return RuntimeFleetShutdownOutcome {
-                    observed_processes,
-                    reaped_processes: 0,
-                    force_kill_signals_sent,
-                    deadline_expired: true,
-                };
-            }
-        };
-
-        let (observed_processes, targets) = match timeout_at(graceful_deadline, async {
+        let (observed_ids, plans) = match timeout_at(graceful_deadline, async {
+            let _operation = self.operations.lock().await;
             let mut state = self.state.lock().await;
-            let process_ids = state.processes.keys().cloned().collect::<Vec<_>>();
-            let observed_processes = process_ids.len();
-            let targets = process_ids
-                .into_iter()
-                .filter_map(|fleet_process_id| {
-                    state
-                        .mark_stopping(&fleet_process_id)
-                        .map(|host| (fleet_process_id, host))
-                })
+            state.shutdown_started = true;
+            let observed_ids = state.processes.keys().cloned().collect::<Vec<_>>();
+            let plans = observed_ids
+                .iter()
+                .map(|process_id| state.plan_stop(process_id))
                 .collect::<Vec<_>>();
-            (observed_processes, targets)
+            (observed_ids, plans)
         })
         .await
         {
@@ -1359,78 +1748,37 @@ impl AgentRuntimeFleetManager {
                 };
             }
         };
-
-        let mut lease_cleanup_tasks = JoinSet::new();
-        let mut stop_tasks = JoinSet::new();
-        for (fleet_process_id, host) in targets {
-            if let Some(config) = host.builtin_tool_process_config() {
-                let leases = self.builtin_tool_leases.clone();
-                lease_cleanup_tasks.spawn(async move {
-                    leases.unregister(config.process_id()).await;
-                });
-            }
-            let owner_process_id = host.process_id().to_string();
-            let stop_timeout = self.config.stop_timeout;
-            stop_tasks.spawn(async move {
-                let host_deadline = std::cmp::min(
-                    graceful_deadline,
-                    Instant::now()
-                        .checked_add(stop_timeout)
-                        .unwrap_or(graceful_deadline),
-                );
-                let reaped = host.shutdown_and_reap_until(host_deadline).await;
-                (fleet_process_id, owner_process_id, reaped, !reaped)
-            });
-        }
-
-        let mut reaped = Vec::new();
-        let stop_wait = timeout_at(graceful_deadline, async {
-            while let Some(result) = stop_tasks.join_next().await {
-                match result {
-                    Ok((fleet_process_id, owner_process_id, true, timed_out)) => {
-                        deadline_expired |= timed_out;
-                        reaped.push((fleet_process_id, owner_process_id));
-                    }
-                    Ok((_, _, false, timed_out)) => deadline_expired |= timed_out,
-                    Err(_) => deadline_expired = true,
-                }
-            }
-        })
-        .await;
-        if stop_wait.is_err() {
-            deadline_expired = true;
-            stop_tasks.abort_all();
-        }
-        drop(stop_tasks);
-
-        let lease_cleanup = timeout_at(graceful_deadline, async {
-            while lease_cleanup_tasks.join_next().await.is_some() {}
-        })
-        .await;
-        if lease_cleanup.is_err() {
-            deadline_expired = true;
-            lease_cleanup_tasks.abort_all();
-        }
-        drop(lease_cleanup_tasks);
-
-        for (_, owner_process_id) in &reaped {
-            if let Some(owner_records) = &self.owner_records {
-                owner_records.remove(owner_process_id);
-            }
+        let observed_processes = observed_ids.len();
+        let waits = plans
+            .into_iter()
+            .map(|plan| self.dispatch_stop_plan(plan))
+            .collect::<Vec<_>>();
+        let mut wait_tasks = JoinSet::new();
+        for wait in waits {
+            wait_tasks.spawn(wait.wait());
         }
         if timeout_at(graceful_deadline, async {
-            let mut state = self.state.lock().await;
-            for (fleet_process_id, _) in &reaped {
-                state.remove_process(fleet_process_id);
+            while let Some(result) = wait_tasks.join_next().await {
+                if !matches!(result, Ok(true)) {
+                    deadline_expired = true;
+                }
             }
         })
         .await
         .is_err()
         {
             deadline_expired = true;
+            wait_tasks.abort_all();
         }
-
-        let unresolved_processes = observed_processes.saturating_sub(reaped.len());
+        drop(wait_tasks);
+        let reaped_processes = {
+            let state = self.state.lock().await;
+            observed_ids
+                .iter()
+                .filter(|process_id| !state.processes.contains_key(*process_id))
+                .count()
+        };
+        let unresolved_processes = observed_processes.saturating_sub(reaped_processes);
         let force_kill_signals_sent = if unresolved_processes == 0 && !deadline_expired {
             0
         } else {
@@ -1442,24 +1790,30 @@ impl AgentRuntimeFleetManager {
 
         RuntimeFleetShutdownOutcome {
             observed_processes,
-            reaped_processes: reaped.len(),
+            reaped_processes,
             force_kill_signals_sent,
             deadline_expired,
         }
     }
 
     pub(crate) async fn shutdown_all(&self) {
-        let _operation = self.operations.lock().await;
-        let process_ids = self
-            .state
-            .lock()
-            .await
-            .processes
-            .keys()
-            .cloned()
+        let plans = {
+            let _operation = self.operations.lock().await;
+            let mut state = self.state.lock().await;
+            state.shutdown_started = true;
+            let process_ids = state.processes.keys().cloned().collect::<Vec<_>>();
+            process_ids
+                .into_iter()
+                .map(|process_id| state.plan_stop(&process_id))
+                .collect::<Vec<_>>()
+        };
+        let waits = plans
+            .into_iter()
+            .map(|plan| self.dispatch_stop_plan(plan))
             .collect::<Vec<_>>();
-        for process_id in process_ids {
-            self.stop_process_locked(&process_id).await;
+        let deadline = Instant::now() + self.config.stop_timeout;
+        for wait in waits {
+            let _ = timeout_at(deadline, wait.wait()).await;
         }
     }
 
@@ -1492,6 +1846,7 @@ mod tests {
             process_id: process_id.to_string(),
             shutdown_delay: Duration::ZERO,
             reaped: std::sync::atomic::AtomicBool::new(false),
+            shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
         }))
     }
 
@@ -1508,11 +1863,17 @@ mod tests {
         fleet: &AgentRuntimeFleetManager,
         process_id: &str,
         shutdown_delay: Duration,
-    ) {
+    ) -> Arc<FakeRuntimeProcessHost> {
         let run_lease = RunLeaseKey {
             agent_run_id: format!("run-{process_id}"),
             execution_epoch: 1,
         };
+        let host = Arc::new(FakeRuntimeProcessHost {
+            process_id: process_id.to_string(),
+            shutdown_delay,
+            reaped: std::sync::atomic::AtomicBool::new(false),
+            shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+        });
         let mut state = fleet.state.lock().await;
         state
             .process_by_run
@@ -1528,17 +1889,17 @@ mod tests {
                     "digest-1",
                 ),
                 state: FleetProcessState::BusyBurst,
-                host: Some(RuntimeProcessHost::Fake(Arc::new(FakeRuntimeProcessHost {
-                    process_id: process_id.to_string(),
-                    shutdown_delay,
-                    reaped: std::sync::atomic::AtomicBool::new(false),
-                }))),
+                residency: FleetResidency::Burst,
+                host: Some(RuntimeProcessHost::Fake(host.clone())),
+                startup: None,
+                stop: None,
                 run_lease: Some(run_lease),
                 idle_since: None,
                 last_used_sequence: 0,
                 retire_after_run: false,
             },
         );
+        host
     }
 
     #[test]
@@ -1550,13 +1911,579 @@ mod tests {
         assert_eq!(config.sweep_interval, Duration::from_secs(60));
     }
 
-    #[test]
-    fn stopping_is_a_resident_state_but_burst_is_not() {
-        assert!(FleetProcessState::Starting.is_resident());
-        assert!(FleetProcessState::BusyResident.is_resident());
-        assert!(FleetProcessState::IdleWarm.is_resident());
-        assert!(FleetProcessState::Stopping.is_resident());
-        assert!(!FleetProcessState::BusyBurst.is_resident());
+    #[tokio::test]
+    async fn different_runs_spawn_outside_the_global_fleet_lock() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let started = Arc::new(tokio::sync::Semaphore::new(0));
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+
+        let first = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(
+                        acquire_request("parallel-a", "camp-a"),
+                        move || async move {
+                            started.add_permits(1);
+                            release.acquire().await.unwrap().forget();
+                            Ok(fake_host("parallel-host-a"))
+                        },
+                    )
+                    .await
+            })
+        };
+        let second = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            tokio::spawn(async move {
+                let mut request = acquire_request("parallel-b", "camp-b");
+                request.adapter_kind = AdapterKind::CodexCli;
+                fleet
+                    .acquire(request, move || async move {
+                        started.add_permits(1);
+                        release.acquire().await.unwrap().forget();
+                        Ok(fake_host("parallel-host-b"))
+                    })
+                    .await
+            })
+        };
+
+        tokio::time::timeout(Duration::from_secs(1), started.acquire_many(2))
+            .await
+            .expect("both independent spawns must enter before either completes")
+            .unwrap()
+            .forget();
+        release.add_permits(2);
+        assert_eq!(
+            first.await.unwrap().unwrap().host.process_id(),
+            "parallel-host-a"
+        );
+        assert_eq!(
+            second.await.unwrap().unwrap().host.process_id(),
+            "parallel-host-b"
+        );
+        fleet.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn starting_reservation_counts_toward_resident_capacity() {
+        let mut config = test_config(Duration::from_secs(1));
+        config.max_resident_processes_global = 1;
+        config.max_resident_processes_per_member = 1;
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(config));
+        let started = Arc::new(tokio::sync::Semaphore::new(0));
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+
+        let first = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(
+                        acquire_request("capacity-a", "camp-a"),
+                        move || async move {
+                            started.add_permits(1);
+                            release.acquire().await.unwrap().forget();
+                            Ok(fake_host("capacity-host-a"))
+                        },
+                    )
+                    .await
+            })
+        };
+        started.acquire().await.unwrap().forget();
+        let second = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(
+                        acquire_request("capacity-b", "camp-a"),
+                        move || async move {
+                            started.add_permits(1);
+                            release.acquire().await.unwrap().forget();
+                            Ok(fake_host("capacity-host-b"))
+                        },
+                    )
+                    .await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(1), started.acquire())
+            .await
+            .expect("the burst spawn must not wait for the resident startup")
+            .unwrap()
+            .forget();
+        release.add_permits(2);
+
+        assert_eq!(
+            first.await.unwrap().unwrap().residency,
+            FleetResidency::Resident
+        );
+        assert_eq!(
+            second.await.unwrap().unwrap().residency,
+            FleetResidency::Burst
+        );
+        fleet.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn same_run_waits_for_one_starting_reservation_and_shares_its_lease() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let spawn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let request = acquire_request("singleflight", "camp-a");
+
+        let first = {
+            let fleet = fleet.clone();
+            let spawn_count = spawn_count.clone();
+            let started = started.clone();
+            let release = release.clone();
+            let request = request.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(request, move || async move {
+                        spawn_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        started.notify_one();
+                        release.notified().await;
+                        Ok(fake_host("singleflight-host"))
+                    })
+                    .await
+            })
+        };
+        started.notified().await;
+        let second = {
+            let fleet = fleet.clone();
+            let spawn_count = spawn_count.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(request, move || async move {
+                        spawn_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Ok(fake_host("duplicate-host"))
+                    })
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        assert_eq!(spawn_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        release.notify_one();
+
+        let first = first.await.unwrap().unwrap();
+        let second = second.await.unwrap().unwrap();
+        assert_eq!(first.process_id, second.process_id);
+        assert_eq!(first.host.process_id(), "singleflight-host");
+        assert_eq!(second.host.process_id(), "singleflight-host");
+        assert_eq!(spawn_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        fleet.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn dropping_the_first_waiter_does_not_orphan_the_fleet_owned_startup() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let started = Arc::new(tokio::sync::Semaphore::new(0));
+        let finish = Arc::new(tokio::sync::Semaphore::new(0));
+        let spawn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let request = acquire_request("detached-waiter", "camp-a");
+        let first = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let finish = finish.clone();
+            let spawn_count = spawn_count.clone();
+            let request = request.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(request, move || async move {
+                        spawn_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        started.add_permits(1);
+                        finish.acquire().await.unwrap().forget();
+                        Ok(fake_host("detached-waiter-host"))
+                    })
+                    .await
+            })
+        };
+        started.acquire().await.unwrap().forget();
+        first.abort();
+        match first.await {
+            Err(error) => assert!(error.is_cancelled()),
+            Ok(_) => panic!("the first acquire waiter should have been cancelled"),
+        }
+
+        let second = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(request, || async {
+                        panic!("the surviving waiter must share the existing startup")
+                    })
+                    .await
+            })
+        };
+        finish.add_permits(1);
+        let lease = tokio::time::timeout(Duration::from_secs(1), second)
+            .await
+            .expect("Fleet-owned startup must reach a terminal state")
+            .unwrap()
+            .unwrap();
+        assert_eq!(lease.host.process_id(), "detached-waiter-host");
+        assert_eq!(spawn_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(
+            fleet
+                .state
+                .lock()
+                .await
+                .processes
+                .values()
+                .all(|entry| entry.state != FleetProcessState::Starting)
+        );
+        fleet.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn a_slow_stop_does_not_block_an_unrelated_acquire() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        insert_fake_process(&fleet, "slow-stop", Duration::from_millis(300)).await;
+        let stop = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move {
+                fleet
+                    .stop_agent_run_until(
+                        "run-slow-stop",
+                        1,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await
+            })
+        };
+        loop {
+            if fleet.state.lock().await.processes["slow-stop"].state == FleetProcessState::Stopping
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        let unrelated = tokio::time::timeout(
+            Duration::from_millis(100),
+            fleet.acquire(acquire_request("unrelated", "camp-b"), || async {
+                Ok(fake_host("unrelated-host"))
+            }),
+        )
+        .await
+        .expect("slow process I/O must not hold the Fleet operations lock")
+        .unwrap();
+        assert_eq!(unrelated.host.process_id(), "unrelated-host");
+        assert!(stop.await.unwrap());
+        fleet.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_stops_share_one_host_stop_operation() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let host = insert_fake_process(&fleet, "shared-stop", Duration::from_millis(100)).await;
+        let first = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move {
+                fleet
+                    .stop_agent_run_until(
+                        "run-shared-stop",
+                        1,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await
+            })
+        };
+        loop {
+            if fleet.state.lock().await.processes["shared-stop"].state
+                == FleetProcessState::Stopping
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let second = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move {
+                fleet
+                    .stop_agent_run_until(
+                        "run-shared-stop",
+                        1,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await
+            })
+        };
+        assert!(first.await.unwrap());
+        assert!(second.await.unwrap());
+        assert_eq!(
+            host.shutdown_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn same_run_waiter_observes_the_starting_reservation_failure() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let request = acquire_request("singleflight-failure", "camp-a");
+        let first = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            let request = request.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(request, move || async move {
+                        started.notify_one();
+                        release.notified().await;
+                        anyhow::bail!("controlled startup failure")
+                    })
+                    .await
+            })
+        };
+        started.notified().await;
+        let second = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(request, || async {
+                        panic!("same Run must not execute a second spawn")
+                    })
+                    .await
+            })
+        };
+        release.notify_one();
+        let first = first
+            .await
+            .unwrap()
+            .err()
+            .expect("creator must observe the startup failure")
+            .to_string();
+        let second = second
+            .await
+            .unwrap()
+            .err()
+            .expect("waiter must observe the startup failure")
+            .to_string();
+        assert_eq!(first, "controlled startup failure");
+        assert_eq!(second, first);
+        assert!(fleet.state.lock().await.processes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_retires_an_inflight_start_before_it_can_commit() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let spawned_host = Arc::new(FakeRuntimeProcessHost {
+            process_id: "shutdown-starting-host".to_string(),
+            shutdown_delay: Duration::ZERO,
+            reaped: std::sync::atomic::AtomicBool::new(false),
+            shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let acquire = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            let spawned_host = spawned_host.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(
+                        acquire_request("shutdown-starting", "camp-a"),
+                        move || async move {
+                            started.notify_one();
+                            release.notified().await;
+                            Ok(RuntimeProcessHost::Fake(spawned_host))
+                        },
+                    )
+                    .await
+            })
+        };
+        started.notified().await;
+        let shutdown = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move { fleet.shutdown_all().await })
+        };
+        loop {
+            if fleet.state.lock().await.shutdown_started {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        release.notify_one();
+
+        let error = acquire
+            .await
+            .unwrap()
+            .err()
+            .expect("shutdown must invalidate the starting reservation")
+            .to_string();
+        assert!(error.contains("cancelled"));
+        shutdown.await.unwrap();
+        assert!(
+            spawned_host
+                .reaped
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+        assert!(fleet.state.lock().await.processes.is_empty());
+        let rejected = fleet
+            .acquire(acquire_request("after-shutdown", "camp-a"), || async {
+                panic!("Fleet shutdown must reject new spawn work")
+            })
+            .await
+            .err()
+            .expect("Fleet must remain closed after shutdown")
+            .to_string();
+        assert_eq!(rejected, "Runtime Fleet is shutting down");
+    }
+
+    #[tokio::test]
+    async fn force_stop_waits_for_an_inflight_start_to_reap() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let spawned_host = Arc::new(FakeRuntimeProcessHost {
+            process_id: "force-stop-starting-host".to_string(),
+            shutdown_delay: Duration::ZERO,
+            reaped: std::sync::atomic::AtomicBool::new(false),
+            shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let acquire = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            let spawned_host = spawned_host.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(
+                        acquire_request("force-stop-starting", "camp-a"),
+                        move || async move {
+                            started.notify_one();
+                            release.notified().await;
+                            Ok(RuntimeProcessHost::Fake(spawned_host))
+                        },
+                    )
+                    .await
+            })
+        };
+        started.notified().await;
+        let stop = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move {
+                fleet
+                    .stop_agent_run_until(
+                        "force-stop-starting",
+                        1,
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await
+            })
+        };
+        loop {
+            if fleet
+                .state
+                .lock()
+                .await
+                .processes
+                .values()
+                .any(|entry| entry.retire_after_run)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        release.notify_one();
+
+        assert!(stop.await.unwrap());
+        assert!(acquire.await.unwrap().is_err());
+        assert!(
+            spawned_host
+                .reaped
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+        assert!(fleet.state.lock().await.processes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn forced_camp_deletion_waits_for_an_inflight_start_to_reap() {
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+            Duration::from_secs(1),
+        )));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let spawned_host = Arc::new(FakeRuntimeProcessHost {
+            process_id: "delete-starting-host".to_string(),
+            shutdown_delay: Duration::ZERO,
+            reaped: std::sync::atomic::AtomicBool::new(false),
+            shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let acquire = {
+            let fleet = fleet.clone();
+            let started = started.clone();
+            let release = release.clone();
+            let spawned_host = spawned_host.clone();
+            tokio::spawn(async move {
+                fleet
+                    .acquire(
+                        acquire_request("delete-starting", "camp-a"),
+                        move || async move {
+                            started.notify_one();
+                            release.notified().await;
+                            Ok(RuntimeProcessHost::Fake(spawned_host))
+                        },
+                    )
+                    .await
+            })
+        };
+        started.notified().await;
+        let deletion_fence = {
+            let fleet = fleet.clone();
+            tokio::spawn(async move { fleet.force_fence_camp_for_deletion("camp-a").await })
+        };
+        loop {
+            if fleet
+                .state
+                .lock()
+                .await
+                .processes
+                .values()
+                .any(|entry| entry.retire_after_run)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        release.notify_one();
+
+        deletion_fence.await.unwrap().unwrap();
+        assert!(acquire.await.unwrap().is_err());
+        assert!(
+            spawned_host
+                .reaped
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+        assert!(fleet.state.lock().await.processes.is_empty());
     }
 
     #[tokio::test]

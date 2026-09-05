@@ -21,8 +21,9 @@ use crate::{
     camp_attachment_view::commit_publication_in_message_transaction,
     camp_content::{
         StructuredCampMessageContent, StructuredCampMessageSegment, canonical_content_digest,
-        has_all_members_mention, member_mention_ids, mentions_current_user, normalize_content,
-        render_plain_text, validate_content, validate_user_authored_content,
+        composer_document_to_content, has_all_members_mention, member_mention_ids,
+        mentions_current_user, normalize_content, parse_composer_document_json, render_plain_text,
+        validate_content, validate_user_authored_content,
     },
     camp_id::CampId,
     command::{
@@ -39,12 +40,19 @@ use crate::{
     gather::{
         GatherInitiatorLifetime, cancel_gathers_for_initiator, settle_item_from_delivery_terminal,
     },
+    local_attachment_source::{
+        LocalAttachmentSourceRef, parse_source_attachments, serialize_source_attachments,
+        validate_source_attachments,
+    },
     managed_attachment::{
         CommitManagedAttachmentIngest, ManagedAttachmentIngestSource, ManagedAttachmentService,
     },
     pending_camp_input::{self, SendPendingCampInputCommand},
     runtime::AgentRunWorkspace,
 };
+
+#[cfg(test)]
+use crate::camp_content::{composer_document_from_content, serialize_composer_document};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -571,6 +579,7 @@ impl CollaborationService {
             });
             let content = normalize_content(content);
             validate_user_authored_content(&content)?;
+            let composer_document = composer_document_from_content(&content)?;
             let now = chrono::Utc::now();
             let expires_at = (now + chrono::Duration::hours(24)).to_rfc3339();
             database.connection().execute(
@@ -592,7 +601,7 @@ impl CollaborationService {
                 params![
                     envelope.payload.camp_id,
                     envelope.payload.body,
-                    serde_json::to_string(&content)?,
+                    serialize_composer_document(&composer_document)?,
                     envelope.payload.reply_to_camp_message_id,
                     now.to_rfc3339(),
                     expires_at,
@@ -2701,6 +2710,7 @@ impl CollaborationService {
                 Ok(Ok(CampMessageSubmission {
                     body: rendered_body,
                     structured_content: content,
+                    source_attachments: Vec::new(),
                     prepared_attachment_ids: Vec::new(),
                     address: CampMessageAddress::Explicit {
                         agent_ids: vec![envelope.payload.agent_id.clone()],
@@ -2852,6 +2862,7 @@ impl CollaborationService {
                 camp_id: &input.camp_id,
                 body: &input.body,
                 structured_content: &input.structured_content,
+                source_attachments: &[],
                 prepared_attachment_ids: &[],
                 managed_attachment_ingest_intent_id: None,
                 legacy_attachment_publication_operation_id: None,
@@ -2926,6 +2937,7 @@ impl CollaborationService {
                         transaction,
                         &command.camp_id,
                         current.content,
+                        current.source_attachments,
                         current.reply_to_camp_message_id,
                         current.recipient_selection_required,
                         Vec::new(),
@@ -2993,15 +3005,15 @@ impl CollaborationService {
                         "Actor cannot write to this Camp",
                     ));
                 }
-                let has_attachments: bool = transaction.query_row(
+                let has_legacy_attachments: bool = transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)",
                     [&command.camp_id],
                     |row| row.get(0),
                 )?;
-                if has_attachments {
+                if has_legacy_attachments {
                     return Ok(rejected(
-                        "pending_input.attachments_unsupported",
-                        "当前版本暂不支持排队附件；草稿和附件已保留，请等待队列结束后发送。",
+                        "legacy_draft.queue_unsupported",
+                        "Legacy Prepared Attachments must be sent directly or removed before queueing.",
                     ));
                 }
                 return match prepare(transaction)? {
@@ -3009,6 +3021,7 @@ impl CollaborationService {
                         transaction,
                         &command.camp_id,
                         &submission.structured_content,
+                        &submission.source_attachments,
                         submission.reply_to_camp_message_id.as_deref(),
                         &command.execution,
                         user_id,
@@ -3017,6 +3030,20 @@ impl CollaborationService {
                 };
             }
             let prepared = prepare(transaction)?;
+            let prepared = match prepared {
+                Ok(submission) => {
+                    if let Err(failure) = validate_source_attachments(&submission.source_attachments)
+                    {
+                        Err(rejected(
+                            failure.code().as_str(),
+                            "A Source Attachment is unavailable; repair the message before sending",
+                        ))
+                    } else {
+                        Ok(submission)
+                    }
+                }
+                Err(rejection) => Err(rejection),
+            };
             let result = match prepared {
                 Ok(submission) => (|| -> Result<CommandHandlerResult> {
                     let camp_exists = transaction
@@ -3150,6 +3177,7 @@ impl CollaborationService {
                             camp_id: &command.camp_id,
                             body: &submission.body,
                             structured_content: &submission.structured_content,
+                            source_attachments: &submission.source_attachments,
                             prepared_attachment_ids: &submission.prepared_attachment_ids,
                             legacy_attachment_publication_operation_id: attachment_commit
                                 .legacy_publication_operation_id,
@@ -3294,6 +3322,7 @@ impl UserCampMessageSource<'_> {
 struct CampMessageSubmission {
     body: String,
     structured_content: StructuredCampMessageContent,
+    source_attachments: Vec<LocalAttachmentSourceRef>,
     prepared_attachment_ids: Vec<String>,
     address: CampMessageAddress,
     reply_to_camp_message_id: Option<String>,
@@ -3350,7 +3379,7 @@ fn load_structured_draft_submission(
                    reply_to_camp_message_id, recipient_selection_required,
                    continuation_source_message_id,
                    continuation_suppressed_source_message_id,
-                   recipient_selection_touched
+                   recipient_selection_touched, source_attachments_json
             FROM camp_composer_draft
             WHERE camp_id = ?1
             "#,
@@ -3364,6 +3393,7 @@ fn load_structured_draft_submission(
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, bool>(6)?,
+                    row.get::<_, String>(7)?,
                 ))
             },
         )
@@ -3376,6 +3406,7 @@ fn load_structured_draft_submission(
         continuation_source_message_id,
         continuation_suppressed_source_message_id,
         recipient_selection_touched,
+        source_attachments_json,
     )) = stored
     else {
         return Ok(Err(rejected(
@@ -3390,10 +3421,9 @@ fn load_structured_draft_submission(
         )));
     }
 
-    let mut content = normalize_content(
-        serde_json::from_str::<StructuredCampMessageContent>(&content_json)
-            .context("Camp Composer Draft contains invalid Structured Content")?,
-    );
+    let composer_document = parse_composer_document_json(&content_json)
+        .context("Camp Composer Draft contains invalid Composer Document")?;
+    let mut content = composer_document_to_content(&composer_document)?;
     validate_user_authored_content(&content)?;
     if reply_to_camp_message_id.is_none()
         && !recipient_selection_touched
@@ -3451,10 +3481,15 @@ fn load_structured_draft_submission(
             .query_map([camp_id], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
+    let source_attachments = parse_source_attachments(&source_attachments_json)?;
+    if !prepared_attachment_ids.is_empty() && !source_attachments.is_empty() {
+        anyhow::bail!("Camp Composer Draft mixes legacy Prepared and Source Attachments");
+    }
     load_structured_content_submission(
         transaction,
         camp_id,
         content,
+        source_attachments,
         reply_to_camp_message_id,
         recipient_required,
         prepared_attachment_ids,
@@ -3465,6 +3500,7 @@ fn load_structured_content_submission(
     transaction: &Transaction<'_>,
     camp_id: &str,
     content: StructuredCampMessageContent,
+    source_attachments: Vec<LocalAttachmentSourceRef>,
     reply_to_camp_message_id: Option<String>,
     recipient_required: bool,
     prepared_attachment_ids: Vec<String>,
@@ -3518,7 +3554,8 @@ fn load_structured_content_submission(
         );
     }
     let body = render_plain_text(&content, |agent_id| member_names.get(agent_id).cloned())?;
-    if body.trim().is_empty() && prepared_attachment_ids.is_empty() {
+    if body.trim().is_empty() && prepared_attachment_ids.is_empty() && source_attachments.is_empty()
+    {
         return Ok(Err(rejected(
             "camp_message.empty_body",
             "Camp message must contain text or at least one ready attachment",
@@ -3539,6 +3576,7 @@ fn load_structured_content_submission(
     Ok(Ok(CampMessageSubmission {
         body,
         structured_content: content,
+        source_attachments,
         prepared_attachment_ids,
         address,
         reply_to_camp_message_id,
@@ -3552,6 +3590,7 @@ struct QueueCampMessageInput<'a> {
     camp_id: &'a str,
     body: &'a str,
     structured_content: &'a [StructuredCampMessageSegment],
+    source_attachments: &'a [LocalAttachmentSourceRef],
     prepared_attachment_ids: &'a [String],
     legacy_attachment_publication_operation_id: Option<&'a str>,
     managed_attachment_ingest_intent_id: Option<&'a str>,
@@ -3688,6 +3727,7 @@ fn queue_camp_message_and_runs(
         .collect::<Vec<_>>();
     let addressed_agent_ids_json = serde_json::to_string(&addressed_agent_ids)?;
     let structured_content_json = serde_json::to_string(input.structured_content)?;
+    let source_attachments_json = serialize_source_attachments(input.source_attachments)?;
     let content_digest = canonical_content_digest(input.structured_content)?;
     transaction.execute(
         r#"
@@ -3695,12 +3735,13 @@ fn queue_camp_message_and_runs(
             id, camp_id, sequence,
             author_type, author_id, source_agent_run_id, body,
             structured_content_json, content_digest,
+            source_attachments_json,
             address_mode, addressed_agent_ids_json,
             reply_to_camp_message_id, camp_turn_id, agent_run_id,
             tombstoned_at, version, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-            ?11, ?12, ?13, NULL, NULL, 1, ?14, ?14
+            ?11, ?12, ?13, ?14, NULL, NULL, 1, ?15, ?15
         )
         "#,
         params![
@@ -3713,6 +3754,7 @@ fn queue_camp_message_and_runs(
             input.body,
             structured_content_json,
             content_digest,
+            source_attachments_json,
             input.address_mode,
             addressed_agent_ids_json,
             input.reply_to_camp_message_id,
@@ -3733,6 +3775,7 @@ fn queue_camp_message_and_runs(
         anyhow::bail!("Camp message cannot commit legacy and Managed attachments together");
     }
     let attachment_publication = if input.consume_composer_draft
+        && input.source_attachments.is_empty()
         && input.legacy_attachment_publication_operation_id.is_none()
         && input.managed_attachment_ingest_intent_id.is_none()
     {
@@ -6239,6 +6282,12 @@ mod slow_tests {
         crate::test_support::fresh_schema_database()
     }
 
+    fn composer_document(
+        content: StructuredCampMessageContent,
+    ) -> crate::camp_content::ComposerDocument {
+        composer_document_from_content(&content).unwrap()
+    }
+
     #[test]
     fn add_camp_member_command_defaults_capability_overrides_to_an_object() {
         let command: AddCampMemberCommand = serde_json::from_value(json!({
@@ -8678,7 +8727,7 @@ mod slow_tests {
             text: "普通文字 @luoke；邮箱 dev@muwa.example 不属于 mention。".to_string(),
         }];
         let plain_draft = store
-            .save_content(&mut database, &camp_id, 0, plain_content)
+            .save_content(&mut database, &camp_id, 0, composer_document(plain_content))
             .unwrap();
         let plain = service
             .send_test_camp_message(
@@ -8720,7 +8769,12 @@ mod slow_tests {
             },
         ];
         let draft = store
-            .save_content(&mut database, &camp_id, 0, content.clone())
+            .save_content(
+                &mut database,
+                &camp_id,
+                0,
+                composer_document(content.clone()),
+            )
             .unwrap();
         let send = user_envelope(
             "structured-mention-send",
@@ -8857,7 +8911,12 @@ mod slow_tests {
             },
         ];
         let draft = store
-            .save_content(&mut database, &camp_id, 0, content.clone())
+            .save_content(
+                &mut database,
+                &camp_id,
+                0,
+                composer_document(content.clone()),
+            )
             .unwrap();
         let sent = service
             .send_test_camp_message(
@@ -8929,9 +8988,9 @@ mod slow_tests {
                 &mut database,
                 &camp_id,
                 0,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "普通消息".to_string(),
-                }],
+                }]),
             )
             .unwrap();
         let tampered_content = vec![
@@ -8970,7 +9029,10 @@ mod slow_tests {
         let error = service
             .send_test_camp_message(&mut database, &send)
             .unwrap_err();
-        assert!(error.to_string().contains("only be generated by Core"));
+        assert!(
+            format!("{error:#}").contains("only be generated by Core"),
+            "unexpected rejection: {error:#}"
+        );
         assert_eq!(row_count(&database, "camp_message"), 0);
         assert_eq!(row_count(&database, "notification_occurrence"), 0);
         assert_eq!(row_count(&database, "camp_composer_draft"), 1);
@@ -8990,7 +9052,7 @@ mod slow_tests {
                 &mut database,
                 &camp_id,
                 0,
-                vec![
+                composer_document(vec![
                     Segment::AllMembersMention,
                     Segment::Text {
                         text: " 请同步处理；".to_string(),
@@ -9001,7 +9063,7 @@ mod slow_tests {
                     Segment::MemberMention {
                         agent_id: "agent_2".to_string(),
                     },
-                ],
+                ]),
             )
             .unwrap();
         let result = service
@@ -9066,9 +9128,9 @@ mod slow_tests {
                 &mut database,
                 &camp_id,
                 0,
-                vec![Segment::MemberMention {
+                composer_document(vec![Segment::MemberMention {
                     agent_id: "agent_1".to_string(),
-                }],
+                }]),
             )
             .unwrap();
         let invalid_send = user_envelope(
@@ -9098,9 +9160,9 @@ mod slow_tests {
                 &mut database,
                 &camp_id,
                 unavailable.revision,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "新的耐久内容".to_string(),
-                }],
+                }]),
             )
             .unwrap();
         let stale_send = user_envelope(
@@ -9517,9 +9579,9 @@ mod slow_tests {
                 &mut database,
                 &camp_id,
                 empty.revision,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "继续处理下一步".into(),
-                }],
+                }]),
                 Some(&source_message_id),
             )
             .unwrap();
@@ -9576,9 +9638,9 @@ mod slow_tests {
                 &mut database,
                 &camp_id,
                 next_empty.revision,
-                vec![Segment::Text {
+                composer_document(vec![Segment::Text {
                     text: "对象失效时保留".into(),
-                }],
+                }]),
                 Some(
                     &next_empty
                         .continuation_intent

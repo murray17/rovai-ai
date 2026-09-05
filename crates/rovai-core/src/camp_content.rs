@@ -12,6 +12,50 @@ pub const AGENT_PRINCIPAL_DISPLAY_NAME: &str = "Principal";
 
 pub type StructuredCampMessageContent = Vec<StructuredCampMessageSegment>;
 
+pub const COMPOSER_DOCUMENT_VERSION: u32 = 2;
+pub const EMPTY_COMPOSER_DOCUMENT_JSON: &str = r#"{"version":2,"segments":[]}"#;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ComposerDocument {
+    pub version: u32,
+    pub segments: Vec<ComposerSegment>,
+}
+
+impl Default for ComposerDocument {
+    fn default() -> Self {
+        Self {
+            version: COMPOSER_DOCUMENT_VERSION,
+            segments: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ComposerSegment {
+    Text { text: String },
+    Atom { atom: ComposerAtom },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ComposerAtom {
+    Member {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "labelFallback", skip_serializing_if = "Option::is_none")]
+        label_fallback: Option<String>,
+    },
+    AllMembers,
+    Skill {
+        #[serde(rename = "skillId")]
+        skill_id: String,
+        #[serde(rename = "nameAtSend")]
+        name_at_send: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StructuredCampMessageSegment {
@@ -53,6 +97,227 @@ pub struct ExternalQuoteAttachmentSummary {
 
 const MAX_CONTENT_SEGMENTS: usize = 4_096;
 const MAX_CONTENT_TEXT_BYTES: usize = 1_048_576;
+
+pub fn validate_composer_document(document: &ComposerDocument) -> Result<()> {
+    anyhow::ensure!(
+        document.version == COMPOSER_DOCUMENT_VERSION,
+        "Composer Document requires version 2"
+    );
+    if document.segments.len() > MAX_CONTENT_SEGMENTS {
+        anyhow::bail!("Composer Document has too many segments");
+    }
+    let mut text_bytes = 0_usize;
+    for segment in &document.segments {
+        match segment {
+            ComposerSegment::Text { text } => {
+                text_bytes = text_bytes
+                    .checked_add(text.len())
+                    .context("Composer Document size overflow")?;
+            }
+            ComposerSegment::Atom {
+                atom:
+                    ComposerAtom::Member {
+                        agent_id,
+                        label_fallback,
+                    },
+            } => {
+                validate_composer_identity(agent_id, "Member Atom")?;
+                if let Some(label) = label_fallback {
+                    if label.trim() != label
+                        || label.is_empty()
+                        || label.chars().count() > 120
+                        || label.chars().any(char::is_control)
+                    {
+                        anyhow::bail!("Member Atom fallback label is invalid");
+                    }
+                    text_bytes = text_bytes
+                        .checked_add(label.len())
+                        .context("Composer Document size overflow")?;
+                }
+            }
+            ComposerSegment::Atom {
+                atom: ComposerAtom::AllMembers,
+            } => {}
+            ComposerSegment::Atom {
+                atom:
+                    ComposerAtom::Skill {
+                        skill_id,
+                        name_at_send,
+                    },
+            } => {
+                validate_composer_identity(skill_id, "Skill Atom")?;
+                crate::skill::validate_skill_name(name_at_send)?;
+            }
+        }
+    }
+    if text_bytes > MAX_CONTENT_TEXT_BYTES {
+        anyhow::bail!("Composer Document text exceeds 1 MiB");
+    }
+    Ok(())
+}
+
+fn validate_composer_identity(value: &str, label: &str) -> Result<()> {
+    if value.is_empty()
+        || value.trim() != value
+        || value.len() > 256
+        || value.chars().any(char::is_control)
+    {
+        anyhow::bail!("{label} requires a canonical identity");
+    }
+    Ok(())
+}
+
+pub fn normalize_composer_document(mut document: ComposerDocument) -> ComposerDocument {
+    let mut normalized = Vec::with_capacity(document.segments.len());
+    for segment in document.segments {
+        match segment {
+            ComposerSegment::Text { text } if text.is_empty() => {}
+            ComposerSegment::Text { text } => {
+                if let Some(ComposerSegment::Text { text: previous }) = normalized.last_mut() {
+                    previous.push_str(&text);
+                } else {
+                    normalized.push(ComposerSegment::Text { text });
+                }
+            }
+            atom => normalized.push(atom),
+        }
+    }
+    document.segments = normalized;
+    document
+}
+
+pub fn composer_document_to_content(
+    document: &ComposerDocument,
+) -> Result<StructuredCampMessageContent> {
+    validate_composer_document(document)?;
+    Ok(normalize_content(
+        document
+            .segments
+            .iter()
+            .map(|segment| match segment {
+                ComposerSegment::Text { text } => {
+                    StructuredCampMessageSegment::Text { text: text.clone() }
+                }
+                ComposerSegment::Atom {
+                    atom: ComposerAtom::Member { agent_id, .. },
+                } => StructuredCampMessageSegment::MemberMention {
+                    agent_id: agent_id.clone(),
+                },
+                ComposerSegment::Atom {
+                    atom: ComposerAtom::AllMembers,
+                } => StructuredCampMessageSegment::AllMembersMention,
+                ComposerSegment::Atom {
+                    atom:
+                        ComposerAtom::Skill {
+                            skill_id,
+                            name_at_send,
+                        },
+                } => StructuredCampMessageSegment::SkillMention {
+                    skill_id: skill_id.clone(),
+                    name_at_send: name_at_send.clone(),
+                },
+            })
+            .collect(),
+    ))
+}
+
+pub fn composer_document_from_content(
+    content: &[StructuredCampMessageSegment],
+) -> Result<ComposerDocument> {
+    validate_user_authored_content(content)?;
+    let mut segments = Vec::with_capacity(content.len());
+    for segment in normalize_content(content.to_vec()) {
+        segments.push(match segment {
+            StructuredCampMessageSegment::Text { text } => ComposerSegment::Text { text },
+            StructuredCampMessageSegment::MemberMention { agent_id } => ComposerSegment::Atom {
+                atom: ComposerAtom::Member {
+                    agent_id,
+                    label_fallback: None,
+                },
+            },
+            StructuredCampMessageSegment::AllMembersMention => ComposerSegment::Atom {
+                atom: ComposerAtom::AllMembers,
+            },
+            StructuredCampMessageSegment::SkillMention {
+                skill_id,
+                name_at_send,
+            } => ComposerSegment::Atom {
+                atom: ComposerAtom::Skill {
+                    skill_id,
+                    name_at_send,
+                },
+            },
+            StructuredCampMessageSegment::CurrentUserMention { .. }
+            | StructuredCampMessageSegment::ExternalQuote { .. } => {
+                anyhow::bail!("Composer Document cannot contain Core-owned message segments")
+            }
+        });
+    }
+    let document = ComposerDocument {
+        version: COMPOSER_DOCUMENT_VERSION,
+        segments,
+    };
+    validate_composer_document(&document)?;
+    Ok(document)
+}
+
+pub fn parse_composer_document_json(value: &str) -> Result<ComposerDocument> {
+    let json: serde_json::Value = serde_json::from_str(value)?;
+    let document = if json.is_array() {
+        let legacy: StructuredCampMessageContent =
+            serde_json::from_value(json).context("Legacy Composer content is invalid")?;
+        composer_document_from_content(&legacy)?
+    } else {
+        serde_json::from_value::<ComposerDocument>(json).context("Composer Document is invalid")?
+    };
+    let document = normalize_composer_document(document);
+    validate_composer_document(&document)?;
+    Ok(document)
+}
+
+pub fn serialize_composer_document(document: &ComposerDocument) -> Result<String> {
+    let document = normalize_composer_document(document.clone());
+    validate_composer_document(&document)?;
+    Ok(serde_json::to_string(&document)?)
+}
+
+pub fn render_composer_plain_text(
+    document: &ComposerDocument,
+    mut member_name: impl FnMut(&str) -> Option<String>,
+) -> Result<String> {
+    validate_composer_document(document)?;
+    let mut rendered = String::new();
+    for segment in &document.segments {
+        match segment {
+            ComposerSegment::Text { text } => rendered.push_str(text),
+            ComposerSegment::Atom {
+                atom:
+                    ComposerAtom::Member {
+                        agent_id,
+                        label_fallback,
+                    },
+            } => {
+                let label = member_name(agent_id)
+                    .or_else(|| label_fallback.clone())
+                    .unwrap_or_else(|| "不可用队员".to_string());
+                if !label.starts_with('@') {
+                    rendered.push('@');
+                }
+                rendered.push_str(&label);
+            }
+            ComposerSegment::Atom {
+                atom: ComposerAtom::AllMembers,
+            } => rendered.push_str("@所有队员"),
+            ComposerSegment::Atom {
+                atom: ComposerAtom::Skill { name_at_send, .. },
+            } => {
+                rendered.push('/');
+                rendered.push_str(name_at_send);
+            }
+        }
+    }
+    Ok(rendered)
+}
 
 pub fn validate_content(content: &[StructuredCampMessageSegment]) -> Result<()> {
     if content.len() > MAX_CONTENT_SEGMENTS {
@@ -425,10 +690,13 @@ pub fn canonical_content_digest(content: &[StructuredCampMessageSegment]) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        ExternalQuoteAttachmentSummary, StructuredCampMessageSegment as Segment,
-        canonical_content_digest, member_mention_ids, mentions_current_user, normalize_content,
-        render_agent_plain_text, render_plain_text, render_plain_text_with_current_user,
-        validate_content, validate_user_authored_content,
+        ComposerAtom, ComposerDocument, ComposerSegment, ExternalQuoteAttachmentSummary,
+        StructuredCampMessageSegment as Segment, canonical_content_digest,
+        composer_document_from_content, composer_document_to_content, member_mention_ids,
+        mentions_current_user, normalize_content, parse_composer_document_json,
+        render_agent_plain_text, render_composer_plain_text, render_plain_text,
+        render_plain_text_with_current_user, serialize_composer_document,
+        validate_composer_document, validate_content, validate_user_authored_content,
     };
     use crate::command::canonical_json_digest;
     use crate::current_user::CURRENT_USER_ID;
@@ -454,6 +722,115 @@ mod tests {
             attachment_summaries,
             content_digest,
         }
+    }
+
+    #[test]
+    fn composer_v2_reads_legacy_but_always_writes_the_versioned_text_atom_envelope() {
+        let legacy = r#"[{"kind":"text","text":"请 "},{"kind":"member_mention","agentId":"agent_2"},{"kind":"skill_mention","skillId":"skill-review","nameAtSend":"review-pr"}]"#;
+        let document = parse_composer_document_json(legacy).unwrap();
+
+        assert_eq!(
+            document,
+            ComposerDocument {
+                version: 2,
+                segments: vec![
+                    ComposerSegment::Text {
+                        text: "请 ".to_string(),
+                    },
+                    ComposerSegment::Atom {
+                        atom: ComposerAtom::Member {
+                            agent_id: "agent_2".to_string(),
+                            label_fallback: None,
+                        },
+                    },
+                    ComposerSegment::Atom {
+                        atom: ComposerAtom::Skill {
+                            skill_id: "skill-review".to_string(),
+                            name_at_send: "review-pr".to_string(),
+                        },
+                    },
+                ],
+            }
+        );
+        let serialized = serialize_composer_document(&document).unwrap();
+        assert!(serialized.starts_with(r#"{"version":2,"segments":["#));
+        assert!(!serialized.contains("member_mention"));
+        assert_eq!(parse_composer_document_json(&serialized).unwrap(), document);
+        assert_eq!(
+            composer_document_to_content(&document).unwrap(),
+            serde_json::from_str::<Vec<Segment>>(legacy).unwrap()
+        );
+    }
+
+    #[test]
+    fn composer_v2_keeps_identity_separate_from_current_presentation() {
+        let document = ComposerDocument {
+            version: 2,
+            segments: vec![
+                ComposerSegment::Atom {
+                    atom: ComposerAtom::Member {
+                        agent_id: "agent_2".to_string(),
+                        label_fallback: Some("旧名字".to_string()),
+                    },
+                },
+                ComposerSegment::Text {
+                    text: " 使用 ".to_string(),
+                },
+                ComposerSegment::Atom {
+                    atom: ComposerAtom::Skill {
+                        skill_id: "skill-review".to_string(),
+                        name_at_send: "review-pr".to_string(),
+                    },
+                },
+            ],
+        };
+
+        assert_eq!(
+            render_composer_plain_text(&document, |agent_id| {
+                (agent_id == "agent_2").then(|| "新名字".to_string())
+            })
+            .unwrap(),
+            "@新名字 使用 /review-pr"
+        );
+        assert_eq!(
+            render_composer_plain_text(&document, |_| None).unwrap(),
+            "@旧名字 使用 /review-pr"
+        );
+        assert_eq!(
+            document.segments[0],
+            ComposerSegment::Atom {
+                atom: ComposerAtom::Member {
+                    agent_id: "agent_2".to_string(),
+                    label_fallback: Some("旧名字".to_string()),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn composer_v2_rejects_wrong_versions_unknown_fields_and_core_owned_segments() {
+        assert!(parse_composer_document_json(r#"{"version":1,"segments":[]}"#).is_err());
+        assert!(
+            parse_composer_document_json(r#"{"version":2,"segments":[],"selection":{}}"#).is_err()
+        );
+        assert!(
+            validate_composer_document(&ComposerDocument {
+                version: 2,
+                segments: vec![ComposerSegment::Atom {
+                    atom: ComposerAtom::Member {
+                        agent_id: " agent_2".to_string(),
+                        label_fallback: None,
+                    },
+                }],
+            })
+            .is_err()
+        );
+        assert!(
+            composer_document_from_content(&[Segment::CurrentUserMention {
+                user_id: CURRENT_USER_ID.to_string(),
+            }])
+            .is_err()
+        );
     }
 
     #[test]

@@ -23,7 +23,7 @@ export type AttachmentDisplayClassification = {
 export type AttachmentPresentationSource = {
   displayName: string
   kind: AttachmentKind
-  mediaType: string
+  mediaType: string | null
   previewKind: AttachmentPreviewKind
 }
 
@@ -76,7 +76,7 @@ export function classifyAttachmentDisplay(
   source: AttachmentPresentationSource
 ): AttachmentDisplayClassification {
   const extension = attachmentExtension(source.displayName)
-  const mediaType = source.mediaType.toLocaleLowerCase('en-US')
+  const mediaType = source.mediaType?.toLocaleLowerCase('en-US') ?? ''
   const previewableImage = source.kind === 'file' && source.previewKind === 'image'
 
   let userDisplayType: UserAttachmentDisplayType = 'document'

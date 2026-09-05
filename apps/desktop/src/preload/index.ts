@@ -1,4 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import {
+  APP_PREPARE_QUIT_CHANNEL,
+  type AppQuitPreparationResponse
+} from '../shared/app-lifecycle'
 import type {
   AppearanceSnapshot,
   AppUpdateSnapshot,
@@ -18,6 +22,32 @@ import type {
   ThemePreference
 } from '@contracts'
 
+let appQuitPreparationListener: (() => void | Promise<void>) | null = null
+
+ipcRenderer.on(APP_PREPARE_QUIT_CHANNEL, (event) => {
+  const port = event.ports[0]
+  if (!port) return
+  void (async () => {
+    let response: AppQuitPreparationResponse
+    try {
+      await appQuitPreparationListener?.()
+      response = { status: 'prepared' }
+    } catch (error) {
+      response = {
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error)
+      }
+    }
+    try {
+      port.postMessage(response)
+    } finally {
+      port.close()
+    }
+  })().catch(() => {
+    port.close()
+  })
+})
+
 const api: RovaiApi = {
   async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
     const transport = await ipcRenderer.invoke(
@@ -36,6 +66,14 @@ const api: RovaiApi = {
     const handler = (_event: Electron.IpcRendererEvent, value: CoreEvent): void => listener(value)
     ipcRenderer.on('rovai:event', handler)
     return () => ipcRenderer.removeListener('rovai:event', handler)
+  },
+  appLifecycle: {
+    onPrepareQuit(listener) {
+      appQuitPreparationListener = listener
+      return () => {
+        if (appQuitPreparationListener === listener) appQuitPreparationListener = null
+      }
+    }
   },
   supervisor: {
     getSnapshot() {
@@ -264,6 +302,12 @@ const api: RovaiApi = {
     replacePins(pins: NavigationPin[]) {
       return ipcRenderer.invoke('rovai:navigation-preferences-replace-pins', pins) as Promise<NavigationPreferencesSnapshot>
     },
+    synchronizeProjectOrder(projectKeys: string[]) {
+      return ipcRenderer.invoke(
+        'rovai:navigation-preferences-synchronize-project-order',
+        projectKeys
+      ) as Promise<NavigationPreferencesSnapshot>
+    },
     removeProject(targetKey: string, relatedCampIds: string[]) {
       return ipcRenderer.invoke(
         'rovai:navigation-preferences-remove-project',
@@ -298,7 +342,8 @@ const api: RovaiApi = {
           campId,
           expectedRevision,
           sourcePath,
-          file.name
+          file.name,
+          file.type || null
         )
       }
       const bytes = new Uint8Array(await file.arrayBuffer())
@@ -307,60 +352,97 @@ const api: RovaiApi = {
         campId,
         expectedRevision,
         file.name,
+        file.type || null,
         bytes
       )
     },
-    preview(attachmentId) {
-      return ipcRenderer.invoke('rovai:composer-attachment-preview', attachmentId)
+    async preparePending(input, file) {
+      const sourcePath = webUtils.getPathForFile(file)
+      if (sourcePath) {
+        return ipcRenderer.invoke(
+          'rovai:pending-attachment-prepare-path',
+          input,
+          sourcePath,
+          file.name,
+          file.type || null
+        )
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      return ipcRenderer.invoke(
+        'rovai:pending-attachment-prepare-bytes',
+        input,
+        file.name,
+        file.type || null,
+        bytes
+      )
+    },
+    preview(locator) {
+      return ipcRenderer.invoke('rovai:composer-attachment-preview', locator)
     }
   },
   singleChatAttachments: {
-    async prepare(conversationId, expectedConversationVersion, file) {
+    async prepare(conversationId, expectedDraftRevision, file) {
       const sourcePath = webUtils.getPathForFile(file)
       if (sourcePath) {
         return ipcRenderer.invoke(
           'rovai:single-chat-attachment-prepare-path',
           conversationId,
-          expectedConversationVersion,
+          expectedDraftRevision,
           sourcePath,
-          file.name
+          file.name,
+          file.type || null
         )
       }
       const bytes = new Uint8Array(await file.arrayBuffer())
       return ipcRenderer.invoke(
         'rovai:single-chat-attachment-prepare-bytes',
         conversationId,
-        expectedConversationVersion,
+        expectedDraftRevision,
         file.name,
+        file.type || null,
         bytes
       )
     },
-    remove(conversationId, expectedConversationVersion, attachmentId) {
+    async preparePending(input, file) {
+      const sourcePath = webUtils.getPathForFile(file)
+      if (sourcePath) {
+        return ipcRenderer.invoke(
+          'rovai:single-chat-pending-attachment-prepare-path',
+          input,
+          sourcePath,
+          file.name,
+          file.type || null
+        )
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      return ipcRenderer.invoke(
+        'rovai:single-chat-pending-attachment-prepare-bytes',
+        input,
+        file.name,
+        file.type || null,
+        bytes
+      )
+    },
+    remove(conversationId, expectedDraftRevision, attachmentRefId) {
       return ipcRenderer.invoke(
         'rovai:single-chat-attachment-remove',
         conversationId,
-        expectedConversationVersion,
-        attachmentId
+        expectedDraftRevision,
+        attachmentRefId
       )
-    },
-    preview(attachmentId) {
-      return ipcRenderer.invoke('rovai:single-chat-attachment-preview', attachmentId)
     }
   },
   attachments: {
-    open(campId, attachmentId) {
-      return ipcRenderer.invoke('rovai:attachment-open', campId, attachmentId)
+    open(locator) {
+      return ipcRenderer.invoke('rovai:attachment-open', locator)
     },
-    reveal(campId, attachmentId) {
-      return ipcRenderer.invoke('rovai:attachment-reveal', campId, attachmentId)
+    reveal(locator) {
+      return ipcRenderer.invoke('rovai:attachment-reveal', locator)
     }
   },
   filePreview: {
     bindCamp(campId) {
       return ipcRenderer.invoke('rovai:file-preview-bind-camp', campId)
-    },
-    resolveMessageReferences(request) {
-      return ipcRenderer.invoke('rovai:file-preview-resolve-message-references', request)
     },
     open(request) {
       return ipcRenderer.invoke('rovai:file-preview-open', request)

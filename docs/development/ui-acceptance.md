@@ -132,7 +132,7 @@ pnpm accept:bootstrap-shell-ui
 当前会话完整正文查找（含地图快捷返回、非 Camp 边界、旧消息 anchored 定位与双主题双尺寸）、
 Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十三 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏，以及“关于与更新”
-的真实 packaged 版本、确定性禁用网络自动检查、App Update v1 idle 快照，以及 Bootstrap Shell 在未知 authority 下
+的真实 packaged 版本、确定性禁用网络自动检查、App Update v2 idle 快照，以及 Bootstrap Shell 在未知 authority 下
 保留原文件、隔离业务树、显式重试不消耗 crash budget、Day/Night、1040×700、窄窗口、
 200% 等效布局、reduced motion、键盘焦点和无横向溢出回归。available 到失败的完整状态/动作/fallback 矩阵由 Renderer
 测试覆盖；签名 macOS/Windows 跨版本升级仍属于各平台 Release qualification。
@@ -181,7 +181,10 @@ Core 首次启动仍进行本地初始化时触发慢退出，以免截图流程
 
 验收必须证明：
 
-- `before-quit` 立即阻止新界面交互，前 400ms 不显示关闭反馈；慢退出显示无操作控件的 accessible busy
+- 先等待一个已保存 Draft revision，再输入最后一段 Lexical 正文并立即正常退出；同一隔离数据目录重启后必须
+  读回包含最后一段且 revision 已推进的 Core Draft，证明 Renderer fence 发生在 `core.shutdown()` 前；
+- quit preparation 只锁定当前 Composer 且不显示新等待面；Core shutdown 开始后立即阻止全局新界面交互，前
+  400ms 不显示关闭反馈；慢退出显示无操作控件的 accessible busy
   modal，Day/Night、`1040×700`、200% zoom 与 reduced motion 下标题、条件取消说明和卡片边界均完整，
   背景不得出现关闭阶段的错误横幅或 Toast；
 - Desktop 等待 Core 自行完成 drain 和子进程真实退出，App 以 `exit 0` 自然结束；只有验收清理失败
@@ -351,10 +354,12 @@ pnpm accept:runtime-activity-ui
 `aria-haspopup="dialog"`，并分别证明鼠标点击、Enter/Space 打开既有人物信息卡、`Esc` 的焦点返回及不导航边界；
 已离开、已移除或不可解析作者不得渲染这两个按钮。
 footer 保持透明、零圆角，短转交折线使用 1px Porcelain/Steel 结构线，且 footer 边界与最后一个
-正文内容元素的垂直间距不超过 4px；验收必须同时证明回复/复制使用带可访问名称的线性 SVG，位于正文
-右下方的独立操作行，键盘聚焦后可见且不覆盖收件人。当前用户消息还须证明右对齐、头像位于右侧、
+正文内容元素的垂直间距不超过 4px；验收必须同时证明回复使用对话回折 SVG、回复/复制均有可访问名称，
+用户操作行位于正文右下方，队员操作行位于完整输出左下方并晚于父引用、图片、附件、转交 footer 及锚定的
+`Files Changed` 卡片；键盘聚焦后可见且不覆盖收件人。当前用户消息还须证明右对齐、头像位于右侧、
 浅灰底面按短消息内容自然收窄且最大不超过 Composer 的约三分之二、整条消息 hover 不增加底色，以及超过 20 行时只显示前 19 行与
-第 20 行省略号；复制仍为完整原文。不能只测包含隐藏控件的外层 surface。验收还必须切换到 1040×700，证明 document、timeline
+第 20 行静态省略号，DOM 中不存在展开/收起按钮或点击状态；复制仍为完整原文。带图片或文件的用户消息还须以短正文证明附件区
+不继承正文宽度，右侧与正文、头像同轴，向左最多延伸至队员头像或姓名轨道。不能只测包含隐藏控件的外层 surface。验收还必须切换到 1040×700，证明 document、timeline
 和 footer 无横向溢出且 footer 留在时间线可视区内；2K 场景还须证明 Composer 扩展不改变 footer
 阅读宽度或复制按钮定位。Run stage 也不得重新显示这些 Delivery 状态标签；
 底层 Delivery、失败码与恢复事实继续保留在原有 Core Read Side。

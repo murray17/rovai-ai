@@ -9,11 +9,13 @@ import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { build } from 'vite'
 import { assertUserDataIsIsolated } from './dev-desktop.mjs'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/execution-avatar-rail')
 
-test('production execution popover preserves dismissal, selection, scrolling and navigation through native input', { timeout: 120_000 }, async () => {
+test('production execution popover preserves dismissal, selection, scrolling and navigation through native input', { timeout: 120_000 }, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-execution-avatar-rail-'))
   let child
   let closed

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-09-04
 ---
 
 # Windows Desktop Platform
@@ -72,18 +72,19 @@ transport-independent.
 `%LOCALAPPDATA%\Rovai AI` children. Private objects are created with a protected DACL before becoming visible. Opened
 handle identity, verified ancestry and reparse policy—not lowercase strings—own security and deduplication.
 
-The derived Camp Published Attachment View is the explicit `<data_dir>\runtime-files` private child; Windows never uses
-the macOS Home-based instance directory. Root/managed containers use native private-directory admission, and Runtime may
-receive only one current-Camp `attachments` descendant. Authority remains under Core `camp-attachments`. This storage
-backend does not qualify any Adapter: every `windows-x64` row remains `not_qualified` until independent exact-root,
-read-only, sandbox and lifecycle evidence exists.
+The derived legacy Camp Published Attachment View is the explicit `<data_dir>\runtime-files` private child; Windows never
+uses the macOS Home-based instance directory. Root/managed containers use native private-directory admission, and Runtime
+may receive only one current-Camp `attachments` descendant. Existing Authority remains under Core `camp-attachments`;
+new Desktop user attachments instead keep source refs and use current Run Temp only when the source lies outside
+executionRoot. This storage backend does not qualify any Adapter: every `windows-x64` row remains `not_qualified` until
+independent exact-root, read-only, sandbox and lifecycle evidence exists.
 
 All three shipped EXEs embed `longPathAware`; host policy and the tested envelope are diagnostic facts. The installer
 does not change HKLM. Unsupported storage or paths fail with stable blockers before Runtime input.
 
-Attachment import opens and verifies each component under the admitted root, rejects reparse escape and copies from the
-same verified handles. Skill Projection uses the separate multi-stage copy contract and does not write ownership markers
-inside Runtime-visible Skill content.
+Legacy/Agent Attachment import opens and verifies each component under the admitted root, rejects reparse escape and copies
+from the same verified handles. It does not apply to new Desktop user source refs. Skill Projection uses the separate
+multi-stage copy contract and does not write ownership markers inside Runtime-visible Skill content.
 
 ## 6. Desktop and packaging
 

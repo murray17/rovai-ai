@@ -1,7 +1,7 @@
 import {
   isCampId,
-  type OpenFilePreviewRequest,
-  type ResolveMessageFileReferencesRequest
+  type LocalAttachmentOwnerLocator,
+  type OpenFilePreviewRequest
 } from '@contracts'
 import { isAttachmentId } from '../attachment-desktop'
 
@@ -34,24 +34,82 @@ function positiveInteger(value: unknown): number {
   return value as number
 }
 
-export function parseFilePreviewCamp(value: unknown): string | null {
-  return value === null ? null : campId(value)
+function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachmentOwnerLocator {
+  const input = record(value)
+  const ownerCampId = campId(input.campId)
+  const attachmentRefId = string(input.attachmentRefId, 128)
+  if (ownerCampId !== expectedCampId || !isAttachmentId(attachmentRefId)) {
+    throw new Error('Unsupported Attachment')
+  }
+  if (input.owner === 'composer') {
+    return { owner: input.owner, campId: ownerCampId, attachmentRefId }
+  }
+  if (input.owner === 'pending') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      pendingInputId: string(input.pendingInputId, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'pending_edit') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      pendingInputId: string(input.pendingInputId, 128),
+      editToken: string(input.editToken, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'message') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      messageId: string(input.messageId, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'single_chat_composer') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      conversationId: string(input.conversationId, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'single_chat_pending') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      conversationId: string(input.conversationId, 128),
+      pendingInputId: string(input.pendingInputId, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'single_chat_pending_edit') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      conversationId: string(input.conversationId, 128),
+      pendingInputId: string(input.pendingInputId, 128),
+      editToken: string(input.editToken, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'single_chat_message') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      conversationId: string(input.conversationId, 128),
+      conversationMessageId: string(input.conversationMessageId, 128),
+      attachmentRefId
+    }
+  }
+  throw new Error('Unsupported Attachment')
 }
 
-export function parseResolveMessageFileReferencesRequest(
-  value: unknown
-): ResolveMessageFileReferencesRequest {
-  const input = record(value)
-  if (!Array.isArray(input.rawReferences)
-    || input.rawReferences.length === 0
-    || input.rawReferences.length > 64) {
-    throw new Error('Unsupported file preview reference batch')
-  }
-  return {
-    campId: campId(input.campId),
-    messageId: string(input.messageId, 128),
-    rawReferences: input.rawReferences.map((reference) => string(reference))
-  }
+export function parseFilePreviewCamp(value: unknown): string | null {
+  return value === null ? null : campId(value)
 }
 
 export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequest {
@@ -71,9 +129,12 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
         rawReference: string(input.rawReference)
       }
     case 'attachment': {
-      const attachmentId = string(input.attachmentId, 128)
-      if (!isAttachmentId(attachmentId)) throw new Error('Unsupported Attachment')
-      return { kind: input.kind, campId: campId(input.campId), attachmentId }
+      const attachmentCampId = campId(input.campId)
+      return {
+        kind: input.kind,
+        campId: attachmentCampId,
+        locator: attachmentLocator(input.locator, attachmentCampId)
+      }
     }
     case 'run_evidence':
       if (input.action !== 'review' && input.action !== 'open_current') {

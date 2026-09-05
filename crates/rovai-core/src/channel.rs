@@ -14269,6 +14269,7 @@ mod tests {
                     .into_iter()
                     .filter(|column| {
                         column != "retry_suppression_json"
+                            && column != "source_attachments_json"
                             && !(table == "camp_turn" && column == "kind")
                             && !(table == "agent_run"
                                 && matches!(

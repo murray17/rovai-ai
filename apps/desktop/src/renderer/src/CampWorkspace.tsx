@@ -1,6 +1,6 @@
 import { readErrorMessage } from './error-message'
 import { collapsedMessageProjection } from './conversation-message-collapse'
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -18,6 +18,7 @@ import type {
   AgentRunView,
   BuiltinMemberAvatarRole,
   CampComposerDraftView,
+  ComposerDocument,
   CampPendingInputsView,
   CampComposerReplyRecipient,
   CampMessageAttachmentView,
@@ -35,15 +36,43 @@ import type {
   TaskStatus,
   TaskView,
   NavigationCampItem,
-  PreparedAttachmentView,
   SkillDeliveryGroupView,
   SkillView,
   StoredCommandResult,
   StructuredCampMessageContent
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
-import { StructuredMentionComposer } from './StructuredMentionComposer'
-import { PendingCampInputs, pendingQueueRequiresEnqueue } from './PendingCampInputs'
+import {
+  StructuredMentionComposer,
+  type StructuredMentionComposerHandle
+} from './StructuredMentionComposer'
+import {
+  composerDocumentsEqualDirect,
+  composerDocumentFromText,
+  emptyComposerDocument,
+  type ComposerLocalStatus
+} from './composer-document'
+import {
+  DraftMutationCoordinator,
+  draftCoordinatorChangeRefreshesProjection,
+  type DraftMutation
+} from './draft-mutation-coordinator'
+import { PendingCampInputs, type PendingAttachmentDropTarget } from './PendingCampInputs'
+import { AttachmentCard, AttachmentPlaceholder, ComposerAttachmentStrip } from './AttachmentCard'
+export { attachmentRevealLabel } from './AttachmentCard'
+import {
+  attachmentDragKind,
+  dataTransferContainsFiles,
+  droppedAttachmentInputs,
+  type AttachmentDragKind,
+  type AttachmentKind,
+  type AttachmentPreparationInput
+} from './attachment-drop'
+export {
+  attachmentDragKind,
+  dataTransferContainsFiles,
+  droppedAttachmentInputs
+} from './attachment-drop'
 import {
   activityStatusForAgentRun,
   agentRunPresentation,
@@ -51,7 +80,6 @@ import {
   buildLiveExecutionProgress,
   executionEvidenceResultText,
   executionStepPublicTitle,
-  formatByteSize,
   liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
   type LiveRuntimeEvent,
@@ -69,14 +97,6 @@ import {
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
 import { ImageGallery, partitionMessageAttachments, type GalleryImage } from './ImageGallery'
-import {
-  AgentArtifactIcon,
-  FileExtensionLabel,
-  UserFileIcon,
-  attachmentBaseName,
-  attachmentFormatLabel,
-  classifyAttachmentDisplay
-} from './attachment-presentation'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { AgentRunDeliveryRecipients } from './AgentRunDeliveryRecipients'
 import { MemberPortrait } from './MemberPortrait'
@@ -91,10 +111,6 @@ import { FilePreviewResizeHandle, FilePreviewWorkspace } from './FilePreviewLayo
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { agentRunFileChangesSummaryLabel, inlineDiffLines, exactMutationDiffLines } from './file-changes-presentation'
 import { FileReferenceText, type FileReferenceActivation } from './FileReferenceLink'
-import {
-  useResolvedMessageFileReferences,
-  type MessageFileReferenceSource
-} from './use-resolved-message-file-references'
 import {
   captureTimelineReadingAnchor,
   restoreTimelineReadingAnchor,
@@ -246,17 +262,15 @@ export interface CampMemberRemoveOutcome {
   reconciliationStatus?: 'reconciling' | 'settled'
 }
 type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
-type AttachmentKind = 'file' | 'directory'
-type AttachmentDragKind = 'files' | 'directory'
-
-export function attachmentRevealLabel(platform: NodeJS.Platform): string {
-  return platform === 'darwin'
-    ? '在 Finder 中显示'
-    : platform === 'win32'
-      ? '在文件资源管理器中显示'
-      : '显示所在位置'
+export interface CampLeavePreparation {
+  complete(didLeave: boolean): void
 }
-type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
+export type CampLeaveGuard = () => Promise<CampLeavePreparation>
+type DraftLoadState =
+  | { state: 'loading' }
+  | { state: 'ready' }
+  | { state: 'error'; error: Error }
+
 type ReplyFocusModality = 'pointer' | 'keyboard'
 type ConversationFindStatus = 'idle' | 'searching' | 'loading_target' | 'ready' | 'error'
 
@@ -364,8 +378,10 @@ export function composerDraftNeedsReplyRepair(draft: CampComposerDraftView | nul
   const author = intent.author
   return author?.authorType === 'agent'
     && author.recipientAvailability === 'unavailable'
-    && draft.content.some((segment) =>
-      segment.kind === 'member_mention' && segment.agentId === author.authorId
+    && draft.content.segments.some((segment) =>
+      segment.kind === 'atom'
+        && segment.atom.type === 'member'
+        && segment.atom.agentId === author.authorId
     )
 }
 
@@ -381,12 +397,61 @@ export function composerDraftNeedsContinuationRepair(
   return intent.recipientSelectionRequired || !available
 }
 
+async function mutateComposerDraft(
+  draft: CampComposerDraftView,
+  mutation: DraftMutation
+): Promise<CampComposerDraftView> {
+  const common = { campId: draft.campId, expectedRevision: draft.revision }
+  switch (mutation.kind) {
+    case 'save_content':
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
+        ...common,
+        content: mutation.content,
+        continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
+      })
+    case 'add_source_attachment':
+      return window.rovai.composerAttachments.prepare(
+        draft.campId,
+        draft.revision,
+        mutation.file
+      )
+    case 'remove_source_attachment':
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.removeAttachment', {
+        ...common,
+        attachmentId: mutation.attachmentId
+      })
+    case 'start_reply':
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.startReply', {
+        ...common,
+        replyToCampMessageId: mutation.replyToCampMessageId
+      })
+    case 'cancel_reply':
+      return window.rovai.request<CampComposerDraftView>('camp.composerDraft.cancelReply', common)
+    case 'resolve_reply_recipient':
+      return window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.resolveReplyRecipient',
+        { ...common, recipient: mutation.recipient }
+      )
+    case 'dismiss_continuation':
+      return window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.dismissContinuation',
+        { ...common, sourceCampMessageId: mutation.sourceCampMessageId }
+      )
+    case 'resolve_continuation_recipient':
+      return window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.resolveContinuationRecipient',
+        { ...common, agentId: mutation.agentId }
+      )
+  }
+}
+
 export function composerRecipientSummary(
-  content: StructuredCampMessageContent,
+  content: ComposerDocument,
   members: CampSnapshot['members']
 ): string | null {
-  if (content.some((segment) =>
-    segment.kind === 'member_mention' || segment.kind === 'all_members_mention'
+  if (content.segments.some((segment) =>
+    segment.kind === 'atom'
+      && (segment.atom.type === 'member' || segment.atom.type === 'all_members')
   )) return null
   const defaultLead = members.find((member) => member.isDefaultLead)
   return `默认由 Lead · ${defaultLead?.displayName ?? '当前不可用'}接收`
@@ -404,37 +469,6 @@ export function initialCampConversationView(
   return showingFirstRunWelcome || !worldMapEnabled
     ? 'conversation'
     : campConversationViewFromStoredValue(storedValue)
-}
-
-export function dataTransferContainsFiles(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
-  return Array.from(dataTransfer.types).includes('Files')
-}
-
-export function attachmentDragKind(
-  dataTransfer: Pick<DataTransfer, 'items' | 'types'>
-): AttachmentDragKind | null {
-  if (!dataTransferContainsFiles(dataTransfer)) return null
-  const fileItems = Array.from(dataTransfer.items).filter((item) => item.kind === 'file')
-  if (fileItems.length !== 1) return 'files'
-  const entry = fileItems[0].webkitGetAsEntry?.()
-  return entry?.isDirectory ? 'directory' : 'files'
-}
-
-export function droppedAttachmentInputs(
-  dataTransfer: Pick<DataTransfer, 'files' | 'items'>
-): AttachmentPreparationInput[] {
-  const fromItems = Array.from(dataTransfer.items)
-    .filter((item) => item.kind === 'file')
-    .flatMap((item) => {
-      const file = item.getAsFile()
-      if (!file) return []
-      return [{
-        file,
-        kindHint: item.webkitGetAsEntry?.()?.isDirectory ? 'directory' : 'file'
-      } satisfies AttachmentPreparationInput]
-    })
-  if (fromItems.length > 0) return fromItems
-  return Array.from(dataTransfer.files).map((file) => ({ file, kindHint: 'file' }))
 }
 
 export type AgentExecutionProcess = {
@@ -1301,6 +1335,7 @@ export function CampWorkspace({
   onSend,
   onPendingDraftPersisted,
   onPendingCampLeave,
+  onCampLeaveGuardChange,
   onChangeLead,
   onAddMembers,
   onPreviewMemberRemoval,
@@ -1349,6 +1384,7 @@ export function CampWorkspace({
   onSend(draft: CampComposerDraftView): Promise<CampMessageSendReceipt | void>
   onPendingDraftPersisted?(): void
   onPendingCampLeave?(draft: CampComposerDraftView): Promise<void>
+  onCampLeaveGuardChange?(campId: string, guard: CampLeaveGuard | null): void
   onChangeLead(agentId: string): Promise<void>
   onAddMembers?(agentIds: string[]): Promise<CampMemberAddOutcome>
   onPreviewMemberRemoval?(agentId: string): Promise<CampMemberRemovalPreview>
@@ -1385,16 +1421,29 @@ export function CampWorkspace({
   onNotify?(message: string): void
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
-  const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
-  const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
+  const [, setComposerDraftProjectionVersion] = useState(0)
+  const [draftLoadState, setDraftLoadState] = useState<DraftLoadState>({ state: 'loading' })
+  const [composerPersistenceError, setComposerPersistenceError] = useState<Error | null>(null)
+  const [composerLocalStatus, setComposerLocalStatus] = useState<ComposerLocalStatus>({
+    hasContent: false,
+    hasExplicitRecipient: false,
+    hasUnavailableAtom: false
+  })
   const [pendingQueue, setPendingQueue] = useState<CampPendingInputsView | null>(null)
   const [pendingEditing, setPendingEditing] = useState(false)
+  const [pendingAttachmentDropTarget, setPendingAttachmentDropTarget] = useState<PendingAttachmentDropTarget>(null)
+  const updatePendingAttachmentDropTarget = useCallback((target: PendingAttachmentDropTarget): void => {
+    setPendingAttachmentDropTarget(() => target)
+  }, [])
   const [pendingRefresh, setPendingRefresh] = useState(0)
   const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind }>>([])
   const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind; error: string }>>([])
   const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [routingMutating, setRoutingMutating] = useState(false)
+  const composerSubmittingRef = useRef(false)
+  const routingMutatingRef = useRef(false)
+  const composerLockAwaitingDisabledCommitRef = useRef(false)
   const [replyInteractionError, setReplyInteractionError] = useState<string | null>(null)
   const [suppressPointerFocusRing, setSuppressPointerFocusRing] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
@@ -1406,18 +1455,50 @@ export function CampWorkspace({
     status: 'loading' | 'ready' | 'error'
   }>({ skills: [], groups: [], status: 'loading' })
   const composerEditorRef = useRef<HTMLDivElement>(null)
-  const pendingStarterPromptFocusRef = useRef<string | null>(null)
+  const composerHandleRef = useRef<StructuredMentionComposerHandle>(null)
   const composerFileInputRef = useRef<HTMLInputElement>(null)
-  const draftSaveTimer = useRef<number | null>(null)
-  const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
-  const draftContent = useRef<StructuredCampMessageContent>([])
   const draftCampId = useRef<string | null>(null)
-  const composerDraftRef = useRef<CampComposerDraftView | null>(null)
   const initializedComposerRoute = useRef<{
-    draft: CampComposerDraftView
+    revision: number
     publishedMessageSequence: number
   } | null>(null)
-  const draftMutationQueues = useRef(new Map<string, Promise<CampComposerDraftView>>())
+  const activeCampIdRef = useRef(snapshot.camp.id)
+  const activationStateRef = useRef(snapshot.camp.activationState)
+  const pendingDraftPersistedRef = useRef(onPendingDraftPersisted)
+  const pendingCampLeaveRef = useRef(onPendingCampLeave)
+  activeCampIdRef.current = snapshot.camp.id
+  activationStateRef.current = snapshot.camp.activationState
+  pendingDraftPersistedRef.current = onPendingDraftPersisted
+  pendingCampLeaveRef.current = onPendingCampLeave
+  const draftCoordinatorRef = useRef<DraftMutationCoordinator | null>(null)
+  if (!draftCoordinatorRef.current) {
+    draftCoordinatorRef.current = new DraftMutationCoordinator({
+      load: (campId) => window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.get',
+        { campId }
+      ),
+      mutate: async (draft, mutation) => {
+        const next = await mutateComposerDraft(draft, mutation)
+        if (
+          activeCampIdRef.current === draft.campId
+          && activationStateRef.current === 'pending'
+          && (mutation.kind !== 'save_content' || draft.revision === 0)
+        ) pendingDraftPersistedRef.current?.()
+        return next
+      },
+      onChange: (_draft, _epoch, kind) => {
+        if (draftCoordinatorChangeRefreshesProjection(kind)) {
+          setComposerDraftProjectionVersion((version) => version + 1)
+        }
+      }
+    })
+  }
+  const draftCoordinator = draftCoordinatorRef.current
+  const coordinatorDraft = draftCoordinator.getCurrentDraft()
+  const composerDraft = draftLoadState.state === 'ready'
+    && coordinatorDraft?.campId === snapshot.camp.id
+    ? coordinatorDraft
+    : null
   const dragLeaveTimer = useRef<number | null>(null)
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
@@ -1619,6 +1700,7 @@ export function CampWorkspace({
     () => snapshot.members.map((member) => ({
       agentId: member.agentId,
       displayName: member.displayName,
+      teamRole: member.teamRole,
       avatarRef: member.avatarRef,
       mentionable: member.membershipStatus === 'active' && member.profilePresence === 'present'
     })),
@@ -1785,20 +1867,7 @@ export function CampWorkspace({
     fallback?.focus({ preventScroll: true })
   }, [executionDrawerAgentId, executionPlacement])
 
-  const message = useMemo(
-    () => structuredCampContentPlainText(messageContent, snapshot.members),
-    [messageContent, snapshot.members]
-  )
-  const hasUnavailableMention = useMemo(
-    () => messageContent.some((segment) => {
-      if (segment.kind !== 'member_mention') return false
-      const member = memberById.get(segment.agentId)
-      return !member
-        || member.membershipStatus !== 'active'
-        || member.profilePresence !== 'present'
-    }),
-    [memberById, messageContent]
-  )
+  const hasUnavailableMention = composerLocalStatus.hasUnavailableAtom
   const runById = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [run.id, run])),
     [snapshot.agentRuns]
@@ -1851,12 +1920,19 @@ export function CampWorkspace({
       visibleCampMessages
     ]
   )
+  const latestAgentMessageId = useMemo(() => {
+    for (let index = conversationTimeline.length - 1; index >= 0; index -= 1) {
+      const item = conversationTimeline[index]
+      if (item.kind === 'camp_message' && item.message.authorType === 'agent') {
+        return item.message.id
+      }
+    }
+    return null
+  }, [conversationTimeline])
   const isCampEmpty = !campConversationHasVisibleHistory(conversationTimeline)
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const replyRepairRequired = composerDraftNeedsReplyRepair(composerDraft)
-  const hasExplicitRecipient = messageContent.some((segment) =>
-    segment.kind === 'member_mention' || segment.kind === 'all_members_mention'
-  )
+  const hasExplicitRecipient = composerLocalStatus.hasExplicitRecipient
   const continuationIntent = composerDraft?.continuationIntent ?? null
   const continuationReplacementMembers = composerMembers.filter((member) =>
     member.mentionable !== false
@@ -1868,7 +1944,7 @@ export function CampWorkspace({
   const continuationRecipientAvailable = continuationRecipient?.membershipStatus === 'active'
     && continuationRecipient.profilePresence === 'present'
   const hasReadyAttachment = (composerDraft?.attachments.length ?? 0) > 0
-  const hasSendablePayload = composerHasSendablePayload(message, hasReadyAttachment)
+  const hasSendablePayload = composerLocalStatus.hasContent || hasReadyAttachment
   const hasLocalDraftPayload = Boolean(
     hasSendablePayload
       || preparingAttachments.length > 0
@@ -1886,8 +1962,10 @@ export function CampWorkspace({
       && !continuationRepairRequired
   )
   const recipientSummary = useMemo(
-    () => composerRecipientSummary(messageContent, snapshot.members),
-    [messageContent, snapshot.members]
+    () => hasExplicitRecipient
+      ? null
+      : composerRecipientSummary(emptyComposerDocument(), snapshot.members),
+    [hasExplicitRecipient, snapshot.members]
   )
   const composerSkills = useMemo(
     () => availableComposerSkillsForLead(
@@ -1899,11 +1977,10 @@ export function CampWorkspace({
   )
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
-  const showComposerStop = executionBlocked && message.trim().length === 0
-  const requiresQueue = pendingQueueRequiresEnqueue(
-    pendingQueue?.campId === snapshot.camp.id ? pendingQueue : null, executionBlocked
-  )
-  const queueAttachmentsBlocked = requiresQueue && hasReadyAttachment
+  const showComposerStop = executionBlocked && !hasSendablePayload
+  const composerInteractionDisabled = draftLoadState.state !== 'ready'
+    || routingMutating
+    || composerSubmitting
   const composerSendDisabled = composerSendIsDisabled({
     hasSendablePayload,
     hasUnavailableMention,
@@ -1915,7 +1992,7 @@ export function CampWorkspace({
     composerDraftAvailable: composerDraft !== null,
     preparingAttachmentCount: preparingAttachments.length,
     failedAttachmentCount: failedAttachments.length
-  }) || queueAttachmentsBlocked
+  })
   const executionDrawerProcess = executionDrawerAgentId
     ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
     : null
@@ -1965,61 +2042,87 @@ export function CampWorkspace({
     return counts
   }, [snapshot.executionEvidence])
 
-  const applyComposerDraft = (campId: string, draft: CampComposerDraftView): void => {
-    if (draftCampId.current !== campId) return
-    composerDraftRef.current = draft
-    setComposerDraft(draft)
+  const saveStructuredDraft = async (
+    campId: string,
+    content: ComposerDocument
+  ): Promise<void> => {
+    if (draftCoordinator.getCurrentDraft()?.campId !== campId) {
+      throw new Error('Composer Draft context changed before content persistence.')
+    }
+    await draftCoordinator.saveContent(content)
   }
 
-  const queueDraftMutation = (
-    campId: string,
-    mutate: (draft: CampComposerDraftView) => Promise<CampComposerDraftView>
-  ): Promise<CampComposerDraftView> => {
-    const current = composerDraftRef.current
-    const initial = current?.campId === campId
-      ? Promise.resolve(current)
-      : window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
-    const previous = draftMutationQueues.current.get(campId) ?? initial
-    const mutation = previous
-      .catch(() => window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId }))
-      .then(mutate)
-    const next = mutation.catch(async (error: unknown) => {
-      const refreshed = await window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.get',
-        { campId }
-      )
-      applyComposerDraft(campId, refreshed)
-      throw error
-    })
-    draftMutationQueues.current.set(campId, next)
-    void next.then((draft) => {
-      if (draftMutationQueues.current.get(campId) === next) {
-        draftMutationQueues.current.delete(campId)
-      }
-      applyComposerDraft(campId, draft)
-      if (snapshot.camp.activationState === 'pending') onPendingDraftPersisted?.()
-    }, () => {
-      if (draftMutationQueues.current.get(campId) === next) {
-        draftMutationQueues.current.delete(campId)
-      }
-    })
-    return next
-  }
-
-  const saveStructuredDraft = (
-    campId: string,
-    content: StructuredCampMessageContent
-  ): Promise<CampComposerDraftView> => queueDraftMutation(
-    campId,
-    (draft) => JSON.stringify(draft.content) === JSON.stringify(content)
-      ? Promise.resolve(draft)
-      : window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
-        campId,
-        expectedRevision: draft.revision,
-        content,
-        continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
+  const retryComposerDraftLoad = async (): Promise<void> => {
+    if (draftLoadState.state === 'loading') return
+    const campId = snapshot.camp.id
+    const composerHandle = composerHandleRef.current
+    composerHandle?.setInteractionLocked(true)
+    setDraftLoadState({ state: 'loading' })
+    try {
+      await draftCoordinator.load()
+      if (draftCampId.current !== campId) return
+      setComposerPersistenceError(null)
+      setDraftLoadState({ state: 'ready' })
+    } catch (error) {
+      if (draftCampId.current !== campId) return
+      setDraftLoadState({
+        state: 'error',
+        error: error instanceof Error ? error : new Error(readErrorMessage(error))
       })
-  )
+    } finally {
+      composerHandle?.setInteractionLocked(false)
+    }
+  }
+
+  const prepareForCampLeave = useCallback(async (): Promise<CampLeavePreparation> => {
+    if (draftLoadState.state !== 'ready') {
+      return { complete: () => undefined }
+    }
+    if (composerSubmittingRef.current || routingMutatingRef.current) {
+      throw new Error('Composer 正在提交变更，请稍后再离开当前会话。')
+    }
+    const composerHandle = composerHandleRef.current
+    composerHandle?.setInteractionLocked(true)
+    try {
+      await attachmentPreparationQueue.current
+      const flushed = await composerHandle?.flush()
+      const draft = flushed?.draft ?? await draftCoordinator.waitForIdle()
+      const settlePending = activationStateRef.current === 'pending'
+        ? pendingCampLeaveRef.current
+        : undefined
+      let completed = false
+      return {
+        complete(didLeave) {
+          if (completed) return
+          completed = true
+          if (!didLeave) composerHandle?.setInteractionLocked(false)
+          if (didLeave && settlePending) {
+            void settlePending(draft).catch(() => undefined)
+          }
+        }
+      }
+    } catch (error) {
+      composerHandle?.setInteractionLocked(false)
+      const normalized = error instanceof Error ? error : new Error(readErrorMessage(error))
+      setComposerPersistenceError(normalized)
+      throw normalized
+    }
+  }, [draftCoordinator, draftLoadState.state])
+
+  useLayoutEffect(() => {
+    const campId = snapshot.camp.id
+    onCampLeaveGuardChange?.(campId, prepareForCampLeave)
+    return () => onCampLeaveGuardChange?.(campId, null)
+  }, [onCampLeaveGuardChange, prepareForCampLeave, snapshot.camp.id])
+
+  useLayoutEffect(() => {
+    if (
+      draftLoadState.state !== 'error'
+      || !composerLockAwaitingDisabledCommitRef.current
+    ) return
+    composerLockAwaitingDisabledCommitRef.current = false
+    composerHandleRef.current?.setInteractionLocked(false)
+  }, [draftLoadState.state])
 
   const loadReplyAnchorWindow = useCallback((messageId: string): Promise<CampMessageView[] | null> => {
     const existing = replyAnchorLoads.current.get(messageId)
@@ -2055,23 +2158,23 @@ export function CampWorkspace({
   useEffect(() => {
     if (!composerDraft || hasLocalDraftPayload || composerSubmitting || routingMutating) return
     const initializedRoute = initializedComposerRoute.current
-    if (initializedRoute && initializedRoute.draft === composerDraftRef.current
+    if (initializedRoute && initializedRoute.revision === composerDraft.revision
       && initializedRoute.publishedMessageSequence >= publishedMessageSequence) return
     const campId = snapshot.camp.id
     let cancelled = false
     // Pending publication bypasses submitMessage. Refresh Core's route projection
     // when a message enters the conversation, without replacing the local editor.
     void (async () => {
-      await draftMutationQueues.current.get(campId)
-      if (cancelled) return
-      const current = composerDraftRef.current
-      const content = draftContent.current
-      const refreshed = await window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+      const epoch = draftCoordinator.getEpoch()
+      await draftCoordinator.waitForIdle()
+      if (cancelled || epoch !== draftCoordinator.getEpoch()) return
+      const localVersion = composerHandleRef.current?.getLocalVersion() ?? 0
+      const refreshed = await draftCoordinator.load()
       if (cancelled || draftCampId.current !== campId
-        || composerDraftRef.current !== current || draftContent.current !== content
-        || draftSaveTimer.current !== null || draftMutationQueues.current.has(campId)) return
-      initializedComposerRoute.current = { draft: refreshed, publishedMessageSequence }
-      applyComposerDraft(campId, refreshed)
+        || epoch !== draftCoordinator.getEpoch()
+        || composerHandleRef.current?.getLocalVersion() !== localVersion
+        || composerHandleRef.current?.isDirty()) return
+      initializedComposerRoute.current = { revision: refreshed.revision, publishedMessageSequence }
     })().catch(() => { /* Keep the current Draft; the next publication or Draft mutation refreshes it. */ })
     return () => { cancelled = true }
   }, [snapshot.camp.id, publishedMessageSequence, composerDraft !== null, hasLocalDraftPayload, composerSubmitting, routingMutating])
@@ -2432,43 +2535,39 @@ export function CampWorkspace({
     visibleCampMessages
   ])
 
-  const syncReplyDraft = (draft: CampComposerDraftView): CampComposerDraftView => {
-    applyComposerDraft(draft.campId, draft)
-    setMessageContent(draft.content)
-    draftContent.current = draft.content
-    return draft
-  }
-
-  const mutateRoutingDraft = (
-    method:
-      | 'camp.composerDraft.startReply'
-      | 'camp.composerDraft.cancelReply'
-      | 'camp.composerDraft.resolveReplyRecipient'
-      | 'camp.composerDraft.resolveContinuationRecipient',
-    params: Record<string, unknown>
+  const mutateRoutingDraft = async (
+    mutation: () => Promise<CampComposerDraftView>
   ): Promise<CampComposerDraftView> => {
-    if (draftSaveTimer.current !== null) {
-      window.clearTimeout(draftSaveTimer.current)
-      draftSaveTimer.current = null
+    const composerHandle = composerHandleRef.current
+    if (!composerHandle || draftLoadState.state !== 'ready') {
+      throw new Error('Composer Draft 尚未就绪。')
     }
-    const campId = snapshot.camp.id
-    const localContent = draftContent.current
-    return queueDraftMutation(campId, async (draft) => {
-      const exactDraft = await window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.save',
-        {
-          campId,
-          expectedRevision: draft.revision,
-          content: localContent,
-          continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
-        }
-      )
-      return window.rovai.request<CampComposerDraftView>(method, {
-        campId,
-        expectedRevision: exactDraft.revision,
-        ...params
-      })
-    }).then(syncReplyDraft)
+    routingMutatingRef.current = true
+    setRoutingMutating(true)
+    composerHandle.setInteractionLocked(true)
+    let before: Awaited<ReturnType<StructuredMentionComposerHandle['flush']>> | null = null
+    try {
+      before = await composerHandle.flush()
+      const nextDraft = await mutation()
+      if (!composerDocumentsEqualDirect(before.document, nextDraft.content)) {
+        composerHandle.replaceDocument(nextDraft.content, 'end')
+      }
+      return nextDraft
+    } catch (error) {
+      const refreshedDraft = draftCoordinator.getCurrentDraft()
+      if (
+        before
+        && refreshedDraft
+        && !composerDocumentsEqualDirect(before.document, refreshedDraft.content)
+      ) {
+        composerHandle.replaceDocument(refreshedDraft.content, 'end')
+      }
+      throw error
+    } finally {
+      composerHandle.setInteractionLocked(false)
+      routingMutatingRef.current = false
+      setRoutingMutating(false)
+    }
   }
 
   const focusComposerAtBoundary = (
@@ -2477,15 +2576,7 @@ export function CampWorkspace({
   ): void => {
     setSuppressPointerFocusRing(modality === 'pointer')
     window.requestAnimationFrame(() => {
-      const editor = composerEditorRef.current
-      if (!editor) return
-      editor.focus({ preventScroll: true })
-      const selection = window.getSelection()
-      const range = document.createRange()
-      range.selectNodeContents(editor)
-      range.collapse(boundary === 'start')
-      selection?.removeAllRanges()
-      selection?.addRange(range)
+      composerHandleRef.current?.focus(boundary)
     })
   }
 
@@ -2497,13 +2588,15 @@ export function CampWorkspace({
       onNotify?.('请先保存或取消待发送消息的编辑，再回复另一条消息。')
       return
     }
-    if (message.id.startsWith('optimistic:') || routingMutating) return
-    setRoutingMutating(true)
+    if (
+      message.id.startsWith('optimistic:')
+      || routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      const draft = await mutateRoutingDraft('camp.composerDraft.startReply', {
-        replyToCampMessageId: message.id
-      })
+      const draft = await mutateRoutingDraft(() => draftCoordinator.startReply(message.id))
       if (composerDraftNeedsReplyRepair(draft)) {
         setSuppressPointerFocusRing(false)
         window.requestAnimationFrame(() => {
@@ -2514,76 +2607,69 @@ export function CampWorkspace({
       }
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
   const cancelReply = async (focusBoundary: 'start' | 'end' = 'end'): Promise<void> => {
-    if (routingMutating) return
-    setRoutingMutating(true)
+    if (
+      routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      await mutateRoutingDraft('camp.composerDraft.cancelReply', {})
+      await mutateRoutingDraft(() => draftCoordinator.cancelReply())
       focusComposerAtBoundary('keyboard', focusBoundary)
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
   const resolveReplyRecipient = async (recipient: CampComposerReplyRecipient): Promise<void> => {
-    if (routingMutating) return
-    setRoutingMutating(true)
+    if (
+      routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      await mutateRoutingDraft('camp.composerDraft.resolveReplyRecipient', { recipient })
+      await mutateRoutingDraft(() => draftCoordinator.resolveReplyRecipient(recipient))
       focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
   const dismissContinuation = async (restoreFocus = true): Promise<void> => {
-    const intent = composerDraftRef.current?.continuationIntent
-    if (!intent || routingMutating) return
-    setRoutingMutating(true)
+    const intent = draftCoordinator.getCurrentDraft()?.continuationIntent
+    if (
+      !intent
+      || routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      const campId = snapshot.camp.id
-      await queueDraftMutation(
-        campId,
-        (draft) => window.rovai.request<CampComposerDraftView>(
-          'camp.composerDraft.dismissContinuation',
-          {
-            campId,
-            expectedRevision: draft.revision,
-            sourceCampMessageId: intent.sourceCampMessageId
-          }
-        )
-      )
+      await mutateRoutingDraft(() =>
+        draftCoordinator.dismissContinuation(intent.sourceCampMessageId))
       if (restoreFocus) focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
   const resolveContinuationRecipient = async (agentId: string): Promise<void> => {
-    if (routingMutating) return
-    setRoutingMutating(true)
+    if (
+      routingMutatingRef.current
+      || composerSubmittingRef.current
+      || draftLoadState.state !== 'ready'
+    ) return
     setReplyInteractionError(null)
     try {
-      await mutateRoutingDraft('camp.composerDraft.resolveContinuationRecipient', { agentId })
+      await mutateRoutingDraft(() => draftCoordinator.resolveContinuationRecipient(agentId))
       focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
-    } finally {
-      setRoutingMutating(false)
     }
   }
 
@@ -2664,16 +2750,14 @@ export function CampWorkspace({
       snapshot: null,
       error: null
     })
-    if (campLeaveTimer.current?.campId === campId) {
-      window.clearTimeout(campLeaveTimer.current.timer)
-      campLeaveTimer.current = null
-    }
-    if (draftSaveTimer.current !== null) {
-      window.clearTimeout(draftSaveTimer.current)
-      draftSaveTimer.current = null
-    }
-    setComposerDraft(null)
-    composerDraftRef.current = null
+    draftCoordinator.beginEpoch(campId)
+    setDraftLoadState({ state: 'loading' })
+    setComposerPersistenceError(null)
+    setComposerLocalStatus({
+      hasContent: false,
+      hasExplicitRecipient: false,
+      hasUnavailableAtom: false
+    })
     initializedComposerRoute.current = null
     setPreparingAttachments([])
     setFailedAttachments([])
@@ -2684,53 +2768,22 @@ export function CampWorkspace({
     setReplyInteractionError(null)
     setSuppressPointerFocusRing(false)
     autoSuppressedContinuationSourceRef.current = null
-    setMessageContent([])
-    draftContent.current = []
     draftCampId.current = campId
-    const pendingDraft = draftMutationQueues.current.get(campId)
-    void (pendingDraft ?? window.rovai.request<CampComposerDraftView>(
-      'camp.composerDraft.get',
-      { campId }
-    ))
-      .then((draft) => {
+    void draftCoordinator.load()
+      .then(() => {
         if (cancelled || draftCampId.current !== campId) return
-        applyComposerDraft(campId, draft)
-        setMessageContent(draft.content)
-        draftContent.current = draft.content
+        setDraftLoadState({ state: 'ready' })
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled && draftCampId.current === campId) {
-          const emptyDraft: CampComposerDraftView = {
-            campId,
-            body: '',
-            content: [],
-            revision: 0,
-            attachments: [],
-            replyIntent: null,
-            continuationIntent: null,
-            updatedAt: null,
-            expiresAt: null
-          }
-          composerDraftRef.current = emptyDraft
-          setComposerDraft(emptyDraft)
+          setDraftLoadState({
+            state: 'error',
+            error: error instanceof Error ? error : new Error(readErrorMessage(error))
+          })
         }
       })
     return () => {
       cancelled = true
-      if (draftSaveTimer.current !== null) window.clearTimeout(draftSaveTimer.current)
-      if (draftCampId.current === campId) {
-        const content = draftContent.current
-        const timer = window.setTimeout(() => {
-          if (campLeaveTimer.current?.timer === timer) campLeaveTimer.current = null
-          const persistedDraft = saveStructuredDraft(campId, content)
-          if (snapshot.camp.activationState === 'pending' && onPendingCampLeave) {
-            void persistedDraft.then(onPendingCampLeave).catch(() => undefined)
-          } else {
-            void persistedDraft.catch(() => undefined)
-          }
-        }, 0)
-        campLeaveTimer.current = { campId, timer }
-      }
     }
   }, [snapshot.camp.id])
 
@@ -3171,82 +3224,65 @@ export function CampWorkspace({
 
   const submitMessage = async (): Promise<void> => {
     if (
-      pendingEditing || composerSendDisabled
+      pendingEditing
+      || composerSendDisabled
+      || composerSubmittingRef.current
+      || routingMutatingRef.current
     ) return
     const campId = snapshot.camp.id
+    const composerHandle = composerHandleRef.current
+    if (!composerHandle) return
     followTimelineAfterUserSend(campId)
+    composerSubmittingRef.current = true
     setComposerSubmitting(true)
-    let sendAttempted = false
     let restoreEditorFocus = true
+    composerHandle.setInteractionLocked(true)
     try {
-      if (draftSaveTimer.current !== null) {
-        window.clearTimeout(draftSaveTimer.current)
-        draftSaveTimer.current = null
-      }
       await attachmentPreparationQueue.current
-      const frozenDraft = await saveStructuredDraft(campId, draftContent.current)
-      applyComposerDraft(campId, frozenDraft)
-      sendAttempted = true
+      const flushed = await composerHandle.flush()
+      const frozenDraft = flushed.draft ?? draftCoordinator.getCurrentDraft()
+      if (!frozenDraft) throw new Error('Composer Draft 尚未就绪。')
       const sendReceipt = await onSend(frozenDraft)
       if (sendReceipt?.agentRunIds.length || sendReceipt?.campTurnId) {
         setSubmittedExecutionRequest(sendReceipt)
       }
-      const acceptedDraftFallback: CampComposerDraftView = {
-        campId,
-        body: '',
-        content: [],
-        revision: 0,
-        attachments: [],
-        replyIntent: null,
-        continuationIntent: null,
-        updatedAt: null,
-        expiresAt: null
-      }
-      if (draftCampId.current === campId) syncReplyDraft(acceptedDraftFallback)
-      // Finish initializing the next route before accepting another keystroke:
-      // otherwise a fast next Draft can freeze a null continuation source.
-      const nextDraft = await window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.get', { campId }
-      )
-      if (draftCampId.current === campId) {
-        initializedComposerRoute.current = {
-          draft: nextDraft,
-          publishedMessageSequence: Math.max(publishedMessageSequence, sendReceipt?.publishedMessageSequence ?? 0)
+      try {
+        const nextDraft = await draftCoordinator.load()
+        if (draftCampId.current === campId) {
+          initializedComposerRoute.current = {
+            revision: nextDraft.revision,
+            publishedMessageSequence: Math.max(
+              publishedMessageSequence,
+              sendReceipt?.publishedMessageSequence ?? 0
+            )
+          }
+          composerHandle.replaceDocument(nextDraft.content, 'end')
+          setComposerPersistenceError(null)
+          setDraftLoadState({ state: 'ready' })
         }
-        syncReplyDraft(nextDraft)
+      } catch (error) {
+        if (draftCampId.current === campId) {
+          restoreEditorFocus = false
+          composerLockAwaitingDisabledCommitRef.current = true
+          setDraftLoadState({
+            state: 'error',
+            error: error instanceof Error ? error : new Error(readErrorMessage(error))
+          })
+        }
+        throw error
       }
     } catch {
-      if (sendAttempted) {
-        try {
-          const draft = await window.rovai.request<CampComposerDraftView>(
-            'camp.composerDraft.get',
-            { campId }
-          )
-          if (draftCampId.current === campId) {
-            syncReplyDraft(draft)
-            if (
-              composerDraftNeedsReplyRepair(draft)
-              || composerDraftNeedsContinuationRepair(
-                draft,
-                snapshot.members,
-                Boolean(draft.body.trim() || draft.attachments.length > 0)
-              )
-            ) {
-              restoreEditorFocus = false
-              window.requestAnimationFrame(() => {
-                window.requestAnimationFrame(() => recipientRepairFirstOptionRef.current?.focus())
-              })
-            }
-          }
-        } catch {
-          // The App-level error remains visible; a later Camp refresh can recover the Draft.
-        }
-      }
+      // onSend owns send failure presentation. A post-send Draft load failure is
+      // represented by draftLoadState and recovered only through an explicit reload.
     } finally {
+      if (!composerLockAwaitingDisabledCommitRef.current) {
+        composerHandle.setInteractionLocked(false)
+      }
+      composerSubmittingRef.current = false
       setComposerSubmitting(false)
       setPendingRefresh((value) => value + 1)
       if (restoreEditorFocus) {
-        window.requestAnimationFrame(() => composerEditorRef.current?.focus())
+        window.requestAnimationFrame(() => composerHandleRef.current?.focus('end'))
       }
     }
   }
@@ -3256,22 +3292,13 @@ export function CampWorkspace({
     void submitMessage()
   }
 
-  const changeMessage = (nextContent: StructuredCampMessageContent): void => {
-    setMessageContent(nextContent)
-    draftContent.current = nextContent
-    if (draftSaveTimer.current !== null) window.clearTimeout(draftSaveTimer.current)
-    const campId = snapshot.camp.id
-    draftSaveTimer.current = window.setTimeout(() => {
-      draftSaveTimer.current = null
-      void saveStructuredDraft(campId, draftContent.current).catch(() => undefined)
-    }, 300)
-  }
-
   const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
-    if (pendingEditing || requiresQueue) {
-      onNotify?.('待发送消息暂不支持附件，请在队列结束后添加。')
-      return
-    }
+    if (
+      pendingEditing
+      || draftLoadState.state !== 'ready'
+      || composerSubmittingRef.current
+      || routingMutatingRef.current
+    ) return
     const campId = snapshot.camp.id
     const pending = inputs.map(({ file, kindHint }, index) => ({
       id: crypto.randomUUID(),
@@ -3285,28 +3312,28 @@ export function CampWorkspace({
       ...pending.map(({ id, file, kind }) => ({ id, name: file.name, kind }))
     ])
     const preparePending = async (): Promise<void> => {
+      try {
+        await composerHandleRef.current?.flush()
+      } catch (error) {
+        if (draftCampId.current === campId) {
+          setFailedAttachments((current) => [
+            ...current,
+            ...pending.map((item) => ({
+              id: item.id,
+              name: item.file.name,
+              kind: item.kind,
+              error: attachmentErrorMessage(error)
+            }))
+          ])
+        }
+        setPreparingAttachments((current) => current.filter(
+          ({ id }) => !pending.some((item) => item.id === id)
+        ))
+        return
+      }
       for (const item of pending) {
         try {
-          await queueDraftMutation(
-            campId,
-            async (draft) => {
-              const exactDraft = await window.rovai.request<CampComposerDraftView>(
-                'camp.composerDraft.save',
-                {
-                  campId,
-                  expectedRevision: draft.revision,
-                  content: draftContent.current,
-                  continuationSourceMessageId:
-                    draft.continuationIntent?.sourceCampMessageId ?? null
-                }
-              )
-              return window.rovai.composerAttachments.prepare(
-                campId,
-                exactDraft.revision,
-                item.file
-              )
-            }
-          )
+          await draftCoordinator.addSourceAttachment(item.file)
         } catch (error) {
           if (draftCampId.current === campId) {
             setFailedAttachments((current) => [
@@ -3354,7 +3381,7 @@ export function CampWorkspace({
   const attachmentDropBlocked = attachmentDropIsBlocked({
     executionDrawerPresent: Boolean(executionDrawerProcess),
     mentionPopoverPresent: Boolean(mentionPopover)
-  }) || pendingEditing || requiresQueue
+  }) || (pendingEditing ? !pendingAttachmentDropTarget : composerInteractionDisabled)
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -3410,7 +3437,9 @@ export function CampWorkspace({
     }
     const inputs = droppedAttachmentInputs(event.dataTransfer)
     clearAttachmentDragState()
-    if (inputs.length > 0) void prepareFiles(inputs)
+    if (inputs.length === 0) return
+    if (pendingEditing) pendingAttachmentDropTarget?.(inputs.map(({ file }) => file))
+    else void prepareFiles(inputs)
   }
 
   useEffect(() => {
@@ -3423,14 +3452,13 @@ export function CampWorkspace({
   }, [])
 
   const removePreparedAttachment = async (attachmentId: string): Promise<void> => {
-    const campId = snapshot.camp.id
-    await queueDraftMutation(
-      campId,
-      (draft) => window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.removeAttachment',
-        { campId, expectedRevision: draft.revision, attachmentId }
-      )
-    )
+    if (
+      composerInteractionDisabled
+      || composerSubmittingRef.current
+      || routingMutatingRef.current
+    ) return
+    await composerHandleRef.current?.flush()
+    await draftCoordinator.removeSourceAttachment(attachmentId)
   }
 
   const copyMessage = (
@@ -3452,31 +3480,9 @@ export function CampWorkspace({
   }
 
   const chooseStarterPrompt = (prompt: string, announceDraft = false): void => {
-    pendingStarterPromptFocusRef.current = prompt
-    changeMessage([{ kind: 'text', text: prompt }])
+    composerHandleRef.current?.setDocument(composerDocumentFromText(prompt), 'end')
     if (announceDraft) setStarterNotice('已填入输入框，可修改后发送')
   }
-
-  useLayoutEffect(() => {
-    const pendingPrompt = pendingStarterPromptFocusRef.current
-    if (
-      pendingPrompt === null
-      || messageContent.length !== 1
-      || messageContent[0].kind !== 'text'
-      || messageContent[0].text !== pendingPrompt
-    ) return
-
-    const editor = composerEditorRef.current
-    if (!editor) return
-    pendingStarterPromptFocusRef.current = null
-    editor.focus()
-    const selection = window.getSelection()
-    const range = document.createRange()
-    range.selectNodeContents(editor)
-    range.collapse(false)
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-  }, [messageContent])
 
   const selectInspectorTab = (tab: CampInspectorTab): void => {
     if (controlledInspectorTab === undefined) setLocalInspectorTab(tab)
@@ -3986,7 +3992,8 @@ export function CampWorkspace({
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
                 let previousMessageAuthorKey: string | null = null
-                for (const timelineItem of conversationTimeline) {
+                for (let timelineIndex = 0; timelineIndex < conversationTimeline.length; timelineIndex += 1) {
+                  const timelineItem = conversationTimeline[timelineIndex]
                   const dayKey = localDayKey(timelineItem.createdAt)
                   if (dayKey && dayKey !== lastDayKey) {
                     lastDayKey = dayKey
@@ -4091,7 +4098,34 @@ export function CampWorkspace({
                   )
                   const isConversationFindCurrent = conversationFind.open
                     && conversationFind.snapshot?.match?.messageId === campMessage.id
-                  items.push(
+                  const trailingFileChangeItems: Extract<
+                    CampConversationTimelineItem,
+                    { kind: 'run_file_changes' }
+                  >[] = []
+                  if (campMessage.authorType === 'agent' && campMessage.sourceAgentRunId) {
+                    for (
+                      let nextIndex = timelineIndex + 1;
+                      nextIndex < conversationTimeline.length;
+                      nextIndex += 1
+                    ) {
+                      const candidate = conversationTimeline[nextIndex]
+                      if (
+                        candidate.kind !== 'run_file_changes'
+                        || candidate.changes.agentRunId !== campMessage.sourceAgentRunId
+                      ) break
+                      trailingFileChangeItems.push(candidate)
+                    }
+                  }
+                  const copied = copiedMessageId === campMessage.id
+                  const handleReply = campMessage.id.startsWith('optimistic:')
+                    ? undefined
+                    : (modality: ReplyFocusModality) => void startReply(campMessage, modality)
+                  const handleCopy = (): void => copyMessage(
+                    campMessage.id,
+                    displayBody,
+                    campMessage.content
+                  )
+                  const messageElement = (
                     <article
                       className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${isConversationFindCurrent ? ' conversation-find-current-message' : ''}`}
                       key={campMessage.id}
@@ -4153,16 +4187,11 @@ export function CampWorkspace({
                                 <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
                               </div>
                               <MessageSurface
-                                copied={copiedMessageId === campMessage.id}
+                                copied={copied}
                                 hasDelivery={campMessageDeliveries.length > 0}
-                                onReply={campMessage.id.startsWith('optimistic:')
-                                  ? undefined
-                                  : (modality) => void startReply(campMessage, modality)}
-                                onCopy={() => copyMessage(
-                                  campMessage.id,
-                                  displayBody,
-                                  campMessage.content
-                                )}
+                                showActions={campMessage.authorType !== 'agent'}
+                                onReply={humanAuthored ? undefined : handleReply}
+                                onCopy={handleCopy}
                               >
                                 {replyParentId && (
                                   <ReplyParentQuote
@@ -4179,6 +4208,7 @@ export function CampWorkspace({
                                   <MessageAttachmentGroups
                                     attachments={campMessage.attachments}
                                     campId={snapshot.camp.id}
+                                    messageId={campMessage.id}
                                     presentation="user"
                                     onNotify={onNotify}
                                   />
@@ -4194,10 +4224,6 @@ export function CampWorkspace({
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
-                                            fileReferenceSource={{
-                                              campId: snapshot.camp.id,
-                                              messageId: campMessage.id
-                                            }}
                                             onActivateMemberMention={openMemberProfilePopover}
                                             onFileReference={(rawReference, source, target) => {
                                               if (!filePreview) return
@@ -4216,16 +4242,12 @@ export function CampWorkspace({
                                       )
                                     : (
                                         <div className="message-bubble">
-                                          <CollapsibleStructuredMessageBody
+                                          <TruncatedStructuredMessageBody
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
-                                            collapsible={humanAuthored}
+                                            truncate={humanAuthored}
                                             forceExpanded={isConversationFindCurrent}
-                                            fileReferenceSource={{
-                                              campId: snapshot.camp.id,
-                                              messageId: campMessage.id
-                                            }}
                                             renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
                                             onActivateMemberMention={openMemberProfilePopover}
                                             onActivateAllMembersMention={(trigger, focusPanel) =>
@@ -4260,6 +4282,7 @@ export function CampWorkspace({
                                       image
                                     }))}
                                     campId={snapshot.camp.id}
+                                    messageId={campMessage.id}
                                     presentation="agent"
                                     onNotify={onNotify}
                                   />
@@ -4270,11 +4293,55 @@ export function CampWorkspace({
                                 memberById={memberById}
                                 onActivateMemberMention={openMemberProfilePopover}
                               />
+                              {campMessage.authorType === 'agent'
+                                && trailingFileChangeItems.length === 0
+                                && (
+                                  <MessageActions
+                                    copied={copied}
+                                    className={`agent-message-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
+                                    onReply={handleReply}
+                                    onCopy={handleCopy}
+                                  />
+                                )}
                             </div>
                           )
                         : <p>{displayBody}</p>}
                     </article>
                   )
+                  if (trailingFileChangeItems.length > 0) {
+                    items.push(
+                      <div
+                        className={`agent-message-output${followsSameAuthor ? ' same-author' : ''}`}
+                        data-message-output-id={campMessage.id}
+                        key={`agent-message-output:${campMessage.id}`}
+                      >
+                        {messageElement}
+                        {trailingFileChangeItems.map((fileChangeItem) => (
+                          <AgentRunFileChangesTimelineCard
+                            key={fileChangeItem.id}
+                            changes={fileChangeItem.changes}
+                            onOpenReview={(selectedEvidenceFileId) => {
+                              filePreview?.openFileChanges(
+                                snapshot.camp.id,
+                                fileChangeItem.changes,
+                                selectedEvidenceFileId
+                              )
+                            }}
+                          />
+                        ))}
+                        <MessageActions
+                          copied={copied}
+                          className={`agent-message-output-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
+                          onReply={handleReply}
+                          onCopy={handleCopy}
+                        />
+                      </div>
+                    )
+                    timelineIndex += trailingFileChangeItems.length
+                    previousMessageAuthorKey = null
+                    continue
+                  }
+                  items.push(messageElement)
                   previousMessageAuthorKey = messageAuthorKey
                 }
                 return items
@@ -4477,7 +4544,9 @@ export function CampWorkspace({
         <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
-          stopping={stopping} onStop={onStop} onQueueChange={setPendingQueue} onEditingChange={(editing) => {
+          attachmentDragActive={pendingEditing && attachmentDragState !== null}
+          onAttachmentDropTargetChange={updatePendingAttachmentDropTarget}
+          onQueueChange={setPendingQueue} onEditingChange={(editing) => {
             setPendingEditing(editing)
             if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
           }} />
@@ -4502,7 +4571,7 @@ export function CampWorkspace({
                           type="button"
                           aria-label={`取消继续发给 ${continuationIntent.recipient.displayName}`}
                           title="取消继续发送"
-                          disabled={routingMutating}
+                          disabled={composerInteractionDisabled}
                           onClick={() => void dismissContinuation()}
                         >
                           <svg aria-hidden="true" viewBox="0 0 12 12">
@@ -4536,6 +4605,11 @@ export function CampWorkspace({
                     {composerDraft?.attachments.map((attachment) => (
                       <AttachmentCard
                         attachment={attachment}
+                        locator={{
+                          owner: 'composer',
+                          campId: snapshot.camp.id,
+                          attachmentRefId: attachment.id
+                        }}
                         key={attachment.id}
                         onRemove={() => void removePreparedAttachment(attachment.id)}
                         presentation="composer"
@@ -4581,7 +4655,7 @@ export function CampWorkspace({
                     className="composer-reply-cancel"
                     type="button"
                     aria-label="取消回复"
-                    disabled={routingMutating}
+                    disabled={composerInteractionDisabled}
                     onClick={() => void cancelReply()}
                   >
                     取消
@@ -4609,7 +4683,7 @@ export function CampWorkspace({
                                   className="quiet-button compact"
                                   type="button"
                                   key={member.agentId}
-                                  disabled={routingMutating}
+                                  disabled={composerInteractionDisabled}
                                   onClick={() => void resolveReplyRecipient({
                                     kind: 'member',
                                     agentId: member.agentId
@@ -4624,7 +4698,7 @@ export function CampWorkspace({
                                   : undefined}
                                 className="quiet-button compact"
                                 type="button"
-                                disabled={routingMutating}
+                                disabled={composerInteractionDisabled}
                                 onClick={() => void resolveReplyRecipient({ kind: 'all_members' })}
                               >
                                 @所有队员
@@ -4656,7 +4730,7 @@ export function CampWorkspace({
                         className="quiet-button compact"
                         type="button"
                         key={member.agentId}
-                        disabled={routingMutating}
+                        disabled={composerInteractionDisabled}
                         onClick={() => void resolveContinuationRecipient(member.agentId)}
                       >
                         @{member.displayName}
@@ -4665,10 +4739,35 @@ export function CampWorkspace({
                 </div>
               </div>
             )}
+            {draftLoadState.state === 'error' && (
+              <div className="reply-recipient-repair composer-draft-load-error" role="alert">
+                <div className="reply-recipient-repair-copy">
+                  <strong>草稿无法加载</strong>
+                  <span>{draftLoadState.error.message}</span>
+                </div>
+                <button
+                  className="quiet-button compact"
+                  type="button"
+                  onClick={() => void retryComposerDraftLoad()}
+                >
+                  重新加载草稿
+                </button>
+              </div>
+            )}
             <StructuredMentionComposer
+              ref={composerHandleRef}
               id="camp-message"
-              value={messageContent}
-              onChange={changeMessage}
+              draftIdentity={`${snapshot.camp.id}:composer`}
+              document={composerDraft?.campId === snapshot.camp.id
+                ? composerDraft.content
+                : emptyComposerDocument()}
+              ready={draftLoadState.state === 'ready'
+                && composerDraft?.campId === snapshot.camp.id}
+              getAuthoritativeDraft={() => draftCoordinator.getCurrentDraft()}
+              persistDocument={(content) => saveStructuredDraft(snapshot.camp.id, content)}
+              waitForDraftAuthority={() => draftCoordinator.waitForIdle().then(() => undefined)}
+              onLocalStatusChange={setComposerLocalStatus}
+              onPersistenceErrorChange={setComposerPersistenceError}
               onBackspaceAtStart={composerDraft?.replyIntent
                 ? () => cancelReply('start')
                 : undefined}
@@ -4680,10 +4779,12 @@ export function CampWorkspace({
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
               ariaLabel={`给 ${defaultLead?.displayName ?? '默认负责人'} 发消息`}
-              placeholder={isCampEmpty
-                ? '集结队伍，写下这次冒险的目标…'
-                : '和队伍继续前行：补充线索、调整方向或布置新任务…'}
-              disabled={busy || composerSubmitting || routingMutating}
+              placeholder={draftLoadState.state === 'error'
+                ? '草稿暂不可用'
+                : isCampEmpty
+                  ? '集结队伍，写下这次冒险的目标…'
+                  : '和队伍继续前行：补充线索、调整方向或布置新任务…'}
+              disabled={composerInteractionDisabled}
               editorRef={composerEditorRef}
               onActivateMemberMention={(member, trigger, focusPanel) =>
                 openMemberProfilePopover(member.agentId, trigger, focusPanel)}
@@ -4702,6 +4803,11 @@ export function CampWorkspace({
                 {replyInteractionError}
               </span>
             )}
+            {composerPersistenceError && (
+              <span className="composer-reply-status" role="status" aria-live="polite">
+                草稿尚未保存；发送或切换会先重试。{composerPersistenceError.message}
+              </span>
+            )}
           </div>
           <div className="composer-action-row">
             <div className="composer-tools">
@@ -4711,6 +4817,7 @@ export function CampWorkspace({
                 type="file"
                 multiple
                 tabIndex={-1}
+                disabled={composerInteractionDisabled}
                 onChange={(event) => {
                   const files = Array.from(event.currentTarget.files ?? [])
                   event.currentTarget.value = ''
@@ -4724,7 +4831,7 @@ export function CampWorkspace({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={busy || composerSubmitting || routingMutating || requiresQueue}
+                disabled={busy || composerInteractionDisabled}
                 onClick={() => composerFileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18">
@@ -4733,9 +4840,7 @@ export function CampWorkspace({
               </button>
             </div>
             <div className="composer-actions">
-              {queueAttachmentsBlocked
-                ? <span className="pending-input-attachment-notice">暂不支持排队附件，草稿已保留。</span>
-                : !executionBlocked && (
+              {!executionBlocked && (
                 <span className="composer-hint">
                   <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
                   <span className="composer-hint-visual" aria-hidden="true">
@@ -4787,8 +4892,8 @@ export function CampWorkspace({
                 <strong>松手添加到当前消息</strong>
                 <span>
                   {attachmentDragState === 'directory'
-                    ? '文件夹将保存为只读快照，原文件不会移动'
-                    : '支持文件与文件夹 · 将安全复制到附件队列'}
+                    ? '将引用此文件夹的当前位置，不会移动原文件'
+                    : '支持文件与文件夹 · 原位置移动或删除后可能不可用'}
                 </span>
               </span>
             </div>
@@ -7182,12 +7287,14 @@ function ReplyMark(): JSX.Element {
 function MessageSurface({
   copied,
   hasDelivery,
+  showActions = true,
   onReply,
   onCopy,
   children
 }: {
   copied: boolean
   hasDelivery: boolean
+  showActions?: boolean
   onReply?(modality: ReplyFocusModality): void
   onCopy(): void
   children: React.ReactNode
@@ -7195,23 +7302,45 @@ function MessageSurface({
   return (
     <div className={`message-surface${hasDelivery ? ' has-delivery' : ''}${copied ? ' copied' : ''}`}>
       {children}
-      <div className="message-actions" role="group" aria-label="消息操作">
-        <span className="copy-feedback" role="status" aria-live="polite">
-          {copied ? '已复制' : ''}
-        </span>
-        {onReply && (
-          <button
-            className="message-reply-button"
-            type="button"
-            aria-label="回复这条消息"
-            title="回复"
-            onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
-          >
-            <MessageReplyIcon />
-          </button>
-        )}
-        <MessageCopyButton copied={copied} onCopy={onCopy} />
-      </div>
+      {showActions && (
+        <MessageActions copied={copied} onReply={onReply} onCopy={onCopy} />
+      )}
+    </div>
+  )
+}
+
+function MessageActions({
+  copied,
+  className,
+  onReply,
+  onCopy
+}: {
+  copied: boolean
+  className?: string
+  onReply?(modality: ReplyFocusModality): void
+  onCopy(): void
+}): JSX.Element {
+  return (
+    <div
+      className={`message-actions${copied ? ' copied' : ''}${className ? ` ${className}` : ''}`}
+      role="group"
+      aria-label="消息操作"
+    >
+      <span className="copy-feedback" role="status" aria-live="polite">
+        {copied ? '已复制' : ''}
+      </span>
+      <MessageCopyButton copied={copied} onCopy={onCopy} />
+      {onReply && (
+        <button
+          className="message-reply-button"
+          type="button"
+          aria-label="回复这条消息"
+          title="回复"
+          onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
+        >
+          <MessageReplyIcon />
+        </button>
+      )}
     </div>
   )
 }
@@ -7219,30 +7348,28 @@ function MessageSurface({
 function MessageReplyIcon(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5.4 4.7h13.2a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1h-8.2L5.6 20v-3.7h-.2a2.1 2.1 0 0 1-2.1-2.1V6.8a2.1 2.1 0 0 1 2.1-2.1Z" />
-      <circle className="message-reply-dot" cx="8" cy="10.5" r="1" />
-      <circle className="message-reply-dot" cx="12" cy="10.5" r="1" />
-      <circle className="message-reply-dot" cx="16" cy="10.5" r="1" />
+      <path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2" />
+      <path d="m15.2 9.2-3.6 3.5 3.6 3.5" />
+      <path d="M11.8 12.7h8.7" />
     </svg>
   )
 }
 
-function CollapsibleStructuredMessageBody({
+function TruncatedStructuredMessageBody({
   body,
   content,
   members,
-  collapsible,
+  truncate,
   forceExpanded,
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
   onActivateAllMembersMention,
-  onFileReference,
-  fileReferenceSource
+  onFileReference
 }: {
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
-  collapsible: boolean
+  truncate: boolean
   forceExpanded: boolean
   renderLeadingCurrentUserMarkdown?: boolean
   onActivateMemberMention?(
@@ -7252,15 +7379,14 @@ function CollapsibleStructuredMessageBody({
   ): void
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
   onFileReference?: FileReferenceActivation
-  fileReferenceSource?: MessageFileReferenceSource
 }): JSX.Element {
+  const projection = useMemo(
+    () => truncate ? collapsedMessageProjection(body, content) : null,
+    [body, content, truncate]
+  )
   const [expanded, setExpanded] = useState(false)
   const contentId = useId()
-  const projection = useMemo(
-    () => collapsible ? collapsedMessageProjection(body, content) : null,
-    [body, collapsible, content]
-  )
-  const displayFullMessage = expanded || forceExpanded || projection === null
+  const displayFullMessage = forceExpanded || expanded || projection === null
   const displayBody = displayFullMessage ? body : projection.body
   const displayContent = displayFullMessage ? content : projection.content
 
@@ -7273,28 +7399,28 @@ function CollapsibleStructuredMessageBody({
       onActivateMemberMention={onActivateMemberMention}
       onActivateAllMembersMention={onActivateAllMembersMention}
       onFileReference={onFileReference}
-      fileReferenceSource={fileReferenceSource}
     />
   )
-  if (!projection) return messageBody
+  if (!projection || forceExpanded) return messageBody
 
   return (
-    <div className={`message-long-copy${displayFullMessage ? ' is-expanded' : ''}`}>
+    <div className="message-long-copy">
       <div id={contentId}>{messageBody}</div>
-      {!forceExpanded && (
-        <button
-          className={`message-long-toggle ${expanded ? 'is-collapse' : 'is-expand'}`}
-          type="button"
-          aria-controls={contentId}
-          aria-expanded={expanded}
-          aria-label={expanded
-            ? `收起长消息，共 ${projection.lineCount} 行`
-            : `展开完整消息，共 ${projection.lineCount} 行`}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? '收起长消息' : '…'}
-        </button>
-      )}
+      <button
+        className="message-long-toggle"
+        type="button"
+        aria-controls={contentId}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span>{expanded ? '收起' : '展开'}</span>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m4 6 4 4 4-4" />
+        </svg>
+      </button>
+      <span className="sr-only" aria-live="polite">
+        {expanded ? '全文已展开' : '其余内容已收起'}，共 {projection.lineCount} 行
+      </span>
     </div>
   )
 }
@@ -7304,15 +7430,13 @@ function AgentMessageMarkdownBody({
   content,
   members,
   onActivateMemberMention,
-  onFileReference,
-  fileReferenceSource
+  onFileReference
 }: {
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
   onActivateMemberMention(agentId: string, trigger: HTMLElement, focusPanel: boolean): void
   onFileReference?: FileReferenceActivation
-  fileReferenceSource?: MessageFileReferenceSource
 }): JSX.Element {
   // Only authoritative leading tokens form a recipient prefix. Literal @names
   // stay Markdown text; the Renderer never derives addressing from the body.
@@ -7324,20 +7448,8 @@ function AgentMessageMarkdownBody({
   const markdownBody = content && prefixLength > 0
     ? structuredCampContentMarkdownText(content.slice(prefixLength), members)
     : body
-  const resolvedInlineFileReferences = useResolvedMessageFileReferences(
-    fileReferenceSource,
-    markdownBody,
-    Boolean(onFileReference)
-  )
   if (!content || prefixLength === 0) {
-    return (
-      <SafeMarkdown
-        onFileReference={onFileReference}
-        resolvedInlineFileReferences={resolvedInlineFileReferences}
-      >
-        {body}
-      </SafeMarkdown>
-    )
+    return <SafeMarkdown onFileReference={onFileReference}>{body}</SafeMarkdown>
   }
 
   const hasBody = markdownBody.trim().length > 0
@@ -7359,7 +7471,6 @@ function AgentMessageMarkdownBody({
           leadingContent={prefix}
           inlineLeadingContent={inlineBody}
           onFileReference={onFileReference}
-          resolvedInlineFileReferences={resolvedInlineFileReferences}
         >
           {markdownBody}
         </SafeMarkdown>
@@ -7376,8 +7487,7 @@ function StructuredMessageBody({
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
   onActivateAllMembersMention,
-  onFileReference,
-  fileReferenceSource
+  onFileReference
 }: {
   body: string
   content: StructuredCampMessageContent | null
@@ -7391,22 +7501,12 @@ function StructuredMessageBody({
   ): void
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
   onFileReference?: FileReferenceActivation
-  fileReferenceSource?: MessageFileReferenceSource
 }): JSX.Element {
   const markdownBody = renderLeadingCurrentUserMarkdown && content !== null
     ? projectLeadingCurrentUserMentionMarkdownBody(content, members)
     : null
-  const referenceMarkdown = markdownBody ?? (content === null
-    ? body
-    : content.flatMap((segment) => segment.kind === 'text' ? [segment.text] : []).join('\n'))
-  const resolvedInlineFileReferences = useResolvedMessageFileReferences(
-    fileReferenceSource,
-    referenceMarkdown,
-    Boolean(onFileReference)
-  )
   if (content === null) {
-    return <p><FileReferenceText text={body} onActivate={onFileReference}
-      resolvedInlineFileReferences={resolvedInlineFileReferences} /></p>
+    return <p><FileReferenceText text={body} onActivate={onFileReference} /></p>
   }
   if (markdownBody !== null) {
     return (
@@ -7416,8 +7516,9 @@ function StructuredMessageBody({
           {markdownBody.length > 0 ? ' ' : ''}
         </span>
         {markdownBody.length > 0 && (
-          <SafeMarkdown className="current-user-markdown-content" onFileReference={onFileReference}
-            resolvedInlineFileReferences={resolvedInlineFileReferences}>{markdownBody}</SafeMarkdown>
+          <SafeMarkdown className="current-user-markdown-content" onFileReference={onFileReference}>
+            {markdownBody}
+          </SafeMarkdown>
         )}
       </div>
     )
@@ -7435,8 +7536,7 @@ function StructuredMessageBody({
             : segment.text
           return text ? (
             <span key={`text-${index}`}>
-              <FileReferenceText text={text} onActivate={onFileReference}
-                resolvedInlineFileReferences={resolvedInlineFileReferences} />
+              <FileReferenceText text={text} onActivate={onFileReference} />
             </span>
           ) : null
         }
@@ -7575,31 +7675,30 @@ function MessageCopyButton({
   )
 }
 
-function AttachmentFolderGlyph(): JSX.Element {
-  return (
-    <svg className="attachment-folder-glyph" viewBox="0 0 24 24">
-      <path className="fill" d="M3.8 7.2c0-1.1.9-2 2-2h4l2 2.1h6.5c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2Z" />
-      <path d="M3.8 8.2V7.1c0-1 .8-1.8 1.8-1.8h4.1l2.1 2.1h6.4c1.1 0 2 .9 2 2v7.3c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2V8.2Z" />
-    </svg>
-  )
-}
 
 export function MessageAttachmentGroups({
   attachments,
   runtimeImages = [],
   campId,
+  messageId,
   presentation,
   onNotify
 }: {
   attachments: CampMessageAttachmentView[]
   runtimeImages?: GalleryImage[]
   campId: string
+  messageId: string
   presentation: 'user' | 'agent'
   onNotify: (message: string) => void
 }): JSX.Element | null {
   const groups = partitionMessageAttachments(attachments)
   const images: GalleryImage[] = [
-    ...groups.images.map((image): GalleryImage => ({ kind: 'attachment', campId, image })),
+    ...groups.images.map((image): GalleryImage => ({
+      kind: 'attachment',
+      campId,
+      locator: { owner: 'message', campId, messageId, attachmentRefId: image.id },
+      image
+    })),
     ...runtimeImages
   ]
   if (images.length === 0 && groups.files.length === 0) return null
@@ -7617,7 +7716,7 @@ export function MessageAttachmentGroups({
             {groups.files.map((attachment) => (
               <AttachmentCard
                 attachment={attachment}
-                campId={campId}
+                locator={{ owner: 'message', campId, messageId, attachmentRefId: attachment.id }}
                 key={attachment.id}
                 onNotify={onNotify}
                 presentation="user-timeline"
@@ -7646,7 +7745,7 @@ export function MessageAttachmentGroups({
             {groups.files.map((attachment) => (
               <AttachmentCard
                 attachment={attachment}
-                campId={campId}
+                locator={{ owner: 'message', campId, messageId, attachmentRefId: attachment.id }}
                 key={attachment.id}
                 onNotify={onNotify}
                 presentation="agent-timeline"
@@ -7659,424 +7758,13 @@ export function MessageAttachmentGroups({
   )
 }
 
-function AttachmentCard({
-  attachment,
-  onRemove,
-  campId,
-  onNotify = () => undefined,
-  presentation = 'composer'
-}: {
-  attachment: CampMessageAttachmentView | PreparedAttachmentView
-  onRemove?: () => void
-  campId?: string
-  onNotify?: (message: string) => void
-  presentation?: 'composer' | 'user-timeline' | 'agent-timeline'
-}): JSX.Element {
-  const filePreview = useOptionalFilePreview()
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [previewFailed, setPreviewFailed] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [attachmentAction, setAttachmentAction] = useState<'open' | 'reveal' | null>(null)
-  const [contextMenuOpen, setContextMenuOpen] = useState(false)
-  const [contextAnchor, setContextAnchor] = useState({ x: 0, y: 0 })
-  const attachmentButtonRef = useRef<HTMLButtonElement>(null)
-  const runtimeProjectionState = 'runtimeProjectionState' in attachment
-    ? attachment.runtimeProjectionState
-    : 'available'
-  const timeline = presentation !== 'composer'
-  const agentPresentation = presentation === 'agent-timeline'
-  const composerImage = presentation === 'composer' && attachment.previewKind === 'image'
-  const displayClassification = classifyAttachmentDisplay(attachment)
-  const baseName = attachmentBaseName(attachment.displayName, attachment.kind)
-  const formatLabel = attachmentFormatLabel(attachment.displayName, attachment.kind)
-  const rendererPlatform = typeof window === 'undefined' ? 'darwin' : window.rovai.platform
-  useEffect(() => {
-    if (attachment.previewKind !== 'image') return
-    let active = true
-    let objectUrl: string | null = null
-    void window.rovai.composerAttachments.preview(attachment.id)
-      .then((preview) => {
-        if (!active || !preview) {
-          if (active) setPreviewFailed(true)
-          return
-        }
-        objectUrl = URL.createObjectURL(new Blob(
-          [Uint8Array.from(preview.bytes).buffer],
-          { type: preview.mediaType }
-        ))
-        setPreviewUrl(objectUrl)
-      })
-      .catch(() => {
-        if (active) setPreviewFailed(true)
-      })
-    return () => {
-      active = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [attachment.id, attachment.previewKind])
-
-  const runAttachmentAction = async (
-    action: 'open' | 'reveal',
-    forceSystem = false
-  ): Promise<void> => {
-    if (!timeline || !campId || attachmentAction) return
-    setAttachmentAction(action)
-    try {
-      if (action === 'open') {
-        if (!forceSystem && attachment.kind === 'file' && filePreview) {
-          const outcome = await filePreview.open({
-            kind: 'attachment',
-            campId,
-            attachmentId: attachment.id
-          })
-          if (outcome.kind === 'error') onNotify(outcome.error.message)
-          return
-        }
-        const result = await window.rovai.attachments.open(campId, attachment.id)
-        if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
-        else if (result.error) onNotify('无法使用系统应用打开此附件')
-      } else {
-        const result = await window.rovai.attachments.reveal(campId, attachment.id)
-        if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
-        else if (result.error) {
-          onNotify(rendererPlatform === 'darwin'
-            ? '无法在 Finder 中显示此附件'
-            : rendererPlatform === 'win32'
-              ? '无法在文件资源管理器中显示此附件'
-              : '无法显示此附件所在位置')
-        }
-      }
-    } catch {
-      onNotify(action === 'open'
-        ? '无法使用系统应用打开此附件'
-        : '无法显示此附件所在位置')
-    } finally {
-      setAttachmentAction(null)
-    }
-  }
-
-  const revealLabel = attachmentRevealLabel(rendererPlatform)
-  const systemOpenLabel = attachment.kind === 'directory'
-    ? '打开文件夹'
-    : '使用系统应用打开'
-  const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null
-  const showAttachmentContextMenu = (x: number, y: number): void => {
-    setContextAnchor({ x, y })
-    setContextMenuOpen(true)
-  }
-  const showAttachmentKeyboardMenu = (): void => {
-    const bounds = attachmentButtonRef.current?.getBoundingClientRect()
-    showAttachmentContextMenu(bounds?.left ?? 8, bounds?.bottom ?? 8)
-  }
-
-  const projectionLabel = runtimeProjectionState === 'failed'
-    ? '队员读取不可用'
-    : runtimeProjectionState === 'pending'
-      || runtimeProjectionState === 'recovery_required'
-      ? '正在准备供队员读取'
-      : null
-
-  const detailLabel = projectionLabel ?? (agentPresentation
-    ? attachment.kind === 'directory'
-      ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
-      : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`
-    : null)
-
-  const content = composerImage
-    ? (
-        <span className="attachment-visual composer-image-preview" aria-hidden="true">
-          {previewUrl
-            ? <img src={previewUrl} alt="" />
-            : !previewFailed ? <i className="attachment-loading" /> : <b>!</b>}
-        </span>
-      )
-    : (
-        <>
-          {agentPresentation
-            ? <AgentArtifactIcon type={displayClassification.agentDisplayType} />
-            : (
-                <UserFileIcon
-                  type={displayClassification.userDisplayType === 'image'
-                    ? 'document'
-                    : displayClassification.userDisplayType}
-                />
-              )}
-          <span className="attachment-copy">
-            <span className="attachment-title-line">
-              <strong title={attachment.displayName}>{baseName}</strong>
-              <FileExtensionLabel>{formatLabel}</FileExtensionLabel>
-            </span>
-            {detailLabel && <small>{detailLabel}</small>}
-          </span>
-          {agentPresentation && (
-            <span className="agent-file-open-cue" aria-hidden="true">
-              <svg viewBox="0 0 18 18">
-                <path d="M10.3 3.3h4.4v4.4M14.5 3.5 8.6 9.4" />
-                <path d="M13.5 9.5v4.3H3.8v-9.7h4.3" />
-              </svg>
-              <span>打开</span>
-            </span>
-          )}
-        </>
-      )
-
-  return (
-    <div
-      className={`attachment-card ${presentation === 'composer' ? 'composer-attachment-card' : presentation} ${composerImage ? 'composer-image-attachment' : ''} type-${displayClassification.agentDisplayType} ${projectionLabel ? `attachment-projection-${runtimeProjectionState}` : ''}`}
-      aria-label={projectionLabel ? `${attachment.displayName}：${projectionLabel}` : undefined}
-      data-context-open={contextMenuOpen ? 'true' : undefined}
-      onContextMenu={timeline && campId
-        ? (event) => {
-            event.preventDefault()
-            if (event.clientX === 0 && event.clientY === 0) showAttachmentKeyboardMenu()
-            else showAttachmentContextMenu(event.clientX, event.clientY)
-          }
-        : undefined}
-    >
-      {timeline && campId
-        ? (
-            <>
-              <button
-                className={`attachment-open ${hasImagePreview ? 'is-preview' : ''}`}
-                type="button"
-                aria-busy={attachmentAction !== null}
-                aria-label={hasImagePreview
-                  ? `预览附件 ${attachment.displayName}`
-                  : attachment.kind === 'file' && filePreview
-                    ? `打开文件预览 ${attachment.displayName}`
-                    : `${systemOpenLabel} ${attachment.displayName}`}
-                disabled={attachmentAction !== null}
-                onClick={() => {
-                  if (attachment.kind === 'file' && filePreview) void runAttachmentAction('open')
-                  else if (hasImagePreview) setPreviewOpen(true)
-                  else void runAttachmentAction('open')
-                }}
-                onKeyDown={(event) => {
-                  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
-                  event.preventDefault()
-                  showAttachmentKeyboardMenu()
-                }}
-                ref={attachmentButtonRef}
-              >
-                {content}
-                {attachmentAction && <i className="attachment-action-loading" aria-hidden="true" />}
-              </button>
-              <DropdownMenu.Root open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
-                <DropdownMenu.Trigger asChild>
-                  <span
-                    className="attachment-context-anchor"
-                    style={{ left: contextAnchor.x, top: contextAnchor.y }}
-                  />
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content
-                    className="attachment-context-menu"
-                    aria-label={`附件操作：${attachment.displayName}`}
-                    align="start"
-                    side="right"
-                    sideOffset={4}
-                    collisionPadding={8}
-                    loop
-                    onCloseAutoFocus={(event) => {
-                      event.preventDefault()
-                      attachmentButtonRef.current?.focus()
-                    }}
-                  >
-                    <DropdownMenu.Label className="attachment-context-menu-label">
-                      <strong>{attachment.displayName}</strong>
-                      <small>{attachment.kind === 'directory' ? '文件夹' : attachmentTypeLabel(attachment.mediaType)}</small>
-                    </DropdownMenu.Label>
-                    <DropdownMenu.Item
-                      className="attachment-context-menu-item"
-                      disabled={attachmentAction !== null}
-                      onSelect={() => void runAttachmentAction('open', true)}
-                    >
-                      <AttachmentOpenGlyph kind={attachment.kind} />
-                      <span>{systemOpenLabel}</span>
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator className="attachment-context-menu-separator" />
-                    <DropdownMenu.Item
-                      className="attachment-context-menu-item"
-                      disabled={attachmentAction !== null}
-                      onSelect={() => void runAttachmentAction('reveal')}
-                    >
-                      <AttachmentRevealGlyph />
-                      <span>{revealLabel}</span>
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Root>
-            </>
-          )
-        : hasImagePreview
-          ? (
-              <button
-                className="attachment-open is-preview"
-                type="button"
-                aria-label={`预览附件 ${attachment.displayName}`}
-                onClick={() => setPreviewOpen(true)}
-              >
-                {content}
-              </button>
-            )
-          : <div className="attachment-open">{content}</div>}
-      {hasImagePreview && (
-            <Dialog.Root open={previewOpen} onOpenChange={setPreviewOpen}>
-              <Dialog.Portal>
-                <Dialog.Overlay className="attachment-lightbox-overlay" />
-                <Dialog.Content className="attachment-lightbox" aria-describedby={undefined}>
-                  <Dialog.Title>{attachment.displayName}</Dialog.Title>
-                  <img src={previewUrl} alt={attachment.displayName} />
-                  <Dialog.Close className="attachment-lightbox-close" aria-label="关闭附件预览">×</Dialog.Close>
-                </Dialog.Content>
-              </Dialog.Portal>
-            </Dialog.Root>
-      )}
-      {onRemove && (
-        <button
-          className="attachment-remove"
-          type="button"
-          aria-label={`移除附件 ${attachment.displayName}`}
-          onClick={onRemove}
-        >
-          ×
-        </button>
-      )}
-    </div>
-  )
-}
-
-function AttachmentOpenGlyph({ kind }: { kind: 'file' | 'directory' }): JSX.Element {
-  return kind === 'directory'
-    ? (
-        <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
-          <path d="M2.8 5.8h4l1.5 1.7h6.9v6.7H2.8z" />
-          <path d="M2.8 7.5V4.8h4.4l1.3 1.5" />
-        </svg>
-      )
-    : (
-        <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
-          <path d="M3.4 3.2h7.2l4 4v7.6H3.4z" />
-          <path d="M10.6 3.2v4h4M6.2 11.1h5.7M9.7 8.8l2.2 2.3-2.2 2.2" />
-        </svg>
-      )
-}
-
-function AttachmentRevealGlyph(): JSX.Element {
-  return (
-    <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
-      <path d="M2.8 5.8h4l1.5 1.7h6.9v6.7H2.8z" />
-      <circle cx="11.9" cy="11.2" r="2.1" />
-      <path d="m13.4 12.7 1.8 1.8" />
-    </svg>
-  )
-}
-
-function ComposerAttachmentStrip({ children }: { children: ReactNode }): JSX.Element {
-  const stripRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const strip = stripRef.current
-    if (!strip) return
-    const onWheel = (event: WheelEvent): void => scrollAttachmentStripOnWheel(strip, event)
-    strip.addEventListener('wheel', onWheel, { passive: false })
-    return () => strip.removeEventListener('wheel', onWheel)
-  }, [])
-  return (
-    <div
-      className="composer-attachment-strip"
-      role="group"
-      aria-label="待发送附件，使用左右方向键浏览"
-      tabIndex={0}
-      onKeyDown={scrollAttachmentStripOnKeyDown}
-      ref={stripRef}
-    >
-      {children}
-    </div>
-  )
-}
-
-function scrollAttachmentStripOnKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
-  const strip = event.currentTarget
-  const step = Math.max(144, Math.round(strip.clientWidth * 0.64))
-  if (event.key === 'ArrowLeft') strip.scrollBy({ left: -step })
-  else if (event.key === 'ArrowRight') strip.scrollBy({ left: step })
-  else if (event.key === 'Home') strip.scrollTo({ left: 0 })
-  else if (event.key === 'End') strip.scrollTo({ left: strip.scrollWidth })
-  else return
-  event.preventDefault()
-}
-
-function scrollAttachmentStripOnWheel(strip: HTMLDivElement, event: WheelEvent): void {
-  if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY) || event.deltaY === 0) return
-  const nextScrollLeft = Math.max(0, Math.min(
-    strip.scrollWidth - strip.clientWidth,
-    strip.scrollLeft + event.deltaY
-  ))
-  if (nextScrollLeft === strip.scrollLeft) return
-  strip.scrollLeft = nextScrollLeft
-  event.preventDefault()
-}
-
-function AttachmentPlaceholder({
-  name,
-  kind,
-  state,
-  detail,
-  onRemove
-}: {
-  name: string
-  kind: AttachmentKind
-  state: 'preparing' | 'error'
-  detail?: string
-  onRemove?: () => void
-}): JSX.Element {
-  return (
-    <div className={`attachment-card composer-attachment-card attachment-${state}`}>
-      <span className="attachment-visual" aria-hidden="true">
-        {kind === 'directory'
-          ? (
-              <span className="attachment-folder-state">
-                <AttachmentFolderGlyph />
-                {state === 'preparing'
-                  ? <i className="attachment-loading" />
-                  : <b>!</b>}
-              </span>
-            )
-          : state === 'preparing' ? <i className="attachment-loading" /> : '!'}
-      </span>
-      <span className="attachment-copy">
-        <strong title={name}>{name}</strong>
-        <small title={detail}>
-          {state === 'preparing'
-            ? kind === 'directory' ? '正在创建只读快照…' : '正在安全接入…'
-            : detail ?? '附件处理失败'}
-        </small>
-      </span>
-      {onRemove && (
-        <button className="attachment-remove" type="button" aria-label={`移除失败附件 ${name}`} onClick={onRemove}>×</button>
-      )}
-    </div>
-  )
-}
-
-function attachmentTypeLabel(mediaType: string): string {
-  if (mediaType === 'inode/directory') return '文件夹'
-  if (mediaType.startsWith('image/')) return '图片'
-  if (mediaType === 'application/pdf') return 'PDF'
-  if (mediaType.includes('zip')) return '压缩文件'
-  if (mediaType.startsWith('text/')) return '文本'
-  return '文件'
-}
 
 function attachmentErrorMessage(error: unknown): string {
   const message = readErrorMessage(error)
   if (message.includes('25 MiB')) return '文件超过 25 MiB'
-  if (message.includes('count limit')) return '一条消息最多 10 个附件'
-  if (message.includes('total attachment') || message.includes('64 MiB')) return '附件总大小超过 64 MiB'
-  if (message.includes('2000-file')) return '文件夹内文件数量超过 2,000 个'
-  if (message.includes('4000-entry')) return '文件夹内项目数量超过 4,000 个'
-  if (message.includes('32-level')) return '文件夹层级超过 32 层'
-  if (message.includes('symbolic link') || message.includes('symlinks')) return '文件夹包含不支持的软链接'
+  if (message.includes('attachment_unreadable')) return '文件当前无法读取'
+  if (message.includes('attachment_kind_changed')) return '文件类型已变化'
+  if (message.includes('legacy_draft.attachments_locked')) return '请先发送或移除旧版草稿附件'
   if (message.includes('unsupported item')) return '文件夹包含不支持的项目'
   if (message.includes('regular files and directories')) return '仅支持普通文件或文件夹'
   return '安全接入失败，可移除后重试'
