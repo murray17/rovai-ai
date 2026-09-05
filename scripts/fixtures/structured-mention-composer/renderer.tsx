@@ -28,6 +28,7 @@ const fixtureSkills: ComposerSkillOption[] = [
 const initialMembers: StructuredMentionMember[] = [{
   agentId: 'agent-a',
   displayName: '队员甲',
+  teamRole: '系统架构师',
   mentionable: true
 }]
 

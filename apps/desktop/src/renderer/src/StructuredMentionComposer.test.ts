@@ -6,6 +6,7 @@ import {
   StructuredMentionOptionAvatar,
   shouldHandleStructuredComposerBackspaceAtStart,
   shouldSubmitStructuredComposerOnEnter,
+  structuredMentionMemberDescription,
   structuredMentionOptions,
   structuredSkillOptions
 } from './StructuredMentionComposer'
@@ -16,11 +17,13 @@ import type { ComposerSkillOption } from './composer-skill-picker'
 const members = [{
   agentId: 'agent_1',
   displayName: '新洛可',
+  teamRole: '默认队长',
   avatarRef: 'rovai://member-avatar/builtin/luoke/v1',
   mentionable: true
 }, {
   agentId: 'agent_2',
   displayName: '沐瓦',
+  teamRole: '',
   mentionable: true
 }]
 
@@ -87,6 +90,11 @@ describe('StructuredMentionComposer V2', () => {
     expect(memberMarkup).toContain('class="member-avatar-image"')
     expect(allMembersMarkup).toContain('class="mention-avatar"')
     expect(allMembersMarkup).toContain('>@</span>')
+  })
+
+  it('uses the catalog-backed team role as the member candidate description', () => {
+    expect(structuredMentionMemberDescription(members[0])).toBe('默认队长')
+    expect(structuredMentionMemberDescription(members[1])).toBe('团队角色未设置')
   })
 
   it('filters Skills by name and description and keeps all options for an empty query', () => {
