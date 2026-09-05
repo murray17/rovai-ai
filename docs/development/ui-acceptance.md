@@ -132,7 +132,7 @@ pnpm accept:bootstrap-shell-ui
 当前会话完整正文查找（含地图快捷返回、非 Camp 边界、旧消息 anchored 定位与双主题双尺寸）、
 Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十三 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏，以及“关于与更新”
-的真实 packaged 版本、确定性禁用网络自动检查、App Update v1 idle 快照，以及 Bootstrap Shell 在未知 authority 下
+的真实 packaged 版本、确定性禁用网络自动检查、App Update v2 idle 快照，以及 Bootstrap Shell 在未知 authority 下
 保留原文件、隔离业务树、显式重试不消耗 crash budget、Day/Night、1040×700、窄窗口、
 200% 等效布局、reduced motion、键盘焦点和无横向溢出回归。available 到失败的完整状态/动作/fallback 矩阵由 Renderer
 测试覆盖；签名 macOS/Windows 跨版本升级仍属于各平台 Release qualification。
@@ -181,7 +181,10 @@ Core 首次启动仍进行本地初始化时触发慢退出，以免截图流程
 
 验收必须证明：
 
-- `before-quit` 立即阻止新界面交互，前 400ms 不显示关闭反馈；慢退出显示无操作控件的 accessible busy
+- 先等待一个已保存 Draft revision，再输入最后一段 Lexical 正文并立即正常退出；同一隔离数据目录重启后必须
+  读回包含最后一段且 revision 已推进的 Core Draft，证明 Renderer fence 发生在 `core.shutdown()` 前；
+- quit preparation 只锁定当前 Composer 且不显示新等待面；Core shutdown 开始后立即阻止全局新界面交互，前
+  400ms 不显示关闭反馈；慢退出显示无操作控件的 accessible busy
   modal，Day/Night、`1040×700`、200% zoom 与 reduced motion 下标题、条件取消说明和卡片边界均完整，
   背景不得出现关闭阶段的错误横幅或 Toast；
 - Desktop 等待 Core 自行完成 drain 和子进程真实退出，App 以 `exit 0` 自然结束；只有验收清理失败

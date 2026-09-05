@@ -35,6 +35,9 @@ const runtimeKind = process.env.ROVAI_PLANNED_SHUTDOWN_RUNTIME_KIND?.trim() || '
 const shutdownDeadlineMs = 10_000
 const promptCancellationTargetMs = 5_000
 const reportPath = join(outputDir, 'planned-shutdown-acceptance.json')
+const quitDraftSavedPrefix = '退出前已经持久化；'
+const quitDraftLatestSuffix = '最后输入必须由退出 fence 保存。'
+const quitDraftExpectedBody = `${quitDraftSavedPrefix}${quitDraftLatestSuffix}`
 
 let firstApp = null
 let recoveredApp = null
@@ -103,11 +106,17 @@ try {
       : null
   }, 'real Runtime input handoff', 180_000, 40)
   await openCamp(firstApp.cdp, campId)
+  await appendComposerText(firstApp.cdp, quitDraftSavedPrefix, quitDraftSavedPrefix)
+  const savedDraftBeforeQuit = await waitFor(async () => {
+    const draft = await request('camp.composerDraft.get', { campId })
+    return draft.body === quitDraftSavedPrefix ? draft : null
+  }, 'initial Composer Draft autosave', 10_000, 40)
 
   const liveDescendantPids = await descendantProcessIds(firstApp.child.pid)
   assert(liveDescendantPids.length >= 3,
     `Packaged App did not own the expected Core/Runtime process tree: ${liveDescendantPids.join(', ')}`)
 
+  await appendComposerText(firstApp.cdp, quitDraftLatestSuffix, quitDraftExpectedBody)
   const shutdownStartedAt = Date.now()
   const quitRequest = requestAppQuit(firstApp)
   trace(`normal quit requested for pid ${firstApp.child.pid}`)
@@ -159,6 +168,13 @@ try {
 
   recoveredApp = await launchApp(await availablePort(), 1040, 700)
   const recoveredRequest = (method, params = {}) => appRequest(recoveredApp.cdp, method, params)
+  const recoveredDraft = await recoveredRequest('camp.composerDraft.get', { campId })
+  assert(recoveredDraft.body === quitDraftExpectedBody
+    && recoveredDraft.revision > savedDraftBeforeQuit.revision,
+  `Normal App quit did not persist the latest Composer Draft: ${JSON.stringify({
+    before: savedDraftBeforeQuit,
+    recovered: recoveredDraft
+  })}`)
   const recoveredSnapshot = await waitFor(async () => {
     const snapshot = await recoveredRequest('camps.snapshot', { campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
@@ -298,6 +314,12 @@ try {
       executionEpoch: recoveredRun.executionEpoch,
       hasUnsettledExternalEffects: recoveredRun.hasUnsettledExternalEffects,
       terminal
+    },
+    composerDraft: {
+      savedRevisionBeforeQuit: savedDraftBeforeQuit.revision,
+      recoveredRevision: recoveredDraft.revision,
+      recoveredBody: recoveredDraft.body,
+      latestEditorStatePersisted: recoveredDraft.body === quitDraftExpectedBody
     },
     overlays: {
       day: dayOverlay,
@@ -460,6 +482,29 @@ async function openCamp(cdp, campId) {
   })()`)
   assert(opened, `Could not open Camp ${campId}`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-workspace'))`, 30_000)
+}
+
+async function appendComposerText(cdp, text, expectedBody) {
+  await waitForExpression(cdp,
+    `document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'`, 30_000)
+  const focused = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    if (!editor || editor.getAttribute('contenteditable') !== 'true') return false
+    editor.focus()
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    return document.activeElement === editor
+  })()`)
+  assert(focused, 'Could not focus the Camp Composer before planned shutdown')
+  await cdp.send('Input.insertText', { text })
+  const localBody = await evaluate(cdp,
+    `document.querySelector('#camp-message')?.textContent ?? null`)
+  assert(localBody === expectedBody,
+    `Camp Composer did not commit the expected local EditorState: ${JSON.stringify(localBody)}`)
 }
 
 async function openAgentProcess(cdp, targetAgentId) {

@@ -1,7 +1,19 @@
 import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, extname, join } from 'node:path'
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, protocol, screen, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  MessageChannelMain,
+  nativeTheme,
+  protocol,
+  screen,
+  shell
+} from 'electron'
 import { isCampId } from '@contracts'
 import type {
   AppearanceSnapshot,
@@ -103,6 +115,7 @@ import {
   type DesktopAutoUpdater
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
+import { requestRendererQuitPreparation } from './renderer-quit-preparation'
 import { ChannelSettingsService } from './channel-settings'
 import { ExecutionViewService } from './execution-view-service'
 import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
@@ -716,10 +729,11 @@ function createWindow(): void {
   }
   window.on('resize', persistBounds)
   window.on('move', persistBounds)
-  window.on('close', () => {
+  window.on('close', (event) => {
     if (persistBoundsTimer) clearTimeout(persistBoundsTimer)
     persistBoundsTimer = null
     flushBounds()
+    if (process.platform !== 'darwin') appQuitCoordinator.handleQuitRequest(event)
   })
   window.on('closed', () => {
     if (pageZoomFeedbackTimer !== null) clearTimeout(pageZoomFeedbackTimer)
@@ -1906,14 +1920,24 @@ ipcMain.handle('rovai:export-memory', async () => {
 const appQuitCoordinator = new AppQuitCoordinator({
   updateInstallPending: () => appUpdates?.get().status === 'installing',
   beforeDrain: () => {
+    // Keep services and Core fully available until Renderer Draft preparation succeeds.
+  },
+  prepareRenderer: () => requestRendererQuitPreparation(
+    mainWindow,
+    () => new MessageChannelMain()
+  ),
+  drain: async () => {
     appUpdates?.dispose()
     nativeTheme.removeListener('updated', publishAppearance)
-  },
-  drain: async () => {
     const stopAutomation = userAutomation?.stop() ?? Promise.resolve()
     userAutomation = null
     try {
-      await Promise.all([stopAutomation, channelHostLifecycle.stop(), executionView.stop()])
+      await Promise.all([
+        filePreview.closeAll(),
+        stopAutomation,
+        channelHostLifecycle.stop(),
+        executionView.stop()
+      ])
     } catch (error) {
       console.error('Rovai application services shutdown failed', error)
     }
@@ -1922,6 +1946,9 @@ const appQuitCoordinator = new AppQuitCoordinator({
   },
   reportFailure: (error) => {
     console.error('Rovai Core controlled shutdown failed', error)
+  },
+  reportPreparationFailure: (error) => {
+    console.error('Rovai Renderer quit preparation failed; the App remains open', error)
   },
   finish: () => {
     // The updater has already staged its installer before update-driven quit.
@@ -1935,8 +1962,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
-  void filePreview.closeAll()
-  appQuitCoordinator.handleBeforeQuit(event)
+  appQuitCoordinator.handleQuitRequest(event)
 })
 
 function requireGeneralPreferences(): GeneralPreferencesStore {

@@ -56,6 +56,7 @@ import {
   effectiveCancellingTurnIds,
   notificationFocusMatchesAction,
   optimisticCampMessage,
+  prepareActiveCampForAppQuit,
   rectanglesIntersect,
   recentCampSnapshot,
   reconcileCancellingTurnIds,
@@ -1948,6 +1949,36 @@ describe('task event projections', () => {
       () => true
     )).rejects.toThrow('navigation failed')
     expect(failedComplete).toHaveBeenCalledWith(false)
+  })
+
+  it('prepares only the matching mounted Camp before App quit', async () => {
+    const complete = vi.fn()
+    const guard = vi.fn(async () => ({ complete }))
+    const registration = { campId: 'camp-a', guard }
+
+    await prepareActiveCampForAppQuit('camp', 'camp-a', registration)
+
+    expect(guard).toHaveBeenCalledOnce()
+    expect(complete).toHaveBeenCalledOnce()
+    expect(complete).toHaveBeenCalledWith(true)
+
+    await prepareActiveCampForAppQuit('compose', 'camp-a', registration)
+    await prepareActiveCampForAppQuit('camp', 'camp-b', registration)
+    await prepareActiveCampForAppQuit('camp', null, registration)
+    expect(guard).toHaveBeenCalledOnce()
+  })
+
+  it('propagates App quit Draft preparation failures without completing a leave', async () => {
+    const failure = new Error('draft save failed')
+    const guard = vi.fn(async () => {
+      throw failure
+    })
+
+    await expect(prepareActiveCampForAppQuit('camp', 'camp-a', {
+      campId: 'camp-a',
+      guard
+    })).rejects.toBe(failure)
+    expect(guard).toHaveBeenCalledOnce()
   })
 
   it('keeps attachment-only message bytes empty while supplying a non-empty execution purpose', () => {

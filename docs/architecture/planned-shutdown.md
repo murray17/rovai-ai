@@ -9,7 +9,7 @@ last_updated: 2026-09-01
 
 本文组合主动退出、重启和更新时的 Core 生命周期结构。当前产品定义是：退出 Rovai 即取消所有非终态
 AgentRun，完成本地收口，再结束进程。精确 wire、字段、幂等和 deadline 由
-[Planned Shutdown v5](../contracts/planned-shutdown-v5.md)拥有；Runtime terminal 与未知外部效果边界由
+[Planned Shutdown v6](../contracts/planned-shutdown-v6.md)拥有；Runtime terminal 与未知外部效果边界由
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有。没有 durable shutdown
 cycle 的异常崩溃、强杀、断电继续由 [AgentRun Recovery](agent-run-recovery.md)处理。
 
@@ -114,11 +114,18 @@ persist durable cancel-all intent and settle business obligations
 
 ## 7. Desktop boundary 与 Renderer
 
-Electron Main 是唯一 shutdown caller。第一次 `before-quit` 保留 Renderer 等待面，禁止 Core 自动重启，发送
-一次 v3 request，并等待 report 与 child 真实 exit；重复 quit 复用同一个 Promise。外层 watchdog 只负责 Core
-完全失去响应的最终强制结束，不能伪造领域 terminal。
+Electron Main 是唯一 shutdown caller。第一次可控 quit 在 Renderer 仍存活时由既有 `AppQuitCoordinator` 阻止并冻结
+reason；Windows/Linux 主窗口关闭同样在窗口销毁前进入该入口。Main 先通过私有一次性响应通道请求 Renderer 准备退出，
+Renderer 只复用匹配 active Camp 的 `CampLeaveGuard`，等待附件、最新 Lexical flush 与 Draft mutation queue。成功后
+Main 才停止应用服务、禁止 Core 自动重启、发送一次 v3 request，并等待 report 与 child 真实 exit；重复 quit 不创建
+第二轮准备或 drain。
 
-Renderer 只消费 `runtime.state = shutting_down`。它立即建立覆盖当前页面的交互 guard；若关闭在 400ms 内
+Renderer 准备失败或响应通道失败时，本次退出终止：不停止服务、不调用 `core.shutdown()`、不执行 `app.exit()`；当前
+Camp、Lexical 内容和交互由 leave guard 保留并显示既有保存错误，下一次 quit 可重新尝试。没有存活且已加载的 Renderer
+时不存在内存 Composer authority，因此准备为 no-op。外层 watchdog 仍只负责 Core 已开始关闭后完全失去响应的最终
+强制结束，不能伪造领域 terminal。
+
+Renderer 只在准备成功、Core shutdown 已开始后消费 `runtime.state = shutting_down`。它立即建立覆盖当前页面的交互 guard；若关闭在 400ms 内
 完成则不显示反馈，超过门槛才显示可聚焦、无操作按钮的 busy modal：“正在安全退出”。modal 说明 Rovai
 正在保存本地状态并关闭后台服务；若有尚未完成的 AgentRun，将一并取消，未确认的文件、命令或工具效果
 保留为待核对记录。进入该状态后 Renderer 停止页面投影刷新，并抑制由关闭拒绝产生的晚到错误横幅与 Toast；

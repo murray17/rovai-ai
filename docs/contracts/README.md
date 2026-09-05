@@ -234,7 +234,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v10（当前）](camp-composer-draft-v10.md) | v9 wire/事务不变；现有 leave guard 覆盖所有真正卸载 active Camp Composer 的普通 Renderer 导航 |
+| [Camp Composer Draft v11（当前）](camp-composer-draft-v11.md) | v10 wire/事务不变；可控正常退出在 Planned Shutdown 前复用 active-Camp leave guard 持久化最新 Lexical EditorState |
+| [Camp Composer Draft v10（历史）](camp-composer-draft-v10.md) | v9 wire/事务不变；现有 leave guard 覆盖所有真正卸载 active Camp Composer 的普通 Renderer 导航；App 退出边界由 v11 替代 |
 | [Camp Composer Draft v9（历史）](camp-composer-draft-v9.md) | v8 V2 wire/identity 不变；Core content 显式回写 Lexical，发送/路由/切换同步锁定，加载失败 fail closed，autosave 投影收窄；导航 leave 范围由 v10 替代 |
 | [Camp Composer Draft v8（历史）](camp-composer-draft-v8.md) | v7 revision/附件语义不变；Draft 改用 Text + Atom ComposerDocument V2，旧数组只读兼容、body 派生；发送中输入语义由 v9 替代 |
 | [Camp Composer Draft v7（历史）](camp-composer-draft-v7.md) | exact Draft 保存 source refs，可直接发送或连同附件进入私有 FIFO；旧 Prepared Draft 互斥自然耗尽；content wire 由 v8 替代 |
@@ -244,11 +245,13 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Composer Draft v3（历史）](camp-composer-draft-v3.md) | v2 reply/continuation 边界不变；ready 附件可以独立构成用户发送 payload，空正文忠实持久化并保留原子消费 |
 | [Camp Composer Draft v2（历史）](camp-composer-draft-v2.md) | v1 reply 边界加 durable recipient continuation、source suppression、发送物化、显式修复与无 Default Lead fallback；仍继承正文非空发送要求 |
 | [Camp Composer Draft v1 (historical)](camp-composer-draft-v1.md) | Structured Content、附件引用、持久 reply intent、exact revision mutation、显式接收者修复与 Draft-only user send；不含 continuation |
-| [Planned Shutdown v5（当前）](planned-shutdown-v5.md) | v4 wire/report 不变；退出取消 Run 统一为 cancelled，内部未知效果计数保留 |
+| [Planned Shutdown v6（当前）](planned-shutdown-v6.md) | v5 Core wire/report 不变；Main 在服务 drain 与 Core shutdown 前等待 Renderer 完成最新 Composer Draft fence，失败保留 App 供重试 |
+| [Planned Shutdown v5（历史）](planned-shutdown-v5.md) | v4 wire/report 不变；退出取消 Run 统一为 cancelled，内部未知效果计数保留；Desktop Composer 前置 fence 由 v6 替代 |
 | [Planned Shutdown v4（历史）](planned-shutdown-v4.md) | wire 仍为 protocol 3；先业务结算再 Runtime 清理，未知终态与原 report 保留 |
 | [Planned Shutdown v3（历史）](planned-shutdown-v3.md) | 退出、重启或更新统一取消全部非终态 AgentRun；稳定快照后立即关闭 terminal/route 准入，保留未知效果并使用 v3 report |
 | [Planned Shutdown v2（历史）](planned-shutdown-v2.md) | v1 generation-local reliable terminal 加 durable shutdown cycle、product fence、启动补偿、终态 unknown-effect 保留与 v2 report |
-| [App Update v1（当前）](app-update-v1.md) | Desktop 主动检查、独立 release/prompt 事实、显式下载与安装、精确提醒 dismiss、状态投影和 updater-first 受控退出 |
+| [App Update v2（当前）](app-update-v2.md) | v1 snapshot/API 与 updater-first staging 不变；安装已接受后先完成 active Composer Draft fence，再进入同一 Planned Shutdown |
+| [App Update v1（历史）](app-update-v1.md) | Desktop 主动检查、独立 release/prompt 事实、显式下载与安装、精确提醒 dismiss、状态投影和 updater-first 受控退出；Composer 前置 fence 由 v2 替代 |
 | [Windows Private Storage v2（当前）](windows-private-storage-v2.md) | v1 私有存储不变；增加 `<data_dir>\runtime-files`、受保护 View containers 与精确 Camp root 暴露边界 |
 | [Windows Private Storage v1（历史）](windows-private-storage-v1.md) | `%LOCALAPPDATA%` 布局、local NTFS admission、创建时 protected DACL、handle identity 与 long-path blocker；不含 Runtime Files Root |
 | [Windows Skill Projection v1（当前）](windows-skill-projection-v1.md) | copy backend 多阶段 journal、crash-window 幂等恢复、Execution Root Projection Gate 与 project-owned preserve |
