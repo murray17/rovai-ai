@@ -4,7 +4,7 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-09-03
+last_updated: 2026-09-05
 ---
 
 # Runtime Platform Admission v2
@@ -59,15 +59,17 @@ Admission，不是 Renderer-only Settings Preview；后者仍没有 Adapter、In
 Machine facts remain independent. `preview` does not manufacture installation, authentication, model, capability, Session or Ready
 evidence; all ordinary checks and fail-closed Runtime blockers still apply.
 
-## 4. Current Pi preview
+## 4. Current Pi qualification
 
-`pi × macos-arm64`、`pi × macos-x64` 与 `pi × windows-x64` are `preview /
-runtime_platform.qualification_evidence_missing / evidenceRevision=null`. They participate in discovery, explicit checks,
-member selection, diagnostics and AgentRun so users can test the integration. The UI must disclose “实验性开放” and must not
-display these rows as qualified.
+`pi × macos-arm64`、`pi × macos-x64` 与 `pi × windows-x64` are `qualified / reasonCode=null`, and each row binds
+its own immutable Pi evidence revision. They participate in ordinary discovery, explicit checks, member selection,
+diagnostics and AgentRun without experimental disclosure. Machine installation, authentication, model, Session and Ready
+facts remain independent and fail closed.
 
-Moving any Pi row from `preview` to `qualified` still requires that exact platform's immutable Pi qualification artifact.
-Missing compaction, workspace/read-only, failure/retry, idle eviction or packaged lifecycle evidence is not waived by preview use.
+This promotion follows the maintainer's completed target-host validation and explicit release approval. It does not let one
+platform inherit another platform's result, and it does not change Pi's accepted capability differences such as External MCP,
+structured Web Search or Camp Fast. Future platforms or materially incompatible Pi versions still require their own immutable
+artifact and admission decision.
 
 ## 5. Existing configuration preservation
 
@@ -78,6 +80,7 @@ No fallback Runtime or synthetic default may be created after failure.
 ## References
 
 - [V1.39-D06](../versions/v1.39/decisions.md#v1-39-d06)
+- [V1.49-D02](../versions/v1.49/decisions.md#v1-49-d02)
 - [Runtime Launch and Verification v31](runtime-launch-and-verification-v31.md)
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime compatibility register](../runtime-compatibility.md)

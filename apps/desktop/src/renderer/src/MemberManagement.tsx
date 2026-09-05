@@ -1131,7 +1131,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
                 disabled={hostPlatform !== null && !runtimePlatformAdmissionAllowsUse(
                   runtimePlatformAdmissionFor(hostPlatform, runtimePlatformAdmission, kind)
                 )}
-              >{adapterLabel(kind)}{kind === 'pi' ? '（实验性）' : ''}</option>
+              >{adapterLabel(kind)}</option>
             ))}
           </select>
           </label>
@@ -1778,7 +1778,7 @@ function adapterLabel(kind: AdapterKind): string {
 function adapterMaturityLabel(kind: AdapterKind): string {
   return ({
     'codex-cli': '稳定',
-    pi: '实验性',
+    pi: '稳定',
     'opencode-cli': '测试',
     'copilot-cli': '测试',
     'claude-code-cli': '测试',

@@ -32,8 +32,9 @@ use crate::{
     runtime_platform_admission::{
         GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
         GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-        RuntimePlatformAdmission, RuntimePlatformAdmissionReasonCode,
-        WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+        PI_MACOS_ARM64_EVIDENCE_REVISION, PI_MACOS_X64_EVIDENCE_REVISION,
+        PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
+        RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
     },
 };
 
@@ -690,10 +691,14 @@ impl AgentRuntimeAdapterRegistry {
             );
         }
         if kind == AdapterKind::Pi {
-            return RuntimePlatformAdmission::preview(
+            return RuntimePlatformAdmission::qualified(
                 kind,
                 platform,
-                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                match platform {
+                    HostPlatformKey::MacosArm64 => PI_MACOS_ARM64_EVIDENCE_REVISION,
+                    HostPlatformKey::MacosX64 => PI_MACOS_X64_EVIDENCE_REVISION,
+                    HostPlatformKey::WindowsX64 => PI_WINDOWS_X64_EVIDENCE_REVISION,
+                },
             );
         }
         if kind == AdapterKind::GrokBuild {

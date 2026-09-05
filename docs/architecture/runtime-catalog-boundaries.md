@@ -392,9 +392,9 @@ Extension 的未映射交互返回 cancelled/denied，不 poison Host。stderr�
 reasoning/cost 保持 NULL。
 
 Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Camp Fast 当前仍 unsupported/hidden。macOS arm64、
-macOS x64 和 Windows x64 均为
-`preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`；普通 discovery、检查、成员选择、
-Diagnostics 与 AgentRun 对三平台开放，UI 明确标记实验性，但不得称为 First-Class/qualified。字段级行为见
+macOS x64 和 Windows x64 各自绑定 Pi 专属 immutable evidence revision，均为 `qualified / reasonCode=null`；普通
+discovery、检查、成员选择、Diagnostics 与 AgentRun 对三平台开放，UI 走正式 Runtime 展示且不再标记实验性。
+平台晋升不新增 Pi 已明确 unsupported/hidden 的能力。字段级行为见
 [Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)，
 证据状态见[Runtime 兼容性清单](../runtime-compatibility.md)。
 

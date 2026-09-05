@@ -6734,6 +6734,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('>Codex CLI</option>')
+    expect(markup).toContain('>Pi Coding Agent</option>')
     expect(markup).toContain('>OpenCode</option>')
     expect(markup).toContain('>GitHub Copilot</option>')
     expect(markup).toContain('>Claude Code</option>')
@@ -6891,7 +6892,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('前往 Agent 运行时')
   })
 
-  it('keeps Pi selectable on a platform preview row and labels it experimental', () => {
+  it('keeps qualified Pi selectable without experimental disclosure', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: agentProfile(),
       installations: [],
@@ -6905,7 +6906,8 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('<option value="pi">Pi Coding Agent（实验性）</option>')
+    expect(markup).toContain('<option value="pi">Pi Coding Agent</option>')
+    expect(markup).not.toContain('Pi Coding Agent（实验性）')
     expect(markup).not.toContain('<option value="pi" disabled="">')
   })
 
@@ -6976,7 +6978,7 @@ describe('task event projections', () => {
     expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(14)
     expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(14)
     expect(markup.match(/检查可用性/g)).toHaveLength(13)
-    expect(markup).toContain('实验性开放 ·')
+    expect(markup).not.toContain('实验性开放 ·')
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
     expect(markup).not.toContain('来源 inherited_path')
@@ -7157,9 +7159,7 @@ function runtimeAdmissionRows(
     'antigravity-app'
   ]
   return runtimeKinds.map((runtimeKind) => {
-    const effectiveStatus = runtimeKind === 'pi' && status === 'qualified'
-      ? 'preview'
-      : runtimeKind === 'cursor-agent' && status === 'qualified'
+    const effectiveStatus = runtimeKind === 'cursor-agent' && status === 'qualified'
         ? 'not_qualified'
         : status
     return {

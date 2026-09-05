@@ -12,7 +12,7 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 if (process.platform !== 'darwin') {
-  throw new Error('The current Pi local-evidence smoke is implemented for macOS; formal platform admission remains NotQualified')
+  throw new Error('The current Pi qualification smoke is implemented for macOS; use the platform-specific Windows acceptance path on Windows')
 }
 
 const root = resolve(import.meta.dirname, '..')
@@ -370,7 +370,7 @@ try {
     reportedVersion: installation.snapshot.reportedVersion,
     testedPiVersion: piVersion,
     localEvidencePlatform: `${process.platform}-${process.arch}`,
-    formalPlatformAdmission: 'preview',
+    formalPlatformAdmission: 'qualified',
     probeSessionRootPollution: false,
     nativeSessionCompatibilityKey: installation.snapshot.nativeSessionCompatibilityKey,
     nativeSessionId: firstStart.params.nativeThreadId,

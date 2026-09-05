@@ -76,7 +76,8 @@ capability snapshot 的 permission options 归一为空列表、profile 与非�
 - Skills、Extensions、Context files、Prompt templates、Built-in/Extension Tools 都由 Pi 原生 ResourceLoader 负责；
   Rovai 投递到 `.pi/skills` 的内容也走同一原生发现链。
 - Pi 不提供 Rovai Tool Approval 或 sandbox；permission options 为空。
-- 图片继续按模型能力经 `prompt.images` 发送；Session、model、thinking、Preview/NotQualified 结论保持不变。
+- 图片继续按模型能力经 `prompt.images` 发送；Session、model 与 thinking 语义保持不变。精确平台准入由
+  Runtime Platform Admission Registry 及各平台 immutable evidence 拥有，不由本 launch 合同冻结。
 - Formatter 22 Prompt 不解析 Slash/CURRENT_INPUT，不手工展开 Skill/Prompt template，不做 Prompt Transform。
 - Host/Fleet 的 owner binding、epoch fence、singleflight、LRU、correlated abort、shutdown/reap 与 exact resume 保持不变。
 

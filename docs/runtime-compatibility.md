@@ -23,8 +23,9 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 当前 closed `AdapterKind` 包含十四种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
 Grok Build 与 Pi Coding Agent。
-Cursor 在三个目标平台均为 `not_qualified`；Pi 在三个目标平台均为可运行但未正式资格化的 `preview`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
-digest-bound `qualified`。
+Cursor 在三个目标平台均为 `not_qualified`；Pi、Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
+digest-bound `qualified`。Pi 三个平台分别绑定自己的 adapter-scoped evidence，不继承通用 macOS/Windows、
+Kimi 或 Grok 的平台结论。
 Grok Build 在 adapter-scoped 证据分别覆盖的 macOS arm64、macOS x64 与 Windows x64 均为 `qualified`；
 三个宿主平台各自绑定独立 evidence digest，不互相外推。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
@@ -32,7 +33,26 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
-### 2026-09-03 Pi 0.84.4 macOS arm64 开发证据与实验性开放记录
+### 2026-09-05 Pi 三平台正式准入
+
+维护者确认 Pi 已分别在 macOS arm64、macOS x64 与 Windows x64 完成目标主机验证，没有发现阻止发布的问题，并
+明确批准三端移除“实验性/实验性开放”披露。三行因此从 `preview /
+runtime_platform.qualification_evidence_missing / evidenceRevision=null` 晋升为 `qualified / reasonCode=null`，各自绑定
+[`macos-arm64-pi-v1`](../qualification/runtime-platform/macos-arm64-pi-v1.json)、
+[`macos-x64-pi-v1`](../qualification/runtime-platform/macos-x64-pi-v1.json)与
+[`windows-x64-pi-v1`](../qualification/runtime-platform/windows-x64-pi-v1.json)的不可变 SHA-256 revision。
+
+本次 Windows 验收使用安装后的 Core 与 Pi `0.84.4`，通过官方 `minimax-cn / MiniMax-M3` 配置完成真实模型回复、
+Host 重启后的 exact Native Session continuation、原生文件写入、Bash 输出和计划关闭。macOS 两个平台的晋升来源是
+维护者已完成各自目标主机验收后的明确发布确认；本提交不冒充重新执行那两次私有模型会话，含凭据、Prompt、路径、
+Native Session ID 和原始日志的材料也不进入仓库。
+
+该平台晋升不改变 Pi `>=0.84.4`、Machine Ready、安装、认证、模型、Session 或 Dispatch 的逐次门禁，也不新增能力。
+External MCP 继续为 accepted `Unsupported`，结构化 Web Search 与 Camp Fast 继续 unsupported/hidden，Skills 继续由 Pi
+原生 ResourceLoader 与 workspace trust 发现，Usage 未报告的 reasoning/cost 保持 unknown。Renderer 仍保留通用
+`preview` 展示能力，但当前 Pi 三个平台不再使用它。
+
+### 2026-09-03 Pi 0.84.4 macOS arm64 开发证据与历史实验性开放记录
 
 本机把 `@earendil-works/pi-coding-agent@0.84.4` 安装到一次性目录，未替换 PATH 上的 0.84.2。Pi 官方
 `auth.json/settings.json` 使用 `minimax-cn / MiniMax-M3`，直接官方 Pi 请求返回固定 marker；凭据值没有进入仓库、
@@ -54,13 +74,13 @@ Probe、成员选择、诊断或 AgentRun 语义。
 Pi executable 缺失时，独立 optional subsystem 只把 `runtime.pi` 标成 degraded；Core、Skills、MCP 与其他 Runtime
 仍可用。这个安装存在性检查不等于 Ready 或平台资格。
 
-本记录只形成 `macos-arm64` 开发证据，不是 `Runtime Platform Admission` artifact。Pi 在 macOS arm64、macOS x64、
-Windows x64 均为 `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`；普通 discovery、
-检查、成员选择、Diagnostics 与 AgentRun 已开放供主动测试，但不宣称 First-Class/qualified。Pi Prompt message 原样
+本记录在 2026-09-03 当时只形成 `macos-arm64` 开发证据，不是 `Runtime Platform Admission` artifact；当时 Pi 在
+三个目标平台均为 `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`。该历史结论已由
+上方 2026-09-05 的三平台独立资格 evidence 与发布决定替代。Pi Prompt message 原样
 使用 Formatter 22，不解释 `/...`；Prompt images 从结构化 ContextManifest attachment refs 接入原生 RPC。
 Pi-specific structured Web Search 与 Camp Fast 当前明确 unsupported/hidden。完整差异和
 未闭合项见 [Pi Parity Matrix](research/pi-runtime-reintegration-parity-matrix.md)与
-[Runtime Launch v34](contracts/runtime-launch-and-verification-v34.md)。
+[Runtime Launch v36](contracts/runtime-launch-and-verification-v36.md)。
 
 ### 2026-08-31 Camp Fast metadata 边界
 
@@ -251,15 +271,16 @@ implementation `Disabled`，不是 `Unsupported`；usage/token 变化、历史�
 
 v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
 Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。2026-08-23 复核既有 Windows 证据并在当前源码树完成
-逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已资格化；Pi 另以实验性 Preview 开放，明确不在本轮设置页范围的
-`cursor-agent` 仍不准入。下表是当前准入状态，不是本机
+逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已资格化；Pi 当时另以 Preview 开放，随后在
+2026-09-05 以自己的 Windows target-host evidence 正式晋升。明确不在设置页范围的 `cursor-agent` 仍不准入。
+下表是当前准入状态，不是本机
 `not_installed`、Probe 失败、上游不支持或 Renderer allowlist；唯一产品真源是 Rust Registry 的
 [Runtime Platform Admission v2](contracts/runtime-platform-admission-v2.md)投影。
 
 | AdapterKind | `windows-x64` admission | evidence revision | 说明 |
 | --- | --- | --- | --- |
 | `codex-cli` | `qualified` | `sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054` | 两轮纯消息与 Native Session 延续通过 |
-| `pi` | `preview` | — | 实验性开放供主动测试；Windows 专属 qualification evidence 仍缺失 |
+| `pi` | `qualified` | `sha256:2dec32c61673793e06c80e9c55fb9631473a418cb773b309f9e075216b3362b8` | Pi 0.84.4、MiniMax-M3、exact resume、原生写入/Bash 与关闭通过；使用专属 artifact |
 | `opencode-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
 | `copilot-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
 | `claude-code-cli` | `qualified` | 同上 | 两轮、取消与 packaged planned-shutdown 证据通过 |

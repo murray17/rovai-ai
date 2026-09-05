@@ -19,9 +19,12 @@ last_updated: 2026-09-05
 
 状态词遵循 [Runtime 接入 Checklist](../development/runtime-integration-checklist.md)：只有
 `Verified + Implemented` 或“可靠证明上游 Unsupported 且由当前版本接受差异”才能通过。deterministic fixture 只证明
-Core parser、fence 和状态机，不替代目标版本真实 Runtime smoke；最后一列因此也是当前阻止 First-Class 平台准入的明确清单。
+Core parser、fence 和状态机，不替代目标版本真实 Runtime smoke。下表最后一列冻结 2026-09-03 Preview 阶段的
+补强清单；维护者随后确认三个目标平台的验收均已完成并批准发布，2026-09-05 的精确平台 artifact 与
+[V1.49-D02](../versions/v1.49/decisions.md#v1-49-d02)已把三行晋升为 `qualified`。尚列出的项目继续作为回归和能力
+增强清单，不被改写成这次提交重新跑出的证据。
 
-| 核心能力轴 | 当前 main 的标准 | 旧 Pi 分支做法 | Pi 0.84.4 真实能力 | 本次实现 | 仍未取得证据的能力 |
+| 核心能力轴 | 当前 main 的标准 | 旧 Pi 分支做法 | Pi 0.84.4 真实能力 | 本次实现 | Preview 阶段补强清单 |
 | --- | --- | --- | --- | --- | --- |
 | Auth / Provider / Model | 使用目标 Runtime 原生 auth/provider/default；真实 catalog；显式模型启动后核对；secret 不持久化或公开；drift 精确 fence | 最终 revision 改为继承用户 Pi 原生 Home，通过 `get_available_models`、`set_model`、`get_state` 管理；早期 Claude/MiniMax overlay 已被决定替代 | 原生 OAuth、subscription、API key 与 `models.json`；RPC 提供完整 model catalog、显式 set 和当前 state | 正式 Host 只使用 Pi 官方配置；runtime-default 不发送 sentinel；显式 provider/model 逐 Session set+readback；provider/model/installation identity 进入 binding fence。0.84.4 官方配置的 MiniMax M3 直接请求与所有本机 Pi smoke 成功；secret 未进入仓库/trace | 真实显式 model override、运行中 auth/provider/model drift 后的 Host/Session fence 尚未跑完整矩阵 |
 | Host / Fleet / LRU | 明确 Host 策略；可驻留 Runtime 进入统一 Fleet；只复用 healthy、idle、process-compatible Host；失败/取消/漂移停止；统一 shutdown/reap | 独立 Pi JSONL Host 接入 Fleet；后期采用 workspace/process resident、多 Session 串行切换；旧接口落后当前 planned shutdown protocol 3 | RPC 进程可长期驻留；`new_session`、exact `switch_session` 会 teardown/rebind Session runtime；`get_state` 暴露 idle/queue 状态 | `resident_multi_session`；公共 Fleet 以计入容量的 Starting reservation 短锁 Reserve、锁外 Spawn、短锁 Commit，同 Run 等待同一 completion，不同 Run/Runtime 并发。复用 identity 为 canonical workspace + process digest，当前 Camp/member invalidation scope 随领取更新；shutdown/删除先退役 in-flight start，MCP Assignment 不进入 compatibility 或 LRU | idle TTL/capacity eviction、packaged App shutdown 与 Core crash recovery 尚未取得真实进程树证据；macOS x64/Windows 尚未验证 |
@@ -36,7 +39,7 @@ Core parser、fence 和状态机，不替代目标版本真实 Runtime smoke；�
 | Built-in `rovai` CLI | 当前 bundled CLI、operation catalog、Charter 与 per-Run lease；真实正式 operation smoke | 通过受管 Bash 与 Fleet builtin process config；旧 smoke 曾受 provider 并发预算中断 | Pi 可通过原生 shell Tool 调用 bundled CLI；无 Pi 专有 Built-in transport | 复用当前 Built-in Tool Runtime/lease/env；真实 0.84.4 完成当前 15-operation full Run 和 resumed/new-lease Run，覆盖三种输入、Gather、exact successor read、conflict 与 lease fencing；Pi shell 本身不经过 Rovai Approval | 另外两个平台及 packaged shutdown 未验证；本机能力本身已是 `Verified + Implemented` |
 | Usage / Cache / Cost | 有结构化 usage 就实现；字段保留 source/scope/counter/input semantics/session/turn；baseline/dedupe；未知保持 NULL；不推价格 | 旧分支因未完成归因而 Disabled | `message_end.message.usage` 是该 assistant response 的权威 usage；字段含 input/output/cacheRead/cacheWrite 与 provider cost；session stats 是全 Session total | 仅 terminal assistant `message_end.message.usage` 形成 `model_call/delta/exclusive_buckets`，按 session+prompt+message digest 去重；session stats/update 不计量。真实 MiniMax Monitoring 观察到 input/output；未知 cache/reasoning/cost 保持 NULL | cache read/write 非零语义、provider cost、retry/compaction/cold resume 去重的真实计量矩阵尚未完成；不消费未证明的 ToolResult/compaction nested usage |
 | Prompt / Images / Queue / Cleanup | accepted 使用 native evidence；图片必须绑定当前授权输入；queue/retry/late event fenced；业务 cancelled 先提交；host quiescent 才进 LRU | 只发送纯文本 prompt；prompt response + V1 receipt 作为 accepted；abort+Fleet stop | RPC 原生支持 `prompt.images`、steer/follow-up/clear_queue、modes、messages/entries、stats/name、compact、auto-compaction 与 export | Formatter 22 payload 不变地发送；图片只从 ContextManifest refs/授权取得，按原顺序发送 exact base64 bytes，模型能力、MIME/digest/size 漂移在 prompt 前失败，每项 schema-2 evidence 直接绑定 Delivery。Prompt response 不接受 Delivery；首个 owner-fenced `agent_start` 原子接受并幂等发布 started。cancel/late fence 和 planned shutdown 保留 | steer/follow-up 产品 ingress、真实 queue/retry late event、compaction/export 授权、crash/invalid JSON/timeout、idle eviction、packaged shutdown 与 Core crash recovery尚未完成 |
-| Ready / Version / Platform | availability、authenticated Ready、capability、platform qualification 分离；专属 immutable evidence；每 shipped platform独立 Golden Flow | 旧分支有 deep probe/validator，但曾提前把 macOS arm64 qualified；后加 exact switch 与独立 session dir | `--version`、RPC state/catalog/extension handshake 可证明 machine ready，但不能自动证明行为资格 | Pi 专属 deep probe 已在本机 0.84.4 真实通过：创建 Session→full ID/file→replacement→`switch_session(exact file)`→`get_state` ID/file/cwd；Probe 使用临时 `--session-dir` 且无污染；snapshot/dispatch 复检。缺安装时只降级 `runtime.pi`；三平台均以 `preview` 开放 discovery、检查、选择与 AgentRun，Fast 仍 hidden | macOS arm64 尚无完整 Golden Flow/immutable artifact；macOS x64、Windows x64 完全无真实证据。Windows `.cmd/.bat`/interpreter/resolved target/fingerprint/identity 尚待验证 |
+| Ready / Version / Platform | availability、authenticated Ready、capability、platform qualification 分离；专属 immutable evidence；每 shipped platform独立 Golden Flow | 旧分支有 deep probe/validator，但曾提前把 macOS arm64 qualified；后加 exact switch 与独立 session dir | `--version`、RPC state/catalog/extension handshake 可证明 machine ready，但不能自动证明行为资格 | Pi 专属 deep probe 已在本机 0.84.4 真实通过；维护者确认三平台目标主机验收完成后，macOS arm64、macOS x64 与 Windows x64 分别绑定 `macos-arm64-pi-v1`、`macos-x64-pi-v1`、`windows-x64-pi-v1` immutable evidence 并晋升为 `qualified`。缺安装时仍只降级 `runtime.pi`，Fast 仍 hidden | 未来平台或不兼容 Pi 版本必须重新取得独立 artifact；本次晋升不把一个平台结果外推给另一个平台，也不撤销普通 Machine Ready 与 Dispatch 门禁 |
 
 ## 实施结论
 
@@ -57,11 +60,12 @@ Core parser、fence 和状态机，不替代目标版本真实 Runtime smoke；�
 - Pi 0.84.4 已有可归因的 model-call Usage，因此不允许继续把整个 Usage 轴标为 Disabled。
 - Prompt images 通过原生 RPC 与当前附件授权接入；Web Search 与 Fast 在没有 Pi 专属结构化事件/资格前明确 Unsupported，
   不从正文、路径、MCP 名或普通 query 推断。
-- 平台资格和实现完成分开：没有精确平台的不可变真实证据时，Pi 以 `preview` 开放 discovery、成员选择与 AgentRun
-  供主动测试，但不得宣称 First-Class/qualified。
+- 平台资格和实现完成分开：Pi 当前三个 shipped platform 各自绑定 immutable evidence 并为 `qualified`；未来没有
+  精确平台 evidence 的行仍不得从现有平台外推，最多按当时的当前版本决定进入 `preview`。
 
-本机当前结论是 `Core Compatible / platform preview`，不是 First-Class。已通过的真实 smoke 关闭了多个实现疑问，
-但上表最后一列仍有 Checklist 核心轴缺口，不能用 Preview 可运行性或 deterministic fixture 把任何 shipped platform 晋升。
+当前产品结论是 Pi 在 macOS arm64、macOS x64 与 Windows x64 均为 platform `qualified`。本矩阵继续保留晋升前的
+补强项与已接受差异，用于后续回归和能力增强；本次发布确认不会把未在提交内重跑的私有目标主机流程描述成新证据，
+也不会把 qualified 平台行解释为新增 External MCP、Web Search、Fast、Approval 或 sandbox 能力。
 
 ## 上游证据入口
 
