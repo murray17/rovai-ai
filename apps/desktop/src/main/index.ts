@@ -149,6 +149,7 @@ import {
   parseHandleRequest,
   parseLineRequest,
   parseOpenFilePreviewRequest,
+  parseRestoreFilePreviewRequest,
   parsePageRequest,
   parseReloadRequest,
   parseReopenRequest
@@ -1014,6 +1015,9 @@ ipcMain.handle('rovai:file-preview-bind-camp', (event, value: unknown) =>
 
 ipcMain.handle('rovai:file-preview-open', (event, value: unknown) =>
   filePreview.open(requireFilePreviewSender(event), parseOpenFilePreviewRequest(value)))
+
+ipcMain.handle('rovai:file-preview-restore', (event, value: unknown) =>
+  filePreview.restore(requireFilePreviewSender(event), parseRestoreFilePreviewRequest(value)))
 
 ipcMain.handle('rovai:file-preview-reopen', (event, value: unknown) =>
   filePreview.reopen(requireFilePreviewSender(event), parseReopenRequest(value)))

@@ -1400,6 +1400,10 @@ export type OpenFilePreviewRequest =
       rawReference: string
     }
 
+export type RestoreFilePreviewRequest = Extract<OpenFilePreviewRequest, {
+  kind: 'message_reference' | 'camp_workspace' | 'attachment' | 'run_evidence'
+}>
+
 export interface ReopenFilePreviewRequest {
   campId: string
   reopenToken: string
@@ -1565,6 +1569,7 @@ export interface FilePreviewExternalUpdateEvent {
 export interface FilePreviewApi {
   bindCamp(campId: string | null): Promise<void>
   open(request: OpenFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
+  restore(request: RestoreFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
   reopen(request: ReopenFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
   readText(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewTextContent>>
   readPage(request: { handleId: string; expectedGeneration: string; offset: number; maxBytes?: number }): Promise<FilePreviewOperationResult<FilePreviewPageContent>>

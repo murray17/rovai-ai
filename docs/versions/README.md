@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.50
-last_updated: 2026-09-05
+current_version: v1.51
+last_updated: 2026-09-06
 ---
 
 # Rovai-ai 版本记录
@@ -201,4 +201,5 @@ last_updated: 2026-09-05
 | v1.47 | `historical` | Camp Composer 在所有实际卸载导航前统一完成 Draft leave guard | [v1.47/README.md](v1.47/README.md) |
 | v1.48 | `historical` | Pi 原生执行、Rovai Approval/Receipt 退役与 `agent_start` 输入准入收口 | [v1.48/README.md](v1.48/README.md) |
 | v1.49 | `historical` | 正常退出前持久化最新 Camp Composer Draft，再进入既有 Planned Shutdown | [v1.49/README.md](v1.49/README.md) |
-| v1.50 | `current` | Camp 内私有 Single Chat、共享 Source Attachment 链路与 Conversation 级待发送队列 | [v1.50/README.md](v1.50/README.md) |
+| v1.50 | `historical` | Camp 内私有 Single Chat、共享 Source Attachment 链路与 Conversation 级待发送队列 | [v1.50/README.md](v1.50/README.md) |
+| v1.51 | `current` | 窗口内按 Camp 恢复文件预览会话，并以无副作用重验和代次 fence 阻断旧能力 | [v1.51/README.md](v1.51/README.md) |

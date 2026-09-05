@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { SafeMarkdown } from './SafeMarkdown'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
 import { FileChangesPreview } from './FileChangesPreview'
-import { FilePreviewTabIcon } from './FilePreviewTabIcon'
+import { FilePreviewTabIcon, ResourceReferenceIcon } from './FilePreviewTabIcon'
 import { previewPathIsVisible, previewTabLabel, previewTabLabels } from './file-preview-tab-presentation'
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 import { parseUnifiedPatch } from './file-preview-patch'
@@ -71,13 +71,13 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   }, [searchMatches.length])
 
   useLayoutEffect(() => {
-    const targetLine = tab.file.target?.line
+    const targetLine = tab.file?.target?.line
     const root = rootRef.current
     const row = targetLine ? root?.querySelector<HTMLElement>(`[data-file-row="${targetLine}"]`) : null
     if (!root || !row) return
     root.scrollTop += row.getBoundingClientRect().top - root.getBoundingClientRect().top
       - (root.clientHeight - row.getBoundingClientRect().height) / 2
-  }, [startLine, tab.content, tab.file.target])
+  }, [startLine, tab.content, tab.file?.target])
 
   useEffect(() => {
     const match = searchMatches[searchIndex]
@@ -95,9 +95,9 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
     <>
       <div
         ref={rootRef}
-        className={`file-preview-code kind-${tab.file.kind}`}
+        className={`file-preview-code kind-${tab.file?.kind ?? 'text'}`}
         role="region"
-        aria-label={`${tab.file.fileName} 内容`}
+        aria-label={`${tab.presentation.fileName} 内容`}
         tabIndex={0}
         onKeyDown={(event) => {
           if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'f') {
@@ -112,7 +112,7 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
         }}
       >
         {lines.map((line, index) => {
-          const patchClass = tab.file.kind === 'patch'
+          const patchClass = tab.file?.kind === 'patch'
             ? line.startsWith('+') && !line.startsWith('+++')
               ? 'is-addition'
               : line.startsWith('-') && !line.startsWith('---')
@@ -123,7 +123,7 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
             : ''
           const currentMatch = searchMatches[searchIndex]
           const highlight = currentMatch?.line === index ? currentMatch : null
-          const target = tab.file.target
+          const target = tab.file?.target
           const targeted = target?.line !== undefined && startLine + index >= target.line
             && startLine + index <= (target.endLine ?? target.line)
           return (
@@ -220,7 +220,7 @@ function ImageViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
     <div className="file-preview-image-stage">
       <img
         src={content.url}
-        alt={tab.file.fileName}
+        alt={tab.presentation.fileName}
         draggable={false}
         style={scaledStyle}
         onLoad={(event) => setDimensions({
@@ -230,7 +230,7 @@ function ImageViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
         onError={() => setImageError(true)}
       />
       <div className="file-preview-image-info" aria-live="polite">
-        {dimensions ? `${dimensions.width} × ${dimensions.height} · ` : ''}{fileSizeLabel(tab.file.size)}
+        {dimensions ? `${dimensions.width} × ${dimensions.height} · ` : ''}{tab.file ? fileSizeLabel(tab.file.size) : ''}
         {scale === null ? '' : ` · ${Math.round(effectiveScale * 100)}%`}
       </div>
       <div className="file-preview-image-controls" aria-label="图片缩放">
@@ -263,7 +263,7 @@ function HtmlViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element | 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const { open } = useFilePreview()
   const [linkError, setLinkError] = useState<string | null>(null)
-  const fragment = tab.file.target?.htmlFragment
+  const fragment = tab.file?.target?.htmlFragment
 
   const scrollToFragment = (): void => {
     if (!content || !fragment) return
@@ -308,6 +308,7 @@ function HtmlViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element | 
         setLinkError('预览中的外部链接已阻止。')
         return
       }
+      if (!tab.file) return
       void open({
         kind: 'child_of_handle',
         parentHandleId: tab.file.handleId,
@@ -319,15 +320,15 @@ function HtmlViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element | 
     }
     window.addEventListener('message', receive)
     return () => window.removeEventListener('message', receive)
-  }, [content, open, tab.file.handleId])
+  }, [content, open, tab.file])
 
-  if (!content) return null
+  if (!content || !tab.file) return null
   return (
     <div className="file-preview-html-stage">
       <iframe
         ref={iframeRef}
         className="file-preview-html"
-        title={`${tab.file.fileName} HTML 预览`}
+        title={`${tab.presentation.fileName} HTML 预览`}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
         srcDoc={content.html}
@@ -349,7 +350,7 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
     document.getElementById(`${tab.id}-${id}`)?.scrollIntoView({ block: 'start' })
   }
   const openFile = (rawReference: string | null): void => {
-    if (!rawReference) return
+    if (!rawReference || !tab.file) return
     void open({
       kind: 'child_of_handle',
       parentHandleId: tab.file.handleId,
@@ -427,13 +428,14 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const { open } = useFilePreview()
   const [linkError, setLinkError] = useState<string | null>(null)
-  if (!tab.content) return <div className="file-preview-empty-content" />
+  const file = tab.file
+  if (!tab.content || !file) return <div className="file-preview-empty-content" />
   if (tab.content.kind === 'markdown') {
     return (
       <div className="file-preview-markdown">
         {linkError && <p className="file-preview-inline-error" role="alert">{linkError}</p>}
         <SafeMarkdown
-          headingTarget={tab.file.target?.heading}
+          headingTarget={file.target?.heading}
           onHeadingTargetResult={(found) => setLinkError(found ? null : '未找到指定的标题，已保持在文件顶部。')}
           localImageUrl={(rawReference) => filePreviewAssetUrl(
             rawReference,
@@ -443,7 +445,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
           onFileReference={(rawReference, _source, target) => {
             void open({
               kind: 'child_of_handle',
-              parentHandleId: tab.file.handleId,
+              parentHandleId: file.handleId,
               rawReference,
               allowSystemOpen: true
             }, target).then((outcome) => {
@@ -469,10 +471,11 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 }
 
 function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
-  const { reload, retry, changePage } = useFilePreview()
+  const { reload, changePage } = useFilePreview()
   const page = tab.content?.kind === 'page' ? tab.content.page : null
-  const showPath = previewPathIsVisible(tab.file)
-  const showUpdate = tab.hasExternalUpdate || tab.isRefreshing
+  const showPath = tab.loadState === 'ready' && previewPathIsVisible(tab.presentation)
+  const showUpdate = tab.loadState === 'ready' && Boolean(tab.file)
+    && (tab.hasExternalUpdate || tab.isRefreshing)
   const updateAction = showUpdate ? (
     <button
       className="file-preview-update-action"
@@ -487,7 +490,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   return (
     <>
       {showPath && <div className="file-preview-path-row">
-        <RelativePath path={tab.file.displayPath} fileName={tab.file.fileName} />
+        <RelativePath path={tab.presentation.displayPath} fileName={tab.presentation.fileName} />
         {updateAction}
       </div>}
       {!showPath && updateAction && <div className="file-preview-update-row">{updateAction}</div>}
@@ -495,11 +498,12 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
         {tab.loadState === 'opening' && !tab.content && (
           <OpeningIndicator />
         )}
-        {tab.loadState === 'error' && !tab.content && (
-          <div className="file-preview-error" role="alert">
-            <strong>无法打开文件</strong>
-            <span>{tab.error?.message}</span>
-            <button type="button" onClick={() => void retry(tab.id)}>重试</button>
+        {['missing', 'unavailable', 'error'].includes(tab.loadState) && !tab.content && (
+          <div className="file-preview-recovery-stage">
+            <div className="file-preview-recovery" role="status" aria-live="polite">
+              <ResourceReferenceIcon kind="file" className="file-preview-recovery-icon" />
+              <p>{tab.error?.message ?? '暂时无法读取文件'}</p>
+            </div>
           </div>
         )}
         {tab.content && <Viewer tab={tab} />}

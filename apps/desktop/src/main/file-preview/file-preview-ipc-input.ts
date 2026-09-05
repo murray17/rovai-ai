@@ -1,7 +1,8 @@
 import {
   isCampId,
   type LocalAttachmentOwnerLocator,
-  type OpenFilePreviewRequest
+  type OpenFilePreviewRequest,
+  type RestoreFilePreviewRequest
 } from '@contracts'
 import { isAttachmentId } from '../attachment-desktop'
 
@@ -168,6 +169,14 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
     default:
       throw new Error('Unsupported file preview source')
   }
+}
+
+export function parseRestoreFilePreviewRequest(value: unknown): RestoreFilePreviewRequest {
+  const request = parseOpenFilePreviewRequest(value)
+  if (request.kind === 'child_of_handle' || request.kind === 'authorized_root') {
+    throw new Error('Unsupported file preview restore source')
+  }
+  return request
 }
 
 export function parseHandleRequest(value: unknown): { handleId: string } {

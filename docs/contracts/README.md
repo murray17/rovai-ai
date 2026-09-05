@@ -110,7 +110,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v2（历史）](camp-open-projection-v2.md) | v1 methods/window 不变；AgentRun 独立取消请求事实、Camp Open schema 2 与 Read Model schema 31；不含 Runtime 模型观测 |
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
-| [File Preview v6（当前）](file-preview-v6.md) | v5 owner-scoped 附件与既有打开分类不变；只有显式 Markdown link 产生消息资源入口，删除渲染前存在性探测，共享视觉类型只统一会话链接与 Tab 图标 |
+| [File Preview v7（当前）](file-preview-v7.md) | v6 显式文件入口不变；增加窗口内按 Camp 的无能力 Tab 快照、无原生副作用 restore wire、binding generation fence 与单句失败呈现 |
+| [File Preview v6（历史）](file-preview-v6.md) | v5 owner-scoped 附件与既有打开分类不变；只有显式 Markdown link 产生消息资源入口，删除渲染前存在性探测，共享视觉类型只统一会话链接与 Tab 图标 |
 | [File Preview v5（历史）](file-preview-v5.md) | v4 文件引用不变；附件 preview/open/reveal 使用 Composer/Pending/Pending Edit/Message exact owner locator 并返回按动作 availability |
 | [File Preview v4（历史）](file-preview-v4.md) | v3 打开与分类不变；消息 inline-code 只在同来源可解析为现存普通文件时生成链接，共享资源类型定义统一候选已知类型和会话/Tab 图标 |
 | [File Preview v3（历史）](file-preview-v3.md) | 具体文件点击直接创建临时只读能力；Main 签发项目相对路径或仅文件名的安全呈现语义，工作区外文件不升级目录授权，HTML/Markdown 资源绑定文档目录 |

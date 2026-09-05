@@ -432,6 +432,91 @@ describe('FilePreviewService', () => {
     expect(registry.rootCount).toBe(0)
   })
 
+  it('restores only previewable files without native actions or authorization prompts', async () => {
+    const { root, service, native, openPath } = await fixture()
+    const outside = await mkdtemp(join(tmpdir(), 'rovai-file-preview-restore-outside-'))
+    directories.push(outside)
+    await writeFile(join(root, 'README.md'), '# Restored')
+    await writeFile(join(root, 'installer.exe'), new Uint8Array([0, 1, 2]))
+    await mkdir(join(root, 'reports'))
+    await symlink(outside, join(root, 'external-directory'))
+
+    expect(await service.restore(1, request('README.md'))).toMatchObject({
+      ok: true,
+      value: { kind: 'file_preview', file: { fileName: 'README.md' } }
+    })
+    expect(await service.restore(1, request('installer.exe'))).toMatchObject({
+      ok: false,
+      error: { code: 'reference_not_clickable' }
+    })
+    expect(await service.restore(1, request('reports'))).toMatchObject({
+      ok: false,
+      error: { code: 'reference_not_clickable' }
+    })
+    const outsideResult = await service.restore(1, request('external-directory'))
+    expect(outsideResult).toMatchObject({
+      ok: false,
+      error: { code: 'outside_authorized_root' }
+    })
+    if (!outsideResult.ok) expect(outsideResult.error.authorizationChallenge).toBeUndefined()
+
+    expect(native.confirmOpen).not.toHaveBeenCalled()
+    expect(native.revealPath).not.toHaveBeenCalled()
+    expect(native.selectRoot).not.toHaveBeenCalled()
+    expect(openPath).not.toHaveBeenCalled()
+    expect(service.handleCount).toBe(1)
+  })
+
+  it('rejects a late Camp result even after switching back to the same Camp id', async () => {
+    const { root, service, authority, native } = await fixture()
+    await writeFile(join(root, 'notes.txt'), 'notes')
+    type AuthorityResult = Awaited<ReturnType<FilePreviewSourceAuthority['resolve']>>
+    let completeAuthority!: (result: AuthorityResult) => void
+    const delayedAuthority = new Promise<AuthorityResult>((resolveResult) => {
+      completeAuthority = resolveResult
+    })
+    const resolveSource = vi.spyOn(authority, 'resolve').mockReturnValueOnce(delayedAuthority)
+
+    const opening = service.open(1, request('notes.txt'))
+    await vi.waitFor(() => expect(resolveSource).toHaveBeenCalledOnce())
+    await service.bindCamp(1, 'camp-2')
+    await service.bindCamp(1, 'camp-1')
+    completeAuthority({
+      kind: 'file_target',
+      campId: 'camp-1',
+      sourceKind: 'camp_workspace',
+      sourceIdentity: 'camp-1:notes.txt',
+      rootPath: root,
+      basePath: root,
+      rawReference: 'notes.txt',
+      allowChildren: true
+    })
+
+    expect(await opening).toMatchObject({ ok: false, error: { code: 'read_failed' } })
+    expect(service.handleCount).toBe(0)
+    expect(native.revealPath).not.toHaveBeenCalled()
+    expect(native.openPath).not.toHaveBeenCalled()
+  })
+
+  it('rechecks the Camp generation after native confirmation before opening', async () => {
+    const { root, service, native, openPath } = await fixture()
+    await writeFile(join(root, 'installer.exe'), new Uint8Array([0, 1, 2]))
+    let completeConfirmation!: (confirmed: boolean) => void
+    vi.mocked(native.confirmOpen).mockReturnValueOnce(new Promise<boolean>((resolveConfirmation) => {
+      completeConfirmation = resolveConfirmation
+    }))
+
+    const opening = service.open(1, request('installer.exe'))
+    await vi.waitFor(() => expect(native.confirmOpen).toHaveBeenCalledOnce())
+    await service.bindCamp(1, 'camp-2')
+    await service.bindCamp(1, 'camp-1')
+    completeConfirmation(true)
+
+    expect(await opening).toMatchObject({ ok: false, error: { code: 'open_failed' } })
+    expect(openPath).not.toHaveBeenCalled()
+    expect(service.handleCount).toBe(0)
+  })
+
   it('opens absolute, Home-relative, and file-URI references to one external file without choosing a root', async () => {
     const { service, native, registry } = await fixture()
     const outside = await mkdtemp(join(tmpdir(), 'rovai-file-preview-outside-'))
