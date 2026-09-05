@@ -31,6 +31,8 @@ Source Attachment 基础设施上增加本地用户与单个 Camp Member 的私�
   失效队首进入 `needs_repair` 并阻塞同一 Conversation 的后续项，用户可编辑、增删、重排或删除后恢复。
 - Renderer 使用带头像的对象选择器、无头像双轨 transcript、执行台式过程与终态自动折叠；Composer 与 Camp
   输入面的附件卡片、键盘语义和操作层级一致，运行中空 Draft 显示“停止”，有正文或附件时仍可“发送”进入队列。
+- Single Chat panel 打开时只读取一次列表和当前完整 Snapshot；空闲时不轮询，运行期每约 800ms 只读取当前
+  Conversation，并在 terminal 且无自动发布 Pending 后立即停止；可见态变化信号和本地 mutation 使用定向刷新。
 
 ## 跨版本文档影响
 

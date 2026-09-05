@@ -14,6 +14,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AgentRunExecutionEvidenceView,
   CampMemberView,
+  CoreEvent,
   SingleChatPendingInputEditAction,
   SingleChatPendingInputView,
   SingleChatConversationView,
@@ -47,7 +48,91 @@ import {
 } from './execution-tool-grouping'
 
 const NON_TERMINAL_RUNS = new Set<SingleChatRunView['status']>(['queued', 'running', 'waiting'])
+export const SINGLE_CHAT_POLL_INTERVAL_MS = 800
 const END_CONFIRMATION_STORAGE_KEY = 'rovai.single-chat.skip-end-confirmation.v1'
+
+export function singleChatSnapshotNeedsPolling(snapshot: SingleChatSnapshot | null): boolean {
+  return Boolean(
+    snapshot
+    && (
+      snapshot.agentRuns.some((run) => NON_TERMINAL_RUNS.has(run.status))
+      || snapshot.pendingInputs.items.some((item) => item.state === 'queued')
+    )
+  )
+}
+
+export function startSingleChatPolling<Timer>(
+  conversationId: string,
+  refresh: (conversationId: string) => Promise<SingleChatSnapshot | null | undefined>,
+  schedule: (callback: () => void, delayMs: number) => Timer,
+  cancel: (timer: Timer) => void
+): () => void {
+  let disposed = false
+  let timer: Timer | null = null
+
+  const queueNext = (): void => {
+    timer = schedule(() => void poll(), SINGLE_CHAT_POLL_INTERVAL_MS)
+  }
+  const poll = async (): Promise<void> => {
+    timer = null
+    let next: SingleChatSnapshot | null | undefined
+    try {
+      next = await refresh(conversationId)
+    } catch {
+      next = undefined
+    }
+    if (disposed) return
+    if (next === undefined || singleChatSnapshotNeedsPolling(next)) queueNext()
+  }
+
+  queueNext()
+  return () => {
+    disposed = true
+    if (timer !== null) cancel(timer)
+    timer = null
+  }
+}
+
+export type SingleChatChangeRefreshTarget = 'none' | 'conversation-list' | 'current-conversation'
+
+function eventRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function nonEmptyEventString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+export function singleChatChangeRefreshTarget(
+  event: CoreEvent,
+  campId: string,
+  currentConversationId: string | null
+): SingleChatChangeRefreshTarget {
+  if (event.method !== 'single_chat.changed') return 'none'
+  const params = eventRecord(event.params)
+  if (params?.campId !== campId) return 'none'
+  const result = eventRecord(params.result)
+  const resultPayload = eventRecord(result?.payload)
+  const conversationId = nonEmptyEventString(params.conversationId)
+    ?? nonEmptyEventString(resultPayload?.conversationId)
+  const resultCode = nonEmptyEventString(result?.code)
+  const reason = nonEmptyEventString(params.reason)
+
+  if (resultCode === 'single_chat.opened' || resultCode === 'single_chat.ended') {
+    return 'conversation-list'
+  }
+  if (conversationId && conversationId === currentConversationId) {
+    return 'current-conversation'
+  }
+  if (resultCode === 'single_chat.reply_queued' || reason === 'pending_input_published') {
+    return 'conversation-list'
+  }
+  // If Core cannot identify the changed conversation, reconcile the bounded
+  // active list. Other identified conversations cannot affect this transcript.
+  return conversationId ? 'none' : 'conversation-list'
+}
 
 function SingleChatGlyph(): React.JSX.Element {
   return (
@@ -451,7 +536,10 @@ function SingleChatPendingQueue({
     return result
   }
 
-  const perform = async (operation: () => Promise<void>): Promise<void> => {
+  const perform = async (
+    operation: () => Promise<void>,
+    refreshAfter = true
+  ): Promise<void> => {
     if (busy || busyOutside) return
     setBusy(true)
     try {
@@ -459,7 +547,7 @@ function SingleChatPendingQueue({
     } catch (error) {
       onNotify(readErrorMessage(error, '待发送消息操作未完成。'))
     } finally {
-      await onRefresh().catch(() => undefined)
+      if (refreshAfter) await onRefresh().catch(() => undefined)
       setBusy(false)
     }
   }
@@ -526,7 +614,7 @@ function SingleChatPendingQueue({
       } finally {
         setPreparing(false)
       }
-    })
+    }, false)
   }
   preparePendingFilesRef.current = preparePendingFiles
 
@@ -691,8 +779,14 @@ export function SingleChatPanel({
   const panelRef = useRef<HTMLElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const focusPanel = useRef(false)
+  const visibleRef = useRef(visible)
+  const campIdRef = useRef(campId)
   const selectedAgentIdRef = useRef<string | null>(initialAgentId)
+  const currentConversationIdRef = useRef<string | null>(null)
+  const conversationsRef = useRef<SingleChatConversationView[]>([])
   const snapshotRef = useRef<SingleChatSnapshot | null>(null)
+  const listRefreshGenerationRef = useRef(0)
+  const snapshotRefreshGenerationRef = useRef(0)
   const viewportRef = useRef<HTMLElement>(null)
   const viewportEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -725,9 +819,17 @@ export function SingleChatPanel({
 
   const activeMembers = useMemo(() => members.filter(memberCanSingleChat), [members])
   const memberById = useMemo(() => new Map(activeMembers.map((member) => [member.agentId, member])), [activeMembers])
+  const activeMemberIdsKey = activeMembers.map((member) => member.agentId).join('\u0000')
+  const activeMembersRef = useRef(activeMembers)
+  const memberByIdRef = useRef(memberById)
   const selectedMember = selectedAgentId ? memberById.get(selectedAgentId) ?? null : null
   const activeRun = snapshot?.agentRuns.find((run) => NON_TERMINAL_RUNS.has(run.status)) ?? null
   const runningCount = conversations.filter((conversation) => conversation.activeAgentRunId !== null).length
+
+  visibleRef.current = visible
+  campIdRef.current = campId
+  activeMembersRef.current = activeMembers
+  memberByIdRef.current = memberById
 
   useEffect(() => {
     selectedAgentIdRef.current = selectedAgentId
@@ -736,68 +838,187 @@ export function SingleChatPanel({
     snapshotRef.current = snapshot
   }, [snapshot])
 
-  useEffect(() => {
-    let disposed = false
-    void window.rovai.request<SingleChatConversationView[]>('singleChat.list', { campId })
-      .then((nextConversations) => {
-        if (!disposed) setConversations(nextConversations)
-      })
-      .catch(() => undefined)
-    return () => {
-      disposed = true
-    }
-  }, [campId])
-
-  const loadConversation = async (conversationId: string): Promise<SingleChatSnapshot | null> => {
+  const loadConversation = useCallback(async (conversationId: string): Promise<SingleChatSnapshot | null> => {
     const next = await window.rovai.request<SingleChatSnapshot | null>('singleChat.get', { conversationId })
     if (!next || next.conversation.campId !== campId) return null
     return next
-  }
+  }, [campId])
 
-  const refresh = async (showLoading = false): Promise<void> => {
+  const acceptSnapshot = useCallback((
+    conversationId: string,
+    next: SingleChatSnapshot | null,
+    invalidatePendingRead = false
+  ): void => {
+    if (
+      !visibleRef.current
+      || campIdRef.current !== campId
+      || currentConversationIdRef.current !== conversationId
+    ) return
+    if (invalidatePendingRead) ++snapshotRefreshGenerationRef.current
+    snapshotRef.current = next
+    setSnapshot(next)
+    if (next) {
+      const nextConversations = conversationsRef.current.map((conversation) => (
+        conversation.id === next.conversation.id ? next.conversation : conversation
+      ))
+      conversationsRef.current = nextConversations
+      setConversations(nextConversations)
+    }
+    setError(null)
+  }, [campId])
+
+  const refreshCurrentConversation = useCallback(async (
+    conversationId = currentConversationIdRef.current
+  ): Promise<SingleChatSnapshot | null | undefined> => {
+    if (!visibleRef.current || campIdRef.current !== campId || !conversationId) return undefined
+    const generation = ++snapshotRefreshGenerationRef.current
+    try {
+      const next = await loadConversation(conversationId)
+      if (
+        generation !== snapshotRefreshGenerationRef.current
+        || !visibleRef.current
+        || campIdRef.current !== campId
+        || currentConversationIdRef.current !== conversationId
+      ) return undefined
+      acceptSnapshot(conversationId, next)
+      return next
+    } catch (nextError) {
+      if (
+        generation === snapshotRefreshGenerationRef.current
+        && visibleRef.current
+        && campIdRef.current === campId
+        && currentConversationIdRef.current === conversationId
+      ) {
+        setError(readErrorMessage(nextError, '单聊暂时无法读取。'))
+      }
+      return undefined
+    }
+  }, [acceptSnapshot, campId, loadConversation])
+
+  const refreshConversationList = useCallback(async ({
+    showLoading = false,
+    preferredAgentId = null,
+    refreshCurrent = 'always'
+  }: {
+    showLoading?: boolean
+    preferredAgentId?: string | null
+    refreshCurrent?: 'always' | 'if-changed' | 'never'
+  } = {}): Promise<SingleChatSnapshot | null> => {
+    if (!visibleRef.current || campIdRef.current !== campId) return null
+    const generation = ++listRefreshGenerationRef.current
     if (showLoading) setLoading(true)
     try {
       const nextConversations = await window.rovai.request<SingleChatConversationView[]>('singleChat.list', { campId })
-      setConversations(nextConversations)
-      let agentId = selectedAgentIdRef.current
-      if (!agentId || !memberById.has(agentId)) {
-        agentId = nextConversations.find((conversation) => memberById.has(conversation.agentId))?.agentId
-          ?? activeMembers.find((member) => member.isDefaultLead)?.agentId
-          ?? activeMembers[0]?.agentId
+      if (
+        generation !== listRefreshGenerationRef.current
+        || !visibleRef.current
+        || campIdRef.current !== campId
+      ) return null
+
+      const availableMembers = activeMembersRef.current
+      const availableMemberById = memberByIdRef.current
+      let agentId = preferredAgentId ?? selectedAgentIdRef.current
+      if (!agentId || !availableMemberById.has(agentId)) {
+        agentId = nextConversations.find((conversation) => availableMemberById.has(conversation.agentId))?.agentId
+          ?? availableMembers.find((member) => member.isDefaultLead)?.agentId
+          ?? availableMembers[0]?.agentId
           ?? null
-        selectedAgentIdRef.current = agentId
-        setSelectedAgentId(agentId)
       }
       const conversation = agentId
         ? nextConversations.find((candidate) => candidate.agentId === agentId) ?? null
         : null
-      const nextSnapshot = conversation ? await loadConversation(conversation.id) : null
-      snapshotRef.current = nextSnapshot
-      setSnapshot(nextSnapshot)
-      setError(null)
+      const previousConversationId = currentConversationIdRef.current
+      const nextConversationId = conversation?.id ?? null
+
+      conversationsRef.current = nextConversations
+      setConversations(nextConversations)
+      selectedAgentIdRef.current = agentId
+      setSelectedAgentId(agentId)
+      currentConversationIdRef.current = nextConversationId
+
+      if (!nextConversationId) {
+        ++snapshotRefreshGenerationRef.current
+        snapshotRef.current = null
+        setSnapshot(null)
+        setError(null)
+        return null
+      }
+      if (refreshCurrent === 'never'
+        || (refreshCurrent === 'if-changed' && nextConversationId === previousConversationId)) {
+        setError(null)
+        return snapshotRef.current
+      }
+
+      const snapshotGeneration = ++snapshotRefreshGenerationRef.current
+      if (nextConversationId !== previousConversationId) {
+        snapshotRef.current = null
+        setSnapshot(null)
+      }
+      const nextSnapshot = await loadConversation(nextConversationId)
+      if (
+        generation !== listRefreshGenerationRef.current
+        || snapshotGeneration !== snapshotRefreshGenerationRef.current
+        || !visibleRef.current
+        || campIdRef.current !== campId
+        || currentConversationIdRef.current !== nextConversationId
+      ) return null
+      acceptSnapshot(nextConversationId, nextSnapshot)
+      return nextSnapshot
     } catch (nextError) {
-      setError(readErrorMessage(nextError, '单聊暂时无法读取。'))
+      if (
+        generation === listRefreshGenerationRef.current
+        && visibleRef.current
+        && campIdRef.current === campId
+      ) {
+        setError(readErrorMessage(nextError, '单聊暂时无法读取。'))
+      }
+      return null
     } finally {
-      if (showLoading) setLoading(false)
+      if (generation === listRefreshGenerationRef.current) setLoading(false)
     }
-  }
+  }, [acceptSnapshot, campId, loadConversation])
+
+  useEffect(() => {
+    if (!visible) {
+      ++listRefreshGenerationRef.current
+      ++snapshotRefreshGenerationRef.current
+      return
+    }
+    void refreshConversationList({ showLoading: true, refreshCurrent: 'always' })
+    return () => {
+      ++listRefreshGenerationRef.current
+      ++snapshotRefreshGenerationRef.current
+    }
+  // Only actual target eligibility changes should repeat the panel-open list read.
+  }, [activeMemberIdsKey, campId, refreshConversationList, visible])
+
+  const pollingRequired = singleChatSnapshotNeedsPolling(snapshot)
+  useEffect(() => {
+    const conversationId = snapshot?.conversation.id ?? null
+    if (!visible || !conversationId || !pollingRequired) return
+    return startSingleChatPolling(
+      conversationId,
+      refreshCurrentConversation,
+      (callback, delayMs) => window.setTimeout(callback, delayMs),
+      (timer) => window.clearTimeout(timer)
+    )
+  }, [pollingRequired, refreshCurrentConversation, snapshot?.conversation.id, visible])
 
   useEffect(() => {
     if (!visible) return
-    let disposed = false
-    let timeout: number | null = null
-    const poll = async (showLoading = false): Promise<void> => {
-      if (disposed) return
-      await refresh(showLoading)
-      if (!disposed) timeout = window.setTimeout(() => void poll(false), 800)
-    }
-    void poll(true)
-    return () => {
-      disposed = true
-      if (timeout !== null) window.clearTimeout(timeout)
-    }
-  // The latest member maps are intentional refresh inputs; a roster change must fence the selector.
-  }, [campId, visible, memberById, activeMembers])
+    return window.rovai.onEvent((event) => {
+      const target = singleChatChangeRefreshTarget(
+        event,
+        campId,
+        currentConversationIdRef.current
+      )
+      if (target === 'current-conversation') {
+        void refreshCurrentConversation().catch(() => undefined)
+      } else if (target === 'conversation-list') {
+        void refreshConversationList({ refreshCurrent: 'if-changed' }).catch(() => undefined)
+      }
+    })
+  }, [campId, refreshConversationList, refreshCurrentConversation, visible])
 
   useEffect(() => {
     if (!visible || !activeRun) return
@@ -838,10 +1059,13 @@ export function SingleChatPanel({
     if (result.status === 'rejected') throw new Error(resultMessage(result))
     const conversationId = resultPayloadString(result, 'conversationId')
     if (!conversationId) throw new Error('单聊已打开，但未返回对话标识。')
-    const next = await loadConversation(conversationId)
-    if (!next) throw new Error('单聊已不在当前会话中。')
-    snapshotRef.current = next
-    setSnapshot(next)
+    const next = await refreshConversationList({
+      preferredAgentId: agentId,
+      refreshCurrent: 'always'
+    })
+    if (!next || next.conversation.id !== conversationId) {
+      throw new Error('单聊已不在当前会话中。')
+    }
     return next
   }
 
@@ -850,11 +1074,14 @@ export function SingleChatPanel({
     setPreparingAttachments([])
     selectedAgentIdRef.current = agentId
     setSelectedAgentId(agentId)
+    currentConversationIdRef.current = null
+    ++snapshotRefreshGenerationRef.current
+    snapshotRef.current = null
+    setSnapshot(null)
     setError(null)
     setLoading(true)
     try {
       await openConversation(agentId)
-      await refresh(false)
     } catch (nextError) {
       setError(readErrorMessage(nextError, '无法打开这段单聊。'))
     } finally {
@@ -882,8 +1109,7 @@ export function SingleChatPanel({
             file
           )
           current = next
-          snapshotRef.current = next
-          setSnapshot(next)
+          acceptSnapshot(current.conversation.id, next, true)
           setPreparingAttachments((items) => items.filter(({ id }) => id !== item.id))
         } catch (nextError) {
           const message = readErrorMessage(nextError, '附件处理失败，请移除后重试。')
@@ -1006,8 +1232,7 @@ export function SingleChatPanel({
         current.draft.revision,
         attachmentId
       )
-      snapshotRef.current = next
-      setSnapshot(next)
+      acceptSnapshot(current.conversation.id, next, true)
     } catch (nextError) {
       setError(readErrorMessage(nextError, '附件未能移除，请重试。'))
     }
@@ -1040,7 +1265,7 @@ export function SingleChatPanel({
       if (result.status === 'rejected') throw new Error(resultMessage(result))
       setDraft('')
       setPreparingAttachments([])
-      await refresh(false)
+      await refreshCurrentConversation(current.conversation.id)
     } catch (nextError) {
       setError(readErrorMessage(nextError, '消息未发送，请重试。'))
     } finally {
@@ -1059,7 +1284,7 @@ export function SingleChatPanel({
         command: { campId, agentRunId: run.id, expectedVersion: run.version }
       })
       if (result.status === 'rejected') throw new Error(resultMessage(result))
-      await refresh(false)
+      await refreshCurrentConversation(snapshotRef.current?.conversation.id ?? null)
     } catch (nextError) {
       setError(readErrorMessage(nextError, '停止请求未完成，请重试。'))
     } finally {
@@ -1085,9 +1310,16 @@ export function SingleChatPanel({
       if (skipEndConfirmation) storeBoolean(END_CONFIRMATION_STORAGE_KEY, true)
       setEndDialogOpen(false)
       setPreparingAttachments([])
+      currentConversationIdRef.current = null
+      ++snapshotRefreshGenerationRef.current
       snapshotRef.current = null
       setSnapshot(null)
-      setConversations((currentConversations) => currentConversations.filter((conversation) => conversation.id !== current.conversation.id))
+      const remainingConversations = conversationsRef.current.filter((conversation) => (
+        conversation.id !== current.conversation.id
+      ))
+      conversationsRef.current = remainingConversations
+      setConversations(remainingConversations)
+      await refreshConversationList({ refreshCurrent: 'if-changed' })
       onNotify('单聊已结束')
     } catch (nextError) {
       setError(readErrorMessage(nextError, '单聊未结束，请重试。'))
@@ -1222,10 +1454,11 @@ export function SingleChatPanel({
           snapshot={snapshot}
           busyOutside={sending || ending}
           onSnapshot={(next) => {
-            snapshotRef.current = next
-            setSnapshot(next)
+            acceptSnapshot(next.conversation.id, next, true)
           }}
-          onRefresh={() => refresh(false)}
+          onRefresh={async () => {
+            await refreshCurrentConversation()
+          }}
           onNotify={onNotify}
           onAttachmentDropTargetChange={updatePendingAttachmentDropTarget}
         />

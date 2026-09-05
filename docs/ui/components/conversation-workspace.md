@@ -310,6 +310,13 @@ Conversation 的后项，用户保存有效内容或删除队首后恢复；不�
 对话和未发布队列仍可继续。发送后回到最新；后台 Evidence 更新仅在用户原本接近底部时跟随，
 用户上滚阅读时不得抢走位置。选择另一个对象恢复其 active transcript 或创建新 transcript，UI 不区分这两种内部结果。
 
+panel 每次打开时读取一次 active Conversation 列表和当前对象的完整 Snapshot；空闲后不保留固定刷新计时器。只有当前
+Conversation 存在非终态 Run，或存在会在 Run 结束后自动发布的 `queued` Pending Input 时，才按约 800ms 周期只读取当前
+Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即停止，`needs_repair` 不触发轮询。panel 可见时沿用
+`single_chat.changed` 做定向刷新：当前 Conversation 变化只读其 Snapshot，列表身份或运行标记可能变化时才重读列表；
+本地 mutation 优先直接采用接口返回的完整 Snapshot。panel 收起后停止计时刷新，再次打开时重新执行一次 list + get。
+本流程继续使用完整 `singleChat.get`，不引入增量 Read API 或另一套事件流。
+
 “结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，
 并提供“不再询问”复选框；选择后只把该确认偏好保存在本机。结束成功立即从产品 surface 移除该 transcript，之后与
 同一队员发起单聊显示新的空白 Conversation。具体 ended/审计保留、取消和迟到事件行为由
