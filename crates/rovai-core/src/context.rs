@@ -262,13 +262,6 @@ pub struct RuntimeInputDelivery {
     pub bootstrap_redelivery_revision: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommittedPiManagedInputReceipt {
-    pub digest: String,
-    pub commit_nonce: String,
-    pub delivery: RuntimeInputDelivery,
-}
-
 #[derive(Default)]
 struct RuntimeInputDeliveryOptions<'a> {
     proposed_binding_id: Option<&'a str>,
@@ -2014,7 +2007,7 @@ impl ContextService {
         }
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction()?;
-        let delivery = acknowledge_input_delivery_transaction(
+        let (delivery, _) = acknowledge_input_delivery_transaction(
             &transaction,
             delivery_id,
             native_input_id,
@@ -2024,136 +2017,25 @@ impl ContextService {
         Ok(delivery)
     }
 
-    pub fn commit_pi_managed_input_receipt_and_accept(
+    pub fn acknowledge_input_delivery_transition(
         &self,
         database: &mut Database,
         delivery_id: &str,
-        native_prompt_id: &str,
-        receipt: &Value,
-        commit_nonce: &str,
-    ) -> Result<CommittedPiManagedInputReceipt> {
-        if native_prompt_id.trim().is_empty() {
-            anyhow::bail!("Pi Native Prompt ID must not be empty");
-        }
-        let receipt_bytes = serde_json::to_vec(receipt)?;
-        if receipt_bytes.len() > 2 * 1024 * 1024 {
-            anyhow::bail!("Pi managed input receipt exceeds the private evidence limit");
-        }
-        if commit_nonce.len() != 64
-            || !commit_nonce
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            anyhow::bail!("Pi managed input receipt commit nonce is invalid");
-        }
-        let receipt_digest = canonical_json_digest(receipt)?;
-        let receipt_delivery_id = required_receipt_string(receipt, "runtimeInputDeliveryId")?;
-        let receipt_prompt_id = required_receipt_string(receipt, "nativePromptId")?;
-        let receipt_agent_run_id = required_receipt_string(receipt, "agentRunId")?;
-        let receipt_native_binding_id = required_receipt_string(receipt, "nativeBindingId")?;
-        let receipt_native_session_id = required_receipt_string(receipt, "nativeSessionId")?;
-        let receipt_execution_epoch = receipt
-            .get("executionEpoch")
-            .and_then(Value::as_i64)
-            .context("Pi managed input receipt omitted executionEpoch")?;
-        let receipt_binding_generation = receipt
-            .get("nativeBindingGeneration")
-            .and_then(Value::as_i64)
-            .context("Pi managed input receipt omitted nativeBindingGeneration")?;
-        if receipt_delivery_id != delivery_id || receipt_prompt_id != native_prompt_id {
-            anyhow::bail!("Pi managed input receipt did not match its Delivery/Prompt route");
+        native_input_id: &str,
+    ) -> Result<(RuntimeInputDelivery, bool)> {
+        if native_input_id.trim().is_empty() {
+            anyhow::bail!("Native Input ID must not be empty");
         }
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction()?;
-        let row = load_delivery_target(&transaction, delivery_id)?
-            .context("Runtime Input Delivery does not exist")?;
-        let (dispatch_started_at, delivery_mode): (Option<String>, String) = transaction
-            .query_row(
-                r#"
-            SELECT delivery.dispatch_started_at, bootstrap.delivery_mode
-            FROM runtime_input_delivery AS delivery
-            JOIN context_manifest AS manifest ON manifest.id = delivery.context_manifest_id
-            JOIN native_session_bootstrap_evidence AS bootstrap
-              ON bootstrap.id = manifest.bootstrap_evidence_id
-            WHERE delivery.id = ?1
-            "#,
-                [delivery_id],
-                |query_row| Ok((query_row.get(0)?, query_row.get(1)?)),
-            )?;
-        if dispatch_started_at.is_none() || delivery_mode != "managed_system_prompt" {
-            anyhow::bail!("Pi managed input receipt is outside a dispatched managed prompt");
-        }
-        if row.agent_run_id != receipt_agent_run_id
-            || row.execution_epoch != receipt_execution_epoch
-            || row.native_binding_id != receipt_native_binding_id
-            || row.native_binding_generation != receipt_binding_generation
-        {
-            anyhow::bail!("Pi managed input receipt failed durable Run/Binding validation");
-        }
-        let stored = transaction
-            .query_row(
-                r#"
-                SELECT receipt_digest, commit_nonce, native_prompt_id, native_session_id
-                FROM pi_managed_input_receipt
-                WHERE runtime_input_delivery_id = ?1
-                "#,
-                [delivery_id],
-                |query_row| {
-                    Ok((
-                        query_row.get::<_, String>(0)?,
-                        query_row.get::<_, String>(1)?,
-                        query_row.get::<_, String>(2)?,
-                        query_row.get::<_, String>(3)?,
-                    ))
-                },
-            )
-            .optional()?;
-        if let Some((stored_digest, stored_nonce, stored_prompt, stored_session)) = stored {
-            if stored_digest != receipt_digest
-                || stored_nonce != commit_nonce
-                || stored_prompt != native_prompt_id
-                || stored_session != receipt_native_session_id
-            {
-                anyhow::bail!("Pi managed input receipt changed after commit");
-            }
-        } else {
-            transaction.execute(
-                r#"
-                INSERT INTO pi_managed_input_receipt(
-                    id, runtime_input_delivery_id, agent_run_id, execution_epoch,
-                    native_binding_id, native_binding_generation, native_session_id,
-                    native_prompt_id, receipt_version, receipt_json, receipt_digest,
-                    commit_nonce, committed_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 2, ?9, ?10, ?11, ?12)
-                "#,
-                params![
-                    Uuid::new_v4().to_string(),
-                    delivery_id,
-                    receipt_agent_run_id,
-                    receipt_execution_epoch,
-                    receipt_native_binding_id,
-                    receipt_binding_generation,
-                    receipt_native_session_id,
-                    native_prompt_id,
-                    serde_json::to_string(receipt)?,
-                    receipt_digest,
-                    commit_nonce,
-                    now,
-                ],
-            )?;
-        }
-        let delivery = acknowledge_input_delivery_transaction(
+        let result = acknowledge_input_delivery_transaction(
             &transaction,
             delivery_id,
-            native_prompt_id,
+            native_input_id,
             &now,
         )?;
         transaction.commit()?;
-        Ok(CommittedPiManagedInputReceipt {
-            digest: receipt_digest,
-            commit_nonce: commit_nonce.to_string(),
-            delivery,
-        })
+        Ok(result)
     }
 
     pub fn mark_input_delivery_unknown(
@@ -2288,53 +2170,19 @@ impl ContextService {
     }
 }
 
-fn required_receipt_string<'a>(receipt: &'a Value, key: &str) -> Result<&'a str> {
-    receipt
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .with_context(|| format!("Pi managed input receipt omitted {key}"))
-}
-
 fn acknowledge_input_delivery_transaction(
     transaction: &Transaction<'_>,
     delivery_id: &str,
     native_input_id: &str,
     now: &str,
-) -> Result<RuntimeInputDelivery> {
+) -> Result<(RuntimeInputDelivery, bool)> {
     let row = load_delivery_target(transaction, delivery_id)?
         .context("Runtime Input Delivery does not exist")?;
-    let managed_system_prompt: bool = transaction.query_row(
-        r#"
-        SELECT EXISTS(
-            SELECT 1
-            FROM runtime_input_delivery AS delivery
-            JOIN context_manifest AS manifest ON manifest.id = delivery.context_manifest_id
-            JOIN native_session_bootstrap_evidence AS bootstrap
-              ON bootstrap.id = manifest.bootstrap_evidence_id
-            WHERE delivery.id = ?1 AND bootstrap.delivery_mode = 'managed_system_prompt'
-        )
-        "#,
-        [delivery_id],
-        |query_row| query_row.get(0),
-    )?;
-    if managed_system_prompt {
-        let receipt_present: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pi_managed_input_receipt WHERE runtime_input_delivery_id = ?1 AND receipt_version IN (1, 2))",
-            [delivery_id],
-            |query_row| query_row.get(0),
-        )?;
-        if !receipt_present {
-            anyhow::bail!(
-                "Managed System Prompt input cannot be accepted without its committed receipt"
-            );
-        }
-    }
     if row.status == "accepted" {
         if row.native_input_id.as_deref() != Some(native_input_id) {
             anyhow::bail!("Runtime Input Delivery was accepted with another Native Input ID");
         }
-        return Ok(row.as_public(delivery_id));
+        return Ok((row.as_public(delivery_id), false));
     }
     if !matches!(row.status.as_str(), "prepared" | "delivery_unknown") {
         anyhow::bail!("Runtime Input Delivery is not acknowledgeable");
@@ -2455,13 +2303,16 @@ fn acknowledge_input_delivery_transaction(
             "collaborationStateIncluded": row.collaboration_state_included,
         }),
     )?;
-    Ok(RuntimeInputDelivery {
-        id: delivery_id.to_string(),
-        status: "accepted".to_string(),
-        native_input_id: Some(native_input_id.to_string()),
-        boundary_camp_message_sequence: row.boundary_camp_message_sequence,
-        bootstrap_redelivery_revision: row.bootstrap_redelivery_revision,
-    })
+    Ok((
+        RuntimeInputDelivery {
+            id: delivery_id.to_string(),
+            status: "accepted".to_string(),
+            native_input_id: Some(native_input_id.to_string()),
+            boundary_camp_message_sequence: row.boundary_camp_message_sequence,
+            bootstrap_redelivery_revision: row.bootstrap_redelivery_revision,
+        },
+        true,
+    ))
 }
 
 fn validate_manifest_view_receipt(
@@ -12055,6 +11906,84 @@ mod slow_tests {
                 )
                 .unwrap()
         );
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn pi_agent_start_accepts_managed_prompt_without_receipt_once() {
+        let mut fixture = fixture();
+        bind_fixture_native_session(&mut fixture, "pi-agent-start-session");
+        let ContextMaterialization::Ready(prepared) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("Pi context must be ready");
+        };
+        let delivery = ContextService
+            .prepare_input_delivery_for_context(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared,
+            )
+            .unwrap();
+        assert!(
+            ContextService
+                .begin_runtime_input_dispatch(
+                    &mut fixture.database,
+                    &delivery.id,
+                    &fixture.run_id,
+                    fixture.execution_epoch,
+                )
+                .unwrap()
+        );
+
+        let (accepted, transitioned) = ContextService
+            .acknowledge_input_delivery_transition(
+                &mut fixture.database,
+                &delivery.id,
+                "pi-prompt-agent-start",
+            )
+            .unwrap();
+        assert!(transitioned);
+        assert_eq!(accepted.status, "accepted");
+        assert_eq!(
+            accepted.native_input_id.as_deref(),
+            Some("pi-prompt-agent-start")
+        );
+        let (_, duplicate_transitioned) = ContextService
+            .acknowledge_input_delivery_transition(
+                &mut fixture.database,
+                &delivery.id,
+                "pi-prompt-agent-start",
+            )
+            .unwrap();
+        assert!(!duplicate_transitioned);
+        let (receipt_count, acceptance_events): (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM pi_managed_input_receipt
+                     WHERE runtime_input_delivery_id = ?1),
+                    (SELECT COUNT(*) FROM event_log
+                     WHERE event_type = 'runtime.input_accepted'
+                       AND json_extract(payload_json, '$.runtimeInputDeliveryId') = ?1)",
+                [&delivery.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(receipt_count, 0);
+        assert_eq!(acceptance_events, 1);
         fixture.cleanup();
     }
 

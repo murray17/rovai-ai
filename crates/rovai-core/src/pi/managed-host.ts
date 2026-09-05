@@ -1,19 +1,12 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
-import {
-  SettingsManager,
-  getAgentDir,
-  getShellConfig,
-} from "@earendil-works/pi-coding-agent";
 
 const SCHEMA_VERSION = 3;
-const EXTENSION_VERSION = "rovai-pi-host-v6";
-const GOVERNED_NATIVE_TOOLS = ["bash", "edit", "write"];
-const BINDING_KEYS = [
+const EXTENSION_VERSION = "rovai-pi-host-v7";
+const REQUIRED_BINDING_KEYS = [
   "agentRunId",
   "bootstrap",
-  "bootstrapEvidenceId",
   "bootstrapPayloadDigest",
   "executionEpoch",
   "expectedNativeSessionId",
@@ -22,8 +15,6 @@ const BINDING_KEYS = [
   "hostInstanceId",
   "nativeBindingGeneration",
   "nativeBindingId",
-  "nativePromptId",
-  "runtimeInputDeliveryId",
   "schemaVersion",
 ];
 
@@ -31,32 +22,12 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function canonicalize(value: any): any {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, canonicalize(value[key])]),
-    );
-  }
-  return value;
-}
-
-function canonicalJson(value: any): string {
-  return JSON.stringify(canonicalize(value));
-}
-
-function canonicalDigest(value: any): string {
-  return sha256(canonicalJson(value));
-}
-
-function exactKeys(value: any, expected: string[]): boolean {
+function hasRequiredKeys(value: any, expected: string[]): boolean {
   return (
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value) &&
-    JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort())
+    expected.every((key) => Object.prototype.hasOwnProperty.call(value, key))
   );
 }
 
@@ -76,7 +47,7 @@ function loadBinding(): any {
     }
   }
   const binding = JSON.parse(readFileSync(bindingPath, "utf8"));
-  if (!exactKeys(binding, BINDING_KEYS)) throw new Error("binding shape mismatch");
+  if (!hasRequiredKeys(binding, REQUIRED_BINDING_KEYS)) throw new Error("binding shape mismatch");
   if (
     binding.schemaVersion !== SCHEMA_VERSION ||
     binding.extensionVersion !== EXTENSION_VERSION ||
@@ -89,10 +60,7 @@ function loadBinding(): any {
     !nonEmpty(binding.nativeBindingId) ||
     !Number.isSafeInteger(binding.nativeBindingGeneration) ||
     binding.nativeBindingGeneration < 1 ||
-    !nonEmpty(binding.runtimeInputDeliveryId) ||
-    !nonEmpty(binding.nativePromptId) ||
     !(binding.expectedNativeSessionId === null || nonEmpty(binding.expectedNativeSessionId)) ||
-    !nonEmpty(binding.bootstrapEvidenceId) ||
     typeof binding.bootstrap !== "string" ||
     !/^[a-f0-9]{64}$/.test(binding.bootstrapPayloadDigest) ||
     sha256(binding.bootstrap) !== binding.bootstrapPayloadDigest
@@ -100,24 +68,6 @@ function loadBinding(): any {
     throw new Error("binding evidence mismatch");
   }
   return binding;
-}
-
-function resolvedShell(cwd: string, projectTrusted: boolean): any {
-  const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted });
-  const resolved = getShellConfig(settings.getShellPath());
-  if (
-    !nonEmpty(resolved.shell) ||
-    !Array.isArray(resolved.args) ||
-    resolved.args.some((value: unknown) => !nonEmpty(value)) ||
-    !(resolved.commandTransport === undefined || resolved.commandTransport === "argv" || resolved.commandTransport === "stdin")
-  ) {
-    throw new Error("invalid Pi shell resolution");
-  }
-  return {
-    path: resolved.shell,
-    args: [...resolved.args],
-    commandTransport: resolved.commandTransport ?? "argv",
-  };
 }
 
 function publishManagedSessionState(ctx: any, current: any): void {
@@ -129,7 +79,7 @@ function publishManagedSessionState(ctx: any, current: any): void {
   }
   ctx.ui.setStatus(
     "rovai-managed-session-state",
-    canonicalJson({
+    JSON.stringify({
       schemaVersion: SCHEMA_VERSION,
       extensionVersion: EXTENSION_VERSION,
       hostInstanceId: current.hostInstanceId,
@@ -145,7 +95,7 @@ function publishFailure(ctx: any, binding: any, phase: string, error: unknown): 
   const message = error instanceof Error ? error.message : String(error);
   ctx.ui.setStatus(
     "rovai-managed-failure",
-    canonicalJson({
+    JSON.stringify({
       schemaVersion: 1,
       extensionVersion: EXTENSION_VERSION,
       hostInstanceId: binding?.hostInstanceId ?? null,
@@ -160,126 +110,21 @@ function publishFailure(ctx: any, binding: any, phase: string, error: unknown): 
   );
 }
 
-function approvalEnvelope(
-  binding: any,
-  toolCallId: string,
-  toolName: string,
-  input: any,
-  cwd: string,
-  projectTrusted: boolean,
-): any {
-  return {
-    schemaVersion: 1,
-    extensionVersion: EXTENSION_VERSION,
-    kind: "native_tool",
-    hostInstanceId: binding.hostInstanceId,
-    hostBindingGeneration: binding.hostBindingGeneration,
-    agentRunId: binding.agentRunId,
-    executionEpoch: binding.executionEpoch,
-    nativeBindingGeneration: binding.nativeBindingGeneration,
-    toolCallId,
-    toolName,
-    input,
-    shell: toolName === "bash" ? resolvedShell(cwd, projectTrusted) : null,
-  };
-}
-
-function validateSession(binding: any, ctx: any): { sessionId: string; cwd: string } {
-  const sessionId = ctx.sessionManager.getSessionId();
-  const cwd = realpathSync(ctx.sessionManager.getCwd());
-  if (!nonEmpty(sessionId) || !nonEmpty(cwd)) throw new Error("Pi managed Session identity is incomplete");
-  if (binding.expectedNativeSessionId !== null && binding.expectedNativeSessionId !== sessionId) {
-    throw new Error("Pi managed Session identity mismatch");
-  }
-  return { sessionId, cwd };
-}
-
 export default function (pi: any) {
-  let binding: any;
-
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
-      binding = loadBinding();
-      ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
-      publishManagedSessionState(ctx, binding);
+      publishManagedSessionState(ctx, loadBinding());
     } catch (error) {
-      publishFailure(ctx, binding, "session_start", error);
-    }
-  });
-
-  pi.on("tool_call", async (event: any, ctx: any) => {
-    if (!GOVERNED_NATIVE_TOOLS.includes(event.toolName)) return undefined;
-    if (!ctx.hasUI || ctx.mode !== "rpc") {
-      return { block: true, reason: "Rovai partial approval channel is unavailable" };
-    }
-    try {
-      const current = loadBinding();
-      validateSession(current, ctx);
-      const allowed = await ctx.ui.confirm(
-        "Rovai partial approval",
-        JSON.stringify(
-          approvalEnvelope(
-            current,
-            event.toolCallId,
-            event.toolName,
-            event.input,
-            ctx.cwd,
-            ctx.isProjectTrusted(),
-          ),
-        ),
-      );
-      return allowed ? undefined : { block: true, reason: "Blocked by Rovai approval" };
-    } catch (error) {
-      publishFailure(ctx, binding, "tool_call", error);
-      return { block: true, reason: "Rovai partial approval failed closed" };
+      publishFailure(ctx, undefined, "session_start", error);
     }
   });
 
   pi.on("before_agent_start", async (event: any, ctx: any) => {
     try {
       const current = loadBinding();
-      const { sessionId, cwd } = validateSession(current, ctx);
-      if (!ctx.hasUI || ctx.mode !== "rpc") throw new Error("managed receipt channel is unavailable");
-      const availableTools = new Set(pi.getAllTools().map((tool: any) => tool.name));
-      const governedNativeTools = GOVERNED_NATIVE_TOOLS.map((name) => ({
-        name,
-        observable: availableTools.has(name),
-      }));
-      if (governedNativeTools.some((tool) => !tool.observable)) {
-        throw new Error("a governed native Tool is not observable");
-      }
-      const receipt = {
-        schemaVersion: SCHEMA_VERSION,
-        extensionVersion: EXTENSION_VERSION,
-        hostInstanceId: current.hostInstanceId,
-        hostBindingGeneration: current.hostBindingGeneration,
-        agentRunId: current.agentRunId,
-        executionEpoch: current.executionEpoch,
-        nativeBindingId: current.nativeBindingId,
-        nativeBindingGeneration: current.nativeBindingGeneration,
-        runtimeInputDeliveryId: current.runtimeInputDeliveryId,
-        nativePromptId: current.nativePromptId,
-        nativeSessionId: sessionId,
-        cwd,
-        bootstrapEvidenceId: current.bootstrapEvidenceId,
-        bootstrapPayloadDigest: current.bootstrapPayloadDigest,
-        governedNativeTools,
-        bindingDocumentDigest: canonicalDigest(current),
-      };
-      const expectedNonce = sha256(
-        `rovai-pi-managed-input-receipt-v2\n${canonicalJson(receipt)}`,
-      );
-      const nonce = await ctx.ui.input(
-        "Rovai managed input receipt",
-        JSON.stringify(receipt),
-      );
-      if (nonce !== expectedNonce) throw new Error("receipt commit nonce mismatch");
-      binding = current;
-      ctx.ui.setStatus("rovai-managed-host", EXTENSION_VERSION);
       return { systemPrompt: `${event.systemPrompt}\n\n${current.bootstrap}` };
     } catch (error) {
-      publishFailure(ctx, binding, "before_agent_start", error);
-      ctx.abort();
+      publishFailure(ctx, undefined, "before_agent_start", error);
       return undefined;
     }
   });

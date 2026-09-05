@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-04
+last_updated: 2026-09-05
 ---
 
 # Agent Runtime 兼容性清单
@@ -44,8 +44,8 @@ Probe、成员选择、诊断或 AgentRun 语义。
 | Ready / Probe | managed extension handshake；创建 Session 后取得 full UUID/canonical file；创建 replacement；实际 `switch_session(exact file)`；`get_state` 核对 ID/file/cwd；Probe session root 未污染 | Pi 专属 Machine Ready 已实现；这些行为仍不是平台 qualification |
 | Auth / Model | 官方 native default MiniMax M3 请求成功；Core catalog/default 与 explicit set/get validator 有 deterministic coverage | 正式 Run 只继承 Pi 官方配置；不借 Claude provider/Home |
 | Session / Host | First Run 后停止 Core，重启后同 full Native Session ID cold exact resume；下一 Run 复用同 Host/Session；跨 Camp A→B→A 使用同 workspace Host、两个 full Session ID 严格分离并准确切回；两个并发 Run 使用不同 Host | `resident_multi_session` 实现成立；复用 identity 是 workspace/process，当前 Camp/member invalidation scope 单独更新；公共 Fleet 用计入容量的 Starting reservation 在锁外并发 spawn，同 Run 等待同一结果；Core planned shutdown 后 descendant 与 Host config 为零 |
-| Bootstrap / receipt | 首次、cold resume、warm reuse 均通过 managed-input receipt；公开 events/stderr 不含 `sessionFile` 或 `nativeSessionFile` | v6 在自身 hook 位置追加 `managed_system_prompt`；locator Core-private；schema-3 receipt 只证明最小 binding/Bootstrap/三个 governed Tool，不声明后加载 Extension 未改写最终输入 |
-| Action / cancel | 单一真实 Run 覆盖 stdout、stderr、mixed、empty、exit 7 与 >50KB/2500 行；每个 Tool ID 一个 terminal Action，command 在 `runtime.action`，完整大输出由 Blob evidence 取回；write allow-once 只产生一次文件，deny 不建文件，sleep cancel 严格结算 `cancelled` 且不建延迟文件 | `partial_managed` 只审批 bash/edit/write；shell path/args/transport 来自 Pi 当前 project trust 下实际配置，不伪造 zsh argv；未知 Extension Tool 按 Pi 原生语义执行，Windows shell identity 仍待目标机验证 |
+| Bootstrap / lifecycle | 历史 smoke 的首次、cold resume、warm reuse 曾通过 managed-input receipt；公开 events/stderr 不含 `sessionFile` 或 `nativeSessionFile` | 当前 v7 每轮重新读取 binding 并追加 `managed_system_prompt`，失败只诊断；新 Run 不生成或读取 Receipt。首个 owner-fenced `agent_start` 接受 Delivery 并发布 started，`agent_settled` 结算 |
+| Action / cancel | 历史受管 smoke 覆盖 stdout、stderr、mixed、empty、exit 7、>50KB/2500 行、allow/deny 与 sleep cancel；这些仍是 wire/lifecycle 证据，不再证明当前审批产品能力 | 当前所有 Built-in/Extension Tool 按 Pi 原生语义执行；无 Rovai Approval、shell envelope、permission option 或 sandbox。Action 继续由原生结构化 Tool events 归一，cancel 仍使用 correlated `abort` |
 | MCP | 上游没有原生 External MCP；通用 Extension Tool API 不作为产品 MCP transport | `Unsupported`；Pi 静默忽略已保存 Assignment，不读取配置、不投影或启动 Server、不注册 proxy Tool，MCP 变化不参与 Host/LRU/resume |
 | Skills / Built-in | 历史真实 smoke 调用过 `.pi/skills` projected Skill，并覆盖导入、Revision update、disable/re-enable、unassign/restore、hard delete、重启、project-owned 同名 shadow 与同 Host 相邻 Session no-leak；Built-in CLI 15-operation full Run 与 resumed/new-lease Run 通过 | Skill 文件投递保持 Implemented，但当前 Runtime discovery 为 `DocumentationOnly`：只由 Pi 原生 ResourceLoader/workspace trust 决定，Rovai 不追加 path、不读取 `get_commands`、不做 catalog attestation；Built-in 既有 Verified 证据不变 |
 | Final / Usage | `agent_settled` 后唯一成功；terminal assistant `message_end.message.usage` 在 Monitoring 得到 input/output；cancel 不触发成功 | streamed update/session totals 不计量；reasoning/cost 缺失保持 unknown |

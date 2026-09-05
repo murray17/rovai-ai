@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.47
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -11,7 +11,7 @@ last_updated: 2026-09-05
 
 # Rovai-ai v1.47：Camp Draft 统一离开保护
 
-前置：[v1.46](../v1.46/README.md)。本版本保留 Lexical、`ComposerDraftSync`、唯一
+前置：[v1.46](../v1.46/README.md)。后续：[v1.48](../v1.48/README.md)。本版本保留 Lexical、`ComposerDraftSync`、唯一
 `DraftMutationCoordinator`、Core exact revision 和现有 `CampLeaveGuard`；只把该 guard 从 Camp-to-Camp
 切换扩展到所有真正卸载当前 Camp Composer 的普通 Renderer 导航。
 
