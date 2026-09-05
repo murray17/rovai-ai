@@ -234,7 +234,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v11（当前）](camp-composer-draft-v11.md) | v10 wire/事务不变；可控正常退出在 Planned Shutdown 前复用 active-Camp leave guard 持久化最新 Lexical EditorState |
+| [Camp Composer Draft v12（当前）](camp-composer-draft-v12.md) | v11 wire/事务与 App quit 不变；macOS 独立关窗也等待既有 Draft preparation，成功只关窗，失败保留窗口并可重试 |
+| [Camp Composer Draft v11（历史）](camp-composer-draft-v11.md) | v10 wire/事务不变；可控正常退出在 Planned Shutdown 前复用 active-Camp leave guard 持久化最新 Lexical EditorState；macOS 独立关窗 fence 由 v12 补齐 |
 | [Camp Composer Draft v10（历史）](camp-composer-draft-v10.md) | v9 wire/事务不变；现有 leave guard 覆盖所有真正卸载 active Camp Composer 的普通 Renderer 导航；App 退出边界由 v11 替代 |
 | [Camp Composer Draft v9（历史）](camp-composer-draft-v9.md) | v8 V2 wire/identity 不变；Core content 显式回写 Lexical，发送/路由/切换同步锁定，加载失败 fail closed，autosave 投影收窄；导航 leave 范围由 v10 替代 |
 | [Camp Composer Draft v8（历史）](camp-composer-draft-v8.md) | v7 revision/附件语义不变；Draft 改用 Text + Atom ComposerDocument V2，旧数组只读兼容、body 派生；发送中输入语义由 v9 替代 |

@@ -243,7 +243,7 @@ Agent 消息继续左对齐并保持透明开放阅读面，不添加身份色�
 一层紧凑父引用，作者与摘要同样只占一个可视行，超出显示省略号；点击通过 same-Camp anchor load 定位并
 聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
-[Camp Composer Draft v11](../../contracts/camp-composer-draft-v11.md)，评审方向见
+[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，评审方向见
 [HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
 
 渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
@@ -276,7 +276,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 标签出现后对象在空白 Draft 失效时，标签消失并持久抑制该来源；正文或附件已经存在时，保留全部 Draft，
 展开“原接收者当前不可接收，请选择其他成员”，禁用发送并把焦点交给第一个有效替代选择。不得隐藏错误、
 自动插入失效 Mention 或改投 Lead。字段和竞态边界见
-[Camp Composer Draft v11](../../contracts/camp-composer-draft-v11.md)，交互探索见
+[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，交互探索见
 [延续路由原型](../../prototypes/composer-continuation-routing/index.html)。
 
 ## Camp 执行过程
@@ -672,7 +672,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 长名称必须省略且可取得完整名称。拖放命中、反馈和卡片合同见
 [会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
 [Camp Attachment v8](../../contracts/camp-attachment-v8.md)，发送边界见
-[Camp Composer Draft v11](../../contracts/camp-composer-draft-v11.md)。
+[Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)。
 
 准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
 独立格式标签，不显示大小；图片是 48×48px 圆角缩略块，不显示文件名。两者共处一条不换行的附件带，删除

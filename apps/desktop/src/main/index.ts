@@ -116,6 +116,7 @@ import {
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
 import { requestRendererQuitPreparation } from './renderer-quit-preparation'
+import { createWindowCloseHandler } from './window-close-guard'
 import { ChannelSettingsService } from './channel-settings'
 import { ExecutionViewService } from './execution-view-service'
 import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
@@ -729,11 +730,19 @@ function createWindow(): void {
   }
   window.on('resize', persistBounds)
   window.on('move', persistBounds)
+  const handleWindowClose = createWindowCloseHandler(
+    window,
+    () => requestRendererQuitPreparation(window, () => new MessageChannelMain()),
+    (error) => {
+      console.error('Rovai Renderer window-close preparation failed; the window remains open', error)
+    }
+  )
   window.on('close', (event) => {
     if (persistBoundsTimer) clearTimeout(persistBoundsTimer)
     persistBoundsTimer = null
     flushBounds()
-    if (process.platform !== 'darwin') appQuitCoordinator.handleQuitRequest(event)
+    if (process.platform === 'darwin') handleWindowClose(event)
+    else appQuitCoordinator.handleQuitRequest(event)
   })
   window.on('closed', () => {
     if (pageZoomFeedbackTimer !== null) clearTimeout(pageZoomFeedbackTimer)
