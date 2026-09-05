@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # Rovai-ai 文档导航
@@ -28,7 +28,7 @@ last_updated: 2026-09-05
 | 新增或修改 Version Decision、Architecture、Contract、版本文档或文档路由 | [决策治理与准入](decisions/README.md)、[当前决定导航](decisions/CURRENT.md)、对应目录 README，并运行通用文档门禁；禁止新增数字 ADR |
 | 判断当前版本目标、范围、进度或验收口径 | 从[版本索引中的唯一 `current` 条目](versions/README.md)进入对应版本概览与实施计划 |
 | 修改 Camp 连续输入、带附件的私有待发送队列、working source refs、编辑占用或自动续发 | [Pending Camp Input v3](contracts/pending-camp-input-v3.md)、[Camp Composer Draft v12](contracts/camp-composer-draft-v12.md)、[Composer 架构](architecture/camp-composer-draft.md)、[结构化 Mention 与 Atom](ui/components/structured-mentions.md)及[Camp 会话工作区](ui/components/conversation-workspace.md) |
-| 修改 Camp 内单聊、私有 Conversation、Single Chat Context/Built-in policy、私有 terminal 路由、结束/取消、Conversation 级待发送队列或单聊 UI | [Single Chat v1](contracts/single-chat-v1.md)、[Single Chat Architecture](architecture/single-chat.md)、[Camp Attachment v8](contracts/camp-attachment-v8.md)、[Camp 会话工作区](ui/components/conversation-workspace.md#camp-内单聊) |
+| 修改 Camp 内单聊、私有 Conversation、Single Chat Context/Built-in policy、私有 terminal 路由、结束/取消、Conversation 级待发送队列或单聊 UI | [Single Chat v2](contracts/single-chat-v2.md)、[Single Chat Architecture](architecture/single-chat.md)、[Camp Attachment v8](contracts/camp-attachment-v8.md)、[Camp 会话工作区](ui/components/conversation-workspace.md#camp-内单聊) |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 新增 Agent Runtime、建立真实 Probe、判断 Settings Preview 或主机平台准入边界 | [Agent Runtime 接入与准入 Checklist](development/runtime-integration-checklist.md)、[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)、[Runtime Platform Admission v2](contracts/runtime-platform-admission-v2.md)、[Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[当前 Pi Runtime 版本](versions/v1.39/README.md)、[Pi Parity Matrix](research/pi-runtime-reintegration-parity-matrix.md)、[Kimi Research](research/kimi-code-runtime-research.md)、[Cursor Research](research/cursor-agent-runtime-research.md)及[TRAE Research/Probe](research/trae-cli-runtime/README.md) |
 | 修改 Runtime Usage、监控 collection、Coverage、成本层或设置页运行监控 | [Evidence 与 Usage 不变量](architecture/foundational-invariants.md#evidence-usage)、[Runtime Monitoring 架构](architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v4](contracts/runtime-usage-monitoring-v4.md)及[可采集性审计](research/runtime-monitoring/README.md) |

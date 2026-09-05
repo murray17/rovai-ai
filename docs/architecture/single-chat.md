@@ -2,13 +2,13 @@
 document_type: architecture
 architecture: single-chat
 authority: single-chat-component-boundaries-and-data-flow
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # Single Chat Architecture
 
 Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。字段级合同见
-[Single Chat v1](../contracts/single-chat-v1.md)，当前选择理由见
+[Single Chat v2](../contracts/single-chat-v2.md)，当前选择理由见
 [V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)至
 [V1.50-D04](../versions/v1.50/decisions.md#v1-50-d04)。
 
@@ -104,12 +104,20 @@ Renderer 只读取 SingleChatSnapshot 中的私有 Messages、Pending 与精确 
 tool 与 command 分组；终态自动折叠过程而不是删除 Evidence，final message 保持可读。用户历史附件和 Composer/Pending
 附件都由清洗后的 View 加精确 owner locator 呈现。
 
+Panel 打开或切换对象时由 Renderer 唯一决定 target、清空旧 Snapshot 并管理 loading；一个 target request
+sequence 同时校验当前队员，阻止迟到结果跨目标写回。后台 `refreshList` 只更新 active Conversation 列表和
+运行标记；`refreshCurrent` 只读当前完整 Snapshot，以一个 in-flight 标记串行化同一目标的读取，期间重复刷新合并为完成后
+的一次补读。Mutation 返回的 Snapshot 可立即呈现，但仍通过同一补读入口确保修改前的在途读取不会成为最后结果。
+这些后台读取不切换目标、不清空 Snapshot，也不修改 loading。空闲时无计时器；运行期约每 800ms 只读当前 Conversation，
+Panel 收起、Camp 离开或组件卸载使旧 target request 失效并停止刷新。
+
 ## 取消、结束与并发
 
 启动协调在普通 AgentRun recovery 分类前先把非终态 Single Chat Run 交给既有 abortive cancellation。该规则只结束当前
-回复，不结束 Conversation，也不恢复旧 Native Turn。用户结束 Conversation 时使用同一取消结算，在事务提交点关闭
-输出路由、删除 Composer Draft 与 Pending edit session，并把未发布 Pending 标为 cancelled；所有操作都只移除 Source Ref，
-不删除用户原始文件。
+回复，不结束 Conversation，也不恢复旧 Native Turn。用户结束只指定 `campId + conversationId`，不提供 expected version 或 active
+Run ID。`SingleChatService` 在 Command Gateway 的同一事务内读取 exact Conversation 当前状态：active 时使用同一取消结算，
+在事务提交点关闭输出路由、删除 Composer Draft 与 Pending edit session，并把未发布 Pending 标为 cancelled；已 ended 时
+返回成功 no-op，不再次取消资源、推进 version 或写 ended 领域事件。所有清理都只移除 Source Ref，不删除用户原始文件。
 
 predecessor ended 后 successor 使用全新 Conversation/Binding/Session，因此不会命中 predecessor 的 Conversation-local
 队列或 cleanup fence。两个 Runtime cleanup/dispatch 可以短暂重叠；底层无法并发时由现有 Scheduler/Fleet 表达 readiness

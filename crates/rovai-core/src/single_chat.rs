@@ -74,7 +74,6 @@ pub struct EndSingleChatCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub conversation_id: String,
-    pub expected_conversation_version: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -672,13 +671,19 @@ impl SingleChatService {
                     "Single Chat v1 is available only to the local user",
                 ));
             };
-            let target = load_active_target(transaction, &envelope.payload.conversation_id)?;
+            let target = load_end_target(transaction, &envelope.payload.conversation_id)?;
             let Some(target) = target else {
                 return Ok(rejected(
                     "single_chat.not_active",
                     "Single Chat does not exist or has ended",
                 ));
             };
+            if target.kind != "single_chat" {
+                return Ok(rejected(
+                    "single_chat.not_active",
+                    "Single Chat does not exist or has ended",
+                ));
+            }
             if envelope.camp_id.as_deref() != Some(target.camp_id.as_str())
                 || envelope.payload.camp_id != target.camp_id
             {
@@ -687,34 +692,29 @@ impl SingleChatService {
                     "Single Chat command is outside the Camp",
                 ));
             }
-            if target.version != envelope.payload.expected_conversation_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "single_chat.version_conflict",
-                    json!({ "currentVersion": target.version }),
+            if target.ended_at.is_some() {
+                return Ok(CommandHandlerResult::applied(
+                    "single_chat.ended",
+                    json!({
+                        "conversationId": target.conversation_id,
+                        "conversationVersion": target.version,
+                        "cancelledAgentRunId": null,
+                    }),
+                    Some(entity_ref("conversation", &target.conversation_id)),
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
             let updated = transaction.execute(
                 r#"
                 UPDATE conversation
-                SET ended_at = ?3, ended_reason = 'user_ended',
+                SET ended_at = ?2, ended_reason = 'user_ended',
                     ended_binding_generation = native_binding_generation,
-                    version = version + 1, updated_at = ?3
-                WHERE id = ?1 AND version = ?2
-                  AND kind = 'single_chat' AND ended_at IS NULL
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND kind = 'single_chat' AND ended_at IS NULL
                 "#,
-                params![
-                    target.conversation_id,
-                    envelope.payload.expected_conversation_version,
-                    now
-                ],
+                params![target.conversation_id, now],
             )?;
-            if updated != 1 {
-                return Ok(rejected(
-                    "single_chat.version_conflict",
-                    "Single Chat changed before it could be ended",
-                ));
-            }
+            anyhow::ensure!(updated == 1, "Single Chat end update did not match its active target");
             let active_run = transaction
                 .query_row(
                     "SELECT id, camp_turn_id, execution_epoch FROM agent_run WHERE conversation_id = ?1 AND invocation_kind = 'single_chat' AND status IN ('queued', 'running', 'waiting') ORDER BY created_at, id LIMIT 1",
@@ -1531,7 +1531,17 @@ struct ActiveTarget {
     version: i64,
     last_message_sequence: i64,
     current_public_boundary_sequence: i64,
+}
+
+#[derive(Debug)]
+struct EndTarget {
+    conversation_id: String,
+    camp_id: String,
+    agent_id: String,
+    version: i64,
     native_binding_generation: i64,
+    kind: String,
+    ended_at: Option<String>,
 }
 
 fn source_attachment_views(value: &str) -> Result<Vec<LocalAttachmentSourceView>> {
@@ -2227,7 +2237,7 @@ fn load_active_target(
             r#"
             SELECT conversation.id, conversation.camp_id, conversation.agent_id,
                    conversation.version, conversation.last_message_sequence,
-                   camp.last_message_sequence, conversation.native_binding_generation
+                   camp.last_message_sequence
             FROM conversation
             JOIN camp ON camp.id = conversation.camp_id
             WHERE conversation.id = ?1
@@ -2244,7 +2254,35 @@ fn load_active_target(
                     version: row.get(3)?,
                     last_message_sequence: row.get(4)?,
                     current_public_boundary_sequence: row.get(5)?,
-                    native_binding_generation: row.get(6)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+fn load_end_target(
+    transaction: &Transaction<'_>,
+    conversation_id: &str,
+) -> Result<Option<EndTarget>> {
+    Ok(transaction
+        .query_row(
+            r#"
+            SELECT conversation.id, conversation.camp_id, conversation.agent_id,
+                   conversation.version, conversation.native_binding_generation,
+                   conversation.kind, conversation.ended_at
+            FROM conversation
+            WHERE conversation.id = ?1
+            "#,
+            [conversation_id],
+            |row| {
+                Ok(EndTarget {
+                    conversation_id: row.get(0)?,
+                    camp_id: row.get(1)?,
+                    agent_id: row.get(2)?,
+                    version: row.get(3)?,
+                    native_binding_generation: row.get(4)?,
+                    kind: row.get(5)?,
+                    ended_at: row.get(6)?,
                 })
             },
         )
@@ -2555,7 +2593,7 @@ mod tests {
     }
 
     #[test]
-    fn send_is_atomic_per_conversation_and_end_does_not_fence_a_successor() {
+    fn send_is_atomic_and_end_uses_exact_identity_without_fencing_a_successor() {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
         let (conversation_id, version) =
@@ -2601,6 +2639,10 @@ mod tests {
         );
         assert_eq!(busy.result.status, CommandResultStatus::Accepted);
         assert_eq!(busy.result.code, "single_chat.pending_input_queued");
+        let pending_input_id = busy.result.payload["pendingInputId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let user_messages: i64 = database
             .connection()
             .query_row(
@@ -2623,6 +2665,88 @@ mod tests {
             )
             .unwrap();
         assert_eq!(queued_inputs, 1);
+        let editing = service
+            .edit_pending_input(
+                &mut database,
+                &user_envelope(
+                    "single-chat-begin-pending-before-end",
+                    Some(&camp_id),
+                    EditSingleChatPendingInputCommand {
+                        camp_id: camp_id.clone(),
+                        conversation_id: conversation_id.clone(),
+                        pending_input_id,
+                        expected_revision: 1,
+                        edit_token: None,
+                        action: SingleChatPendingInputEditAction::Begin,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(editing.result.status, CommandResultStatus::Applied);
+
+        let missing = service
+            .end(
+                &mut database,
+                &user_envelope(
+                    "single-chat-end-missing",
+                    Some(&camp_id),
+                    EndSingleChatCommand {
+                        camp_id: camp_id.clone(),
+                        conversation_id: "missing-single-chat-conversation".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(missing.result.status, CommandResultStatus::Rejected);
+        assert_eq!(missing.result.code, "single_chat.not_active");
+
+        let camp_mismatch = service
+            .end(
+                &mut database,
+                &user_envelope(
+                    "single-chat-end-camp-mismatch",
+                    None,
+                    EndSingleChatCommand {
+                        camp_id: camp_id.clone(),
+                        conversation_id: conversation_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(camp_mismatch.result.status, CommandResultStatus::Rejected);
+        assert_eq!(camp_mismatch.result.code, "single_chat.camp_mismatch");
+
+        let ordinary_conversation_id = "ordinary-conversation-end-target";
+        let ordinary_created_at = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO conversation(
+                    id, camp_id, agent_id, kind,
+                    summary_through_message_sequence, last_message_sequence,
+                    last_accepted_public_boundary_sequence, last_input_sequence,
+                    native_binding_generation, version, created_at, updated_at
+                ) VALUES (?1, ?2, 'agent_1', 'camp_member', 0, 0, 0, 0, 0, 1, ?3, ?3)
+                "#,
+                params![ordinary_conversation_id, camp_id, ordinary_created_at],
+            )
+            .unwrap();
+        let wrong_kind = service
+            .end(
+                &mut database,
+                &user_envelope(
+                    "single-chat-end-wrong-kind",
+                    Some(&camp_id),
+                    EndSingleChatCommand {
+                        camp_id: camp_id.clone(),
+                        conversation_id: ordinary_conversation_id.to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(wrong_kind.result.status, CommandResultStatus::Rejected);
+        assert_eq!(wrong_kind.result.code, "single_chat.not_active");
 
         let ended = service
             .end(
@@ -2633,7 +2757,6 @@ mod tests {
                     EndSingleChatCommand {
                         camp_id: camp_id.clone(),
                         conversation_id: conversation_id.clone(),
-                        expected_conversation_version: version + 1,
                     },
                 ),
             )
@@ -2648,6 +2771,75 @@ mod tests {
             )
             .unwrap();
         assert_eq!(old_status, "cancelled");
+        let cleanup_counts: (i64, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM single_chat_composer_draft
+                     WHERE conversation_id = ?1),
+                    (SELECT COUNT(*) FROM single_chat_pending_input_edit_session
+                     WHERE conversation_id = ?1),
+                    (SELECT COUNT(*) FROM single_chat_pending_input
+                     WHERE conversation_id = ?1 AND state IN ('queued', 'needs_repair')),
+                    (SELECT COUNT(*) FROM single_chat_pending_input
+                     WHERE conversation_id = ?1 AND state = 'cancelled')",
+                [&conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(cleanup_counts, (0, 0, 0, 1));
+        let ended_version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM conversation WHERE id = ?1",
+                [&conversation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let ended_events: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log
+                 WHERE event_type = 'single_chat.ended'
+                   AND entity_type = 'conversation' AND entity_id = ?1",
+                [&conversation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(ended_events, 1);
+
+        let ended_again = service
+            .end(
+                &mut database,
+                &user_envelope(
+                    "single-chat-end-first-again",
+                    Some(&camp_id),
+                    EndSingleChatCommand {
+                        camp_id: camp_id.clone(),
+                        conversation_id: conversation_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(ended_again.result.status, CommandResultStatus::Applied);
+        assert_eq!(
+            ended_again.result.payload["conversationVersion"],
+            ended_version
+        );
+        assert!(ended_again.result.payload["cancelledAgentRunId"].is_null());
+        let unchanged_end_state: (i64, i64) = database
+            .connection()
+            .query_row(
+                "SELECT conversation.version,
+                        (SELECT COUNT(*) FROM event_log
+                         WHERE event_type = 'single_chat.ended'
+                           AND entity_type = 'conversation' AND entity_id = ?1)
+                 FROM conversation WHERE conversation.id = ?1",
+                [&conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unchanged_end_state, (ended_version, ended_events));
 
         let (successor_id, successor_version) = open(
             &service,
@@ -2751,7 +2943,6 @@ mod tests {
                         EndSingleChatCommand {
                             camp_id: camp_id.clone(),
                             conversation_id: conversation_id.clone(),
-                            expected_conversation_version: version + 2,
                         },
                     ),
                 )
@@ -2786,7 +2977,6 @@ mod tests {
                     EndSingleChatCommand {
                         camp_id: camp_id.clone(),
                         conversation_id: cancel_conversation_id.clone(),
-                        expected_conversation_version: cancel_version + 1,
                     },
                 ),
             )

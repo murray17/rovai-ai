@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.50
 lifecycle: current
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # v1.50 决定
@@ -31,24 +31,28 @@ private ConversationMessage，不创建 CampMessage、Channel delivery 或 Missi
 - 拒绝第二套执行聚合和 Prompt-only 隔离：前者复制核心生命周期，后者不能成为授权或 terminal route 边界。
 
 <a id="v1-50-d02"></a>
-## V1.50-D02：重启取消当前回复，结束不建立 successor cleanup fence
+## V1.50-D02：重启取消当前回复，结束按 exact Conversation 身份且不建立 successor cleanup fence
 
 ### 背景
 
 为旧 Native Turn 建立专用恢复与 transcript replay 会引入推测性结果和新的产品状态；结束旧会话后等待 Runtime 完全
-cleanup，则把 Provider 退出时延错误提升成新 Conversation 的生命周期依赖。
+cleanup，则把 Provider 退出时延错误提升成新 Conversation 的生命周期依赖。结束确认后的消息、final 或 Pending 变化会推进
+Conversation version，但它们不改变用户要结束的 exact Conversation 身份；以旧 version 拒绝会把不相干的活动误当成目标冲突。
 
 ### 决定
 
 App、Core 或 Runtime Host 重启命中的非终态 Single Chat Run 直接按现有取消语义结算，Conversation 保持 active。
-只有用户显式结束使 Conversation 变为 ended 并关闭旧私有 route。用户可立即创建同一队员的新 Conversation，不增加
-跨 Conversation cleanup fence；所有迟到事件继续按 Run、epoch、Conversation 与 Binding 身份归属旧执行。
+用户显式结束只指定 `campId + conversationId`；Core 在 command transaction 内读取该 exact Conversation 的当前状态，不使用
+expected version 或 active Run ID 作为前置条件。active 会话变为 ended 并关闭旧私有 route；对已 ended 的同一 ID 返回成功
+no-op。用户可立即创建同一队员的新 Conversation，不增加跨 Conversation cleanup fence；所有迟到事件继续按 Run、epoch、
+Conversation 与 Binding 身份归属旧执行。
 
 ### 后果与被拒绝方案
 
 - 不出现 `app_restart`、`recovery_blocked`、旧输入重发、私有摘要恢复或 Native Turn reconcile 产品状态。
+- 结束确认只冻结 Camp、Conversation ID 和显示名；消息或 Run 在确认期间变化不阻断结束，重复结束不重复取消或写 ended 事件。
 - 新 Conversation 不继承旧 transcript、Binding、Session 或公共水位；底层并发限制继续由通用 Scheduler/Fleet 表达。
-- 拒绝自动 replay 和 predecessor cleanup 等待，因为两者都无法提供更强的 exactly-once 证明。
+- 拒绝自动 replay、predecessor cleanup 等待和结束 version CAS：前两者无法提供更强的 exactly-once 证明，后者保护的是状态快照而不是结束意图的稳定目标。
 
 <a id="v1-50-d03"></a>
 ## V1.50-D03：Single Chat 附件复用公共弱持久 Source Ref，不维护私有内容仓库

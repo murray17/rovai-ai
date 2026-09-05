@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
 model_context_change: true
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # Rovai-ai v1.50：Camp 内私有 Single Chat
@@ -32,7 +32,8 @@ Source Attachment 基础设施上增加本地用户与单个 Camp Member 的私�
 - Renderer 使用带头像的对象选择器、无头像双轨 transcript、执行台式过程与终态自动折叠；Composer 与 Camp
   输入面的附件卡片、键盘语义和操作层级一致，运行中空 Draft 显示“停止”，有正文或附件时仍可“发送”进入队列。
 - Single Chat panel 打开时只读取一次列表和当前完整 Snapshot；空闲时不轮询，运行期每约 800ms 只读取当前
-  Conversation，并在 terminal 且无自动发布 Pending 后立即停止；可见态变化信号和本地 mutation 使用定向刷新。
+  Conversation，并在 terminal 且无自动发布 Pending 后立即停止；列表刷新不接管目标/loading，当前 Snapshot 读取串行且合并一次补读。
+- `singleChat.end` 只固定 Camp 与 Conversation ID，不校验 expected version；Core 在同一事务内结束当前实际状态，已 ended 的同一 ID 成功 no-op。
 
 ## 跨版本文档影响
 
@@ -40,7 +41,7 @@ Source Attachment 基础设施上增加本地用户与单个 Camp Member 的私�
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.49 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.50 |
 | Decisions | 已更新 | [V1.50-D01](decisions.md#v1-50-d01)至[V1.50-D04](decisions.md#v1-50-d04)记录私有执行复用、结束语义、共享 Source Ref 与 Conversation-local FIFO；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Single Chat v1](../../contracts/single-chat-v1.md)同步 Draft、Source Ref、队列、Runtime attachment、history 与精确 owner locator 合同；Contracts 索引同步摘要 |
+| Contracts | 已更新 | [Single Chat v2](../../contracts/single-chat-v2.md)在 v1 基础上收敛 exact-ID 结束和 Renderer 刷新合同；Contracts 索引已切换 current 入口 |
 | Architecture | 已更新 | [Single Chat Architecture](../../architecture/single-chat.md)及 Architecture 索引同步组件职责、公共附件复用和队列调度流 |
 | UI | 已更新 | [Camp 内单聊](../../ui/components/conversation-workspace.md#camp-内单聊)同步共享 AttachmentCard、运行中排队和 repair 编辑交互 |
 | Runtime Activity | 确认无需更新 | Single Chat 继续复用既有 Execution Evidence 与 Canonical Activity 映射，没有新增 Runtime activity kind |
@@ -53,7 +54,7 @@ Source Attachment 基础设施上增加本地用户与单个 Camp Member 的私�
 - [实施与验收](implementation-plan.md)
 - [版本决定](decisions.md)
 - [核心模型上下文变更确认](model-context-change-single-chat.md)
-- [Single Chat v1](../../contracts/single-chat-v1.md)
+- [Single Chat v2](../../contracts/single-chat-v2.md)
 - [Single Chat Architecture](../../architecture/single-chat.md)
 - [Camp Attachment v8](../../contracts/camp-attachment-v8.md)
 - [Pending Camp Input v3](../../contracts/pending-camp-input-v3.md)

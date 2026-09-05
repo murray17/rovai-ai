@@ -235,13 +235,17 @@ describe('Single Chat presentation', () => {
     }
 
     expect(laterSnapshot.conversation.id).toBe('conversation-2')
-    expect(singleChatEndCommand('camp-1', target)).toEqual({
+    expect(target).toEqual({
       campId: 'camp-1',
       conversationId: 'conversation-1',
-      expectedConversationVersion: 1
+      displayName: '雾切响子'
+    })
+    expect(singleChatEndCommand(target)).toEqual({
+      campId: 'camp-1',
+      conversationId: 'conversation-1'
     })
     expect(source).toContain('endConversation(endTarget)')
-    expect(source).toContain('singleChatEndCommand(campId, target)')
+    expect(source).toContain('singleChatEndCommand(target)')
   })
 
   it('uses the Camp composer contract and keeps agent output unboxed', () => {
@@ -379,9 +383,49 @@ describe('Single Chat presentation', () => {
     expect(pollEnd).toBeGreaterThan(pollStart)
     expect(pollingEffect).toContain('if (!visible || !conversationId || !pollingRequired) return')
     expect(pollingEffect).toContain('startSingleChatPolling(')
-    expect(pollingEffect).toContain('refreshCurrentConversation,')
+    expect(pollingEffect).toContain('refreshCurrent,')
     expect(pollingEffect).not.toContain('singleChat.list')
     expect(SINGLE_CHAT_POLL_INTERVAL_MS).toBe(800)
     expect(source).toContain("if (!visible) return\n    return window.rovai.onEvent")
+  })
+
+  it('separates list reads and target loading from coalesced current-conversation reads', () => {
+    expect(source).not.toContain('listRefreshGenerationRef')
+    expect(source).not.toContain('snapshotRefreshGenerationRef')
+    expect(source).not.toContain('acceptIf')
+    expect(source).not.toContain("refreshCurrent: 'always'")
+    expect(source).not.toContain("refreshCurrent: 'if-changed'")
+    expect(source).toContain('const currentReadInFlightRef = useRef')
+    expect(source).toContain('const currentReadAgainRef = useRef(false)')
+
+    const acceptStart = source.indexOf('const acceptSnapshot = useCallback')
+    const currentStart = source.indexOf('const refreshCurrent = useCallback', acceptStart)
+    const listStart = source.indexOf('const refreshList = useCallback', currentStart)
+    const targetLoadStart = source.indexOf('\n  useEffect(() => {', listStart)
+    expect(acceptStart).toBeGreaterThan(-1)
+    expect(currentStart).toBeGreaterThan(-1)
+    expect(listStart).toBeGreaterThan(currentStart)
+    expect(targetLoadStart).toBeGreaterThan(listStart)
+
+    const snapshotWriteSource = source.slice(acceptStart, currentStart)
+    expect(snapshotWriteSource).toContain('setSnapshot(next)')
+    expect(snapshotWriteSource).not.toContain('setConversations(')
+
+    const currentReadSource = source.slice(currentStart, listStart)
+    expect(currentReadSource).toContain('currentReadAgainRef.current = true')
+    expect(currentReadSource).toContain('currentReadInFlightRef.current')
+    expect(currentReadSource).toContain('inFlight.conversationId === conversationId')
+    expect(currentReadSource).toContain('inFlight.targetRequest.sequence === targetRequest.sequence')
+    expect(currentReadSource).toContain('currentReadInFlightRef.current === currentRead')
+    expect(currentReadSource).toContain('&& !currentReadAgainRef.current')
+    expect(currentReadSource).not.toContain('setLoading(')
+    expect(currentReadSource).not.toContain('singleChat.list')
+
+    const listReadSource = source.slice(listStart, targetLoadStart)
+    expect(listReadSource).toContain("'singleChat.list'")
+    expect(listReadSource).not.toContain('setLoading(')
+    expect(listReadSource).not.toContain('setSelectedAgentId(')
+    expect(listReadSource).not.toContain('setSnapshot(')
+    expect(listReadSource).not.toContain('singleChat.get')
   })
 })

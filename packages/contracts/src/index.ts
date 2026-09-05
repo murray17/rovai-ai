@@ -809,7 +809,6 @@ export interface SendSingleChatMessageCommand {
 export interface EndSingleChatCommand {
   campId: string
   conversationId: string
-  expectedConversationVersion: number
 }
 
 export interface SingleChatConversationView {
