@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "rovai-core"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "anyhow",
  "base64",
