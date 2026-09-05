@@ -22,9 +22,10 @@ last_updated: 2026-09-05
   `single-chat-input-attachments`；Context 只接收公共 resolved paths。
 - [x] Single Chat Context 修复 A2A lineage 分支，Bootstrap 不投递 Memory，Skill exposure 排除两个 official bundled
   Skill；Built-in policy、private final、重启取消与 successor 隔离保持既定边界。
-- [x] Renderer/Preload/Main bridge 接入 Source Ref Draft 与 Pending 编辑，复用公共拖拽识别、AttachmentCard、Preview、Open、
-  Reveal 和 FilePreview；文件选择、拖拽与粘贴临时文件进入同一 Source Ref 流程，运行中 Composer 可继续发送，空 Draft
-  仍显示停止动作。
+- [x] Renderer/Preload/Main bridge 接入 Source Ref Draft 与 Pending 编辑，Desktop Main allowlist 包含
+  `singleChat.pendingInputs.edit`；复用公共拖拽识别、AttachmentCard、Preview、Open、Reveal 和 FilePreview。文件选择、
+  拖拽与粘贴临时文件进入同一 Source Ref 流程，运行中 Composer 可继续发送，空 Draft 仍显示停止动作；对象切换使用请求
+  序号和当前队员双重 fence，结束确认冻结 exact Conversation 目标。
 - [x] Single Chat panel 改为打开时一次 list + get、空闲时不轮询；运行期约 800ms 只 get 当前 Conversation，terminal 且无
   `queued` Pending 后立即停止，`single_chat.changed` 与本地 mutation 只做必要的定向刷新，panel 收起后不保留刷新计时器。
 - [x] 更新 Single Chat 原生 UI fixture、类型合同、Architecture/Contract/UI/Context 与当前版本/决定导航。
@@ -35,7 +36,7 @@ last_updated: 2026-09-05
 | --- | --- | --- |
 | Single Chat Core 定向回归 | `passed` | 10 项测试通过；覆盖私有 final/迟到 fence、Source Ref 消费与 Run 解析、exact locator、History 公共元数据、消息 Source Ref 不可变、FIFO 发布、missing repair 和 Skill policy |
 | Migration 140 原子性 | `passed` | v1.49/schema 90 准入、receipt failure 回滚、旧私聊附件表缺失与 v1.50 current marker 定向测试通过 |
-| TypeScript 与 Renderer 回归 | `passed` | `pnpm typecheck` 通过；Vitest 152 个文件、1533 项测试通过，其中 SingleChatPanel 定向回归 9 项 |
+| TypeScript 与 Renderer 回归 | `passed` | `pnpm typecheck` 通过；Vitest 152 个文件、1536 项测试通过，其中 SingleChatPanel 定向回归 11 项，Desktop Main allowlist 定向回归新增 1 项 |
 | 原生 Single Chat UI | `platform-blocked` | fixture 已接入共享 Electron sandbox admission；当前嵌套 macOS sandbox 被规范化识别并跳过，不把未运行的原生断言记作通过 |
 | Rust 总门禁 | `passed` | workspace/all-targets check、CLI 33 项、Core binary 219 项和适用的 Core lib 505 项测试通过；一个未改动的 macOS sandbox-exec 测试因宿主返回 `Operation not permitted` 被定向排除 |
 | Desktop / 文档总门禁 | `passed` | Desktop production build、完整 `pnpm test`、`pnpm docs:test`、`pnpm docs:check`、相对 main 的 diff-aware 文档门禁与 diff hygiene 通过 |

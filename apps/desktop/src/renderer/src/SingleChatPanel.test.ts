@@ -15,9 +15,13 @@ import {
   SingleChatPanel,
   formatSingleChatDuration,
   singleChatChangeRefreshTarget,
+  singleChatConversationReady,
+  singleChatEndCommand,
+  singleChatEndTargetFromSnapshot,
   singleChatEvidenceForRun,
   singleChatRunSummary,
   singleChatSnapshotNeedsPolling,
+  singleChatTargetRequestIsCurrent,
   startSingleChatPolling
 } from './SingleChatPanel'
 
@@ -169,6 +173,77 @@ describe('Single Chat presentation', () => {
     expect(source).not.toContain('recovery_blocked')
   })
 
+  it('rejects stale target loads and disables conversation actions until the selected target is ready', async () => {
+    const firstRequest = { agentId: 'agent-2', sequence: 4 }
+    expect(singleChatTargetRequestIsCurrent(firstRequest, 4, 'agent-2')).toBe(true)
+    expect(singleChatTargetRequestIsCurrent(firstRequest, 5, 'agent-3')).toBe(false)
+    expect(singleChatTargetRequestIsCurrent(firstRequest, 4, 'agent-3')).toBe(false)
+
+    let sequence = 4
+    let selectedAgentId = 'agent-2'
+    let releaseFirst!: (value: string) => void
+    const acceptWhenCurrent = async (
+      request: { agentId: string; sequence: number },
+      value: Promise<string>
+    ): Promise<string | null> => {
+      const resolved = await value
+      return singleChatTargetRequestIsCurrent(request, sequence, selectedAgentId)
+        ? resolved
+        : null
+    }
+    const firstResult = acceptWhenCurrent(firstRequest, new Promise((resolve) => { releaseFirst = resolve }))
+    sequence = 5
+    selectedAgentId = 'agent-3'
+    const secondResult = acceptWhenCurrent(
+      { agentId: 'agent-3', sequence },
+      Promise.resolve('conversation-3')
+    )
+    releaseFirst('conversation-2')
+    expect(await secondResult).toBe('conversation-3')
+    expect(await firstResult).toBeNull()
+
+    const firstSnapshot = snapshot()
+    expect(singleChatConversationReady(null, 'agent-1', false)).toBe(true)
+    expect(singleChatConversationReady(null, null, false)).toBe(false)
+    expect(singleChatConversationReady(firstSnapshot, 'agent-1', false)).toBe(true)
+    expect(singleChatConversationReady(firstSnapshot, 'agent-2', false)).toBe(false)
+    expect(singleChatConversationReady(firstSnapshot, 'agent-1', true)).toBe(false)
+
+    const chooseTargetStart = source.indexOf('const chooseTarget = async')
+    const chooseTargetEnd = source.indexOf('\n  const prepareFiles =', chooseTargetStart)
+    const chooseTargetSource = source.slice(chooseTargetStart, chooseTargetEnd)
+    expect(chooseTargetSource).toContain('targetRequestSequenceRef')
+    expect(chooseTargetSource).toContain('snapshotRef.current = null')
+    expect(chooseTargetSource).toContain('setSnapshot(null)')
+    expect(chooseTargetSource).toContain('singleChatTargetRequestIsCurrent')
+    expect(source).toContain('disabled={!snapshot || !currentTargetReady || ending}')
+    expect(source).toContain('disabled={!currentTargetReady || cancelling}')
+    expect(source).toContain('!selectedMember || !currentTargetReady || sending || ending')
+  })
+
+  it('pins the end command to the conversation shown when confirmation opens', () => {
+    const firstSnapshot = snapshot()
+    const target = singleChatEndTargetFromSnapshot(firstSnapshot, '雾切响子')
+    const laterSnapshot = {
+      ...firstSnapshot,
+      conversation: {
+        ...firstSnapshot.conversation,
+        id: 'conversation-2',
+        agentId: 'agent-2',
+        version: 9
+      }
+    }
+
+    expect(laterSnapshot.conversation.id).toBe('conversation-2')
+    expect(singleChatEndCommand('camp-1', target)).toEqual({
+      campId: 'camp-1',
+      conversationId: 'conversation-1',
+      expectedConversationVersion: 1
+    })
+    expect(source).toContain('endConversation(endTarget)')
+    expect(source).toContain('singleChatEndCommand(campId, target)')
+  })
+
   it('uses the Camp composer contract and keeps agent output unboxed', () => {
     expect(source).toContain('className="composer single-chat-composer"')
     expect(source).toContain('composer-box single-chat-composer-box')
@@ -297,7 +372,7 @@ describe('Single Chat presentation', () => {
   it('keeps list reads out of the 800ms run loop and gates all reads on panel visibility', () => {
     expect(source.match(/'singleChat\.list'/gu)).toHaveLength(1)
     expect(source.match(/'singleChat\.get'/gu)).toHaveLength(1)
-    const pollStart = source.indexOf('const pollingRequired = singleChatSnapshotNeedsPolling(snapshot)')
+    const pollStart = source.indexOf('const pollingRequired = singleChatSnapshotNeedsPolling(currentSnapshot)')
     const pollEnd = source.indexOf('if (!visible || !activeRun) return', pollStart)
     const pollingEffect = source.slice(pollStart, pollEnd)
     expect(pollStart).toBeGreaterThan(-1)

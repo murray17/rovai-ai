@@ -51,6 +51,65 @@ const NON_TERMINAL_RUNS = new Set<SingleChatRunView['status']>(['queued', 'runni
 export const SINGLE_CHAT_POLL_INTERVAL_MS = 800
 const END_CONFIRMATION_STORAGE_KEY = 'rovai.single-chat.skip-end-confirmation.v1'
 
+export type SingleChatTargetRequest = {
+  agentId: string
+  sequence: number
+}
+
+export type SingleChatEndTarget = {
+  conversationId: string
+  expectedConversationVersion: number
+  agentId: string
+  displayName: string
+}
+
+export function singleChatTargetRequestIsCurrent(
+  request: SingleChatTargetRequest,
+  currentSequence: number,
+  selectedAgentId: string | null
+): boolean {
+  return request.sequence === currentSequence && request.agentId === selectedAgentId
+}
+
+export function singleChatConversationReady(
+  snapshot: SingleChatSnapshot | null,
+  selectedAgentId: string | null,
+  loading: boolean
+): boolean {
+  return Boolean(
+    !loading
+    && selectedAgentId
+    && (!snapshot || snapshot.conversation.agentId === selectedAgentId)
+  )
+}
+
+export function singleChatEndTargetFromSnapshot(
+  snapshot: SingleChatSnapshot,
+  displayName: string
+): SingleChatEndTarget {
+  return {
+    conversationId: snapshot.conversation.id,
+    expectedConversationVersion: snapshot.conversation.version,
+    agentId: snapshot.conversation.agentId,
+    displayName
+  }
+}
+
+export function singleChatEndCommand(
+  campId: string,
+  target: SingleChatEndTarget
+): {
+  campId: string
+  conversationId: string
+  expectedConversationVersion: number
+} {
+  return {
+    campId,
+    conversationId: target.conversationId,
+    expectedConversationVersion: target.expectedConversationVersion
+  }
+}
+
 export function singleChatSnapshotNeedsPolling(snapshot: SingleChatSnapshot | null): boolean {
   return Boolean(
     snapshot
@@ -787,6 +846,7 @@ export function SingleChatPanel({
   const snapshotRef = useRef<SingleChatSnapshot | null>(null)
   const listRefreshGenerationRef = useRef(0)
   const snapshotRefreshGenerationRef = useRef(0)
+  const targetRequestSequenceRef = useRef(0)
   const viewportRef = useRef<HTMLElement>(null)
   const viewportEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -798,6 +858,7 @@ export function SingleChatPanel({
   const [snapshot, setSnapshot] = useState<SingleChatSnapshot | null>(null)
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
+  const loadingRef = useRef(false)
   const [sending, setSending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [ending, setEnding] = useState(false)
@@ -807,6 +868,7 @@ export function SingleChatPanel({
     useState<SingleChatPendingAttachmentDropTarget>(null)
   const [error, setError] = useState<string | null>(null)
   const [endDialogOpen, setEndDialogOpen] = useState(false)
+  const [endTarget, setEndTarget] = useState<SingleChatEndTarget | null>(null)
   const [skipEndConfirmation, setSkipEndConfirmation] = useState(false)
   const [now, setNow] = useState(() => new Date().toISOString())
 
@@ -823,7 +885,9 @@ export function SingleChatPanel({
   const activeMembersRef = useRef(activeMembers)
   const memberByIdRef = useRef(memberById)
   const selectedMember = selectedAgentId ? memberById.get(selectedAgentId) ?? null : null
-  const activeRun = snapshot?.agentRuns.find((run) => NON_TERMINAL_RUNS.has(run.status)) ?? null
+  const currentTargetReady = singleChatConversationReady(snapshot, selectedAgentId, loading)
+  const currentSnapshot = currentTargetReady ? snapshot : null
+  const activeRun = currentSnapshot?.agentRuns.find((run) => NON_TERMINAL_RUNS.has(run.status)) ?? null
   const runningCount = conversations.filter((conversation) => conversation.activeAgentRunId !== null).length
 
   visibleRef.current = visible
@@ -898,21 +962,27 @@ export function SingleChatPanel({
   const refreshConversationList = useCallback(async ({
     showLoading = false,
     preferredAgentId = null,
-    refreshCurrent = 'always'
+    refreshCurrent = 'always',
+    acceptIf = null
   }: {
     showLoading?: boolean
     preferredAgentId?: string | null
     refreshCurrent?: 'always' | 'if-changed' | 'never'
+    acceptIf?: (() => boolean) | null
   } = {}): Promise<SingleChatSnapshot | null> => {
-    if (!visibleRef.current || campIdRef.current !== campId) return null
+    if (!visibleRef.current || campIdRef.current !== campId || (acceptIf && !acceptIf())) return null
     const generation = ++listRefreshGenerationRef.current
-    if (showLoading) setLoading(true)
+    if (showLoading) {
+      loadingRef.current = true
+      setLoading(true)
+    }
     try {
       const nextConversations = await window.rovai.request<SingleChatConversationView[]>('singleChat.list', { campId })
       if (
         generation !== listRefreshGenerationRef.current
         || !visibleRef.current
         || campIdRef.current !== campId
+        || (acceptIf && !acceptIf())
       ) return null
 
       const availableMembers = activeMembersRef.current
@@ -961,6 +1031,7 @@ export function SingleChatPanel({
         || !visibleRef.current
         || campIdRef.current !== campId
         || currentConversationIdRef.current !== nextConversationId
+        || (acceptIf && !acceptIf())
       ) return null
       acceptSnapshot(nextConversationId, nextSnapshot)
       return nextSnapshot
@@ -969,12 +1040,16 @@ export function SingleChatPanel({
         generation === listRefreshGenerationRef.current
         && visibleRef.current
         && campIdRef.current === campId
+        && (!acceptIf || acceptIf())
       ) {
         setError(readErrorMessage(nextError, '单聊暂时无法读取。'))
       }
       return null
     } finally {
-      if (generation === listRefreshGenerationRef.current) setLoading(false)
+      if (showLoading && generation === listRefreshGenerationRef.current) {
+        loadingRef.current = false
+        setLoading(false)
+      }
     }
   }, [acceptSnapshot, campId, loadConversation])
 
@@ -982,19 +1057,21 @@ export function SingleChatPanel({
     if (!visible) {
       ++listRefreshGenerationRef.current
       ++snapshotRefreshGenerationRef.current
+      ++targetRequestSequenceRef.current
       return
     }
     void refreshConversationList({ showLoading: true, refreshCurrent: 'always' })
     return () => {
       ++listRefreshGenerationRef.current
       ++snapshotRefreshGenerationRef.current
+      ++targetRequestSequenceRef.current
     }
   // Only actual target eligibility changes should repeat the panel-open list read.
   }, [activeMemberIdsKey, campId, refreshConversationList, visible])
 
-  const pollingRequired = singleChatSnapshotNeedsPolling(snapshot)
+  const pollingRequired = singleChatSnapshotNeedsPolling(currentSnapshot)
   useEffect(() => {
-    const conversationId = snapshot?.conversation.id ?? null
+    const conversationId = currentSnapshot?.conversation.id ?? null
     if (!visible || !conversationId || !pollingRequired) return
     return startSingleChatPolling(
       conversationId,
@@ -1002,7 +1079,7 @@ export function SingleChatPanel({
       (callback, delayMs) => window.setTimeout(callback, delayMs),
       (timer) => window.clearTimeout(timer)
     )
-  }, [pollingRequired, refreshCurrentConversation, snapshot?.conversation.id, visible])
+  }, [currentSnapshot?.conversation.id, pollingRequired, refreshCurrentConversation, visible])
 
   useEffect(() => {
     if (!visible) return
@@ -1049,20 +1126,26 @@ export function SingleChatPanel({
   useEffect(() => {
     if (!visible || !followLatestRef.current) return
     viewportEndRef.current?.scrollIntoView({ block: 'end' })
-  }, [snapshot?.conversation.lastMessageSequence, activeRun?.executionEvidenceCount, visible])
+  }, [currentSnapshot?.conversation.lastMessageSequence, activeRun?.executionEvidenceCount, visible])
 
-  const openConversation = async (agentId: string): Promise<SingleChatSnapshot> => {
+  const openConversation = async (
+    agentId: string,
+    acceptIf: (() => boolean) | null = null
+  ): Promise<SingleChatSnapshot | null> => {
     const result = await window.rovai.request<StoredCommandResult>('singleChat.open', {
       commandId: crypto.randomUUID(),
       command: { campId, agentId }
     })
+    if (acceptIf && !acceptIf()) return null
     if (result.status === 'rejected') throw new Error(resultMessage(result))
     const conversationId = resultPayloadString(result, 'conversationId')
     if (!conversationId) throw new Error('单聊已打开，但未返回对话标识。')
     const next = await refreshConversationList({
       preferredAgentId: agentId,
-      refreshCurrent: 'always'
+      refreshCurrent: 'always',
+      acceptIf
     })
+    if (acceptIf && !acceptIf()) return null
     if (!next || next.conversation.id !== conversationId) {
       throw new Error('单聊已不在当前会话中。')
     }
@@ -1070,28 +1153,51 @@ export function SingleChatPanel({
   }
 
   const chooseTarget = async (agentId: string): Promise<void> => {
+    const targetRequest: SingleChatTargetRequest = {
+      agentId,
+      sequence: ++targetRequestSequenceRef.current
+    }
+    const requestIsCurrent = (): boolean => (
+      visibleRef.current
+      && campIdRef.current === campId
+      && singleChatTargetRequestIsCurrent(
+        targetRequest,
+        targetRequestSequenceRef.current,
+        selectedAgentIdRef.current
+      )
+    )
     followLatestRef.current = true
     setPreparingAttachments([])
     selectedAgentIdRef.current = agentId
     setSelectedAgentId(agentId)
     currentConversationIdRef.current = null
+    ++listRefreshGenerationRef.current
     ++snapshotRefreshGenerationRef.current
     snapshotRef.current = null
     setSnapshot(null)
     setError(null)
+    loadingRef.current = true
     setLoading(true)
     try {
-      await openConversation(agentId)
+      await openConversation(agentId, requestIsCurrent)
     } catch (nextError) {
-      setError(readErrorMessage(nextError, '无法打开这段单聊。'))
+      if (requestIsCurrent()) setError(readErrorMessage(nextError, '无法打开这段单聊。'))
     } finally {
-      setLoading(false)
+      if (requestIsCurrent()) {
+        loadingRef.current = false
+        setLoading(false)
+      }
     }
   }
 
   const prepareFiles = async (files: File[]): Promise<void> => {
     const agentId = selectedAgentIdRef.current
-    if (!agentId || ending || files.length === 0) return
+    if (
+      !agentId
+      || !singleChatConversationReady(snapshotRef.current, agentId, loadingRef.current)
+      || ending
+      || files.length === 0
+    ) return
     const pending = files.map((file) => ({ id: crypto.randomUUID(), name: file.name, error: null }))
     setPreparingAttachments((current) => [...current, ...pending])
     setError(null)
@@ -1100,6 +1206,7 @@ export function SingleChatPanel({
       : null
     try {
       if (!current) current = await openConversation(agentId)
+      if (!current) throw new Error('单聊已不在当前会话中。')
       for (const [index, file] of files.entries()) {
         const item = pending[index]
         try {
@@ -1146,10 +1253,10 @@ export function SingleChatPanel({
     }, 1_200)
   }
 
-  const pendingEditing = Boolean(snapshot?.pendingInputs.editSession)
+  const pendingEditing = Boolean(currentSnapshot?.pendingInputs.editSession)
   const attachmentDropBlocked = pendingEditing
     ? pendingAttachmentDropTarget === null
-    : !selectedMember
+    : !currentTargetReady
       || ending
       || sending
       || preparingAttachments.some((item) => !item.error)
@@ -1224,7 +1331,11 @@ export function SingleChatPanel({
 
   const removeDraftAttachment = async (attachmentId: string): Promise<void> => {
     const current = snapshotRef.current
-    if (!current || ending) return
+    if (
+      !current
+      || !singleChatConversationReady(current, selectedAgentIdRef.current, loadingRef.current)
+      || ending
+    ) return
     setError(null)
     try {
       const next = await window.rovai.singleChatAttachments.remove(
@@ -1242,7 +1353,12 @@ export function SingleChatPanel({
     event.preventDefault()
     const body = draft.trim()
     const agentId = selectedAgentIdRef.current
-    if (!agentId || sending || preparingAttachments.some((item) => !item.error)) return
+    if (
+      !agentId
+      || !singleChatConversationReady(snapshotRef.current, agentId, loadingRef.current)
+      || sending
+      || preparingAttachments.some((item) => !item.error)
+    ) return
     followLatestRef.current = true
     setSending(true)
     setError(null)
@@ -1275,7 +1391,14 @@ export function SingleChatPanel({
 
   const stopCurrentRun = async (): Promise<void> => {
     const run = activeRun
-    if (!run || cancelling) return
+    const current = snapshotRef.current
+    if (
+      !run
+      || !current
+      || !singleChatConversationReady(current, selectedAgentIdRef.current, loadingRef.current)
+      || current.conversation.activeAgentRunId !== run.id
+      || cancelling
+    ) return
     setCancelling(true)
     setError(null)
     try {
@@ -1284,38 +1407,38 @@ export function SingleChatPanel({
         command: { campId, agentRunId: run.id, expectedVersion: run.version }
       })
       if (result.status === 'rejected') throw new Error(resultMessage(result))
-      await refreshCurrentConversation(snapshotRef.current?.conversation.id ?? null)
+      await refreshCurrentConversation(current.conversation.id)
     } catch (nextError) {
-      setError(readErrorMessage(nextError, '停止请求未完成，请重试。'))
+      if (currentConversationIdRef.current === current.conversation.id) {
+        setError(readErrorMessage(nextError, '停止请求未完成，请重试。'))
+      }
     } finally {
       setCancelling(false)
     }
   }
 
-  const endConversation = async (): Promise<void> => {
-    const current = snapshotRef.current
-    if (!current || ending) return
+  const endConversation = async (target: SingleChatEndTarget): Promise<void> => {
+    if (ending) return
     setEnding(true)
     setError(null)
     try {
       const result = await window.rovai.request<StoredCommandResult>('singleChat.end', {
         commandId: crypto.randomUUID(),
-        command: {
-          campId,
-          conversationId: current.conversation.id,
-          expectedConversationVersion: current.conversation.version
-        }
+        command: singleChatEndCommand(campId, target)
       })
       if (result.status === 'rejected') throw new Error(resultMessage(result))
       if (skipEndConfirmation) storeBoolean(END_CONFIRMATION_STORAGE_KEY, true)
       setEndDialogOpen(false)
-      setPreparingAttachments([])
-      currentConversationIdRef.current = null
-      ++snapshotRefreshGenerationRef.current
-      snapshotRef.current = null
-      setSnapshot(null)
+      setEndTarget(null)
+      if (currentConversationIdRef.current === target.conversationId) {
+        setPreparingAttachments([])
+        currentConversationIdRef.current = null
+        ++snapshotRefreshGenerationRef.current
+        snapshotRef.current = null
+        setSnapshot(null)
+      }
       const remainingConversations = conversationsRef.current.filter((conversation) => (
-        conversation.id !== current.conversation.id
+        conversation.id !== target.conversationId
       ))
       conversationsRef.current = remainingConversations
       setConversations(remainingConversations)
@@ -1329,11 +1452,22 @@ export function SingleChatPanel({
   }
 
   const requestEnd = (): void => {
-    if (!snapshotRef.current) return
+    const current = snapshotRef.current
+    const agentId = selectedAgentIdRef.current
+    if (
+      !current
+      || !singleChatConversationReady(current, agentId, loadingRef.current)
+      || current.conversation.id !== currentConversationIdRef.current
+    ) return
+    const target = singleChatEndTargetFromSnapshot(
+      current,
+      memberByIdRef.current.get(current.conversation.agentId)?.displayName ?? '这位队员'
+    )
     if (safeStoredBoolean(END_CONFIRMATION_STORAGE_KEY)) {
-      void endConversation()
+      void endConversation(target)
       return
     }
+    setEndTarget(target)
     setSkipEndConfirmation(false)
     setEndDialogOpen(true)
   }
@@ -1424,7 +1558,7 @@ export function SingleChatPanel({
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
         <span className="single-chat-private-label"><LockGlyph />仅你可见</span>
-        <button className="single-chat-end-button" type="button" disabled={!snapshot || ending} aria-label={selectedMember ? `结束与${selectedMember.displayName}的单聊` : '结束单聊'} onClick={requestEnd}>
+        <button className="single-chat-end-button" type="button" disabled={!snapshot || !currentTargetReady || ending} aria-label={selectedMember ? `结束与${selectedMember.displayName}的单聊` : '结束单聊'} onClick={requestEnd}>
           {ending ? '结束中…' : '结束'}
         </button>
       </div>
@@ -1440,18 +1574,18 @@ export function SingleChatPanel({
         }}
       >
         <div className="single-chat-transcript">
-          {loading && !snapshot && <div className="single-chat-empty" role="status"><span className="single-chat-spinner" /><strong>正在打开单聊</strong></div>}
+          {loading && <div className="single-chat-empty" role="status"><span className="single-chat-spinner" /><strong>正在打开单聊</strong></div>}
           {!loading && !selectedMember && <div className="single-chat-empty"><strong>当前没有可单聊的队员</strong><span>队员回到当前会话后即可开始单聊。</span></div>}
-          {!loading && selectedMember && !snapshot && <div className="single-chat-empty"><strong>和 {selectedMember.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
-          {snapshot && snapshot.messages.length === 0 && <div className="single-chat-empty"><strong>和 {selectedMember?.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
-          {snapshot && <SingleChatTranscript snapshot={snapshot} now={now} onNotify={onNotify} />}
+          {!loading && selectedMember && !currentSnapshot && <div className="single-chat-empty"><strong>和 {selectedMember.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
+          {currentSnapshot && currentSnapshot.messages.length === 0 && <div className="single-chat-empty"><strong>和 {selectedMember?.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
+          {currentSnapshot && <SingleChatTranscript snapshot={currentSnapshot} now={now} onNotify={onNotify} />}
           <div ref={viewportEndRef} aria-hidden="true" />
         </div>
       </section>
 
-      {snapshot && (
+      {currentSnapshot && (
         <SingleChatPendingQueue
-          snapshot={snapshot}
+          snapshot={currentSnapshot}
           busyOutside={sending || ending}
           onSnapshot={(next) => {
             acceptSnapshot(next.conversation.id, next, true)
@@ -1467,15 +1601,15 @@ export function SingleChatPanel({
       <form className="composer single-chat-composer" onSubmit={(event) => void send(event)}>
         <div className={`composer-box single-chat-composer-box${activeRun ? ' is-running' : ''}`}>
           <div className="composer-input">
-            {((snapshot?.draft.attachments.length ?? 0) > 0 || preparingAttachments.length > 0) && (
+            {((currentSnapshot?.draft.attachments.length ?? 0) > 0 || preparingAttachments.length > 0) && (
               <SingleChatAttachmentStrip>
-                {snapshot?.draft.attachments.map((attachment) => (
+                {currentSnapshot?.draft.attachments.map((attachment) => (
                   <AttachmentCard
                     attachment={attachment}
                     locator={{
                       owner: 'single_chat_composer',
                       campId,
-                      conversationId: snapshot.conversation.id,
+                      conversationId: currentSnapshot.conversation.id,
                       attachmentRefId: attachment.id
                     }}
                     onNotify={onNotify}
@@ -1499,7 +1633,7 @@ export function SingleChatPanel({
             <textarea
               id={`${panelId}-composer`}
               value={draft}
-              disabled={!selectedMember || sending || ending}
+              disabled={!selectedMember || !currentTargetReady || sending || ending}
               placeholder={selectedMember ? `给 ${selectedMember.displayName} 发消息…` : '选择一位队员后开始单聊'}
               onChange={(event) => setDraft(event.target.value)}
               onPaste={(event) => {
@@ -1538,7 +1672,7 @@ export function SingleChatPanel({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={!selectedMember || sending || ending || preparingAttachments.some((item) => !item.error)}
+                disabled={!selectedMember || !currentTargetReady || sending || ending || preparingAttachments.some((item) => !item.error)}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18"><path d="m6.2 9.8 4.65-4.65a2.5 2.5 0 0 1 3.54 3.54l-6.1 6.1a4 4 0 0 1-5.66-5.66l6.1-6.1" /></svg>
@@ -1553,13 +1687,13 @@ export function SingleChatPanel({
                   </span>
                 </span>
               )}
-              {activeRun && !draft.trim() && (snapshot?.draft.attachments.length ?? 0) === 0
-                ? <button className="danger-button composer-stop single-chat-stop" type="button" disabled={cancelling} onClick={() => void stopCurrentRun()}>{cancelling ? '正在提交停止请求…' : '停止'}</button>
+              {activeRun && !draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0
+                ? <button className="danger-button composer-stop single-chat-stop" type="button" disabled={!currentTargetReady || cancelling} onClick={() => void stopCurrentRun()}>{cancelling ? '正在提交停止请求…' : '停止'}</button>
                 : <button
                     className="primary-button composer-send single-chat-send"
                     type="submit"
                     aria-busy={sending || preparingAttachments.some((item) => !item.error)}
-                    disabled={(!draft.trim() && (snapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || sending || ending || preparingAttachments.some((item) => !item.error)}
+                    disabled={(!draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || ending || preparingAttachments.some((item) => !item.error)}
                   >发送</button>}
             </div>
           </div>
@@ -1587,12 +1721,16 @@ export function SingleChatPanel({
       </span>
     </aside>
 
-    <Dialog.Root open={endDialogOpen} onOpenChange={(open) => !ending && setEndDialogOpen(open)}>
+    <Dialog.Root open={endDialogOpen} onOpenChange={(open) => {
+      if (ending) return
+      setEndDialogOpen(open)
+      if (!open) setEndTarget(null)
+    }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <AppDialogContent tone="danger" aria-describedby={`${panelId}-end-description`}>
           <AppDialogHeader
-            title={selectedMember ? `结束与${selectedMember.displayName}的单聊？` : '结束单聊？'}
+            title={endTarget ? `结束与${endTarget.displayName}的单聊？` : '结束单聊？'}
             description="这段对话将被删除且无法回复。"
             descriptionId={`${panelId}-end-description`}
             icon="trash"
@@ -1606,7 +1744,7 @@ export function SingleChatPanel({
           </AppDialogBody>
           <AppDialogFooter>
             <Dialog.Close asChild><button className="quiet-button" type="button" data-dialog-autofocus disabled={ending}>取消</button></Dialog.Close>
-            <button className="danger-button" type="button" disabled={ending} onClick={() => void endConversation()}>{ending ? '结束中…' : '结束'}</button>
+            <button className="danger-button" type="button" disabled={ending || !endTarget} onClick={() => endTarget && void endConversation(endTarget)}>{ending ? '结束中…' : '结束'}</button>
           </AppDialogFooter>
         </AppDialogContent>
       </Dialog.Portal>

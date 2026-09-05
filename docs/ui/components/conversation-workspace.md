@@ -309,6 +309,9 @@ Camp 公共 Source Attachment 组件。`Enter` 发送、`Shift+Enter` 换行，I
 Conversation 的后项，用户保存有效内容或删除队首后恢复；不得阻塞 Camp 公屏或其他 Single Chat。停止只结束当前回复，
 对话和未发布队列仍可继续。发送后回到最新；后台 Evidence 更新仅在用户原本接近底部时跟随，
 用户上滚阅读时不得抢走位置。选择另一个对象恢复其 active transcript 或创建新 transcript，UI 不区分这两种内部结果。
+切换对象时立即撤下旧 Snapshot；新对象加载完成前，发送、附件、停止与结束等依赖当前 Conversation 的操作保持禁用。
+晚到的打开或读取结果必须同时匹配最后一次目标请求序号和当前队员，不能覆盖较新的选择。结束确认固定使用打开确认框时的
+Conversation ID、version 与队员名称，确认时不得重新读取可能已经切换的全局 Snapshot。
 
 panel 每次打开时读取一次 active Conversation 列表和当前对象的完整 Snapshot；空闲后不保留固定刷新计时器。只有当前
 Conversation 存在非终态 Run，或存在会在 Run 结束后自动发布的 `queued` Pending Input 时，才按约 800ms 周期只读取当前

@@ -245,6 +245,7 @@ const allowedMethods = new Set<CoreMethod>([
   'singleChat.open',
   'singleChat.send',
   'singleChat.end',
+  'singleChat.pendingInputs.edit',
   'campTurns.cancel',
   'agentRuns.cancel',
   'agentRuns.resolveRecoveryBlocker',
