@@ -5,6 +5,7 @@ pub mod agent_run_file_change;
 pub mod agent_run_image;
 pub mod agent_runtime_adapter;
 pub mod authority_migration;
+pub mod automation;
 pub mod brand;
 pub mod builtin_tool_cli_output;
 pub mod builtin_tool_evidence_projection;

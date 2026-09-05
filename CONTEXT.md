@@ -70,6 +70,22 @@ _Avoid_: Renderer-only state transition, eager Conversation allocation, implicit
 The product-facing and domain name for Rovai-ai's application-managed workspace group for Camps that are not bound to a user-selected directory, displayed in Chinese as `快速对话`. It uses one managed workspace directory but is neither a Camp nor a Project; each contained Camp keeps its own identity and lifecycle.
 _Avoid_: Lobby, 大厅, Project, Quick Chat entity
 
+**Automation**:
+A durable user instruction that binds one Prompt, Member, workspace reference, schedule and optional notification channels for future execution. The product displays it in Chinese as `定时任务`; it is neither a Camp nor a reusable Conversation.
+_Avoid_: cron job, background Camp, scheduled Camp, recurring Conversation
+
+**Automation Occurrence**:
+One planned or explicitly requested trigger of an Automation at a stable scheduled instant. It may be claimed for execution or recorded as missed/overlapping, but it is never postponed into a second trigger.
+_Avoid_: retry, delayed run, catch-up batch, Scheduler tick
+
+**AutomationRun**:
+The immutable outcome record of one claimed Automation Occurrence, anchored to exactly one new CampTurn when execution is admitted. Its execution result is independent from any later channel notification outcome.
+_Avoid_: AgentRun, CampTurn, notification job, reusable execution
+
+**Automation Notification Delivery**:
+One provider-scoped attempt series to send a frozen AutomationRun result or failure to the selected Member Bot's current Owner private chat. It is delivery evidence and never part of the AutomationRun execution outcome.
+_Avoid_: AutomationRun retry, CampMessage, execution result, configured recipient
+
 **Main Window Session**:
 The lifetime of one top-level Rovai-ai window, from its creation during application launch or macOS reopen until that window closes. It is distinct from the longer-lived application process; focusing or restoring the same window, a Core restart, and a Navigation refresh remain within the same Main Window Session.
 _Avoid_: application process lifetime, Native Session, Core session, Navigation refresh

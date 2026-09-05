@@ -84,7 +84,12 @@ export class AdaptiveChannelHostPump {
   }
 
   handleCoreEvent(event: CoreEvent): void {
-    if (this.#stopped || !this.#active) return
+    if (this.#stopped) return
+    if (event.method === 'automation.notification.available') {
+      this.wake()
+      return
+    }
+    if (!this.#active) return
     const wake = this.#dependencies.classifyCoreEvent?.(event) ?? defaultCoreEventWake(event)
     if (wake === 'terminal') {
       this.#requestImmediate()

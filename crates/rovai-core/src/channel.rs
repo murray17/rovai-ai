@@ -6254,13 +6254,21 @@ impl ChannelService {
             reconcile_terminal_pending_execution_consoles(&transaction, &now_text)?;
             settle_terminal_requests(&transaction, &now_text)?;
             promote_ready_requests(&transaction, &now_text, &mut settled_run_ids)?;
-            let claims = claim_deliveries(
+            let mut claims = claim_deliveries(
                 &transaction,
                 provider,
                 &request.worker_id,
                 request.limit,
                 &now,
             )?;
+            let remaining = request.limit.saturating_sub(claims.len());
+            claims.extend(crate::automation::claim_notification_deliveries(
+                &transaction,
+                provider,
+                &request.worker_id,
+                remaining,
+                &now,
+            )?);
             let roster_refreshes = if provider == FEISHU_PROVIDER {
                 crate::message_delivery::pending_topic_roster_refreshes(&transaction)?
             } else {
@@ -6285,7 +6293,8 @@ impl ChannelService {
                 [&retention_boundary],
             )?;
             let has_outstanding_work = !roster_refreshes.is_empty()
-                || channel_host_has_outstanding_work(&transaction, provider)?;
+                || channel_host_has_outstanding_work(&transaction, provider)?
+                || crate::automation::has_notification_work(&transaction, provider)?;
             ChannelHostTickResult {
                 deliveries: claims,
                 roster_refreshes,
@@ -6311,6 +6320,26 @@ impl ChannelService {
                     "channel.host_required",
                     "Only a trusted Channel Host can settle deliveries",
                 ));
+            }
+            if let Some(provider) = crate::automation::notification_provider(
+                transaction,
+                &envelope.payload.delivery_id,
+            )? {
+                if !is_channel_host_for_provider(&envelope.actor, &provider) {
+                    return Ok(rejected(
+                        "channel.host_required",
+                        "Only this provider's trusted Channel Host can settle deliveries",
+                    ));
+                }
+                return crate::automation::settle_notification_delivery_in_tx(
+                    transaction,
+                    &envelope.payload.delivery_id,
+                    &envelope.payload.worker_id,
+                    &envelope.payload.outcome,
+                    envelope.payload.external_delivery_message_id.as_deref(),
+                    envelope.payload.failure_code.as_deref(),
+                    envelope.payload.retryable,
+                );
             }
             let state = transaction
                 .query_row(
@@ -14268,7 +14297,9 @@ mod tests {
                     .unwrap()
                     .into_iter()
                     .filter(|column| {
-                        column != "retry_suppression_json" && column != "source_attachments_json"
+                        column != "retry_suppression_json"
+                            && column != "source_attachments_json"
+                            && column != "automation_run_id"
                     })
                     .collect::<Vec<_>>()
                     .join(", ");

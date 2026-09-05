@@ -1,4 +1,32 @@
 {
+  "automation.list": {
+    "canonicalResult": {"automations":[{"automationId":"rvat_123","version":2,"name":"Weekly report","prompt":"Summarize project progress.","enabled":true,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":"2026-01-02T01:00:00Z","lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}],"nextCursor":null,"truncated":false},
+    "agentOutput": {"automations":[{"automationId":"rvat_123","version":2,"name":"Weekly report","prompt":"Summarize project progress.","enabled":true,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":"2026-01-02T01:00:00Z","lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}],"nextCursor":null,"truncated":false}
+  },
+  "automation.get": {
+    "canonicalResult": {"automationId":"rvat_123","version":2,"name":"Weekly report","prompt":"Summarize project progress.","enabled":true,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":"2026-01-02T01:00:00Z","lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
+    "agentOutput": {"automationId":"rvat_123","version":2,"name":"Weekly report","prompt":"Summarize project progress.","enabled":true,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":"2026-01-02T01:00:00Z","lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
+  },
+  "automation.create": {
+    "canonicalResult": {"automationId":"rvat_123","version":1,"name":"Weekly report","prompt":"Summarize project progress.","enabled":true,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":"2026-01-02T01:00:00Z","lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
+    "agentOutput": {"automationId":"rvat_123","version":1,"name":"Weekly report","prompt":"Summarize project progress.","enabled":true,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":"2026-01-02T01:00:00Z","lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
+  },
+  "automation.run": {
+    "canonicalResult": {"status":"started","runId":"rvar_123","campId":"rvcamp_123","conversationId":"rvcamp_123","reason":null},
+    "agentOutput": {"status":"started","runId":"rvar_123","campId":"rvcamp_123","conversationId":"rvcamp_123","reason":null}
+  },
+  "automation.close": {
+    "canonicalResult": {"automationId":"rvat_123","version":3,"name":"Weekly report","prompt":"Summarize project progress.","enabled":false,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":null,"lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
+    "agentOutput": {"automationId":"rvat_123","version":3,"name":"Weekly report","prompt":"Summarize project progress.","enabled":false,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":null,"lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
+  },
+  "automation.update": {
+    "canonicalResult": {"automationId":"rvat_123","version":3,"name":"Updated report","prompt":"Summarize project progress.","enabled":true,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":"2026-01-02T01:00:00Z","lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
+    "agentOutput": {"automationId":"rvat_123","version":3,"name":"Updated report","prompt":"Summarize project progress.","enabled":true,"memberId":"agent_27","projectRef":{"kind":"quick_chat"},"schedule":{"kind":"weekdays","at":"09:00"},"notifyChannels":["feishu"],"nextRunAt":"2026-01-02T01:00:00Z","lastRun":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
+  },
+  "automation.delete": {
+    "canonicalResult": {"automationId":"rvat_123","deleted":true},
+    "agentOutput": {"automationId":"rvat_123","deleted":true}
+  },
   "camp.message.send": {
     "canonicalResult": {"status":"accepted","messageId":"msg_123","agentAddressingMode":"automatic","visibility":"camp_public","campTurnId":"turn_123","effectiveRecipients":["agent_27"],"recipientPresentation":{},"recipientSetDigest":"sha256:recipient-set","deliveryIds":["delivery_123"],"allocatedAgentRunResponsibilities":1},
     "agentOutput": {"messageId":"msg_123","agentAddressingMode":"automatic","effectiveRecipients":["agent_27"],"deliveryIds":["delivery_123"]}

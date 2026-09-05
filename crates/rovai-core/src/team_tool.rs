@@ -9,6 +9,11 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::AdapterKind,
+    automation::{
+        AUTOMATION_CLOSE_TOOL_NAME, AUTOMATION_CREATE_TOOL_NAME, AUTOMATION_DELETE_TOOL_NAME,
+        AUTOMATION_GET_TOOL_NAME, AUTOMATION_LIST_TOOL_NAME, AUTOMATION_RUN_TOOL_NAME,
+        AUTOMATION_UPDATE_TOOL_NAME,
+    },
     camp_attachment::MAX_PREPARED_ATTACHMENTS,
     camp_attachment_publication::AuthorityAttachment,
     camp_history::{
@@ -44,7 +49,14 @@ pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 15] = [
+pub const TEAM_TOOL_NAMES: [&str; 22] = [
+    AUTOMATION_LIST_TOOL_NAME,
+    AUTOMATION_GET_TOOL_NAME,
+    AUTOMATION_CREATE_TOOL_NAME,
+    AUTOMATION_RUN_TOOL_NAME,
+    AUTOMATION_CLOSE_TOOL_NAME,
+    AUTOMATION_UPDATE_TOOL_NAME,
+    AUTOMATION_DELETE_TOOL_NAME,
     CAMP_MESSAGE_SEND_TOOL_NAME,
     GATHER_TOOL_NAME,
     MEMBER_CREATE_TOOL_NAME,

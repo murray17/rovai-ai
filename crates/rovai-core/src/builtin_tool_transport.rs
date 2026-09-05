@@ -9,13 +9,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 21;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 22;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 2;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 21;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 22;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v21";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v22";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -177,7 +177,7 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 15] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 22] = [
     BuiltinToolCliIdentity {
         operation: "camp.message.send",
         group: "send",
@@ -252,6 +252,41 @@ pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 15] = [
         operation: "memory.write",
         group: "memory",
         action: "write",
+    },
+    BuiltinToolCliIdentity {
+        operation: "automation.list",
+        group: "automation",
+        action: "list",
+    },
+    BuiltinToolCliIdentity {
+        operation: "automation.get",
+        group: "automation",
+        action: "get",
+    },
+    BuiltinToolCliIdentity {
+        operation: "automation.create",
+        group: "automation",
+        action: "create",
+    },
+    BuiltinToolCliIdentity {
+        operation: "automation.run",
+        group: "automation",
+        action: "run",
+    },
+    BuiltinToolCliIdentity {
+        operation: "automation.close",
+        group: "automation",
+        action: "close",
+    },
+    BuiltinToolCliIdentity {
+        operation: "automation.update",
+        group: "automation",
+        action: "update",
+    },
+    BuiltinToolCliIdentity {
+        operation: "automation.delete",
+        group: "automation",
+        action: "delete",
     },
 ];
 
@@ -872,7 +907,9 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
         "memory.write" => Ok("memory-write-v2"),
         "member.create" | "team.create_task" | "team.get_task" | "team.list_tasks"
         | "team.update_task" | "camp.list" | "camp.search" | "camp.read" | "history.search"
-        | "memory.search" | "memory.read" | "memory.view" => Ok("canonical-result-v1"),
+        | "memory.search" | "memory.read" | "memory.view" | "automation.list"
+        | "automation.get" | "automation.create" | "automation.run" | "automation.close"
+        | "automation.update" | "automation.delete" => Ok("canonical-result-v1"),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
 }
@@ -1004,9 +1041,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 21);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 21);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v21");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 22);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 22);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v22");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -1016,8 +1053,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 15);
-        assert_eq!(commands.len(), 15);
+        assert_eq!(operations.len(), 22);
+        assert_eq!(commands.len(), 22);
     }
 
     #[test]

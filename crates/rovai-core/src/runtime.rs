@@ -4848,6 +4848,57 @@ pub(crate) fn settle_abortive_camp_turn_in_tx(
     })
 }
 
+/// Internal cancellation authority for scheduled Automations. The exact
+/// AutomationRun/CampTurn association is checked in the same transaction so
+/// this path cannot be used as a general-purpose replacement for the existing
+/// user stop command.
+pub(crate) fn cancel_automation_camp_turn_in_tx(
+    transaction: &Transaction<'_>,
+    automation_run_id: &str,
+    camp_turn_id: &str,
+    reason_code: &str,
+    now: &str,
+) -> Result<AbortiveTurnSettlement> {
+    if !matches!(
+        reason_code,
+        "interaction_required" | "timeout" | "interrupted"
+    ) {
+        anyhow::bail!("Automation cancellation reason is not allowed");
+    }
+    let association: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM automation_run AS automation
+            JOIN camp_turn AS turn ON turn.id = automation.camp_turn_id
+            WHERE automation.id = ?1 AND automation.camp_turn_id = ?2
+              AND turn.automation_run_id = automation.id
+              AND automation.status IN ('running', 'cancelling')
+        )
+        "#,
+        params![automation_run_id, camp_turn_id],
+        |row| row.get(0),
+    )?;
+    if !association {
+        anyhow::bail!("AutomationRun does not own the requested CampTurn");
+    }
+    let actor = ActorRef::System {
+        component_id: "automation-cancellation".to_string(),
+    };
+    transaction.execute(
+        "UPDATE camp_turn SET cancel_requested_at = COALESCE(cancel_requested_at, ?2),
+         cancel_request_command_id = COALESCE(cancel_request_command_id, ?3),
+         version = version + CASE WHEN cancel_requested_at IS NULL THEN 1 ELSE 0 END,
+         updated_at = ?2 WHERE id = ?1",
+        params![
+            camp_turn_id,
+            now,
+            format!("automation-cancel:{automation_run_id}:{reason_code}")
+        ],
+    )?;
+    settle_abortive_camp_turn_in_tx(transaction, camp_turn_id, reason_code, &actor, now)
+}
+
 /// A bounded, Camp-scoped repair of the retired two-phase cancellation protocol. The empty
 /// path performs no writes and never reads the event log or unrelated historical Camps.
 pub(crate) fn settle_pending_camp_cancellations(

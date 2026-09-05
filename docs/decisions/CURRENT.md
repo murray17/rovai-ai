@@ -81,7 +81,7 @@ last_updated: 2026-09-05
 
 ## Skills、MCP 与 Built-ins
 
-- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
+- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
 - 理由来源：[v0.06](../versions/v0.06/decisions.md)、[v0.09](../versions/v0.09/decisions.md)、[v0.31](../versions/v0.31/decisions.md)、[v0.37](../versions/v0.37/decisions.md)、[v0.42](../versions/v0.42/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.82](../versions/v0.82/decisions.md)、[v0.85](../versions/v0.85/decisions.md)、[v0.91](../versions/v0.91/decisions.md)、[v0.92](../versions/v0.92/decisions.md)、[v0.93](../versions/v0.93/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.17-D02](../versions/v1.17/decisions.md#v1-17-d02)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.27-D04](../versions/v1.27/decisions.md#v1-27-d04)、[V1.28-D03](../versions/v1.28/decisions.md#v1-28-d03)。
 - Pi `.pi/skills` 只由原生 ResourceLoader 发现、Rovai 不追加路径或验证 catalog 的理由：[V1.44-D01](../versions/v1.44/decisions.md#v1-44-d01)；当前 Pi External MCP Unsupported 与旧 bridge clean removal 理由：[V1.39-D09](../versions/v1.39/decisions.md#v1-39-d09)。
 
@@ -89,6 +89,11 @@ last_updated: 2026-09-05
 
 - 当前规范：[User Automation 不变量](../architecture/foundational-invariants.md#user-automation-trial)、[User Automation Architecture](../architecture/user-automation.md)和[User Automation v1](../contracts/user-automation-v1.md)。
 - 理由来源：[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.21-D02](../versions/v1.21/decisions.md#v1-21-d02)、[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)、[V1.21-D04](../versions/v1.21/decisions.md#v1-21-d04)。
+
+## Scheduled Automation
+
+- 当前规范：[Scheduled Automation 不变量](../architecture/foundational-invariants.md#scheduled-automation)、[Scheduled Automation Architecture](../architecture/scheduled-automation.md)、[Scheduled Automation v1](../contracts/scheduled-automation-v1.md)、[Automation 工作区](../ui/components/automation-workspace.md)和[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)。
+- 原子领取、新 Camp 派发与不可恢复重派发的理由：[V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)；执行和渠道通知分离的理由：[V1.50-D02](../versions/v1.50/decisions.md#v1-50-d02)。
 
 ## Evidence、Runtime Activity 与 Usage
 
@@ -113,7 +118,7 @@ last_updated: 2026-09-05
 
 ## 外部附件 CLI 入口
 
-- 当前规范：[Camp Attachment v8](../contracts/camp-attachment-v8.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)及[附件架构](../architecture/camp-published-attachment-view.md)。Agent CLI 的私有 snapshot 语义继续由 v8 继承的 v7 条款拥有。
+- 当前规范：[Camp Attachment v8](../contracts/camp-attachment-v8.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)及[附件架构](../architecture/camp-published-attachment-view.md)。Agent CLI 的私有 snapshot 语义继续由 v8 继承的 v7 条款拥有。
 - 主要理由：[V1.32-D01](../versions/v1.32/decisions.md#v1-32-d01)：由 CLI 以 Runtime 权限适配外部路径，保持 Core 的读取根目录限制。
 
 ## Camp 连续消息

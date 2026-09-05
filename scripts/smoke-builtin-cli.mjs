@@ -29,6 +29,13 @@ const historyPublicA2aMarker = 'ROVAI_BUILTIN_HISTORY_PUBLIC_A2A_V1'
 const historyAttachmentMarker = 'ROVAI_BUILTIN_HISTORY_ATTACHMENT_V1'
 const historySeedCompletionMarker = 'ROVAI_BUILTIN_HISTORY_SEED_OK'
 const expectedOperations = [
+  'automation.close',
+  'automation.create',
+  'automation.delete',
+  'automation.get',
+  'automation.list',
+  'automation.run',
+  'automation.update',
   'camp.list',
   'camp.message.send',
   'camp.read',
@@ -239,7 +246,7 @@ try {
 
   const results = []
   for (const specification of runtimeSpecifications) {
-    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 15-operation Run\n`)
+    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 22-operation Run\n`)
     const source = await startVerificationRun(core, specification, false)
     const sourceSnapshot = await waitForRun(core, specification.campId, source.agentRunId, {
       marker: specification.successMarker,
@@ -478,9 +485,9 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v21')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v22')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v21: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v22: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -700,7 +707,7 @@ async function startVerificationRun(coreClient, specification, resumed) {
       taskId: null,
       purpose: resumed
         ? `Verify ${specification.adapterKind} resume/process reuse receives a new active CLI lease.`
-        : `Verify ${specification.adapterKind} executes all 15 CLI-only built-in operations.`,
+        : `Verify ${specification.adapterKind} executes all 22 CLI-only built-in operations.`,
       completionRole: 'required'
     }
   })
@@ -1068,7 +1075,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v21 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v22 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -1135,7 +1142,7 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v21 ipc-v2'
+"$CLI" --version | grep -q 'contract-v22 ipc-v2'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
@@ -1223,6 +1230,68 @@ printf '%s\n' "$member_create" | "$JQ" -e '
   and .version == 1
   and .avatarRef == null
   and .avatarStatus == "not_requested"
+' >/dev/null
+created_agent_id="$(printf '%s\n' "$member_create" | "$JQ" -er '.agentId')"
+
+STEP=automation_create
+automation_create="$("$CLI" automation create \
+  --name ${shellQuote(`CLI Automation ${input.slug}`)} \
+  --prompt 'Return one short verification result.' \
+  --member "$created_agent_id" \
+  --project quick-chat \
+  --repeat manual)"
+assert_success "$automation_create" 'automation.create'
+automation_id="$(printf '%s\n' "$automation_create" | "$JQ" -er '.automationId')"
+automation_version="$(printf '%s\n' "$automation_create" | "$JQ" -er '.version')"
+printf '%s\n' "$automation_create" | "$JQ" -e --arg automationId "$automation_id" '
+  .automationId == $automationId and .enabled == true and .nextRunAt == null
+' >/dev/null
+
+STEP=automation_list
+automation_list="$("$CLI" automation list --status enabled --query ${shellQuote(`CLI Automation ${input.slug}`)} --limit 10)"
+assert_success "$automation_list" 'automation.list'
+printf '%s\n' "$automation_list" | "$JQ" -e --arg automationId "$automation_id" '
+  .automations | any(.automationId == $automationId)
+' >/dev/null
+
+STEP=automation_get
+automation_get="$("$CLI" automation get --automation-id "$automation_id")"
+assert_success "$automation_get" 'automation.get'
+printf '%s\n' "$automation_get" | "$JQ" -e --arg automationId "$automation_id" '
+  .automationId == $automationId and .version == 1
+' >/dev/null
+
+STEP=automation_update
+automation_update="$("$CLI" automation update \
+  --automation-id "$automation_id" \
+  --expected-version "$automation_version" \
+  --name ${shellQuote(`Updated CLI Automation ${input.slug}`)})"
+assert_success "$automation_update" 'automation.update'
+automation_version="$(printf '%s\n' "$automation_update" | "$JQ" -er '.version')"
+printf '%s\n' "$automation_update" | "$JQ" -e '.version == 2' >/dev/null
+
+STEP=automation_run
+automation_run="$("$CLI" automation run --automation-id "$automation_id")"
+assert_success "$automation_run" 'automation.run'
+printf '%s\n' "$automation_run" | "$JQ" -e '
+  .status == "failed" and .reason == "runtime_not_ready" and .campId == null
+' >/dev/null
+
+STEP=automation_close
+automation_close="$("$CLI" automation close \
+  --automation-id "$automation_id" \
+  --expected-version "$automation_version")"
+assert_success "$automation_close" 'automation.close'
+automation_version="$(printf '%s\n' "$automation_close" | "$JQ" -er '.version')"
+printf '%s\n' "$automation_close" | "$JQ" -e '.enabled == false and .version == 3' >/dev/null
+
+STEP=automation_delete
+automation_delete="$("$CLI" automation delete \
+  --automation-id "$automation_id" \
+  --expected-version "$automation_version")"
+assert_success "$automation_delete" 'automation.delete'
+printf '%s\n' "$automation_delete" | "$JQ" -e --arg automationId "$automation_id" '
+  .automationId == $automationId and .deleted == true
 ' >/dev/null
 
 cat > "$RUN_TMP/task-create.json" <<'ROVAI_JSON'
@@ -1498,7 +1567,7 @@ trap - EXIT
 printf '%s\n' ${shellQuote(JSON.stringify({
     ok: true,
     marker: input.successMarker,
-    operationCount: 15,
+    operationCount: 22,
     versionConflict: 'refresh_then_decide'
   }))}
 `

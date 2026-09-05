@@ -164,7 +164,14 @@ export function feishuAgentOutputCards(
 
 export async function sendFeishuAgentOutput(
   client: MessageClient,
-  input: { deliveryId: string; chatId: string; topicKey: string; payload: Record<string, unknown>; ownerOpenId?: string | null }
+  input: {
+    deliveryId: string
+    chatId: string
+    topicKey: string
+    payload: Record<string, unknown>
+    ownerOpenId?: string | null
+    receiveIdType?: 'chat_id' | 'open_id'
+  }
 ): Promise<string> {
   const cards = feishuAgentOutputCards(input.payload, input.ownerOpenId)
   let firstMessageId = ''
@@ -178,7 +185,10 @@ export async function sendFeishuAgentOutput(
     try {
       response = input.topicKey
         ? await client.reply({ path: { message_id: input.topicKey }, data: { ...data, reply_in_thread: true } })
-        : await client.create({ params: { receive_id_type: 'chat_id' }, data: { ...data, receive_id: input.chatId } })
+        : await client.create({
+            params: { receive_id_type: input.receiveIdType ?? 'chat_id' },
+            data: { ...data, receive_id: input.chatId }
+          })
     } catch {
       throw new LarkChannelError('unknown', 'feishu_output_send_failed')
     }

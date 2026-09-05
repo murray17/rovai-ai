@@ -405,6 +405,18 @@ last_updated: 2026-09-05
 - Diagnostic Trial 是 CLI-owned durable workflow，不是 Core Trial/Benchmark/Qualification entity。它在首次 Core mutation 前持久化 journal，每次只接受一个 root AgentRun，冻结单责任、零 A2A 与 elapsed budget，并以 global domain sequence、Run-local evidence sequence 双 cursor 观察；AgentRun terminal 只由领域状态决定。
 - AgentRun 诊断采用字段 allowlist，不从 raw payload 黑名单删减。raw effective config、Runtime payload/final output、secret、environment、context/bootstrap bytes 与 Authority path 永不进入普通终端或 bundle；公共输出只取正式 CampMessage。Trial/export 必须明示非正式资格，不能自动晋升为 Benchmark 结果。
 
+<a id="scheduled-automation"></a>
+
+### Scheduled Automation
+
+- Automation 定义只授权未来 occurrence。调度领取必须在一个 immediate transaction 中冻结执行快照、推进 `nextRunAt`，并原子建立唯一的新 Camp、首条公共消息、CampTurn、root AgentRun 与双向 AutomationRun 关联；事务提交前 Runtime 不可见。
+- 计划 occurrence 以 `(automationId, scheduledFor UTC)` 唯一标识，一个 Automation 同时最多一个 `running | cancelling` 运行。定义编辑不改变已领取快照；一次性计划在执行、missed 或 overlap 任一消费后关闭。
+- App 退出或设备休眠期间不逐条补跑。恢复只记录最近一次错过并直接计算未来时间；已有活跃运行时本次明确 `skipped(overlap)`，两者都不延迟重试。
+- 重启、交互等待或超时都不重新派发 Prompt。Core 只用精确 `automationRunId + campTurnId` 的内部入口取消关联 CampTurn，确认权威终态后再结算 AutomationRun 和释放并发门禁；迟到 Runtime 回调继续受现有 execution fence 约束。
+- Automation 的 completed 结果只冻结 root AgentRun 正式公开、未删除、无 Agent 收件人的唯一 CampMessage。A2A、子 Run、私有输出或用户后续交流不能替换结果，也不能复活终态运行。
+- 渠道通知与执行生命周期分离：结算时建立 provider-scoped delivery，claim 时重验当前队员 Bot 与 Owner identity，最多尝试三次；通知失败不改变执行终态或重新执行 Prompt。定义删除保留既有 Camp、运行与投递证据。
+- V1 只有 Desktop/Core 本机 scheduler，不增加 daemon、云端唤醒或 Automation 来源专属 Runtime 权限。Agent 管理操作仍需要 current Built-in lease、既有权限边界和用户明确意图。
+
 <a id="skills-external-mcp"></a>
 
 ### 外部 MCP 配置与投影

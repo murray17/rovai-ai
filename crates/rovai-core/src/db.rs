@@ -208,8 +208,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.49";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 90;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.50";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 91;
+const V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.49";
+const V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 90;
 const V139_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.48";
 const V139_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 89;
 const V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.47";
@@ -607,6 +609,7 @@ struct CurrentMigrationState {
     v137: bool,
     v138: bool,
     v139: bool,
+    v140: bool,
 }
 
 impl CurrentMigrationState {
@@ -685,6 +688,29 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v140
+                && self.v139
+                && self.v138
+                && self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v140 {
+            return false;
+        }
+        if contract == V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v139
                 && self.v138
@@ -2525,6 +2551,7 @@ pub(crate) fn classify_database_contract(
         || (migrations.v137 && !source_attachment_v137_schema_matches(connection)?)
         || (migrations.v138 && !pi_native_input_v138_schema_matches(connection)?)
         || (migrations.v139 && !pi_native_execution_v139_schema_matches(connection)?)
+        || (migrations.v140 && !automation_v140_schema_matches(connection)?)
     {
         if connection_has_legacy_feishu_migration_collision(connection)?
             || main_camp_migration_collision(connection)?.is_some()
@@ -2731,6 +2758,54 @@ fn pi_native_execution_v139_schema_matches(connection: &Connection) -> rusqlite:
     Ok(receipt_archive_objects == 5 && !acceptance_guard_exists)
 }
 
+fn automation_v140_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    let table_count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN (
+            'automation', 'automation_run', 'automation_notification_delivery'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let turn_column: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('camp_turn') WHERE name = 'automation_run_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    let index_count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN (
+            'automation_due_idx', 'automation_run_occurrence_unique',
+            'automation_run_active_idx', 'automation_run_history_idx',
+            'automation_notification_claim_idx',
+            'camp_turn_automation_run_unique'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let trigger_count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name IN (
+            'automation_run_snapshot_immutable',
+            'automation_run_terminal_immutable',
+            'camp_turn_automation_run_insert_valid',
+            'camp_turn_automation_run_immutable',
+            'automation_run_dispatch_link_valid'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let run_unique_indexes: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM pragma_index_list('automation_run')
+         WHERE (name = 'automation_run_occurrence_unique' AND \"unique\" = 1)
+            OR (name = 'automation_run_active_idx' AND \"unique\" = 1 AND partial = 1)",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(table_count == 3
+        && turn_column
+        && index_count == 6
+        && trigger_count == 5
+        && run_unique_indexes == 2)
+}
+
 #[cfg(test)]
 fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     if !connection_has_admissible_data_contract(connection)? {
@@ -2741,7 +2816,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 139)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2828,7 +2903,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 136),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 137),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 138),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 139)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 139),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)
         "#,
         [],
         |row| {
@@ -2903,6 +2979,7 @@ fn load_current_migration_state(
                 v137: row.get(67)?,
                 v138: row.get(68)?,
                 v139: row.get(69)?,
+                v140: row.get(70)?,
             })
         },
     )
@@ -5391,6 +5468,9 @@ impl Database {
             if !self.schema_migration_applied(139)? {
                 migration_step!("migration_139", self.migrate_pi_native_execution_v139());
             }
+            if !self.schema_migration_applied(140)? {
+                migration_step!("migration_140", self.migrate_scheduled_automations_v140());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -5990,6 +6070,9 @@ impl Database {
         }
         if !self.schema_migration_applied(139)? {
             migration_step!("migration_139", self.migrate_pi_native_execution_v139());
+        }
+        if !self.schema_migration_applied(140)? {
+            migration_step!("migration_140", self.migrate_scheduled_automations_v140());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -21545,6 +21628,221 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_scheduled_automations_v140(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if contract != V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || schema != V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
+            || !pi_native_execution_v139_schema_matches(&transaction)?
+        {
+            anyhow::bail!(
+                "Scheduled Automation migration requires the exact v1.49/schema 90 source"
+            );
+        }
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE automation (
+                id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+                prompt TEXT NOT NULL CHECK(length(trim(prompt)) > 0),
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+                member_id TEXT NOT NULL CHECK(length(trim(member_id)) > 0),
+                project_ref_json TEXT NOT NULL CHECK(
+                    json_valid(project_ref_json)
+                    AND json_type(project_ref_json) = 'object'
+                ),
+                schedule_json TEXT NOT NULL CHECK(
+                    json_valid(schedule_json)
+                    AND json_type(schedule_json) = 'object'
+                ),
+                notify_channels_json TEXT NOT NULL DEFAULT '[]' CHECK(
+                    json_valid(notify_channels_json)
+                    AND json_type(notify_channels_json) = 'array'
+                ),
+                next_run_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX automation_due_idx
+                ON automation(enabled, next_run_at, id)
+                WHERE enabled = 1 AND next_run_at IS NOT NULL;
+
+            CREATE TABLE automation_run (
+                id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+                automation_id TEXT NOT NULL CHECK(length(trim(automation_id)) > 0),
+                automation_version INTEGER NOT NULL CHECK(automation_version >= 1),
+                trigger_kind TEXT NOT NULL CHECK(trigger_kind IN ('scheduled', 'manual')),
+                scheduled_for TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN (
+                    'running', 'cancelling', 'completed', 'failed', 'skipped'
+                )),
+                reason TEXT CHECK(reason IS NULL OR reason IN (
+                    'missed', 'overlap', 'interaction_required', 'timeout',
+                    'interrupted', 'no_result', 'execution_failed',
+                    'runtime_not_ready', 'dispatch_rejected'
+                )),
+                prompt TEXT NOT NULL CHECK(length(trim(prompt)) > 0),
+                member_id TEXT NOT NULL CHECK(length(trim(member_id)) > 0),
+                project_ref_json TEXT NOT NULL CHECK(
+                    json_valid(project_ref_json)
+                    AND json_type(project_ref_json) = 'object'
+                ),
+                notify_channels_json TEXT NOT NULL CHECK(
+                    json_valid(notify_channels_json)
+                    AND json_type(notify_channels_json) = 'array'
+                ),
+                timeout_at TEXT,
+                camp_id TEXT UNIQUE,
+                camp_turn_id TEXT UNIQUE,
+                root_agent_run_id TEXT UNIQUE,
+                result_message_id TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                ended_at TEXT,
+                updated_at TEXT NOT NULL,
+                CHECK(
+                    (status IN ('running', 'cancelling') AND started_at IS NOT NULL AND ended_at IS NULL)
+                    OR (status IN ('completed', 'failed') AND started_at IS NOT NULL AND ended_at IS NOT NULL)
+                    OR (status = 'skipped' AND started_at IS NULL AND ended_at IS NOT NULL)
+                ),
+                CHECK(status <> 'completed' OR (reason IS NULL AND result_message_id IS NOT NULL)),
+                CHECK(status NOT IN ('failed', 'skipped') OR reason IS NOT NULL),
+                CHECK(
+                    (camp_id IS NULL AND camp_turn_id IS NULL AND root_agent_run_id IS NULL)
+                    OR (camp_id IS NOT NULL AND camp_turn_id IS NOT NULL AND root_agent_run_id IS NOT NULL)
+                )
+            );
+            CREATE UNIQUE INDEX automation_run_occurrence_unique
+                ON automation_run(automation_id, scheduled_for);
+            CREATE UNIQUE INDEX automation_run_active_idx
+                ON automation_run(automation_id)
+                WHERE status IN ('running', 'cancelling');
+            CREATE INDEX automation_run_history_idx
+                ON automation_run(automation_id, created_at DESC, id DESC);
+            CREATE TRIGGER automation_run_snapshot_immutable
+            BEFORE UPDATE ON automation_run
+            FOR EACH ROW
+            WHEN OLD.automation_id <> NEW.automation_id
+              OR OLD.automation_version <> NEW.automation_version
+              OR OLD.trigger_kind <> NEW.trigger_kind
+              OR OLD.scheduled_for <> NEW.scheduled_for
+              OR OLD.prompt <> NEW.prompt
+              OR OLD.member_id <> NEW.member_id
+              OR OLD.project_ref_json <> NEW.project_ref_json
+              OR OLD.notify_channels_json <> NEW.notify_channels_json
+              OR OLD.created_at <> NEW.created_at
+            BEGIN
+                SELECT RAISE(ABORT, 'AutomationRun execution snapshot is immutable');
+            END;
+            CREATE TRIGGER automation_run_terminal_immutable
+            BEFORE UPDATE ON automation_run
+            FOR EACH ROW
+            WHEN OLD.status IN ('completed', 'failed', 'skipped')
+            BEGIN
+                SELECT RAISE(ABORT, 'terminal AutomationRun is immutable');
+            END;
+
+            CREATE TABLE automation_notification_delivery (
+                id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+                automation_run_id TEXT NOT NULL
+                    REFERENCES automation_run(id) ON DELETE CASCADE,
+                provider TEXT NOT NULL CHECK(provider IN ('feishu', 'dingtalk')),
+                member_id TEXT NOT NULL CHECK(length(trim(member_id)) > 0),
+                payload_json TEXT NOT NULL CHECK(
+                    json_valid(payload_json)
+                    AND json_type(payload_json) = 'object'
+                ),
+                status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 3),
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                external_delivery_message_id TEXT,
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_at TEXT,
+                UNIQUE(automation_run_id, provider),
+                CHECK(
+                    (status = 'attempting' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+                    OR (status <> 'attempting' AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                ),
+                CHECK(
+                    (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                    OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                )
+            );
+            CREATE INDEX automation_notification_claim_idx
+                ON automation_notification_delivery(provider, status, available_at, created_at, id)
+                WHERE status IN ('pending', 'attempting');
+
+            ALTER TABLE camp_turn ADD COLUMN automation_run_id TEXT;
+            CREATE UNIQUE INDEX camp_turn_automation_run_unique
+                ON camp_turn(automation_run_id)
+                WHERE automation_run_id IS NOT NULL;
+            CREATE TRIGGER camp_turn_automation_run_insert_valid
+            BEFORE INSERT ON camp_turn
+            FOR EACH ROW
+            WHEN NEW.automation_run_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM automation_run WHERE id = NEW.automation_run_id
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'CampTurn AutomationRun association is invalid');
+            END;
+            CREATE TRIGGER camp_turn_automation_run_immutable
+            BEFORE UPDATE OF automation_run_id ON camp_turn
+            FOR EACH ROW
+            WHEN OLD.automation_run_id IS NOT NEW.automation_run_id
+            BEGIN
+                SELECT RAISE(ABORT, 'CampTurn AutomationRun association is immutable');
+            END;
+            CREATE TRIGGER automation_run_dispatch_link_valid
+            BEFORE UPDATE OF camp_id, camp_turn_id, root_agent_run_id ON automation_run
+            FOR EACH ROW
+            WHEN NEW.camp_turn_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM camp_turn
+                WHERE id = NEW.camp_turn_id
+                  AND camp_id = NEW.camp_id
+                  AND automation_run_id = NEW.id
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'AutomationRun dispatch association is invalid');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.50', projection_schema_version = 91,
+                updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES(140, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v140 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn reconcile_legacy_feishu_migration_collision(&mut self) -> Result<bool> {
         if self.reconcile_main_camp_migration_collision()? {
             return Ok(true);
@@ -26242,7 +26540,49 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
 }
 
 #[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v139_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            DROP TRIGGER automation_run_dispatch_link_valid;
+            DROP TRIGGER camp_turn_automation_run_immutable;
+            DROP TRIGGER camp_turn_automation_run_insert_valid;
+            DROP INDEX camp_turn_automation_run_unique;
+            ALTER TABLE camp_turn DROP COLUMN automation_run_id;
+
+            DROP INDEX automation_notification_claim_idx;
+            DROP TABLE automation_notification_delivery;
+            DROP TRIGGER automation_run_terminal_immutable;
+            DROP TRIGGER automation_run_snapshot_immutable;
+            DROP INDEX automation_run_history_idx;
+            DROP INDEX automation_run_active_idx;
+            DROP INDEX automation_run_occurrence_unique;
+            DROP TABLE automation_run;
+            DROP INDEX automation_due_idx;
+            DROP TABLE automation;
+
+            DELETE FROM schema_migration WHERE version = 140;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.49', projection_schema_version = 90
+            WHERE singleton = 1;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v138_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v139_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 139)",
@@ -28800,6 +29140,7 @@ mod tests {
             v137: version >= 137,
             v138: version >= 138,
             v139: version >= 139,
+            v140: version >= 140,
         }
     }
 
@@ -28905,6 +29246,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                140,
+            ),
+            (
+                "v1.49/schema-90 before Scheduled Automations",
+                V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 139,
             ),
             (
@@ -29298,7 +29645,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(139);
+        let current = migration_state_through(140);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -29320,7 +29667,16 @@ mod tests {
         missing_pi_native_input.v138 = false;
         let mut missing_pi_native_execution = current;
         missing_pi_native_execution.v139 = false;
+        let mut missing_scheduled_automations = current;
+        missing_scheduled_automations.v140 = false;
         let rejected = [
+            (
+                "current marker without Scheduled Automation migration",
+                missing_scheduled_automations,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Pi native execution migration",
                 missing_pi_native_execution,
@@ -29609,7 +29965,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(139));
+        assert_eq!(state, migration_state_through(140));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -32101,6 +32457,38 @@ mod tests {
             .unwrap();
         database.migrate_pi_native_execution_v139().unwrap();
         assert!(pi_native_execution_v139_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_scheduled_automation_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 140 BEGIN SELECT RAISE(ABORT, 'Scheduled Automation receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_scheduled_automations_v140()
+                .unwrap_err()
+                .to_string()
+                .contains("Scheduled Automation receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(140).unwrap());
+        assert!(!automation_v140_schema_matches(database.connection()).unwrap());
+        let preceding: (String, i64) = database.connection().query_row(
+            "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(
+            preceding,
+            (
+                V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.into(),
+                V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            )
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_scheduled_automation_receipt")
+            .unwrap();
+        database.migrate_scheduled_automations_v140().unwrap();
+        assert!(automation_v140_schema_matches(database.connection()).unwrap());
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -32184,7 +32572,7 @@ mod tests {
     }
 
     #[test]
-    fn v135_through_v139_retires_receipt_admission_and_preserves_historical_cascades() {
+    fn v135_through_v140_retires_receipt_admission_and_preserves_historical_cascades() {
         let (mut database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v134_source_for_test(database.connection());
         database.migrate_pi_runtime_v135().unwrap();
@@ -32542,6 +32930,10 @@ mod tests {
         );
         database.migrate_pi_native_execution_v139().unwrap();
         assert!(pi_native_execution_v139_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_scheduled_automations_v140().unwrap();
+        assert!(automation_v140_schema_matches(database.connection()).unwrap());
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
         assert_eq!(
             database
                 .connection()
@@ -32738,6 +33130,18 @@ mod tests {
                 .unwrap(),
             1,
             "reopen must not reapply v139"
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 140",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "reopen must not reapply v140"
         );
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
@@ -40008,7 +40412,7 @@ mod tests {
             connection,
             &[
                 58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
-                102, 103, 104, 105, 106, 107, 108,
+                102, 103, 104, 105, 106, 107, 108, 140,
             ],
         );
         for table in [
@@ -40061,6 +40465,9 @@ mod tests {
                 "camp_attachment_view_operation",
                 "camp_attachment_view_operation_entry",
                 "camp_attachment_publication_resolution",
+                "automation",
+                "automation_run",
+                "automation_notification_delivery",
             ],
             true,
         );
@@ -40087,6 +40494,12 @@ mod tests {
                 "camp_attachment_publication_revision_unique",
                 "camp_attachment_publication_writer_intent_idx",
                 "message_attachment_runtime_projection_idx",
+                "automation_due_idx",
+                "automation_run_occurrence_unique",
+                "automation_run_active_idx",
+                "automation_run_history_idx",
+                "automation_notification_claim_idx",
+                "camp_turn_automation_run_unique",
             ],
             true,
         );
@@ -40137,6 +40550,7 @@ mod tests {
             &["status", "archived_at"],
         );
         assert_table_columns(connection, "agent_run", &["runtime_observed_model_id"], &[]);
+        assert_table_columns(connection, "camp_turn", &["automation_run_id"], &[]);
         assert_table_columns(
             connection,
             "skill_projection_observation",
@@ -40219,6 +40633,11 @@ mod tests {
                 "context_manifest_version_immutable",
                 "runtime_input_delivery_attachment_auth_insert",
                 "camp_attachment_view_camp_insert",
+                "automation_run_snapshot_immutable",
+                "automation_run_terminal_immutable",
+                "camp_turn_automation_run_insert_valid",
+                "camp_turn_automation_run_immutable",
+                "automation_run_dispatch_link_valid",
             ],
             true,
         );

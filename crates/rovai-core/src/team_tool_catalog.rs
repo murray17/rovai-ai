@@ -2,6 +2,13 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
 use crate::{
+    automation::{
+        AUTOMATION_CLOSE_TOOL_NAME, AUTOMATION_CREATE_TOOL_NAME, AUTOMATION_DELETE_TOOL_NAME,
+        AUTOMATION_GET_TOOL_NAME, AUTOMATION_LIST_TOOL_NAME, AUTOMATION_RUN_TOOL_NAME,
+        AUTOMATION_UPDATE_TOOL_NAME, AutomationCreateToolInput, AutomationGetToolInput,
+        AutomationListToolInput, AutomationRunToolInput, AutomationUpdateToolInput,
+        AutomationVersionedToolInput,
+    },
     builtin_tool_cli_output::validate_schema,
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
@@ -70,6 +77,24 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         }
         MEMORY_WRITE_TOOL_NAME => {
             serde_json::from_value::<MemoryWriteToolInput>(input.clone()).map(|_| ())
+        }
+        AUTOMATION_LIST_TOOL_NAME => {
+            serde_json::from_value::<AutomationListToolInput>(input.clone()).map(|_| ())
+        }
+        AUTOMATION_GET_TOOL_NAME => {
+            serde_json::from_value::<AutomationGetToolInput>(input.clone()).map(|_| ())
+        }
+        AUTOMATION_CREATE_TOOL_NAME => {
+            serde_json::from_value::<AutomationCreateToolInput>(input.clone()).map(|_| ())
+        }
+        AUTOMATION_RUN_TOOL_NAME => {
+            serde_json::from_value::<AutomationRunToolInput>(input.clone()).map(|_| ())
+        }
+        AUTOMATION_CLOSE_TOOL_NAME | AUTOMATION_DELETE_TOOL_NAME => {
+            serde_json::from_value::<AutomationVersionedToolInput>(input.clone()).map(|_| ())
+        }
+        AUTOMATION_UPDATE_TOOL_NAME => {
+            serde_json::from_value::<AutomationUpdateToolInput>(input.clone()).map(|_| ())
         }
         _ => bail!("unknown built-in operation: {canonical_name}"),
     };
@@ -582,6 +607,189 @@ fn memory_target_schema(scope: &str, relationship_direction: Option<&str>) -> Va
     })
 }
 
+fn automation_identifier_schema() -> Value {
+    json!({"type": "string", "minLength": 1, "maxLength": 256})
+}
+
+fn automation_notify_schema() -> Value {
+    json!({
+        "type": "array", "maxItems": 2, "uniqueItems": true,
+        "items": {"type": "string", "enum": ["feishu", "dingtalk"]}
+    })
+}
+
+fn automation_time_schema() -> Value {
+    json!({"type": "string", "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"})
+}
+
+fn automation_project_ref_schema() -> Value {
+    json!({
+        "oneOf": [
+            {
+                "type": "object", "additionalProperties": false,
+                "required": ["kind"],
+                "properties": {"kind": {"const": "quick_chat"}}
+            },
+            {
+                "type": "object", "additionalProperties": false,
+                "required": ["kind", "path"],
+                "properties": {
+                    "kind": {"const": "directory"},
+                    "path": {"type": "string", "minLength": 1}
+                }
+            }
+        ]
+    })
+}
+
+fn automation_stored_schedule_schema() -> Value {
+    let timed = |kind: &str| {
+        json!({
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "at"],
+            "properties": {"kind": {"const": kind}, "at": automation_time_schema()}
+        })
+    };
+    json!({
+        "oneOf": [
+            timed("daily"),
+            timed("weekdays"),
+            {
+                "type": "object", "additionalProperties": false,
+                "required": ["kind", "weekday", "at"],
+                "properties": {
+                    "kind": {"const": "weekly"},
+                    "weekday": {"type": "string", "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]},
+                    "at": automation_time_schema()
+                }
+            },
+            {
+                "type": "object", "additionalProperties": false,
+                "required": ["kind", "date", "at"],
+                "properties": {
+                    "kind": {"const": "once"},
+                    "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                    "at": automation_time_schema()
+                }
+            },
+            {
+                "type": "object", "additionalProperties": false,
+                "required": ["kind", "expression"],
+                "properties": {
+                    "kind": {"const": "cron"},
+                    "expression": {"type": "string", "minLength": 1, "maxLength": 128}
+                }
+            },
+            {
+                "type": "object", "additionalProperties": false,
+                "required": ["kind"],
+                "properties": {"kind": {"const": "manual"}}
+            }
+        ]
+    })
+}
+
+fn automation_run_summary_schema() -> Value {
+    json!({
+        "type": "object", "additionalProperties": false,
+        "required": ["runId", "status", "reason", "scheduledFor", "campId", "resultMessageId", "notificationStatus", "createdAt", "endedAt"],
+        "properties": {
+            "runId": {"type": "string", "minLength": 1},
+            "status": {"type": "string", "enum": ["running", "cancelling", "completed", "failed", "skipped"]},
+            "reason": {"type": ["string", "null"]},
+            "scheduledFor": {"type": "string"},
+            "campId": {"type": ["string", "null"]},
+            "resultMessageId": {"type": ["string", "null"]},
+            "notificationStatus": {"type": "string", "enum": ["none", "pending", "sent", "failed", "partial"]},
+            "createdAt": {"type": "string"},
+            "endedAt": {"type": ["string", "null"]}
+        }
+    })
+}
+
+fn automation_schedule_schema() -> Value {
+    let common = json!({
+        "name": {"type": "string", "maxLength": 80},
+        "prompt": {"type": "string", "minLength": 1, "maxLength": 100000},
+        "member": {"type": "string", "minLength": 1},
+        "project": {"type": "string", "minLength": 1},
+        "notify": automation_notify_schema()
+    });
+    let properties = |repeat: &str| {
+        let mut value = common.clone();
+        value["repeat"] = json!({"const": repeat});
+        value
+    };
+    let mut daily = properties("daily");
+    daily["at"] = automation_time_schema();
+    let mut weekdays = properties("weekdays");
+    weekdays["at"] = daily["at"].clone();
+    let mut weekly = properties("weekly");
+    weekly["at"] = daily["at"].clone();
+    weekly["weekday"] = json!({"type": "string", "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]});
+    let mut once = properties("once");
+    once["at"] = daily["at"].clone();
+    once["date"] = json!({"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"});
+    let mut cron = properties("cron");
+    cron["cron"] = json!({"type": "string", "minLength": 1, "maxLength": 128});
+    json!({
+        "oneOf": [
+            {"type": "object", "additionalProperties": false, "required": ["prompt", "repeat", "at"], "properties": daily},
+            {"type": "object", "additionalProperties": false, "required": ["prompt", "repeat", "at"], "properties": weekdays},
+            {"type": "object", "additionalProperties": false, "required": ["prompt", "repeat", "weekday", "at"], "properties": weekly},
+            {"type": "object", "additionalProperties": false, "required": ["prompt", "repeat", "date", "at"], "properties": once},
+            {"type": "object", "additionalProperties": false, "required": ["prompt", "repeat", "cron"], "properties": cron},
+            {"type": "object", "additionalProperties": false, "required": ["prompt", "repeat"], "properties": properties("manual")}
+        ]
+    })
+}
+
+fn automation_view_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["automationId", "version", "name", "prompt", "enabled", "memberId", "projectRef", "schedule", "notifyChannels", "nextRunAt", "lastRun", "createdAt", "updatedAt"],
+        "properties": {
+            "automationId": automation_identifier_schema(),
+            "version": {"type": "integer", "minimum": 1},
+            "name": {"type": "string", "maxLength": 80},
+            "prompt": {"type": "string", "minLength": 1, "maxLength": 100000},
+            "enabled": {"type": "boolean"},
+            "memberId": {"type": "string", "minLength": 1},
+            "projectRef": automation_project_ref_schema(),
+            "schedule": automation_stored_schedule_schema(),
+            "notifyChannels": automation_notify_schema(),
+            "nextRunAt": {"type": ["string", "null"]},
+            "lastRun": {"oneOf": [automation_run_summary_schema(), {"type": "null"}]},
+            "createdAt": {"type": "string"},
+            "updatedAt": {"type": "string"}
+        }
+    })
+}
+
+fn automation_update_input_schema() -> Value {
+    json!({
+        "type": "object", "additionalProperties": false,
+        "required": ["automationId", "expectedVersion"],
+        "properties": {
+            "automationId": automation_identifier_schema(),
+            "expectedVersion": {"type": "integer", "minimum": 1},
+            "name": {"type": "string", "maxLength": 80},
+            "prompt": {"type": "string", "minLength": 1, "maxLength": 100000},
+            "member": {"type": "string", "minLength": 1},
+            "project": {"type": "string", "minLength": 1},
+            "repeat": {"type": "string", "enum": ["daily", "weekdays", "weekly", "once", "cron", "manual"]},
+            "at": {"type": "string"},
+            "weekday": {"type": "string", "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]},
+            "date": {"type": "string"},
+            "cron": {"type": "string"},
+            "notify": automation_notify_schema(),
+            "clearNotify": {"type": "boolean"},
+            "enabled": {"type": "boolean"}
+        }
+    })
+}
+
 fn memory_view_success_schema() -> Value {
     json!({
         "oneOf": [
@@ -661,6 +869,98 @@ fn memory_view_item_schema(
 
 pub fn builtin_tool_definitions() -> Vec<Value> {
     vec![
+        json!({
+            "name": AUTOMATION_LIST_TOOL_NAME,
+            "title": "List scheduled Automations",
+            "description": "List a bounded page of the local user's scheduled Automations. Filter by enabled state, name or prompt text, and stable project reference. This read does not run or modify a task.",
+            "inputSchema": {
+                "type": "object", "additionalProperties": false,
+                "properties": {
+                    "status": {"type": "string", "enum": ["all", "enabled", "closed"]},
+                    "query": {"type": "string"},
+                    "project": {"type": "string", "minLength": 1},
+                    "cursor": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50}
+                }
+            },
+            "outputSchema": {
+                "type": "object", "additionalProperties": false,
+                "required": ["automations", "nextCursor", "truncated"],
+                "properties": {
+                    "automations": {"type": "array", "maxItems": 50, "items": automation_view_schema()},
+                    "nextCursor": {"type": ["string", "null"]},
+                    "truncated": {"type": "boolean"}
+                }
+            }
+        }),
+        json!({
+            "name": AUTOMATION_GET_TOOL_NAME,
+            "title": "Get one scheduled Automation",
+            "description": "Read one Automation by stable ID. Use automationId=current only from a conversation created by that Automation.",
+            "inputSchema": {
+                "type": "object", "additionalProperties": false, "required": ["automationId"],
+                "properties": {"automationId": automation_identifier_schema()}
+            },
+            "outputSchema": automation_view_schema()
+        }),
+        json!({
+            "name": AUTOMATION_CREATE_TOOL_NAME,
+            "title": "Create a scheduled Automation",
+            "description": "Create and enable one durable Automation only when the user explicitly asks. member defaults to the current Agent; project defaults to the current Camp project or Quick Chat. Times use the device timezone; notify may include feishu and dingtalk.",
+            "inputSchema": automation_schedule_schema(),
+            "outputSchema": automation_view_schema()
+        }),
+        json!({
+            "name": AUTOMATION_RUN_TOOL_NAME,
+            "title": "Run an Automation now",
+            "description": "Run one enabled Automation immediately only when the user explicitly asks. A successful start creates a new ordinary conversation; an overlapping run is skipped.",
+            "inputSchema": {
+                "type": "object", "additionalProperties": false, "required": ["automationId"],
+                "properties": {"automationId": automation_identifier_schema()}
+            },
+            "outputSchema": {
+                "type": "object", "additionalProperties": false,
+                "required": ["status", "runId", "campId", "conversationId", "reason"],
+                "properties": {
+                    "status": {"type": "string", "enum": ["started", "skipped", "failed"]},
+                    "runId": {"type": "string"},
+                    "campId": {"type": ["string", "null"]},
+                    "conversationId": {"type": ["string", "null"]},
+                    "reason": {"type": ["string", "null"]}
+                }
+            }
+        }),
+        json!({
+            "name": AUTOMATION_CLOSE_TOOL_NAME,
+            "title": "Close a scheduled Automation",
+            "description": "Disable one Automation only when the user explicitly asks, using its current version. Existing claimed runs continue to their terminal state.",
+            "inputSchema": {
+                "type": "object", "additionalProperties": false, "required": ["automationId", "expectedVersion"],
+                "properties": {"automationId": automation_identifier_schema(), "expectedVersion": {"type": "integer", "minimum": 1}}
+            },
+            "outputSchema": automation_view_schema()
+        }),
+        json!({
+            "name": AUTOMATION_UPDATE_TOOL_NAME,
+            "title": "Update a scheduled Automation",
+            "description": "Update one Automation only when the user explicitly asks, using its current version. Omitted fields stay unchanged. notify replaces all channels; clear-notify removes all. Providing repeat replaces the full schedule.",
+            "inputSchema": automation_update_input_schema(),
+            "outputSchema": automation_view_schema()
+        }),
+        json!({
+            "name": AUTOMATION_DELETE_TOOL_NAME,
+            "title": "Delete a scheduled Automation",
+            "description": "Permanently delete one Automation definition only when the user explicitly asks, using its current version. Existing run conversations and immutable run history remain available.",
+            "inputSchema": {
+                "type": "object", "additionalProperties": false, "required": ["automationId", "expectedVersion"],
+                "properties": {"automationId": automation_identifier_schema(), "expectedVersion": {"type": "integer", "minimum": 1}}
+            },
+            "outputSchema": {
+                "type": "object", "additionalProperties": false,
+                "required": ["automationId", "deleted"],
+                "properties": {"automationId": {"type": "string"}, "deleted": {"const": true}}
+            }
+        }),
         json!({
             "name": CAMP_MESSAGE_SEND_TOOL_NAME,
             "title": "Send a public Camp message",

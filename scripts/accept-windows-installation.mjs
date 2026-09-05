@@ -148,7 +148,7 @@ async function installedFileEvidence(directory, { compareWithCurrentPayload = tr
     evidence[name] = { path, bytes: (await stat(path)).size, sha256: installedHash }
   }
   const version = run(files.cli, ['--version'])
-  if (!version.includes('contract-v21 ipc-v2')) throw new Error(`installed CLI is incompatible: ${version}`)
+  if (!version.includes('contract-v22 ipc-v2')) throw new Error(`installed CLI is incompatible: ${version}`)
   return evidence
 }
 

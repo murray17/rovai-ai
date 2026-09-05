@@ -3228,6 +3228,78 @@ export interface RejectHearthReviewItemCommand {
   expectedReviewItemVersion: number
 }
 
+export type AutomationNotifyChannel = 'feishu' | 'dingtalk'
+export type AutomationWeekday =
+  | 'monday' | 'tuesday' | 'wednesday' | 'thursday'
+  | 'friday' | 'saturday' | 'sunday'
+
+export type AutomationSchedule =
+  | { kind: 'daily'; at: string }
+  | { kind: 'weekdays'; at: string }
+  | { kind: 'weekly'; weekday: AutomationWeekday; at: string }
+  | { kind: 'once'; date: string; at: string }
+  | { kind: 'cron'; expression: string }
+  | { kind: 'manual' }
+
+export type AutomationProjectRef =
+  | { kind: 'quick_chat' }
+  | { kind: 'directory'; path: string }
+
+export interface AutomationRunSummary {
+  runId: string
+  status: 'running' | 'cancelling' | 'completed' | 'failed' | 'skipped'
+  reason: string | null
+  scheduledFor: string
+  campId: string | null
+  resultMessageId: string | null
+  notificationStatus: 'none' | 'pending' | 'sent' | 'failed' | 'partial'
+  createdAt: string
+  endedAt: string | null
+}
+
+export interface AutomationView {
+  automationId: string
+  version: number
+  name: string
+  prompt: string
+  enabled: boolean
+  memberId: string
+  projectRef: AutomationProjectRef
+  schedule: AutomationSchedule
+  notifyChannels: AutomationNotifyChannel[]
+  nextRunAt: string | null
+  lastRun: AutomationRunSummary | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AutomationListPage {
+  automations: AutomationView[]
+  nextCursor: string | null
+  truncated: boolean
+}
+
+export interface CreateAutomationCommand {
+  name?: string
+  prompt: string
+  memberId: string
+  projectRef: AutomationProjectRef
+  schedule: AutomationSchedule
+  notifyChannels: AutomationNotifyChannel[]
+}
+
+export interface UpdateAutomationCommand {
+  automationId: string
+  expectedVersion: number
+  name?: string
+  prompt?: string
+  memberId?: string
+  projectRef?: AutomationProjectRef
+  schedule?: AutomationSchedule
+  notifyChannels?: AutomationNotifyChannel[]
+  enabled?: boolean
+}
+
 export type CoreMethod =
   | 'health.check'
   | 'diagnostics.check'
@@ -3251,6 +3323,13 @@ export type CoreMethod =
   | 'members.removalPreview'
   | 'members.remove'
   | 'members.reorder'
+  | 'automations.list'
+  | 'automations.get'
+  | 'automations.create'
+  | 'automations.update'
+  | 'automations.close'
+  | 'automations.delete'
+  | 'automations.run'
   | 'memory.list'
   | 'memory.get'
   | 'memory.create'

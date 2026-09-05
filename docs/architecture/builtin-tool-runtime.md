@@ -9,7 +9,7 @@ last_updated: 2026-09-05
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)、
+[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
@@ -121,12 +121,13 @@ Core 只维护一份 catalog。它服务 IPC 校验、合同测试、Qualificati
 identity 不构成 Agent discovery 协议。
 
 Agent Runtime 没有 `rovai tool list`、`rovai tool describe`、隐藏 discovery、`tool invoke` 或
-`tool call`。Agent 只使用十五个固定业务命令：
+`tool call`。Agent 只使用二十二个固定业务命令：
 
 ```text
 rovai send
 rovai gather
 rovai member create
+rovai automation list|get|create|run|close|update|delete
 rovai task create|get|update|list
 rovai camp list|search|read
 rovai history search
@@ -176,7 +177,7 @@ Domain Service 保留 line-leading 连续有效 mention 的兼容 parser，未�
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 grammar。`--public-only` 在任何 alias/member lookup 前绕过正文寻址，并与显式
 `to/taskId` 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 该 schema 继续进入当前 catalog digest。
-当前 v21 contract/CLI command version、`builtin_cli.transport.v21` capability 与 IPC protocol 2 必须同时进入
+当前 v22 contract/CLI command version、`builtin_cli.transport.v22` capability 与 IPC protocol 2 必须同时进入
 Binding compatibility 和 digest。Camp History 使用 v4；Native Binding context contract 加入内部
 `sessionCharterRevision: 5`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
 继续使用 Formatter 22 / ContextManifest 22，不做 endpoint 猜测并 fail closed。
@@ -210,6 +211,10 @@ canonical result 或 Evidence；这条 narrow importer 与 Renderer 上传继续
 | `team.get_task` | 完整 `TaskDetail` |
 | `team.update_task` | `{taskId, title, status, assigneeAgentId, version, changed, availableActions}` |
 | `team.list_tasks` | 紧凑 `TaskListPage` |
+| `automation.list` | `{automations, nextCursor, truncated}` |
+| `automation.get/create/close/update` | 完整 `AutomationView` |
+| `automation.run` | `{status, runId, campId, conversationId, reason}` |
+| `automation.delete` | `{automationId, deleted}` |
 | `memory.view` | complete exact-Scope canonical result；不分页、不截断 |
 | `memory.write` | `{outcome: effective, memoryId, revisionId} \| {outcome: review_pending, reviewItemId}` |
 | 其余七项 | 去除 Envelope wrapper 后的 canonical result |
@@ -636,5 +641,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v21 command、projection、replay、
+- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v22 command、projection、replay、
   fence 和 negative-path 验收：对应平台版本不得完成。未准入 Windows Runtime 不进入 AgentRun。

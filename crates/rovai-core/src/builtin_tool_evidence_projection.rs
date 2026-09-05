@@ -2,6 +2,11 @@ use anyhow::{Result, ensure};
 use serde_json::{Map, Value, json};
 
 use crate::{
+    automation::{
+        AUTOMATION_CLOSE_TOOL_NAME, AUTOMATION_CREATE_TOOL_NAME, AUTOMATION_DELETE_TOOL_NAME,
+        AUTOMATION_GET_TOOL_NAME, AUTOMATION_LIST_TOOL_NAME, AUTOMATION_RUN_TOOL_NAME,
+        AUTOMATION_UPDATE_TOOL_NAME,
+    },
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
     },
@@ -18,7 +23,7 @@ use crate::{
     },
 };
 
-pub const BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION: i64 = 2;
+pub const BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION: i64 = 3;
 
 const SEMANTIC_TEXT_LIMIT_CHARS: usize = 512;
 const IDENTIFIER_LIMIT_CHARS: usize = 256;
@@ -251,6 +256,44 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
         MEMORY_WRITE_TOOL_NAME => {
             project_memory_mutation_input(&mut projected, input);
         }
+        AUTOMATION_LIST_TOOL_NAME => {
+            insert_enum(&mut projected, "status", input.get("status"));
+            insert_query(&mut projected, input.get("query"));
+            insert_safe_string(&mut projected, "project", input.get("project"), 512);
+            insert_i64(&mut projected, "limit", input.get("limit"));
+            insert_opaque_cursor(&mut projected, input.get("cursor"));
+        }
+        AUTOMATION_GET_TOOL_NAME
+        | AUTOMATION_RUN_TOOL_NAME
+        | AUTOMATION_CLOSE_TOOL_NAME
+        | AUTOMATION_DELETE_TOOL_NAME => {
+            insert_identifier(&mut projected, "automationId", input.get("automationId"));
+            insert_i64(
+                &mut projected,
+                "expectedVersion",
+                input.get("expectedVersion"),
+            );
+        }
+        AUTOMATION_CREATE_TOOL_NAME | AUTOMATION_UPDATE_TOOL_NAME => {
+            insert_identifier(&mut projected, "automationId", input.get("automationId"));
+            insert_i64(
+                &mut projected,
+                "expectedVersion",
+                input.get("expectedVersion"),
+            );
+            insert_semantic_text(&mut projected, "name", input.get("name"));
+            insert_content_facts(&mut projected, input.get("prompt"));
+            insert_safe_string(&mut projected, "member", input.get("member"), 256);
+            insert_safe_string(&mut projected, "project", input.get("project"), 512);
+            insert_enum(&mut projected, "repeat", input.get("repeat"));
+            insert_enum(&mut projected, "weekday", input.get("weekday"));
+            insert_safe_string(&mut projected, "at", input.get("at"), 16);
+            insert_safe_string(&mut projected, "date", input.get("date"), 32);
+            insert_safe_string(&mut projected, "cron", input.get("cron"), 128);
+            insert_string_array(&mut projected, "notify", input.get("notify"));
+            insert_bool(&mut projected, "clearNotify", input.get("clearNotify"));
+            insert_bool(&mut projected, "enabled", input.get("enabled"));
+        }
         _ => anyhow::bail!("unsupported Built-in Tool Evidence operation: {operation}"),
     }
     Ok(Value::Object(projected))
@@ -439,6 +482,37 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
             insert_identifier(&mut projected, "memoryId", result.get("memoryId"));
             insert_identifier(&mut projected, "revisionId", result.get("revisionId"));
             insert_identifier(&mut projected, "reviewItemId", result.get("reviewItemId"));
+        }
+        AUTOMATION_LIST_TOOL_NAME => {
+            let automations = project_object_array(result.get("automations"), |item| {
+                let mut value = Map::new();
+                insert_identifier(&mut value, "automationId", item.get("automationId"));
+                insert_i64(&mut value, "version", item.get("version"));
+                insert_bool(&mut value, "enabled", item.get("enabled"));
+                Value::Object(value)
+            });
+            projected.insert("automationCount".to_string(), json!(automations.total));
+            projected.insert("automations".to_string(), Value::Array(automations.values));
+            insert_bool(&mut projected, "truncated", result.get("truncated"));
+            insert_cursor_facts(&mut projected, result.get("nextCursor"));
+        }
+        AUTOMATION_GET_TOOL_NAME
+        | AUTOMATION_CREATE_TOOL_NAME
+        | AUTOMATION_CLOSE_TOOL_NAME
+        | AUTOMATION_UPDATE_TOOL_NAME => {
+            insert_identifier(&mut projected, "automationId", result.get("automationId"));
+            insert_i64(&mut projected, "version", result.get("version"));
+            insert_bool(&mut projected, "enabled", result.get("enabled"));
+        }
+        AUTOMATION_RUN_TOOL_NAME => {
+            insert_identifier(&mut projected, "runId", result.get("runId"));
+            insert_identifier(&mut projected, "campId", result.get("campId"));
+            insert_enum(&mut projected, "status", result.get("status"));
+            insert_enum(&mut projected, "reason", result.get("reason"));
+        }
+        AUTOMATION_DELETE_TOOL_NAME => {
+            insert_identifier(&mut projected, "automationId", result.get("automationId"));
+            insert_bool(&mut projected, "deleted", result.get("deleted"));
         }
         _ => anyhow::bail!("unsupported Built-in Tool Evidence operation: {operation}"),
     }

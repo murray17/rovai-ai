@@ -37,6 +37,9 @@ Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主�
 Camp 内显式 Markdown 文件链接、共享资源图标、独立文件阅读、共享顶栏、文件 Tabs、路径行、Viewer、更新反馈与响应式替换由
 [Camp 文件预览区](components/file-preview.md)拥有稳定呈现边界。
 
+定时任务的一级入口、模板、自动保存、状态和结果会话入口由
+[Automation 工作区](components/automation-workspace.md)拥有稳定呈现边界。
+
 Runtime 终态文件行与会话中的每 Run 文件变化卡片由
 [Camp 会话工作区](components/conversation-workspace.md#runtime-终态文件变更与-agentrun-文件变化)拥有稳定呈现边界。
 
