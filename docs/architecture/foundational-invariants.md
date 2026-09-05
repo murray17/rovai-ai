@@ -119,7 +119,7 @@ last_updated: 2026-09-05
 - Draft 读取只有 loading、ready 和 error；只有成功 Core response 才能建立 revision-zero 空 Draft。读取失败禁止编辑、附件、路由和发送并提供显式重试，不能伪造空 Draft；统一 Camp leave guard 的 flush 失败保留当前 Camp 与 EditorState，并阻断目标导航，组件 cleanup 不承担异步持久化。
 - 用户 Draft 的 derived body 非空或至少一个 source/legacy attachment 时才可发送；两者同时为空继续拒绝。纯附件 accepted 消息忠实保存空 body 与空公共 Structured Content，不生成占位正文，并沿用同一 consume、CampTurn 与 AgentRun 原子边界。
 - Reply 是持久双意图：引用同 Camp 可回复消息，并从其最终冻结寻址推导接收者；引用失效时必须显式修复，不能静默退回 Default Lead。单一非 Lead 显式收件人可形成下一空白 Draft 的 continuation，Agent 发言、Default、Broadcast、多收件人或 Lead 消息不会推进该候选。
-- 私有 Pending 不进入公共时间线、History 或 Runtime Context。Renderer 先等 Core 决定入队或发布；只有具有正式 Message 身份的输入才展示为消息。Pending 原子保存 V2 document 与 source refs，working refs 受 edit token/revision 约束；FIFO、编辑与 needs-repair 见 [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)，完整 Draft 合同见 [Camp Composer Draft v11](../contracts/camp-composer-draft-v11.md)。
+- 私有 Pending 不进入公共时间线、History 或 Runtime Context。Renderer 先等 Core 决定入队或发布；只有具有正式 Message 身份的输入才展示为消息。Pending 原子保存 V2 document 与 source refs，working refs 受 edit token/revision 约束；FIFO、编辑与 needs-repair 见 [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)，完整 Draft 合同见 [Camp Composer Draft v12](../contracts/camp-composer-draft-v12.md)。
 
 <a id="camp-resources"></a>
 
