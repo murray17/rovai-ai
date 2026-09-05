@@ -31,7 +31,7 @@ last_updated: 2026-09-06
 ## Camp 文件预览
 
 - 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v8](../contracts/file-preview-v8.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)。
-- 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)、[V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)、[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)、[V1.42-D01](../versions/v1.42/decisions.md#v1-42-d01)、[V1.51-D01](../versions/v1.51/decisions.md#v1-51-d01)及[V1.51-D02](../versions/v1.51/decisions.md#v1-51-d02)；[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案与 [V1.39-D05](../versions/v1.39/decisions.md#v1-39-d05) 的 inline-code 存在性探测已被替代。
+- 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)、[V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)、[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)、[V1.42-D01](../versions/v1.42/decisions.md#v1-42-d01)、[V1.51-D01](../versions/v1.51/decisions.md#v1-51-d01)、[V1.51-D02](../versions/v1.51/decisions.md#v1-51-d02)及[V1.52-D01](../versions/v1.52/decisions.md#v1-52-d01)；[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案与 [V1.39-D05](../versions/v1.39/decisions.md#v1-39-d05) 的 inline-code 存在性探测已被替代。
 
 ## Channels 与 External Principals
 

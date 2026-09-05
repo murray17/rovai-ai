@@ -14,10 +14,23 @@ last_updated: 2026-09-06
 ## 实施顺序
 
 - [x] 记录最终设计与本清单，收录第三版 HTML，创建独立 worktree，并同步至最新 `origin/main`。
+- [x] 为项目内合格 `child_of_handle` 建立 Main-owned 独立 workspace 恢复来源，保留 generation fence、稳定
+  source 与 `previewKey` 去重，并覆盖 A→B→C、父释放／删除和外部来源边界。
 - [x] 确定最小文件阅读引用与新增／编辑投影；按协议结构完成来源、路径、成功终态与生命周期校验。
 - [x] 实施统一详情底色／左轴、组文案、子行图形、停止样式、文件链接、独立 Diff 箭头及红色 Toast。
 - [x] 同步受影响的当前 UI／Contracts；按 Registry 规则交付正反例、started→terminal、迁移与 live/history 一致性证据。
 - [x] 完成 UI 与 14 个 Runtime 的真实事件验收；通过、诚实回退、运行失败与产品准入阻断分别记录。
+
+## 项目内子文件恢复验收
+
+- [x] `child_of_handle` 成功打开后仅由 Main 独立取得当前 Camp workspace 根；目标越界、引用有歧义或 authority
+  不可用时省略 `restoreRequest`，不影响当前成功预览。
+- [x] `restoreRequest` 使用可逆 root-relative `camp_workspace` 引用；发布 handle 前重验 binding generation，
+  不复用父 capability root，也不形成父链。
+- [x] Renderer 优先安装 Main 返回的稳定来源；临时 child 不覆盖稳定业务来源，同一项目文件通过稳定 source key 与
+  `previewKey` 复用冷 Tab ID。
+- [x] 父文件释放／删除、A→B→C、A→B→A stale result、外部／Root Grant child、系统应用格式、消息／附件／
+  Evidence 原来源及无副作用 restore 均有定向回归。
 
 ## UI 验收
 

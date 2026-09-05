@@ -57,6 +57,8 @@ last_updated: 2026-09-06
 文件链接或 File Change 卡片选择内容，不伪造默认文件；关闭最后一个 Tab 仍自动收起预览。
 切换 Camp 时，各 Camp 的 Tab 顺序、当前 Tab 与 Pane 可见性在本窗口内独立记忆；关闭 App 后不恢复。返回 Camp
 先显示安全 Tab shell，只有 Pane 可见时才恢复 active 文件，其他普通文件首次激活时再加载，不用旧正文制造即时假象。
+预览内链接成功打开当前 Camp 工作区内的普通文件后，该子 Tab 使用 Main 签发的独立工作区恢复来源；关闭或删除父 Tab
+不影响它再次重验。项目外或临时授权派生文件仍只保留 unavailable shell，不显示新的恢复入口或状态装饰。
 
 预览顶栏空白处与会话顶栏共用原生窗口拖拽和双击行为（遵循平台标题栏设置），不另造全屏状态。
 标签、关闭、返回和预览按钮使用 `no-drag`；即使标签溢出横向滚动，也在最右按钮前保留窗口拖拽空白。
@@ -121,7 +123,8 @@ Alt+Shift+左右重排。关闭后优先激活右侧，再回到左侧；最后�
 
 恢复中的普通 Tab 保留原文件图标、文件名和关闭按钮，不增加可见 Loading／错误 Badge；`opening`、`missing`、
 `unavailable` 与 `error` 只追加到 Tab 的可访问名称。恢复 shell 没有当前 handle 时，默认应用、显示所在位置与复制路径
-操作禁用；有稳定业务 source 时菜单提供明确的“重新打开”，临时 child/root source 不伪造该动作。
+操作禁用；有稳定业务 source 时菜单提供明确的“重新打开”，临时 child/root source 不伪造该动作。Main 已确认位于
+Camp 工作区内的 child 会先收敛为独立稳定 source，同一项目文件从消息、预览内链接或恢复入口再次到达时复用既有 Tab ID。
 
 ### File Change 标签页
 
@@ -182,8 +185,7 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 
 首次打开与恢复使用 cold/opening/ready/missing/unavailable/error；快速成功直接显示正文，耗时后才显示轻量 Loading。
 无法形成当前可读内容时，正文只显示水平、垂直居中的 32px 通用文件轮廓，图标下方相隔 12px 显示一句 13px 常规
-公开文案。其他已经进入预览流程的入口与会话恢复，其错误码到文案的 closed mapping 继续由
-[File Preview v7](../../contracts/file-preview-v7.md#失败呈现) 拥有。
+公开文案。错误码到文案的 closed mapping 由 [File Preview v8](../../contracts/file-preview-v8.md#失败呈现) 拥有。
 该状态不显示路径、尺寸、标题、卡片、边框、按钮、技术详情或内部能力名称；错误内容区之外的 Tabs、Viewer 布局和
 其他 Camp 界面沿用既有视觉，不以本状态为理由重做。
 历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、

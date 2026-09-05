@@ -26,7 +26,10 @@ import {
   filePreviewPresentationFromRequest,
   filePreviewSessionStore,
   filePreviewSourceKey,
+  filePreviewTabMatchesResolvedFile,
+  resolvedFilePreviewSource,
   restorableFilePreviewRequest,
+  stableFilePreviewSourceKey,
   type FilePreviewPresentation,
   type FilePreviewPresentationHint,
   type FilePreviewSessionSnapshot,
@@ -186,7 +189,7 @@ function restoredTab(snapshot: FilePreviewTabSnapshot): PreviewTabModel {
     kind: 'file',
     id: snapshot.id,
     sourceKey: snapshot.sourceRequest
-      ? filePreviewSourceKey(snapshot.sourceRequest)
+      ? stableFilePreviewSourceKey(snapshot.sourceRequest, snapshot.presentation)
       : `unavailable:${snapshot.id}`,
     sourceRequest: snapshot.sourceRequest,
     previewKey: null,
@@ -461,7 +464,6 @@ export function FilePreviewProvider({
   const installResolvedFile = useCallback((
     requestedTabId: string,
     request: OpenFilePreviewRequest,
-    sourceKey: string,
     file: ResolvedFilePreview,
     scopeGeneration: number,
     requestGeneration: number,
@@ -481,23 +483,21 @@ export function FilePreviewProvider({
       return { kind: 'error', error: unavailableSourceError() }
     }
 
+    const resolvedSource = resolvedFilePreviewSource(request, file)
     const duplicate = tabsRef.current.find((tab) => tab.kind === 'file'
       && tab.id !== requestedTabId
-      && tab.previewKey === file.previewKey) as FilePreviewTabModel | undefined
+      && filePreviewTabMatchesResolvedFile(tab, file, resolvedSource.sourceKey)
+    ) as FilePreviewTabModel | undefined
     const targetTabId = duplicate?.id ?? requestedTabId
     const targetRequestGeneration = duplicate
       ? duplicate.requestGeneration + 1
       : requestGeneration
     const replaced = duplicate ?? requestedTab
-    const currentRestorableSource = duplicate?.sourceRequest
-      ? restorableFilePreviewRequest(duplicate.sourceRequest)
-      : null
-    const installedRequest = restorableFilePreviewRequest(request)
-      ? request
-      : currentRestorableSource ?? request
-    const installedSourceKey = installedRequest === request
-      ? sourceKey
-      : duplicate?.sourceKey ?? sourceKey
+    const installedSource = resolvedFilePreviewSource(
+      request,
+      file,
+      duplicate?.sourceRequest
+    )
     if (replaced.file?.handleId !== file.handleId) {
       if (replaced.file) void window.rovai.filePreview.release({ handleId: replaced.file.handleId })
       revokeContent(replaced.content)
@@ -512,8 +512,8 @@ export function FilePreviewProvider({
       .map((tab) => tab.kind === 'file' && tab.id === targetTabId
         ? {
             ...tab,
-            sourceKey: installedSourceKey,
-            sourceRequest: installedRequest,
+            sourceKey: installedSource.sourceKey,
+            sourceRequest: installedSource.sourceRequest,
             previewKey: file.previewKey,
             presentation: filePreviewPresentationFromFile(file),
             file,
@@ -627,7 +627,6 @@ export function FilePreviewProvider({
     discardOnFailure = false,
     rollback?: FilePreviewViewRollback
   ): Promise<FilePreviewOpenOutcome> => {
-    const sourceKey = filePreviewSourceKey(request)
     const scopeGeneration = scopeGenerationRef.current
     const requestGeneration = beginFileTabRequest(
       tabId,
@@ -700,7 +699,6 @@ export function FilePreviewProvider({
         return installResolvedFile(
           tabId,
           request,
-          sourceKey,
           file,
           scopeGeneration,
           requestGeneration,

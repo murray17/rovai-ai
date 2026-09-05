@@ -35,7 +35,7 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v8](../contracts/file-preview-v8.md) 继承的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v8](../contracts/file-preview-v8.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有按 Camp 隔离的窗口内 Tab shell、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web
   入口；inline-code 和正文不进入文件识别，也不读取磁盘。Tab shell 不拥有文件能力或当前文件事实。
 
@@ -86,14 +86,18 @@ capabilityRoot + capabilities + contentVersion + contentGeneration`。TTL 为 30
 `previewKey` 由窗口、Camp 与已校验的 canonical path 摘要生成，仅用于 Renderer Tab 去重；不包含消息/Run 来源或行号，
 同一文件从不同入口打开仍激活现有 Tab。每次打开继续单独校验来源、创建来源绑定的 handle；去重不共享或升级权限。
 `reopenToken` 在 Main 绑定各自原始来源链；刷新或句柄过期时重新验证来源、realpath 和文件身份并最多自动重试一次。子文件成功打开后获得
-独立 token，父 Tab 关闭不撤销子 Tab。
+独立 token，父 Tab 关闭不撤销子 Tab。若 `child_of_handle` 最终打开的是当前 Camp 业务工作区内的普通文件，Main 还会
+独立读取当前 Camp/workspace authority、重新 canonicalize 工作区根并签发相对工作区根的 `camp_workspace`
+`restoreRequest`；它不保存或延长父 handle，也不把项目外临时能力升级为业务来源。
 
 ## Camp 文件会话与恢复
 
 Renderer 维护最多 24 个 Camp 的窗口内 LRU session。它只保存 Tab 的稳定 Renderer ID、可重验业务 source、安全呈现、
 顺序、active ID 与 Pane 可见性；File Change 保存既有不可变 summary 和 selected evidence ID。Main handle、reopen token、
 Root Grant、challenge、HTML/asset token、Blob URL、正文、分页、尺寸、watcher 与旧 `previewKey` 都不进入快照。
-`child_of_handle` 和 `authorized_root` 只依赖旧 Camp 的短期能力，因此只恢复安全 shell 并标记 unavailable。
+`authorized_root` 与未取得 Main 签发 `restoreRequest` 的 `child_of_handle` 只依赖旧 Camp 的短期能力，因此只恢复安全 shell
+并标记 unavailable。项目内子文件若已取得独立 `camp_workspace` 来源，Renderer 保存该来源而非临时 child 请求；父文件
+关闭、删除或不在快照中都不影响子文件下次重验。
 
 Camp route commit 先递增 Renderer scope generation、保存旧快照和撤销 Blob URL，再立即请求 Main `bindCamp`，随后恢复
 本地 shell。只有 bind 成功、Pane 仍可见且 active Tab 仍属于该 scope 时，Renderer 才经独立 `restore` wire 重验一个

@@ -3,7 +3,10 @@ import {
   FilePreviewSessionStore,
   filePreviewPresentationFromRequest,
   filePreviewSourceKey,
+  filePreviewTabMatchesResolvedFile,
+  resolvedFilePreviewSource,
   restorableFilePreviewRequest,
+  stableFilePreviewSourceKey,
   type FilePreviewSessionSnapshot
 } from './file-preview-session'
 
@@ -74,6 +77,87 @@ describe('file preview session identity', () => {
       rootGrantId: 'grant-1',
       rawReference: 'child.md'
     })).toBeNull()
+  })
+
+  it('installs a Main-verified workspace source for a project child file', () => {
+    const childRequest = {
+      kind: 'child_of_handle' as const,
+      parentHandleId: 'handle-parent',
+      rawReference: './design.md'
+    }
+    const restoreRequest = {
+      kind: 'camp_workspace' as const,
+      campId: 'camp-1',
+      rawReference: 'docs/design.md'
+    }
+
+    const resolvedFile = {
+      restoreRequest,
+      displayPath: 'docs/design.md',
+      pathPresentation: 'project_relative' as const
+    }
+    expect(resolvedFilePreviewSource(childRequest, resolvedFile)).toEqual({
+      sourceRequest: restoreRequest,
+      sourceKey: 'workspace:camp-1:docs/design.md'
+    })
+    expect(filePreviewTabMatchesResolvedFile(
+      { previewKey: null, sourceKey: 'workspace:camp-1:docs/design.md' },
+      { previewKey: 'verified-file' },
+      'workspace:camp-1:docs/design.md'
+    )).toBe(true)
+  })
+
+  it('keeps an existing stable source when a later temporary child request resolves to the same file', () => {
+    const stableRequest = {
+      kind: 'camp_workspace' as const,
+      campId: 'camp-1',
+      rawReference: 'docs/design.md'
+    }
+    const childRequest = {
+      kind: 'child_of_handle' as const,
+      parentHandleId: 'handle-parent',
+      rawReference: './design.md'
+    }
+
+    const resolvedFile = {
+      displayPath: 'docs/design.md',
+      pathPresentation: 'project_relative' as const
+    }
+    expect(resolvedFilePreviewSource(childRequest, resolvedFile, stableRequest)).toEqual({
+      sourceRequest: stableRequest,
+      sourceKey: 'workspace:camp-1:docs/design.md'
+    })
+    expect(resolvedFilePreviewSource(childRequest, {
+      displayPath: 'design.md',
+      pathPresentation: 'file_name_only'
+    })).toEqual({
+      sourceRequest: childRequest,
+      sourceKey: 'child:handle-parent:./design.md'
+    })
+  })
+
+  it('uses Main-signed project paths to match a cold tab across business source kinds', () => {
+    const presentation = { displayPath: 'docs/design.md', pathPresentation: 'project_relative' as const }
+    const messageRequest = {
+      kind: 'message_reference' as const,
+      campId: 'camp-1',
+      messageId: 'message-1',
+      rawReference: './docs/design.md'
+    }
+    const workspaceRequest = {
+      kind: 'camp_workspace' as const,
+      campId: 'camp-1',
+      rawReference: './docs/design.md'
+    }
+
+    expect(stableFilePreviewSourceKey(messageRequest, presentation)).toBe(
+      stableFilePreviewSourceKey(workspaceRequest, presentation)
+    )
+    expect(filePreviewTabMatchesResolvedFile(
+      { previewKey: null, sourceKey: stableFilePreviewSourceKey(messageRequest, presentation) },
+      { previewKey: 'verified-file' },
+      stableFilePreviewSourceKey(workspaceRequest, presentation)
+    )).toBe(true)
   })
 
   it('never turns an unverified absolute reference into a displayed physical path', () => {
