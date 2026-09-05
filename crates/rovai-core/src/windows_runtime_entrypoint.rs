@@ -321,6 +321,29 @@ fn windows_process_visible_path(path: PathBuf) -> PathBuf {
     path
 }
 
+/// cmd.exe treats even a verbatim *local* cwd as UNC and silently switches to
+/// the Windows directory. Give only command shims a verified DOS spelling;
+/// native EXEs keep their original long-path-aware working directory.
+pub(crate) fn command_shim_working_directory(path: &Path) -> Result<PathBuf> {
+    let canonical = path
+        .canonicalize()
+        .context("managed_process.invalid_argument: command shim cwd is unavailable")?;
+    let visible = windows_process_visible_path(canonical.clone());
+    if !matches!(
+        visible.components().next(),
+        Some(std::path::Component::Prefix(prefix))
+            if matches!(prefix.kind(), std::path::Prefix::Disk(_))
+    ) {
+        bail!(
+            "managed_process.invalid_argument: command shim requires a local DOS working directory"
+        );
+    }
+    if visible.canonicalize()? != canonical {
+        bail!("managed_process.invalid_argument: command shim cwd spelling changed its identity");
+    }
+    Ok(visible)
+}
+
 fn reject_cmd_line_breaks(value: &OsStr, label: &str) -> Result<()> {
     if value
         .encode_wide()

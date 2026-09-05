@@ -1,8 +1,8 @@
 use std::{
     cmp::Ordering as EpochOrdering,
     collections::HashMap,
-    fs::{File, OpenOptions},
-    io::{BufRead as _, BufReader as StdBufReader, Read as _, Write as _},
+    fs::File,
+    io::{BufRead as _, BufReader as StdBufReader, Read as _},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex as StdMutex, Weak,
@@ -10,6 +10,9 @@ use std::{
     },
     time::Duration,
 };
+
+#[cfg(not(windows))]
+use std::{fs::OpenOptions, io::Write as _};
 
 use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
@@ -1344,7 +1347,7 @@ impl PiRpcRuntimeAdapter {
             runtime_creation: StdMutex::new(HashMap::new()),
             incoming,
             fleet,
-            private_runtime_dir: data_dir.join("runtime/pi"),
+            private_runtime_dir: private_runtime_directory(data_dir),
         }
     }
 
@@ -2079,6 +2082,18 @@ fn parse_explicit_model_id(value: &str) -> Result<(String, String)> {
     Ok((provider, model))
 }
 
+fn private_runtime_directory(data_dir: &Path) -> PathBuf {
+    // The old Windows root was created with inherited ACLs even when Pi was
+    // unused. Its first private write always failed at directory fsync, so it
+    // cannot contain a successfully admitted Windows Pi Session. Leave it intact
+    // instead of silently repairing unknown objects into the private boundary.
+    if cfg!(windows) {
+        data_dir.join("runtime/pi-windows-private-v1")
+    } else {
+        data_dir.join("runtime/pi")
+    }
+}
+
 fn session_locator_root(private_root: &Path, camp_id: &str, agent_id: &str) -> Result<PathBuf> {
     Ok(private_root
         .join("sessions")
@@ -2187,6 +2202,13 @@ fn validate_native_session_file(path: &Path, id: &str, cwd: &Path, must_exist: b
     Ok(())
 }
 
+#[cfg(windows)]
+fn create_private_directory(path: &Path) -> Result<()> {
+    rovai_core::platform::prepare_private_directory(path)?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
 fn create_private_directory(path: &Path) -> Result<()> {
     std::fs::create_dir_all(path)
         .with_context(|| format!("failed to create private Pi directory {}", path.display()))?;
@@ -2204,6 +2226,15 @@ fn write_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
     write_private_file(path, &bytes)
 }
 
+#[cfg(windows)]
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    // Windows does not support Unix directory fsync. The shared primitive
+    // flushes a private sibling and publishes via MOVEFILE_WRITE_THROUGH,
+    // including replacement of resident Host binding/locator documents.
+    rovai_core::platform::atomic_write_private_bytes(path, bytes)
+}
+
+#[cfg(not(windows))]
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("private Pi file has no parent")?;
     create_private_directory(parent)?;
@@ -2269,6 +2300,54 @@ fn redact_pi_diagnostic(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Owns Pi's actual private-file seam: the no-Prompt probe creates an empty
+    // Session, while resident Hosts replace binding documents at the same path.
+    // Pure Session validators and Unix-only fake Hosts do not exercise this I/O.
+    #[test]
+    fn private_files_support_empty_probe_sessions_and_atomic_binding_replacement() {
+        let root = std::env::temp_dir().join(format!("rovai-pi-private-{}", uuid::Uuid::new_v4()));
+        let result = (|| -> Result<()> {
+            #[cfg(windows)]
+            {
+                let legacy = root.join("runtime/pi");
+                std::fs::create_dir_all(&legacy)?;
+                std::fs::write(legacy.join("untouched"), b"legacy")?;
+            }
+            let private_root = private_runtime_directory(&root);
+            let session = private_root
+                .join("sessions")
+                .join("machine-ready-session.jsonl");
+            write_private_file(&session, b"")?;
+            assert!(std::fs::read(&session)?.is_empty());
+            let locator = private_root
+                .join("sessions")
+                .join("a".repeat(64))
+                .join("b".repeat(64))
+                .join("locator.json");
+            write_private_json(&locator, &json!({"session": "exact"}))?;
+            assert!(locator.is_file());
+            let binding = private_root.join("host-config").join("binding.json");
+            for generation in [1, 2] {
+                write_private_json(&binding, &json!({"generation": generation}))?;
+                let saved: Value = serde_json::from_slice(&std::fs::read(&binding)?)?;
+                assert_eq!(saved["generation"], generation);
+            }
+            assert_eq!(std::fs::read_dir(binding.parent().unwrap())?.count(), 1);
+            // A failed destination must stay a directory; genuine I/O failures
+            // remain errors and the helper removes its uncommitted sibling.
+            let occupied = private_root.join("occupied");
+            create_private_directory(&occupied)?;
+            assert!(write_private_file(&occupied, b"invalid").is_err());
+            assert!(occupied.is_dir());
+            assert_eq!(std::fs::read_dir(&private_root)?.count(), 3);
+            #[cfg(windows)]
+            assert_eq!(std::fs::read(root.join("runtime/pi/untouched"))?, b"legacy");
+            Ok(())
+        })();
+        let _ = std::fs::remove_dir_all(&root);
+        result.unwrap();
+    }
 
     #[test]
     fn execution_epoch_fence_rejects_stale_before_runtime_retirement() {
