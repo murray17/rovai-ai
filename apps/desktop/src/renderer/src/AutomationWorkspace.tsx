@@ -27,6 +27,7 @@ type AutomationIssue = {
   kind: 'load' | 'save' | 'conflict' | 'action'
   message: string
 }
+export type AutomationLeaveGuard = () => Promise<boolean>
 
 class AutomationCommandError extends Error {
   constructor(readonly code: string, message: string) {
@@ -209,7 +210,8 @@ export function AutomationWorkspace({
   defaultMemberId,
   topNotices,
   onOpenCamp,
-  onNotify
+  onNotify,
+  onLeaveGuardChange
 }: {
   agents: AgentProfile[]
   projects: ProjectNavigationGroup[]
@@ -217,6 +219,7 @@ export function AutomationWorkspace({
   topNotices?: React.ReactNode
   onOpenCamp(campId: string): void
   onNotify(message: string): void
+  onLeaveGuardChange?(guard: AutomationLeaveGuard | null): void
 }): React.JSX.Element {
   const [automations, setAutomations] = useState<AutomationView[]>([])
   const automationsRef = useRef<AutomationView[]>([])
@@ -373,6 +376,7 @@ export function AutomationWorkspace({
         savedVersions.current.set(automationId, updated.version)
         replaceAutomation(updated)
         if (selectedIdRef.current === automationId && draftFingerprint(draftRef.current) === fingerprint) {
+          draftRef.current = normalizedDraft
           setDraft(normalizedDraft)
           setSaveState('saved')
         }
@@ -391,6 +395,29 @@ export function AutomationWorkspace({
     })
     return saveQueue.current
   }, [replaceAutomation])
+
+  const flushBeforeLeave = useCallback(async (): Promise<boolean> => {
+    const automationId = selectedIdRef.current
+    if (!automationId || automationId === 'new') return true
+    try {
+      for (;;) {
+        await saveQueue.current.catch(() => undefined)
+        if (selectedIdRef.current !== automationId) return false
+        const snapshot = draftRef.current
+        if (savedFingerprints.current.get(automationId) === draftFingerprint(snapshot)) {
+          return true
+        }
+        await queueSave(automationId, snapshot)
+      }
+    } catch {
+      return false
+    }
+  }, [queueSave])
+
+  useEffect(() => {
+    onLeaveGuardChange?.(flushBeforeLeave)
+    return () => onLeaveGuardChange?.(null)
+  }, [flushBeforeLeave, onLeaveGuardChange])
 
   useEffect(() => {
     if (!selected || !draft.prompt.trim() || saveState === 'conflict') return undefined

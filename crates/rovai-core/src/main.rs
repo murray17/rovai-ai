@@ -620,6 +620,8 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
             | "userAutomation.camp.send"
+            | "automations.schedulerControl"
+            | "automations.schedulerTick"
             | "automations.run"
             | "camp.sourceAttachments.addFromPath"
             | "camp.pendingInputs.addSourceAttachmentFromPath"
@@ -1185,6 +1187,36 @@ struct SendUserAutomationCampMessageParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AutomationGetParams {
     automation_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationSchedulerControl {
+    epoch: u64,
+    recovery_boundary: chrono::DateTime<chrono::Utc>,
+    paused: bool,
+}
+
+type AutomationSchedulerControlParams = AutomationSchedulerControl;
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationSchedulerTickParams {
+    epoch: u64,
+    now: chrono::DateTime<chrono::Utc>,
+}
+
+fn apply_automation_scheduler_control(
+    current: &mut Option<AutomationSchedulerControl>,
+    next: AutomationSchedulerControl,
+) -> bool {
+    if let Some(value) = current {
+        if value.epoch > next.epoch || (value.epoch == next.epoch && *value != next) {
+            return false;
+        }
+    }
+    *current = Some(next);
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -1779,6 +1811,7 @@ struct Core {
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeCheckActivity>>,
     runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckRequest>,
     attachment_projection_requests: mpsc::UnboundedSender<String>,
+    automation_scheduler_control: RwLock<Option<AutomationSchedulerControl>>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
     agent_run_cleanup_inflight: Mutex<HashSet<ActiveExecutionKey>>,
@@ -5436,6 +5469,33 @@ impl Core {
         }
         let _ = &request.params;
         match request.method.as_str() {
+            "automations.schedulerControl" => {
+                let params: AutomationSchedulerControlParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut current = self.automation_scheduler_control.write().await;
+                let applied = apply_automation_scheduler_control(&mut current, params);
+                Ok(json!({
+                    "applied": applied,
+                    "epoch": current.as_ref().map(|value| value.epoch),
+                }))
+            }
+            "automations.schedulerTick" => {
+                let params: AutomationSchedulerTickParams =
+                    serde_json::from_value(request.params.clone())?;
+                let current = self.automation_scheduler_control.read().await;
+                let Some(control) = *current else {
+                    return Ok(json!({ "processed": false }));
+                };
+                if control.paused || control.epoch != params.epoch {
+                    return Ok(json!({ "processed": false }));
+                }
+                // The Desktop timestamp is fixed when the tick is sent. If the
+                // process sleeps while this request is in flight, it cannot turn
+                // into a post-resume claim with the older recovery boundary.
+                self.process_automations(params.now, control.recovery_boundary)
+                    .await;
+                Ok(json!({ "processed": true }))
+            }
             "automations.list" => {
                 let params: AutomationListQuery = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
@@ -8870,7 +8930,7 @@ impl Core {
     async fn process_automations(
         &self,
         now: chrono::DateTime<chrono::Utc>,
-        active_since: chrono::DateTime<chrono::Utc>,
+        recovery_boundary: chrono::DateTime<chrono::Utc>,
     ) {
         let quick_chat_path = self.data_dir.join("quick-chat");
         if let Err(error) = std::fs::create_dir_all(&quick_chat_path) {
@@ -8885,7 +8945,7 @@ impl Core {
             let service = AutomationService::default();
             service.settle_runs(&mut database, now).and_then(|settled| {
                 let dispatches =
-                    service.claim_due(&mut database, now, active_since, &quick_chat_path)?;
+                    service.claim_due(&mut database, now, recovery_boundary, &quick_chat_path)?;
                 let mut ready = Vec::with_capacity(dispatches.len());
                 for dispatch in dispatches {
                     match self
@@ -14006,6 +14066,7 @@ async fn run_core(
 ) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
+    let automation_scheduler_control = parse_automation_scheduler_control()?;
     let data_dir_lease = match CoreDataDirLease::try_acquire(&data_dir) {
         Ok(CoreDataDirLeaseAcquisition::Acquired(lease)) => lease,
         Ok(CoreDataDirLeaseAcquisition::OwnedByActiveCore { data_dir, owner }) => {
@@ -14345,6 +14406,7 @@ async fn run_core(
         runtime_check_activity: RwLock::new(BTreeMap::new()),
         runtime_check_requests: runtime_check_tx,
         attachment_projection_requests: attachment_projection_tx,
+        automation_scheduler_control: RwLock::new(automation_scheduler_control),
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
         agent_run_cleanup_inflight: Mutex::new(HashSet::new()),
@@ -19683,7 +19745,6 @@ async fn process_agent_run_scheduler(
 ) {
     let mut interval = tokio::time::interval(Duration::from_millis(500));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut last_automation_tick = None;
     let mut mcp_cleanup_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(30),
         Duration::from_secs(30),
@@ -19701,16 +19762,6 @@ async fn process_agent_run_scheduler(
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
                 dispatch_pending_camp_inputs(&core).await;
-                let automation_tick = chrono::Utc::now();
-                let automation_active_since = last_automation_tick
-                    .filter(|previous| {
-                        let elapsed = automation_tick.signed_duration_since(*previous);
-                        elapsed >= chrono::Duration::zero()
-                            && elapsed <= chrono::Duration::seconds(2)
-                    })
-                    .unwrap_or(automation_tick);
-                last_automation_tick = Some(automation_tick);
-                core.process_automations(automation_tick, automation_active_since).await;
                 core.dispatch_agent_runs(&output).await;
             },
             _ = core.agent_run_cancellation_notify.notified() => {
@@ -20565,6 +20616,64 @@ fn parse_data_dir() -> Result<PathBuf> {
 
 fn parse_runtime_camp_files_root() -> Result<PathBuf> {
     parse_runtime_camp_files_root_from(std::env::args().skip(1))
+}
+
+fn parse_automation_scheduler_control() -> Result<Option<AutomationSchedulerControl>> {
+    parse_automation_scheduler_control_from(std::env::args().skip(1))
+}
+
+fn parse_automation_scheduler_control_from(
+    args: impl IntoIterator<Item = String>,
+) -> Result<Option<AutomationSchedulerControl>> {
+    let mut args = args.into_iter();
+    let mut epoch = None;
+    let mut recovery_boundary = None;
+    let mut paused = false;
+    let mut paused_seen = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--automation-scheduler-epoch" => {
+                let value = args
+                    .next()
+                    .context("--automation-scheduler-epoch requires a non-negative integer")?
+                    .parse::<u64>()
+                    .context("--automation-scheduler-epoch requires a non-negative integer")?;
+                if epoch.replace(value).is_some() {
+                    anyhow::bail!("--automation-scheduler-epoch may be provided only once");
+                }
+            }
+            "--automation-recovery-boundary" => {
+                let value = args
+                    .next()
+                    .context("--automation-recovery-boundary requires an RFC 3339 timestamp")?;
+                let value = chrono::DateTime::parse_from_rfc3339(&value)
+                    .context("--automation-recovery-boundary requires an RFC 3339 timestamp")?
+                    .with_timezone(&chrono::Utc);
+                if recovery_boundary.replace(value).is_some() {
+                    anyhow::bail!("--automation-recovery-boundary may be provided only once");
+                }
+            }
+            "--automation-scheduler-paused" => {
+                if paused_seen {
+                    anyhow::bail!("--automation-scheduler-paused may be provided only once");
+                }
+                paused = true;
+                paused_seen = true;
+            }
+            _ => {}
+        }
+    }
+    match (epoch, recovery_boundary, paused_seen) {
+        (None, None, false) => Ok(None),
+        (Some(epoch), Some(recovery_boundary), _) => Ok(Some(AutomationSchedulerControl {
+            epoch,
+            recovery_boundary,
+            paused,
+        })),
+        _ => anyhow::bail!(
+            "Automation scheduler control requires both --automation-scheduler-epoch and --automation-recovery-boundary"
+        ),
+    }
 }
 
 fn parse_windows_data_root_preparation() -> Result<Option<PathBuf>> {
@@ -22351,6 +22460,88 @@ while IFS= read -r _ignored; do :; done
             )
             .contains("only once")
         );
+    }
+
+    #[test]
+    fn automation_scheduler_control_is_closed_and_monotonic() {
+        let boundary = chrono::DateTime::parse_from_rfc3339("2026-09-05T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let active = parse_automation_scheduler_control_from(vec![
+            "--automation-scheduler-epoch".to_string(),
+            "4".to_string(),
+            "--automation-recovery-boundary".to_string(),
+            boundary.to_rfc3339(),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            active,
+            AutomationSchedulerControl {
+                epoch: 4,
+                recovery_boundary: boundary,
+                paused: false,
+            }
+        );
+        assert!(
+            parse_automation_scheduler_control_from(Vec::new())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            parse_automation_scheduler_control_from(vec![
+                "--automation-scheduler-epoch".to_string(),
+                "4".to_string(),
+            ])
+            .is_err()
+        );
+
+        let mut current = Some(active);
+        assert!(!apply_automation_scheduler_control(
+            &mut current,
+            AutomationSchedulerControl {
+                epoch: 3,
+                recovery_boundary: boundary,
+                paused: true,
+            }
+        ));
+        assert_eq!(current, Some(active));
+        let paused = AutomationSchedulerControl {
+            epoch: 5,
+            recovery_boundary: boundary,
+            paused: true,
+        };
+        assert!(apply_automation_scheduler_control(&mut current, paused));
+        assert_eq!(current, Some(paused));
+    }
+
+    #[tokio::test]
+    async fn automation_scheduler_pause_waits_for_the_inflight_tick_fence() {
+        let boundary = chrono::Utc::now();
+        let control = Arc::new(RwLock::new(Some(AutomationSchedulerControl {
+            epoch: 0,
+            recovery_boundary: boundary,
+            paused: false,
+        })));
+        let claim_fence = control.read().await;
+        let writer_control = control.clone();
+        let pause = tokio::spawn(async move {
+            let mut current = writer_control.write().await;
+            apply_automation_scheduler_control(
+                &mut current,
+                AutomationSchedulerControl {
+                    epoch: 1,
+                    recovery_boundary: boundary,
+                    paused: true,
+                },
+            )
+        });
+
+        tokio::task::yield_now().await;
+        assert!(!pause.is_finished());
+        drop(claim_fence);
+        assert!(pause.await.unwrap());
+        assert!(control.read().await.unwrap().paused);
     }
 
     #[test]

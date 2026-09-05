@@ -384,6 +384,213 @@ done
 
 describe('CoreClient Supervisor protocol', () => {
   it.runIf(process.platform !== 'win32')(
+    'caches the recovery boundary before readiness and orders suspend/resume controls',
+    async () => {
+      useSupportedPosixHost()
+      const root = mkdtempSync(join(tmpdir(), 'rovai-core-automation-resume-'))
+      temporaryRoots.push(root)
+      const launchPath = join(root, 'launch.txt')
+      const requestPath = join(root, 'requests.jsonl')
+      const fakeCore = join(root, 'fake-core.sh')
+      writeFileSync(fakeCore, `#!/bin/sh
+printf '%s\n' "$*" > '${launchPath}'
+printf '%s\n' '{"kind":"core_startup","schemaVersion":1,"status":"ready","authorityState":{"kind":"current"}}'
+IFS= read -r request || exit 1
+printf '%s\n' "$request" >> '${requestPath}'
+printf '%s\n' '{"id":1,"result":{}}'
+IFS= read -r request || exit 1
+printf '%s\n' "$request" >> '${requestPath}'
+printf '%s\n' '{"id":2,"result":{}}'
+IFS= read -r request || exit 1
+printf '%s\n' "$request" >> '${requestPath}'
+printf '%s\n' '{"id":3,"result":{}}'
+while IFS= read -r request; do :; done
+`)
+      chmodSync(fakeCore, 0o700)
+      process.env.ROVAI_CORE_BIN = fakeCore
+      process.env.ROVAI_CORE_TEST_USER_DATA = root
+
+      const client = new CoreClient(
+        root,
+        undefined,
+        '2026-09-05T08:00:00.000Z'
+      )
+      try {
+        await client.notifyAutomationSystemResumed('2026-09-05T09:00:00.000Z')
+        const ready = nextSnapshot(client, (snapshot) => snapshot.fullCoreState === 'ready')
+        client.start()
+        await ready
+        const launch = readFileSync(launchPath, 'utf8')
+        expect(launch).toContain('--automation-scheduler-epoch 1')
+        expect(launch).toContain('--automation-recovery-boundary 2026-09-05T09:00:00.000Z')
+
+        await client.tickAutomationScheduler('2026-09-05T09:30:00.000Z')
+        await client.notifyAutomationSystemSuspending()
+        await client.notifyAutomationSystemResumed('2026-09-05T10:00:00.000Z')
+        const requests = readFileSync(requestPath, 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line))
+        expect(requests).toMatchObject([{
+          method: 'automations.schedulerTick',
+          params: {
+            epoch: 1,
+            now: '2026-09-05T09:30:00.000Z'
+          }
+        }, {
+          method: 'automations.schedulerControl',
+          params: {
+            epoch: 2,
+            recoveryBoundary: '2026-09-05T09:00:00.000Z',
+            paused: true
+          }
+        }, {
+          method: 'automations.schedulerControl',
+          params: {
+            epoch: 3,
+            recoveryBoundary: '2026-09-05T10:00:00.000Z',
+            paused: false
+          }
+        }])
+      } finally {
+        client.stop()
+      }
+    }
+  )
+
+  it.runIf(process.platform !== 'win32')(
+    'reuses the Desktop-owned recovery boundary when Core restarts',
+    async () => {
+      useSupportedPosixHost()
+      const root = mkdtempSync(join(tmpdir(), 'rovai-core-automation-restart-'))
+      temporaryRoots.push(root)
+      const launchPath = join(root, 'launches.txt')
+      const fakeCore = join(root, 'fake-core.sh')
+      writeFileSync(fakeCore, `#!/bin/sh
+printf '%s\n' "$*" >> '${launchPath}'
+printf '%s\n' '{"kind":"core_startup","schemaVersion":1,"status":"ready","authorityState":{"kind":"current"}}'
+sleep 0.1
+exit 1
+`)
+      chmodSync(fakeCore, 0o700)
+      process.env.ROVAI_CORE_BIN = fakeCore
+      process.env.ROVAI_CORE_TEST_USER_DATA = root
+
+      const client = new CoreClient(root, undefined, '2026-09-05T08:00:00.000Z')
+      try {
+        const restarted = nextSnapshot(
+          client,
+          (snapshot) => snapshot.generation === 2 && snapshot.fullCoreState === 'ready',
+          5_000
+        )
+        client.start()
+        await restarted
+        const launches = readFileSync(launchPath, 'utf8').trim().split('\n')
+        expect(launches).toHaveLength(2)
+        expect(launches.every((launch) => (
+          launch.includes('--automation-scheduler-epoch 0')
+          && launch.includes('--automation-recovery-boundary 2026-09-05T08:00:00.000Z')
+        ))).toBe(true)
+      } finally {
+        client.stop()
+      }
+    }
+  )
+
+  it.runIf(process.platform !== 'win32')(
+    'restarts a bootstrapping Core with a resume boundary that arrived before readiness',
+    async () => {
+      useSupportedPosixHost()
+      const root = mkdtempSync(join(tmpdir(), 'rovai-core-automation-bootstrap-resume-'))
+      temporaryRoots.push(root)
+      process.env.ROVAI_CORE_BIN = process.execPath
+      process.env.ROVAI_CORE_TEST_USER_DATA = root
+      const children: Array<ReturnType<typeof fakeChild>> = []
+      function fakeChild() {
+        return Object.assign(new EventEmitter(), {
+          stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+          kill: vi.fn(() => true), killed: false
+        })
+      }
+      const spawn = vi.spyOn(childProcess, 'spawn').mockImplementation(() => {
+        const child = fakeChild()
+        children.push(child)
+        return child as unknown as childProcess.ChildProcess
+      })
+
+      const client = new CoreClient(root, undefined, '2026-09-05T08:00:00.000Z')
+      try {
+        const restarted = nextSnapshot(
+          client,
+          (snapshot) => snapshot.generation === 2 && snapshot.fullCoreState === 'ready',
+          5_000
+        )
+        client.start()
+        await client.notifyAutomationSystemResumed('2026-09-05T09:00:00.000Z')
+        expect(children[0].kill).toHaveBeenCalledWith('SIGTERM')
+        children[0].stdout.end()
+        children[0].stderr.end()
+        children[0].emit('close', null, 'SIGTERM')
+        expect(children).toHaveLength(2)
+        children[1].stdout.write(`${JSON.stringify({
+          kind: 'core_startup',
+          schemaVersion: 1,
+          status: 'ready',
+          authorityState: { kind: 'current' }
+        })}\n`)
+        await restarted
+        const launches = spawn.mock.calls.map(([, args]) => args as string[])
+        expect(launches[0]).toEqual(expect.arrayContaining([
+          '--automation-scheduler-epoch', '0',
+          '--automation-recovery-boundary', '2026-09-05T08:00:00.000Z'
+        ]))
+        expect(launches[1]).toEqual(expect.arrayContaining([
+          '--automation-scheduler-epoch', '1',
+          '--automation-recovery-boundary', '2026-09-05T09:00:00.000Z'
+        ]))
+      } finally {
+        client.stop()
+        for (const child of children) {
+          child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy()
+        }
+      }
+    },
+    10_000
+  )
+
+  it('adds the Automation scheduler snapshot only when supplied', () => {
+    expect(coreLaunchArguments(
+      '/daily/user-data',
+      '/daily/runtime-files',
+      null,
+      [],
+      null,
+      {
+        epoch: 7,
+        recoveryBoundary: '2026-09-05T10:00:00.000Z',
+        paused: true
+      }
+    )).toEqual([
+      '--data-dir', '/daily/user-data',
+      '--runtime-camp-files-root', '/daily/runtime-files',
+      '--use-default-skill-library',
+      '--automation-scheduler-epoch', '7',
+      '--automation-recovery-boundary', '2026-09-05T10:00:00.000Z',
+      '--automation-scheduler-paused'
+    ])
+    expect(coreLaunchArguments(
+      '/daily/user-data',
+      '/daily/runtime-files',
+      null,
+      []
+    )).toEqual([
+      '--data-dir', '/daily/user-data',
+      '--runtime-camp-files-root', '/daily/runtime-files',
+      '--use-default-skill-library'
+    ])
+  })
+
+  it.runIf(process.platform !== 'win32')(
     'publishes complete monotonic snapshots and enables authority only after ready',
     async () => {
       useSupportedPosixHost()

@@ -3,7 +3,11 @@ use std::{collections::BTreeSet, path::Path, str::FromStr};
 use anyhow::{Context, Result};
 use chrono::{
     DateTime, Datelike, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, NaiveTime,
-    SecondsFormat, TimeZone, Timelike, Utc,
+    SecondsFormat, TimeZone, Utc,
+};
+use croner::{
+    Cron,
+    parser::{CronParser, Seconds, Year},
 };
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -878,7 +882,7 @@ impl AutomationService {
         &self,
         database: &mut Database,
         now: DateTime<Utc>,
-        active_since: DateTime<Utc>,
+        recovery_boundary: DateTime<Utc>,
         quick_chat_path: &Path,
     ) -> Result<Vec<AutomationDispatch>> {
         let ids = {
@@ -915,7 +919,7 @@ impl AutomationService {
                 transaction.commit()?;
                 continue;
             }
-            let missed = stored_due < active_since;
+            let missed = stored_due < recovery_boundary;
             let consumed_at = if missed {
                 latest_occurrence_at_or_before(&record.schedule, now)?.unwrap_or(stored_due)
             } else {
@@ -1994,7 +1998,7 @@ fn validate_schedule(schedule: &AutomationSchedule) -> Result<()> {
             parse_time(at)?;
         }
         AutomationSchedule::Cron { expression } => {
-            CronExpression::parse(expression)?;
+            parse_cron_expression(expression)?;
         }
         AutomationSchedule::Manual => {}
     }
@@ -2023,7 +2027,11 @@ pub fn next_occurrence_after(
             })
         }
         AutomationSchedule::Cron { expression } => {
-            CronExpression::parse(expression)?.next_after(after)
+            let cron = parse_cron_expression(expression)?;
+            let next = cron
+                .find_next_occurrence(&after.with_timezone(&Local), false)
+                .context("Cron expression has no future occurrence")?;
+            Ok(Some(next.with_timezone(&Utc)))
         }
     }
 }
@@ -2039,7 +2047,11 @@ fn latest_occurrence_at_or_before(
             Ok(candidate.filter(|candidate| *candidate <= at))
         }
         AutomationSchedule::Cron { expression } => {
-            CronExpression::parse(expression)?.latest_at_or_before(at)
+            let cron = parse_cron_expression(expression)?;
+            let latest = cron
+                .find_previous_occurrence(&at.with_timezone(&Local), true)
+                .context("Cron expression has no previous occurrence")?;
+            Ok(Some(latest.with_timezone(&Utc)))
         }
         _ => {
             let mut cursor = at - Duration::days(8);
@@ -2091,118 +2103,32 @@ fn local_datetime(date: NaiveDate, time: NaiveTime) -> Result<Option<DateTime<Ut
     Ok(None)
 }
 
-#[derive(Debug)]
-struct CronExpression {
-    minutes: BTreeSet<u32>,
-    hours: BTreeSet<u32>,
-    month_days: BTreeSet<u32>,
-    months: BTreeSet<u32>,
-    weekdays: BTreeSet<u32>,
-    month_days_wildcard: bool,
-    weekdays_wildcard: bool,
-}
-
-impl CronExpression {
-    fn parse(expression: &str) -> Result<Self> {
-        let fields = expression.split_whitespace().collect::<Vec<_>>();
-        if fields.len() != 5 {
-            anyhow::bail!("Cron expression must contain exactly five fields");
-        }
-        Ok(Self {
-            minutes: parse_cron_field(fields[0], 0, 59, false)?,
-            hours: parse_cron_field(fields[1], 0, 23, false)?,
-            month_days: parse_cron_field(fields[2], 1, 31, false)?,
-            months: parse_cron_field(fields[3], 1, 12, false)?,
-            weekdays: parse_cron_field(fields[4], 0, 7, true)?,
-            month_days_wildcard: fields[2] == "*",
-            weekdays_wildcard: fields[4] == "*",
-        })
+fn parse_cron_expression(expression: &str) -> Result<Cron> {
+    let fields = expression.split_whitespace().collect::<Vec<_>>();
+    if fields.len() != 5 {
+        anyhow::bail!("Cron expression must contain exactly five fields");
     }
-
-    fn matches(&self, value: DateTime<Local>) -> bool {
-        let weekday = value.weekday().num_days_from_sunday();
-        let day_match = self.month_days.contains(&value.day());
-        let weekday_match = self.weekdays.contains(&weekday);
-        let calendar_match = if self.month_days_wildcard || self.weekdays_wildcard {
-            day_match && weekday_match
-        } else {
-            day_match || weekday_match
-        };
-        self.minutes.contains(&value.minute())
-            && self.hours.contains(&value.hour())
-            && self.months.contains(&value.month())
-            && calendar_match
-    }
-
-    fn next_after(&self, after: DateTime<Utc>) -> Result<Option<DateTime<Utc>>> {
-        let mut candidate = (after + Duration::minutes(1))
-            .with_second(0)
-            .and_then(|value| value.with_nanosecond(0))
-            .context("Cron timestamp overflow")?;
-        let end = after + Duration::days(366 * 5);
-        while candidate <= end {
-            if self.matches(candidate.with_timezone(&Local)) {
-                return Ok(Some(candidate));
-            }
-            candidate += Duration::minutes(1);
-        }
-        anyhow::bail!("Cron expression has no occurrence in the supported five-year horizon")
-    }
-
-    fn latest_at_or_before(&self, at: DateTime<Utc>) -> Result<Option<DateTime<Utc>>> {
-        let mut candidate = at
-            .with_second(0)
-            .and_then(|value| value.with_nanosecond(0))
-            .context("Cron timestamp overflow")?;
-        let start = at - Duration::days(366 * 5);
-        while candidate >= start {
-            if self.matches(candidate.with_timezone(&Local)) {
-                return Ok(Some(candidate));
-            }
-            candidate -= Duration::minutes(1);
-        }
-        anyhow::bail!("Cron expression has no occurrence in the supported five-year horizon")
-    }
-}
-
-fn parse_cron_field(value: &str, min: u32, max: u32, sunday_alias: bool) -> Result<BTreeSet<u32>> {
-    let mut values = BTreeSet::new();
-    for item in value.split(',') {
-        let (range, step) = match item.split_once('/') {
-            Some((range, step)) => (range, step.parse::<u32>()?),
-            None => (item, 1),
-        };
-        if step == 0 {
-            anyhow::bail!("Cron step must be positive");
-        }
-        let (start, end) = if range == "*" {
-            (min, max)
-        } else if let Some((start, end)) = range.split_once('-') {
-            (start.parse::<u32>()?, end.parse::<u32>()?)
-        } else {
-            let exact = range.parse::<u32>()?;
-            (exact, exact)
-        };
-        if start < min || end > max || start > end {
-            anyhow::bail!("Cron field is outside its supported range");
-        }
-        let mut current = start;
-        while current <= end {
-            values.insert(if sunday_alias && current == 7 {
-                0
+    let normalized = fields
+        .into_iter()
+        .map(|field| {
+            if field
+                .strip_prefix("*/")
+                .and_then(|step| step.parse::<u32>().ok())
+                == Some(1)
+            {
+                "*"
             } else {
-                current
-            });
-            let Some(next) = current.checked_add(step) else {
-                break;
-            };
-            current = next;
-        }
-    }
-    if values.is_empty() {
-        anyhow::bail!("Cron field must select at least one value");
-    }
-    Ok(values)
+                field
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    CronParser::builder()
+        .seconds(Seconds::Disallowed)
+        .year(Year::Disallowed)
+        .build()
+        .parse(&normalized)
+        .context("Cron expression is invalid")
 }
 
 fn parse_time(value: &str) -> Result<NaiveTime> {
@@ -2717,6 +2643,100 @@ mod tests {
     }
 
     #[test]
+    fn delayed_tick_during_the_same_active_session_claims_the_due_occurrence() {
+        let service = AutomationService::default();
+        let (mut database, directory, quick_chat_path) = test_database();
+        let local_due = Local::now() + Duration::days(1);
+        let create = service
+            .create(
+                &mut database,
+                &user_command(
+                    "automation-delayed-tick-create",
+                    CreateAutomationCommand {
+                        name: Some("Delayed tick".to_string()),
+                        prompt: "Run after an ordinary scheduler delay.".to_string(),
+                        member_id: "agent_1".to_string(),
+                        project_ref: AutomationProjectRef::QuickChat,
+                        schedule: AutomationSchedule::Once {
+                            date: local_due.format("%Y-%m-%d").to_string(),
+                            at: local_due.format("%H:%M").to_string(),
+                        },
+                        notify_channels: Vec::new(),
+                    },
+                ),
+            )
+            .expect("one-time Automation should be created");
+        let automation_id = create.result.payload["automationId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let due = parse_timestamp(create.result.payload["nextRunAt"].as_str().unwrap()).unwrap();
+
+        let dispatches = service
+            .claim_due(
+                &mut database,
+                due + Duration::seconds(10),
+                due - Duration::days(1),
+                &quick_chat_path,
+            )
+            .expect("an ordinary delayed tick should claim the occurrence");
+
+        assert_eq!(dispatches.len(), 1);
+        let run: (String, Option<String>, String) = database
+            .connection()
+            .query_row(
+                "SELECT status, reason, scheduled_for FROM automation_run WHERE automation_id = ?1",
+                [&automation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(run, ("running".into(), None, timestamp(due)));
+        service
+            .interrupt_before_runtime(&mut database, &dispatches[0].automation_run_id)
+            .expect("test run should settle");
+
+        remove_test_database(database, directory);
+    }
+
+    #[test]
+    fn cron_wildcard_step_one_has_the_same_weekly_occurrences_as_wildcard() {
+        let after = local_datetime(
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        let wildcard = AutomationSchedule::Cron {
+            expression: "0 9 * * 1".to_string(),
+        };
+        let wildcard_step = AutomationSchedule::Cron {
+            expression: "0 9 */1 * 1".to_string(),
+        };
+
+        let next = next_occurrence_after(&wildcard, after).unwrap().unwrap();
+        assert_eq!(
+            next_occurrence_after(&wildcard_step, after).unwrap(),
+            Some(next)
+        );
+        assert_eq!(next.with_timezone(&Local).weekday(), chrono::Weekday::Mon);
+        assert_eq!(
+            next.with_timezone(&Local).format("%H:%M").to_string(),
+            "09:00"
+        );
+
+        let latest_at = next + Duration::days(3);
+        assert_eq!(
+            latest_occurrence_at_or_before(&wildcard, latest_at).unwrap(),
+            Some(next)
+        );
+        assert_eq!(
+            latest_occurrence_at_or_before(&wildcard_step, latest_at).unwrap(),
+            Some(next)
+        );
+        assert!(parse_cron_expression("0 9 1 * * 2027").is_err());
+    }
+
+    #[test]
     fn terminal_public_result_and_notification_outcomes_settle_independently() {
         let service = AutomationService::default();
         let (mut database, directory, quick_chat_path) = test_database();
@@ -2824,7 +2844,7 @@ mod tests {
     }
 
     #[test]
-    fn missed_once_records_only_the_latest_occurrence_and_closes() {
+    fn pre_sleep_tick_cannot_claim_and_resume_records_only_the_missed_once() {
         let service = AutomationService::default();
         let (mut database, directory, quick_chat_path) = test_database();
         let local_due = Local::now() + Duration::days(1);
@@ -2852,6 +2872,25 @@ mod tests {
             .unwrap()
             .to_string();
         let due = parse_timestamp(create.result.payload["nextRunAt"].as_str().unwrap()).unwrap();
+
+        let stale_tick = service
+            .claim_due(
+                &mut database,
+                due - Duration::seconds(1),
+                due - Duration::days(1),
+                &quick_chat_path,
+            )
+            .expect("a pre-sleep tick should remain safe if processed after wake");
+        assert!(stale_tick.is_empty());
+        let run_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM automation_run WHERE automation_id = ?1",
+                [&automation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(run_count, 0);
 
         let dispatches = service
             .claim_due(

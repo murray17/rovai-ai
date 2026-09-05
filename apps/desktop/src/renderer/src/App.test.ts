@@ -56,6 +56,7 @@ import {
   effectiveCancellingTurnIds,
   notificationFocusMatchesAction,
   optimisticCampMessage,
+  prepareActiveAutomationForAppQuit,
   prepareActiveCampForAppQuit,
   rectanglesIntersect,
   recentCampSnapshot,
@@ -65,6 +66,7 @@ import {
   rememberCampSnapshot,
   requestAuthoritativeCampOpenProjection,
   runtimeRecoveryFromCommandResult,
+  runAutomationLeaveTransition,
   runPreparedCampLeaveTransition,
   selectProjectDirectory,
   SettingsView,
@@ -1979,6 +1981,46 @@ describe('task event projections', () => {
       guard
     })).rejects.toBe(failure)
     expect(guard).toHaveBeenCalledOnce()
+  })
+
+  it('waits for Automation save before leaving and stays when saving fails', async () => {
+    const events: string[] = []
+    const saved = await runAutomationLeaveTransition(
+      'automations',
+      async () => {
+        events.push('save:start')
+        await Promise.resolve()
+        events.push('save:end')
+        return true
+      },
+      () => { events.push('transition') }
+    )
+
+    expect(saved).toBe(true)
+    expect(events).toEqual(['save:start', 'save:end', 'transition'])
+
+    const transition = vi.fn()
+    const stayed = await runAutomationLeaveTransition(
+      'automations',
+      async () => false,
+      transition
+    )
+    expect(stayed).toBe(false)
+    expect(transition).not.toHaveBeenCalled()
+  })
+
+  it('guards Automation changes during App quit', async () => {
+    const guard = vi.fn(async () => true)
+    await prepareActiveAutomationForAppQuit('automations', guard)
+    expect(guard).toHaveBeenCalledOnce()
+
+    await prepareActiveAutomationForAppQuit('memory', guard)
+    expect(guard).toHaveBeenCalledOnce()
+
+    await expect(prepareActiveAutomationForAppQuit(
+      'automations',
+      async () => false
+    )).rejects.toThrow('定时任务修改尚未保存')
   })
 
   it('keeps attachment-only message bytes empty while supplying a non-empty execution purpose', () => {

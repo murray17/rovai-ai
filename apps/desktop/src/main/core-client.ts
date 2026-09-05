@@ -16,6 +16,17 @@ import type {
   StartupPhase
 } from '@contracts'
 
+type CoreInternalMethod =
+  | 'core.shutdown'
+  | 'automations.schedulerControl'
+  | 'automations.schedulerTick'
+
+export type AutomationSchedulerControl = {
+  epoch: number
+  recoveryBoundary: string
+  paused: boolean
+}
+
 type ChildToken = { readonly id: string }
 
 type PendingRequest = {
@@ -25,7 +36,7 @@ type PendingRequest = {
   resolve(value: unknown): void
   reject(error: RovaiRequestError): void
   timer: NodeJS.Timeout
-  method: CoreMethod | 'core.shutdown'
+  method: CoreMethod | CoreInternalMethod
   startedAt: number
   traceId: string | null
 }
@@ -62,6 +73,7 @@ type ActiveChild = {
   ready: boolean
   deterministicRefusal: boolean
   startupRetryDelayMs: number | null
+  restartForAutomationControl: boolean
 }
 
 const STARTUP_RETRY_DELAYS_MS = [250, 750, 1500] as const
@@ -137,7 +149,8 @@ export function coreLaunchArguments(
   runtimeCampFilesRoot: string,
   skillLibraryRoot: string | null,
   removedSkillProjectRoots: readonly string[],
-  mcpConfigPath: string | null = null
+  mcpConfigPath: string | null = null,
+  automationSchedulerControl: AutomationSchedulerControl | null = null
 ): string[] {
   const args = [
     '--data-dir', dataDirectory,
@@ -146,6 +159,13 @@ export function coreLaunchArguments(
   if (skillLibraryRoot) args.push('--skill-library-root', skillLibraryRoot)
   else args.push('--use-default-skill-library')
   if (mcpConfigPath) args.push('--mcp-config-path', mcpConfigPath)
+  if (automationSchedulerControl) {
+    args.push(
+      '--automation-scheduler-epoch', String(automationSchedulerControl.epoch),
+      '--automation-recovery-boundary', automationSchedulerControl.recoveryBoundary
+    )
+    if (automationSchedulerControl.paused) args.push('--automation-scheduler-paused')
+  }
   for (const executionRoot of removedSkillProjectRoots) {
     args.push('--removed-skill-project-root', executionRoot)
   }
@@ -301,19 +321,27 @@ export class CoreClient {
   #removedSkillProjectRoots: string[] = []
   #skillLibraryRoot: string | null = null
   #mcpConfigPath: string | null = null
+  #automationSchedulerControl: AutomationSchedulerControl
+  #automationTickPending = false
   readonly #dataDirectory: string | null
   readonly #runtimeCampFilesRoot: string | null
   #startupBlock: { error: StructuredError; phase: StartupPhase } | null = null
 
   constructor(
     dataDirectory: string | null = app.getPath('userData'),
-    runtimeFilesRoot?: string
+    runtimeFilesRoot?: string,
+    automationStartedAt = new Date().toISOString()
   ) {
     this.#dataDirectory = dataDirectory
     this.#runtimeCampFilesRoot = dataDirectory === null ? null : runtimeFilesRoot ?? runtimeCampFilesRoot(
       dataDirectory,
       coreProcessHomeDirectory(app.getPath('home'))
     )
+    this.#automationSchedulerControl = {
+      epoch: 0,
+      recoveryBoundary: automationStartedAt,
+      paused: false
+    }
   }
 
   blockStartup(error: StructuredError, phase: StartupPhase): void {
@@ -415,7 +443,8 @@ export class CoreClient {
       this.#runtimeCampFilesRoot,
       this.#skillLibraryRoot,
       this.#removedSkillProjectRoots,
-      this.#mcpConfigPath
+      this.#mcpConfigPath,
+      this.#automationSchedulerControl
     )
     // Once this Desktop has observed authority, retries/crash restarts cannot
     // reinterpret its disappearance as a first install.
@@ -431,7 +460,8 @@ export class CoreClient {
       token,
       ready: false,
       deterministicRefusal: false,
-      startupRetryDelayMs: null
+      startupRetryDelayMs: null,
+      restartForAutomationControl: false
     }
     this.#child = active
     this.#updateSnapshot({
@@ -504,6 +534,46 @@ export class CoreClient {
     return this.#sendRequest<T>(active, method, params, 60_000)
   }
 
+  async notifyAutomationSystemSuspending(): Promise<void> {
+    this.#automationSchedulerControl = {
+      ...this.#automationSchedulerControl,
+      epoch: this.#automationSchedulerControl.epoch + 1,
+      paused: true
+    }
+    await this.#publishAutomationSchedulerControl()
+  }
+
+  async notifyAutomationSystemResumed(resumedAt: string): Promise<void> {
+    this.#automationSchedulerControl = {
+      epoch: this.#automationSchedulerControl.epoch + 1,
+      recoveryBoundary: resumedAt,
+      paused: false
+    }
+    await this.#publishAutomationSchedulerControl()
+  }
+
+  async tickAutomationScheduler(now: string): Promise<void> {
+    if (
+      this.#stopping
+      || this.#automationSchedulerControl.paused
+      || this.#automationTickPending
+    ) return
+    const active = this.#child
+    if (!active?.ready || this.#snapshot.fullCoreState !== 'ready') return
+    const epoch = this.#automationSchedulerControl.epoch
+    this.#automationTickPending = true
+    try {
+      await this.#sendRequest(
+        active,
+        'automations.schedulerTick',
+        { epoch, now },
+        5_000
+      )
+    } finally {
+      this.#automationTickPending = false
+    }
+  }
+
   shutdown(): Promise<CoreShutdownResult> {
     if (this.#shutdownPromise) return this.#shutdownPromise
     this.#shutdownPromise = this.#performShutdown()
@@ -570,7 +640,7 @@ export class CoreClient {
 
   #sendRequest<T>(
     active: ActiveChild,
-    method: CoreMethod | 'core.shutdown',
+    method: CoreMethod | CoreInternalMethod,
     params: unknown,
     timeoutMs: number
   ): Promise<T> {
@@ -625,6 +695,31 @@ export class CoreClient {
         )))
       })
     })
+  }
+
+  async #publishAutomationSchedulerControl(): Promise<void> {
+    if (this.#stopping) return
+    const active = this.#child
+    if (!active) return
+    if (!active.ready || this.#snapshot.fullCoreState !== 'ready') {
+      if (
+        !active.deterministicRefusal
+        && !active.restartForAutomationControl
+        && !active.process.killed
+      ) {
+        // The generation was launched with an older Desktop-owned control snapshot.
+        // Replace it before that generation can expose an Automation scheduler.
+        active.restartForAutomationControl = true
+        active.process.kill('SIGTERM')
+      }
+      return
+    }
+    await this.#sendRequest(
+      active,
+      'automations.schedulerControl',
+      this.#automationSchedulerControl,
+      5_000
+    )
   }
 
   onEvent(listener: (event: CoreEvent) => void): () => void {
@@ -707,6 +802,7 @@ export class CoreClient {
       )
       return
     }
+    if (frame.status === 'ready' && active.restartForAutomationControl) return
     if (frame.status === 'ready' || frame.phase === 'opening_authority' || frame.phase === 'migrating_authority'
       || frame.authorityState?.kind === 'admitted' || frame.authorityState?.kind === 'migration_required'
       || frame.authorityState?.kind === 'migration_failed' || coreStartupRetryDelay(frame, 0) !== null) {
@@ -830,6 +926,10 @@ export class CoreClient {
       this.#stableTimer = null
     }
     if (this.#stopping) return
+    if (active.restartForAutomationControl) {
+      this.start()
+      return
+    }
     if (active.deterministicRefusal) {
       if (this.#queuedRetryGeneration === generation) {
         this.#queuedRetryGeneration = null
