@@ -62,7 +62,7 @@ export function FileChangesPreview({ tab }: { tab: FileChangesPreviewTabModel })
       executionEpoch: changes.executionEpoch,
       evidenceFileId: file.evidenceFileId,
       action: 'open_current'
-    })
+    }, undefined, { fileName: file.path })
     setOpenCurrentStatus('idle')
     if (outcome.kind === 'preview') {
       return

@@ -9,9 +9,9 @@ export function previewTabPresentation(tab: PreviewTabModel): {
   icon: ResourceVisualKind
 } {
   if (tab.kind === 'file') return {
-    fileName: tab.file.fileName,
-    displayPath: tab.file.displayPath,
-    icon: getResourceVisualKind(tab.file.fileName)
+    fileName: tab.presentation.fileName,
+    displayPath: tab.presentation.displayPath,
+    icon: getResourceVisualKind(tab.presentation.fileName)
   }
   const file = tab.changes.files.find((entry) => entry.evidenceFileId === tab.selectedEvidenceFileId)
     ?? tab.changes.files[0]

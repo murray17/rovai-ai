@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-09-04
+last_updated: 2026-09-06
 ---
 
 # File Preview Architecture
@@ -35,9 +35,9 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v6](../contracts/file-preview-v6.md) 的场景化方法；iframe 不获得 Preload；
-- **Renderer** 拥有当前 Camp 的 Tab、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web 入口；
-  inline-code 和正文不进入文件识别，也不读取磁盘。
+- **Preload** 只暴露 [File Preview v7](../contracts/file-preview-v7.md) 的场景化方法；iframe 不获得 Preload；
+- **Renderer** 拥有按 Camp 隔离的窗口内 Tab shell、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web
+  入口；inline-code 和正文不进入文件识别，也不读取磁盘。Tab shell 不拥有文件能力或当前文件事实。
 
 预览仅提供阅读能力。文字选择与系统复制是本地阅读行为，不连接 Composer 写入、消息持久化或 Agent input；
 引用能力不在当前组件图内。
@@ -88,6 +88,27 @@ capabilityRoot + capabilities + contentVersion + contentGeneration`。TTL 为 30
 `reopenToken` 在 Main 绑定各自原始来源链；刷新或句柄过期时重新验证来源、realpath 和文件身份并最多自动重试一次。子文件成功打开后获得
 独立 token，父 Tab 关闭不撤销子 Tab。
 
+## Camp 文件会话与恢复
+
+Renderer 维护最多 24 个 Camp 的窗口内 LRU session。它只保存 Tab 的稳定 Renderer ID、可重验业务 source、安全呈现、
+顺序、active ID 与 Pane 可见性；File Change 保存既有不可变 summary 和 selected evidence ID。Main handle、reopen token、
+Root Grant、challenge、HTML/asset token、Blob URL、正文、分页、尺寸、watcher 与旧 `previewKey` 都不进入快照。
+`child_of_handle` 和 `authorized_root` 只依赖旧 Camp 的短期能力，因此只恢复安全 shell 并标记 unavailable。
+
+Camp route commit 先递增 Renderer scope generation、保存旧快照和撤销 Blob URL，再立即请求 Main `bindCamp`，随后恢复
+本地 shell。只有 bind 成功、Pane 仍可见且 active Tab 仍属于该 scope 时，Renderer 才经独立 `restore` wire 重验一个
+active 文件；其他普通文件保持 cold，首次激活才加载。Pane 隐藏只改变可见性；Tab 关闭才移出 session。Camp 永久删除
+清除对应快照，离开 effect 不能把它再次写回。
+
+Main 的窗口绑定是 `{campId, bindingGeneration}`，不是裸 Camp ID。每次实际绑定变化创建新 generation；来源解析后、
+原生效果前、异步确认后和 handle 注册前都复核同一个绑定对象。旧 generation 释放时只删除自己的 handle、Grant、
+challenge、HTML token 与 watcher subscription，因而 A→B→A 的旧 A 完成或旧 A 清理都不能命中新 A。
+
+`restore` 只接受 message、workspace、owner-scoped Attachment 与 Run Evidence 业务来源。它可以在完整重验后签发新的
+Preview handle，但不 reveal 目录、不打开系统格式、不显示确认或目录选择器，也不产生 authorization challenge；这些
+效果仍只属于明确用户激活的 `open`。Renderer 另以每 Tab request generation 拒绝同一 scope 内的晚到结果，并负责释放
+未采用的 handle 或 Blob URL。
+
 ## 读取与 generation
 
 整文件 Markdown/HTML/代码渲染上限为 4 MiB；更大文本使用 generation-bound 分页。每个响应携带当前
@@ -131,7 +152,9 @@ HTML 通过无 `allow-same-origin` 的 sandbox iframe 执行；CSP 在用户文�
 
 - Tab 关闭：handle、reopen token、asset/HTML token 与 watcher subscription；
 - Pane 隐藏：保留 Tab 与阅读状态，句柄仍受 TTL；
-- Camp route commit：释放旧 Camp 全部窗口能力、Grant、challenge 和订阅，再清空 Renderer state；
+- Camp route commit：按 binding generation 释放旧 Camp 全部窗口能力、Grant、challenge 和订阅；Renderer 释放旧内容，
+  但把无能力 Tab shell 保存到对应 Camp 的有界窗口 session；
+- Camp 永久删除：清除该 Camp 的窗口 session，并阻止当前 route 离开 effect 把删除前 shell 写回；
 - webContents 销毁/应用退出：幂等释放对应或全部资源。
 
 不支持格式在来源与本地文件校验后直接交给系统默认应用，并在返回前释放一次性解析材料；它不进入上述长期资源图。

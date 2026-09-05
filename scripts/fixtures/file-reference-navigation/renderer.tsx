@@ -42,6 +42,7 @@ const api: FilePreviewApi = {
         : {})
     } } }
   },
+  restore: unsupported,
   readText: async () => ({ ok: true, value: {
     text: Array.from({ length: 300 }, (_, index) => `value_${index + 1} = "line ${index + 1}"`).join('\n'),
     contentGeneration: file.contentGeneration, contentVersion: file.contentVersion

@@ -131,7 +131,7 @@ export function AttachmentCard({
             kind: 'attachment',
             campId: locator.campId,
             locator
-          })
+          }, undefined, { fileName: attachment.displayName })
           if (outcome.kind === 'error') {
             if (outcome.error.code === 'attachment_missing') setAvailability('missing')
             else if (outcome.error.code === 'attachment_unreadable') setAvailability('unreadable')

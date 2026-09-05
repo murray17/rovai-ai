@@ -447,6 +447,9 @@ const api: RovaiApi = {
     open(request) {
       return ipcRenderer.invoke('rovai:file-preview-open', request)
     },
+    restore(request) {
+      return ipcRenderer.invoke('rovai:file-preview-restore', request)
+    },
     reopen(request) {
       return ipcRenderer.invoke('rovai:file-preview-reopen', request)
     },

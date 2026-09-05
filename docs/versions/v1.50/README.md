@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.50
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -11,7 +11,7 @@ last_updated: 2026-09-06
 
 # Rovai-ai v1.50：Camp 内私有 Single Chat
 
-前置：[v1.49](../v1.49/README.md)。本版本在现有 Conversation、CampTurn、AgentRun、Context、Runtime Fleet 与
+前置：[v1.49](../v1.49/README.md)。下一版本：[v1.51](../v1.51/README.md)。本版本在现有 Conversation、CampTurn、AgentRun、Context、Runtime Fleet 与
 Source Attachment 基础设施上增加本地用户与单个 Camp Member 的私有会话；不建立第二套执行系统，也不把私聊正文
 或最终回答投影到 Camp 公屏。
 

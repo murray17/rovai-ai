@@ -213,6 +213,18 @@ fn classify_high_value_runtime_error(
     }
     if contains_any(
         lower,
+        &["at capacity", "server overloaded", "serveroverloaded"],
+    ) {
+        return (
+            RuntimeFailureOrigin::Runtime,
+            default_phase,
+            "runtime_server_overloaded".to_string(),
+            "Runtime 服务暂时繁忙".to_string(),
+            true,
+        );
+    }
+    if contains_any(
+        lower,
         &[
             "quota exceeded",
             "quota exhausted",
@@ -619,6 +631,23 @@ mod tests {
         assert_eq!(failure.code, "runtime_rate_limited");
         assert_eq!(failure.origin, RuntimeFailureOrigin::Runtime);
         assert!(failure.retryable);
+
+        let capacity = public_runtime_failure_from_output(
+            AdapterKind::CodexCli,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            "runtime_turn_failed",
+            "Codex CLI 未能完成运行",
+            Some("Selected model is at capacity. Please try a different model."),
+            &[],
+            false,
+        );
+        assert_eq!(capacity.code, "runtime_server_overloaded");
+        assert_eq!(
+            capacity.detail.as_deref(),
+            Some("Selected model is at capacity. Please try a different model.")
+        );
+        assert!(capacity.retryable);
 
         let compatibility = public_runtime_failure_from_output(
             AdapterKind::ClaudeCodeCli,

@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react'
+import { StrictMode, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, StructuredCampMessageContent, TaskView } from '@contracts'
+import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, ComposerDocument, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, TaskView } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import { FilePreviewProvider, useFilePreview, type FilePreviewContextValue } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
@@ -22,29 +22,46 @@ const file: ResolvedFilePreview = {
 const tabFiles = ['src/app.ts', 'src/layout.tsx', 'src/theme.ts', 'src/routes.ts', 'src/search.ts',
   'src/settings.tsx', 'src/navigation.ts', 'src/very-long-file-preview-reading-anchor.tsx']
 const fileNameOnlyReference = 'external-preview.ts'
+const missingReference = 'src/missing-report.ts'
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected fixture API operation') }
 const fileOpens: OpenFilePreviewRequest[] = []
+const fileRestores: OpenFilePreviewRequest[] = []
+const campBindings: Array<string | null> = []
 const releases: string[] = []
 const reviewRequests: Array<{ campId: string; agentRunId: string; executionEpoch: number }> = []
 let failNextReview = false
 let fileReads = 0
+async function resolvePreview(request: OpenFilePreviewRequest) {
+  if (request.kind === 'message_reference' && request.rawReference === missingReference) {
+    return { ok: false as const, error: {
+      code: 'file_not_found' as const,
+      message: 'Fixture detail must not reach the recovery surface.',
+      retryable: false
+    } }
+  }
+  let target = file
+  if (request.kind === 'run_evidence' && request.action === 'open_current') {
+    const selected = changes.files.find((entry) => entry.evidenceFileId === request.evidenceFileId)
+    if (!selected) return unsupported()
+    target = { ...file, previewKey: `current:${selected.path}`, displayPath: selected.path, fileName: selected.path.split('/').at(-1)! }
+  } else if (request.kind === 'message_reference' && tabFiles.includes(request.rawReference)) {
+    target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
+      fileName: request.rawReference.split('/').at(-1)! }
+  } else if (request.kind === 'message_reference' && request.rawReference === fileNameOnlyReference) {
+    target = { ...file, previewKey: fileNameOnlyReference, displayPath: fileNameOnlyReference,
+      pathPresentation: 'file_name_only', fileName: fileNameOnlyReference }
+  } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
+  return { ok: true as const, value: { kind: 'file_preview' as const, file: { ...target, handleId: crypto.randomUUID() } } }
+}
 const api: FilePreviewApi = {
-  bindCamp: async () => {},
+  bindCamp: async (campId) => { campBindings.push(campId) },
   open: async (request) => {
     fileOpens.push(request)
-    let target = file
-    if (request.kind === 'run_evidence' && request.action === 'open_current') {
-      const selected = changes.files.find((entry) => entry.evidenceFileId === request.evidenceFileId)
-      if (!selected) return unsupported()
-      target = { ...file, previewKey: `current:${selected.path}`, displayPath: selected.path, fileName: selected.path.split('/').at(-1)! }
-    } else if (request.kind === 'message_reference' && tabFiles.includes(request.rawReference)) {
-      target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
-        fileName: request.rawReference.split('/').at(-1)! }
-    } else if (request.kind === 'message_reference' && request.rawReference === fileNameOnlyReference) {
-      target = { ...file, previewKey: fileNameOnlyReference, displayPath: fileNameOnlyReference,
-        pathPresentation: 'file_name_only', fileName: fileNameOnlyReference }
-    } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
-    return { ok: true, value: { kind: 'file_preview', file: { ...target, handleId: crypto.randomUUID() } } }
+    return resolvePreview(request)
+  },
+  restore: async (request) => {
+    fileRestores.push(request)
+    return resolvePreview(request)
   },
   readText: async () => { fileReads += 1; return { ok: true, value: {
     text: Array.from({ length: 300 }, (_, index) => `const readingLine${index + 1} = "保持会话和文件的阅读位置"`).join('\n'),
@@ -111,7 +128,10 @@ let previewController: FilePreviewContextValue
 function Workspace(): React.JSX.Element {
   const preview = useFilePreview()
   previewController = preview
-  const [draft, setDraft] = useState<StructuredCampMessageContent>([{ kind: 'text', text: '保留这条未发送草稿' }])
+  const [draft] = useState<ComposerDocument>({
+    version: 2,
+    segments: [{ kind: 'text', text: '保留这条未发送草稿' }]
+  })
   const [findOpen, setFindOpen] = useState(false)
   const [docks, setDocks] = useState<'none' | 'approval' | 'recovery' | 'both'>('none')
   const approvalRef = useRef<HTMLElement>(null)
@@ -145,6 +165,10 @@ function Workspace(): React.JSX.Element {
                 onActivate={(rawReference) => void preview.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })}>
                 preview-layout.ts
               </FileReferenceLink>
+              <FileReferenceLink className="message-file-reference missing-file-reference" rawReference={missingReference}
+                onActivate={(rawReference) => void preview.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })}>
+                missing-report.ts
+              </FileReferenceLink>
               <TaskTimelineCard task={task} assigneeName="未分配" onOpen={() => {}} />
               <AgentRunFileChangesTimelineCard changes={changes} onOpenReview={(evidenceFileId) => preview.openFileChanges('camp-1', changes, evidenceFileId)} />
               <div className="safe-markdown">
@@ -168,8 +192,14 @@ function Workspace(): React.JSX.Element {
         <form className="composer" onSubmit={(event) => event.preventDefault()}>
           <div className="composer-route-rail"><span className="mention-target-summary">新消息交给当前队长</span></div>
           <div className="composer-box">
-            <div className="composer-input"><StructuredMentionComposer id="fixture-message" value={draft} onChange={setDraft}
-              members={[]} ariaLabel="消息草稿" onSubmit={() => {}} /></div>
+            <div className="composer-input"><StructuredMentionComposer
+              id="fixture-message"
+              draftIdentity="fixture-camp-1"
+              document={draft}
+              members={[]}
+              ariaLabel="消息草稿"
+              onSubmit={() => {}}
+            /></div>
             <div className="composer-action-row">
               <div className="composer-tools"><button type="button" className="composer-attachment-button" aria-label="添加文件">＋</button></div>
               <div className="composer-actions">
@@ -198,7 +228,7 @@ function Fixture(): React.JSX.Element {
     </div>
   </FilePreviewProvider>
 }
-createRoot(document.getElementById('root')!).render(<Fixture />)
+createRoot(document.getElementById('root')!).render(<StrictMode><Fixture /></StrictMode>)
 
 const element = (selector: string): HTMLElement | null => document.querySelector(selector)
 const visible = (selector: string): boolean => Boolean(element(selector)?.getClientRects().length)
@@ -244,8 +274,16 @@ Object.assign(window, { previewTest: {
     })
     await settle()
   },
+  async openMissing() {
+    await previewController.open({
+      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: missingReference
+    })
+    await settle()
+  },
   async closeExtraTabs() {
-    previewController.closeMany(previewController.tabs.filter((tab) => tab.kind !== 'file' || tab.file.previewKey !== file.previewKey).map((tab) => tab.id))
+    previewController.closeMany(previewController.tabs
+      .filter((tab) => tab.kind !== 'file' || tab.file?.previewKey !== file.previewKey)
+      .map((tab) => tab.id))
     await settle()
   },
   tabSnapshot() {
@@ -283,6 +321,33 @@ Object.assign(window, { previewTest: {
       updateVisible: Boolean(update?.getClientRects().length),
       panelTop: panel.getBoundingClientRect().top,
       contentTop: content.getBoundingClientRect().top
+    }
+  },
+  recoverySnapshot() {
+    const panel = element('.file-preview-tab-panel:not([hidden])')
+    const content = panel?.querySelector<HTMLElement>('.file-preview-content')
+    const recovery = content?.querySelector<HTMLElement>('.file-preview-recovery')
+    const icon = recovery?.querySelector<SVGElement>('.file-preview-recovery-icon')
+    const contentBounds = content?.getBoundingClientRect()
+    const recoveryBounds = recovery?.getBoundingClientRect()
+    const style = recovery ? getComputedStyle(recovery) : null
+    return {
+      text: recovery?.querySelector('p')?.textContent,
+      paragraphs: recovery?.querySelectorAll('p').length ?? 0,
+      buttons: content?.querySelectorAll('button').length ?? 0,
+      childCount: recovery?.children.length ?? 0,
+      pathVisible: Boolean(panel?.querySelector('.file-preview-path-row')),
+      resourceType: icon?.dataset.resourceType,
+      iconWidth: icon?.getBoundingClientRect().width ?? 0,
+      iconHeight: icon?.getBoundingClientRect().height ?? 0,
+      centeredX: contentBounds && recoveryBounds
+        ? Math.abs((contentBounds.left + contentBounds.right - recoveryBounds.left - recoveryBounds.right) / 2)
+        : null,
+      centeredY: contentBounds && recoveryBounds
+        ? Math.abs((contentBounds.top + contentBounds.bottom - recoveryBounds.top - recoveryBounds.bottom) / 2)
+        : null,
+      borderWidths: style ? [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth] : [],
+      background: style?.backgroundColor
     }
   },
   async openReview(index = 0) {
@@ -388,7 +453,8 @@ Object.assign(window, { previewTest: {
       dragSpace: strip ? toggle.parentElement!.getBoundingClientRect().left - strip.getBoundingClientRect().right : null,
       toggleExpanded: toggle.getAttribute('aria-expanded'), toggleVisible: visible('.file-preview-toggle'),
       separatorVisible: visible('.file-preview-toggle-divider'),
-      reviewRequests: [...reviewRequests], fileOpens: [...fileOpens], fileReads, releases: [...releases]
+      reviewRequests: [...reviewRequests], fileOpens: [...fileOpens], fileRestores: [...fileRestores],
+      campBindings: [...campBindings], fileReads, releases: [...releases]
     }
   },
   conversationSnapshot() {

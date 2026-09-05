@@ -40,7 +40,8 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     openInSystem,
     revealInFolder,
     copyDisplayPath,
-    reload
+    reload,
+    reopen
   } = useFilePreview()
   const listRef = useRef<HTMLDivElement>(null)
   const leftButtonRef = useRef<HTMLButtonElement>(null)
@@ -239,6 +240,12 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
             const label = tabLabels.get(tab.id) ?? previewTabLabel(tab)
             const { displayPath, fileName, icon } = previewTabPresentation(tab)
             const hasExternalUpdate = tab.kind === 'file' && tab.hasExternalUpdate
+            const statusLabel = tab.kind !== 'file' ? ''
+              : tab.loadState === 'missing' ? '，找不到文件'
+                : tab.loadState === 'unavailable' ? '，访问已失效'
+                  : tab.loadState === 'error' ? '，读取失败'
+                    : tab.loadState === 'opening' ? '，正在打开'
+                      : ''
             const feedback = openFeedback?.tabId === tab.id ? openFeedback : null
             return (
               <div
@@ -268,19 +275,19 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   className="file-preview-tab-activate"
                   type="button"
                   role="tab"
-                  aria-label={`${label}${hasExternalUpdate ? '，有更新' : ''}`}
+                  aria-label={`${label}${statusLabel}${hasExternalUpdate ? '，有更新' : ''}`}
                   aria-selected={active}
                   aria-controls={panelDomId(tab.id)}
                   tabIndex={active ? 0 : -1}
                   title={tab.kind === 'file_change'
                     ? `${displayPath}\nFile Change · ${tab.changes.completedAt}`
-                    : displayPath === fileName && label !== fileName ? label : displayPath}
+                    : `${displayPath === fileName && label !== fileName ? label : displayPath}${statusLabel}`}
                   onClick={() => activate(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                 >
                   <FilePreviewTabIcon
                     kind={icon}
-                    fileType={tab.kind === 'file' ? tab.file.kind : 'file_change'}
+                    fileType={tab.kind === 'file' ? tab.file?.kind : 'file_change'}
                   />
                   <span className="file-preview-tab-label">{label}</span>
                   {hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
@@ -334,22 +341,28 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
             aria-label={`${tabLabels.get(tab.id) ?? previewTabLabel(tab)} 操作`}
             style={{ left: menu.left, top: menu.top }}
           >
-            {tab.kind === 'file' && <><button role="menuitem" type="button" onClick={() => void runSystemAction(
+            {tab.kind === 'file' && <><button role="menuitem" type="button" disabled={!tab.file} onClick={() => void runSystemAction(
               () => openInSystem(tab.id),
               '已交给系统默认应用打开'
             )}>使用默认应用打开</button>
-            <button role="menuitem" type="button" onClick={() => void runSystemAction(
+            <button role="menuitem" type="button" disabled={!tab.file} onClick={() => void runSystemAction(
               () => revealInFolder(tab.id),
               '已在文件夹中定位'
             )}>{revealLabel}</button>
-            <button role="menuitem" type="button" onClick={() => void runSystemAction(
+            <button role="menuitem" type="button" disabled={!tab.file} onClick={() => void runSystemAction(
               () => copyDisplayPath(tab.id),
               '已复制相对路径'
             )}>复制相对路径</button>
-            <button role="menuitem" type="button" onClick={() => {
-              setMenu(null)
-              void reload(tab.id)
-            }}>重新加载</button>
+            <button
+              role="menuitem"
+              type="button"
+              disabled={!tab.file && !tab.sourceRequest}
+              onClick={() => {
+                setMenu(null)
+                if (tab.file && tab.loadState === 'ready') void reload(tab.id)
+                else void reopen(tab.id)
+              }}
+            >{tab.file && tab.loadState === 'ready' ? '重新加载' : '重新打开'}</button>
             <div role="separator" /></>}
             <button role="menuitem" type="button" onClick={() => {
               setMenu(null)
