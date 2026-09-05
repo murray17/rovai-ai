@@ -9,7 +9,7 @@ last_updated: 2026-09-05
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)、
+[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
@@ -74,6 +74,7 @@ Core BuiltinToolRouter
     ├── Public Camp Message / Message Delivery service
     ├── Collaboration / Task service
     ├── Camp History service
+    ├── Single Chat history service
     ├── Memory Retrieval / Mutation service
     └── Member Profile service + narrow managed-avatar importer
 ```
@@ -121,7 +122,8 @@ Core 只维护一份 catalog。它服务 IPC 校验、合同测试、Qualificati
 identity 不构成 Agent discovery 协议。
 
 Agent Runtime 没有 `rovai tool list`、`rovai tool describe`、隐藏 discovery、`tool invoke` 或
-`tool call`。Agent 只使用十五个固定业务命令：
+`tool call`。Catalog 共有十六个固定业务命令；普通 Camp Run 使用原有十五项，最后一项只在当前有效
+Single Chat Run 中开放：
 
 ```text
 rovai send
@@ -131,7 +133,12 @@ rovai task create|get|update|list
 rovai camp list|search|read
 rovai history search
 rovai memory view|search|read|write
+rovai single-chat history    Single Chat only
 ```
+
+`rovai single-chat history` 不接受 Conversation、Camp 或 Agent ID。Core 从已认证 Run 的冻结 destination
+推导当前 active Single Chat，并把 exclusive `beforeSequence` 上界限制在 `CURRENT_INPUT` sequence；它只返回
+此前的 user/assistant 正文和分页 cursor，不返回执行身份或 Evidence，也不改变 Conversation 或公共水位。
 
 `rovai gather` 只在当前 Default Lead 需要向多个成员派发同一共享主题、并在所有责任终态后统一继续时
 使用。它由持久 Gather Barrier 产生一条普通 FIFO Completion Delivery；成员仍用正常公开 send 返回，
@@ -176,7 +183,7 @@ Domain Service 保留 line-leading 连续有效 mention 的兼容 parser，未�
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 grammar。`--public-only` 在任何 alias/member lookup 前绕过正文寻址，并与显式
 `to/taskId` 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 该 schema 继续进入当前 catalog digest。
-当前 v21 contract/CLI command version、`builtin_cli.transport.v21` capability 与 IPC protocol 2 必须同时进入
+当前 v22 contract/CLI command version、`builtin_cli.transport.v22` capability 与 IPC protocol 2 必须同时进入
 Binding compatibility 和 digest。Camp History 使用 v4；Native Binding context contract 加入内部
 `sessionCharterRevision: 5`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
 继续使用 Formatter 22 / ContextManifest 22，不做 endpoint 猜测并 fail closed。
@@ -212,7 +219,7 @@ canonical result 或 Evidence；这条 narrow importer 与 Renderer 上传继续
 | `team.list_tasks` | 紧凑 `TaskListPage` |
 | `memory.view` | complete exact-Scope canonical result；不分页、不截断 |
 | `memory.write` | `{outcome: effective, memoryId, revisionId} \| {outcome: review_pending, reviewItemId}` |
-| 其余七项 | 去除 Envelope wrapper 后的 canonical result |
+| 其余八项 | 去除 Envelope wrapper 后的 canonical result |
 
 `memory.view` item 与 authorized current/revised `memory.read` 的 canonical result 包含同一个 indivisible
 `target(memoryId, revisionId, complete Agent-relative Scope identity)`。Agent revise 原样复制 target；CLI 只

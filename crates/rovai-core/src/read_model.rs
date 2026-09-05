@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, collections::BTreeMap, path::Path};
 
 use anyhow::{Context, Result};
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1859,16 +1859,18 @@ fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result
               (SELECT COUNT(*) FROM camp_message
                WHERE camp_id = ?1 AND tombstoned_at IS NULL),
               (SELECT COUNT(*) FROM message_delivery WHERE camp_id = ?1),
-              (SELECT COUNT(*) FROM camp_turn WHERE camp_id = ?1),
+              (SELECT COUNT(*) FROM camp_turn WHERE camp_id = ?1 AND kind = 'camp'),
               (SELECT COUNT(*)
                FROM agent_run
                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-               WHERE camp_turn.camp_id = ?1),
+               WHERE camp_turn.camp_id = ?1
+                 AND agent_run.invocation_kind <> 'single_chat'),
               (SELECT COUNT(*)
                FROM agent_run_execution_evidence AS evidence
                JOIN agent_run ON agent_run.id = evidence.agent_run_id
                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-               WHERE camp_turn.camp_id = ?1),
+               WHERE camp_turn.camp_id = ?1
+                 AND agent_run.invocation_kind <> 'single_chat'),
               (SELECT COUNT(*)
                FROM approval
                JOIN action_execution ON action_execution.id = approval.action_id
@@ -2643,7 +2645,7 @@ fn load_turns(
                execution_budget_exhaustion_reason,
                execution_budget_exhaustion_command_id,
                version, created_at, updated_at, ended_at
-        FROM camp_turn WHERE camp_id = ?1
+        FROM camp_turn WHERE camp_id = ?1 AND kind = 'camp'
         ORDER BY
           CASE
             WHEN ?2 IS NOT NULL AND status IN ('running', 'waiting') THEN 0
@@ -2911,6 +2913,7 @@ fn load_agent_runs(
         JOIN camp ON camp.id = camp_turn.camp_id
         JOIN conversation ON conversation.id = agent_run.conversation_id
         WHERE camp_turn.camp_id = ?1
+          AND agent_run.invocation_kind <> 'single_chat'
         ORDER BY
           CASE
             WHEN ?2 IS NOT NULL
@@ -3099,6 +3102,7 @@ fn load_execution_evidence(
           JOIN agent_run ON agent_run.id = evidence.agent_run_id
           JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
           WHERE camp_turn.camp_id = ?1
+            AND agent_run.invocation_kind <> 'single_chat'
             AND (?3 = 0 OR agent_run.status IN ('queued', 'running', 'waiting'))
           ORDER BY evidence.occurred_at DESC,
                    evidence.agent_run_id DESC, evidence.sequence DESC
@@ -3119,10 +3123,10 @@ fn load_execution_evidence(
 }
 
 pub(crate) fn public_execution_evidence_for_agent_run(
-    transaction: &Transaction<'_>,
+    connection: &Connection,
     agent_run_id: &str,
 ) -> Result<Vec<AgentRunExecutionEvidenceView>> {
-    let mut statement = transaction.prepare(
+    let mut statement = connection.prepare(
         r#"
         SELECT evidence.id, evidence.agent_run_id, evidence.execution_epoch,
                evidence.sequence, evidence.event_type, evidence.kind,
@@ -3143,7 +3147,7 @@ pub(crate) fn public_execution_evidence_for_agent_run(
         .map(|row| execution_evidence_view(row?))
         .collect::<Result<Vec<_>>>()?;
     drop(statement);
-    attach_canonical_activity(transaction, &mut evidence)?;
+    attach_canonical_activity(connection, &mut evidence)?;
     Ok(evidence)
 }
 
@@ -3213,7 +3217,7 @@ fn execution_evidence_view(row: ExecutionEvidenceRow) -> Result<AgentRunExecutio
 }
 
 fn attach_canonical_activity(
-    transaction: &Transaction<'_>,
+    connection: &Connection,
     evidence: &mut [AgentRunExecutionEvidenceView],
 ) -> Result<()> {
     if evidence.is_empty() {
@@ -3224,7 +3228,7 @@ fn attach_canonical_activity(
         .map(|item| (&item.id, &item.agent_run_id, item.execution_epoch))
         .collect::<Vec<_>>();
     let requested_json = serde_json::to_string(&requested)?;
-    let mut statement = transaction.prepare(
+    let mut statement = connection.prepare(
         r#"
         WITH requested AS (
             SELECT

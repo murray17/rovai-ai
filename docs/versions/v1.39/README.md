@@ -11,6 +11,8 @@ last_updated: 2026-09-04
 
 # Rovai-ai v1.39：Pi Runtime 安全重接入
 
+后继：[v1.40](../v1.40/README.md)。
+
 前置：[v1.38](../v1.38/README.md)。本版本基于
 `main@991d0cb24b3edc6dd67b823fdf11fe3caa7e2e17` 重新接入 Pi Coding Agent，并以
 `main@72ecbce9f4892433727d01e348da9a56c5926863` 作为 revision 3 原生能力调整的实现基线；旧 Pi 分支只作为协议与负向

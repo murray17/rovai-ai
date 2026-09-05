@@ -380,7 +380,7 @@ try {
     cli: await verifyBinary('rovai', cliExecutable)
   }
   const cliVersion = run(cliExecutable, ['--version'])
-  if (!cliVersion.includes(`rovai ${packageMetadata.version} contract-v21 ipc-v2`)) {
+  if (!cliVersion.includes(`rovai ${packageMetadata.version} contract-v22 ipc-v2`)) {
     throw new Error(`unexpected packaged CLI version: ${cliVersion}`)
   }
   report.push(`CLI: ${cliVersion}`)

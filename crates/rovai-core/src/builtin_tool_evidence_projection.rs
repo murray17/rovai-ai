@@ -12,6 +12,7 @@ use crate::{
     memory_secret,
     memory_tool::MEMORY_WRITE_TOOL_NAME,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
+    single_chat::SINGLE_CHAT_HISTORY_TOOL_NAME,
     team_tool::{
         TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
         TEAM_UPDATE_TASK_TOOL_NAME,
@@ -237,6 +238,14 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
                 insert_i64(&mut projected, field, input.get(field));
             }
         }
+        SINGLE_CHAT_HISTORY_TOOL_NAME => {
+            insert_i64(
+                &mut projected,
+                "beforeSequence",
+                input.get("beforeSequence"),
+            );
+            insert_i64(&mut projected, "limit", input.get("limit"));
+        }
         MEMORY_READ_TOOL_NAME => {
             insert_string_array(&mut projected, "memoryIds", input.get("memoryIds"));
         }
@@ -380,6 +389,23 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
                 insert_bool(&mut projected, field, result.get(field));
             }
             insert_i64(&mut projected, "nextCursor", result.get("nextCursor"));
+        }
+        SINGLE_CHAT_HISTORY_TOOL_NAME => {
+            let messages = project_object_array(result.get("messages"), |item| {
+                let mut value = Map::new();
+                insert_i64(&mut value, "sequence", item.get("sequence"));
+                insert_enum(&mut value, "role", item.get("role"));
+                Value::Object(value)
+            });
+            projected.insert("messages".to_string(), Value::Array(messages.values));
+            projected.insert("messageCount".to_string(), json!(messages.total));
+            projected.insert("messagesTruncated".to_string(), json!(messages.truncated));
+            insert_bool(&mut projected, "hasMore", result.get("hasMore"));
+            insert_i64(
+                &mut projected,
+                "nextBeforeSequence",
+                result.get("nextBeforeSequence"),
+            );
         }
         MEMORY_SEARCH_TOOL_NAME => {
             let memories = project_object_array(result.get("results"), |item| {
@@ -1129,6 +1155,34 @@ mod tests {
             persisted_digest,
             canonical_json_digest(&digest_document).unwrap()
         );
+    }
+
+    #[test]
+    fn single_chat_history_evidence_keeps_pagination_facts_without_private_bodies() {
+        let projected = projection(
+            SINGLE_CHAT_HISTORY_TOOL_NAME,
+            json!({"beforeSequence": 12, "limit": 20}),
+            json!({
+                "schemaVersion": 1,
+                "messages": [
+                    {"sequence": 9, "role": "user", "body": "PRIVATE_USER_BODY"},
+                    {"sequence": 10, "role": "assistant", "body": "PRIVATE_ASSISTANT_BODY"}
+                ],
+                "hasMore": true,
+                "nextBeforeSequence": 9
+            }),
+        );
+        assert_eq!(projected["canonicalInput"]["beforeSequence"], 12);
+        assert_eq!(projected["canonicalResult"]["messageCount"], 2);
+        assert_eq!(projected["canonicalResult"]["messages"][0]["sequence"], 9);
+        assert_eq!(
+            projected["canonicalResult"]["messages"][1]["role"],
+            "assistant"
+        );
+        assert_eq!(projected["canonicalResult"]["nextBeforeSequence"], 9);
+        let encoded = serde_json::to_string(&projected).unwrap();
+        assert!(!encoded.contains("PRIVATE_USER_BODY"));
+        assert!(!encoded.contains("PRIVATE_ASSISTANT_BODY"));
     }
 
     #[test]

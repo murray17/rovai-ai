@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.49
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -11,7 +11,7 @@ last_updated: 2026-09-05
 
 # Rovai-ai v1.49：正常退出前 Composer Draft Fence
 
-前置：[v1.48](../v1.48/README.md)。本版本保留 `AppQuitCoordinator`、`CampLeaveGuard`、Lexical、
+前置：[v1.48](../v1.48/README.md)。下一版本：[v1.50](../v1.50/README.md)。本版本保留 `AppQuitCoordinator`、`CampLeaveGuard`、Lexical、
 `ComposerDraftSync`、唯一 `DraftMutationCoordinator`、Core exact revision 和 Planned Shutdown v3 wire；只在正常
 退出的 Renderer 与 Core shutdown 之间增加一道 Draft preparation fence。
 

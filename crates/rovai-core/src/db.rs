@@ -208,8 +208,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.49";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 90;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.50";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 91;
+const V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.49";
+const V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 90;
 const V139_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.48";
 const V139_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 89;
 const V138_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.47";
@@ -607,6 +609,7 @@ struct CurrentMigrationState {
     v137: bool,
     v138: bool,
     v139: bool,
+    v140: bool,
 }
 
 impl CurrentMigrationState {
@@ -685,6 +688,29 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v140
+                && self.v139
+                && self.v138
+                && self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v140 {
+            return false;
+        }
+        if contract == V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v139
                 && self.v138
@@ -2525,6 +2551,7 @@ pub(crate) fn classify_database_contract(
         || (migrations.v137 && !source_attachment_v137_schema_matches(connection)?)
         || (migrations.v138 && !pi_native_input_v138_schema_matches(connection)?)
         || (migrations.v139 && !pi_native_execution_v139_schema_matches(connection)?)
+        || (migrations.v140 && !single_chat_v140_schema_matches(connection)?)
     {
         if connection_has_legacy_feishu_migration_collision(connection)?
             || main_camp_migration_collision(connection)?.is_some()
@@ -2731,6 +2758,75 @@ fn pi_native_execution_v139_schema_matches(connection: &Connection) -> rusqlite:
     Ok(receipt_archive_objects == 5 && !acceptance_guard_exists)
 }
 
+fn single_chat_v140_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    for (table, column) in [
+        ("conversation", "kind"),
+        ("camp_turn", "kind"),
+        ("agent_run", "response_delivery"),
+        ("agent_run", "operation_policy"),
+        ("agent_run", "operation_policy_version"),
+        ("agent_run", "destination_conversation_id"),
+        ("conversation_message", "source_attachments_json"),
+    ] {
+        let admitted: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            params![table, column],
+            |row| row.get(0),
+        )?;
+        if !admitted {
+            return Ok(false);
+        }
+    }
+    let required_objects: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN (
+            'single_chat_composer_draft',
+            'single_chat_pending_input',
+            'single_chat_pending_input_queue_idx',
+            'single_chat_pending_input_edit_session',
+            'conversation_active_single_chat_unique',
+            'agent_run_active_single_chat_conversation_unique',
+            'agent_run_single_chat_route_update_guard',
+            'conversation_message_single_chat_attachment_insert_guard',
+            'conversation_message_single_chat_attachment_update_guard',
+            'single_chat_composer_draft_scope_insert',
+            'single_chat_pending_input_scope_insert'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let retired_objects: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN (
+            'single_chat_prepared_attachment',
+            'single_chat_message_attachment'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let conversation_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversation'",
+        [],
+        |row| row.get(0),
+    )?;
+    let camp_turn_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_turn'",
+        [],
+        |row| row.get(0),
+    )?;
+    let agent_run_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(required_objects == 11
+        && retired_objects == 0
+        && conversation_sql.contains("kind IN ('camp_member', 'single_chat')")
+        && camp_turn_sql.contains("kind IN ('camp', 'single_chat')")
+        && camp_turn_sql.contains("'conversation_message'")
+        && agent_run_sql.contains("'single_chat'")
+        && agent_run_sql.contains("response_delivery")
+        && agent_run_sql.contains("destination_conversation_id"))
+}
+
 #[cfg(test)]
 fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     if !connection_has_admissible_data_contract(connection)? {
@@ -2741,7 +2837,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 139)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2828,7 +2924,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 136),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 137),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 138),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 139)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 139),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)
         "#,
         [],
         |row| {
@@ -2903,6 +3000,7 @@ fn load_current_migration_state(
                 v137: row.get(67)?,
                 v138: row.get(68)?,
                 v139: row.get(69)?,
+                v140: row.get(70)?,
             })
         },
     )
@@ -3616,6 +3714,309 @@ fn validate_migration_foreign_keys(transaction: &Transaction<'_>, tables: &[&str
             anyhow::bail!("migration would leave a foreign-key violation in {table} row {row:?}");
         }
     }
+    Ok(())
+}
+
+fn migration_schema_objects(
+    transaction: &Transaction<'_>,
+    table: &str,
+    include_referencing_triggers: bool,
+) -> Result<Vec<(String, String, String)>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT type, name, sql
+        FROM sqlite_master
+        WHERE sql IS NOT NULL
+          AND (
+              (tbl_name = ?1 AND type IN ('index', 'trigger'))
+              OR (?2 AND type = 'trigger' AND instr(lower(sql), lower(?1)) > 0)
+          )
+        ORDER BY type, name
+        "#,
+    )?;
+    Ok(statement
+        .query_map(params![table, include_referencing_triggers], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn drop_rebuild_triggers(
+    transaction: &Transaction<'_>,
+    objects: &[(String, String, String)],
+) -> Result<()> {
+    for (object_type, name, _) in objects {
+        if object_type == "trigger" {
+            transaction
+                .execute_batch(&format!("DROP TRIGGER \"{}\";", name.replace('"', "\"\"")))?;
+        }
+    }
+    Ok(())
+}
+
+fn restore_rebuild_schema_objects(
+    transaction: &Transaction<'_>,
+    table: &str,
+    objects: Vec<(String, String, String)>,
+) -> Result<()> {
+    for (_, name, sql) in objects {
+        transaction
+            .execute_batch(&sql)
+            .with_context(|| format!("v140 failed to restore {table} schema object {name}"))?;
+    }
+    Ok(())
+}
+
+fn rebuild_conversation_for_single_chat_v140(transaction: &Transaction<'_>) -> Result<()> {
+    if table_columns(transaction, "conversation")?
+        .iter()
+        .any(|column| column == "kind")
+    {
+        return Ok(());
+    }
+    let source_schema: String = transaction.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversation'",
+        [],
+        |row| row.get(0),
+    )?;
+    let objects = migration_schema_objects(transaction, "conversation", true)?;
+    let mut target_schema = source_schema
+        .replacen(
+            "CREATE TABLE conversation",
+            "CREATE TABLE conversation_v140",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"conversation\"",
+            "CREATE TABLE conversation_v140",
+            1,
+        )
+        .replacen(
+            "UNIQUE(camp_id, agent_id)",
+            r#"kind TEXT NOT NULL DEFAULT 'camp_member'
+                    CHECK(kind IN ('camp_member', 'single_chat')),
+                ended_at TEXT,
+                ended_reason TEXT,
+                ended_binding_generation INTEGER CHECK(ended_binding_generation >= 0),
+                CHECK(
+                    (kind = 'camp_member'
+                        AND ended_at IS NULL
+                        AND ended_reason IS NULL
+                        AND ended_binding_generation IS NULL)
+                    OR
+                    (kind = 'single_chat'
+                        AND (
+                            (ended_at IS NULL
+                                AND ended_reason IS NULL
+                                AND ended_binding_generation IS NULL)
+                            OR
+                            (ended_at IS NOT NULL
+                                AND ended_reason IS NOT NULL
+                                AND ended_binding_generation IS NOT NULL)
+                        ))
+                )"#,
+            1,
+        );
+    if !target_schema.contains("CREATE TABLE conversation_v140")
+        || !target_schema.contains("kind IN ('camp_member', 'single_chat')")
+        || target_schema.contains("UNIQUE(camp_id, agent_id)")
+    {
+        anyhow::bail!("v140 could not extend the Conversation schema");
+    }
+    target_schema =
+        target_schema.replace("REFERENCES conversation(", "REFERENCES conversation_v140(");
+    transaction.execute_batch(&target_schema)?;
+    let columns = table_columns(transaction, "conversation")?
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    drop_rebuild_triggers(transaction, &objects)?;
+    transaction.execute_batch(&format!(
+        r#"
+        INSERT INTO conversation_v140({columns}) SELECT {columns} FROM conversation;
+        DROP TABLE conversation;
+        ALTER TABLE conversation_v140 RENAME TO conversation;
+        "#,
+    ))?;
+    restore_rebuild_schema_objects(transaction, "conversation", objects)?;
+    transaction.execute_batch(
+        r#"
+        CREATE UNIQUE INDEX conversation_camp_member_unique
+            ON conversation(camp_id, agent_id)
+            WHERE kind = 'camp_member';
+        CREATE UNIQUE INDEX conversation_active_single_chat_unique
+            ON conversation(camp_id, agent_id)
+            WHERE kind = 'single_chat' AND ended_at IS NULL;
+        "#,
+    )?;
+    Ok(())
+}
+
+fn rebuild_camp_turn_for_single_chat_v140(transaction: &Transaction<'_>) -> Result<()> {
+    if table_columns(transaction, "camp_turn")?
+        .iter()
+        .any(|column| column == "kind")
+    {
+        return Ok(());
+    }
+    let source_schema: String = transaction.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_turn'",
+        [],
+        |row| row.get(0),
+    )?;
+    let objects = migration_schema_objects(transaction, "camp_turn", true)?;
+    let target_schema = source_schema
+        .replacen(
+            "CREATE TABLE camp_turn",
+            "CREATE TABLE camp_turn_v140",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"camp_turn\"",
+            "CREATE TABLE camp_turn_v140",
+            1,
+        )
+        .replacen(
+            "CHECK(trigger_type IN ('camp_message', 'inbox_message', 'system_event'))",
+            "CHECK(trigger_type IN ('camp_message', 'inbox_message', 'system_event', 'conversation_message'))",
+            1,
+        )
+        .replacen(
+            "UNIQUE(camp_id, trigger_type, trigger_id)",
+            r#"kind TEXT NOT NULL DEFAULT 'camp'
+                    CHECK(kind IN ('camp', 'single_chat')),
+                UNIQUE(camp_id, trigger_type, trigger_id),
+                CHECK(
+                    (kind = 'single_chat' AND trigger_type = 'conversation_message')
+                    OR (kind = 'camp' AND trigger_type <> 'conversation_message')
+                )"#,
+            1,
+        );
+    if !target_schema.contains("CREATE TABLE camp_turn_v140")
+        || !target_schema.contains("'conversation_message'")
+        || !target_schema.contains("kind IN ('camp', 'single_chat')")
+    {
+        anyhow::bail!("v140 could not extend the CampTurn schema");
+    }
+    transaction.execute_batch(&target_schema)?;
+    let columns = table_columns(transaction, "camp_turn")?
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    drop_rebuild_triggers(transaction, &objects)?;
+    transaction.execute_batch(&format!(
+        r#"
+        INSERT INTO camp_turn_v140({columns}) SELECT {columns} FROM camp_turn;
+        DROP TABLE camp_turn;
+        ALTER TABLE camp_turn_v140 RENAME TO camp_turn;
+        "#,
+    ))?;
+    restore_rebuild_schema_objects(transaction, "camp_turn", objects)?;
+    Ok(())
+}
+
+fn rebuild_agent_run_for_single_chat_v140(transaction: &Transaction<'_>) -> Result<()> {
+    if table_columns(transaction, "agent_run")?
+        .iter()
+        .any(|column| column == "response_delivery")
+    {
+        return Ok(());
+    }
+    let source_schema: String = transaction.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+        [],
+        |row| row.get(0),
+    )?;
+    let objects = migration_schema_objects(transaction, "agent_run", true)?;
+    let mut target_schema = source_schema
+        .replacen("CREATE TABLE agent_run", "CREATE TABLE agent_run_v140", 1)
+        .replacen(
+            "CREATE TABLE \"agent_run\"",
+            "CREATE TABLE agent_run_v140",
+            1,
+        )
+        .replacen(
+            "CHECK(invocation_kind IN ('direct', 'a2a', 'gather_completion'))",
+            "CHECK(invocation_kind IN ('direct', 'a2a', 'gather_completion', 'single_chat'))",
+            1,
+        )
+        .replace("REFERENCES agent_run(", "REFERENCES agent_run_v140(")
+        .replace("REFERENCES \"agent_run\"(", "REFERENCES agent_run_v140(");
+    let constraint = target_schema
+        .find("UNIQUE(camp_turn_id")
+        .context("v140 AgentRun schema has no table constraints")?;
+    target_schema.insert_str(
+        constraint,
+        r#"response_delivery TEXT NOT NULL DEFAULT 'camp_message'
+                    CHECK(response_delivery IN ('camp_message', 'conversation_message')),
+                operation_policy TEXT NOT NULL DEFAULT 'camp_member_v1'
+                    CHECK(operation_policy IN ('camp_member_v1', 'single_chat_v1')),
+                operation_policy_version INTEGER NOT NULL DEFAULT 1
+                    CHECK(operation_policy_version = 1),
+                destination_conversation_id TEXT REFERENCES conversation(id),
+                CHECK(
+                    (invocation_kind = 'single_chat'
+                        AND response_delivery = 'conversation_message'
+                        AND operation_policy = 'single_chat_v1'
+                        AND destination_conversation_id = conversation_id)
+                    OR
+                    (invocation_kind <> 'single_chat'
+                        AND response_delivery = 'camp_message'
+                        AND operation_policy = 'camp_member_v1'
+                        AND destination_conversation_id IS NULL)
+                ),
+                "#,
+    );
+    if !target_schema.contains("CREATE TABLE agent_run_v140")
+        || !target_schema.contains("'single_chat'")
+        || !target_schema.contains("response_delivery")
+    {
+        anyhow::bail!("v140 could not extend the AgentRun schema");
+    }
+    transaction.execute_batch(&target_schema)?;
+    let columns = table_columns(transaction, "agent_run")?
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    drop_rebuild_triggers(transaction, &objects)?;
+    transaction.execute_batch(&format!(
+        r#"
+        INSERT INTO agent_run_v140({columns}) SELECT {columns} FROM agent_run;
+        DROP TABLE agent_run;
+        ALTER TABLE agent_run_v140 RENAME TO agent_run;
+        "#,
+    ))?;
+    restore_rebuild_schema_objects(transaction, "agent_run", objects)?;
+    transaction.execute_batch(
+        r#"
+        CREATE UNIQUE INDEX agent_run_active_single_chat_conversation_unique
+            ON agent_run(conversation_id)
+            WHERE invocation_kind = 'single_chat'
+              AND status IN ('queued', 'running', 'waiting');
+        CREATE TRIGGER agent_run_single_chat_route_update_guard
+            BEFORE UPDATE OF invocation_kind, response_delivery, operation_policy,
+                operation_policy_version, destination_conversation_id
+            ON agent_run
+            WHEN (OLD.invocation_kind = 'single_chat' OR NEW.invocation_kind = 'single_chat')
+              AND (
+                NEW.invocation_kind <> OLD.invocation_kind
+                OR NEW.response_delivery <> OLD.response_delivery
+                OR NEW.operation_policy <> OLD.operation_policy
+                OR NEW.operation_policy_version <> OLD.operation_policy_version
+                OR NEW.destination_conversation_id IS NOT OLD.destination_conversation_id
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'agent_run output route is immutable');
+            END;
+        "#,
+    )?;
     Ok(())
 }
 
@@ -5391,6 +5792,9 @@ impl Database {
             if !self.schema_migration_applied(139)? {
                 migration_step!("migration_139", self.migrate_pi_native_execution_v139());
             }
+            if !self.schema_migration_applied(140)? {
+                migration_step!("migration_140", self.migrate_single_chat_v140());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -5990,6 +6394,9 @@ impl Database {
         }
         if !self.schema_migration_applied(139)? {
             migration_step!("migration_139", self.migrate_pi_native_execution_v139());
+        }
+        if !self.schema_migration_applied(140)? {
+            migration_step!("migration_140", self.migrate_single_chat_v140());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -21545,6 +21952,197 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_single_chat_v140(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+                "SELECT contract_version, projection_schema_version, classifier_version
+                 FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            if contract != V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                || schema != V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                || !load_current_migration_state(&transaction)?.admits(
+                    &contract,
+                    schema,
+                    &classifier,
+                )
+                || !source_attachment_v137_schema_matches(&transaction)?
+            {
+                anyhow::bail!("Single Chat migration requires the exact v1.49/schema 90 source");
+            }
+
+            rebuild_conversation_for_single_chat_v140(&transaction)?;
+            rebuild_camp_turn_for_single_chat_v140(&transaction)?;
+            rebuild_agent_run_for_single_chat_v140(&transaction)?;
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE conversation_message
+                    ADD COLUMN source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                    CHECK(json_valid(source_attachments_json)
+                        AND json_type(source_attachments_json) = 'array');
+
+                CREATE TABLE single_chat_composer_draft (
+                    conversation_id TEXT PRIMARY KEY
+                        REFERENCES conversation(id) ON DELETE CASCADE,
+                    revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+                    source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(source_attachments_json)
+                            AND json_type(source_attachments_json) = 'array'),
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE single_chat_pending_input (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL
+                        REFERENCES conversation(id) ON DELETE CASCADE,
+                    enqueue_sequence INTEGER NOT NULL CHECK(enqueue_sequence > 0),
+                    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+                    state TEXT NOT NULL DEFAULT 'queued'
+                        CHECK(state IN ('queued', 'needs_repair', 'published', 'cancelled')),
+                    body TEXT NOT NULL,
+                    source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(source_attachments_json)
+                            AND json_type(source_attachments_json) = 'array'),
+                    user_id TEXT NOT NULL,
+                    published_conversation_message_id TEXT
+                        REFERENCES conversation_message(id),
+                    published_camp_turn_id TEXT REFERENCES camp_turn(id),
+                    published_agent_run_id TEXT REFERENCES agent_run(id),
+                    published_at TEXT,
+                    last_attempt_error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(conversation_id, enqueue_sequence),
+                    UNIQUE(conversation_id, id),
+                    CHECK((state = 'published') =
+                        (published_conversation_message_id IS NOT NULL)),
+                    CHECK((state = 'published') = (published_camp_turn_id IS NOT NULL)),
+                    CHECK((state = 'published') = (published_agent_run_id IS NOT NULL))
+                );
+                CREATE INDEX single_chat_pending_input_queue_idx
+                    ON single_chat_pending_input(conversation_id, enqueue_sequence)
+                    WHERE state IN ('queued', 'needs_repair');
+
+                CREATE TABLE single_chat_pending_input_edit_session (
+                    conversation_id TEXT PRIMARY KEY
+                        REFERENCES conversation(id) ON DELETE CASCADE,
+                    pending_input_id TEXT NOT NULL UNIQUE,
+                    edit_token TEXT NOT NULL,
+                    base_pending_revision INTEGER NOT NULL CHECK(base_pending_revision > 0),
+                    recovery_required INTEGER NOT NULL DEFAULT 0
+                        CHECK(recovery_required IN (0, 1)),
+                    working_body TEXT NOT NULL,
+                    working_source_attachments_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(working_source_attachments_json)
+                            AND json_type(working_source_attachments_json) = 'array'),
+                    FOREIGN KEY(conversation_id, pending_input_id)
+                        REFERENCES single_chat_pending_input(conversation_id, id)
+                        ON DELETE CASCADE
+                );
+
+                CREATE TRIGGER conversation_message_single_chat_attachment_insert_guard
+                BEFORE INSERT ON conversation_message
+                WHEN NEW.source_attachments_json <> '[]'
+                  AND NOT EXISTS(
+                      SELECT 1 FROM conversation
+                      WHERE conversation.id = NEW.conversation_id
+                        AND conversation.kind = 'single_chat'
+                        AND NEW.author_type = 'user'
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'Conversation Message Source Attachments require a Single Chat user message');
+                END;
+
+                CREATE TRIGGER conversation_message_single_chat_attachment_update_guard
+                BEFORE UPDATE OF source_attachments_json, conversation_id, author_type
+                ON conversation_message
+                WHEN NEW.source_attachments_json <> OLD.source_attachments_json
+                  OR (
+                      NEW.source_attachments_json <> '[]'
+                      AND NOT EXISTS(
+                          SELECT 1 FROM conversation
+                          WHERE conversation.id = NEW.conversation_id
+                            AND conversation.kind = 'single_chat'
+                            AND NEW.author_type = 'user'
+                      )
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'Conversation Message Source Attachments are immutable and require a Single Chat user message');
+                END;
+
+                CREATE TRIGGER single_chat_composer_draft_scope_insert
+                BEFORE INSERT ON single_chat_composer_draft
+                WHEN NOT EXISTS(
+                    SELECT 1 FROM conversation
+                    WHERE conversation.id = NEW.conversation_id
+                      AND conversation.kind = 'single_chat'
+                      AND conversation.ended_at IS NULL
+                )
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'Single Chat Composer Draft requires an active Single Chat');
+                END;
+
+                CREATE TRIGGER single_chat_pending_input_scope_insert
+                BEFORE INSERT ON single_chat_pending_input
+                WHEN NOT EXISTS(
+                    SELECT 1 FROM conversation
+                    WHERE conversation.id = NEW.conversation_id
+                      AND conversation.kind = 'single_chat'
+                      AND conversation.ended_at IS NULL
+                )
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'Single Chat Pending Input requires an active Single Chat');
+                END;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.50', projection_schema_version = 91,
+                    updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES(140, datetime('now'));
+                "#,
+            )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "conversation",
+                    "camp_turn",
+                    "agent_run",
+                    "conversation_message",
+                    "single_chat_composer_draft",
+                    "single_chat_pending_input",
+                    "single_chat_pending_input_edit_session",
+                ],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v140 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn reconcile_legacy_feishu_migration_collision(&mut self) -> Result<bool> {
         if self.reconcile_main_camp_migration_collision()? {
             return Ok(true);
@@ -26242,7 +26840,270 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
 }
 
 #[cfg(test)]
+fn rebuild_table_to_v135_source_for_test(
+    transaction: &Transaction<'_>,
+    table: &str,
+    target_table: &str,
+    target_schema: &str,
+    omitted_schema_objects: &[&str],
+) {
+    let objects = migration_schema_objects(transaction, table, true)
+        .unwrap()
+        .into_iter()
+        .filter(|(_, name, _)| !omitted_schema_objects.contains(&name.as_str()))
+        .collect::<Vec<_>>();
+    transaction.execute_batch(target_schema).unwrap();
+    let columns = table_columns(transaction, target_table)
+        .unwrap()
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    drop_rebuild_triggers(transaction, &objects).unwrap();
+    transaction
+        .execute_batch(&format!(
+            r#"
+            INSERT INTO {target_table}({columns}) SELECT {columns} FROM {table};
+            DROP TABLE {table};
+            ALTER TABLE {target_table} RENAME TO {table};
+            "#,
+        ))
+        .unwrap();
+    restore_rebuild_schema_objects(transaction, table, objects).unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v139_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    let single_chat_rows: i64 = connection
+        .query_row(
+            "SELECT
+                (SELECT count(*) FROM conversation WHERE kind = 'single_chat')
+                + (SELECT count(*) FROM camp_turn WHERE kind = 'single_chat')
+                + (SELECT count(*) FROM agent_run WHERE invocation_kind = 'single_chat')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        single_chat_rows, 0,
+        "the v139 source fixture cannot represent Single Chat rows"
+    );
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    let transaction = connection.unchecked_transaction().unwrap();
+    transaction
+        .execute_batch(
+            r#"
+            DROP TRIGGER IF EXISTS conversation_message_single_chat_attachment_insert_guard;
+            DROP TRIGGER IF EXISTS conversation_message_single_chat_attachment_update_guard;
+            DROP TRIGGER IF EXISTS single_chat_composer_draft_scope_insert;
+            DROP TRIGGER IF EXISTS single_chat_pending_input_scope_insert;
+            DROP TABLE IF EXISTS single_chat_pending_input_edit_session;
+            DROP TABLE IF EXISTS single_chat_pending_input;
+            DROP TABLE IF EXISTS single_chat_composer_draft;
+            ALTER TABLE conversation_message DROP COLUMN source_attachments_json;
+            "#,
+        )
+        .unwrap();
+
+    let agent_run_schema: String = transaction
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let agent_run_v139 = agent_run_schema
+        .replacen(
+            "CREATE TABLE agent_run",
+            "CREATE TABLE agent_run_v139_source",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"agent_run\"",
+            "CREATE TABLE agent_run_v139_source",
+            1,
+        )
+        .replacen(
+            "CHECK(invocation_kind IN ('direct', 'a2a', 'gather_completion', 'single_chat'))",
+            "CHECK(invocation_kind IN ('direct', 'a2a', 'gather_completion'))",
+            1,
+        )
+        .replacen(
+            r#"response_delivery TEXT NOT NULL DEFAULT 'camp_message'
+                    CHECK(response_delivery IN ('camp_message', 'conversation_message')),
+                operation_policy TEXT NOT NULL DEFAULT 'camp_member_v1'
+                    CHECK(operation_policy IN ('camp_member_v1', 'single_chat_v1')),
+                operation_policy_version INTEGER NOT NULL DEFAULT 1
+                    CHECK(operation_policy_version = 1),
+                destination_conversation_id TEXT REFERENCES conversation(id),
+                CHECK(
+                    (invocation_kind = 'single_chat'
+                        AND response_delivery = 'conversation_message'
+                        AND operation_policy = 'single_chat_v1'
+                        AND destination_conversation_id = conversation_id)
+                    OR
+                    (invocation_kind <> 'single_chat'
+                        AND response_delivery = 'camp_message'
+                        AND operation_policy = 'camp_member_v1'
+                        AND destination_conversation_id IS NULL)
+                ),
+                "#,
+            "",
+            1,
+        );
+    assert!(agent_run_v139.contains("CREATE TABLE agent_run_v139_source"));
+    assert!(!agent_run_v139.contains("response_delivery"));
+    rebuild_table_to_v135_source_for_test(
+        &transaction,
+        "agent_run",
+        "agent_run_v139_source",
+        &agent_run_v139,
+        &[
+            "agent_run_active_single_chat_conversation_unique",
+            "agent_run_single_chat_route_update_guard",
+        ],
+    );
+
+    let camp_turn_schema: String = transaction
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_turn'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let camp_turn_v139 = camp_turn_schema
+        .replacen(
+            "CREATE TABLE camp_turn",
+            "CREATE TABLE camp_turn_v139_source",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"camp_turn\"",
+            "CREATE TABLE camp_turn_v139_source",
+            1,
+        )
+        .replacen(
+            "CHECK(trigger_type IN ('camp_message', 'inbox_message', 'system_event', 'conversation_message'))",
+            "CHECK(trigger_type IN ('camp_message', 'inbox_message', 'system_event'))",
+            1,
+        )
+        .replacen(
+            r#"kind TEXT NOT NULL DEFAULT 'camp'
+                    CHECK(kind IN ('camp', 'single_chat')),
+                UNIQUE(camp_id, trigger_type, trigger_id),
+                CHECK(
+                    (kind = 'single_chat' AND trigger_type = 'conversation_message')
+                    OR (kind = 'camp' AND trigger_type <> 'conversation_message')
+                )"#,
+            "UNIQUE(camp_id, trigger_type, trigger_id)",
+            1,
+        );
+    assert!(camp_turn_v139.contains("CREATE TABLE camp_turn_v139_source"));
+    assert!(!camp_turn_v139.contains("conversation_message"));
+    rebuild_table_to_v135_source_for_test(
+        &transaction,
+        "camp_turn",
+        "camp_turn_v139_source",
+        &camp_turn_v139,
+        &[],
+    );
+
+    let conversation_schema: String = transaction
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversation'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let conversation_v139 = conversation_schema
+        .replacen(
+            "CREATE TABLE conversation",
+            "CREATE TABLE conversation_v139_source",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"conversation\"",
+            "CREATE TABLE conversation_v139_source",
+            1,
+        )
+        .replacen(
+            r#"kind TEXT NOT NULL DEFAULT 'camp_member'
+                    CHECK(kind IN ('camp_member', 'single_chat')),
+                ended_at TEXT,
+                ended_reason TEXT,
+                ended_binding_generation INTEGER CHECK(ended_binding_generation >= 0),
+                CHECK(
+                    (kind = 'camp_member'
+                        AND ended_at IS NULL
+                        AND ended_reason IS NULL
+                        AND ended_binding_generation IS NULL)
+                    OR
+                    (kind = 'single_chat'
+                        AND (
+                            (ended_at IS NULL
+                                AND ended_reason IS NULL
+                                AND ended_binding_generation IS NULL)
+                            OR
+                            (ended_at IS NOT NULL
+                                AND ended_reason IS NOT NULL
+                                AND ended_binding_generation IS NOT NULL)
+                        ))
+                )"#,
+            "UNIQUE(camp_id, agent_id)",
+            1,
+        );
+    assert!(conversation_v139.contains("CREATE TABLE conversation_v139_source"));
+    assert!(!conversation_v139.contains("kind IN ('camp_member', 'single_chat')"));
+    rebuild_table_to_v135_source_for_test(
+        &transaction,
+        "conversation",
+        "conversation_v139_source",
+        &conversation_v139,
+        &[
+            "conversation_camp_member_unique",
+            "conversation_active_single_chat_unique",
+        ],
+    );
+
+    transaction
+        .execute_batch(
+            "DELETE FROM schema_migration WHERE version = 140;
+             UPDATE rovai_data_contract
+             SET contract_version = 'v1.49', projection_schema_version = 90
+             WHERE singleton = 1;",
+        )
+        .unwrap();
+    validate_migration_foreign_keys(
+        &transaction,
+        &[
+            "agent_run",
+            "camp_turn",
+            "conversation",
+            "conversation_message",
+        ],
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON;")
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v138_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v139_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 139)",
@@ -28800,6 +29661,7 @@ mod tests {
             v137: version >= 137,
             v138: version >= 138,
             v139: version >= 139,
+            v140: version >= 140,
         }
     }
 
@@ -28905,6 +29767,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                140,
+            ),
+            (
+                "v1.49/schema-90 before Single Chat",
+                V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 139,
             ),
             (
@@ -29298,7 +30166,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(139);
+        let current = migration_state_through(140);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -29320,7 +30188,16 @@ mod tests {
         missing_pi_native_input.v138 = false;
         let mut missing_pi_native_execution = current;
         missing_pi_native_execution.v139 = false;
+        let mut missing_single_chat = current;
+        missing_single_chat.v140 = false;
         let rejected = [
+            (
+                "current marker without Single Chat migration",
+                missing_single_chat,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Pi native execution migration",
                 missing_pi_native_execution,
@@ -29609,7 +30486,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(139));
+        assert_eq!(state, migration_state_through(140));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -32101,6 +32978,32 @@ mod tests {
             .unwrap();
         database.migrate_pi_native_execution_v139().unwrap();
         assert!(pi_native_execution_v139_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_single_chat_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 140 BEGIN SELECT RAISE(ABORT, 'Single Chat receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_single_chat_v140()
+                .unwrap_err()
+                .to_string()
+                .contains("Single Chat receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(140).unwrap());
+        assert!(!single_chat_v140_schema_matches(database.connection()).unwrap());
+        assert!(
+            database
+                .connection()
+                .prepare("SELECT id FROM single_chat_message_attachment")
+                .is_err()
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_single_chat_receipt")
+            .unwrap();
+        database.migrate_single_chat_v140().unwrap();
+        assert!(single_chat_v140_schema_matches(database.connection()).unwrap());
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();

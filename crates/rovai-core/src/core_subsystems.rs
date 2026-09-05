@@ -339,13 +339,14 @@ impl super::Core {
                 })()
             );
             initialization.retired_camp_directories.retain(|camp| {
-                match attachments.remove_camp(camp) {
+                let camp_failed = match attachments.remove_camp(camp) {
                     Ok(()) => false,
                     Err(error) => {
                         errors.push(format!("pending_camp_directory: {error:#}"));
                         true
                     }
-                }
+                };
+                camp_failed
             });
             maintain!(
                 "runtime_search_generation",

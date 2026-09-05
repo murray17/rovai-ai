@@ -242,6 +242,11 @@ use rovai_core::{
     runtime_platform_admission::RuntimePlatformAdmission,
     runtime_resolution::RuntimeResolutionService,
     runtime_search_operation,
+    single_chat::{
+        EditSingleChatPendingInputCommand, EndSingleChatCommand, OpenSingleChatCommand,
+        SINGLE_CHAT_HISTORY_TOOL_NAME, SendSingleChatMessageCommand, SingleChatHistoryInput,
+        SingleChatService,
+    },
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
         SetSkillGroupAssignmentsCommand, SkillLibraryService,
@@ -616,6 +621,12 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "camp.attachments.desktopOpenTarget"
             | "campTurns.cancel"
             | "agentRuns.cancel"
+            | "singleChat.sourceAttachments.addFromPath"
+            | "singleChat.composerDraft.removeAttachment"
+            | "singleChat.pendingInputs.addSourceAttachmentFromPath"
+            | "singleChat.pendingInputs.edit"
+            | "singleChat.send"
+            | "singleChat.end"
             | "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel"
             | "runtime.pendingExecution.cancel"
@@ -900,6 +911,30 @@ struct CampCreationMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: CampId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SingleChatSnapshotParams {
+    conversation_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AddSingleChatSourceAttachmentFromPathParams {
+    conversation_id: String,
+    expected_draft_revision: i64,
+    source_path: String,
+    display_name: String,
+    media_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemoveSingleChatSourceAttachmentParams {
+    conversation_id: String,
+    expected_draft_revision: i64,
+    attachment_ref_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1254,6 +1289,19 @@ struct AddPendingSourceAttachmentFromPathParams {
     media_type: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AddSingleChatPendingSourceAttachmentFromPathParams {
+    camp_id: CampId,
+    conversation_id: String,
+    pending_input_id: String,
+    expected_revision: i64,
+    edit_token: String,
+    source_path: String,
+    display_name: String,
+    media_type: Option<String>,
+}
+
 async fn add_composer_source_attachment_from_path(
     database: &Mutex<Database>,
     output: &mpsc::UnboundedSender<String>,
@@ -1322,6 +1370,83 @@ async fn add_pending_source_attachment_from_path(
     };
     emit_pending_inputs_changed(output, params.camp_id.as_str(), "edited");
     Ok(serde_json::to_value(queue)?)
+}
+
+async fn add_single_chat_source_attachment_from_path(
+    database: &Mutex<Database>,
+    output: &mpsc::UnboundedSender<String>,
+    params: AddSingleChatSourceAttachmentFromPathParams,
+) -> Result<Value> {
+    let source_path = params.source_path.clone();
+    let display_name = params.display_name.clone();
+    let media_type = params.media_type.clone();
+    let source_ref = tokio::task::spawn_blocking(move || {
+        observe_source_attachment(
+            Path::new(&source_path),
+            &display_name,
+            media_type.as_deref(),
+        )
+    })
+    .await
+    .context("Single Chat Source Attachment observation task failed")??;
+    let snapshot = {
+        let mut database = database.lock().await;
+        SingleChatService::default().add_source_attachment(
+            &mut database,
+            &params.conversation_id,
+            params.expected_draft_revision,
+            source_ref,
+        )?
+    };
+    emit(
+        output,
+        "single_chat.changed",
+        json!({
+            "campId": snapshot.conversation.camp_id.clone(),
+            "conversationId": params.conversation_id,
+        }),
+    );
+    Ok(serde_json::to_value(snapshot)?)
+}
+
+async fn add_single_chat_pending_source_attachment_from_path(
+    database: &Mutex<Database>,
+    output: &mpsc::UnboundedSender<String>,
+    params: AddSingleChatPendingSourceAttachmentFromPathParams,
+) -> Result<Value> {
+    let source_path = params.source_path.clone();
+    let display_name = params.display_name.clone();
+    let media_type = params.media_type.clone();
+    let source_ref = tokio::task::spawn_blocking(move || {
+        observe_source_attachment(
+            Path::new(&source_path),
+            &display_name,
+            media_type.as_deref(),
+        )
+    })
+    .await
+    .context("Single Chat pending Source Attachment observation task failed")??;
+    let snapshot = {
+        let mut database = database.lock().await;
+        SingleChatService::default().add_pending_source_attachment(
+            &mut database,
+            params.camp_id.as_str(),
+            &params.conversation_id,
+            &params.pending_input_id,
+            params.expected_revision,
+            &params.edit_token,
+            source_ref,
+        )?
+    };
+    emit(
+        output,
+        "single_chat.changed",
+        json!({
+            "campId": params.camp_id,
+            "conversationId": params.conversation_id,
+        }),
+    );
+    Ok(serde_json::to_value(snapshot)?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1819,7 +1944,7 @@ struct RuntimeInputPreparationRequest<'a> {
 }
 
 impl CampAttachmentRunAccess<'_> {
-    fn prove(self, execution: &AgentRunExecution) -> Result<()> {
+    fn prove(&self, execution: &AgentRunExecution) -> Result<()> {
         self.admission.prove(&execution.camp_id)?;
         if self.authorization.camp_id != execution.camp_id {
             anyhow::bail!("Camp Attachment Runtime authorization does not match the AgentRun Camp");
@@ -4206,6 +4331,34 @@ impl Core {
                         "Command input does not match the accepted arguments.",
                     );
                 }
+                let single_chat_denial = {
+                    let database = self.database.lock().await;
+                    rovai_core::single_chat::authorize_builtin_operation(
+                        &database,
+                        &authorized.agent_run_id,
+                        authorized.execution_epoch,
+                        &operation,
+                        &input,
+                    )
+                };
+                match single_chat_denial {
+                    Ok(Some(rejection)) => {
+                        return builtin_tool_rejection(
+                            &operation,
+                            &request_id,
+                            &rejection.code,
+                            &command_rejection_message(&rejection.payload),
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("failed to authorize Single Chat Built-in operation: {error:#}");
+                        return BuiltinToolIpcResponse::ipc_error(
+                            "builtin_tool.internal_error",
+                            "Built-in Tool authorization could not be verified",
+                        );
+                    }
+                }
                 let digest = match request_digest(&operation, &input) {
                     Ok(digest) => digest,
                     Err(error) => {
@@ -4649,6 +4802,20 @@ impl Core {
                 )?
             };
             evidence_run = Some(authenticated_run.clone());
+            if let Some(rejection) = rovai_core::single_chat::authorize_builtin_operation(
+                &database,
+                &authenticated_run.agent_run_id,
+                authenticated_run.execution_epoch,
+                &request.tool_name,
+                &request.input,
+            )? {
+                return Err(BuiltinOperationError {
+                    code: rejection.code,
+                    message: command_rejection_message(&rejection.payload),
+                    details: Some(rejection.payload),
+                }
+                .into());
+            }
             // Scope the request identity to the authenticated Run so retries in one
             // Run replay while a later Run cannot collide with the same request ID.
             request.runtime_tool_call_id = scoped_runtime_tool_call_id(
@@ -4978,6 +5145,17 @@ impl Core {
                     let input = serde_json::from_value::<CampReadInput>(request.input)
                         .map_err(|_| invalid_input_error("camp.read input is invalid"))?;
                     CampHistoryService.read(&mut database, &authenticated_run, &input)
+                }
+                SINGLE_CHAT_HISTORY_TOOL_NAME => {
+                    let input = serde_json::from_value::<SingleChatHistoryInput>(request.input)
+                        .map_err(|_| invalid_input_error("single_chat.history input is invalid"))?;
+                    let output = SingleChatService::default().history(
+                        &database,
+                        &authenticated_run.agent_run_id,
+                        authenticated_run.execution_epoch,
+                        &input,
+                    )?;
+                    serde_json::to_value(output).map_err(Into::into)
                 }
                 _ => Err(anyhow::anyhow!("private built-in operation is unsupported")),
             }?;
@@ -6730,6 +6908,151 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_exists(&database, params.camp_id.as_str())?,
                 )?)
+            }
+            "singleChat.list" => {
+                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    SingleChatService::default().list_active(&database, params.camp_id.as_str())?,
+                )?)
+            }
+            "singleChat.get" => {
+                let params: SingleChatSnapshotParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    SingleChatService::default().snapshot(&database, &params.conversation_id)?,
+                )?)
+            }
+            "singleChat.sourceAttachments.addFromPath" => {
+                let params: AddSingleChatSourceAttachmentFromPathParams =
+                    serde_json::from_value(request.params.clone())?;
+                add_single_chat_source_attachment_from_path(&self.database, &self.output, params)
+                    .await
+            }
+            "singleChat.composerDraft.removeAttachment" => {
+                let params: RemoveSingleChatSourceAttachmentParams =
+                    serde_json::from_value(request.params.clone())?;
+                let snapshot = {
+                    let mut database = self.database.lock().await;
+                    SingleChatService::default().remove_source_attachment(
+                        &mut database,
+                        &params.conversation_id,
+                        params.expected_draft_revision,
+                        &params.attachment_ref_id,
+                    )?
+                };
+                emit(
+                    &self.output,
+                    "single_chat.changed",
+                    json!({
+                        "campId": snapshot.conversation.camp_id.clone(),
+                        "conversationId": params.conversation_id,
+                    }),
+                );
+                Ok(serde_json::to_value(snapshot)?)
+            }
+            "singleChat.pendingInputs.addSourceAttachmentFromPath" => {
+                let params: AddSingleChatPendingSourceAttachmentFromPathParams =
+                    serde_json::from_value(request.params.clone())?;
+                add_single_chat_pending_source_attachment_from_path(
+                    &self.database,
+                    &self.output,
+                    params,
+                )
+                .await
+            }
+            "singleChat.pendingInputs.edit" => {
+                let params: UserCommandParams<EditSingleChatPendingInputCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let conversation_id = params.command.conversation_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = SingleChatService::default().edit_pending_input(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                drop(database);
+                if execution.result.status != CommandResultStatus::Rejected && !execution.replayed {
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({
+                            "campId": camp_id,
+                            "conversationId": conversation_id,
+                            "result": execution.result,
+                        }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "singleChat.open" => {
+                let params: UserCommandParams<OpenSingleChatCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = SingleChatService::default().open(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                let changed = execution.result.status != CommandResultStatus::Rejected;
+                drop(database);
+                if changed {
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "singleChat.send" => {
+                let params: UserCommandParams<SendSingleChatMessageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = SingleChatService::default().send(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                let changed = execution.result.status != CommandResultStatus::Rejected;
+                drop(database);
+                if changed {
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "singleChat.end" => {
+                let params: UserCommandParams<EndSingleChatCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = SingleChatService::default().end(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                let changed = execution.result.status != CommandResultStatus::Rejected;
+                let cancelled = execution
+                    .result
+                    .payload
+                    .get("cancelledAgentRunId")
+                    .is_some_and(|value| !value.is_null());
+                drop(database);
+                if cancelled {
+                    self.agent_run_cancellation_notify.notify_one();
+                }
+                if changed {
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
             }
             "camps.enter" => {
                 let params: CampEnterParams = serde_json::from_value(request.params.clone())?;
@@ -11038,6 +11361,10 @@ impl Core {
         };
         self.bind_prepared_native_session(execution, &binding_credential, &thread_id)
             .await?;
+        let active_builtin_tools = runtime
+            .builtin_tool_process_config()
+            .context("Codex Runtime has no Built-in Tool process context")?
+            .clone();
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
@@ -12694,6 +13021,10 @@ impl Core {
             .context("failed to bind ACP Native Session")?;
         self.establish_acp_compaction_observer_best_effort(execution, &runtime, &session_id)
             .await;
+        let active_builtin_tools = runtime
+            .builtin_tool_process_config()
+            .context("ACP Runtime has no Built-in Tool process context")?
+            .clone();
         let Some((prepared_context, delivery)) = self
             .materialize_and_prepare_agent_run_input(
                 execution,
@@ -13717,6 +14048,7 @@ async fn run_core(
         DesiredCompactionDetectorPolicies::from_process_environment();
     let recovery = (|| -> Result<_> {
         rovai_core::pending_camp_input::recover_edit_sessions(&database)?;
+        rovai_core::single_chat::recover_pending_edit_sessions(&database)?;
         let controlled = ExecutionRuntimeService::default()
             .recover_interrupted_controlled_shutdowns(&mut database)?;
         // Preserve the existing best-effort observer semantics and ordering:
@@ -13738,6 +14070,7 @@ async fn run_core(
         if let Err(error) = fence_active_observers_on_core_start(&mut database) {
             eprintln!("Stale Compaction Observer fencing unavailable: {error:#}");
         }
+        ExecutionRuntimeService::default().cancel_interrupted_single_chat_runs(&mut database)?;
         database.prepare_v2_recovery()?;
         mark_unstarted_deliveries_interrupted_before_dispatch(&mut database)?;
         rovai_core::runtime::settle_legacy_retry_waits(&mut database)?;
@@ -19161,6 +19494,85 @@ async fn dispatch_pending_camp_inputs(core: &Core) {
     }
 }
 
+async fn dispatch_pending_single_chat_inputs(core: &Core) {
+    let candidates = {
+        let database = core.database.lock().await;
+        rovai_core::single_chat::ready_pending_inputs(&database)
+    };
+    let candidates = match candidates {
+        Ok(candidates) => candidates,
+        Err(error) => {
+            eprintln!("Single Chat pending input admission failed: {error:#}");
+            return;
+        }
+    };
+    for command in candidates {
+        let camp_id = command.camp_id.clone();
+        let conversation_id = command.conversation_id.clone();
+        let envelope = CommandEnvelope {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            actor: ActorRef::User {
+                user_id: command.user_id.clone(),
+            },
+            camp_id: Some(camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: command.clone(),
+        };
+        let result = {
+            let mut database = core.database.lock().await;
+            SingleChatService::default().publish_pending_input(&mut database, &envelope)
+        };
+        match result {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => emit(
+                &core.output,
+                "single_chat.changed",
+                json!({
+                    "campId": camp_id,
+                    "conversationId": conversation_id,
+                    "reason": "pending_input_published",
+                }),
+            ),
+            Ok(_) => emit(
+                &core.output,
+                "single_chat.changed",
+                json!({
+                    "campId": camp_id,
+                    "conversationId": conversation_id,
+                    "reason": "pending_input_publication_deferred",
+                }),
+            ),
+            Err(error) => {
+                let code = error
+                    .downcast_ref::<LocalAttachmentFailure>()
+                    .map(|failure| failure.code().as_str())
+                    .unwrap_or("single_chat.pending_input_send_failed");
+                let record_result = {
+                    let database = core.database.lock().await;
+                    rovai_core::single_chat::record_pending_publish_failure(
+                        &database, &command, code,
+                    )
+                };
+                if let Err(record_error) = record_result {
+                    eprintln!(
+                        "Single Chat pending input failure could not be recorded: {record_error:#}"
+                    );
+                }
+                emit(
+                    &core.output,
+                    "single_chat.changed",
+                    json!({
+                        "campId": camp_id,
+                        "conversationId": conversation_id,
+                        "reason": "pending_input_needs_repair",
+                    }),
+                );
+                eprintln!("Single Chat pending input publication paused: {error:#}");
+            }
+        }
+    }
+}
+
 async fn process_agent_run_scheduler(
     core: Arc<Core>,
     output: mpsc::UnboundedSender<String>,
@@ -19185,6 +19597,7 @@ async fn process_agent_run_scheduler(
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
                 dispatch_pending_camp_inputs(&core).await;
+                dispatch_pending_single_chat_inputs(&core).await;
                 core.dispatch_agent_runs(&output).await;
             },
             _ = core.agent_run_cancellation_notify.notified() => {

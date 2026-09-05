@@ -37,6 +37,15 @@ function attachmentOwnerKey(locator: LocalAttachmentOwnerLocator): string {
   if (locator.owner === 'pending' || locator.owner === 'pending_edit') {
     return `${locator.owner}:${locator.pendingInputId}`
   }
+  if (locator.owner === 'single_chat_message') {
+    return `${locator.owner}:${locator.conversationId}:${locator.conversationMessageId}`
+  }
+  if (locator.owner === 'single_chat_pending' || locator.owner === 'single_chat_pending_edit') {
+    return `${locator.owner}:${locator.conversationId}:${locator.pendingInputId}`
+  }
+  if (locator.owner === 'single_chat_composer') {
+    return `${locator.owner}:${locator.conversationId}`
+  }
   return locator.owner
 }
 

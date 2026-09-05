@@ -476,7 +476,7 @@ fn invocation_identity(args: &[String]) -> Option<BuiltinToolCliIdentity> {
 }
 
 fn is_family_help(args: &[String]) -> bool {
-    matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "member" | "task" | "camp" | "history" | "memory"))
+    matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "member" | "task" | "camp" | "history" | "memory" | "single-chat"))
 }
 
 fn load_context() -> Result<BuiltinToolCliContext> {
@@ -2112,6 +2112,10 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
             "rovai camp read --mode thread --message-id '<message-id>' --direction after --limit 20",
         ],
         "history.search" => &["rovai history search --query 'amount'"],
+        "single_chat.history" => &[
+            "rovai single-chat history",
+            "rovai single-chat history --before-sequence 12 --limit 20",
+        ],
         "memory.view" => &[
             "rovai memory view --scope companion",
             "rovai memory view --scope relationship --counterparty-agent-id agent_3",
@@ -2222,6 +2226,33 @@ mod tests {
     }
 
     #[test]
+    fn single_chat_history_direct_flags_are_bounded_and_id_free() {
+        let description = builtin_tool_description("single_chat.history").unwrap();
+        let input = parse_and_validate_operation_input(
+            &description,
+            &[
+                "--before-sequence".to_string(),
+                "12".to_string(),
+                "--limit".to_string(),
+                "20".to_string(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(input, json!({"beforeSequence": 12, "limit": 20}));
+        assert!(
+            parse_and_validate_operation_input(
+                &description,
+                &["--limit".to_string(), "51".to_string()]
+            )
+            .is_err()
+        );
+        assert!(description.arguments.iter().all(|argument| !matches!(
+            argument.field.as_str(),
+            "conversationId" | "campId" | "agentId"
+        )));
+    }
+
+    #[test]
     fn direct_flags_and_input_file_are_mutually_exclusive() {
         let description = builtin_tool_description("team.create_task").unwrap();
         assert!(
@@ -2258,7 +2289,7 @@ mod tests {
         );
         assert!(builtin_tool_identity_by_command("tool", "list").is_none());
         assert!(builtin_tool_identity_by_command("tool", "describe").is_none());
-        for family in ["member", "task", "camp", "history", "memory"] {
+        for family in ["member", "task", "camp", "history", "memory", "single-chat"] {
             let args = [family.to_string(), "--help".to_string()];
             assert!(operation_help(&args).unwrap().is_none());
             assert!(is_family_help(&args));
@@ -2266,7 +2297,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_help_surface_covers_all_fifteen_operations_and_no_family_aliases() {
+    fn exact_help_surface_covers_all_sixteen_operations_and_no_family_aliases() {
         let exact_paths: &[&[&str]] = &[
             &["send", "--help"],
             &["gather", "--help"],
@@ -2279,12 +2310,13 @@ mod tests {
             &["camp", "search", "--help"],
             &["camp", "read", "--help"],
             &["history", "search", "--help"],
+            &["single-chat", "history", "--help"],
             &["memory", "view", "--help"],
             &["memory", "search", "--help"],
             &["memory", "read", "--help"],
             &["memory", "write", "--help"],
         ];
-        assert_eq!(exact_paths.len(), 15);
+        assert_eq!(exact_paths.len(), 16);
         for path in exact_paths {
             let args = path
                 .iter()
@@ -2295,7 +2327,7 @@ mod tests {
                 "missing exact help for {path:?}"
             );
         }
-        for family in ["member", "task", "camp", "history", "memory"] {
+        for family in ["member", "task", "camp", "history", "memory", "single-chat"] {
             let args = vec![family.to_string(), "--help".to_string()];
             assert!(operation_help(&args).unwrap().is_none());
             assert!(is_family_help(&args));

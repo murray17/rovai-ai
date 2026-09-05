@@ -14268,7 +14268,17 @@ mod tests {
                     .unwrap()
                     .into_iter()
                     .filter(|column| {
-                        column != "retry_suppression_json" && column != "source_attachments_json"
+                        column != "retry_suppression_json"
+                            && column != "source_attachments_json"
+                            && !(table == "camp_turn" && column == "kind")
+                            && !(table == "agent_run"
+                                && matches!(
+                                    column.as_str(),
+                                    "response_delivery"
+                                        | "operation_policy"
+                                        | "operation_policy_version"
+                                        | "destination_conversation_id"
+                                ))
                     })
                     .collect::<Vec<_>>()
                     .join(", ");

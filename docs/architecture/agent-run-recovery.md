@@ -33,6 +33,10 @@ Core 在普通 Startup Recovery Coordinator 之前先检查 pending `planned_shu
 AgentRun 通过 durable product fence 直接收敛为 terminal cancelled，同时保留 accepted/delivery-unknown
 input 与 unknown external effects；它们不进入下面的普通分类，也不会恢复旧 Run 执行权。
 
+非终态 `invocation_kind=single_chat` Run 同样在普通分类前直接使用既有取消结算；它只取消当前回复，保持
+Single Chat Conversation active，并允许下一条用户消息建立新 Run。它不进入 accepted-input blocker、Native Turn
+reconcile、私有 transcript replay 或专用恢复状态。完整边界见 [Single Chat Architecture](single-chat.md#取消结束与并发)。
+
 没有 pending controlled-shutdown cycle 时，Startup Recovery Coordinator 在同一事务内先收敛 Action、
 Approval、Runtime Delivery 和 prepared input，再分类 AgentRun：
 

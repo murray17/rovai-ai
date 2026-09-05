@@ -7,7 +7,9 @@ use uuid::Uuid;
 
 use crate::{
     db::Database,
-    local_attachment_snapshot::{normalize_display_name, validate_runtime_safe_leaf},
+    local_attachment_snapshot::{
+        DIRECTORY_MEDIA_TYPE, normalize_display_name, validate_runtime_safe_leaf,
+    },
 };
 
 pub const EMPTY_SOURCE_ATTACHMENTS_JSON: &str = "[]";
@@ -62,6 +64,17 @@ pub struct LocalAttachmentSourceView {
     pub availability: LocalAttachmentAvailability,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAttachmentHistoryView {
+    pub attachment_id: String,
+    pub name: String,
+    pub kind: String,
+    pub file_count: u64,
+    pub media_type: String,
+    pub byte_size: u64,
+}
+
 impl LocalAttachmentSourceRef {
     pub fn view(&self, availability: LocalAttachmentAvailability) -> LocalAttachmentSourceView {
         LocalAttachmentSourceView {
@@ -82,6 +95,24 @@ impl LocalAttachmentSourceRef {
             }
             .to_string(),
             availability,
+        }
+    }
+
+    pub fn history_view(&self) -> LocalAttachmentHistoryView {
+        let is_file = self.kind == LocalAttachmentKind::File;
+        LocalAttachmentHistoryView {
+            attachment_id: self.id.clone(),
+            name: self.display_name.clone(),
+            kind: self.kind.as_str().to_string(),
+            file_count: u64::from(is_file),
+            media_type: self.media_type.clone().unwrap_or_else(|| {
+                if is_file {
+                    "application/octet-stream".to_string()
+                } else {
+                    DIRECTORY_MEDIA_TYPE.to_string()
+                }
+            }),
+            byte_size: self.observed_byte_size.unwrap_or(0),
         }
     }
 }
@@ -121,6 +152,46 @@ pub enum LocalAttachmentOwnerLocator {
         #[serde(rename = "attachmentRefId")]
         attachment_ref_id: String,
     },
+    SingleChatComposer {
+        #[serde(rename = "campId")]
+        camp_id: String,
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "attachmentRefId")]
+        attachment_ref_id: String,
+    },
+    SingleChatPending {
+        #[serde(rename = "campId")]
+        camp_id: String,
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "pendingInputId")]
+        pending_input_id: String,
+        #[serde(rename = "attachmentRefId")]
+        attachment_ref_id: String,
+    },
+    SingleChatPendingEdit {
+        #[serde(rename = "campId")]
+        camp_id: String,
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "pendingInputId")]
+        pending_input_id: String,
+        #[serde(rename = "editToken")]
+        edit_token: String,
+        #[serde(rename = "attachmentRefId")]
+        attachment_ref_id: String,
+    },
+    SingleChatMessage {
+        #[serde(rename = "campId")]
+        camp_id: String,
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "conversationMessageId")]
+        conversation_message_id: String,
+        #[serde(rename = "attachmentRefId")]
+        attachment_ref_id: String,
+    },
 }
 
 impl LocalAttachmentOwnerLocator {
@@ -129,7 +200,11 @@ impl LocalAttachmentOwnerLocator {
             Self::Composer { camp_id, .. }
             | Self::Pending { camp_id, .. }
             | Self::PendingEdit { camp_id, .. }
-            | Self::Message { camp_id, .. } => camp_id,
+            | Self::Message { camp_id, .. }
+            | Self::SingleChatComposer { camp_id, .. }
+            | Self::SingleChatPending { camp_id, .. }
+            | Self::SingleChatPendingEdit { camp_id, .. }
+            | Self::SingleChatMessage { camp_id, .. } => camp_id,
         }
     }
 
@@ -145,6 +220,18 @@ impl LocalAttachmentOwnerLocator {
                 attachment_ref_id, ..
             }
             | Self::Message {
+                attachment_ref_id, ..
+            }
+            | Self::SingleChatComposer {
+                attachment_ref_id, ..
+            }
+            | Self::SingleChatPending {
+                attachment_ref_id, ..
+            }
+            | Self::SingleChatPendingEdit {
+                attachment_ref_id, ..
+            }
+            | Self::SingleChatMessage {
                 attachment_ref_id, ..
             } => attachment_ref_id,
         }
@@ -381,6 +468,90 @@ pub fn load_source_attachment(
                 |row| row.get::<_, String>(0),
             )
             .optional()?,
+        LocalAttachmentOwnerLocator::SingleChatComposer {
+            camp_id,
+            conversation_id,
+            ..
+        } => connection
+            .query_row(
+                r#"
+                SELECT draft.source_attachments_json
+                FROM single_chat_composer_draft AS draft
+                JOIN conversation ON conversation.id = draft.conversation_id
+                WHERE conversation.camp_id = ?1
+                  AND conversation.id = ?2
+                  AND conversation.kind = 'single_chat'
+                "#,
+                params![camp_id, conversation_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?,
+        LocalAttachmentOwnerLocator::SingleChatPending {
+            camp_id,
+            conversation_id,
+            pending_input_id,
+            ..
+        } => connection
+            .query_row(
+                r#"
+                SELECT input.source_attachments_json
+                FROM single_chat_pending_input AS input
+                JOIN conversation ON conversation.id = input.conversation_id
+                WHERE conversation.camp_id = ?1
+                  AND conversation.id = ?2
+                  AND conversation.kind = 'single_chat'
+                  AND input.conversation_id = conversation.id
+                  AND input.id = ?3
+                "#,
+                params![camp_id, conversation_id, pending_input_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?,
+        LocalAttachmentOwnerLocator::SingleChatPendingEdit {
+            camp_id,
+            conversation_id,
+            pending_input_id,
+            edit_token,
+            ..
+        } => connection
+            .query_row(
+                r#"
+                SELECT edit.working_source_attachments_json
+                FROM single_chat_pending_input_edit_session AS edit
+                JOIN conversation ON conversation.id = edit.conversation_id
+                WHERE conversation.camp_id = ?1
+                  AND conversation.id = ?2
+                  AND conversation.kind = 'single_chat'
+                  AND edit.conversation_id = conversation.id
+                  AND edit.pending_input_id = ?3
+                  AND edit.edit_token = ?4
+                "#,
+                params![camp_id, conversation_id, pending_input_id, edit_token],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?,
+        LocalAttachmentOwnerLocator::SingleChatMessage {
+            camp_id,
+            conversation_id,
+            conversation_message_id,
+            ..
+        } => connection
+            .query_row(
+                r#"
+                SELECT message.source_attachments_json
+                FROM conversation_message AS message
+                JOIN conversation ON conversation.id = message.conversation_id
+                WHERE conversation.camp_id = ?1
+                  AND conversation.id = ?2
+                  AND conversation.kind = 'single_chat'
+                  AND message.conversation_id = conversation.id
+                  AND message.id = ?3
+                  AND message.author_type = 'user'
+                "#,
+                params![camp_id, conversation_id, conversation_message_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?,
     };
     let Some(json) = json else {
         return Ok(None);
@@ -395,6 +566,43 @@ pub fn load_agent_run_source_attachments(
     agent_run_id: &str,
     execution_epoch: i64,
 ) -> Result<Vec<LocalAttachmentSourceRef>> {
+    let invocation_kind = database
+        .connection()
+        .query_row(
+            "SELECT invocation_kind FROM agent_run WHERE id = ?1 AND execution_epoch = ?2",
+            params![agent_run_id, execution_epoch],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if invocation_kind.as_deref() == Some("single_chat") {
+        let json = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT message.source_attachments_json
+                FROM agent_run AS run
+                JOIN conversation_message AS message
+                  ON message.id = run.trigger_conversation_message_id
+                JOIN conversation ON conversation.id = message.conversation_id
+                WHERE run.id = ?1
+                  AND run.execution_epoch = ?2
+                  AND run.invocation_kind = 'single_chat'
+                  AND run.trigger_conversation_message_id = message.id
+                  AND run.conversation_id = message.conversation_id
+                  AND run.destination_conversation_id = message.conversation_id
+                  AND conversation.id = message.conversation_id
+                  AND conversation.kind = 'single_chat'
+                  AND message.author_type = 'user'
+                "#,
+                params![agent_run_id, execution_epoch],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        return json
+            .map(|value| parse_source_attachments(&value))
+            .transpose()
+            .map(Option::unwrap_or_default);
+    }
     let json = database
         .connection()
         .query_row(

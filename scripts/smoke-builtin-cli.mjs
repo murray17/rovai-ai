@@ -239,7 +239,7 @@ try {
 
   const results = []
   for (const specification of runtimeSpecifications) {
-    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 15-operation Run\n`)
+    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 15-operation ordinary Camp Run\n`)
     const source = await startVerificationRun(core, specification, false)
     const sourceSnapshot = await waitForRun(core, specification.campId, source.agentRunId, {
       marker: specification.successMarker,
@@ -433,7 +433,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 21,
+    contractVersion: 22,
     ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -478,9 +478,9 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v21')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v22')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v21: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v22: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -1068,7 +1068,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v21 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v22 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -1135,7 +1135,7 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v21 ipc-v2'
+"$CLI" --version | grep -q 'contract-v22 ipc-v2'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"

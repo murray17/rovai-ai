@@ -240,6 +240,12 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.enter',
   'camps.open',
   'camps.delete',
+  'singleChat.list',
+  'singleChat.get',
+  'singleChat.open',
+  'singleChat.send',
+  'singleChat.end',
+  'singleChat.pendingInputs.edit',
   'campTurns.cancel',
   'agentRuns.cancel',
   'agentRuns.resolveRecoveryBlocker',
@@ -1492,6 +1498,45 @@ function requireAttachmentOwnerLocator(value: unknown): LocalAttachmentOwnerLoca
       attachmentRefId
     }
   }
+  if (owner === 'single_chat_composer') {
+    return {
+      owner,
+      campId,
+      conversationId: requireIpcString(input.conversationId, 'Conversation ID'),
+      attachmentRefId
+    }
+  }
+  if (owner === 'single_chat_pending') {
+    return {
+      owner,
+      campId,
+      conversationId: requireIpcString(input.conversationId, 'Conversation ID'),
+      pendingInputId: requireIpcString(input.pendingInputId, 'Pending Input ID'),
+      attachmentRefId
+    }
+  }
+  if (owner === 'single_chat_pending_edit') {
+    return {
+      owner,
+      campId,
+      conversationId: requireIpcString(input.conversationId, 'Conversation ID'),
+      pendingInputId: requireIpcString(input.pendingInputId, 'Pending Input ID'),
+      editToken: requireIpcString(input.editToken, 'Edit Token'),
+      attachmentRefId
+    }
+  }
+  if (owner === 'single_chat_message') {
+    return {
+      owner,
+      campId,
+      conversationId: requireIpcString(input.conversationId, 'Conversation ID'),
+      conversationMessageId: requireIpcString(
+        input.conversationMessageId,
+        'Conversation Message ID'
+      ),
+      attachmentRefId
+    }
+  }
   throw new Error('Attachment Owner 无效。')
 }
 
@@ -1516,6 +1561,10 @@ type PendingAttachmentOwner = {
   editToken: string
 }
 
+type SingleChatPendingAttachmentOwner = PendingAttachmentOwner & {
+  conversationId: string
+}
+
 function requirePendingAttachmentOwner(value: unknown): PendingAttachmentOwner {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Pending Attachment Owner 无效。')
@@ -1526,6 +1575,17 @@ function requirePendingAttachmentOwner(value: unknown): PendingAttachmentOwner {
     pendingInputId: requireIpcString(input.pendingInputId, 'Pending Input ID'),
     expectedRevision: requireDraftRevision(input.expectedRevision),
     editToken: requireIpcString(input.editToken, 'Edit Token')
+  }
+}
+
+function requireSingleChatPendingAttachmentOwner(
+  value: unknown
+): SingleChatPendingAttachmentOwner {
+  const owner = requirePendingAttachmentOwner(value)
+  const input = value as Record<string, unknown>
+  return {
+    ...owner,
+    conversationId: requireIpcString(input.conversationId, 'Conversation ID')
   }
 }
 
@@ -1680,6 +1740,140 @@ ipcMain.handle(
     } catch (error) {
       return { preview: null, availability: attachmentAvailabilityFromError(error) }
     }
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-attachment-prepare-path',
+  async (
+    _event,
+    conversationId: unknown,
+    expectedDraftRevision: unknown,
+    sourcePath: unknown,
+    displayName: unknown,
+    mediaType: unknown
+  ) => {
+    return core.request('singleChat.sourceAttachments.addFromPath' as CoreMethod, {
+      conversationId: requireIpcString(conversationId, 'Conversation ID'),
+      expectedDraftRevision: requireDraftRevision(expectedDraftRevision),
+      sourcePath: requireIpcString(sourcePath, '附件路径'),
+      displayName: requireIpcString(displayName, '附件名称'),
+      mediaType: typeof mediaType === 'string' && mediaType.trim() ? mediaType : null
+    })
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-attachment-prepare-bytes',
+  async (
+    _event,
+    conversationId: unknown,
+    expectedDraftRevision: unknown,
+    displayName: unknown,
+    mediaType: unknown,
+    input: unknown
+  ) => {
+    const resolvedConversationId = requireIpcString(conversationId, 'Conversation ID')
+    const resolvedRevision = requireDraftRevision(expectedDraftRevision)
+    const resolvedDisplayName = requireIpcString(displayName, '附件名称')
+    if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
+      throw new Error('附件无效或超过 25 MiB。')
+    }
+    if (!core.getSnapshot().capabilities.coreRequests) {
+      throw new Error('Core is not available for attachment references')
+    }
+    const temporaryPath = temporarySourceAttachmentPath(resolvedDisplayName)
+    let referenced = false
+    try {
+      await writeFile(temporaryPath, input, { flag: 'wx', mode: 0o600 })
+      const snapshot = await core.request(
+        'singleChat.sourceAttachments.addFromPath' as CoreMethod,
+        {
+          conversationId: resolvedConversationId,
+          expectedDraftRevision: resolvedRevision,
+          sourcePath: temporaryPath,
+          displayName: resolvedDisplayName,
+          mediaType: typeof mediaType === 'string' && mediaType.trim() ? mediaType : null
+        }
+      )
+      referenced = true
+      return snapshot
+    } finally {
+      if (!referenced) await unlink(temporaryPath).catch(() => undefined)
+    }
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-pending-attachment-prepare-path',
+  async (
+    _event,
+    owner: unknown,
+    sourcePath: unknown,
+    displayName: unknown,
+    mediaType: unknown
+  ) => {
+    const resolvedOwner = requireSingleChatPendingAttachmentOwner(owner)
+    return core.request('singleChat.pendingInputs.addSourceAttachmentFromPath' as CoreMethod, {
+      ...resolvedOwner,
+      sourcePath: requireIpcString(sourcePath, '附件路径'),
+      displayName: requireIpcString(displayName, '附件名称'),
+      mediaType: typeof mediaType === 'string' && mediaType.trim() ? mediaType : null
+    })
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-pending-attachment-prepare-bytes',
+  async (
+    _event,
+    owner: unknown,
+    displayName: unknown,
+    mediaType: unknown,
+    input: unknown
+  ) => {
+    const resolvedOwner = requireSingleChatPendingAttachmentOwner(owner)
+    const resolvedDisplayName = requireIpcString(displayName, '附件名称')
+    if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
+      throw new Error('附件无效或超过 25 MiB。')
+    }
+    if (!core.getSnapshot().capabilities.coreRequests) {
+      throw new Error('Core is not available for attachment references')
+    }
+    const temporaryPath = temporarySourceAttachmentPath(resolvedDisplayName)
+    let referenced = false
+    try {
+      await writeFile(temporaryPath, input, { flag: 'wx', mode: 0o600 })
+      const snapshot = await core.request(
+        'singleChat.pendingInputs.addSourceAttachmentFromPath' as CoreMethod,
+        {
+          ...resolvedOwner,
+          sourcePath: temporaryPath,
+          displayName: resolvedDisplayName,
+          mediaType: typeof mediaType === 'string' && mediaType.trim() ? mediaType : null
+        }
+      )
+      referenced = true
+      return snapshot
+    } finally {
+      if (!referenced) await unlink(temporaryPath).catch(() => undefined)
+    }
+  }
+)
+
+ipcMain.handle(
+  'rovai:single-chat-attachment-remove',
+  async (
+    _event,
+    conversationId: unknown,
+    expectedDraftRevision: unknown,
+    attachmentRefId: unknown
+  ) => {
+    return core.request('singleChat.composerDraft.removeAttachment' as CoreMethod, {
+      conversationId: requireIpcString(conversationId, 'Conversation ID'),
+      expectedDraftRevision: requireDraftRevision(expectedDraftRevision),
+      attachmentRefId: requireIpcString(attachmentRefId, '附件 ID')
+    })
   }
 )
 

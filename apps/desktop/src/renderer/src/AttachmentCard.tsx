@@ -38,7 +38,19 @@ function localAttachmentLocatorKey(locator: LocalAttachmentOwnerLocator): string
   if (locator.owner === 'pending') {
     return `pending:${locator.campId}:${locator.pendingInputId}:${locator.attachmentRefId}`
   }
-  return `pending-edit:${locator.campId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
+  if (locator.owner === 'pending_edit') {
+    return `pending-edit:${locator.campId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
+  }
+  if (locator.owner === 'single_chat_composer') {
+    return `single-chat-composer:${locator.campId}:${locator.conversationId}:${locator.attachmentRefId}`
+  }
+  if (locator.owner === 'single_chat_message') {
+    return `single-chat-message:${locator.campId}:${locator.conversationId}:${locator.conversationMessageId}:${locator.attachmentRefId}`
+  }
+  if (locator.owner === 'single_chat_pending') {
+    return `single-chat-pending:${locator.campId}:${locator.conversationId}:${locator.pendingInputId}:${locator.attachmentRefId}`
+  }
+  return `single-chat-pending-edit:${locator.campId}:${locator.conversationId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
 }
 
 export function AttachmentCard({

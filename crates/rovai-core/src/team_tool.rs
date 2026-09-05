@@ -38,13 +38,14 @@ use crate::{
         persist_public_a2a_message,
     },
     runtime::AgentRunWorkspace,
+    single_chat::SINGLE_CHAT_HISTORY_TOOL_NAME,
 };
 
 pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 15] = [
+pub const TEAM_TOOL_NAMES: [&str; 16] = [
     CAMP_MESSAGE_SEND_TOOL_NAME,
     GATHER_TOOL_NAME,
     MEMBER_CREATE_TOOL_NAME,
@@ -56,6 +57,7 @@ pub const TEAM_TOOL_NAMES: [&str; 15] = [
     CAMP_SEARCH_TOOL_NAME,
     HISTORY_SEARCH_TOOL_NAME,
     CAMP_READ_TOOL_NAME,
+    SINGLE_CHAT_HISTORY_TOOL_NAME,
     "memory.view",
     "memory.search",
     "memory.read",

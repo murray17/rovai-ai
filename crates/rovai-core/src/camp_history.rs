@@ -19,7 +19,7 @@ use crate::{
     camp_message_publication::public_camp_message_publication_cte,
     db::Database,
     local_attachment_snapshot::DIRECTORY_MEDIA_TYPE,
-    local_attachment_source::{LocalAttachmentKind, parse_source_attachments},
+    local_attachment_source::parse_source_attachments,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{AuthenticatedTeamToolRun, TeamToolInvocationError},
 };
@@ -2057,23 +2057,7 @@ fn load_attachments(
     let mut attachments = source_attachments
         .into_iter()
         .take(MAX_ATTACHMENTS)
-        .map(|source_ref| {
-            let is_file = source_ref.kind == LocalAttachmentKind::File;
-            json!({
-                "attachmentId": source_ref.id,
-                "name": truncate_metadata(source_ref.display_name),
-                "kind": source_ref.kind.as_str(),
-                "fileCount": if is_file { 1 } else { 0 },
-                "mediaType": truncate_metadata(source_ref.media_type.unwrap_or_else(|| {
-                    if is_file {
-                        "application/octet-stream".to_string()
-                    } else {
-                        "application/x-directory".to_string()
-                    }
-                })),
-                "byteSize": source_ref.observed_byte_size.unwrap_or(0),
-            })
-        })
+        .map(|source_ref| json!(source_ref.history_view()))
         .collect::<Vec<_>>();
     let legacy_limit = MAX_ATTACHMENTS.saturating_sub(attachments.len());
     if legacy_limit == 0 {

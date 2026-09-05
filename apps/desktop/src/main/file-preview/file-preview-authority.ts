@@ -86,11 +86,18 @@ function attachmentAuthorityTarget(
   request: Extract<OpenFilePreviewRequest, { kind: 'attachment' }>,
   target: DesktopAttachmentTarget
 ): FilePreviewAuthorityResult {
-  const ownerIdentity = request.locator.owner === 'message'
-    ? `${request.locator.owner}:${request.locator.messageId}`
-    : request.locator.owner === 'pending' || request.locator.owner === 'pending_edit'
-      ? `${request.locator.owner}:${request.locator.pendingInputId}`
-      : request.locator.owner
+  const locator = request.locator
+  const ownerIdentity = locator.owner === 'message'
+    ? `${locator.owner}:${locator.messageId}`
+    : locator.owner === 'pending' || locator.owner === 'pending_edit'
+      ? `${locator.owner}:${locator.pendingInputId}`
+      : locator.owner === 'single_chat_message'
+        ? `${locator.owner}:${locator.conversationId}:${locator.conversationMessageId}`
+        : locator.owner === 'single_chat_pending' || locator.owner === 'single_chat_pending_edit'
+          ? `${locator.owner}:${locator.conversationId}:${locator.pendingInputId}`
+          : locator.owner === 'single_chat_composer'
+            ? `${locator.owner}:${locator.conversationId}`
+            : locator.owner
   return {
     kind: 'file_target',
     campId: request.campId,

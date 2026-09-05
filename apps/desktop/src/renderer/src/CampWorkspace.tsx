@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { CampDetailPopover } from './CampDetailPopover'
+import { SingleChatPanel } from './SingleChatPanel'
 import { CampMemberFastToggle } from './CampMemberFastToggle'
 import type {
   ActionApprovalView,
@@ -59,6 +60,19 @@ import {
 import { PendingCampInputs, type PendingAttachmentDropTarget } from './PendingCampInputs'
 import { AttachmentCard, AttachmentPlaceholder, ComposerAttachmentStrip } from './AttachmentCard'
 export { attachmentRevealLabel } from './AttachmentCard'
+import {
+  attachmentDragKind,
+  dataTransferContainsFiles,
+  droppedAttachmentInputs,
+  type AttachmentDragKind,
+  type AttachmentKind,
+  type AttachmentPreparationInput
+} from './attachment-drop'
+export {
+  attachmentDragKind,
+  dataTransferContainsFiles,
+  droppedAttachmentInputs
+} from './attachment-drop'
 import {
   activityStatusForAgentRun,
   agentRunPresentation,
@@ -248,8 +262,6 @@ export interface CampMemberRemoveOutcome {
   reconciliationStatus?: 'reconciling' | 'settled'
 }
 type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
-type AttachmentKind = 'file' | 'directory'
-type AttachmentDragKind = 'files' | 'directory'
 export interface CampLeavePreparation {
   complete(didLeave: boolean): void
 }
@@ -259,7 +271,6 @@ type DraftLoadState =
   | { state: 'ready' }
   | { state: 'error'; error: Error }
 
-type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
 type ReplyFocusModality = 'pointer' | 'keyboard'
 type ConversationFindStatus = 'idle' | 'searching' | 'loading_target' | 'ready' | 'error'
 
@@ -458,37 +469,6 @@ export function initialCampConversationView(
   return showingFirstRunWelcome || !worldMapEnabled
     ? 'conversation'
     : campConversationViewFromStoredValue(storedValue)
-}
-
-export function dataTransferContainsFiles(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
-  return Array.from(dataTransfer.types).includes('Files')
-}
-
-export function attachmentDragKind(
-  dataTransfer: Pick<DataTransfer, 'items' | 'types'>
-): AttachmentDragKind | null {
-  if (!dataTransferContainsFiles(dataTransfer)) return null
-  const fileItems = Array.from(dataTransfer.items).filter((item) => item.kind === 'file')
-  if (fileItems.length !== 1) return 'files'
-  const entry = fileItems[0].webkitGetAsEntry?.()
-  return entry?.isDirectory ? 'directory' : 'files'
-}
-
-export function droppedAttachmentInputs(
-  dataTransfer: Pick<DataTransfer, 'files' | 'items'>
-): AttachmentPreparationInput[] {
-  const fromItems = Array.from(dataTransfer.items)
-    .filter((item) => item.kind === 'file')
-    .flatMap((item) => {
-      const file = item.getAsFile()
-      if (!file) return []
-      return [{
-        file,
-        kindHint: item.webkitGetAsEntry?.()?.isDirectory ? 'directory' : 'file'
-      } satisfies AttachmentPreparationInput]
-    })
-  if (fromItems.length > 0) return fromItems
-  return Array.from(dataTransfer.files).map((file) => ({ file, kindHint: 'file' }))
 }
 
 export type AgentExecutionProcess = {
@@ -1376,6 +1356,9 @@ export function CampWorkspace({
   inspectorVisible = false,
   inspectorTab: controlledInspectorTab,
   detailEntryHost,
+  singleChatVisible = false,
+  onOpenSingleChat = () => undefined,
+  onCloseSingleChat = () => undefined,
   onCloseInspector = () => undefined,
   onInspectorTabChange,
   onOpenInspector,
@@ -1422,6 +1405,9 @@ export function CampWorkspace({
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
   detailEntryHost?: HTMLElement | null
+  singleChatVisible?: boolean
+  onOpenSingleChat?(): void
+  onCloseSingleChat?(): void
   onCloseInspector?(): void
   onInspectorTabChange?(tab: CampInspectorTab): void
   onOpenInspector?(tab: CampInspectorTab): void
@@ -4465,6 +4451,17 @@ export function CampWorkspace({
               />
             </section>
             </CampDetailPopover>}
+            {snapshot.camp.activationState === 'active' && (
+              <SingleChatPanel
+                campId={snapshot.camp.id}
+                members={snapshot.members}
+                entryHost={detailEntryHost}
+                visible={singleChatVisible}
+                onOpen={onOpenSingleChat}
+                onClose={onCloseSingleChat}
+                onNotify={onNotify}
+              />
+            )}
           </div>
           {executionPlacement === 'bottom' && (
             <RunPulse

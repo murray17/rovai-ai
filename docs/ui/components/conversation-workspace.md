@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # Camp 会话工作区
@@ -278,6 +278,64 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 自动插入失效 Mention 或改投 Lead。字段和竞态边界见
 [Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，交互探索见
 [延续路由原型](../../prototypes/composer-continuation-routing/index.html)。
+
+## Camp 内单聊
+
+Camp Header 的“当前会话”详情入口包含一个独立“单聊”项；打开后使用锚定在会话区右上方的非模态 panel，
+与既有成员/Task/文件详情互斥，但不改变 Camp route、公共时间线、Composer Draft 或执行台位置。入口显示 active
+Single Chat 数量；任一会话正在回复时复用紧凑运行 spinner，不用未读或通知语义。
+
+panel 顶部先显示标题，再显示单聊对象选择栏和直接“结束”按钮，不提供省略号菜单。选择器 trigger 使用当前队员头像、
+显示名和团队角色；展开列表每个选项也显示头像、名称和角色，不把对象分成“已有单聊 / 新的单聊”两组，也不暴露
+Conversation、Binding 或 Session 状态。选择器和用户消息使用既有执行浮层的 `--execution-running-surface` 分层，
+不能新增主题专属色值。
+
+transcript 采用对话式双轨：用户正文与附件居右，队员回复居左；正文区两侧都不显示头像。用户正文继续使用既有执行
+浮层的 `--execution-running-surface`，队员消息容器不使用背景、边框或气泡，只以开放排版承载执行过程与 final。队员一次回复由“执行过程 +
+final message”组成。运行中过程复用当前执行台的 narration、plan、command/tool 与状态视觉；连续 Command 聚合为一个
+可展开的“已执行 x 项操作”，而不是平铺多个重边框卡片。运行中默认展开，用户仍可主动收起；Run 进入 terminal 后
+过程自动折叠，summary 使用中文：成功为“工作了 {时长}”，取消为“你在 {时长}后停止了运行”，失败保持明确失败语义。
+summary 下方以一条分隔线连接始终展开的 final message；不得把 final 收进执行 disclosure，也不得保留英文
+“Working for / You stopped after”。取消或失败没有 final 时只显示诚实终态，不合成队员答案。
+
+Single Chat Composer 与当前 Camp Composer 使用同一输入框风格和操作层级：输入区、附件入口、待发送附件卡片、
+“↵ 发送 · ⇧↵ 换行”提示与“发送”按钮。支持文件选择、粘贴文件和仅附件消息；附件暂存与已发送附件都只展示在
+当前私有 Conversation，不复用公屏 Draft，但选择、可用性状态、`AttachmentCard`、Preview、Open 与 Reveal 都复用
+Camp 公共 Source Attachment 组件。`Enter` 发送、`Shift+Enter` 换行，IME 合成期间不提交。
+
+同一段 Single Chat 有非终态 Run 时 Composer 仍可输入后续正文和附件。Draft 为空时主要动作显示“停止”；一旦存在正文
+或附件，主要动作恢复为“发送”，提交后把内容放入该 Conversation 自己的 FIFO，不改变当前 Run 输入。队列按顺序展示，
+支持删除和独占编辑；编辑中可修改正文并添加、移除或重排附件。发布前附件失效时队首显示可理解的修复状态并阻塞同一
+Conversation 的后项，用户保存有效内容或删除队首后恢复；不得阻塞 Camp 公屏或其他 Single Chat。停止只结束当前回复，
+对话和未发布队列仍可继续。发送后回到最新；后台 Evidence 更新仅在用户原本接近底部时跟随，
+用户上滚阅读时不得抢走位置。选择另一个对象恢复其 active transcript 或创建新 transcript，UI 不区分这两种内部结果。
+切换对象时立即撤下旧 Snapshot；新对象加载完成前，发送、附件、停止与结束等依赖当前 Conversation 的操作保持禁用。
+打开 panel、切换对象和成员目标变化是唯一可以决定当前对象、清空 Snapshot 和改变 loading 的路径。晚到的打开或读取结果
+必须同时匹配最后一次 target request sequence 和当前队员，不能覆盖较新的选择。panel 收起、离开 Camp 或组件卸载时必须使旧
+target request 失效。结束确认只固定打开确认框时的 `campId`、Conversation ID 与队员显示名称，不保存 version，确认时也不得从
+可能已切换的全局 Snapshot 重新解析目标。
+
+panel 每次打开时读取一次 active Conversation 列表和当前对象的完整 Snapshot；空闲后不保留固定刷新计时器。只有当前
+Conversation 存在非终态 Run，或存在会在 Run 结束后自动发布的 `queued` Pending Input 时，才按约 800ms 周期只读取当前
+Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即停止，`needs_repair` 不触发轮询。panel 可见时沿用
+`single_chat.changed` 做定向刷新：`refreshList` 只读列表并更新对象列表/运行标记，不选择对象、不加载正文也不改变 loading；
+`refreshCurrent` 只读当前 Conversation Snapshot。轮询、事件与本地 mutation 共用同一 `refreshCurrent`；同一目标已有 get 在途时
+不并发新读取，期间的重复需求合并为当前读取完成后的一次补读。接口返回完整 Snapshot 时可先直接呈现，但在途旧读取不得成为
+本地修改后的最后结果。所有后台刷新都不清空 Snapshot、不切换对象且不改变 loading。panel 收起后停止计时刷新，再次打开时重新执行
+一次 list + get。
+本流程继续使用完整 `singleChat.get`，不引入增量 Read API 或另一套事件流。
+
+“结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，
+并提供“不再询问”复选框；选择后只把该确认偏好保存在本机。结束成功立即从产品 surface 移除该 transcript，之后与
+同一队员发起单聊显示新的空白 Conversation。具体 ended/审计保留、取消和迟到事件行为由
+[Single Chat v2](../../contracts/single-chat-v2.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
+
+panel 保留明确的收起按钮与 `Esc`，对象菜单和确认 Dialog 打开时 `Esc` 先关闭最上层浮层。选择器、Disclosure、停止、
+结束和发送均需可键盘到达并有可见 `focus-visible`；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
+不能遮住全局侧栏或溢出可视区；reduced motion 关闭非必要位移和旋转动画但保留状态变化。
+
+领域、权限与输出路由见 [Single Chat v2](../../contracts/single-chat-v2.md)，组件数据流见
+[Single Chat Architecture](../../architecture/single-chat.md)。
 
 ## Camp 执行过程
 

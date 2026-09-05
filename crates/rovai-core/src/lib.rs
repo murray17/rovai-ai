@@ -74,6 +74,7 @@ pub mod runtime_platform_admission;
 pub mod runtime_probe_process;
 pub mod runtime_resolution;
 pub mod runtime_search_operation;
+pub mod single_chat;
 pub mod skill;
 pub mod skill_projection;
 pub mod team_tool;

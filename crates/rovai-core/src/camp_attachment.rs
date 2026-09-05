@@ -392,7 +392,11 @@ pub fn legacy_attachment_belongs_to_owner(
             |row| row.get(0),
         )?,
         LocalAttachmentOwnerLocator::Pending { .. }
-        | LocalAttachmentOwnerLocator::PendingEdit { .. } => false,
+        | LocalAttachmentOwnerLocator::PendingEdit { .. }
+        | LocalAttachmentOwnerLocator::SingleChatComposer { .. }
+        | LocalAttachmentOwnerLocator::SingleChatPending { .. }
+        | LocalAttachmentOwnerLocator::SingleChatPendingEdit { .. }
+        | LocalAttachmentOwnerLocator::SingleChatMessage { .. } => false,
     };
     Ok(belongs)
 }

@@ -69,6 +69,42 @@ function attachmentLocator(value: unknown, expectedCampId: string): LocalAttachm
       attachmentRefId
     }
   }
+  if (input.owner === 'single_chat_composer') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      conversationId: string(input.conversationId, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'single_chat_pending') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      conversationId: string(input.conversationId, 128),
+      pendingInputId: string(input.pendingInputId, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'single_chat_pending_edit') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      conversationId: string(input.conversationId, 128),
+      pendingInputId: string(input.pendingInputId, 128),
+      editToken: string(input.editToken, 128),
+      attachmentRefId
+    }
+  }
+  if (input.owner === 'single_chat_message') {
+    return {
+      owner: input.owner,
+      campId: ownerCampId,
+      conversationId: string(input.conversationId, 128),
+      conversationMessageId: string(input.conversationMessageId, 128),
+      attachmentRefId
+    }
+  }
   throw new Error('Unsupported Attachment')
 }
 

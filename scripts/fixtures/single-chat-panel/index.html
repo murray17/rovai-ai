@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Single Chat acceptance fixture</title>
+    <style>
+      html, body, #root { width: 100%; height: 100%; margin: 0; }
+      body { overflow: hidden; background: var(--app-surface); }
+      .single-chat-fixture { display: grid; width: 100%; height: 100%; grid-template-rows: 64px minmax(0, 1fr); color: var(--ink); background: var(--app-surface); }
+      .single-chat-fixture-header { display: flex; align-items: center; gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--toolbar-surface); }
+      .single-chat-fixture-title { display: grid; gap: 2px; }
+      .single-chat-fixture-title span { color: var(--faint); font-size: 10px; }
+      .single-chat-fixture-title strong { font-size: 14px; }
+      .single-chat-fixture-entries { margin-left: auto; }
+      .single-chat-fixture-stage { position: relative; min-width: 0; min-height: 0; margin: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--conversation-surface); }
+      .single-chat-fixture-watermark { display: grid; height: 100%; place-content: center; color: var(--faint); font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/renderer.tsx"></script>
+  </body>
+</html>

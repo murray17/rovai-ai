@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # 当前规范与决定理由导航
@@ -50,6 +50,14 @@ last_updated: 2026-09-05
 - 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Public A2A Message Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Gather](../architecture/durable-gather-barrier.md)、[Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Message Delivery v8](../contracts/message-delivery-v8.md)、[Gather v5](../contracts/gather-v5.md)和[Camp History Retrieval v4](../contracts/camp-history-v4.md)。
 - 理由来源：[v0.15](../versions/v0.15/decisions.md)、[v0.45](../versions/v0.45/decisions.md)、[v0.47](../versions/v0.47/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.59](../versions/v0.59/decisions.md)、[v0.62](../versions/v0.62/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v1.06](../versions/v1.06/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D02](../versions/v1.29/decisions.md#v1-29-d02)、[V1.29-D05](../versions/v1.29/decisions.md#v1-29-d05)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)及[V1.37-D03](../versions/v1.37/decisions.md#v1-37-d03)。
 
+## Single Chat
+
+- 当前规范：[Single Chat Architecture](../architecture/single-chat.md)、[Single Chat v2](../contracts/single-chat-v2.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)和[Camp 内单聊 UI](../ui/components/conversation-workspace.md#camp-内单聊)。
+- 复用现有执行体系、固定私有路由与封闭 Built-in policy 的理由：[V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)。
+- 重启取消当前回复、显式结束和无 successor cleanup fence 的理由：[V1.50-D02](../versions/v1.50/decisions.md#v1-50-d02)。
+- 复用公共弱持久 Source Ref、不维护 Single Chat 附件内容仓库的理由：[V1.50-D03](../versions/v1.50/decisions.md#v1-50-d03)。
+- 运行中输入进入 Conversation-local FIFO、失效队首阻塞并可修复的理由：[V1.50-D04](../versions/v1.50/decisions.md#v1-50-d04)。
+
 ## Runtime execution 与 Security
 
 - 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Planned Shutdown v6](../contracts/planned-shutdown-v6.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[ACP Client Terminal v2](../contracts/acp-client-terminal-v2.md)、[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)和[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)。
@@ -81,7 +89,7 @@ last_updated: 2026-09-05
 
 ## Skills、MCP 与 Built-ins
 
-- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
+- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
 - 理由来源：[v0.06](../versions/v0.06/decisions.md)、[v0.09](../versions/v0.09/decisions.md)、[v0.31](../versions/v0.31/decisions.md)、[v0.37](../versions/v0.37/decisions.md)、[v0.42](../versions/v0.42/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.82](../versions/v0.82/decisions.md)、[v0.85](../versions/v0.85/decisions.md)、[v0.91](../versions/v0.91/decisions.md)、[v0.92](../versions/v0.92/decisions.md)、[v0.93](../versions/v0.93/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.17-D02](../versions/v1.17/decisions.md#v1-17-d02)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.27-D04](../versions/v1.27/decisions.md#v1-27-d04)、[V1.28-D03](../versions/v1.28/decisions.md#v1-28-d03)。
 - Pi `.pi/skills` 只由原生 ResourceLoader 发现、Rovai 不追加路径或验证 catalog 的理由：[V1.44-D01](../versions/v1.44/decisions.md#v1-44-d01)；当前 Pi External MCP Unsupported 与旧 bridge clean removal 理由：[V1.39-D09](../versions/v1.39/decisions.md#v1-39-d09)。
 
@@ -113,7 +121,7 @@ last_updated: 2026-09-05
 
 ## 外部附件 CLI 入口
 
-- 当前规范：[Camp Attachment v8](../contracts/camp-attachment-v8.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)及[附件架构](../architecture/camp-published-attachment-view.md)。Agent CLI 的私有 snapshot 语义继续由 v8 继承的 v7 条款拥有。
+- 当前规范：[Camp Attachment v8](../contracts/camp-attachment-v8.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Built-in Tool Transport v22](../contracts/builtin-tool-transport-v22.md)及[附件架构](../architecture/camp-published-attachment-view.md)。Agent CLI 的私有 snapshot 语义继续由 v8 继承的 v7 条款拥有。
 - 主要理由：[V1.32-D01](../versions/v1.32/decisions.md#v1-32-d01)：由 CLI 以 Runtime 权限适配外部路径，保持 Core 的读取根目录限制。
 
 ## Camp 连续消息

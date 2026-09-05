@@ -793,6 +793,120 @@ export interface CancelCampTurnCommand {
   expectedVersion: number
 }
 
+export interface OpenSingleChatCommand {
+  campId: string
+  agentId: string
+}
+
+export interface SendSingleChatMessageCommand {
+  campId: string
+  conversationId: string
+  body: string
+  expectedConversationVersion: number
+  draftRevision: number
+}
+
+export interface EndSingleChatCommand {
+  campId: string
+  conversationId: string
+}
+
+export interface SingleChatConversationView {
+  id: string
+  campId: string
+  agentId: string
+  version: number
+  status: 'active' | 'ended'
+  lastMessageSequence: number
+  lastAcceptedPublicBoundarySequence: number
+  activeAgentRunId: string | null
+  createdAt: string
+  updatedAt: string
+  endedAt: string | null
+}
+
+export interface SingleChatMessageView {
+  id: string
+  sequence: number
+  authorType: 'user' | 'agent' | 'system'
+  authorId: string
+  body: string
+  attachments: CampMessageAttachmentView[]
+  agentRunId: string | null
+  createdAt: string
+}
+
+export interface SingleChatRunView {
+  id: string
+  triggerConversationMessageId: string
+  status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
+  version: number
+  executionEpoch: number
+  cancelRequestedAt: string | null
+  lastErrorCode: string | null
+  createdAt: string
+  startedAt: string | null
+  endedAt: string | null
+  finalConversationMessageId: string | null
+  executionEvidenceCount: number
+}
+
+export interface SingleChatSnapshot {
+  conversation: SingleChatConversationView
+  messages: SingleChatMessageView[]
+  draft: SingleChatComposerDraftView
+  pendingInputs: SingleChatPendingInputsView
+  agentRuns: SingleChatRunView[]
+  executionEvidence: AgentRunExecutionEvidenceView[]
+}
+
+export interface SingleChatComposerDraftView {
+  revision: number
+  attachments: LocalAttachmentSourceView[]
+  updatedAt: string | null
+}
+
+export interface SingleChatPendingInputView {
+  id: string
+  conversationId: string
+  enqueueSequence: number
+  revision: number
+  state: 'queued' | 'needs_repair'
+  body: string
+  lastAttemptErrorCode: string | null
+  attachments: LocalAttachmentSourceView[]
+}
+
+export interface SingleChatPendingInputEditSessionView {
+  pendingInputId: string
+  editToken: string
+  basePendingRevision: number
+  recoveryRequired: boolean
+  workingBody: string
+  workingAttachments: LocalAttachmentSourceView[]
+}
+
+export interface SingleChatPendingInputsView {
+  executionActive: boolean
+  items: SingleChatPendingInputView[]
+  editSession: SingleChatPendingInputEditSessionView | null
+}
+
+export type SingleChatPendingInputEditAction =
+  | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
+  | { type: 'save'; body: string }
+  | { type: 'remove_attachment'; attachmentRefId: string }
+  | { type: 'reorder_attachments'; attachmentRefIds: string[] }
+
+export interface EditSingleChatPendingInputCommand {
+  campId: string
+  conversationId: string
+  pendingInputId: string
+  expectedRevision: number
+  editToken: string | null
+  action: SingleChatPendingInputEditAction
+}
+
 export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 
 export type CampChannelSource =
@@ -1116,6 +1230,34 @@ export type LocalAttachmentOwnerLocator =
       attachmentRefId: string
     }
   | { owner: 'message'; campId: string; messageId: string; attachmentRefId: string }
+  | {
+      owner: 'single_chat_composer'
+      campId: string
+      conversationId: string
+      attachmentRefId: string
+    }
+  | {
+      owner: 'single_chat_pending'
+      campId: string
+      conversationId: string
+      pendingInputId: string
+      attachmentRefId: string
+    }
+  | {
+      owner: 'single_chat_pending_edit'
+      campId: string
+      conversationId: string
+      pendingInputId: string
+      editToken: string
+      attachmentRefId: string
+    }
+  | {
+      owner: 'single_chat_message'
+      campId: string
+      conversationId: string
+      conversationMessageId: string
+      attachmentRefId: string
+    }
 
 export interface CampComposerDraftView {
   campId: string
@@ -1481,6 +1623,7 @@ export type AgentRunCancelReasonCode =
   | 'camp_turn_cancelled'
   | 'execution_budget_exhausted'
   | 'user_requested_agent_run_stop'
+  | 'single_chat_ended'
 
 export interface AgentRunView {
   id: string
@@ -1508,7 +1651,7 @@ export interface AgentRunView {
   runtimeModel: { modelId: string | null } | null
   executionEpoch: number
   permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
-  invocationKind: 'direct' | 'a2a' | 'gather_completion'
+  invocationKind: 'direct' | 'a2a' | 'gather_completion' | 'single_chat'
   triggerDeliveryGeneration: number
   a2aParentAgentRunId: string | null
   a2aRootAgentRunId: string | null
@@ -3366,6 +3509,15 @@ export type CoreMethod =
   | 'camps.enter'
   | 'camps.open'
   | 'camps.delete'
+  | 'singleChat.list'
+  | 'singleChat.get'
+  | 'singleChat.open'
+  | 'singleChat.send'
+  | 'singleChat.end'
+  | 'singleChat.sourceAttachments.addFromPath'
+  | 'singleChat.composerDraft.removeAttachment'
+  | 'singleChat.pendingInputs.addSourceAttachmentFromPath'
+  | 'singleChat.pendingInputs.edit'
   | 'campTurns.cancel'
   | 'agentRuns.cancel'
   | 'agentRuns.diagnostic.get'
@@ -3435,6 +3587,25 @@ export interface RovaiApi {
       editToken: string
     }, file: File): Promise<CampPendingInputsView>
     preview(locator: LocalAttachmentOwnerLocator): Promise<AttachmentPreviewResult>
+  }
+  singleChatAttachments: {
+    prepare(
+      conversationId: string,
+      expectedDraftRevision: number,
+      file: File
+    ): Promise<SingleChatSnapshot>
+    preparePending(input: {
+      campId: string
+      conversationId: string
+      pendingInputId: string
+      expectedRevision: number
+      editToken: string
+    }, file: File): Promise<SingleChatSnapshot>
+    remove(
+      conversationId: string,
+      expectedDraftRevision: number,
+      attachmentRefId: string
+    ): Promise<SingleChatSnapshot>
   }
   attachments: {
     open(locator: LocalAttachmentOwnerLocator): Promise<AttachmentOpenResult>

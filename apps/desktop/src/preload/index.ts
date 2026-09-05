@@ -380,6 +380,58 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:composer-attachment-preview', locator)
     }
   },
+  singleChatAttachments: {
+    async prepare(conversationId, expectedDraftRevision, file) {
+      const sourcePath = webUtils.getPathForFile(file)
+      if (sourcePath) {
+        return ipcRenderer.invoke(
+          'rovai:single-chat-attachment-prepare-path',
+          conversationId,
+          expectedDraftRevision,
+          sourcePath,
+          file.name,
+          file.type || null
+        )
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      return ipcRenderer.invoke(
+        'rovai:single-chat-attachment-prepare-bytes',
+        conversationId,
+        expectedDraftRevision,
+        file.name,
+        file.type || null,
+        bytes
+      )
+    },
+    async preparePending(input, file) {
+      const sourcePath = webUtils.getPathForFile(file)
+      if (sourcePath) {
+        return ipcRenderer.invoke(
+          'rovai:single-chat-pending-attachment-prepare-path',
+          input,
+          sourcePath,
+          file.name,
+          file.type || null
+        )
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      return ipcRenderer.invoke(
+        'rovai:single-chat-pending-attachment-prepare-bytes',
+        input,
+        file.name,
+        file.type || null,
+        bytes
+      )
+    },
+    remove(conversationId, expectedDraftRevision, attachmentRefId) {
+      return ipcRenderer.invoke(
+        'rovai:single-chat-attachment-remove',
+        conversationId,
+        expectedDraftRevision,
+        attachmentRefId
+      )
+    }
+  },
   attachments: {
     open(locator) {
       return ipcRenderer.invoke('rovai:attachment-open', locator)

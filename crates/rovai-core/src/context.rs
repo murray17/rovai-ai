@@ -8,6 +8,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const BUILTIN_CLI_CHARTER: &str = include_str!("../resources/charter-rovai-cli.md");
+const SINGLE_CHAT_SESSION_CHARTER: &str = include_str!("../resources/charter-rovai-single-chat.md");
+const SINGLE_CHAT_GUIDANCE: &str = include_str!("../resources/single-chat-guidance-v1.json");
 const FEISHU_FILE_DELIVERY_GUIDANCE: &str = "This Camp is connected to an external channel. Local file paths and Runtime image previews are not delivered there; when the recipient needs the file itself, include `--file <path>` in the corresponding `rovai send` message.";
 const CODEX_FINAL_CAMP_ANSWER_GUIDANCE: &str = "When publishing the Camp-visible final answer with `rovai send`, use the complete final response in polished Markdown; do not send a compressed one-line summary and then write a richer Runtime final.";
 
@@ -45,6 +47,7 @@ use crate::{
     managed_blob::ManagedBlobStore,
     mcp_projection::{McpExposureSnapshot, PreparedMcpProjection},
     memory::{MemoryScopeKind, MemoryService, RelationshipDirection},
+    single_chat::filter_single_chat_skill_exposure,
     skill::SkillLibraryService,
     skill_projection::{PreparedSkillExposure, SkillExposureSnapshot, SkillProjectionReconciler},
 };
@@ -453,7 +456,11 @@ impl ContextService {
             std::path::Path::new(execution_root),
             adapter_kind,
         )?;
-        Ok(prepared)
+        if snapshot.invocation_kind == "single_chat" {
+            filter_single_chat_skill_exposure(database, prepared)
+        } else {
+            Ok(prepared)
+        }
     }
 
     fn materialize_inner(
@@ -548,11 +555,12 @@ impl ContextService {
         let bootstrap_required = requires_new_native_session
             || snapshot.native_charter_digest.as_deref()
                 != Some(bootstrap_evidence_digest.as_str());
-        let previous_accepted_public_boundary_sequence = if !requires_new_native_session {
-            snapshot.last_accepted_public_boundary_sequence
-        } else {
-            0
-        };
+        let previous_accepted_public_boundary_sequence =
+            if snapshot.invocation_kind == "single_chat" || !requires_new_native_session {
+                snapshot.last_accepted_public_boundary_sequence
+            } else {
+                0
+            };
         if previous_accepted_public_boundary_sequence > snapshot.camp_message_boundary_sequence {
             anyhow::bail!("Accepted Public Context Boundary is ahead of the AgentRun boundary");
         }
@@ -585,7 +593,11 @@ impl ContextService {
         let profile_json = serde_json::to_value(profile)?;
         let profile_digest = profile.canonical_digest()?;
         let (mut self_active_tasks, mut self_active_task_omitted_count) =
-            load_self_active_tasks(database, &snapshot, profile.max_self_active_tasks)?;
+            if snapshot.invocation_kind == "single_chat" {
+                (Vec::new(), 0)
+            } else {
+                load_self_active_tasks(database, &snapshot, profile.max_self_active_tasks)?
+            };
         let mut recent_messages = load_recent_public_messages(
             database,
             &snapshot,
@@ -717,6 +729,8 @@ impl ContextService {
                 shared_conversation: &shared_conversation,
                 run_facts: &rendered_run_facts,
                 a2a_guidance: a2a_guidance.payload_json.as_deref(),
+                single_chat_guidance: (snapshot.invocation_kind == "single_chat")
+                    .then_some(SINGLE_CHAT_GUIDANCE.trim()),
                 current_input: &current_input_value,
             })?;
             let runtime_payload = bootstrap_payload.as_deref().map_or_else(
@@ -1230,6 +1244,7 @@ impl ContextService {
                 shared_conversation: &shared_conversation,
                 run_facts: &rendered_run_facts,
                 a2a_guidance: a2a_guidance.payload_json.as_deref(),
+                single_chat_guidance: None,
                 current_input: &current_input_value,
             })?;
             if rendered.len() <= runtime_budget {
@@ -2209,7 +2224,9 @@ fn acknowledge_input_delivery_transaction(
               AND turn.status IN ('running', 'waiting') AND turn.cancel_requested_at IS NULL
               AND turn.execution_budget_exhausted_at IS NULL
               AND conversation.native_binding_id = ?3
-              AND conversation.native_binding_generation = ?4)"#,
+              AND conversation.native_binding_generation = ?4
+              AND (conversation.kind <> 'single_chat'
+                   OR conversation.ended_at IS NULL))"#,
         params![
             row.agent_run_id,
             row.execution_epoch,
@@ -2583,6 +2600,9 @@ fn build_session_charter(
     snapshot: &RunSnapshot,
     has_active_feishu_binding: bool,
 ) -> Result<String> {
+    if snapshot.invocation_kind == "single_chat" {
+        return Ok(SINGLE_CHAT_SESSION_CHARTER.trim().to_string());
+    }
     let file_guidance = if has_active_feishu_binding {
         format!("\n- {FEISHU_FILE_DELIVERY_GUIDANCE}")
     } else {
@@ -2685,7 +2705,18 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         camp_has_active_feishu_binding(database.connection(), &snapshot.camp_id)?;
     let charter = build_session_charter(snapshot, has_active_feishu_binding)?;
     let (entrypoint, observed, authorization_basis_digest) =
-        build_memory_entrypoint(database, snapshot)?;
+        if snapshot.invocation_kind == "single_chat" {
+            (
+                String::new(),
+                Vec::new(),
+                canonical_json_digest(&json!({
+                    "schemaVersion": 1,
+                    "memoryAccess": "none",
+                }))?,
+            )
+        } else {
+            build_memory_entrypoint(database, snapshot)?
+        };
     let charter_digest = sha256_text(&charter);
     let entrypoint_digest = sha256_text(&entrypoint);
     let charter_blob = blob_store.put_bytes(
@@ -2840,12 +2871,18 @@ fn render_session_bootstrap(
     member_identity: &MemberIdentityBootstrapProjection,
     memory_entrypoint: &str,
 ) -> Result<String> {
-    Ok(format!(
-        "[SESSION_CHARTER]\n{}\n[/SESSION_CHARTER]\n\n[MEMBER_IDENTITY]\n{}\n[/MEMBER_IDENTITY]\n\n[MEMORY_ENTRYPOINT]\n{}\n[/MEMORY_ENTRYPOINT]",
+    let mut bootstrap = format!(
+        "[SESSION_CHARTER]\n{}\n[/SESSION_CHARTER]\n\n[MEMBER_IDENTITY]\n{}\n[/MEMBER_IDENTITY]",
         charter.trim(),
         serde_json::to_string_pretty(member_identity)?,
-        memory_entrypoint.trim()
-    ))
+    );
+    if !memory_entrypoint.trim().is_empty() {
+        bootstrap.push_str(&format!(
+            "\n\n[MEMORY_ENTRYPOINT]\n{}\n[/MEMORY_ENTRYPOINT]",
+            memory_entrypoint.trim()
+        ));
+    }
+    Ok(bootstrap)
 }
 
 fn compose_first_payload(bootstrap: &str, dynamic_context: &str) -> String {
@@ -3289,6 +3326,19 @@ struct DelegationFact {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ConversationModeFact {
+    kind: &'static str,
+    visibility: &'static str,
+    response_delivery: &'static str,
+    operation_policy: &'static str,
+    camp_publication_allowed: bool,
+    member_dispatch_allowed: bool,
+    task_mutation_allowed: bool,
+    memory_mutation_allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct CampResourcesFact {
     camp_id: String,
     published_attachment_root: String,
@@ -3302,6 +3352,8 @@ struct CampResourcesFact {
 struct RunFacts {
     schema_version: i64,
     camp_resources: CampResourcesFact,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conversation_mode: Option<ConversationModeFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     task_context: Option<TaskContextFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3364,6 +3416,18 @@ fn build_run_facts<R: ContextReadConnection>(
             scope: "current_camp",
             mutability: "read_only",
         },
+        conversation_mode: (snapshot.invocation_kind == "single_chat").then_some(
+            ConversationModeFact {
+                kind: "single_chat",
+                visibility: "principal_only",
+                response_delivery: "conversation_message",
+                operation_policy: "single_chat_v1",
+                camp_publication_allowed: false,
+                member_dispatch_allowed: false,
+                task_mutation_allowed: false,
+                memory_mutation_allowed: false,
+            },
+        ),
         task_context: None,
         session_continuity: None,
         external_effect: None,
@@ -3401,7 +3465,10 @@ fn build_run_facts<R: ContextReadConnection>(
     {
         facts.task_context = Some(task_context);
     }
-    if requires_new_native_session && snapshot.native_session_id.is_some() {
+    if snapshot.invocation_kind != "single_chat"
+        && requires_new_native_session
+        && snapshot.native_session_id.is_some()
+    {
         facts.session_continuity = Some(SessionContinuityFact {
             state: "lost",
             required_action: "recheck_private_session_assumptions",
@@ -4094,12 +4161,12 @@ fn load_recent_public_messages<R: ContextReadConnection>(
           AND camp_message.sequence <= ?3
           AND camp_message.tombstoned_at IS NULL
           AND (?4 IS NULL OR camp_message.id <> ?4)
-          AND NOT (
+          AND (?6 = 1 OR NOT (
               camp_message.author_type = 'agent'
               AND camp_message.author_id = ?5
-          )
+          ))
         ORDER BY camp_message.sequence DESC
-        LIMIT ?6
+        LIMIT ?7
         "#,
     )?;
     let mut rows = statement
@@ -4110,6 +4177,7 @@ fn load_recent_public_messages<R: ContextReadConnection>(
                 through_sequence,
                 snapshot.trigger_camp_message_id,
                 snapshot.agent_id,
+                i64::from(snapshot.invocation_kind == "single_chat"),
                 profile.max_public_messages as i64,
             ],
             |row| {
@@ -4269,6 +4337,16 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
             || snapshot.trigger_message_delivery_id.is_none()
         {
             anyhow::bail!("Gather Completion AgentRun has invalid lineage metadata");
+        }
+        return Ok(None);
+    }
+    if snapshot.invocation_kind == "single_chat" {
+        if snapshot.trigger_message_delivery_id.is_some()
+            || snapshot.a2a_parent_agent_run_id.is_some()
+            || snapshot.a2a_root_agent_run_id.is_some()
+            || snapshot.a2a_depth != 0
+        {
+            anyhow::bail!("Single Chat AgentRun has invalid A2A lineage metadata");
         }
         return Ok(None);
     }
@@ -4469,7 +4547,7 @@ fn omitted_public_messages<R: ContextReadConnection>(
         WHERE camp_id = ?1 AND sequence > ?2 AND sequence <= ?3
           AND tombstoned_at IS NULL
           AND (?4 IS NULL OR id <> ?4)
-          AND NOT (author_type = 'agent' AND author_id = ?5)
+          AND (?7 = 1 OR NOT (author_type = 'agent' AND author_id = ?5))
           AND NOT EXISTS (
               SELECT 1
               FROM json_each(?6) AS excluded
@@ -4483,6 +4561,7 @@ fn omitted_public_messages<R: ContextReadConnection>(
                 snapshot.trigger_camp_message_id,
                 snapshot.agent_id,
                 excluded_message_ids_json,
+                i64::from(snapshot.invocation_kind == "single_chat"),
             ],
             |row| {
                 Ok((
@@ -4583,9 +4662,7 @@ impl CurrentInput {
         skill_links: &[CurrentInputSkillLink],
     ) -> Value {
         let mut payload = self.payload.clone();
-        if self.source_camp_message_id.is_some()
-            && let Some(payload) = payload.as_object_mut()
-        {
+        if let Some(payload) = payload.as_object_mut() {
             if !skill_links.is_empty() {
                 payload.insert("skills".to_string(), json!(skill_links));
             }
@@ -5093,6 +5170,32 @@ fn load_current_input<R: ContextReadConnection>(
                 )
                 .optional()?
                 .context("AgentRun trigger ConversationMessage does not exist")?;
+            if snapshot.invocation_kind == "single_chat" {
+                if snapshot.trigger_message_delivery_id.is_some()
+                    || snapshot.a2a_parent_agent_run_id.is_some()
+                    || snapshot.a2a_root_agent_run_id.is_some()
+                    || snapshot.a2a_depth != 0
+                    || author_type != "user"
+                    || author_id.trim().is_empty()
+                    || source_agent_run_id.is_some()
+                {
+                    anyhow::bail!("Single Chat Current Input lineage is inconsistent");
+                }
+                let body_digest = sha256_text(&body);
+                return Ok(CurrentInput {
+                    id,
+                    payload: json!({
+                        "source": { "type": "user" },
+                        "message": body,
+                        "mentionsCurrentUser": false,
+                    }),
+                    source_camp_message_id: None,
+                    source_conversation_message_id: Some(conversation_message_id.to_string()),
+                    source_content_digest: body_digest.clone(),
+                    projected_body_digest: body_digest,
+                    mentions_current_user: false,
+                });
+            }
             let parent_agent_run_id = snapshot
                 .a2a_parent_agent_run_id
                 .as_deref()
@@ -5182,9 +5285,8 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
             SELECT id, camp_id, content_digest, position AS ordinal,
                    'legacy_v1' AS storage_model
             FROM message_attachment
-            WHERE ((
-                ?1 IS NOT NULL AND camp_message_id = ?1
-            ) OR (?2 IS NOT NULL AND conversation_message_id = ?2))
+            WHERE ((?1 IS NOT NULL AND camp_message_id = ?1)
+                OR (?2 IS NOT NULL AND conversation_message_id = ?2))
               AND runtime_projection_state = 'available'
             UNION ALL
             SELECT managed.id, managed.camp_id, managed.content_digest,
@@ -5368,6 +5470,7 @@ struct RenderPayloadInput<'a> {
     shared_conversation: &'a SharedConversation,
     run_facts: &'a RenderedRunFacts,
     a2a_guidance: Option<&'a str>,
+    single_chat_guidance: Option<&'a str>,
     current_input: &'a Value,
 }
 
@@ -5402,6 +5505,9 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
     }
     if let Some(a2a_guidance) = input.a2a_guidance {
         append_json_text_section(&mut output, "A2A_GUIDANCE", a2a_guidance);
+    }
+    if let Some(single_chat_guidance) = input.single_chat_guidance {
+        append_json_text_section(&mut output, "SINGLE_CHAT_GUIDANCE", single_chat_guidance);
     }
     append_json_section(&mut output, "CURRENT_INPUT", input.current_input)?;
     Ok(output)
@@ -6778,6 +6884,7 @@ mod slow_tests {
             ExecutionRuntimeService, ResolveAcceptedInputRecoveryBlockerCommand,
             SucceedAgentRunCommand,
         },
+        single_chat::{OpenSingleChatCommand, SendSingleChatMessageCommand, SingleChatService},
         skill::{SetSkillEnabledCommand, SetSkillGroupAssignmentsCommand, SkillLibraryService},
         team_tool::{
             AuthenticatedTeamToolRun, CampMessageSendInput, CampMessageSendInvocation,
@@ -6798,6 +6905,7 @@ mod slow_tests {
                 scope: "current_camp",
                 mutability: "read_only",
             },
+            conversation_mode: None,
             task_context: None,
             session_continuity: None,
             external_effect: None,
@@ -6937,6 +7045,95 @@ mod slow_tests {
 \"personalityTraits\": [],\n  \"workingPrinciples\": \"\",\n  \"growthTopic\": \"\"\n}\n\
 [/MEMBER_IDENTITY]\n\n[MEMORY_ENTRYPOINT]\nentrypoint\n[/MEMORY_ENTRYPOINT]"
         );
+    }
+
+    #[test]
+    fn bootstrap_formatter_omits_an_empty_memory_entrypoint_section() {
+        let identity = MemberIdentityBootstrapProjection {
+            schema_version: 1,
+            name: "Single Chat member".to_string(),
+            team_role: String::new(),
+            professional_responsibilities: String::new(),
+            personality_traits: Vec::new(),
+            working_principles: String::new(),
+            growth_topic: String::new(),
+        };
+        let formatted = render_session_bootstrap("single chat charter", &identity, "").unwrap();
+        assert!(formatted.contains("[SESSION_CHARTER]"));
+        assert!(formatted.contains("[MEMBER_IDENTITY]"));
+        assert!(!formatted.contains("[MEMORY_ENTRYPOINT]"));
+    }
+
+    #[test]
+    fn single_chat_contract_bytes_and_dynamic_section_order_are_exact() {
+        assert_eq!(
+            sha256_text(SINGLE_CHAT_SESSION_CHARTER),
+            "sha256:2b32ee67029322b9e864024a09a09b42c1aa741947ba80df03cc673321d0a173"
+        );
+        assert_eq!(
+            sha256_text(SINGLE_CHAT_GUIDANCE),
+            "sha256:31b92852b9c8497b5f759d67168460932cd7a1cebf219d01feda6484644e48f9"
+        );
+        let guidance: Value = serde_json::from_str(SINGLE_CHAT_GUIDANCE).unwrap();
+        assert_eq!(guidance["schemaVersion"], 2);
+        for forbidden in [
+            "sessionContinuity",
+            "continuity lost",
+            "replacement Session",
+            "privateHistoryAvailable",
+            "Native Binding",
+            "Native Session",
+        ] {
+            assert!(!SINGLE_CHAT_SESSION_CHARTER.contains(forbidden));
+            assert!(!SINGLE_CHAT_GUIDANCE.contains(forbidden));
+        }
+        let shared_conversation = SharedConversation {
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
+            originating_public_user_message: None,
+            reference_closure: Vec::new(),
+            recent_messages: Vec::new(),
+            omitted_messages: None,
+            omission_entries: Vec::new(),
+        };
+        let facts = RunFacts {
+            conversation_mode: Some(ConversationModeFact {
+                kind: "single_chat",
+                visibility: "principal_only",
+                response_delivery: "conversation_message",
+                operation_policy: "single_chat_v1",
+                camp_publication_allowed: false,
+                member_dispatch_allowed: false,
+                task_mutation_allowed: false,
+                memory_mutation_allowed: false,
+            }),
+            ..test_run_facts()
+        };
+        let run_facts = render_run_facts(&facts).unwrap();
+        let payload = render_payload(RenderPayloadInput {
+            collaboration_state: None,
+            self_active_tasks: None,
+            shared_conversation: &shared_conversation,
+            run_facts: &run_facts,
+            a2a_guidance: None,
+            single_chat_guidance: Some(SINGLE_CHAT_GUIDANCE.trim()),
+            current_input: &json!({
+                "source": { "type": "user" },
+                "message": "请看一下",
+                "mentionsCurrentUser": false,
+            }),
+        })
+        .unwrap();
+        assert!(!payload.contains("[SELF_ACTIVE_TASKS]"));
+        assert!(!payload.contains("[A2A_GUIDANCE]"));
+        assert!(payload.contains("\"responseDelivery\":\"conversation_message\""));
+        assert!(
+            payload.find("[RUN_FACTS]").unwrap() < payload.find("[SINGLE_CHAT_GUIDANCE]").unwrap()
+        );
+        assert!(
+            payload.find("[SINGLE_CHAT_GUIDANCE]").unwrap()
+                < payload.find("[CURRENT_INPUT]").unwrap()
+        );
+        assert!(payload.ends_with("[/CURRENT_INPUT]\n\n"));
     }
 
     #[test]
@@ -12785,6 +12982,138 @@ mod slow_tests {
     }
 
     #[test]
+    fn single_chat_materializes_conversation_input_with_a_memory_free_bootstrap() {
+        let mut fixture = fixture();
+        let single_chat = SingleChatService::default();
+        let opened = single_chat
+            .open(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "context-single-chat-open".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: OpenSingleChatCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_1".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+        let conversation_id = opened.result.payload["conversationId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let sent = single_chat
+            .send(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "context-single-chat-send".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendSingleChatMessageCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        conversation_id,
+                        body: "只检查当前单聊输入".to_string(),
+                        attachment_ids: Vec::new(),
+                        expected_conversation_version: 1,
+                    },
+                },
+            )
+            .unwrap();
+        let run_id = sent.result.payload["agentRunId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let candidate = ExecutionRuntimeService::default()
+            .list_dispatchable_agent_runs(&fixture.database, 8)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.agent_run_id == run_id)
+            .unwrap();
+        let claimed = ExecutionRuntimeService::default()
+            .claim_agent_run(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "context-single-chat-claim".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: run_id.clone(),
+                        expected_version: candidate.version,
+                        lease_owner: "single-chat-context-test".to_string(),
+                        lease_seconds: 60,
+                        workspace: Some(AgentRunWorkspace {
+                            execution_root: fixture.directory.display().to_string(),
+                            access: "read_only".to_string(),
+                            isolation: "shared".to_string(),
+                        }),
+                        starting_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        let execution_epoch = claimed.result.payload["executionEpoch"].as_i64().unwrap();
+        let binding = TeamToolService::default()
+            .prepare_binding_credential(&mut fixture.database, &run_id, execution_epoch, false)
+            .unwrap();
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let ContextMaterialization::Ready(prepared) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &run_id,
+                    execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::FirstPayload,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("Single Chat context should be ready")
+        };
+        assert!(prepared.runtime_payload.starts_with("[SESSION_CHARTER]\n"));
+        assert!(prepared.runtime_payload.contains("[MEMBER_IDENTITY]"));
+        assert!(!prepared.runtime_payload.contains("[MEMORY_ENTRYPOINT]"));
+        assert!(prepared.rendered_payload.contains("只检查当前单聊输入"));
+        assert!(prepared.rendered_payload.contains("[SINGLE_CHAT_GUIDANCE]"));
+        let evidence: (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT memory_entrypoint_blob_id, observed_memory_revisions_json FROM native_session_bootstrap_evidence WHERE id = ?1",
+                [&prepared.bootstrap_evidence_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(store.read_text(&fixture.database, &evidence.0).unwrap(), "");
+        assert_eq!(evidence.1, "[]");
+        let memory_access_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM memory_access_evidence WHERE native_binding_id = ?1",
+                [&binding.native_binding_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(memory_access_count, 0);
+        fixture.cleanup();
+    }
+
+    #[test]
     fn collaboration_projection_refreshes_only_for_model_visible_peer_changes_and_accepted_ack() {
         let mut fixture = fixture();
         let now = chrono::Utc::now().to_rfc3339();
@@ -14447,6 +14776,7 @@ mod slow_tests {
         let facts = RunFacts {
             schema_version: 2,
             camp_resources: test_run_facts().camp_resources,
+            conversation_mode: None,
             task_context: Some(TaskContextFact {
                 task_id: "task-1".to_string(),
                 reference_mode: "frozen",
@@ -14559,6 +14889,7 @@ mod slow_tests {
             shared_conversation: &shared_conversation,
             run_facts: &camp_resources_only,
             a2a_guidance: None,
+            single_chat_guidance: None,
             current_input: &json!({"source":{"type":"user"},"body":"work"}),
         })
         .unwrap();
@@ -14667,6 +14998,47 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(persisted_output_count, 1);
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn single_chat_public_delta_includes_the_target_agents_own_public_message() {
+        let mut fixture = fixture();
+        let own_public_output = "TARGET_AGENT_PUBLIC_CONTEXT_FOR_SINGLE_CHAT";
+        send_explicit_public_output(
+            &mut fixture,
+            "single-chat-own-public-context",
+            own_public_output,
+        );
+        let boundary: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut snapshot =
+            load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                .unwrap()
+                .unwrap();
+        snapshot.invocation_kind = "single_chat".to_string();
+        snapshot.trigger_camp_message_id = None;
+        let selected = load_recent_public_messages(
+            &fixture.database,
+            &snapshot,
+            0,
+            boundary,
+            current_context_delivery_profile().unwrap(),
+        )
+        .unwrap();
+        assert!(
+            selected
+                .iter()
+                .any(|message| message.body == own_public_output),
+            "Single Chat must not apply the normal same-Agent public-output filter"
+        );
         fixture.cleanup();
     }
 
