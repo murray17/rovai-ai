@@ -1058,6 +1058,7 @@ pub struct PiRuntime {
     model_supports_images: bool,
     final_message: RwLock<Option<String>>,
     final_stop_reason: RwLock<Option<String>>,
+    active_tool_executions: Mutex<HashMap<String, Value>>,
     session_id: String,
     session_file: PathBuf,
     model_fingerprint: String,
@@ -1077,6 +1078,7 @@ impl PiRuntime {
             model_supports_images: activation.model_supports_images,
             final_message: RwLock::new(None),
             final_stop_reason: RwLock::new(None),
+            active_tool_executions: Mutex::new(HashMap::new()),
             session_id: activation.session_id,
             session_file: activation.session_file,
             model_fingerprint: activation.model_fingerprint,
@@ -1086,6 +1088,7 @@ impl PiRuntime {
     pub async fn start_prompt(&self, message: &str, images: &[PiPromptImage]) -> Result<()> {
         *self.final_message.write().await = None;
         *self.final_stop_reason.write().await = None;
+        self.active_tool_executions.lock().await.clear();
         if !images.is_empty() && !self.model_supports_images {
             bail!("Pi selected model does not advertise image input support");
         }
@@ -1226,14 +1229,14 @@ impl PiRuntime {
         self.host.send(response).await
     }
 
-    pub async fn observe(&self, message: &Value) -> Result<Option<CompletedAcpAction>> {
+    pub async fn observe(&self, mut message: Value) -> Result<(Value, Option<CompletedAcpAction>)> {
         match message.get("type").and_then(Value::as_str) {
             Some("message_end") => {
                 let Some(assistant) = message
                     .get("message")
                     .filter(|value| value.get("role").and_then(Value::as_str) == Some("assistant"))
                 else {
-                    return Ok(None);
+                    return Ok((message, None));
                 };
                 *self.final_stop_reason.write().await = assistant
                     .get("stopReason")
@@ -1243,10 +1246,37 @@ impl PiRuntime {
                     *self.final_message.write().await = Some(text);
                 }
             }
-            Some("tool_execution_end") => return completed_action(message),
+            Some("tool_execution_start" | "tool_execution_update") => {
+                if let Some(tool_call_id) = message.get("toolCallId").and_then(Value::as_str)
+                    && (message.get("toolName").is_some() || message.get("args").is_some())
+                {
+                    let mut active = self.active_tool_executions.lock().await;
+                    let mut observation = message.clone();
+                    if let Some(previous) = active.get(tool_call_id) {
+                        super::reconcile_terminal_tool_message(&mut observation, previous);
+                    }
+                    active.insert(tool_call_id.to_string(), observation);
+                }
+            }
+            Some("tool_execution_end") => {
+                let start =
+                    if let Some(tool_call_id) = message.get("toolCallId").and_then(Value::as_str) {
+                        self.active_tool_executions
+                            .lock()
+                            .await
+                            .remove(tool_call_id)
+                    } else {
+                        None
+                    };
+                if let Some(start) = start.as_ref() {
+                    super::reconcile_terminal_tool_message(&mut message, start);
+                }
+                let completion = completed_action(&message)?;
+                return Ok((message, completion));
+            }
             _ => {}
         }
-        Ok(None)
+        Ok((message, None))
     }
 
     pub async fn terminal(&self) -> (Option<String>, Option<String>) {

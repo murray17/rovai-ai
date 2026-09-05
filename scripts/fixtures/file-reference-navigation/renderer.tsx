@@ -52,7 +52,7 @@ const api: FilePreviewApi = {
   prepareHtml: unsupported, reload: unsupported, openInSystem: unsupported, revealInFolder: unsupported,
   copyPath: unsupported, chooseAuthorizedRoot: async () => { chooseRootCalls += 1; return null as never }
 }
-const draft = { campId, body: '保留原有草稿', content: [{ kind: 'text', text: '保留原有草稿' }], revision: 1,
+const draft = { campId, body: '保留原有草稿', content: { version: 2, segments: [{ kind: 'text', text: '保留原有草稿' }] }, revision: 1,
   attachments: [], replyIntent: null, continuationIntent: null, updatedAt: null, expiresAt: null }
 Object.assign(window, { rovai: {
   filePreview: api, platform: 'darwin', onEvent: () => () => {},

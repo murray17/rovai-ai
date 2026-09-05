@@ -754,6 +754,7 @@ function statusIcon(status: ActivityStatus): string {
     case 'waiting': return '○'
     case 'failed': return '✕'
     case 'stopped': return '■'
+    case 'skipped': return '−'
     case 'recorded': return '◇'
   }
 }

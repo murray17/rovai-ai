@@ -1369,7 +1369,8 @@ export function CampWorkspace({
   firstRunCamp = null,
   onConfigureRuntime,
   onDismissRuntimeRecovery,
-  onNotify = () => undefined
+  onNotify = () => undefined,
+  onNotifyError
 }: {
   snapshot: CampSnapshot
   openCoverage?: CampOpenProjection['coverage'] | null
@@ -1419,8 +1420,10 @@ export function CampWorkspace({
   onConfigureRuntime?(agentId: string): void
   onDismissRuntimeRecovery?(): void
   onNotify?(message: string): void
+  onNotifyError?(message: string): void
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
+  const notifyError = onNotifyError ?? onNotify
   const [, setComposerDraftProjectionVersion] = useState(0)
   const [draftLoadState, setDraftLoadState] = useState<DraftLoadState>({ state: 'loading' })
   const [composerPersistenceError, setComposerPersistenceError] = useState<Error | null>(null)
@@ -3760,6 +3763,7 @@ export function CampWorkspace({
       onCancelAgentRun={onCancelAgentRun}
       resolvingRecoveryBlockerId={resolvingRecoveryBlockerId}
       memberById={memberById}
+      onFileOpenError={notifyError}
     />
   ) : null
 
@@ -5146,7 +5150,8 @@ function ExecutionDrawer({
   onResolveRecoveryBlocker,
   onCancelAgentRun,
   resolvingRecoveryBlockerId,
-  memberById
+  memberById,
+  onFileOpenError
 }: {
   placement: ExecutionConsolePlacement
   process: AgentExecutionProcess
@@ -5170,6 +5175,7 @@ function ExecutionDrawer({
   onCancelAgentRun(run: AgentRunView): Promise<void>
   resolvingRecoveryBlockerId: string | null
   memberById: Map<string, CampSnapshot['members'][number]>
+  onFileOpenError(message: string): void
 }): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null)
   const drawerBodyRef = useRef<HTMLDivElement>(null)
@@ -5641,6 +5647,7 @@ function ExecutionDrawer({
                       focused={focused}
                       onResolveRecoveryBlocker={onResolveRecoveryBlocker}
                       resolvingRecoveryBlocker={resolvingRecoveryBlockerId === run.id}
+                      onFileOpenError={onFileOpenError}
                     />
                   </article>
                 </li>
@@ -8193,62 +8200,152 @@ function ToolCallDetail({
 type ToolCallStep = Extract<LiveExecutionProgress['items'][number], { kind: 'tool' }>['step']
 
 
-function ModifiedFileRow({ change, semanticKind }: {
+function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError }: {
+  campId: string
   change: NonNullable<ToolCallStep['fileChanges']>[number]
   semanticKind: ToolCallStep['fileChangeSemantics']
+  onFileOpenError(message: string): void
 }): JSX.Element {
+  const filePreview = useOptionalFilePreview()
+  const [expanded, setExpanded] = useState(false)
+  const diffId = useId()
   const fileName = change.path.split('/').filter(Boolean).at(-1) ?? change.path
+  const verb = change.changeKind === 'add' ? '新增' : '编辑'
   const exactMutation = semanticKind === 'exact_mutation'
   const lines = useMemo(
     () => exactMutation ? exactMutationDiffLines(change.diff) : inlineDiffLines(change.diff),
     [change.diff, exactMutation]
   )
+  const openFile = async (): Promise<void> => {
+    if (!filePreview) {
+      onFileOpenError('无法打开该文件')
+      return
+    }
+    const outcome = await filePreview.open({
+      kind: 'camp_workspace',
+      campId,
+      rawReference: change.path
+    }, undefined, undefined, { commitOnSuccess: true, previewOnly: true })
+    if (outcome.kind !== 'preview') onFileOpenError('无法打开该文件')
+  }
   return (
-    <details className="process-action modified-file-row" data-activity-domain="file">
-      <summary
+    <div className={`process-action modified-file-row${expanded ? ' is-expanded' : ''}`} data-activity-domain="file">
+      <div
         className="modified-file-summary"
-        aria-label={`修改 ${change.path}，新增 ${change.additions} 行，删除 ${change.deletions} 行`}
+        role="group"
+        aria-label={`${verb} ${change.path}，新增 ${change.additions} 行，删除 ${change.deletions} 行`}
       >
-        <ToolCallIcon iconKind="file" />
-        <span className="modified-file-title" title={change.path}>修改 {fileName}</span>
+        <ToolCallIcon iconKind="file-write" />
+        <span className="modified-file-title">
+          <span>{verb} </span>
+          <button
+            className="tool-file-link"
+            type="button"
+            aria-label={`打开文件预览：${change.path}`}
+            title={`${change.path} · 打开文件预览`}
+            onClick={() => void openFile()}
+          >
+            {fileName}
+          </button>
+        </span>
         <span className="modified-file-stats" aria-hidden="true">
           <span className="diff-addition">+{change.additions}</span>
           <span className="diff-deletion">−{change.deletions}</span>
         </span>
-        <span className="tool-call-disclosure-slot" aria-hidden="true">
+        <button
+          className="tool-call-disclosure-slot"
+          type="button"
+          aria-controls={diffId}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? '收起' : '展开'} ${change.path} 的文件差异`}
+          title={`${expanded ? '收起' : '展开'}文件差异`}
+          onClick={() => setExpanded((current) => !current)}
+        >
           <svg viewBox="0 0 16 16" focusable="false">
             <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
           </svg>
-        </span>
-      </summary>
+        </button>
+      </div>
       <div
+        id={diffId}
         className={`modified-file-diff${exactMutation ? ' is-exact-mutation' : ''}`}
-        tabIndex={0}
+        tabIndex={expanded ? 0 : -1}
+        hidden={!expanded}
         aria-label={`${change.path} 的${exactMutation ? '修改片段' : '文件差异'}`}
       >
-        {lines.map((line, index) => exactMutation
-          ? (
-              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
-                <span aria-hidden="true">{line.kind === 'addition' ? '+' : '-'}</span>
-                <code>{line.text || ' '}</code>
-              </div>
-            )
-          : line.kind === 'hunk' || line.kind === 'metadata'
-          ? (
-              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
-                <code>{line.text}</code>
-              </div>
-            )
-          : (
-              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
-                <span aria-hidden="true">{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ''}</span>
-                <span aria-hidden="true">{line.oldLine ?? ''}</span>
-                <span aria-hidden="true">{line.newLine ?? ''}</span>
-                <code>{line.text || ' '}</code>
-              </div>
-            ))}
+          {lines.map((line, index) => exactMutation
+            ? (
+                <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                  <span aria-hidden="true">{line.kind === 'addition' ? '+' : '-'}</span>
+                  <code>{line.text || ' '}</code>
+                </div>
+              )
+            : line.kind === 'hunk' || line.kind === 'metadata'
+            ? (
+                <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                  <code>{line.text}</code>
+                </div>
+              )
+            : (
+                <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                  <span aria-hidden="true">{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ''}</span>
+                  <span aria-hidden="true">{line.oldLine ?? ''}</span>
+                  <span aria-hidden="true">{line.newLine ?? ''}</span>
+                  <code>{line.text || ' '}</code>
+                </div>
+              ))}
       </div>
-    </details>
+    </div>
+  )
+}
+
+function FileOperationRow({ campId, step, runStatus, onFileOpenError }: {
+  campId: string
+  step: ToolCallStep & { fileOperation: NonNullable<ToolCallStep['fileOperation']> }
+  runStatus: AgentRunView['status']
+  onFileOpenError(message: string): void
+}): JSX.Element {
+  const filePreview = useOptionalFilePreview()
+  const { operationKind, path } = step.fileOperation
+  const fileName = path.split('/').filter(Boolean).at(-1) ?? path
+  const verb = operationKind === 'read' ? '阅读' : '编辑'
+  const status = activityStatusForAgentRun(step.status, runStatus)
+  const openFile = async (): Promise<void> => {
+    if (!filePreview) {
+      onFileOpenError('无法打开该文件')
+      return
+    }
+    const outcome = await filePreview.open(
+      { kind: 'camp_workspace', campId, rawReference: path },
+      undefined,
+      undefined,
+      { commitOnSuccess: true, previewOnly: true }
+    )
+    if (outcome.kind !== 'preview') onFileOpenError('无法打开该文件')
+  }
+  return (
+    <div
+      className={`process-action tool-call-summary tool-call-static file-operation-row status-${status}`}
+      data-activity-domain="file"
+      role="group"
+      aria-label={`${verb} ${path}，${toolCallStatusLabel(status)}`}
+    >
+      <ToolCallIcon iconKind={operationKind === 'read' ? 'file-read' : 'file-write'} />
+      <span className="tool-call-title file-operation-title">
+        <span>{verb} </span>
+        <button
+          className="tool-file-link"
+          type="button"
+          aria-label={`打开文件预览：${path}`}
+          title={`${path} · 打开文件预览`}
+          onClick={() => void openFile()}
+        >
+          {fileName}
+        </button>
+      </span>
+      <ToolCallState status={status} />
+      <span className="tool-call-disclosure-slot is-placeholder" aria-hidden="true" />
+    </div>
   )
 }
 
@@ -8429,7 +8526,9 @@ function ToolActivityGroupState({ status, label }: { status: string; label: stri
       role="img"
       aria-label={label}
       title={label}
-    />
+    >
+      <StatusGlyph status={status} />
+    </span>
   )
 }
 
@@ -8439,7 +8538,8 @@ function ToolActivityGroup({
   liveTail,
   runId,
   runStatus,
-  completeEvidence
+  completeEvidence,
+  onFileOpenError
 }: {
   campId: string
   items: ToolProgressItem[]
@@ -8449,6 +8549,7 @@ function ToolActivityGroup({
   completeEvidence: {
     byToolId: Map<string, PresentableExecutionEvidence>
   }
+  onFileOpenError(message: string): void
 }): JSX.Element {
   const presentation = toolActivityGroupPresentation(items, runStatus, liveTail)
   return (
@@ -8479,7 +8580,9 @@ function ToolActivityGroup({
             )}
           </span>
         </span>
-        <ToolActivityGroupState status={presentation.status} label={presentation.statusLabel} />
+        {presentation.status === 'running' || presentation.status === 'waiting'
+          ? <ToolActivityGroupState status={presentation.status} label={presentation.statusLabel} />
+          : <span className="tool-group-state is-placeholder" aria-hidden="true" />}
         <span className="tool-group-disclosure" aria-hidden="true">
           <svg viewBox="0 0 16 16" focusable="false">
             <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
@@ -8492,11 +8595,24 @@ function ToolActivityGroup({
           if (step.fileChanges?.length) {
             return step.fileChanges.map((change, index) => (
               <ModifiedFileRow
+                campId={campId}
                 change={change}
                 key={`${item.key}:file:${index}:${change.path}`}
+                onFileOpenError={onFileOpenError}
                 semanticKind={step.fileChangeSemantics}
               />
             ))
+          }
+          if (step.fileOperation) {
+            return (
+              <FileOperationRow
+                key={item.key}
+                campId={campId}
+                step={step as ToolCallStep & { fileOperation: NonNullable<ToolCallStep['fileOperation']> }}
+                runStatus={runStatus}
+                onFileOpenError={onFileOpenError}
+              />
+            )
           }
           return (
             <ToolCallRow
@@ -8550,7 +8666,8 @@ function RunExecutionContent({
   cancelling,
   onLoadHistoricalEvidence,
   onResolveRecoveryBlocker,
-  resolvingRecoveryBlocker
+  resolvingRecoveryBlocker,
+  onFileOpenError
 }: {
   run: AgentRunView
   progress?: LiveExecutionProgress
@@ -8563,6 +8680,7 @@ function RunExecutionContent({
   onLoadHistoricalEvidence(): Promise<void>
   onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
   resolvingRecoveryBlocker: boolean
+  onFileOpenError(message: string): void
 }): JSX.Element {
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const publicFailure = run.status === 'failed' ? run.failure : null
@@ -8622,6 +8740,7 @@ function RunExecutionContent({
               runId={run.id}
               runStatus={run.status}
               completeEvidence={completeEvidence}
+              onFileOpenError={onFileOpenError}
             />
           )
         }
@@ -8672,10 +8791,23 @@ function RunExecutionContent({
           return step.fileChanges.map((change, index) => (
             <ModifiedFileRow
               change={change}
+              campId={campId}
               key={`${item.key}:file:${index}:${change.path}`}
+              onFileOpenError={onFileOpenError}
               semanticKind={step.fileChangeSemantics}
             />
           ))
+        }
+        if (step.fileOperation) {
+          return (
+            <FileOperationRow
+              key={item.key}
+              campId={campId}
+              step={step as ToolCallStep & { fileOperation: NonNullable<ToolCallStep['fileOperation']> }}
+              runStatus={run.status}
+              onFileOpenError={onFileOpenError}
+            />
+          )
         }
         const fullEvidence = completeEvidence.byToolId.get(step.id)
         return (
@@ -8759,7 +8891,8 @@ export function RunExecutionDisclosure({
   cancelling = false,
   focused = false,
   onResolveRecoveryBlocker,
-  resolvingRecoveryBlocker = false
+  resolvingRecoveryBlocker = false,
+  onFileOpenError = () => undefined
 }: {
   run: AgentRunView
   progress?: LiveExecutionProgress
@@ -8771,6 +8904,7 @@ export function RunExecutionDisclosure({
   focused?: boolean
   onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
   resolvingRecoveryBlocker?: boolean
+  onFileOpenError?(message: string): void
 }): JSX.Element | null {
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
@@ -8841,6 +8975,7 @@ export function RunExecutionDisclosure({
       onLoadHistoricalEvidence={loadHistoricalEvidence}
       onResolveRecoveryBlocker={onResolveRecoveryBlocker}
       resolvingRecoveryBlocker={resolvingRecoveryBlocker}
+      onFileOpenError={onFileOpenError}
     />
   ) : null
 
@@ -8888,6 +9023,18 @@ function ToolCallIcon({ iconKind }: { iconKind: ActivityIconKind }): JSX.Element
       <>
         <path d="M4 1.75h5.1L12.5 5v9.25H4z" />
         <path d="M9 1.9V5h3.2M6 8h4.4M6 10.5h3.3" />
+      </>
+    ),
+    'file-read': (
+      <>
+        <path d="M2.25 3.25c1.85-.6 3.45-.35 5.75.85v9.05c-2.3-1.2-3.9-1.45-5.75-.85z" />
+        <path d="M13.75 3.25c-1.85-.6-3.45-.35-5.75.85v9.05c2.3-1.2 3.9-1.45 5.75-.85zM8 4.1v9.05" />
+      </>
+    ),
+    'file-write': (
+      <>
+        <path d="m3 11.55-.45 2 2-.45 7.55-7.55-1.55-1.55z" />
+        <path d="m9.75 4.8 1.55 1.55M3.1 11.45l1.55 1.55M9.9 3.85l.85-.85a1.1 1.1 0 0 1 1.55 0l.7.7a1.1 1.1 0 0 1 0 1.55l-.85.85" />
       </>
     ),
     web: (
@@ -8941,8 +9088,29 @@ function ToolCallState({ status }: { status: string }): JSX.Element {
       role="img"
       aria-label={label}
       title={label}
-    />
+    >
+      <StatusGlyph status={status} />
+    </span>
   )
+}
+
+function StatusGlyph({ status }: { status: string }): JSX.Element {
+  switch (status) {
+    case 'running':
+      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" /><path d="M8 3a5 5 0 0 1 4.7 3.3" /></svg>
+    case 'waiting':
+      return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2.5 5.5 5.5L8 13.5 2.5 8z" /></svg>
+    case 'completed':
+      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="m5.3 8.1 1.75 1.8 3.75-4" /></svg>
+    case 'failed':
+      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="m6 6 4 4m0-4-4 4" /></svg>
+    case 'stopped':
+      return <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="1.25" /><path d="M6.1 6.1h3.8v3.8H6.1z" /></svg>
+    case 'skipped':
+      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="M5.25 8h5.5" /></svg>
+    default:
+      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="M6.5 6.3a1.55 1.55 0 1 1 2.2 1.4c-.55.25-.7.65-.7 1.2M8 10.9h.01" /></svg>
+  }
 }
 
 function toolCallStatusLabel(status: string): string {
@@ -8952,7 +9120,8 @@ function toolCallStatusLabel(status: string): string {
     failed: '失败',
     waiting: '等待审批',
     stopped: '已停止',
-    recorded: '已记录'
+    skipped: '未执行',
+    recorded: '结果未知'
   } as Record<string, string>)[status] ?? status
 }
 

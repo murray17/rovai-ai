@@ -23,6 +23,7 @@ const tabFiles = ['src/app.ts', 'src/layout.tsx', 'src/theme.ts', 'src/routes.ts
   'src/settings.tsx', 'src/navigation.ts', 'src/very-long-file-preview-reading-anchor.tsx']
 const fileNameOnlyReference = 'external-preview.ts'
 const missingReference = 'src/missing-report.ts'
+const toolPreviewReference = 'src/tool-link-preview.ts'
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected fixture API operation') }
 const fileOpens: OpenFilePreviewRequest[] = []
 const fileRestores: OpenFilePreviewRequest[] = []
@@ -30,6 +31,11 @@ const campBindings: Array<string | null> = []
 const releases: string[] = []
 const reviewRequests: Array<{ campId: string; agentRunId: string; executionEpoch: number }> = []
 let failNextReview = false
+let failNextRead = false
+let deferNextRead = false
+let deferredReadStarted: (() => void) | null = null
+let deferredReadRelease: (() => void) | null = null
+let pendingToolOpen: ReturnType<FilePreviewContextValue['open']> | null = null
 let fileReads = 0
 async function resolvePreview(request: OpenFilePreviewRequest) {
   if (request.kind === 'message_reference' && request.rawReference === missingReference) {
@@ -50,6 +56,9 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
   } else if (request.kind === 'message_reference' && request.rawReference === fileNameOnlyReference) {
     target = { ...file, previewKey: fileNameOnlyReference, displayPath: fileNameOnlyReference,
       pathPresentation: 'file_name_only', fileName: fileNameOnlyReference }
+  } else if (request.kind === 'camp_workspace' && request.rawReference === toolPreviewReference) {
+    target = { ...file, previewKey: toolPreviewReference, displayPath: toolPreviewReference,
+      fileName: toolPreviewReference.split('/').at(-1)! }
   } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
   return { ok: true as const, value: { kind: 'file_preview' as const, file: { ...target, handleId: crypto.randomUUID() } } }
 }
@@ -63,10 +72,22 @@ const api: FilePreviewApi = {
     fileRestores.push(request)
     return resolvePreview(request)
   },
-  readText: async () => { fileReads += 1; return { ok: true, value: {
-    text: Array.from({ length: 300 }, (_, index) => `const readingLine${index + 1} = "保持会话和文件的阅读位置"`).join('\n'),
-    contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
-  } } },
+  readText: async () => {
+    fileReads += 1
+    if (deferNextRead) {
+      deferNextRead = false
+      deferredReadStarted?.()
+      await new Promise<void>((resolve) => { deferredReadRelease = resolve })
+    }
+    if (failNextRead) {
+      failNextRead = false
+      return { ok: false, error: { code: 'read_failed', message: 'Fixture read failed.', retryable: true } }
+    }
+    return { ok: true, value: {
+      text: Array.from({ length: 300 }, (_, index) => `const readingLine${index + 1} = "保持会话和文件的阅读位置"`).join('\n'),
+      contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
+    } }
+  },
   release: async ({ handleId }) => { releases.push(handleId); return { released: true } },
   onExternalUpdate: () => () => {},
   reopen: unsupported, readPage: unsupported, resolveLine: unsupported,
@@ -273,6 +294,39 @@ Object.assign(window, { previewTest: {
       kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: fileNameOnlyReference
     })
     await settle()
+  },
+  async openToolPreview(failRead = false) {
+    failNextRead = failRead
+    const outcome = await previewController.open(
+      { kind: 'camp_workspace', campId: 'camp-1', rawReference: toolPreviewReference },
+      undefined,
+      undefined,
+      { commitOnSuccess: true, previewOnly: true }
+    )
+    await settle()
+    return outcome
+  },
+  async startPendingToolPreview() {
+    deferNextRead = true
+    const started = new Promise<void>((resolve) => { deferredReadStarted = resolve })
+    pendingToolOpen = previewController.open(
+      { kind: 'camp_workspace', campId: 'camp-1', rawReference: toolPreviewReference },
+      undefined,
+      undefined,
+      { commitOnSuccess: true, previewOnly: true }
+    )
+    await started
+    await settle()
+  },
+  async finishPendingToolPreview() {
+    if (!pendingToolOpen || !deferredReadRelease) throw new Error('No pending Tool preview read')
+    deferredReadRelease()
+    const outcome = await pendingToolOpen
+    pendingToolOpen = null
+    deferredReadStarted = null
+    deferredReadRelease = null
+    await settle()
+    return outcome
   },
   async openMissing() {
     await previewController.open({

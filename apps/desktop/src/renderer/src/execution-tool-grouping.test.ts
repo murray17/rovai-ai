@@ -84,9 +84,9 @@ describe('execution Tool grouping', () => {
     ])
     const groups = grouped.filter((item) => item.kind === 'toolGroup')
     expect(toolActivityGroupPresentation(groups[0].items, 'succeeded').primary)
-      .toBe('已执行 2 项操作')
+      .toBe('完成了 2 个步骤')
     expect(toolActivityGroupPresentation(groups[1].items, 'succeeded').primary)
-      .toBe('已执行 1 项操作')
+      .toBe('完成了 1 个步骤')
   })
 
   it('keeps imminent Compaction neutral and treats only started as active', () => {
@@ -148,8 +148,8 @@ describe('execution Tool grouping', () => {
       grouped[0].kind === 'toolGroup' ? grouped[0].items : [],
       'succeeded'
     )).toMatchObject({
-      primary: '已执行 2 项操作',
-      accessibleLabel: '已执行 2 项操作；状态：全部成功'
+      primary: '完成了 2 个步骤',
+      accessibleLabel: '完成了 2 个步骤'
     })
   })
 
@@ -173,8 +173,8 @@ describe('execution Tool grouping', () => {
       grouped[0].kind === 'toolGroup' ? grouped[0].items : [],
       'succeeded'
     )).toMatchObject({
-      primary: '已执行 2 项操作',
-      accessibleLabel: '已执行 2 项操作；状态：全部成功'
+      primary: '完成了 2 个步骤',
+      accessibleLabel: '完成了 2 个步骤'
     })
   })
 
@@ -247,9 +247,9 @@ describe('execution Tool grouping', () => {
     ], 'failed')).toMatchObject({
       status: 'completed',
       statusLabel: '含成功操作',
-      primary: '已执行 3 项操作',
+      primary: '完成了 3 个步骤',
       countLabel: null,
-      accessibleLabel: '已执行 3 项操作；状态：含成功操作'
+      accessibleLabel: '完成了 3 个步骤'
     })
 
     expect(toolActivityGroupPresentation([
@@ -257,7 +257,7 @@ describe('execution Tool grouping', () => {
     ], 'succeeded')).toMatchObject({
       status: 'recorded',
       statusLabel: '已记录',
-      primary: '已汇总 1 项操作',
+      primary: '完成了 1 个步骤',
       countLabel: null
     })
   })
@@ -290,7 +290,7 @@ describe('execution Tool grouping', () => {
       tool('one')
     ], 'succeeded', true)).toMatchObject({
       status: 'completed',
-      primary: '已执行 1 项操作',
+      primary: '完成了 1 个步骤',
       countLabel: null
     })
   })
@@ -302,7 +302,7 @@ describe('execution Tool grouping', () => {
     ], 'failed')).toMatchObject({
       status: 'failed',
       statusLabel: '全部失败',
-      primary: '已执行 2 项操作',
+      primary: '完成了 2 个步骤',
       countLabel: null
     })
 
@@ -312,7 +312,7 @@ describe('execution Tool grouping', () => {
     ], 'failed')).toMatchObject({
       status: 'stopped',
       statusLabel: '已停止，含失败操作',
-      primary: '已执行 2 项操作',
+      primary: '完成了 2 个步骤',
       countLabel: null
     })
   })

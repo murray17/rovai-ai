@@ -17,6 +17,7 @@ if (process.platform !== 'darwin') {
 
 const root = resolve(import.meta.dirname, '..')
 const traceEnabled = process.env.ROVAI_PI_SMOKE_TRACE === '1'
+const fileOperationMatrix = process.env.ROVAI_PI_FILE_OPERATION_MATRIX === '1'
 const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-pi-runtime-')))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
@@ -101,6 +102,17 @@ try {
     throw new Error(`Pi permission-free Runtime configuration was not frozen: ${JSON.stringify(profile)}`)
   }
 
+  if (fileOperationMatrix) {
+    const result = await runPiFileOperationMatrix({
+      client,
+      workspace,
+      agentId,
+      projectRoot,
+      reportedVersion: installation.snapshot.reportedVersion,
+      piVersion
+    })
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2))
+  } else {
   const first = await createConfiguredCampAndSend(client.request, {
     commandId: crypto.randomUUID(),
     workspace,
@@ -403,10 +415,171 @@ try {
       privateHostConfigFilesRemaining: 0
     }
   }, null, 2))
+  }
 } finally {
   await client?.stop()
   await removeEphemeralRuntimeCampFilesRoot(dataDir)
   await rm(fixtureRoot, { recursive: true, force: true })
+}
+
+async function runPiFileOperationMatrix({ client, workspace, agentId, projectRoot, reportedVersion, piVersion }) {
+  const directory = join(projectRoot, 'runtime-file-operation-matrix', 'PI')
+  const existingPath = join(directory, 'existing.txt')
+  const emptyPath = join(directory, 'empty.txt')
+  const createdPath = join(directory, 'created.txt')
+  const originalText = 'RUNTIME_FILE_PI_ORIGINAL\n'
+  const editedText = 'RUNTIME_FILE_PI_EDITED\n'
+  const createdText = 'RUNTIME_FILE_PI_CREATED\n'
+  const emptyEditedText = 'RUNTIME_FILE_PI_EMPTY_EDITED\n'
+  await mkdir(directory, { recursive: true })
+  await writeFile(existingPath, originalText)
+  await writeFile(emptyPath, '')
+
+  const cases = [
+    {
+      name: 'read', path: existingPath, expectedText: originalText, operation: 'read',
+      prompt: `Use the native read tool exactly once to read ${existingPath}. Do not use Bash, grep, find, ls, or another tool. Then reply exactly FILE_READ_DONE.`
+    },
+    {
+      name: 'add', path: createdPath, expectedText: createdText, operation: 'write',
+      prompt: `Use the native write tool exactly once to create ${createdPath} with exactly ${createdText.trimEnd()} and a trailing newline. Do not read or call another tool. Then reply exactly FILE_ADD_DONE.`
+    },
+    {
+      name: 'edit', path: existingPath, expectedText: editedText, operation: 'write',
+      prompt: `Use native file tools to edit ${existingPath}; replace the exact text ${originalText.trimEnd()} with ${editedText.trimEnd()}. If the edit tool requires reading first, use the native read tool once before editing. Do not use shell or unrelated tools. Then reply exactly FILE_EDIT_DONE.`
+    },
+    {
+      name: 'edit_empty', path: emptyPath, expectedText: emptyEditedText, operation: 'write',
+      prompt: `The file ${emptyPath} already exists and is empty. Use native file tools to set it to exactly ${emptyEditedText.trimEnd()} and a trailing newline. If the write or edit tool requires reading first, use the native read tool once before writing. Do not use shell or unrelated tools. Then reply exactly FILE_EMPTY_EDIT_DONE.`
+    }
+  ]
+
+  let campId = null
+  const results = []
+  let nativeSessionId = null
+  for (const [index, testCase] of cases.entries()) {
+    const eventStart = client.events.length
+    const sent = index === 0
+      ? await createConfiguredCampAndSend(client.request, {
+          commandId: crypto.randomUUID(),
+          workspace,
+          body: testCase.prompt,
+          address: { mode: 'explicit', agentIds: [agentId] },
+          purpose: `Verify Pi ${testCase.name} file-operation Evidence`
+        })
+      : await sendExistingCampMessage(
+          client.request,
+          campId,
+          testCase.prompt,
+          `Verify Pi ${testCase.name} file-operation Evidence`
+        )
+    const accepted = acceptedRun(sent, campId ?? undefined)
+    campId ??= accepted.campId
+    const result = await waitForRun(client, campId, accepted.agentRunId)
+    const start = startForRun(client.events, accepted.agentRunId)
+    nativeSessionId ??= start?.params?.nativeThreadId ?? null
+    const evidencePage = await client.request('agentRunEvidence.list', {
+      campId,
+      agentRunId: accepted.agentRunId,
+      afterSequence: 0,
+      limit: 1_000
+    })
+    const pathSuffix = testCase.path.slice(projectRoot.length + 1)
+    const actualText = await readFile(testCase.path, 'utf8').catch((error) => {
+      if (error?.code === 'ENOENT') return null
+      throw error
+    })
+    const history = evidencePage.evidence.map((entry) => {
+      const operation = entry.payload?.runtimeFileOperation
+      const diffEntries = entry.canonical?.diffProjection?.status === 'available'
+        ? entry.canonical.diffProjection.entries ?? []
+        : []
+      return {
+        evidenceId: entry.id,
+        sequence: entry.sequence,
+        eventType: entry.eventType,
+        phase: entry.canonical?.phase ?? entry.phase,
+        outcome: entry.canonical?.outcome ?? null,
+        classifierVersion: entry.canonical?.classifierVersion ?? null,
+        activityDomain: entry.canonical?.activityDomain ?? null,
+        semanticKind: entry.canonical?.semanticKind ?? null,
+        operation: operation?.schemaVersion === 2
+          ? {
+              schemaVersion: operation.schemaVersion,
+              status: operation.status,
+              operationKind: operation.operationKind ?? null,
+              path: operation.path ?? null,
+              safeReasonCode: operation.safeReasonCode ?? null,
+              sourceEventKind: operation.sourceMetadata?.sourceEventKind ?? null
+            }
+          : null,
+        diffEntries: diffEntries.map((entry) => ({
+          path: entry.path,
+          changeKind: entry.changeKind,
+          additions: entry.additions,
+          deletions: entry.deletions
+        }))
+      }
+    }).filter((entry) => entry.operation || entry.diffEntries.length > 0)
+    const matchingOperation = history.find((entry) =>
+      entry.operation?.status === 'available'
+        && entry.operation.operationKind === testCase.operation
+        && entry.operation.path === pathSuffix
+    )
+    const matchingDiff = history.flatMap((entry) => entry.diffEntries)
+      .find((entry) => entry.path === pathSuffix)
+    const fileLinkTarget = matchingOperation?.operation?.path ?? matchingDiff?.path ?? null
+    const live = client.events.slice(eventStart)
+      .filter((event) => event.params?.agentRunId === accepted.agentRunId)
+      .map((event) => ({
+        id: event.params?.evidenceId ?? null,
+        method: event.method,
+        classifierVersion: event.params?.canonical?.classifierVersion ?? null,
+        semanticKind: event.params?.canonical?.semanticKind ?? null,
+        phase: event.params?.canonical?.phase ?? null,
+        operationKind: event.params?.payload?.runtimeFileOperation?.operationKind ?? null,
+        path: event.params?.payload?.runtimeFileOperation?.path ?? null
+      }))
+      .filter((entry) => entry.operationKind || entry.semanticKind?.startsWith('file.'))
+    const fileChanges = result.snapshot.agentRunFileChanges.filter((entry) =>
+      entry.agentRunId === accepted.agentRunId
+    )
+    const output = outputForRun(result.snapshot, accepted.agentRunId)?.body ?? null
+    results.push({
+      name: testCase.name,
+      agentRunId: accepted.agentRunId,
+      runStatus: result.run.status,
+      nativeSessionContinued: start?.params?.nativeThreadId === nativeSessionId,
+      expectedPath: pathSuffix,
+      fileEffect: actualText === testCase.expectedText ? 'passed' : 'failed',
+      observedText: actualText,
+      output,
+      typedProjection: matchingOperation ? 'passed' : 'not_observed',
+      diffChangeKind: matchingDiff?.changeKind ?? null,
+      fileLinkTarget,
+      fileLinkMatchesExpected: fileLinkTarget === pathSuffix,
+      presentation: testCase.name === 'read'
+        ? matchingOperation ? '阅读' : '保持原工具回退'
+        : matchingDiff?.changeKind === 'add'
+          ? '新增'
+          : matchingOperation || matchingDiff
+            ? '编辑'
+            : '保持原工具回退',
+      filesChangedCount: fileChanges.length,
+      live,
+      history
+    })
+  }
+
+  return {
+    adapterKind: 'pi',
+    protocol: 'pi-jsonl-rpc-v1',
+    reportedVersion,
+    testedPiVersion: piVersion,
+    localEvidencePlatform: `${process.platform}-${process.arch}`,
+    nativeSessionId,
+    fileOperations: results
+  }
 }
 
 function assertCapabilitySnapshot(snapshot) {
@@ -553,7 +726,7 @@ async function sendExistingCampMessage(request, campId, body, purpose) {
   const saved = await request('camp.composerDraft.save', {
     campId,
     expectedRevision: draft.revision,
-    content: [{ kind: 'text', text: body }]
+    content: { version: 2, segments: [{ kind: 'text', text: body }] }
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),

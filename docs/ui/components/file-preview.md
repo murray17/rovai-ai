@@ -176,6 +176,13 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 
 ## 更新与错误
 
+执行过程中的阅读／新增／编辑文件名是显式文件入口：只有虚线底线的 basename 可点击，完整路径保留在 title 和
+可访问名称中。它复用 `camp_workspace` 来源校验，并采用成功后提交导航；Main open 和 Renderer 首屏内容读取都成功后
+才显示／激活目标 Tab 和预览 Pane。文件已移动、删除、无权或读取失败时，当前页只显示红色 Toast `无法打开该文件`，不创建失败预览页、不切换
+当前 Tab、不替换已有 ready 内容，也不抢焦点；不支持应用内预览的类型同样不从这类入口启动系统应用或显示目录。
+精确事务与资源清理边界见
+[File Preview v8](../../contracts/file-preview-v8.md)。
+
 首次打开与恢复使用 cold/opening/ready/missing/unavailable/error；快速成功直接显示正文，耗时后才显示轻量 Loading。
 无法形成当前可读内容时，正文只显示水平、垂直居中的 32px 通用文件轮廓，图标下方相隔 12px 显示一句 13px 常规
 公开文案。错误码到文案的 closed mapping 由 [File Preview v8](../../contracts/file-preview-v8.md#失败呈现) 拥有。

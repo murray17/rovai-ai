@@ -16,7 +16,9 @@ use crate::{
     runtime_file_operation,
 };
 
-pub use crate::runtime_activity_mapping::{CLASSIFIER_VERSION, LEGACY_CLASSIFIER_VERSION};
+pub use crate::runtime_activity_mapping::{
+    CLASSIFIER_VERSION, LEGACY_CLASSIFIER_VERSION, PREVIOUS_CLASSIFIER_VERSION,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -149,9 +151,15 @@ pub fn classify_evidence_with_version(
             kind,
             payload,
         );
+    let file_operation = runtime_file_operation::operation_from_evidence(payload);
     let file_operation_path = runtime_file_operation::path_from_evidence(payload);
     let diff_projection = runtime_diff::projection_from_evidence(payload, evidence_id);
-    if file_operation_path.is_some()
+    if classifier_version == CLASSIFIER_VERSION
+        && file_operation.is_some_and(|operation| operation.operation_kind == "read")
+    {
+        activity_domain = "file".to_string();
+        semantic_kind = Some("file.read".to_string());
+    } else if file_operation_path.is_some()
         || diff_projection
             .as_ref()
             .is_some_and(|projection| projection.status == "available")
@@ -161,7 +169,7 @@ pub fn classify_evidence_with_version(
     }
     let classification_is_structured = runtime_classification_is_structured
         || validated_core_tool.is_some()
-        || file_operation_path.is_some()
+        || file_operation.is_some()
         || diff_projection.is_some();
     let phase = canonical_phase(event_type, phase, payload);
     let outcome = canonical_outcome(&phase, payload);
@@ -600,7 +608,7 @@ mod tests {
                 "title": null,
                 "status": "completed",
                 "runtimeFileOperation": {
-                    "schemaVersion": 1,
+                    "schemaVersion": 2,
                     "source": "runtime_reported",
                     "status": "available",
                     "operationKind": "write",
@@ -619,6 +627,51 @@ mod tests {
         assert_eq!(projection.semantic_kind.as_deref(), Some("file.write"));
         assert_eq!(projection.presentation_hint.as_deref(), Some("Edit"));
         assert!(projection.diff_projection.is_none());
+    }
+
+    #[test]
+    fn activity_v3_projects_structured_command_reads_without_rewriting_v2_history() {
+        let payload = json!({
+            "item": {
+                "id": "command-read-1",
+                "type": "commandExecution",
+                "status": "completed",
+                "command": "cat docs/README.md"
+            },
+            "runtimeFileOperation": {
+                "schemaVersion": 2,
+                "source": "runtime_reported",
+                "status": "available",
+                "operationKind": "read",
+                "path": "docs/README.md"
+            }
+        });
+        let current = classify_evidence_with_version(
+            CLASSIFIER_VERSION,
+            "run-codex",
+            1,
+            "evidence-read",
+            "activity.completed",
+            "command",
+            "completed",
+            &payload,
+        );
+        let previous = classify_evidence_with_version(
+            PREVIOUS_CLASSIFIER_VERSION,
+            "run-codex",
+            1,
+            "evidence-read",
+            "activity.completed",
+            "command",
+            "completed",
+            &payload,
+        );
+
+        assert_eq!(current.operation_id, previous.operation_id);
+        assert_eq!(current.activity_domain, "file");
+        assert_eq!(current.semantic_kind.as_deref(), Some("file.read"));
+        assert_eq!(previous.activity_domain, "shell");
+        assert_eq!(previous.semantic_kind.as_deref(), Some("shell.execute"));
     }
 
     #[test]
