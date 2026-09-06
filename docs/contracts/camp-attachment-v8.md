@@ -4,7 +4,7 @@ contract: camp-attachment
 version: 8
 status: accepted
 authority: user-source-attachment-reference-and-runtime-resolution
-last_updated: 2026-09-04
+last_updated: 2026-09-06
 ---
 
 # Camp Attachment v8
@@ -141,6 +141,6 @@ monitor, Runtime policy, copy budget, quota system or new cross-cutting path-red
 
 - [Camp Composer Draft v7](camp-composer-draft-v7.md)
 - [Pending Camp Input v2](pending-camp-input-v2.md)
-- [Camp Open Projection v15](camp-open-projection-v15.md)
+- [Camp Open Projection v16](camp-open-projection-v16.md)
 - [File Preview v5](file-preview-v5.md)
 - [Camp attachment architecture](../architecture/camp-published-attachment-view.md)

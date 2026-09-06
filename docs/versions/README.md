@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.52
+current_version: v1.53
 last_updated: 2026-09-06
 ---
 
@@ -203,4 +203,5 @@ last_updated: 2026-09-06
 | v1.49 | `historical` | 正常退出前持久化最新 Camp Composer Draft，再进入既有 Planned Shutdown | [v1.49/README.md](v1.49/README.md) |
 | v1.50 | `historical` | Camp 内私有 Single Chat、共享 Source Attachment 链路与 Conversation 级待发送队列 | [v1.50/README.md](v1.50/README.md) |
 | v1.51 | `historical` | 窗口内按 Camp 恢复文件预览会话，并以无副作用重验和代次 fence 阻断旧能力 | [v1.51/README.md](v1.51/README.md) |
-| v1.52 | `current` | 项目内预览子文件取得独立工作区恢复来源，不依赖父文件或临时能力 | [v1.52/README.md](v1.52/README.md) |
+| v1.52 | `historical` | 项目内预览子文件取得独立工作区恢复来源，不依赖父文件或临时能力 | [v1.52/README.md](v1.52/README.md) |
+| v1.53 | `current` | Runtime 图片公屏只自动展示 Adapter 已确认的 Codex 与 Antigravity 原生生图 | [v1.53/README.md](v1.53/README.md) |
