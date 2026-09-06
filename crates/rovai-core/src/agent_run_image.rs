@@ -36,7 +36,25 @@ pub struct RuntimeImageCandidate {
 pub struct RuntimeImageObservation {
     pub tool_call_id: String,
     pub tool_name: Option<String>,
+    #[serde(default)]
+    pub public_display_source: Option<RuntimeImagePublicDisplaySource>,
     pub images: Vec<RuntimeImageCandidate>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeImagePublicDisplaySource {
+    CodexNativeImageGeneration,
+    AntigravityNativeGenerateImage,
+}
+
+impl RuntimeImagePublicDisplaySource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::CodexNativeImageGeneration => "codex_native_image_generation",
+            Self::AntigravityNativeGenerateImage => "antigravity_native_generate_image",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -128,6 +146,7 @@ pub fn claude_tool_images(
     (!images.is_empty()).then_some(RuntimeImageObservation {
         tool_call_id,
         tool_name,
+        public_display_source: None,
         images,
     })
 }
@@ -153,6 +172,9 @@ pub fn codex_tool_images(message: &Value) -> Option<RuntimeImageObservation> {
         return Some(RuntimeImageObservation {
             tool_call_id: item.get("id")?.as_str()?.to_owned(),
             tool_name: Some("imageGeneration".into()),
+            public_display_source: Some(
+                RuntimeImagePublicDisplaySource::CodexNativeImageGeneration,
+            ),
             images: vec![RuntimeImageCandidate {
                 data: data.map(str::to_owned),
                 path: path.map(str::to_owned),
@@ -174,6 +196,7 @@ pub fn codex_tool_images(message: &Value) -> Option<RuntimeImageObservation> {
     (!images.is_empty()).then_some(RuntimeImageObservation {
         tool_call_id,
         tool_name: item.get("tool").and_then(Value::as_str).map(str::to_owned),
+        public_display_source: None,
         images,
     })
 }
@@ -215,6 +238,9 @@ pub fn antigravity_tool_images(
     Some(RuntimeImageObservation {
         tool_call_id: format!("agy:{conversation_id}:step:{step_index}"),
         tool_name: Some("generate_image".into()),
+        public_display_source: Some(
+            RuntimeImagePublicDisplaySource::AntigravityNativeGenerateImage,
+        ),
         images: vec![RuntimeImageCandidate {
             data: data.map(str::to_owned),
             path: path.map(str::to_owned),
@@ -317,6 +343,7 @@ impl AcpImageAccumulator {
         Some(RuntimeImageObservation {
             tool_call_id: tool_id.to_owned(),
             tool_name,
+            public_display_source: None,
             images,
         })
     }
@@ -532,15 +559,19 @@ pub fn record_images(
                 .unwrap_or_else(|| format!("运行图片 {}", count + 1));
             let changed = database.connection().execute(
                 "INSERT OR IGNORE INTO agent_run_image
-                 (id, agent_run_id, execution_epoch, tool_call_id, source_key, source_path,
-                  content_blob_id, display_name, media_type, byte_size, ordinal, created_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                 (id, agent_run_id, execution_epoch, tool_call_id, source_key,
+                  public_display_source, source_path, content_blob_id, display_name, media_type,
+                  byte_size, ordinal, created_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                 params![
                     format!("run-image-{}", Uuid::new_v4()),
                     agent_run_id,
                     execution_epoch,
                     observation.tool_call_id,
                     key,
+                    observation
+                        .public_display_source
+                        .map(RuntimeImagePublicDisplaySource::as_str),
                     source_path.map(|path| path.to_string_lossy().into_owned()),
                     blob_id,
                     display_name,
@@ -587,10 +618,17 @@ pub fn list_camp_images(connection: &Connection, camp_id: &str) -> Result<Vec<Ag
          LEFT JOIN published_images published ON published.agent_run_id=image.agent_run_id
            AND published.content_digest='sha256:' || blob.sha256
          WHERE turn.camp_id=?1 AND published.agent_run_id IS NULL
+           AND image.public_display_source IN (
+             ?2, ?3
+           )
          ORDER BY run.started_at, run.id, image.execution_epoch, image.ordinal, image.id",
     )?;
     let mut groups: Vec<AgentRunImagesView> = Vec::new();
-    let mut rows = statement.query([camp_id])?;
+    let mut rows = statement.query(params![
+        camp_id,
+        RuntimeImagePublicDisplaySource::CodexNativeImageGeneration.as_str(),
+        RuntimeImagePublicDisplaySource::AntigravityNativeGenerateImage.as_str(),
+    ])?;
     while let Some(row) = rows.next()? {
         let agent_run_id: String = row.get(0)?;
         let execution_epoch: i64 = row.get(1)?;
@@ -791,6 +829,7 @@ mod tests {
         let images = accumulator
             .observe(AdapterKind::CopilotCli, &copilot)
             .unwrap();
+        assert_eq!(images.public_display_source, None);
         assert_eq!(images.images.len(), 1);
         assert_eq!(
             images.images[0].data.as_deref(),
@@ -805,6 +844,7 @@ mod tests {
         trae["params"]["update"]["rawOutput"] = Value::Null;
         trae["params"]["update"]["status"] = json!("completed");
         let captured = accumulator.observe(AdapterKind::TraeCnCli, &trae).unwrap();
+        assert_eq!(captured.public_display_source, None);
         assert_eq!(captured.images.len(), 1);
         assert_eq!(
             captured.images[0].data.as_deref(),
@@ -821,20 +861,24 @@ mod tests {
             {"type":"image","source":{"type":"base64","media_type":"image/png","data":"Yg=="}},
             {"type":"image","source":{"type":"url","url":"https://example.com/result.png"}}
         ]});
-        assert_eq!(
-            claude_tool_images(&claude, Some("Read".into()))
-                .unwrap()
-                .images
-                .len(),
-            2
-        );
+        let claude_images = claude_tool_images(&claude, Some("Read".into())).unwrap();
+        assert_eq!(claude_images.images.len(), 2);
+        assert_eq!(claude_images.public_display_source, None);
         let mut codex = json!({"method":"item/completed","params":{"item":{
             "type":"mcpToolCall","id":"tool-m","tool":"screenshot","result":{"content":[
                 {"type":"image","mimeType":"image/png","data":"YQ=="},
                 {"type":"text","text":"/tmp/result.png"}
             ]}
         }}});
-        assert_eq!(codex_tool_images(&codex).unwrap().images.len(), 1);
+        let mcp_images = codex_tool_images(&codex).unwrap();
+        assert_eq!(mcp_images.images.len(), 1);
+        assert_eq!(mcp_images.public_display_source, None);
+        codex["params"]["item"]["tool"] = json!("generate_image");
+        assert_eq!(
+            codex_tool_images(&codex).unwrap().public_display_source,
+            None,
+            "a third-party tool display name never proves native image generation"
+        );
         codex["method"] = json!("item/started");
         assert!(codex_tool_images(&codex).is_none());
         codex["method"] = json!("item/completed");
@@ -845,6 +889,10 @@ mod tests {
             "result":"YQ==","savedPath":"/tmp/generated.png","revisedPrompt":"not a result"
         }}});
         let native = codex_tool_images(&generated).unwrap();
+        assert_eq!(
+            native.public_display_source,
+            Some(RuntimeImagePublicDisplaySource::CodexNativeImageGeneration)
+        );
         assert_eq!(native.images[0].data.as_deref(), Some("YQ=="));
         assert_eq!(native.images[0].path.as_deref(), Some("/tmp/generated.png"));
         let conversation_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
@@ -853,6 +901,10 @@ mod tests {
         ))
         .unwrap();
         let generated = antigravity_tool_images(&agy, conversation_id, 2).unwrap();
+        assert_eq!(
+            generated.public_display_source,
+            Some(RuntimeImagePublicDisplaySource::AntigravityNativeGenerateImage)
+        );
         assert_eq!(
             generated.images[0].path.as_deref(),
             Some("file:///fixture/blue-paper-boat.jpg")
@@ -922,6 +974,9 @@ mod tests {
         let observation = RuntimeImageObservation {
             tool_call_id: "mixed".into(),
             tool_name: None,
+            public_display_source: Some(
+                RuntimeImagePublicDisplaySource::CodexNativeImageGeneration,
+            ),
             images: vec![
                 RuntimeImageCandidate {
                     data: Some(STANDARD.encode(b"inline wins")),
@@ -1058,6 +1113,9 @@ mod tests {
         let mut large = RuntimeImageObservation {
             tool_call_id: "quota-bytes".into(),
             tool_name: None,
+            public_display_source: Some(
+                RuntimeImagePublicDisplaySource::CodexNativeImageGeneration,
+            ),
             images: vec![],
         };
         for index in 0..5 {
@@ -1079,6 +1137,9 @@ mod tests {
         let mut small = RuntimeImageObservation {
             tool_call_id: "quota-count".into(),
             tool_name: None,
+            public_display_source: Some(
+                RuntimeImagePublicDisplaySource::CodexNativeImageGeneration,
+            ),
             images: vec![],
         };
         for index in 0..20 {
@@ -1140,6 +1201,126 @@ mod tests {
         );
     }
 
+    // Public projection is source-confirmed and fail-closed. Non-generation images remain
+    // retained/readable for Runtime use but cannot become a message gallery or fallback node.
+    #[test]
+    fn public_projection_only_lists_confirmed_native_generation_sources() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        let root = database.directory().join("workspace");
+        seed(&database, &root);
+        let blobs = ManagedBlobStore::new(database.directory());
+
+        let screenshot = codex_tool_images(&json!({
+            "method":"item/completed",
+            "params":{"item":{
+                "type":"mcpToolCall",
+                "id":"cua-screenshot",
+                "tool":"mcp__cua_repl/js",
+                "result":{"content":[{
+                    "type":"image",
+                    "mimeType":"image/png",
+                    "data":"c2NyZWVuc2hvdA=="
+                }]}
+            }}
+        }))
+        .unwrap();
+        assert_eq!(screenshot.public_display_source, None);
+        assert_eq!(
+            record_images(&mut database, &blobs, "image-run", 1, None, &screenshot).unwrap(),
+            1
+        );
+        assert!(
+            list_camp_images(database.connection(), "image-camp")
+                .unwrap()
+                .is_empty(),
+            "a screenshot-only Run has no public fallback image"
+        );
+        let screenshot_id: String = database
+            .connection()
+            .query_row(
+                "SELECT id FROM agent_run_image WHERE tool_call_id='cua-screenshot'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            read_image(&database, &blobs, "image-camp", &screenshot_id)
+                .unwrap()
+                .is_some(),
+            "projection filtering must not delete retained image data"
+        );
+
+        let codex_native = codex_tool_images(&json!({
+            "method":"item/completed",
+            "params":{"item":{
+                "type":"imageGeneration",
+                "id":"codex-native",
+                "result":"Y29kZXgtbmF0aXZl"
+            }}
+        }))
+        .unwrap();
+        assert_eq!(
+            record_images(&mut database, &blobs, "image-run", 1, None, &codex_native).unwrap(),
+            1
+        );
+
+        let conversation_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let mut agy: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/runtime-images/antigravity-1.1.22-generate-image.json"
+        ))
+        .unwrap();
+        agy["steps"][0]["generateImage"]["generatedMedia"]["inlineData"] =
+            json!("YW50aWdyYXZpdHktbmF0aXZl");
+        agy["steps"][0]["generateImage"]["generatedMedia"]["uri"] = Value::Null;
+        let antigravity_native = antigravity_tool_images(&agy, conversation_id, 2).unwrap();
+        assert_eq!(
+            record_images(
+                &mut database,
+                &blobs,
+                "image-run",
+                1,
+                None,
+                &antigravity_native
+            )
+            .unwrap(),
+            1
+        );
+
+        let public = list_camp_images(database.connection(), "image-camp").unwrap();
+        assert_eq!(public.len(), 1);
+        assert_eq!(public[0].images.len(), 2);
+        let public_ids = public[0]
+            .images
+            .iter()
+            .map(|image| image.id.as_str())
+            .collect::<HashSet<_>>();
+        assert!(!public_ids.contains(screenshot_id.as_str()));
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM agent_run_image", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        let sources = database
+            .connection()
+            .prepare("SELECT public_display_source FROM agent_run_image ORDER BY tool_call_id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, Option<String>>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            sources,
+            [
+                Some("antigravity_native_generate_image".into()),
+                Some("codex_native_image_generation".into()),
+                None,
+            ]
+        );
+    }
+
     // Projection owns cross-source presentation: Runtime bytes followed by an explicit Send
     // must not show the same picture twice. Storage/replay remains owned by the lifecycle test.
     #[test]
@@ -1152,6 +1333,9 @@ mod tests {
         let observation = RuntimeImageObservation {
             tool_call_id: "generate".into(),
             tool_name: None,
+            public_display_source: Some(
+                RuntimeImagePublicDisplaySource::CodexNativeImageGeneration,
+            ),
             images: vec![RuntimeImageCandidate {
                 data: Some(STANDARD.encode(bytes)),
                 path: None,
@@ -1266,6 +1450,9 @@ mod tests {
         let stable_observation = RuntimeImageObservation {
             tool_call_id: "stable-result".into(),
             tool_name: None,
+            public_display_source: Some(
+                RuntimeImagePublicDisplaySource::CodexNativeImageGeneration,
+            ),
             images: vec![RuntimeImageCandidate {
                 data: None,
                 path: Some(stable.to_string_lossy().into_owned()),
