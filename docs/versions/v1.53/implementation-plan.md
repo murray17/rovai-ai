@@ -275,3 +275,55 @@ Skill Library 的工具详情定向验收通过，验证“完成了 1 个步骤
 全量 `accept:runtime-activity-ui` 本轮未通过：消息操作栏现有 `margin-left: -5px` 与旧脚本要求的零偏移不符；
 该偏移在 PR #255 的基线已存在，本轮不修改消息操作栏或放宽全量断言。定向脚本的旧“已执行 1 项操作”
 断言已同步当前工具组合同；该补充只改变验收脚本和记录，已打包的生产代码不变。
+
+## 新对话创建性能补充
+
+- [x] `camps.create` 改为只执行 `select_workspace` 的目录准入与规范化，不调用 Git inspection。
+- [x] `observe_git` 移除 `git status` 工作树扫描，保留 capability、root/common directory、object format、
+  HEAD 与 branch；新 observation 的 `dirty` 为 `None`。
+- [x] 保留 `GitObservation.dirty` 的 nullable wire、数据库与历史读取兼容，不伪造 clean 状态，不修改诊断 schema。
+- [x] 扩展既有 `git::tests` owner，证明 clean 与 modified 工作树都只返回相同 HEAD/branch 且 dirty unavailable；
+  Files Changed / Diff Card 仍完全由 Runtime evidence 投影拥有。
+- [x] 更新 Workspace / User Automation 权威、v2 合同、版本决定与导航。
+- [x] 执行 Core、Desktop、文档治理与合入前门禁，并在下方记录结果及已确认的主线 Clippy 基线。
+
+本轮不新增平行测试夹具：既有 `git::tests` 已拥有 Git metadata observation，直接扩展它即可捕捉重新引入
+dirty scan 的行为合同；`smoke:core` 继续拥有临时数据目录与 Git / 非 Git Camp 创建的端到端 seam。性能边界
+由调用图保证：Camp 创建路径不再包含 Git 子进程，Git observation 也不再包含工作树命令；不设置依赖机器负载的
+毫秒阈值。
+
+### 必跑命令
+
+```bash
+cargo fmt --all -- --check
+cargo test -p rovai-core --lib git::tests::
+cargo test -p rovai-core --bin rovai-core
+pnpm smoke:core
+pnpm typecheck
+pnpm test
+pnpm build:desktop
+pnpm test:rust:pr
+cargo clippy --workspace --all-targets -- -D warnings
+pnpm docs:test
+pnpm docs:check
+DOCS_BASE_REF=<merge-base-with-main> pnpm docs:check:ci
+git diff --check
+```
+
+### 验证记录
+
+- Git observation 定向 4 个用例通过；Core binary 230 个用例通过，5 个手工真实 Runtime smoke 按设计忽略。
+- `TMPDIR=/private/tmp pnpm smoke:core` 通过，覆盖 fresh Core、Git / 非 Git Camp 创建、重启读取与删除；默认
+  macOS `tmpdir()` 返回的 `/var` 别名会被既有 Runtime Files Root symlink 门禁拒绝，因此使用规范临时目录，
+  未修改 smoke 脚本或产品门禁。
+- `pnpm test:rust:pr` 通过：Library 524、CLI 33、slow integration 306 个用例全部通过。
+- `pnpm typecheck`、`pnpm test` 与 `pnpm build:desktop` 通过；整合最新主线后的全量前端为 159 个 Vitest 文件／1,616 个用例，
+  最终 Node 批次 222 个通过／1 个 Windows-only 跳过。
+- `pnpm docs:test`（9 个用例）、`pnpm docs:check`、
+  `DOCS_BASE_REF=c1582f4b6987b37979ca1b01fc7c639b5b800614 pnpm docs:check:ci`、Rust format 与 diff 检查通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 仍只在未修改的
+  `record_available_runtime_model` 报既有 `too_many_arguments`；该函数与本分支基线一致，本次不扩大范围修改。
+- 当前工作树重复三次完整 `git status --porcelain=v1 -z` 分别耗时 1.69s、1.62s、1.39s；新的
+  `camps.create` 调用图不含 Git 子进程，因而直接移除该段随工作树增长的创建等待。
+
+真实 Runtime、日常 Electron userData 与用户工作区未参与本轮自动验收。

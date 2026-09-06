@@ -195,11 +195,10 @@ pub async fn observe_git(path: &Path) -> GitObservation {
         };
     }
 
-    let (root, common, object_format, status, head_commit, branch) = tokio::join!(
+    let (root, common, object_format, head_commit, branch) = tokio::join!(
         required_git_text(path, &["rev-parse", "--show-toplevel"]),
         required_git_text(path, &["rev-parse", "--git-common-dir"]),
         required_git_text(path, &["rev-parse", "--show-object-format"]),
-        git_output(path, &["status", "--porcelain=v1", "-z"]),
         optional_git_text(path, &["rev-parse", "--verify", "HEAD^{commit}"]),
         optional_git_text(path, &["symbolic-ref", "--quiet", "--short", "HEAD"]),
     );
@@ -244,13 +243,6 @@ pub async fn observe_git(path: &Path) -> GitObservation {
         }
         Err(error) => return invalid_observation(observed_at, format!("{error:#}")),
     };
-    let status = match status {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
-            return invalid_observation(observed_at, output_error(&output, "Git status failed"));
-        }
-        Err(error) => return invalid_observation(observed_at, format!("{error:#}")),
-    };
     GitObservation {
         state: GitCapabilityState::GitValid,
         repository_root: Some(repository_root.to_string_lossy().to_string()),
@@ -258,7 +250,10 @@ pub async fn observe_git(path: &Path) -> GitObservation {
         object_format: Some(object_format),
         head_commit,
         branch,
-        dirty: Some(!status.stdout.is_empty()),
+        // Working-tree state is intentionally not scanned. Runtime file-change
+        // evidence owns changed-file attribution, while `git status` can make
+        // workspace inspection and Camp creation scale with untracked content.
+        dirty: None,
         observed_at,
         diagnostic: None,
     }
@@ -425,13 +420,13 @@ mod tests {
             GitCapabilityState::GitValid
         );
         assert_eq!(empty_inspection.git_observation.head_commit, None);
-        assert_eq!(empty_inspection.git_observation.dirty, Some(false));
+        assert_eq!(empty_inspection.git_observation.dirty, None);
 
         fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
-    async fn git_observation_tracks_head_branch_and_dirty_state() {
+    async fn git_observation_tracks_head_and_branch_without_claiming_dirty_state() {
         let root = test_root("observation");
         let data_dir = root.join("data");
         let project = root.join("project");
@@ -448,11 +443,13 @@ mod tests {
         assert_eq!(clean.state, GitCapabilityState::GitValid);
         assert!(clean.head_commit.is_some());
         assert!(clean.branch.is_some());
-        assert_eq!(clean.dirty, Some(false));
+        assert_eq!(clean.dirty, None);
 
         fs::write(project.join("README.md"), "changed\n").unwrap();
-        let dirty = observe_git(&project).await;
-        assert_eq!(dirty.dirty, Some(true));
+        let changed = observe_git(&project).await;
+        assert_eq!(changed.head_commit, clean.head_commit);
+        assert_eq!(changed.branch, clean.branch);
+        assert_eq!(changed.dirty, None);
 
         fs::remove_dir_all(root).unwrap();
     }

@@ -6775,16 +6775,15 @@ impl Core {
                         )
                     })?;
                 }
-                let inspection = git::inspect_workspace(
+                let selection = git::select_workspace(
                     Path::new(&requested_path),
                     &self.data_dir,
                     project_binding_kind == ProjectBindingKind::QuickChat,
-                )
-                .await?;
+                )?;
                 let command = CreateCampCommand {
                     name: params.name,
                     project_binding_kind,
-                    project_path: inspection.project_path,
+                    project_path: selection.project_path,
                     member_agent_ids: params.member_agent_ids,
                     default_lead_agent_id: params.default_lead_agent_id,
                     collaboration_mode: params.collaboration_mode,

@@ -4,7 +4,7 @@ authority: renderer-ui-routing
 status: accepted
 design_direction: porcelain-day-steel-night
 target_version: cross-version
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # Rovai AI UI 规范
@@ -54,7 +54,7 @@ Runtime 终态文件行与会话中的每 Run 文件变化卡片由
 
 普通用户通过 `rovai app camp open` 请求导航时，Desktop Main 必须先验证 Camp，再复用现有 window 恢复与
 Camp activation 路径；Renderer 不接收 automation credential、socket、任意 route 或本地路径，也不建立第二套
-视觉 surface。字段和错误由 [User Automation v1](../contracts/user-automation-v1.md)拥有。
+视觉 surface。字段和错误由 [User Automation v2](../contracts/user-automation-v2.md)拥有。
 
 ## 页面局部 Brief
 

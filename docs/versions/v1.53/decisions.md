@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.53
 lifecycle: current
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # v1.53 决定
@@ -117,3 +117,38 @@ Delivery 都 fail closed。Claude Code 明确仍在原生 API retry 时不登记
 当前规范见 [Network Interruption Recovery v1](../../contracts/network-interruption-recovery-v1.md)、
 [AgentRun Recovery](../../architecture/agent-run-recovery.md)与
 [Camp 会话工作区](../../ui/components/conversation-workspace.md)。
+
+<a id="v1-53-d05"></a>
+## V1.53-D05：Camp 创建只做目录准入，Git observation 不扫描工作树
+
+### 背景
+
+标准新建对话流程会先调用 `workspaces.inspect` 展示工作区信息，随后 `camps.create` 又执行一次完整 Git
+inspection。后者实际只消费规范化项目路径，却连带运行 `git status --porcelain=v1 -z`；该命令的成本会随
+工作树和未跟踪内容增长，在较大仓库中可把本应为毫秒级的 Camp 持久化放大到数秒。
+
+Files Changed / Diff Card 已由 Runtime execution evidence 及其文件变更投影拥有，不读取 Git dirty。
+`GitObservation.dirty` 只进入诊断和历史导出，未参与 Camp 准入、调度、AgentRun 生命周期判断或 Renderer
+产品展示，因此不能用创建路径的同步延迟换取这一弱观测。
+
+### 决定
+
+`camps.create` 只通过 Core directory admission 完成目录存在性、类型、受管目录排除和规范化校验，不执行
+任何 Git 子进程。显式 `workspaces.inspect` 以及 AgentRun 开始／结束 observation 继续读取 Git capability、
+repository root、common directory、object format、HEAD 和 branch，但不运行 `git status`，也不扫描工作树；
+新 observation 的 `dirty` 写为 `null`。
+
+保留 nullable `dirty` 字段与历史布尔值的读取兼容，不修改诊断 schema。仓库测试、发布脚本或开发门禁中
+有明确目的的 `git status` 不属于产品运行路径，继续保留。
+
+### 后果与被拒绝方案
+
+- 新建对话的后端路径不再随仓库未跟踪文件数量增长；标准对话框仍可显示 branch 等轻量 Git metadata。
+- 新产生的诊断记录不再声称掌握运行前后工作树 dirty；历史 `true` / `false` 仍可原样读取。
+- 拒绝缓存或复用一次完整 `git status`：它既保留首次延迟，也会快速失效，且创建流程不消费其结果。
+- 拒绝 `--untracked-files=no`：它仍扫描索引和已跟踪文件，同时把不完整结果包装成 dirty 事实。
+- 拒绝改用 Git diff 驱动 Files Changed：它会丢失 Runtime owner、epoch、工具证据和实时投影语义。
+
+当前规范见 [Workspace / Git 不变量](../../architecture/foundational-invariants.md#camp-workspace)、
+[User Automation v2](../../contracts/user-automation-v2.md)与
+[Runtime 文件变更架构](../../architecture/runtime-file-change-observation.md)。
