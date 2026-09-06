@@ -6,6 +6,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { CampDetailPopover } from './CampDetailPopover'
 import { SingleChatPanel } from './SingleChatPanel'
+import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { CampMemberFastToggle } from './CampMemberFastToggle'
 import type {
   ActionApprovalView,
@@ -4893,18 +4894,15 @@ export function CampWorkspace({
                   </span>
                 </span>
               )}
-              <button
-                className={showComposerStop ? 'danger-button composer-stop' : 'primary-button composer-send'}
+              <ComposerPrimaryAction
+                action={showComposerStop ? 'stop' : 'send'}
                 type={showComposerStop ? 'button' : 'submit'}
-                aria-label={showComposerStop ? (stopping ? '正在提交停止请求' : '停止当前执行') : undefined}
                 onClick={showComposerStop ? onStop : undefined}
                 disabled={showComposerStop ? stopping || activeRuns.length === 0 : composerSendDisabled}
-                aria-busy={showComposerStop
+                busy={showComposerStop
                   ? stopping
                   : Boolean(busy || composerSubmitting || preparingAttachments.length > 0)}
-              >
-                {showComposerStop ? (stopping ? '正在提交停止请求…' : '停止') : '发送'}
-              </button>
+              />
             </div>
           </div>
         </div>

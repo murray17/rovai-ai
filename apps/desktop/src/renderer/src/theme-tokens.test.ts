@@ -483,6 +483,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.composer-hint kbd\s*\{[^}]*min-width:\s*20px[^}]*height:\s*18px[^}]*border:\s*1px solid var\(--line\)/)
     expect(css).toMatch(/@media\s*\(max-width:\s*760px\)\s*\{[^}]*\.composer-hint\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
+    expect(css).toMatch(/\.composer-primary-action\s*\{[^}]*width:\s*32px[^}]*height:\s*32px/)
+    expect(css).toMatch(/\.composer-primary-action\.is-stop\s*\{[^}]*border-color:\s*var\(--control-line\)[^}]*background:\s*var\(--surface-subtle\)/)
+    expect(css).toMatch(/\.composer-primary-action-spinner\s*\{[^}]*animation:\s*composer-primary-action-spin/)
   })
 
   it('keeps long Composer input internally scrollable without covering its actions', () => {
