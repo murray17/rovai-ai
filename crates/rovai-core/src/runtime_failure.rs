@@ -3,7 +3,7 @@ use std::{fmt, path::Path};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::agent_profile::AdapterKind;
+use crate::{agent_profile::AdapterKind, network_recovery::classify_network_failure};
 
 pub const PUBLIC_RUNTIME_ERROR_MAX_CHARS: usize = 2048;
 const PUBLIC_RUNTIME_ERROR_MAX_LINES: usize = 4;
@@ -279,6 +279,15 @@ fn classify_high_value_runtime_error(
             "runtime_permission_denied".to_string(),
             format!("{runtime_name} 拒绝了访问请求"),
             false,
+        );
+    }
+    if classify_network_failure(None, Some(default_code), Some(lower)).is_some() {
+        return (
+            RuntimeFailureOrigin::Runtime,
+            default_phase,
+            "runtime_network_interrupted".to_string(),
+            "网络连接中断".to_string(),
+            true,
         );
     }
     (

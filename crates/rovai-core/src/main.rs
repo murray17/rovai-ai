@@ -197,6 +197,10 @@ use rovai_core::{
         parse_acp_usage_message, parse_claude_result_usage, parse_codex_usage_message,
         parse_pi_usage_message, pi_usage_source_identity,
     },
+    network_recovery::{
+        NetworkFailureCategory, NetworkRecoveryAttempt, NetworkRecoveryQueue,
+        NetworkRecoveryRegistration, NetworkRecoveryRegistrationOutcome, classify_network_failure,
+    },
     notification::{
         AcknowledgeNotificationEpisodeCommand, AcknowledgeVisibleNotificationSourcesCommand,
         ClearNotificationEpisodeCommand, MarkAllNotificationEpisodesReadCommand,
@@ -215,14 +219,15 @@ use rovai_core::{
     read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AgentRunCancellationCandidate, AgentRunExecution, AgentRunWorkspace,
-        BindNativeSessionCommand, CampRuntimeCleanupTarget, CancelAgentRunCommand,
-        CancelCampTurnCommand, ClaimAgentRunCommand, ExecutionRuntimeService, FailAgentRunCommand,
-        MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, NativeSessionResumeDisposition,
-        NativeSessionResumeFailure, PermissionSemantics, PlannedShutdownAbortiveTerminal,
-        RebindAgentRunRuntimeCommand, RecordCancelledAgentRunEndingGitObservationCommand,
-        RecordObservedRuntimeModelCommand, RejectAgentRunDispatchCommand,
-        ResolveAcceptedInputRecoveryBlockerCommand, RestartNativeSessionCommand,
-        SucceedAgentRunCommand,
+        ArmAgentRunNetworkRecoveryCommand, BindNativeSessionCommand, CampRuntimeCleanupTarget,
+        CancelAgentRunCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
+        CompleteAgentRunNetworkRecoveryCommand, ExecutionRuntimeService, FailAgentRunCommand,
+        MarkAgentRunForNetworkRecoveryCommand, MissingSendRecoveryBoundary,
+        MissingSendRecoveryCandidate, NativeSessionResumeDisposition, NativeSessionResumeFailure,
+        PermissionSemantics, PlannedShutdownAbortiveTerminal, RebindAgentRunRuntimeCommand,
+        RecordCancelledAgentRunEndingGitObservationCommand, RecordObservedRuntimeModelCommand,
+        RejectAgentRunDispatchCommand, ResolveAcceptedInputRecoveryBlockerCommand,
+        RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
     runtime_compaction_display::{
         RUNTIME_COMPACTION_DISPLAY_EVENT, RuntimeCompactionCompletionEvidence,
@@ -612,6 +617,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.discovery.rescan"
             | "runtime.product.ensure"
             | "runtime.product.check"
+            | "runtime.networkRecovery.wake"
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
             | "userAutomation.camp.send"
@@ -1883,6 +1889,8 @@ struct Core {
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
     agent_run_cleanup_inflight: Mutex<HashSet<ActiveExecutionKey>>,
+    network_recovery: Mutex<NetworkRecoveryQueue>,
+    network_recovery_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
     mcp_config: Result<McpConfigStore>,
@@ -5280,6 +5288,20 @@ impl Core {
         }
         let _ = &request.params;
         match request.method.as_str() {
+            "runtime.networkRecovery.wake" => {
+                let woken = self
+                    .network_recovery
+                    .lock()
+                    .await
+                    .wake_waiting(Instant::now());
+                if woken > 0 {
+                    self.network_recovery_notify.notify_one();
+                }
+                Ok(json!({
+                    "status": "observed",
+                    "waitingChecksWoken": woken,
+                }))
+            }
             "channels.credentials.get" => {
                 let params: GetChannelCredentialParams =
                     serde_json::from_value(request.params.clone())?;
@@ -8706,6 +8728,359 @@ impl Core {
         Ok(serde_json::to_value(execution.result)?)
     }
 
+    async fn register_network_recovery(
+        &self,
+        execution: &AgentRunExecution,
+        category: NetworkFailureCategory,
+        source: &str,
+    ) {
+        let outcome = self.network_recovery.lock().await.register(
+            NetworkRecoveryRegistration {
+                agent_run_id: execution.agent_run_id.clone(),
+                camp_id: execution.camp_id.clone(),
+                camp_turn_id: execution.camp_turn_id.clone(),
+                execution_epoch: execution.execution_epoch,
+                adapter_kind: execution.runtime.adapter_kind.as_str().to_string(),
+                category,
+                source: source.to_string(),
+            },
+            Instant::now(),
+        );
+        match outcome {
+            NetworkRecoveryRegistrationOutcome::Scheduled { attempt, delay } => {
+                eprintln!(
+                    "network_recovery run={} epoch={} source={} attempt={} delay_seconds={} category={} decision=scheduled",
+                    execution.agent_run_id,
+                    execution.execution_epoch,
+                    source,
+                    attempt,
+                    delay.as_secs(),
+                    category.as_str(),
+                );
+                emit(
+                    &self.output,
+                    "agent_run.network_recovery_waiting",
+                    json!({
+                        "campId": execution.camp_id,
+                        "campTurnId": execution.camp_turn_id,
+                        "agentRunId": execution.agent_run_id,
+                        "executionEpoch": execution.execution_epoch,
+                        "adapterKind": execution.runtime.adapter_kind,
+                        "category": category,
+                        "source": source,
+                        "attempt": attempt,
+                        "retryAfterSeconds": delay.as_secs(),
+                    }),
+                );
+                emit_navigation_invalidated(
+                    &self.output,
+                    "agent_run.network_recovery_waiting",
+                    Some(&execution.camp_id),
+                );
+                self.network_recovery_notify.notify_one();
+            }
+            NetworkRecoveryRegistrationOutcome::Duplicate => {
+                eprintln!(
+                    "network_recovery run={} epoch={} source={} category={} decision=coalesced",
+                    execution.agent_run_id,
+                    execution.execution_epoch,
+                    source,
+                    category.as_str(),
+                );
+            }
+            NetworkRecoveryRegistrationOutcome::Stale => {
+                eprintln!(
+                    "network_recovery run={} epoch={} source={} category={} decision=stale",
+                    execution.agent_run_id,
+                    execution.execution_epoch,
+                    source,
+                    category.as_str(),
+                );
+            }
+        }
+    }
+
+    async fn complete_network_recovery_after_input_acceptance(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) {
+        if !self
+            .network_recovery
+            .lock()
+            .await
+            .contains(agent_run_id, execution_epoch)
+        {
+            return;
+        }
+        let completion: Result<Option<(String, CommandExecution)>> = {
+            let mut database = self.database.lock().await;
+            let service = ExecutionRuntimeService::default();
+            match service.load_agent_run_execution(&database, agent_run_id, execution_epoch) {
+                Ok(Some(execution)) => {
+                    let camp_id = execution.camp_id.clone();
+                    service
+                        .complete_network_recovery(
+                            &mut database,
+                            &CommandEnvelope {
+                                command_id: uuid::Uuid::new_v4().to_string(),
+                                actor: ActorRef::System {
+                                    component_id: "network-recovery-coordinator".to_string(),
+                                },
+                                camp_id: Some(camp_id.clone()),
+                                expected_versions: Vec::new(),
+                                execution_epoch: None,
+                                payload: CompleteAgentRunNetworkRecoveryCommand {
+                                    agent_run_id: agent_run_id.to_string(),
+                                    expected_version: execution.version,
+                                    execution_epoch,
+                                },
+                            },
+                        )
+                        .map(|completion| Some((camp_id, completion)))
+                }
+                Ok(None) => Ok(None),
+                Err(error) => Err(error),
+            }
+        };
+        match completion {
+            Ok(Some((camp_id, completion)))
+                if completion.result.status != CommandResultStatus::Rejected =>
+            {
+                self.stop_network_recovery(agent_run_id, execution_epoch, "runtime_input_accepted")
+                    .await;
+                emit_navigation_invalidated(
+                    &self.output,
+                    "agent_run.network_recovery_progressed",
+                    Some(&camp_id),
+                );
+            }
+            Ok(Some((_, completion))) => {
+                eprintln!(
+                    "network_recovery run={} epoch={} decision=progress_rejected code={}",
+                    agent_run_id, execution_epoch, completion.result.code,
+                );
+                if completion.result.code == "agent_run.network_recovery_not_active" {
+                    self.stop_network_recovery(
+                        agent_run_id,
+                        execution_epoch,
+                        "network_recovery_already_cleared",
+                    )
+                    .await;
+                }
+            }
+            Ok(None) => {
+                self.stop_network_recovery(agent_run_id, execution_epoch, "run_fenced")
+                    .await;
+            }
+            Err(error) => eprintln!(
+                "network_recovery run={} epoch={} decision=progress_error error={error:#}",
+                agent_run_id, execution_epoch,
+            ),
+        }
+    }
+
+    async fn stop_network_recovery(
+        &self,
+        agent_run_id: &str,
+        through_execution_epoch: i64,
+        reason: &str,
+    ) {
+        if let Some(stopped) = self
+            .network_recovery
+            .lock()
+            .await
+            .complete(agent_run_id, through_execution_epoch)
+        {
+            eprintln!(
+                "network_recovery run={} epoch={} source={} attempt={} category={} decision=stopped reason={}",
+                stopped.registration.agent_run_id,
+                stopped.registration.execution_epoch,
+                stopped.registration.source,
+                stopped.attempt,
+                stopped.registration.category.as_str(),
+                reason,
+            );
+            self.network_recovery_notify.notify_one();
+        }
+    }
+
+    async fn stop_network_recovery_after_terminal(
+        &self,
+        agent_run_id: &str,
+        terminal_execution_epoch: i64,
+        reason: &str,
+    ) {
+        if let Some(stopped) = self
+            .network_recovery
+            .lock()
+            .await
+            .complete_after_terminal(agent_run_id, terminal_execution_epoch)
+        {
+            eprintln!(
+                "network_recovery run={} epoch={} source={} attempt={} category={} decision=stopped reason={}",
+                stopped.registration.agent_run_id,
+                stopped.registration.execution_epoch,
+                stopped.registration.source,
+                stopped.attempt,
+                stopped.registration.category.as_str(),
+                reason,
+            );
+            self.network_recovery_notify.notify_one();
+        }
+    }
+
+    async fn defer_network_recovery_check(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        reason: &str,
+    ) {
+        if let Some((deferred, delay)) = self.network_recovery.lock().await.defer_check(
+            agent_run_id,
+            execution_epoch,
+            Instant::now(),
+        ) {
+            eprintln!(
+                "network_recovery run={} epoch={} source={} attempt={} delay_seconds={} category={} decision=deferred reason={}",
+                deferred.registration.agent_run_id,
+                deferred.registration.execution_epoch,
+                deferred.registration.source,
+                deferred.attempt,
+                delay.as_secs(),
+                deferred.registration.category.as_str(),
+                reason,
+            );
+            self.network_recovery_notify.notify_one();
+        }
+    }
+
+    async fn begin_network_recovery_attempt(
+        self: &Arc<Self>,
+        attempt: NetworkRecoveryAttempt,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> bool {
+        let registration = &attempt.registration;
+        let admission: Result<Option<CommandExecution>> = {
+            let mut database = self.database.lock().await;
+            let service = ExecutionRuntimeService::default();
+            match service.load_agent_run_execution(
+                &database,
+                &registration.agent_run_id,
+                registration.execution_epoch,
+            ) {
+                Ok(Some(execution)) => service
+                    .arm_network_recovery_attempt(
+                        &mut database,
+                        &CommandEnvelope {
+                            command_id: uuid::Uuid::new_v4().to_string(),
+                            actor: ActorRef::System {
+                                component_id: "network-recovery-coordinator".to_string(),
+                            },
+                            camp_id: Some(registration.camp_id.clone()),
+                            expected_versions: Vec::new(),
+                            execution_epoch: None,
+                            payload: ArmAgentRunNetworkRecoveryCommand {
+                                agent_run_id: registration.agent_run_id.clone(),
+                                expected_version: execution.version,
+                                execution_epoch: registration.execution_epoch,
+                                attempt: attempt.attempt,
+                            },
+                        },
+                    )
+                    .map(Some),
+                Ok(None) => Ok(None),
+                Err(error) => Err(error),
+            }
+        };
+        match admission {
+            Ok(Some(admission))
+                if admission.result.code == "agent_run.network_recovery_attempt_admitted" =>
+            {
+                eprintln!(
+                    "network_recovery run={} epoch={} source={} attempt={} category={} decision=admitted",
+                    registration.agent_run_id,
+                    registration.execution_epoch,
+                    registration.source,
+                    attempt.attempt,
+                    registration.category.as_str(),
+                );
+                emit(
+                    output,
+                    "agent_run.recovering",
+                    json!({
+                        "campId": registration.camp_id,
+                        "campTurnId": registration.camp_turn_id,
+                        "agentRunId": registration.agent_run_id,
+                        "executionEpoch": registration.execution_epoch,
+                        "adapterKind": registration.adapter_kind,
+                        "reason": "network_recovery",
+                        "category": registration.category,
+                        "source": registration.source,
+                        "attempt": attempt.attempt,
+                    }),
+                );
+                emit_navigation_invalidated(
+                    output,
+                    "agent_run.network_recovery_attempt_admitted",
+                    Some(&registration.camp_id),
+                );
+                true
+            }
+            Ok(Some(admission)) => {
+                eprintln!(
+                    "network_recovery run={} epoch={} source={} attempt={} category={} decision=stopped code={}",
+                    registration.agent_run_id,
+                    registration.execution_epoch,
+                    registration.source,
+                    attempt.attempt,
+                    registration.category.as_str(),
+                    admission.result.code,
+                );
+                self.stop_network_recovery(
+                    &registration.agent_run_id,
+                    registration.execution_epoch,
+                    &admission.result.code,
+                )
+                .await;
+                if admission.result.code == "agent_run.network_recovery_needs_attention" {
+                    emit_navigation_invalidated(
+                        output,
+                        "agent_run.network_recovery_needs_attention",
+                        Some(&registration.camp_id),
+                    );
+                }
+                false
+            }
+            Ok(None) => {
+                self.stop_network_recovery(
+                    &registration.agent_run_id,
+                    registration.execution_epoch,
+                    "run_no_longer_active",
+                )
+                .await;
+                false
+            }
+            Err(error) => {
+                eprintln!(
+                    "network_recovery run={} epoch={} source={} attempt={} category={} decision=admission_error error={error:#}",
+                    registration.agent_run_id,
+                    registration.execution_epoch,
+                    registration.source,
+                    attempt.attempt,
+                    registration.category.as_str(),
+                );
+                self.defer_network_recovery_check(
+                    &registration.agent_run_id,
+                    registration.execution_epoch,
+                    "admission_error",
+                )
+                .await;
+                false
+            }
+        }
+    }
+
     async fn dispatch_agent_runs(self: &Arc<Self>, output: &mpsc::UnboundedSender<String>) {
         let candidates = {
             let database = self.database.lock().await;
@@ -9387,6 +9762,12 @@ impl Core {
         output: &mpsc::UnboundedSender<String>,
         candidate: AgentRunCancellationCandidate,
     ) -> bool {
+        self.stop_network_recovery(
+            &candidate.agent_run_id,
+            candidate.execution_epoch,
+            "user_or_turn_cancelled",
+        )
+        .await;
         let fence = self
             .cleanup_agent_run_runtime(
                 &candidate.agent_run_id,
@@ -13143,6 +13524,12 @@ impl Core {
         runtime_terminal_observed: bool,
         public_failure: Option<RuntimeFailureView>,
     ) {
+        self.stop_network_recovery(
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            "runtime_failure",
+        )
+        .await;
         let file_change_ingress_flushed = match self
             .agent_run_runtime(&execution.agent_run_id, execution.execution_epoch)
             .await
@@ -14185,6 +14572,8 @@ async fn run_core(
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
         agent_run_cleanup_inflight: Mutex::new(HashSet::new()),
+        network_recovery: Mutex::new(NetworkRecoveryQueue::default()),
+        network_recovery_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
         mcp_config,
@@ -14329,6 +14718,12 @@ async fn run_core(
         core.clone(),
         output_tx.clone(),
         scheduler_shutdown_rx,
+    ));
+    let (network_recovery_shutdown_tx, network_recovery_shutdown_rx) = oneshot::channel();
+    let mut network_recovery_handle = tokio::spawn(process_network_recovery(
+        core.clone(),
+        output_tx.clone(),
+        network_recovery_shutdown_rx,
     ));
     let (runtime_check_shutdown_tx, runtime_check_shutdown_rx) = oneshot::channel();
     let mut runtime_check_handle = tokio::spawn(process_runtime_check_manager(
@@ -14515,6 +14910,7 @@ async fn run_core(
         // This store is the launch-admission linearization point. Worker stop
         // signals follow it, so no new recovery or scheduler launch can enter.
         core.planned_shutdown.close_launch_admission();
+        let _ = network_recovery_shutdown_tx.send(());
         let _ = scheduler_shutdown_tx.send(());
         let _ = attachment_projection_shutdown_tx.send(());
         let _ = runtime_check_shutdown_tx.send(());
@@ -14621,6 +15017,12 @@ async fn run_core(
         .await;
         let scheduler_quiesced = join_or_abort_until(
             &mut scheduler_handle,
+            interrupt_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
+        let network_recovery_quiesced = join_or_abort_until(
+            &mut network_recovery_handle,
             interrupt_deadline,
             fence_settlement_deadline,
         )
@@ -14749,6 +15151,7 @@ async fn run_core(
             && routes_drained
             && runtime_discovery_quiesced
             && background_requests_quiesced
+            && network_recovery_quiesced
             && scheduler_quiesced
             && attachment_projection_quiesced
             && runtime_checks_quiesced
@@ -14913,6 +15316,8 @@ async fn run_core(
         while background_requests.join_next().await.is_some() {}
         runtime_discovery_handle.abort();
         let _ = runtime_discovery_handle.await;
+        let _ = network_recovery_shutdown_tx.send(());
+        let _ = network_recovery_handle.await;
         let _ = scheduler_shutdown_tx.send(());
         let _ = scheduler_handle.await;
         let _ = attachment_projection_shutdown_tx.send(());
@@ -15916,6 +16321,12 @@ async fn process_pi_agent_run_exit(
     core.planned_shutdown
         .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
         .await;
+    core.stop_network_recovery(
+        agent_run_id,
+        execution_epoch,
+        "runtime_host_exit_unclassified",
+    )
+    .await;
     let execution = {
         let database = core.database.lock().await;
         ExecutionRuntimeService::default().load_agent_run_execution(
@@ -16367,12 +16778,20 @@ async fn process_acp_input_accepted(
         let _ = runtime.cancel().await;
         return;
     }
-    if let Err(error) = core
+    match core
         .acknowledge_runtime_input(delivery_id, native_prompt_id)
         .await
     {
-        eprintln!("failed to persist ACP input acceptance for AgentRun {agent_run_id}: {error:#}");
-        let _ = runtime.cancel().await;
+        Ok(()) => {
+            core.complete_network_recovery_after_input_acceptance(agent_run_id, execution_epoch)
+                .await;
+        }
+        Err(error) => {
+            eprintln!(
+                "failed to persist ACP input acceptance for AgentRun {agent_run_id}: {error:#}"
+            );
+            let _ = runtime.cancel().await;
+        }
     }
 }
 
@@ -17944,6 +18363,20 @@ async fn persist_acp_prompt_completion(
         // was accepted, a successor instruction is required instead of replaying the Run.
         failure.retryable &= manual_retry_allowed;
     }
+    let network_category = acp_prompt_network_recovery_category(
+        planned_outcome,
+        delivery_status.as_deref(),
+        params.get("nativeErrorKind").and_then(Value::as_str),
+        public_failure.as_ref().map(|failure| failure.code.as_str()),
+        response_error,
+    );
+    if network_category.is_some()
+        && let Some(failure) = public_failure.as_mut()
+    {
+        failure.code = "runtime_network_interrupted".to_string();
+        failure.summary = "网络连接中断".to_string();
+        failure.retryable = manual_retry_allowed;
+    }
     let error_code = public_failure
         .as_ref()
         .map(|failure| failure.code.clone())
@@ -17963,6 +18396,84 @@ async fn persist_acp_prompt_completion(
             .await
             .context("ACP terminal route was fenced during Host release")?;
     }
+    if let (Some(category), Some(failure)) = (network_category, public_failure.as_ref()) {
+        let recovery = {
+            let mut database = core.database.lock().await;
+            match ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                agent_run_id,
+                execution_epoch,
+            ) {
+                Ok(Some(execution)) => {
+                    let command = ExecutionRuntimeService::default().mark_for_network_recovery(
+                        &mut database,
+                        &CommandEnvelope {
+                            command_id: uuid::Uuid::new_v4().to_string(),
+                            actor: ActorRef::System {
+                                component_id: "network-recovery-coordinator".to_string(),
+                            },
+                            camp_id: Some(execution.camp_id.clone()),
+                            expected_versions: Vec::new(),
+                            execution_epoch: None,
+                            payload: MarkAgentRunForNetworkRecoveryCommand {
+                                agent_run_id: agent_run_id.to_string(),
+                                expected_version: execution.version,
+                                execution_epoch,
+                                category: category.as_str().to_string(),
+                                source: "acp_prompt_terminal".to_string(),
+                                failure: failure.clone(),
+                            },
+                        },
+                    );
+                    Some((execution, command))
+                }
+                Ok(None) => None,
+                Err(error) => {
+                    eprintln!(
+                        "failed to load AgentRun {agent_run_id} for network recovery: {error:#}"
+                    );
+                    None
+                }
+            }
+        };
+        if let Some((execution, command)) = recovery {
+            match command {
+                Ok(command) if command.result.status != CommandResultStatus::Rejected => {
+                    core.planned_shutdown
+                        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+                        .await;
+                    runtime_route_permit.complete_callback();
+                    if core.planned_shutdown.shutdown_started() {
+                        eprintln!(
+                            "network_recovery run={} epoch={} source=acp_prompt_terminal category={} decision=stopped reason=planned_shutdown",
+                            agent_run_id,
+                            execution_epoch,
+                            category.as_str(),
+                        );
+                        return Ok(());
+                    }
+                    core.register_network_recovery(&execution, category, "acp_prompt_terminal")
+                        .await;
+                    return Ok(());
+                }
+                Ok(command) => eprintln!(
+                    "network_recovery run={} epoch={} source=acp_prompt_terminal category={} decision=not_admitted code={}",
+                    agent_run_id,
+                    execution_epoch,
+                    category.as_str(),
+                    command.result.code,
+                ),
+                Err(error) => eprintln!(
+                    "network_recovery run={} epoch={} source=acp_prompt_terminal category={} decision=error error={error:#}",
+                    agent_run_id,
+                    execution_epoch,
+                    category.as_str(),
+                ),
+            }
+        }
+    }
+    core.stop_network_recovery_after_terminal(agent_run_id, execution_epoch, "runtime_terminal")
+        .await;
     let mut terminal_admission = core
         .admit_planned_shutdown_terminal(
             agent_run_id,
@@ -18191,6 +18702,18 @@ fn acp_prompt_manual_retry_allowed(
     outcome == RuntimeTerminalOutcome::Failed && delivery_status == Some("not_accepted")
 }
 
+fn acp_prompt_network_recovery_category(
+    outcome: RuntimeTerminalOutcome,
+    delivery_status: Option<&str>,
+    structured_code: Option<&str>,
+    public_failure_code: Option<&str>,
+    detail: Option<&str>,
+) -> Option<NetworkFailureCategory> {
+    acp_prompt_manual_retry_allowed(outcome, delivery_status)
+        .then(|| classify_network_failure(structured_code, public_failure_code, detail))
+        .flatten()
+}
+
 async fn process_acp_agent_run_exit(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -18229,6 +18752,12 @@ async fn process_acp_agent_run_exit(
     core.planned_shutdown
         .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
         .await;
+    core.stop_network_recovery(
+        agent_run_id,
+        execution_epoch,
+        "runtime_host_exit_unclassified",
+    )
+    .await;
     let execution = {
         let database = core.database.lock().await;
         ExecutionRuntimeService::default().load_agent_run_execution(
@@ -19481,6 +20010,12 @@ async fn process_agent_run_exit(
     core.planned_shutdown
         .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
         .await;
+    core.stop_network_recovery(
+        agent_run_id,
+        execution_epoch,
+        "runtime_host_exit_unclassified",
+    )
+    .await;
     let execution = {
         let database = core.database.lock().await;
         ExecutionRuntimeService::default().load_agent_run_execution(
@@ -19683,6 +20218,99 @@ async fn process_agent_run_scheduler(
             },
             _ = &mut shutdown => break,
         }
+    }
+}
+
+async fn process_network_recovery(
+    core: Arc<Core>,
+    output: mpsc::UnboundedSender<String>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    'coordinator: loop {
+        let next_deadline = core.network_recovery.lock().await.next_deadline();
+        let should_dispatch = match next_deadline {
+            Some(deadline) => {
+                let sleep = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline));
+                tokio::pin!(sleep);
+                tokio::select! {
+                    _ = &mut sleep => true,
+                    _ = core.network_recovery_notify.notified() => false,
+                    _ = &mut shutdown => break,
+                }
+            }
+            None => {
+                tokio::select! {
+                    _ = core.network_recovery_notify.notified() => false,
+                    _ = &mut shutdown => break,
+                }
+            }
+        };
+        if !should_dispatch {
+            continue;
+        }
+        let attempts = core.network_recovery.lock().await.take_due(Instant::now());
+        if attempts.is_empty() {
+            continue;
+        }
+        let mut workers = tokio::task::JoinSet::new();
+        let mut worker_entries = HashMap::new();
+        for attempt in attempts {
+            let entry_key = (
+                attempt.registration.agent_run_id.clone(),
+                attempt.registration.execution_epoch,
+            );
+            let core = core.clone();
+            let output = output.clone();
+            let handle = workers
+                .spawn(async move { core.begin_network_recovery_attempt(attempt, &output).await });
+            worker_entries.insert(handle.id(), entry_key);
+        }
+        let mut dispatch_admitted = false;
+        while !workers.is_empty() {
+            tokio::select! {
+                result = workers.join_next_with_id() => {
+                    match result {
+                        Some(Ok((task_id, admitted))) => {
+                            worker_entries.remove(&task_id);
+                            dispatch_admitted |= admitted;
+                        }
+                        Some(Err(error)) => {
+                            if let Some((agent_run_id, execution_epoch)) = worker_entries.remove(&error.id()) {
+                                core.defer_network_recovery_check(
+                                    &agent_run_id,
+                                    execution_epoch,
+                                    "worker_failed",
+                                ).await;
+                            }
+                            eprintln!("network recovery worker failed: {error}");
+                        }
+                        None => {}
+                    }
+                }
+                _ = &mut shutdown => {
+                    workers.abort_all();
+                    while workers.join_next().await.is_some() {}
+                    break 'coordinator;
+                }
+            }
+        }
+        if dispatch_admitted {
+            tokio::select! {
+                _ = core.dispatch_agent_runs(&output) => {}
+                _ = &mut shutdown => break 'coordinator,
+            }
+        }
+    }
+    let remaining = core.network_recovery.lock().await.drain();
+    for stopped in remaining {
+        eprintln!(
+            "network_recovery run={} epoch={} source={} attempt={} category={} decision=stopped reason=core_shutdown",
+            stopped.registration.agent_run_id,
+            stopped.registration.execution_epoch,
+            stopped.registration.source,
+            stopped.attempt,
+            stopped.registration.category.as_str(),
+        );
     }
 }
 
@@ -20701,6 +21329,36 @@ mod tests {
             RuntimeTerminalOutcome::Cancelled,
             Some("not_accepted")
         ));
+        assert_eq!(
+            acp_prompt_network_recovery_category(
+                RuntimeTerminalOutcome::Failed,
+                Some("not_accepted"),
+                Some("ECONNRESET"),
+                Some("runtime_prompt_runtime_error"),
+                Some("request failed"),
+            ),
+            Some(NetworkFailureCategory::ConnectionReset)
+        );
+        assert!(
+            acp_prompt_network_recovery_category(
+                RuntimeTerminalOutcome::Failed,
+                Some("accepted"),
+                Some("ECONNRESET"),
+                Some("runtime_prompt_runtime_error"),
+                Some("request failed"),
+            )
+            .is_none()
+        );
+        assert!(
+            acp_prompt_network_recovery_category(
+                RuntimeTerminalOutcome::Failed,
+                Some("not_accepted"),
+                None,
+                Some("runtime_prompt_runtime_error"),
+                Some("HTTP 503 service unavailable"),
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -20971,6 +21629,8 @@ mod tests {
             compaction_detector_policies: compaction_detector_policies.clone(),
             agent_run_cancellation_notify: Notify::new(),
             agent_run_cleanup_inflight: Mutex::new(HashSet::new()),
+            network_recovery: Mutex::new(NetworkRecoveryQueue::default()),
+            network_recovery_notify: Notify::new(),
             pending_execution_recovery: Mutex::new(()),
             skill_library,
             mcp_config: Ok(mcp_config),
@@ -23032,6 +23692,9 @@ while IFS= read -r _ignored; do :; done
             "runtime.installations.refresh"
         ));
         assert!(request_runs_outside_main_queue("runtime.discovery.rescan"));
+        assert!(request_runs_outside_main_queue(
+            "runtime.networkRecovery.wake"
+        ));
         assert!(request_runs_outside_main_queue("runtime.product.ensure"));
         assert!(request_runs_outside_main_queue("runtime.product.check"));
         assert!(!request_runs_outside_main_queue("camps.snapshot"));

@@ -2172,6 +2172,7 @@ describe('task event projections', () => {
     const turn = { cancelRequestedAt: null }
     expect(canStopAgentRun(run, turn)).toBe(true)
     expect(canStopAgentRun({ ...run, waitReason: 'recovery_blocked' }, turn)).toBe(false)
+    expect(canStopAgentRun({ ...run, waitReason: 'network_recovery_blocked' }, turn)).toBe(true)
     expect(canStopAgentRun({ ...run, cancelRequestedAt: '2026-08-19T01:00:00Z' }, turn))
       .toBe(false)
     expect(canStopAgentRun(run, { cancelRequestedAt: '2026-08-19T01:00:00Z' }))
@@ -3616,6 +3617,9 @@ describe('task event projections', () => {
     expect(executionDisclosureIsLiveOpen('queued', true, true)).toBe(false)
     expect(agentRunCountsAsExecuting({ status: 'waiting', waitReason: 'runtime_recovery' })).toBe(true)
     expect(agentRunCountsAsExecuting({ status: 'waiting', waitReason: 'recovery_blocked' })).toBe(false)
+    expect(agentRunCountsAsExecuting({
+      status: 'waiting', waitReason: 'network_recovery_blocked'
+    })).toBe(false)
 
     const submittedFirstRun = {
       ...snapshot.agentRuns[0],
@@ -4723,11 +4727,37 @@ describe('task event projections', () => {
       label: '结果待确认',
       tone: 'danger'
     })
+    expect(agentRunPresentation({ status: 'waiting', waitReason: 'network_recovery' })).toEqual({
+      label: '连接中断，等待恢复',
+      tone: 'attention'
+    })
+    expect(agentRunPresentation({
+      status: 'running',
+      waitReason: null,
+      failure: {
+        runtimeKind: 'opencode-cli',
+        origin: 'runtime',
+        phase: 'execution',
+        code: 'runtime_network_interrupted',
+        summary: '网络连接中断',
+        detail: null,
+        retryable: true
+      }
+    })).toEqual({
+      label: '正在恢复',
+      tone: 'attention'
+    })
+    expect(agentRunPresentation({
+      status: 'waiting',
+      waitReason: 'network_recovery_blocked'
+    })).toEqual({ label: '需要处理', tone: 'danger' })
     expect(agentRunStateTag({ status: 'waiting', waitReason: 'recovery_blocked' })).toEqual({
       tag: 'REVIEW',
       tone: 'danger'
     })
     expect(agentRunWaitDetail('recovery_blocked')).toContain('原请求不会自动重发')
+    expect(agentRunWaitDetail('network_recovery')).toContain('确认输入未被接收')
+    expect(agentRunWaitDetail('network_recovery_blocked')).toContain('需要处理')
     expect(agentRunPresentation({ status: 'running', waitReason: null }, true)).toEqual({
       label: '正在停止…',
       tone: 'neutral'
@@ -5431,6 +5461,20 @@ describe('task event projections', () => {
     expect(waitingMarkup).toContain('class="process-content"')
     expect(waitingMarkup).toContain('仅在详情激活后渲染')
     expect(waitingMarkup).toContain('无法安全自动恢复')
+
+    const networkBlockedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run: {
+        ...run,
+        id: 'run-network-recovery-blocked',
+        status: 'waiting' as const,
+        waitReason: 'network_recovery_blocked' as const,
+        endedAt: null
+      },
+      progress,
+      campId: 'camp-1'
+    }))
+    expect(networkBlockedMarkup).toContain('自动恢复已停止')
+    expect(networkBlockedMarkup).not.toContain('process-spinner')
   })
 
   it('does not present an ACP protocol kind as Copilot execution detail', () => {

@@ -2,16 +2,18 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-and-native-turn-recovery-boundaries
-last_updated: 2026-09-01
+last_updated: 2026-09-06
 ---
 
 # AgentRun Recovery
 
-本文描述 Core 重启后 AgentRun、Native Session 与 Native Turn 的长期恢复边界。规范依据是
+本文描述 App/Core 持续运行期间的网络中断恢复，以及 Core 重启后 AgentRun、Native Session 与 Native Turn 的长期恢复
+边界。规范依据是
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)。受控关闭后的 product
 fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；字段级状态与命令见
 [Accepted Input Recovery v5](../contracts/accepted-input-recovery-v5.md)与
-[Planned Shutdown v6](../contracts/planned-shutdown-v6.md)。
+[Planned Shutdown v6](../contracts/planned-shutdown-v6.md)；运行中网络恢复的精确合同见
+[Network Interruption Recovery v1](../contracts/network-interruption-recovery-v1.md)。
 
 ## 1. 三个独立恢复对象
 
@@ -27,7 +29,32 @@ Core 拥有 AgentRun 和 Runtime Input Delivery；Runtime Provider 拥有 Native
 Session 恢复只重新建立会话 handle，不能恢复旧 Host 内存中的 prompt route。只有经验证的 Adapter
 `native_turn.reconcile.v1` 才能把同一旧 Turn 重新对账。
 
-## 2. 启动恢复分类
+## 2. 运行中网络中断恢复
+
+网络恢复不从历史失败扫描，也不创建新 Run 或 replay Evidence。ACP Prompt 在 failed terminal 且当前 epoch Input
+Delivery 明确 `not_accepted` 时，先完成旧 Prompt route 与 Host 可见性清理；若 structured code 优先的严格 classifier
+确认 connection failed/reset、temporary DNS failure 或 network timeout，Core 在普通 terminal settlement 前把同一
+AgentRun 转为 `waiting/network_recovery`。
+
+generation-local `NetworkRecoveryQueue` 只保存 Run/epoch、Adapter、category、source、attempt、deadline、in-flight 与
+connectivity-hint-consumed。
+延迟固定为 `1, 2, 3, 5, 10, 15, 30, 30...` 秒，从上次 attempt 失败结束时起算。online 与 system resume 只使非
+in-flight deadline 提前到 now；同一故障周期至多消费一次提示，后续失败 epoch 继承已消费标记，持续 signal 不会
+逐档绕过退避。真正恢复仍先通过 system-only domain admission，再移交既有
+`waiting/runtime_recovery` Scheduler。Scheduler/Fleet 的 claim、epoch、lease、并发与 accepted-input fence 保持唯一
+执行权威。
+
+每次 admission 重读 Run/Turn、版本、epoch、取消、预算、成员、授权、Delivery 与未决 Approval/Action/Runtime
+Delivery。只有无 Delivery、明确 `not_accepted` 或尚未跨 dispatch boundary 的 `prepared` 可继续；accepted、unknown、
+未决效果或身份变化停止自动恢复。安全条件变化但仍需人工收口时投影 `network_recovery_blocked`，并保留普通 Run Stop。
+新 epoch 只有在 Runtime Input 正式 accepted 后才清除网络故障周期；Host/Session/连接建立本身不够。
+
+Claude Code 已报告原生 API retry 时仍由 Runtime 拥有恢复，Core 不登记第二个 timer。当前 Rovai 接管只覆盖 ACP
+terminal/not-accepted seam；其他 Adapter/phase 不因 `retryable` 或进程消失被自动重发。Core exit 清除内存 queue；
+若 durable Run 留在 `network_recovery`，下次启动先归一为现有 `runtime_recovery` 再按下面规则分类，不恢复 attempt 或
+deadline，也不建立跨重启保证。
+
+## 3. 启动恢复分类
 
 Core 在普通 Startup Recovery Coordinator 之前先检查 pending `planned_shutdown_cycle`。cycle 覆盖的
 AgentRun 通过 durable product fence 直接收敛为 terminal cancelled，同时保留 accepted/delivery-unknown
@@ -61,7 +88,7 @@ Migration 99/100 是两次 evidence-aware clean break：旧 Formatter 20 或 Man
 Manifest、payload Blob、Runtime Auth Receipt、ACK、Binding identity 和执行证据保留为 non-dispatchable history；
 新的 Scheduler 只接受 Formatter 21/Manifest 21。
 
-## 3. 调度与 Adapter 边界
+## 4. 调度与 Adapter 边界
 
 Scheduler 只领取 queued，或确有自动动作的 `waiting/runtime_recovery` Run。accepted input filter 保留为
 纵深防御；`recovery_blocked` 永不进入候选集合。Codex/ACP Adapter 遇到既有 accepted Delivery 时必须
@@ -76,7 +103,7 @@ fail closed，不得发 `agent_run.input_resumed` 或等待一个不存在的旧
 未来若某 Adapter 通过 P1 实验，Core 才能为它增加独立的 `native_turn_reconciliation` 状态与 Coordinator。
 该 Coordinator 只能 lookup/reattach 同一 Provider Turn，不能调用新的 prompt API。
 
-## 4. 用户与预算收敛
+## 5. 用户与预算收敛
 
 Renderer 从 Snapshot 读取 blocker，不推断恢复进度。用户执行
 `agentRuns.resolveRecoveryBlocker` 后，Core 原子写入：
@@ -104,7 +131,7 @@ Runtime reaper 不再承担业务结算。发送前条件更新及迟到证据�
 `recovery_blocked` 不提供普通 Run Stop，仍只允许既有“结束此运行”把 blocker 收敛为 outcome unknown。
 用户若要继续，必须检查 Workspace/Git/外部效果现场并发送新的后续任务；Core 不自动创建 successor。
 
-## 5. 证据与观测
+## 6. 证据与观测
 
 - `accepted` 回执证明 Runtime 接受过输入，不证明模型读取、工具完成或 terminal result；
 - Runtime correlation ID 不自动升级为 Provider Turn ID；

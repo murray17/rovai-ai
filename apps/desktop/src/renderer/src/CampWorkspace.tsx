@@ -479,7 +479,9 @@ export type AgentExecutionProcess = {
 }
 
 export function agentRunCountsAsExecuting(run: Pick<AgentRunView, 'status' | 'waitReason'>): boolean {
-  return NON_TERMINAL_RUNS.has(run.status) && run.waitReason !== 'recovery_blocked'
+  return NON_TERMINAL_RUNS.has(run.status)
+    && run.waitReason !== 'recovery_blocked'
+    && run.waitReason !== 'network_recovery_blocked'
 }
 
 export function agentRunRuntimeModelPresentation(
@@ -9085,9 +9087,21 @@ function RunExecutionContent({
           </button>
         </div>
       )}
+      {nonTerminal && !cancelling && run.waitReason === 'network_recovery_blocked' && (
+        <div className="process-recovery-blocker" role="status">
+          <div>
+            <strong>自动恢复已停止</strong>
+            <p>
+              恢复前的安全条件已经变化，Rovai AI 不会自动重发原请求。
+              请检查执行记录；需要继续时可停止本次运行，再发送后续任务。
+            </p>
+          </div>
+        </div>
+      )}
       {nonTerminal
         && !cancelling
         && run.waitReason !== 'recovery_blocked'
+        && run.waitReason !== 'network_recovery_blocked'
         && !hasActiveTool
         && !hasActiveCompaction
         && liveTailToolGroupKey === null
@@ -9098,6 +9112,8 @@ function RunExecutionContent({
               ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
               : run.status === 'queued'
                 ? '等待开始'
+                : run.failure?.code === 'runtime_network_interrupted'
+                  ? '正在恢复连接'
                 : activeRetryDiagnostic
                   ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
                   : '正在处理'}</span>

@@ -5,7 +5,10 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { isDeepStrictEqual } from 'node:util'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
-import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import {
+  composerDocumentForAddress,
+  createConfiguredCampAndSend
+} from './lib/create-configured-camp.mjs'
 import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
@@ -809,7 +812,7 @@ async function sendExistingCampMessage(request, campId, body, execution) {
   const saved = await request('camp.composerDraft.save', {
     campId,
     expectedRevision: draft.revision,
-    content: { version: 2, segments: [{ kind: 'text', text: body }] }
+    content: composerDocumentForAddress({ mode: 'default' }, body)
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),

@@ -319,6 +319,7 @@ Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵�
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
 | `pnpm smoke:missing-send-recovery` | 十三种可执行实现（含 Pi、Kimi、Grok）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture，Pi 额外执行原生 Read Tool→final 并验证 `agent_settled` 专属终点与 Tool Activity。Pi 官方配置与 Session root 同样逐 Runtime 临时复制；debug pass 不晋升正式资格 |
+| `pnpm accept:network-recovery` | Claude Code + OpenCode | macOS 普通交互式终端；使用同一隔离 Core generation 与隔离 Git workspace，先验证 Claude Code 的 `runtime_api_retrying` 原生自恢复，再验证 OpenCode ACP `not_accepted` terminal 由 Rovai 在新 epoch 接管并于 Input accepted 后清除恢复标记。脚本只提示操作者断开／恢复 Wi-Fi，不修改系统网络设置；失败时操作者必须手动恢复网络，fixture 与脱敏报告会保留 |
 | `pnpm accept:planned-shutdown` | 当前平台正式 Runtime + packaged App | 在隔离 Git workspace/`userData` 中等待真实 input handoff 后退出，验证 5 秒目标、10 秒硬 deadline、400ms 关闭反馈门槛、无伪 terminal、进程 reap、重启 blocker、Run 取消审计与安全退出 modal 截图；运行前在 macOS 执行 `pnpm package:mac`，在 Windows x64 执行 `pnpm package:windows:x64` |
 | `pnpm accept:onboarding-ui` | 本机首个可用正式 Runtime + packaged App | 不调用模型；用全新隔离 `userData` 验证三页断点、真实 provisioning、`初次集结`、Draft-only starter、重启与 `1040×700` 双主题截图 |
 | `pnpm accept:bootstrap-shell-ui` | 无 Runtime；packaged App + 独立未知 authority / 崩溃恢复 fixture | 不调用模型；证明未知 authority 保留、业务树不挂载、显式重试不消耗 crash budget；另在真实 Core 写事务产生 WAL 后强杀该隔离子进程，验证结构化失败字段、自动恢复已提交数据和工作区重挂载；覆盖双主题、窄窗口、200% 等效布局与 reduced motion 截图 |
@@ -375,6 +376,9 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | `ROVAI_MISSING_SEND_RECOVERY_ADAPTERS` | Missing-Send Recovery Runtime 列表或 `all`（默认） |
 | `ROVAI_MISSING_SEND_RECOVERY_REPORT_DIR` | Missing-Send Recovery 的持久 report/protocol fixture 输出目录 |
 | `ROVAI_MISSING_SEND_RECOVERY_MODEL_<ADAPTER_SLUG>` | 为单个 Missing-Send Runtime 选择真实显式模型；Adapter slug 转为大写并把 `-` 换成 `_`，例如 `ROVAI_MISSING_SEND_RECOVERY_MODEL_COPILOT_CLI=gpt-5.6-sol` |
+| `ROVAI_NETWORK_RECOVERY_ACCEPT_FIXTURE_ROOT` | Network Recovery 验收的显式隔离 data/workspace root |
+| `ROVAI_NETWORK_RECOVERY_ACCEPT_OUTPUT_DIR` | Network Recovery 验收的脱敏 JSON 报告目录 |
+| `ROVAI_KEEP_NETWORK_RECOVERY_FIXTURE=1` | 成功后保留 Network Recovery 隔离 fixture；失败 fixture 总是保留以供诊断 |
 | `ROVAI_PLANNED_SHUTDOWN_ACCEPT_FIXTURE_ROOT` | Planned Shutdown 验收的显式隔离 fixture root |
 | `ROVAI_PLANNED_SHUTDOWN_ACCEPT_OUTPUT_DIR` | Planned Shutdown JSON report 与四张截图输出目录 |
 | `ROVAI_KEEP_PLANNED_SHUTDOWN_FIXTURE=1` | 成功后保留 Planned Shutdown 隔离 fixture |

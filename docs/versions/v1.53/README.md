@@ -9,7 +9,7 @@ model_context_change: false
 last_updated: 2026-09-06
 ---
 
-# Rovai-ai v1.53：Runtime 图片来源、工具一致性与正文块持久化
+# Rovai-ai v1.53：Runtime 图片来源、工具一致性、正文块持久化与网络恢复
 
 前置：[v1.52](../v1.52/README.md)。本版本保留 Runtime 结构化图片观察、混合存储、按需读取和既有图片
 Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
@@ -45,18 +45,38 @@ Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
 旧工具 141 的时间在原子汇合中保留，未知/部分 schema 不准入。见 [V1.53-D03](decisions.md#v1-53-d03)
 及 [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)。
 
+## 运行中网络恢复补充
+
+- Core 增加职责单一的进程内网络恢复队列，固定使用 `1, 2, 3, 5, 10, 15, 30, 30...` 秒且无 jitter；每档从前一
+  attempt 结束时起算，无登记项时不轮询。
+- ACP Prompt 仅在 failed terminal、当前 Delivery 为 `not_accepted` 且严格网络 classifier 通过时，于普通失败结算前
+  转为 `waiting/network_recovery`；旧 Prompt route 先解绑，新 attempt 继续经正式 Scheduler/Fleet。
+- 每次 attempt 重验 Run/version/epoch、取消、预算、成员、授权、Input Delivery、Approval、Action 与 Runtime Delivery；
+  accepted、unknown 或已开始 dispatch 的输入不重发。
+- `online` 与系统 resume 只提前唤醒安全检查；重复信号合并，in-flight singleflight，不直接调用 Adapter，也不重置
+  backoff。
+- Runtime Input 在新 epoch 被正式接受后才清除网络恢复提示；连接或 Session 建立本身不算任务恢复。
+- Renderer 与共享渠道 presentation 增加“连接中断，等待恢复”“正在恢复”“需要处理”，并保留 Run Stop、既有输出、
+  草稿、附件、Approval 与 Evidence。
+- 自动接管代码已接入十个 ACP Adapter 共用的 prompt terminal/not-accepted seam；在真实双链路 qualification 完成前，
+  这些只算候选覆盖，不声明任一 Adapter/平台已获网络恢复资格。Claude Code 现有原生 API retry 仍由 Runtime 单独拥有；
+  Codex、Pi、Antigravity、ACP Host 未分类退出、accepted/unknown 输入及无强网络证据阶段保持既有终态或人工处理边界。
+- 自动化实现与定向回归已经完成；Claude Code 真实断网原生恢复通过，OpenCode 接管分支仍待实机验证。
+  完整资格未通过，操作者已停止继续断网验证并决定先合入实现；本版本继续保持 `in-progress`。
+  详见[网络恢复实施与验收](implementation-plan.md#运行中网络恢复补充)和 [V1.53-D04](decisions.md#v1-53-d04)。
+
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.52 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.53 |
-| Decisions | 已更新 | [V1.53-D01](decisions.md#v1-53-d01)拥有图片准入理由，[D02](decisions.md#v1-53-d02)拥有正文块与维护调用理由，[D03](decisions.md#v1-53-d03)拥有部署迁移汇合理由；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Images v5](../../contracts/runtime-images-v5.md)、[Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)、[Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)与 [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)分别拥有图片、读取、typed 操作与工具呈现 |
-| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[文件操作](../../architecture/runtime-file-change-observation.md)、[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)同步保留式投影与精确升级源汇合 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与 [File Preview](../../ui/components/file-preview.md)保留合入分支的工具一致性和文件阅读语义；正文优化不增加界面设计改动 |
+| Decisions | 已更新 | [V1.53-D01](decisions.md#v1-53-d01)拥有图片准入理由，[D02](decisions.md#v1-53-d02)拥有正文块与维护调用理由，[D03](decisions.md#v1-53-d03)拥有部署迁移汇合理由，[D04](decisions.md#v1-53-d04)拥有网络安全续接理由；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Runtime Images v5](../../contracts/runtime-images-v5.md)、[Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)、[Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)与 [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)分别拥有图片、读取、typed 操作与工具呈现；[Network Interruption Recovery v1](../../contracts/network-interruption-recovery-v1.md)拥有网络分类、固定退避与 Input 安全门禁 |
+| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[文件操作](../../architecture/runtime-file-change-observation.md)、[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)同步保留式投影与精确升级源汇合；[AgentRun Recovery](../../architecture/agent-run-recovery.md)同步进程内恢复协调与生命周期 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与 [File Preview](../../ui/components/file-preview.md)保留合入分支的工具一致性和文件阅读语义；正文优化不增加界面设计改动；网络恢复补充等待、恢复与需处理状态及 Stop 保留规则 |
 | Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)记录 activity-v3、可靠 typed read/write、历史 classifier 冻结和两种部署源兼容 |
 | Runtime compatibility | 确认无需更新 | 不改变 Runtime 启动、协议能力或平台资格；只使用已经适配并验证的原生事件字段 |
-| Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture 索引、版本指针和当前决定导航均指向 Runtime Images v5 与 Camp Open v16 |
+| Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture 索引、版本指针和当前决定导航均指向 Runtime Images v5、Camp Open v16 与 Network Interruption Recovery v1 |
 | Root README | 确认无需更新 | 项目定位、安装方法与公开 Runtime 支持范围不因本地公屏图片集合收紧而变化 |
 
 ## References

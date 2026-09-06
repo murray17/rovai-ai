@@ -10,6 +10,7 @@ import {
   Menu,
   MessageChannelMain,
   nativeTheme,
+  powerMonitor,
   protocol,
   screen,
   shell
@@ -372,6 +373,10 @@ const projectAccessTransactions = new ProjectAccessTransactionCoordinator()
 let userAutomation: UserAutomationServer | null = null
 const desktopSessions = new DesktopSessionRegistry()
 const memberAvatars = coreDataPath === null ? null : new MemberAvatarAssetService(coreDataPath)
+
+const wakeNetworkRecoveryAfterSystemResume = (): void => {
+  void core.request('runtime.networkRecovery.wake').catch(() => undefined)
+}
 
 function requireMemberAvatars(): MemberAvatarAssetService {
   if (!memberAvatars) throw new Error('Core data directory has not been admitted')
@@ -829,6 +834,7 @@ if (primaryInstance) void app.whenReady().then(async () => {
   themePreference = loadedAppearance.preference
   nativeTheme.themeSource = nativeThemeSource(themePreference)
   nativeTheme.on('updated', publishAppearance)
+  powerMonitor.on('resume', wakeNetworkRecoveryAfterSystemResume)
   publishAppearance()
   core.onEvent((event) => {
     channelSettings.handleCoreEvent(event)
@@ -2136,6 +2142,7 @@ const appQuitCoordinator = new AppQuitCoordinator({
   drain: async () => {
     appUpdates?.dispose()
     nativeTheme.removeListener('updated', publishAppearance)
+    powerMonitor.removeListener('resume', wakeNetworkRecoveryAfterSystemResume)
     const stopAutomation = userAutomation?.stop() ?? Promise.resolve()
     userAutomation = null
     try {

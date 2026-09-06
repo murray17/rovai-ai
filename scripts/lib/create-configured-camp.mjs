@@ -24,7 +24,7 @@ export async function createConfiguredCampAndSend(request, input) {
   }
 
   const currentDraft = await request('camp.composerDraft.get', { campId })
-  const content = composerContent(input.address ?? { mode: 'default' }, input.body)
+  const content = composerDocumentForAddress(input.address ?? { mode: 'default' }, input.body)
   const savedDraft = await request('camp.composerDraft.save', {
     campId,
     expectedRevision: currentDraft.revision,
@@ -50,7 +50,7 @@ export async function createConfiguredCampAndSend(request, input) {
   }
 }
 
-function composerContent(address, body) {
+export function composerDocumentForAddress(address, body) {
   if (address.mode === 'broadcast') {
     return {
       version: 2,
@@ -64,11 +64,10 @@ function composerContent(address, body) {
     return {
       version: 2,
       segments: [
-        ...address.agentIds.flatMap((agentId) => [
+        ...address.agentIds.flatMap((agentId, index) => [
           { kind: 'atom', atom: { type: 'member', agentId } },
-          { kind: 'text', text: ' ' }
-        ]),
-        { kind: 'text', text: body }
+          { kind: 'text', text: index === address.agentIds.length - 1 ? ` ${body}` : ' ' }
+        ])
       ]
     }
   }

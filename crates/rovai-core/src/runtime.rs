@@ -30,6 +30,7 @@ use crate::{
         cancel_pending_turn_deliveries, dispatch_delivery, dispatch_pending_for_recipient,
         settle_materialized_delivery_for_agent_run,
     },
+    network_recovery::NetworkFailureCategory,
     planned_shutdown::{ActiveExecutionKey, RuntimeTerminalOutcome, TerminalSettlementPermit},
     runtime_failure::RuntimeFailureView,
 };
@@ -121,6 +122,49 @@ pub struct MarkAgentRunForRecoveryCommand {
 impl sealed::Sealed for MarkAgentRunForRecoveryCommand {}
 impl DomainCommand for MarkAgentRunForRecoveryCommand {
     const TYPE: &'static str = "agent_run.runtime_recovery.request";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkAgentRunForNetworkRecoveryCommand {
+    pub agent_run_id: String,
+    pub expected_version: i64,
+    pub execution_epoch: i64,
+    pub category: String,
+    pub source: String,
+    pub failure: RuntimeFailureView,
+}
+
+impl sealed::Sealed for MarkAgentRunForNetworkRecoveryCommand {}
+impl DomainCommand for MarkAgentRunForNetworkRecoveryCommand {
+    const TYPE: &'static str = "agent_run.network_recovery.wait";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArmAgentRunNetworkRecoveryCommand {
+    pub agent_run_id: String,
+    pub expected_version: i64,
+    pub execution_epoch: i64,
+    pub attempt: u32,
+}
+
+impl sealed::Sealed for ArmAgentRunNetworkRecoveryCommand {}
+impl DomainCommand for ArmAgentRunNetworkRecoveryCommand {
+    const TYPE: &'static str = "agent_run.network_recovery.attempt";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteAgentRunNetworkRecoveryCommand {
+    pub agent_run_id: String,
+    pub expected_version: i64,
+    pub execution_epoch: i64,
+}
+
+impl sealed::Sealed for CompleteAgentRunNetworkRecoveryCommand {}
+impl DomainCommand for CompleteAgentRunNetworkRecoveryCommand {
+    const TYPE: &'static str = "agent_run.network_recovery.complete";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1880,6 +1924,407 @@ impl ExecutionRuntimeService {
                 "agent_run.runtime_recovery_requested",
                 json!({ "agentRunId": envelope.payload.agent_run_id }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+            ))
+        })
+    }
+
+    pub fn mark_for_network_recovery(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<MarkAgentRunForNetworkRecoveryCommand>,
+    ) -> Result<CommandExecution> {
+        if NetworkFailureCategory::parse(&envelope.payload.category).is_none() {
+            anyhow::bail!("AgentRun network recovery category is invalid");
+        }
+        if envelope.payload.source != "acp_prompt_terminal" {
+            anyhow::bail!("AgentRun network recovery source is invalid");
+        }
+        validate_public_runtime_failure(
+            "runtime_network_interrupted",
+            Some(&envelope.payload.failure),
+        )?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(
+                &envelope.actor,
+                ActorRef::System { component_id } if component_id == "network-recovery-coordinator"
+            ) {
+                return Ok(rejected(
+                    "agent_run.network_recovery_coordinator_required",
+                    "Network recovery requires its coordinator",
+                ));
+            }
+            let run = load_claimable_run(transaction, &envelope.payload.agent_run_id)?;
+            let Some(run) = run else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if run.version != envelope.payload.expected_version
+                || run.execution_epoch != envelope.payload.execution_epoch
+            {
+                return Ok(rejected(
+                    "agent_run.network_recovery_fenced",
+                    "AgentRun network failure evidence is stale",
+                ));
+            }
+            if run.status != "running" || run.cancel_requested_at.is_some() {
+                return Ok(rejected(
+                    "agent_run.network_recovery_fenced",
+                    "AgentRun is no longer running",
+                ));
+            }
+            if !network_recovery_input_is_safe(transaction, &run.id, run.execution_epoch)? {
+                return Ok(rejected(
+                    "agent_run.network_recovery_input_unsafe",
+                    "Runtime input was accepted or its delivery outcome is unknown",
+                ));
+            }
+            if has_recovery_safety_blocker(transaction, &run.id)? {
+                return Ok(rejected(
+                    "agent_run.network_recovery_effect_unsafe",
+                    "Approval, Action or Runtime Delivery must settle before network recovery",
+                ));
+            }
+            let budget_now = camp_turn_execution_budget_now();
+            let deadline = chrono::DateTime::parse_from_rfc3339(&run.execution_budget_deadline_at)?
+                .with_timezone(&chrono::Utc);
+            if budget_now >= deadline
+                || !matches!(run.camp_turn_status.as_str(), "running" | "waiting")
+                || run.camp_turn_cancel_requested_at.is_some()
+                || run.execution_budget_exhausted_at.is_some()
+            {
+                return Ok(rejected(
+                    "agent_run.network_recovery_deadline_fenced",
+                    "CampTurn is no longer accepting network recovery",
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            let failure_json = serde_json::to_string(&envelope.payload.failure)?;
+            let error_details_ref = json!({
+                "category": envelope.payload.category,
+                "source": envelope.payload.source,
+            })
+            .to_string();
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'waiting', wait_reason = 'network_recovery',
+                    wait_deadline_at = NULL, runtime_recovery_required = 1,
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    last_error_code = 'runtime_network_interrupted',
+                    last_error_details_ref = ?4,
+                    public_runtime_failure_json = ?5,
+                    manual_retry_allowed = 1,
+                    version = version + 1, updated_at = ?6
+                WHERE id = ?1 AND status = 'running'
+                  AND version = ?2 AND execution_epoch = ?3
+                  AND cancel_requested_at IS NULL
+                "#,
+                params![
+                    run.id,
+                    envelope.payload.expected_version,
+                    envelope.payload.execution_epoch,
+                    error_details_ref,
+                    failure_json,
+                    now,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.network_recovery_fenced",
+                    "AgentRun changed before network recovery was persisted",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.network_recovery_waiting",
+                &run.camp_id,
+                ("agent_run", &run.id),
+                &envelope.actor,
+                Some(run.execution_epoch),
+                &json!({
+                    "category": envelope.payload.category,
+                    "source": envelope.payload.source,
+                }),
+            )?;
+            let camp_turn_status = recompute_camp_turn(
+                transaction,
+                &run.camp_id,
+                &run.camp_turn_id,
+                &envelope.actor,
+                Some(run.execution_epoch),
+                &now,
+            )?;
+            Ok(CommandHandlerResult::accepted(
+                "agent_run.network_recovery_waiting",
+                json!({
+                    "agentRunId": run.id,
+                    "campTurnId": run.camp_turn_id,
+                    "campTurnStatus": camp_turn_status,
+                    "executionEpoch": run.execution_epoch,
+                    "version": run.version + 1,
+                }),
+                Some(entity_ref("agent_run", &run.id)),
+            ))
+        })
+    }
+
+    pub fn arm_network_recovery_attempt(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ArmAgentRunNetworkRecoveryCommand>,
+    ) -> Result<CommandExecution> {
+        if envelope.payload.attempt == 0 {
+            anyhow::bail!("AgentRun network recovery attempt must be positive");
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(
+                &envelope.actor,
+                ActorRef::System { component_id } if component_id == "network-recovery-coordinator"
+            ) {
+                return Ok(rejected(
+                    "agent_run.network_recovery_coordinator_required",
+                    "Network recovery requires its coordinator",
+                ));
+            }
+            let run = load_claimable_run(transaction, &envelope.payload.agent_run_id)?;
+            let Some(run) = run else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if run.version != envelope.payload.expected_version
+                || run.execution_epoch != envelope.payload.execution_epoch
+                || run.status != "waiting"
+                || run.wait_reason.as_deref() != Some("network_recovery")
+                || !run.runtime_recovery_required
+            {
+                return Ok(rejected(
+                    "agent_run.network_recovery_fenced",
+                    "AgentRun changed before the recovery attempt",
+                ));
+            }
+            if run.cancel_requested_at.is_some()
+                || !matches!(run.camp_turn_status.as_str(), "running" | "waiting")
+                || run.camp_turn_cancel_requested_at.is_some()
+                || run.execution_budget_exhausted_at.is_some()
+            {
+                return Ok(rejected(
+                    "agent_run.network_recovery_stopped",
+                    "AgentRun recovery is cancelled or no longer active",
+                ));
+            }
+            let budget_now = camp_turn_execution_budget_now();
+            let deadline = chrono::DateTime::parse_from_rfc3339(&run.execution_budget_deadline_at)?
+                .with_timezone(&chrono::Utc);
+            if budget_now >= deadline {
+                return Ok(rejected(
+                    "agent_run.network_recovery_stopped",
+                    "CampTurn Execution Budget deadline has elapsed",
+                ));
+            }
+            if !run.member_active
+                || !current_authorization_covers_snapshot(
+                    &run.effective_config,
+                    &run.current_default_capabilities,
+                    &run.current_capability_overrides,
+                )?
+                || !network_recovery_input_is_safe(transaction, &run.id, run.execution_epoch)?
+                || has_recovery_safety_blocker(transaction, &run.id)?
+            {
+                let now = chrono::Utc::now().to_rfc3339();
+                let updated = transaction.execute(
+                    r#"
+                    UPDATE agent_run
+                    SET wait_reason = 'network_recovery_blocked',
+                        runtime_recovery_required = 0,
+                        manual_retry_allowed = 0,
+                        version = version + 1, updated_at = ?4
+                    WHERE id = ?1 AND status = 'waiting'
+                      AND wait_reason = 'network_recovery'
+                      AND runtime_recovery_required = 1
+                      AND version = ?2 AND execution_epoch = ?3
+                    "#,
+                    params![
+                        run.id,
+                        envelope.payload.expected_version,
+                        envelope.payload.execution_epoch,
+                        now,
+                    ],
+                )?;
+                if updated != 1 {
+                    return Ok(rejected(
+                        "agent_run.network_recovery_fenced",
+                        "AgentRun changed before unsafe recovery was closed",
+                    ));
+                }
+                append_domain_event(
+                    transaction,
+                    "agent_run.network_recovery_needs_attention",
+                    &run.camp_id,
+                    ("agent_run", &run.id),
+                    &envelope.actor,
+                    Some(run.execution_epoch),
+                    &json!({ "attempt": envelope.payload.attempt }),
+                )?;
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.network_recovery_needs_attention",
+                    json!({
+                        "agentRunId": run.id,
+                        "executionEpoch": run.execution_epoch,
+                        "attempt": envelope.payload.attempt,
+                        "version": run.version + 1,
+                    }),
+                    Some(entity_ref("agent_run", &run.id)),
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET wait_reason = 'runtime_recovery',
+                    version = version + 1, updated_at = ?4
+                WHERE id = ?1 AND status = 'waiting'
+                  AND wait_reason = 'network_recovery'
+                  AND runtime_recovery_required = 1
+                  AND version = ?2 AND execution_epoch = ?3
+                  AND cancel_requested_at IS NULL
+                "#,
+                params![
+                    run.id,
+                    envelope.payload.expected_version,
+                    envelope.payload.execution_epoch,
+                    now,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.network_recovery_fenced",
+                    "AgentRun changed before the recovery attempt was admitted",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.network_recovery_attempt_admitted",
+                &run.camp_id,
+                ("agent_run", &run.id),
+                &envelope.actor,
+                Some(run.execution_epoch),
+                &json!({ "attempt": envelope.payload.attempt }),
+            )?;
+            Ok(CommandHandlerResult::accepted(
+                "agent_run.network_recovery_attempt_admitted",
+                json!({
+                    "agentRunId": run.id,
+                    "executionEpoch": run.execution_epoch,
+                    "attempt": envelope.payload.attempt,
+                    "version": run.version + 1,
+                }),
+                Some(entity_ref("agent_run", &run.id)),
+            ))
+        })
+    }
+
+    pub fn complete_network_recovery(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<CompleteAgentRunNetworkRecoveryCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(
+                &envelope.actor,
+                ActorRef::System { component_id } if component_id == "network-recovery-coordinator"
+            ) {
+                return Ok(rejected(
+                    "agent_run.network_recovery_coordinator_required",
+                    "Network recovery requires its coordinator",
+                ));
+            }
+            let run = load_claimable_run(transaction, &envelope.payload.agent_run_id)?;
+            let Some(run) = run else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if run.version != envelope.payload.expected_version
+                || run.execution_epoch != envelope.payload.execution_epoch
+                || run.status != "running"
+            {
+                return Ok(rejected(
+                    "agent_run.network_recovery_fenced",
+                    "AgentRun changed before recovery progress was recorded",
+                ));
+            }
+            let accepted: i64 = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM runtime_input_delivery
+                    WHERE agent_run_id = ?1 AND execution_epoch = ?2
+                      AND status = 'accepted'
+                )
+                "#,
+                params![run.id, run.execution_epoch],
+                |row| row.get(0),
+            )?;
+            if accepted == 0 {
+                return Ok(rejected(
+                    "agent_run.network_recovery_progress_unproven",
+                    "Accepted Runtime input is required to complete network recovery",
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET last_error_code = NULL, last_error_details_ref = NULL,
+                    public_runtime_failure_json = NULL, manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?4
+                WHERE id = ?1 AND status = 'running'
+                  AND version = ?2 AND execution_epoch = ?3
+                  AND last_error_code = 'runtime_network_interrupted'
+                "#,
+                params![
+                    run.id,
+                    envelope.payload.expected_version,
+                    envelope.payload.execution_epoch,
+                    now,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.network_recovery_not_active",
+                    "AgentRun has no active network recovery cycle",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.network_recovery_progressed",
+                &run.camp_id,
+                ("agent_run", &run.id),
+                &envelope.actor,
+                Some(run.execution_epoch),
+                &json!({ "progress": "runtime_input_accepted" }),
+            )?;
+            Ok(CommandHandlerResult::accepted(
+                "agent_run.network_recovery_progressed",
+                json!({
+                    "agentRunId": run.id,
+                    "executionEpoch": run.execution_epoch,
+                    "version": run.version + 1,
+                }),
+                Some(entity_ref("agent_run", &run.id)),
             ))
         })
     }
@@ -5584,6 +6029,34 @@ fn has_accepted_runtime_input(transaction: &Transaction<'_>, run_id: &str) -> Re
     Ok(accepted != 0)
 }
 
+fn network_recovery_input_is_safe(
+    transaction: &Transaction<'_>,
+    run_id: &str,
+    execution_epoch: i64,
+) -> Result<bool> {
+    let delivery = transaction
+        .query_row(
+            r#"
+            SELECT status, dispatch_started_at
+            FROM runtime_input_delivery
+            WHERE agent_run_id = ?1 AND execution_epoch = ?2
+            "#,
+            params![run_id, execution_epoch],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    Ok(match delivery {
+        None => true,
+        Some((status, _)) if status == "not_accepted" => true,
+        Some((status, dispatch_started_at))
+            if status == "prepared" && dispatch_started_at.is_none() =>
+        {
+            true
+        }
+        Some(_) => false,
+    })
+}
+
 fn has_recovery_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> Result<bool> {
     let blockers: i64 = transaction.query_row(
         r#"
@@ -6794,14 +7267,15 @@ mod tests {
                 )
                 "#,
                 params![
-                    format!("test-input-{agent_run_id}"),
+                    format!("test-input-{agent_run_id}-{execution_epoch}"),
                     agent_run_id,
                     execution_epoch,
-                    format!("test-manifest-{agent_run_id}"),
-                    format!("test-binding-{agent_run_id}"),
-                    format!("sha256:{agent_run_id}"),
+                    format!("test-manifest-{agent_run_id}-{execution_epoch}"),
+                    format!("test-binding-{agent_run_id}-{execution_epoch}"),
+                    format!("sha256:{agent_run_id}:{execution_epoch}"),
                     status,
-                    (status == "accepted").then(|| format!("native-input-{agent_run_id}")),
+                    (status == "accepted")
+                        .then(|| format!("native-input-{agent_run_id}-{execution_epoch}")),
                     now,
                     (status == "accepted").then_some(now.as_str()),
                 ],
@@ -6811,6 +7285,399 @@ mod tests {
             .connection()
             .execute_batch("PRAGMA foreign_keys = ON;")
             .unwrap();
+    }
+
+    #[test]
+    fn network_recovery_waits_reclaims_and_clears_only_after_input_acceptance() {
+        let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "not_accepted");
+        let service = ExecutionRuntimeService::default();
+        let version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let failure = RuntimeFailureView::new(
+            AdapterKind::CodexCli,
+            crate::runtime_failure::RuntimeFailureOrigin::Runtime,
+            crate::runtime_failure::RuntimeFailurePhase::Execution,
+            "runtime_network_interrupted",
+            "网络连接中断",
+            Some("connection reset by peer".to_string()),
+            true,
+        );
+        let waiting = service
+            .mark_for_network_recovery(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "network-recovery-wait".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "network-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: MarkAgentRunForNetworkRecoveryCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: version,
+                        execution_epoch,
+                        category: "connection_reset".to_string(),
+                        source: "acp_prompt_terminal".to_string(),
+                        failure,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(waiting.result.code, "agent_run.network_recovery_waiting");
+        let waiting_version = waiting.result.payload["version"].as_i64().unwrap();
+        let waiting_state: (String, Option<String>, i64, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, wait_reason, runtime_recovery_required,
+                       public_runtime_failure_json
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(waiting_state.0, "waiting");
+        assert_eq!(waiting_state.1.as_deref(), Some("network_recovery"));
+        assert_eq!(waiting_state.2, 1);
+        assert!(waiting_state.3.is_some());
+
+        let armed = service
+            .arm_network_recovery_attempt(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "network-recovery-arm".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "network-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ArmAgentRunNetworkRecoveryCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: waiting_version,
+                        execution_epoch,
+                        attempt: 1,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            armed.result.code,
+            "agent_run.network_recovery_attempt_admitted"
+        );
+        let reclaimed = service
+            .claim_agent_run(
+                &mut database,
+                &scheduler_envelope(
+                    "network-recovery-reclaim",
+                    &camp_id,
+                    ClaimAgentRunCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: armed.result.payload["version"].as_i64().unwrap(),
+                        lease_owner: "network-recovery-test-host".to_string(),
+                        lease_seconds: 60,
+                        workspace: None,
+                        starting_git_observation: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(reclaimed.result.status, CommandResultStatus::Accepted);
+        let recovered_epoch = reclaimed.result.payload["executionEpoch"].as_i64().unwrap();
+        assert_eq!(recovered_epoch, execution_epoch + 1);
+        insert_test_runtime_input(&database, &agent_run_id, recovered_epoch, "accepted");
+        let recovered = service
+            .load_agent_run_execution(&database, &agent_run_id, recovered_epoch)
+            .unwrap()
+            .unwrap();
+        let completed = service
+            .complete_network_recovery(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "network-recovery-complete".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "network-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CompleteAgentRunNetworkRecoveryCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: recovered.version,
+                        execution_epoch: recovered_epoch,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            completed.result.code,
+            "agent_run.network_recovery_progressed"
+        );
+        let cleared: (Option<String>, Option<String>, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT last_error_code, public_runtime_failure_json, manual_retry_allowed
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(cleared, (None, None, 0));
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn network_recovery_never_replays_an_accepted_input() {
+        let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "accepted");
+        let version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let blocked = ExecutionRuntimeService::default()
+            .mark_for_network_recovery(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "network-recovery-accepted-blocked".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "network-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: MarkAgentRunForNetworkRecoveryCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: version,
+                        execution_epoch,
+                        category: "connection_failed".to_string(),
+                        source: "acp_prompt_terminal".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::CodexCli,
+                            crate::runtime_failure::RuntimeFailureOrigin::Runtime,
+                            crate::runtime_failure::RuntimeFailurePhase::Execution,
+                            "runtime_network_interrupted",
+                            "网络连接中断",
+                            None,
+                            false,
+                        ),
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(blocked.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            blocked.result.code,
+            "agent_run.network_recovery_input_unsafe"
+        );
+        let state: (String, Option<String>, i64) = database
+            .connection()
+            .query_row(
+                "SELECT status, wait_reason, version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("running".to_string(), None, version));
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn network_recovery_rechecks_safety_and_keeps_attention_state_across_restart() {
+        let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "not_accepted");
+        let service = ExecutionRuntimeService::default();
+        let version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let waiting = service
+            .mark_for_network_recovery(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "network-recovery-safety-wait".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "network-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: MarkAgentRunForNetworkRecoveryCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: version,
+                        execution_epoch,
+                        category: "connection_failed".to_string(),
+                        source: "acp_prompt_terminal".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::CodexCli,
+                            crate::runtime_failure::RuntimeFailureOrigin::Runtime,
+                            crate::runtime_failure::RuntimeFailurePhase::Execution,
+                            "runtime_network_interrupted",
+                            "网络连接中断",
+                            None,
+                            true,
+                        ),
+                    },
+                },
+            )
+            .unwrap();
+        let waiting_version = waiting.result.payload["version"].as_i64().unwrap();
+
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_profile
+                SET profile_status = 'away'
+                WHERE id = (
+                    SELECT conversation.agent_id
+                    FROM agent_run
+                    JOIN conversation ON conversation.id = agent_run.conversation_id
+                    WHERE agent_run.id = ?1
+                )
+                "#,
+                [&agent_run_id],
+            )
+            .unwrap();
+        let blocked = service
+            .arm_network_recovery_attempt(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "network-recovery-safety-recheck".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "network-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ArmAgentRunNetworkRecoveryCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: waiting_version,
+                        execution_epoch,
+                        attempt: 1,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            blocked.result.code,
+            "agent_run.network_recovery_needs_attention"
+        );
+        assert_eq!(blocked.result.status, CommandResultStatus::Applied);
+
+        database.prepare_v2_recovery().unwrap();
+        let state: (String, Option<String>, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, wait_reason, runtime_recovery_required
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            state,
+            (
+                "waiting".to_string(),
+                Some("network_recovery_blocked".to_string()),
+                0,
+            )
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn core_restart_hands_live_network_wait_to_existing_startup_recovery() {
+        let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "not_accepted");
+        let version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let waiting = ExecutionRuntimeService::default()
+            .mark_for_network_recovery(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "network-recovery-before-restart".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "network-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: MarkAgentRunForNetworkRecoveryCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: version,
+                        execution_epoch,
+                        category: "dns_temporary_failure".to_string(),
+                        source: "acp_prompt_terminal".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::CodexCli,
+                            crate::runtime_failure::RuntimeFailureOrigin::Runtime,
+                            crate::runtime_failure::RuntimeFailurePhase::Execution,
+                            "runtime_network_interrupted",
+                            "网络连接中断",
+                            None,
+                            true,
+                        ),
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(waiting.result.status, CommandResultStatus::Accepted);
+
+        database.prepare_v2_recovery().unwrap();
+        let state: (String, Option<String>, i64, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, wait_reason, runtime_recovery_required, last_error_code
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(state.0, "waiting");
+        assert_eq!(state.1.as_deref(), Some("runtime_recovery"));
+        assert_eq!(state.2, 1);
+        assert_eq!(
+            state.3.as_deref(),
+            Some("core_restarted_during_network_recovery")
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     async fn planned_terminal_permit(

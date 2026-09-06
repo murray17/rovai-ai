@@ -204,13 +204,16 @@ export function activityStatusForAgentRun(
 
 export function agentRunPresentation(
   run: Pick<AgentRunView, 'status' | 'waitReason'>
-    & Partial<Pick<AgentRunView, 'terminalReasonCode'>>,
+    & Partial<Pick<AgentRunView, 'terminalReasonCode' | 'failure'>>,
   cancelling = false
 ): SemanticStatus {
   if (cancelling && ['queued', 'running', 'waiting'].includes(run.status)) {
     return { label: '正在停止…', tone: 'neutral' }
   }
   if (run.status === 'queued') return { label: '已排队', tone: 'neutral' }
+  if (run.status === 'running' && run.failure?.code === 'runtime_network_interrupted') {
+    return { label: '正在恢复', tone: 'attention' }
+  }
   if (run.status === 'running') return { label: '执行中', tone: 'info' }
   if (run.status === 'succeeded') return { label: '已完成', tone: 'success' }
   if (run.terminalReasonCode === 'runtime_interrupted') {
@@ -226,11 +229,15 @@ export function agentRunPresentation(
     label: ({
       delivery_unknown: '投递待确认',
       runtime_recovery: '恢复中',
+      network_recovery: '连接中断，等待恢复',
+      network_recovery_blocked: '需要处理',
       recovery_blocked: '结果待确认',
       approval: '等待审批',
       user_input: '等待用户'
     } as Record<string, string>)[run.waitReason ?? ''] ?? '等待处理',
-    tone: run.waitReason === 'delivery_unknown' || run.waitReason === 'recovery_blocked'
+    tone: run.waitReason === 'delivery_unknown'
+      || run.waitReason === 'recovery_blocked'
+      || run.waitReason === 'network_recovery_blocked'
       ? 'danger'
       : 'attention'
   }
@@ -238,11 +245,14 @@ export function agentRunPresentation(
 
 export function agentRunStateTag(
   run: Pick<AgentRunView, 'status' | 'waitReason'>
-    & Partial<Pick<AgentRunView, 'terminalReasonCode'>>,
+    & Partial<Pick<AgentRunView, 'terminalReasonCode' | 'failure'>>,
   cancelling = false
 ): { tag: string; tone: 'brand' | 'attention' | 'success' | 'danger' | 'neutral' } {
   if (cancelling && ['queued', 'running', 'waiting'].includes(run.status)) {
     return { tag: '正在停止', tone: 'neutral' }
+  }
+  if (run.status === 'running' && run.failure?.code === 'runtime_network_interrupted') {
+    return { tag: 'RECOVERING', tone: 'attention' }
   }
   if (run.status === 'running') return { tag: 'RUNNING', tone: 'brand' }
   if (run.status === 'queued') return { tag: 'QUEUED', tone: 'neutral' }
@@ -259,10 +269,12 @@ export function agentRunStateTag(
   return {
     tag: run.waitReason === 'approval'
       ? 'WAITING APPROVAL'
-      : run.waitReason === 'recovery_blocked'
+      : run.waitReason === 'recovery_blocked' || run.waitReason === 'network_recovery_blocked'
         ? 'REVIEW'
         : 'WAITING',
-    tone: run.waitReason === 'delivery_unknown' || run.waitReason === 'recovery_blocked'
+    tone: run.waitReason === 'delivery_unknown'
+      || run.waitReason === 'recovery_blocked'
+      || run.waitReason === 'network_recovery_blocked'
       ? 'danger'
       : 'attention'
   }
@@ -272,6 +284,8 @@ export function agentRunWaitDetail(waitReason: string | null): string | null {
   return ({
     delivery_unknown: 'Agent 运行时是否接收输入尚不可确认；为避免重复执行，Rovai AI 不会盲目重发。',
     runtime_recovery: '正在从已保存的执行、运行会话与输入回执恢复。',
+    network_recovery: '连接中断，等待恢复。确认输入未被接收后，Rovai AI 会自动重试。',
+    network_recovery_blocked: '自动恢复的安全条件已经变化，需要处理。请检查执行记录；确认后可停止本次运行并发送后续任务。',
     recovery_blocked: 'Agent 运行时已接受任务，但 Rovai AI 重启后无法确认原任务的最终结果。原请求不会自动重发。',
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
