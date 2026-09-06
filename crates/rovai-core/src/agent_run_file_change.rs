@@ -902,6 +902,15 @@ fn normalized_file_operation_path(payload: &Value, execution_root: &Path) -> Opt
     if operation.get("status").and_then(Value::as_str) != Some("available") {
         return None;
     }
+    match operation.get("operationKind").and_then(Value::as_str) {
+        Some("write") => {}
+        Some(_) => return None,
+        None if operation
+            .get("changeKind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| matches!(kind, "add" | "update" | "delete")) => {}
+        None => return None,
+    }
     let raw_path = operation.get("path").and_then(Value::as_str)?;
     normalize_reported_path_for_display(execution_root, raw_path)
 }
@@ -1511,19 +1520,44 @@ mod tests {
     }
 
     #[test]
-    fn operation_only_path_creates_a_card_without_diff_or_counts() {
+    fn operation_only_add_path_preserves_its_change_kind_without_diff_or_counts() {
         let projection = aggregate_evidence(
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
             Path::new("/repo"),
-            &[evidence(1, json!({"runtimeFileOperation": {"status": "available", "path": "src/app.ts", "changeKind": "update"}}))],
+            &[evidence(1, json!({"runtimeFileOperation": {"status": "available", "path": "src/app.ts", "changeKind": "add"}}))],
         )
         .unwrap();
         let file = &projection.details.files[0];
+        assert_eq!(file.change_kind, "add");
         assert_eq!(file.presentation_kind, "operation_only");
         assert!(file.blocks[0].diff.is_none());
         assert_eq!(projection.details.card.additions, None);
+    }
+
+    #[test]
+    fn read_operation_never_enters_the_files_changed_projection() {
+        assert!(
+            aggregate_evidence(
+                "run-read",
+                1,
+                "2026-09-06T00:00:00Z",
+                Path::new("/repo"),
+                &[evidence(
+                    1,
+                    json!({
+                        "runtimeFileOperation": {
+                            "schemaVersion": 2,
+                            "status": "available",
+                            "operationKind": "read",
+                            "path": "docs/README.md"
+                        }
+                    }),
+                )],
+            )
+            .is_none()
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::{
     runtime_diff::{normalize_reported_path_for_display, reported_path_is_within_root},
 };
 
-pub const FILE_OPERATION_SCHEMA_VERSION: u32 = 1;
+pub const FILE_OPERATION_SCHEMA_VERSION: u32 = 2;
 pub(crate) const RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT: &str =
     "runtime_file_operation_managed_output_root";
 
@@ -15,6 +15,7 @@ pub(crate) const RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT: &str =
 pub struct AdmittedRuntimeFileOperation {
     pub operation_kind: String,
     pub path: String,
+    pub change_kind: Option<String>,
 }
 
 pub fn admit_runtime_file_operation(
@@ -61,19 +62,48 @@ fn admit_candidate(
     let adapter = adapter_kind
         .parse::<AdapterKind>()
         .map_err(|_| "runtime_file_operation_adapter_invalid")?;
-    if !adapter.uses_acp()
-        || candidate.get("protocolFamily").and_then(Value::as_str) != Some("acp-v1")
-        || candidate.get("sourceEventKind").and_then(Value::as_str)
-            != Some("session/update.tool_call_update.completed")
-    {
-        return Err("runtime_file_operation_source_not_allowlisted");
-    }
     let operation_kind = candidate
         .get("operationKind")
         .and_then(Value::as_str)
         .ok_or("runtime_file_operation_kind_invalid")?;
-    if operation_kind != "write" {
+    if !matches!(operation_kind, "read" | "write") {
         return Err("runtime_file_operation_kind_invalid");
+    }
+    let change_kind = match candidate.get("changeKind") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(change_kind))
+            if operation_kind == "write" && matches!(change_kind.as_str(), "add" | "update") =>
+        {
+            Some(change_kind.clone())
+        }
+        Some(_) => return Err("runtime_file_operation_change_kind_invalid"),
+    };
+    let protocol_family = candidate.get("protocolFamily").and_then(Value::as_str);
+    let source_event_kind = candidate.get("sourceEventKind").and_then(Value::as_str);
+    let source_is_allowlisted = if adapter.uses_acp() {
+        protocol_family == Some("acp-v1")
+            && source_event_kind == Some("session/update.tool_call_update.completed")
+    } else {
+        match adapter {
+            AdapterKind::CodexCli => {
+                operation_kind == "read"
+                    && protocol_family == Some("codex-app-server")
+                    && source_event_kind == Some("activity.commandExecution.read")
+            }
+            AdapterKind::ClaudeCodeCli => {
+                protocol_family == Some("claude-stream-json")
+                    && source_event_kind
+                        == Some("assistant.tool_use.file+user.tool_result.completed")
+            }
+            AdapterKind::Pi => {
+                protocol_family == Some("pi-jsonl-rpc-v1")
+                    && source_event_kind == Some("tool_execution_end.completed")
+            }
+            _ => false,
+        }
+    };
+    if !source_is_allowlisted {
+        return Err("runtime_file_operation_source_not_allowlisted");
     }
     let raw_path = candidate
         .get("path")
@@ -89,15 +119,43 @@ fn admit_candidate(
     Ok(AdmittedRuntimeFileOperation {
         operation_kind: operation_kind.to_string(),
         path,
+        change_kind,
     })
 }
 
 pub fn path_from_evidence(payload: &Value) -> Option<&str> {
+    operation_from_evidence(payload)
+        .filter(|operation| operation.operation_kind == "write")
+        .map(|operation| operation.path)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeFileOperationRef<'a> {
+    pub operation_kind: &'a str,
+    pub path: &'a str,
+    pub change_kind: Option<&'a str>,
+}
+
+pub fn operation_from_evidence(payload: &Value) -> Option<RuntimeFileOperationRef<'_>> {
     let projection = payload.get("runtimeFileOperation")?;
-    (projection.get("status").and_then(Value::as_str) == Some("available")
-        && projection.get("operationKind").and_then(Value::as_str) == Some("write"))
-    .then(|| projection.get("path").and_then(Value::as_str))
-    .flatten()
+    if projection.get("schemaVersion").and_then(Value::as_u64)
+        != Some(u64::from(FILE_OPERATION_SCHEMA_VERSION))
+        || projection.get("status").and_then(Value::as_str) != Some("available")
+    {
+        return None;
+    }
+    let operation_kind = projection.get("operationKind")?.as_str()?;
+    if !matches!(operation_kind, "read" | "write") {
+        return None;
+    }
+    Some(RuntimeFileOperationRef {
+        operation_kind,
+        path: projection.get("path")?.as_str()?,
+        change_kind: projection
+            .get("changeKind")
+            .and_then(Value::as_str)
+            .filter(|change_kind| matches!(*change_kind, "add" | "update")),
+    })
 }
 
 #[cfg(test)]
@@ -125,6 +183,51 @@ mod tests {
 
         assert_eq!(admitted.operation_kind, "write");
         assert_eq!(admitted.path, "src/app.ts");
+        assert_eq!(admitted.change_kind, None);
+    }
+
+    #[test]
+    fn admits_only_explicit_add_or_update_for_structured_writes() {
+        for change_kind in ["add", "update"] {
+            let admitted = admit_runtime_file_operation(
+                &json!({
+                    "runtimeFileOperation": {
+                        "adapterKind": "opencode-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": "write",
+                        "changeKind": change_kind,
+                        "path": "/repo/src/app.ts"
+                    }
+                }),
+                Path::new("/repo"),
+                Some("opencode-cli"),
+            )
+            .expect("candidate should exist")
+            .expect("explicit write change kind should be admitted");
+            assert_eq!(admitted.change_kind.as_deref(), Some(change_kind));
+        }
+
+        for (operation_kind, change_kind) in
+            [("read", "add"), ("write", "delete"), ("write", "create")]
+        {
+            let result = admit_runtime_file_operation(
+                &json!({
+                    "runtimeFileOperation": {
+                        "adapterKind": "opencode-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": operation_kind,
+                        "changeKind": change_kind,
+                        "path": "/repo/src/app.ts"
+                    }
+                }),
+                Path::new("/repo"),
+                Some("opencode-cli"),
+            )
+            .expect("candidate should exist");
+            assert_eq!(result, Err("runtime_file_operation_change_kind_invalid"));
+        }
     }
 
     #[test]
@@ -188,14 +291,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_paths_or_non_write_file_operation_candidates() {
+    fn rejects_invalid_paths_or_unknown_file_operation_candidates() {
         for (operation_kind, path, reason) in [
             (
                 "write",
                 "https://example.com/outside.txt",
                 "runtime_file_operation_path_invalid",
             ),
-            ("read", "src/app.ts", "runtime_file_operation_kind_invalid"),
+            (
+                "delete",
+                "src/app.ts",
+                "runtime_file_operation_kind_invalid",
+            ),
         ] {
             let result = admit_runtime_file_operation(
                 &json!({
@@ -213,6 +320,65 @@ mod tests {
             .expect("candidate should exist");
             assert_eq!(result, Err(reason));
         }
+    }
+
+    #[test]
+    fn admits_structured_reads_from_acp_codex_claude_and_pi_only() {
+        for (adapter, protocol, source) in [
+            (
+                "opencode-cli",
+                "acp-v1",
+                "session/update.tool_call_update.completed",
+            ),
+            (
+                "codex-cli",
+                "codex-app-server",
+                "activity.commandExecution.read",
+            ),
+            (
+                "claude-code-cli",
+                "claude-stream-json",
+                "assistant.tool_use.file+user.tool_result.completed",
+            ),
+            ("pi", "pi-jsonl-rpc-v1", "tool_execution_end.completed"),
+        ] {
+            let admitted = admit_runtime_file_operation(
+                &json!({
+                    "runtimeFileOperation": {
+                        "adapterKind": adapter,
+                        "protocolFamily": protocol,
+                        "sourceEventKind": source,
+                        "operationKind": "read",
+                        "path": "/repo/docs/README.md"
+                    }
+                }),
+                Path::new("/repo"),
+                Some(adapter),
+            )
+            .expect("candidate should exist")
+            .expect("allowlisted read should be admitted");
+            assert_eq!(admitted.operation_kind, "read");
+            assert_eq!(admitted.path, "docs/README.md");
+        }
+
+        let rejected = admit_runtime_file_operation(
+            &json!({
+                "runtimeFileOperation": {
+                    "adapterKind": "codex-cli",
+                    "protocolFamily": "codex-app-server",
+                    "sourceEventKind": "activity.commandExecution.read",
+                    "operationKind": "write",
+                    "path": "/repo/docs/README.md"
+                }
+            }),
+            Path::new("/repo"),
+            Some("codex-cli"),
+        )
+        .expect("candidate should exist");
+        assert_eq!(
+            rejected,
+            Err("runtime_file_operation_source_not_allowlisted")
+        );
     }
 
     #[test]

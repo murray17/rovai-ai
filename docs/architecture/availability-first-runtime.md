@@ -134,6 +134,13 @@ Unix rename 的 ctime 变化只在这条兼容路径解释，对象、长度和 
 以同一事务保存全部原有行、引用和receipt，推进当前 `v1.42/schema 83`；仍使用上述逐步恢复，不重放131或已映射的130。
 不能仅凭版本字符串准入，也不能为了消除编号冲突清空凭据、队列、Fast 选择或改变业务 ID。
 
+工具一致性分支曾以 141 发布 `v1.52/schema 92/activity-v3`，与主线图片来源 141 冲突。
+保留主线 141 的已发布含义，classifier cutover 使用 142。对工具分支来源，只有完整 receipt 链、
+精确旧图片 schema 和下层合同均通过时，才在同一事务把原 141 映射为 142（保留 applied-at），
+增加缺失的图片来源列与 141 receipt，并发布 `v1.53/schema 93/activity-v3`。任一步失败整体回滚，
+不降级 classifier，不重算 Canonical/Evidence。主线 `v1.53/schema 92/activity-v2` 则只执行 142；
+参见 [Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)。
+
 内部 trace 保留 assessment/open、reconciliation、每个实际 migration、reassessment/reopen、core_ready 的耗时和
 source/target contract；不记录 SQL、业务行或渠道秘密，不把技术阶段转为产品页面文案。
 

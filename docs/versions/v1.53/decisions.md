@@ -58,3 +58,17 @@ Antigravity `generateImage.generatedMedia`。Core 持久化 nullable `public_dis
 当前规范见 [正文块 Evidence](../../contracts/run-process-detail-surface-v30.md#text-block-evidence)、
 [Camp Open](../../contracts/camp-open-projection-v16.md)、[通知合同](../../contracts/notification-episode-v5.md)与
 [Evidence 不变量](../../architecture/foundational-invariants.md#evidence-usage)。
+
+<a id="v1-53-d03"></a>
+## V1.53-D03：已部署的工具分类与图片来源迁移原子汇合
+
+工具一致性分支和主线图片来源已分别使用迁移 141，且工具分支数据已在日常使用。仅选择一侧代码会拒绝
+另一侧的真实升级源，直接删除 receipt 或改 marker 又会丢失既有分类切换的含义和时间。
+
+保留主线已发布 141 的图片语义，工具 classifier cutover 使用 142。对精确识别的旧工具分支库，在单一
+原位事务内保留原 classifier receipt 时间并映射到 142，补齐图片 schema/receipt，发布统一 marker。
+主线图片库沿正常链执行 142；两条路径都不重写历史执行事实，未知或部分状态保持 fail closed。
+
+拒绝为了快速启动而降级 classifier、伪造已完成步骤、删除旧 receipt 或全库重分类；也不为本次冲突新增
+通用迁移策略系统。当前规范由 [Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)
+和 [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)拥有。

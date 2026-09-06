@@ -204,7 +204,7 @@ describe('ExecutionViewService', () => {
           kind: 'activityGroup',
           status: 'completed',
           statusLabel: '全部成功',
-          primary: '已执行 1 项操作',
+          primary: '完成了 1 个步骤',
           activities: [{
             iconKind: 'unknown',
             title: 'pnpm test',

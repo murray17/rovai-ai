@@ -33,6 +33,7 @@ const databasePath = join(coreDataDir, 'rovai.sqlite')
 const runtimeTempDir = process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_RUNTIME_TMP ?? tmpdir()
 const agentId = 'agent_1'
 const runtimeKind = process.env.ROVAI_PLANNED_SHUTDOWN_RUNTIME_KIND?.trim() || 'claude-code-cli'
+const textAcceptanceMode = process.env.ROVAI_EXECUTION_TEXT_ACCEPT
 const shutdownDeadlineMs = 10_000
 const promptCancellationTargetMs = 5_000
 const reportPath = join(outputDir, 'planned-shutdown-acceptance.json')
@@ -74,7 +75,7 @@ try {
   const workspace = await request('workspaces.inspect', { path: projectRoot })
   const installation = await configureProductRuntime(request, runtimeKind, [agentId])
   let textAcceptance = null
-  if (process.env.ROVAI_EXECUTION_TEXT_ACCEPT === '1') {
+  if (['1', 'text-and-partial'].includes(textAcceptanceMode)) {
     await evaluate(firstApp.cdp, `(() => {
       window.__textAcceptFrames = {};
       window.rovai.onEvent((event) => {
@@ -134,7 +135,7 @@ try {
     `Packaged App did not own the expected Core/Runtime process tree: ${liveDescendantPids.join(', ')}`)
 
   await appendComposerText(firstApp.cdp, quitDraftLatestSuffix, quitDraftExpectedBody)
-  const acceptedText = ['1', 'partial-only'].includes(process.env.ROVAI_EXECUTION_TEXT_ACCEPT)
+  const acceptedText = ['1', 'partial-only', 'text-and-partial'].includes(textAcceptanceMode)
     ? await waitFor(async () => {
       const snapshot = await request('camps.snapshot', { campId })
       const text = snapshot.executionEvidence.find((item) => item.agentRunId === agentRunId
@@ -259,11 +260,12 @@ try {
     && finalFacts.run.terminal_reason_code === null,
   `Restart did not preserve the controlled-shutdown terminal: ${JSON.stringify(finalFacts.run)}`)
 
-  if (process.env.ROVAI_EXECUTION_TEXT_ACCEPT === 'partial-only') {
+  if (['partial-only', 'text-and-partial'].includes(textAcceptanceMode)) {
     // A focused persistence acceptance does not depend on keeping the unrelated
     // empty-App shutdown overlay alive long enough for three screenshots.
     const report = {
       ok: true, mode: 'execution-text-normal-quit-restart', agentRunId,
+      textAcceptance,
       partialTextPreservedOnQuit: { characters: acceptedText.text.length, status: 'interrupted' },
       inputStatusBeforeShutdown, shutdownElapsedMs, recoveredShutdownElapsedMs,
       shutdown: firstShutdownResult, recoveredShutdown: recoveredShutdownResult,

@@ -52,16 +52,25 @@ export async function createConfiguredCampAndSend(request, input) {
 
 function composerContent(address, body) {
   if (address.mode === 'broadcast') {
-    return { version: 2, segments: [{ kind: 'atom', atom: { type: 'all_members' } }, { kind: 'text', text: ` ${body}` }] }
+    return {
+      version: 2,
+      segments: [
+        { kind: 'atom', atom: { type: 'all_members' } },
+        { kind: 'text', text: ` ${body}` }
+      ]
+    }
   }
   if (address.mode === 'explicit') {
-    return { version: 2, segments: [
-      ...address.agentIds.flatMap((agentId) => [
-        { kind: 'atom', atom: { type: 'member', agentId } },
-        { kind: 'text', text: ' ' }
-      ]),
-      { kind: 'text', text: body }
-    ] }
+    return {
+      version: 2,
+      segments: [
+        ...address.agentIds.flatMap((agentId) => [
+          { kind: 'atom', atom: { type: 'member', agentId } },
+          { kind: 'text', text: ' ' }
+        ]),
+        { kind: 'text', text: body }
+      ]
+    }
   }
   return { version: 2, segments: [{ kind: 'text', text: body }] }
 }

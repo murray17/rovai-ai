@@ -892,6 +892,7 @@ struct ClaudeCodeStreamState {
     terminal_tools: HashSet<String>,
     tool_inputs: HashMap<String, Value>,
     tool_queries: HashMap<String, Value>,
+    file_operation_candidates: HashMap<String, Value>,
     exact_edit_mutations: HashMap<String, Value>,
     api_retry_attempts: HashSet<(u64, u64)>,
 }
@@ -1139,7 +1140,13 @@ fn normalize_claude_runtime_events(
                 state.tool_inputs.insert(tool_use_id.clone(), input);
             }
             if let Some(query) = public_claude_search_query(&tool_name, block.get("input")) {
-                state.tool_queries.insert(tool_use_id, query);
+                state.tool_queries.insert(tool_use_id.clone(), query);
+            }
+            if let Some(candidate) = claude_file_operation_candidate(&tool_name, block.get("input"))
+            {
+                state
+                    .file_operation_candidates
+                    .insert(tool_use_id, candidate);
             }
         }
         Some("stream_event")
@@ -1239,6 +1246,15 @@ fn normalize_claude_runtime_events(
                 if let Some(query) = public_claude_search_query(&tool_name, block.get("input")) {
                     state.tool_queries.insert(tool_use_id.clone(), query);
                 }
+                if let Some(candidate) =
+                    claude_file_operation_candidate(&tool_name, block.get("input"))
+                {
+                    state
+                        .file_operation_candidates
+                        .insert(tool_use_id.clone(), candidate);
+                } else {
+                    state.file_operation_candidates.remove(&tool_use_id);
+                }
                 if let Some(mutation) = claude_exact_edit_mutation(&tool_name, block.get("input")) {
                     state
                         .exact_edit_mutations
@@ -1299,6 +1315,7 @@ fn normalize_claude_runtime_events(
                 let kind = tool_name.as_deref().map(claude_tool_kind).unwrap_or("tool");
                 let title = tool_name.clone();
                 let exact_mutation = state.exact_edit_mutations.remove(&tool_use_id);
+                let file_operation_candidate = state.file_operation_candidates.remove(&tool_use_id);
                 let mut payload = serde_json::json!({
                     "toolCallId": tool_use_id,
                     "toolName": tool_name,
@@ -1319,6 +1336,14 @@ fn normalize_claude_runtime_events(
                     &mut payload,
                     search_operation_candidate,
                 );
+                if reliably_non_error && let Some(mut candidate) = file_operation_candidate {
+                    if tool_name.as_deref() == Some("Write")
+                        && let Some(change_kind) = claude_write_change_kind(event, &candidate)
+                    {
+                        candidate["changeKind"] = Value::String(change_kind.to_string());
+                    }
+                    payload["runtimeFileOperation"] = candidate;
+                }
                 if reliably_non_error && let Some(exact_mutation) = exact_mutation {
                     payload["runtimeDiff"] = serde_json::json!({
                         "adapterKind": "claude-code-cli",
@@ -1430,6 +1455,42 @@ fn public_claude_search_query(tool_name: &str, input: Option<&Value>) -> Option<
         {
             Some(Value::Array(queries.clone()))
         }
+        _ => None,
+    }
+}
+
+fn claude_file_operation_candidate(tool_name: &str, input: Option<&Value>) -> Option<Value> {
+    let operation_kind = match tool_name {
+        "Read" => "read",
+        "Edit" | "Write" => "write",
+        _ => return None,
+    };
+    let path = input?
+        .get("file_path")?
+        .as_str()
+        .filter(|path| !path.trim().is_empty())?;
+    Some(serde_json::json!({
+        "adapterKind": "claude-code-cli",
+        "protocolFamily": "claude-stream-json",
+        "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed",
+        "operationKind": operation_kind,
+        "path": path,
+    }))
+}
+
+fn claude_write_change_kind<'a>(event: &'a Value, candidate: &Value) -> Option<&'a str> {
+    let result = event.get("tool_use_result")?.as_object()?;
+    let result_path = result.get("filePath")?.as_str()?.trim();
+    let candidate_path = candidate.get("path")?.as_str()?.trim();
+    if result_path.is_empty() || result_path != candidate_path {
+        return None;
+    }
+    // Claude Code 2.1.236 reports both a missing file and an already-existing
+    // empty file as `create` with `originalFile: null`. That shape cannot prove
+    // add without consulting the live filesystem, so keep it as path-only
+    // write. `update` remains a reliable edit refinement for the matching path.
+    match result.get("type")?.as_str()? {
+        "update" => Some("update"),
         _ => None,
     }
 }
@@ -2660,9 +2721,171 @@ exit 1
             payload.pointer("/runtimeDiff/entries/0/oldText"),
             Some(&json!("const enabled = false"))
         );
+        assert_eq!(
+            payload.pointer("/runtimeFileOperation/operationKind"),
+            Some(&json!("write"))
+        );
         let encoded = serde_json::to_string(payload).expect("payload should serialize");
         assert!(!encoded.contains("provider_private"));
         assert!(!encoded.contains("must-not-leak"));
+    }
+
+    #[test]
+    fn terminal_file_tools_emit_operations_only_after_reliable_success() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        for (tool_name, operation_kind) in [
+            ("Read", Some("read")),
+            ("Write", Some("write")),
+            ("Edit", Some("write")),
+            ("Grep", None),
+            ("Glob", None),
+        ] {
+            for failed in [false, true] {
+                let tool_use_id = format!("toolu-{tool_name}-{failed}");
+                let mut state = ClaudeCodeStreamState::default();
+                normalize_claude_runtime_events(
+                    &json!({
+                        "type": "assistant",
+                        "session_id": session_id,
+                        "message": {"content": [{
+                            "type": "tool_use",
+                            "id": tool_use_id,
+                            "name": tool_name,
+                            "input": {"file_path": "/repo/src/app.ts", "pattern": "needle"}
+                        }]}
+                    }),
+                    session_id,
+                    &mut state,
+                )
+                .unwrap();
+                let completed = normalize_claude_runtime_events(
+                    &json!({
+                        "type": "user",
+                        "session_id": session_id,
+                        "message": {"content": [{
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "is_error": failed,
+                            "content": if failed { "failed" } else { "done" }
+                        }]}
+                    }),
+                    session_id,
+                    &mut state,
+                )
+                .unwrap();
+                let projected = completed[0]
+                    .payload
+                    .pointer("/runtimeFileOperation/operationKind")
+                    .and_then(Value::as_str);
+                assert_eq!(projected, (!failed).then_some(operation_kind).flatten());
+            }
+        }
+    }
+
+    #[test]
+    fn write_result_type_classifies_update_but_does_not_promote_ambiguous_create() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        for (result_type, expected_change_kind) in [("update", "update")] {
+            let tool_use_id = format!("toolu-write-{result_type}");
+            let mut state = ClaudeCodeStreamState::default();
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "assistant",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": "Write",
+                        "input": {
+                            "file_path": "/repo/src/app.ts",
+                            "content": "new content"
+                        }
+                    }]}
+                }),
+                session_id,
+                &mut state,
+            )
+            .unwrap();
+            let completed = normalize_claude_runtime_events(
+                &json!({
+                    "type": "user",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": "completed"
+                    }]},
+                    "tool_use_result": {
+                        "type": result_type,
+                        "filePath": "/repo/src/app.ts",
+                        "content": "must-not-be-published",
+                        "originalFile": null
+                    }
+                }),
+                session_id,
+                &mut state,
+            )
+            .unwrap();
+
+            assert_eq!(
+                completed[0]
+                    .payload
+                    .pointer("/runtimeFileOperation/changeKind"),
+                Some(&json!(expected_change_kind))
+            );
+            assert!(
+                !completed[0]
+                    .payload
+                    .to_string()
+                    .contains("must-not-be-published")
+            );
+        }
+
+        for (tool_name, result_type, result_path) in [
+            ("Write", "create", "/repo/src/app.ts"),
+            ("Write", "create", "/repo/src/other.ts"),
+            ("Write", "replace", "/repo/src/app.ts"),
+            ("Edit", "create", "/repo/src/app.ts"),
+        ] {
+            let tool_use_id = format!("toolu-no-classification-{tool_name}-{result_type}");
+            let mut state = ClaudeCodeStreamState::default();
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "assistant",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": tool_name,
+                        "input": {"file_path": "/repo/src/app.ts", "content": "new content"}
+                    }]}
+                }),
+                session_id,
+                &mut state,
+            )
+            .unwrap();
+            let completed = normalize_claude_runtime_events(
+                &json!({
+                    "type": "user",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": "completed"
+                    }]},
+                    "tool_use_result": {"type": result_type, "filePath": result_path}
+                }),
+                session_id,
+                &mut state,
+            )
+            .unwrap();
+            assert!(
+                completed[0]
+                    .payload
+                    .pointer("/runtimeFileOperation/changeKind")
+                    .is_none()
+            );
+        }
     }
 
     #[test]

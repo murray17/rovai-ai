@@ -210,7 +210,9 @@ impl MainCampMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.53";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 92;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 93;
+const V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
+const V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 92;
 const V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.50";
 const V141_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 91;
 const V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.49";
@@ -505,6 +507,7 @@ const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.52";
 const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 const V116_CLASSIFIER_VERSION: &str = "activity-v2";
+const V142_CLASSIFIER_VERSION: &str = "activity-v3";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DatabaseContractMarker {
@@ -614,6 +617,7 @@ struct CurrentMigrationState {
     v139: bool,
     v140: bool,
     v141: bool,
+    v142: bool,
 }
 
 impl CurrentMigrationState {
@@ -691,8 +695,19 @@ impl CurrentMigrationState {
         {
             return false;
         }
-        if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
-        {
+        let current = contract == CURRENT_DATA_CONTRACT_VERSION
+            && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            && classifier == V142_CLASSIFIER_VERSION
+            && self.v142;
+        let image_source = contract == V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            && classifier == V116_CLASSIFIER_VERSION
+            && !self.v142;
+        let deployed_tool_source = contract == "v1.52"
+            && schema == 92
+            && classifier == V142_CLASSIFIER_VERSION
+            && !self.v142;
+        if current || image_source || deployed_tool_source {
             return self.v141
                 && self.v140
                 && self.v139
@@ -709,15 +724,16 @@ impl CurrentMigrationState {
                 && self.v129
                 && self.v130
                 && self.v131
-                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+                && self.admits_channel_v125(true, through_v113);
         }
-        if self.v141 {
+        if self.v141 || self.v142 {
             return false;
         }
         if contract == V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V141_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v140
+            return channel_classifier_admissible
+                && self.v140
                 && self.v139
                 && self.v138
                 && self.v137
@@ -732,7 +748,7 @@ impl CurrentMigrationState {
                 && self.v129
                 && self.v130
                 && self.v131
-                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+                && self.admits_channel_v125(true, through_v113);
         }
         if self.v140 {
             return false;
@@ -2570,6 +2586,9 @@ pub(crate) fn classify_database_contract(
         return Ok(DatabaseContractClassification::Unknown(None));
     };
     let migrations = load_current_migration_state(connection)?;
+    let deployed_tool_source = marker.contract_version == "v1.52"
+        && marker.projection_schema_version == 92
+        && marker.classifier_version == V142_CLASSIFIER_VERSION;
     if !migrations.admits(
         &marker.contract_version,
         marker.projection_schema_version,
@@ -2580,7 +2599,12 @@ pub(crate) fn classify_database_contract(
         || (migrations.v138 && !pi_native_input_v138_schema_matches(connection)?)
         || (migrations.v139 && !pi_native_execution_v139_schema_matches(connection)?)
         || (migrations.v140 && !single_chat_v140_schema_matches(connection)?)
-        || (migrations.v141 && !runtime_image_v141_schema_matches(connection)?)
+        || (migrations.v141
+            && if deployed_tool_source {
+                !deployed_tool_v141_image_schema_matches(connection)?
+            } else {
+                !runtime_image_v141_schema_matches(connection)?
+            })
     {
         if connection_has_legacy_feishu_migration_collision(connection)?
             || main_camp_migration_collision(connection)?.is_some()
@@ -2593,7 +2617,7 @@ pub(crate) fn classify_database_contract(
     }
     if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
         && marker.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION
-        && marker.classifier_version == V116_CLASSIFIER_VERSION
+        && marker.classifier_version == V142_CLASSIFIER_VERSION
     {
         Ok(DatabaseContractClassification::Current(marker))
     } else {
@@ -2883,6 +2907,45 @@ fn runtime_image_v141_schema_matches(connection: &Connection) -> rusqlite::Resul
         }))
 }
 
+fn deployed_tool_v141_image_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    // The deployed classifier-only migration changed no image schema. Reject a
+    // partially added provenance column or unexpected/future receipts, not just
+    // a lookalike version marker. Lower schema fingerprints are checked above.
+    let columns_and_receipts: bool = connection.query_row(
+        "SELECT (SELECT max(version) FROM schema_migration) = 141
+             AND (SELECT count(*) FROM pragma_table_info('agent_run_image')) = 12
+             AND NOT EXISTS(SELECT 1 FROM pragma_table_info('agent_run_image')
+                            WHERE name = 'public_display_source')
+             AND (SELECT count(*) FROM pragma_table_info('agent_run_image')
+                  WHERE (name IN ('id','agent_run_id','tool_call_id','source_key','source_path',
+                                  'content_blob_id','display_name','media_type','created_at') AND type='TEXT')
+                     OR (name IN ('execution_epoch','byte_size','ordinal') AND type='INTEGER')) = 12",
+        [], |row| row.get(0),
+    )?;
+    let actual: Option<String> = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_run_image'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let expected = "CREATE TABLE agent_run_image (
+        id TEXT PRIMARY KEY,
+        agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+        execution_epoch INTEGER NOT NULL, tool_call_id TEXT NOT NULL, source_key TEXT NOT NULL,
+        source_path TEXT, content_blob_id TEXT REFERENCES managed_blob(id),
+        display_name TEXT NOT NULL, media_type TEXT NOT NULL,
+        byte_size INTEGER NOT NULL CHECK(byte_size > 0 AND byte_size <= 20971520),
+        ordinal INTEGER NOT NULL CHECK(ordinal >= 0), created_at TEXT NOT NULL,
+        CHECK((source_path IS NOT NULL) != (content_blob_id IS NOT NULL)),
+        UNIQUE(agent_run_id, execution_epoch, tool_call_id, source_key))";
+    Ok(columns_and_receipts
+        && actual.is_some_and(|sql| {
+            sql.split_whitespace().collect::<String>()
+                == expected.split_whitespace().collect::<String>()
+        }))
+}
+
 #[cfg(test)]
 fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     if !connection_has_admissible_data_contract(connection)? {
@@ -2900,7 +2963,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         params![
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
-            V116_CLASSIFIER_VERSION,
+            V142_CLASSIFIER_VERSION,
         ],
         |row| row.get(0),
     )
@@ -2982,7 +3045,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 138),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 139),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 140),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 141)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 141),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 142)
         "#,
         [],
         |row| {
@@ -3059,6 +3123,7 @@ fn load_current_migration_state(
                 v139: row.get(69)?,
                 v140: row.get(70)?,
                 v141: row.get(71)?,
+                v142: row.get(72)?,
             })
         },
     )
@@ -5895,6 +5960,12 @@ impl Database {
                     self.migrate_runtime_image_public_display_source_v141()
                 );
             }
+            if !self.schema_migration_applied(142)? {
+                migration_step!(
+                    "migration_142",
+                    self.migrate_runtime_activity_classifier_v142()
+                );
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -6502,6 +6573,12 @@ impl Database {
             migration_step!(
                 "migration_141",
                 self.migrate_runtime_image_public_display_source_v141()
+            );
+        }
+        if !self.schema_migration_applied(142)? {
+            migration_step!(
+                "migration_142",
+                self.migrate_runtime_activity_classifier_v142()
             );
         }
         if let Err(error) =
@@ -22293,7 +22370,89 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_runtime_activity_classifier_v142(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                    && marker.projection_schema_version == V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                    && marker.classifier_version == V116_CLASSIFIER_VERSION)
+        {
+            anyhow::bail!(
+                "classifier v3 migration requires the exact image-provenance/schema 92 source"
+            );
+        }
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             classifier_version=?3, updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration VALUES(142, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn reconcile_deployed_tool_classifier_v141(&mut self) -> Result<bool> {
+        if !matches!(classify_database_contract(&self.connection)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.52"
+                    && marker.projection_schema_version == 92
+                    && marker.classifier_version == V142_CLASSIFIER_VERSION)
+        {
+            return Ok(false);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.52"
+                    && marker.projection_schema_version == 92
+                    && marker.classifier_version == V142_CLASSIFIER_VERSION)
+        {
+            anyhow::bail!("deployed tool-classifier source changed before reconciliation");
+        }
+        // The old 141 is the classifier receipt, not the image migration. Keep
+        // its original applied_at at canonical 142, add the missing image step,
+        // and publish the joined marker atomically; never downgrade activity-v3.
+        transaction.execute_batch(
+            "UPDATE schema_migration SET version=142 WHERE version=141;
+             ALTER TABLE agent_run_image ADD COLUMN public_display_source TEXT
+                CHECK( public_display_source IS NULL OR public_display_source IN (
+                    'codex_native_image_generation', 'antigravity_native_generate_image' ) );
+             INSERT INTO schema_migration VALUES(141, datetime('now'));",
+        )?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        if !matches!(
+            classify_database_contract(&transaction)?,
+            DatabaseContractClassification::Current(_)
+        ) {
+            anyhow::bail!("reconciled tool/image source failed current-schema admission");
+        }
+        transaction.commit()?;
+        Ok(true)
+    }
+
     fn reconcile_legacy_feishu_migration_collision(&mut self) -> Result<bool> {
+        if self.reconcile_deployed_tool_classifier_v141()? {
+            return Ok(true);
+        }
         if self.reconcile_main_camp_migration_collision()? {
             return Ok(true);
         }
@@ -22370,6 +22529,7 @@ impl Database {
             |row| row.get(0),
         )?;
         match classifier.as_str() {
+            V142_CLASSIFIER_VERSION if self.schema_migration_applied(142)? => {}
             V116_CLASSIFIER_VERSION => {}
             V043_CLASSIFIER_VERSION => {
                 self.connection.execute(
@@ -27023,7 +27183,7 @@ fn rebuild_table_to_v135_source_for_test(
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v140_source_for_test(connection: &Connection) {
+pub(crate) fn downgrade_current_schema_to_v140_source_for_test(connection: &Connection) {
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 141)",
@@ -27037,9 +27197,10 @@ fn downgrade_current_schema_to_v140_source_for_test(connection: &Connection) {
     connection
         .execute_batch(
             "ALTER TABLE agent_run_image DROP COLUMN public_display_source;
-             DELETE FROM schema_migration WHERE version = 141;
+             DELETE FROM schema_migration WHERE version IN (141, 142);
              UPDATE rovai_data_contract
-             SET contract_version = 'v1.50', projection_schema_version = 91
+             SET contract_version = 'v1.50', projection_schema_version = 91,
+                 classifier_version = 'activity-v2'
              WHERE singleton = 1;",
         )
         .unwrap();
@@ -27253,9 +27414,10 @@ fn downgrade_current_schema_to_v139_source_for_test(connection: &Connection) {
 
     transaction
         .execute_batch(
-            "DELETE FROM schema_migration WHERE version = 140;
+            "DELETE FROM schema_migration WHERE version IN (140, 141);
              UPDATE rovai_data_contract
-             SET contract_version = 'v1.49', projection_schema_version = 90
+             SET contract_version = 'v1.49', projection_schema_version = 90,
+                 classifier_version = 'activity-v2'
              WHERE singleton = 1;",
         )
         .unwrap();
@@ -29838,6 +30000,7 @@ mod tests {
             v139: version >= 139,
             v140: version >= 140,
             v141: version >= 141,
+            v142: version >= 142,
         }
     }
 
@@ -29943,6 +30106,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                142,
+            ),
+            (
+                "v1.53/schema-92 image provenance before classifier cutover",
+                V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 141,
             ),
             (
@@ -30337,7 +30506,9 @@ mod tests {
             ),
         ];
         for (name, contract, schema, through) in supported {
-            let classifier = if through >= 116 {
+            let classifier = if through >= 142 {
+                V142_CLASSIFIER_VERSION
+            } else if through >= 116 {
                 V116_CLASSIFIER_VERSION
             } else {
                 V043_CLASSIFIER_VERSION
@@ -30348,7 +30519,8 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(141);
+        assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
+        let current = migration_state_through(142);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -30374,76 +30546,92 @@ mod tests {
         missing_single_chat.v140 = false;
         let mut missing_runtime_image_display_source = current;
         missing_runtime_image_display_source.v141 = false;
+        let mut missing_classifier = current;
+        missing_classifier.v142 = false;
         let rejected = [
+            (
+                "current without classifier receipt",
+                missing_classifier,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION,
+            ),
+            (
+                "deployed source with future receipt",
+                current,
+                "v1.52",
+                92,
+                V142_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Runtime image public display provenance",
                 missing_runtime_image_display_source,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Single Chat migration",
                 missing_single_chat,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native execution migration",
                 missing_pi_native_execution,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-input migration",
                 missing_pi_native_input,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Source Attachment migration",
                 missing_source_attachments,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-capabilities migration",
                 missing_pi_native_capabilities,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi Runtime migration",
                 missing_pi_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without cancellation dispatch boundary",
                 missing_cancellation_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Runtime image migration",
                 missing_image_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Quick Chat picker migration",
                 missing_quick_chat_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "old picker marker with the new resolved constraint",
@@ -30457,7 +30645,7 @@ mod tests {
                 missing_index_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "old joined marker with a newer index migration",
@@ -30485,7 +30673,7 @@ mod tests {
                 missing_intermediate,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "one marker beyond source",
@@ -30499,14 +30687,14 @@ mod tests {
                 current,
                 "v99.0",
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "future schema",
                 current,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION + 1,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
         ];
         for (name, state, contract, schema, classifier) in rejected {
@@ -30678,7 +30866,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(141));
+        assert_eq!(state, migration_state_through(142));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -33224,6 +33412,28 @@ mod tests {
             .migrate_runtime_image_public_display_source_v141()
             .unwrap();
         assert!(runtime_image_v141_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_classifier_v3_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 142 BEGIN SELECT RAISE(ABORT, 'Classifier v3 receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_runtime_activity_classifier_v142()
+                .unwrap_err()
+                .to_string()
+                .contains("Classifier v3 receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(142).unwrap());
+        assert_eq!(database.connection().query_row(
+            "SELECT contract_version,projection_schema_version,classifier_version FROM rovai_data_contract",
+            [], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?))).unwrap(),
+            ("v1.53".into(),92,V116_CLASSIFIER_VERSION.into()));
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_classifier_v3_receipt")
+            .unwrap();
+        database.migrate_runtime_activity_classifier_v142().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -33261,7 +33471,7 @@ mod tests {
     fn deployed_tool_classifier_v141_upgrade_preserves_receipts_and_rolls_back() {
         // Unlike the marker-only matrix, this regression owns the deployed
         // branch's complete schema admission and atomic receipt reconciliation.
-        let database = crate::test_support::seeded_runtime_database_owned();
+        let mut database = crate::test_support::seeded_runtime_database_owned();
         downgrade_current_schema_to_v140_source_for_test(database.connection());
         database
             .connection()
@@ -33277,6 +33487,83 @@ mod tests {
                 DatabaseContractClassification::SupportedMigrationSource(_)
             ),
             "the already-deployed tool-classifier source must be admitted for migration"
+        );
+        for mutation in [
+            "UPDATE rovai_data_contract SET classifier_version='activity-v2'",
+            "UPDATE rovai_data_contract SET projection_schema_version=93",
+            "DELETE FROM schema_migration WHERE version=140",
+            "INSERT INTO schema_migration VALUES(142,'unexpected')",
+            "INSERT INTO schema_migration VALUES(143,'future')",
+            "ALTER TABLE agent_run_image ADD COLUMN public_display_source TEXT",
+            "ALTER TABLE agent_run_image ADD COLUMN unknown_partial_column TEXT",
+        ] {
+            database
+                .connection()
+                .execute_batch("SAVEPOINT source_probe")
+                .unwrap();
+            database.connection().execute_batch(mutation).unwrap();
+            assert!(
+                matches!(
+                    classify_database_contract(database.connection()).unwrap(),
+                    DatabaseContractClassification::Unknown(_)
+                ),
+                "{mutation}"
+            );
+            database
+                .connection()
+                .execute_batch("ROLLBACK TO source_probe; RELEASE source_probe")
+                .unwrap();
+        }
+        let receipts = MigrationReceiptSnapshot::read(database.connection()).unwrap();
+        // Distinct failure points cover receipt remapping, DDL, and the final
+        // marker. None may leave a half-joined source for the next startup.
+        for trigger in [
+            "CREATE TEMP TRIGGER reject_join BEFORE UPDATE ON schema_migration WHEN NEW.version=142 BEGIN SELECT RAISE(ABORT,'join fixture failure'); END;",
+            "CREATE TEMP TRIGGER reject_join BEFORE INSERT ON schema_migration WHEN NEW.version=141 BEGIN SELECT RAISE(ABORT,'join fixture failure'); END;",
+            "CREATE TEMP TRIGGER reject_join BEFORE UPDATE ON rovai_data_contract BEGIN SELECT RAISE(ABORT,'join fixture failure'); END;",
+        ] {
+            database.connection().execute_batch(trigger).unwrap();
+            assert!(
+                database
+                    .reconcile_deployed_tool_classifier_v141()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("join fixture failure")
+            );
+            assert_eq!(
+                MigrationReceiptSnapshot::read(database.connection()).unwrap(),
+                receipts
+            );
+            assert!(deployed_tool_v141_image_schema_matches(database.connection()).unwrap());
+            assert!(
+                matches!(classify_database_contract(database.connection()).unwrap(),
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.contract_version=="v1.52" && marker.classifier_version==V142_CLASSIFIER_VERSION)
+            );
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER reject_join")
+                .unwrap();
+        }
+        database.migrate(false).unwrap();
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT applied_at FROM schema_migration WHERE version=142",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "original-classifier-cutover"
+        );
+        let writes = database.connection().total_changes();
+        assert!(!database.reconcile_deployed_tool_classifier_v141().unwrap());
+        assert_eq!(
+            database.connection().total_changes(),
+            writes,
+            "a retry must not remap or rewrite again"
         );
     }
 
@@ -33336,6 +33623,7 @@ mod tests {
             .unwrap();
 
         assert!(runtime_image_v141_schema_matches(database.connection()).unwrap());
+        database.migrate_runtime_activity_classifier_v142().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained: (i64, Option<String>) = database
             .connection()
@@ -34110,11 +34398,18 @@ mod tests {
             Uuid::new_v4()
         ));
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v140_source_for_test(database.connection());
         database
             .connection()
             .execute(
-                "UPDATE rovai_data_contract SET classifier_version = ?1 WHERE singleton = 1",
-                [V043_CLASSIFIER_VERSION],
+                "UPDATE rovai_data_contract
+                 SET contract_version = ?1, projection_schema_version = ?2, classifier_version = ?3
+                 WHERE singleton = 1",
+                params![
+                    V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                    V141_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                    V043_CLASSIFIER_VERSION,
+                ],
             )
             .unwrap();
         assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
@@ -34143,7 +34438,7 @@ mod tests {
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION.to_string(),
+                V142_CLASSIFIER_VERSION.to_string(),
             )
         );
         assert!(!directory.join("inactive-data-quarantine").exists());

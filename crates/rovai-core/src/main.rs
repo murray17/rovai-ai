@@ -15461,7 +15461,7 @@ async fn process_agent_run_pi_message(
             ),
         }
     }
-    let completed_action = runtime.observe(&message).await?;
+    let (message, completed_action) = runtime.observe(message).await?;
     if message_type == "extension_ui_request" {
         match message.get("method").and_then(Value::as_str) {
             Some("setStatus") => return Ok(()),
@@ -16978,16 +16978,26 @@ fn normalize_acp_event_with_completion(
             });
             runtime_search_operation::insert_candidate(&mut payload, search_operation_candidate);
             if public_status == "completed"
-                && let Some(path) =
-                    completion.and_then(|value| value.public_file_operation_path.as_ref())
+                && let Some((operation_kind, path)) = completion.and_then(|value| {
+                    value
+                        .public_file_operation_kind
+                        .as_ref()
+                        .zip(value.public_file_operation_path.as_ref())
+                })
             {
                 payload["runtimeFileOperation"] = json!({
                     "adapterKind": adapter_kind.as_str(),
                     "protocolFamily": "acp-v1",
                     "sourceEventKind": "session/update.tool_call_update.completed",
-                    "operationKind": "write",
+                    "operationKind": operation_kind,
                     "path": path,
                 });
+                if let Some(change_kind) =
+                    completion.and_then(|value| value.public_file_operation_change_kind.as_deref())
+                {
+                    payload["runtimeFileOperation"]["changeKind"] =
+                        Value::String(change_kind.to_string());
+                }
             }
             if public_status == "completed"
                 && let Some(changes) =
