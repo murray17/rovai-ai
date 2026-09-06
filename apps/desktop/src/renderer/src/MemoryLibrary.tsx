@@ -729,12 +729,12 @@ export function MemoryLibrary({
           <AppDialogContent className="memory-confirm-dialog" tone="danger">
             <AppDialogHeader
               title="永久遗忘这条记忆？"
-              description="当前正文、Retrieval Keys 与受控候选内容会被清除，操作不可撤销。"
+              description="将清除正文、检索词与受控候选内容，且无法恢复。"
               icon="brain"
               kicker="不可撤销"
               closeDisabled={busy !== null}
             />
-            <AppDialogFooter note="清除后无法恢复。">
+            <AppDialogFooter>
               <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}>取消</button></Dialog.Close>
               <button className="danger-button" type="button" onClick={() => forgetTarget && void forget(forgetTarget)} disabled={busy !== null}>{busy?.startsWith('forget-') ? '正在遗忘…' : '永久遗忘'}</button>
             </AppDialogFooter>
@@ -985,7 +985,7 @@ function ReviewScheduleDialog({
         >
           <AppDialogHeader
             title="设置下次复核"
-            description="选择一个未来时间。到期后，这条记忆会进入“待复核”，但仍会继续沿用。"
+            description="到期后进入“待复核”，记忆仍会继续沿用。"
             icon="clock"
             closeLabel="关闭设置下次复核弹窗"
             closeDisabled={busy}
@@ -1189,7 +1189,7 @@ function ReviewDrawer({
         <Dialog.Overlay className="dialog-overlay memory-drawer-overlay" />
         <Dialog.Content className="memory-review-drawer">
           <header>
-            <div><Dialog.Title>共同记忆审核</Dialog.Title><Dialog.Description>待审核候选与正式记忆隔离；接受后才会进入共同记忆。关闭抽屉不会改变审核状态。</Dialog.Description></div>
+            <div><Dialog.Title>共同记忆审核</Dialog.Title><Dialog.Description>候选在接受后才成为共同记忆。</Dialog.Description></div>
             <Dialog.Close asChild><button className="icon-button" type="button" aria-label="关闭共同记忆审核">×</button></Dialog.Close>
           </header>
           <div className="memory-review-drawer-list">
@@ -1214,7 +1214,7 @@ function ReviewDrawer({
                 </article>
               ))}
             </section>
-            <section className="memory-review-section memory-review-history" aria-labelledby="review-history-title">
+            <details className="app-dialog-disclosure"><summary>处理记录</summary><section className="memory-review-section memory-review-history" aria-labelledby="review-history-title">
               <div className="memory-review-section-heading"><strong id="review-history-title">处理记录</strong><span>{history.length}</span></div>
               {history.length === 0 && <EmptyMemory text="还没有已处理的审核记录。" />}
               {history.map((reviewItem) => (
@@ -1228,7 +1228,7 @@ function ReviewDrawer({
                   </div>
                 </article>
               ))}
-            </section>
+            </section></details>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -1269,10 +1269,11 @@ function MemoryEditorDialog({
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
         <AppDialogContent className="memory-editor-dialog" width="wide">
           <AppDialogHeader
-            title={editor?.kind === 'create' ? '新增记忆' : editor?.kind === 'reviewItem' ? '编辑后接受共同记忆审核项' : '修订记忆'}
+            title={editor?.kind === 'create' ? '新增记忆' : editor?.kind === 'reviewItem' ? '编辑后接受记忆' : '修订记忆'}
             description="正文应面向未来、可独立理解且不包含秘密。Retrieval Keys 只用于检索，不代替正文。"
             icon="brain"
             closeDisabled={busy}
+            hideDescription
           />
           <form className="app-dialog-form" onSubmit={onSubmit}>
             <AppDialogBody>
@@ -1287,8 +1288,8 @@ function MemoryEditorDialog({
                   {draft.direction === 'directed' && <AgentSelect label="责任方" value={draft.directedActorAgentId} agents={agents.filter((agent) => [draft.firstAgentId, draft.secondAgentId].includes(agent.agentId))} disabled={identityLocked || busy} onChange={(directedActorAgentId) => onDraft({ ...draft, directedActorAgentId })} />}
                 </>}
               </div>
-              <label className="field-label memory-body-field">Retrieval Keys<input value={draft.retrievalKeys} disabled={busy} placeholder="1–3 个关键词，使用逗号分隔" onChange={(event) => onDraft({ ...draft, retrievalKeys: event.target.value })} /><small>{keys.length}/3 项 · {keyBytes}/48 bytes</small></label>
               <label className="field-label memory-body-field">正文<textarea autoFocus data-dialog-autofocus value={draft.body} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} /><small>{bodyBytes}/2048 bytes</small></label>
+              <label className="field-label memory-body-field">Retrieval Keys<input value={draft.retrievalKeys} disabled={busy} placeholder="1–3 个关键词，使用逗号分隔" onChange={(event) => onDraft({ ...draft, retrievalKeys: event.target.value })} /><small>{keys.length}/3 项 · {keyBytes}/48 bytes</small></label>
               {!reviewItemEditable && <div className="memory-review-warning" role="status">权威审核状态已变化。草稿仍保留，但这条审核不能再接受；请关闭后查看最新记录。</div>}
             </AppDialogBody>
             <AppDialogFooter>

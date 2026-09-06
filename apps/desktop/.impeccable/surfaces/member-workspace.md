@@ -1,5 +1,5 @@
 ---
-version: 7
+version: 8
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -118,3 +118,12 @@ Inherit root [`DESIGN.md`](../../../../DESIGN.md), both theme contracts, the sha
 baseline and [member identity contract](../../../../docs/ui/components/member-identity.md). This brief
 cannot change AgentProfile fields, Member Order semantics, Runtime catalogs, removal transactions or
 Memory authority.
+
+## Identity dialog composition
+
+Identity editing uses a 560px quiet dialog with a single title. Name and team role share a row;
+professional responsibility and editable trait tags follow. Working principles and growth focus use
+one collapsed disclosure with a filled-field count. Keep draft values when collapsing, show validation
+at its field, and expand/focus the relevant advanced field when validation fails. Counters and short
+input guidance appear on focus. The footer contains cancel and save/new actions without a future-work
+note. Avatar editing remains separate; anchored member cards retain the half-body portrait.

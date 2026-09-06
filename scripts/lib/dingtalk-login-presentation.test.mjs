@@ -8,7 +8,6 @@ import { createRequire } from 'node:module'
 import test from 'node:test'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
-import ts from 'typescript'
 import { build } from 'vite'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
@@ -31,9 +30,9 @@ test('DingTalk login uses the production Rovai dialog and a separate sandboxed n
       build: { outDir: join(fixture, 'renderer'), minify: false } })
     await esbuild.build({ entryPoints: [join(root, 'apps/desktop/src/main/dingtalk-login-view.ts')],
       outfile: join(fixture, 'login-view.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'] })
-    const preload = ts.transpileModule(await readFile(join(root, 'apps/desktop/src/preload/index.ts'), 'utf8'), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
-    }).outputText
+    await esbuild.build({ entryPoints: [join(root, 'apps/desktop/src/preload/index.ts')],
+      outfile: join(fixture, 'preload.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'] })
+    const preload = await readFile(join(fixture, 'preload.cjs'), 'utf8')
     await writeFile(join(fixture, 'preload.cjs'), preload + '\n' +
       'require("electron").contextBridge.exposeInMainWorld("loginFixture", {' +
       'stage: value => require("electron").ipcRenderer.invoke("fixture:stage", value),' +

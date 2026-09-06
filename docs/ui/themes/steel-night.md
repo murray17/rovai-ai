@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-09-04
+last_updated: 2026-09-06
 ---
 
 # Steel Night
@@ -162,6 +162,18 @@ Night 为相同十个格式家族提供独立亮度值；它们只表达文件�
 `#f7fafb` ink, `rgb(255 255 255 / 18%)` line, `rgb(255 255 255 / 10%)` control and
 `0 28px 80px rgb(0 0 0 / 52%)` shadow over `rgb(3 7 10 / 84%)`.
 
+### Dialog fields
+
+| Token | Value |
+|---|---:|
+| `--dialog-field-label` | `#a6abb2` |
+| `--dialog-field-line` | `#3b434a` |
+| `--dialog-field-line-hover` | `#697983` |
+
+Labels use regular weight. Fields retain a 1px border, input surface and visible focus outline;
+higher contrast preferences use the stronger control line and ink. Import MCP source JSON reuses
+`--conversation-code-block-canvas`, with no extra left margin.
+
 ### Shared aliases and geometry
 
 Night inherits the shared non-color structure from `:root`; aliases resolve against Night values:
@@ -186,9 +198,8 @@ Night inherits the shared non-color structure from `:root`; aliases resolve agai
 
 ## Brand, semantic, identity, and evidence color rules
 
-The New Conversation workspace, member and Lead dropdowns use the dedicated
-`--new-camp-picker-*` assignments. They do not recolor the Dialog surface or the optional-configuration
-accordion.
+New Conversation workspace, member and Lead controls share the dialog field tokens and
+  standard input surface. Optional naming uses the same quiet form treatment.
 
 The same semantic separation as Day applies. Brightened identity colors retain stable ID mapping;
 they do not become statuses. Evidence and diffs remain neutral and structurally labeled. Narrative

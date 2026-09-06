@@ -164,6 +164,14 @@ app.whenReady().then(async () => {
     })
 
     await run('Skill Typeahead stores skillId and nameAtSend', async () => {
+      await reset('')
+      await insert('/')
+      await key('ArrowUp', 38)
+      const keyboard = await state(true)
+      assert.equal(keyboard.activeOption, keyboard.options.at(-1), JSON.stringify(keyboard))
+      assert.ok(keyboard.menuOverflows && keyboard.menuScrollTop > 0, JSON.stringify(keyboard))
+      assert.ok(keyboard.activeVisible && keyboard.activeDescendantMatches, JSON.stringify(keyboard))
+      await key('Escape', 27)
       await reset('请 ')
       await insert('/work')
       const open = await state(false)
@@ -289,7 +297,8 @@ app.whenReady().then(async () => {
         ]
       }
       await reset(document)
-      const copied = await evaluate('window.composerTest.copyAll()')
+      await key('a', 65, process.platform === 'darwin' ? 4 : 2, 'KeyA')
+      const copied = await evaluate('window.composerTest.copySelection()')
       assert.equal(copied.plain, '请 @队员甲 用 /worktree')
       assert.deepEqual(JSON.parse(copied.structured), document)
       assert.match(copied.html, /white-space: pre-wrap/)

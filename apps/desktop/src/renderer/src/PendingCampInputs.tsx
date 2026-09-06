@@ -421,7 +421,7 @@ export function PendingCampInputs({
           requestAnimationFrame(() => editorRef.current?.focus())
         }}>
           <AppDialogHeader icon="pencil" title="保留这次修改吗？"
-            description="当前待发送消息有未保存的修改。保存或放弃后再离开。" />
+            description="待发送消息有未保存的修改。" />
           <AppDialogFooter>
             <button type="button" className="quiet-button" disabled={busy} onClick={() => setSwitchTarget(null)}>继续编辑</button>
             <button type="button" className="quiet-button" disabled={busy} onClick={() => void perform(() => confirmSwitch(false))}>放弃修改</button>
