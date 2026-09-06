@@ -802,7 +802,6 @@ export interface SendSingleChatMessageCommand {
   campId: string
   conversationId: string
   body: string
-  expectedConversationVersion: number
   draftRevision: number
 }
 

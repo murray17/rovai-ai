@@ -52,6 +52,10 @@ Scheduler 发现该 Conversation 空闲
   → 用户可独占编辑、takeover、增删/重排附件、保存或删除
 ```
 
+发送命令以固定 Conversation ID 为目标，不接收 expected Conversation version。`SingleChatService` 在同一事务内读取当前
+Conversation 状态并决定直接准入或 Pending 入队；后台 ACK、final 等对 Conversation version 的推进不构成用户输入冲突，
+只有独立的 Draft revision 继续保护附件 Draft 的精确消费。
+
 队列以 `conversation_id + enqueue_sequence` 定序。Camp 公屏队列、其他 Single Chat、同一队员的 successor Conversation
 和普通 Scheduler capacity 都不共享这个顺序域。Pending 尚未发布时不占用 ConversationMessage sequence，不创建
 CampTurn/AgentRun，也不推进 Conversation version。
