@@ -4,7 +4,7 @@ contract: runtime-file-change-observation
 version: v3
 status: accepted
 source_version: v1.53
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # Runtime File Change Observation v3
@@ -62,10 +62,11 @@ Migration 142 原子地把 data contract 标记切到 `v1.53 / projection schema
 或既有 Canonical rows。operation 首次建立的 classifier 继续冻结：在切换前已经以 v1/v2 建立的活动用原版本
 结算；切换后的新活动使用 v3。Read Side 按 v3、v2、v1 的确定性优先级读取。
 
-随后 Migration 143 将 current marker 推进到 projection schema 94。它只压缩 terminal 完整输出已覆盖的
+随后 Migration 143 将中间 marker 推进到 projection schema 94。它只压缩 terminal 完整输出已覆盖的
 历史 command delta 与未引用的空文本生命周期壳；任何 `agent_run_file_change_projection.source_evidence_ids_json`
 引用都会阻止候选删除，迁移后文件投影不得出现悬挂 Evidence。typed file operation、Diff 和 AgentRun 文件变化
-投影均不重算、不改写。
+投影均不重算、不改写。Migration 144 再从该精确来源发布 current schema 95，只登记命令结果存储兼容
+边界且不改变本合同的 Evidence 或文件投影；见 [Domain Command Result v1](domain-command-result-v1.md)。
 
 已部署工具分支的 `v1.52/schema 92/activity-v3` 曾使用编号 141，与主线图片来源迁移冲突。
 仅在完整旧 receipt 链及精确旧图片/下层 schema 匹配时，原位事务把该 classifier receipt 映射到 142
@@ -94,3 +95,4 @@ projector 显式排除 schema 2 read；失败、取消、拒绝或 unavailable o
 - [Runtime File Change Observation 架构](../architecture/runtime-file-change-observation.md)
 - [Runtime Activity Registry](../runtime-activity/registry.md)
 - [Run Process Detail Surface v31](run-process-detail-surface-v31.md)
+- [Domain Command Result v1](domain-command-result-v1.md)

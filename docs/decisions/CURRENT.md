@@ -12,6 +12,11 @@ last_updated: 2026-09-07
 
 ## Core data 与 Read Side
 
+- 命令结果单份正文与事件双读：[Domain Command Result v1](../contracts/domain-command-result-v1.md)、
+  [命令/Read Side 不变量](../architecture/foundational-invariants.md#core-command-transaction)与
+  [schema 95 原位升级](../architecture/availability-first-runtime.md#migration-switch)；理由：
+  [V1.53-D06](../versions/v1.53/decisions.md#v1-53-d06)。
+
 - 工具分类与图片迁移汇合：[原位升级](../architecture/availability-first-runtime.md#migration-switch)、[Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)；理由：[V1.53-D03](../versions/v1.53/decisions.md#v1-53-d03)。
 
 - 正文块与维护写放大当前规范：[Evidence 持久化与模型观察边界](../contracts/run-process-detail-surface-v31.md#evidence-持久化与模型观察边界)、[Camp Open](../contracts/camp-open-projection-v16.md)、[可见来源确认](../contracts/notification-episode-v5.md)、[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；理由：[V1.53-D02](../versions/v1.53/decisions.md#v1-53-d02)。

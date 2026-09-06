@@ -210,7 +210,9 @@ impl MainCampMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.53";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 94;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 95;
+const V144_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
+const V144_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 94;
 const V143_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
 const V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 93;
 const V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -621,6 +623,7 @@ struct CurrentMigrationState {
     v141: bool,
     v142: bool,
     v143: bool,
+    v144: bool,
 }
 
 impl CurrentMigrationState {
@@ -702,23 +705,38 @@ impl CurrentMigrationState {
             && schema == CURRENT_PROJECTION_SCHEMA_VERSION
             && classifier == V142_CLASSIFIER_VERSION
             && self.v142
-            && self.v143;
+            && self.v143
+            && self.v144;
+        let command_result_storage_source = contract == V144_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V144_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            && classifier == V142_CLASSIFIER_VERSION
+            && self.v142
+            && self.v143
+            && !self.v144;
         let evidence_compaction_source = contract == V143_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             && classifier == V142_CLASSIFIER_VERSION
             && self.v142
-            && !self.v143;
+            && !self.v143
+            && !self.v144;
         let image_source = contract == V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             && classifier == V116_CLASSIFIER_VERSION
             && !self.v142
-            && !self.v143;
+            && !self.v143
+            && !self.v144;
         let deployed_tool_source = contract == "v1.52"
             && schema == 92
             && classifier == V142_CLASSIFIER_VERSION
             && !self.v142
-            && !self.v143;
-        if current || evidence_compaction_source || image_source || deployed_tool_source {
+            && !self.v143
+            && !self.v144;
+        if current
+            || command_result_storage_source
+            || evidence_compaction_source
+            || image_source
+            || deployed_tool_source
+        {
             return self.v141
                 && self.v140
                 && self.v139
@@ -737,7 +755,7 @@ impl CurrentMigrationState {
                 && self.v131
                 && self.admits_channel_v125(true, through_v113);
         }
-        if self.v141 || self.v142 || self.v143 {
+        if self.v141 || self.v142 || self.v143 || self.v144 {
             return false;
         }
         if contract == V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
@@ -2967,7 +2985,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 143)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 144)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -3058,7 +3076,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 140),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 141),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 142),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 143)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 143),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 144)
         "#,
         [],
         |row| {
@@ -3137,6 +3156,7 @@ fn load_current_migration_state(
                 v141: row.get(71)?,
                 v142: row.get(72)?,
                 v143: row.get(73)?,
+                v144: row.get(74)?,
             })
         },
     )
@@ -6000,6 +6020,9 @@ impl Database {
                     self.migrate_execution_evidence_compaction_v143()
                 );
             }
+            if !self.schema_migration_applied(144)? {
+                migration_step!("migration_144", self.migrate_command_result_storage_v144());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -6620,6 +6643,9 @@ impl Database {
                 "migration_143",
                 self.migrate_execution_evidence_compaction_v143()
             );
+        }
+        if !self.schema_migration_applied(144)? {
+            migration_step!("migration_144", self.migrate_command_result_storage_v144());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -22733,12 +22759,43 @@ impl Database {
              classifier_version=?3, updated_at=datetime('now') WHERE singleton=1",
             params![
                 CURRENT_DATA_CONTRACT_VERSION,
-                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V144_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 V142_CLASSIFIER_VERSION
             ],
         )?;
         transaction.execute(
             "INSERT INTO schema_migration VALUES(143, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_command_result_storage_v144(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == V144_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                    && marker.projection_schema_version == V144_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                    && marker.classifier_version == V142_CLASSIFIER_VERSION)
+        {
+            anyhow::bail!(
+                "command result column storage requires the exact v1.53/schema 94 source"
+            );
+        }
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             classifier_version=?3, updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration VALUES(144, datetime('now'))",
             [],
         )?;
         transaction.commit()?;
@@ -27543,7 +27600,7 @@ pub(crate) fn downgrade_current_schema_to_v140_source_for_test(connection: &Conn
     connection
         .execute_batch(
             "ALTER TABLE agent_run_image DROP COLUMN public_display_source;
-             DELETE FROM schema_migration WHERE version IN (141, 142, 143);
+             DELETE FROM schema_migration WHERE version IN (141, 142, 143, 144);
              UPDATE rovai_data_contract
              SET contract_version = 'v1.50', projection_schema_version = 91,
                  classifier_version = 'activity-v2'
@@ -30348,6 +30405,7 @@ mod tests {
             v141: version >= 141,
             v142: version >= 142,
             v143: version >= 143,
+            v144: version >= 144,
         }
     }
 
@@ -30453,6 +30511,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                144,
+            ),
+            (
+                "v1.53/schema-94 before command result column storage",
+                V144_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V144_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 143,
             ),
             (
@@ -30873,7 +30937,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(143);
+        let current = migration_state_through(144);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -30903,7 +30967,16 @@ mod tests {
         missing_classifier.v142 = false;
         let mut missing_evidence_compaction = current;
         missing_evidence_compaction.v143 = false;
+        let mut missing_command_result_storage = current;
+        missing_command_result_storage.v144 = false;
         let rejected = [
+            (
+                "current without command result storage receipt",
+                missing_command_result_storage,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION,
+            ),
             (
                 "current without Evidence compaction receipt",
                 missing_evidence_compaction,
@@ -31228,7 +31301,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(143));
+        assert_eq!(state, migration_state_through(144));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -31244,6 +31317,89 @@ mod tests {
             .unwrap();
         assert!(!connection_has_admissible_data_contract(database.connection()).unwrap());
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v144_advances_storage_authority_without_rewriting_event_history() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v144-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json, actor_type, actor_id,
+                    command_id, command_type, request_digest, request_digest_version,
+                    result_status, result_code, result_payload_json, created_at
+                ) VALUES (
+                    'v144-old-command', 'command.result',
+                    '{"commandType":"test.old","status":"applied","code":"test.ok","result":{"kept":true},"resultEntity":null}',
+                    'system', 'fixture', 'v144-old-command-id', 'test.old', 'digest', 1,
+                    'applied', 'test.ok', '{"kept":true}', 'kept-command-time'
+                );
+                INSERT INTO event_log(event_id,event_type,payload_json,actor_type,actor_id,created_at)
+                VALUES ('v144-ordinary','test.ordinary','{"kept":"ordinary"}',
+                        'system','fixture','kept-ordinary-time');
+                DELETE FROM schema_migration WHERE version=144;
+                UPDATE rovai_data_contract
+                SET projection_schema_version=94, updated_at='kept-contract-time'
+                WHERE singleton=1;
+                "#,
+            )
+            .unwrap();
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(_)
+        ));
+        let before = database
+            .connection()
+            .prepare(
+                "SELECT global_sequence,event_id,event_type,payload_json,result_payload_json,created_at
+                 FROM event_log WHERE event_id LIKE 'v144-%' ORDER BY global_sequence",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+
+        database.migrate_command_result_storage_v144().unwrap();
+
+        let after = database
+            .connection()
+            .prepare(
+                "SELECT global_sequence,event_id,event_type,payload_json,result_payload_json,created_at
+                 FROM event_log WHERE event_id LIKE 'v144-%' ORDER BY global_sequence",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(after, before);
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        assert!(database.schema_migration_applied(144).unwrap());
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -33816,6 +33972,35 @@ mod tests {
         database
             .migrate_execution_evidence_compaction_v143()
             .unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_command_result_storage_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 144 BEGIN SELECT RAISE(ABORT, 'command result storage receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_command_result_storage_v144()
+                .unwrap_err()
+                .to_string()
+                .contains("command result storage receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(144).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT projection_schema_version FROM rovai_data_contract",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            V144_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_command_result_storage_receipt")
+            .unwrap();
+        database.migrate_command_result_storage_v144().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -33876,6 +34061,7 @@ mod tests {
             "DELETE FROM schema_migration WHERE version=140",
             "INSERT INTO schema_migration VALUES(142,'unexpected')",
             "INSERT INTO schema_migration VALUES(143,'future')",
+            "INSERT INTO schema_migration VALUES(144,'future')",
             "ALTER TABLE agent_run_image ADD COLUMN public_display_source TEXT",
             "ALTER TABLE agent_run_image ADD COLUMN unknown_partial_column TEXT",
         ] {
@@ -34009,6 +34195,7 @@ mod tests {
         database
             .migrate_execution_evidence_compaction_v143()
             .unwrap();
+        database.migrate_command_result_storage_v144().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained: (i64, Option<String>) = database
             .connection()
@@ -34130,7 +34317,7 @@ mod tests {
                      'progress', 'unsettled', 'runtime_structured', 'fine_grained',
                      'runtime', '["v143-command-partial"]', 5, 5, 1,
                      '2026-09-06', '2026-09-06');
-                DELETE FROM schema_migration WHERE version = 143;
+                DELETE FROM schema_migration WHERE version IN (143, 144);
                 UPDATE rovai_data_contract
                 SET projection_schema_version = 93
                 WHERE singleton = 1;
@@ -34175,6 +34362,8 @@ mod tests {
         database
             .migrate_execution_evidence_compaction_v143()
             .unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_command_result_storage_v144().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained = database
             .connection()

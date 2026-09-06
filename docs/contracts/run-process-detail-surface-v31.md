@@ -70,6 +70,9 @@ Activity；不拆分 Tool Call、Evidence 或步骤计数，也不增加逐文�
 `activity.completed` 且包含 `aggregatedOutput` 时的历史 `command.output.delta`，并删除无正文、无 Blob、
 未被 Canonical 或文件投影引用的 narration/reasoning 生命周期空壳。
 
+schema 94 是后续 Migration 144 的精确来源；Migration 144 只发布 current schema 95 的命令结果存储兼容
+边界，不再次清理 Evidence。该后续边界见 [Domain Command Result v1](domain-command-result-v1.md)。
+
 迁移在删除前按原数组顺序修复受影响 Canonical `source_evidence_ids_json`，重算首末 Evidence sequence；
 任何 Canonical 来源会变空、候选仍被文件投影引用，或删除后存在悬挂来源时整步回滚。Canonical revision
 保持不变，因为本次只压缩支持证据载体，不重算语义结论。没有可靠 terminal aggregate 的 command delta、

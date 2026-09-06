@@ -84,7 +84,8 @@ python3 scripts/aggregate-execution-text.test.py
   安装前的隔离新库验收没有覆盖这一真实升级源；不得把正文测试或聚合完整性通过表述为日常 App 可用。
 - 经用户授权合入 PR #245 后，63 个数据库测试和生产迁移组合测试通过。聚合后的真实隔离副本从
   `v1.52/schema 92/activity-v3` 原子迁移为 `v1.53/schema 93/activity-v3`，原 classifier receipt 的时间保留于 142；
-  schema 93 现在是 Migration 143 的精确来源，迁移完成后的 current marker 为 `v1.53/schema 94/activity-v3`。
+  schema 93 是 Migration 143 的精确来源，迁移完成后形成 `v1.53/schema 94/activity-v3`；后续
+  Migration 144 再从该来源推进当前 schema 95，且不重写这里已验收的数据。
   9 张正文/工具/事件/业务表逐表摘要不变，完整性与外键检查通过，目标 Camp 的 18 个 Run 可读取。
   合并后的执行正文与文件预览 Electron 验收均通过。
 - 用户授权安装后的日常 App/Core 正常启动，原库生产兼容迁移和目标 Camp 的全部 Run/Evidence CLI 读回通过；
@@ -95,6 +96,55 @@ python3 scripts/aggregate-execution-text.test.py
 - 全量 slow Rust 检查仍有基线已有的 `current_input_skill_links_are_direct_user_siblings_with_canonical_bytes`
   断言失败；Clippy 在未修改的 `core_subsystems.rs` 报 `let_and_return`。不为本次正文任务修改 Skill 上下文
   或清理无关模块，完整门禁不宣称全绿。另仅修正旧 Single Chat 测试夹具已经失效的 `draft_revision` 字段。
+
+## 命令结果正文去重补充
+
+- [x] 核对 `command.result` 全部生产写入、幂等回放、事件订阅、完整 Snapshot、Camp History、Team Tool、
+  诊断/迁移与历史清除入口；确认生产写入唯一收口于 `append_command_result`，回放只读专用列。
+- [x] 新写入的 `payload_json` 固定为 `command-result-columns-v1` 内部 marker，完整正文只序列化并写入
+  `result_payload_json`；所有回执列、事件元数据和事务边界保留。
+- [x] `load_events` 在原批量 SELECT 中取得专用列；旧 `command.result` 原样读取，新 marker 严格还原公开
+  payload，普通事件不变，不增加 N+1 查询或读取时写入。
+- [x] 缺列、非法状态、损坏 JSON、不完整实体引用、未知或带额外字段的 marker fail closed；错误只带事件
+  ID/序号和错误类别，不打印结果正文。
+- [x] Migration 144 从精确 `v1.53/schema 94/activity-v3` 原子发布 schema 95 与 receipt，不改写历史事件；
+  authority admission、逐步恢复和旧来源升级链同步扩展。
+- [x] 保持直接响应、三种状态、幂等摘要/冲突、首次时间戳、Handler 错误回滚、事件 wire 与
+  `EVENT_BATCH_SCHEMA_VERSION = 9` 不变。
+- [x] 完成定向 Rust、PR Rust、workspace check 与文档治理门禁，记录 Clippy 基线失败及实际逻辑字节对比。
+
+### 合同 owner 与验证范围
+
+低成本 JSON 边界、marker 识别和错误矩阵由 `command::tests` 的纯投影 owner 表驱动覆盖；同一 owner 扩展
+既有重放测试，覆盖 `applied/accepted/rejected`、物理列与单份正文，避免为每种状态复制数据库夹具。
+持久重开和 Handler 回滚需要跨事务边界，保留一个完整临时数据库 owner。`read_model::slow_tests` 只证明
+真实事件入口能在同一批次混读旧回执、新 marker 和普通事件，并保持顺序、分页、游标与 fail-closed 定位；
+`db::tests` 与 `authority_migration::tests` 分别拥有 marker-only 原子迁移和正式 lease/ticket/reopen 链。
+
+所有数据库验证只使用 OS 临时目录。默认升级不转换旧历史、不执行 VACUUM，也不接触日常 App 数据。
+
+### 验证记录（2026-09-07）
+
+- `cargo fmt --all --check`、`cargo check --workspace --all-targets` 通过。
+- `cargo test -p rovai-core --lib command::` 运行 7 项并全通过；
+  `cargo test -p rovai-core --lib read_model::` 运行 3 项并全通过。Migration 144、完整 Migration 链和
+  authority in-place/reopen 定向测试均实际运行并通过。
+- `pnpm test:rust:pr` 通过：527 项 library、33 项 CLI、307 项 slow tests 全部通过；slow suite 包含真实
+  `events.subscribe` Read Side 的旧回执、新 marker、普通事件和大正文混合分页夹具。
+- `pnpm docs:test` 9 项全通过；`pnpm docs:check` 与基于
+  `0ee42c5064b0f2950704b7ea8bb38f6198b977bd` 的 `pnpm docs:check:ci` 通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 已执行，但被本分支未修改的
+  `crates/rovai-core/src/main.rs:17558` 既有 `clippy::too_many_arguments` 阻断；本任务没有借机改动该函数。
+- 代表性隔离夹具的结果 JSON 为 426,030 字节。旧编码的 `payload_json + result_payload_json` 为
+  852,200 字节；新编码为 45 字节 marker + 426,030 字节正文，共 426,075 字节，单行减少
+  426,125 字节（50.003%）。这是大结果回执行的逻辑字节，不代表全库大小或订阅传输量同比下降；订阅仍
+  返回完整公开结果。生产查询保持单次批量 SELECT，没有逐事件查询或读取时写入。
+
+### 回退基线
+
+schema 95 的双读 Core 可先恢复旧格式写入并继续读取两种行。若回退到不支持 marker 的 schema 94 Core，
+必须先停止新写入，使用另行授权和隔离验证的工具把所有 marker 行反向物化为旧公开 payload，确认 marker
+为零后才能回退 authority；只切换 writer 不能修复已经提交的新格式行。
 
 ## 实施范围
 

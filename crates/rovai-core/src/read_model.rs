@@ -14,7 +14,7 @@ use crate::{
         public_camp_message_event_predicate, public_camp_message_publication_cte,
     },
     canonical_activity::CanonicalRuntimeActivity,
-    command::canonical_json_digest,
+    command::{canonical_json_digest, project_persisted_command_result_event_payload},
     current_input_skill::CurrentInputSkillResolution,
     db::Database,
     git::{GitCapabilityState, GitObservation},
@@ -3772,7 +3772,10 @@ fn load_events(
                event_log.entity_type, event_log.entity_id,
                event_log.actor_type, event_log.actor_id,
                event_log.source_agent_run_id, event_log.execution_epoch,
-               event_log.payload_json, event_log.created_at
+               event_log.payload_json, event_log.command_type,
+               event_log.result_status, event_log.result_code,
+               event_log.result_payload_json, event_log.result_entity_type,
+               event_log.result_entity_id, event_log.created_at
         FROM event_log
         LEFT JOIN task ON task.id = event_log.task_id
         WHERE event_log.global_sequence > ?1
@@ -3804,7 +3807,13 @@ fn load_events(
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<i64>>(9)?,
                     row.get::<_, String>(10)?,
-                    row.get::<_, String>(11)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, Option<String>>(16)?,
+                    row.get::<_, String>(17)?,
                 ))
             },
         )?
@@ -3823,9 +3832,35 @@ fn load_events(
                 actor_id,
                 source_agent_run_id,
                 execution_epoch,
-                payload,
+                payload_json,
+                command_type,
+                result_status,
+                result_code,
+                result_payload_json,
+                result_entity_type,
+                result_entity_id,
                 created_at,
             )| {
+                let payload = if event_type == "command.result" {
+                    project_persisted_command_result_event_payload(
+                        &payload_json,
+                        command_type.as_deref(),
+                        result_status.as_deref(),
+                        result_code.as_deref(),
+                        result_payload_json.as_deref(),
+                        result_entity_type.as_deref(),
+                        result_entity_id.as_deref(),
+                    )
+                } else {
+                    serde_json::from_str(&payload_json)
+                        .context("failed to decode persisted domain event payload")
+                }
+                .with_context(|| {
+                    format!(
+                        "failed to project event {} at global sequence {global_sequence}",
+                        event_id.as_deref().unwrap_or("<missing>")
+                    )
+                })?;
                 Ok(DomainEventView {
                     global_sequence,
                     event_id,
@@ -3837,7 +3872,7 @@ fn load_events(
                     actor_id,
                     source_agent_run_id,
                     execution_epoch,
-                    payload: serde_json::from_str(&payload)?,
+                    payload,
                     created_at,
                 })
             },
@@ -4002,7 +4037,7 @@ mod slow_tests {
             RenameCampCommand, TestCampConversationCommand, TestCampMessageAddress,
             TestCampMessageCommand,
         },
-        command::{ActorRef, CommandEnvelope},
+        command::{ActorRef, COMMAND_RESULT_STORAGE_MARKER_JSON, CommandEnvelope},
     };
     use serde_json::json;
     use uuid::Uuid;
@@ -5681,6 +5716,180 @@ mod slow_tests {
             .unwrap();
         assert!(batch.reset_required);
         assert!(batch.events.is_empty());
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn event_reader_hydrates_mixed_command_result_storage_without_changing_pagination() {
+        let (mut database, directory) = crate::test_support::fresh_schema_database_fast();
+        let after: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COALESCE(MAX(global_sequence), 0) FROM event_log",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let old_payload = json!({
+            "commandType": "test.old",
+            "status": "applied",
+            "code": "test.old.applied",
+            "result": { "historical": true },
+            "resultEntity": null,
+            "historicalExtension": "must remain",
+        });
+        let large_result = json!({
+            "nested": {
+                "text": "大正文🧭".repeat(32 * 1024),
+                "values": [null, true, 42],
+            }
+        });
+        let large_result_json = serde_json::to_string(&large_result).unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json, actor_type, actor_id,
+                    command_id, command_type, request_digest, request_digest_version,
+                    result_status, result_code, result_payload_json, created_at
+                ) VALUES (
+                    'mixed-old-command', 'command.result', ?1, 'system', 'fixture',
+                    'mixed-old-command-id', 'test.old', 'old-digest', 1,
+                    'applied', 'test.old.applied', '{"historical":true}',
+                    '2026-09-07T00:00:01Z'
+                )
+                "#,
+                [old_payload.to_string()],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "INSERT INTO event_log(event_id,event_type,payload_json,actor_type,actor_id,created_at)
+                 VALUES ('mixed-ordinary','test.ordinary','{\"ordinary\":true}','system','fixture','2026-09-07T00:00:02Z')",
+                [],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json, camp_id, entity_type, entity_id,
+                    actor_type, actor_id, command_id, command_type, request_digest,
+                    request_digest_version, result_status, result_code, result_payload_json,
+                    result_entity_type, result_entity_id, created_at
+                ) VALUES (
+                    'mixed-new-command', 'command.result', ?1, 'camp-mixed', 'task', 'task-1',
+                    'user', 'local_user', 'mixed-new-command-id', 'test.new', 'new-digest',
+                    1, 'accepted', 'test.new.accepted', ?2,
+                    'task', 'task-1', '2026-09-07T00:00:03Z'
+                )
+                "#,
+                params![COMMAND_RESULT_STORAGE_MARKER_JSON, large_result_json,],
+            )
+            .unwrap();
+        let sequences = database
+            .connection()
+            .prepare(
+                "SELECT event_id, global_sequence FROM event_log
+                 WHERE event_id LIKE 'mixed-%' ORDER BY global_sequence",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+
+        let first = ReadModelService
+            .events_since(&mut database, None, after, 2)
+            .unwrap();
+        assert!(first.has_more);
+        assert_eq!(
+            first
+                .events
+                .iter()
+                .map(|event| event.event_id.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["mixed-old-command", "mixed-ordinary"]
+        );
+        assert_eq!(first.events[0].payload, old_payload);
+        assert_eq!(first.events[1].payload, json!({ "ordinary": true }));
+        assert_eq!(first.next_global_sequence, sequences[1].1);
+
+        let second = ReadModelService
+            .events_since(&mut database, None, first.next_global_sequence, 2)
+            .unwrap();
+        assert!(!second.has_more);
+        assert_eq!(
+            second.through_global_sequence,
+            first.through_global_sequence
+        );
+        assert_eq!(second.next_global_sequence, second.through_global_sequence);
+        assert_eq!(second.events.len(), 1);
+        assert_eq!(
+            second.events[0].event_id.as_deref(),
+            Some("mixed-new-command")
+        );
+        assert_eq!(second.events[0].event_type, "command.result");
+        assert_eq!(second.events[0].camp_id.as_deref(), Some("camp-mixed"));
+        assert_eq!(second.events[0].entity_type.as_deref(), Some("task"));
+        assert_eq!(second.events[0].entity_id.as_deref(), Some("task-1"));
+        assert_eq!(second.events[0].actor_type.as_deref(), Some("user"));
+        assert_eq!(second.events[0].actor_id.as_deref(), Some("local_user"));
+        assert_eq!(second.events[0].created_at, "2026-09-07T00:00:03Z");
+        assert_eq!(
+            second.events[0].payload,
+            json!({
+                "commandType": "test.new",
+                "status": "accepted",
+                "code": "test.new.accepted",
+                "result": large_result,
+                "resultEntity": { "entityType": "task", "entityId": "task-1" },
+            })
+        );
+        assert_eq!(second.events[0].global_sequence, sequences[2].1);
+
+        let new_logical_bytes = database
+            .connection()
+            .query_row(
+                "SELECT length(CAST(payload_json AS BLOB))
+                        + length(CAST(result_payload_json AS BLOB))
+                 FROM event_log WHERE event_id='mixed-new-command'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        let old_format_payload_json = serde_json::to_string(&second.events[0].payload).unwrap();
+        let old_logical_bytes =
+            old_format_payload_json.len() as i64 + large_result_json.len() as i64;
+        assert_eq!(
+            old_logical_bytes - new_logical_bytes,
+            old_format_payload_json.len() as i64 - COMMAND_RESULT_STORAGE_MARKER_JSON.len() as i64
+        );
+        assert!(new_logical_bytes * 2 < old_logical_bytes + 256);
+
+        database
+            .connection()
+            .execute(
+                "UPDATE event_log SET payload_json='{\"_rovaiStorage\":\"command-result-columns-v2\"}'
+                 WHERE event_id='mixed-new-command'",
+                [],
+            )
+            .unwrap();
+        let error = ReadModelService
+            .events_since(&mut database, None, sequences[1].1, 2)
+            .expect_err("an unknown storage marker must fail closed");
+        let message = format!("{error:#}");
+        assert!(message.contains("mixed-new-command"));
+        assert!(message.contains(&sequences[2].1.to_string()));
+        assert!(!message.contains("大正文🧭"));
+        assert!(!message.contains("command-result-columns-v2"));
+
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

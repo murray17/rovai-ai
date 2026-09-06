@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-availability-and-authority-startup-boundary
 status: accepted
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # Availability-first Runtime
@@ -141,7 +141,10 @@ Unix rename 的 ctime 变化只在这条兼容路径解释，对象、长度和 
 不降级 classifier，不重算 Canonical/Evidence。主线 `v1.53/schema 92/activity-v2` 则只执行 142；
 参见 [Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)。
 两条路径随后都以 schema 93 作为 Migration 143 的唯一来源，原子压缩可证明冗余的历史 Evidence、修复
-Canonical 引用并发布 current `v1.53/schema 94/activity-v3`；未知、部分或带未来 receipt 的状态仍拒绝准入。
+Canonical 引用并发布 `v1.53/schema 94/activity-v3`。Migration 144 再以该精确来源原子发布 current
+`v1.53/schema 95/activity-v3`，只登记 `command.result` 专用列正文编码的 reader/writer 兼容边界，不改写
+任何历史事件；未知、部分或带未来 receipt 的状态仍拒绝准入。字段和回退要求见
+[Domain Command Result v1](../contracts/domain-command-result-v1.md)。
 
 内部 trace 保留 assessment/open、reconciliation、每个实际 migration、reassessment/reopen、core_ready 的耗时和
 source/target contract；不记录 SQL、业务行或渠道秘密，不把技术阶段转为产品页面文案。
