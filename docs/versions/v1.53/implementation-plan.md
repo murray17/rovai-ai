@@ -19,8 +19,9 @@ last_updated: 2026-09-06
 - [x] 离线工具默认只操作副本；显式原库模式获得 Core 同款 flock、SQLite 排他锁和完整恢复备份。
 - [x] 本地历史副本逐块内容/序号/状态校验，并验证 event_log、工具投影、封存渠道快照不变。
 - [x] 成品 App 隔离验收及真实新 Run 的正文块/写入量验证。
-- [x] 用户授权的日常 App 升级，保留旧安装备份；当前旧进程未被终止。
-- [ ] 原库一次性聚合：等待日常 App 正常退出，再持锁备份与处理。
+- [x] 用户授权的日常 App 安装替换，保留旧安装备份；不把安装成功等同于真实升级源验收通过。
+- [x] 用户授权的原库一次性聚合：确认 App/Core 已退出，持锁创建独立完整恢复备份，处理后完整性、外键和保护表校验通过。
+- [ ] 日常新版读取验收：已部署的 PR #245 `v1.52/schema 92/activity-v3` 与主线图片来源迁移占用同一编号 141，当前 Core 拒绝该升级源；待确认跨分支兼容处理范围，未改写标记绕过准入。
 
 ### 合同 owner 与最小验证
 
@@ -60,9 +61,12 @@ python3 scripts/aggregate-execution-text.test.py
 - 真实 Codex 验收：582 个 text/reasoning 流式片段保存为 8 条块记录、16 次正文 SQL 行写入；加上工具等
   事实共 18 条 Evidence、26 次 SQL 行写入。该指标不是物理磁盘写入字节数。
 - 合入最新主线后重新 `package:mac:daily` 并验签；`ROVAI_EXECUTION_TEXT_ACCEPT=partial-only` 的成品
-  正常退出/重开场景通过：至少 515 字符未完成正文被保留为 interrupted，退出 641ms，无强制信号，最新 Draft 保留。
+  最终 `a54e2ac7` 成品正常退出/重开场景通过：516 字符未完成正文被保留为 interrupted，退出 953ms，无强制信号，最新 Draft 保留。
   此定向模式不运行无关的空闲退出浮层截图；完整脚本该环节因 App 先退出导致 CDP 关闭，不能计为完整通过。
 - 离线聚合 3 个 Python 用例及真实副本逐块内容、顺序、状态、引用和工具不变校验通过；副本原位重跑零变化。
+- 用户授权的原库聚合及独立校验通过，完整恢复备份留在用户私有目录。日常启动验收另发现并行分支
+  Migration 141 冲突：聚合前备份已包含 PR #245 的 classifier cutover，而不是当前主线的图片来源列。
+  安装前的隔离新库验收没有覆盖这一真实升级源；不得把正文测试或聚合完整性通过表述为日常 App 可用。
 - 全量 slow Rust 检查仍有基线已有的 `current_input_skill_links_are_direct_user_siblings_with_canonical_bytes`
   断言失败；Clippy 在未修改的 `core_subsystems.rs` 报 `let_and_return`。不为本次正文任务修改 Skill 上下文
   或清理无关模块，完整门禁不宣称全绿。另仅修正旧 Single Chat 测试夹具已经失效的 `draft_revision` 字段。
