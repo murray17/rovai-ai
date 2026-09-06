@@ -152,3 +152,38 @@ repository root、common directory、object format、HEAD 和 branch，但不运
 当前规范见 [Workspace / Git 不变量](../../architecture/foundational-invariants.md#camp-workspace)、
 [User Automation v2](../../contracts/user-automation-v2.md)与
 [Runtime 文件变更架构](../../architecture/runtime-file-change-observation.md)。
+
+<a id="v1-53-d06"></a>
+## V1.53-D06：命令结果正文由专用回执列唯一保存，事件读取保持原合同
+
+### 背景
+
+`command.result` 同一行同时把完整结果写入 `result_payload_json` 与 `payload_json.result`。前者已经是命令
+幂等回放的读取来源，后者只为了通用事件读取而重复保存；结果较大时，这会把正文序列化和 SQLite 逻辑
+存储近似放大一份。删除回执事件或缩减结果会破坏审计、重试回放与现有事件消费者，单纯让旧 reader 看到
+空对象又会改变 wire 合同。
+
+### 决定
+
+新 `command.result` 只在专用 `result_payload_json` 保存完整结果，`payload_json` 固定写入显式
+`command-result-columns-v1` 内部标记。通用事件 Read Side 在原批量 SELECT 中取回同一行专用列并还原既有
+`{commandType,status,code,result,resultEntity}`；历史无标记行继续原样返回，普通事件不变。未知标记、损坏
+JSON、缺少专用列、非法状态或不完整实体引用均 fail closed，不用当前业务对象或默认值补猜。
+
+wire shape、事件元数据、排序、过滤、游标与 reset 语义没有变化，因此 `EVENT_BATCH_SCHEMA_VERSION` 保持 9。
+内部 reader/writer 兼容性有变化：旧 Core 会直接暴露 marker，所以 Migration 144 从精确 schema 94 来源发布
+schema 95，仅更新 marker/receipt 而不改写历史事件。schema 95 双读 Core 是直接回退基线；若必须回到更旧
+Core，必须先反向物化所有 marker 行并验证清零，再回退 authority。
+
+### 后果与被拒绝方案
+
+- 命令执行、三种业务状态、请求摘要、首次时间戳、事务和重放保证不变；Handler 错误仍整体回滚。
+- 升级后立即停止新增重复正文，但旧历史仍保持旧格式；历史转换只能作为独立、显式授权且可校验的任务。
+- 拒绝拆出 Receipt 表、删除 `command.result`、改成摘要/Blob 引用或改变保留期：这些会扩大领域与迁移范围。
+- 拒绝按 `{}`、字段缺失或 SQL NULL 猜新格式：显式 marker 才能区分历史、清除语义与损坏数据。
+- 拒绝逐事件调用回放读取：批量 hydration 保持一次查询，避免 N+1 和游标路径退化。
+- 拒绝因表结构未变而继续使用 schema 94：authority 版本必须阻止不认识 marker 的旧 reader 直接打开新库。
+
+当前规范见 [Domain Command Result v1](../../contracts/domain-command-result-v1.md)、
+[权威写入与幂等事务](../../architecture/foundational-invariants.md#core-command-transaction)和
+[原位升级](../../architecture/availability-first-runtime.md#migration-switch)。

@@ -10,6 +10,9 @@ use uuid::Uuid;
 use crate::db::Database;
 
 const REQUEST_DIGEST_VERSION: i64 = 1;
+pub(crate) const COMMAND_RESULT_STORAGE_MARKER_JSON: &str =
+    r#"{"_rovaiStorage":"command-result-columns-v1"}"#;
+const COMMAND_RESULT_STORAGE_MARKER: &str = "command-result-columns-v1";
 
 pub(crate) mod sealed {
     pub trait Sealed {}
@@ -440,6 +443,59 @@ fn load_stored_result(
         .transpose()
 }
 
+pub(crate) fn project_persisted_command_result_event_payload(
+    payload_json: &str,
+    command_type: Option<&str>,
+    result_status: Option<&str>,
+    result_code: Option<&str>,
+    result_payload_json: Option<&str>,
+    result_entity_type: Option<&str>,
+    result_entity_id: Option<&str>,
+) -> Result<Value> {
+    let stored_payload: Value = serde_json::from_str(payload_json)
+        .context("failed to decode persisted command result event payload")?;
+    let Some(marker) = stored_payload
+        .as_object()
+        .and_then(|object| object.get("_rovaiStorage"))
+    else {
+        return Ok(stored_payload);
+    };
+    let known_marker = stored_payload
+        .as_object()
+        .is_some_and(|object| object.len() == 1)
+        && marker.as_str() == Some(COMMAND_RESULT_STORAGE_MARKER);
+    anyhow::ensure!(
+        known_marker,
+        "unsupported persisted command result storage marker"
+    );
+
+    let command_type = command_type.context("stored command result is missing command_type")?;
+    let status = CommandResultStatus::parse(
+        result_status.context("stored command result is missing result_status")?,
+    )?;
+    let code = result_code.context("stored command result is missing result_code")?;
+    let result: Value = serde_json::from_str(
+        result_payload_json.context("stored command result is missing result_payload_json")?,
+    )
+    .context("failed to decode persisted command result result_payload_json")?;
+    let result_entity = match (result_entity_type, result_entity_id) {
+        (None, None) => None,
+        (Some(entity_type), Some(entity_id)) => Some(EntityReference {
+            entity_type: entity_type.to_string(),
+            entity_id: entity_id.to_string(),
+        }),
+        _ => anyhow::bail!("stored command result has an incomplete result entity reference"),
+    };
+
+    Ok(json!({
+        "commandType": command_type,
+        "status": status,
+        "code": code,
+        "result": result,
+        "resultEntity": result_entity,
+    }))
+}
+
 fn append_command_result<C>(
     transaction: &Transaction<'_>,
     envelope: &CommandEnvelope<C>,
@@ -456,13 +512,6 @@ where
         .result_entity
         .as_ref()
         .map(|reference| reference.entity_id.as_str());
-    let payload_json = serde_json::to_string(&json!({
-        "commandType": result.command_type,
-        "status": result.status,
-        "code": result.code,
-        "result": result.payload,
-        "resultEntity": result.result_entity,
-    }))?;
     let result_payload_json = serde_json::to_string(&result.payload)?;
 
     transaction.execute(
@@ -483,7 +532,7 @@ where
         "#,
         params![
             Uuid::new_v4().to_string(),
-            payload_json,
+            COMMAND_RESULT_STORAGE_MARKER_JSON,
             envelope.camp_id,
             result_entity_type,
             result_entity_id,
@@ -578,42 +627,325 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_command_replays_the_first_result_without_running_handler_again() {
+    fn command_results_store_one_body_and_replay_all_statuses_without_rerunning_handlers() {
         let (mut database, directory) = database();
         let gateway = DomainCommandGateway;
-        let envelope = system_command("command-1", json!({ "value": 42 }));
-        let calls = Cell::new(0);
+        for (index, handler_result) in [
+            CommandHandlerResult::applied(
+                "test.applied",
+                json!({ "answer": 42, "text": "完整结果 🧭" }),
+                Some(EntityReference {
+                    entity_type: "test_entity".to_string(),
+                    entity_id: "entity-applied".to_string(),
+                }),
+            ),
+            CommandHandlerResult::accepted(
+                "test.accepted",
+                json!(["queued", { "position": 2 }]),
+                None,
+            ),
+            CommandHandlerResult::rejected("test.rejected", Value::Null),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let command_id = format!("command-{index}");
+            let envelope = system_command(&command_id, json!({ "value": index }));
+            let calls = Cell::new(0);
+            let expected_handler_result = handler_result.clone();
+            let first = gateway
+                .execute(&mut database, &envelope, |_| {
+                    calls.set(calls.get() + 1);
+                    Ok(handler_result)
+                })
+                .expect("first command should persist its result");
+            let replay = gateway
+                .execute(&mut database, &envelope, |_| {
+                    calls.set(calls.get() + 1);
+                    Ok(CommandHandlerResult::rejected("must.not.run", Value::Null))
+                })
+                .expect("duplicate command should replay");
 
+            assert!(!first.replayed);
+            assert!(replay.replayed);
+            assert_eq!(first.result, replay.result);
+            assert_eq!(first.result.recorded_at, replay.result.recorded_at);
+            assert_eq!(calls.get(), 1);
+            let persisted: (
+                String,
+                String,
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                i64,
+            ) = database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT payload_json, command_type, result_status, result_code,
+                           result_payload_json, result_entity_type, result_entity_id,
+                           length(CAST(payload_json AS BLOB))
+                               + length(CAST(result_payload_json AS BLOB))
+                    FROM event_log
+                    WHERE event_type = 'command.result' AND command_id = ?1
+                    "#,
+                    [&command_id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert_eq!(persisted.0, COMMAND_RESULT_STORAGE_MARKER_JSON);
+            assert_eq!(
+                serde_json::from_str::<Value>(&persisted.4).unwrap(),
+                expected_handler_result.payload
+            );
+            let projected = project_persisted_command_result_event_payload(
+                &persisted.0,
+                Some(&persisted.1),
+                Some(&persisted.2),
+                Some(&persisted.3),
+                Some(&persisted.4),
+                persisted.5.as_deref(),
+                persisted.6.as_deref(),
+            )
+            .unwrap();
+            assert_eq!(
+                projected,
+                json!({
+                    "commandType": TestCommand::TYPE,
+                    "status": expected_handler_result.status,
+                    "code": expected_handler_result.code,
+                    "result": expected_handler_result.payload,
+                    "resultEntity": expected_handler_result.result_entity,
+                })
+            );
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM event_log WHERE command_id = ?1",
+                        [&command_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                persisted.7,
+                COMMAND_RESULT_STORAGE_MARKER_JSON.len() as i64 + persisted.4.len() as i64
+            );
+        }
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn command_result_projection_preserves_json_boundaries_and_fails_closed_on_markers() {
+        let large = "大正文🧭".repeat(32 * 1024);
+        for result in [
+            Value::Null,
+            json!({}),
+            json!([]),
+            json!(42),
+            json!(true),
+            json!("Unicode 结果 🧭"),
+            json!({ "nested": [{ "large": large }] }),
+        ] {
+            let result_json = serde_json::to_string(&result).unwrap();
+            let payload = project_persisted_command_result_event_payload(
+                COMMAND_RESULT_STORAGE_MARKER_JSON,
+                Some("test.command"),
+                Some("accepted"),
+                Some("test.accepted"),
+                Some(&result_json),
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(payload["result"], result);
+            assert!(payload["resultEntity"].is_null());
+        }
+
+        let old = json!({
+            "commandType": "old.command",
+            "status": "applied",
+            "code": "old.applied",
+            "result": { "kept": true },
+            "resultEntity": null,
+            "historicalExtension": "preserved",
+        });
+        assert_eq!(
+            project_persisted_command_result_event_payload(
+                &old.to_string(),
+                None,
+                None,
+                None,
+                None,
+                Some("ignored"),
+                None,
+            )
+            .unwrap(),
+            old
+        );
+
+        for (payload_json, command_type, status, code, result_json, entity_type, entity_id) in [
+            (
+                r#"{"_rovaiStorage":"command-result-columns-v2"}"#,
+                Some("test.command"),
+                Some("applied"),
+                Some("ok"),
+                Some("null"),
+                None,
+                None,
+            ),
+            (
+                r#"{"_rovaiStorage":"command-result-columns-v1","extra":true}"#,
+                Some("test.command"),
+                Some("applied"),
+                Some("ok"),
+                Some("null"),
+                None,
+                None,
+            ),
+            (
+                COMMAND_RESULT_STORAGE_MARKER_JSON,
+                None,
+                Some("applied"),
+                Some("ok"),
+                Some("null"),
+                None,
+                None,
+            ),
+            (
+                COMMAND_RESULT_STORAGE_MARKER_JSON,
+                Some("test.command"),
+                None,
+                Some("ok"),
+                Some("null"),
+                None,
+                None,
+            ),
+            (
+                COMMAND_RESULT_STORAGE_MARKER_JSON,
+                Some("test.command"),
+                Some("applied"),
+                None,
+                Some("null"),
+                None,
+                None,
+            ),
+            (
+                COMMAND_RESULT_STORAGE_MARKER_JSON,
+                Some("test.command"),
+                Some("applied"),
+                Some("ok"),
+                None,
+                None,
+                None,
+            ),
+            (
+                COMMAND_RESULT_STORAGE_MARKER_JSON,
+                Some("test.command"),
+                Some("unknown"),
+                Some("ok"),
+                Some("null"),
+                None,
+                None,
+            ),
+            (
+                COMMAND_RESULT_STORAGE_MARKER_JSON,
+                Some("test.command"),
+                Some("applied"),
+                Some("ok"),
+                Some("not-json"),
+                None,
+                None,
+            ),
+            (
+                COMMAND_RESULT_STORAGE_MARKER_JSON,
+                Some("test.command"),
+                Some("applied"),
+                Some("ok"),
+                Some("null"),
+                Some("task"),
+                None,
+            ),
+        ] {
+            assert!(
+                project_persisted_command_result_event_payload(
+                    payload_json,
+                    command_type,
+                    status,
+                    code,
+                    result_json,
+                    entity_type,
+                    entity_id,
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn committed_results_replay_after_reopen_and_handler_errors_roll_back_atomically() {
+        let (mut database, directory) = database();
+        let gateway = DomainCommandGateway;
+        let committed = system_command("command-committed", json!({ "value": 1 }));
         let first = gateway
-            .execute(&mut database, &envelope, |_| {
-                calls.set(calls.get() + 1);
+            .execute(&mut database, &committed, |_| {
                 Ok(CommandHandlerResult::applied(
-                    "test.applied",
-                    json!({ "answer": 42 }),
+                    "test.persisted",
+                    json!({ "first": true }),
                     None,
                 ))
             })
-            .expect("first command should apply");
-        let replay = gateway
-            .execute(&mut database, &envelope, |_| {
-                calls.set(calls.get() + 1);
-                Ok(CommandHandlerResult::rejected("must.not.run", Value::Null))
-            })
-            .expect("duplicate command should replay");
+            .unwrap();
+        drop(database);
 
-        assert!(!first.replayed);
+        let mut database = Database::open(&directory).unwrap();
+        let replay = gateway
+            .execute(&mut database, &committed, |_| {
+                unreachable!("a committed command must replay after database reopen")
+            })
+            .unwrap();
         assert!(replay.replayed);
-        assert_eq!(first.result, replay.result);
-        assert_eq!(calls.get(), 1);
-        let count: i64 = database
+        assert_eq!(replay.result, first.result);
+
+        let failed = system_command("command-failed", json!({ "value": 2 }));
+        let error = gateway
+            .execute(&mut database, &failed, |transaction| {
+                transaction.execute(
+                    "INSERT INTO event_log(event_id,event_type,payload_json,created_at) VALUES (?1,'test.partial','{}',?2)",
+                    params![Uuid::new_v4().to_string(), chrono::Utc::now().to_rfc3339()],
+                )?;
+                anyhow::bail!("handler fixture failure")
+            })
+            .expect_err("handler failure must abort the transaction");
+        assert!(error.to_string().contains("handler fixture failure"));
+        let remaining: (i64, i64) = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM event_log WHERE command_id = 'command-1'",
+                "SELECT
+                    (SELECT COUNT(*) FROM event_log WHERE command_id='command-failed'),
+                    (SELECT COUNT(*) FROM event_log WHERE event_type='test.partial')",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(remaining, (0, 0));
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

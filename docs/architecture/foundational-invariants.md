@@ -46,6 +46,9 @@ last_updated: 2026-09-07
 - 命令在规范化后计算版本化请求摘要，并在一个 SQLite 写事务中重查幂等结果、校验 Actor、epoch、Capability、expected version 和领域门禁，再提交对象变化、审计事件与唯一命令结果。相同命令身份和相同摘要永久返回首次结果；相同身份但不同语义必须稳定冲突。
 - Repository 参加调用方拥有的 Unit of Work，不自行提交。Migration 只改变 schema 和数据，不在事务中执行 Runtime、Git、网络或文件系统补偿；提交后的唤醒只是可恢复提示，不是事实真源。
 - 领域事件日志用于审计、幂等结果和增量失效，不是 Event Sourcing 状态库、Outbox、Worker 队列或业务对象的替代真源。
+- `command.result` 的完整结果正文只由同一事件行的 `result_payload_json` 专用列保存；`payload_json` 只写显式、
+  版本化的内部存储标记。命令直接响应与重放仍从专用回执列返回第一次提交的完整值，事务、摘要、状态和
+  时间戳语义不变。该内部编码与字段边界见 [Domain Command Result v1](../contracts/domain-command-result-v1.md)。
 - 渠道 Host 的内部 tick 只推进已提交的 request/Outbox，不是新的业务意图入口，也不为每次唤醒保存永久命令回执。
   维护步骤仍在 Core 单个写事务内调用既有 Handler；真实 admission 的领域事件、FIFO 防重和 delivery lease/结算幂等
   均保留。Core event 只负责提早唤醒，provider outstanding、静默判定及请求/响应丢失恢复由
@@ -67,6 +70,9 @@ last_updated: 2026-09-07
 - Renderer DTO 从 SQLite 权威表和确定性派生规则生成，不维护第二套持久投影或可独立写入的 Runtime 状态缓存。每个 Snapshot 在单一读事务中捕获 `throughGlobalSequence`；增量事件只用于失效和时间线更新。
 - 影响 Desktop Navigation 投影的 mutation 只在权威提交完成后发 `navigation.invalidated`；该事件不携带可直接应用的状态。Renderer 通过一个全局 generation coordinator 合并事件、focus 与低频安全刷新，串行重读完整 Snapshot，不为每个 Camp 建立 timer，也不让 Overview 附属模块失败关闭 Navigation 恢复。
 - 断连、序列缺口、未知 schema 或派生缓存不确定时，客户端丢弃相关缓存并重新获取 Snapshot，不能靠事件重放猜测权威状态。授权范围必须先于过滤和分页建立。
+- 事件 Read Side 在原批量查询中同时读取 `command.result` 专用列：历史完整 `payload_json` 原样返回，已知
+  内部标记严格还原为相同公开 payload；未知标记或损坏专用列 fail closed。还原不得逐事件查询、读取当前
+  业务对象、改写数据库或把内部标记暴露给订阅者；普通事件继续直接读取 `payload_json`。
 - Renderer 只能通过 Electron Main 的封闭 allowlist 和类型化合同访问 Core，不直接访问 SQLite、受管文件、Git 或 Shell。每个领域命令只有一个权威写入路径，每个读取入口都必须按调用者和 Camp scope 过滤。
 
 <a id="core-notifications"></a>
