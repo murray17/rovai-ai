@@ -14,7 +14,7 @@ last_updated: 2026-09-06
 - [x] 原生完成结果覆盖同块累计内容；工具事实、旧历史和已有 reasoning 保留语义不变。
 - [x] 活动读取叠加内存正文；正常关闭、取消、失败保存已收到的中断块；大正文使用既有 Blob。
 - [x] Renderer 数据适配支持块定稿、偏移去重、稀疏历史序号与按需全文读取，不改变 UI 布局。
-- [x] 有效 Lead enter 跳过新 reconcile；可见通知采用 Camp 局部变化和冻结 UUID/request 重试；Roster sweep 尊重已有缓存。
+- [x] 有效 Lead enter 跳过新 reconcile；可见通知按 Camp 记忆局部变化并冻结 UUID/request 重试，A/B/A 切换不重复空确认；Roster sweep 尊重已有缓存。
 - [x] Navigation 聚合先过滤实际影响 marker 的事件；CampOpen 业务读继续不访问 event_log。
 - [x] 离线工具默认只操作副本；显式原库模式获得 Core 同款 flock、SQLite 排他锁和完整恢复备份。
 - [x] 本地历史副本逐块内容/序号/状态校验，并验证 event_log、工具投影、封存渠道快照不变。

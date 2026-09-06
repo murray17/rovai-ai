@@ -270,12 +270,12 @@ export function NotificationAttentionController({
   const pollFailureCount = useRef(0)
   const pollRetryAt = useRef(0)
   const navigationGeneration = useRef(0)
-  const visibleAcknowledgementKey = useRef<string | null>(null)
+  const visibleAcknowledgementKeys = useRef(new Map<string, string>())
   const visibleAcknowledgementRunning = useRef(false)
   const visibleRetryTimer = useRef<number | null>(null)
   const mounted = useRef(false)
   const visibleCampAdmissions = useRef(new Map<string, number>())
-  const visibleCommand = useRef<VisibleAcknowledgementIntent | null>(null)
+  const visibleCommands = useRef(new Map<string, VisibleAcknowledgementIntent>())
 
   useEffect(() => {
     mounted.current = true
@@ -311,8 +311,8 @@ export function NotificationAttentionController({
     if (generation !== baselineGeneration.current) return
     setHeadsUpState(emptyNotificationHeadsUpState())
     changeCursor.current = inbox.throughChangeSequence
-    visibleAcknowledgementKey.current = null
-    visibleCommand.current = null
+    visibleAcknowledgementKeys.current.clear()
+    visibleCommands.current.clear()
     visibleCampAdmissions.current.clear()
     setObservedThroughChangeSequence(inbox.throughChangeSequence)
     baselineReady.current = true
@@ -517,23 +517,24 @@ export function NotificationAttentionController({
     if (sourceCount === 0) return undefined
     const intent = visibleAcknowledgementIntent(visibleSources,
       visibleCampAdmissions.current.get(visibleSources.campId) ?? 0,
-      observedThroughChangeSequence, visibleCommand.current)
+      observedThroughChangeSequence, visibleCommands.current.get(visibleSources.campId) ?? null)
     const key = intent.key
-    if (visibleAcknowledgementRunning.current || visibleAcknowledgementKey.current === key) {
+    if (visibleAcknowledgementRunning.current
+      || visibleAcknowledgementKeys.current.get(visibleSources.campId) === key) {
       return undefined
     }
     visibleAcknowledgementRunning.current = true
-    visibleCommand.current = intent
+    visibleCommands.current.set(visibleSources.campId, intent)
     const generation = baselineGeneration.current
     let applied = false
     void window.rovai.request<StoredCommandResult>(
       'notifications.acknowledgeVisibleSources',
-      visibleCommand.current.request
+      intent.request
     ).then(async (result) => {
       if (result.status !== 'applied') throw new Error(commandFailure(result))
       applied = true
       if (!mounted.current || generation !== baselineGeneration.current) return
-      visibleAcknowledgementKey.current = key
+      visibleAcknowledgementKeys.current.set(visibleSources.campId, key)
       // A failed refresh does not make the already-acknowledged command uncertain.
       await Promise.all([pollChanges(), readUnreadStatus()]).catch(() => undefined)
     }).catch(() => {

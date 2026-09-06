@@ -37,6 +37,24 @@ it('does not create visible ack commands for global cursor churn, and freezes un
   expect(first.request.command.visibleMessageIds).toEqual(['m1'])
 })
 
+it('keeps the acknowledgement identity independently for each Camp across A/B/A navigation', () => {
+  let ids = 0
+  const newId = (): string => `command-${++ids}`
+  const commands = new Map<string, ReturnType<typeof visibleAcknowledgementIntent>>()
+  const source = (campId: string) => ({ campId, snapshotSequence: 20,
+    messageIds: [`message-${campId}`], campTurnIds: [], approvalIds: [] })
+  const a = visibleAcknowledgementIntent(source('camp-a'), 10, 20, null, newId)
+  commands.set('camp-a', a)
+  const b = visibleAcknowledgementIntent(source('camp-b'), 11, 20, null, newId)
+  commands.set('camp-b', b)
+  const aAgain = visibleAcknowledgementIntent(
+    { ...source('camp-a'), snapshotSequence: 900 }, 10, 900,
+    commands.get('camp-a') ?? null, newId
+  )
+  expect(aAgain).toBe(a)
+  expect(ids).toBe(2)
+})
+
 function action(
   episodeId: string,
   kind: NotificationActionView['kind'] = 'open_camp_turn'
