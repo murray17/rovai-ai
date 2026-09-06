@@ -4,6 +4,54 @@ import { describe, expect, it } from 'vitest'
 import { SafeMarkdown } from './SafeMarkdown'
 
 describe('SafeMarkdown file preview references', () => {
+  it('keeps document headings at their native levels without changing the default message hierarchy', () => {
+    const source = [
+      '# 一级',
+      '## 二级',
+      '### 三级',
+      '#### 四级',
+      '##### 五级',
+      '###### 六级'
+    ].join('\n\n')
+    const documentMarkup = renderToStaticMarkup(createElement(SafeMarkdown, {
+      children: source,
+      mode: 'document'
+    }))
+    const messageMarkup = renderToStaticMarkup(createElement(SafeMarkdown, { children: source }))
+
+    expect(documentMarkup).toContain('class="safe-markdown is-document"')
+    for (const [level, label] of ['一级', '二级', '三级', '四级', '五级', '六级'].entries()) {
+      expect(documentMarkup).toContain(`<h${level + 1} data-markdown-heading="${label}">${label}</h${level + 1}>`)
+    }
+    expect(messageMarkup).toContain('<h3 data-markdown-heading="一级">一级</h3>')
+    expect(messageMarkup).toContain('<h3 data-markdown-heading="二级">二级</h3>')
+    expect(messageMarkup).not.toContain('class="safe-markdown is-document"')
+  })
+
+  it('renders fenced document code through the static source highlighter surface', () => {
+    const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
+      children: '```tsx\nconst App = () => <main />\n```\n\n```\nplain text\n```',
+      mode: 'document',
+      theme: 'night'
+    }))
+
+    expect(markup.match(/class="markdown-code-block"/gu)).toHaveLength(2)
+    expect(markup).toContain('<code data-code-language="tsx">const App = () =&gt; &lt;main /&gt;\n</code>')
+    expect(markup).toContain('<code>plain text\n</code>')
+    expect(markup).not.toContain('cm-editor')
+  })
+
+  it('gives document tables their own horizontal scroll surface', () => {
+    const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
+      children: '| 项目 | 说明 |\n| --- | --- |\n| 预览 | 宽内容 |',
+      mode: 'document'
+    }))
+
+    expect(markup).toContain('<div class="markdown-table-scroll"><table>')
+    expect(markup).toContain('<th>项目</th>')
+    expect(markup).toContain('<td>宽内容</td>')
+  })
+
   it('turns only explicit Markdown file links into resource links', () => {
     const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
       onFileReference: () => undefined,

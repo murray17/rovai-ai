@@ -3755,7 +3755,7 @@ function AuthoritativeApp({
   }
 
   return (
-    <FilePreviewProvider campId={view === 'camp' ? activeCampId : null}>
+    <FilePreviewProvider campId={view === 'camp' ? activeCampId : null} resolvedTheme={appearance.resolvedTheme}>
     <div className={view === 'camp' ? 'app-shell app-shell-camp' : 'app-shell'}>
       <CampNavigation
         platform={window.rovai.platform}
