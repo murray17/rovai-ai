@@ -33258,6 +33258,29 @@ mod tests {
     }
 
     #[test]
+    fn deployed_tool_classifier_v141_upgrade_preserves_receipts_and_rolls_back() {
+        // Unlike the marker-only matrix, this regression owns the deployed
+        // branch's complete schema admission and atomic receipt reconciliation.
+        let database = crate::test_support::seeded_runtime_database_owned();
+        downgrade_current_schema_to_v140_source_for_test(database.connection());
+        database
+            .connection()
+            .execute_batch(
+                "UPDATE rovai_data_contract SET contract_version='v1.52',
+                projection_schema_version=92, classifier_version='activity-v3';
+             INSERT INTO schema_migration VALUES (141, 'original-classifier-cutover');",
+            )
+            .unwrap();
+        assert!(
+            matches!(
+                classify_database_contract(database.connection()).unwrap(),
+                DatabaseContractClassification::SupportedMigrationSource(_)
+            ),
+            "the already-deployed tool-classifier source must be admitted for migration"
+        );
+    }
+
+    #[test]
     fn v141_retains_historical_runtime_images_as_unconfirmed() {
         let mut database = crate::test_support::seeded_runtime_database_owned();
         downgrade_current_schema_to_v140_source_for_test(database.connection());
