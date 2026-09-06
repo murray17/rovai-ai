@@ -2068,8 +2068,8 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
   box-shadow: var(--shadow-menu);
   font-size: 10px;
 }
-.file-preview-markdown { width: 100%; overflow: auto; overscroll-behavior: contain; padding: 26px clamp(24px, 6vw, 68px) 54px; }
-.file-preview-markdown .safe-markdown { max-width: 780px; margin: 0 auto; font-size: 13px; line-height: 1.72; }
+.file-preview-markdown { width: 100%; overflow: auto; overscroll-behavior: contain; padding: 28px clamp(18px, 5cqi, 52px) 54px; }
+.file-preview-markdown .safe-markdown { max-width: 780px; margin: 0 auto; }
 .file-preview-markdown .safe-markdown img { display: block; max-width: 100%; height: auto; margin: 18px auto; border-radius: 7px; box-shadow: var(--shadow-card); }
 .safe-markdown .markdown-file-reference,
 .safe-markdown .markdown-web-reference,
@@ -2253,48 +2253,17 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .file-preview-patch-line.is-deletion { background: color-mix(in srgb, var(--diff-remove) 10%, transparent); }
 .file-preview-patch-line.is-metadata { color: var(--faint); }
 .file-preview-code {
+  display: flex;
   width: 100%;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 8px 0 26px;
+  overflow: hidden;
   color: var(--ink);
   background: var(--conversation-surface);
-  font: 500 10.5px/1.58 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  tab-size: 2;
 }
-.file-preview-search {
-  position: absolute;
-  z-index: 20;
-  top: 8px;
-  right: 10px;
-  display: grid;
-  min-width: 292px;
-  min-height: 32px;
-  grid-template-columns: minmax(110px, 1fr) 50px 27px 27px 27px;
-  align-items: center;
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  color: var(--muted);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-menu);
-}
-.file-preview-search input { min-width: 0; height: 30px; padding: 0 8px; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 10.5px; }
-.file-preview-search > span { padding: 0 5px; color: var(--faint); font-size: 9px; text-align: right; white-space: nowrap; }
-.file-preview-search button { display: grid; width: 27px; height: 27px; padding: 0; place-items: center; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
-.file-preview-search button:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
-.file-preview-search button:disabled { opacity: .36; }
+.file-preview-code-mirror { min-width: 0; min-height: 0; flex: 1 1 auto; }
+.file-preview-code-mirror > .cm-editor { height: 100%; }
 .file-preview-code:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.file-preview-code-line { display: grid; min-width: max-content; width: 100%; grid-template-columns: 48px minmax(max-content, 1fr); }
-.file-preview-code-line > span { padding-right: 10px; color: var(--faint); text-align: right; user-select: none; }
-.file-preview-code-line code { display: block; padding: 0 16px 0 10px; white-space: pre; }
-.file-preview-code-line mark { color: var(--ink); background: var(--attention-soft); outline: 1px solid var(--attention); }
-.file-preview-code-line.is-addition { background: color-mix(in srgb, var(--diff-add) 10%, transparent); }
-.file-preview-code-line.is-deletion { background: color-mix(in srgb, var(--diff-remove) 10%, transparent); }
-.file-preview-code-line.is-hunk { color: var(--info); background: var(--info-soft); }
-.file-preview-code-line.is-location-target { background: var(--info-soft); box-shadow: inset 2px 0 var(--info); }
 .file-preview-page-controls {
   display: flex;
   min-height: 36px;
@@ -2313,7 +2282,6 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .file-preview-page-controls button:disabled { cursor: default; opacity: .42; }
 
 @container camp-shell (max-width: 1329px) {
-  .file-preview-markdown { padding-inline: 24px; }
   .file-preview-patch { grid-template-columns: minmax(0, 1fr); }
   .file-preview-patch-outline { display: none; }
   .context-project, .context-sep { display: none; }
@@ -3354,6 +3322,30 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .safe-markdown th { background: var(--surface-muted); font-weight: 700; }
 .safe-markdown a { color: var(--resource-link); text-decoration: underline; text-underline-offset: 2px; }
 .safe-markdown a:hover { color: var(--resource-link-hover); }
+.safe-markdown.is-document { font-size: 15px; line-height: 1.7; }
+.safe-markdown.is-document p { margin: 0 0 14px; }
+.safe-markdown.is-document h1,
+.safe-markdown.is-document h2,
+.safe-markdown.is-document h3,
+.safe-markdown.is-document h4,
+.safe-markdown.is-document h5,
+.safe-markdown.is-document h6 { color: var(--ink); font-weight: 680; }
+.safe-markdown.is-document h1 { margin: 0 0 19px; font-size: 26px; line-height: 1.24; }
+.safe-markdown.is-document h2 { margin: 34px 0 14px; font-size: 21px; line-height: 1.3; }
+.safe-markdown.is-document h3 { margin: 27px 0 11px; font-size: 17px; line-height: 1.38; }
+.safe-markdown.is-document h4 { margin: 22px 0 9px; font-size: 15px; line-height: 1.42; }
+.safe-markdown.is-document h5 { margin: 19px 0 8px; font-size: 14px; line-height: 1.45; }
+.safe-markdown.is-document h6 { margin: 17px 0 7px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.safe-markdown.is-document ul,
+.safe-markdown.is-document ol { margin: 9px 0 16px; padding-left: 24px; }
+.safe-markdown.is-document li + li { margin-top: 4px; }
+.safe-markdown.is-document blockquote { margin: 15px 0 17px; padding: 5px 13px; }
+.safe-markdown.is-document pre { margin: 16px 0 19px; padding: 13px 14px; font-size: 13px; line-height: 1.65; }
+.safe-markdown.is-document .markdown-table-scroll { max-width: 100%; margin: 17px 0 20px; overflow-x: auto; overscroll-behavior: contain; }
+.safe-markdown.is-document .markdown-table-scroll > table { display: table; width: max-content; min-width: 100%; margin: 0; overflow: visible; font-size: 14px; line-height: 1.55; }
+.safe-markdown.is-document th,
+.safe-markdown.is-document td { padding: 8px 10px; overflow-wrap: normal; word-break: normal; }
+.safe-markdown.is-document hr { margin: 28px 0; border: 0; border-top: 1px solid var(--line); }
 .markdown-inert-link { cursor: text; }
 .message-actions {
   display: flex;

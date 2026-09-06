@@ -158,11 +158,27 @@ Renderer 不自行猜测。
 
 Viewer 不显示预览/源码切换、右上角复制按钮、整行工具栏或 `Ready` 状态。每个类型只有一个规范阅读视图：
 
-- Markdown 渲染安全 GFM；行内 code 与围栏代码块复用 Camp 工作区的 Mist Gray 分层，超出 4 MiB 显示分页原文；
+- Markdown 继续通过 `SafeMarkdown` 渲染安全 GFM，并在文件预览中显式使用 document 模式；超出 4 MiB 显示分页原文；
 - HTML 在 sandbox iframe 中执行；超限或初始化失败回退只读原文；
-- 代码/文本只读显示行号、搜索、定位、选择与系统复制，大文件分页；
+- 代码/文本通过同一个只读 CodeMirror 6 Viewer 显示行号、搜索、定位、选择与系统复制，大文件分页；
 - 图片/SVG 提供适应、原始尺寸、缩放和重置，不把 SVG 注入宿主 DOM；
 - Diff/Patch 按文件和 hunk 展示，解析失败回退文本。
+
+代码 Viewer 固定使用 14px、400 字重、1.6 行高的系统等宽字体栈和 14px 顶部留白，长行在 Viewer 内横向滚动。
+`readOnly` 与 `editable=false` 禁止修改，但不移除焦点、文本选择、无行号复制和 `Cmd/Ctrl+F`；查找只使用
+CodeMirror 自带面板，不再维护第二套文件搜索 UI。真实文件行号按当前分页起始行投影，行目标与行范围使用低强调
+底色和左侧细线，并在首次内容与语言状态稳定后进入可见区域。应用把已解析的日间/夜间状态直接映射为
+`theme="light"` / `theme="dark"`；主题切换重配现有 Editor，并保留顶部可见源码行，不重建 Viewer。
+
+源码语言只通过 `@codemirror/language-data` 的 `LanguageDescription.matchFilename` 按文件名匹配，并调用该描述的
+`load()` 按需加载；Renderer 不维护扩展名白名单。语言加载前继续显示完整纯文本，未知语言或加载失败也保持纯文本，
+不会为高亮重复读取文件。语言解析与基础明暗语法配色同时进入 Viewer；一处 `EditorView.theme` 只覆盖 Rovai
+surface、行号、选区、搜索匹配与目标行等界面样式，不另建 token 调色板。
+
+Markdown document 模式保留 H1–H6 的真实语义与层级；正文为 15px/1.7，H1、H2、H3 分别为 26px、21px、17px，
+其余标题逐级收敛。该模式只用于文件预览，原有消息调用和聊天排版不变。围栏代码块按语言标记复用同一 language-data
+加载器与基础明暗语法配色，直接输出静态高亮 span；每个代码块不创建 CodeMirror 实例，未知、无标记或加载失败时
+保留纯文本。表格使用接近正文的 14px 字号；宽表格由自身滚动容器承接水平滚动，不缩小文字或扩大整个页面。
 
 Viewer 底色与会话阅读区共用语义 surface。选中文字只保留普通系统选择/复制行为，不出现“附加到会话”浮层，
 也不向 Composer 添加引用卡片；引用能力留待后续整体设计。

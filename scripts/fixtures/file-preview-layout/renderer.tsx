@@ -1,6 +1,6 @@
 import { StrictMode, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, ComposerDocument, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, TaskView } from '@contracts'
+import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, ComposerDocument, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, ResolvedTheme, TaskView } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import { FilePreviewProvider, useFilePreview, type FilePreviewContextValue } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
@@ -17,8 +17,37 @@ const file: ResolvedFilePreview = {
   pathPresentation: 'project_relative',
   size: 8_000, mime: 'text/plain', extension: '.ts', kind: 'code',
   hasExternalUpdate: false, contentVersion: { size: 8_000, mtimeMs: 1 },
-  contentGeneration: 'generation-1', capabilities: ['read']
+  contentGeneration: 'generation-1', capabilities: ['read'], target: { line: 120, endLine: 122 }
 }
+const markdownReference = 'docs/preview-reader.md'
+const markdownFile: ResolvedFilePreview = {
+  ...file,
+  previewKey: 'markdown-reader',
+  displayPath: markdownReference,
+  fileName: 'preview-reader.md',
+  size: 2_000,
+  mime: 'text/markdown',
+  extension: '.md',
+  kind: 'markdown',
+  target: { heading: '核心阅读' }
+}
+const markdownSource = [
+  '# 文件预览',
+  '',
+  '正文以舒适字号呈现，并保留清楚的文档层级。',
+  '',
+  '## 核心阅读',
+  '',
+  '### 静态代码高亮',
+  '',
+  '```tsx',
+  'const Preview = ({ title }: { title: string }) => <main>{title}</main>',
+  '```',
+  '',
+  '| 项目 | 说明 |',
+  '| --- | --- |',
+  `| 宽表格 | ${'wideTableColumn'.repeat(40)} |`
+].join('\n')
 const tabFiles = ['src/app.ts', 'src/layout.tsx', 'src/theme.ts', 'src/routes.ts', 'src/search.ts',
   'src/settings.tsx', 'src/navigation.ts', 'src/very-long-file-preview-reading-anchor.tsx']
 const fileNameOnlyReference = 'external-preview.ts'
@@ -50,6 +79,8 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
   } else if (request.kind === 'message_reference' && request.rawReference === fileNameOnlyReference) {
     target = { ...file, previewKey: fileNameOnlyReference, displayPath: fileNameOnlyReference,
       pathPresentation: 'file_name_only', fileName: fileNameOnlyReference }
+  } else if (request.kind === 'message_reference' && request.rawReference === markdownReference) {
+    target = markdownFile
   } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
   return { ok: true as const, value: { kind: 'file_preview' as const, file: { ...target, handleId: crypto.randomUUID() } } }
 }
@@ -64,13 +95,22 @@ const api: FilePreviewApi = {
     return resolvePreview(request)
   },
   readText: async () => { fileReads += 1; return { ok: true, value: {
-    text: Array.from({ length: 300 }, (_, index) => `const readingLine${index + 1} = "保持会话和文件的阅读位置"`).join('\n'),
+    text: Array.from({ length: 300 }, (_, index) => `const readingLine${index + 1} = "保持会话和文件的阅读位置"${index === 122 ? ' + "long-line"'.repeat(70) : ''}`).join('\n'),
     contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
   } } },
   release: async ({ handleId }) => { releases.push(handleId); return { released: true } },
   onExternalUpdate: () => () => {},
   reopen: unsupported, readPage: unsupported, resolveLine: unsupported,
-  readBinary: unsupported, prepareHtml: unsupported, reload: unsupported,
+  readBinary: unsupported,
+  prepareHtml: async () => ({ ok: true, value: {
+    html: markdownSource,
+    tabToken: 'markdown-tab-token',
+    bridgeToken: 'markdown-bridge-token',
+    assetBasePath: '',
+    contentGeneration: markdownFile.contentGeneration,
+    contentVersion: markdownFile.contentVersion
+  } }),
+  reload: unsupported,
   openInSystem: unsupported, revealInFolder: unsupported, copyPath: unsupported,
   chooseAuthorizedRoot: unsupported
 }
@@ -217,10 +257,16 @@ function Workspace(): React.JSX.Element {
 }
 
 let switchCamp: () => void
+let setFixtureTheme: (theme: ResolvedTheme) => void
 function Fixture(): React.JSX.Element {
   const [camp, setCamp] = useState('camp-1')
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>('day')
   switchCamp = () => setCamp((previous) => previous === 'camp-1' ? 'camp-2' : 'camp-1')
-  return <FilePreviewProvider campId={camp}>
+  setFixtureTheme = (theme) => {
+    document.documentElement.dataset.theme = theme
+    setResolvedTheme(theme)
+  }
+  return <FilePreviewProvider campId={camp} resolvedTheme={resolvedTheme}>
     <div className="app-shell app-shell-camp">
       <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)' }}>Rovai AI</aside>
       <AppHeader campTitle="文件预览验收" contextLabel="Rovai AI" camp={null} onFocusApprovals={() => {}} />
@@ -237,6 +283,7 @@ let bookmarkedEditor: HTMLElement | null = null
 let bookmarkedTimeline: HTMLElement | null = null
 let bookmarkedTask: HTMLElement | null = null
 let bookmarkedReview: HTMLElement | null = null
+let bookmarkedSourceEditor: HTMLElement | null = null
 let lastPointer = 0
 const pointerEvents: unknown[] = []
 for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture']) {
@@ -271,6 +318,12 @@ Object.assign(window, { previewTest: {
   async openFileNameOnly() {
     await previewController.open({
       kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: fileNameOnlyReference
+    })
+    await settle()
+  },
+  async openMarkdown() {
+    await previewController.open({
+      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: markdownReference
     })
     await settle()
   },
@@ -371,12 +424,107 @@ Object.assign(window, { previewTest: {
     bookmarkedReview.scrollTop = 640
   },
   async switchCamp() { switchCamp(); await settle() },
+  async setTheme(theme: ResolvedTheme) { setFixtureTheme(theme); await settle() },
   async find(open: boolean) { showFind(open); await settle() },
   async docks(mode: 'none' | 'approval' | 'recovery' | 'both') { showDocks(mode); await settle() },
+  async bookmarkSource() {
+    bookmarkedSourceEditor = element('.file-preview-tab-panel:not([hidden]) .cm-editor')
+    const scroller = element('.file-preview-tab-panel:not([hidden]) .cm-scroller')
+    if (scroller) scroller.scrollTop = 480
+    await settle()
+  },
+  async sourceSnapshot(requireTarget = false) {
+    const deadline = performance.now() + 3_000
+    while (!element('.file-preview-tab-panel:not([hidden]) .cm-content .cm-line span')
+      || (requireTarget && !element('.file-preview-tab-panel:not([hidden]) .cm-location-target'))) {
+      if (performance.now() > deadline) throw new Error('Source highlighting did not settle')
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const panel = element('.file-preview-tab-panel:not([hidden])')!
+    const editor = panel.querySelector<HTMLElement>('.cm-editor')!
+    const scroller = panel.querySelector<HTMLElement>('.cm-scroller')!
+    const content = panel.querySelector<HTMLElement>('.cm-content')!
+    const gutter = panel.querySelector<HTMLElement>('.cm-gutters')!
+    const keyword = [...panel.querySelectorAll<HTMLElement>('.cm-line span')]
+      .find((span) => span.textContent === 'const')!
+    const scrollerBounds = scroller.getBoundingClientRect()
+    const firstVisibleLine = [...panel.querySelectorAll<HTMLElement>('.cm-line')].find((line) => {
+        const bounds = line.getBoundingClientRect()
+        return bounds.bottom > scrollerBounds.top && bounds.top < scrollerBounds.bottom
+      })!
+    const firstLine = panel.querySelector<HTMLElement>('.cm-location-target') ?? firstVisibleLine
+    const selection = window.getSelection()!
+    const range = document.createRange()
+    range.selectNodeContents(firstLine)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    const selectedText = selection.toString()
+    selection.removeAllRanges()
+    return {
+      sameEditor: bookmarkedSourceEditor === editor,
+      scrollTop: scroller.scrollTop,
+      horizontalScroll: scroller.scrollWidth > scroller.clientWidth,
+      fontSize: getComputedStyle(scroller).fontSize,
+      fontWeight: getComputedStyle(scroller).fontWeight,
+      lineHeight: getComputedStyle(scroller).lineHeight,
+      contentPaddingTop: getComputedStyle(content).paddingTop,
+      contentEditable: content.getAttribute('contenteditable'),
+      readOnly: content.getAttribute('aria-readonly'),
+      tabIndex: content.getAttribute('tabindex'),
+      gutterColor: getComputedStyle(gutter).color,
+      sourceColor: getComputedStyle(content).color,
+      keywordColor: getComputedStyle(keyword).color,
+      firstVisibleLine: firstVisibleLine.textContent?.match(/readingLine\d+/)?.[0],
+      selectedText,
+      targetLines: [...panel.querySelectorAll<HTMLElement>('.cm-location-target')].map((line) => line.textContent),
+      gutterLines: [...panel.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')].map((line) => line.textContent),
+      searchVisible: Boolean(panel.querySelector('.cm-panel.cm-search')?.getClientRects().length),
+      replaceVisible: Boolean(panel.querySelector('[name="replace"]')),
+      searchMatches: panel.querySelectorAll('.cm-searchMatch').length,
+      currentMatches: panel.querySelectorAll('.cm-searchMatch-selected').length
+    }
+  },
+  async setSourceSearch(query: string) {
+    const input = document.querySelector<HTMLInputElement>('.file-preview-tab-panel:not([hidden]) .cm-panel.cm-search [name="search"]')!
+    input.value = query
+    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'e' }))
+    document.querySelector<HTMLButtonElement>('.file-preview-tab-panel:not([hidden]) .cm-panel.cm-search [name="next"]')!.click()
+    await settle()
+  },
+  async markdownSnapshot() {
+    const deadline = performance.now() + 3_000
+    while (!element('.file-preview-tab-panel:not([hidden]) .markdown-code-block span')) {
+      if (performance.now() > deadline) throw new Error('Markdown syntax highlighting did not load')
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const panel = element('.file-preview-tab-panel:not([hidden])')!
+    const documentRoot = panel.querySelector<HTMLElement>('.safe-markdown.is-document')!
+    const code = panel.querySelector<HTMLElement>('.markdown-code-block code')!
+    const syntax = code.querySelector<HTMLElement>('span')!
+    const table = panel.querySelector<HTMLElement>('table')!
+    const tableScroll = panel.querySelector<HTMLElement>('.markdown-table-scroll')!
+    return {
+      bodyFontSize: getComputedStyle(documentRoot).fontSize,
+      bodyLineHeight: getComputedStyle(documentRoot).lineHeight,
+      h1: getComputedStyle(panel.querySelector('h1')!).fontSize,
+      h2: getComputedStyle(panel.querySelector('h2')!).fontSize,
+      h3: getComputedStyle(panel.querySelector('h3')!).fontSize,
+      codeLanguage: code.dataset.codeLanguage,
+      codeFontSize: getComputedStyle(code.parentElement!).fontSize,
+      syntaxColor: getComputedStyle(syntax).color,
+      sourceColor: getComputedStyle(code).color,
+      editorCount: panel.querySelectorAll('.cm-editor').length,
+      tableFontSize: getComputedStyle(table).fontSize,
+      tableScrolls: tableScroll.scrollWidth > tableScroll.clientWidth,
+      documentWidth: documentRoot.getBoundingClientRect().width,
+      paneWidth: panel.getBoundingClientRect().width,
+      pageOverflow: document.documentElement.scrollWidth > innerWidth
+    }
+  },
   bookmark() {
     bookmarkedViewer = element('.file-preview-code')!
-    bookmarkedViewer.scrollTop = 640
-    bookmarkedEditor = element('[contenteditable]')
+    element('.file-preview-code .cm-scroller')!.scrollTop = 640
+    bookmarkedEditor = element('.structured-mention-editor[contenteditable]')
     bookmarkedTimeline = element('.camp-timeline')
     bookmarkedTask = element('.task-event-card')
   },
@@ -394,6 +542,7 @@ Object.assign(window, { previewTest: {
     const paneBounds = pane?.getBoundingClientRect()
     const handleBounds = handle?.getBoundingClientRect()
     const viewer = element('.file-preview-code')
+    const viewerScroller = viewer?.querySelector<HTMLElement>('.cm-scroller')
     return {
       available: gridBounds.width, right: gridBounds.right,
       width: paneBounds?.width ?? 0,
@@ -413,9 +562,9 @@ Object.assign(window, { previewTest: {
       opacity: pane ? getComputedStyle(pane).opacity : null,
       resizing: document.documentElement.classList.contains('file-preview-resizing'),
       focused: (document.activeElement as HTMLElement)?.className,
-      sameViewer: bookmarkedViewer === viewer, scroll: viewer?.scrollTop,
-      draft: element('[contenteditable]')?.textContent,
-      sameEditor: bookmarkedEditor === element('[contenteditable]'),
+      sameViewer: bookmarkedViewer === viewer, scroll: viewerScroller?.scrollTop,
+      draft: element('.structured-mention-editor[contenteditable]')?.textContent,
+      sameEditor: bookmarkedEditor === element('.structured-mention-editor[contenteditable]'),
       sameTimeline: bookmarkedTimeline === element('.camp-timeline'),
       sameTask: bookmarkedTask === element('.task-event-card'),
       tabCount: document.querySelectorAll('[role="tab"]').length,
