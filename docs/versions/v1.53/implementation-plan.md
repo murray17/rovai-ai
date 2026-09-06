@@ -242,3 +242,17 @@ ACP 原有错误/投递测试扩展网络类别与 accepted/not-accepted 分流�
 - 该 Run 无工具调用及文件变更 Evidence；隔离工作区仍有启动期生成的 `mcp-gateway/standalone.json`，
   完整工作区洁净门禁未通过验收，不声明双链路无副作用资格已经完成。
 - 操作者停止进一步断网验证并决定先合入实现。网络恢复实机资格保持待验收，不晋升任何候选 Adapter/平台组合。
+
+### 整合主线后的自动化验证
+
+- 整合 `ec3b4295` 后，`cargo fmt --all --check`、`cargo check --workspace --all-targets` 通过。
+  `pnpm test:rust:pr` 全部通过：Library 524、CLI 33、slow integration 306；`pnpm test:rust:core`
+  230 通过、5 个需人工真实 Runtime 的用例忽略。网络恢复的分类、队列、领域 fence 与 startup handoff 均通过。
+- `pnpm typecheck`、`pnpm test`、`pnpm build:desktop` 通过：Vitest 157 个文件／1,608 个用例，最终 Node
+  批次 222 通过／1 个 Windows-only 跳过；文档与 Skill 单测、Electron sandbox capability gate 通过。
+  同步主线已过期的 Product Contract Fingerprint 测试期望到实际 schema 94，未改变产品 schema。
+- `DOCS_BASE_REF=ec3b4295 pnpm docs:check:ci` 与 diff 检查通过。
+- `cargo clippy --workspace --all-targets -- -D warnings` 未通过：`main.rs` 的
+  `record_available_runtime_model` 具有 8 个参数，触发 `too_many_arguments`。该函数与主线 `ec3b4295`
+  完全一致，本次保留并记录基线 lint；不声明完整 Clippy 门禁全绿。
+- 实机恢复资格仍采用上节结果；自动化检查通过不代替 ACP 接管链路的真实验收。
