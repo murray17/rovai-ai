@@ -13,9 +13,29 @@ import {
   promoteNotificationHeadsUpOverflow,
   notificationHeadsUpPresentation,
   readNotificationChangePages,
-  shouldPollForNotificationEvent
+  shouldPollForNotificationEvent,
+  visibleAcknowledgementIntent
 } from './NotificationAttentionController'
 import { preferenceFromUnknown } from './NotificationSettings'
+
+it('does not create visible ack commands for global cursor churn, and freezes uncertain retries', () => {
+  let ids = 0
+  const newId = (): string => `command-${++ids}`
+  const sources = { campId: 'camp-1', snapshotSequence: 20,
+    messageIds: ['m1'], campTurnIds: ['t1'], approvalIds: [] }
+  const first = visibleAcknowledgementIntent(sources, 10, 20, null, newId)
+  const retry = visibleAcknowledgementIntent({ ...sources, snapshotSequence: 900 }, 10, 900, first, newId)
+  expect(retry).toBe(first)
+  expect(retry.request.command.observedThroughChangeSequence).toBe(20)
+  expect(ids).toBe(1)
+  const newOccurrence = visibleAcknowledgementIntent(sources, 901, 902, retry, newId)
+  expect(newOccurrence.request.commandId).toBe('command-2')
+  expect(newOccurrence.key).not.toBe(first.key)
+  const newSource = visibleAcknowledgementIntent({ ...sources, messageIds: ['m1', 'm2'] }, 901, 903, newOccurrence, newId)
+  expect(newSource.request.commandId).toBe('command-3')
+  sources.messageIds.push('not-previously-visible')
+  expect(first.request.command.visibleMessageIds).toEqual(['m1'])
+})
 
 function action(
   episodeId: string,

@@ -96,6 +96,8 @@ impl ExecutionEvidenceService {
             "agent.reasoning.summary.delta"
                 | "agent.thought.delta"
                 | "agent.text.delta"
+                | "agent.text.completed"
+                | "agent.text.boundary"
                 | "runtime.plan"
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
@@ -155,6 +157,14 @@ impl ExecutionEvidenceService {
     ) -> Result<Vec<Option<RecordedExecutionEvidence>>> {
         if prepared.is_empty() {
             return Ok(Vec::new());
+        }
+        if prepared
+            .iter()
+            .any(|item| crate::execution_text::is_text_delta(&item.event_type))
+        {
+            anyhow::bail!(
+                "Text fragments require per-item aggregation, not transactional batch retry"
+            );
         }
         let total_bytes = prepared.iter().try_fold(0_usize, |total, evidence| {
             if !evidence.is_inline_delta_batchable() {
@@ -488,6 +498,16 @@ impl ExecutionEvidenceService {
         allow_fenced_terminal_tool_result: bool,
         managed_output_root: Option<&Path>,
     ) -> Result<Option<RecordedExecutionEvidence>> {
+        if let Some(handled) = crate::execution_text::observe(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            event_type,
+            payload,
+        )? {
+            return Ok(handled);
+        }
         let Some((kind, phase)) = evidence_classification(event_type, payload) else {
             return Ok(None);
         };
@@ -741,6 +761,9 @@ impl ExecutionEvidenceService {
             )
             .optional()?
             .context("Execution Evidence does not exist in this Camp")?;
+        if let Some(payload) = crate::execution_text::live_payload(database, evidence_id)? {
+            return Ok(payload);
+        }
         let bytes = match row.1 {
             Some(blob_id) => blob_store.read_bytes(database, &blob_id)?,
             None => row.0.into_bytes(),
@@ -2537,16 +2560,33 @@ mod tests {
                 .iter()
                 .all(PreparedRuntimeEvidence::is_inline_delta_batchable)
         );
-        let batch = ExecutionEvidenceService
-            .record_prepared_runtime_event_batch(
-                &mut database,
-                &run_id,
-                execution_epoch,
-                prepared_batch,
-            )
-            .unwrap()
+        let before_batch = database.connection().total_changes();
+        assert!(
+            ExecutionEvidenceService
+                .record_prepared_runtime_event_batch(
+                    &mut database,
+                    &run_id,
+                    execution_epoch,
+                    prepared_batch.clone()
+                )
+                .is_err()
+        );
+        assert_eq!(database.connection().total_changes(), before_batch);
+        let batch = prepared_batch
             .into_iter()
-            .map(Option::unwrap)
+            .map(|item| {
+                ExecutionEvidenceService
+                    .record_runtime_event(
+                        &mut database,
+                        &blob_store,
+                        &run_id,
+                        execution_epoch,
+                        &item.event_type,
+                        &item.payload,
+                    )
+                    .unwrap()
+                    .unwrap()
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             batch
@@ -2557,6 +2597,14 @@ mod tests {
         );
         assert_eq!(batch[0].payload["delta"], "hello ");
         assert!(batch.iter().all(|evidence| evidence.canonical.is_none()));
+        let durable_deltas: i64 = database.connection().query_row(
+            "SELECT COUNT(*) FROM agent_run_execution_evidence WHERE agent_run_id = ?1 AND event_type IN ('agent.text.delta', 'agent.thought.delta', 'agent.reasoning.summary.delta')",
+            [&run_id], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            durable_deltas, 0,
+            "transport fragments must not become durable Evidence"
+        );
 
         let runtime_diagnostic = ExecutionEvidenceService
             .prepare_runtime_event(
@@ -2753,22 +2801,17 @@ mod tests {
             .into_iter()
             .map(|delta| {
                 ExecutionEvidenceService
-                    .prepare_runtime_event(
+                    .record_runtime_event(
+                        &mut database,
+                        &blob_store,
+                        &run_id,
+                        execution_epoch,
                         "agent.text.delta",
                         &json!({"itemId": "message-3", "delta": delta}),
                     )
                     .unwrap()
-                    .unwrap()
             })
-            .collect();
-        let fenced_batch = ExecutionEvidenceService
-            .record_prepared_runtime_event_batch(
-                &mut database,
-                &run_id,
-                execution_epoch,
-                fenced_batch,
-            )
-            .unwrap();
+            .collect::<Vec<_>>();
         assert!(fenced_batch.iter().all(Option::is_none));
 
         let failed_tool_result = json!({

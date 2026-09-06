@@ -882,6 +882,8 @@ struct ClaudeCodeStreamState {
     acceptance_emitted: bool,
     model_observation_emitted: bool,
     message_ordinal: u64,
+    native_message_id: Option<String>,
+    message_text_completed: bool,
     text_delta_emitted: bool,
     partial_text_items: HashMap<u64, String>,
     tool_names: HashMap<String, String>,
@@ -1009,6 +1011,13 @@ fn process_claude_stream_line(
     Ok(())
 }
 
+fn claude_text_item_id(state: &ClaudeCodeStreamState, index: u64) -> String {
+    match &state.native_message_id {
+        Some(id) => format!("claude-text-native:{id}:{index}"),
+        None => format!("claude-text-{}-{index}", state.message_ordinal),
+    }
+}
+
 fn normalize_claude_runtime_events(
     event: &Value,
     expected_session_id: &str,
@@ -1084,6 +1093,11 @@ fn normalize_claude_runtime_events(
         {
             validate_claude_stream_session(event, expected_session_id)?;
             state.message_ordinal = state.message_ordinal.saturating_add(1);
+            state.native_message_id = event
+                .pointer("/event/message/id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            state.message_text_completed = false;
             state.partial_text_items.clear();
         }
         Some("stream_event")
@@ -1097,10 +1111,9 @@ fn normalize_claude_runtime_events(
             if block_type == Some("text") {
                 validate_claude_stream_session(event, expected_session_id)?;
                 if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
-                    state.partial_text_items.insert(
-                        index,
-                        format!("claude-text-{}-{index}", state.message_ordinal),
-                    );
+                    state
+                        .partial_text_items
+                        .insert(index, claude_text_item_id(state, index));
                 }
                 return Ok(normalized);
             }
@@ -1151,11 +1164,11 @@ fn normalize_claude_runtime_events(
                 .pointer("/event/index")
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            let message_ordinal = state.message_ordinal;
+            let stable_item_id = claude_text_item_id(state, index);
             let item_id = state
                 .partial_text_items
                 .entry(index)
-                .or_insert_with(|| format!("claude-text-{message_ordinal}-{index}"))
+                .or_insert(stable_item_id)
                 .clone();
             state.text_delta_emitted = true;
             normalized.push(ClaudeCodeRuntimeEvent {
@@ -1180,6 +1193,28 @@ fn normalize_claude_runtime_events(
             let Some(blocks) = claude_message_content(event) else {
                 return Ok(normalized);
             };
+            validate_claude_stream_session(event, expected_session_id)?;
+            if let Some(id) = event.pointer("/message/id").and_then(Value::as_str) {
+                state.native_message_id = Some(id.to_owned());
+            } else if state.message_text_completed {
+                state.message_ordinal = state.message_ordinal.saturating_add(1);
+                state.native_message_id = None;
+            }
+            for (index, block) in blocks.iter().enumerate() {
+                if block.get("type").and_then(Value::as_str) == Some("text")
+                    && let Some(text) = block.get("text").and_then(Value::as_str)
+                {
+                    state.text_delta_emitted = true;
+                    state.message_text_completed = true;
+                    normalized.push(ClaudeCodeRuntimeEvent {
+                        event_type: "agent.text.completed",
+                        payload: serde_json::json!({
+                            "itemId": claude_text_item_id(state, index as u64),
+                            "text": text,
+                        }),
+                    });
+                }
+            }
             let tool_blocks = blocks
                 .iter()
                 .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
@@ -2333,6 +2368,17 @@ exit 1
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].payload["itemId"], "claude-text-1-0");
         assert_eq!(second[0].payload["delta"], " reply");
+        let complete = normalize_claude_runtime_events(
+            &json!({"type":"assistant", "session_id":session_id,
+            "message":{"content":[{"type":"text","text":"public reply (complete)"}]}}),
+            session_id,
+            &mut streamed_state,
+        )
+        .unwrap();
+        assert_eq!(complete.len(), 1);
+        assert_eq!(complete[0].event_type, "agent.text.completed");
+        assert_eq!(complete[0].payload["itemId"], first[0].payload["itemId"]);
+        assert_eq!(complete[0].payload["text"], "public reply (complete)");
         assert!(
             normalize_claude_runtime_events(
                 &json!({
@@ -2356,6 +2402,31 @@ exit 1
         );
 
         let mut fallback_state = ClaudeCodeStreamState::default();
+        let mut complete_only = ClaudeCodeStreamState::default();
+        for (id, text) in [("message-a", "intermediate"), ("message-b", "final")] {
+            let blocks = normalize_claude_runtime_events(
+                &json!({"type":"assistant","session_id":session_id,
+                "message":{"id":id,"content":[{"type":"text","text":text}]}}),
+                session_id,
+                &mut complete_only,
+            )
+            .unwrap();
+            assert_eq!(
+                blocks[0].payload["itemId"],
+                format!("claude-text-native:{id}:0")
+            );
+            assert_eq!(blocks[0].payload["text"], text);
+        }
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({"type":"result","subtype":"success","is_error":false,
+            "session_id":session_id,"result":"final"}),
+                session_id,
+                &mut complete_only
+            )
+            .unwrap()
+            .is_empty()
+        );
         let fallback = normalize_claude_runtime_events(
             &json!({
                 "type": "result",

@@ -131,6 +131,62 @@ pub fn normalize_event(message: &Value) -> (&'static str, Value) {
     }
 }
 
+/// Pi's delta frame contains a contentIndex, not a message identity. Keep that
+/// index scoped to this Runtime's explicit message_start/message_end interval.
+#[derive(Default)]
+pub(super) struct PiTextState {
+    message_ordinal: u64,
+    native_message_id: Option<String>,
+}
+
+impl PiTextState {
+    fn item_id(&self, index: u64) -> String {
+        format!(
+            "pi-text-{}-{index}",
+            self.native_message_id
+                .as_deref()
+                .map(str::to_owned)
+                .unwrap_or_else(|| self.message_ordinal.to_string())
+        )
+    }
+
+    pub(super) fn normalize(&mut self, message: &Value) -> Vec<(&'static str, Value)> {
+        let event = message.get("type").and_then(Value::as_str);
+        let assistant =
+            message.pointer("/message/role").and_then(Value::as_str) == Some("assistant");
+        if event == Some("message_start") && assistant {
+            self.message_ordinal += 1;
+            self.native_message_id = message
+                .pointer("/message/id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+        if event == Some("message_end") && assistant {
+            return message.pointer("/message/content").and_then(Value::as_array)
+                .into_iter().flatten().enumerate().filter_map(|(index, block)| {
+                    (block.get("type").and_then(Value::as_str) == Some("text"))
+                        .then(|| block.get("text").and_then(Value::as_str)).flatten().map(|text| {
+                            ("agent.text.completed", json!({
+                                "itemId": self.item_id(index as u64), "text": text,
+                                "status": match message.pointer("/message/stopReason").and_then(Value::as_str) {
+                                    Some("aborted" | "error") => "interrupted", _ => "completed"
+                                }
+                            }))
+                        })
+                }).collect();
+        }
+        let (event_type, mut payload) = normalize_event(message);
+        if event_type == "agent.text.delta" {
+            let index = message
+                .pointer("/assistantMessageEvent/contentIndex")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            payload["itemId"] = json!(self.item_id(index));
+        }
+        vec![(event_type, payload)]
+    }
+}
+
 pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     cwd: &Path,
@@ -313,6 +369,25 @@ pub(super) async fn read_jsonl_record<R: AsyncBufRead + Unpin>(
 mod tests {
     use super::*;
     use tokio::io::BufReader;
+
+    #[test]
+    fn text_identity_is_scoped_to_message_and_content_index_with_authoritative_terminal() {
+        let mut state = PiTextState::default();
+        state.normalize(&json!({"type":"message_start","message":{"role":"assistant"}}));
+        let a = state.normalize(&json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"A"}}));
+        let b = state.normalize(&json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":2,"delta":"B"}}));
+        let terminal = state.normalize(&json!({"type":"message_end","message":{"role":"assistant","stopReason":"aborted","content":[{"type":"text","text":"A final"},{"type":"toolCall","id":"tool"},{"type":"text","text":"B partial"}]}}));
+        assert_ne!(a[0].1["itemId"], b[0].1["itemId"]);
+        assert_eq!(terminal.len(), 2);
+        assert_eq!(terminal[0].0, "agent.text.completed");
+        assert_eq!(terminal[0].1["itemId"], a[0].1["itemId"]);
+        assert_eq!(terminal[1].1["itemId"], b[0].1["itemId"]);
+        assert_eq!(terminal[0].1["text"], "A final");
+        assert_eq!(terminal[0].1["status"], "interrupted");
+        state.normalize(&json!({"type":"message_start","message":{"role":"assistant"}}));
+        let next = state.normalize(&json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"C"}}));
+        assert_ne!(next[0].1["itemId"], a[0].1["itemId"]);
+    }
 
     #[tokio::test]
     async fn jsonl_reader_preserves_unicode_line_separators() {

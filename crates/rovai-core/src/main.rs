@@ -15056,6 +15056,14 @@ fn prepare_codex_delta_batch(
             .to_string();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let (event_type, payload) = codex::normalize_event(&native_method, &params);
+        // Text aggregation is stateful. Never put it through the transactional batch
+        // fallback, which may replay the whole batch after a later frame fails.
+        if matches!(
+            event_type,
+            "agent.text.delta" | "agent.reasoning.summary.delta"
+        ) {
+            return Ok(None);
+        }
         let Some(evidence) =
             ExecutionEvidenceService.prepare_runtime_event(event_type, &payload)?
         else {
@@ -15095,6 +15103,9 @@ fn prepare_acp_delta_batch(
             .to_string();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let (event_type, payload) = normalize_acp_event(adapter_kind, &native_method, &params);
+        if matches!(event_type, "agent.text.delta" | "agent.thought.delta") {
+            return Ok(None);
+        }
         let Some(evidence) =
             ExecutionEvidenceService.prepare_runtime_event(event_type, &payload)?
         else {
@@ -15524,40 +15535,44 @@ async fn process_agent_run_pi_message(
         )
         .await;
     }
-    let (event_type, payload) = pi::normalize_event(&message);
-    if event_type != "runtime.usage" {
-        let evidence = persist_runtime_evidence(
-            core,
-            agent_run_id,
-            execution_epoch,
-            runtime
-                .builtin_tool_process_config()
-                .map(BuiltinToolProcessConfig::run_tmp),
-            event_type,
-            &payload,
-        )
-        .await?;
-        if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type)
-            || evidence.is_some()
-        {
-            let evidence_id = evidence.as_ref().map(|value| value.id.as_str());
-            let public_payload = evidence
-                .as_ref()
-                .map(|value| &value.payload)
-                .unwrap_or(&payload);
-            emit(
-                output,
+    for (event_type, payload) in runtime.normalize_events(&message).await {
+        if event_type != "runtime.usage" {
+            let evidence = persist_runtime_evidence(
+                core,
+                agent_run_id,
+                execution_epoch,
+                runtime
+                    .builtin_tool_process_config()
+                    .map(BuiltinToolProcessConfig::run_tmp),
                 event_type,
-                json!({
-                    "agentRunId": agent_run_id,
-                    "executionEpoch": execution_epoch,
-                    "adapterKind": AdapterKind::Pi,
-                    "nativeMethod": message_type,
-                    "evidenceId": evidence_id,
-                    "payload": public_payload,
-                    "canonical": evidence.as_ref().and_then(|value| value.canonical.as_ref()),
-                }),
-            );
+                &payload,
+            )
+            .await?;
+            if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type)
+                || evidence.is_some()
+            {
+                let evidence_id = evidence.as_ref().map(|value| value.id.as_str());
+                let public_payload = evidence
+                    .as_ref()
+                    .map(|value| &value.payload)
+                    .unwrap_or(&payload);
+                let event_type = evidence
+                    .as_ref()
+                    .map_or(event_type, |value| value.event_type.as_str());
+                emit(
+                    output,
+                    event_type,
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "adapterKind": AdapterKind::Pi,
+                        "nativeMethod": message_type,
+                        "evidenceId": evidence_id,
+                        "payload": public_payload,
+                        "canonical": evidence.as_ref().and_then(|value| value.canonical.as_ref()),
+                    }),
+                );
+            }
         }
     }
     if let Some(completion) = completed_action {
@@ -16780,6 +16795,9 @@ async fn process_agent_run_acp_message(
         .as_ref()
         .map(|evidence| &evidence.payload)
         .unwrap_or(&payload);
+    let event_type = evidence
+        .as_ref()
+        .map_or(event_type, |evidence| evidence.event_type.as_str());
     emit(
         output,
         event_type,
@@ -17241,7 +17259,7 @@ async fn process_runtime_event(
     };
     emit(
         output,
-        event_type,
+        &evidence.event_type,
         json!({
             "agentRunId": scope.agent_run_id,
             "executionEpoch": scope.execution_epoch,
@@ -18671,6 +18689,9 @@ async fn process_agent_run_codex_message(
         .as_ref()
         .map(|evidence| &evidence.payload)
         .unwrap_or(&payload);
+    let event_type = evidence
+        .as_ref()
+        .map_or(event_type, |evidence| evidence.event_type.as_str());
     emit(
         output,
         event_type,
@@ -22045,7 +22066,11 @@ while IFS= read -r _ignored; do :; done
         let CodexIncoming::Message { message, .. } = codex_delta else {
             unreachable!()
         };
-        let mut item_bounded_batch = vec![message; RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS];
+        assert!(prepare_codex_delta_batch(&[message]).unwrap().is_none());
+        let mut item_bounded_batch = vec![
+            json!({"method":"item/plan/delta","params":{"delta":"step"}});
+            RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS
+        ];
         assert!(
             prepare_codex_delta_batch(&item_bounded_batch)
                 .unwrap()
@@ -22106,7 +22131,7 @@ while IFS= read -r _ignored; do :; done
                 }]
             )
             .unwrap()
-            .is_some()
+            .is_none()
         );
         let AcpIncoming::Message {
             native_session_id,

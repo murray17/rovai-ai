@@ -41,3 +41,23 @@ locator；多层链接的每一层都直接投影到 workspace root，不保存�
 
 当前规范见 [File Preview v8](../../contracts/file-preview-v8.md)、
 [File Preview Architecture](../../architecture/file-preview.md)与[Camp 文件预览区](../../ui/components/file-preview.md)。
+
+<a id="v1-52-d02"></a>
+## V1.52-D02：正文按消息块定稿，维护空调用在源头收敛
+
+流式文本的运输粒度不应成为历史粒度。逐 delta 写入放大 Evidence 行数，而仅保留最后 final answer 又会
+丢失工具之间的过程正文。因此每个正文块保留独立身份和首次位置，优先采用原生 item 完成结果；无可靠
+完成结果时在 Core 聚合到明确连续边界。短暂占位允许定稿更新，工具事实继续 append-only；读取叠加当前
+未定稿正文以保持切换/重进运行中 Camp 的完整性。
+
+拒绝仅在数据库入口丢弃 delta、只保留 Run 最后一段、重复保存累计正文及完成正文，以及按 UI 隐藏状态
+删除已有 reasoning 历史。取消、失败和正常退出保存已收到正文，但不承诺强制杀进程或断电后恢复未落盘
+片段。历史不自动重写；单次离线聚合必须显式授权、备份并验证未改变工具、顺序、内容和引用。
+
+维护写放大优先减少明确的空调用，不用统一日志策略削弱命令保证：有效 Lead 的新 enter 不提交 reconcile，
+可见通知不因全局游标推进重复确认。Roster 的 observed-at/generation 仍参与新鲜度与待投递授权；只复用
+仍有效的已有短期缓存，不按成员列表相同跳过更新。已执行命令继续保留原结果回放、审计和恢复职责。
+
+当前规范见 [正文块 Evidence](../../contracts/run-process-detail-surface-v30.md#text-block-evidence)、
+[Camp Open](../../contracts/camp-open-projection-v15.md)、[通知合同](../../contracts/notification-episode-v5.md)与
+[Evidence 不变量](../../architecture/foundational-invariants.md#evidence-usage)。

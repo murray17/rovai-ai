@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type {
   AgentProfile,
+  AgentRunView,
+  AgentRunExecutionEvidenceView,
   CampComposerDraftView,
   CampOpenMessageCoverage,
   CampOpenProjection,
@@ -9,12 +11,37 @@ import type {
   NavigationSnapshot
 } from '@contracts'
 import { AppHeader, campOpenProjectionAsSnapshot } from '../../../apps/desktop/src/renderer/src/App'
-import { CampWorkspace, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import { CampWorkspace, RunExecutionDisclosure, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import { CampNavigation } from '../../../apps/desktop/src/renderer/src/CampNavigation'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const now = '2026-08-31T00:00:00Z'
 const campId = 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'
+const fullNarration = `BODY_A ${'完整正文🙂 '.repeat(5000)} LONG_BODY_A_END`
+let textReadFailures = 1
+const textEvidence: AgentRunExecutionEvidenceView[] = [
+  ['A', 'agent.text.block', { blockId: 'A', itemId: 'A', text: 'BODY_A preview', status: 'completed' }],
+  ['tool1', 'runtime.action', { toolCallId: 'tool1', title: 'Tool One', status: 'completed' }],
+  ['B', 'agent.text.block', { blockId: 'B', itemId: 'B', text: 'BODY_B intermediate', status: 'completed' }],
+  ['tool2', 'runtime.action', { toolCallId: 'tool2', title: 'Tool Two', status: 'completed' }],
+  ['C', 'agent.text.block', { blockId: 'C', itemId: 'C', text: 'BODY_C interrupted', status: 'interrupted' }],
+  ['reasoning', 'agent.thought.block', { blockId: 'reasoning', text: 'HIDDEN_REASONING', status: 'completed' }]
+].map(([id, eventType, payload], index) => ({ id: id as string, agentRunId: 'text-run', executionEpoch: 1,
+  sequence: (index + 1) * 10, eventType: eventType as string, payload,
+  kind: eventType === 'runtime.action' ? 'step' : 'narration', phase: 'completed',
+  contentBlobId: id === 'A' ? 'text-blob' : null, contentByteCount: id === 'A' ? 80_000 : 80,
+  isTruncated: id === 'A', occurredAt: now }))
+const textRun: AgentRunView = {
+  id: 'text-run', campTurnId: 'turn-text', conversationId: 'conversation-text', agentId: 'agent_1',
+  taskId: null, responsibilityKey: 'direct:agent_1', responsibilityGeneration: 0, purpose: 'Text acceptance',
+  completionRole: 'required', status: 'cancelled', waitReason: null, cancelRequestedAt: now,
+  cancelReasonCode: 'user_cancelled', cancelAcknowledgedAt: now, executionEpoch: 1,
+  terminalResolutionSource: null, terminalReasonCode: null, failure: null, runtimeModel: null,
+  permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
+  a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0, executionEvidenceCount: 6,
+  hasUnsettledExternalEffects: false, workspace: { path: '/fixture' }, startingGitObservation: null,
+  endingGitObservation: null, version: 1, createdAt: now, startedAt: now, endedAt: now, updatedAt: now
+}
 const attachmentReviewMode = new URLSearchParams(window.location.search).get('review') === 'attachments'
 const createAgent = (
   agentId: string,
@@ -119,7 +146,7 @@ const reviewImages = [
 ]
 let imageResult: FixtureImageResult = reviewImages[0]
 let imageResultsById = new Map<string, FixtureImageResult>()
-let draft: CampComposerDraftView = { campId, body: '', content: [], revision: 1, attachments: [],
+let draft: CampComposerDraftView = { campId, body: '', content: { version: 2, segments: [] }, revision: 1, attachments: [],
   replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 
 const attachmentFile = (id: string, displayName: string, mediaType: string, options: {
@@ -188,7 +215,7 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
   draft = {
     ...draft,
     body: draftBody,
-    content: [{ kind: 'text', text: draftBody }],
+    content: { version: 2, segments: [{ kind: 'text', text: draftBody }] },
     revision: draft.revision + 1,
     attachments: composerFiles.map((attachment) => ({
       ...attachment, state: 'ready' as const, errorMessage: null, createdAt: now
@@ -226,12 +253,20 @@ Object.assign(window, { rovai: {
   request: async (method: string, params?: {
     imageId?: string
     content?: CampComposerDraftView['content']
+    evidenceId?: string
   }): Promise<unknown> => {
+    if (method === 'agentRunEvidence.list') return { schemaVersion: 1, agentRunId: 'text-run',
+      requestedAfterSequence: 0, nextAfterSequence: 60, throughSequence: 60, hasMore: false, evidence: textEvidence }
+    if (method === 'agentRunEvidence.getContent') {
+      if (params?.evidenceId !== 'A') throw new Error('Unexpected full-content request')
+      if (textReadFailures-- > 0) throw new Error('Transient Blob read error')
+      return { payload: { text: fullNarration } }
+    }
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.composerDraft.get') return draft
     if (method === 'camp.composerDraft.save') {
-      const content = params?.content ?? []
-      draft = { ...draft, content, body: content.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
+      const content = params?.content ?? { version: 2, segments: [] }
+      draft = { ...draft, content, body: content.segments.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
         revision: draft.revision + 1 }
       return draft
     }
@@ -322,10 +357,12 @@ function Fixture(): React.JSX.Element {
     </main>
   </div>
 }
-createRoot(document.getElementById('root')!).render(<Fixture />)
+const reactRoot = createRoot(document.getElementById('root')!)
+reactRoot.render(<Fixture />)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let anchor: HTMLElement | null = null
 Object.assign(window, { campOpenTest: {
+  showTextEvidence: () => reactRoot.render(<RunExecutionDisclosure run={textRun} campId={campId} />),
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   openTask: () => element('.task-event-card').click(),
   closeTask: () => closeTask(),

@@ -564,6 +564,8 @@ export function groupExecutionEventsByRunId(
 ): Map<string, LiveRuntimeEvent[]> {
   const currentRunIds = new Set(runs.map((run) => run.id))
   const grouped = new Map<string, Map<string, LiveRuntimeEvent>>()
+  const blockState = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}
 
   const append = (event: LiveRuntimeEvent, authoritative: boolean): void => {
     if (!currentRunIds.has(event.agentRunId)) return
@@ -574,7 +576,12 @@ export function groupExecutionEventsByRunId(
       grouped.set(event.agentRunId, eventsById)
     }
 
-    if (authoritative || !eventsById.has(event.id)) {
+    const previous = eventsById.get(event.id)
+    const blockUpdate = event.eventType === 'agent.text.block' && previous
+      && (blockState(previous.payload).status === 'streaming')
+      && (blockState(event.payload).status !== 'streaming'
+        || Number(blockState(event.payload).textLength) >= Number(blockState(previous.payload).textLength))
+    if (authoritative || !previous || blockUpdate) {
       eventsById.set(event.id, event)
     }
   }
@@ -946,6 +953,17 @@ export async function loadCompleteAgentRunExecutionEvidence(
       throw new Error('Execution Evidence page is incompatible')
     }
     throughSequence = page.throughSequence
+    let previousSequence = afterSequence
+    for (const item of page.evidence) {
+      if (item.agentRunId !== agentRunId || item.sequence <= previousSequence
+        || item.sequence > throughSequence) {
+        throw new Error('Execution Evidence page order is incompatible')
+      }
+      previousSequence = item.sequence
+    }
+    if (page.nextAfterSequence !== (page.evidence.at(-1)?.sequence ?? throughSequence)) {
+      throw new Error('Execution Evidence page cursor is incompatible')
+    }
     evidence.push(...page.evidence)
     if (!page.hasMore) break
     if (page.nextAfterSequence <= afterSequence) {
@@ -953,10 +971,28 @@ export async function loadCompleteAgentRunExecutionEvidence(
     }
     afterSequence = page.nextAfterSequence
   }
-  if (throughSequence !== null && evidence.length !== throughSequence) {
+  // Sequence is a stable timeline position, not a row count (offline aggregation leaves gaps).
+  if (throughSequence !== null && (evidence.at(-1)?.sequence ?? 0) !== throughSequence) {
     throw new Error('Execution Evidence history is incomplete')
   }
   return evidence
+}
+
+export async function loadExecutionNarrationBodies(
+  evidence: AgentRunExecutionEvidenceView[],
+  requestContent: (evidenceId: string) => Promise<{ payload: unknown }>
+): Promise<Map<string, string>> {
+  const bodies = new Map<string, string>()
+  // Only hydrate displayed narration. Tool results keep their existing expand-to-load path;
+  // hidden reasoning is neither requested nor exposed by this adapter.
+  for (const item of evidence) {
+    if (item.eventType !== 'agent.text.block' || !item.isTruncated || !item.contentBlobId) continue
+    const response = await requestContent(item.id)
+    const text = executionEvidenceResultText(item.eventType, response.payload)
+    if (text === null) throw new Error('Execution narration content is unavailable')
+    bodies.set(`narration:${item.id}`, text)
+  }
+  return bodies
 }
 
 export type CampConversationTimelineItem =
@@ -8567,6 +8603,30 @@ function RunExecutionContent({
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const publicFailure = run.status === 'failed' ? run.failure : null
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
+  const narrationEvidence = historicalEvidence ?? truncatedEvidence
+  const [narrationBodies, setNarrationBodies] = useState<Map<string, string>>(new Map())
+  const [narrationStatus, setNarrationStatus] = useState<RunExecutionHistoryStatus>('idle')
+  const [narrationRetry, setNarrationRetry] = useState(0)
+  useEffect(() => {
+    let disposed = false
+    setNarrationBodies(new Map())
+    if (!narrationEvidence.some((item) => item.eventType === 'agent.text.block'
+      && item.isTruncated && item.contentBlobId)) {
+      setNarrationStatus('ready')
+      return undefined
+    }
+    setNarrationStatus('loading')
+    void loadExecutionNarrationBodies(narrationEvidence, (evidenceId) =>
+      window.rovai.request('agentRunEvidence.getContent', { campId, evidenceId })
+    ).then((bodies) => {
+      if (disposed) return
+      setNarrationBodies(bodies)
+      setNarrationStatus('ready')
+    }).catch(() => {
+      if (!disposed) setNarrationStatus('failed')
+    })
+    return () => { disposed = true }
+  }, [campId, narrationEvidence, narrationRetry])
   const historicalProgress = useMemo(() => historicalEvidence
     ? buildLiveExecutionProgress(
         historicalEvidence.map(liveRuntimeEventFromExecutionEvidence),
@@ -8578,9 +8638,13 @@ function RunExecutionContent({
     .filter(isPresentableExecutionEvidence)
   const effectiveProgress = historicalProgress ?? progress
   const finalKey = finalBody ? comparableMessageText(finalBody) : null
-  const processItems = useMemo(() => (effectiveProgress?.items ?? []).filter((item) =>
+  const processItems = useMemo(() => (effectiveProgress?.items ?? []).map((item) =>
+    item.kind === 'narration' && narrationBodies.has(item.key)
+      ? { ...item, body: narrationBodies.get(item.key)! }
+      : item
+  ).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
-  ), [effectiveProgress?.items, finalKey])
+  ), [effectiveProgress?.items, finalKey, narrationBodies])
   const groupedProcessItems = useMemo(
     () => groupConsecutiveToolItems(processItems),
     [processItems]
@@ -8689,16 +8753,19 @@ function RunExecutionContent({
           />
         )
       })}
-      {historyStatus === 'loading' && (
+      {(historyStatus === 'loading' || narrationStatus === 'loading') && (
         <div className="process-action current" role="status">
           <span className="process-spinner" aria-hidden="true" />
           <span>正在读取完整过程</span>
         </div>
       )}
-      {historyStatus === 'failed' && (
+      {(historyStatus === 'failed' || narrationStatus === 'failed') && (
         <div className="process-action history-load-error" role="status">
           <span>完整执行过程读取失败。</span>
-          <button className="quiet-button compact" type="button" onClick={() => void onLoadHistoricalEvidence()}>
+          <button className="quiet-button compact" type="button" onClick={() => {
+            if (narrationStatus === 'failed') setNarrationRetry((value) => value + 1)
+            if (historyStatus === 'failed') void onLoadHistoricalEvidence()
+          }}>
             重试
           </button>
         </div>

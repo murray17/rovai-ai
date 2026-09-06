@@ -136,7 +136,7 @@ import {
   createNavigationRefreshCoordinator,
   type NavigationRefreshTrigger
 } from './navigation-refresh-coordinator'
-import { createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
+import { appendLiveRuntimeEventBatch, createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
 
 export { allNavigationCamps }
 
@@ -2296,7 +2296,7 @@ function AuthoritativeApp({
 
   useEffect(() => {
     const liveEvents = createLiveRuntimeEventBuffer((batch) => {
-      setLiveRuntimeEvents((current) => [...current, ...batch])
+      setLiveRuntimeEvents((current) => appendLiveRuntimeEventBatch(current, batch))
     })
     const unsubscribe = window.rovai.onEvent((event: CoreEvent) => {
       const params = asRecord(event.params)

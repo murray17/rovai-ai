@@ -273,6 +273,9 @@ export function formatByteSize(bytes: number): string {
 }
 
 const LIVE_RUNTIME_EVENT_TYPES = new Set([
+  'agent.text.block',
+  'agent.thought.block',
+  'agent.reasoning.summary.block',
   'activity.started',
   'activity.completed',
   'agent.text.delta',
@@ -301,7 +304,7 @@ export function liveRuntimeEventFromCore(
     eventType: event.method,
     payload: Object.prototype.hasOwnProperty.call(params, 'payload') ? params.payload : params,
     canonical: canonicalRuntimeActivity(params.canonical),
-    createdAt
+    createdAt: stringField(asRecord(params.payload), 'blockStartedAt') ?? createdAt
   }
 }
 
@@ -477,6 +480,7 @@ export function buildLiveExecutionProgress(
   options: { textMode?: 'live_tail' | 'complete' } = {}
 ): LiveExecutionProgress {
   const narrationByItem = new Map<string, string>()
+  const settledNarration = new Set<string>()
   let anonymousNarrationSegment = 0
   let activeAnonymousNarrationItemId: string | null = null
   let planExplanation = ''
@@ -542,8 +546,16 @@ export function buildLiveExecutionProgress(
     if (event.agentRunId !== agentRunId) continue
     const payload = asRecord(event.payload)
 
-    if (event.eventType === 'agent.reasoning.summary.delta' || event.eventType === 'agent.thought.delta') {
+    if (event.eventType === 'agent.reasoning.summary.delta' || event.eventType === 'agent.thought.delta'
+      || event.eventType === 'agent.reasoning.summary.block' || event.eventType === 'agent.thought.block') {
       finishNarrationStream()
+      continue
+    }
+    if (event.eventType === 'agent.text.block') {
+      const itemId = stringField(payload, 'blockId') ?? event.id
+      rememberItem(`narration:${itemId}`)
+      narrationByItem.set(itemId, stringField(payload, 'text') ?? '')
+      if (payload.status !== 'streaming') settledNarration.add(itemId)
       continue
     }
     if (event.eventType === 'agent.text.delta') {
@@ -551,8 +563,12 @@ export function buildLiveExecutionProgress(
       const stableItemId = stringField(payload, 'itemId')
       const itemId = stableItemId ?? anonymousNarrationItemId()
       if (stableItemId) activeAnonymousNarrationItemId = null
+      if (settledNarration.has(itemId)) continue
       rememberItem(`narration:${itemId}`)
-      narrationByItem.set(itemId, `${narrationByItem.get(itemId) ?? ''}${delta}`)
+      const previous = narrationByItem.get(itemId) ?? ''
+      const offset = numberField(payload, 'textOffset')
+      const unseen = offset === null ? delta : delta.slice(Math.max(0, previous.length - offset))
+      narrationByItem.set(itemId, `${previous}${unseen}`)
       continue
     }
     if (event.eventType === 'runtime.plan') {
@@ -1012,6 +1028,7 @@ export function executionEvidenceResultText(
   canonical?: CanonicalRuntimeActivityView | null
 ): string | null {
   const payload = asRecord(payloadValue)
+  if (eventType === 'agent.text.block') return stringField(payload, 'text')
   if (eventType === 'runtime.compaction.display') {
     const compaction = runtimeCompactionDisplayItem(payload)
     return compaction ? runtimeCompactionDetailText(compaction) : null

@@ -1024,7 +1024,7 @@ impl ReadModelService {
         let message_deliveries = load_message_deliveries(&transaction, camp_id, None)?;
         let turns = load_turns(&transaction, camp_id, None)?;
         let agent_runs = load_agent_runs(&transaction, camp_id, None)?;
-        let execution_evidence = load_execution_evidence(
+        let mut execution_evidence = load_execution_evidence(
             &transaction,
             camp_id,
             Some(EXECUTION_EVIDENCE_SNAPSHOT_LIMIT),
@@ -1045,6 +1045,7 @@ impl ReadModelService {
             false,
         )?;
         transaction.commit()?;
+        crate::execution_text::overlay(database, &mut execution_evidence)?;
         Ok(CampSnapshot {
             schema_version: READ_MODEL_SCHEMA_VERSION,
             through_global_sequence,
@@ -1083,7 +1084,7 @@ impl ReadModelService {
             load_message_deliveries(&transaction, camp_id, Some(CAMP_OPEN_DELIVERY_LIMIT))?;
         let turns = load_turns(&transaction, camp_id, Some(CAMP_OPEN_TURN_LIMIT))?;
         let agent_runs = load_agent_runs(&transaction, camp_id, Some(CAMP_OPEN_AGENT_RUN_LIMIT))?;
-        let execution_evidence = load_execution_evidence(&transaction, camp_id, None, true)?;
+        let mut execution_evidence = load_execution_evidence(&transaction, camp_id, None, true)?;
         let agent_run_file_changes = list_completed_run_file_changes(&transaction, camp_id)?;
         let agent_run_images = list_camp_images(&transaction, camp_id)?;
         let approvals =
@@ -1104,6 +1105,7 @@ impl ReadModelService {
             approvals: collection_coverage(approvals.len(), counts.pending_approvals),
         };
         transaction.commit()?;
+        crate::execution_text::overlay(database, &mut execution_evidence)?;
         Ok(CampOpenProjection {
             schema_version: CAMP_OPEN_SCHEMA_VERSION,
             through_global_sequence,
@@ -1357,6 +1359,7 @@ impl ReadModelService {
             .last()
             .map_or(through_sequence, |item| item.sequence);
         transaction.commit()?;
+        crate::execution_text::overlay(database, &mut evidence)?;
         Ok(AgentRunExecutionEvidencePage {
             schema_version: EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION,
             agent_run_id: agent_run_id.to_string(),
@@ -1674,6 +1677,10 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
              AND camp_message.id = event_log.entity_id
             WHERE event_log.camp_id IS NOT NULL
               AND event_log.global_sequence IS NOT NULL
+              AND ({publication_predicate} OR event_log.event_type IN (
+                  'agent_run.succeeded', 'agent_run.failed', 'agent_run.cancelled',
+                  'camp_turn.status_changed'
+              ))
             GROUP BY event_log.camp_id
         )
         SELECT
@@ -3137,6 +3144,7 @@ pub(crate) fn public_execution_evidence_for_agent_run(
         WHERE evidence.agent_run_id = ?1
           AND evidence.event_type NOT IN (
               'agent.reasoning.summary.delta', 'agent.thought.delta',
+              'agent.reasoning.summary.block', 'agent.thought.block',
               'runtime.compaction.display'
           )
         ORDER BY evidence.sequence

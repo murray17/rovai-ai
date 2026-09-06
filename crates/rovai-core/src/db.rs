@@ -51,6 +51,7 @@ pub struct V2RecoverySummary {
 }
 
 pub struct Database {
+    pub(crate) execution_text: crate::execution_text::ExecutionTextBuffer,
     connection: Connection,
     path: PathBuf,
     runtime_camp_files_root: PathBuf,
@@ -4159,6 +4160,35 @@ fn remove_generated_sqlite_sidecars(path: &Path) {
 }
 
 impl Database {
+    /// Offline acceptance only: no admission, migrations, recovery, seeds or workers.
+    /// The SQLite connection itself is read-only, including all nested Read Side calls.
+    #[cfg(feature = "slow-tests")]
+    pub fn open_read_only_measurement(path: &Path) -> Result<Self> {
+        anyhow::ensure!(
+            path.is_absolute() && path.is_file(),
+            "measurement requires an existing absolute database path"
+        );
+        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        crate::monitoring::register_monitoring_sql_functions(&connection)?;
+        let runtime_camp_files_root = path
+            .parent()
+            .context("database parent")?
+            .join("runtime-files");
+        register_runtime_camp_files_functions(
+            &connection,
+            &runtime_camp_files_root,
+            "offline-read-only",
+        )?;
+        connection.execute_batch("PRAGMA query_only = ON")?;
+        Ok(Self {
+            execution_text: Default::default(),
+            connection,
+            path: path.into(),
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest: "offline-read-only".into(),
+        })
+    }
+
     pub fn open_admitted(
         ticket: ExistingAuthorityTicket<'_>,
     ) -> std::result::Result<Self, DatabaseOpenError> {
@@ -4242,6 +4272,7 @@ impl Database {
         open.revalidate()?;
         configure_runtime_connection(&connection, &path)?;
         let mut database = Self {
+            execution_text: Default::default(),
             connection,
             path,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4365,6 +4396,7 @@ impl Database {
                 ))
             })?;
             let mut staged = Self {
+                execution_text: Default::default(),
                 connection,
                 path: temporary.clone(),
                 runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4437,6 +4469,7 @@ impl Database {
             ))
         })?;
         Ok(Self {
+            execution_text: Default::default(),
             connection,
             path: target,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4506,6 +4539,7 @@ impl Database {
         })();
         progress("authority_open", started.elapsed());
         let mut database = Self {
+            execution_text: Default::default(),
             connection: connection?,
             path: path.clone(),
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4570,6 +4604,7 @@ impl Database {
                 )
             })?;
         let mut staged = Self {
+            execution_text: Default::default(),
             connection,
             path: path.to_path_buf(),
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4709,6 +4744,7 @@ impl Database {
             |row| row.get(0),
         )?;
         let mut database = Self {
+            execution_text: Default::default(),
             connection,
             path,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4782,6 +4818,7 @@ impl Database {
             )?,
         }
         Ok(Self {
+            execution_text: Default::default(),
             connection,
             path,
             runtime_camp_files_root,
@@ -29427,6 +29464,7 @@ mod tests {
                 CREATE TABLE skill_projection_observation(id TEXT PRIMARY KEY);").unwrap();
             connection.execute_batch(&format!("CREATE TRIGGER reject_receipt BEFORE INSERT ON schema_migration WHEN NEW.version = {version} BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;")).unwrap();
             let mut database = Database {
+                execution_text: Default::default(),
                 connection,
                 path: PathBuf::from("unused-memory-fixture"),
                 runtime_camp_files_root: PathBuf::new(),
@@ -30362,6 +30400,7 @@ mod tests {
                     .unwrap();
             }
             let mut database = Database {
+                execution_text: Default::default(),
                 connection,
                 path: PathBuf::new(),
                 runtime_camp_files_root: PathBuf::new(),
@@ -40817,6 +40856,7 @@ mod tests {
             )
             .unwrap();
         let mut database = Database {
+            execution_text: Default::default(),
             connection,
             path,
             runtime_camp_files_root,

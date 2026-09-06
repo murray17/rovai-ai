@@ -1061,6 +1061,7 @@ pub struct PiRuntime {
     session_id: String,
     session_file: PathBuf,
     model_fingerprint: String,
+    text_state: Mutex<super::PiTextState>,
 }
 
 impl PiRuntime {
@@ -1080,7 +1081,12 @@ impl PiRuntime {
             session_id: activation.session_id,
             session_file: activation.session_file,
             model_fingerprint: activation.model_fingerprint,
+            text_state: Mutex::new(super::PiTextState::default()),
         })
+    }
+
+    pub(crate) async fn normalize_events(&self, message: &Value) -> Vec<(&'static str, Value)> {
+        self.text_state.lock().await.normalize(message)
     }
 
     pub async fn start_prompt(&self, message: &str, images: &[PiPromptImage]) -> Result<()> {

@@ -39,6 +39,40 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--text-evidence') {
+      await run('window.campOpenTest.showTextEvidence()')
+      await run('window.campOpenTest.settle()')
+      await run('document.querySelector(".execution-disclosure summary").click()')
+      const waitForText = async (expression) => {
+        const deadline = Date.now() + 5000
+        while (Date.now() < deadline) {
+          await run('window.campOpenTest.settle()')
+          if (await run(expression)) return
+        }
+        assert.fail(`Execution text condition was not reached: ${expression}`)
+      }
+      await waitForText('Boolean(document.querySelector(".history-load-error button"))')
+      await run('document.querySelector(".history-load-error button").click()')
+      await waitForText('document.querySelector(".process-content").textContent.includes("LONG_BODY_A_END")')
+      const text = await run(`(() => {
+        const bodies = [...document.querySelectorAll('.process-copy')].map(node => node.textContent);
+        return { bodies: bodies.map(body => ({ length: body.length, start: body.slice(0, 12), tail: body.slice(-15) })),
+          hasFailure: Boolean(document.querySelector('.history-load-error')),
+          tools: document.querySelectorAll('.tool-activity-group').length,
+          privateReasoningVisible: document.body.textContent.includes('HIDDEN_REASONING') };
+      })()`)
+      assert.equal(text.bodies.length, 3)
+      assert.ok(text.bodies[0].length > 30_000 && text.bodies[0].tail.includes('LONG_BODY_A_END'))
+      assert.ok(text.bodies[1].start.includes('BODY_B'))
+      assert.ok(text.bodies[2].start.includes('BODY_C'))
+      assert.equal(text.hasFailure, false)
+      assert.equal(text.privateReasoningVisible, false)
+      assert.equal(text.tools, 2)
+      await capture('execution-text-full-history')
+      console.log(JSON.stringify({ ok: true, mode, text }))
+      app.exit(0)
+      return
+    }
     if (attachmentReview) {
       await run(`window.campOpenTest.setComposerText(${JSON.stringify('请按交互稿核对附件尺寸、顺序、图标和视觉层级。')})`)
       await run("window.campOpenTest.scrollAttachmentSurface('agent')")

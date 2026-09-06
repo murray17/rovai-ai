@@ -441,7 +441,7 @@ last_updated: 2026-09-05
 
 ### Evidence 与 Canonical Activity
 
-- Runtime source event、append-only Execution Evidence、Canonical Runtime Activity 和 Renderer presentation 是四个显式层。Runtime/Core 只声明它们真实观测或介入的事实；Evidence 保留来源、序列、原始观测边界和脱敏结果；Core classifier 拥有 canonical 语义；Renderer 只本地化/分组/呈现。任一层都不能用未报告行为、进程消失、命令文本或 UI 提示补写“已执行”。
+- Runtime source event、Execution Evidence、Canonical Runtime Activity 和 Renderer presentation 是四个显式层。Runtime/Core 只声明它们真实观测或介入的事实；工具 Evidence 保持 append-only，文本 Evidence 按独立正文块定稿；二者保留来源、序列、原始观测边界和脱敏结果。Core classifier 拥有 canonical 语义；Renderer 只本地化/分组/呈现。任一层都不能用未报告行为、进程消失、命令文本或 UI 提示补写“已执行”。
 - Canonical Runtime Activity 是 Core 从不可变 Evidence 构建、持久但可重建的版本化投影，不是新的效果真源。Lifecycle/Read Side 只从选定的 canonical projection 派生，不跳过它直接从 Runtime 标题或 evidence payload 猜状态。
 - `source_event_key` 与 Core-scoped `operationId` 是严格分离的身份：前者只在一个已声明 observation scope 内去重单个来源事件，后者才能跨 phase/evidence 合并同一操作。Core 只接受协议原生 ID、自有调用/receipt 关联或 Adapter 按封闭规则构造的可证明身份；不用时间、文本、路径或顺序相似性聚合。重放使用同一规则得到同一 identity/归约结果。
 - Activity Domain（历史字段名 `capabilityKind`）是稳定顶层观测域；可选 `semanticKind` 只能在 Evidence 支持时细分，`presentationHint` 永不成为 canonical semantics。Domain/kind 词汇扩展必须在 Mapping Registry 注册、版本化并提供 replay fixture；无证据时保留已有域或 `unknown`。
@@ -504,7 +504,7 @@ last_updated: 2026-09-05
 
 ### 用户可见 evidence 与 Usage
 
-- AgentRun Execution Evidence 是独立、用户可见但默认不回流 Agent 的 append-only 权威记录，不归 Task、Message、Activity presentation 或 Runtime cache 所有。小元数据与内容 digest 在 SQLite，大正文进入 Managed Blob；Read Side 每次按当前 Camp/Run 授权、稳定 sequence 和有界分页读取，保留缺失/截断/完整性状态。
+- AgentRun Execution Evidence 是独立、用户可见但默认不回流 Agent 的权威记录，不归 Task、Message、Activity presentation 或 Runtime cache 所有。工具与执行事实保持 append-only；正文、公开 thought 与 reasoning summary 各自按消息块保留，delta 只作实时运输。每块在首片占据稳定位置，由原生 item 完成结果或连续正文边界定稿；取消、失败、受控退出保存已接受内容并标明中断，不把整个 Run 简化为最后一段。小内容在 SQLite，大正文进入 Managed Blob；当前 Read Side 叠加所属 Run 的未定稿内容，历史与实时使用同一块身份去重。字段与有界存储见 [Run Process Detail Surface v30](../contracts/run-process-detail-surface-v30.md#text-block-evidence)。
 - Renderer 对文本、结构化数据、二进制/未知类型和链接使用安全、有界渲染；不执行 evidence 内容、不把它当作 Agent 消息、Task 完成证明或可重放命令。保留/回收由权威 Run/Camp 引用和 Managed Blob GC 决定，不因 UI 清理或 Agent 不可见而提前删除。
 - Runtime Monitoring 只拥有 Usage-derived metering：原始 observation、归一化 usage、flush/rollup 和 bounded snapshot 由当前五表合同约束。缺失 token/cache/cost 保持稀疏 unknown，不补零或跨 grain 重复计费。
 - Usage raw observation、normalized grain、flush cursor/lease、rollup 和 bounded snapshot 保持独立身份/幂等键；读取按成员/Run/时间范围限界，retention/rollup 不改写已归一化 grain 或从缺失值补数。Cost 只在精确模型、价格版本、token category/grain 可证明且不重复计费时估算；Coverage、unknown 与数据新鲜度随 Snapshot 返回，UI 不把部分支持展示成完整精确账单。

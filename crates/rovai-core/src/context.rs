@@ -13022,7 +13022,7 @@ mod slow_tests {
                         camp_id: fixture.camp_id.clone(),
                         conversation_id,
                         body: "只检查当前单聊输入".to_string(),
-                        attachment_ids: Vec::new(),
+                        draft_revision: 0,
                         expected_conversation_version: 1,
                     },
                 },

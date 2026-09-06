@@ -129,6 +129,7 @@ import {
   groupExecutionEventsByRunId,
   isViewingNonTerminalAgentRun,
   loadCompleteAgentRunExecutionEvidence,
+  loadExecutionNarrationBodies,
   MessageAttachmentGroups,
   memberRuntimeConfigurationPresentation,
   preferredAgentProcessRun,
@@ -6574,7 +6575,7 @@ describe('task event projections', () => {
             agentRunId: 'run-history',
             requestedAfterSequence: 0,
             nextAfterSequence: 2,
-            throughSequence: 3,
+            throughSequence: 30,
             hasMore: true,
             evidence: [evidence(1), evidence(2)]
           }
@@ -6582,10 +6583,10 @@ describe('task event projections', () => {
             schemaVersion: 1,
             agentRunId: 'run-history',
             requestedAfterSequence: 2,
-            nextAfterSequence: 3,
-            throughSequence: 3,
+            nextAfterSequence: 30,
+            throughSequence: 30,
             hasMore: false,
-            evidence: [evidence(3)]
+            evidence: [{ ...evidence(3), sequence: 30 }]
           }
     }, 'camp-history', 'run-history')
 
@@ -6597,6 +6598,24 @@ describe('task event projections', () => {
     const narration = progress.items.find((item) => item.kind === 'narration')
     expect(narration?.body).toHaveLength(deltas.join('').length)
     expect(narration?.body).toBe(deltas.join(''))
+    const requestedContent: string[] = []
+    const fullBody = `${'long narration 🙂'.repeat(2000)} END`
+    const block = { ...events[0], eventType: 'agent.text.block', isTruncated: true,
+      contentBlobId: 'blob-body', payload: { text: 'preview', blockId: events[0].id } }
+    const fullBodies = await loadExecutionNarrationBodies([
+      block,
+      { ...block, id: 'private', eventType: 'agent.thought.block' },
+      { ...block, id: 'tool', eventType: 'activity.completed' },
+      { ...block, id: 'inline', isTruncated: false }
+    ], async (id) => {
+      requestedContent.push(id)
+      return { payload: { text: fullBody } }
+    })
+    expect(requestedContent).toEqual([block.id])
+    expect(fullBodies.get(`narration:${block.id}`)).toBe(fullBody)
+    await expect(loadExecutionNarrationBodies([block], async () => {
+      throw new Error('temporary read failure')
+    })).rejects.toThrow('temporary read failure')
   })
 
   it('classifies diff lines without treating file headers as changes', () => {

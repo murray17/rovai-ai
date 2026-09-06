@@ -8,6 +8,7 @@ import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 import { requestNormalApplicationQuit } from './lib/planned-shutdown-app-quit.mjs'
 import { querySqliteRows } from './lib/sqlite.mjs'
+import { acceptExecutionText } from './lib/execution-text-acceptance.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const defaultAppPath = process.platform === 'win32'
@@ -72,6 +73,21 @@ try {
   const request = (method, params = {}) => appRequest(firstApp.cdp, method, params)
   const workspace = await request('workspaces.inspect', { path: projectRoot })
   const installation = await configureProductRuntime(request, runtimeKind, [agentId])
+  let textAcceptance = null
+  if (process.env.ROVAI_EXECUTION_TEXT_ACCEPT === '1') {
+    await evaluate(firstApp.cdp, `(() => {
+      window.__textAcceptFrames = {};
+      window.rovai.onEvent((event) => {
+        const runId = event.params?.agentRunId;
+        if (!runId || !['agent.text.delta', 'agent.thought.delta', 'agent.reasoning.summary.delta'].includes(event.method)) return;
+        const counts = window.__textAcceptFrames[runId] ??= {};
+        counts[event.method] = (counts[event.method] ?? 0) + 1;
+      });
+    })()`)
+    textAcceptance = await acceptExecutionText({ request, workspace, databasePath, waitFor,
+      frames: (runId) => evaluate(firstApp.cdp, `window.__textAcceptFrames[${JSON.stringify(runId)}] ?? {}`) })
+    await writeFile(join(outputDir, 'execution-text-acceptance.json'), JSON.stringify(textAcceptance, null, 2), { mode: 0o600 })
+  }
   const sent = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     name: 'Planned shutdown real Runtime acceptance',
@@ -83,6 +99,7 @@ try {
       'This is a controlled planned-shutdown acceptance run.',
       'Do not call tools, execute commands, inspect files, or modify the workspace.',
       'Write a detailed 4000-word explanation of why process exit alone cannot prove a distributed task was cancelled.',
+      'Emit that explanation as one long streaming commentary block, not as tool arguments. Do not start with a short acknowledgement or call tools before finishing that block.',
       'Stay within this one response and do not send messages through any external tool.'
     ].join(' '),
     purpose: 'Keep one real Runtime turn active while Rovai performs a controlled shutdown.'
@@ -92,7 +109,7 @@ try {
   assert(sent.status === 'accepted' && campId && agentRunId,
     `Real Runtime AgentRun was not accepted: ${JSON.stringify(sent)}`)
 
-  const shutdownReadySnapshot = await waitFor(async () => {
+  await waitFor(async () => {
     const snapshot = await request('camps.snapshot', { campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (['succeeded', 'failed', 'cancelled'].includes(run?.status)) {
@@ -117,6 +134,20 @@ try {
     `Packaged App did not own the expected Core/Runtime process tree: ${liveDescendantPids.join(', ')}`)
 
   await appendComposerText(firstApp.cdp, quitDraftLatestSuffix, quitDraftExpectedBody)
+  const acceptedText = ['1', 'partial-only'].includes(process.env.ROVAI_EXECUTION_TEXT_ACCEPT)
+    ? await waitFor(async () => {
+      const snapshot = await request('camps.snapshot', { campId })
+      const text = snapshot.executionEvidence.find((item) => item.agentRunId === agentRunId
+        && item.eventType === 'agent.text.block' && item.payload.status === 'streaming'
+        && item.payload.text?.length >= 512)
+      return text ? { id: text.id, text: text.payload.text } : null
+    }, 'accepted unfinished body immediately before normal App quit', 120_000, 20)
+    : null
+  // Delivery can advance from prepared to accepted while the Composer is being
+  // exercised. Assert against the boundary just before quit, not the first poll.
+  const beforeQuitSnapshot = await request('camps.snapshot', { campId })
+  const inputStatusBeforeShutdown = beforeQuitSnapshot.contextManifests
+    .find((manifest) => manifest.agentRunId === agentRunId)?.delivery?.status ?? null
   const shutdownStartedAt = Date.now()
   const quitRequest = requestAppQuit(firstApp)
   trace(`normal quit requested for pid ${firstApp.child.pid}`)
@@ -153,10 +184,8 @@ try {
     && afterShutdown.run.ended_at !== null
     && afterShutdown.run.terminal_resolution_source === null
     && afterShutdown.run.terminal_reason_code === null
-    && afterShutdown.run.last_error_code === 'planned_shutdown_outcome_unknown',
+    && afterShutdown.run.last_error_code === null,
   `Controlled shutdown did not terminalize the unresolved AgentRun honestly: ${JSON.stringify(afterShutdown.run)}`)
-  const inputStatusBeforeShutdown = shutdownReadySnapshot.contextManifests
-    .find((manifest) => manifest.agentRunId === agentRunId)?.delivery?.status ?? null
   assert(afterShutdown.delivery?.status === (inputStatusBeforeShutdown === 'prepared'
     ? 'delivery_unknown'
     : 'accepted'),
@@ -168,6 +197,12 @@ try {
 
   recoveredApp = await launchApp(await availablePort(), 1040, 700)
   const recoveredRequest = (method, params = {}) => appRequest(recoveredApp.cdp, method, params)
+  if (acceptedText) {
+    const recoveredText = await recoveredRequest('agentRunEvidence.getContent', { campId, evidenceId: acceptedText.id })
+    assert(recoveredText.payload?.status === 'interrupted'
+      && recoveredText.payload?.text?.startsWith(acceptedText.text),
+    'Normal App quit lost accepted partial text or marked it successfully completed')
+  }
   const recoveredDraft = await recoveredRequest('camp.composerDraft.get', { campId })
   assert(recoveredDraft.body === quitDraftExpectedBody
     && recoveredDraft.revision > savedDraftBeforeQuit.revision,
@@ -179,7 +214,7 @@ try {
     const snapshot = await recoveredRequest('camps.snapshot', { campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     return run?.status === 'cancelled'
-      && run.hasUnsettledExternalEffects === true
+      && run.hasUnsettledExternalEffects === false
       ? snapshot
       : null
   }, 'controlled-shutdown terminal after restart', 45_000, 100)
@@ -219,7 +254,7 @@ try {
     && finalFacts.run.cancel_requested_at !== null
     && finalFacts.run.cancel_reason_code === 'app_shutdown_cancel_all'
     && finalFacts.run.cancel_acknowledged_at !== null
-    && finalFacts.run.last_error_code === 'planned_shutdown_outcome_unknown'
+    && finalFacts.run.last_error_code === null
     && finalFacts.run.terminal_resolution_source === null
     && finalFacts.run.terminal_reason_code === null,
   `Restart did not preserve the controlled-shutdown terminal: ${JSON.stringify(finalFacts.run)}`)
@@ -282,6 +317,8 @@ try {
 
   const report = {
     ok: true,
+    executionText: textAcceptance,
+    partialTextPreservedOnQuit: acceptedText ? { characters: acceptedText.text.length, status: 'interrupted' } : null,
     mode: `packaged-app-real-${runtimeKind}-runtime`,
     app: basename(appPath),
     runtime: {
@@ -402,7 +439,10 @@ async function launchApp(port, width, height, {
     })
     await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
     if (waitForHealth) {
-      const health = await appRequest(cdp, 'health.check')
+      // The shell is intentionally visible before Core startup completes.
+      const health = await waitFor(async () => {
+        try { return await appRequest(cdp, 'health.check') } catch { return null }
+      }, 'isolated Core health after visible shell', 60_000, 100)
       assert(await realpath(health.database.path) === await realpath(databasePath),
         `Isolated packaged App opened the wrong database: ${health.database.path}`)
     } else {
@@ -411,6 +451,7 @@ async function launchApp(port, width, height, {
     return { cdp, child, stderr }
   } catch (error) {
     cdp?.close()
+    await writeFile(join(outputDir, 'launch-failure-stderr.log'), stderr.join(''), { mode: 0o600 })
     await terminateProcessTree(child)
     throw error
   }
@@ -514,7 +555,7 @@ async function openAgentProcess(cdp, targetAgentId) {
     return Boolean(chip)
   })()`)
   assert(opened, `Could not open the recovered process for ${targetAgentId}`)
-  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-uncertain'))`, 10_000)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.process-content'))`, 10_000)
 }
 
 async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight, deviceScaleFactor) {
@@ -594,19 +635,18 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
 
 async function collectFencedTerminal(cdp) {
   const terminal = await evaluate(cdp, `(() => {
-    const value = document.querySelector('.execution-uncertain')
-    const drawer = value?.closest('.process-content')
-    return value ? {
-      text: value.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+    const drawer = document.querySelector('.process-content')
+    return drawer ? {
+      uncertainCount: document.querySelectorAll('.execution-uncertain').length,
       recoveryBlockerCount: drawer?.querySelectorAll('.process-recovery-blocker').length ?? null,
       spinnerCount: drawer?.querySelectorAll('.spinner, [aria-busy="true"]').length ?? null
     } : null
   })()`)
   assert(terminal
-    && terminal.text.includes('外部效果待确认')
+    && terminal.uncertainCount === 0
     && terminal.recoveryBlockerCount === 0
     && terminal.spinnerCount === 0,
-  `Fenced Run did not show an honest terminal warning: ${JSON.stringify(terminal)}`)
+  `Cancelled Run exposed obsolete uncertainty/recovery UI: ${JSON.stringify(terminal)}`)
   return terminal
 }
 

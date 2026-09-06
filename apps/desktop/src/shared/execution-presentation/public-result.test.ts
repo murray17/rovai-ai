@@ -17,6 +17,21 @@ function step(events: LiveRuntimeEvent[]): ExecutionStep {
 }
 
 describe('ExecutionStep publicResult boundary', () => {
+  it('overlays a running text block without replaying old fragments and keeps tool interleaving', () => {
+    const block = event({ blockId: 'block-a', itemId: 'block-a', text: '正文🙂', status: 'streaming' }, 'agent.text.block', 'block-a')
+    const old = event({ itemId: 'block-a', delta: '正文🙂', textOffset: 0 }, 'agent.text.delta', 'old')
+    const next = event({ itemId: 'block-a', delta: '继续', textOffset: 4 }, 'agent.text.delta', 'next')
+    const tool = event({ kind: 'tool', toolCallId: 'tool', status: 'completed', title: 'Read' })
+    const tail = event({ blockId: 'block-b', text: '正文B', status: 'interrupted' }, 'agent.text.block', 'block-b')
+    const live = buildLiveExecutionProgress([block, old, next, tool, tail], 'run-1')
+    expect(live.items.map((item) => item.kind)).toEqual(['narration', 'tool', 'narration'])
+    expect(live.items[0]).toMatchObject({ body: '正文🙂继续' })
+    const terminal = event({ blockId: 'block-a', text: '正文🙂完整', status: 'completed' }, 'agent.text.block', 'block-a')
+    const settled = buildLiveExecutionProgress([terminal, old, next, tool, tail], 'run-1')
+    expect(settled.items[0]).toMatchObject({ body: '正文🙂完整' })
+    expect(settled.items[2]).toMatchObject({ body: '正文B' })
+  })
+
   it.each([
     { output: 'plain result', expected: 'plain result' },
     { output: { stdout: 'stdout result', stderr: 'stderr result' }, expected: 'stdout result\nstderr result' },
