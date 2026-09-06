@@ -17,7 +17,8 @@ import type {
   FilePreviewPageContent,
   OpenFilePreviewRequest,
   OpenFilePreviewResult,
-  ResolvedFilePreview
+  ResolvedFilePreview,
+  ResolvedTheme
 } from '@contracts'
 import { secureFilePreviewHtml } from './file-preview-html-document'
 import { FilePreviewLayoutProvider } from './FilePreviewLayout'
@@ -97,6 +98,7 @@ export interface FilePreviewContextValue {
   activeTabId: string | null
   openFeedback: FilePreviewOpenFeedback | null
   paneVisible: boolean
+  resolvedTheme: ResolvedTheme
   open(
     request: OpenFilePreviewRequest,
     target?: FileLocationTarget,
@@ -204,9 +206,11 @@ function restoredTab(snapshot: FilePreviewTabSnapshot): PreviewTabModel {
 
 export function FilePreviewProvider({
   campId,
+  resolvedTheme,
   children
 }: {
   campId: string | null
+  resolvedTheme: ResolvedTheme
   children: ReactNode
 }): React.JSX.Element {
   const [tabs, setTabsState] = useState<PreviewTabModel[]>([])
@@ -982,6 +986,7 @@ export function FilePreviewProvider({
     activeTabId,
     openFeedback,
     paneVisible,
+    resolvedTheme,
     open,
     openFileChanges,
     selectChangedFile,
@@ -998,7 +1003,7 @@ export function FilePreviewProvider({
     reopen,
     retry,
     changePage
-  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openFileChanges, openFeedback, openInSystem, paneVisible, reload, reopen, revealInFolder, retry, selectChangedFile, showPane, tabs])
+  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openFileChanges, openFeedback, openInSystem, paneVisible, reload, reopen, resolvedTheme, revealInFolder, retry, selectChangedFile, showPane, tabs])
 
   return (
     <FilePreviewContext.Provider value={value}>

@@ -5,6 +5,8 @@ import { FILE_REFERENCE_FRAGMENT, FileReferenceLink, type FileReferenceActivatio
 import { ResourceReferenceIcon } from './FilePreviewTabIcon'
 import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
 import { parseFileReference } from '../../file-preview-reference'
+import { MarkdownCodeBlock } from './MarkdownCodeBlock'
+import type { ResolvedTheme } from '@contracts'
 
 type MarkdownTreeNode = {
   type?: string
@@ -42,6 +44,16 @@ function markdownHeadingText(children: ReactNode): string {
     return markdownHeadingText(children.props.children)
   }
   return ''
+}
+
+type MarkdownHeadingTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+
+function markdownCodeBlock(children: ReactNode): { code: string; languageName?: string } | null {
+  const child = Array.isArray(children) && children.length === 1 ? children[0] : children
+  if (!isValidElement<{ children?: ReactNode; className?: string }>(child)) return null
+  const code = markdownHeadingText(child.props.children)
+  const match = /(?:^|\s)language-([^\s]+)/u.exec(child.props.className ?? '')
+  return { code, languageName: match?.[1] }
 }
 
 function markdownHeadingSlug(value: string): string {
@@ -90,7 +102,9 @@ export function SafeMarkdown({
   headingTarget,
   onHeadingTargetResult,
   leadingContent,
-  inlineLeadingContent = true
+  inlineLeadingContent = true,
+  mode = 'message',
+  theme = 'day'
 }: {
   children: string
   className?: string
@@ -101,6 +115,8 @@ export function SafeMarkdown({
   /** Trusted inline UI, never parsed from the Markdown source. */
   leadingContent?: ReactNode
   inlineLeadingContent?: boolean
+  mode?: 'message' | 'document'
+  theme?: ResolvedTheme
 }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const callbacks = useRef({ onFileReference, onHeadingTargetResult })
@@ -124,10 +140,24 @@ export function SafeMarkdown({
   // image projection changes still invalidate it because they change the output.
   // Leading UI reads context so member/profile updates do not reparse Markdown.
   const markdown = useMemo(() => {
-    const heading = (Tag: 'h3' | 'h4') => function MarkdownHeading({ children: headingChildren }: { children?: ReactNode }) {
+    const heading = (Tag: MarkdownHeadingTag) => function MarkdownHeading({ children: headingChildren }: { children?: ReactNode }) {
       const text = markdownHeadingText(headingChildren)
       return <Tag data-markdown-heading={text}>{headingChildren}</Tag>
     }
+    const headingComponents = mode === 'document'
+      ? {
+          h1: heading('h1'),
+          h2: heading('h2'),
+          h3: heading('h3'),
+          h4: heading('h4'),
+          h5: heading('h5'),
+          h6: heading('h6')
+        }
+      : {
+          h1: heading('h3'),
+          h2: heading('h3'),
+          h3: heading('h4')
+        }
     return (
       <Markdown
         remarkPlugins={[
@@ -143,6 +173,7 @@ export function SafeMarkdown({
         ]}
         unwrapDisallowed
         components={{
+          ...headingComponents,
           p({ node, children: paragraphChildren }) {
             const leading = node?.properties['data-rovai-leading-content'] === 'true'
             return (
@@ -153,9 +184,17 @@ export function SafeMarkdown({
               </p>
             )
           },
-          h1: heading('h3'),
-          h2: heading('h3'),
-          h3: heading('h4'),
+          ...(mode === 'document' ? {
+            pre({ children: preChildren }) {
+              const block = markdownCodeBlock(preChildren)
+              return block
+                ? <MarkdownCodeBlock code={block.code} languageName={block.languageName} theme={theme} />
+                : <pre>{preChildren}</pre>
+            },
+            table({ children: tableChildren }) {
+              return <div className="markdown-table-scroll"><table>{tableChildren}</table></div>
+            }
+          } : {}),
           a({ href, children: linkChildren }) {
             if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && fileReferencesEnabled) {
               let rawReference: string
@@ -219,11 +258,18 @@ export function SafeMarkdown({
         {children}
       </Markdown>
     )
-  }, [children, fileReferencesEnabled, localImageUrl, hasLeadingContent, inlineLeadingContent])
+  }, [children, fileReferencesEnabled, localImageUrl, hasLeadingContent, inlineLeadingContent, mode, theme])
 
   return (
     <LeadingMarkdownContentContext.Provider value={leadingContent}>
-      <div ref={rootRef} className={className ? `safe-markdown ${className}` : 'safe-markdown'}>
+      <div
+        ref={rootRef}
+        className={[
+          'safe-markdown',
+          mode === 'document' ? 'is-document' : '',
+          className ?? ''
+        ].filter(Boolean).join(' ')}
+      >
         {markdown}
       </div>
     </LeadingMarkdownContentContext.Provider>
