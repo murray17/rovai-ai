@@ -385,7 +385,7 @@ try {
     ]
     await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
       (draft) => draft.body === smokeBody && deepEqual(draft.content, smokeContent), 10_000)
-    await mouseClick(running.cdp, '.camp-workspace .composer-send')
+    await mouseClick(running.cdp, '.composer:has(#camp-message) .composer-send')
 
     const smokeSnapshot = await waitForValue(async () =>
       request(running.cdp, 'camps.snapshot', { campId }), (snapshot) => {
@@ -551,7 +551,7 @@ try {
           || document.activeElement !== editor
           || !selection?.isCollapsed
           || !selection.anchorNode
-          || document.querySelector('.camp-workspace .composer-reply-line')) return false
+          || document.querySelector('.composer:has(#camp-message) .composer-reply-line')) return false
       const beforeCaret = document.createRange()
       beforeCaret.selectNodeContents(editor)
       beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset)
@@ -568,7 +568,7 @@ try {
         editorFocused: document.activeElement === editor,
         caretCollapsed: selection.isCollapsed,
         caretAtStart: beforeCaret.toString().length === 0,
-        replyDockPresent: Boolean(document.querySelector('.camp-workspace .composer-reply-line')),
+        replyDockPresent: Boolean(document.querySelector('.composer:has(#camp-message) .composer-reply-line')),
         editorText: editor.textContent
       }
     })()`)
@@ -601,14 +601,14 @@ try {
     await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
       (draft) => deepEqual(draft.content, emptyComposerDocument), 10_000)
     await waitForExpression(running.cdp, `(() => {
-      const rail = document.querySelector('.camp-workspace .composer-route-rail')
+      const rail = document.querySelector('.composer:has(#camp-message) .composer-route-rail')
       const summary = rail?.querySelector('.mention-target-summary')
       return rail?.getAttribute('aria-label') === '接收者路由'
         && summary?.textContent?.trim() === ${JSON.stringify(`默认由 Lead · ${targetMembers[0].displayName}接收`)}
     })()`)
     const defaultRouteInspection = await evaluate(running.cdp, `(() => {
-      const rail = document.querySelector('.camp-workspace .composer-route-rail')
-      const box = document.querySelector('.camp-workspace .composer-box')
+      const rail = document.querySelector('.composer:has(#camp-message) .composer-route-rail')
+      const box = document.querySelector('.composer:has(#camp-message) .composer-box')
       const summary = rail?.querySelector('.mention-target-summary')
       const actionRow = box?.querySelector('.composer-action-row')
       const attachmentButton = box?.querySelector('button[aria-label="添加文件"]')
@@ -669,7 +669,7 @@ try {
     await waitForExpression(running.cdp, `(() => (
       document.querySelector('#camp-message')?.textContent === ${JSON.stringify(`@${targetMembers[1].displayName} `)}
         && document.activeElement?.id === 'camp-message'
-        && !document.querySelector('.camp-workspace .composer-route-rail')
+        && !document.querySelector('.composer:has(#camp-message) .composer-route-rail')
     ))()`)
     await focusEditorAtEnd(running.cdp)
     const continuationMessageText = '继续发送验收'
@@ -682,11 +682,11 @@ try {
           { kind: 'text', text: ` ${continuationMessageText}` }
         ])), 10_000)
     await waitForExpression(running.cdp,
-      `document.querySelector('.camp-workspace .composer-send')?.disabled === false`)
+      `document.querySelector('.composer:has(#camp-message) .composer-send')?.disabled === false`)
     const continuationStartedAt = Date.now()
-    await mouseClick(running.cdp, '.camp-workspace .composer-send')
+    await mouseClick(running.cdp, '.composer:has(#camp-message) .composer-send')
     await waitForExpression(running.cdp, `(() => {
-      const continuation = document.querySelector('.camp-workspace .composer-continuation')
+      const continuation = document.querySelector('.composer:has(#camp-message) .composer-continuation')
       return continuation?.getAttribute('aria-label') === ${JSON.stringify(`继续发给 ${targetMembers[1].displayName}`)}
         && continuation.textContent?.includes(${JSON.stringify(`继续发给 @${targetMembers[1].displayName}`)})
         && document.querySelector('#camp-message')?.textContent === ''
@@ -702,9 +702,9 @@ try {
       key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 123
     })
     const continuationLayoutInspection = await evaluate(running.cdp, `(() => {
-      const rail = document.querySelector('.camp-workspace .composer-route-rail')
+      const rail = document.querySelector('.composer:has(#camp-message) .composer-route-rail')
       const continuation = rail?.querySelector('.composer-continuation')
-      const box = document.querySelector('.camp-workspace .composer-box')
+      const box = document.querySelector('.composer:has(#camp-message) .composer-box')
       const editor = document.querySelector('#camp-message')
       if (!(rail instanceof HTMLElement)
           || !(continuation instanceof HTMLElement)
@@ -1024,8 +1024,8 @@ try {
     (snapshot) => snapshot.agentRuns.every((run) =>
       ['succeeded', 'failed', 'cancelled'].includes(run.status)), 30_000)
   await waitForExpression(running.cdp,
-    `document.querySelector('.camp-workspace .composer-send')?.disabled === false`)
-  await mouseClick(running.cdp, '.camp-workspace .composer-send')
+    `document.querySelector('.composer:has(#camp-message) .composer-send')?.disabled === false`)
+  await mouseClick(running.cdp, '.composer:has(#camp-message) .composer-send')
 
   const sent = await waitForValue(async () => {
     const snapshot = await request(running.cdp, 'camps.snapshot', { campId })
@@ -1373,8 +1373,8 @@ try {
       && composerHasMember(draft.content, targetMemberIds[0]), 10_000)
   await waitForExpression(running.cdp, `(() => (
     document.activeElement?.id === 'camp-message'
-      && document.querySelector('.camp-workspace .composer')?.classList.contains('suppress-pointer-focus-ring')
-      && document.querySelector('.camp-workspace .composer-reply-line strong')?.textContent === '回复 叮叮'
+      && document.querySelector('.composer:has(#camp-message)')?.classList.contains('suppress-pointer-focus-ring')
+      && document.querySelector('.composer:has(#camp-message) .composer-reply-line strong')?.textContent === '回复 叮叮'
       && !document.querySelector('.mention-target-summary')
   ))()`)
   // Use a constrained viewport to exercise real overflow. The bounded excerpt
@@ -1427,7 +1427,7 @@ try {
         || document.activeElement !== editor
         || !selection?.isCollapsed
         || !selection.anchorNode
-        || document.querySelector('.camp-workspace .composer-reply-line')) return false
+        || document.querySelector('.composer:has(#camp-message) .composer-reply-line')) return false
     const beforeCaret = document.createRange()
     beforeCaret.selectNodeContents(editor)
     beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset)
@@ -1487,7 +1487,7 @@ try {
   const unresolvedReplyInspection = await evaluate(running.cdp, `(() => ({
     theme: document.documentElement.dataset.theme,
     warning: document.querySelector('.reply-recipient-repair-copy strong')?.textContent ?? null,
-    sendDisabled: document.querySelector('.camp-workspace .composer-send')?.disabled ?? null,
+    sendDisabled: document.querySelector('.composer:has(#camp-message) .composer-send')?.disabled ?? null,
     summary: document.querySelector('.mention-target-summary')?.textContent ?? null
   }))()`)
   assert(
@@ -1512,14 +1512,14 @@ try {
       && !composerHasMember(draft.content, targetMemberIds[0]), 10_000)
   await waitForExpression(running.cdp, `(() => (
     !document.querySelector('.reply-recipient-repair')
-      && document.querySelector('.camp-workspace .composer-reply-line strong')?.textContent === '回复 叮叮'
+      && document.querySelector('.composer:has(#camp-message) .composer-reply-line strong')?.textContent === '回复 叮叮'
       && !document.querySelector('.mention-target-summary')
-      && document.querySelector('.camp-workspace .composer-send')?.disabled === false
+      && document.querySelector('.composer:has(#camp-message) .composer-send')?.disabled === false
   ))()`)
   const continuationStartedAt = Date.now()
-  await mouseClick(running.cdp, '.camp-workspace .composer-send')
+  await mouseClick(running.cdp, '.composer:has(#camp-message) .composer-send')
   await waitForExpression(running.cdp, `(() => {
-    const continuation = document.querySelector('.camp-workspace .composer-continuation')
+    const continuation = document.querySelector('.composer:has(#camp-message) .composer-continuation')
     return continuation?.getAttribute('aria-label') === '继续发给 咕咕'
       && continuation.textContent?.includes('继续发给 @咕咕')
       && document.querySelector('#camp-message')?.textContent === ''
@@ -1606,21 +1606,21 @@ try {
       && draft.replyIntent.recipientSelectionRequired === false, 10_000)
   await emulateDesktopZoom(running.cdp, 1040, 700, 2)
   await waitForExpression(running.cdp, `(() => Boolean(
-    document.querySelector('.camp-workspace .composer-box')
-      && document.querySelector('.camp-workspace .composer-reply-line .composer-reply-copy > span')
+    document.querySelector('.composer:has(#camp-message) .composer-box')
+      && document.querySelector('.composer:has(#camp-message) .composer-reply-line .composer-reply-copy > span')
       && document.querySelector(
         '[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .reply-parent-quote'
       )
-      && document.querySelector('.camp-workspace .composer-send, .camp-workspace .composer-stop')
+      && document.querySelector('.composer:has(#camp-message) .composer-send, .composer:has(#camp-message) .composer-stop')
   ))()`)
   const zoom200ReplyInspection = await evaluate(running.cdp, `(() => {
-    const box = document.querySelector('.camp-workspace .composer-box')
-    const line = document.querySelector('.camp-workspace .composer-reply-line')
+    const box = document.querySelector('.composer:has(#camp-message) .composer-box')
+    const line = document.querySelector('.composer:has(#camp-message) .composer-reply-line')
     const excerpt = line?.querySelector('.composer-reply-copy > span')
     const parentQuote = document.querySelector(
       '[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .reply-parent-quote'
     )
-    const action = document.querySelector('.camp-workspace .composer-send, .camp-workspace .composer-stop')
+    const action = document.querySelector('.composer:has(#camp-message) .composer-send, .composer:has(#camp-message) .composer-stop')
     if (
       !(box instanceof HTMLElement)
       || !(line instanceof HTMLElement)
@@ -1668,7 +1668,7 @@ try {
   // The Core receipt can arrive before cancelReply's Renderer focus callback.
   // Finish that interaction before moving focus to the keyboard Reply action.
   await waitForExpression(running.cdp, `(() => (
-    !document.querySelector('.camp-workspace .composer-reply-line')
+    !document.querySelector('.composer:has(#camp-message) .composer-reply-line')
       && document.activeElement?.id === 'camp-message'
   ))()`)
   await setViewport(running.cdp, 1440, 920)
@@ -1686,8 +1686,8 @@ try {
   await pressNativeButtonEnter(running.cdp)
   await waitForExpression(running.cdp, `(() => (
     document.activeElement?.id === 'camp-message'
-      && !document.querySelector('.camp-workspace .composer')?.classList.contains('suppress-pointer-focus-ring')
-      && Boolean(document.querySelector('.camp-workspace .composer-reply-line'))
+      && !document.querySelector('.composer:has(#camp-message)')?.classList.contains('suppress-pointer-focus-ring')
+      && Boolean(document.querySelector('.composer:has(#camp-message) .composer-reply-line'))
   ))()`)
 
   result = {
@@ -1765,8 +1765,8 @@ try {
             focusedStages: [...document.querySelectorAll('.execution-process-stage.is-focused')].map((node) => ({ ...node.dataset })),
             drawerCount: document.querySelectorAll('.execution-drawer').length,
             composerText: document.querySelector('#camp-message')?.innerText ?? null,
-            composerSend: document.querySelector('.camp-workspace .composer-send')?.outerHTML ?? null,
-            composerStatus: [...document.querySelectorAll('.camp-workspace .composer [role="alert"], .camp-workspace .composer [role="status"]')]
+            composerSend: document.querySelector('.composer:has(#camp-message) .composer-send')?.outerHTML ?? null,
+            composerStatus: [...document.querySelectorAll('.composer:has(#camp-message) [role="alert"], .composer:has(#camp-message) [role="status"]')]
               .map((node) => node.textContent)
           }))()`)
           await writeFile(join(outputDir, 'failure-state.json'), JSON.stringify(state, null, 2))
@@ -2747,23 +2747,25 @@ async function pressNativeButtonEnter(cdp) {
 }
 
 async function selectWholeEditor(cdp) {
-  const selected = await evaluate(cdp, `(() => {
+  // Native selection updates Lexical's committed selection before the next key;
+  // a DOM-only Range can be overwritten when a Typeahead portal closes.
+  const focused = await evaluate(cdp, `(() => {
     const editor = document.querySelector('#camp-message')
     if (!(editor instanceof HTMLElement)) return false
     editor.focus()
-    const range = document.createRange()
-    range.selectNodeContents(editor)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    if (!selection || selection.rangeCount !== 1) return false
-    const selectedRange = selection.getRangeAt(0)
-    return selectedRange.startContainer === editor
-      && selectedRange.startOffset === 0
-      && selectedRange.endContainer === editor
-      && selectedRange.endOffset === editor.childNodes.length
+    return document.activeElement === editor
   })()`)
-  assert(selected, 'Could not select the whole Composer body')
+  assert(focused, 'Could not focus the whole Composer body')
+  await pressKey(cdp, {
+    key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 0, modifiers: 4
+  })
+  await waitForExpression(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    const selection = window.getSelection()
+    return Boolean(editor && selection?.anchorNode && selection.focusNode
+      && editor.contains(selection.anchorNode) && editor.contains(selection.focusNode)
+      && selection.toString() === (editor.textContent ?? ''))
+  })()`, 3_000)
 }
 
 async function activateLastInteractiveMentionWithKey(cdp, activation) {
@@ -3104,10 +3106,10 @@ async function emulateDesktopZoom(cdp, physicalWidth, physicalHeight, zoomFactor
 
 async function inspectLightweightReply(cdp) {
   return evaluate(cdp, `(() => {
-    const composer = document.querySelector('.camp-workspace .composer')
-    const box = document.querySelector('.camp-workspace .composer-box')
-    const line = document.querySelector('.camp-workspace .composer-reply-line')
-    const copy = document.querySelector('.camp-workspace .composer-reply-copy')
+    const composer = document.querySelector('.composer:has(#camp-message)')
+    const box = document.querySelector('.composer:has(#camp-message) .composer-box')
+    const line = document.querySelector('.composer:has(#camp-message) .composer-reply-line')
+    const copy = document.querySelector('.composer:has(#camp-message) .composer-reply-copy')
     const author = copy?.querySelector('strong')
     const excerpt = copy?.querySelector(':scope > span')
     const editor = document.querySelector('#camp-message')
