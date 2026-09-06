@@ -230,6 +230,10 @@ pnpm package:mac
 pnpm accept:runtime-activity-ui
 ```
 
+只核对共享工具详情时，可补充运行 `ROVAI_RUNTIME_ACTIVITY_ACCEPT_TOOL_DETAILS_ONLY=1 pnpm accept:runtime-activity-ui`。
+它在同一隔离夹具验证 Web 的 Canonical 步骤数、查询原文、类型图标与展开结果，以及无输出 Shell 命令的结果展开；
+报告和截图与全量结果分开保存。此定向检查不能替代完整交互矩阵或把全量失败改报为通过。
+
 需要把生产 App 留给人工检查时，可运行
 `node scripts/accept-runtime-activity-ui.mjs "dist/mac-arm64/Rovai AI.app" --preview`。
 它创建同样的隔离 fixture、打开明确标注“模拟数据”的执行 Camp 并等待用户关闭 App；不调用真实模型，

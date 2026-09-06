@@ -30,6 +30,7 @@ const conversationDropZoneOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DROP_
 const worldMapOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_WORLD_MAP_ONLY === '1'
 const runtimeModelOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_MODEL_ONLY === '1'
 const webSearchOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_WEB_SEARCH_ONLY === '1'
+const toolDetailsOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_TOOL_DETAILS_ONLY === '1'
 const databasePath = join(dataDir, 'rovai.sqlite')
 const debugPort = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT
   ? Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT)
@@ -192,25 +193,28 @@ try {
   await waitForExpression(app.cdp, `document.querySelector('.camp-detail-popover')?.hidden === false`)
   await mouseClickSelector(app.cdp, '.run-pulse-inspector .execution-placement-button')
   await waitForExpression(app.cdp, `document.querySelector('.execution-drawer')?.dataset.placement === 'bottom'`)
-  if (!webSearchOnly) {
+  if (!webSearchOnly && !toolDetailsOnly) {
     await evaluate(app.cdp,
       `document.querySelector('.execution-drawer [aria-label="收起执行详情"]')?.click()`)
     await waitForExpression(app.cdp, `!document.querySelector('.execution-drawer')`)
   }
 
-  if (webSearchOnly) {
+  if (webSearchOnly || toolDetailsOnly) {
     const webSearchPresentation = await verifyWebSearchPresentation(app.cdp)
     const webSearchCapture = join(outputDir, 'runtime-activity-web-search.png')
     await capture(app.cdp, webSearchCapture)
-    const reportPath = join(outputDir, 'runtime-search-acceptance.json')
+    const shellPresentation = toolDetailsOnly ? await verifyClaudeCommandDisclosure(app.cdp) : null
+    const shellCapture = toolDetailsOnly ? join(outputDir, 'runtime-activity-shell-command.png') : null
+    if (shellCapture) await capture(app.cdp, shellCapture)
+    const reportPath = join(outputDir, toolDetailsOnly ? 'runtime-tool-details-acceptance.json' : 'runtime-search-acceptance.json')
     const report = {
       ok: true,
-      mode: 'controlled-runtime-web-search-fixture',
+      mode: toolDetailsOnly ? 'controlled-runtime-tool-details-fixture' : 'controlled-runtime-web-search-fixture',
       app: basename(appPath),
       fixtureRoot,
       outputDir,
-      verified: { webSearchPresentation },
-      captures: { webSearch: webSearchCapture }
+      verified: { webSearchPresentation, ...(toolDetailsOnly ? { shellPresentation } : {}) },
+      captures: { webSearch: webSearchCapture, ...(shellCapture ? { shell: shellCapture } : {}) }
     }
     await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
     console.log(JSON.stringify({ ...report, reportPath }, null, 2))
@@ -3099,7 +3103,7 @@ async function verifyWebSearchPresentation(cdp) {
   })()`)
   assert(opened.found
     && opened.groupFound
-    && opened.groupLabel === '已执行 1 项操作；状态：全部成功',
+    && opened.groupLabel === '完成了 1 个步骤',
   `Web search was not counted inside the Tool operation group: ${JSON.stringify(opened)}`)
   await waitForExpression(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]

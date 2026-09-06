@@ -269,3 +269,9 @@ ACP 原有错误/投递测试扩展网络类别与 accepted/not-accepted 分流�
 
 验证命令：`pnpm typecheck`、`pnpm exec vitest run`、`node --test scripts/lib/single-chat-panel.test.mjs`、
 `pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check` 与 `DOCS_BASE_REF=<PR base> pnpm docs:check:ci`。
+
+成品补充验证：`pnpm package:mac:daily` 的 arm64/ad-hoc App、Core、CLI 校验通过。带隔离 userData 和
+Skill Library 的工具详情定向验收通过，验证“完成了 1 个步骤”、Web 查询全文和 Shell 无输出结果展开。
+全量 `accept:runtime-activity-ui` 本轮未通过：消息操作栏现有 `margin-left: -5px` 与旧脚本要求的零偏移不符；
+该偏移在 PR #255 的基线已存在，本轮不修改消息操作栏或放宽全量断言。定向脚本的旧“已执行 1 项操作”
+断言已同步当前工具组合同；该补充只改变验收脚本和记录，已打包的生产代码不变。
