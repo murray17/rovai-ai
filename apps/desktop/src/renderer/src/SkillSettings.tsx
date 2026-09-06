@@ -16,9 +16,7 @@ import {
   AppDialogBody,
   AppDialogContent,
   AppDialogFooter,
-  AppDialogHeader,
-  AppDialogImpact,
-  AppDialogImpactList
+  AppDialogHeader
 } from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
@@ -756,15 +754,15 @@ function ImportInspectionDialog({ inspection, busy, onClose, onCommit }: {
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
         <AppDialogContent className="skill-import-dialog" width="wide" tone="info">
           <AppDialogHeader
-            title="检查 Skill 导入"
-            description="确认后写入 Rovai Skill Library。新 Skill 默认启用并选择全部 Agent 运行时生效组；之后仍可逐项调整。"
+            title="导入 Skill"
+            description="新 Skill 默认启用，并应用到全部 Agent 运行时生效组。"
             icon="sparkles"
             kicker="安全预览"
             closeDisabled={busy !== null}
           />
           {inspection && (
             <AppDialogBody>
-              <code className="inspection-path">{inspection.sourcePath}</code>
+              <details className="app-dialog-disclosure"><summary>来源目录</summary><code className="inspection-path">{inspection.sourcePath}</code></details>
               <div className="import-candidate-list">
                 {inspection.candidates.map((candidate) => {
                   const blocked = candidate.importAction === 'official_conflict'
@@ -813,13 +811,7 @@ export function DeleteSkillDialog({ skill, busy, onClose, onConfirm }: {
             kicker="受管内容"
             closeDisabled={busy !== null}
           />
-          <AppDialogBody>
-            <AppDialogImpactList>
-              <AppDialogImpact tone="delete" icon="trash" label="Rovai 管理内容">当前 Revision 与受管文件将在安全释放后删除。</AppDialogImpact>
-              <AppDialogImpact tone="keep" icon="keep" label="原生 Skill">Agent 运行时原生的同名 Skill 不会被删除。</AppDialogImpact>
-              <AppDialogImpact tone="keep" icon="shield" label="当前执行">已经开始的执行继续使用启动时冻结的版本。</AppDialogImpact>
-            </AppDialogImpactList>
-          </AppDialogBody>
+
           <AppDialogFooter>
             <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}>取消</button></Dialog.Close>
             <button className="danger-button" type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith('delete-') ? '正在删除…' : copy.confirmLabel}</button>
@@ -848,14 +840,9 @@ export function UpdateSkillDialog({ candidate, busy, onClose, onConfirm }: {
             icon="sparkles"
             kicker="版本更新"
             closeDisabled={busy !== null}
+            hideDescription
           />
-          <AppDialogBody>
-            <AppDialogImpactList>
-              <AppDialogImpact icon="sparkles" label="将创建">一个新的不可变 Revision，并将其设为之后投递使用的版本。</AppDialogImpact>
-              <AppDialogImpact tone="keep" icon="keep" label="生效组">当前分配到的 Agent 运行时生效组保持不变。</AppDialogImpact>
-              <AppDialogImpact tone="keep" icon="shield" label="当前执行">已经开始的执行继续使用启动时选择的原版本。</AppDialogImpact>
-            </AppDialogImpactList>
-          </AppDialogBody>
+
           <AppDialogFooter>
             <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}>取消</button></Dialog.Close>
             <button className="primary-button" type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith('import-') ? '正在更新…' : copy.confirmLabel}</button>

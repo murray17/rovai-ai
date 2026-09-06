@@ -5994,28 +5994,35 @@ function MentionProfilePopover({
                       {mentionRuntimeLabel(profile)}
                     </span>
                   </div>
-                  <dl className="mention-profile-fields">
-                    <div>
-                      <dt>专业职责</dt>
-                      <dd>{profile.professionalResponsibilities.trim() || '未设置'}</dd>
-                    </div>
-                    <div>
-                      <dt>工作准则</dt>
-                      <dd>{profile.workingPrinciples.trim() || '未设置'}</dd>
-                    </div>
-                    <div>
-                      <dt>性格底色</dt>
-                      <dd>
-                        {profile.personalityTraits.length > 0
-                          ? (
-                              <span className="mention-profile-traits">
-                                {profile.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}
-                              </span>
-                            )
-                          : '未设置'}
-                      </dd>
-                    </div>
-                  </dl>
+                  <div className="mention-profile-fields">
+                    <dl>
+                      <div>
+                        <dt>专业职责</dt>
+                        <dd>{profile.professionalResponsibilities.trim() || '未设置'}</dd>
+                      </div>
+                    </dl>
+                    <details className="app-dialog-disclosure">
+                      <summary>工作准则与性格底色</summary>
+                      <dl>
+                        <div>
+                          <dt>工作准则</dt>
+                          <dd>{profile.workingPrinciples.trim() || '未设置'}</dd>
+                        </div>
+                        <div>
+                          <dt>性格底色</dt>
+                          <dd>
+                            {profile.personalityTraits.length > 0
+                              ? (
+                                  <span className="mention-profile-traits">
+                                    {profile.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}
+                                  </span>
+                                )
+                              : '未设置'}
+                          </dd>
+                        </div>
+                      </dl>
+                    </details>
+                  </div>
                 </div>
               </div>
             )
@@ -6642,6 +6649,7 @@ function CampMembersPanel({
               icon="user"
               kicker="当前会话"
               closeDisabled={addSubmitting}
+              hideDescription
             />
             <AppDialogBody className="camp-member-dialog-body">
               {addResult && (
@@ -6684,6 +6692,10 @@ function CampMembersPanel({
                           <i aria-hidden="true" />{mentionRuntimeLabel(profile)}
                         </span>
                       </label>
+                      <details className="camp-member-invite-detail">
+                        <summary>职责</summary>
+                        <p>{profile.professionalResponsibilities || '职责尚未填写'}</p>
+                      </details>
                       {failure && <div className="camp-member-candidate-error" role="alert">{failure}</div>}
                     </div>
                   )
@@ -6698,7 +6710,7 @@ function CampMembersPanel({
                 )}
               </div>
             </AppDialogBody>
-            <AppDialogFooter note="仅显示当前在队、尚未加入本会话的队员。">
+            <AppDialogFooter>
               <Dialog.Close asChild><button className="quiet-button" type="button" disabled={addSubmitting}>取消</button></Dialog.Close>
               <button
                 className="primary-button"
@@ -6721,7 +6733,7 @@ function CampMembersPanel({
           >
             <AppDialogHeader
               title={`移出${removalTarget?.displayName ?? '这位队员'}？`}
-              description={`只影响当前会话：移出后，${removalTarget?.displayName ?? '这位队员'}将不再接收这里的新工作。`}
+              description="只影响当前会话，移出后不再接收这里的新工作。"
               descriptionId="camp-remove-member-description"
               icon="user"
               kicker="当前会话"
@@ -9741,7 +9753,8 @@ export function TaskPanel({
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
           <AppDialogContent className="task-editor-dialog" width="wide" onCloseAutoFocus={restoreEditorFocus}>
-            <AppDialogHeader icon="pencil" title={mode === 'create' ? '新建任务' : '编辑任务'} description={mode === 'create' ? '记录需要持续跟踪的责任与验收条件。' : `版本 ${expectedVersion} · 修改任务内容与状态。`} />
+            <AppDialogHeader icon="pencil" title={mode === 'create' ? '新建任务' : '编辑任务'} description={mode === 'create' ? '记录需要持续跟踪的责任与验收条件。' : `版本 ${expectedVersion} · 修改任务内容与状态。`}
+            hideDescription />
             <form className="task-editor" onSubmit={(event) => void (mode === 'create' ? submitCreate(event) : submitUpdate(event))}>
               <AppDialogBody>
                 {formError && <p className="task-form-error" role="alert">{formError}</p>}
@@ -9772,7 +9785,7 @@ export function TaskPanel({
                 <small className="task-draft-note">关闭后保留本次草稿</small>
                 <button className="quiet-button" type="button" disabled={submitting} onClick={closeEditor}>收起</button>
                 <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy || (mode === 'edit' && (terminal || !selectedTask))}>
-                  {submitting ? '正在保存…' : mode === 'create' ? '创建任务' : '保存修改'}
+                  {submitting ? '正在保存…' : mode === 'create' ? '新建' : '保存'}
                 </button>
               </AppDialogFooter>
             </form>

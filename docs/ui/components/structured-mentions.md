@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -40,6 +40,8 @@ Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp Catalog 
 按键时不得触发发送。Enter/Tab 的归属不读取 React `menuOpen` 或渲染后的候选数组，而由 Typeahead 的 Lexical
 critical-priority command 从当前 selection 同步重算 trigger：Catalog loading 时消费按键但不选择，ready 且有候选时
 选择当前项，无 trigger 或 ready/error 且无候选时才交给普通发送行为。
+当前候选必须保持在滚动区域内，并通过稳定 option ID 与编辑器的 `aria-activedescendant` 对应；
+Member 与 Skill 菜单共享这项焦点同步，菜单关闭后移除该关联。
 
 普通 Member 候选的主行显示当前 Camp Catalog 名称，副行显示同一 Catalog 的团队角色；团队角色为空时显示
 “团队角色未设置”。副行不得使用所有候选共享的“Camp 成员”等占位文案。All Members 候选继续显示广播说明。

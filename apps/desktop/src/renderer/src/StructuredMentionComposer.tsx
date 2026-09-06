@@ -521,7 +521,7 @@ function renderMentionMenu(
     <div className="mention-menu-heading"><strong>选择接收者</strong><span>↑↓ 选择 · Enter 确认</span></div>
     {options.length === 0
       ? <p className="structured-mention-empty">没有匹配的队员</p>
-      : options.map((option, index) => <button type="button" role="option"
+      : options.map((option, index) => <button type="button" role="option" id={`${menuId}-option-${index}`}
           key={option.kind === 'all_members' ? 'all-members' : `member:${option.member.agentId}`}
           aria-selected={selectedIndex === index}
           className={selectedIndex === index ? 'active' : ''}
@@ -557,7 +557,7 @@ function renderSkillMenu(
         ? <p className="structured-mention-empty">Skills 暂时无法读取，请稍后重试</p>
         : options.length === 0
           ? <p className="structured-mention-empty">没有匹配的 Skill</p>
-          : options.map((option, index) => <button type="button" role="option"
+          : options.map((option, index) => <button type="button" role="option" id={`${menuId}-option-${index}`}
               key={`skill:${option.id}`} data-skill-name={option.name}
               aria-selected={selectedIndex === index}
               className={selectedIndex === index ? 'active' : ''}

@@ -786,7 +786,7 @@ function JsonEditorDialog({
         <AppDialogContent className="mcp-editor-dialog" width="wide">
           <AppDialogHeader
             title={editor.serverId ? '编辑 MCP' : '添加 MCP'}
-            description={<>粘贴一个标准 <code>mcpServers</code> 对象；本次只能保存一个 Server，外层对象键将作为 Server Name。</>}
+            description={<>使用标准 <code>mcpServers</code> JSON，每次保存一个 Server。</>}
             icon="server"
             closeDisabled={busy}
           />
@@ -834,7 +834,7 @@ function ImportDialog({
         <AppDialogContent className="mcp-import-dialog" width="large" tone="info">
           <AppDialogHeader
             title="从本机配置导入 MCP"
-            description="只读取用户级配置并生成预览。导入项默认停用且不分配队员；明文凭据不会复制或显示。"
+            description="导入项默认停用且不分配队员；明文凭据不会复制。"
             icon="download"
             kicker="本机只读扫描"
             closeDisabled={busy}
@@ -858,13 +858,13 @@ function ImportDialog({
                       <input type="checkbox" checked={draft?.selected ?? false} disabled={unavailable} onChange={(event) => update(candidate.candidateId, { selected: event.target.checked })} />
                       <span><strong>{candidate.sourceName}</strong><small>{sourceLabel(candidate.sourceKind)} · {importCompatibilityLabel(candidate.compatibility, candidate.conflict)}</small></span>
                     </label>
-                    <pre className="mcp-import-source-preview">{candidate.sourceDefinitionJson}</pre>
+                    <details className="app-dialog-disclosure"><summary>来源 JSON</summary><pre className="mcp-import-source-preview">{candidate.sourceDefinitionJson}</pre></details>
                     {draft?.selected && (
                       <div className="mcp-import-options">
                         {candidate.conflict === 'name_conflict' && (
                           <label><span>冲突处理</span><select value={draft.action} onChange={(event) => update(candidate.candidateId, { action: event.target.value as ImportDraft['action'] })}><option value="replace">替换同名 Server，保留 ID 与分配</option><option value="create">修改 JSON 后另存</option></select></label>
                         )}
-                        <label className="mcp-import-json"><span>规范化后的 JSON</span><textarea spellCheck={false} value={draft.definitionJson} onChange={(event) => update(candidate.candidateId, { definitionJson: event.target.value })} /></label>
+                        <details className="app-dialog-disclosure"><summary>查看或修改 JSON</summary><label className="mcp-import-json"><span>规范化后的 JSON</span><textarea spellCheck={false} value={draft.definitionJson} onChange={(event) => update(candidate.candidateId, { definitionJson: event.target.value })} /></label></details>
                       </div>
                     )}
                     <div className="mcp-import-issues">
@@ -876,7 +876,7 @@ function ImportDialog({
               })}
             </div>
           </AppDialogBody>
-          <AppDialogFooter note="导入后需显式启用并分配给队员。">
+          <AppDialogFooter>
             <button className="quiet-button" type="button" onClick={onClose} disabled={busy}>取消</button>
             <button className="primary-button" type="button" onClick={onCommit} disabled={busy || selectedCount === 0}>{busy ? '正在导入…' : `导入所选（${selectedCount}）`}</button>
           </AppDialogFooter>

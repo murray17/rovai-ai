@@ -268,7 +268,6 @@ function resultMessage(result: StoredCommandResult): string {
   if (typeof message === 'string' && message.trim()) return message
   if (result.code === 'single_chat.runtime_not_ready') return '这位队员的运行时暂不可用。'
   if (result.code === 'single_chat.member_unavailable') return '这位队员已不在当前会话中。'
-  if (result.code === 'single_chat.version_conflict') return '对话刚刚发生变化，请重试。'
   if (result.code === 'single_chat.draft_changed') return '附件草稿刚刚发生变化，请重试。'
   if (result.code === 'single_chat.pending_input_changed') return '这条排队消息刚刚发生变化，请重试。'
   if (result.code === 'single_chat.pending_input_edit_open') return '另一处正在编辑这条排队消息。'
@@ -1429,7 +1428,6 @@ export function SingleChatPanel({
           campId,
           conversationId: current.conversation.id,
           body,
-          expectedConversationVersion: current.conversation.version,
           draftRevision: current.draft.revision
         }
       })
