@@ -1,8 +1,30 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
+import { appendLiveRuntimeEventBatch, createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
 import { buildLiveExecutionProgress, type LiveRuntimeEvent } from './ui-model'
 
 afterEach(() => vi.useRealTimers())
+
+it('retains one live entry per identified block across batches, tools, overlap and native completion', () => {
+  const delta = (blockId: string, textOffset: number, text: string): LiveRuntimeEvent => ({
+    ...event(textOffset), id: `${blockId}:${textOffset}`,
+    payload: { blockId, itemId: blockId, textOffset, delta: text }
+  })
+  let events: LiveRuntimeEvent[] = []
+  for (let i = 0; i < 1000; i++) events = appendLiveRuntimeEventBatch(events, [delta('A', i * 2, '🙂')])
+  expect(events).toHaveLength(1)
+  const tool = { ...event(1001, 'runtime.action'), payload: { toolCallId: 'tool', status: 'completed', title: 'Read' } }
+  events = appendLiveRuntimeEventBatch(events, [tool, delta('B', 40, 'part')])
+  events = appendLiveRuntimeEventBatch(events, [delta('B', 42, 'rt two'), delta('A', 1998, '🙂')])
+  expect(events).toHaveLength(3)
+  expect(events[2].payload).toMatchObject({ textOffset: 40, delta: 'part two' })
+  events = appendLiveRuntimeEventBatch(events, [{ ...event(1, 'agent.text.block'), id: 'A',
+    payload: { blockId: 'A', itemId: 'A', text: 'A full', status: 'completed' } }, delta('A', 2000, 'late')])
+  const progress = buildLiveExecutionProgress(events, 'run')
+  expect(progress.items.map(item => item.kind)).toEqual(['narration', 'tool', 'narration'])
+  expect(progress.items[0]).toMatchObject({ body: 'A full' })
+  expect(events).toHaveLength(3)
+  expect(events[1]).toBe(tool)
+})
 
 function event(id: number, eventType = 'agent.text.delta'): LiveRuntimeEvent {
   return { id: `event-${id}`, agentRunId: 'run', eventType,

@@ -5,7 +5,7 @@ use rusqlite::OptionalExtension;
 
 use crate::{
     collaboration::{CollaborationService, ReconcileDefaultLeadCommand},
-    command::{CommandEnvelope, CommandResultStatus},
+    command::{ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway},
     db::Database,
     read_model::{CampOpenProjection, ReadModelService},
 };
@@ -35,7 +35,21 @@ impl CampOpenService {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        let reconcile_duration = if activation_state.as_deref() == Some("pending") {
+        let pending = activation_state.as_deref() == Some("pending");
+        // Enter may be a pure read. A real, previously submitted reconciliation still
+        // replays its original receipt (including rejection) even if membership changed.
+        let recorded = if pending {
+            None
+        } else {
+            DomainCommandGateway.replay_if_recorded(database, envelope)?
+        };
+        let lead_valid: bool = database.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM camp JOIN camp_member ON camp_member.camp_id=camp.id AND camp_member.agent_id=camp.default_lead_agent_id JOIN agent_profile ON agent_profile.id=camp_member.agent_id WHERE camp.id=?1 AND camp_member.status='active' AND camp_member.leave_requested_at IS NULL AND agent_profile.profile_status='present')",
+            [&camp_id], |row| row.get(0),
+        )?;
+        let reconcile_duration = if pending
+            || (recorded.is_none() && lead_valid && matches!(envelope.actor, ActorRef::User { .. }))
+        {
             None
         } else {
             let reconcile_started_at = Instant::now();
@@ -51,6 +65,7 @@ impl CampOpenService {
             Some(reconcile_duration)
         };
         crate::runtime::settle_pending_camp_cancellations(database, &camp_id)?;
+        crate::execution_text::flush_settled(database)?;
         let projection_started_at = Instant::now();
         let projection = ReadModelService.camp_open_projection(database, &camp_id)?;
         Ok(CampOpenOutcome {
@@ -62,6 +77,7 @@ impl CampOpenService {
 
     pub fn open(&self, database: &mut Database, camp_id: &str) -> Result<CampOpenOutcome> {
         crate::runtime::settle_pending_camp_cancellations(database, camp_id)?;
+        crate::execution_text::flush_settled(database)?;
         let projection_started_at = Instant::now();
         let projection = ReadModelService.camp_open_projection(database, camp_id)?;
         Ok(CampOpenOutcome {
@@ -149,6 +165,47 @@ mod slow_tests {
                 .any(|member| member.agent_id == "agent_2" && member.is_default_lead)
         );
         assert!(outcome.reconcile_duration.is_some());
+        let stable_sequence = outcome.projection.through_global_sequence;
+        let read_only_enter = CampOpenService
+            .enter(
+                &mut database,
+                &user_envelope(
+                    "camp-open-unchanged",
+                    Some(&camp_id),
+                    ReconcileDefaultLeadCommand {
+                        camp_id: camp_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(read_only_enter.reconcile_duration.is_none());
+        assert_eq!(
+            read_only_enter.projection.through_global_sequence,
+            stable_sequence
+        );
+        let receipt_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE command_id='camp-open-unchanged'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(receipt_count, 0);
+        let replay = CampOpenService
+            .enter(
+                &mut database,
+                &user_envelope(
+                    "camp-open-enter",
+                    Some(&camp_id),
+                    ReconcileDefaultLeadCommand {
+                        camp_id: camp_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(replay.reconcile_duration.is_some());
+        assert_eq!(replay.projection.through_global_sequence, stable_sequence);
         assert_eq!(
             outcome.projection.schema_version,
             crate::read_model::CAMP_OPEN_SCHEMA_VERSION

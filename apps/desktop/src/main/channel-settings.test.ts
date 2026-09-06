@@ -2596,17 +2596,20 @@ describe('channel settings service', () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const calls: Array<{ method: string; command: Record<string, unknown> }> = []
     let refreshRequested = false
+    let now = 200_000
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({
         'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
       }),
       createChannel: harness.createChannel,
       ...inertInterval(),
+      now: () => now,
       core: channelCore((method, rawParams) => {
         const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command
           ?? {})
         if (method === 'channels.feishu.snapshot') {
           return coreSnapshot({
+            transportConversations: [{ tenantKey: 'tenant-1', chatId: 'oc_topic_group' }],
             memberBots: [{
               agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
               botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
@@ -2618,7 +2621,7 @@ describe('channel settings service', () => {
           calls.push({ method, command })
           expect(rawParams).toEqual({ workerId: expect.any(String), limit: 20 })
           if (refreshRequested) {
-            return { deliveries: [], rosterRefreshes: [] }
+            return { deliveries: [], rosterRefreshes: [], hasOutstandingWork: true }
           }
           refreshRequested = true
           return {
@@ -2656,6 +2659,24 @@ describe('channel settings service', () => {
         chatId: 'oc_topic_group',
         presentAppIds: ['cli_a']
       })
+    // A forced generation refresh must still run inside the cache lifetime. The next
+    // background sweep, fifteen seconds later, must reuse that observation without a receipt.
+    const wake = async () => {
+      const ticks = calls.filter((call) => call.method === 'channels.host.tick').length
+      service.handleCoreEvent({ method: 'agent_run.started', params: {} })
+      await vi.waitFor(() => expect(calls.filter((call) => call.method === 'channels.host.tick').length).toBeGreaterThan(ticks))
+    }
+    now = 215_000
+    refreshRequested = false
+    await wake()
+    await vi.waitFor(() => expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(2))
+    now = 230_000
+    await wake()
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(2)
+    expect(calls.filter((call) => call.method === 'channels.roster.reconcile')).toHaveLength(2)
+    now = 260_000
+    await wake()
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(3)
     await service.stop()
   })
 

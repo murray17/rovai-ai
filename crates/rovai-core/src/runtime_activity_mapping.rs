@@ -9,7 +9,8 @@ use serde_json::Value;
 use crate::agent_profile::AdapterKind;
 
 pub const LEGACY_CLASSIFIER_VERSION: &str = "activity-v1";
-pub const CLASSIFIER_VERSION: &str = "activity-v2";
+pub const PREVIOUS_CLASSIFIER_VERSION: &str = "activity-v2";
+pub const CLASSIFIER_VERSION: &str = "activity-v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeActivityMappingDescriptor {

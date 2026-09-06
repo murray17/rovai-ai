@@ -4,12 +4,12 @@ version: v1.53
 lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: complete
+implementation_status: in-progress
 model_context_change: false
 last_updated: 2026-09-06
 ---
 
-# Rovai-ai v1.53：Runtime 原生生图公屏收紧
+# Rovai-ai v1.53：Runtime 图片来源、工具一致性与正文块持久化
 
 前置：[v1.52](../v1.52/README.md)。本版本保留 Runtime 结构化图片观察、混合存储、按需读取和既有图片
 Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
@@ -27,16 +27,34 @@ Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
   因而使用同一集合，Renderer wire 和 UI 结构不变。
 - `rovai send --file` 的显式图片附件继续走 CampMessage 与 Managed Attachment 链，不读取来源标记，行为不变。
 
+## 正文持久化补充
+
+本轮补充正文持久化与维护写放大修复，见 [V1.53-D02](decisions.md#v1-53-d02)和
+[实施与验收](implementation-plan.md#正文持久化补充)。补充任务更新 Runtime Evidence、Camp Open 读取
+与可见通知调用源。Migration 143 对旧库中已被同一 Canonical Command 终态完整输出覆盖的历史 delta
+及无正文生命周期空壳做一次性压缩，原子修复 Canonical 来源引用，并将 current marker 推进到
+`v1.53/schema 94/activity-v3`；没有终态的部分输出和所有真实工具事实保留。显式模型已由冻结配置拥有，
+因此其 Runtime 观察不再提交空命令。上述变化不改变 UI 布局、Runtime 平台准入或本版本原生图片过滤边界。
+
+## 工具一致性与已部署数据库兼容
+
+合入 PR #245 的 typed read/write、Shell 阅读摘要、统一工具状态及成功读取后提交文件预览；保留主线
+文件阅读器改动，不重新设计界面。Migration 142 将 classifier 切换到 `activity-v3` 并形成
+`v1.53/schema 93` 的 Migration 143 精确来源；此前主线 `v1.53/schema 92` 和工具分支
+`v1.52/schema 92/activity-v3` 均有明确升级路径，随后统一进入 current `v1.53/schema 94/activity-v3`。
+旧工具 141 的时间在原子汇合中保留，未知/部分 schema 不准入。见 [V1.53-D03](decisions.md#v1-53-d03)
+及 [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)。
+
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.52 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.53 |
-| Decisions | 已更新 | [V1.53-D01](decisions.md#v1-53-d01)记录 Adapter 确认的闭集来源、历史 fail-closed 与保留式过滤；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Images v5](../../contracts/runtime-images-v5.md)拥有来源准入、持久标记和显式发送边界；[Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)拥有收紧后的集合语义 |
-| Architecture | 已更新 | [Runtime 图片架构](../../architecture/runtime-images.md)同步观察/保留与自动展示分层、Core 单一过滤 seam 和显式附件分离 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)明确只消费 Core 已准入图片；布局、组件和文案不改 |
-| Runtime Activity | 确认无需更新 | 内部图片观察仍在 Evidence 前消费，Canonical Activity、Evidence 分类与执行台映射均不改变 |
+| Decisions | 已更新 | [V1.53-D01](decisions.md#v1-53-d01)拥有图片准入理由，[D02](decisions.md#v1-53-d02)拥有正文块与维护调用理由，[D03](decisions.md#v1-53-d03)拥有部署迁移汇合理由；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Runtime Images v5](../../contracts/runtime-images-v5.md)、[Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)、[Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)与 [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)分别拥有图片、读取、typed 操作与工具呈现 |
+| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[文件操作](../../architecture/runtime-file-change-observation.md)、[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)同步保留式投影与精确升级源汇合 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与 [File Preview](../../ui/components/file-preview.md)保留合入分支的工具一致性和文件阅读语义；正文优化不增加界面设计改动 |
+| Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)记录 activity-v3、可靠 typed read/write、历史 classifier 冻结和两种部署源兼容 |
 | Runtime compatibility | 确认无需更新 | 不改变 Runtime 启动、协议能力或平台资格；只使用已经适配并验证的原生事件字段 |
 | Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture 索引、版本指针和当前决定导航均指向 Runtime Images v5 与 Camp Open v16 |
 | Root README | 确认无需更新 | 项目定位、安装方法与公开 Runtime 支持范围不因本地公屏图片集合收紧而变化 |

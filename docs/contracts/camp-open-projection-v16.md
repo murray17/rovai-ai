@@ -25,6 +25,16 @@ Renderer 不补做来源猜测。过滤发生在消息图片区和独立兜底�
 Open schema 6、Snapshot 34、Navigation 3、`agentRunImages` metadata shape 与
 `agentRunImages.read({campId,imageId})` wire 均不变；`public_display_source` 不向 Renderer 暴露。
 
+## 按需进入维护
+
+Active `camps.enter` 先做只读 command receipt lookup 和当前 Default Lead 有效性检查。有原结果仍按原
+Envelope 回放（包括拒绝与 digest conflict）；新 User enter 且 Lead 仍为 present、active、无 leave intent
+时不提交 reconcile，不制造 `default_lead_unchanged` receipt。需要修复或 actor 不合格时保持原 Gateway
+语义。直接调用 `camps.reconcileDefaultLead` 的幂等、结果与审计不变。
+
+业务 `camps.open` 仍不读取 event_log。Navigation 的历史排序与完成游标仍依赖真实 publication/terminal
+事件，但聚合前过滤其他事件；不能把维护 receipt 当作业务活动，也不能删除现有事件来优化读取。
+
 ## References
 
 - [Runtime Images v5](runtime-images-v5.md)

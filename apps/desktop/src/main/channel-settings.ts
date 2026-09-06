@@ -2011,7 +2011,7 @@ export class ChannelSettingsService {
       [...unique.values()].map((conversation) => this.#reconcileChatRoster(
         conversation.chatId,
         conversation.tenantKey,
-        true,
+        false,
         snapshot
       ))
     )

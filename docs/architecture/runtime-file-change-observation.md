@@ -8,7 +8,7 @@ last_updated: 2026-08-28
 
 # Runtime File Change Observation 架构
 
-字段、归约与授权接口见 [Runtime File Change Observation v2](../contracts/runtime-file-change-observation-v2.md)。
+字段、归约与授权接口见 [Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md)。
 本架构只消费 Runtime 明确报告的文件变化，不读取当前文件、不扫描工作区，也不依赖 Git。
 
 ## 产品模型
@@ -19,7 +19,7 @@ Runtime terminal file event
   -> exact managed-output-root exclusion
   -> append-only Execution Evidence
        -> Canonical Activity projector
-            -> Command View `修改 <file>`
+            -> Command View `阅读 | 新增 | 编辑 <file>`
             -> optional inline Command Diff
        -> AgentRun file-change projector
             -> one projection per agentRunId + executionEpoch
@@ -38,7 +38,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 ### Runtime Adapter normalizer
 
-- Adapter 只接纳它能从协议终态证明的成功文件操作、完整 before/after、完整 unified diff snapshot 或 exact
+- Adapter 只接纳它能从协议结构化字段证明的成功 read/write 文件操作、完整 before/after、完整 unified diff snapshot 或 exact
   mutation；失败、取消、字段不完整和自由文本保持普通 Tool Evidence；
 - 路径按 Run 冻结的 execution root 做纯词法规范化，该 root 也是 display root。root 内转换为相对路径；root 外
   保留规范化绝对路径。相对 `..` 可解析到 root 外，但不能越过文件系统根；其他 URI scheme、Git metadata 路径和
@@ -54,7 +54,8 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 ### Canonical Activity projector
 
-- 成功的可靠单文件 operation 可在原 Canonical Activity 上形成 `修改 <basename>` presentation row；
+- 成功的可靠单文件 read/write operation 可在原 Canonical Activity 上形成阅读／编辑 presentation row；明确
+  `changeKind=add` 的 operation 或 Diff 行可显示新增，只有 write path 时保守显示编辑；
 - 有可靠内容时，同一行再获得 `diffProjection`、增删计数与 inline disclosure；只有 path 时仍显示文件行，但不
   伪造计数或空 diff；
 - Activity identity、phase、outcome、排序和 operation count 继续由既有 Canonical Activity 拥有。逐文件行只是
@@ -67,6 +68,8 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 - 投影 key 是 `agentRunId + executionEpoch`。Core 在 Run terminal ingress 已落库后执行；成功、失败或取消 Run
   都可以包含 terminal 前已经确认成功的文件操作；
+- schema 2 `operationKind=read` 永远不进入本投影；schema 1 历史 write/changeKind 和 schema 2 write 继续按既有
+  规则归约；
 - 正常 terminal callback 本身位于顺序消费的 Runtime ingress queue 中；取消路径则由 Host 级 ingress fence 将
   `route + enqueue` 与 `unbind + barrier` 串行化。Core 只在 barrier 被 consumer 确认后投影，不能让已选中 owner
   但尚未入队的终态文件事件落到 `no_changes` 之后；
@@ -121,6 +124,9 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - 标准 ACP Diff 形成完整 before/after。可靠单路径但没有 Diff 时形成 `OperationOnly`；
 - `rawInput` 的 `file_path | filePath | filepath` 只用于稳定路径，`old_string | oldString` 与
   `new_string | newString` 字段完整且 `replace_all != true` 时形成 FullBeforeAfter；
+- OpenCode 的成功 write 终态只有在 `rawOutput.metadata.exists` 是 Boolean、metadata `filepath` 与同 ToolCall
+  location 或 rawInput 的唯一非空路径完全一致时，才把 `false | true` 投影为 `changeKind=add | update`。该规则不
+  泛化到其他 ACP adapter；缺字段、类型错误、路径冲突或仅靠 metadata 给出路径时仍是普通 write；
 - failed/cancelled terminal 不发布。Kiro 的 `file:` URI、绝对路径、相对路径与已知 rooted-relative Diff 只按
   同 ToolCall 的唯一 location 做严格对齐，不做 suffix 猜测；合法 root 外绝对路径仍可作为展示路径；
 - ToolCall 的唯一 location 命中当前 managed output root 时，path-only 与绑定的单 entry Diff 都 fail closed；
@@ -131,6 +137,10 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - Claude Code 只配对 `assistant.tool_use(name=Edit)` 与相同 `tool_use_id` 的非错误 `user.tool_result`，保存
   `file_path + old_string + new_string` 的 ExactMutation；`replace_all=true`、Write、NotebookEdit、ApplyPatch、
   缺失或失败 result 均不准入；
+- Claude Write 仍不形成内容 Diff；同一 `tool_use_id` 的成功结构化结果只有在 `type=update` 且 `filePath` 与 tool
+  input 完全一致时，才在 typed write operation 上增加 `changeKind=update`。2.1.236 对不存在文件和已有空文件都
+  实际报告 `type=create + originalFile=null`，所以 create 不能作为 add 证据；字段缺失、create、未知类型、路径
+  冲突和 Edit 继续保守显示编辑；
 - 同一文件连续 Edit 保留多个时序块，不合并为虚假的完整文件净差异；
 - Antigravity 当前没有等价可靠终态内容，因此不生成文件变化卡片或 Command Diff。
 
@@ -145,7 +155,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 ## 相关规范
 
-- [Runtime File Change Observation v2](../contracts/runtime-file-change-observation-v2.md)
+- [Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md)
 - [Execution Evidence 与 Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [v1.29 决定](../versions/v1.29/decisions.md#v1-29-d08)

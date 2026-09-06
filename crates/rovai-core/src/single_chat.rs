@@ -1466,6 +1466,7 @@ impl SingleChatService {
                 &run.id,
             )?);
         }
+        crate::execution_text::overlay(database, &mut execution_evidence)?;
         Ok(Some(SingleChatSnapshot {
             conversation,
             messages,

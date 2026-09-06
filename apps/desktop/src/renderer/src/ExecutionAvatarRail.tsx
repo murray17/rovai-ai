@@ -1,10 +1,11 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { MemberAvatar, type MemberAvatarProps } from './MemberAvatar'
+import { ExecutionStatusGlyph, type ExecutionStatusShape } from './ExecutionStatusGlyph'
 
 export interface ExecutionAvatarRailItem extends Pick<MemberAvatarProps, 'agentId' | 'avatarRef' | 'displayName'> {
   statusLabel: string
   statusTone: string
-  stateShape: 'running' | 'waiting' | 'completed' | 'failed' | 'stopped' | 'recorded'
+  stateShape: ExecutionStatusShape
 }
 
 // Four 38px controls, each followed by a 6px gap. Keep the CSS slot size in sync.
@@ -27,17 +28,6 @@ function revealAvatar(rail: HTMLUListElement, button: HTMLButtonElement): void {
     left: Math.max(0, Math.min(rail.scrollLeft + delta, maximum)),
     behavior: scrollBehavior()
   })
-}
-
-function StateIcon({ shape }: { shape: ExecutionAvatarRailItem['stateShape'] }): React.JSX.Element {
-  return <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    {shape === 'running' && <><circle cx="8" cy="8" r="2.5" fill="currentColor" /><circle cx="8" cy="8" r="5.5" /></>}
-    {shape === 'waiting' && <circle cx="8" cy="8" r="4.5" />}
-    {shape === 'completed' && <path d="m3.5 8 3 3 6-6" />}
-    {shape === 'failed' && <><path d="M8 1.5 14.5 8 8 14.5 1.5 8Z" /><path d="M8 5v3M8 10.5h.01" /></>}
-    {shape === 'stopped' && <rect x="4" y="4" width="8" height="8" rx="1" />}
-    {shape === 'recorded' && <path d="M4 8h8" />}
-  </svg>
 }
 
 export function ExecutionAvatarRail({
@@ -221,7 +211,7 @@ export function ExecutionAvatarRail({
         >
           <MemberAvatar agentId={item.agentId} avatarRef={item.avatarRef} displayName={item.displayName} size="list" decorative />
           <span className={`run-pulse-chip-state tone-${item.statusTone} state-${item.stateShape}`} role="img" aria-label={item.statusLabel}>
-            <StateIcon shape={item.stateShape} />
+            <ExecutionStatusGlyph status={item.stateShape} />
           </span>
         </button>
       </li>)}

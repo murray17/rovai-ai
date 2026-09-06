@@ -3819,6 +3819,7 @@ impl ExecutionRuntimeService {
         }
         if cycle.1.is_some() {
             transaction.commit()?;
+            crate::execution_text::flush_settled(database)?;
             return Ok(ControlledShutdownCycleSettlement {
                 core_generation: core_generation.to_string(),
                 fenced_agent_runs: Vec::new(),
@@ -3923,6 +3924,7 @@ impl ExecutionRuntimeService {
             }
         }
         transaction.commit()?;
+        crate::execution_text::flush_settled(database)?;
         Ok(ControlledShutdownCycleSettlement {
             core_generation: core_generation.to_string(),
             fenced_agent_runs,
@@ -3971,6 +3973,7 @@ impl ExecutionRuntimeService {
                 |row| row.get::<_, String>(0),
             )?;
             transaction.commit()?;
+            crate::execution_text::flush_settled(database)?;
             return Ok(PlannedShutdownTerminalSettlement {
                 agent_run_id: target.agent_run_id,
                 camp_turn_id: target.camp_turn_id,
@@ -4088,6 +4091,7 @@ impl ExecutionRuntimeService {
             &target.now,
         )?;
         transaction.commit()?;
+        crate::execution_text::flush_settled(database)?;
         pump_target_after_run_terminal(database, &terminal.agent_run_id)?;
         Ok(PlannedShutdownTerminalSettlement {
             agent_run_id: target.agent_run_id,

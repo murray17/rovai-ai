@@ -21,7 +21,7 @@ last_updated: 2026-09-06
 | Renderer startup controller | 快照返回后立即显示候选目标的一级页面框架；候选 Camp 与 committed Camp 分离，只有 enter 成功才提交权威 Camp 内容 |
 | Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
 | Electron Main bridge | allowlist typed method、记录不含内容的 IPC roundtrip/response bytes；不组装或缓存领域投影 |
-| Core Camp enter module | 在一次串行 request 中先读 activation state；Pending 直接读取投影，Active 顺序执行 Default Lead reconcile 与 post-reconcile read；缺失或 rejected 时 fail closed |
+| Core Camp enter module | 在一次串行 request 中先读 activation state；Pending 直接读取投影，Active 先按原 Envelope 查 receipt 并校验 Lead，有效新 User enter 只读，需要修复时 reconcile 后再读；缺失或 rejected 时 fail closed |
 | Core Camp open read model | 在单一 SQLite transaction 中组装业务首屏投影、完整 non-terminal Execution Evidence、coverage 与 high-water；不读取 event_log 或 Context Manifest/Action history |
 | Camp message history read | 以 stable sequence cursor 读取 earlier page；不回放 event 构造第二真源 |
 | Camp conversation find read | 扫描当前 Camp 公开 user/agent 正文投影，返回 exact total 与一个选中命中；不改变 Agent-facing discovery search，也不返回完整结果集 |
@@ -43,7 +43,7 @@ Open 仅读取当前 Camp 的业务表。它及其嵌套 loader、CTE、view 不
 `throughGlobalSequence` 仍从 `event_sequence` singleton 读取，不通过事件表求最大值。移除 timeline 与其
 exact count 后，打开成本不随其他 Camp 的事件历史增长；当前 Camp 的活动 Evidence 完整性不因此降级。
 
-此边界只约束投影读取，不撤销 Active enter 的 reconciliation/command receipt，也不修改完整
+此边界只约束投影读取，不撤销已执行 Active reconciliation 的 command receipt，也不修改完整
 `camp_snapshot()`、显式 History/Find、Navigation 或 `events.subscribe` 的审计与 invalidation 语义。
 无需清理旧数据、补历史字段、迁移或给旧 event 查询补索引。
 
@@ -53,7 +53,7 @@ app click / notification target
   -> cache miss keeps the current surface; no target route is committed yet
   -> Core reads authoritative activation state
        -> Pending: skip reconciliation
-       -> Active: serialized Default Lead reconciliation
+       -> Active: replay prior receipt or validate current Lead; reconcile only when needed
   -> Core read transaction + complete non-terminal Evidence + bounded other collections + throughGlobalSequence
   -> Main parses typed response
   -> Renderer atomically commits target Camp ID + project + recent Camp surface
@@ -91,6 +91,11 @@ invalidation，因为后一个终态可能在首个 read transaction 开始后�
 使二者失效，但不得让当前 Camp refresh 代替后台 Camp marker 收敛，也不得为每个 Camp 建立 Navigation timer。
 全局合并、失败退避、可见性与 20 秒安全刷新见
 [Desktop Navigation Refresh](desktop-navigation-refresh.md)。
+
+Navigation 仍按真实 publication/terminal event 求活动与完成游标；进入聚合前过滤其他事件，避免对维护
+receipt 执行无效 join/group。它和 Camp Open 共用 Core 数据库锁，但不因此把 event_log 变为 Open 的
+业务依赖。可见来源 acknowledge 的去重也不使用全局 cursor 或 Snapshot watermark 作为来源变化，见
+[Notification Episode v5](../contracts/notification-episode-v5.md)。
 
 缓存只保存最近的 Camp 投影；除完整 non-terminal Evidence 外，其他 collection 保持有界。cache hit 可立即
 恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把

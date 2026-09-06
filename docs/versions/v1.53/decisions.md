@@ -38,3 +38,45 @@ Antigravity `generateImage.generatedMedia`。Core 持久化 nullable `public_dis
 当前规范见 [Runtime Images v5](../../contracts/runtime-images-v5.md)、
 [Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)与
 [Runtime 图片架构](../../architecture/runtime-images.md)。
+
+<a id="v1-53-d02"></a>
+## V1.53-D02：正文按消息块定稿，维护空调用在源头收敛
+
+流式文本的运输粒度不应成为历史粒度。逐 delta 写入放大 Evidence 行数，而仅保留最后 final answer 又会
+丢失工具之间的过程正文。因此每个正文块保留独立身份和首次位置，优先采用原生 item 完成结果；无可靠
+完成结果时在 Core 聚合到明确连续边界。短暂占位允许定稿更新，工具事实继续 append-only；读取叠加当前
+未定稿正文以保持切换/重进运行中 Camp 的完整性。原生 `userMessage` 的无正文 started/completed 仅是输入
+生命周期壳，不形成用户可见 Evidence；用户消息继续由 CampMessage 权威拥有。
+
+拒绝仅在数据库入口丢弃 delta、只保留 Run 最后一段、重复保存累计正文及完成正文，以及按 UI 隐藏状态
+删除已有 reasoning 历史。取消、失败和正常退出保存已收到正文，但不承诺强制杀进程或断电后恢复未落盘
+片段。用户已对本地历史治理明确授权后，Migration 143 只删除同一 Canonical Command 内已有后续
+`activity.completed + aggregatedOutput` 覆盖的 `command.output.delta`，以及无正文且未被任何投影引用的文本
+生命周期空壳；它在同一事务按原顺序过滤 Canonical source IDs、重算首末 Evidence sequence，并拒绝空来源、
+文件投影引用或悬挂引用。没有终态输出的 command delta、完整正文/reasoning 块和工具 started/completed
+继续保留。该迁移不执行 VACUUM，也不把一次性历史治理扩张为通用压缩系统。
+
+维护写放大优先减少明确的空调用，不用统一日志策略削弱命令保证：有效 Lead 的新 enter 不提交 reconcile，
+可见通知不因全局游标推进重复确认。Roster 的 observed-at/generation 仍参与新鲜度与待投递授权；只复用
+仍有效的已有短期缓存，不按成员列表相同跳过更新。已执行命令继续保留原结果回放、审计和恢复职责。
+固定模型已经是 AgentRun 冻结配置，不需要 Runtime 再观察；明确 `model.source=explicit` 的启动回执与
+`runtime.model.observed` 事件在 Command Gateway 前停止，不再制造 `runtime_model.observe` 的 unchanged result。
+`runtime_default` 的首次可信模型观察仍提交原命令，保留既有幂等、审计与 Read Model 收敛保证。
+
+当前规范见 [Evidence 持久化边界](../../contracts/run-process-detail-surface-v31.md#evidence-持久化与模型观察边界)、
+[Camp Open](../../contracts/camp-open-projection-v16.md)、[通知合同](../../contracts/notification-episode-v5.md)与
+[Evidence 不变量](../../architecture/foundational-invariants.md#evidence-usage)。
+
+<a id="v1-53-d03"></a>
+## V1.53-D03：已部署的工具分类与图片来源迁移原子汇合
+
+工具一致性分支和主线图片来源已分别使用迁移 141，且工具分支数据已在日常使用。仅选择一侧代码会拒绝
+另一侧的真实升级源，直接删除 receipt 或改 marker 又会丢失既有分类切换的含义和时间。
+
+保留主线已发布 141 的图片语义，工具 classifier cutover 使用 142。对精确识别的旧工具分支库，在单一
+原位事务内保留原 classifier receipt 时间并映射到 142，补齐图片 schema/receipt，发布统一 marker。
+主线图片库沿正常链执行 142；两条路径都不重写历史执行事实，未知或部分状态保持 fail closed。
+
+拒绝为了快速启动而降级 classifier、伪造已完成步骤、删除旧 receipt 或全库重分类；也不为本次冲突新增
+通用迁移策略系统。当前规范由 [Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)
+和 [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)拥有。
