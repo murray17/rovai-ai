@@ -4278,10 +4278,18 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer-hint kbd { display: inline-grid; min-width: 20px; height: 18px; padding: 0 4px; place-items: center; border: 1px solid var(--line); border-bottom-color: var(--line-strong); border-radius: 4px; background: var(--surface-subtle); font: 650 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .composer-hint-separator { margin: 0 1px; color: var(--line-strong); }
 .composer-send { min-height: 28px; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 650; }
-.single-chat-send { min-height: 28px; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 650; }
-.composer-stop { min-height: 28px; padding: 5px 14px; border-color: var(--danger); border-radius: 6px; color: var(--danger-contrast); background: var(--danger); font-size: 12px; font-weight: 700; }
-.single-chat-stop { min-height: 28px; padding: 5px 14px; border-color: var(--danger); border-radius: 6px; color: var(--danger-contrast); background: var(--danger); font-size: 12px; font-weight: 700; }
-.composer-stop:hover:not(:disabled), .single-chat-stop:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 82%, black); background: color-mix(in srgb, var(--danger) 82%, black); }
+.composer-primary-action { display: grid; width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; padding: 0; place-items: center; border: 1px solid transparent; border-radius: 8px; cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease; }
+.composer-primary-action.is-send { border-color: var(--brand); color: var(--brand-contrast); background: var(--brand); }
+.composer-primary-action.is-send:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
+.composer-primary-action.is-stop { border-color: var(--control-line); color: var(--ink); background: var(--surface-subtle); }
+.composer-primary-action.is-stop:hover:not(:disabled) { border-color: var(--muted); background: var(--surface-muted); }
+.composer-primary-action[aria-busy="true"] { opacity: .72; cursor: wait; }
+.composer-primary-action-icon { position: relative; display: grid; width: 18px; height: 18px; place-items: center; }
+.composer-primary-action-glyph { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; transition: transform 140ms ease; }
+.composer-primary-action-stop-square { fill: currentColor; stroke: none; }
+.composer-primary-action-spinner { position: absolute; inset: -1px; border: 1.5px solid currentColor; border-right-color: transparent; border-bottom-color: transparent; border-radius: 50%; animation: composer-primary-action-spin 900ms linear infinite; }
+.composer-primary-action[aria-busy="true"] .composer-primary-action-glyph { transform: scale(.62); }
+@keyframes composer-primary-action-spin { to { transform: rotate(360deg); } }
 .composer-attachment-strip { --user-file-gap: 9px; --user-composer-file-height: 48px; --user-composer-icon-size: 30px; --user-composer-font-size: 12.5px; --user-composer-min-width: 172px; --user-composer-max-width: 308px; display: flex; gap: var(--user-file-gap); min-width: 0; max-width: 100%; padding: 1px 1px 5px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; scrollbar-width: none; scroll-snap-type: x proximity; }
 .composer-attachment-strip::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .composer-attachment-strip:focus-visible { border-radius: 12px; outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -4401,6 +4409,8 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 @media (prefers-reduced-motion: reduce) {
   .conversation-drop-layer { animation: none; }
   .composer-box { transition: none; }
+  .composer-primary-action, .composer-primary-action-glyph { transition: none; }
+  .composer-primary-action-spinner { animation: none; }
   .agent-timeline { transition: none; }
   .agent-timeline:hover { transform: none; }
   .message-actions,

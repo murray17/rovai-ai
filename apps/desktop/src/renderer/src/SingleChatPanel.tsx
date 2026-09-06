@@ -33,6 +33,7 @@ import {
 } from './attachment-drop'
 import { MemberAvatar } from './MemberAvatar'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
+import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { SafeMarkdown } from './SafeMarkdown'
 import { shouldSubmitStructuredComposerOnEnter } from './StructuredMentionComposer'
 import { readErrorMessage } from './error-message'
@@ -1746,13 +1747,13 @@ export function SingleChatPanel({
                 </span>
               )}
               {activeRun && !draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0
-                ? <button className="danger-button composer-stop single-chat-stop" type="button" disabled={!currentTargetReady || cancelling} onClick={() => void stopCurrentRun()}>{cancelling ? '正在提交停止请求…' : '停止'}</button>
-                : <button
-                    className="primary-button composer-send single-chat-send"
+                ? <ComposerPrimaryAction action="stop" type="button" busy={cancelling} disabled={!currentTargetReady || cancelling} onClick={() => void stopCurrentRun()} />
+                : <ComposerPrimaryAction
+                    action="send"
                     type="submit"
-                    aria-busy={sending || preparingAttachments.some((item) => !item.error)}
+                    busy={sending || preparingAttachments.some((item) => !item.error)}
                     disabled={(!draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || ending || preparingAttachments.some((item) => !item.error)}
-                  >发送</button>}
+                  />}
             </div>
           </div>
         </div>

@@ -3313,8 +3313,9 @@ describe('task event projections', () => {
     expect(markup).toContain('配置洛可的 Agent 运行时')
     expect(markup.indexOf('class="runtime-recovery-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
     expect(markup).toMatch(
-      /<div class="composer-actions"><span class="composer-hint"><span class="sr-only">Enter 发送，Shift\+Enter 换行<\/span><span class="composer-hint-visual" aria-hidden="true"><kbd>↵<\/kbd><span>发送<\/span><span class="composer-hint-separator">·<\/span><kbd>⇧↵<\/kbd><span>换行<\/span><\/span><\/span><button class="primary-button composer-send"/
+      /<div class="composer-actions"><span class="composer-hint"><span class="sr-only">Enter 发送，Shift\+Enter 换行<\/span><span class="composer-hint-visual" aria-hidden="true"><kbd>↵<\/kbd><span>发送<\/span><span class="composer-hint-separator">·<\/span><kbd>⇧↵<\/kbd><span>换行<\/span><\/span><\/span><button class="composer-primary-action is-send"/
     )
+    expect(markup).toContain('aria-label="发送消息"')
     expect(markup).not.toContain('<span class="composer-hint">Enter</span>')
     expect(markup).not.toContain('agent_run.runtime_not_ready')
     expect(markup).not.toContain('agent_1')
@@ -3762,9 +3763,12 @@ describe('task event projections', () => {
     expect(markup).not.toContain('working-row')
     expect(markup).not.toContain('live-execution-progress')
     expect(markup).toContain('aria-label="停止当前执行"')
-    expect(markup).not.toContain('class="primary-button composer-send"')
-    expect((markup.match(/class="(?:primary-button composer-send|danger-button composer-stop)"/g) ?? []))
-      .toHaveLength(1)
+    expect(markup).toContain('class="composer-primary-action is-stop"')
+    const runningComposerAction = markup.slice(
+      markup.indexOf('class="composer-primary-action is-stop"'),
+      markup.indexOf('</button>', markup.indexOf('class="composer-primary-action is-stop"'))
+    )
+    expect(runningComposerAction).not.toContain('停止</button>')
     expect(markup).not.toContain('加入待发送')
 
     const cachedPreviewMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -3951,7 +3955,12 @@ describe('task event projections', () => {
     expect(cancellingMarkup).toContain('正在提交停止请求，完成后即可继续发送。')
     expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
     expect(cancellingMarkup).toContain('aria-label="正在提交停止请求"')
-    expect(cancellingMarkup).not.toContain('class="primary-button composer-send"')
+    const cancellingComposerAction = cancellingMarkup.slice(
+      cancellingMarkup.indexOf('class="composer-primary-action is-stop"'),
+      cancellingMarkup.indexOf('</button>', cancellingMarkup.indexOf('class="composer-primary-action is-stop"'))
+    )
+    expect(cancellingComposerAction).toContain('composer-primary-action-spinner')
+    expect(cancellingComposerAction).not.toContain('正在提交停止请求…')
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
     expect(cancellingMarkup).not.toContain('execution-disclosure is-running')
 
@@ -4010,8 +4019,8 @@ describe('task event projections', () => {
     const persistentActionsMarkup = terminalMarkup.slice(persistentActionsStart, persistentActionsEnd)
     expect(persistentActionsMarkup.indexOf('class="message-copy-button"'))
       .toBeLessThan(persistentActionsMarkup.indexOf('class="message-reply-button"'))
-    expect(terminalMarkup).not.toContain('class="danger-button composer-stop"')
-    expect(terminalMarkup).toMatch(/class="primary-button composer-send"[^>]*>发送<\/button>/)
+    expect(terminalMarkup).not.toContain('class="composer-primary-action is-stop"')
+    expect(terminalMarkup).toContain('class="composer-primary-action is-send"')
 
     const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
