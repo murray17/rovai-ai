@@ -143,6 +143,17 @@ fn block_event(kind: &str) -> &'static str {
         _ => "agent.reasoning.summary.block",
     }
 }
+fn native_identity<'a>(payload: &'a Value, kind: &str) -> Option<&'a str> {
+    ["itemId", "messageId"]
+        .into_iter()
+        .chain((kind != "narration").then_some("toolCallId"))
+        .find_map(|field| {
+            payload
+                .get(field)
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+        })
+}
 fn key(run: &str, epoch: i64, kind: &str, native: Option<&str>) -> String {
     serde_json::to_string(&(run, epoch, kind, native)).expect("string tuple")
 }
@@ -210,15 +221,7 @@ pub(crate) fn observe(
     let result = (|| {
         if is_text_delta(event) {
             let kind = event_kind(event);
-            let native = payload
-                .get("itemId")
-                .or_else(|| {
-                    (kind != "narration")
-                        .then(|| payload.get("toolCallId"))
-                        .flatten()
-                })
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty());
+            let native = native_identity(payload, kind);
             // Anonymous protocol output is segmented at changes of text kind and semantic boundaries.
             let close: Vec<_> = buffer
                 .blocks
@@ -285,8 +288,9 @@ pub(crate) fn observe(
             };
             let native = payload
                 .pointer("/item/id")
-                .or_else(|| payload.get("itemId"))
-                .and_then(Value::as_str);
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .or_else(|| native_identity(payload, kind));
             let k = key(run, epoch, kind, native);
             let complete_text = payload
                 .pointer("/item/text")
@@ -742,6 +746,33 @@ mod slow_tests {
             .unwrap();
         let summary = ExecutionEvidenceService.record_runtime_event(&mut database, &store, run, 2, "activity.completed", &json!({"item":{"type":"reasoning","id":"A","summary":["full summary","second part"]}})).unwrap().unwrap();
         assert_eq!(summary.payload["text"], "full summary\nsecond part");
+        // ACP transports messageId rather than itemId. Preserve even concurrent
+        // named messages without a native completion packet until Run settlement.
+        let mut acp_ids = Vec::new();
+        for (id, text) in [("acp-A", "A1"), ("acp-B", "B1"), ("acp-A", "A2")] {
+            let event = ExecutionEvidenceService
+                .record_runtime_event(
+                    &mut database,
+                    &store,
+                    run,
+                    2,
+                    "agent.text.delta",
+                    &json!({"itemId":null,"messageId":id,"delta":text}),
+                )
+                .unwrap()
+                .unwrap();
+            acp_ids.push(event.payload["blockId"].as_str().unwrap().to_owned());
+        }
+        assert_eq!(acp_ids[0], acp_ids[2]);
+        assert_ne!(acp_ids[0], acp_ids[1]);
+        assert_eq!(
+            live_payload(&database, &acp_ids[0]).unwrap().unwrap()["text"],
+            "A1A2"
+        );
+        assert_eq!(
+            live_payload(&database, &acp_ids[1]).unwrap().unwrap()["text"],
+            "B1"
+        );
         let failed_tail = ExecutionEvidenceService
             .record_runtime_event(
                 &mut database,
@@ -793,6 +824,13 @@ mod slow_tests {
             .unwrap();
         assert_eq!(payload["text"], "failed run partial");
         assert_eq!(payload["status"], "interrupted");
+        for (id, expected) in [(&acp_ids[0], "A1A2"), (&acp_ids[1], "B1")] {
+            let payload = ExecutionEvidenceService
+                .read_full_payload(&database, &store, camp, id)
+                .unwrap();
+            assert_eq!(payload["text"], expected);
+            assert_eq!(payload["status"], "interrupted");
+        }
         let writes = database.connection().total_changes();
         assert_eq!(
             runtime

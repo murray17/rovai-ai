@@ -34,6 +34,12 @@ def digest(value):
     return hashlib.sha256(value).hexdigest()
 
 
+def native_identity(payload, kind):
+    fields = ["itemId", "messageId"] + (["toolCallId"] if kind != "narration" else [])
+    return next((payload[field] for field in fields
+        if isinstance(payload.get(field), str) and payload[field].strip()), None)
+
+
 @dataclass
 class Block:
     kind: str
@@ -67,7 +73,7 @@ def blocks_for_run(rows, status):
             continue
         if event in DELTAS:
             kind = DELTAS[event]
-            native = p.get("itemId") or (p.get("toolCallId") if kind == "thought" else None)
+            native = native_identity(p, kind)
             close_anonymous(kind if native is None else None)
             key = (kind, native)
             text = p.get("delta")

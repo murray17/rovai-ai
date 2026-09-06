@@ -60,6 +60,13 @@ class Boundaries(unittest.TestCase):
         self.assertIs(blocks[0].rows[0], rows[0])
         self.assertIs(blocks[1].rows[0], rows[2])
         self.assertFalse(any(rows[1] is r for b in blocks for r in b.rows))
+        acp_rows = [{"event_type": "agent.text.delta", "payload": {
+            "itemId": None, "messageId": identity, "delta": text}}
+            for identity, text in [("A", "A1"), ("B", "B1"), ("A", "A2")]]
+        acp = module.blocks_for_run(acp_rows, "failed")
+        self.assertEqual([(b.native, b.text(), b.status) for b in acp],
+            [("A", "A1A2", "interrupted"), ("B", "B1", "interrupted")])
+        self.assertEqual(module.native_identity({"itemId": None, "toolCallId": "R"}, "reasoning_summary"), "R")
 
 
 if __name__ == "__main__":

@@ -66,6 +66,8 @@ SQLite。分别以 `agent.text.block`、`agent.thought.block`、`agent.reasoning
 Claude 使用对应 assistant message 的 text content block，Pi 以 message 边界和 contentIndex 关联流式片段与
 `message_end.message`。没有可靠完整结果的 Runtime，按文字种类变化及工具/plan/compaction 等连续边界
 定稿；不同原生 item 即使交错输出也不能混合。
+ACP 已规范化的 `messageId` 与 `itemId` 同样是原生块身份；字段为空不能遮蔽另一个有效身份。
+有身份但没有完成包的消息分别保留到 Run 收口，不能退化为跨消息的匿名正文拼接。
 
 首片只插入一个空内容的 `updated` 占位，冻结 ID、sequence 和 occurredAt；后续片段只追加到 Core 所有的
 有界缓冲，完成后在同一行填入完整内容，不能另存累计副本或把完成位置排到工具之后。payload 包含

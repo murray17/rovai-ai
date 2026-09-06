@@ -54,6 +54,7 @@ python3 scripts/aggregate-execution-text.test.py
   `pnpm typecheck`、文档治理（base `f4c1bb12082707534243fec4a9f288ce5eeed3df`）、Rust format 与 diff 检查通过。
 - 正文 Core 集成验证 1,000 个片段在首块占位后不新增 SQL 写入，覆盖原生完成覆盖、正文/工具交错、活动
   读取、取消/失败、旧 epoch fence、Blob 全文和重开。Default Lead 有效 enter 零新增日志、原命令重放和真实修复通过。
+  补充 ACP `messageId` 的 A/B/A 交错与空 `itemId` fallback；Core 与离线聚合使用同一原生身份优先级。
 - 独立 Electron 正文场景通过：稀疏 sequence、35,023 字符 Blob 全文、失败重试、3 段正文和 2 组工具、
   reasoning 不泄漏到公开展示。原完整 CampOpen 图片截图场景仍有图片解码时序断言失败，未调整图片 UI 或删减原覆盖。
 - 真实 Codex 验收：582 个 text/reasoning 流式片段保存为 8 条块记录、16 次正文 SQL 行写入；加上工具等
