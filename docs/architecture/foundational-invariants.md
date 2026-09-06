@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # 当前基础架构不变量
@@ -95,7 +95,7 @@ last_updated: 2026-09-06
 ### Workspace 与动态 Git 能力
 
 - 每个 Camp 的持久 Workspace Binding 由 `projectBindingKind: quick_chat | directory` 和绝对、规范化、可遍历且安全的 `projectPath` 组成。`quick_chat` 指向应用受管的 Quick Chat 目录，`directory` 指向用户明确选择的安全目录。Core 拒绝文件系统根、产品私有数据树、直接 Git 元数据目录和 bare repository；Runtime 权限仍独立决定 Agent 实际可做什么。
-- Git 是对当前目录的动态能力，而不是 Camp 身份。Core 在创建、Run 启动、Git 专用操作和 Run 终止等边界重新观测 `not_git | git_valid | git_invalid`；Git 失效只关闭 Git 专用行为，不废止安全目录、协作历史或普通文件工作。
+- Git 是对当前目录的动态能力，而不是 Camp 身份。Camp 创建只重新执行 Core-owned 目录准入，不运行 Git 子进程；显式 Workspace inspection、Run 启动、Git 专用操作和 Run 终止等边界重新观测 `not_git | git_valid | git_invalid`、HEAD 与 branch。Git observation 不扫描 tracked/untracked 工作树，新 observation 的 nullable `dirty` 固定为 unavailable；Git 失效只关闭 Git 专用行为，不废止安全目录、协作历史或普通文件工作。
 - AgentRun 文件变化只来自 Runtime 在该 `agentRunId + executionEpoch` 内明确报告并已落库的可靠终态 Evidence。
   Core 不通过 Git tree、baseline/final、checkpoint ref、目录扫描或当前文件读取补充结果，也不跨 Run 合并；因此
   Git 与非 Git workspace 使用相同观测能力，并行 Run 分别形成自己的结果。
@@ -103,7 +103,7 @@ last_updated: 2026-09-06
   root 内的相对路径或 root 外的规范化绝对路径。当前 Built-in Tool Process 的精确 `ROVAI_RUN_TMP` 及后代必须在
   durable Evidence ingress 前排除；该边界不扩大到应用 data dir、其他进程临时目录、同名前缀目录或普通 root 外
   用户文件，也不打开文件、不改变 ACP Client FS/Terminal 的 Runtime-owned 权限模型。
-- AgentRun 仍冻结 workspace 路径及起止 Git observation 作为既有终态审计事实；这些 per-Run audit facts 不参与
+- AgentRun 仍冻结 workspace 路径及起止 Git capability、HEAD 与 branch observation 作为既有终态审计事实；历史 boolean dirty 保留读取，新 observation 不采集 dirty。这些 per-Run audit facts 不参与
   文件变化卡片归约，也不成为 Project/导航身份。导航继续按规范目录路径分组，不引入 Project 表或 Repository
   Scope。
 - **Quick Chat / 快速对话** 是应用受管 workspace 的规范领域与产品分组术语，不是 Camp 或 Project。Rust variant 使用 `QuickChat`，存储与 IPC 值使用 `quick_chat`，JavaScript/TypeScript property 使用 `quickChat`，CSS/test identifier 与受管目录名使用 `quick-chat`。旧称只允许存在于历史快照和迁移证据；当前代码、合同与投影不保留 alias、deprecated field、dual read 或旧 wire value 翻译。
@@ -181,7 +181,7 @@ last_updated: 2026-09-06
 - CampMember 只表达 Camp 内关系，不复制全局 Presence。成员顺序使用稳定、不复用的关系序列；Default Lead 必须是当前有效关系且符合领导资格，Camp 至少保留一位 active member。动态关系命令使用 generation/version CAS，Lead successor 与影响预览由 Core 验证，不由 Renderer 自选替代。
 - Camp 只冻结 workspace binding 和成员关系，Git/Project 是可重观测投影而不是新聚合。新 Camp 不预创建 Conversation 或 Run；原子 Execution Admission 为精确目标惰性创建 Conversation、公共消息、Turn 与 queued Run，多目标保持 all-or-none。Workspace、Git、Runtime 与可执行文件检查属于后续 Scheduler dispatch 边界。永久删除默认要求 quiescent，force 只能在用户明确确认和持久停止/隔离边界后执行。
 - 外部渠道不得直接写 CampMessage、CampTurn 或 AgentRun；完成 transport dedup/聚合和 live binding recheck 后，必须复用同一原子 Execution Admission。尚未绑定或仍在渠道 FIFO 中的消息不是公共消息，也不进入 History、Context 或执行。`ExternalPrincipal` 只表达作者、上下文来源和回复目标，不继承 `local_user` 的项目、绑定或本机管理能力。
-- Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 exact membership lifetime/permission/fence 检查。所有 Agent 业务工具也必须匹配 Run 冻结的 membership version；再次添加同一 Agent 不恢复旧 Run 权限。失败产生诚实 Run 终态，不撤销已接受消息；per-Run ending Git observation 属于终态审计，Runtime 文件变化属于 terminal 后的附加 Evidence projection，二者都不是发送准入。
+- Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 exact membership lifetime/permission/fence 检查。所有 Agent 业务工具也必须匹配 Run 冻结的 membership version；再次添加同一 Agent 不恢复旧 Run 权限。失败产生诚实 Run 终态，不撤销已接受消息；per-Run ending Git metadata observation 属于终态审计，Runtime 文件变化属于 terminal 后的附加 Evidence projection，二者都不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
 - CampMessage/CampTurn/AgentRun/Conversation 与 Domain Event 的创建、开始、更新和结束字段使用调用时 UTC wall clock；`AgentRun.created_at` 属于输入接受边界，`started_at` 属于实际 claim 边界。Execution Budget 另用非倒退 observation，取 wall clock、进程 awake elapsed anchor 和上次 observation 的最大值，使系统休眠计入 deadline、wall clock 回拨不延长预算；Budget observation 不得写入业务审计时间。
 - Composer Stop 作用于整个 CampTurn；共享 ExecutionDrawer 的 Run Stop 只作用于当前 Run，不取消兄弟 Run 或关闭整轮渠道输出。两者都在 Core 事务提交 cancelled 业务终态，IPC 返回后结束等待；Runtime 后台清理不影响业务终态。发送与效果不确定性继续保存在 Input/Action 审计中，但取消不产生公共 hasUnsettledExternalEffects 提示，也不允许自动重发。待发送队列按业务 Turn 完成推进，同 Conversation 的新执行仍须通过旧 Runtime 清理隔离。

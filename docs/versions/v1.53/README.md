@@ -9,7 +9,7 @@ model_context_change: false
 last_updated: 2026-09-07
 ---
 
-# Rovai-ai v1.53：Runtime 图片来源、工具一致性、正文块持久化与网络恢复
+# Rovai-ai v1.53：Runtime 图片来源、工具一致性、正文块持久化、网络恢复与创建性能
 
 前置：[v1.52](../v1.52/README.md)。本版本保留 Runtime 结构化图片观察、混合存储、按需读取和既有图片
 Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
@@ -71,19 +71,31 @@ Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
 命令图标、精确结果和步骤计数。保留审批、重试、网络恢复、停止和失败事实，以及已展开结果状态。
 这是已确认界面的局部修复，不新增 Runtime、数据库或投递合同；验证记录见[实施与验收](implementation-plan.md#单聊与执行台反馈补充)。
 
+## 新对话创建性能补充
+
+- `camps.create` 只重新执行 Core directory admission 与路径规范化，不运行 Git 子进程；Camp 持久化不再被
+  工作树大小或未跟踪文件数量阻塞。
+- 显式 Workspace inspection 与 AgentRun 起止 observation 保留 capability、HEAD、branch 等轻量 metadata，
+  但不执行 `git status` 或扫描工作树。新 observation 的 `dirty` 为 `null`，历史布尔值继续兼容读取。
+- Files Changed / Diff Card 的权威不变，继续只来自当前 AgentRun 与 execution epoch 的 Runtime evidence；
+  本次优化不改变 Renderer 布局、文件变化归约或 Git 专用操作。
+
+边界与理由见 [V1.53-D05](decisions.md#v1-53-d05)、[User Automation v2](../../contracts/user-automation-v2.md)
+及[实施与验收](implementation-plan.md#新对话创建性能补充)。
+
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v1.52 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.53 |
-| Decisions | 已更新 | [V1.53-D01](decisions.md#v1-53-d01)拥有图片准入理由，[D02](decisions.md#v1-53-d02)拥有正文块与维护调用理由，[D03](decisions.md#v1-53-d03)拥有部署迁移汇合理由，[D04](decisions.md#v1-53-d04)拥有网络安全续接理由；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Images v5](../../contracts/runtime-images-v5.md)、[Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)、[Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)与 [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)分别拥有图片、读取、typed 操作与工具呈现；[Network Interruption Recovery v1](../../contracts/network-interruption-recovery-v1.md)拥有网络分类、固定退避与 Input 安全门禁 |
-| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[文件操作](../../architecture/runtime-file-change-observation.md)、[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)同步保留式投影与精确升级源汇合；[AgentRun Recovery](../../architecture/agent-run-recovery.md)同步进程内恢复协调与生命周期 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与 [File Preview](../../ui/components/file-preview.md)保留合入分支的工具一致性和文件阅读语义；正文优化不增加界面设计改动；网络恢复补充等待、恢复与需处理状态及 Stop 保留规则 |
+| Version lifecycle | 已更新 | v1.52 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.53，并记录创建性能补充 |
+| Decisions | 已更新 | [V1.53-D01](decisions.md#v1-53-d01)拥有图片准入理由，[D02](decisions.md#v1-53-d02)拥有正文块与维护调用理由，[D03](decisions.md#v1-53-d03)拥有部署迁移汇合理由，[D04](decisions.md#v1-53-d04)拥有网络安全续接理由，[D05](decisions.md#v1-53-d05)拥有 Camp 创建与 Git observation 的性能边界；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Runtime Images v5](../../contracts/runtime-images-v5.md)、[Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)、[Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)与 [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)分别拥有图片、读取、typed 操作与工具呈现；[Network Interruption Recovery v1](../../contracts/network-interruption-recovery-v1.md)拥有网络分类、固定退避与 Input 安全门禁；[User Automation v2](../../contracts/user-automation-v2.md)拥有创建和轻量 Git observation 边界 |
+| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[文件操作](../../architecture/runtime-file-change-observation.md)、[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)同步保留式投影与精确升级源汇合；[AgentRun Recovery](../../architecture/agent-run-recovery.md)同步进程内恢复协调与生命周期；[Workspace 不变量](../../architecture/foundational-invariants.md#camp-workspace)与 [User Automation](../../architecture/user-automation.md)同步无工作树扫描边界 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与 [File Preview](../../ui/components/file-preview.md)保留合入分支的工具一致性和文件阅读语义；正文优化不增加界面设计改动；网络恢复补充等待、恢复与需处理状态及 Stop 保留规则；创建性能补充不改变界面 |
 | Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)记录 activity-v3、可靠 typed read/write、历史 classifier 冻结和两种部署源兼容 |
-| Runtime compatibility | 确认无需更新 | 不改变 Runtime 启动、协议能力或平台资格；只使用已经适配并验证的原生事件字段 |
-| Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture 索引、版本指针和当前决定导航均指向 Runtime Images v5、Camp Open v16 与 Network Interruption Recovery v1 |
-| Root README | 确认无需更新 | 项目定位、安装方法与公开 Runtime 支持范围不因本地公屏图片集合收紧而变化 |
+| Runtime compatibility | 确认无需更新 | 不改变 Runtime 启动、协议能力或平台资格；创建性能补充也不改变 Runtime 文件变化 Evidence |
+| Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture 索引、版本指针和当前决定导航已包含 User Automation v2 与 Workspace inspection 边界 |
+| Root README | 确认无需更新 | 项目定位、安装方法与公开 Runtime 支持范围不因本地公屏图片集合或创建路径内部优化而变化 |
 
 ## References
 
@@ -91,5 +103,6 @@ Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
 - [版本决定](decisions.md)
 - [Runtime Images v5](../../contracts/runtime-images-v5.md)
 - [Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)
+- [User Automation v2](../../contracts/user-automation-v2.md)
 - [Runtime 图片架构](../../architecture/runtime-images.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)

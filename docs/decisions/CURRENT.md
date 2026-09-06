@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # 当前规范与决定理由导航
@@ -100,8 +100,8 @@ last_updated: 2026-09-06
 
 ## User Automation 与 Diagnostic Trial
 
-- 当前规范：[User Automation 不变量](../architecture/foundational-invariants.md#user-automation-trial)、[User Automation Architecture](../architecture/user-automation.md)和[User Automation v1](../contracts/user-automation-v1.md)。
-- 理由来源：[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.21-D02](../versions/v1.21/decisions.md#v1-21-d02)、[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)、[V1.21-D04](../versions/v1.21/decisions.md#v1-21-d04)。
+- 当前规范：[User Automation 不变量](../architecture/foundational-invariants.md#user-automation-trial)、[Workspace 与动态 Git 不变量](../architecture/foundational-invariants.md#camp-workspace)、[User Automation Architecture](../architecture/user-automation.md)和[User Automation v2](../contracts/user-automation-v2.md)。
+- 理由来源：[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.21-D02](../versions/v1.21/decisions.md#v1-21-d02)、[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)、[V1.21-D04](../versions/v1.21/decisions.md#v1-21-d04)及[V1.53-D05](../versions/v1.53/decisions.md#v1-53-d05)。
 
 ## Evidence、Runtime Activity 与 Usage
 

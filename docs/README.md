@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # Rovai-ai 文档导航
@@ -41,7 +41,7 @@ last_updated: 2026-09-06
 | 修改渠道 Camp 自动命名、来源前缀或手动重命名展示 | [Channel Camp Naming v1](contracts/channel-camp-naming-v1.md)、[Camp 命名不变量](architecture/foundational-invariants.md#camp-lifecycle)、[App Shell 与统一侧栏](ui/components/app-shell-navigation.md) |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
 | 修改内置 Agent CLI、IPC、Envelope、receipt、Projection、Gather、Single Chat history、队员创建、纯附件 Agent Send 或幂等合同 | [Built-in Tool Transport v22 合同](contracts/builtin-tool-transport-v22.md)、[Built-in 运输不变量](architecture/foundational-invariants.md#skills-builtin-transport)、[Gather v5](contracts/gather-v5.md)、[Skill Library 与投影不变量](architecture/foundational-invariants.md#skills-library-projection)、[Camp Message Send v19](contracts/camp-message-send-v19.md)及[Current User Attention v4](contracts/current-user-attention-v4.md) |
-| 修改普通用户 `rovai app`、User Automation IPC/credential、Camp/Run 终端自动化、Diagnostic Trial、双 cursor 或诊断 bundle | [User Automation v1](contracts/user-automation-v1.md)、[User Automation Architecture](architecture/user-automation.md)、[User Automation 不变量](architecture/foundational-invariants.md#user-automation-trial)及[v1.21 交付版本](versions/v1.21/README.md) |
+| 修改普通用户 `rovai app`、Workspace inspection、Camp/Run 终端自动化、Diagnostic Trial、双 cursor 或诊断 bundle | [User Automation v2](contracts/user-automation-v2.md)、[User Automation Architecture](architecture/user-automation.md)、[Workspace 与动态 Git 不变量](architecture/foundational-invariants.md#camp-workspace)及[当前版本](versions/v1.53/README.md) |
 | 修改 `camp.search`、`camp.read`、`history.search`、Agent/Human Principal message projection、跨 Camp Manifest/live authorization、Public A2A 历史可见性、Camp message publication fence 或 Agent read 附件输出 | [Camp History Retrieval v4](contracts/camp-history-v4.md)、[公共上下文不变量](architecture/foundational-invariants.md#context-public-history)、[History 与寻址不变量](architecture/foundational-invariants.md#collaboration-history-addressing)、[Message Delivery 不变量](architecture/foundational-invariants.md#collaboration-delivery)、[Built-in Tool Runtime](architecture/builtin-tool-runtime.md)及[Public A2A Message Delivery](architecture/public-a2a-message-delivery.md) |
 | 修改 Memory 在线捕获、complete exact-Scope View、Agent mutation、copyable target、Hearth Review、active body quota、clean break、候选清除、Forget 闭包或审核并发 | [Online Memory Capture 架构](architecture/online-memory-capture.md)、[Memory Capture v3](contracts/memory-capture-v3.md)、[Memory 写入与存储不变量](architecture/foundational-invariants.md#memory-write-store)及[Memory 读取与投影不变量](architecture/foundational-invariants.md#memory-read-projection) |
 | 修改通知来源、Episode 聚合、未读/清除、会话可见确认、增量、浮层设置或类型化导航 | [Notification Episode v5](contracts/notification-episode-v5.md)、[Current User Attention v4](contracts/current-user-attention-v4.md)、[通知事实与投影](architecture/foundational-invariants.md#core-notifications)及[Notification Episode 架构](architecture/notification-episodes.md) |

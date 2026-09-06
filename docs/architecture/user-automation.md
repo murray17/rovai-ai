@@ -3,13 +3,13 @@ document_type: architecture
 architecture: user-automation
 authority: desktop-user-automation-component-boundaries
 status: accepted
-last_updated: 2026-08-23
+last_updated: 2026-09-07
 ---
 
 # User Automation Architecture
 
 本文说明普通用户终端自动化与 Runtime Diagnostic Trial 的长期组件边界。字段、命令、错误和 bundle 以
-[User Automation v1](../contracts/user-automation-v1.md)为准；决定理由见
+[User Automation v2](../contracts/user-automation-v2.md)为准；决定理由见
 [v1.21 决策](../versions/v1.21/decisions.md)。
 
 ## 进程结构
@@ -70,6 +70,10 @@ Diagnostic Trial 只回答“这个已配置成员 Runtime 能否在当前产品
 Core 的安全诊断投影把 frozen facts、公开输出与派生摘要组合成 allowlist view。Main 和 CLI 不读取 raw Runtime
 payload 后再做黑名单脱敏；这样新私有字段不会因调用方忘记删除而进入终端或 bundle。公共结果必须来自
 CampMessage publication seam，Evidence 只说明观察事实，不替代消息、Task outcome 或 terminal authority。
+
+Workspace inspection 只读取目录身份和轻量 Git metadata；Camp 创建重新执行目录准入，但不重复 inspection。
+Run 起止 observation 同样不扫描 tracked/untracked 工作树，新 `dirty` 为 unavailable。历史 dirty boolean 只作为
+既有诊断事实继续读取；Files Changed Card 仍完全来自 Runtime Evidence。
 
 ## Desktop 生命周期
 
