@@ -32,19 +32,22 @@ import {
   type AttachmentDragKind
 } from './attachment-drop'
 import { MemberAvatar } from './MemberAvatar'
-import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
+import { CompactionEventRow, RuntimeRetryNotice, ToolActivityGroup, isPresentableExecutionEvidence } from './ExecutionToolGroup'
+import { executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { SafeMarkdown } from './SafeMarkdown'
 import { shouldSubmitStructuredComposerOnEnter } from './StructuredMentionComposer'
 import { readErrorMessage } from './error-message'
 import {
   buildLiveExecutionProgress,
-  executionStepPublicTitle,
+  selectCompleteExecutionEvidence,
   liveRuntimeEventFromExecutionEvidence,
   type ExecutionProgressItem
 } from './ui-model'
 import {
+  executionHasActiveCompaction,
   groupConsecutiveToolItems,
+  toolActivityGroupHasActiveTool,
   type GroupedExecutionProgressItem,
   type ToolProgressItem
 } from './execution-tool-grouping'
@@ -210,10 +213,6 @@ function LockGlyph(): React.JSX.Element {
   return <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" /></svg>
 }
 
-function ToolGlyph(): React.JSX.Element {
-  return <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M9.65 2.35a3.15 3.15 0 0 0-3.2 3.85L2.8 9.85a1.85 1.85 0 0 0 2.62 2.62l3.65-3.65a3.15 3.15 0 0 0 3.85-3.2L10.8 7.74l-2.5-.45-.45-2.5z" /></svg>
-}
-
 function CheckGlyph(): React.JSX.Element {
   return <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3.2 8.2 2.7 2.7 6.8-6.4" /></svg>
 }
@@ -280,33 +279,7 @@ function resultPayloadString(result: StoredCommandResult, field: string): string
   return typeof value === 'string' && value.trim() ? value : null
 }
 
-export function formatSingleChatDuration(startedAt: string, endedAt: string): string {
-  const started = Date.parse(startedAt)
-  const ended = Date.parse(endedAt)
-  const totalSeconds = Number.isFinite(started) && Number.isFinite(ended)
-    ? Math.max(0, Math.floor((ended - started) / 1_000))
-    : 0
-  const hours = Math.floor(totalSeconds / 3_600)
-  const minutes = Math.floor((totalSeconds % 3_600) / 60)
-  const seconds = totalSeconds % 60
-  return [
-    ...(hours > 0 ? [`${hours} 小时`] : []),
-    ...(minutes > 0 ? [`${minutes} 分`] : []),
-    `${seconds} 秒`
-  ].join(' ')
-}
-
-export function singleChatRunSummary(run: SingleChatRunView, now: string): string {
-  const start = run.startedAt ?? run.createdAt
-  const end = run.endedAt ?? now
-  const duration = formatSingleChatDuration(start, end)
-  if (run.status === 'succeeded') return `工作了 ${duration}`
-  if (run.status === 'cancelled') return `你在 ${duration}后停止了运行`
-  if (run.status === 'failed') return `运行 ${duration}后失败`
-  if (run.status === 'queued') return '等待开始'
-  if (run.status === 'waiting') return `等待继续 · ${duration}`
-  return `正在工作 · ${duration}`
-}
+export { formatExecutionDuration as formatSingleChatDuration, executionRunSummary as singleChatRunSummary } from './execution-run-summary'
 
 export function singleChatEvidenceForRun(
   evidence: readonly AgentRunExecutionEvidenceView[],
@@ -323,108 +296,25 @@ function memberCanSingleChat(member: CampMemberView): boolean {
     && member.profilePresence === 'present'
 }
 
-function toolStepStatusLabel(status: string): string {
-  return ({
-    running: '执行中',
-    waiting: '等待审批',
-    completed: '成功',
-    failed: '失败',
-    stopped: '已停止',
-    skipped: '未执行',
-    recorded: '结果未知'
-  } as Record<string, string>)[status] ?? status
-}
-
-function ToolGroup({
-  items,
-  runStatus
-}: {
-  items: ToolProgressItem[]
-  runStatus: SingleChatRunView['status']
-}): React.JSX.Element {
-  const activeStatus = NON_TERMINAL_RUNS.has(runStatus)
-    ? [...items].reverse().find((item) => item.step.status === 'running' || item.step.status === 'waiting')?.step.status ?? null
-    : null
-  const running = activeStatus !== null
-  const label = running
-    ? activeStatus === 'waiting' ? '等待审批' : '正在执行'
-    : `完成了 ${items.length} 个步骤`
-  return (
-    <details className="single-chat-tool-group" open={running || undefined}>
-      <summary aria-label={`${label}；展开操作详情`}>
-        <span className="single-chat-tool-icon"><ToolGlyph /></span>
-        <span>{label}</span>
-        <span className={`single-chat-tool-state${activeStatus ? ` is-${activeStatus}` : ' is-placeholder'}`} aria-hidden="true">
-          {activeStatus && <ExecutionStatusGlyph status={activeStatus} />}
-        </span>
-        <span className="single-chat-disclosure"><ChevronGlyph /></span>
-      </summary>
-      <div className="single-chat-tool-items">
-        {items.map((item) => (
-          <div className="single-chat-tool-row" key={item.key}>
-            <span className="single-chat-tool-icon"><ToolGlyph /></span>
-            <span className="single-chat-tool-copy">
-              <strong>{item.step.toolName ?? item.step.activityDomain ?? '操作'}</strong>
-              <code title={executionStepPublicTitle(item.step)}>{executionStepPublicTitle(item.step)}</code>
-            </span>
-            <span
-              className={`single-chat-tool-result is-${item.step.status}`}
-              role="img"
-              aria-label={toolStepStatusLabel(item.step.status)}
-              title={toolStepStatusLabel(item.step.status)}
-            >
-              <ExecutionStatusGlyph status={item.step.status} />
-            </span>
-          </div>
-        ))}
-      </div>
-    </details>
-  )
-}
-
-function ExecutionItem({ item, runStatus }: {
-  item: GroupedExecutionProgressItem
-  runStatus: SingleChatRunView['status']
-}): React.JSX.Element | null {
-  if (item.kind === 'toolGroup') return <ToolGroup items={item.items} runStatus={runStatus} />
-  if (item.kind === 'narration') {
-    return <div className="single-chat-narration"><SafeMarkdown>{item.body}</SafeMarkdown></div>
-  }
-  if (item.kind === 'plan') {
-    return (
-      <div className="single-chat-plan">
-        {item.explanation && <SafeMarkdown>{item.explanation}</SafeMarkdown>}
-        {item.plan.length > 0 && <ol>{item.plan.map((step, index) => (
-          <li className={`is-${step.status}`} key={`${index}:${step.step}`}>
-            <span aria-hidden="true">{step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '●' : '○'}</span>
-            <span>{step.step}</span>
-          </li>
-        ))}</ol>}
-      </div>
-    )
-  }
-  if (item.kind === 'diagnostic') {
-    return <p className="single-chat-process-note">运行时正在重试（{item.diagnostic.attempt}/{item.diagnostic.maxAttempts}）</p>
-  }
-  if (item.kind === 'compaction') {
-    return <p className="single-chat-process-note">已整理较早的执行上下文</p>
-  }
-  if (item.kind === 'tool') return <ToolGroup items={[item]} runStatus={runStatus} />
-  return null
-}
-
-function SingleChatRunHistory({
+export function SingleChatRunHistory({
+  campId,
   run,
   evidence,
   finalMessage,
-  now
+  now,
+  cancelling = false,
+  onNotify = () => undefined
 }: {
+  campId: string
   run: SingleChatRunView
   evidence: AgentRunExecutionEvidenceView[]
   finalMessage: SingleChatMessageView | null
   now: string
+  cancelling?: boolean
+  onNotify?(message: string): void
 }): React.JSX.Element {
   const terminal = !NON_TERMINAL_RUNS.has(run.status)
+  const stopping = !terminal && (cancelling || run.cancelRequestedAt !== null)
   const [open, setOpen] = useState(!terminal)
   const previousStatus = useRef(run.status)
   useEffect(() => {
@@ -442,35 +332,88 @@ function SingleChatRunHistory({
         || item.body.trim() !== finalMessage.body.trim())
   }, [evidence, finalMessage, run.id])
   const grouped = useMemo(() => groupConsecutiveToolItems(processItems), [processItems])
-  const hasProcess = grouped.length > 0
+  const completeEvidence = useMemo(() => selectCompleteExecutionEvidence(
+    evidence.filter((item) => item.isTruncated).filter(isPresentableExecutionEvidence)
+  ), [evidence])
+  const trailingItem = grouped.at(-1)
+  const liveTailKey = run.status === 'running' && !stopping && trailingItem?.kind === 'toolGroup'
+    ? trailingItem.key
+    : null
+  const hasActiveTool = toolActivityGroupHasActiveTool(
+    processItems.filter((item): item is ToolProgressItem => item.kind === 'tool'), run.status
+  )
+  const hasActiveCompaction = executionHasActiveCompaction(processItems)
+  const retry = !terminal ? processItems.findLast((item) => item.kind === 'diagnostic') : null
 
-  if (run.status === 'queued' && !hasProcess && !finalMessage) return <></>
+  const renderItem = (item: GroupedExecutionProgressItem): React.JSX.Element | null => {
+    if (item.kind === 'toolGroup' || item.kind === 'tool') {
+      return <ToolActivityGroup
+        key={item.key}
+        campId={campId}
+        items={item.kind === 'toolGroup' ? item.items : [item]}
+        liveTail={item.key === liveTailKey}
+        cancelling={stopping}
+        runId={run.id}
+        runStatus={run.status}
+        completeEvidence={completeEvidence}
+        onFileOpenError={onNotify}
+      />
+    }
+    if (item.kind === 'narration') {
+      return <div className="single-chat-narration" key={item.key}><SafeMarkdown>{item.body}</SafeMarkdown></div>
+    }
+    if (item.kind === 'plan') {
+      return <div className="process-plan live-progress-plan" key={item.key}>
+        {item.explanation && <SafeMarkdown>{item.explanation}</SafeMarkdown>}
+        {item.plan.length > 0 && <ol>{item.plan.map((step, index) => (
+          <li className={`plan-${step.status}`} key={`${index}:${step.step}`}>
+            <span aria-hidden="true">{step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '●' : '○'}</span>
+            <span>{step.step}</span>
+          </li>
+        ))}</ol>}
+      </div>
+    }
+    if (item.kind === 'diagnostic') {
+      return !terminal ? <RuntimeRetryNotice diagnostic={item.diagnostic} key={item.key} /> : null
+    }
+    if (item.kind === 'compaction') {
+      return <CompactionEventRow
+        key={item.key}
+        campId={campId}
+        compaction={item.compaction}
+        runId={run.id}
+        runStatus={run.status}
+        completeEvidence={completeEvidence.byCompactionId.get(item.compaction.id)}
+      />
+    }
+    return null
+  }
 
   return (
     <section className="single-chat-agent-response" aria-label="队员回复">
       <div className="single-chat-agent-column">
         <details
           className={`single-chat-run-history${terminal ? ' is-terminal' : ' is-live'}`}
-          open={open}
-          onToggle={(event) => setOpen(event.currentTarget.open)}
+          open={!terminal || open}
+          onToggle={(event) => { if (terminal) setOpen(event.currentTarget.open) }}
         >
-          <summary>
-            <span className="single-chat-run-summary" aria-live={terminal ? undefined : 'polite'}>
-              {singleChatRunSummary(run, now)}
-            </span>
+          <summary hidden={!terminal}>
+            <span className="single-chat-run-summary">{terminal && executionRunSummary(run, now)}</span>
             <span className="single-chat-disclosure" aria-hidden="true"><ChevronGlyph /></span>
           </summary>
-          <div className="single-chat-execution-content">
-            {grouped.map((item) => (
-              <ExecutionItem item={item} runStatus={run.status} key={item.key} />
-            ))}
-            {!hasProcess && NON_TERMINAL_RUNS.has(run.status) && (
-              <div className="single-chat-processing" role="status">
-                <span className="single-chat-spinner" aria-hidden="true" />
-                <span>{run.status === 'queued' ? '等待开始' : run.status === 'waiting' ? '等待继续' : '正在处理'}</span>
+          <div className="single-chat-execution-content process-content">
+            {grouped.map(renderItem)}
+            {!terminal && !stopping && !hasActiveTool && !hasActiveCompaction && liveTailKey === null && (
+              <div className="process-action current" role="status">
+                <span className="process-spinner" aria-hidden="true" />
+                <span>{run.status === 'waiting' ? '等待继续'
+                  : retry?.kind === 'diagnostic'
+                    ? `等待 Claude Code 自动重试（${retry.diagnostic.attempt}/${retry.diagnostic.maxAttempts}）`
+                    : 'Thinking'}</span>
               </div>
             )}
-            {!hasProcess && run.status === 'failed' && (
+            {stopping && <div className="process-action cancelling" role="status">正在提交停止请求，完成后即可继续发送。</div>}
+            {grouped.length === 0 && run.status === 'failed' && (
               <p className="single-chat-process-note is-error">本轮回复失败，可以重新发送。</p>
             )}
           </div>
@@ -487,10 +430,12 @@ function SingleChatRunHistory({
 function SingleChatTranscript({
   snapshot,
   now,
+  cancelling,
   onNotify
 }: {
   snapshot: SingleChatSnapshot
   now: string
+  cancelling: boolean
   onNotify(message: string): void
 }): React.JSX.Element {
   const runsByTrigger = useMemo(() => new Map(
@@ -539,6 +484,9 @@ function SingleChatTranscript({
           </div>
           {run && (
             <SingleChatRunHistory
+              campId={snapshot.conversation.campId}
+              cancelling={cancelling && run.id === snapshot.conversation.activeAgentRunId}
+              onNotify={onNotify}
               run={run}
               evidence={singleChatEvidenceForRun(snapshot.executionEvidence, run)}
               finalMessage={finalByRun.get(run.id) ?? null}
@@ -1166,7 +1114,7 @@ export function SingleChatPanel({
   useEffect(() => {
     if (!visible || !followLatestRef.current) return
     viewportEndRef.current?.scrollIntoView({ block: 'end' })
-  }, [currentSnapshot?.conversation.lastMessageSequence, activeRun?.executionEvidenceCount, visible])
+  }, [currentSnapshot?.conversation.lastMessageSequence, activeRun?.executionEvidenceCount, sending, visible])
 
   const acceptMutationSnapshot = (next: SingleChatSnapshot): void => {
     acceptSnapshot(next.conversation.id, next)
@@ -1635,9 +1583,12 @@ export function SingleChatPanel({
         <div className="single-chat-transcript">
           {loading && <div className="single-chat-empty" role="status"><span className="single-chat-spinner" /><strong>正在打开单聊</strong></div>}
           {!loading && !selectedMember && <div className="single-chat-empty"><strong>当前没有可单聊的队员</strong><span>队员回到当前会话后即可开始单聊。</span></div>}
-          {!loading && selectedMember && !currentSnapshot && <div className="single-chat-empty"><strong>和 {selectedMember.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
-          {currentSnapshot && currentSnapshot.messages.length === 0 && <div className="single-chat-empty"><strong>和 {selectedMember?.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
-          {currentSnapshot && <SingleChatTranscript snapshot={currentSnapshot} now={now} onNotify={onNotify} />}
+          {!loading && !sending && selectedMember && !currentSnapshot && <div className="single-chat-empty"><strong>和 {selectedMember.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
+          {!sending && currentSnapshot && currentSnapshot.messages.length === 0 && <div className="single-chat-empty"><strong>和 {selectedMember?.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
+          {currentSnapshot && <SingleChatTranscript snapshot={currentSnapshot} now={now} cancelling={cancelling} onNotify={onNotify} />}
+          {sending && !activeRun && <div className="process-action current single-chat-send-feedback" role="status">
+            <span className="process-spinner" aria-hidden="true" /><span>Thinking</span>
+          </div>}
           <div ref={viewportEndRef} aria-hidden="true" />
         </div>
       </section>

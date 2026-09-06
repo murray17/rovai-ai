@@ -5,7 +5,7 @@ authority: tool-group-and-file-operation-presentation
 status: accepted
 version: 31
 source_version: v1.52
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # Run Process Detail Surface v31
@@ -13,6 +13,14 @@ last_updated: 2026-09-06
 完整继承 [v30](run-process-detail-surface-v30.md) 的公开当前指令、Evidence 边界、连续 Tool 分组和 Runtime
 Compaction。本版统一 Tool 详情、状态图形、文件操作入口与纯读取 Shell 摘要；不改变 Tool 内容、
 Canonical Activity 计数、Diff 内容或渠道卡片文案。
+
+## Run 反馈与工具组边界
+
+本地单聊和执行台共用工具组、工具行、类型/状态 SVG、结果惰性读取和键盘交互。普通排队、等待首段输出及正文后
+继续处理显示 `Thinking`；活动工具/Compaction 或未收口的尾组接替该提示，审批、重试、网络恢复和停止保留实际状态。
+耗时总结只由 Run terminal 触发，成功使用“工作了 {时长}”并折叠过程；不能由正文首次到达、工具终态或步骤组收口
+触发。非终态外层不显示耗时，已激活的工具结果在外层呈现切换时保持挂载。此补充只调整本地反馈与组件复用，
+不改变 Canonical、Evidence、Single Chat 的私有投递或渠道卡片。
 
 ## 分组摘要与状态
 
