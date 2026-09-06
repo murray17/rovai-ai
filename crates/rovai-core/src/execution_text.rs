@@ -205,12 +205,14 @@ pub(crate) fn observe(
 ) -> Result<Option<Option<RecordedExecutionEvidence>>> {
     let native_type = payload.pointer("/item/type").and_then(Value::as_str);
     let native_text = matches!(native_type, Some("agentMessage" | "reasoning"));
+    let native_user_message = native_type == Some("userMessage");
     let completion =
         event == "agent.text.completed" || (event == "activity.completed" && native_text);
     let boundary = event == "agent.text.boundary";
     if !admitted(database, run, epoch)? {
         return Ok(
-            if is_text_delta(event) || native_text || completion || boundary {
+            if is_text_delta(event) || native_text || native_user_message || completion || boundary
+            {
                 Some(None)
             } else {
                 None
@@ -370,7 +372,16 @@ pub(crate) fn observe(
                 finish(database, store, &mut buffer, &k, None, "completed")?;
             }
         }
-        Ok(if boundary { Some(None) } else { None })
+        Ok(
+            if boundary
+                || (native_user_message
+                    && matches!(event, "activity.started" | "activity.completed"))
+            {
+                Some(None)
+            } else {
+                None
+            },
+        )
     })();
     database.execution_text = buffer;
     result
@@ -652,6 +663,24 @@ mod slow_tests {
             )
             .is_none()
         );
+        let user_message_baseline = database.connection().total_changes();
+        assert!(
+            write(
+                &mut database,
+                "activity.started",
+                json!({"item":{"type":"userMessage","id":"user-message-1"}})
+            )
+            .is_none()
+        );
+        assert!(
+            write(
+                &mut database,
+                "activity.completed",
+                json!({"item":{"type":"userMessage","id":"user-message-1"}})
+            )
+            .is_none()
+        );
+        assert_eq!(database.connection().total_changes(), user_message_baseline);
         write(&mut database, "agent.text.delta", json!({"delta":"正文B"}));
         write(
             &mut database,

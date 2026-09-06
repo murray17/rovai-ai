@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # 当前基础架构不变量
@@ -500,7 +500,8 @@ last_updated: 2026-09-05
   结果仍是丢弃。它不写 Execution Evidence、不推进 Canonical Activity、不创建 Managed Blob，也不进入 Renderer
   live event state。
   `item/completed` 的 `aggregatedOutput` 是 Command 最终输出的唯一权威，大输出继续按既有阈值进入 Managed Blob。
-  已存在的历史 delta Evidence/Blob 保持原样且仍可读取，本规则不迁移、删除、重写或重建历史。
+  Migration 143 只压缩同一 Canonical Command 内已被后续 terminal `aggregatedOutput` 覆盖的历史 delta，
+  并按原顺序修复其 Canonical 来源；没有 terminal aggregate 的部分输出继续作为唯一事实保留。
 - Adapter 必须优先从原生 terminal semantic event 提供完整公开输出。若未来某个 Adapter 无法提供完整 terminal
   aggregate，只能在 Adapter 内使用有硬上限、Run 结束即删除的临时 spool，并在 terminal 生成完整或明确
   truncated 的单一结果；Core 与 Renderer 都不得无限拼接字符串，也不得退回逐片段持久化。
@@ -509,7 +510,7 @@ last_updated: 2026-09-05
 
 ### 用户可见 evidence 与 Usage
 
-- AgentRun Execution Evidence 是独立、用户可见但默认不回流 Agent 的权威记录，不归 Task、Message、Activity presentation 或 Runtime cache 所有。工具与执行事实保持 append-only；正文、公开 thought 与 reasoning summary 各自按消息块保留，delta 只作实时运输。每块在首片占据稳定位置，由原生 item 完成结果或连续正文边界定稿；取消、失败、受控退出保存已接受内容并标明中断，不把整个 Run 简化为最后一段。小内容在 SQLite，大正文进入 Managed Blob；当前 Read Side 叠加所属 Run 的未定稿内容，历史与实时使用同一块身份去重。字段与有界存储见 [Run Process Detail Surface v30](../contracts/run-process-detail-surface-v30.md#text-block-evidence)。
+- AgentRun Execution Evidence 是独立、用户可见但默认不回流 Agent 的权威记录，不归 Task、Message、Activity presentation 或 Runtime cache 所有。工具与执行事实保持 append-only；正文、公开 thought 与 reasoning summary 各自按消息块保留，delta 只作实时运输。每块在首片占据稳定位置，由原生 item 完成结果或连续正文边界定稿；取消、失败、受控退出保存已接受内容并标明中断，不把整个 Run 简化为最后一段。小内容在 SQLite，大正文进入 Managed Blob；当前 Read Side 叠加所属 Run 的未定稿内容，历史与实时使用同一块身份去重。原生 `userMessage` 的空生命周期不复制 CampMessage；Migration 143 可删除 terminal 完整输出已覆盖的 command delta 和未被引用的空文本壳，但必须在同一事务修复 Canonical 来源、保持非空和无悬挂，且不改写 Canonical revision。字段与有界存储见 [Run Process Detail Surface v31](../contracts/run-process-detail-surface-v31.md#evidence-持久化与模型观察边界)。
 - Renderer 对文本、结构化数据、二进制/未知类型和链接使用安全、有界渲染；不执行 evidence 内容、不把它当作 Agent 消息、Task 完成证明或可重放命令。保留/回收由权威 Run/Camp 引用和 Managed Blob GC 决定，不因 UI 清理或 Agent 不可见而提前删除。
 - Runtime Monitoring 只拥有 Usage-derived metering：原始 observation、归一化 usage、flush/rollup 和 bounded snapshot 由当前五表合同约束。缺失 token/cache/cost 保持稀疏 unknown，不补零或跨 grain 重复计费。
 - Usage raw observation、normalized grain、flush cursor/lease、rollup 和 bounded snapshot 保持独立身份/幂等键；读取按成员/Run/时间范围限界，retention/rollup 不改写已归一化 grain 或从缺失值补数。Cost 只在精确模型、价格版本、token category/grain 可证明且不重复计费时估算；Coverage、unknown 与数据新鲜度随 Snapshot 返回，UI 不把部分支持展示成完整精确账单。

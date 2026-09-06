@@ -1273,6 +1273,7 @@ mod tests {
             "joined_v129",
             "image_v141",
             "deployed_tool_v141",
+            "evidence_v143",
         ] {
             let directory = std::env::temp_dir()
                 .join(format!("rovai-authority-migration-test-{}", Uuid::new_v4()));
@@ -1296,9 +1297,19 @@ mod tests {
                     database
                         .connection()
                         .execute_batch(
-                            "DELETE FROM schema_migration WHERE version=142;
+                            "DELETE FROM schema_migration WHERE version IN (142,143);
                          UPDATE rovai_data_contract SET contract_version='v1.53',
                             projection_schema_version=92, classifier_version='activity-v2';",
+                        )
+                        .unwrap();
+                }
+                "evidence_v143" => {
+                    database
+                        .connection()
+                        .execute_batch(
+                            "DELETE FROM schema_migration WHERE version=143;
+                             UPDATE rovai_data_contract SET contract_version='v1.53',
+                                projection_schema_version=93, classifier_version='activity-v3';",
                         )
                         .unwrap();
                 }

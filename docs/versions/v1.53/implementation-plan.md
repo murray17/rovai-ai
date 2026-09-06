@@ -24,6 +24,12 @@ last_updated: 2026-09-06
 - [x] 经用户确认合入 PR #245，保留主线图片 141，将 classifier cutover 统一为 142；既有工具 141 原子映射并保留 applied-at。
 - [x] 两种升级源的 marker/schema 准入、部分状态拒绝、三个事务失败点回滚，以及生产 lease/ticket/migration/reopen 路径测试通过。
 - [x] 日常新版读取验收：兼容修复后重新构建、隔离副本升级、用户授权安装与目标 Camp 全部历史读回。
+- [x] Migration 143 在单一 IMMEDIATE 事务压缩 terminal aggregate 已覆盖的历史 command delta 与未引用空壳，
+  按原顺序修复 Canonical source IDs，并验证非空、文件投影隔离和无悬挂引用。
+- [x] 新原生 `userMessage` 空生命周期不再写 Evidence；显式模型在 Gateway 前跳过
+  `runtime_model.observe`，`runtime_default` 首次观察和 handler 防御保持不变。
+- [ ] 合并后停止日常 App，创建新完整恢复备份，迁移原库、执行显式孤儿 Managed Blob GC 与 VACUUM，
+  验证真实新增/删除行数、引用、完整性、文件体积和目标 Camp 读取，再启动最新 App。
 
 ### 合同 owner 与最小验证
 
@@ -77,7 +83,8 @@ python3 scripts/aggregate-execution-text.test.py
   Migration 141 冲突：聚合前备份已包含 PR #245 的 classifier cutover，而不是当前主线的图片来源列。
   安装前的隔离新库验收没有覆盖这一真实升级源；不得把正文测试或聚合完整性通过表述为日常 App 可用。
 - 经用户授权合入 PR #245 后，63 个数据库测试和生产迁移组合测试通过。聚合后的真实隔离副本从
-  `v1.52/schema 92/activity-v3` 原子迁移为 `v1.53/schema 93/activity-v3`，原 classifier receipt 的时间保留于 142。
+  `v1.52/schema 92/activity-v3` 原子迁移为 `v1.53/schema 93/activity-v3`，原 classifier receipt 的时间保留于 142；
+  schema 93 现在是 Migration 143 的精确来源，迁移完成后的 current marker 为 `v1.53/schema 94/activity-v3`。
   9 张正文/工具/事件/业务表逐表摘要不变，完整性与外键检查通过，目标 Camp 的 18 个 Run 可读取。
   合并后的执行正文与文件预览 Electron 验收均通过。
 - 用户授权安装后的日常 App/Core 正常启动，原库生产兼容迁移和目标 Camp 的全部 Run/Evidence CLI 读回通过；
@@ -117,6 +124,8 @@ cargo test -p rovai-core --lib agent_run_image::tests
 cargo test -p rovai-core --lib db::tests::current_migration_state_admission_matrix -- --exact
 cargo test -p rovai-core --lib db::tests::v141_retains_historical_runtime_images_as_unconfirmed -- --exact
 cargo test -p rovai-core --lib db::tests::v127_preserves_saved_bindings_and_introduces_no_fast_override -- --exact
+cargo test -p rovai-core --lib db::tests::v143_compacts_terminal_command_deltas_and_empty_text_shells_atomically -- --exact
+cargo test -p rovai-core --bin rovai-core tests::only_runtime_default_model_selection_submits_observation_commands -- --exact
 cargo test -p rovai-core
 pnpm typecheck
 pnpm test

@@ -53,6 +53,25 @@ Shell、Web、Built-in 与普通 Tool 的详情容器统一使用现有 Shell �
 列出文件名。文件名沿用虚线底线预览入口。展开后继续显示原始完整命令和输出，状态与退出码仍属于整次
 Activity；不拆分 Tool Call、Evidence 或步骤计数，也不增加逐文件状态或详情界面。
 
+## Evidence 持久化与模型观察边界
+
+流式正文、公开 thought 与 reasoning summary 继续按 v30 的独立消息块保存，delta 只服务实时展示。
+原生 `userMessage` 的无正文 started/completed 生命周期不写 Execution Evidence；用户输入仍由 CampMessage
+拥有。Migration 143 从精确 `v1.53/schema 93/activity-v3` 来源原子升级为
+`v1.53/schema 94/activity-v3`：只删除同一 Canonical Command 已有后续 terminal
+`activity.completed` 且包含 `aggregatedOutput` 时的历史 `command.output.delta`，并删除无正文、无 Blob、
+未被 Canonical 或文件投影引用的 narration/reasoning 生命周期空壳。
+
+迁移在删除前按原数组顺序修复受影响 Canonical `source_evidence_ids_json`，重算首末 Evidence sequence；
+任何 Canonical 来源会变空、候选仍被文件投影引用，或删除后存在悬挂来源时整步回滚。Canonical revision
+保持不变，因为本次只压缩支持证据载体，不重算语义结论。没有可靠 terminal aggregate 的 command delta、
+完整正文/reasoning 块与真实工具开始/完成事实不得删除。迁移不执行 VACUUM，旧库空间回收与 Managed Blob
+GC 是独立、显式运维动作。
+
+运行模型观察只用于把 `runtime_default` 从未观察态收敛到首个可信模型。`model.source=explicit` 已由冻结
+AgentRun 配置完整拥有，Adapter 启动结果或 `runtime.model.observed` 不提交 `runtime_model.observe`；Gateway
+内的显式模型防御仍保留。默认模型观察继续使用原命令身份与幂等结果。
+
 ## 文件操作行
 
 `runtimeFileOperation schemaVersion=2` 且 `operationKind=read` 的可靠单文件操作显示为不可展开的
@@ -79,6 +98,9 @@ Diff，点击 Diff 箭头不得打开文件。缺少可靠路径时不生成文�
 - read 行不可展开；新增、编辑、path-only write 和无可靠 path／Diff 的回退符合上述规则；
 - 文件名和 Diff 箭头可独立键盘操作，失败只产生红色 Toast 且不改变已有预览状态；
 - 静态行无假 hover，取消等待不形成色条，底部执行台与 Inspector 复用同一 presentation。
+- 历史终态 Command 的 delta 被压缩且 Canonical 来源顺序、首末 sequence 和 revision 正确；无终态部分输出、
+  完整正文和真实工具事实保留，迁移失败不留下半更新；
+- 新原生 `userMessage` 空壳不落库，显式模型不提交观察命令，`runtime_default` 首次观察行为不变。
 
 ## References
 

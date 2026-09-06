@@ -62,6 +62,11 @@ Migration 142 原子地把 data contract 标记切到 `v1.53 / projection schema
 或既有 Canonical rows。operation 首次建立的 classifier 继续冻结：在切换前已经以 v1/v2 建立的活动用原版本
 结算；切换后的新活动使用 v3。Read Side 按 v3、v2、v1 的确定性优先级读取。
 
+随后 Migration 143 将 current marker 推进到 projection schema 94。它只压缩 terminal 完整输出已覆盖的
+历史 command delta 与未引用的空文本生命周期壳；任何 `agent_run_file_change_projection.source_evidence_ids_json`
+引用都会阻止候选删除，迁移后文件投影不得出现悬挂 Evidence。typed file operation、Diff 和 AgentRun 文件变化
+投影均不重算、不改写。
+
 已部署工具分支的 `v1.52/schema 92/activity-v3` 曾使用编号 141，与主线图片来源迁移冲突。
 仅在完整旧 receipt 链及精确旧图片/下层 schema 匹配时，原位事务把该 classifier receipt 映射到 142
 并保留 `applied_at`，补齐图片来源列及 141 receipt，再发布统一 marker。任何失败回滚整个汇合步骤；

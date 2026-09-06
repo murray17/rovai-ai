@@ -14,7 +14,7 @@ last_updated: 2026-09-06
 
 - 工具分类与图片迁移汇合：[原位升级](../architecture/availability-first-runtime.md#migration-switch)、[Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)；理由：[V1.53-D03](../versions/v1.53/decisions.md#v1-53-d03)。
 
-- 正文块与维护写放大当前规范：[正文块 Evidence](../contracts/run-process-detail-surface-v30.md#text-block-evidence)、[Camp Open](../contracts/camp-open-projection-v16.md)、[可见来源确认](../contracts/notification-episode-v5.md)、[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；理由：[V1.53-D02](../versions/v1.53/decisions.md#v1-53-d02)。
+- 正文块与维护写放大当前规范：[Evidence 持久化与模型观察边界](../contracts/run-process-detail-surface-v31.md#evidence-持久化与模型观察边界)、[Camp Open](../contracts/camp-open-projection-v16.md)、[可见来源确认](../contracts/notification-episode-v5.md)、[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；理由：[V1.53-D02](../versions/v1.53/decisions.md#v1-53-d02)。
 
 - Camp 队员 Fast 当前规范：[Camp Member Fast v1](../contracts/camp-member-fast-v1.md)、[Runtime 边界](../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)、[Usage v4](../contracts/runtime-usage-monitoring-v4.md)；理由：[V1.34-D01](../versions/v1.34/decisions.md#v1-34-d01)。
 

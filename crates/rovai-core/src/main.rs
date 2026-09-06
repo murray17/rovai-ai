@@ -11524,6 +11524,7 @@ impl Core {
             &execution.camp_id,
             &execution.agent_run_id,
             execution.execution_epoch,
+            &execution.runtime.model.source,
             runtime.observed_model_id().await,
         )
         .await;
@@ -13126,6 +13127,7 @@ impl Core {
             &execution.camp_id,
             &execution.agent_run_id,
             execution.execution_epoch,
+            &execution.runtime.model.source,
             runtime.observed_model_id().await,
         )
         .await;
@@ -15531,6 +15533,7 @@ async fn process_agent_run_pi_message(
             &execution.camp_id,
             &execution.agent_run_id,
             execution.execution_epoch,
+            &execution.runtime.model.source,
             Some(execution.runtime.model.model_id.clone()),
         )
         .await;
@@ -17141,8 +17144,12 @@ async fn record_available_runtime_model(
     camp_id: &str,
     agent_run_id: &str,
     execution_epoch: i64,
+    model_source: &str,
     model_id: Option<String>,
 ) {
+    if !runtime_model_observation_admitted(model_source) {
+        return;
+    }
     let Some(model_id) = model_id else {
         return;
     };
@@ -17161,6 +17168,10 @@ async fn record_available_runtime_model(
             "failed to persist {adapter_kind:?} Runtime model observation for AgentRun {agent_run_id}: {error:#}"
         );
     }
+}
+
+fn runtime_model_observation_admitted(model_source: &str) -> bool {
+    model_source == "runtime_default"
 }
 
 #[derive(Clone, Copy)]
@@ -17243,6 +17254,18 @@ async fn process_runtime_event(
             .get("modelId")
             .and_then(Value::as_str)
             .context("Runtime model observation omitted modelId")?;
+        let admitted = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default()
+                .load_agent_run_execution(&database, scope.agent_run_id, scope.execution_epoch)?
+                .is_some_and(|execution| {
+                    execution.runtime.adapter_kind == scope.adapter_kind
+                        && runtime_model_observation_admitted(&execution.runtime.model.source)
+                })
+        };
+        if !admitted {
+            return Ok(());
+        }
         record_runtime_model_observation(
             core,
             output,
@@ -22449,6 +22472,13 @@ while IFS= read -r _ignored; do :; done
             first,
             scoped_runtime_tool_call_id("run-b", "mcp-jsonrpc:same")
         );
+    }
+
+    #[test]
+    fn only_runtime_default_model_selection_submits_observation_commands() {
+        assert!(runtime_model_observation_admitted("runtime_default"));
+        assert!(!runtime_model_observation_admitted("explicit"));
+        assert!(!runtime_model_observation_admitted("inherited"));
     }
 
     fn managed_runtime_fixture(

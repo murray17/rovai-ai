@@ -31,13 +31,17 @@ Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
 
 本轮补充正文持久化与维护写放大修复，见 [V1.53-D02](decisions.md#v1-53-d02)和
 [实施与验收](implementation-plan.md#正文持久化补充)。补充任务更新 Runtime Evidence、Camp Open 读取
-与可见通知调用源；不改变 UI 布局、Runtime 平台准入或本版本原生图片过滤边界。
+与可见通知调用源。Migration 143 对旧库中已被同一 Canonical Command 终态完整输出覆盖的历史 delta
+及无正文生命周期空壳做一次性压缩，原子修复 Canonical 来源引用，并将 current marker 推进到
+`v1.53/schema 94/activity-v3`；没有终态的部分输出和所有真实工具事实保留。显式模型已由冻结配置拥有，
+因此其 Runtime 观察不再提交空命令。上述变化不改变 UI 布局、Runtime 平台准入或本版本原生图片过滤边界。
 
 ## 工具一致性与已部署数据库兼容
 
 合入 PR #245 的 typed read/write、Shell 阅读摘要、统一工具状态及成功读取后提交文件预览；保留主线
-文件阅读器改动，不重新设计界面。Migration 142 将 classifier 切换到 `activity-v3`，统一当前标记为
-`v1.53/schema 93`；此前主线 `v1.53/schema 92` 和工具分支 `v1.52/schema 92/activity-v3` 均有明确升级路径。
+文件阅读器改动，不重新设计界面。Migration 142 将 classifier 切换到 `activity-v3` 并形成
+`v1.53/schema 93` 的 Migration 143 精确来源；此前主线 `v1.53/schema 92` 和工具分支
+`v1.52/schema 92/activity-v3` 均有明确升级路径，随后统一进入 current `v1.53/schema 94/activity-v3`。
 旧工具 141 的时间在原子汇合中保留，未知/部分 schema 不准入。见 [V1.53-D03](decisions.md#v1-53-d03)
 及 [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)。
 
