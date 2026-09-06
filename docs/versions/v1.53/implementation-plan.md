@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.53
 authority: implementation-and-acceptance-status
 status: in-progress
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # v1.53 实施与验收
@@ -256,3 +256,16 @@ ACP 原有错误/投递测试扩展网络类别与 accepted/not-accepted 分流�
   `record_available_runtime_model` 具有 8 个参数，触发 `too_many_arguments`。该函数与主线 `ec3b4295`
   完全一致，本次保留并记录基线 lint；不声明完整 Clippy 门禁全绿。
 - 实机恢复资格仍采用上节结果；自动化检查通过不代替 ACP 接管链路的真实验收。
+
+## 单聊与执行台反馈补充
+
+- [x] 排队不再返回空过程；发送确认前和普通处理显示 `Thinking`，正文/工具到达不出现耗时总结。
+- [x] 单聊与执行台共用 `ExecutionToolGroup`；组按 Canonical Activity 计数，尾组延续、类型图标、四轨布局、结果加载/重试及键盘行为一致。
+- [x] 终态才出现中文耗时；成功自动折叠外层，final 独立展开。状态切换不卸载已打开的组和工具结果。
+- [x] TypeScript、完整 Vitest（157 文件 / 1,610 项）、Electron 双主题/七阶段、发送确认与拒绝、轮询与事件、工具结果失败重试、键盘及状态保留验证。
+
+本轮沿用已有 `SingleChatPanel` Electron fixture，并加入独立合成公共任务验证执行台，二者不共享正文或工具输出。
+不新建数据/Runtime 夹具、不运行真实模型或写入日常 userData；不将合成证据验收宣称为真实 Runtime 资格测试。
+
+验证命令：`pnpm typecheck`、`pnpm exec vitest run`、`node --test scripts/lib/single-chat-panel.test.mjs`、
+`pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check` 与 `DOCS_BASE_REF=<PR base> pnpm docs:check:ci`。
