@@ -2785,7 +2785,8 @@ exit 1
     #[test]
     fn write_result_type_classifies_update_but_does_not_promote_ambiguous_create() {
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
-        for (result_type, expected_change_kind) in [("update", "update")] {
+        {
+            let (result_type, expected_change_kind) = ("update", "update");
             let tool_use_id = format!("toolu-write-{result_type}");
             let mut state = ClaudeCodeStreamState::default();
             normalize_claude_runtime_events(
