@@ -2383,6 +2383,18 @@ async function acceptInlineSkillQueries(cdp, campId, skill) {
     await pressKey(cdp, {
       key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38, nativeVirtualKeyCode: 126
     })
+    // Selection commits before the effect scrolls and updates the editor's active descendant.
+    await waitForExpression(cdp, `(() => {
+      const editor = document.querySelector('#camp-message')
+      const menu = document.querySelector('.skill-picker-menu')
+      const active = menu?.querySelector('[aria-selected="true"]')
+      if (!editor || !menu || !active) return false
+      const menuRect = menu.getBoundingClientRect()
+      const activeRect = active.getBoundingClientRect()
+      return active === [...menu.querySelectorAll('[role="option"]')].at(-1)
+        && editor.getAttribute('aria-activedescendant') === active.id
+        && activeRect.top >= menuRect.top && activeRect.bottom <= menuRect.bottom
+    })()`)
     const layout = await evaluate(cdp, `(() => {
       const editor = document.querySelector('#camp-message')
       const menu = document.querySelector('.skill-picker-menu')

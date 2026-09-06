@@ -60,8 +60,7 @@ export function AppDialogContent({
 export function AppDialogHeader({
   title,
   description,
-  icon,
-  kicker,
+  hideDescription = false,
   closeLabel = '关闭',
   closeDisabled = false,
   descriptionId,
@@ -69,7 +68,8 @@ export function AppDialogHeader({
 }: {
   title: ReactNode
   description: ReactNode
-  icon: AppDialogIconName
+  hideDescription?: boolean
+  icon?: AppDialogIconName
   kicker?: ReactNode
   closeLabel?: string
   closeDisabled?: boolean
@@ -78,92 +78,74 @@ export function AppDialogHeader({
 }): React.JSX.Element {
   return (
     <header className="app-dialog-header">
-      <span className="app-dialog-icon" aria-hidden="true"><AppDialogGlyph name={icon} /></span>
-      <div className="app-dialog-heading">
-        {kicker && <span className="app-dialog-kicker">{kicker}</span>}
+      <div className="app-dialog-title-row">
         <Dialog.Title className="app-dialog-title">{title}</Dialog.Title>
-        <Dialog.Description className="app-dialog-description" id={descriptionId}>{description}</Dialog.Description>
-      </div>
-      {hideClose
-        ? <span aria-hidden="true" />
-        : (
+        {!hideClose && (
           <Dialog.Close asChild>
-            <button className="app-dialog-close" type="button" aria-label={closeLabel} disabled={closeDisabled}>
-              <CloseGlyph />
+            <button className="app-dialog-close compact-close" type="button" aria-label={closeLabel} disabled={closeDisabled}>
+              <DialogControlIcon name="close" />
             </button>
           </Dialog.Close>
-          )}
+        )}
+      </div>
+      <Dialog.Description className={hideDescription ? 'sr-only' : 'app-dialog-description'} id={descriptionId}>{description}</Dialog.Description>
     </header>
   )
 }
 
-export function AppDialogBody({
-  children,
-  className = '',
-  divided = true
-}: {
+export function AppDialogBody({ children, className = '' }: {
   children: ReactNode
   className?: string
   divided?: boolean
 }): React.JSX.Element {
-  return <div className={`app-dialog-body${divided ? ' with-divider' : ''}${className ? ` ${className}` : ''}`}>{children}</div>
+  return <div className={`app-dialog-body${className ? ` ${className}` : ''}`}>{children}</div>
 }
 
-export function AppDialogFooter({
-  children,
-  note,
-  leading
-}: {
+export function AppDialogFooter({ children, note, leading }: {
   children: ReactNode
   note?: ReactNode
   leading?: ReactNode
 }): React.JSX.Element {
   return (
     <footer className="app-dialog-footer">
-      <div className="app-dialog-footer-copy">{leading ?? note}</div>
+      {(leading || note) && <div className="app-dialog-footer-copy">{leading ?? note}</div>}
       <div className="dialog-actions">{children}</div>
     </footer>
   )
 }
 
 export function AppDialogFactGrid({ children }: { children: ReactNode }): React.JSX.Element {
-  return <div className="app-dialog-fact-grid">{children}</div>
+  return <dl className="app-dialog-fact-grid">{children}</dl>
 }
 
 export function AppDialogFact({ label, children }: { label: ReactNode; children: ReactNode }): React.JSX.Element {
-  return <div className="app-dialog-fact"><span>{label}</span><strong>{children}</strong></div>
+  return <div className="app-dialog-fact"><dt>{label}</dt><dd>{children}</dd></div>
 }
 
 export function AppDialogImpactList({ children }: { children: ReactNode }): React.JSX.Element {
-  return <div className="app-dialog-impact-list">{children}</div>
+  return <ul className="app-dialog-impact-list">{children}</ul>
 }
 
-export function AppDialogImpact({
-  tone = 'neutral',
-  icon,
-  label,
-  children
-}: {
+export function AppDialogImpact({ tone = 'neutral', label, children }: {
   tone?: 'neutral' | 'delete' | 'keep' | 'warning'
-  icon: AppDialogIconName
+  icon?: AppDialogIconName
   label: ReactNode
   children: ReactNode
 }): React.JSX.Element {
-  return (
-    <div className={`app-dialog-impact is-${tone}`}>
-      <AppDialogGlyph name={icon} />
-      <strong>{label}</strong>
-      <span>{children}</span>
-    </div>
-  )
+  return <li className={`app-dialog-impact is-${tone}`}><span>{label}</span><p>{children}</p></li>
+}
+
+export function DialogControlIcon({ name }: { name: 'close' | 'chevron' | 'plus' | 'check' }): React.JSX.Element {
+  return <svg className="dialog-glyph" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {name === 'close' ? <path d="m5 5 10 10M15 5 5 15" />
+      : name === 'plus' ? <path d="M10 4v12M4 10h12" />
+      : name === 'check' ? <path d="m4.5 10 3.5 3.5L15.5 6" />
+      : <path d="m6 8 4 4 4-4" />}
+  </svg>
 }
 
 export function AppDialogGlyph({ name }: { name: AppDialogIconName }): React.JSX.Element {
   return <svg viewBox="0 0 20 20" aria-hidden="true">{glyphPaths(name)}</svg>
-}
-
-function CloseGlyph(): React.JSX.Element {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 4 12 12M16 4 4 16" /></svg>
 }
 
 function glyphPaths(name: AppDialogIconName): React.JSX.Element {

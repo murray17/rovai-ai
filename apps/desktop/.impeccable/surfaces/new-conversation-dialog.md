@@ -1,5 +1,5 @@
 ---
-version: 4
+version: 5
 slug: "new-conversation-dialog"
 primary_target: "apps/desktop/src/renderer/src/NewConversationDialog.tsx"
 related_targets:
@@ -16,12 +16,13 @@ without hiding safety checks or creating a second Draft model.
 ## Geometry and hierarchy
 
 Open the same Radix Dialog from every entry point. Width is
-`min(760px, viewport width - 72px)` and maximum height is
-`min(790px, viewport height - 72px)`. Header and footer remain fixed while the body scrolls. Use the
-raised theme surface, strong boundary and 3px Steel top edge; semantic errors keep their own color.
+`min(520px, viewport width - 48px)` and maximum height is `viewport height - 48px`.
+Header and footer remain fixed while the body scrolls. Use the raised theme surface, a 1px neutral
+boundary and no colored top stripe. Semantic errors keep their own color.
 
-Header: a bounded `+` creation icon, eyebrow `NEW CAMP`, title “创建新对话”, description
-“确定这段对话的工作环境与队员”, and an accessibly named close button.
+Header: title “创建新对话” and an accessibly named close button. Keep the description available to
+assistive technology without repeating it visually. Use the paired dialog label and field tokens,
+regular-weight labels and 44px picker rows.
 
 Workspace, teammate, Lead and optional-configuration controls share one 16px stroke chevron and one
 right-edge inset. Lead uses the established accessible custom radio menu rather than a native select,
@@ -36,18 +37,16 @@ arrow-key navigation, `Esc` dismissal and focus return.
    uses the semantic success foreground and surface, while the in-progress inspection state remains neutral.
    Before removed-Project authority is ready, keep Project choices disabled, do not inspect or submit a cached
    directory, and identify the wait with neutral loading copy; Quick Chat creation remains available.
-2. **队员与 Lead** — default to the saved valid team configuration, otherwise all active teammates.
+2. **队员 / 负责人** — default to the saved valid team configuration, otherwise all active teammates.
    The set is non-empty and Lead remains inside it. Runtime availability is guidance, not a structural
    selector. Unavailable saved members are filtered while initializing the draft without adding a
-   separate “默认配置已失效” warning block. The Lead trigger shows the current portrait, name and
-   availability; menu candidates come only from the currently selected teammates and each shows a
-   portrait. Do not add “Agent 运行时” copy to this selector.
-3. **可选配置 / 对话名称** — collapsed by default. Expansion focuses the input. Normalize and count
-   Unicode scalars up to 80; indent the expanded name editor on a visible child rail and keep the exact
+   separate “默认配置已失效” warning block. The Lead trigger shows the current portrait and name, with unavailable status only when needed; menu candidates come only from the currently selected teammates and each shows a
+   portrait. A concise runtime-readiness note may appear below the member row; it does not block structural creation.
+3. **添加对话名称 / 对话名称** — collapsed by default. Expansion focuses the input. Normalize and count
+   Unicode scalars up to 80; align the expanded name editor with the form without a child rail and keep the exact
    placeholder `输入名称...`. Empty means “未命名对话” and is not delegated to a Runtime/LLM.
 
-Footer summary contains only Quick Chat/directory display name, teammate count and Lead, followed by
-“取消 / 创建”. Do not add a duplicate body summary or static warning block.
+Footer contains “取消 / 新建”. Do not repeat directory, teammate count or Lead in a summary.
 
 ## Submission and recovery
 
@@ -61,16 +60,6 @@ state returns focus to the exact opener.
 
 Do not restore “协作方式 / 并肩协作 / 领队统筹 / 暂未开放”; the request continues to submit the existing
 `peer` semantics. This is a Renderer simplification, not a Core union or SQLite migration.
-
-## Active color review
-
-The [non-authoritative HTML color study](../../../../docs/prototypes/new-conversation-dialog-colors/index.html)
-keeps the current Dialog, Header, Footer and brand treatment while comparing the current picker colors with
-three cooler treatments for the workspace, member and Lead dropdowns. C “瓷白钢边” was selected on
-2026-09-01 and is implemented through the paired `--new-camp-picker-*` Day/Night semantic tokens. The
-optional-configuration accordion intentionally keeps the standard Dialog surface tokens because it is a
-secondary disclosure, not a picker. The study remains non-authoritative context; production tokens and this
-brief define the accepted component treatment.
 
 ## Inheritance and hard boundaries
 

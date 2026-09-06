@@ -5,21 +5,23 @@ const component = readFileSync(new URL('./NewConversationDialog.tsx', import.met
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 
 describe('New Conversation dialog presentation contract', () => {
-  it('keeps the creation icon and the optional name editor collapsed with the exact placeholder', () => {
-    expect(component).toContain('className="new-camp-dialog-header-icon"')
+  it('keeps a single title and a collapsed, focusable optional name editor', () => {
+    expect(component).not.toContain('new-camp-dialog-header-icon')
     expect(component).toContain('setOptionalOpen(false)')
+    expect(component).toContain('aria-expanded={optionalOpen}')
+    expect(component).toContain('aria-controls="new-camp-optional-panel"')
     expect(component).toContain('placeholder="输入名称..."')
-    expect(styles).toMatch(/\.new-camp-optional-panel\s*\{[^}]*margin:\s*0 10px 10px 42px/)
-    expect(styles).toContain('.new-camp-optional-panel::before')
+    expect(component).toContain('nameInputRef.current?.focus()')
+    expect(component).toContain("{busy ? '正在新建…' : '新建'}")
   })
 
   it('uses an avatar radio menu whose candidates remain the currently selected members', () => {
     expect(component).not.toMatch(/<select[\s>]/)
     expect(component).toContain('<DropdownMenu.RadioGroup value={leadId} onValueChange={setLeadId}>')
     expect(component).toContain('{selectedMembers.map((member) => {')
-    expect(component).toContain('className="new-camp-lead-trigger"')
-    expect(component).toContain('className="new-camp-lead-option"')
-    expect(component).not.toContain('Agent 运行时')
+    expect(component).toContain('aria-labelledby="new-camp-lead-label new-camp-lead-value"')
+    expect(component).toContain('aria-label="选择负责人"')
+    expect(component).toContain('<DropdownMenu.RadioItem className="compact-option"')
   })
 
   it('distinguishes valid Git metadata from the neutral inspection state', () => {
@@ -36,12 +38,11 @@ describe('New Conversation dialog presentation contract', () => {
     expect(component).toContain(': closeButtonRef.current')
   })
 
-  it('scopes the selected porcelain picker colors to dropdown controls', () => {
-    expect(styles).toMatch(/\.new-camp-picker-trigger\s*\{[^}]*border:\s*1px solid var\(--new-camp-picker-line-strong\)[^}]*background:\s*var\(--new-camp-picker-surface\)/s)
-    expect(styles).toMatch(/\.new-camp-picker-menu\s*\{[^}]*border:\s*1px solid var\(--new-camp-picker-line-strong\)[^}]*background:\s*var\(--new-camp-picker-surface\)/s)
-    expect(styles).toMatch(/\.new-camp-lead-trigger\s*\{[^}]*border:\s*1px solid var\(--new-camp-picker-line-strong\)[^}]*background:\s*var\(--new-camp-picker-surface\)/s)
-    expect(styles).toMatch(/\.new-camp-lead-menu\s*\{[^}]*border:\s*1px solid var\(--new-camp-picker-line-strong\)[^}]*background:\s*var\(--new-camp-picker-surface\)/s)
-    expect(styles).toMatch(/\.new-camp-optional-shell\s*\{[^}]*background:\s*var\(--surface\)/s)
-    expect(styles).toMatch(/\.new-camp-optional-icon\s*\{[^}]*background:\s*var\(--surface-muted\)/s)
+  it('uses paired light field boundaries without losing focus and contrast support', () => {
+    expect(styles).toMatch(/\.compact-picker\s*\{[^}]*border:\s*1px solid var\(--dialog-field-line\)/s)
+    expect(styles).toContain('--dialog-field-label: #707070;')
+    expect(styles).toContain('--dialog-field-label: #a6abb2;')
+    expect(styles).toContain('prefers-contrast: more')
+    expect(styles).toContain('outline:2px solid var(--focus)')
   })
 })

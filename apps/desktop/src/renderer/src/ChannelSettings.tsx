@@ -699,7 +699,7 @@ export function QrDialog({
         <AppDialogContent className={`channel-qr-dialog${attemptKind === 'dingtalk' ? ' is-dingtalk' : ''}${interaction ? ' has-platform-view' : ''}`}>
           <AppDialogHeader
             title={`登录${providerName}开放平台`}
-            description={`使用${providerName}扫码登录开发者平台。本次不会创建应用、读取 App Secret 或发布 Bot。`}
+            description="仅登录开发者平台，本次不会创建应用或发布 Bot。"
             icon="shield"
             closeDisabled={committing || (attemptKind !== 'dingtalk' && busy && attempt.stage !== 'failed')}
           />
@@ -716,7 +716,7 @@ export function QrDialog({
               ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}`
               : '开发者会话保存在 Rovai 本地数据库，不会暴露给页面。'}</small>
           </AppDialogBody>
-          <AppDialogFooter note="登录后，后续发布会复用同一开发者会话。">
+          <AppDialogFooter>
             {attemptKind === 'dingtalk' && attempt.stage === 'expired' && <button
               className="primary-button" type="button" onClick={() => onRefresh(attempt.attemptId)}
             >刷新二维码</button>}
@@ -783,9 +783,7 @@ function PublishBotDialog({
             title={boundAppId
               ? `重新发布「${agent.displayName}」${providerName} Bot`
               : `发布「${agent.displayName}」为${providerName} Bot`}
-            description={boundAppId
-              ? `Rovai 会核对并恢复这名队员已经绑定的${providerName}应用。App ID 保持不变，不会创建或换绑其他应用。`
-              : `Rovai 会复用当前开发者会话，在后台创建、配置并发布这名队员的独立应用。正常流程不会打开${providerName}创建确认页，也不需要再次登录。`}
+            description={boundAppId ? "核对并恢复已绑定应用，保持原 App ID。" : "将使用当前账号创建并发布这位队员的独立应用。"}
             icon="server"
             closeDisabled={busy && !terminal}
           />
@@ -856,7 +854,7 @@ function PublishBotDialog({
               ? '创建结果无法确认。Rovai 已锁定再次创建，避免产生重复应用。'
             : effectiveAppId
               ? '重新发布始终复用已绑定应用，不提供换绑入口。'
-              : '发布只使用当前开发者会话，不会打开平台创建确认页。'}>
+              : null}>
             <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>取消</button>
             {sessionUnavailable ? (
               <button className="primary-button" type="button" disabled={busy} onClick={onReconnect}>

@@ -766,6 +766,7 @@ export function CampNavigation({
                   description="仅更新侧栏中的对话名称。项目归属、队员、消息与活动顺序保持不变。"
                   icon="pencil"
                   closeDisabled={actionBusy}
+            hideDescription
                 />
                 <form className="app-dialog-form" onSubmit={(event) => void submitRename(event)}>
                   <AppDialogBody>
@@ -781,7 +782,7 @@ export function CampNavigation({
               <>
                 <AppDialogHeader
                   title={`永久删除“${formatCampTitle(action.camp)}”？`}
-                  description="Rovai 会永久删除会话数据，并请求停止这段对话中仍未结束的执行。"
+                  description="此操作不可撤销。"
                   icon="trash"
                   kicker="不可撤销"
                   closeDisabled={actionBusy}
@@ -793,7 +794,7 @@ export function CampNavigation({
                     <AppDialogImpact tone="keep" icon="folder" label="保持不变">本地项目目录及其中的文件不会被删除。</AppDialogImpact>
                   </AppDialogImpactList>
                 </AppDialogBody>
-                <AppDialogFooter note="删除成功后无法恢复。">
+                <AppDialogFooter>
                   <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={actionBusy}>取消</button></Dialog.Close>
                   <button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '正在永久删除…' : '永久删除对话'}</button>
                 </AppDialogFooter>
@@ -806,6 +807,7 @@ export function CampNavigation({
                   icon="folder"
                   kicker="可恢复"
                   closeDisabled={actionBusy}
+            hideDescription
                 />
                 <AppDialogBody>
                   <AppDialogImpactList>

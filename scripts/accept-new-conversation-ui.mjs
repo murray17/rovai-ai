@@ -44,7 +44,7 @@ try {
   })
   if (existingDialog.result?.result?.value) {
     await cdp.send('Runtime.evaluate', {
-      expression: `document.querySelector('.new-camp-dialog .dialog-close')?.click()`
+      expression: `document.querySelector('.new-camp-dialog .compact-close')?.click()`
     })
     await waitForExpression(cdp, `document.querySelector('.new-camp-dialog') === null`, 5_000)
   }
@@ -68,17 +68,18 @@ try {
     5_000
   )
   await cdp.send('Runtime.evaluate', {
-    expression: `document.querySelector('.new-camp-picker-trigger.member-trigger')?.click()`
+    expression: `document.querySelector('button[aria-labelledby~="new-camp-members-label"]')?.focus()`
   })
+  await dispatchDomKey(cdp, 'ArrowDown')
   await waitForExpression(
     cdp,
-    `document.querySelectorAll('.new-camp-member-option input[type="checkbox"]').length > 0`,
+    `document.querySelectorAll('.compact-menu[aria-label="选择队员"] [role="menuitemcheckbox"]').length > 0`,
     5_000
   )
   const memberSelection = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const checks = [...document.querySelectorAll('.new-camp-member-option input[type="checkbox"]')]
-      return { count: checks.length, selected: checks.filter((input) => input.checked).length }
+      const checks = [...document.querySelectorAll('.compact-menu[aria-label="选择队员"] [role="menuitemcheckbox"]')]
+      return { count: checks.length, selected: checks.filter((input) => input.getAttribute('aria-checked') === 'true').length }
     })()`,
     returnByValue: true
   })
@@ -89,7 +90,7 @@ try {
       const dialog = document.querySelector('.new-camp-dialog')
       const text = dialog?.textContent ?? ''
       const buttons = [...(dialog?.querySelectorAll('button') ?? [])]
-      const primary = buttons.find((button) => button.classList.contains('primary-button'))
+      const primary = buttons.find((button) => button.classList.contains('compact-primary'))
       const rect = dialog?.getBoundingClientRect()
       return {
         title: dialog?.querySelector('h2')?.textContent,
@@ -101,11 +102,11 @@ try {
           && !text.includes('暂未开放')
           && !text.includes('协作方式'),
         saysRecommended: text.includes('推荐'),
-        optionalShell: Boolean(dialog?.querySelector('.new-camp-optional-shell')),
-        optionalCollapsed: !dialog?.querySelector('.new-camp-optional-panel'),
+        optionalShell: Boolean(dialog?.querySelector('.compact-name-disclosure')),
+        optionalCollapsed: !dialog?.querySelector('.compact-name-field'),
         headerCreationIcon: Boolean(dialog?.querySelector('.new-camp-dialog-header-icon svg path')),
         leadPicker: (() => {
-          const trigger = dialog?.querySelector('.new-camp-lead-trigger')
+          const trigger = dialog?.querySelector('button[aria-labelledby~="new-camp-lead-label"]')
           return {
             custom: Boolean(trigger) && !dialog?.querySelector('.new-camp-lead-field select'),
             hasAvatar: Boolean(trigger?.querySelector('.member-avatar')),
@@ -113,12 +114,12 @@ try {
             hasAriaPopup: trigger?.getAttribute('aria-haspopup') === 'menu'
           }
         })(),
-        agentRuntimeCopyRemoved: !text.includes('Agent 运行时'),
+        agentRuntimeCopyRemoved: !dialog?.querySelector('button[aria-labelledby~="new-camp-lead-label"]')?.textContent?.includes('Agent 运行时'),
         defaultsAttentionRemoved: !text.includes('默认配置已失效')
           && !text.includes('已保存配置曾失效')
           && !text.includes('以上调整只用于本次创建'),
         dropdownIcons: (() => {
-          const icons = [...dialog.querySelectorAll('.new-camp-chevron')]
+          const icons = [...dialog.querySelectorAll('.compact-picker > svg:last-child')]
           const rightEdges = icons.map((icon) => icon.getBoundingClientRect().right)
           return {
             count: icons.length,
@@ -134,7 +135,7 @@ try {
         })(),
         selectedMembers: ${JSON.stringify(memberSelectionValue.selected)},
         memberCount: ${JSON.stringify(memberSelectionValue.count)},
-        focusedProject: document.activeElement?.classList.contains('new-camp-picker-trigger'),
+        memberMenuFocused: Boolean(document.querySelector('.compact-menu[aria-label="选择队员"]')?.contains(document.activeElement)),
         viewportOverflow: document.documentElement.scrollWidth > window.innerWidth,
         overflowNodes: [...document.querySelectorAll('body *')]
           .filter((node) => {
@@ -145,7 +146,7 @@ try {
           .map((node) => ({ tag: node.tagName, className: node.className, right: Math.round(node.getBoundingClientRect().right) })),
         dialogOverflow: Boolean(rect && (rect.left < 0 || rect.right > window.innerWidth || rect.top < 0 || rect.bottom > window.innerHeight)),
         bodyScrollable: (() => {
-          const body = dialog?.querySelector('.new-camp-dialog-body')
+          const body = dialog?.querySelector('.compact-body')
           return Boolean(body && body.scrollHeight >= body.clientHeight)
         })()
       }
@@ -155,61 +156,56 @@ try {
   const value = inspection.result?.result?.value
   if (
     value?.title !== '创建新对话'
-    || value?.primary !== '创建'
+    || value?.primary !== '新建'
     || value?.primaryEnabled !== true
-    || value?.description !== '确定这段对话的工作环境与队员。'
+    || value?.description !== '选择工作目录、队员与负责人。对话名称可选。'
     || value?.collaborationRemoved !== true
     || value?.saysRecommended !== false
     || value?.optionalShell !== true
     || value?.optionalCollapsed !== true
-    || value?.headerCreationIcon !== true
+    || value?.headerCreationIcon !== false
     || value?.leadPicker?.custom !== true
     || value?.leadPicker?.hasAvatar !== true
-    || value?.leadPicker?.hasAvailability !== true
     || value?.leadPicker?.hasAriaPopup !== true
     || value?.agentRuntimeCopyRemoved !== true
     || value?.defaultsAttentionRemoved !== true
-    || value?.dropdownIcons?.count !== 4
+    || value?.dropdownIcons?.count !== 3
     || value?.dropdownIcons?.allSvg !== true
     || value?.dropdownIcons?.rightEdgeSpread > 2
     || value?.memberCount < 1
     || value?.selectedMembers !== value?.memberCount
-    || value?.focusedProject !== true
+    || value?.memberMenuFocused !== true
     || value?.viewportOverflow !== false
     || value?.dialogOverflow !== false
   ) {
     throw new Error(`New Conversation Dialog acceptance failed: ${JSON.stringify(value)}`)
   }
-  await cdp.send('Runtime.evaluate', {
-    expression: `document.querySelector('.new-camp-picker-menu.member-menu')
-      ? document.querySelector('.new-camp-picker-trigger.member-trigger')?.click()
-      : undefined`
-  })
+  await dispatchDomKey(cdp, 'Escape')
   await waitForExpression(
     cdp,
-    `document.querySelector('.new-camp-picker-menu.member-menu') === null`,
+    `document.querySelector('.compact-menu[aria-label="选择队员"]') === null`,
     5_000
   )
   await cdp.send('Runtime.evaluate', {
-    expression: `document.querySelector('.new-camp-lead-trigger')?.focus()`
+    expression: `document.querySelector('button[aria-labelledby~="new-camp-lead-label"]')?.focus()`
   })
   await wait(100)
   await dispatchDomKey(cdp, 'ArrowDown')
   await waitForExpression(
     cdp,
-    `Boolean(document.querySelector('.new-camp-lead-menu'))`,
+    `Boolean(document.querySelector('.compact-menu[aria-label="选择负责人"]'))`,
     5_000
   )
   const leadMenuInspection = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const menu = document.querySelector('.new-camp-lead-menu')
+      const menu = document.querySelector('.compact-menu[aria-label="选择负责人"]')
       const options = [...(menu?.querySelectorAll('[role="menuitemradio"]') ?? [])]
       return {
         count: options.length,
         allHaveAvatars: options.every((option) => Boolean(option.querySelector('.member-avatar'))),
         checkedCount: options.filter((option) => option.getAttribute('aria-checked') === 'true').length,
         activeInside: Boolean(menu?.contains(document.activeElement)),
-        activeLabel: document.activeElement?.getAttribute('aria-label') ?? null
+        activeLabel: document.activeElement?.textContent ?? null
       }
     })()`,
     returnByValue: true
@@ -227,12 +223,12 @@ try {
   if (leadMenuValue.count > 1) {
     await waitForExpression(
       cdp,
-      `document.activeElement?.getAttribute('aria-label') !== ${JSON.stringify(leadMenuValue.activeLabel)}`,
+      `document.activeElement?.textContent !== ${JSON.stringify(leadMenuValue.activeLabel)}`,
       5_000
     )
   }
   const navigatedLead = await cdp.send('Runtime.evaluate', {
-    expression: `document.activeElement?.getAttribute('aria-label') ?? null`,
+    expression: `document.activeElement?.textContent ?? null`,
     returnByValue: true
   })
   const navigatedLeadLabel = navigatedLead.result?.result?.value
@@ -244,21 +240,21 @@ try {
   } else {
     await dispatchDomKey(cdp, 'Escape')
   }
-  await waitForExpression(cdp, `document.querySelector('.new-camp-lead-menu') === null`, 5_000)
+  await waitForExpression(cdp, `document.querySelector('.compact-menu[aria-label="选择负责人"]') === null`, 5_000)
   await waitForExpression(
     cdp,
-    `document.activeElement?.classList.contains('new-camp-lead-trigger') === true`,
+    `document.activeElement?.matches('button[aria-labelledby~="new-camp-lead-label"]') === true`,
     5_000
   )
   await wait(100)
   await cdp.send('Runtime.evaluate', {
-    expression: `document.querySelector('.new-camp-optional-trigger')?.click()`
+    expression: `document.querySelector('.compact-name-disclosure > button')?.click()`
   })
   await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-name'`, 5_000)
   const optionalInspection = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const trigger = document.querySelector('.new-camp-optional-trigger')
-      const panel = document.querySelector('.new-camp-optional-panel')
+      const trigger = document.querySelector('.compact-name-disclosure > button')
+      const panel = document.querySelector('.compact-name-field')
       const input = document.getElementById('new-camp-name')
       const triggerRect = trigger?.getBoundingClientRect()
       const panelRect = panel?.getBoundingClientRect()
@@ -267,7 +263,7 @@ try {
         placeholder: input?.getAttribute('placeholder'),
         focused: document.activeElement === input,
         indent: triggerRect && panelRect ? panelRect.left - triggerRect.left : null,
-        unnamedHint: panel?.textContent?.includes('留空将创建为「未命名对话」。') === true
+        unnamedHint: panel?.textContent?.includes('留空为「未命名对话」') === true
       }
     })()`,
     returnByValue: true
@@ -277,7 +273,7 @@ try {
     optionalValue?.expanded !== true
     || optionalValue?.placeholder !== '输入名称...'
     || optionalValue?.focused !== true
-    || optionalValue?.indent < 40
+    || Math.abs(optionalValue?.indent ?? 1) > 0.5
     || optionalValue?.unnamedHint !== true
   ) {
     throw new Error(`Optional name acceptance failed: ${JSON.stringify(optionalValue)}`)
@@ -293,7 +289,7 @@ try {
   await writeFile(output, Buffer.from(screenshot.result.data, 'base64'))
   if (createCamp) {
     await cdp.send('Runtime.evaluate', {
-      expression: `document.querySelector('.new-camp-dialog .primary-button')?.click()`
+      expression: `document.querySelector('.new-camp-dialog .compact-primary')?.click()`
     })
     await waitForExpression(
       cdp,

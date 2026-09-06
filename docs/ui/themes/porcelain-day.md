@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-09-04
+last_updated: 2026-09-06
 ---
 
 # Porcelain Day
@@ -162,6 +162,18 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 `#f7fafb` ink, `rgb(255 255 255 / 18%)` line, `rgb(255 255 255 / 10%)` control and
 `0 28px 80px rgb(0 0 0 / 42%)` shadow over `rgb(12 18 24 / 72%)`.
 
+### Dialog fields
+
+| Token | Value |
+|---|---:|
+| `--dialog-field-label` | `#707070` |
+| `--dialog-field-line` | `#e2e4e7` |
+| `--dialog-field-line-hover` | `#bcc3ca` |
+
+Labels use regular weight. Fields retain a 1px border, input surface and visible focus outline;
+higher contrast preferences use the stronger control line and ink. Import MCP source JSON reuses
+`--conversation-code-block-canvas`, with no extra left margin.
+
 ### Shared aliases and geometry
 
 | Token | Value |
@@ -184,9 +196,8 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 
 ## Brand, semantic, identity, and evidence color rules
 
-- The New Conversation workspace, member and Lead dropdowns use the dedicated
-  `--new-camp-picker-*` assignments. They do not recolor the Dialog surface or the optional-configuration
-  accordion.
+- New Conversation workspace, member and Lead controls share the dialog field tokens and
+  standard input surface. Optional naming uses the same quiet form treatment.
 - `attention` is for pending user action or approval; warm `ember` is decorative and cannot replace it.
 - `danger` is for stop, permanent deletion, forgetting and confirmed failure—not ordinary disabled state.
 - Stable IDs map to `--identity-1..8`; identity color never signals state or permission.
