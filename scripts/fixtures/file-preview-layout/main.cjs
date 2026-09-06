@@ -301,6 +301,38 @@ app.whenReady().then(async () => {
     await open()
   })
 
+  await check('file paths use available width before truncating directories and preserve the filename in narrow panes', async () => {
+    await run('window.previewTest.openPath(0)')
+    const short = await run('window.previewTest.pathSnapshot()')
+    assert.equal(short.pathTitle, 'crates/rovai-core/src/acp.rs')
+    assert.deepEqual(short.segments.map(segment => segment.text), ['crates', 'rovai-core', 'src', 'acp.rs'])
+    assert.ok(short.segments.every(segment => !segment.truncated), 'The short acp.rs path fits without any ellipses')
+    await capture('preview-path-acp-day')
+
+    await run('window.previewTest.openPath(1)')
+    const wide = await run('window.previewTest.pathSnapshot()')
+    assert.ok(wide.segments.every(segment => !segment.truncated), 'Directory character limits cannot truncate a path that fits')
+    assert.equal(wide.pathOverflow, false)
+
+    await viewport(1_111)
+    const narrow = await run('window.previewTest.pathSnapshot()')
+    assert.equal(narrow.pathOverflow, false)
+    assert.equal(narrow.segments[1].truncated, true, 'An overlong middle directory yields space')
+    assert.equal(narrow.segments.at(-1).truncated, false, 'The filename stays readable')
+    assert.ok(narrow.segments.at(-1).right <= narrow.partsRight + 1, 'The filename remains inside the path row')
+    await run('window.previewTest.setTheme("night")')
+    await snapshot()
+    await capture('preview-path-narrow-night')
+
+    await viewport(2_560, 1_440)
+    const expanded = await run('window.previewTest.pathSnapshot()')
+    assert.ok(expanded.segments.every(segment => !segment.truncated), 'Widening the pane restores the complete path')
+    await capture('preview-path-wide-night')
+    await run('window.previewTest.setTheme("day"); window.previewTest.closeExtraTabs()')
+    await viewport(1_440)
+    await open()
+  })
+
   await check('filename-only files remove the complete path row and return its height to the viewer', async () => {
     const projectFile = await run('window.previewTest.pathSnapshot()')
     assert.equal(projectFile.pathVisible, true)

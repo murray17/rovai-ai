@@ -51,6 +51,10 @@ const markdownSource = [
 const tabFiles = ['src/app.ts', 'src/layout.tsx', 'src/theme.ts', 'src/routes.ts', 'src/search.ts',
   'src/settings.tsx', 'src/navigation.ts', 'src/very-long-file-preview-reading-anchor.tsx']
 const fileNameOnlyReference = 'external-preview.ts'
+const pathReferences = [
+  'crates/rovai-core/src/acp.rs',
+  'workspace-crates-directory/core-runtime-source-and-language-adapters/source-implementations/acp.rs'
+]
 const missingReference = 'src/missing-report.ts'
 const toolPreviewReference = 'src/tool-link-preview.ts'
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected fixture API operation') }
@@ -79,7 +83,8 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
     const selected = changes.files.find((entry) => entry.evidenceFileId === request.evidenceFileId)
     if (!selected) return unsupported()
     target = { ...file, previewKey: `current:${selected.path}`, displayPath: selected.path, fileName: selected.path.split('/').at(-1)! }
-  } else if (request.kind === 'message_reference' && tabFiles.includes(request.rawReference)) {
+  } else if (request.kind === 'message_reference'
+    && [...tabFiles, ...pathReferences].includes(request.rawReference)) {
     target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
       fileName: request.rawReference.split('/').at(-1)! }
   } else if (request.kind === 'message_reference' && request.rawReference === fileNameOnlyReference) {
@@ -342,6 +347,12 @@ Object.assign(window, { previewTest: {
     })
     await settle()
   },
+  async openPath(index: number) {
+    const rawReference = pathReferences[index]
+    if (!rawReference) throw new Error('Unknown fixture path')
+    await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })
+    await settle()
+  },
   async openMarkdown() {
     await previewController.open({
       kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: markdownReference
@@ -422,7 +433,18 @@ Object.assign(window, { previewTest: {
     const content = panel.querySelector<HTMLElement>('.file-preview-content')!
     const path = panel.querySelector<HTMLElement>('.file-preview-path-row')
     const update = panel.querySelector<HTMLElement>('.file-preview-update-row')
+    const parts = path?.querySelector<HTMLElement>('.file-preview-path-parts')
     return {
+      pathTitle: parts?.title,
+      pathOverflow: Boolean(path && path.scrollWidth > path.clientWidth + 1),
+      partsRight: parts?.getBoundingClientRect().right,
+      segments: [...(parts?.querySelectorAll<HTMLElement>(
+        '.file-preview-path-leading, .file-preview-path-middle, .file-preview-path-trailing, .file-preview-path-name'
+      ) ?? [])].map((segment) => ({
+        text: segment.textContent,
+        truncated: segment.scrollWidth > segment.clientWidth + 1,
+        right: segment.getBoundingClientRect().right
+      })),
       pathVisible: Boolean(path?.getClientRects().length),
       pathHeight: path?.getBoundingClientRect().height ?? 0,
       updateVisible: Boolean(update?.getClientRects().length),
