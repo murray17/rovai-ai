@@ -16974,6 +16974,12 @@ fn normalize_acp_event_with_completion(
                     "operationKind": operation_kind,
                     "path": path,
                 });
+                if let Some(change_kind) =
+                    completion.and_then(|value| value.public_file_operation_change_kind.as_deref())
+                {
+                    payload["runtimeFileOperation"]["changeKind"] =
+                        Value::String(change_kind.to_string());
+                }
             }
             if public_status == "completed"
                 && let Some(changes) =

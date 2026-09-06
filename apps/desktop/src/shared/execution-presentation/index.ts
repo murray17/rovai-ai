@@ -112,6 +112,7 @@ export type ExecutionStep = {
   fileOperation?: {
     operationKind: 'read' | 'write'
     path: string
+    changeKind?: 'add' | 'update'
   }
   fileChanges?: Array<{
     path: string
@@ -1251,7 +1252,9 @@ function reliableFileActivityTitle(
   const fileName = path.split(/[\\/]/u).filter(Boolean).at(-1)
   if (!fileName) return null
   if (operation?.operationKind === 'read') return `阅读 ${fileName}`
-  const changeKind = diffEntries.length === 1 ? diffEntries[0]?.changeKind : null
+  const changeKind = diffEntries.length === 1
+    ? diffEntries[0]?.changeKind
+    : operation?.changeKind
   return `${changeKind === 'add' ? '新增' : '编辑'} ${fileName}`
 }
 
@@ -1262,9 +1265,13 @@ function reliableRuntimeFileOperation(payload: unknown): ExecutionStep['fileOper
   }
   const operationKind = stringField(operation, 'operationKind')
   const path = stringField(operation, 'path')?.trim()
-  return path && (operationKind === 'read' || operationKind === 'write')
-    ? { operationKind, path }
+  if (!path || (operationKind !== 'read' && operationKind !== 'write')) return undefined
+  const candidateChangeKind = stringField(operation, 'changeKind')
+  const changeKind = operationKind === 'write'
+    && (candidateChangeKind === 'add' || candidateChangeKind === 'update')
+    ? candidateChangeKind
     : undefined
+  return { operationKind, path, ...(changeKind ? { changeKind } : {}) }
 }
 
 function reliableFileActivityInstruction(

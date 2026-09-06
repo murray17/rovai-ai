@@ -1520,16 +1520,17 @@ mod tests {
     }
 
     #[test]
-    fn operation_only_path_creates_a_card_without_diff_or_counts() {
+    fn operation_only_add_path_preserves_its_change_kind_without_diff_or_counts() {
         let projection = aggregate_evidence(
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
             Path::new("/repo"),
-            &[evidence(1, json!({"runtimeFileOperation": {"status": "available", "path": "src/app.ts", "changeKind": "update"}}))],
+            &[evidence(1, json!({"runtimeFileOperation": {"status": "available", "path": "src/app.ts", "changeKind": "add"}}))],
         )
         .unwrap();
         let file = &projection.details.files[0];
+        assert_eq!(file.change_kind, "add");
         assert_eq!(file.presentation_kind, "operation_only");
         assert!(file.blocks[0].diff.is_none());
         assert_eq!(projection.details.card.additions, None);

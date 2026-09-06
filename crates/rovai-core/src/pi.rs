@@ -201,6 +201,7 @@ pub(super) fn completed_action(message: &Value) -> Result<Option<CompletedAcpAct
             .as_ref()
             .map(|(operation_kind, _)| operation_kind.clone()),
         public_file_operation_path: file_operation.map(|(_, path)| path),
+        public_file_operation_change_kind: None,
         public_file_changes: None,
         observation_digest,
         outcome: if is_error {

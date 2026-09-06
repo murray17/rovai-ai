@@ -1301,7 +1301,12 @@ fn normalize_claude_runtime_events(
                     &mut payload,
                     search_operation_candidate,
                 );
-                if reliably_non_error && let Some(candidate) = file_operation_candidate {
+                if reliably_non_error && let Some(mut candidate) = file_operation_candidate {
+                    if tool_name.as_deref() == Some("Write")
+                        && let Some(change_kind) = claude_write_change_kind(event, &candidate)
+                    {
+                        candidate["changeKind"] = Value::String(change_kind.to_string());
+                    }
                     payload["runtimeFileOperation"] = candidate;
                 }
                 if reliably_non_error && let Some(exact_mutation) = exact_mutation {
@@ -1436,6 +1441,23 @@ fn claude_file_operation_candidate(tool_name: &str, input: Option<&Value>) -> Op
         "operationKind": operation_kind,
         "path": path,
     }))
+}
+
+fn claude_write_change_kind<'a>(event: &'a Value, candidate: &Value) -> Option<&'a str> {
+    let result = event.get("tool_use_result")?.as_object()?;
+    let result_path = result.get("filePath")?.as_str()?.trim();
+    let candidate_path = candidate.get("path")?.as_str()?.trim();
+    if result_path.is_empty() || result_path != candidate_path {
+        return None;
+    }
+    // Claude Code 2.1.236 reports both a missing file and an already-existing
+    // empty file as `create` with `originalFile: null`. That shape cannot prove
+    // add without consulting the live filesystem, so keep it as path-only
+    // write. `update` remains a reliable edit refinement for the matching path.
+    match result.get("type")?.as_str()? {
+        "update" => Some("update"),
+        _ => None,
+    }
 }
 
 fn claude_exact_edit_mutation(tool_name: &str, input: Option<&Value>) -> Option<Value> {
@@ -2686,6 +2708,112 @@ exit 1
                     .and_then(Value::as_str);
                 assert_eq!(projected, (!failed).then_some(operation_kind).flatten());
             }
+        }
+    }
+
+    #[test]
+    fn write_result_type_classifies_update_but_does_not_promote_ambiguous_create() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        for (result_type, expected_change_kind) in [("update", "update")] {
+            let tool_use_id = format!("toolu-write-{result_type}");
+            let mut state = ClaudeCodeStreamState::default();
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "assistant",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": "Write",
+                        "input": {
+                            "file_path": "/repo/src/app.ts",
+                            "content": "new content"
+                        }
+                    }]}
+                }),
+                session_id,
+                &mut state,
+            )
+            .unwrap();
+            let completed = normalize_claude_runtime_events(
+                &json!({
+                    "type": "user",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": "completed"
+                    }]},
+                    "tool_use_result": {
+                        "type": result_type,
+                        "filePath": "/repo/src/app.ts",
+                        "content": "must-not-be-published",
+                        "originalFile": null
+                    }
+                }),
+                session_id,
+                &mut state,
+            )
+            .unwrap();
+
+            assert_eq!(
+                completed[0]
+                    .payload
+                    .pointer("/runtimeFileOperation/changeKind"),
+                Some(&json!(expected_change_kind))
+            );
+            assert!(
+                !completed[0]
+                    .payload
+                    .to_string()
+                    .contains("must-not-be-published")
+            );
+        }
+
+        for (tool_name, result_type, result_path) in [
+            ("Write", "create", "/repo/src/app.ts"),
+            ("Write", "create", "/repo/src/other.ts"),
+            ("Write", "replace", "/repo/src/app.ts"),
+            ("Edit", "create", "/repo/src/app.ts"),
+        ] {
+            let tool_use_id = format!("toolu-no-classification-{tool_name}-{result_type}");
+            let mut state = ClaudeCodeStreamState::default();
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "assistant",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": tool_name,
+                        "input": {"file_path": "/repo/src/app.ts", "content": "new content"}
+                    }]}
+                }),
+                session_id,
+                &mut state,
+            )
+            .unwrap();
+            let completed = normalize_claude_runtime_events(
+                &json!({
+                    "type": "user",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": "completed"
+                    }]},
+                    "tool_use_result": {"type": result_type, "filePath": result_path}
+                }),
+                session_id,
+                &mut state,
+            )
+            .unwrap();
+            assert!(
+                completed[0]
+                    .payload
+                    .pointer("/runtimeFileOperation/changeKind")
+                    .is_none()
+            );
         }
     }
 

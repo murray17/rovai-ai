@@ -942,6 +942,7 @@ async function runFileOperationMatrix({ request, events, campId, adapterKind, pr
               schemaVersion: operation.schemaVersion,
               status: operation.status,
               operationKind: operation.operationKind ?? null,
+              changeKind: operation.changeKind ?? null,
               path: operation.path ?? null,
               safeReasonCode: operation.safeReasonCode ?? null,
               sourceEventKind: operation.sourceMetadata?.sourceEventKind ?? null
@@ -976,6 +977,7 @@ async function runFileOperationMatrix({ request, events, campId, adapterKind, pr
           ? {
               status: event.params.payload.runtimeFileOperation.status,
               operationKind: event.params.payload.runtimeFileOperation.operationKind ?? null,
+              changeKind: event.params.payload.runtimeFileOperation.changeKind ?? null,
               path: event.params.payload.runtimeFileOperation.path ?? null
             }
           : null
@@ -1004,7 +1006,7 @@ async function runFileOperationMatrix({ request, events, campId, adapterKind, pr
     const output = snapshot.messages.find((message) => message.sourceAgentRunId === agentRunId)?.body ?? null
     const presentation = testCase.name === 'read'
       ? matchingOperation ? '阅读' : '保持原工具回退'
-      : reportedDiff?.changeKind === 'add'
+      : reportedDiff?.changeKind === 'add' || matchingOperation?.operation?.changeKind === 'add'
         ? '新增'
         : matchingOperation || reportedDiff
           ? '编辑'

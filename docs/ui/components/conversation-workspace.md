@@ -457,8 +457,9 @@ Shell `-c/-lc` 包装，保留参数、Node inline/heredoc 代码开头、全部
 `&&`、`||`、`|`、`;`、`&`。已知 token、password、
 Authorization、API key 与 `rovai send` 正文值替换为脱敏占位。标题值不做固定字符截断，由名称轨在真实
 宽度内单行视觉省略；完整脱敏值仍可通过 `title` 与辅助技术读取。没有公开 command 的 Runtime 继续使用
-非通用 title/toolName 与“终端操作”。available typed read 显示 `阅读 <basename>`；文件 Diff 明确 add 时显示
-`新增 <basename>`，update、path-only write 或无法可靠区分时显示 `编辑 <basename>`，否则使用 toolName/title/“文件操作”；`tool.web.search` 固定为“Web 搜索”，普通 Tool
+非通用 title/toolName 与“终端操作”。available typed read 显示 `阅读 <basename>`；typed write operation 或
+文件 Diff 明确 add 时显示 `新增 <basename>`，update、path-only write 或无法可靠区分时显示
+`编辑 <basename>`，否则使用 toolName/title/“文件操作”；`tool.web.search` 固定为“Web 搜索”，普通 Tool
 使用 canonical toolName/title/“工具调用”，Runtime 与 Unknown 使用对应中文 fallback。命令展示只改变
 presentation，不得参与 identity 或 lifecycle 合并；ACP 仅由 Adapter 白名单的 command shape 在原生 kind
 缺失时证明 execute。上述稳定 Tool 行标题不因活动组的具体当前指令而改变，渠道卡片也不读取该组摘要字段。

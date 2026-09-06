@@ -6394,6 +6394,21 @@ describe('task event projections', () => {
         path: 'rovai-runtime-validation/qoder-cli.txt'
       }
     })).toBe('编辑 qoder-cli.txt')
+    expect(executionActivityTitle(canonicalActivity('file-add', {
+      classifierVersion: 'activity-v3',
+      activityDomain: 'file',
+      semanticKind: 'file.write',
+      toolName: 'Write',
+      presentationHint: null
+    }), {
+      runtimeFileOperation: {
+        schemaVersion: 2,
+        status: 'available',
+        operationKind: 'write',
+        changeKind: 'add',
+        path: 'src/new-file.ts'
+      }
+    })).toBe('新增 new-file.ts')
     expect(executionActivityTitle(canonicalActivity('file-read', {
       classifierVersion: 'activity-v3',
       activityDomain: 'file',
@@ -6486,7 +6501,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('renders an activity-v3 typed read as a static linked file row', () => {
+  it('renders activity-v3 typed reads and evidence-backed adds as static linked file rows', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'codex-read-completed', agentRunId: 'run-codex-read', eventType: 'activity.completed',
       payload: {
@@ -6510,6 +6525,25 @@ describe('task event projections', () => {
         presentationHint: null, phase: 'terminal', outcome: 'succeeded'
       }),
       createdAt: '2026-09-06T00:00:00Z'
+    }, {
+      id: 'opencode-add-completed', agentRunId: 'run-codex-read', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'write-add-1', status: 'completed', kind: 'write', toolName: 'Write',
+        runtimeFileOperation: {
+          schemaVersion: 2,
+          source: 'runtime_reported',
+          status: 'available',
+          operationKind: 'write',
+          changeKind: 'add',
+          path: 'src/new-file.ts'
+        }
+      },
+      canonical: canonicalActivity('write-add-1', {
+        classifierVersion: 'activity-v3',
+        activityDomain: 'file', semanticKind: 'file.write', toolName: 'Write',
+        presentationHint: null, phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-09-06T00:00:01Z'
     }], 'run-codex-read')
 
     expect(progress.items[0]).toMatchObject({
@@ -6519,6 +6553,14 @@ describe('task event projections', () => {
         detail: '',
         iconKind: 'file-read',
         fileOperation: { operationKind: 'read', path: 'docs/README.md' }
+      }
+    })
+    expect(progress.items[1]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: '新增 new-file.ts',
+        iconKind: 'file-write',
+        fileOperation: { operationKind: 'write', changeKind: 'add', path: 'src/new-file.ts' }
       }
     })
 
@@ -6531,7 +6573,7 @@ describe('task event projections', () => {
       terminalReasonCode: null, failure: null, runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
       triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
-      a2aDepth: 0, executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
+      a2aDepth: 0, executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
       workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
       version: 1, createdAt: '2026-09-06T00:00:00Z', startedAt: '2026-09-06T00:00:00Z',
       endedAt: '2026-09-06T00:00:01Z', updatedAt: '2026-09-06T00:00:01Z'
@@ -6541,10 +6583,13 @@ describe('task event projections', () => {
     }))
     expect(markup).toContain('class="process-action tool-call-summary tool-call-static file-operation-row status-completed"')
     expect(markup).toContain('role="group" aria-label="阅读 docs/README.md，成功"')
+    expect(markup).toContain('role="group" aria-label="新增 src/new-file.ts，成功"')
     expect(markup).toContain('data-icon-domain="file-read"')
+    expect(markup).toContain('data-icon-domain="file-write"')
     expect(markup).toContain('class="tool-file-link"')
     expect(markup).toContain('docs/README.md · 打开文件预览')
     expect(markup).toContain('>README.md</button>')
+    expect(markup).toContain('>new-file.ts</button>')
     expect(markup).not.toContain('private file content must not become row detail')
     expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
     expect(markup).toContain('class="tool-group-state is-placeholder"')

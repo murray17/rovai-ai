@@ -15,6 +15,7 @@ pub(crate) const RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT: &str =
 pub struct AdmittedRuntimeFileOperation {
     pub operation_kind: String,
     pub path: String,
+    pub change_kind: Option<String>,
 }
 
 pub fn admit_runtime_file_operation(
@@ -68,6 +69,15 @@ fn admit_candidate(
     if !matches!(operation_kind, "read" | "write") {
         return Err("runtime_file_operation_kind_invalid");
     }
+    let change_kind = match candidate.get("changeKind") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(change_kind))
+            if operation_kind == "write" && matches!(change_kind.as_str(), "add" | "update") =>
+        {
+            Some(change_kind.clone())
+        }
+        Some(_) => return Err("runtime_file_operation_change_kind_invalid"),
+    };
     let protocol_family = candidate.get("protocolFamily").and_then(Value::as_str);
     let source_event_kind = candidate.get("sourceEventKind").and_then(Value::as_str);
     let source_is_allowlisted = if adapter.uses_acp() {
@@ -109,6 +119,7 @@ fn admit_candidate(
     Ok(AdmittedRuntimeFileOperation {
         operation_kind: operation_kind.to_string(),
         path,
+        change_kind,
     })
 }
 
@@ -122,6 +133,7 @@ pub fn path_from_evidence(payload: &Value) -> Option<&str> {
 pub struct RuntimeFileOperationRef<'a> {
     pub operation_kind: &'a str,
     pub path: &'a str,
+    pub change_kind: Option<&'a str>,
 }
 
 pub fn operation_from_evidence(payload: &Value) -> Option<RuntimeFileOperationRef<'_>> {
@@ -139,6 +151,10 @@ pub fn operation_from_evidence(payload: &Value) -> Option<RuntimeFileOperationRe
     Some(RuntimeFileOperationRef {
         operation_kind,
         path: projection.get("path")?.as_str()?,
+        change_kind: projection
+            .get("changeKind")
+            .and_then(Value::as_str)
+            .filter(|change_kind| matches!(*change_kind, "add" | "update")),
     })
 }
 
@@ -167,6 +183,51 @@ mod tests {
 
         assert_eq!(admitted.operation_kind, "write");
         assert_eq!(admitted.path, "src/app.ts");
+        assert_eq!(admitted.change_kind, None);
+    }
+
+    #[test]
+    fn admits_only_explicit_add_or_update_for_structured_writes() {
+        for change_kind in ["add", "update"] {
+            let admitted = admit_runtime_file_operation(
+                &json!({
+                    "runtimeFileOperation": {
+                        "adapterKind": "opencode-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": "write",
+                        "changeKind": change_kind,
+                        "path": "/repo/src/app.ts"
+                    }
+                }),
+                Path::new("/repo"),
+                Some("opencode-cli"),
+            )
+            .expect("candidate should exist")
+            .expect("explicit write change kind should be admitted");
+            assert_eq!(admitted.change_kind.as_deref(), Some(change_kind));
+        }
+
+        for (operation_kind, change_kind) in
+            [("read", "add"), ("write", "delete"), ("write", "create")]
+        {
+            let result = admit_runtime_file_operation(
+                &json!({
+                    "runtimeFileOperation": {
+                        "adapterKind": "opencode-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": operation_kind,
+                        "changeKind": change_kind,
+                        "path": "/repo/src/app.ts"
+                    }
+                }),
+                Path::new("/repo"),
+                Some("opencode-cli"),
+            )
+            .expect("candidate should exist");
+            assert_eq!(result, Err("runtime_file_operation_change_kind_invalid"));
+        }
     }
 
     #[test]

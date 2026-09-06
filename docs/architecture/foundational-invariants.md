@@ -466,7 +466,8 @@ last_updated: 2026-09-05
   时序，链断裂或 operation-only 只保留操作历史。只有所有文件都是完整净差异时才能显示全局增删计数。
 - 文件变化观察不执行 Git、filesystem scan 或当前文件读取，不解析 shell 命令，也不跨 Run 合并。失败或取消 Run
   可以展示此前已成功报告的文件变化；failed/cancelled Operation 自身不得进入。没有可靠 Evidence 时不生成卡片。
-- `runtimeFileOperation schemaVersion=2` 只接受 allowlisted Runtime 的 typed `read | write` 和可靠单文件路径。
+- `runtimeFileOperation schemaVersion=2` 只接受 allowlisted Runtime 的 typed `read | write` 和可靠单文件路径；
+  write 可携带来源已证明的可选 `changeKind=add | update`，缺失时必须保守解释为 update。
   v3 把 available read 归类为 `file.read`，但它只是过程事实，明确排除在 AgentRun `Files Changed` 之外。Codex
   只接纳非空、全为 read 且唯一 path 的 `commandActions`，不解析 cat/head/tail/sed 等命令前缀；ACP、Claude 与 Pi
   也只按各自成功终态的封闭结构化字段准入。

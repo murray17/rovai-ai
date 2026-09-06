@@ -40,9 +40,12 @@ Migration 141 已原子切换 `v1.52 / projection schema 92 / activity-v3`。Cor
 projection 命名文件行，read 不进入 `Files Changed`。文件入口在 Main 校验和 Renderer 首屏读取都成功后才激活
 预览；失败只显示红色 Toast，并保留原页面与已有预览。
 
-本机真实矩阵覆盖 14 个 Runtime：12 个完成模型执行，其中可靠 typed read/write、保守“编辑”与无证据回退均按
-合同通过；Antigravity 缺少公开单文件终态而保持回退，Grok 的写入未完成，CodeBuddy 缺可用默认模型、Cursor 缺
-当前平台准入证据而阻断。具体版本、每项结果和 Qwen basename-only Diff 边界见[Runtime 验收](runtime-acceptance.md)。
+本机真实矩阵覆盖 14 个 Runtime：13 个完成模型执行，其中可靠 typed read/write、证据驱动“新增”、保守“编辑”与
+无证据回退均按合同通过。OpenCode 的写入前 `metadata.exists` 可在同 ToolCall 路径对齐后区分新增／编辑；Claude
+2.1.236 的 create 对已有空文件存在假阳性，不能升级为新增。CodeBuddy 使用本机 MiniMax 配置完成五条文件矩阵；
+Grok 的 Runtime、模型与 ACP 会话已连通，但连续两次文件矩阵一成一败，因不可重复仍保持回退。Antigravity 缺少
+公开单文件终态，Cursor 缺当前平台准入证据而阻断。具体版本、每项结果和 Qwen basename-only Diff 边界见
+[Runtime 验收](runtime-acceptance.md)。
 这些结果不改变 Runtime 平台资格。本版本不修改 Agent 模型上下文。
 
 ## 跨版本文档影响

@@ -38,7 +38,8 @@ Shell、Web、Built-in 与普通 Tool 的详情容器统一使用现有 Shell �
 ## 文件操作行
 
 `runtimeFileOperation schemaVersion=2` 且 `operationKind=read` 的可靠单文件操作显示为不可展开的
-`阅读 <文件名>`，使用阅读文件图标。可靠写入或 Diff 行使用笔图标：明确 `changeKind=add` 显示
+`阅读 <文件名>`，使用阅读文件图标。可靠写入或 Diff 行使用笔图标：operation 或 Diff 明确
+`changeKind=add` 显示
 `新增 <文件名>`；`update`、path-only write 或无法可靠区分新增／编辑时显示 `编辑 <文件名>`。
 
 文件名使用虚线底线按钮并保留完整路径的 title／可访问名称。点击只请求当前 Camp workspace 文件预览；
@@ -63,4 +64,3 @@ Diff，点击 Diff 箭头不得打开文件。缺少可靠路径时不生成文�
 - [Runtime File Change Observation v3](runtime-file-change-observation-v3.md)
 - [File Preview v8](file-preview-v8.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
-

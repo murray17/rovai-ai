@@ -1112,14 +1112,20 @@ fn normalize_runtime_file_operation_evidence(
         "sourceEventKind": candidate.get("sourceEventKind"),
     });
     payload["runtimeFileOperation"] = match admitted {
-        Some(Ok(admitted)) => serde_json::json!({
-            "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
-            "source": "runtime_reported",
-            "status": "available",
-            "operationKind": admitted.operation_kind,
-            "path": admitted.path,
-            "sourceMetadata": source,
-        }),
+        Some(Ok(admitted)) => {
+            let mut projection = serde_json::json!({
+                "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
+                "source": "runtime_reported",
+                "status": "available",
+                "operationKind": admitted.operation_kind,
+                "path": admitted.path,
+                "sourceMetadata": source,
+            });
+            if let Some(change_kind) = admitted.change_kind {
+                projection["changeKind"] = Value::String(change_kind);
+            }
+            projection
+        }
         Some(Err(reason)) => serde_json::json!({
             "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
             "source": "runtime_reported",
@@ -2182,6 +2188,40 @@ mod tests {
         );
         assert!(payload["runtimeDiff"].is_null());
         assert!(runtime_diff::projection_from_evidence(&payload, "evidence-qoder").is_none());
+
+        let mut add_payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "opencode-add",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeFileOperation": {
+                    "adapterKind": "opencode-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "changeKind": "add",
+                    "path": "/repo/src/new-file.ts"
+                }
+            }),
+        );
+        normalize_runtime_file_operation_evidence(
+            &mut add_payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("opencode-cli"),
+            Some("1.18.20"),
+            None,
+        );
+        assert_eq!(add_payload["runtimeFileOperation"]["status"], "available");
+        assert_eq!(
+            add_payload["runtimeFileOperation"]["operationKind"],
+            "write"
+        );
+        assert_eq!(add_payload["runtimeFileOperation"]["changeKind"], "add");
+        assert_eq!(
+            add_payload["runtimeFileOperation"]["path"],
+            "src/new-file.ts"
+        );
 
         let mut managed_payload = normalize_public_payload(
             "runtime.action",

@@ -49,23 +49,26 @@ last_updated: 2026-09-06
 | Runtime / adapter | 阅读事件 | 新增事件 | 编辑事件 | 本轮结果与重点 |
 | --- | --- | --- | --- | --- |
 | Codex CLI / `codex-cli` | `passed` | `passed` | `passed` | 0.153.4；cat/head/tail/sed structured read 与 add/update Diff 通过 |
-| OpenCode / `opencode-cli` | `passed` | `passed` | `passed` | 1.18.20；path-only write 保守显示“编辑” |
+| OpenCode / `opencode-cli` | `passed` | `passed` | `passed` | 1.18.20；同路径 `rawOutput.metadata.exists` 区分新增／编辑，缺失或冲突保守回退 |
 | GitHub Copilot / `copilot-cli` | `passed` | `passed` | `passed` | 1.0.82；新文件被报告为 update，未误称新增 |
-| Claude Code / `claude-code-cli` | `passed` | `passed` | `passed` | 2.1.236；Read/Write/Edit matching result 与 exact mutation 通过 |
+| Claude Code / `claude-code-cli` | `passed` | `passed` | `passed` | 2.1.236；Read/Write/Edit matching result 与 exact mutation 通过；create 对已有空文件的假阳性不升级为新增 |
 | Antigravity / `antigravity-app` | `passed` | `passed` | `passed` | 1.1.27；文件效果成功，无可靠单文件终态时保持原工具回退 |
 | Kiro / `kiro-cli` | `passed` | `passed` | `passed` | 2.21.1；location、path-only 和 update Diff 通过 |
 | Qoder / `qoder-cli` | `passed` | `passed` | `passed` | 1.1.28；read/write、稀疏终态和空文件事件通过 |
-| CodeBuddy / `codebuddy-cli` | `blocked` | `blocked` | `blocked` | 2.133.1；当前配置无法建立含可用默认模型的 Ready snapshot |
+| CodeBuddy / `codebuddy-cli` | `passed` | `passed` | `passed` | 2.133.1；本机 MiniMax `minimax-m3` Ready 与五条真实 Run 通过，path-only add 保守显示“编辑” |
 | Qwen Code / `qwen-code` | `passed` | `passed` | `passed` | 0.23.0；read 通过；写入按 typed path 或 update Diff 显示“编辑”，basename-only 路径缺口已记录 |
 | TRAE CLI CN / `trae-cn-cli` | `passed` | `passed` | `passed` | 0.120.52；四项 typed path 与 live/history 通过，新增被报告为 update |
 | Cursor Agent / `cursor-agent` | `blocked` | `blocked` | `blocked` | 当前 macOS arm64 缺 qualification evidence，按产品准入阻断 |
 | Kimi Code / `kimi-code-cli` | `passed` | `passed` | `passed` | 0.40.1；read、path-only write 与 update Diff 通过 |
-| Grok Build / `grok-build` | `passed` | `failed` | `failed` | 1.0.13；read 只有 Run 级回退；三类写入未完成且未补造事件 |
+| Grok Build / `grok-build` | `failed` | `failed` | `failed` | 1.0.13；连接与模型执行通过，一次完整文件矩阵成功、紧接复跑无可用文件 Tool 终态，因不可重复保持回退 |
 | Pi / `pi` | `passed` | `passed` | `passed` | 0.84.4；同 ToolCall start 参数与成功 end 关联后 read/write 精确路径通过 |
 
 统一通过条件：
 
-- **新增与编辑**：只有明确新增证据才显示“新增”；例如 Codex `add` 或标准完整 before/after 中明确不存在的旧文件。已有空文件仍是编辑；仅证明写入时允许回退“编辑”。没有文件操作证据则保留原工具／未知，不能为了通过矩阵补造事件。
+- **新增与编辑**：只有明确新增证据才显示“新增”；例如 Codex `add`、标准完整 before/after 中明确不存在的旧文件，
+  或 OpenCode 写入前 `metadata.exists=false` 与同 ToolCall path 对齐。Claude 2.1.236 的 `create` 对已有空文件存在
+  假阳性，不能单独准入。已有空文件仍是编辑；仅证明写入时允许回退“编辑”。没有文件操作证据则保留原工具／
+  未知，不能为了通过矩阵补造事件。
 - **阅读**：可靠只读语义和文件路径才产生“阅读 文件名”。Codex 另测 `sed -i`、读后写／测试的复合命令、多文件、缺路径与路径含空格；不能凭命令前缀误翻译。Built-in `camp.read` 仍是读取 Camp 消息。
 - **生命周期与恢复**：覆盖 started→terminal、稀疏更新、重复事件、失败／拒绝／取消；不得把未执行或失败写入当作成功修改，不得重复步骤或文件行。相同证据在 live 与历史回读中呈现一致。
 - **预览与变化**：点击对应真实文件；删除文件后的点击只出 Toast。已存在的 Diff、path-only、单次多文件、项目外文件与受管临时产物排除遵守当前合同，不从当前磁盘重建历史 Diff。
@@ -81,14 +84,15 @@ last_updated: 2026-09-06
   188 个用例并通过。
 - `pnpm typecheck`、`pnpm build:desktop`、`cargo fmt --all --check` 与
   `cargo check --workspace --all-targets` 通过。
-- `rovai-core --lib` 在命令环境中 510 个用例通过，唯一受嵌套 macOS sandbox 阻断的隔离用例在本机原生终端
-  单独运行通过；`rovai-core --bin rovai-core` 为 225 个通过、5 个需显式本机条件的用例按设计忽略。
+- `rovai-core --lib` 在命令环境中 511 个用例通过，唯一受嵌套 macOS sandbox 阻断的隔离用例在宿主环境
+  单独运行通过；`rovai-core --bin rovai-core` 为 227 个通过、5 个需显式本机条件的用例按设计忽略。
 - 生产 Electron `file-preview-layout` 与 `file-reference-navigation` 均在本机原生终端通过；前者还以挂起首屏读取
   证明成功前不出现 provisional Tab，失败不切换页面、Tab 或 Pane，且释放 handle 后可重试。
 - 第三版 HTML 的内联脚本语法、`pnpm docs:test`、`pnpm docs:check`、基于下列 Base 的
   `docs:check:ci` 与 `git diff --check` 通过。
-- 14 个 Runtime 均使用本机真实安装、账号、Provider 与默认模型执行；逐项结果、诚实回退、模型执行失败和准入
-  阻断见[真实文件操作验收](runtime-acceptance.md)，没有用共享 fixture 代替真实矩阵。
+- 14 个 Runtime 均使用本机真实安装、账号与 Provider 执行；CodeBuddy 明确选择本机已配置的 `minimax-m3`，其余
+  使用记录中的 Runtime 模型。逐项结果、诚实回退、模型执行失败和准入阻断见
+  [真实文件操作验收](runtime-acceptance.md)，没有用共享 fixture 代替真实矩阵。
 
 真实 App/Runtime 验收遵守[本地隔离流程](../../development/local-workflow.md)，使用独立临时 Core data root、Git
 workspace 与 Camp，不读写日常 App 数据目录；运行产生的 ID、绝对临时路径与原始输出未进入仓库。

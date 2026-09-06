@@ -8306,9 +8306,9 @@ function FileOperationRow({ campId, step, runStatus, onFileOpenError }: {
   onFileOpenError(message: string): void
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
-  const { operationKind, path } = step.fileOperation
+  const { operationKind, path, changeKind } = step.fileOperation
   const fileName = path.split('/').filter(Boolean).at(-1) ?? path
-  const verb = operationKind === 'read' ? '阅读' : '编辑'
+  const verb = operationKind === 'read' ? '阅读' : changeKind === 'add' ? '新增' : '编辑'
   const status = activityStatusForAgentRun(step.status, runStatus)
   const openFile = async (): Promise<void> => {
     if (!filePreview) {
