@@ -1,3 +1,4 @@
+import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
 import { collapsedMessageProjection } from './conversation-message-collapse'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
@@ -2571,6 +2572,7 @@ export function CampWorkspace({
 
   useEffect(() => {
     const handleFindShortcut = (event: globalThis.KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing || isFileFindTarget(event.target)) return
       if (
         event.altKey
         || (!event.metaKey && !event.ctrlKey)
@@ -4137,7 +4139,7 @@ export function CampWorkspace({
                         {fileChanges.map((changes) => (
                           <AgentRunFileChangesTimelineCard key={`${changes.agentRunId}:${changes.executionEpoch}`}
                             changes={changes} onOpenReview={(selectedEvidenceFileId) => {
-                              filePreview?.openFileChanges(snapshot.camp.id, changes, selectedEvidenceFileId)
+                              return filePreview?.openFileChanges(snapshot.camp.id, changes, selectedEvidenceFileId)
                             }} />
                         ))}
                       </section>
@@ -4162,7 +4164,7 @@ export function CampWorkspace({
                         key={timelineItem.id}
                         changes={timelineItem.changes}
                         onOpenReview={(selectedEvidenceFileId) => {
-                          filePreview?.openFileChanges(snapshot.camp.id, timelineItem.changes, selectedEvidenceFileId)
+                          return filePreview?.openFileChanges(snapshot.camp.id, timelineItem.changes, selectedEvidenceFileId)
                         }}
                       />
                     )
@@ -4445,7 +4447,7 @@ export function CampWorkspace({
                             key={fileChangeItem.id}
                             changes={fileChangeItem.changes}
                             onOpenReview={(selectedEvidenceFileId) => {
-                              filePreview?.openFileChanges(
+                              return filePreview?.openFileChanges(
                                 snapshot.camp.id,
                                 fileChangeItem.changes,
                                 selectedEvidenceFileId
@@ -7255,8 +7257,9 @@ export function AgentRunFileChangesTimelineCard({
   onOpenReview
 }: {
   changes: AgentRunFileChangesView
-  onOpenReview(selectedEvidenceFileId: string | undefined, trigger: HTMLButtonElement): void
+  onOpenReview(selectedEvidenceFileId: string | undefined, trigger: HTMLButtonElement): string | void
 }): JSX.Element {
+  const find = useOptionalFileFind()
   const [showAllFiles, setShowAllFiles] = useState(false)
   const visibleFiles = showAllFiles ? changes.files : changes.files.slice(0, 3)
   const additionalFileCount = Math.max(0, changes.files.length - 3)
@@ -7265,24 +7268,31 @@ export function AgentRunFileChangesTimelineCard({
   }, [changes.agentRunId, changes.executionEpoch])
   return (
     <article className="timeline-node run-file-changes-card">
-      <button
-        className="run-file-changes-card-header"
-        type="button"
-        aria-label={`查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
-        onClick={(event) => onOpenReview(undefined, event.currentTarget)}
-      >
-        <span className="run-file-changes-card-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24">
-            <path d="M4 7h6l2 2h8v10H4Z" />
-            <path d="M8 13h8M12 11v4" />
-          </svg>
-        </span>
-        <span className="run-file-changes-card-copy">
-          <strong>Files Changed</strong>
-          <span>{agentRunFileChangesSummaryLabel(changes)}</span>
-        </span>
-        <span className="run-file-changes-card-view" aria-hidden="true">查看变化</span>
-      </button>
+      <div className="run-file-changes-header-actions">
+        <button
+          className="run-file-changes-card-header"
+          type="button"
+          aria-label={`查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
+          onClick={(event) => onOpenReview(undefined, event.currentTarget)}
+        >
+          <span className="run-file-changes-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 7h6l2 2h8v10H4Z" />
+              <path d="M8 13h8M12 11v4" />
+            </svg>
+          </span>
+          <span className="run-file-changes-card-copy">
+            <strong>Files Changed</strong>
+            <span>{agentRunFileChangesSummaryLabel(changes)}</span>
+          </span>
+          <span className="run-file-changes-card-view" aria-hidden="true">查看变化</span>
+        </button>
+        {find && <button type="button" className="file-find-icon" aria-label="查找这次文件变化" title="查找这次文件变化"
+          disabled={!changes.files.some(file => file.presentationKind !== 'operation_only')}
+          onClick={event => { const id = onOpenReview(undefined, event.currentTarget); if (id) find.request(id, true) }}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg>
+        </button>}
+      </div>
       <div className="run-file-changes-card-files" aria-label="变更文件">
         {visibleFiles.map((file, index) => (
           <button

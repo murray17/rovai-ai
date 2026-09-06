@@ -6,13 +6,13 @@ import {
   type LanguageSupport
 } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
-import { search, searchKeymap } from '@codemirror/search'
 import { EditorState, StateField, type Extension } from '@codemirror/state'
-import { Decoration, EditorView, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
+import { Decoration, EditorView, lineNumbers, type DecorationSet } from '@codemirror/view'
 import { highlightCode } from '@lezer/highlight'
 import { oneDarkHighlightStyle } from '@uiw/react-codemirror'
 import { StyleModule } from 'style-mod'
 import type { FileLocationTarget, ResolvedTheme } from '@contracts'
+import { fileFindDecorations } from './file-find-code'
 
 const SOURCE_FONT_FAMILY = [
   'ui-monospace',
@@ -85,55 +85,7 @@ const sourceReaderInterface = {
     backgroundColor: 'var(--info-soft)',
     boxShadow: 'inset 2px 0 var(--info)'
   },
-  '.cm-panels': {
-    color: 'var(--muted)',
-    backgroundColor: 'var(--surface-raised)'
-  },
-  '.cm-panels.cm-panels-top': {
-    borderBottom: '1px solid var(--line-strong)'
-  },
-  '.cm-panel.cm-search': {
-    padding: '7px 34px 7px 10px',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif',
-    fontSize: '11px',
-    lineHeight: '1.4'
-  },
-  '.cm-panel.cm-search input': {
-    height: '27px',
-    padding: '0 7px',
-    border: '1px solid var(--control-line)',
-    borderRadius: '5px',
-    color: 'var(--ink)',
-    backgroundColor: 'var(--input)'
-  },
-  '.cm-panel.cm-search input:focus-visible': {
-    outline: '2px solid var(--focus)',
-    outlineOffset: '1px'
-  },
-  '.cm-panel.cm-search button': {
-    minHeight: '27px',
-    padding: '0 7px',
-    border: '1px solid var(--line)',
-    borderRadius: '5px',
-    color: 'var(--muted)',
-    backgroundColor: 'var(--surface-subtle)',
-    backgroundImage: 'none',
-    fontSize: '11px'
-  },
-  '.cm-panel.cm-search button:hover': {
-    color: 'var(--ink)',
-    backgroundColor: 'var(--surface-hover)'
-  },
-  '.cm-panel.cm-search [name=close]': {
-    top: '7px',
-    right: '8px',
-    border: '0',
-    backgroundColor: 'transparent'
-  },
-  '.cm-panel.cm-search label': {
-    color: 'var(--faint)',
-    fontSize: '10px'
-  }
+
 } as const
 
 const sourceReaderThemes: Record<ResolvedTheme, Extension> = {
@@ -235,8 +187,7 @@ export function sourceReaderExtensions({
 }): Extension[] {
   return [
     lineNumbers({ formatNumber: (line) => sourceLineNumber(startLine, line) }),
-    search({ top: true }),
-    keymap.of(searchKeymap),
+    fileFindDecorations,
     EditorState.tabSize.of(2),
     EditorState.phrases.of({
       Find: '查找',

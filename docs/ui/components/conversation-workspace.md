@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # Camp 会话工作区
@@ -165,6 +165,8 @@ around-window 合入时间线，不触发 earlier page 全量加载，也不改�
 定位线，不能只靠颜色表达。结果以 `aria-live` 播报，图标按钮有动作名称，reduced motion 关闭浮层进入
 和 spinner 之外的非必要动画。每次首次查询或前后导航都必须以当前 occurrence 的文字 Range 定位，而不是
 只把整条消息居中；Range 落在扣除悬浮查找条后的安全可视区中央，长消息中的首尾命中无需用户再次滚动。
+
+文件预览展开时，`Cmd/Ctrl+F` 依据焦点区域独立路由；文件正文、Tabs 与文件搜索入口不触发会话查找。会话与文件分别保存查询和结果，只统一视觉样式，详见[文件区域内查找](file-preview.md#文件区域内查找)。
 
 ## A2A 会话消息
 

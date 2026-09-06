@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # File Preview Architecture
@@ -148,8 +148,10 @@ Root Grant 只服务“选择目录、打开文件夹、添加外部目录、浏
 HTML/Markdown 的公开 `assetBasePath` 为空，相对资源从当前文档目录开始；`..` 不得越过该目录。
 
 HTML 通过无 `allow-same-origin` 的 sandbox iframe 执行；CSP 在用户文档之前注入，禁止网络、连接、表单、顶层
-导航和下载。宿主拦截主/子 frame 导航与新窗口。消息桥只接受 ready、受限高度和本地链接选择三类有界消息，
-同时验证 `event.source`、token、字段长度和当前 iframe 实例。可信本地链接点击使用 `child_of_handle` 打开新的具体
+导航和下载。宿主拦截主/子 frame 导航与新窗口。消息桥接受 ready、受限高度、本地链接选择与文件内查找的封闭有界消息，
+同时验证 `event.source`、token、字段长度和当前 iframe 实例。文件查找只传递当前可见正文快照（最多 8 MiB）、
+请求序号、匹配范围（最多 10,000 条）和可信键盘/点击事件；宿主 Worker 执行可取消匹配，iframe 仅投影高亮和阅读定位。
+这条链路不新增 Main IPC、文件能力、系统打开或网络权限。可信本地链接点击使用 `child_of_handle` 打开新的具体
 文件 handle；自动资源读取不创建子 handle，也不能启动系统应用。
 
 ## 资源释放

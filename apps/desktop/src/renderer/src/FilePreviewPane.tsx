@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SafeMarkdown } from './SafeMarkdown'
+import { FileFindScope } from './FilePreviewFind'
+import { FileFindDomAdapter } from './FileFindDomAdapter'
+import { useHtmlFileFind } from './file-find-html'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
 import { FileChangesPreview } from './FileChangesPreview'
 import { FilePreviewTabIcon, ResourceReferenceIcon } from './FilePreviewTabIcon'
@@ -49,6 +52,7 @@ function SourceViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element 
       fileName={tab.presentation.fileName}
       text={text}
       startLine={startLine}
+      findScopeLabel={tab.content?.kind === 'page' ? '仅查找当前已加载页' : ''}
       target={tab.file?.target}
       theme={resolvedTheme}
     />
@@ -139,6 +143,7 @@ function OpeningIndicator(): React.JSX.Element | null {
 function HtmlViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element | null {
   const content = tab.content?.kind === 'html' ? tab.content : null
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  useHtmlFileFind(iframeRef, content)
   const { open } = useFilePreview()
   const [linkError, setLinkError] = useState<string | null>(null)
   const fragment = tab.file?.target?.htmlFragment
@@ -218,6 +223,7 @@ function HtmlViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element | 
 }
 
 function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
+  const root = useRef<HTMLDivElement>(null)
   const text = tab.content && 'text' in tab.content ? tab.content.text : ''
   const patch = useMemo(() => parseUnifiedPatch(text), [text])
   const { open } = useFilePreview()
@@ -240,7 +246,8 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   }
 
   return (
-    <div className="file-preview-patch">
+    <div className="file-preview-patch" ref={root} tabIndex={0}>
+      <FileFindDomAdapter root={root} selector=".file-preview-patch-line:not(.is-metadata) code" revision={text} />
       <nav className="file-preview-patch-outline" aria-label="补丁目录">
         {patch.files.map((file) => (
           <div key={file.id}>
@@ -304,13 +311,15 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 }
 
 function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
+  const root = useRef<HTMLDivElement>(null)
   const { open, resolvedTheme } = useFilePreview()
   const [linkError, setLinkError] = useState<string | null>(null)
   const file = tab.file
   if (!tab.content || !file) return <div className="file-preview-empty-content" />
   if (tab.content.kind === 'markdown') {
     return (
-      <div className="file-preview-markdown">
+      <div className="file-preview-markdown" ref={root} tabIndex={0}>
+        <FileFindDomAdapter root={root} selector=".safe-markdown" revision={tab.content} />
         {linkError && <p className="file-preview-inline-error" role="alert">{linkError}</p>}
         <SafeMarkdown
           mode="document"
@@ -427,7 +436,7 @@ export function FilePreviewPane(): React.JSX.Element {
         aria-label={tabLabels.get(tab.id) ?? previewTabLabel(tab)}
         aria-labelledby={`file-preview-tab-${tab.id}`}
       >
-        {tab.kind === 'file_change' ? <FileChangesPreview tab={tab} /> : <FilePreviewDocument tab={tab} />}
+        <FileFindScope id={tab.id}>{tab.kind === 'file_change' ? <FileChangesPreview tab={tab} /> : <FilePreviewDocument tab={tab} />}</FileFindScope>
       </section>)}
     </section>
   )

@@ -1,4 +1,7 @@
-import { StrictMode, useRef, useState } from 'react'
+import { searchFileDocuments } from '../../../apps/desktop/src/renderer/src/file-find-client'
+import { EMPTY_FILE_FIND } from '../../../apps/desktop/src/renderer/src/file-find'
+import { isFileFindTarget } from '../../../apps/desktop/src/renderer/src/FilePreviewFind'
+import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, ComposerDocument, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, ResolvedTheme, TaskView } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
@@ -34,7 +37,7 @@ const markdownFile: ResolvedFilePreview = {
 const markdownSource = [
   '# 文件预览',
   '',
-  '正文以舒适字号呈现，并保留清楚的文档层级。',
+  '正文以舒适字号呈现，并保留清楚的文档层级。文件**预览**支持跨行内格式查找。',
   '',
   '## 核心阅读',
   '',
@@ -70,6 +73,9 @@ let deferredReadStarted: (() => void) | null = null
 let deferredReadRelease: (() => void) | null = null
 let pendingToolOpen: ReturnType<FilePreviewContextValue['open']> | null = null
 let fileReads = 0
+const htmlHandles = new Set<string>()
+const patchHandles = new Set<string>()
+const htmlSource = '<h1>HTML 文件预览</h1><p>文件<strong>预览</strong> bridge</p><p hidden>隐藏词</p><p style="display:none">隐藏词</p><button>按钮可见词</button>'
 async function resolvePreview(request: OpenFilePreviewRequest) {
   if (request.kind === 'message_reference' && request.rawReference === missingReference) {
     return { ok: false as const, error: {
@@ -92,11 +98,19 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
       pathPresentation: 'file_name_only', fileName: fileNameOnlyReference }
   } else if (request.kind === 'message_reference' && request.rawReference === markdownReference) {
     target = markdownFile
+  } else if (request.kind === 'message_reference' && ['find.patch', 'find.log', 'find.svg'].includes(request.rawReference)) {
+    target = { ...file, previewKey: request.rawReference, fileName: request.rawReference, displayPath: request.rawReference, target: undefined,
+      kind: request.rawReference === 'find.patch' ? 'patch' : request.rawReference === 'find.log' ? 'paged_text' : 'svg', size: 8 * 1024 * 1024 }
+  } else if (request.kind === 'message_reference' && request.rawReference === 'find.html') {
+    target = { ...markdownFile, kind: 'html', previewKey: 'html-find', fileName: 'find.html', displayPath: 'find.html', target: undefined }
   } else if (request.kind === 'camp_workspace' && request.rawReference === toolPreviewReference) {
     target = { ...file, previewKey: toolPreviewReference, displayPath: toolPreviewReference,
       fileName: toolPreviewReference.split('/').at(-1)! }
   } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
-  return { ok: true as const, value: { kind: 'file_preview' as const, file: { ...target, handleId: crypto.randomUUID() } } }
+  const handleId = crypto.randomUUID()
+  if (target.kind === 'html') htmlHandles.add(handleId)
+  if (target.kind === 'patch') patchHandles.add(handleId)
+  return { ok: true as const, value: { kind: 'file_preview' as const, file: { ...target, handleId } } }
 }
 const api: FilePreviewApi = {
   bindCamp: async (campId) => { campBindings.push(campId) },
@@ -108,7 +122,8 @@ const api: FilePreviewApi = {
     fileRestores.push(request)
     return resolvePreview(request)
   },
-  readText: async () => {
+  readText: async ({ handleId }) => {
+    if (patchHandles.has(handleId)) return { ok: true, value: { text: 'diff --git a/find.ts b/find.ts\n--- a/find.ts\n+++ b/find.ts\n@@ -1,2 +1,2 @@\n unchanged\n-before patch\n+after patch\n\\ No newline at end of file', contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } }
     fileReads += 1
     if (deferNextRead) {
       deferNextRead = false
@@ -126,10 +141,15 @@ const api: FilePreviewApi = {
   },
   release: async ({ handleId }) => { releases.push(handleId); return { released: true } },
   onExternalUpdate: () => () => {},
-  reopen: unsupported, readPage: unsupported, resolveLine: unsupported,
-  readBinary: unsupported,
-  prepareHtml: async () => ({ ok: true, value: {
-    html: markdownSource,
+  reopen: unsupported, resolveLine: unsupported,
+  readPage: async ({ offset }) => ({ ok: true, value: {
+    text: offset === 0 ? 'first-page needle' : 'second-page needle', startOffset: offset, endOffset: offset + 1024,
+    startLine: offset === 0 ? 1 : 101, hasPrevious: offset > 0, hasNext: offset === 0,
+    contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
+  } }),
+  readBinary: async () => ({ ok: true, value: { bytes: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20"/></svg>'), mime: 'image/svg+xml', contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } }),
+  prepareHtml: async ({ handleId }) => ({ ok: true, value: {
+    html: htmlHandles.has(handleId) ? htmlSource : markdownSource,
     tabToken: 'markdown-tab-token',
     bridgeToken: 'markdown-bridge-token',
     assetBasePath: '',
@@ -201,6 +221,14 @@ function Workspace(): React.JSX.Element {
   const [findOpen, setFindOpen] = useState(false)
   const [docks, setDocks] = useState<'none' | 'approval' | 'recovery' | 'both'>('none')
   const approvalRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || isFileFindTarget(event.target)) return
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); setFindOpen(true) }
+    }
+    window.addEventListener('keydown', shortcut)
+    return () => window.removeEventListener('keydown', shortcut)
+  }, [])
   showFind = setFindOpen
   showDocks = setDocks
   return <section className="workspace-shell camp-workspace">
@@ -554,17 +582,61 @@ Object.assign(window, { previewTest: {
       selectedText,
       targetLines: [...panel.querySelectorAll<HTMLElement>('.cm-location-target')].map((line) => line.textContent),
       gutterLines: [...panel.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')].map((line) => line.textContent),
-      searchVisible: Boolean(panel.querySelector('.cm-panel.cm-search')?.getClientRects().length),
+      searchVisible: Boolean(panel.querySelector('.file-find-surface')?.getClientRects().length),
       replaceVisible: Boolean(panel.querySelector('[name="replace"]')),
       searchMatches: panel.querySelectorAll('.cm-searchMatch').length,
       currentMatches: panel.querySelectorAll('.cm-searchMatch-selected').length
     }
   },
+  async openFindFixture(rawReference: string) {
+    await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })
+    await settle()
+  },
+  async workerSafety() {
+    const abort = new AbortController()
+    const documents = [{ id: 'hostile', text: 'a'.repeat(100_000) + '!' }]
+    const options = { ...EMPTY_FILE_FIND, query: '(a+)+$', regexp: true }
+    const cancelled = searchFileDocuments(documents, options, abort.signal).catch(error => error.name)
+    abort.abort()
+    const timedOut = await searchFileDocuments(documents, options, new AbortController().signal)
+    return { cancelled: await cancelled, timeout: timedOut.error }
+  },
+  async openHtml() {
+    await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: 'find.html' })
+    await settle()
+    const deadline = performance.now() + 4_000
+    while (document.querySelector<HTMLButtonElement>('.file-preview-find-trigger')?.disabled) {
+      if (performance.now() > deadline) throw new Error('HTML bridge did not become ready')
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    await settle()
+  },
+  findSnapshot() {
+    const selected = CSS.highlights.get('rovai-file-find-current')
+    const range = selected ? [...selected][0] as Range | undefined : undefined
+    return {
+      visible: Boolean(document.querySelector('.file-find-surface')),
+      query: document.querySelector<HTMLInputElement>('.file-find-form > input')?.value,
+      count: document.querySelector('.file-find-count')?.textContent,
+      error: document.querySelector('.file-find-error')?.textContent,
+      marked: CSS.highlights.get('rovai-file-find-match')?.size ?? 0,
+      current: range?.toString(),
+      selectedFile: previewController.activeTab?.kind === 'file_change' ? previewController.activeTab.selectedEvidenceFileId : null,
+      conversationQuery: document.querySelector<HTMLInputElement>('.conversation-find-form input')?.value,
+      nativePanel: Boolean(document.querySelector('.cm-panel.cm-search')),
+      toggleBackground: getComputedStyle(element('.file-preview-toggle')!).backgroundColor
+    }
+  },
   async setSourceSearch(query: string) {
-    const input = document.querySelector<HTMLInputElement>('.file-preview-tab-panel:not([hidden]) .cm-panel.cm-search [name="search"]')!
-    input.value = query
-    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'e' }))
-    document.querySelector<HTMLButtonElement>('.file-preview-tab-panel:not([hidden]) .cm-panel.cm-search [name="next"]')!.click()
+    const input = document.querySelector<HTMLInputElement>('.file-preview-tab-panel:not([hidden]) .file-find-form > input')!
+    if (!input) throw new Error('The file find input is not open')
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, query)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    const deadline = performance.now() + 4_000
+    do {
+      await new Promise(resolve => setTimeout(resolve, 25))
+      if (performance.now() > deadline) throw new Error('File find did not settle')
+    } while (document.querySelector('.file-find-count')?.textContent === '…' || document.querySelector('.file-find-form > input')?.getAttribute('value') !== query)
     await settle()
   },
   async markdownSnapshot() {
