@@ -79,6 +79,7 @@ import { FilePreviewProvider, useOptionalFilePreview } from './FilePreviewContex
 import { forgetFilePreviewSession } from './file-preview-session'
 import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { FilePreviewTabs } from './FilePreviewTabs'
+import { FileFindButton } from './FilePreviewFind'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AboutUpdatesSettings } from './AboutUpdatesSettings'
 import { AppUpdatePrompt } from './AppUpdatePrompt'
@@ -4229,6 +4230,7 @@ export function AppHeader({
       </div>
       {previewVisible && <FilePreviewTabs compact={previewLayout?.compact} />}
       {filePreview && <div className="file-preview-toggle-group">
+        <FileFindButton />
         <span className="file-preview-toggle-divider" aria-hidden="true" />
         <button
           className="file-preview-toggle"

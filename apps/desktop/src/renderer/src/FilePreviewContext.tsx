@@ -22,6 +22,7 @@ import type {
 } from '@contracts'
 import { secureFilePreviewHtml } from './file-preview-html-document'
 import { FilePreviewLayoutProvider } from './FilePreviewLayout'
+import { FileFindProvider } from './FilePreviewFind'
 import {
   filePreviewPresentationFromFile,
   filePreviewPresentationFromRequest,
@@ -110,7 +111,7 @@ export interface FilePreviewContextValue {
     presentation?: FilePreviewPresentationHint,
     options?: FilePreviewOpenOptions
   ): Promise<FilePreviewOpenOutcome>
-  openFileChanges(campId: string, changes: AgentRunFileChangesView, evidenceFileId?: string): void
+  openFileChanges(campId: string, changes: AgentRunFileChangesView, evidenceFileId?: string): string | undefined
   selectChangedFile(tabId: string, evidenceFileId: string): void
   showPane(): void
   hidePane(): void
@@ -424,6 +425,7 @@ export function FilePreviewProvider({
     const tab: FileChangesPreviewTabModel = { kind: 'file_change', id, campId: targetCampId, changes, selectedEvidenceFileId }
     setTabs((current) => existing ? current.map((entry) => entry.id === id ? tab : entry) : [...current, tab])
     showOpenedTab(id, !existing)
+    return id
   }, [setTabs, showOpenedTab])
 
   const selectChangedFile = useCallback((tabId: string, evidenceFileId: string) => {
@@ -1108,7 +1110,7 @@ export function FilePreviewProvider({
   return (
     <FilePreviewContext.Provider value={value}>
       <FilePreviewLayoutProvider campId={campId} visible={paneVisible}>
-        {children}
+        <FileFindProvider activeTabId={activeTabId} visible={paneVisible}>{children}</FileFindProvider>
       </FilePreviewLayoutProvider>
     </FilePreviewContext.Provider>
   )

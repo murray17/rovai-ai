@@ -1,3 +1,5 @@
+import { FileFindChangesAdapter } from './FileFindChangesAdapter'
+import { fileChangeFindLineId } from './file-find-changes'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type { AgentRunFileChangesDetailView, AgentRunFileChangesView } from '@contracts'
 import { useFilePreview, type FileChangesPreviewTabModel } from './FilePreviewContext'
@@ -110,6 +112,7 @@ export function AgentRunFileChangesReviewSurface({
   openCurrentError: string | null
   onRetry(): void
 }): JSX.Element {
+  const root = useRef<HTMLElement>(null)
   const selectedIndex = Math.max(0, changes.files.findIndex((file) =>
     file.evidenceFileId === selectedEvidenceFileId
   ))
@@ -119,7 +122,8 @@ export function AgentRunFileChangesReviewSurface({
     : null
   const truthNote = selectedFile ? agentRunFileChangeTruthNote(selectedFile.presentationKind) : null
   return (
-    <section className={`agent-run-file-review${changes.files.length <= 1 ? ' has-single-file' : ''}`} aria-label="File Change 详情">
+    <section className={`agent-run-file-review${changes.files.length <= 1 ? ' has-single-file' : ''}`} aria-label="File Change 详情" ref={root}>
+      <FileFindChangesAdapter root={root} detail={detail} selected={selectedFile?.evidenceFileId ?? null} select={onSelectEvidenceFileId} />
       <header className="agent-run-file-review-header">
         <div className="agent-run-file-review-heading">
           <h2>File Change</h2>
@@ -307,6 +311,7 @@ function AgentRunFileReviewBlocks({
           key={`${block.sequence}:${reviewIndex}`}
           block={block}
           index={reviewIndex}
+          fileId={file.evidenceFileId}
           showLabel={file.presentationKind !== 'full_net_diff' || blocks.length > 1}
         />
       ))}
@@ -317,8 +322,10 @@ function AgentRunFileReviewBlocks({
 function AgentRunFileReviewBlock({
   block,
   index,
-  showLabel
+  showLabel,
+  fileId
 }: {
+  fileId: string
   block: AgentRunFileChangesDetailView['files'][number]['blocks'][number]
   index: number
   showLabel: boolean
@@ -341,7 +348,7 @@ function AgentRunFileReviewBlock({
           ? (
               <div className={`agent-run-file-review-diff-line is-${line.kind}`} key={`${lineIndex}:${line.text}`}>
                 <span aria-hidden="true">{line.kind === 'addition' ? '+' : '−'}</span>
-                <code>{line.text || ' '}</code>
+                <code data-file-find-id={fileChangeFindLineId(fileId, index, lineIndex)}>{line.text || ' '}</code>
               </div>
             )
           : line.kind === 'hunk' || line.kind === 'metadata'
@@ -355,7 +362,7 @@ function AgentRunFileReviewBlock({
                 <span aria-hidden="true">{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ''}</span>
                 <span aria-hidden="true">{line.oldLine ?? ''}</span>
                 <span aria-hidden="true">{line.newLine ?? ''}</span>
-                <code>{line.text || ' '}</code>
+                <code data-file-find-id={fileChangeFindLineId(fileId, index, lineIndex)}>{line.text || ' '}</code>
               </div>
             ))}
       </div>

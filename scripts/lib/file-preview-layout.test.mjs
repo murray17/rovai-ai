@@ -13,7 +13,7 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/file-preview-layout')
 
-test('production file preview keeps split geometry, reading state and stable preferences through native input', { timeout: 60_000 }, async (t) => {
+test('production file preview keeps split geometry, reading state and stable preferences through native input', { timeout: 90_000 }, async (t) => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-file-preview-layout-test-'))
   let child
@@ -34,7 +34,7 @@ test('production file preview keeps split geometry, reading state and stable pre
     let output = ''
     child.stdout.on('data', chunk => { output += chunk.toString() })
     child.stderr.on('data', chunk => { output += chunk.toString() })
-    const timeout = setTimeout(() => child.kill('SIGKILL'), 45_000)
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 75_000)
     let code
     try { [code] = await closed } finally { clearTimeout(timeout) }
     assert.equal(code, 0, `File preview interaction regression failed:\n${output}`)

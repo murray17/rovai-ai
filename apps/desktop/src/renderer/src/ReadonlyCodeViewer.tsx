@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
-import { openSearchPanel } from '@codemirror/search'
+import { useFileFindAdapter } from './FilePreviewFind'
+import { codeFileFindAdapter } from './file-find-code'
 import type { FileLocationTarget, ResolvedTheme } from '@contracts'
 import {
   loadSourceLanguageForFilename,
@@ -20,13 +21,15 @@ export function ReadonlyCodeViewer({
   text,
   startLine = 1,
   target,
-  theme
+  theme,
+  findScopeLabel = ''
 }: {
   fileName: string
   text: string
   startLine?: number
   target?: FileLocationTarget
   theme: ResolvedTheme
+  findScopeLabel?: string
 }): React.JSX.Element {
   const viewRef = useRef<EditorView | null>(null)
   const previousThemeRef = useRef(theme)
@@ -54,6 +57,9 @@ export function ReadonlyCodeViewer({
       active = false
     }
   }, [fileName])
+
+  const findAdapter = useMemo(() => editor ? codeFileFindAdapter(editor, findScopeLabel) : null, [editor, text, findScopeLabel])
+  useFileFindAdapter(findAdapter)
 
   const extensions = useMemo(() => sourceReaderExtensions({
     ariaLabel: `${fileName} 内容`,
@@ -98,11 +104,11 @@ export function ReadonlyCodeViewer({
     const view = viewRef.current
     if (!view) return undefined
     const scrollerBounds = view.scrollDOM.getBoundingClientRect()
-    const contentBounds = view.contentDOM.getBoundingClientRect()
-    const anchor = view.posAtCoords({
-      x: contentBounds.left + 1,
-      y: scrollerBounds.top + 1
-    }, false)
+    const visibleLine = [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')]
+      .find(line => line.getBoundingClientRect().bottom > scrollerBounds.top)
+    // A virtualized editor may still have old layout estimates during theme reconfiguration.
+    // Resolve the rendered line through its DOM position instead of estimated screen coordinates.
+    const anchor = visibleLine ? view.posAtDOM(visibleLine) : view.lineBlockAtHeight(view.scrollDOM.scrollTop).from
     themeAnchorRef.current = { theme, view, position: anchor }
     return undefined
   }, [theme])
@@ -124,11 +130,6 @@ export function ReadonlyCodeViewer({
       role="region"
       aria-label={`${fileName} 内容`}
       tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.defaultPrevented || !(event.metaKey || event.ctrlKey) || event.key.toLocaleLowerCase() !== 'f') return
-        const view = viewRef.current
-        if (view && openSearchPanel(view)) event.preventDefault()
-      }}
     >
       <CodeMirror
         className="file-preview-code-mirror"

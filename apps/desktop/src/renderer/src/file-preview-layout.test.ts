@@ -97,7 +97,7 @@ describe('File preview reading planes', () => {
     const padding = declarations('.camp-topbar.has-file-preview')
       .filter((rule) => rule.includes('--file-preview-tabs-end-padding:'))
     expect(padding).toHaveLength(1)
-    expect(padding[0]).toContain('--file-preview-tabs-end-padding: 76px;')
+    expect(padding[0]).toContain('--file-preview-tabs-end-padding: 112px;')
     expect(declarations('.camp-detail-popover')[0]).toContain('position: absolute;')
     expect(declarations('.file-preview-tabs')[0]).toContain('-webkit-app-region: drag;')
     expect(declarations('.file-preview-tab')[0]).toContain('-webkit-app-region: no-drag;')

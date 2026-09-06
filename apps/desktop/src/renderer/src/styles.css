@@ -1464,12 +1464,12 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   border-bottom: 0;
   background: var(--conversation-surface);
 }
-.camp-topbar.has-file-preview { --file-preview-tabs-end-padding: 76px; }
+.camp-topbar.has-file-preview { --file-preview-tabs-end-padding: 112px; }
 .camp-topbar:not(.has-file-preview) .topbar-conversation-context { padding-right: 58px; }
 .file-preview-toggle-group { position: absolute; top: 5px; right: 6px; display: flex; height: 28px; align-items: center; gap: 8px; -webkit-app-region: no-drag; }
 .file-preview-toggle-divider { width: 1px; height: 18px; flex: 0 0 1px; background: var(--line-strong); }
 .file-preview-toggle { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
-.file-preview-toggle:hover { color: var(--ink); background: var(--surface-hover); }
+.file-preview-toggle:hover { color: var(--ink); background: transparent; }
 .file-preview-toggle[aria-expanded="true"] { color: var(--ink); background: var(--surface-muted); }
 .file-preview-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .file-preview-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
@@ -8624,6 +8624,43 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .dialog-glyph { width:20px; height:20px; flex:0 0 auto; }
 .compact-dialog :is(button,input,textarea):focus-visible,
 .compact-menu :is(button,[role^="menuitem"]):focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+/* File-local find: independent state and focus routing, aligned with conversation find. */
+.file-preview-find-trigger:disabled { opacity: .4; cursor: default; }
+.file-find-scope { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; --file-find-clearance: 0px; --file-find-top: 10px; }
+.file-find-surface { position: absolute; z-index: 22; top: var(--file-find-top, 10px); right: 12px; width: min(388px, calc(100% - 24px)); border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); overflow: hidden; }
+.file-find-surface:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.file-find-scope > .file-preview-content { padding-top: var(--file-find-clearance); }
+.file-find-scope .agent-run-file-review-scroll { padding-top: var(--file-find-clearance); }
+.file-find-form { display: flex; align-items: center; min-height: 32px; gap: 0; padding: 0 2px 0 8px; }
+.file-find-form > svg { width: 15px; height: 15px; flex: none; color: var(--faint); fill: none; stroke: currentColor; stroke-width: 1.7; margin-right: 5px; }
+.file-find-form > input { min-width: 0; width: 100%; flex: 1; height: 30px; border: 0; padding: 0; border-radius: 0; background: transparent; color: var(--ink); font-size: 11.5px; box-shadow: none; outline: none; }
+.file-find-form > input:focus-visible { outline: none; }
+.file-find-icon { display: grid; width: 28px; height: 28px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+.file-find-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.file-find-icon:hover:not(:disabled), .file-find-icon[aria-expanded="true"] { background: var(--surface-hover); color: var(--ink); }
+.file-find-icon:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.file-find-icon:disabled { opacity: .4; cursor: default; }
+.file-find-count { flex: none; min-width: 45px; padding: 0 8px 0 4px; text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.file-find-divider { width: 1px; height: 20px; background: var(--line); }
+.file-find-options { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 8px; border-top: 1px solid var(--line); }
+.file-find-options button { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--muted); font-size: 10.5px; cursor: pointer; }
+.file-find-options button[aria-pressed="true"] { background: var(--focus-soft); border-color: var(--focus); color: var(--ink); }
+.file-find-options button span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.file-find-scope-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 5px 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10.5px; }
+.file-find-scope-row select { min-width: 0; border: 0; background: transparent; color: inherit; font-size: inherit; padding: 0; }
+.file-find-scope-row label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.file-find-scope-row input { width: 12px; height: 12px; margin: 0; accent-color: var(--focus); }
+.file-find-error { padding: 5px 10px; border-top: 1px solid var(--line); color: var(--danger); font-size: 10.5px; }
+::highlight(rovai-file-find-match) { color: var(--ink); background-color: var(--conversation-find-match); }
+::highlight(rovai-file-find-current) { color: var(--ink); background-color: var(--conversation-find-current); text-decoration: underline; text-decoration-color: var(--conversation-find-line); }
+.run-file-changes-header-actions { display: flex; align-items: center; padding-right: 8px; }
+.run-file-changes-header-actions > .run-file-changes-card-header { min-width: 0; flex: 1; }
+
+.file-preview-find-trigger { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+.file-preview-find-trigger:hover, .file-preview-find-trigger[aria-expanded="true"] { color: var(--ink); background: var(--surface-muted); }
+.file-preview-find-trigger:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.file-preview-find-trigger svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
 
 /* Live processes keep their children mounted; elapsed summaries belong to terminal Runs. */
 .single-chat-run-history > summary[hidden],

@@ -1,3 +1,4 @@
+import { createFileFindDomIndex } from './file-find-dom'
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 
 const LOCKED_POLICY = [
@@ -173,6 +174,60 @@ function bootstrapSource(tabToken: string, bridgeToken: string, basePath: string
         || data.tabToken !== tabToken) return;
       const found = scrollToFragment(data.fragment);
       sendToHost({ type: 'rovai-preview-fragment-result', tabToken, bridgeToken, found }, '*');
+    });
+    const createFindIndex = (${createFileFindDomIndex.toString()});
+    let findIndex = null;
+    let findStyle = null;
+    const sendFind = (type, data = {}) => sendToHost({ type, tabToken, bridgeToken, ...data }, '*');
+    const clearFind = () => { CSS.highlights.delete('rovai-file-find-match'); CSS.highlights.delete('rovai-file-find-current'); };
+    const readyFind = () => {
+      if (document.body && !findObserver) {
+        findObserver = new MutationObserver(() => {
+          if (!findIndex) return;
+          findIndex = null; clearFind(); sendFind('rovai-preview-find-invalidated');
+        });
+        findObserver.observe(document.body, { childList: true, characterData: true, subtree: true, attributes: true });
+      }
+      sendFind('rovai-preview-find-ready');
+    };
+    let findObserver = null;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', readyFind, { once: true });
+    else readyFind();
+    document.addEventListener('keydown', (event) => {
+      if (!event.isTrusted || event.isComposing || event.altKey) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault(); event.stopImmediatePropagation(); sendFind('rovai-preview-find-open');
+      }
+    }, true);
+    document.addEventListener('pointerdown', (event) => { if (event.isTrusted) sendFind('rovai-preview-find-close'); }, true);
+    addEventListener('message', (event) => {
+      if (event.source !== parent || !event.data || typeof event.data !== 'object' || event.data.tabToken !== tabToken) return;
+      const data = event.data;
+      if (data.type === 'rovai-preview-find-ready') { if (document.body) readyFind(); return; }
+      if (data.type === 'rovai-preview-find-clear') { clearFind(); return; }
+      if (data.type === 'rovai-preview-find-snapshot' && Number.isSafeInteger(data.requestId)) {
+        clearFind();
+        try {
+          findIndex = createFindIndex(document.body, undefined, true);
+          sendFind('rovai-preview-find-document', { requestId: data.requestId, text: findIndex.text });
+        } catch { sendFind('rovai-preview-find-document', { requestId: data.requestId, error: true }); }
+        return;
+      }
+      if (data.type !== 'rovai-preview-find-matches' || !findIndex || !Array.isArray(data.matches) || data.matches.length > 10000) return;
+      if (!Number.isSafeInteger(data.current) || typeof data.scroll !== 'boolean') return;
+      const ranges = data.matches.map((match) => Number.isSafeInteger(match.from) && Number.isSafeInteger(match.to) ? findIndex.range(match.from, match.to) : null);
+      const selected = ranges[data.current];
+      if (!findStyle) { findStyle = document.createElement('style'); document.head.append(findStyle); }
+      if (Array.isArray(data.colors) && data.colors.length === 3 && data.colors.every(color => typeof color === 'string' && CSS.supports('color', color))) {
+        findStyle.textContent = '::highlight(rovai-file-find-match){background:' + data.colors[0] + ';color:' + data.colors[2] + '}::highlight(rovai-file-find-current){background:' + data.colors[1] + ';color:' + data.colors[2] + ';text-decoration:underline}';
+      }
+      CSS.highlights.set('rovai-file-find-match', new Highlight(...ranges.filter(Boolean)));
+      CSS.highlights.set('rovai-file-find-current', new Highlight(...(selected ? [selected] : [])));
+      if (selected && data.scroll) {
+        selected.startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const bounds = selected.getBoundingClientRect();
+        window.scrollBy(0, bounds.top + bounds.height / 2 - innerHeight / 2);
+      }
     });
     document.currentScript?.remove();
   })();`
