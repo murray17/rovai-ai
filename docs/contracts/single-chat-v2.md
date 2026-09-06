@@ -104,7 +104,7 @@ Single Chat agent final 和其他无附件 ConversationMessage 保存 `[]`。本
 | `singleChat.open` | command envelope + `{ campId, agentId }` | 已有 active 会话则幂等返回，否则创建新 Conversation |
 | `singleChat.sourceAttachments.addFromPath` | `{ conversationId, expectedDraftRevision, sourcePath, displayName, mediaType? }` | 公共观察/校验后把一个 Source Ref 追加到 Draft，不复制内容 |
 | `singleChat.composerDraft.removeAttachment` | `{ conversationId, expectedDraftRevision, attachmentRefId }` | 只从 Draft 删除指定 Source Ref |
-| `singleChat.send` | command envelope + `{ campId, conversationId, body, expectedConversationVersion, draftRevision }` | 原子消费当前 Draft，直接准入或进入该 Conversation 的 Pending FIFO |
+| `singleChat.send` | command envelope + `{ campId, conversationId, body, draftRevision }` | 原子消费当前 Draft，直接准入或进入该 Conversation 的 Pending FIFO |
 | `singleChat.pendingInputs.edit` | command envelope + `EditSingleChatPendingInputCommand` | begin/takeover/save/remove/reorder/cancel/delete 排队编辑 |
 | `singleChat.pendingInputs.addSourceAttachmentFromPath` | `{ campId, conversationId, pendingInputId, expectedRevision, editToken, sourcePath, displayName, mediaType? }` | 向已验证 edit working copy 追加公共 Source Ref |
 | `singleChat.end` | command envelope + `{ campId, conversationId }` | 按精确 Conversation 身份结束当前状态；已 ended 时成功 no-op |
@@ -115,6 +115,10 @@ payload Camp。除 `end` 对同一 exact ended Conversation 的成功 no-op 外�
 Member。附件路径必须为绝对路径且在观察时存在、可读并为公共规则支持的普通文件或目录；名称、媒体类型、数量和 Source
 shape 上限沿用 Camp Composer。
 
+`singleChat.send` 按固定 Conversation ID 在事务中读取当前实际状态，不接收 expected Conversation version。Runtime Input
+Delivery ACK、Agent final 或其他后台状态推进 `conversation.version` 时，不得使合法的直接发送或 Pending 入队变成陈旧请求；
+附件 Draft 仍独立使用 `draftRevision` 做 CAS。
+
 `singleChat.send` 的 trim 后正文与 Draft refs 不得同时为空，正文最多 100,000 Unicode scalar。输入不携带
 `attachmentIds`；附件权威是匹配 `draftRevision` 的有序 Draft refs。Core 在事务中重读并验证 Source 当前状态：
 
@@ -123,7 +127,7 @@ shape 上限沿用 Camp Composer。
 2. Conversation 有非终态 Run或已有 Pending 时，写 `single_chat_pending_input`，清空 Draft并推进 Draft revision，但不写
    ConversationMessage/CampTurn/AgentRun，也不推进 Conversation version。
 
-Source 丢失、不可读、类型变化、Draft/Conversation revision 冲突或其他发送校验失败时，不写 Message/Turn/Run/Pending，
+Source 丢失、不可读、类型变化、Draft revision 冲突或其他发送校验失败时，不写 Message/Turn/Run/Pending，
 不清空 Draft，不推进任一 revision/version。附件-only 输入允许。
 
 ## 5. Conversation-local Pending FIFO
@@ -281,7 +285,6 @@ single_chat.local_user_required
 single_chat.camp_mismatch
 single_chat.member_unavailable
 single_chat.not_active
-single_chat.version_conflict
 single_chat.draft_changed
 single_chat.empty_message
 single_chat.runtime_not_ready

@@ -13025,7 +13025,6 @@ mod slow_tests {
                         conversation_id,
                         body: "只检查当前单聊输入".to_string(),
                         draft_revision: 0,
-                        expected_conversation_version: 1,
                     },
                 },
             )
