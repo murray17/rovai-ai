@@ -23,7 +23,7 @@ last_updated: 2026-09-06
 - [x] 用户授权的原库一次性聚合：确认 App/Core 已退出，持锁创建独立完整恢复备份，处理后完整性、外键和保护表校验通过。
 - [x] 经用户确认合入 PR #245，保留主线图片 141，将 classifier cutover 统一为 142；既有工具 141 原子映射并保留 applied-at。
 - [x] 两种升级源的 marker/schema 准入、部分状态拒绝、三个事务失败点回滚，以及生产 lease/ticket/migration/reopen 路径测试通过。
-- [ ] 日常新版读取验收：兼容修复后重新构建、隔离副本升级、安装与目标 Camp 读取。
+- [x] 日常新版读取验收：兼容修复后重新构建、隔离副本升级、用户授权安装与目标 Camp 全部历史读回。
 
 ### 合同 owner 与最小验证
 
@@ -67,11 +67,11 @@ python3 scripts/aggregate-execution-text.test.py
   补充 ACP `messageId` 的 A/B/A 交错与空 `itemId` fallback；Core 与离线聚合使用同一原生身份优先级。
 - 独立 Electron 正文场景通过：稀疏 sequence、35,023 字符 Blob 全文、失败重试、3 段正文和 2 组工具、
   reasoning 不泄漏到公开展示。原完整 CampOpen 图片截图场景仍有图片解码时序断言失败，未调整图片 UI 或删减原覆盖。
-- 真实 Codex 验收：582 个 text/reasoning 流式片段保存为 8 条块记录、16 次正文 SQL 行写入；加上工具等
-  事实共 18 条 Evidence、26 次 SQL 行写入。该指标不是物理磁盘写入字节数。
-- 合入最新主线后重新 `package:mac:daily` 并验签；`ROVAI_EXECUTION_TEXT_ACCEPT=partial-only` 的成品
-  最终 `a54e2ac7` 成品正常退出/重开场景通过：516 字符未完成正文被保留为 interrupted，退出 953ms，无强制信号，最新 Draft 保留。
-  此定向模式不运行无关的空闲退出浮层截图；完整脚本该环节因 App 先退出导致 CDP 关闭，不能计为完整通过。
+- 合并成品 `4401a870` 的真实 Codex 验收：593 个 text/reasoning 流式片段保存为 9 条块记录、18 次正文 SQL
+  行写入；加上工具等事实共 19 条 Evidence、28 次 SQL 行写入。该指标不是物理磁盘写入字节数。
+- 合并后重新 `package:mac:daily` 并验签；`ROVAI_EXECUTION_TEXT_ACCEPT=text-and-partial` 成品正常退出/重开
+  场景通过：513 字符未完成正文被保留为 interrupted，退出 1,742ms、重开后退出 350ms，无强制信号，最新 Draft 保留。
+  此定向模式不运行无关的空闲退出浮层截图；原完整脚本该环节因 App 先退出导致 CDP 关闭，不能计为完整通过。
 - 离线聚合 3 个 Python 用例及真实副本逐块内容、顺序、状态、引用和工具不变校验通过；副本原位重跑零变化。
 - 用户授权的原库聚合及独立校验通过，完整恢复备份留在用户私有目录。日常启动验收另发现并行分支
   Migration 141 冲突：聚合前备份已包含 PR #245 的 classifier cutover，而不是当前主线的图片来源列。
@@ -79,7 +79,12 @@ python3 scripts/aggregate-execution-text.test.py
 - 经用户授权合入 PR #245 后，63 个数据库测试和生产迁移组合测试通过。聚合后的真实隔离副本从
   `v1.52/schema 92/activity-v3` 原子迁移为 `v1.53/schema 93/activity-v3`，原 classifier receipt 的时间保留于 142。
   9 张正文/工具/事件/业务表逐表摘要不变，完整性与外键检查通过，目标 Camp 的 18 个 Run 可读取。
-  合并后的执行正文与文件预览 Electron 验收均通过；日常原库另行验收，不由副本结果替代。
+  合并后的执行正文与文件预览 Electron 验收均通过。
+- 用户授权安装后的日常 App/Core 正常启动，原库生产兼容迁移和目标 Camp 的全部 Run/Evidence CLI 读回通过；
+  正文、Canonical 与文件投影摘要不变，原事件日志行没有缺失或改写，完整性与外键检查通过。
+  正常渠道启动的既有七天运输清理另按生命周期生效，并非本次聚合或兼容迁移删减；完整恢复备份保留。
+  三次真实往返切 Camp 后没有新增可见通知或 Default Lead 空日志；这里只证明业务读取/维护行为，不冒充 Renderer 端到端计时。
+  `f3f7e2f2` 仅修正合入 Claude 测试的单元素循环 lint，产品产物仍对应 `4401a870`；该实现/测试提交 PR CI 通过。
 - 全量 slow Rust 检查仍有基线已有的 `current_input_skill_links_are_direct_user_siblings_with_canonical_bytes`
   断言失败；Clippy 在未修改的 `core_subsystems.rs` 报 `let_and_return`。不为本次正文任务修改 Skill 上下文
   或清理无关模块，完整门禁不宣称全绿。另仅修正旧 Single Chat 测试夹具已经失效的 `draft_revision` 字段。
