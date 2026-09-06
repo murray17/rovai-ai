@@ -1023,6 +1023,14 @@ export type CampConversationTimelineItem =
       images: AgentRunImagesView
     }
   | {
+      kind: 'run_artifacts'
+      id: string
+      createdAt: string
+      run: AgentRunView
+      imageGroups: AgentRunImagesView[]
+      fileChanges: AgentRunFileChangesView[]
+    }
+  | {
       kind: 'stop_event'
       id: string
       createdAt: string
@@ -1036,6 +1044,7 @@ const TIMELINE_KIND_RANK: Record<CampConversationTimelineItem['kind'], number> =
   task_card: 1,
   stop_event: 2,
   run_images: 3,
+  run_artifacts: 3,
   run_file_changes: 4
 }
 
@@ -1172,10 +1181,29 @@ export function campConversationTimeline(
     )
   }
 
-  return sortedItems.flatMap((item) => {
+  const anchoredItems = sortedItems.flatMap((item) => {
     if (anchoredCardIds.has(item.id)) return []
     const cards = cardsByAnchorMessageId.get(item.id) ?? []
     return item.kind === 'run_file_changes' ? [...cards, item] : [item, ...cards]
+  })
+  const runById = new Map(agentRuns.map((run) => [run.id, run]))
+  const outputsByRunId = new Map<string, Extract<CampConversationTimelineItem, { kind: 'run_artifacts' }>>()
+  // Terminal artifacts without a public message still belong to the executing member.
+  // Keep their first timeline position and group every epoch under that exact Run once.
+  return anchoredItems.flatMap((item): CampConversationTimelineItem[] => {
+    if (item.kind !== 'run_images' && item.kind !== 'run_file_changes') return [item]
+    const runId = item.kind === 'run_images' ? item.images.agentRunId : item.changes.agentRunId
+    const run = runById.get(runId)
+    if (!run || NON_TERMINAL_RUNS.has(run.status) || publicAgentMessageRunIds.has(runId)) return [item]
+    const existing = outputsByRunId.get(runId)
+    const output = existing ?? {
+      kind: 'run_artifacts', id: `run-artifacts:${runId}`, createdAt: item.createdAt,
+      run, imageGroups: [], fileChanges: []
+    } satisfies Extract<CampConversationTimelineItem, { kind: 'run_artifacts' }>
+    if (item.kind === 'run_images') output.imageGroups.push(item.images)
+    else output.fileChanges.push(item.changes)
+    outputsByRunId.set(runId, output)
+    return existing ? [] : [output]
   })
 }
 
@@ -4058,6 +4086,58 @@ export function CampWorkspace({
                           openInspector('tasks')
                         }}
                       />
+                    )
+                    continue
+                  }
+                  if (timelineItem.kind === 'run_artifacts') {
+                    previousMessageAuthorKey = null
+                    const { run, imageGroups, fileChanges } = timelineItem
+                    const member = memberById.get(run.agentId)
+                    const profile = profileById.get(run.agentId)
+                    const author = member?.displayName ?? profile?.displayName ?? run.agentId
+                    const canInspect = Boolean(member && profile
+                      && member.membershipStatus === 'active' && member.profilePresence !== 'removed')
+                    const authorPart = (variant: 'avatar' | 'name'): JSX.Element => {
+                      const content = variant === 'avatar'
+                        ? <MemberAvatar agentId={run.agentId} avatarRef={member?.avatarRef ?? profile?.avatarRef ?? null}
+                            displayName={author} size="list" decorative />
+                        : <strong>{author}</strong>
+                      return canInspect
+                        ? <MessageAuthorProfileTrigger agentId={run.agentId} displayName={author}
+                            variant={variant} onActivate={openMemberProfilePopover}>{content}</MessageAuthorProfileTrigger>
+                        : content
+                    }
+                    items.push(
+                      <section className="agent-message-output run-artifact-output" key={timelineItem.id}
+                        data-run-artifact-output-id={run.id} data-camp-turn-id={run.campTurnId}
+                        aria-label={`${author}的运行产物`}>
+                        <div className="timeline-node conversation-bubble agent"
+                          style={{ '--agent-accent': identityColorToken(run.agentId) } as CSSProperties}>
+                          {authorPart('avatar')}
+                          <div className="message-body">
+                            <div className="bubble-meta">
+                              {authorPart('name')}
+                              {profile?.runtimeConfiguration && <span>{runtimeAdapterLabel(profile.runtimeConfiguration.adapterKind)}</span>}
+                              <time>{messageClockTime(run.endedAt ?? timelineItem.createdAt)}</time>
+                            </div>
+                            {imageGroups.length > 0 && (
+                              <section className="message-attachments agent-message-outputs" aria-label="Agent 输出图片">
+                                <div className="agent-output-images">
+                                  <ImageGallery images={imageGroups.flatMap((group) => group.images.map((image) => ({
+                                    kind: 'runtime' as const, campId: snapshot.camp.id, image
+                                  })))} />
+                                </div>
+                              </section>
+                            )}
+                          </div>
+                        </div>
+                        {fileChanges.map((changes) => (
+                          <AgentRunFileChangesTimelineCard key={`${changes.agentRunId}:${changes.executionEpoch}`}
+                            changes={changes} onOpenReview={(selectedEvidenceFileId) => {
+                              filePreview?.openFileChanges(snapshot.camp.id, changes, selectedEvidenceFileId)
+                            }} />
+                        ))}
+                      </section>
                     )
                     continue
                   }

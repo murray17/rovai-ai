@@ -1453,8 +1453,9 @@ describe('task event projections', () => {
       authorType: 'user'
     }], [], [run('running')], [], [], images)
       .map((item) => item.id)).toEqual(['invalid-user-source'])
-    expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images)
-      .map((item) => item.kind)).toEqual(['run_images', 'run_file_changes'])
+    expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images))
+      .toMatchObject([{ kind: 'run_artifacts', run: { id: 'run-claude', agentId: 'agent-claude' },
+        imageGroups: images, fileChanges: [{ agentRunId: 'run-claude' }] }])
   })
 
   it('renders a three-row Files Changed card with a quiet review entry and mixed totals', () => {

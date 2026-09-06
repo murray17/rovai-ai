@@ -362,6 +362,28 @@ reactRoot.render(<Fixture />)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let anchor: HTMLElement | null = null
 Object.assign(window, { campOpenTest: {
+  showRunArtifacts: (withMessage = false) => {
+    imageResult = reviewImages[0]
+    imageResultsById.clear()
+    const runs: AgentRunView[] = agents.slice(0, 2).map((member, index) => ({
+      ...textRun, id: `artifact-run-${index}`, agentId: member.agentId,
+      status: index === 0 ? 'failed' : 'cancelled', executionEvidenceCount: 0,
+      cancelRequestedAt: index === 0 ? null : now,
+      cancelReasonCode: index === 0 ? null : 'user_requested_agent_run_stop'
+    }))
+    current = { ...current, tasks: [], turns: [], messageDeliveries: [], executionEvidence: [],
+      camp: { ...current.camp, title: '终态运行产物归属' }, agentRuns: runs,
+      messages: withMessage ? [{ ...messages[1], id: 'artifact-message', sourceAgentRunId: runs[0].id }] : [],
+      agentRunImages: [{ agentRunId: runs[0].id, executionEpoch: 1, createdAt: now,
+        images: [{ id: 'artifact-image', displayName: imageResult.displayName,
+          mediaType: imageResult.mediaType, byteSize: atob(imageResult.data).length }] }],
+      agentRunFileChanges: runs.map(item => ({ schemaVersion: 2, agentRunId: item.id, executionEpoch: 1,
+        files: [{ evidenceFileId: `file-${item.id}`, path: `${item.id}/result.ts`, changeKind: 'update',
+          presentationKind: 'operation_history', operationCount: 1 }],
+        fileCount: 1, operationCount: 1, completedAt: now })) }
+    updateMessageHistory(null)
+    updateSnapshot(current)
+  },
   showTextEvidence: () => reactRoot.render(<RunExecutionDisclosure run={textRun} campId={campId} />),
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   openTask: () => element('.task-event-card').click(),
