@@ -554,6 +554,14 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 凭证、用户名或绝对路径。精确合同见
 [Run Process Detail Surface v30](../../contracts/run-process-detail-surface-v30.md)。
 
+同一 App/Core generation 内，权威 Run 为 `waiting/network_recovery` 时显示 attention 状态“连接中断，等待恢复”，
+并说明只有在确认当前输入未被接收后才会自动重试；新 epoch 已进入正式恢复但 Input 尚未 accepted 时显示“正在恢复”／
+“正在恢复连接”。`waiting/network_recovery_blocked` 显示 danger 状态“需要处理”和无 spinner 的“自动恢复已停止”，
+说明安全条件已变化且不会自动重发，并保留普通 Run“停止”入口。Renderer 的 `online` 和 Electron system resume 只
+唤醒 Core 安全检查，不直接发送输入；页面切换、窗口最小化和 Renderer 未产生 signal 不停止 Core timer。只有当前
+恢复 epoch 的 Runtime Input accepted 后才清除过期网络提示，单纯连接或 Session 建立不能显示任务已经恢复。精确合同见
+[Network Interruption Recovery v1](../../contracts/network-interruption-recovery-v1.md)。
+
 failed AgentRun 的公开 `failure` 必须在对应 Run stage 显示 Core 已脱敏并限长的 Runtime 原始错误文本；
 非空 `detail` 优先，否则回退 `summary`。即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑
 隐藏。AgentRun 不增加 Runtime 名称或 `origin` 标题，不翻译错误文本，所有 `origin` 统一使用 danger

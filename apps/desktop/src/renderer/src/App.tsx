@@ -766,6 +766,14 @@ export function App(): React.JSX.Element {
     }
   }), [])
 
+  useEffect(() => {
+    const wakeNetworkRecovery = (): void => {
+      void window.rovai.request('runtime.networkRecovery.wake').catch(() => undefined)
+    }
+    window.addEventListener('online', wakeNetworkRecovery)
+    return () => window.removeEventListener('online', wakeNetworkRecovery)
+  }, [])
+
   const shuttingDown = runtimeShuttingDown || supervisor?.fullCoreState === 'shutting_down'
   const presentationSupervisor = shuttingDown ? supervisorState.lastNonShutdown : supervisor
 

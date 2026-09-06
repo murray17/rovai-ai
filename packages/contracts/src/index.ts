@@ -3382,6 +3382,7 @@ export type CoreMethod =
   | 'diagnostics.check'
   | 'monitoring.snapshot'
   | 'runtime.discovery.rescan'
+  | 'runtime.networkRecovery.wake'
   | 'runtime.subsystems.get'
   | 'runtime.subsystems.retry'
   | 'runtime.product.ensure'

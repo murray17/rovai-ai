@@ -55,6 +55,7 @@ pub mod memory_secret;
 pub mod memory_tool;
 pub mod message_delivery;
 pub mod monitoring;
+pub mod network_recovery;
 pub mod notification;
 pub mod pending_camp_input;
 pub mod planned_shutdown;

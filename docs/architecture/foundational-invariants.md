@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 ---
 
 # 当前基础架构不变量
@@ -283,6 +283,12 @@ last_updated: 2026-09-05
 
 ### 恢复、取消与计划关闭
 
+- App/Core 持续运行期间，只有强网络分类且当前 epoch 输入可证明未接收的失败才可在 terminal settlement 前进入
+  `network_recovery`。Core generation-local coordinator 固定按 `1, 2, 3, 5, 10, 15, 30, 30...` 秒从每次失败
+  完成时调度，并在每次 attempt 前重验 Run/version/epoch、取消、预算、成员、授权、Input Delivery 与未决效果；
+  online/system-resume 只提前唤醒检查，不直接发送或重置 backoff。原生 Runtime 自行重试时保持唯一 owner；只有新
+  epoch 的 Runtime Input accepted 才证明有效恢复进展。完整边界见
+  [Network Interruption Recovery v1](../contracts/network-interruption-recovery-v1.md)。
 - Runtime accepted input 只有在能证明原 Native Turn 的 identity、接受状态和可重连终态时才能恢复。证据不足进入 `recovery_blocked` 或 continuity-lost，不能重发可能已经产生外部效果的输入。
 - 新输入的恢复验证冻结 Manifest attachment receipt 的 closed shape/digest，再独立验证 admitted Runtime Files Root identity、精确 Camp root containment 与当前 Camp-root Auth Receipt；不要求 legacy View ready、append-only successor 或 generation 匹配。路径和历史 payload 不重新解析、探测或改写。Migration 99/100 的旧非终态输入按 delivery/action evidence 诚实终结，历史 Manifest/Blob/Auth Receipt/ACK 保留但不可再 dispatch。
 - Cancellation 在业务事务内把目标 Run 结算为 cancelled 并收口义务和所属 Turn；未发送 Input 为 not_accepted，accepted/delivery_unknown 与可能已执行的 Action 证据保留，但不改变取消终态或产生公共待确认提示，原输入禁止自动重发。Runtime 使用原 active/launch token 有界清理，只有确认后写 cancel_acknowledged_at；清理不拥有业务终态。未确认清理的同 Conversation 新 Run 最多等待三秒，然后 failed/runtime_cleanup_unconfirmed，不允许重叠执行。

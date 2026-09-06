@@ -4812,6 +4812,21 @@ impl Database {
     pub fn prepare_v2_recovery(&mut self) -> Result<V2RecoverySummary> {
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = self.connection.transaction()?;
+        // The live network scheduler is intentionally process-local. If Core
+        // restarts, hand its durable waiting marker back to the existing
+        // startup recovery path instead of recreating or persisting backoff.
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET wait_reason = 'runtime_recovery',
+                last_error_code = 'core_restarted_during_network_recovery',
+                version = version + 1, updated_at = ?1
+            WHERE status = 'waiting'
+              AND wait_reason = 'network_recovery'
+              AND runtime_recovery_required = 1
+            "#,
+            [&now],
+        )?;
         let actions_returned_to_prepared = transaction.execute(
             r#"
             UPDATE action_execution
@@ -4978,7 +4993,7 @@ impl Database {
             WHERE status IN ('running', 'waiting')
               AND NOT (
                   status = 'waiting'
-                  AND wait_reason = 'recovery_blocked'
+                  AND wait_reason IN ('recovery_blocked', 'network_recovery_blocked')
               )
               AND (
                   runtime_recovery_required = 0

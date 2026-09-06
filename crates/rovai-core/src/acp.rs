@@ -1146,6 +1146,7 @@ async fn cleanup_acp_client_terminals(
 #[derive(Debug, Clone)]
 struct AcpRpcError {
     code: Option<i64>,
+    structured_code: Option<String>,
     message: String,
 }
 
@@ -1153,6 +1154,19 @@ impl AcpRpcError {
     fn from_response(value: &Value) -> Self {
         Self {
             code: value.get("code").and_then(Value::as_i64),
+            structured_code: value
+                .pointer("/data/code")
+                .or_else(|| value.pointer("/data/error/code"))
+                .or_else(|| value.pointer("/data/kind"))
+                .and_then(Value::as_str)
+                .filter(|code| {
+                    !code.is_empty()
+                        && code.len() <= 64
+                        && code.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
+                        })
+                })
+                .map(str::to_string),
             message: value
                 .get("message")
                 .and_then(Value::as_str)
@@ -1762,7 +1776,10 @@ impl AcpHost {
                             "deliveryId": active_prompt.delivery_id,
                             "requestId": id,
                             "inputDisposition": input_disposition,
-                            "nativeErrorCode": response_error.and_then(|error| error.code),
+                            "nativeErrorCode": response_error.as_ref().and_then(|error| error.code),
+                            "nativeErrorKind": response_error
+                                .as_ref()
+                                .and_then(|error| error.structured_code.as_deref()),
                             "error": error
                         }),
                     };
@@ -6369,6 +6386,22 @@ mod route_policy_tests {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_rpc_error_keeps_only_a_bounded_structured_kind() {
+        let error = AcpRpcError::from_response(&json!({
+            "code": -32000,
+            "message": "transport failed",
+            "data": { "code": "ECONNRESET" }
+        }));
+        assert_eq!(error.structured_code.as_deref(), Some("ECONNRESET"));
+
+        let rejected = AcpRpcError::from_response(&json!({
+            "message": "transport failed",
+            "data": { "code": "not safe because it has spaces" }
+        }));
+        assert!(rejected.structured_code.is_none());
+    }
     use crate::runtime_fleet::AgentRuntimeFleetConfig;
     use rovai_core::agent_profile::{AdapterPermissionConfig, ResolvedModelSelection};
     use std::os::unix::fs::PermissionsExt;

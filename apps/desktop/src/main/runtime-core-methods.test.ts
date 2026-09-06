@@ -5,15 +5,24 @@ import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 const mainSource = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
 
 describe('Runtime Renderer Core method allowlist', () => {
-  it('exposes discovery, background ensure, explicit checking, and pending execution cancellation', () => {
+  it('exposes discovery, recovery wake, background ensure, explicit checking, and cancellation', () => {
     expect(RUNTIME_RENDERER_CORE_METHODS).toEqual([
       'runtime.discovery.rescan',
       'runtime.product.ensure',
       'runtime.product.check',
+      'runtime.networkRecovery.wake',
       'runtime.modelCatalog.open',
       'runtime.pendingExecution.cancel'
     ])
     expect(RUNTIME_RENDERER_CORE_METHODS).not.toContain('core.shutdown')
+  })
+
+  it('wakes the same Core recovery check when the operating system resumes', () => {
+    expect(mainSource).toContain("powerMonitor.on('resume', wakeNetworkRecoveryAfterSystemResume)")
+    expect(mainSource).toContain("core.request('runtime.networkRecovery.wake')")
+    expect(mainSource).toContain(
+      "powerMonitor.removeListener('resume', wakeNetworkRecoveryAfterSystemResume)"
+    )
   })
 
   it('allows the Single Chat pending-input mutation implemented by Core', () => {
