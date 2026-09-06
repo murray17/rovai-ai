@@ -87,6 +87,12 @@ export type ExecutionPlanStep = {
 
 export type ActivityIconKind = 'terminal' | 'file' | 'file-read' | 'file-write' | 'web' | 'tool' | 'rovai' | 'runtime' | 'unknown'
 
+export type ShellReadSummary = {
+  title: string
+  paths: string[]
+  displayPaths: string[]
+}
+
 export type ExecutionStep = {
   id: string
   title: string
@@ -109,6 +115,8 @@ export type ExecutionStep = {
   iconKind: ActivityIconKind
   toolName: string | null
   credibility: string
+  /** Renderer-only summary for one Shell activity containing multiple proven reads. */
+  shellReadSummary?: ShellReadSummary
   fileOperation?: {
     operationKind: 'read' | 'write'
     path: string
@@ -144,11 +152,11 @@ export type RuntimeCompactionDisplayItem = {
 }
 
 export function executionStepPublicTitle(step: ExecutionStep): string {
-  return step.publicCommand ?? step.title
+  return step.shellReadSummary?.title ?? step.publicCommand ?? step.title
 }
 
 export function executionStepCurrentInstructionTitle(step: ExecutionStep): string {
-  return step.publicCommand ?? step.currentInstruction ?? step.title
+  return step.shellReadSummary?.title ?? step.publicCommand ?? step.currentInstruction ?? step.title
 }
 
 export type RuntimeDiagnostic = {
@@ -518,13 +526,21 @@ export function buildLiveExecutionProgress(
       && genericShellTitle(step.title)
       ? previous.title
       : step.title
+    const readSummary = step.shellReadSummary ?? previous.shellReadSummary
+    const publicCommand = step.publicCommand ?? previous.publicCommand
+    const detail = readSummary && !step.shellReadSummary && publicCommand
+      ? sparseShellReadDetail(publicCommand, previous.detail, step.detail)
+      : step.detail || previous.detail
     steps[index] = {
       ...previous,
       ...step,
       title,
       currentInstruction: step.currentInstruction ?? previous.currentInstruction,
-      publicCommand: step.publicCommand ?? previous.publicCommand,
-      detail: step.detail || previous.detail
+      publicCommand,
+      iconKind: readSummary ? 'file-read' : step.iconKind,
+      shellReadSummary: readSummary,
+      fileOperation: readSummary ? undefined : step.fileOperation,
+      detail
     }
   }
 
@@ -650,6 +666,7 @@ export function buildLiveExecutionProgress(
       const fileChanges = canonicalFileChanges(canonical)
       const fileChangeSemantics = fileChanges ? canonical?.diffProjection?.semanticKind : undefined
       const fileOperation = reliableRuntimeFileOperation(payload)
+      const readSummary = nativeType === 'commandExecution' ? shellReadSummary(payload) : null
       if (nativeType === 'fileChange' && !fileChanges) continue
       if (!fileChanges && isApplyPatchPresentation(canonical, payload)) continue
       const command = stringField(item, 'command')
@@ -675,7 +692,7 @@ export function buildLiveExecutionProgress(
           ?? runtimeToolDetail(item, nativeType)
           ?? nativeStatus
           ?? ''
-      const detail = fileOperation?.operationKind === 'read'
+      const detail = fileOperation?.operationKind === 'read' && readSummary === null
         ? ''
         : searchEvidenceText(typedSearchQuery(payload, canonical), evidenceDetail) ?? ''
       if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
@@ -688,10 +705,11 @@ export function buildLiveExecutionProgress(
         detail,
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
-        iconKind: activityIconKind(canonical),
+        iconKind: readSummary ? 'file-read' : activityIconKind(canonical),
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown',
-        fileOperation,
+        shellReadSummary: readSummary ?? undefined,
+        fileOperation: readSummary ? undefined : fileOperation,
         fileChanges,
         fileChangeSemantics
       })
@@ -709,6 +727,9 @@ export function buildLiveExecutionProgress(
       const fileChanges = canonicalFileChanges(canonical)
       const fileChangeSemantics = fileChanges ? canonical?.diffProjection?.semanticKind : undefined
       const fileOperation = reliableRuntimeFileOperation(payload)
+      const readSummary = canonical?.activityDomain === 'shell'
+        ? shellReadSummary(payload)
+        : null
       if (!fileChanges && isApplyPatchPresentation(canonical, payload)) continue
       if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
@@ -719,15 +740,16 @@ export function buildLiveExecutionProgress(
           ? publicShellCommandPresentation(payload)
           : null,
         publicResult: null,
-        detail: fileOperation?.operationKind === 'read'
+        detail: fileOperation?.operationKind === 'read' && readSummary === null
           ? ''
           : runtimeActionEvidenceText(payload, canonical) ?? '',
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
-        iconKind: activityIconKind(canonical),
+        iconKind: readSummary ? 'file-read' : activityIconKind(canonical),
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown',
-        fileOperation,
+        shellReadSummary: readSummary ?? undefined,
+        fileOperation: readSummary ? undefined : fileOperation,
         fileChanges,
         fileChangeSemantics
       })
@@ -774,6 +796,23 @@ export function buildLiveExecutionProgress(
   return {
     items
   }
+}
+
+function sparseShellReadDetail(
+  publicCommand: string,
+  previousDetail: string,
+  currentDetail: string
+): string {
+  const normalized = currentDetail.trim().toLocaleLowerCase()
+  if (!normalized || [
+    'completed',
+    'failed',
+    'cancelled',
+    'stopped',
+    'succeeded'
+  ].includes(normalized)) return previousDetail
+  if (currentDetail.startsWith('$ ')) return currentDetail
+  return shellCommandDetail(publicCommand, currentDetail)
 }
 
 function canonicalFileChanges(
@@ -1097,6 +1136,8 @@ export function executionActivityTitle(
     ?.replaceAll('Runtime 工具调用', '工具调用')
     .replaceAll('Runtime 活动', '系统活动')
   const domain = canonical?.activityDomain ?? 'unknown'
+  const readSummary = domain === 'shell' ? shellReadSummary(payload) : null
+  if (readSummary) return readSummary.title
 
   if (domain === 'shell') {
     const command = publicShellCommand(payload)
@@ -1650,6 +1691,146 @@ function publicShellCommand(payload: unknown): string | null {
     if (command?.trim()) return command
   }
   return null
+}
+
+type StructuredReadPathResult =
+  | { status: 'available'; paths: string[] }
+  | { status: 'incompatible' | 'unavailable' }
+
+/**
+ * Builds a display-only summary for one command that is proven to contain
+ * multiple file reads. It never changes execution, Evidence, or permissions.
+ */
+export function shellReadSummary(payload: unknown): ShellReadSummary | null {
+  const structured = structuredShellReadPaths(payload)
+  if (structured.status === 'incompatible') return null
+  const paths = structured.status === 'available'
+    ? structured.paths
+    : fallbackSedReadPaths(publicShellCommand(payload))
+  if (!paths || paths.length < 2) return null
+
+  const uniquePaths = [...new Set(paths)]
+  if (uniquePaths.length === 0) return null
+  const displayPaths = shortestUniquePathLabels(uniquePaths)
+  return {
+    title: uniquePaths.length === 1
+      ? `Read ${displayPaths[0]}`
+      : `Read ${uniquePaths.length} files`,
+    paths: uniquePaths,
+    displayPaths
+  }
+}
+
+function structuredShellReadPaths(payload: unknown): StructuredReadPathResult {
+  const root = asRecord(payload)
+  const item = asRecord(root.item)
+  const candidate = Object.prototype.hasOwnProperty.call(item, 'commandActions')
+    ? item.commandActions
+    : root.commandActions
+  if (candidate === undefined || candidate === null) return { status: 'unavailable' }
+  if (!Array.isArray(candidate) || candidate.length === 0) return { status: 'unavailable' }
+
+  const actions = candidate.map(asRecord)
+  const types = actions.map((action) => stringField(action, 'type'))
+  if (types.some((type) => type !== null && type !== 'read' && type !== 'unknown')) {
+    return { status: 'incompatible' }
+  }
+  if (types.some((type) => type !== 'read')) return { status: 'unavailable' }
+
+  const paths = actions.map((action) => stringField(action, 'path')?.trim() ?? '')
+  if (paths.length < 2 || paths.some((path) => path.length === 0)) {
+    return { status: 'unavailable' }
+  }
+  return { status: 'available', paths }
+}
+
+function fallbackSedReadPaths(command: string | null): string[] | null {
+  if (!command) return null
+  const unwrapped = unwrapShellCommand(stripAnsi(command).trim())
+  if (!unwrapped || unwrapped.includes('`') || !simpleShellQuotesAreBalanced(unwrapped)) return null
+  const tokens = tokenizeShellCommand(unwrapped)
+  if (tokens.length === 0 || tokens[0].operator || tokens.at(-1)?.operator) return null
+
+  let actionCount = 1
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    if (!token.operator) continue
+    if (
+      token.value !== ';'
+      || index === 0
+      || index === tokens.length - 1
+      || tokens[index - 1].operator
+      || tokens[index + 1].operator
+    ) return null
+    actionCount += 1
+  }
+  if (actionCount < 2) return null
+
+  const previewSegments: ShellPreviewToken[][] = [[]]
+  for (const token of tokenizeShellPreview(unwrapped)) {
+    if (token.operator) {
+      previewSegments.push([])
+    } else {
+      previewSegments.at(-1)?.push(token)
+    }
+  }
+  const paths: string[] = []
+  for (const segment of previewSegments) {
+    if (
+      segment.length !== 4
+      || shellExecutable(segment[0].value) !== 'sed'
+      || segment[1].value !== '-n'
+      || !/^'\d+,\d+p'$/u.test(segment[2].raw)
+      || !directShellFilePath(segment[3].value)
+    ) return null
+    paths.push(segment[3].value)
+  }
+  return paths.length === actionCount ? paths : null
+}
+
+function simpleShellQuotesAreBalanced(command: string): boolean {
+  let quote: 'single' | 'double' | null = null
+  let escaped = false
+  for (const character of command) {
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === '\\' && quote !== 'single') {
+      escaped = true
+      continue
+    }
+    if (character === "'" && quote !== 'double') {
+      quote = quote === 'single' ? null : 'single'
+      continue
+    }
+    if (character === '"' && quote !== 'single') {
+      quote = quote === 'double' ? null : 'double'
+    }
+  }
+  return quote === null && !escaped
+}
+
+function directShellFilePath(path: string): boolean {
+  const value = path.trim()
+  return value.length > 0
+    && !value.startsWith('-')
+    && !/[\u0000-\u001F\u007F$`*?{}\[\]<>|;&()]/u.test(value)
+}
+
+function shortestUniquePathLabels(paths: string[]): string[] {
+  const parts = paths.map((path) => path.replaceAll('\\', '/').split('/').filter(Boolean))
+  return parts.map((pathParts, index) => {
+    const fallback = pathParts.at(-1) ?? paths[index]
+    for (let length = 1; length <= pathParts.length; length += 1) {
+      const suffix = pathParts.slice(-length).join('/')
+      const unique = parts.every((otherParts, otherIndex) =>
+        otherIndex === index || otherParts.slice(-length).join('/') !== suffix
+      )
+      if (unique) return suffix
+    }
+    return paths[index] || fallback
+  })
 }
 
 function shellCommandLabel(command: string, depth = 0): string | null {

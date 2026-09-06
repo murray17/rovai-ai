@@ -32,6 +32,7 @@ import {
   type AttachmentDragKind
 } from './attachment-drop'
 import { MemberAvatar } from './MemberAvatar'
+import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
 import { SafeMarkdown } from './SafeMarkdown'
 import { shouldSubmitStructuredComposerOnEnter } from './StructuredMentionComposer'
 import { readErrorMessage } from './error-message'
@@ -322,6 +323,18 @@ function memberCanSingleChat(member: CampMemberView): boolean {
     && member.profilePresence === 'present'
 }
 
+function toolStepStatusLabel(status: string): string {
+  return ({
+    running: '执行中',
+    waiting: '等待审批',
+    completed: '成功',
+    failed: '失败',
+    stopped: '已停止',
+    skipped: '未执行',
+    recorded: '结果未知'
+  } as Record<string, string>)[status] ?? status
+}
+
 function ToolGroup({
   items,
   runStatus
@@ -342,11 +355,7 @@ function ToolGroup({
         <span className="single-chat-tool-icon"><ToolGlyph /></span>
         <span>{label}</span>
         <span className={`single-chat-tool-state${activeStatus ? ` is-${activeStatus}` : ' is-placeholder'}`} aria-hidden="true">
-          {activeStatus === 'waiting'
-            ? <svg viewBox="0 0 16 16"><path d="m8 2.5 5.5 5.5L8 13.5 2.5 8z" /></svg>
-            : activeStatus === 'running'
-              ? <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" /><path d="M8 3a5 5 0 0 1 4.7 3.3" /></svg>
-              : null}
+          {activeStatus && <ExecutionStatusGlyph status={activeStatus} />}
         </span>
         <span className="single-chat-disclosure"><ChevronGlyph /></span>
       </summary>
@@ -358,12 +367,13 @@ function ToolGroup({
               <strong>{item.step.toolName ?? item.step.activityDomain ?? '操作'}</strong>
               <code title={executionStepPublicTitle(item.step)}>{executionStepPublicTitle(item.step)}</code>
             </span>
-            <span className={`single-chat-tool-result is-${item.step.status}`} aria-hidden="true">
-              {item.step.status === 'running' || item.step.status === 'waiting'
-                ? <span className="single-chat-spinner" />
-                : item.step.status === 'failed'
-                  ? '×'
-                  : <CheckGlyph />}
+            <span
+              className={`single-chat-tool-result is-${item.step.status}`}
+              role="img"
+              aria-label={toolStepStatusLabel(item.step.status)}
+              title={toolStepStatusLabel(item.step.status)}
+            >
+              <ExecutionStatusGlyph status={item.step.status} />
             </span>
           </div>
         ))}

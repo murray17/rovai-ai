@@ -98,6 +98,7 @@ import {
 import { MemberAvatar } from './MemberAvatar'
 import { ImageGallery, partitionMessageAttachments, type GalleryImage } from './ImageGallery'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
+import { ExecutionStatusGlyph, type ExecutionStatusShape } from './ExecutionStatusGlyph'
 import { AgentRunDeliveryRecipients } from './AgentRunDeliveryRecipients'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
@@ -4948,12 +4949,13 @@ export function runPulseMemberNameLines(
   ]
 }
 
-type RunPulseStateShape = 'running' | 'waiting' | 'completed' | 'failed' | 'stopped' | 'recorded'
+type RunPulseStateShape = ExecutionStatusShape
 
 function runPulseStateShape(run: AgentRunView, stopping: boolean): RunPulseStateShape {
-  if (stopping && NON_TERMINAL_RUNS.has(run.status)) return 'stopped'
+  if (stopping && NON_TERMINAL_RUNS.has(run.status)) return 'cancelling'
   if (run.status === 'running') return 'running'
-  if (run.status === 'queued' || run.status === 'waiting') return 'waiting'
+  if (run.status === 'queued') return 'queued'
+  if (run.status === 'waiting') return 'waiting'
   if (run.status === 'succeeded') return 'completed'
   if (run.status === 'failed') return 'failed'
   if (run.status === 'cancelled') return 'stopped'
@@ -5083,7 +5085,9 @@ function RunPulse({
                   role="img"
                   aria-label={presentation.label}
                   title={presentation.label}
-                />
+                >
+                  <ExecutionStatusGlyph status={stateShape} />
+                </span>
               </button>
             </li>
           )
@@ -5577,6 +5581,7 @@ function ExecutionDrawer({
                 && NON_TERMINAL_RUNS.has(run.status)
               const focused = run.id === resolvedFocusedRunId
               const state = agentRunPresentation(run, cancelling)
+              const stateShape = runPulseStateShape(run, cancelling)
               const runtimeModel = agentRunRuntimeModelPresentation(run.runtimeModel)
               return (
                 <li
@@ -5587,7 +5592,9 @@ function ExecutionDrawer({
                   aria-current={focused ? 'step' : undefined}
                   aria-label={`${runIntervalLabel(run)}，${state.label}`}
                 >
-                  <span className="execution-process-node" aria-hidden="true" />
+                  <span className={`execution-process-node tone-${state.tone} state-${stateShape}`} aria-hidden="true">
+                    <ExecutionStatusGlyph status={stateShape} />
+                  </span>
                   <article className="execution-process-card">
                     <header className="execution-run-boundary">
                       <div className="execution-run-boundary-main">
@@ -8354,24 +8361,75 @@ function ToolCallRow({
   step,
   runId,
   runStatus,
-  completeEvidence
+  completeEvidence,
+  onFileOpenError
 }: {
   campId: string
   step: ToolCallStep
   runId: string
   runStatus: AgentRunView['status']
   completeEvidence?: PresentableExecutionEvidence
+  onFileOpenError(message: string): void
 }): JSX.Element {
+  const filePreview = useOptionalFilePreview()
   const [expanded, setExpanded] = useState(false)
   const [activated, setActivated] = useState(false)
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
   const publicTitle = executionStepPublicTitle(step)
   const hasDetail = Boolean(step.detail) || completeEvidence !== undefined
+  const openReadFile = async (path: string): Promise<void> => {
+    if (!filePreview) {
+      onFileOpenError('无法打开该文件')
+      return
+    }
+    const outcome = await filePreview.open(
+      { kind: 'camp_workspace', campId, rawReference: path },
+      undefined,
+      undefined,
+      { commitOnSuccess: true, previewOnly: true }
+    )
+    if (outcome.kind !== 'preview') onFileOpenError('无法打开该文件')
+  }
+  const readSummary = step.shellReadSummary
+  const readFileLink = (path: string, label: string): JSX.Element => (
+    <button
+      className="tool-file-link shell-read-file-link"
+      type="button"
+      aria-label={`打开文件预览：${path}`}
+      title={`${path} · 打开文件预览`}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        void openReadFile(path)
+      }}
+    >
+      {label}
+    </button>
+  )
   const summary = (
     <>
       <ToolCallIcon iconKind={step.iconKind} />
-      <span className="tool-call-title" title={publicTitle}>{publicTitle}</span>
+      {readSummary ? (
+        <span className="tool-call-title shell-read-summary-copy">
+          <span className="shell-read-summary-title">
+            {readSummary.paths.length === 1
+              ? <><span>Read </span>{readFileLink(readSummary.paths[0], readSummary.displayPaths[0])}</>
+              : readSummary.title}
+          </span>
+          {readSummary.paths.length > 1 && (
+            <span className="shell-read-file-list" role="list" aria-label="读取的文件">
+              {readSummary.paths.map((path, index) => (
+                <span role="listitem" key={path}>
+                  {readFileLink(path, readSummary.displayPaths[index])}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="tool-call-title" title={publicTitle}>{publicTitle}</span>
+      )}
       <ToolCallState status={status} />
       <span
         className={`tool-call-disclosure-slot${hasDetail ? '' : ' is-placeholder'}`}
@@ -8389,7 +8447,7 @@ function ToolCallRow({
   if (!hasDetail) {
     return (
       <div
-        className={`process-action tool-call-summary tool-call-static status-${status}`}
+        className={`process-action tool-call-summary tool-call-static status-${status}${readSummary ? ' has-shell-read-summary' : ''}`}
         data-activity-domain={step.activityDomain}
       >
         {summary}
@@ -8407,7 +8465,7 @@ function ToolCallRow({
         if (nextExpanded) setActivated(true)
       }}
     >
-      <summary ref={summaryRef} className="tool-call-summary">{summary}</summary>
+      <summary ref={summaryRef} className={`tool-call-summary${readSummary ? ' has-shell-read-summary' : ''}`}>{summary}</summary>
       {activated && (
         <ToolCallDetail
           campId={campId}
@@ -8527,7 +8585,7 @@ function ToolActivityGroupState({ status, label }: { status: string; label: stri
       aria-label={label}
       title={label}
     >
-      <StatusGlyph status={status} />
+      <ExecutionStatusGlyph status={status} />
     </span>
   )
 }
@@ -8536,6 +8594,7 @@ function ToolActivityGroup({
   campId,
   items,
   liveTail,
+  cancelling,
   runId,
   runStatus,
   completeEvidence,
@@ -8544,6 +8603,7 @@ function ToolActivityGroup({
   campId: string
   items: ToolProgressItem[]
   liveTail: boolean
+  cancelling: boolean
   runId: string
   runStatus: AgentRunView['status']
   completeEvidence: {
@@ -8551,7 +8611,18 @@ function ToolActivityGroup({
   }
   onFileOpenError(message: string): void
 }): JSX.Element {
-  const presentation = toolActivityGroupPresentation(items, runStatus, liveTail)
+  const settledPresentation = toolActivityGroupPresentation(items, runStatus, liveTail)
+  const presentation = cancelling
+    ? {
+        ...settledPresentation,
+        status: 'stopped' as const,
+        statusLabel: '正在停止',
+        primary: '正在停止',
+        currentTitle: '等待执行结束',
+        countLabel: null,
+        accessibleLabel: '正在停止：等待执行结束'
+      }
+    : settledPresentation
   return (
     <details className={`tool-activity-group status-${presentation.status}`}>
       <summary
@@ -8622,6 +8693,7 @@ function ToolActivityGroup({
               runId={runId}
               runStatus={runStatus}
               completeEvidence={completeEvidence.byToolId.get(step.id)}
+              onFileOpenError={onFileOpenError}
             />
           )
         })}
@@ -8737,6 +8809,7 @@ function RunExecutionContent({
               campId={campId}
               items={item.items}
               liveTail={item.key === liveTailToolGroupKey}
+              cancelling={cancelling}
               runId={run.id}
               runStatus={run.status}
               completeEvidence={completeEvidence}
@@ -8818,6 +8891,7 @@ function RunExecutionContent({
             runId={run.id}
             runStatus={run.status}
             completeEvidence={fullEvidence}
+            onFileOpenError={onFileOpenError}
           />
         )
       })}
@@ -9089,28 +9163,9 @@ function ToolCallState({ status }: { status: string }): JSX.Element {
       aria-label={label}
       title={label}
     >
-      <StatusGlyph status={status} />
+      <ExecutionStatusGlyph status={status} />
     </span>
   )
-}
-
-function StatusGlyph({ status }: { status: string }): JSX.Element {
-  switch (status) {
-    case 'running':
-      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" /><path d="M8 3a5 5 0 0 1 4.7 3.3" /></svg>
-    case 'waiting':
-      return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2.5 5.5 5.5L8 13.5 2.5 8z" /></svg>
-    case 'completed':
-      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="m5.3 8.1 1.75 1.8 3.75-4" /></svg>
-    case 'failed':
-      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="m6 6 4 4m0-4-4 4" /></svg>
-    case 'stopped':
-      return <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="1.25" /><path d="M6.1 6.1h3.8v3.8H6.1z" /></svg>
-    case 'skipped':
-      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="M5.25 8h5.5" /></svg>
-    default:
-      return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="M6.5 6.3a1.55 1.55 0 1 1 2.2 1.4c-.55.25-.7.65-.7 1.2M8 10.9h.01" /></svg>
-  }
 }
 
 function toolCallStatusLabel(status: string): string {
