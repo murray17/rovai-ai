@@ -8244,7 +8244,7 @@ function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError }: {
       >
         <ToolCallIcon iconKind="file-write" />
         <span className="modified-file-title">
-          <span>{verb} </span>
+          <span>{verb}</span>
           <button
             className="tool-file-link"
             type="button"
@@ -8339,7 +8339,7 @@ function FileOperationRow({ campId, step, runStatus, onFileOpenError }: {
     >
       <ToolCallIcon iconKind={operationKind === 'read' ? 'file-read' : 'file-write'} />
       <span className="tool-call-title file-operation-title">
-        <span>{verb} </span>
+        <span>{verb}</span>
         <button
           className="tool-file-link"
           type="button"
@@ -8414,7 +8414,7 @@ function ToolCallRow({
         <span className="tool-call-title shell-read-summary-copy">
           <span className="shell-read-summary-title">
             {readSummary.paths.length === 1
-              ? <><span>Read </span>{readFileLink(readSummary.paths[0], readSummary.displayPaths[0])}</>
+              ? <><span>Read</span>{readFileLink(readSummary.paths[0], readSummary.displayPaths[0])}</>
               : readSummary.title}
           </span>
           {readSummary.paths.length > 1 && (

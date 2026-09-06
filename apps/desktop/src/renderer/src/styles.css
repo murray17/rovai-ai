@@ -3795,7 +3795,7 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .tool-call-disclosure[open] .tool-call-disclosure-slot svg { transform: rotate(180deg); }
 .tool-call-disclosure-slot.is-placeholder { visibility: hidden; }
 .modified-file-summary { display: grid; min-width: 0; min-height: 28px; grid-template-columns: 16px minmax(0, 1fr) auto 20px; align-items: center; column-gap: 8px; padding: 0 2px; border-radius: 5px; }
-.modified-file-title { display: flex; min-width: 0; height: 28px; align-items: center; overflow: hidden; color: var(--muted); line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.modified-file-title { display: flex; min-width: 0; height: 28px; align-items: center; gap: 5px; overflow: hidden; color: var(--muted); line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .tool-file-link { display: block; min-width: 0; min-height: 28px; max-width: 100%; overflow: hidden; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; line-height: 28px; text-align: left; text-decoration-line: underline; text-decoration-style: dashed; text-decoration-thickness: 1px; text-underline-offset: 3px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .tool-file-link:hover { color: var(--ink); text-decoration-style: solid; }
 .tool-file-link:focus-visible { color: var(--ink); outline: 2px solid var(--focus); outline-offset: 2px; text-decoration-style: solid; }
@@ -3804,7 +3804,7 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .tool-call-summary.has-shell-read-summary > .tool-call-state,
 .tool-call-summary.has-shell-read-summary > .tool-call-disclosure-slot { margin-top: 2px; }
 .shell-read-summary-copy { display: grid; height: auto; align-items: start; overflow: visible; white-space: normal; }
-.shell-read-summary-title { display: flex; min-width: 0; min-height: 20px; align-items: center; color: inherit; line-height: 20px; }
+.shell-read-summary-title { display: flex; min-width: 0; min-height: 20px; align-items: center; gap: 5px; color: inherit; line-height: 20px; }
 .shell-read-file-list { display: grid; min-width: 0; padding-left: 12px; }
 .shell-read-file-list > span { display: block; min-width: 0; }
 .shell-read-file-link { width: max-content; max-width: 100%; }
@@ -3816,6 +3816,7 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 }
 .file-operation-title > span,
 .modified-file-title > span { flex: 0 0 auto; }
+.file-operation-title { gap: 5px; }
 .modified-file-stats { display: flex; gap: 6px; font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .diff-addition { color: var(--diff-add); }
 .diff-deletion { color: var(--diff-remove); }

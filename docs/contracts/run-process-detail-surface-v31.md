@@ -60,7 +60,7 @@ Activity；不拆分 Tool Call、Evidence 或步骤计数，也不增加逐文�
 `changeKind=add` 显示
 `新增 <文件名>`；`update`、path-only write 或无法可靠区分新增／编辑时显示 `编辑 <文件名>`。
 
-文件名使用虚线底线按钮并保留完整路径的 title／可访问名称。点击只请求当前 Camp workspace 文件预览；
+动作词与文件名之间固定保留 5px 间距。文件名使用虚线底线按钮并保留完整路径的 title／可访问名称。点击只请求当前 Camp workspace 文件预览；
 动作文字、图标与行内空白不可点击。写入行若有 Diff，最右侧独立按钮控制原有 Diff 展开，点击文件名不得切换
 Diff，点击 Diff 箭头不得打开文件。缺少可靠路径时不生成文件链接；缺少 Diff 时不生成空展开入口。
 

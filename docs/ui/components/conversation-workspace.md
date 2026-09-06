@@ -513,7 +513,7 @@ Canonical Activity 的 presentation row，明确 add 显示“新增”，其他
 图片或其他中间产物不显示为 `修改 <basename>`，也不进入 `Files Changed`；mixed 事件只展示其余普通文件。
 已经持久化的历史卡片不重算。临时文件经 `rovai send --file` 发布后，附件由独立的 Camp Attachment UI 呈现。
 
-文件操作使用阅读文件或笔形 16px 图标。文件名以虚线底线按钮展示，鼠标或键盘点击后用当前 Camp workspace
+文件操作使用阅读文件或笔形 16px 图标。动作词和文件名之间固定保留 5px 间距；文件名以虚线底线按钮展示，鼠标或键盘点击后用当前 Camp workspace
 来源打开文件预览；成功后才提交预览导航。失败只在当前页显示 danger Toast `无法打开该文件`，不创建或切换
 预览页。写入行最右侧箭头独立控制原有 Diff；文件名与箭头互不触发，动作文字和空白不可点击。缺少可靠路径
 不制造链接，缺少 Diff 不制造展开入口。
