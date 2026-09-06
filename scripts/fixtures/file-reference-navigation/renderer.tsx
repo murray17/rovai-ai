@@ -52,7 +52,10 @@ const api: FilePreviewApi = {
   prepareHtml: unsupported, reload: unsupported, openInSystem: unsupported, revealInFolder: unsupported,
   copyPath: unsupported, chooseAuthorizedRoot: async () => { chooseRootCalls += 1; return null as never }
 }
-const draft = { campId, body: '保留原有草稿', content: { version: 2, segments: [{ kind: 'text', text: '保留原有草稿' }] }, revision: 1,
+const draft = { campId, body: '保留原有草稿', content: {
+  version: 2 as const,
+  segments: [{ kind: 'text' as const, text: '保留原有草稿' }]
+}, revision: 1,
   attachments: [], replyIntent: null, continuationIntent: null, updatedAt: null, expiresAt: null }
 Object.assign(window, { rovai: {
   filePreview: api, platform: 'darwin', onEvent: () => () => {},
@@ -107,7 +110,9 @@ function Workspace(): React.JSX.Element {
       onNotify={(message) => notices.push(message)} />
   </div>
 }
-createRoot(document.getElementById('root')!).render(<FilePreviewProvider campId={campId}><Workspace /></FilePreviewProvider>)
+createRoot(document.getElementById('root')!).render(
+  <FilePreviewProvider campId={campId} resolvedTheme="day"><Workspace /></FilePreviewProvider>
+)
 
 const element = (selector: string): HTMLElement => document.querySelector<HTMLElement>(selector)!
 const link = () => element('[data-message-id="message-12"] [title="run_report.py:44-46"]')
@@ -142,18 +147,21 @@ Object.assign(window, { navigationTest: {
   state() {
     const scroll = timeline()
     const viewer = element('.file-preview-code')
-    const target = viewer?.querySelector<HTMLElement>('[data-file-row="44"]')
+    const target = viewer?.querySelector<HTMLElement>('.cm-location-target')
+    const viewerScroller = viewer?.querySelector<HTMLElement>('.cm-scroller')
     const message = anchorMessageId ? element(`[data-message-id="${anchorMessageId}"]`) : null
     return {
       linkY: link().getBoundingClientRect().top, scrollTop: scroll.scrollTop, width: scroll.clientWidth,
       bottomGap: scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight,
       visible: Boolean(element('.file-preview-pane')?.getBoundingClientRect().width),
       sameTimeline: scroll === bookmarkedTimeline, sameLink: link() === bookmarkedLink,
-      targetLines: [...document.querySelectorAll<HTMLElement>('.is-location-target')].map((row) => Number(row.dataset.fileRow)),
-      targetVisible: Boolean(target && target.getBoundingClientRect().top >= viewer.getBoundingClientRect().top
-        && target.getBoundingClientRect().bottom <= viewer.getBoundingClientRect().bottom),
+      targetLines: [...document.querySelectorAll<HTMLElement>('.cm-location-target')]
+        .map((row) => Number(/value_(\d+)/u.exec(row.textContent ?? '')?.[1])),
+      targetVisible: Boolean(target && viewerScroller
+        && target.getBoundingClientRect().top >= viewerScroller.getBoundingClientRect().top
+        && target.getBoundingClientRect().bottom <= viewerScroller.getBoundingClientRect().bottom),
       messageY: message?.getBoundingClientRect().top, opens, notices, chooseRootCalls, trace,
-      draft: element('[contenteditable]')?.textContent,
+      draft: element('.structured-mention-editor[contenteditable]')?.textContent,
       falseLinks: [...document.querySelectorAll<HTMLAnchorElement>('a[title]')]
         .filter((a) => /FBP|run_gr_reminder/u.test(a.title)).length,
       explicitReferenceTypes: [...document.querySelectorAll<HTMLAnchorElement>(

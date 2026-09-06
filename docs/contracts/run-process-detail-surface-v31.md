@@ -4,7 +4,7 @@ contract: run-process-detail-surface-v31
 authority: tool-group-and-file-operation-presentation
 status: accepted
 version: 31
-source_version: v1.52
+source_version: v1.54
 last_updated: 2026-09-06
 ---
 
@@ -49,8 +49,9 @@ Shell、Web、Built-in 与普通 Tool 的详情容器统一使用现有 Shell �
 内容，也不参与权限放行或安全判断。
 
 展示路径按完整路径精确去重并保留首次出现顺序。同一文件的不同区间只列一次；不同路径的同名文件使用最短
-可区分路径。只有一个不同文件时显示 `Read <文件名或可区分路径>`；多个文件时显示 `Read N files`，下面逐行
-列出文件名。文件名沿用虚线底线预览入口。展开后继续显示原始完整命令和输出，状态与退出码仍属于整次
+可区分路径。折叠态始终在同一行显示 `阅读 <文件1>, <文件2>`；只剩一个不同文件时使用
+`阅读 <文件>`。每个文件名都是独立的虚线底线预览入口。任一结构化 read 缺少非空路径时，整个读取摘要失效并
+保留原 Shell 展示，不显示孤立的“阅读”。展开后继续显示原始完整命令和输出，状态与退出码仍属于整次
 Activity；不拆分 Tool Call、Evidence 或步骤计数，也不增加逐文件状态或详情界面。
 
 ## 文件操作行
@@ -59,10 +60,13 @@ Activity；不拆分 Tool Call、Evidence 或步骤计数，也不增加逐文�
 `阅读 <文件名>`，使用阅读文件图标。可靠写入或 Diff 行使用笔图标：operation 或 Diff 明确
 `changeKind=add` 显示
 `新增 <文件名>`；`update`、path-only write 或无法可靠区分新增／编辑时显示 `编辑 <文件名>`。
+Claude Code matching Write 结果的 `sourceMetadata.runtimeOperationType=create` 是局部展示例外：显示
+`新增 <文件名>`，但不把它解释为文件原先不存在，也不为 Evidence 伪造 `changeKind=add`。
 
 动作词与文件名之间固定保留 5px 间距。文件名使用虚线底线按钮并保留完整路径的 title／可访问名称。点击只请求当前 Camp workspace 文件预览；
-动作文字、图标与行内空白不可点击。写入行若有 Diff，最右侧独立按钮控制原有 Diff 展开，点击文件名不得切换
-Diff，点击 Diff 箭头不得打开文件。缺少可靠路径时不生成文件链接；缺少 Diff 时不生成空展开入口。
+文件链接的命中框按文字收口，动作文字、图标、状态、增删统计与行内空白既不可点击，也不触发整行 hover。
+写入行若有 Diff，最右侧独立按钮控制原有 Diff 展开，点击文件名不得切换 Diff，点击 Diff 箭头不得打开
+文件。缺少可靠路径时不生成文件链接；缺少 Diff 时不生成空展开入口。
 
 文件打开成功后才提交预览导航。打开失败只在当前页面发出 danger Toast `无法打开该文件`，不创建、激活、
 切换或替换预览 Tab，也不抢占焦点。
@@ -74,8 +78,9 @@ Diff，点击 Diff 箭头不得打开文件。缺少可靠路径时不生成文�
 - 执行台队员项、头像角标、Run 时间线和单聊工具行与 Tool 子行使用同一状态图形；取消弧线在 reduced-motion
   下静止；
 - Shell、Web、Built-in 和普通 Tool 详情共享 Shell 底色与左轴，原内容和 File Diff 保持不变；
-- 四条纯 `sed -n` 涉及两个不同文件时仍是一个命令项并显示 `Read 2 files`；重复读取同一文件只列一次，
-  同名不同路径可区分，混合或未支持语法保持原 Shell 展示；
+- 四条纯 `sed -n` 涉及两个不同文件时仍是一个命令项，并在一行显示
+  `阅读 acp.rs, agent_runtime_adapter.rs`；重复完整路径只列一次，同名不同路径可区分，空路径、混合或未支持语法
+  保持原 Shell 展示；
 - read 行不可展开；新增、编辑、path-only write 和无可靠 path／Diff 的回退符合上述规则；
 - 文件名和 Diff 箭头可独立键盘操作，失败只产生红色 Toast 且不改变已有预览状态；
 - 静态行无假 hover，取消等待不形成色条，底部执行台与 Inspector 复用同一 presentation。

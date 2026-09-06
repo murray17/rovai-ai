@@ -137,10 +137,11 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - Claude Code 只配对 `assistant.tool_use(name=Edit)` 与相同 `tool_use_id` 的非错误 `user.tool_result`，保存
   `file_path + old_string + new_string` 的 ExactMutation；`replace_all=true`、Write、NotebookEdit、ApplyPatch、
   缺失或失败 result 均不准入；
-- Claude Write 仍不形成内容 Diff；同一 `tool_use_id` 的成功结构化结果只有在 `type=update` 且 `filePath` 与 tool
-  input 完全一致时，才在 typed write operation 上增加 `changeKind=update`。2.1.236 对不存在文件和已有空文件都
-  实际报告 `type=create + originalFile=null`，所以 create 不能作为 add 证据；字段缺失、create、未知类型、路径
-  冲突和 Edit 继续保守显示编辑；
+- Claude Write 仍不形成内容 Diff；同一 `tool_use_id` 的成功结构化结果只有在 `type=create|update`
+  且 `filePath` 与 tool input 完全一致时，才把原生类型保留为 `sourceMetadata.runtimeOperationType`。
+  `update` 同时可确认编辑；2.1.236 对不存在文件和已有空文件都实际报告
+  `type=create + originalFile=null`，因此 `create` 只由 Renderer 显示“新增”，不写成 filesystem
+  `changeKind=add`。字段缺失、未知类型或路径冲突继续保守回退；
 - 同一文件连续 Edit 保留多个时序块，不合并为虚假的完整文件净差异；
 - Antigravity 当前没有等价可靠终态内容，因此不生成文件变化卡片或 Command Diff。
 

@@ -16,6 +16,7 @@ pub struct AdmittedRuntimeFileOperation {
     pub operation_kind: String,
     pub path: String,
     pub change_kind: Option<String>,
+    pub runtime_operation_type: Option<String>,
 }
 
 pub fn admit_runtime_file_operation(
@@ -78,6 +79,17 @@ fn admit_candidate(
         }
         Some(_) => return Err("runtime_file_operation_change_kind_invalid"),
     };
+    let runtime_operation_type = match candidate.get("runtimeOperationType") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(runtime_operation_type))
+            if adapter == AdapterKind::ClaudeCodeCli
+                && operation_kind == "write"
+                && matches!(runtime_operation_type.as_str(), "create" | "update") =>
+        {
+            Some(runtime_operation_type.clone())
+        }
+        Some(_) => return Err("runtime_file_operation_runtime_type_invalid"),
+    };
     let protocol_family = candidate.get("protocolFamily").and_then(Value::as_str);
     let source_event_kind = candidate.get("sourceEventKind").and_then(Value::as_str);
     let source_is_allowlisted = if adapter.uses_acp() {
@@ -120,6 +132,7 @@ fn admit_candidate(
         operation_kind: operation_kind.to_string(),
         path,
         change_kind,
+        runtime_operation_type,
     })
 }
 
@@ -184,6 +197,64 @@ mod tests {
         assert_eq!(admitted.operation_kind, "write");
         assert_eq!(admitted.path, "src/app.ts");
         assert_eq!(admitted.change_kind, None);
+        assert_eq!(admitted.runtime_operation_type, None);
+    }
+
+    #[test]
+    fn admits_only_claude_write_create_or_update_as_runtime_operation_type() {
+        for runtime_operation_type in ["create", "update"] {
+            let admitted = admit_runtime_file_operation(
+                &json!({
+                    "runtimeFileOperation": {
+                        "adapterKind": "claude-code-cli",
+                        "protocolFamily": "claude-stream-json",
+                        "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed",
+                        "operationKind": "write",
+                        "runtimeOperationType": runtime_operation_type,
+                        "path": "/repo/src/app.ts"
+                    }
+                }),
+                Path::new("/repo"),
+                Some("claude-code-cli"),
+            )
+            .expect("candidate should exist")
+            .expect("Claude Write result type should be admitted");
+            assert_eq!(
+                admitted.runtime_operation_type.as_deref(),
+                Some(runtime_operation_type)
+            );
+        }
+
+        for (adapter, operation_kind, runtime_operation_type) in [
+            ("claude-code-cli", "read", "create"),
+            ("claude-code-cli", "write", "replace"),
+            ("opencode-cli", "write", "create"),
+        ] {
+            let (protocol_family, source_event_kind) = if adapter == "claude-code-cli" {
+                (
+                    "claude-stream-json",
+                    "assistant.tool_use.file+user.tool_result.completed",
+                )
+            } else {
+                ("acp-v1", "session/update.tool_call_update.completed")
+            };
+            let result = admit_runtime_file_operation(
+                &json!({
+                    "runtimeFileOperation": {
+                        "adapterKind": adapter,
+                        "protocolFamily": protocol_family,
+                        "sourceEventKind": source_event_kind,
+                        "operationKind": operation_kind,
+                        "runtimeOperationType": runtime_operation_type,
+                        "path": "/repo/src/app.ts"
+                    }
+                }),
+                Path::new("/repo"),
+                Some(adapter),
+            )
+            .expect("candidate should exist");
+            assert_eq!(result, Err("runtime_file_operation_runtime_type_invalid"));
+        }
     }
 
     #[test]

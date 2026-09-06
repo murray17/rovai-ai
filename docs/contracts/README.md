@@ -32,10 +32,12 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Cancellation Settlement v2（当前）](cancellation-settlement-v2.md) | 取消 Run 统一为 cancelled；效果证据保留但不产生公共待确认提示，清理与后续调度边界不变 |
 | [Cancellation Settlement v1（历史）](cancellation-settlement-v1.md) | 取消事务按发送/效果证据区分 cancelled 与 failed/accepted_input_outcome_unknown 的旧规则 |
 | [Camp Member Fast v1（当前）](camp-member-fast-v1.md) | Camp/member/保存绑定代次的三态覆盖、原生订阅资格、执行冻结、观察与紧凑 UI |
-| [Runtime Images v4（当前）](runtime-images-v4.md) | v3 来源/读取/去重不变；Runtime 图片并入 Agent 图片区，按作者分区并采用 Agent 原比例与用户 72px 两种 Gallery variant |
+| [Runtime Images v5（当前）](runtime-images-v5.md) | 保留结构化图片观察与存储；自动公屏只接受 Codex 原生生图及已完成、精确关联的 Antigravity 生图，历史未知来源默认隐藏，显式发送附件不变 |
+| [Runtime Images v4（历史）](runtime-images-v4.md) | v3 来源/读取/去重不变；Runtime 图片并入 Agent 图片区，按作者分区并采用 Agent 原比例与用户 72px 两种 Gallery variant；自动展示来源由 v5 收紧 |
 | [Runtime Images v3（历史）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示；统一图片几何与附件原序规则由 v4 替代 |
 | [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
-| [Camp Open Projection v15（当前）](camp-open-projection-v15.md) | v14 取消兼容不变；统一 source/Managed/legacy 无路径附件 View，历史读取 availability unknown 且不访问文件系统 |
+| [Camp Open Projection v16（当前）](camp-open-projection-v16.md) | v15 wire/附件读取不变；`agentRunImages` 只投影两类 Adapter 已确认原生生图，未知来源保留但不展示 |
+| [Camp Open Projection v15（历史）](camp-open-projection-v15.md) | v14 取消兼容不变；统一 source/Managed/legacy 无路径附件 View，历史读取 availability unknown 且不访问文件系统；图片集合语义由 v16 收紧 |
 | [Camp Open Projection v14（历史）](camp-open-projection-v14.md) | v13 wire/修复不变；精确兼容投影旧取消失败行，不改写底层证据 |
 | [Camp Open Projection v13（历史）](camp-open-projection-v13.md) | Snapshot 34/Open 6 不变；service 先定向修复半取消，投影仍不读事件日志 |
 | [Camp Open Projection v12（历史）](camp-open-projection-v12.md) | Snapshot 34/Open 6；保留 main 业务投影与渠道来源、Runtime 图片，只读图片 bytes 按需读取 |

@@ -37,7 +37,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v15](../../contracts/camp-open-projection-v15.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -480,8 +480,9 @@ Run 时间线与单聊工具行复用同一组件。forced-colors 保留形状�
 现有结构化命令动作；结构化动作不可用时，只补充识别由引号外分号连接的
 `sed -n '起始行,结束行p' <直接路径>`。所有段都满足该形式且至少两段时才准入；明确非读取动作、管道、重定向、
 变量展开、命令替换、反引号、换行分隔、`sed -i`、混合命令或其他未支持语法继续显示原 Shell。不同读取区间
-的同一完整路径只列一次并保留首次顺序；同名不同路径使用最短可区分路径。一个不同文件显示 `Read <文件>`，
-多个显示 `Read N files` 和文件列表。展开后保留完整原命令、输出与整次状态；该摘要不拆分 Activity/Evidence、
+的同一完整路径只列一次并保留首次顺序；同名不同路径使用最短可区分路径。折叠态在一行显示
+`阅读 <文件1>, <文件2>`，每个文件名都是独立预览入口。结构化 read 中任一路径为空时整个摘要失效，保留原
+Shell 展示。展开后保留完整原命令、输出与整次状态；该摘要不拆分 Activity/Evidence、
 不改变步骤计数，也不参与权限或安全判断。
 
 Shell command Tool disclosure 展开后第一行显示 `$ ` 加完整脱敏 command；存在完整公开 output 时从第二行
@@ -505,7 +506,8 @@ standalone raw Evidence、Envelope JSON 或独立
 
 只有 [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)准入的可靠
 Evidence 才进入文件操作呈现。成功 read 的可靠单路径显示为不可展开的 `阅读 <basename>`；成功 write 的可靠
-单路径显示 `编辑 <basename>`。有完整 before/after、unified snapshot 或 exact mutation 时，每个文件作为同一
+单路径显示 `编辑 <basename>`；Claude matching Write 的 Runtime 原生 `create` 映射为“新增”，但不声称文件
+原先不存在。有完整 before/after、unified snapshot 或 exact mutation 时，每个文件作为同一
 Canonical Activity 的 presentation row，明确 add 显示“新增”，其他显示“编辑”；没有可靠内容时不显示
 `+A −D` 或空 disclosure。read 只属于过程事实，永不进入 AgentRun `Files Changed`。
 
@@ -586,10 +588,15 @@ stderr、私有日志、内部 error chain 或 digest，也不从公开文本重
 
 ## Runtime 图片与消息图片
 
-来源 Run 尚未产生公开消息且仍未终态时，Runtime 图片留在该 Run 内等待，不提前进入会话 Timeline。
-公开正文出现后，每个 Run/epoch 的图片固定并入该 Run 最后一条公开消息的 Agent 图片区；`Files Changed`
+Runtime 图片自动展示只接受 Core 已投影的两类 Adapter 确认来源：Codex 原生 `imageGeneration` 与精确
+conversation/step 关联且已完成的 Antigravity 原生生图。截图、读图、Codex MCP image、Claude tool result、
+ACP/TRAE/Copilot 图片及未知历史来源不进入本 Surface；Renderer 不按工具名、路径、格式或 MIME 补做判断。
+显式消息图片附件不属于该门禁。
+
+来源 Run 尚未产生公开消息且仍未终态时，已准入 Runtime 图片留在该 Run 内等待，不提前进入会话 Timeline。
+公开正文出现后，每个 Run/epoch 的已准入图片固定并入该 Run 最后一条公开消息的 Agent 图片区；`Files Changed`
 仍在整条消息之后。只有 Run 已终态仍没有公开消息时，才按图片时间显示独立兜底，并保持在同 Run 文件变化卡
-之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
+之前。未准入图片不能以独立兜底出现。只读取图片元数据，不把图片变成正文或执行台 Tool。
 
 消息附件先按类型稳定分区，保留图片内部和文件内部的原顺序，不再让两类对象混排。用户消息顺序固定为
 “图片区 → 文件区 → 正文”，Agent 消息固定为“正文 → 图片区 → 文件区”；空区域不渲染。Agent 的显式图片
@@ -622,13 +629,13 @@ Agent 图片继续共用 `ImageGallery` / `ImageTile` / Lightbox：单张按原�
 旧图；正常返回不可用或候选内容解码失败则清除缓存并显示失败；成功候选完成真实解码后无空白替换。
 不持久化缓存，不区分 Runtime 底层存储，也不保证 Chromium 不重新进行内部解码。
 
-Tool/Runtime 图片和显式图片附件均只显示图片，不显示文件名、来源/数量标题或 Runtime projection 说明；
+已准入 Runtime 图片和显式图片附件均只显示图片，不显示文件名、来源/数量标题或 Runtime projection 说明；
 移除附件操作菜单、右键菜单、系统打开和在 Finder/文件资源管理器中显示的入口。非图片附件不受影响。
 只保留点击或键盘查看大图及关闭；大图标题仅供辅助技术读取，不占据可见空间，关闭控件覆盖在图片角落。
 图片解码失败时显示“图片已不可用”并禁用点击，不回退到系统打开。
 同一 Run 的可用图片附件与 Runtime Blob 摘要完全相同时只显示显式附件；底层记录保留，失效附件不能
 隐藏 Runtime 图。不同 Run、不同内容和可变稳定路径不参与过滤。底层边界见
-[Runtime Images v4](../../contracts/runtime-images-v4.md)，不引入 File Preview 授权流程。
+[Runtime Images v5](../../contracts/runtime-images-v5.md)，不引入 File Preview 授权流程。
 
 ## Task、Approval 与停止
 

@@ -1303,9 +1303,14 @@ fn normalize_claude_runtime_events(
                 );
                 if reliably_non_error && let Some(mut candidate) = file_operation_candidate {
                     if tool_name.as_deref() == Some("Write")
-                        && let Some(change_kind) = claude_write_change_kind(event, &candidate)
+                        && let Some(runtime_operation_type) =
+                            claude_write_result_type(event, &candidate)
                     {
-                        candidate["changeKind"] = Value::String(change_kind.to_string());
+                        candidate["runtimeOperationType"] =
+                            Value::String(runtime_operation_type.to_string());
+                        if runtime_operation_type == "update" {
+                            candidate["changeKind"] = Value::String("update".to_string());
+                        }
                     }
                     payload["runtimeFileOperation"] = candidate;
                 }
@@ -1443,19 +1448,18 @@ fn claude_file_operation_candidate(tool_name: &str, input: Option<&Value>) -> Op
     }))
 }
 
-fn claude_write_change_kind<'a>(event: &'a Value, candidate: &Value) -> Option<&'a str> {
+fn claude_write_result_type<'a>(event: &'a Value, candidate: &Value) -> Option<&'a str> {
     let result = event.get("tool_use_result")?.as_object()?;
     let result_path = result.get("filePath")?.as_str()?.trim();
     let candidate_path = candidate.get("path")?.as_str()?.trim();
     if result_path.is_empty() || result_path != candidate_path {
         return None;
     }
-    // Claude Code 2.1.236 reports both a missing file and an already-existing
-    // empty file as `create` with `originalFile: null`. That shape cannot prove
-    // add without consulting the live filesystem, so keep it as path-only
-    // write. `update` remains a reliable edit refinement for the matching path.
+    // Preserve Claude's own successful Write classification separately from
+    // filesystem changeKind. In 2.1.236 `create` also covers an existing empty
+    // file, so the Renderer may say “新增” without claiming the path was absent.
     match result.get("type")?.as_str()? {
-        "update" => Some("update"),
+        runtime_operation_type @ ("create" | "update") => Some(runtime_operation_type),
         _ => None,
     }
 }
@@ -2712,9 +2716,12 @@ exit 1
     }
 
     #[test]
-    fn write_result_type_classifies_update_but_does_not_promote_ambiguous_create() {
+    fn write_result_type_maps_claude_create_and_update_without_rewriting_raw_evidence() {
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
-        for (result_type, expected_change_kind) in [("update", "update")] {
+        for (result_type, original_file, expected_change_kind) in [
+            ("create", Value::Null, None),
+            ("update", json!("previous content"), Some("update")),
+        ] {
             let tool_use_id = format!("toolu-write-{result_type}");
             let mut state = ClaudeCodeStreamState::default();
             normalize_claude_runtime_events(
@@ -2748,7 +2755,7 @@ exit 1
                         "type": result_type,
                         "filePath": "/repo/src/app.ts",
                         "content": "must-not-be-published",
-                        "originalFile": null
+                        "originalFile": original_file
                     }
                 }),
                 session_id,
@@ -2759,8 +2766,15 @@ exit 1
             assert_eq!(
                 completed[0]
                     .payload
-                    .pointer("/runtimeFileOperation/changeKind"),
-                Some(&json!(expected_change_kind))
+                    .pointer("/runtimeFileOperation/runtimeOperationType"),
+                Some(&json!(result_type))
+            );
+            assert_eq!(
+                completed[0]
+                    .payload
+                    .pointer("/runtimeFileOperation/changeKind")
+                    .and_then(Value::as_str),
+                expected_change_kind
             );
             assert!(
                 !completed[0]
@@ -2771,7 +2785,6 @@ exit 1
         }
 
         for (tool_name, result_type, result_path) in [
-            ("Write", "create", "/repo/src/app.ts"),
             ("Write", "create", "/repo/src/other.ts"),
             ("Write", "replace", "/repo/src/app.ts"),
             ("Edit", "create", "/repo/src/app.ts"),

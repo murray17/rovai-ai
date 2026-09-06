@@ -452,7 +452,8 @@ last_updated: 2026-09-05
 - `phase` 只表示 started/progress/terminal 位置，`outcome` 独立表示证据支持的结果。乱序、冲突、waiting、Run 终态和 recovery 使用同一 reducer，不能从进程退出或 UI 消失猜 success/cancelled。Runtime 明确报告连续性中断时，未结算 operation 使用 `phase=terminal / outcome=unsettled / reasonCode=runtime_interrupted`；只有 Runtime 的权威取消终态才能写成 `cancelled`，仍可恢复的 Host 失联继续属于 recovery 而不是 interruption terminal。
 - 每个 operation 的 classifier/version 首次建立后固定。分类升级必须显式选择“只切换新 operation”或“建立平行
   reprojection”；无论哪种都不得静默改写历史或让 live operation 中途换语义。当前 `activity-v3` 采用前者：
-  Migration 141 原子切换 current marker 和 receipt，既有 v1/v2 operation 继续用原版本结算，新 operation 才建立 v3。
+  Migration 142 在 migration 141 之后原子切换 current marker 和 receipt，既有 v1/v2 operation 继续用原版本
+  结算，新 operation 才建立 v3。
 - Read Side 可以按已声明的兼容窗口同时读取多个 classifier version，但必须有确定性优先级且不把双读冒充历史
   replay。当前 v3/v2/v1 读取仅让原有 row 与新 row 都可见；没有批量回填、平行 projection、mapping digest 或任意
   Evidence replay 基础设施，因而不得声称这些能力已经存在。

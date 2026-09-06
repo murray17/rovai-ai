@@ -1113,6 +1113,10 @@ fn normalize_runtime_file_operation_evidence(
     });
     payload["runtimeFileOperation"] = match admitted {
         Some(Ok(admitted)) => {
+            let mut source = source;
+            if let Some(runtime_operation_type) = admitted.runtime_operation_type {
+                source["runtimeOperationType"] = Value::String(runtime_operation_type);
+            }
             let mut projection = serde_json::json!({
                 "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
                 "source": "runtime_reported",
@@ -2253,6 +2257,56 @@ mod tests {
             runtime_file_operation::path_from_evidence(&managed_payload).is_none(),
             "managed output must not create a Command file row or Run-card path"
         );
+    }
+
+    #[test]
+    fn claude_write_type_is_preserved_without_becoming_filesystem_change_evidence() {
+        for (runtime_operation_type, expected_change_kind) in
+            [("create", None), ("update", Some("update"))]
+        {
+            let mut payload = normalize_public_payload(
+                "runtime.action",
+                &json!({
+                    "toolCallId": format!("claude-write-{runtime_operation_type}"),
+                    "status": "completed",
+                    "kind": "write",
+                    "runtimeFileOperation": {
+                        "adapterKind": "claude-code-cli",
+                        "protocolFamily": "claude-stream-json",
+                        "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed",
+                        "operationKind": "write",
+                        "runtimeOperationType": runtime_operation_type,
+                        "changeKind": expected_change_kind,
+                        "path": "/repo/src/app.ts"
+                    }
+                }),
+            );
+            normalize_runtime_file_operation_evidence(
+                &mut payload,
+                Some(r#"{"executionRoot":"/repo"}"#),
+                Some("claude-code-cli"),
+                Some("2.1.236"),
+                None,
+            );
+
+            assert_eq!(payload["runtimeFileOperation"]["status"], "available");
+            assert_eq!(
+                payload.pointer("/runtimeFileOperation/sourceMetadata/runtimeOperationType"),
+                Some(&json!(runtime_operation_type))
+            );
+            assert_eq!(
+                payload["runtimeFileOperation"]
+                    .get("changeKind")
+                    .and_then(Value::as_str),
+                expected_change_kind
+            );
+            assert!(
+                payload
+                    .pointer("/runtimeFileOperation/sourceMetadata/originalFile")
+                    .is_none(),
+                "original file contents are not part of public normalized Evidence"
+            );
+        }
     }
 
     #[test]

@@ -5936,6 +5936,8 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     }))
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
+    expect(markup.match(/<div class="modified-file-summary" role="group"/g)).toHaveLength(2)
+    expect(markup).not.toContain('<summary class="modified-file-summary"')
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
     expect(markup).toContain('aria-label="完成了 1 个步骤"')
     expect(markup).toContain('aria-label="编辑 src/app.ts，新增 2 行，删除 1 行"')
@@ -6423,6 +6425,38 @@ describe('task event projections', () => {
         path: 'docs/README.md'
       }
     })).toBe('阅读 README.md')
+    expect(executionActivityTitle(canonicalActivity('claude-create', {
+      classifierVersion: 'activity-v3',
+      activityDomain: 'file',
+      semanticKind: 'file.write',
+      toolName: 'Write',
+      presentationHint: null
+    }), {
+      runtimeFileOperation: {
+        schemaVersion: 2,
+        status: 'available',
+        operationKind: 'write',
+        path: 'src/empty-existing.ts',
+        sourceMetadata: {
+          adapterKind: 'claude-code-cli',
+          runtimeOperationType: 'create'
+        }
+      }
+    })).toBe('新增 empty-existing.ts')
+    expect(executionActivityTitle(canonicalActivity('missing-read-path', {
+      classifierVersion: 'activity-v3',
+      activityDomain: 'file',
+      semanticKind: 'file.read',
+      toolName: 'Read',
+      presentationHint: null
+    }), {
+      runtimeFileOperation: {
+        schemaVersion: 2,
+        status: 'available',
+        operationKind: 'read',
+        path: '   '
+      }
+    })).toBe('Read')
   })
 
   it('prefers concrete active-group instructions without changing generic Tool row fallbacks', () => {
@@ -6501,7 +6535,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('renders activity-v3 typed reads and evidence-backed adds as static linked file rows', () => {
+  it('renders activity-v3 typed reads, evidence-backed adds and Claude-declared creates as static linked file rows', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'codex-read-completed', agentRunId: 'run-codex-read', eventType: 'activity.completed',
       payload: {
@@ -6544,6 +6578,48 @@ describe('task event projections', () => {
         presentationHint: null, phase: 'terminal', outcome: 'succeeded'
       }),
       createdAt: '2026-09-06T00:00:01Z'
+    }, {
+      id: 'claude-create-completed', agentRunId: 'run-codex-read', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'write-create-2', status: 'completed', kind: 'write', toolName: 'Write',
+        runtimeFileOperation: {
+          schemaVersion: 2,
+          source: 'runtime_reported',
+          status: 'available',
+          operationKind: 'write',
+          path: 'src/empty-existing.ts',
+          sourceMetadata: {
+            adapterKind: 'claude-code-cli',
+            runtimeOperationType: 'create'
+          }
+        }
+      },
+      canonical: canonicalActivity('write-create-2', {
+        classifierVersion: 'activity-v3',
+        activityDomain: 'file', semanticKind: 'file.write', toolName: 'Write',
+        presentationHint: null, phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-09-06T00:00:02Z'
+    }, {
+      id: 'multi-read-completed', agentRunId: 'run-codex-read', eventType: 'activity.completed',
+      payload: {
+        item: {
+          id: 'multi-read-3', type: 'commandExecution', status: 'completed',
+          command: "sed -n '1,120p' docs/development/local-workflow.md ; sed -n '1,180p' scripts/install-macos-daily.mjs ; sed -n '240,320p' docs/development/local-workflow.md",
+          commandActions: [
+            { type: 'read', path: 'docs/development/local-workflow.md' },
+            { type: 'read', path: 'scripts/install-macos-daily.mjs' },
+            { type: 'read', path: 'docs/development/local-workflow.md' }
+          ],
+          aggregatedOutput: 'all three ranges'
+        }
+      },
+      canonical: canonicalActivity('multi-read-3', {
+        classifierVersion: 'activity-v3',
+        activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'exec_command',
+        presentationHint: null, phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-09-06T00:00:03Z'
     }], 'run-codex-read')
 
     expect(progress.items[0]).toMatchObject({
@@ -6563,6 +6639,31 @@ describe('task event projections', () => {
         fileOperation: { operationKind: 'write', changeKind: 'add', path: 'src/new-file.ts' }
       }
     })
+    expect(progress.items[2]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: '新增 empty-existing.ts',
+        iconKind: 'file-write',
+        fileOperation: {
+          operationKind: 'write',
+          changeKind: 'add',
+          path: 'src/empty-existing.ts'
+        }
+      }
+    })
+    expect(progress.items[3]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: '阅读 local-workflow.md, install-macos-daily.mjs',
+        shellReadSummary: {
+          title: '阅读 local-workflow.md, install-macos-daily.mjs',
+          paths: [
+            'docs/development/local-workflow.md',
+            'scripts/install-macos-daily.mjs'
+          ]
+        }
+      }
+    })
 
     const run: AgentRunView = {
       id: 'run-codex-read', campTurnId: 'turn-codex-read', conversationId: 'conversation-codex-read',
@@ -6573,25 +6674,34 @@ describe('task event projections', () => {
       terminalReasonCode: null, failure: null, runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
       triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
-      a2aDepth: 0, executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
+      a2aDepth: 0, executionEvidenceCount: 4, hasUnsettledExternalEffects: false,
       workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
       version: 1, createdAt: '2026-09-06T00:00:00Z', startedAt: '2026-09-06T00:00:00Z',
-      endedAt: '2026-09-06T00:00:01Z', updatedAt: '2026-09-06T00:00:01Z'
+      endedAt: '2026-09-06T00:00:03Z', updatedAt: '2026-09-06T00:00:03Z'
     }
     const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run, progress, campId: 'camp-codex-read', focused: true
     }))
-    expect(markup).toContain('class="process-action tool-call-summary tool-call-static file-operation-row status-completed"')
+    expect(markup).toContain('class="process-action file-operation-row status-completed"')
+    expect(markup).not.toContain('tool-call-static file-operation-row')
     expect(markup).toContain('role="group" aria-label="阅读 docs/README.md，成功"')
     expect(markup).toContain('role="group" aria-label="新增 src/new-file.ts，成功"')
+    expect(markup).toContain('role="group" aria-label="新增 src/empty-existing.ts，成功"')
     expect(markup).toContain('data-icon-domain="file-read"')
     expect(markup).toContain('data-icon-domain="file-write"')
     expect(markup).toContain('class="tool-file-link"')
     expect(markup).toContain('docs/README.md · 打开文件预览')
     expect(markup).toContain('>README.md</button>')
     expect(markup).toContain('>new-file.ts</button>')
+    expect(markup).toContain('>empty-existing.ts</button>')
+    expect(markup).toContain('class="tool-call-title shell-read-summary-title" title="阅读 local-workflow.md, install-macos-daily.mjs"')
+    expect(markup).toContain('class="shell-read-verb">阅读</span>')
+    expect(markup).toContain('>local-workflow.md</button>')
+    expect(markup).toContain('class="shell-read-separator">,</span>')
+    expect(markup).toContain('>install-macos-daily.mjs</button>')
+    expect(markup).not.toContain('shell-read-file-list')
     expect(markup).not.toContain('private file content must not become row detail')
-    expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
+    expect(markup.match(/<details class="process-action tool-call-disclosure/gu)).toHaveLength(1)
     expect(markup).toContain('class="tool-group-state is-placeholder"')
     expect(markup).not.toContain('class="tool-group-state status-completed"')
   })

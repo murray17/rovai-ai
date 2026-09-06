@@ -8332,7 +8332,7 @@ function FileOperationRow({ campId, step, runStatus, onFileOpenError }: {
   }
   return (
     <div
-      className={`process-action tool-call-summary tool-call-static file-operation-row status-${status}`}
+      className={`process-action file-operation-row status-${status}`}
       data-activity-domain="file"
       role="group"
       aria-label={`${verb} ${path}，${toolCallStatusLabel(status)}`}
@@ -8411,21 +8411,14 @@ function ToolCallRow({
     <>
       <ToolCallIcon iconKind={step.iconKind} />
       {readSummary ? (
-        <span className="tool-call-title shell-read-summary-copy">
-          <span className="shell-read-summary-title">
-            {readSummary.paths.length === 1
-              ? <><span>Read</span>{readFileLink(readSummary.paths[0], readSummary.displayPaths[0])}</>
-              : readSummary.title}
-          </span>
-          {readSummary.paths.length > 1 && (
-            <span className="shell-read-file-list" role="list" aria-label="读取的文件">
-              {readSummary.paths.map((path, index) => (
-                <span role="listitem" key={path}>
-                  {readFileLink(path, readSummary.displayPaths[index])}
-                </span>
-              ))}
+        <span className="tool-call-title shell-read-summary-title" title={readSummary.title}>
+          <span className="shell-read-verb">阅读</span>
+          {readSummary.paths.map((path, index) => (
+            <span className="shell-read-file-entry" key={path}>
+              {index > 0 && <span className="shell-read-separator">,</span>}
+              {readFileLink(path, readSummary.displayPaths[index])}
             </span>
-          )}
+          ))}
         </span>
       ) : (
         <span className="tool-call-title" title={publicTitle}>{publicTitle}</span>
@@ -8447,7 +8440,7 @@ function ToolCallRow({
   if (!hasDetail) {
     return (
       <div
-        className={`process-action tool-call-summary tool-call-static status-${status}${readSummary ? ' has-shell-read-summary' : ''}`}
+        className={`process-action tool-call-summary tool-call-static status-${status}`}
         data-activity-domain={step.activityDomain}
       >
         {summary}
@@ -8465,7 +8458,7 @@ function ToolCallRow({
         if (nextExpanded) setActivated(true)
       }}
     >
-      <summary ref={summaryRef} className={`tool-call-summary${readSummary ? ' has-shell-read-summary' : ''}`}>{summary}</summary>
+      <summary ref={summaryRef} className="tool-call-summary">{summary}</summary>
       {activated && (
         <ToolCallDetail
           campId={campId}

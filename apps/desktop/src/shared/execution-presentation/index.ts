@@ -1154,7 +1154,6 @@ export function executionActivityTitle(
   if (domain === 'file') {
     const fileTitle = reliableFileActivityTitle(canonical, payload)
     if (fileTitle) return fileTitle
-    if (canonical?.semanticKind === 'file.read') return '阅读文件'
     if (canonical?.toolName) return canonical.toolName
     if (runtimeTitle) return runtimeTitle
     return '文件操作'
@@ -1308,7 +1307,15 @@ function reliableRuntimeFileOperation(payload: unknown): ExecutionStep['fileOper
   const path = stringField(operation, 'path')?.trim()
   if (!path || (operationKind !== 'read' && operationKind !== 'write')) return undefined
   const candidateChangeKind = stringField(operation, 'changeKind')
-  const changeKind = operationKind === 'write'
+  const sourceMetadata = asRecord(operation.sourceMetadata)
+  const runtimeOperationType = stringField(sourceMetadata, 'runtimeOperationType')
+  const claudeDeclaredCreate = operationKind === 'write'
+    && stringField(sourceMetadata, 'adapterKind') === 'claude-code-cli'
+    && runtimeOperationType === 'create'
+    && candidateChangeKind === null
+  const changeKind = claudeDeclaredCreate
+    ? 'add'
+    : operationKind === 'write'
     && (candidateChangeKind === 'add' || candidateChangeKind === 'update')
     ? candidateChangeKind
     : undefined
@@ -1713,9 +1720,7 @@ export function shellReadSummary(payload: unknown): ShellReadSummary | null {
   if (uniquePaths.length === 0) return null
   const displayPaths = shortestUniquePathLabels(uniquePaths)
   return {
-    title: uniquePaths.length === 1
-      ? `Read ${displayPaths[0]}`
-      : `Read ${uniquePaths.length} files`,
+    title: `阅读 ${displayPaths.join(', ')}`,
     paths: uniquePaths,
     displayPaths
   }
@@ -1738,9 +1743,8 @@ function structuredShellReadPaths(payload: unknown): StructuredReadPathResult {
   if (types.some((type) => type !== 'read')) return { status: 'unavailable' }
 
   const paths = actions.map((action) => stringField(action, 'path')?.trim() ?? '')
-  if (paths.length < 2 || paths.some((path) => path.length === 0)) {
-    return { status: 'unavailable' }
-  }
+  if (paths.some((path) => path.length === 0)) return { status: 'incompatible' }
+  if (paths.length < 2) return { status: 'unavailable' }
   return { status: 'available', paths }
 }
 

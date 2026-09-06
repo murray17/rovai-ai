@@ -467,6 +467,14 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toContain('.tool-call-detail.is-truncated')
   })
 
+  it('limits static file-operation feedback to the filename and Diff disclosure controls', () => {
+    expect(css).toMatch(/\.file-operation-row\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*16px minmax\(0, 1fr\) 16px 20px/)
+    expect(css).toMatch(/\.tool-file-link\s*\{[^}]*flex:\s*0 1 auto[^}]*width:\s*fit-content/)
+    expect(css).toMatch(/\.file-operation-row,\s*\.modified-file-summary\s*\{[^}]*cursor:\s*default/)
+    expect(css).toContain('.tool-call-disclosure > summary:hover .tool-call-title')
+    expect(css).not.toContain('.tool-call-summary:hover .tool-call-title')
+  })
+
   it('keeps the Composer on its responsive centered track with split tool and send actions', () => {
     expect(css).toMatch(
       /\.composer-box\s*\{[^}]*width:\s*min\(var\(--conversation-composer-width\),\s*100%\)/

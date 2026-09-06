@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SafeMarkdown } from './SafeMarkdown'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
 import { FileChangesPreview } from './FileChangesPreview'
 import { FilePreviewTabIcon, ResourceReferenceIcon } from './FilePreviewTabIcon'
+import { ReadonlyCodeViewer } from './ReadonlyCodeViewer'
 import { previewPathIsVisible, previewTabLabel, previewTabLabels } from './file-preview-tab-presentation'
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 import { parseUnifiedPatch } from './file-preview-patch'
@@ -38,142 +39,19 @@ function RelativePath({ path, fileName }: { path: string; fileName: string }): R
   )
 }
 
-function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
-  const rootRef = useRef<HTMLDivElement>(null)
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchIndex, setSearchIndex] = useState(0)
+function SourceViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
+  const { resolvedTheme } = useFilePreview()
   const text = tab.content?.kind === 'page' ? tab.content.page.text
     : tab.content && 'text' in tab.content ? tab.content.text : ''
   const startLine = tab.content?.kind === 'page' ? tab.content.page.startLine : 1
-  const lines = useMemo(() => text.split('\n').map((line) => line.replace(/\r$/u, '')), [text])
-  const searchMatches = useMemo(() => {
-    const query = searchQuery.toLocaleLowerCase()
-    if (!query) return []
-    const matches: Array<{ line: number; start: number; length: number }> = []
-    for (let line = 0; line < lines.length; line += 1) {
-      const source = lines[line].toLocaleLowerCase()
-      let offset = 0
-      while (offset <= source.length - query.length) {
-        const start = source.indexOf(query, offset)
-        if (start < 0) break
-        matches.push({ line, start, length: query.length })
-        offset = start + Math.max(1, query.length)
-      }
-    }
-    return matches
-  }, [lines, searchQuery])
-
-  useEffect(() => {
-    setSearchIndex((current) => searchMatches.length === 0
-      ? 0
-      : Math.min(current, searchMatches.length - 1))
-  }, [searchMatches.length])
-
-  useLayoutEffect(() => {
-    const targetLine = tab.file?.target?.line
-    const root = rootRef.current
-    const row = targetLine ? root?.querySelector<HTMLElement>(`[data-file-row="${targetLine}"]`) : null
-    if (!root || !row) return
-    root.scrollTop += row.getBoundingClientRect().top - root.getBoundingClientRect().top
-      - (root.clientHeight - row.getBoundingClientRect().height) / 2
-  }, [startLine, tab.content, tab.file?.target])
-
-  useEffect(() => {
-    const match = searchMatches[searchIndex]
-    if (!match) return
-    rootRef.current
-      ?.querySelector<HTMLElement>(`[data-file-row="${startLine + match.line}"]`)
-      ?.scrollIntoView({ block: 'center' })
-  }, [searchIndex, searchMatches, startLine])
-
-  const changeSearchMatch = (direction: -1 | 1): void => {
-    if (searchMatches.length === 0) return
-    setSearchIndex((current) => (current + direction + searchMatches.length) % searchMatches.length)
-  }
   return (
-    <>
-      <div
-        ref={rootRef}
-        className={`file-preview-code kind-${tab.file?.kind ?? 'text'}`}
-        role="region"
-        aria-label={`${tab.presentation.fileName} 内容`}
-        tabIndex={0}
-        onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'f') {
-            event.preventDefault()
-            setSearchOpen(true)
-            return
-          }
-          if (event.key === 'Escape' && searchOpen) {
-            event.preventDefault()
-            setSearchOpen(false)
-          }
-        }}
-      >
-        {lines.map((line, index) => {
-          const patchClass = tab.file?.kind === 'patch'
-            ? line.startsWith('+') && !line.startsWith('+++')
-              ? 'is-addition'
-              : line.startsWith('-') && !line.startsWith('---')
-                ? 'is-deletion'
-                : line.startsWith('@@')
-                  ? 'is-hunk'
-                  : ''
-            : ''
-          const currentMatch = searchMatches[searchIndex]
-          const highlight = currentMatch?.line === index ? currentMatch : null
-          const target = tab.file?.target
-          const targeted = target?.line !== undefined && startLine + index >= target.line
-            && startLine + index <= (target.endLine ?? target.line)
-          return (
-            <div
-              className={`file-preview-code-line ${patchClass}${highlight ? ' is-search-match' : ''}${targeted ? ' is-location-target' : ''}`}
-              data-file-row={startLine + index}
-              key={`${startLine + index}:${line}`}
-            >
-              <span aria-hidden="true">{startLine + index}</span>
-              <code data-file-line={startLine + index}>{highlight
-                ? <>{line.slice(0, highlight.start)}<mark>{line.slice(highlight.start, highlight.start + highlight.length)}</mark>{line.slice(highlight.start + highlight.length) || ' '}</>
-                : line || ' '}</code>
-            </div>
-          )
-        })}
-      </div>
-      {searchOpen && (
-        <div className="file-preview-search" role="search" aria-label="在当前文件中查找">
-          <input
-            autoFocus
-            value={searchQuery}
-            placeholder="查找"
-            aria-label="查找文本"
-            onChange={(event) => {
-              setSearchQuery(event.target.value)
-              setSearchIndex(0)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                changeSearchMatch(event.shiftKey ? -1 : 1)
-              } else if (event.key === 'Escape') {
-                event.preventDefault()
-                setSearchOpen(false)
-                rootRef.current?.focus()
-              }
-            }}
-          />
-          <span aria-live="polite">{searchQuery
-            ? `${searchMatches.length ? searchIndex + 1 : 0} / ${searchMatches.length}`
-            : ''}</span>
-          <button type="button" aria-label="上一个匹配项" disabled={searchMatches.length === 0} onClick={() => changeSearchMatch(-1)}>↑</button>
-          <button type="button" aria-label="下一个匹配项" disabled={searchMatches.length === 0} onClick={() => changeSearchMatch(1)}>↓</button>
-          <button type="button" aria-label="关闭查找" onClick={() => {
-            setSearchOpen(false)
-            rootRef.current?.focus()
-          }}>×</button>
-        </div>
-      )}
-    </>
+    <ReadonlyCodeViewer
+      fileName={tab.presentation.fileName}
+      text={text}
+      startLine={startLine}
+      target={tab.file?.target}
+      theme={resolvedTheme}
+    />
   )
 }
 
@@ -344,7 +222,7 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const patch = useMemo(() => parseUnifiedPatch(text), [text])
   const { open } = useFilePreview()
   const [linkError, setLinkError] = useState<string | null>(null)
-  if (!patch) return <CodeViewer tab={tab} />
+  if (!patch) return <SourceViewer tab={tab} />
 
   const scrollTo = (id: string): void => {
     document.getElementById(`${tab.id}-${id}`)?.scrollIntoView({ block: 'start' })
@@ -426,7 +304,7 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 }
 
 function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
-  const { open } = useFilePreview()
+  const { open, resolvedTheme } = useFilePreview()
   const [linkError, setLinkError] = useState<string | null>(null)
   const file = tab.file
   if (!tab.content || !file) return <div className="file-preview-empty-content" />
@@ -435,6 +313,8 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
       <div className="file-preview-markdown">
         {linkError && <p className="file-preview-inline-error" role="alert">{linkError}</p>}
         <SafeMarkdown
+          mode="document"
+          theme={resolvedTheme}
           headingTarget={file.target?.heading}
           onHeadingTargetResult={(found) => setLinkError(found ? null : '未找到指定的标题，已保持在文件顶部。')}
           localImageUrl={(rawReference) => filePreviewAssetUrl(
@@ -467,7 +347,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   if (tab.content.kind === 'patch') {
     return <PatchViewer tab={tab} />
   }
-  return <CodeViewer tab={tab} />
+  return <SourceViewer tab={tab} />
 }
 
 function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {

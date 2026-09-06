@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.52
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -9,76 +9,46 @@ model_context_change: false
 last_updated: 2026-09-06
 ---
 
-# Rovai-ai v1.52：项目文件恢复与工具调用一致性
+# Rovai-ai v1.52：项目预览子文件独立恢复
 
-前置：[v1.51](../v1.51/README.md)。本版本让项目内预览子文件取得独立恢复来源，并实现工具调用界面一致性、
-typed read/write 文件入口、纯读取 Shell 文件聚合、文件打开成功后提交与 `activity-v3`；
-[第三版 HTML 交互稿](tool-call-consistency.html)、
-[实施及验收清单](implementation-plan.md)和[真实 Runtime 验收](runtime-acceptance.md)一并保存。
+前置：[v1.51](../v1.51/README.md)。本版本保留既有文件来源、Viewer、布局、权限和窗口内 Camp 恢复流程；只让已经
+通过 Markdown、HTML 或 Patch 预览打开且位于当前 Camp workspace 内的普通子文件取得自己的稳定工作区来源。
 
-## 已确认范围
+## 范围与当前状态
 
-项目文件恢复沿用现有来源、Viewer、布局、权限和窗口内 Camp 恢复流程。Main 只在
-`child_of_handle` 已成功打开、文件位于当前 Camp workspace 且能形成无歧义相对引用时，返回独立
-`camp_workspace` 恢复来源；Renderer 以它和 `previewKey` 稳定去重。父 handle 释放或删除后，子文件仍能在
-A→B→A 后独立重验；外部、临时、Root Grant child 与系统应用格式不取得该来源，也不产生父能力链或原生副作用。
-
-1. 所有普通工具详情复用现有 Shell 背景和 2px 左缩进；保留原内容、8px / 9px 内边距、字号与换行，不增加“指令 / 结果”标签、分隔线或空白行。文件 Diff 内容保持现状。
-2. 状态图形覆盖执行中、等待审批、成功、失败、停止、跳过和结果未知；排队只用于有对应事实的 Run，取消等待
-   使用中性弧线。Tool 子行、底部执行台、Inspector 头像角标、Run 时间线和单聊工具行复用同一图形语法。
-   组右侧仅执行中、等待审批显示图标；终态只显示“完成了 x 个步骤”，不追加失败、停止或未知数量。x 仍按
-   组内 Canonical Activity 计数。
-3. 阅读显示“阅读 文件名”，行不展开；文件名有虚线底线，点击打开当前文件预览。Codex 的 cat、head、tail、sed 阅读和其他 Runtime 的结构化阅读需要专项覆盖。
-4. 一次 Shell 执行含多条确定的纯文件读取时，优先按结构化动作、否则只按受限的分号连接 `sed -n` 形式识别；
-   折叠摘要以完整路径去重为 `Read <文件>` 或 `Read N files`，同名文件显示可区分路径。它仍是一个 Activity，
-   展开保留原命令、输出和整次状态；混合或未支持语法保持原 Shell。
-5. 文件写入使用笔图标；明确新增显示“新增 文件名”，编辑或只能证明写入时显示“编辑 文件名”。文件名打开当前文件，独立箭头展开原有 Diff；没有可靠路径不制造链接，没有 Diff 不制造空展开。
-6. 文件打开失败只在当前页面显示红色 Toast“无法打开该文件”，不打开、切换或替换预览。成功后才进入预览；文件名 Hover / Focus 点亮，动作文字和空白不提供点击反馈。
-7. 取消中状态容器保持透明，停止请求与真实停止终态分开；静态行移除误导性的整行 hover。
-8. Web、Built-in 与普通 Tool 的折叠标题按可靠公开信息表达动作与对象；缺字段时保留稳定回退。只改展示，不从 raw JSON、命令前缀或当前磁盘猜测历史活动。
-
-## 当前状态与实施边界
-
-`ResolvedFilePreview.restoreRequest` 已作为可选字段接入 Main 成功结果；来源由 Main 独立取得 workspace authority，
-在发布 handle 前再次经过 binding generation fence。Renderer 保留稳定业务来源，临时 child 不覆盖它。
-
-Migration 141 已原子切换 `v1.52 / projection schema 92 / activity-v3`。Core 只从 Codex structured
-`commandActions.read`、ACP/Claude/Pi 的 matching 成功终态建立 typed read/write；Renderer 使用同一公开
-projection 命名文件行，read 不进入 `Files Changed`。文件入口在 Main 校验和 Renderer 首屏读取都成功后才激活
-预览；失败只显示红色 Toast，并保留原页面与已有预览。
-
-Renderer 还会把同一 Shell Activity 中多条可靠读取按完整路径去重为一个 `Read` 摘要。结构化动作优先；文本
-回退只接受完整由引号外分号连接的受限 `sed -n` 形式，并对任何混合或未覆盖语法关闭。该投影只影响折叠展示，
-原始命令、输出、状态、Activity、Evidence 与权限判断都不改变。
-
-本机真实矩阵覆盖 14 个 Runtime：13 个完成模型执行，其中可靠 typed read/write、证据驱动“新增”、保守“编辑”与
-无证据回退均按合同通过。OpenCode 的写入前 `metadata.exists` 可在同 ToolCall 路径对齐后区分新增／编辑；Claude
-2.1.236 的 create 对已有空文件存在假阳性，不能升级为新增。CodeBuddy 使用本机 MiniMax 配置完成五条文件矩阵；
-Grok 的 Runtime、模型与 ACP 会话已连通，但连续两次文件矩阵一成一败，因不可重复仍保持回退。Antigravity 缺少
-公开单文件终态，Cursor 缺当前平台准入证据而阻断。具体版本、每项结果和 Qwen basename-only Diff 边界见
-[Runtime 验收](runtime-acceptance.md)。
-这些结果不改变 Runtime 平台资格。本版本不修改 Agent 模型上下文。
+- Main 在 `child_of_handle` 成功打开后，独立查询当前目录 Camp 的既有 workspace authority；只有子文件 canonical
+  path 位于该根内且可形成无歧义相对引用时，才返回可选 `restoreRequest`。
+- 独立来源固定使用既有 `camp_workspace` request，以 workspace root 为相对基准；不复用父 capability root、显示路径
+  或 Renderer 目录，不新增 Core 方法、IPC、来源类型或授权范围。
+- Renderer 成功安装时优先采用 Main 返回的恢复来源；同一 Tab 后续再由临时 child 打开时保留稳定业务来源，窗口
+  快照因而可以在 A→B→A 后重验子文件。
+- `previewKey` 与 Main 确认的稳定项目相对 source key 共同去重；同一项目文件从消息、工作区或预览 child 打开时复用
+  冷 Tab 的稳定 ID，而不改变消息、附件或 Evidence 的来源语义。
+- 父文件关闭、释放或删除不影响已经形成的子文件来源；A→B→C 每一层都直接指向 workspace root，不建立父链。
+- 外部、临时、Root Grant child 以及系统应用格式不获得稳定来源；恢复仍无 reveal、系统启动、确认、选择目录或授权
+  challenge 副作用。
+- UI 结构、布局和文案不改；目标删除后的恢复继续显示既有居中轮廓与“找不到这个文件”。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | [v1.51](../v1.51/README.md)冻结为 historical；本概览、[实施计划](implementation-plan.md)、[版本索引](../README.md)与前后链接共同维护唯一 current v1.52 |
-| Decisions | 已更新 | [V1.52-D01](decisions.md#v1-52-d01)记录独立 workspace locator；工具展示与 typed operation 沿用既有权威／诚实投影原则，无新增重要决定；[CURRENT](../../decisions/CURRENT.md)已纳入导航 |
-| Contracts | 已更新 | [运行过程详情 v31](../../contracts/run-process-detail-surface-v31.md)、[文件变化观测 v3](../../contracts/runtime-file-change-observation-v3.md)与[文件预览 v8](../../contracts/file-preview-v8.md)分别冻结展示、typed operation、独立子文件恢复与成功后提交边界 |
-| Architecture | 已更新 | [Runtime 文件变化](../../architecture/runtime-file-change-observation.md)、[文件预览](../../architecture/file-preview.md)及基础 Evidence/Activity 不变量同步新的职责、独立 workspace 投影与迁移边界 |
-| UI | 已更新 | [会话工作区](../../ui/components/conversation-workspace.md)与[文件预览](../../ui/components/file-preview.md)记录统一状态、稳定子文件 Tab、文件名／Diff 双入口和失败 Toast 行为 |
-| Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)切换 `activity-v3`，列出各协议的 typed read/write 准入、正反例和真实验收链接 |
-| Runtime compatibility | 确认无需更新 | [真实 Runtime 验收](runtime-acceptance.md)是版本功能证据，不改变 Adapter 支持级别、模型合同或平台资格 |
-| Documentation routing | 已更新 | 文档任务导航、Contracts 索引与当前权威导航已指向 v31/v3/v8；版本索引保留 v1.52 为唯一 current |
-| Root README | 确认无需更新 | 项目定位、常青能力和支持范围未改变，实施中的 UI 范围不进入项目主页 |
+| Version lifecycle | 已更新 | v1.51 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.52 |
+| Decisions | 已更新 | [V1.52-D01](decisions.md#v1-52-d01)记录用独立 workspace locator 取代父能力链；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [File Preview v8](../../contracts/file-preview-v8.md)增加成功结果的可选独立恢复来源及安装、去重和失败边界 |
+| Architecture | 已更新 | [File Preview Architecture](../../architecture/file-preview.md)同步 Main 独立 workspace 投影与 Renderer 稳定来源安装职责 |
+| UI | 已更新 | [Camp 文件预览区](../../ui/components/file-preview.md)记录子文件跨 Camp 恢复与稳定 Tab 身份；布局、Viewer 和失败视觉不变 |
+| Runtime Activity | 确认无需更新 | AgentRun Activity、Evidence 写入与执行台映射不变；文件预览仍是 Desktop 本地阅读行为 |
+| Runtime compatibility | 确认无需更新 | 不改变 Runtime Adapter、协议、模型、平台准入或 Native Session |
+| Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture 索引、版本指针与当前决定导航均指向 File Preview v8 |
+| Root README | 确认无需更新 | 项目定位、安装方式、平台与 Runtime 支持范围不受窗口内项目文件恢复增强影响 |
 
 ## References
 
-- [实施与验收清单](implementation-plan.md)
+- [实施与验收](implementation-plan.md)
 - [版本决定](decisions.md)
-- [真实 Runtime 文件操作验收](runtime-acceptance.md)
-- [第三版 HTML 交互稿](tool-call-consistency.html)
-- [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)
-- [Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)
 - [File Preview v8](../../contracts/file-preview-v8.md)
+- [File Preview Architecture](../../architecture/file-preview.md)
+- [Camp 文件预览区](../../ui/components/file-preview.md)
+
+后续：[v1.53](../v1.53/README.md)。

@@ -1,12 +1,12 @@
 ---
 document_type: version-acceptance
-version: v1.52
+version: v1.54
 authority: runtime-file-operation-acceptance
 status: complete
 last_updated: 2026-09-06
 ---
 
-# v1.52 Runtime 文件操作验收
+# v1.54 Runtime 文件操作验收
 
 本轮在 macOS 26.3 arm64 使用本机真实 Runtime 安装、账号、Provider 与默认模型执行。每个 Runtime 使用独立的
 临时 Core data root、Git workspace 和 Camp；依次读取已有文件、新增不存在的文件、编辑已有非空文件、编辑已有
@@ -22,7 +22,7 @@ Diff、`Files Changed` 和界面标题。临时目录不进入日常 App 数据�
 | Codex CLI `0.153.4` | `passed` | `passed` | `passed / passed` | cat、head、tail、sed 四个 structured `commandActions.read` 均投影“阅读”，且不进入 `Files Changed`；明确 `fileChange.add` 显示“新增”，update 显示“编辑”并保留 Diff |
 | OpenCode `1.18.20` | `passed` | `passed` | `passed / passed` | read/write 精确路径通过；成功 write 的 `rawOutput.metadata.exists=false` 与同 ToolCall path 对齐后显示“新增”，`true` 显示“编辑”。本次 add 与空文件内容均只缺 Prompt 要求的末尾换行，事件、路径与分类通过 |
 | GitHub Copilot CLI `1.0.82` | `passed` | `passed` | `passed / passed` | 单文件 read/write 通过；新文件被 Runtime 报为 update，因此显示“编辑”而不猜“新增” |
-| Claude Code `2.1.236` | `passed` | `passed` | `passed / passed` | Read/Write/Edit 均在 matching 成功 result 后投影；真实 Write 对新文件与已有空文件都报告 `create + originalFile=null`，不能可靠升级为新增，故两者均保守显示“编辑”；非空已有文件 `update` 与 Edit exact-mutation 通过 |
+| Claude Code `2.1.236` | `passed` | `passed` | `passed / passed` | Read/Write/Edit 均在 matching 成功 result 后投影；新文件与已有空文件的 `create` 均保留为 Runtime 原生声明并在 UI 显示“新增”，但不写成 filesystem add；非空已有文件 `update` 与 Edit exact-mutation 通过 |
 | Antigravity `1.1.27` | `passed（回退）` | `passed（回退）` | `passed（回退） / passed（回退）` | 四次真实文件效果均成功；当前 stream 没有可准入的单文件终态 path/Diff，因此不显示虚构的阅读／编辑文件行 |
 | Kiro `2.21.1` | `passed` | `passed` | `passed / passed` | read 与 write path 精确；只有标准 Diff 时显示计数，path-only 新建与空文件写入显示“编辑”且无空展开 |
 | Qoder `1.1.28` | `passed` | `passed` | `passed / passed` | read/write path 与 update Diff 通过；空文件编辑事件通过，模型省略了请求的末尾换行，此差异不改变事件分类 |
@@ -38,9 +38,10 @@ Diff、`Files Changed` 和界面标题。临时目录不进入日常 App 数据�
 
 - 可靠 read 在所有提供标准单文件终态的 Runtime 中显示“阅读”，并从 `Files Changed` 排除。Antigravity 缺少该
   证据、Grok 无法重复取得该证据时保持回退；Cursor 没有越过已有准入。
-- “新增”由 Codex 的明确 add 与 OpenCode 写入前 `metadata.exists=false` 证明。其他 Runtime 的 path-only write 或
-  update Diff 全部显示“编辑”。Claude 的 create 在 2.1.236 对已有空文件出现真实假阳性，因此不升级为新增，避免
-  把空文件误判为新文件。
+- filesystem “add”证据只来自 Codex 的明确 add 和 OpenCode 写入前 `metadata.exists=false`。其他
+  Runtime 的 path-only write 或 update Diff 显示“编辑”。Claude 2.1.236 的 create 对已有空文件也会出现；
+  本版依用户确认把 Runtime 明确的 create 在 Renderer 显示为“新增”，但公开 Evidence 只保留
+  `runtimeOperationType=create`，不写 `changeKind=add`，因而没有伪造“文件原先不存在”。
 - Qwen 的 basename-only Diff 是本轮唯一不能证明嵌套文件预览目标的成功写入 wire。产品不拼接读操作路径、不读取
   当前磁盘猜测，失败点击只显示 `无法打开该文件`。
 - OpenCode、Qoder、Qwen 与 Pi 的少数运行省略了 Prompt 要求的末尾换行；这是模型文件内容服从度差异，文件操作
@@ -49,7 +50,7 @@ Diff、`Files Changed` 和界面标题。临时目录不进入日常 App 数据�
 Claude 另外以三个一次性隔离目录直接抓取 2.1.236 `stream-json` Write 终态，只保留脱敏结构：不存在文件为
 `type=create / originalFile=null`，已有非空文件为 `type=update / originalFile=string`，已有空文件再次为
 `type=create / originalFile=null`；三者 `tool_use_id`、`filePath` 与成功 result 均准确关联。原始 JSONL 在结构摘要
-生成后删除。
+生成后删除。实现只保留这个原生类型和脱敏来源 metadata，不把 `originalFile` 内容写入公开 Evidence。
 
 当前命令执行环境禁止嵌套 `sandbox-exec`，直接从该环境启动 Core 会使 Runtime 版本探针以 status 71 失败。CodeBuddy
 和 Grok 的最终结论均来自一次性本地 background App 启动的宿主隔离流程；它仍由 Rovai Core 正常应用 Runtime

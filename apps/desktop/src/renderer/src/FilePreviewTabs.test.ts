@@ -88,6 +88,7 @@ beforeEach(() => {
     activeTabId: 'second',
     openFeedback: null,
     paneVisible: true,
+    resolvedTheme: 'day',
     open: vi.fn(),
     openFileChanges: vi.fn(),
     selectChangedFile: vi.fn(),
