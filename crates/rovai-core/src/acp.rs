@@ -5724,7 +5724,9 @@ pub struct CompletedAcpAction {
     pub native_kind: String,
     pub public_command: Option<String>,
     pub public_search_operation_candidate: Option<Value>,
+    pub public_file_operation_kind: Option<String>,
     pub public_file_operation_path: Option<String>,
+    pub public_file_operation_change_kind: Option<String>,
     pub public_file_changes: Option<Value>,
     pub observation_digest: String,
     pub outcome: ActionResultOutcome,
@@ -5798,15 +5800,25 @@ pub fn completed_action(
         .then(|| public_acp_file_changes(update.get("content")))
         .flatten();
     let public_file_operation_path = (succeeded
-        && matches!(native_kind.as_str(), "edit" | "write"))
+        && matches!(native_kind.as_str(), "read" | "edit" | "write"))
     .then(|| single_public_acp_location_path(update.get("locations")))
     .flatten();
+    let public_file_operation_kind = public_file_operation_path.as_ref().map(|_| {
+        if native_kind == "read" {
+            "read"
+        } else {
+            "write"
+        }
+        .to_string()
+    });
     Ok(Some(CompletedAcpAction {
         native_item_id: native_item_id.clone(),
         native_kind,
         public_command,
         public_search_operation_candidate,
+        public_file_operation_kind,
         public_file_operation_path,
+        public_file_operation_change_kind: None,
         public_file_changes,
         observation_digest,
         outcome: if succeeded {
@@ -5852,6 +5864,11 @@ fn reconcile_completed_action(
     let observed_file_operation_path = single_public_acp_location_path(observed.locations.as_ref());
     let observed_raw_input_path = single_public_acp_raw_input_path(observed.raw_input.as_ref());
     let observed_meta_path = single_public_acp_metadata_path(observed.stable_meta.as_ref());
+    let corroborating_file_operation_path = completion
+        .public_file_operation_path
+        .clone()
+        .or_else(|| observed_file_operation_path.clone())
+        .or_else(|| observed_raw_input_path.clone());
     let observed_raw_input_digest = observed
         .raw_input
         .as_ref()
@@ -5897,18 +5914,36 @@ fn reconcile_completed_action(
         &completion.native_kind,
     )
     .to_string();
-    completion.public_file_operation_path =
-        (matches!(completion.outcome, ActionResultOutcome::Succeeded)
-            && matches!(completion.native_kind.as_str(), "edit" | "write"))
-        .then(|| {
-            completion
+    let file_operation = matches!(completion.outcome, ActionResultOutcome::Succeeded)
+        .then(|| match completion.native_kind.as_str() {
+            "read" => completion
                 .public_file_operation_path
                 .clone()
-                .or(observed_file_operation_path)
-                .or(observed_raw_input_path)
-                .or(observed_meta_path)
+                .or_else(|| observed_file_operation_path.clone())
+                .map(|path| ("read".to_string(), path)),
+            "edit" | "write" => completion
+                .public_file_operation_path
+                .clone()
+                .or_else(|| observed_file_operation_path.clone())
+                .or_else(|| observed_raw_input_path.clone())
+                .or_else(|| observed_meta_path.clone())
+                .map(|path| ("write".to_string(), path)),
+            _ => None,
         })
         .flatten();
+    completion.public_file_operation_kind = file_operation
+        .as_ref()
+        .map(|(operation_kind, _)| operation_kind.clone());
+    completion.public_file_operation_path = file_operation.map(|(_, path)| path);
+    completion.public_file_operation_change_kind = opencode_write_change_kind(
+        adapter_kind,
+        update,
+        &completion.native_kind,
+        &completion.outcome,
+        corroborating_file_operation_path.as_deref(),
+        completion.public_file_operation_path.as_deref(),
+    )
+    .map(str::to_string);
     if matches!(completion.outcome, ActionResultOutcome::Succeeded)
         && completion.public_file_changes.is_none()
         && completion.native_kind == "edit"
@@ -5933,6 +5968,37 @@ fn reconcile_completed_action(
         }
     }
     Ok(completion)
+}
+
+fn opencode_write_change_kind<'a>(
+    adapter_kind: AdapterKind,
+    update: &'a Value,
+    native_kind: &str,
+    outcome: &ActionResultOutcome,
+    corroborating_path: Option<&str>,
+    operation_path: Option<&str>,
+) -> Option<&'a str> {
+    // OpenCode records whether the target existed before its native write and
+    // carries that metadata through ACP rawOutput. Keep the signal adapter
+    // scoped and require a second, same-ToolCall path source before publishing
+    // it; an unrelated `exists` field must never upgrade a generic ACP write.
+    if adapter_kind != AdapterKind::OpencodeCli
+        || !matches!(outcome, ActionResultOutcome::Succeeded)
+        || !matches!(native_kind, "edit" | "write")
+    {
+        return None;
+    }
+    let metadata = update.pointer("/rawOutput/metadata")?;
+    let metadata_path = single_public_acp_metadata_path(Some(metadata))?;
+    let corroborating_path = corroborating_path?.trim();
+    let operation_path = operation_path?.trim();
+    if metadata_path != corroborating_path || metadata_path != operation_path {
+        return None;
+    }
+    match metadata.get("exists")?.as_bool()? {
+        false => Some("add"),
+        true => Some("update"),
+    }
 }
 
 fn public_acp_file_changes(content: Option<&Value>) -> Option<Value> {
@@ -10898,7 +10964,204 @@ while IFS= read -r ignored; do :; done
             completion.public_file_operation_path.as_deref(),
             Some("/repo/src/app.ts")
         );
+        assert_eq!(
+            completion.public_file_operation_kind.as_deref(),
+            Some("write")
+        );
         assert!(completion.public_file_changes.is_none());
+    }
+
+    #[test]
+    fn opencode_write_uses_terminal_metadata_exists_only_with_a_corroborated_path() {
+        for (exists, expected_change_kind) in [(false, "add"), (true, "update")] {
+            let terminal = json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": format!("tool-opencode-write-{exists}"),
+                "status": "completed",
+                "kind": "edit",
+                "rawOutput": {
+                    "output": "must-not-be-published",
+                    "metadata": {
+                        "filepath": "/repo/src/app.ts",
+                        "exists": exists,
+                        "diagnostics": []
+                    }
+                }
+            });
+            let completion = completed_action(
+                AdapterKind::OpencodeCli,
+                &json!({"update": terminal.clone()}),
+            )
+            .unwrap()
+            .expect("terminal OpenCode write should complete");
+            let reconciled = reconcile_completed_action(
+                AdapterKind::OpencodeCli,
+                &terminal,
+                ObservedToolMetadata {
+                    native_kind: Some("edit".to_string()),
+                    observation_digest: None,
+                    raw_input: Some(json!({"filePath": "/repo/src/app.ts"})),
+                    stable_meta: None,
+                    locations: None,
+                    public_file_changes: None,
+                },
+                completion,
+            )
+            .unwrap();
+
+            assert_eq!(
+                reconciled.public_file_operation_path.as_deref(),
+                Some("/repo/src/app.ts")
+            );
+            assert_eq!(
+                reconciled.public_file_operation_change_kind.as_deref(),
+                Some(expected_change_kind)
+            );
+            assert!(
+                !reconciled
+                    .result_data
+                    .to_string()
+                    .contains("must-not-be-published")
+            );
+        }
+
+        for (adapter_kind, exists, metadata_path, observed_input, expected_path) in [
+            (
+                AdapterKind::OpencodeCli,
+                json!(false),
+                "/repo/src/other.ts",
+                Some(json!({"filePath": "/repo/src/app.ts"})),
+                Some("/repo/src/app.ts"),
+            ),
+            (
+                AdapterKind::OpencodeCli,
+                json!("false"),
+                "/repo/src/app.ts",
+                Some(json!({"filePath": "/repo/src/app.ts"})),
+                Some("/repo/src/app.ts"),
+            ),
+            (
+                AdapterKind::CodebuddyCli,
+                json!(false),
+                "/repo/src/app.ts",
+                Some(json!({"filePath": "/repo/src/app.ts"})),
+                Some("/repo/src/app.ts"),
+            ),
+            (
+                AdapterKind::OpencodeCli,
+                json!(false),
+                "/repo/src/app.ts",
+                None,
+                Some("/repo/src/app.ts"),
+            ),
+        ] {
+            let terminal = json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-no-opencode-create-upgrade",
+                "status": "completed",
+                "kind": "edit",
+                "rawOutput": {
+                    "metadata": {"filepath": metadata_path, "exists": exists}
+                }
+            });
+            let completion = completed_action(adapter_kind, &json!({"update": terminal.clone()}))
+                .unwrap()
+                .expect("terminal write should complete");
+            let reconciled = reconcile_completed_action(
+                adapter_kind,
+                &terminal,
+                ObservedToolMetadata {
+                    native_kind: Some("edit".to_string()),
+                    observation_digest: None,
+                    raw_input: observed_input,
+                    stable_meta: Some(json!({"filepath": "/repo/src/app.ts"})),
+                    locations: None,
+                    public_file_changes: None,
+                },
+                completion,
+            )
+            .unwrap();
+            assert_eq!(
+                reconciled.public_file_operation_path.as_deref(),
+                expected_path
+            );
+            assert!(reconciled.public_file_operation_change_kind.is_none());
+        }
+
+        let missing_exists_terminal = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-opencode-missing-exists",
+            "status": "completed",
+            "kind": "edit",
+            "rawOutput": {"metadata": {"filepath": "/repo/src/app.ts"}}
+        });
+        let missing_exists = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({"update": missing_exists_terminal.clone()}),
+        )
+        .unwrap()
+        .expect("terminal OpenCode write should complete");
+        let missing_exists = reconcile_completed_action(
+            AdapterKind::OpencodeCli,
+            &missing_exists_terminal,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: None,
+                raw_input: Some(json!({"filePath": "/repo/src/app.ts"})),
+                stable_meta: None,
+                locations: None,
+                public_file_changes: None,
+            },
+            missing_exists,
+        )
+        .unwrap();
+        assert!(missing_exists.public_file_operation_change_kind.is_none());
+    }
+
+    #[test]
+    fn successful_terminal_acp_read_requires_one_structured_location() {
+        let completion = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-read",
+                    "status": "completed",
+                    "kind": "read",
+                    "locations": [{"path": "/repo/docs/README.md"}]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("terminal ACP read should complete");
+        assert_eq!(
+            completion.public_file_operation_kind.as_deref(),
+            Some("read")
+        );
+        assert_eq!(
+            completion.public_file_operation_path.as_deref(),
+            Some("/repo/docs/README.md")
+        );
+
+        let ambiguous = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-read-many",
+                    "status": "completed",
+                    "kind": "read",
+                    "locations": [
+                        {"path": "/repo/docs/README.md"},
+                        {"path": "/repo/docs/ui/README.md"}
+                    ]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("terminal ACP read should still complete");
+        assert!(ambiguous.public_file_operation_kind.is_none());
+        assert!(ambiguous.public_file_operation_path.is_none());
     }
 
     #[test]
@@ -10935,6 +11198,10 @@ while IFS= read -r ignored; do :; done
             reconciled.public_file_operation_path.as_deref(),
             Some("/repo/src/app.ts")
         );
+        assert_eq!(
+            reconciled.public_file_operation_kind.as_deref(),
+            Some("write")
+        );
 
         let read_completion = completed_action(
             AdapterKind::QoderCli,
@@ -10957,7 +11224,14 @@ while IFS= read -r ignored; do :; done
         )
         .unwrap();
         assert_eq!(reconciled_read.native_kind, "read");
-        assert!(reconciled_read.public_file_operation_path.is_none());
+        assert_eq!(
+            reconciled_read.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+        assert_eq!(
+            reconciled_read.public_file_operation_kind.as_deref(),
+            Some("read")
+        );
     }
 
     #[test]

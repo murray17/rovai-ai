@@ -32,6 +32,8 @@ import {
   type AttachmentDragKind
 } from './attachment-drop'
 import { MemberAvatar } from './MemberAvatar'
+import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
+import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { SafeMarkdown } from './SafeMarkdown'
 import { shouldSubmitStructuredComposerOnEnter } from './StructuredMentionComposer'
 import { readErrorMessage } from './error-message'
@@ -267,7 +269,6 @@ function resultMessage(result: StoredCommandResult): string {
   if (typeof message === 'string' && message.trim()) return message
   if (result.code === 'single_chat.runtime_not_ready') return '这位队员的运行时暂不可用。'
   if (result.code === 'single_chat.member_unavailable') return '这位队员已不在当前会话中。'
-  if (result.code === 'single_chat.version_conflict') return '对话刚刚发生变化，请重试。'
   if (result.code === 'single_chat.draft_changed') return '附件草稿刚刚发生变化，请重试。'
   if (result.code === 'single_chat.pending_input_changed') return '这条排队消息刚刚发生变化，请重试。'
   if (result.code === 'single_chat.pending_input_edit_open') return '另一处正在编辑这条排队消息。'
@@ -322,6 +323,18 @@ function memberCanSingleChat(member: CampMemberView): boolean {
     && member.profilePresence === 'present'
 }
 
+function toolStepStatusLabel(status: string): string {
+  return ({
+    running: '执行中',
+    waiting: '等待审批',
+    completed: '成功',
+    failed: '失败',
+    stopped: '已停止',
+    skipped: '未执行',
+    recorded: '结果未知'
+  } as Record<string, string>)[status] ?? status
+}
+
 function ToolGroup({
   items,
   runStatus
@@ -329,16 +342,21 @@ function ToolGroup({
   items: ToolProgressItem[]
   runStatus: SingleChatRunView['status']
 }): React.JSX.Element {
-  const running = NON_TERMINAL_RUNS.has(runStatus)
-    && items.some((item) => item.step.status === 'running' || item.step.status === 'waiting')
-  const stopped = runStatus === 'cancelled'
-  const label = running ? '正在执行' : `已执行 ${items.length} 项操作`
+  const activeStatus = NON_TERMINAL_RUNS.has(runStatus)
+    ? [...items].reverse().find((item) => item.step.status === 'running' || item.step.status === 'waiting')?.step.status ?? null
+    : null
+  const running = activeStatus !== null
+  const label = running
+    ? activeStatus === 'waiting' ? '等待审批' : '正在执行'
+    : `完成了 ${items.length} 个步骤`
   return (
     <details className="single-chat-tool-group" open={running || undefined}>
       <summary aria-label={`${label}；展开操作详情`}>
         <span className="single-chat-tool-icon"><ToolGlyph /></span>
         <span>{label}</span>
-        <span className={`single-chat-tool-state${running ? ' is-running' : stopped ? ' is-stopped' : ''}`} aria-hidden="true" />
+        <span className={`single-chat-tool-state${activeStatus ? ` is-${activeStatus}` : ' is-placeholder'}`} aria-hidden="true">
+          {activeStatus && <ExecutionStatusGlyph status={activeStatus} />}
+        </span>
         <span className="single-chat-disclosure"><ChevronGlyph /></span>
       </summary>
       <div className="single-chat-tool-items">
@@ -349,12 +367,13 @@ function ToolGroup({
               <strong>{item.step.toolName ?? item.step.activityDomain ?? '操作'}</strong>
               <code title={executionStepPublicTitle(item.step)}>{executionStepPublicTitle(item.step)}</code>
             </span>
-            <span className={`single-chat-tool-result is-${item.step.status}`} aria-hidden="true">
-              {item.step.status === 'running' || item.step.status === 'waiting'
-                ? <span className="single-chat-spinner" />
-                : item.step.status === 'failed'
-                  ? '×'
-                  : <CheckGlyph />}
+            <span
+              className={`single-chat-tool-result is-${item.step.status}`}
+              role="img"
+              aria-label={toolStepStatusLabel(item.step.status)}
+              title={toolStepStatusLabel(item.step.status)}
+            >
+              <ExecutionStatusGlyph status={item.step.status} />
             </span>
           </div>
         ))}
@@ -1410,7 +1429,6 @@ export function SingleChatPanel({
           campId,
           conversationId: current.conversation.id,
           body,
-          expectedConversationVersion: current.conversation.version,
           draftRevision: current.draft.revision
         }
       })
@@ -1729,13 +1747,13 @@ export function SingleChatPanel({
                 </span>
               )}
               {activeRun && !draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0
-                ? <button className="danger-button composer-stop single-chat-stop" type="button" disabled={!currentTargetReady || cancelling} onClick={() => void stopCurrentRun()}>{cancelling ? '正在提交停止请求…' : '停止'}</button>
-                : <button
-                    className="primary-button composer-send single-chat-send"
+                ? <ComposerPrimaryAction action="stop" type="button" busy={cancelling} disabled={!currentTargetReady || cancelling} onClick={() => void stopCurrentRun()} />
+                : <ComposerPrimaryAction
+                    action="send"
                     type="submit"
-                    aria-busy={sending || preparingAttachments.some((item) => !item.error)}
+                    busy={sending || preparingAttachments.some((item) => !item.error)}
                     disabled={(!draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || ending || preparingAttachments.some((item) => !item.error)}
-                  >发送</button>}
+                  />}
             </div>
           </div>
         </div>

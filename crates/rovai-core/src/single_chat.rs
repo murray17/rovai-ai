@@ -59,7 +59,6 @@ pub struct SendSingleChatMessageCommand {
     pub camp_id: String,
     pub conversation_id: String,
     pub body: String,
-    pub expected_conversation_version: i64,
     pub draft_revision: i64,
 }
 
@@ -541,12 +540,6 @@ impl SingleChatService {
                 return Ok(rejected(
                     "single_chat.camp_mismatch",
                     "Single Chat command is outside the Camp",
-                ));
-            }
-            if target.version != envelope.payload.expected_conversation_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "single_chat.version_conflict",
-                    json!({ "currentVersion": target.version }),
                 ));
             }
             if !active_member(transaction, &target.camp_id, &target.agent_id)? {
@@ -1473,6 +1466,7 @@ impl SingleChatService {
                 &run.id,
             )?);
         }
+        crate::execution_text::overlay(database, &mut execution_evidence)?;
         Ok(Some(SingleChatSnapshot {
             conversation,
             messages,
@@ -2563,7 +2557,6 @@ mod tests {
         database: &mut Database,
         camp_id: &str,
         conversation_id: &str,
-        version: i64,
         command_id: &str,
     ) -> CommandExecution {
         let draft_revision = database
@@ -2584,7 +2577,6 @@ mod tests {
                         camp_id: camp_id.to_string(),
                         conversation_id: conversation_id.to_string(),
                         body: "请检查这一处设计".to_string(),
-                        expected_conversation_version: version,
                         draft_revision,
                     },
                 ),
@@ -2593,17 +2585,16 @@ mod tests {
     }
 
     #[test]
-    fn send_is_atomic_and_end_uses_exact_identity_without_fencing_a_successor() {
+    fn send_uses_current_state_and_end_uses_exact_identity_without_fencing_a_successor() {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
-        let (conversation_id, version) =
+        let (conversation_id, _) =
             open(&service, &mut database, &camp_id, "single-chat-open-first");
         let first = send(
             &service,
             &mut database,
             &camp_id,
             &conversation_id,
-            version,
             "single-chat-send-first",
         );
         assert_eq!(first.result.status, CommandResultStatus::Accepted);
@@ -2629,12 +2620,20 @@ mod tests {
                 .contains("agent_run output route is immutable"),
             "a Single Chat Run cannot be rewritten into an ordinary public route"
         );
+        // Runtime input acknowledgement can advance the Conversation version while the
+        // Renderer still holds the Snapshot used to prepare this queued input.
+        database
+            .connection()
+            .execute(
+                "UPDATE conversation SET version = version + 1 WHERE id = ?1",
+                [&conversation_id],
+            )
+            .unwrap();
         let busy = send(
             &service,
             &mut database,
             &camp_id,
             &conversation_id,
-            version + 1,
             "single-chat-send-busy",
         );
         assert_eq!(busy.result.status, CommandResultStatus::Accepted);
@@ -2655,16 +2654,11 @@ mod tests {
             user_messages, 1,
             "a queued send must not append user input before publication"
         );
-        let queued_inputs: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM single_chat_pending_input
-                 WHERE conversation_id = ?1 AND state = 'queued'",
-                [&conversation_id],
-                |row| row.get(0),
-            )
+        let queued_snapshot = service
+            .snapshot(&database, &conversation_id)
+            .unwrap()
             .unwrap();
-        assert_eq!(queued_inputs, 1);
+        assert_eq!(queued_snapshot.pending_inputs.items.len(), 1);
         let editing = service
             .edit_pending_input(
                 &mut database,
@@ -2841,7 +2835,7 @@ mod tests {
             .unwrap();
         assert_eq!(unchanged_end_state, (ended_version, ended_events));
 
-        let (successor_id, successor_version) = open(
+        let (successor_id, _) = open(
             &service,
             &mut database,
             &camp_id,
@@ -2853,7 +2847,6 @@ mod tests {
             &mut database,
             &camp_id,
             &successor_id,
-            successor_version,
             "single-chat-send-successor",
         );
         assert_eq!(successor.result.status, CommandResultStatus::Accepted);
@@ -2864,7 +2857,7 @@ mod tests {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
         let runtime = ExecutionRuntimeService::default();
-        let (conversation_id, version) = open(
+        let (conversation_id, _) = open(
             &service,
             &mut database,
             &camp_id,
@@ -2875,7 +2868,6 @@ mod tests {
             &mut database,
             &camp_id,
             &conversation_id,
-            version,
             "single-chat-send-terminal",
         );
         let run_id = sent.result.payload["agentRunId"]
@@ -2933,7 +2925,7 @@ mod tests {
             .unwrap();
         assert_eq!(private_messages, 1);
 
-        let (cancel_conversation_id, cancel_version) = {
+        let (cancel_conversation_id, _) = {
             service
                 .end(
                     &mut database,
@@ -2954,7 +2946,6 @@ mod tests {
             &mut database,
             &camp_id,
             &cancel_conversation_id,
-            cancel_version,
             "single-chat-send-cancel",
         );
         let cancelled_run_id = cancelled_send.result.payload["agentRunId"]
@@ -3021,14 +3012,13 @@ mod tests {
     fn built_in_policy_is_a_closed_allowlist_and_restart_cancels_only_the_reply() {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
-        let (conversation_id, version) =
+        let (conversation_id, _) =
             open(&service, &mut database, &camp_id, "single-chat-open-policy");
         let sent = send(
             &service,
             &mut database,
             &camp_id,
             &conversation_id,
-            version,
             "single-chat-send-policy",
         );
         let run_id = sent.result.payload["agentRunId"]
@@ -3116,7 +3106,6 @@ mod tests {
             &mut database,
             &camp_id,
             &conversation_id,
-            version + 1,
             "single-chat-send-after-restart",
         );
         assert_eq!(next.result.status, CommandResultStatus::Accepted);
@@ -3126,7 +3115,7 @@ mod tests {
     fn source_attachments_are_consumed_by_one_message_and_resolved_for_its_run() {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
-        let (conversation_id, version) = open(
+        let (conversation_id, _) = open(
             &service,
             &mut database,
             &camp_id,
@@ -3156,7 +3145,6 @@ mod tests {
                         camp_id: camp_id.clone(),
                         conversation_id: conversation_id.clone(),
                         body: String::new(),
-                        expected_conversation_version: version,
                         draft_revision: 1,
                     },
                 ),
@@ -3234,7 +3222,7 @@ mod tests {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
         let runtime = ExecutionRuntimeService::default();
-        let (conversation_id, version) = open(
+        let (conversation_id, _) = open(
             &service,
             &mut database,
             &camp_id,
@@ -3245,7 +3233,6 @@ mod tests {
             &mut database,
             &camp_id,
             &conversation_id,
-            version,
             "single-chat-send-pending-first",
         );
         let first_run_id = first.result.payload["agentRunId"]
@@ -3270,7 +3257,6 @@ mod tests {
                         camp_id: camp_id.clone(),
                         conversation_id: conversation_id.clone(),
                         body: "读取排队附件".to_string(),
-                        expected_conversation_version: version + 1,
                         draft_revision: 2,
                     },
                 ),
@@ -3367,7 +3353,7 @@ mod tests {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
         let runtime = ExecutionRuntimeService::default();
-        let (conversation_id, version) = open(
+        let (conversation_id, _) = open(
             &service,
             &mut database,
             &camp_id,
@@ -3378,7 +3364,6 @@ mod tests {
             &mut database,
             &camp_id,
             &conversation_id,
-            version,
             "single-chat-send-repair-first",
         );
         let first_run_id = first.result.payload["agentRunId"]
@@ -3403,7 +3388,6 @@ mod tests {
                         camp_id: camp_id.clone(),
                         conversation_id: conversation_id.clone(),
                         body: "附件坏了仍可修复".to_string(),
-                        expected_conversation_version: version + 1,
                         draft_revision: 2,
                     },
                 ),
@@ -3423,7 +3407,6 @@ mod tests {
                         camp_id: camp_id.clone(),
                         conversation_id: conversation_id.clone(),
                         body: "后续排队消息".to_string(),
-                        expected_conversation_version: version + 1,
                         draft_revision: 3,
                     },
                 ),
@@ -3565,7 +3548,7 @@ mod tests {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
         let runtime = ExecutionRuntimeService::default();
-        let (conversation_id, version) = open(
+        let (conversation_id, _) = open(
             &service,
             &mut database,
             &camp_id,
@@ -3584,7 +3567,6 @@ mod tests {
             &mut database,
             &camp_id,
             &conversation_id,
-            version,
             "single-chat-send-history-first",
         );
         let first_run_id = first.result.payload["agentRunId"].as_str().unwrap();
@@ -3624,7 +3606,6 @@ mod tests {
             &mut database,
             &camp_id,
             &conversation_id,
-            version + 2,
             "single-chat-send-history-current",
         );
         let current_run_id = second.result.payload["agentRunId"]

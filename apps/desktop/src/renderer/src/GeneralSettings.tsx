@@ -561,22 +561,22 @@ export function GeneralSettings({
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
         <AppDialogContent className="one-click-confirm-dialog" tone="info" aria-describedby="one-click-confirm-description">
           <AppDialogHeader
-            title="开启一键创建新对话？"
-            description="开启后，以下入口会直接创建并进入新对话，不再显示创建弹窗。"
+            title="开启一键新建？"
+            description="新建入口会直接进入对话，使用下方默认设置。"
             descriptionId="one-click-confirm-description"
             icon="bolt"
             kicker="创建方式变化"
             closeDisabled={oneClickBusy}
           />
           <AppDialogBody>
-            <div className="app-dialog-choice-list">
+            <details className="app-dialog-disclosure"><summary>查看适用入口</summary><div className="app-dialog-choice-list">
               {ONE_CLICK_ENTRY_DESCRIPTIONS.map((description, index) => (
                 <div className="app-dialog-choice" key={description}>
                   <span aria-hidden="true"><AppDialogGlyph name={index === ONE_CLICK_ENTRY_DESCRIPTIONS.length - 1 ? 'folder' : 'bolt'} /></span>
                   <strong>{description}</strong>
                 </div>
               ))}
-            </div>
+            </div></details>
             <AppDialogFactGrid>
               <AppDialogFact label="项目">由新建入口决定</AppDialogFact>
               <AppDialogFact label="默认队员">{savedMemberNames.length} 位</AppDialogFact>

@@ -204,4 +204,4 @@ last_updated: 2026-09-06
 | v1.50 | `historical` | Camp 内私有 Single Chat、共享 Source Attachment 链路与 Conversation 级待发送队列 | [v1.50/README.md](v1.50/README.md) |
 | v1.51 | `historical` | 窗口内按 Camp 恢复文件预览会话，并以无副作用重验和代次 fence 阻断旧能力 | [v1.51/README.md](v1.51/README.md) |
 | v1.52 | `historical` | 项目内预览子文件取得独立工作区恢复来源，不依赖父文件或临时能力 | [v1.52/README.md](v1.52/README.md) |
-| v1.53 | `current` | App/Core 持续运行期间，对明确未接收的 ACP 网络失败执行固定退避与安全自动续接 | [v1.53/README.md](v1.53/README.md) |
+| v1.53 | `current` | 原生生图、正文块持久化、工具一致性与受限网络恢复；兼容已部署迁移来源 | [v1.53/README.md](v1.53/README.md) |

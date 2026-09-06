@@ -1503,7 +1503,7 @@ tests, and an explicit architectural decision.
 _Avoid_: workspace deletion, Runtime reinstall, silent partial migration, historical Projection replay
 
 **AgentRun Execution Evidence**:
-A durable, append-only, user-visible record of provider-reported reasoning summaries, Agent progress narration, plans, steps, and structured tool/command/file lifecycle for exactly one AgentRun. It is authoritative SQLite state readable through the Camp Read Side until Camp deletion, while remaining absent by construction from CampMessage, ConversationMessage, FTS, public-message context composition, ContextManifest payloads, later AgentRun input, A2A context, and Memory sources. It contains only normalized Runtime-public information, never hidden raw reasoning or invented progress.
+A durable, user-visible record of provider-reported reasoning summaries, Agent progress narration, plans, steps, and structured tool/command/file lifecycle for exactly one AgentRun: text is retained as independently finalized message blocks, while tool and execution facts remain append-only. It is separate from public messages and Agent context or Memory sources, and contains only normalized Runtime-public information, never hidden raw reasoning or invented progress.
 _Avoid_: chain of thought, Camp message, Renderer-only live cache, searchable Agent context, raw provider packet, Task completion evidence
 
 **Agent Execution Process**:

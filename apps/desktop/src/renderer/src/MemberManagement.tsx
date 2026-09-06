@@ -4,10 +4,12 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useId,
   useMemo,
   useRef,
   useState,
   type FormEvent,
+  type ChangeEvent,
   type ReactNode
 } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -35,7 +37,8 @@ import {
   AppDialogFact,
   AppDialogFactGrid,
   AppDialogFooter,
-  AppDialogHeader
+  AppDialogHeader,
+  DialogControlIcon
 } from './AppDialog'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { SettingsPageHeader } from './SettingsPageHeader'
@@ -521,7 +524,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
           >
             <AppDialogHeader
               title={`永久移除“${removal?.displayName ?? '队员'}”？`}
-              description="移除后，这位队员不能再加入后续协作或产生新消息；历史身份与记录继续保留。"
+              description="移除后将不能继续参与协作；历史身份与记录保留。"
               descriptionId="remove-member-description"
               icon="user"
               kicker="需要名称确认"
@@ -549,7 +552,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                     <small>区分大小写</small>
                   </label>
                 </AppDialogBody>
-                <AppDialogFooter note="历史身份、消息与审计记录仍会保留。">
+                <AppDialogFooter>
                   <Dialog.Close className="quiet-button" type="button" disabled={busy === 'remove'}>取消</Dialog.Close>
                   <button
                     className="danger-button"
@@ -569,7 +572,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
           <AppDialogContent className="member-leave-dialog" tone="attention" aria-describedby="member-leave-description">
             <AppDialogHeader
               title="放弃未保存的运行配置？"
-              description="刚才的操作需要离开当前编辑。放弃后，这些更改不会应用到后续执行。"
+              description="运行配置尚未保存，放弃后这些修改将丢失。"
               descriptionId="member-leave-description"
               icon="warning"
               kicker="未保存更改"
@@ -1238,15 +1241,12 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
   onSubmit(draft: IdentityDraft): Promise<void>
 }): React.JSX.Element {
   const [draft, setDraft] = useState<IdentityDraft>(EMPTY_IDENTITY)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [traitInput, setTraitInput] = useState('')
-  const [advancedOpen, setAdvancedOpen] = useState(true)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const nameRef = useRef<HTMLInputElement | null>(null)
-  const teamRoleRef = useRef<HTMLInputElement | null>(null)
-  const responsibilitiesRef = useRef<HTMLTextAreaElement | null>(null)
-  const traitInputRef = useRef<HTMLInputElement | null>(null)
-  const principlesRef = useRef<HTMLTextAreaElement | null>(null)
-  const growthRef = useRef<HTMLTextAreaElement | null>(null)
+  const [error, setError] = useState<{ field: IdentityDraftField | 'submit'; message: string } | null>(null)
+  const [traitError, setTraitError] = useState<string | null>(null)
+  const fieldPrefix = useId()
+  const fieldId = (field: string): string => `${fieldPrefix}-${field}`
 
   useEffect(() => {
     if (!open) return
@@ -1254,142 +1254,109 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
       displayName: agent.displayName,
       teamRole: agent.teamRole,
       professionalResponsibilities: agent.professionalResponsibilities,
-      personalityTraits: agent.personalityTraits,
+      personalityTraits: [...agent.personalityTraits],
       workingPrinciples: agent.workingPrinciples,
       growthTopic: agent.growthTopic
     } : EMPTY_IDENTITY)
+    setAdvancedOpen(false)
     setTraitInput('')
-    setAdvancedOpen(true)
-    setSubmitError(null)
-  // Initialize only when the dialog opens or changes target. Background profile
-  // refreshes must not replace a user's unsaved draft after a rejected save.
+    setError(null)
+    setTraitError(null)
+  // Background profile refreshes must not replace an unsaved draft.
   }, [agent?.agentId, open])
 
-  const addTraits = (value: string): IdentityDraft | null => {
-    const pieces = value.split(/[，,]/).map(normalizeIdentityTag).filter(Boolean)
-    const nextTraits = [...draft.personalityTraits]
-    for (const trait of pieces) {
-      if (unicodeScalarLength(trait) > 16 || hasControlOrNewline(trait)) {
-        setSubmitError('每个性格底色标签最多 16 个字符，且不能包含换行或控制字符。')
-        traitInputRef.current?.focus()
-        return null
-      }
-      if (nextTraits.some((existing) => existing.toLowerCase() === trait.toLowerCase())) continue
-      if (nextTraits.length >= 6) {
-        setSubmitError('性格底色最多设置 6 个标签。')
-        traitInputRef.current?.focus()
-        return null
-      }
-      nextTraits.push(trait)
-    }
-    const nextDraft = { ...draft, personalityTraits: nextTraits }
-    setDraft(nextDraft)
-    setTraitInput('')
-    setSubmitError(null)
-    return nextDraft
+  const update = <K extends keyof IdentityDraft>(key: K, value: IdentityDraft[K]): void => {
+    setDraft((current) => ({ ...current, [key]: value }))
+    if (error?.field === key) setError(null)
   }
-
+  const addTraits = (input = traitInput): IdentityDraft | null => {
+    const next = [...draft.personalityTraits]
+    for (const trait of input.split(/[,，]/).map(normalizeIdentityTag).filter(Boolean)) {
+      if (unicodeScalarLength(trait) > 16 || hasControlOrNewline(trait)) {
+        setTraitError('每个标签最多 16 个字符，且不能包含换行或控制字符。')
+        return null
+      }
+      if (next.some((item) => item.toLowerCase() === trait.toLowerCase())) continue
+      if (next.length >= 6) { setTraitError('最多设置 6 个标签。'); return null }
+      next.push(trait)
+    }
+    update('personalityTraits', next)
+    setTraitInput('')
+    setTraitError(null)
+    return { ...draft, personalityTraits: next }
+  }
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    setSubmitError(null)
-    let nextDraft = draft
-    if (traitInput.trim()) {
-      const withPendingTrait = addTraits(traitInput)
-      if (!withPendingTrait) return
-      nextDraft = withPendingTrait
-    }
-    const issue = identityDraftIssue(nextDraft, agent?.agentId ?? null, agents)
+    if (busy) return
+    const next = traitInput.trim() ? addTraits() : draft
+    if (!next) { document.getElementById(fieldId('traits'))?.focus(); return }
+    const issue = identityDraftIssue(next, agent?.agentId ?? null, agents)
+    setError(issue)
     if (issue) {
-      setSubmitError(issue.message)
-      if (issue.field === 'advanced') setAdvancedOpen(true)
-      const target = {
-        displayName: nameRef.current,
-        teamRole: teamRoleRef.current,
-        professionalResponsibilities: responsibilitiesRef.current,
-        personalityTraits: traitInputRef.current,
-        workingPrinciples: principlesRef.current,
-        growthTopic: growthRef.current,
-        advanced: principlesRef.current
-      }[issue.field]
-      requestAnimationFrame(() => target?.focus())
+      if (['workingPrinciples', 'growthTopic', 'advanced'].includes(issue.field)) setAdvancedOpen(true)
+      requestAnimationFrame(() => document.getElementById(fieldId(issue.field === 'advanced' ? 'workingPrinciples' : issue.field === 'personalityTraits' ? 'traits' : issue.field))?.focus())
       return
     }
-    try {
-      await onSubmit(nextDraft)
-    } catch (nextError) {
-      setSubmitError(errorMessage(nextError))
+    try { await onSubmit(next) } catch (issue) { setError({ field: 'submit', message: errorMessage(issue) }) }
+  }
+  const filled = Number(Boolean(draft.workingPrinciples.trim())) + Number(Boolean(draft.growthTopic.trim()))
+  const field = (key: Exclude<keyof IdentityDraft, 'personalityTraits'>, label: string, max: number, multiline = false, placeholder = '', hint = ''): React.JSX.Element => {
+    const invalid = error?.field === key
+    const Input = multiline ? 'textarea' : 'input'
+    const props = {
+      id: fieldId(key), value: draft[key], placeholder, disabled: busy,
+      onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => update(key, event.target.value),
+      onBlur: () => { const issue = identityDraftIssue(draft, agent?.agentId ?? null, agents); if (issue?.field === key) setError(issue) },
+      'aria-invalid': invalid || undefined,
+      'aria-describedby': `${fieldId(`hint-${key}`)}${invalid ? ` ${fieldId(`error-${key}`)}` : ''}`,
+      required: key === 'displayName'
     }
+    return <div className={`compact-field ${invalid ? 'has-error' : ''}`}>
+      <div className="compact-field-label"><label htmlFor={fieldId(key)}>{label}</label><small className="compact-counter" aria-hidden="true">{unicodeScalarLength(draft[key])} / {max}</small></div>
+      <Input {...props} rows={multiline ? 3 : undefined} />
+      <span id={fieldId(`hint-${key}`)} className="sr-only">最多 {max} 个字符。{hint}</span>
+      {hint && <small className="compact-revealed-hint">{hint}</small>}
+      {invalid && <small className="compact-field-error" id={fieldId(`error-${key}`)} role="alert">{error.message}</small>}
+    </div>
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={(value) => !busy && onOpenChange(value)}>
+    <Dialog.Root open={open} onOpenChange={(value) => { if (!busy) onOpenChange(value) }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent
-          className="member-dialog"
-          width="wide"
-          aria-describedby="member-dialog-description"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            returnFocusRef.current?.focus()
-          }}
-        >
-          <AppDialogHeader
-            title={agent ? '编辑队员身份' : '新增队员'}
-            description={agent
-              ? '更新这位队员的长期身份信息；不会直接改动 Agent 运行时、权限或记忆。'
-              : '设置新队员的长期身份信息；Agent 运行时与权限将在创建后单独配置。'}
-            descriptionId="member-dialog-description"
-            icon="user"
-            closeLabel="关闭身份编辑"
-            closeDisabled={busy}
-          />
-          <form className="member-identity-form app-dialog-form" onSubmit={(event) => void submit(event)}>
-            <AppDialogBody className="member-dialog-scroll">
-              <section className="member-identity-editor" aria-label="队员身份字段">
-                <div className="member-form-grid">
-                  <label className="field-label">名称<input ref={nameRef} required value={draft.displayName} onChange={(event) => { setDraft({ ...draft, displayName: event.target.value }); setSubmitError(null) }} autoFocus data-dialog-autofocus /><small>{unicodeScalarLength(draft.displayName)}/80</small></label>
-                  <label className="field-label">团队角色<input ref={teamRoleRef} value={draft.teamRole} onChange={(event) => { setDraft({ ...draft, teamRole: event.target.value }); setSubmitError(null) }} placeholder="队员在团队中的主要贡献类型" /><small>{unicodeScalarLength(draft.teamRole)}/120</small></label>
+        <Dialog.Content className="member-dialog compact-dialog compact-member"
+          onOpenAutoFocus={(event) => { event.preventDefault(); document.getElementById(fieldId('displayName'))?.focus() }}
+          onCloseAutoFocus={(event) => { event.preventDefault(); returnFocusRef.current?.focus() }}
+          onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }}>
+          <header className="compact-header"><Dialog.Title>{agent ? '编辑队员' : '新增队员'}</Dialog.Title><Dialog.Close asChild><button className="compact-close" type="button" aria-label="关闭身份编辑" disabled={busy}><DialogControlIcon name="close" /></button></Dialog.Close></header>
+          <Dialog.Description className="sr-only">{agent ? '编辑队员的长期身份信息。修改用于之后开始的工作。' : '设置新队员的长期身份信息。新建后可配置 Agent 运行时。'}</Dialog.Description>
+          <form className="compact-form member-identity-form" onSubmit={(event) => void submit(event)}>
+            <div className="compact-body member-fields">
+              <div className="compact-two-columns">{field('displayName', '名称', 80)}{field('teamRole', '团队角色', 120, false, '主要贡献类型')}</div>
+              {field('professionalResponsibilities', '专业职责', 300, true, '长期负责什么，通常交付什么结果')}
+              <div className="compact-field">
+                <div className="compact-field-label"><label htmlFor={fieldId('traits')}>性格底色</label><small className="compact-counter">{draft.personalityTraits.length} / 6</small></div>
+                <div className="compact-trait-editor">
+                  {draft.personalityTraits.map((trait) => <span className="compact-trait" key={trait}>{trait}<button type="button" disabled={busy} aria-label={`移除标签 ${trait}`} onClick={() => { update('personalityTraits', draft.personalityTraits.filter((item) => item !== trait)); setTraitError(null) }}><DialogControlIcon name="close" /></button></span>)}
+                  <input id={fieldId('traits')} value={traitInput} disabled={busy || draft.personalityTraits.length >= 6} placeholder={draft.personalityTraits.length >= 6 ? '已满 6 项' : '添加标签'} aria-describedby={fieldId('trait-hint')} aria-invalid={Boolean(traitError) || error?.field === 'personalityTraits'} onChange={(event) => {
+                    const value = event.target.value
+                    if (/[,，]/.test(value)) { const parts = value.split(/[,，]/); const remainder = parts.pop() ?? ''; if (addTraits(parts.join(','))) setTraitInput(remainder) }
+                    else { setTraitInput(value); setTraitError(null) }
+                  }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); addTraits() } }} onBlur={() => { if (traitInput.trim()) addTraits() }} />
                 </div>
-                <label className="field-label">专业职责<textarea ref={responsibilitiesRef} rows={2} value={draft.professionalResponsibilities} onChange={(event) => { setDraft({ ...draft, professionalResponsibilities: event.target.value }); setSubmitError(null) }} placeholder="说明队员长期负责什么，以及通常交付什么结果。" /><small>{unicodeScalarLength(draft.professionalResponsibilities)}/300</small></label>
-                <div className="field-label">
-                  <span>性格底色</span>
-                  <div className="member-trait-editor">
-                    {draft.personalityTraits.map((trait) => <span className="member-trait-chip" key={trait}>{trait}<button type="button" aria-label={`移除标签 ${trait}`} onClick={() => setDraft({ ...draft, personalityTraits: draft.personalityTraits.filter((candidate) => candidate !== trait) })}>×</button></span>)}
-                    <input ref={traitInputRef} value={traitInput} disabled={draft.personalityTraits.length >= 6} onChange={(event) => {
-                      const value = event.target.value
-                      if (/[，,]/.test(value)) {
-                        const parts = value.split(/[，,]/)
-                        const remainder = parts.pop() ?? ''
-                        if (addTraits(parts.join(','))) setTraitInput(remainder)
-                      } else {
-                        setTraitInput(value)
-                        setSubmitError(null)
-                      }
-                    }} onKeyDown={(event) => {
-                      if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-                      event.preventDefault()
-                      addTraits(traitInput)
-                    }} onBlur={() => { if (traitInput.trim()) addTraits(traitInput) }} placeholder={draft.personalityTraits.length >= 6 ? '最多 6 项' : '输入后按 Enter 或逗号'} />
-                  </div>
-                  <small>自定义标签，每项 1–16 个字符，最多 6 项。</small>
-                </div>
-                <details className="member-identity-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
-                  <summary><span><strong>高级设置</strong><small>{advancedIdentityStatus(draft.workingPrinciples, draft.growthTopic)}</small></span><i aria-hidden="true">⌄</i></summary>
-                  <div className="member-identity-advanced-fields">
-                    <label className="field-label">工作准则<textarea ref={principlesRef} rows={2} value={draft.workingPrinciples} onChange={(event) => { setDraft({ ...draft, workingPrinciples: event.target.value }); setSubmitError(null) }} placeholder="可选。补充这位队员长期遵循的做事方式、质量标准和协作边界。" /><small>{unicodeScalarLength(draft.workingPrinciples)}/300 · 修改后用于之后开始的工作，不影响正在进行的任务。</small></label>
-                    <label className="field-label">成长课题<textarea ref={growthRef} rows={2} value={draft.growthTopic} onChange={(event) => { setDraft({ ...draft, growthTopic: event.target.value }); setSubmitError(null) }} placeholder="可选。描述队员当前希望逐渐练习或改善的方向。" /><small>{unicodeScalarLength(draft.growthTopic)}/300 · 更换课题不会清除已经形成的队员记忆。</small></label>
-                  </div>
-                </details>
+                <span id={fieldId('trait-hint')} className="sr-only">回车或逗号添加标签，最多 6 项，每项最多 16 个字符。</span>
+                <small className="compact-revealed-hint">回车添加 · 最多 6 项，每项 16 字</small>
+                {(traitError || error?.field === 'personalityTraits') && <small className="compact-field-error" role="alert">{traitError ?? error?.message}</small>}
+              </div>
+              <section className="compact-extra">
+                <button type="button" className="compact-extra-toggle" aria-expanded={advancedOpen} aria-controls={fieldId('extra-panel')} disabled={busy} onClick={() => setAdvancedOpen(!advancedOpen)}><span>工作准则与成长课题</span><small>{filled ? `已填写 ${filled} 项` : '未填写'}</small><DialogControlIcon name="chevron" /></button>
+                {advancedOpen && <div className="compact-extra-fields" id={fieldId('extra-panel')}>{field('workingPrinciples', '工作准则', 300, true, '做事方式、质量标准和协作边界', '修改后用于之后开始的工作。')}{field('growthTopic', '成长课题', 300, true, '希望逐渐练习或改善的方向', '更换课题会保留已经形成的记忆。')}</div>}
               </section>
-              {submitError && <div className="inline-error">{submitError}</div>}
-            </AppDialogBody>
-            <AppDialogFooter note="身份变更会用于之后符合条件的新执行。">
-              <Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close>
-              <button className="primary-button" disabled={busy || !draft.displayName.trim()}>{busy ? '正在保存身份…' : agent ? '保存身份' : '创建队员'}</button>
-            </AppDialogFooter>
+              {error?.field === 'submit' && <p className="compact-inline-error" role="alert">{error.message}</p>}
+            </div>
+            <footer className="compact-footer"><Dialog.Close asChild><button type="button" className="compact-cancel" disabled={busy}>取消</button></Dialog.Close><button type="submit" className="compact-primary" disabled={busy || !draft.displayName.trim()}>{busy ? '正在保存…' : agent ? '保存' : '新建'}</button></footer>
           </form>
-        </AppDialogContent>
+        </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
   )
@@ -1509,6 +1476,7 @@ function MemberAvatarDialog({ open, agent, busy, returnFocusRef, onOpenChange, o
             icon="image"
             closeLabel="关闭角色图片编辑"
             closeDisabled={isBusy}
+            hideDescription
           />
           <form className="app-dialog-form" onSubmit={(event) => void submit(event)}>
             <AppDialogBody>
@@ -1717,11 +1685,6 @@ function hasControlOrNewline(value: string): boolean {
 
 function normalizeIdentityTag(value: string): string {
   return value.trim().replace(/\s+/gu, ' ')
-}
-
-function advancedIdentityStatus(workingPrinciples: string, growthTopic: string): string {
-  const count = Number(Boolean(workingPrinciples.trim())) + Number(Boolean(growthTopic.trim()))
-  return count === 0 ? '未设置' : `已设置 ${count}/2 项`
 }
 
 export function hasDuplicateMemberDisplayName(

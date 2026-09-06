@@ -11,6 +11,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type JSX,
@@ -168,12 +169,20 @@ export function ComposerTypeaheadPlugin({
 
   useEffect(() => { setSelectedIndex(0) }, [match?.kind, match?.nodeKey, match?.fromOffset])
 
-  useEffect(() => {
-    const selected = portalHost?.querySelector<HTMLElement>(
-      '.structured-mention-menu [aria-selected="true"]'
-    )
-    selected?.scrollIntoView({ block: 'nearest' })
-  }, [portalHost, selectedIndex])
+  useLayoutEffect(() => {
+    const root = editor.getRootElement()
+    if (!root) return
+    const menuId = root.getAttribute('aria-controls')
+    const menu = match && menuId ? root.ownerDocument.getElementById(menuId) : null
+    const selected = menu?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')
+    if (selected?.id) {
+      root.setAttribute('aria-activedescendant', selected.id)
+      selected.scrollIntoView({ block: 'nearest' })
+    } else {
+      root.removeAttribute('aria-activedescendant')
+    }
+    return () => root.removeAttribute('aria-activedescendant')
+  }, [editor, match, optionCount, portalHost, selectedIndex])
 
   if (!match || !portalHost) return null
   return createPortal(renderMenu({ selectedIndex, setHighlightedIndex: setSelectedIndex, selectIndex }), portalHost)

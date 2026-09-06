@@ -358,7 +358,8 @@ try {
 function startCore(dataDirectory) {
   const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
     ...coreDataDirectoryArguments(dataDirectory),
-    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library'),
+    '--mcp-config-path', join(dataDirectory, 'mcp.json')
   ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe'],

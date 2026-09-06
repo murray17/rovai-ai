@@ -13,6 +13,7 @@ import type {
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { NavigationIcon } from './NavigationIcon'
+import { DialogControlIcon } from './AppDialog'
 
 type CreateCampDraft = Omit<CreateCampRequest, 'commandId' | 'activationState'>
 type WorkspaceChoice = WorkspaceSelection | WorkspaceInspection
@@ -197,346 +198,122 @@ export function NewConversationDialog({
   const gitPresentation = workspaceGitPresentation(workspace, gitInspectionStatus)
 
   return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!busy) onOpenChange(nextOpen)
-      }}
-    >
+    <Dialog.Root open={open} onOpenChange={(nextOpen) => { if (!busy) onOpenChange(nextOpen) }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay new-camp-dialog-overlay" />
         <Dialog.Content
-          className="new-camp-dialog"
+          className="new-camp-dialog compact-dialog"
           aria-describedby="new-camp-dialog-description"
           onOpenAutoFocus={(event) => {
             event.preventDefault()
-            const focusTarget = projectAccessReady
-              ? projectTriggerRef.current
-              : closeButtonRef.current
-            focusTarget?.focus()
+            const target = projectAccessReady ? projectTriggerRef.current : closeButtonRef.current
+            target?.focus()
           }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            returnFocusElement?.focus()
-          }}
-          onEscapeKeyDown={(event) => {
-            if (busy) event.preventDefault()
-          }}
+          onCloseAutoFocus={(event) => { event.preventDefault(); returnFocusElement?.focus() }}
+          onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }}
         >
-          <form className="new-camp-dialog-layout" onSubmit={(event) => void submit(event)}>
-            <header className="new-camp-dialog-header">
-              <span className="new-camp-dialog-header-icon" aria-hidden="true">
-                <svg viewBox="0 0 20 20">
-                  <path d="M10 3v14M3 10h14" />
-                </svg>
-              </span>
-              <div className="new-camp-dialog-header-copy">
-                <span className="new-camp-eyebrow"><i />NEW CAMP</span>
-                <Dialog.Title>创建新对话</Dialog.Title>
-                <Dialog.Description id="new-camp-dialog-description">
-                  确定这段对话的工作环境与队员。
-                </Dialog.Description>
+          <header className="compact-header">
+            <Dialog.Title>创建新对话</Dialog.Title>
+            <Dialog.Close asChild><button ref={closeButtonRef} className="compact-close" type="button" aria-label="关闭创建新对话" disabled={busy}><DialogControlIcon name="close" /></button></Dialog.Close>
+          </header>
+          <Dialog.Description id="new-camp-dialog-description" className="sr-only">选择工作目录、队员与负责人。对话名称可选。</Dialog.Description>
+          <form className="compact-form" onSubmit={(event) => void submit(event)}>
+            <div className="compact-body camp-fields">
+              {attentionMessage && <p className="compact-inline-note" role="status">{attentionMessage}</p>}
+              <div className="compact-row">
+                <span id="new-camp-workspace-label">工作目录</span>
+                <DropdownMenu.Root open={projectMenuOpen} onOpenChange={setProjectMenuOpen}>
+                  <DropdownMenu.Trigger asChild>
+                    <button ref={projectTriggerRef} className="compact-picker new-camp-picker-trigger" type="button" aria-labelledby="new-camp-workspace-label new-camp-workspace-value" aria-busy={!projectAccessReady} disabled={projectActionsDisabled}>
+                      <WorkspaceIcon kind={workspace ? 'project' : 'quick-chat'} /><span id="new-camp-workspace-value">{projectLabel}</span><DialogControlIcon name="chevron" />
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content className="compact-menu workspace-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择工作目录" loop>
+                      <DropdownMenu.RadioGroup value={workspace?.projectPath ?? ''}>
+                        <DropdownMenu.RadioItem className="compact-option" value="" disabled={projectActionsDisabled} onSelect={() => { setWorkspace(null); setProjectMenuOpen(false) }}>
+                          <WorkspaceIcon kind="quick-chat" /><span>使用快速对话<small>由 Rovai AI 管理工作目录</small></span><DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator>
+                        </DropdownMenu.RadioItem>
+                        <DropdownMenu.Separator className="compact-separator" />
+                        {projects.map((project) => <DropdownMenu.RadioItem key={project.projectKey} className="compact-option" value={project.projectPath} disabled={projectActionsDisabled} onSelect={() => selectKnownWorkspace(project)}>
+                          <WorkspaceIcon kind="project" /><span>{project.name}<small>{project.projectPath}</small></span><DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator>
+                        </DropdownMenu.RadioItem>)}
+                      </DropdownMenu.RadioGroup>
+                      <DropdownMenu.Separator className="compact-separator" />
+                      <DropdownMenu.Item className="compact-option" disabled={projectActionsDisabled} onSelect={() => void chooseWorkspaceDirectory()}><DialogControlIcon name="plus" /><span>选择工作目录…</span></DropdownMenu.Item>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
               </div>
-              <Dialog.Close asChild>
-                <button ref={closeButtonRef} className="dialog-close" type="button" aria-label="关闭创建新对话" disabled={busy}>×</button>
-              </Dialog.Close>
-            </header>
-
-            <div className="new-camp-dialog-body">
-              {attentionMessage && <p className="new-camp-attention" role="status">{attentionMessage}</p>}
-              <section className="new-camp-section">
-                <SectionHeading step="01" title="工作目录" optional detail="选择任意安全、可读目录；不选择则创建在快速对话。" />
-                <div className="new-camp-picker">
-                  <button
-                    ref={projectTriggerRef}
-                    className="new-camp-picker-trigger"
-                    type="button"
-                    aria-haspopup="listbox"
-                    aria-expanded={projectMenuOpen}
-                    aria-busy={!projectAccessReady}
-                    disabled={projectActionsDisabled}
-                    onClick={() => setProjectMenuOpen((current) => !current)}
-                  >
-                    <span className="new-camp-picker-icon" aria-hidden="true">
-                      <WorkspaceIcon kind={workspace ? 'project' : 'quick-chat'} />
-                    </span>
-                    <span><strong>{projectLabel}</strong><small>{projectDetail}</small></span>
-                    {gitPresentation.kind === 'metadata' && (
-                      <span className="new-camp-git-metadata" title={gitPresentation.label}>
-                        {gitPresentation.label}
-                      </span>
-                    )}
-                    {gitPresentation.kind === 'loading' && (
-                      <span className="new-camp-git-loading">
-                        <i aria-hidden="true" />{gitPresentation.label}
-                      </span>
-                    )}
-                    <DropdownChevron />
-                  </button>
-                  {projectMenuOpen && (
-                    <div className="new-camp-picker-menu" role="listbox" aria-label="选择工作目录">
-                      <ProjectOption
-                        label="使用快速对话"
-                        detail="Rovai AI 管理的快速对话目录"
-                        kind="quick-chat"
-                        selected={workspace === null}
-                        disabled={projectActionsDisabled}
-                        onSelect={() => {
-                          setWorkspace(null)
-                          setProjectMenuOpen(false)
-                        }}
-                      />
-                      {projects.map((candidate) => {
-                        return (
-                          <ProjectOption
-                            key={candidate.projectKey}
-                            label={candidate.name}
-                            detail={candidate.projectPath}
-                            kind="project"
-                            selected={workspace?.projectPath === candidate.projectPath}
-                            disabled={projectActionsDisabled}
-                            onSelect={() => selectKnownWorkspace(candidate)}
-                          />
-                        )
+              {workspace && <div className="compact-row-detail"><span title={projectDetail}>{projectDetail}</span>{gitPresentation.kind === 'metadata' && <span className="compact-git">{gitPresentation.label}</span>}{gitPresentation.kind === 'loading' && <span role="status">{gitPresentation.label}</span>}</div>}
+              {gitPresentation.kind === 'warning' && <div className="new-camp-workspace-warning" role="alert"><div><strong>{gitPresentation.label}</strong><span>{gitPresentation.detail}</span></div></div>}
+              <div className="compact-row">
+                <span id="new-camp-members-label">队员</span>
+                <DropdownMenu.Root open={memberMenuOpen} onOpenChange={setMemberMenuOpen}>
+                  <DropdownMenu.Trigger asChild>
+                    <button className="compact-picker member-trigger" type="button" aria-labelledby="new-camp-members-label new-camp-members-value" disabled={busy || !preflight.presentMembers.length}>
+                      <span className="compact-avatar-stack">{selectedMembers.slice(0, 3).map((member) => <MemberAvatar key={member.agentId} agentId={member.agentId} avatarRef={profileById.get(member.agentId)?.avatarRef ?? null} displayName={member.displayName} size="mention" decorative />)}</span>
+                      <span id="new-camp-members-value">{selectedMembers.length ? `${selectedMembers.length} 位队员` : '暂无队员'}</span><DialogControlIcon name="chevron" />
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content className="compact-menu roster-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择队员" loop>
+                      <div className="compact-menu-heading"><span>参与本次对话</span><button type="button" disabled={busy || selectedMembers.length === preflight.presentMembers.length} onClick={() => { setSelectedMemberIds(preflight.presentMembers.map((member) => member.agentId)); setMemberError(null) }}>全选</button></div>
+                      {preflight.presentMembers.map((member) => {
+                        const profile = profileById.get(member.agentId)
+                        return <DropdownMenu.CheckboxItem className="compact-option" key={member.agentId} checked={selectedMemberIds.includes(member.agentId)} disabled={busy} onCheckedChange={() => toggleMember(member.agentId)} onSelect={(event) => event.preventDefault()}>
+                          <MemberAvatar agentId={member.agentId} avatarRef={profile?.avatarRef ?? null} displayName={member.displayName} size="mention" decorative />
+                          <span>{member.displayName}<small>{profile?.teamRole || '队员'}</small></span>
+                          {member.runtimeReadiness !== 'ready' && <small className="compact-unavailable">{readinessLabel(member.runtimeReadiness)}</small>}
+                          <span className="compact-checkbox"><DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator></span>
+                        </DropdownMenu.CheckboxItem>
                       })}
-                      <button className="new-camp-project-option choose-local" type="button" role="option" aria-selected="false" disabled={projectActionsDisabled} onClick={() => void chooseWorkspaceDirectory()}>
-                        <span aria-hidden="true">＋</span><span><strong>选择工作目录…</strong><small>普通目录与 Git worktree 均可</small></span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {gitPresentation.kind === 'warning' && (
-                  <div className="new-camp-workspace-warning" role="alert">
-                    <svg viewBox="0 0 20 20" aria-hidden="true">
-                      <path d="M10 2.8 18 17H2L10 2.8Z" />
-                      <path d="M10 7.2v4.7M10 14.5h.01" />
-                    </svg>
-                    <div>
-                      <strong>{gitPresentation.label}</strong>
-                      <span>{gitPresentation.detail}</span>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              <section className="new-camp-section">
-                <SectionHeading
-                  step="02"
-                  title="队员与负责人"
-                  suffix={`已选 ${selectedMembers.length} / ${preflight.presentMembers.length}`}
-                  detail="默认选择全部在队的队员；结构选择不会改变队员的长期配置。"
-                />
-                {preflight.presentMembers.length === 0
-                  ? (
-                      <div className="new-camp-empty-members" role="alert">
-                        当前没有在队的队员，请先前往队员页调整队员状态。
-                      </div>
-                    )
-                  : (
-                      <>
-                        <div className="new-camp-picker">
-                          <button
-                            className="new-camp-picker-trigger member-trigger"
-                            type="button"
-                            aria-haspopup="listbox"
-                            aria-expanded={memberMenuOpen}
-                            disabled={busy}
-                            onClick={() => setMemberMenuOpen((current) => !current)}
-                          >
-                            <span className="new-camp-member-stack" aria-hidden="true">
-                              {selectedMembers.slice(0, 4).map((member) => {
-                                const profile = profileById.get(member.agentId)
-                                return profile
-                                  ? <MemberAvatar key={profile.agentId} agentId={profile.agentId} avatarRef={profile.avatarRef} displayName={profile.displayName} size="mention" decorative />
-                                  : null
-                              })}
-                            </span>
-                            <span><strong>已选择 {selectedMembers.length} 位队员</strong><small>{selectedMembers.map((member) => member.displayName).join('、')}</small></span>
-                            <DropdownChevron />
-                          </button>
-                          {memberMenuOpen && (
-                            <div className="new-camp-picker-menu member-menu" role="listbox" aria-label="选择队员" aria-multiselectable="true">
-                              <div className="new-camp-member-toolbar">
-                                <span>本次会话队员</span>
-                                <button
-                                  type="button"
-                                  disabled={busy || selectedMembers.length === preflight.presentMembers.length}
-                                  onClick={() => {
-                                    setSelectedMemberIds(preflight.presentMembers.map((member) => member.agentId))
-                                    setMemberError(null)
-                                  }}
-                                >全选</button>
-                              </div>
-                              {preflight.presentMembers.map((member) => {
-                                const profile = profileById.get(member.agentId)
-                                const selected = selectedMemberIds.includes(member.agentId)
-                                return (
-                                  <label className={`new-camp-member-option ${selected ? '' : 'unselected'}`} key={member.agentId}>
-                                    <input type="checkbox" checked={selected} disabled={busy} onChange={() => toggleMember(member.agentId)} />
-                                    {profile && <MemberAvatar agentId={profile.agentId} avatarRef={profile.avatarRef} displayName={profile.displayName} size="list" decorative />}
-                                    <span className="new-camp-member-copy">
-                                      <strong>{member.displayName}<small>{profile?.teamRole || '队员'}</small></strong>
-                                      <small>{runtimeDetail(profile)}</small>
-                                    </span>
-                                    <RuntimeReadiness status={member.runtimeReadiness} />
-                                  </label>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
-                        {memberError && <p className="new-camp-field-error" role="alert">{memberError}</p>}
-                        <div className="new-camp-lead-field">
-                          <span>负责人</span>
-                          <DropdownMenu.Root>
-                            <DropdownMenu.Trigger asChild>
-                              <button
-                                className="new-camp-lead-trigger"
-                                type="button"
-                                disabled={busy || !lead}
-                                aria-label={lead
-                                  ? `当前负责人：${lead.displayName}，${readinessLabel(lead.runtimeReadiness)}；选择负责人`
-                                  : '选择负责人'}
-                              >
-                                {lead && (
-                                  <MemberAvatar
-                                    agentId={lead.agentId}
-                                    avatarRef={leadProfile?.avatarRef ?? null}
-                                    displayName={lead.displayName}
-                                    size="list"
-                                    decorative
-                                  />
-                                )}
-                                <span className="new-camp-lead-copy">
-                                  <strong>{lead?.displayName ?? '未设置'}</strong>
-                                  <small>{leadProfile?.teamRole || '队员'}</small>
-                                </span>
-                                {lead && <RuntimeReadiness status={lead.runtimeReadiness} />}
-                                <DropdownChevron />
-                              </button>
-                            </DropdownMenu.Trigger>
-                            <DropdownMenu.Portal>
-                              <DropdownMenu.Content
-                                className="new-camp-lead-menu"
-                                align="start"
-                                sideOffset={6}
-                                collisionPadding={12}
-                                aria-label="选择负责人"
-                                loop
-                              >
-                                <DropdownMenu.Label className="new-camp-lead-menu-label">
-                                  从已选队员中选择
-                                </DropdownMenu.Label>
-                                <DropdownMenu.RadioGroup value={leadId} onValueChange={setLeadId}>
-                                  {selectedMembers.map((member) => {
-                                    const profile = profileById.get(member.agentId)
-                                    return (
-                                      <DropdownMenu.RadioItem
-                                        className="new-camp-lead-option"
-                                        value={member.agentId}
-                                        key={member.agentId}
-                                        disabled={busy}
-                                        aria-label={`${member.displayName}，${readinessLabel(member.runtimeReadiness)}`}
-                                      >
-                                        <MemberAvatar
-                                          agentId={member.agentId}
-                                          avatarRef={profile?.avatarRef ?? null}
-                                          displayName={member.displayName}
-                                          size="list"
-                                          decorative
-                                        />
-                                        <span className="new-camp-lead-copy">
-                                          <strong>{member.displayName}</strong>
-                                          <small>{profile?.teamRole || '队员'}</small>
-                                        </span>
-                                        <RuntimeReadiness status={member.runtimeReadiness} />
-                                        <span className="new-camp-lead-check" aria-hidden="true">
-                                          <DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator>
-                                        </span>
-                                      </DropdownMenu.RadioItem>
-                                    )
-                                  })}
-                                </DropdownMenu.RadioGroup>
-                              </DropdownMenu.Content>
-                            </DropdownMenu.Portal>
-                          </DropdownMenu.Root>
-                        </div>
-                      </>
-                    )}
-              </section>
-
-              <section className="new-camp-section optional-section">
-                <div className="new-camp-optional-shell">
-                  <button
-                    className="new-camp-optional-trigger"
-                    type="button"
-                    aria-expanded={optionalOpen}
-                    aria-controls="new-camp-optional-panel"
-                    disabled={busy}
-                    onClick={() => {
-                      setOptionalOpen((current) => !current)
-                    }}
-                  >
-                    <span className="new-camp-optional-icon" aria-hidden="true">
-                      <svg viewBox="0 0 18 18">
-                        <path d="M4 4.5h2M8 4.5h6M4 9h2M8 9h6M4 13.5h2M8 13.5h6" />
-                      </svg>
-                    </span>
-                    <span><strong>可选配置</strong><small>补充对话名称，不影响上面的结构配置。</small></span>
-                    <em>{normalizedName || '未设置'}</em>
-                    <DropdownChevron />
-                  </button>
-                  {optionalOpen && (
-                    <div className="new-camp-optional-panel" id="new-camp-optional-panel">
-                      <div className="new-camp-name-heading">
-                        <label htmlFor="new-camp-name">对话名称 <span>· 非必填</span></label>
-                        <span>{nameLength} / 80</span>
-                      </div>
-                      <div className="new-camp-name-input-shell">
-                        <input
-                          ref={nameInputRef}
-                          id="new-camp-name"
-                          value={name}
-                          disabled={busy}
-                          aria-invalid={Boolean(nameError)}
-                          aria-describedby={nameError ? 'new-camp-name-error' : 'new-camp-name-hint'}
-                          onChange={(event) => setName(limitDraftNameInput(event.target.value))}
-                          placeholder="输入名称..."
-                          autoComplete="off"
-                        />
-                        {name.length > 0 && (
-                          <button
-                            type="button"
-                            aria-label="清空对话名称"
-                            disabled={busy}
-                            onClick={() => {
-                              setName('')
-                              nameInputRef.current?.focus()
-                            }}
-                          >×</button>
-                        )}
-                      </div>
-                      {nameError
-                        ? <small className="new-camp-field-error" id="new-camp-name-error" role="alert">{nameError}</small>
-                        : <small id="new-camp-name-hint">留空将创建为「未命名对话」。</small>}
-                    </div>
-                  )}
-                </div>
-              </section>
+                      {memberError && <div role="alert" className="compact-menu-error">{memberError}</div>}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+              </div>
+              {!preflight.presentMembers.length && <p className="compact-inline-error" role="alert">当前没有在队的队员，请先前往队员页调整队员状态。</p>}
+              {selectedMembers.some((member) => member.runtimeReadiness !== 'ready') && <p className="compact-inline-note">{selectedMembers.filter((member) => member.runtimeReadiness !== 'ready').length} 位队员的 Agent 运行时尚未就绪</p>}
+              <div className="compact-row">
+                <span id="new-camp-lead-label">负责人</span>
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild>
+                    <button className="compact-picker" type="button" aria-labelledby="new-camp-lead-label new-camp-lead-value" disabled={busy || !lead}>
+                      {lead && <MemberAvatar agentId={lead.agentId} avatarRef={leadProfile?.avatarRef ?? null} displayName={lead.displayName} size="mention" decorative />}
+                      <span id="new-camp-lead-value">{lead?.displayName ?? '未设置'}</span>{lead && lead.runtimeReadiness !== 'ready' && <small className="compact-unavailable">{readinessLabel(lead.runtimeReadiness)}</small>}<DialogControlIcon name="chevron" />
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content className="compact-menu roster-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择负责人" loop>
+                      <DropdownMenu.Label className="compact-menu-heading">从已选队员中选择</DropdownMenu.Label>
+                      <DropdownMenu.RadioGroup value={leadId} onValueChange={setLeadId}>
+                        {selectedMembers.map((member) => {
+                          const profile = profileById.get(member.agentId)
+                          return <DropdownMenu.RadioItem className="compact-option" value={member.agentId} key={member.agentId} disabled={busy}>
+                            <MemberAvatar agentId={member.agentId} avatarRef={profile?.avatarRef ?? null} displayName={member.displayName} size="mention" decorative />
+                            <span>{member.displayName}<small>{profile?.teamRole || '队员'}</small></span><small className={member.runtimeReadiness === 'ready' ? 'compact-ready' : 'compact-unavailable'}>{readinessLabel(member.runtimeReadiness)}</small><DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator>
+                          </DropdownMenu.RadioItem>
+                        })}
+                      </DropdownMenu.RadioGroup>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+              </div>
+              <div className="compact-name-disclosure">
+                <button className="compact-text-button" type="button" aria-expanded={optionalOpen} aria-controls="new-camp-optional-panel" disabled={busy} onClick={() => setOptionalOpen((current) => !current)}><DialogControlIcon name={optionalOpen ? 'chevron' : 'plus'} />{optionalOpen ? '对话名称' : normalizedName ? `对话名称：${normalizedName}` : '添加对话名称'}<span>可选</span></button>
+                {optionalOpen && <div className="compact-name-field" id="new-camp-optional-panel">
+                  <label className="sr-only" htmlFor="new-camp-name">对话名称</label>
+                  <input ref={nameInputRef} id="new-camp-name" value={name} disabled={busy} aria-invalid={Boolean(nameError)} aria-describedby="new-camp-name-hint" onChange={(event) => setName(limitDraftNameInput(event.target.value))} placeholder="输入名称..." autoComplete="off" />
+                  <div className="compact-field-meta"><span id="new-camp-name-hint">留空为「未命名对话」</span><span>{nameLength} / 80</span></div>
+                  {nameError && <small className="compact-field-error" role="alert">{nameError}</small>}
+                </div>}
+              </div>
+              {submitError && <p className="compact-inline-error" role="alert">{submitError}</p>}
             </div>
-
-            <footer className="new-camp-dialog-footer">
-              <div>
-                <span>{workspace?.name ?? '快速对话'} · <strong>{selectedMembers.length} 位队员</strong></span>
-                {lead && <span> · 负责人：{lead.displayName}</span>}
-                {submitError && <p role="alert">{submitError}</p>}
-              </div>
-              <div>
-                <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close>
-                <button className="primary-button" type="submit" disabled={busy || projectSubmissionBlocked || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>
-                  {busy ? '正在创建…' : '创建'}
-                </button>
-              </div>
+            <footer className="compact-footer">
+              <Dialog.Close asChild><button className="compact-cancel" type="button" disabled={busy}>取消</button></Dialog.Close>
+              <button className="compact-primary" type="submit" disabled={busy || projectSubmissionBlocked || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>{busy ? '正在新建…' : '新建'}</button>
             </footer>
           </form>
         </Dialog.Content>
@@ -567,45 +344,6 @@ export function workspaceSubmissionBlocked(
   return workspace !== null && !projectAccessReady
 }
 
-function SectionHeading({ step, title, detail, optional = false, suffix }: {
-  step: string
-  title: string
-  detail: string
-  optional?: boolean
-  suffix?: string
-}): React.JSX.Element {
-  return (
-    <div className="new-camp-section-heading">
-      <span>{step}</span>
-      <div><strong>{title}{optional && <em> · 可选</em>}{suffix && <em> · {suffix}</em>}</strong><small>{detail}</small></div>
-    </div>
-  )
-}
-
-function DropdownChevron(): React.JSX.Element {
-  return (
-    <svg className="new-camp-chevron" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="m4.25 6.25 3.75 3.5 3.75-3.5" />
-    </svg>
-  )
-}
-
-function ProjectOption({ label, detail, kind, selected, disabled, onSelect }: {
-  label: string
-  detail: string
-  kind: 'quick-chat' | 'project'
-  selected: boolean
-  disabled: boolean
-  onSelect(): void
-}): React.JSX.Element {
-  return (
-    <button className={`new-camp-project-option ${selected ? 'selected' : ''}`} type="button" role="option" aria-selected={selected} disabled={disabled} onClick={onSelect}>
-      <span className="new-camp-project-option-icon" aria-hidden="true"><WorkspaceIcon kind={kind} /></span>
-      <span><strong>{label}</strong><small>{detail}</small></span><b aria-hidden="true">✓</b>
-    </button>
-  )
-}
-
 function WorkspaceIcon({ kind }: { kind: 'quick-chat' | 'project' }): React.JSX.Element {
   if (kind === 'quick-chat') return <NavigationIcon name="square-pen" />
   return (
@@ -616,15 +354,6 @@ function WorkspaceIcon({ kind }: { kind: 'quick-chat' | 'project' }): React.JSX.
   )
 }
 
-function RuntimeReadiness({ status }: {
-  status: CampCreationPreflight['presentMembers'][number]['runtimeReadiness']
-}): React.JSX.Element {
-  const tone = status === 'ready' || status === 'light_ready'
-    ? 'ready'
-    : 'attention'
-  return <span className={`new-camp-runtime-status ${tone}`}><i />{readinessLabel(status)}</span>
-}
-
 function readinessLabel(status: CampCreationPreflight['presentMembers'][number]['runtimeReadiness']): string {
   return status === 'ready' || status === 'light_ready'
     ? '可用'
@@ -633,11 +362,6 @@ function readinessLabel(status: CampCreationPreflight['presentMembers'][number][
       : status === 'runtime_not_configured'
         ? '未配置'
         : '不可用'
-}
-
-function runtimeDetail(profile: AgentProfile | undefined): string {
-  if (!profile?.runtimeConfiguration) return '尚未完成运行配置'
-  return `${profile.runtimeConfiguration.adapterKind} · ${readinessLabel(profile.runtimeReadiness.status)}`
 }
 
 export type WorkspaceGitPresentation =

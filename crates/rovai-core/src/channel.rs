@@ -1259,6 +1259,9 @@ impl ChannelService {
                 }
             }
         }
+        if state != "terminal_sealed" {
+            crate::execution_text::overlay(database, &mut snapshot.evidence)?;
+        }
         Ok(Some(ChannelExecutionConsoleSourceView {
             sequence,
             agent_run_id,
@@ -1498,6 +1501,7 @@ impl ChannelService {
                 .context("execution console data directory missing")?,
         );
         for run in &mut runs {
+            crate::execution_text::overlay(database, &mut run.evidence)?;
             for evidence in &mut run.evidence {
                 if let Some(blob_id) = &evidence.content_blob_id {
                     let bytes = blob_store.read_bytes(database, blob_id)?;
@@ -6216,6 +6220,8 @@ impl ChannelService {
         }
         let provider = channel_host_provider(actor)
             .context("Channel Host actor does not identify a supported provider")?;
+        // Sealed cards must capture settled text, not the streaming position placeholder.
+        crate::execution_text::flush_settled(database)?;
         // Even an empty response can expire, settle or admit work. Keep all
         // maintenance and delivery claims atomic, but never journal the poll.
         let mut settled_run_ids = Vec::new();

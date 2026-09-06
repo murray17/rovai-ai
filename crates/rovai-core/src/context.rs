@@ -6979,7 +6979,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn current_input_skill_links_are_direct_user_siblings_with_canonical_bytes() {
+    fn resolved_skill_links_are_payload_siblings_with_canonical_bytes() {
         let direct = CurrentInput {
             id: "message-1".to_string(),
             payload: json!({
@@ -7006,13 +7006,14 @@ mod slow_tests {
         );
         assert!(direct.as_payload(&[], &[]).get("skills").is_none());
 
-        let member_call = CurrentInput {
+        // Resolution owns eligibility; a direct Single Chat input can also carry resolved links.
+        let single_chat = CurrentInput {
             source_camp_message_id: None,
             source_conversation_message_id: Some("conversation-message-1".to_string()),
             ..direct
         };
-        assert!(
-            member_call
+        assert_eq!(
+            single_chat
                 .as_payload(
                     &[],
                     &[CurrentInputSkillLink {
@@ -7020,9 +7021,10 @@ mod slow_tests {
                         path: "/repo/.codex/skills/review-pr/SKILL.md".to_string(),
                     }]
                 )
-                .get("skills")
-                .is_none()
+                .get("skills"),
+            payload.get("skills")
         );
+        assert!(single_chat.as_payload(&[], &[]).get("skills").is_none());
     }
 
     #[test]
@@ -13022,8 +13024,7 @@ mod slow_tests {
                         camp_id: fixture.camp_id.clone(),
                         conversation_id,
                         body: "只检查当前单聊输入".to_string(),
-                        attachment_ids: Vec::new(),
-                        expected_conversation_version: 1,
+                        draft_revision: 0,
                     },
                 },
             )

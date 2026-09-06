@@ -161,16 +161,8 @@ function Harness() {
             clipboardData
           }))
         },
-        async copyAll() {
+        copySelection() {
           const element = editor()
-          element.focus()
-          const range = document.createRange()
-          range.selectNodeContents(element)
-          const selection = window.getSelection()
-          selection?.removeAllRanges()
-          selection?.addRange(range)
-          document.dispatchEvent(new Event('selectionchange'))
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
           const clipboardData = new DataTransfer()
           element.dispatchEvent(new ClipboardEvent('copy', {
             bubbles: true,
@@ -224,6 +216,13 @@ function Harness() {
             options: options
               .map((option) => option.dataset.skillName ?? option.innerText),
             activeOption: selected?.dataset.skillName ?? selected?.innerText ?? null,
+            activeDescendantMatches: Boolean(selected?.id)
+              && element.getAttribute('aria-activedescendant') === selected?.id,
+            activeVisible: Boolean(selected && menu
+              && selected.getBoundingClientRect().top >= menu.getBoundingClientRect().top
+              && selected.getBoundingClientRect().bottom <= menu.getBoundingClientRect().bottom),
+            menuOverflows: Boolean(menu && menu.scrollHeight > menu.clientHeight),
+            menuScrollTop: menu?.scrollTop ?? 0,
             localVersion: composerRef.current?.getLocalVersion() ?? -1,
             dirty,
             localStatus,

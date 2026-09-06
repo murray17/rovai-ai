@@ -51,6 +51,7 @@ pub struct V2RecoverySummary {
 }
 
 pub struct Database {
+    pub(crate) execution_text: crate::execution_text::ExecutionTextBuffer,
     connection: Connection,
     path: PathBuf,
     runtime_camp_files_root: PathBuf,
@@ -208,8 +209,14 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.50";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 91;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.53";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 94;
+const V143_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
+const V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 93;
+const V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
+const V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 92;
+const V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.50";
+const V141_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 91;
 const V140_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.49";
 const V140_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 90;
 const V139_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.48";
@@ -502,6 +509,7 @@ const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.52";
 const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 const V116_CLASSIFIER_VERSION: &str = "activity-v2";
+const V142_CLASSIFIER_VERSION: &str = "activity-v3";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DatabaseContractMarker {
@@ -610,6 +618,9 @@ struct CurrentMigrationState {
     v138: bool,
     v139: bool,
     v140: bool,
+    v141: bool,
+    v142: bool,
+    v143: bool,
 }
 
 impl CurrentMigrationState {
@@ -687,9 +698,29 @@ impl CurrentMigrationState {
         {
             return false;
         }
-        if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
-        {
-            return self.v140
+        let current = contract == CURRENT_DATA_CONTRACT_VERSION
+            && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            && classifier == V142_CLASSIFIER_VERSION
+            && self.v142
+            && self.v143;
+        let evidence_compaction_source = contract == V143_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            && classifier == V142_CLASSIFIER_VERSION
+            && self.v142
+            && !self.v143;
+        let image_source = contract == V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            && classifier == V116_CLASSIFIER_VERSION
+            && !self.v142
+            && !self.v143;
+        let deployed_tool_source = contract == "v1.52"
+            && schema == 92
+            && classifier == V142_CLASSIFIER_VERSION
+            && !self.v142
+            && !self.v143;
+        if current || evidence_compaction_source || image_source || deployed_tool_source {
+            return self.v141
+                && self.v140
                 && self.v139
                 && self.v138
                 && self.v137
@@ -704,7 +735,31 @@ impl CurrentMigrationState {
                 && self.v129
                 && self.v130
                 && self.v131
-                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+                && self.admits_channel_v125(true, through_v113);
+        }
+        if self.v141 || self.v142 || self.v143 {
+            return false;
+        }
+        if contract == V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V141_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && self.v140
+                && self.v139
+                && self.v138
+                && self.v137
+                && self.v136
+                && self.v135
+                && self.v134
+                && self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(true, through_v113);
         }
         if self.v140 {
             return false;
@@ -2542,6 +2597,9 @@ pub(crate) fn classify_database_contract(
         return Ok(DatabaseContractClassification::Unknown(None));
     };
     let migrations = load_current_migration_state(connection)?;
+    let deployed_tool_source = marker.contract_version == "v1.52"
+        && marker.projection_schema_version == 92
+        && marker.classifier_version == V142_CLASSIFIER_VERSION;
     if !migrations.admits(
         &marker.contract_version,
         marker.projection_schema_version,
@@ -2552,6 +2610,12 @@ pub(crate) fn classify_database_contract(
         || (migrations.v138 && !pi_native_input_v138_schema_matches(connection)?)
         || (migrations.v139 && !pi_native_execution_v139_schema_matches(connection)?)
         || (migrations.v140 && !single_chat_v140_schema_matches(connection)?)
+        || (migrations.v141
+            && if deployed_tool_source {
+                !deployed_tool_v141_image_schema_matches(connection)?
+            } else {
+                !runtime_image_v141_schema_matches(connection)?
+            })
     {
         if connection_has_legacy_feishu_migration_collision(connection)?
             || main_camp_migration_collision(connection)?.is_some()
@@ -2564,7 +2628,7 @@ pub(crate) fn classify_database_contract(
     }
     if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
         && marker.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION
-        && marker.classifier_version == V116_CLASSIFIER_VERSION
+        && marker.classifier_version == V142_CLASSIFIER_VERSION
     {
         Ok(DatabaseContractClassification::Current(marker))
     } else {
@@ -2827,6 +2891,72 @@ fn single_chat_v140_schema_matches(connection: &Connection) -> rusqlite::Result<
         && agent_run_sql.contains("destination_conversation_id"))
 }
 
+fn runtime_image_v141_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    let column_exists: bool = connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM pragma_table_info('agent_run_image')
+            WHERE name = 'public_display_source' AND type = 'TEXT'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    let schema = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_image'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(column_exists
+        && schema.is_some_and(|schema| {
+            let schema = schema.split_whitespace().collect::<Vec<_>>().join(" ");
+            schema.contains(
+                "public_display_source TEXT CHECK( public_display_source IS NULL OR \
+                 public_display_source IN ( 'codex_native_image_generation', \
+                 'antigravity_native_generate_image' ) )",
+            )
+        }))
+}
+
+fn deployed_tool_v141_image_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    // The deployed classifier-only migration changed no image schema. Reject a
+    // partially added provenance column or unexpected/future receipts, not just
+    // a lookalike version marker. Lower schema fingerprints are checked above.
+    let columns_and_receipts: bool = connection.query_row(
+        "SELECT (SELECT max(version) FROM schema_migration) = 141
+             AND (SELECT count(*) FROM pragma_table_info('agent_run_image')) = 12
+             AND NOT EXISTS(SELECT 1 FROM pragma_table_info('agent_run_image')
+                            WHERE name = 'public_display_source')
+             AND (SELECT count(*) FROM pragma_table_info('agent_run_image')
+                  WHERE (name IN ('id','agent_run_id','tool_call_id','source_key','source_path',
+                                  'content_blob_id','display_name','media_type','created_at') AND type='TEXT')
+                     OR (name IN ('execution_epoch','byte_size','ordinal') AND type='INTEGER')) = 12",
+        [], |row| row.get(0),
+    )?;
+    let actual: Option<String> = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_run_image'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let expected = "CREATE TABLE agent_run_image (
+        id TEXT PRIMARY KEY,
+        agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+        execution_epoch INTEGER NOT NULL, tool_call_id TEXT NOT NULL, source_key TEXT NOT NULL,
+        source_path TEXT, content_blob_id TEXT REFERENCES managed_blob(id),
+        display_name TEXT NOT NULL, media_type TEXT NOT NULL,
+        byte_size INTEGER NOT NULL CHECK(byte_size > 0 AND byte_size <= 20971520),
+        ordinal INTEGER NOT NULL CHECK(ordinal >= 0), created_at TEXT NOT NULL,
+        CHECK((source_path IS NOT NULL) != (content_blob_id IS NOT NULL)),
+        UNIQUE(agent_run_id, execution_epoch, tool_call_id, source_key))";
+    Ok(columns_and_receipts
+        && actual.is_some_and(|sql| {
+            sql.split_whitespace().collect::<String>()
+                == expected.split_whitespace().collect::<String>()
+        }))
+}
+
 #[cfg(test)]
 fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     if !connection_has_admissible_data_contract(connection)? {
@@ -2837,14 +2967,14 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 143)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
         params![
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
-            V116_CLASSIFIER_VERSION,
+            V142_CLASSIFIER_VERSION,
         ],
         |row| row.get(0),
     )
@@ -2925,7 +3055,10 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 137),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 138),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 139),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 140),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 141),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 142),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 143)
         "#,
         [],
         |row| {
@@ -3001,6 +3134,9 @@ fn load_current_migration_state(
                 v138: row.get(68)?,
                 v139: row.get(69)?,
                 v140: row.get(70)?,
+                v141: row.get(71)?,
+                v142: row.get(72)?,
+                v143: row.get(73)?,
             })
         },
     )
@@ -4159,6 +4295,35 @@ fn remove_generated_sqlite_sidecars(path: &Path) {
 }
 
 impl Database {
+    /// Offline acceptance only: no admission, migrations, recovery, seeds or workers.
+    /// The SQLite connection itself is read-only, including all nested Read Side calls.
+    #[cfg(feature = "slow-tests")]
+    pub fn open_read_only_measurement(path: &Path) -> Result<Self> {
+        anyhow::ensure!(
+            path.is_absolute() && path.is_file(),
+            "measurement requires an existing absolute database path"
+        );
+        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        crate::monitoring::register_monitoring_sql_functions(&connection)?;
+        let runtime_camp_files_root = path
+            .parent()
+            .context("database parent")?
+            .join("runtime-files");
+        register_runtime_camp_files_functions(
+            &connection,
+            &runtime_camp_files_root,
+            "offline-read-only",
+        )?;
+        connection.execute_batch("PRAGMA query_only = ON")?;
+        Ok(Self {
+            execution_text: Default::default(),
+            connection,
+            path: path.into(),
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest: "offline-read-only".into(),
+        })
+    }
+
     pub fn open_admitted(
         ticket: ExistingAuthorityTicket<'_>,
     ) -> std::result::Result<Self, DatabaseOpenError> {
@@ -4242,6 +4407,7 @@ impl Database {
         open.revalidate()?;
         configure_runtime_connection(&connection, &path)?;
         let mut database = Self {
+            execution_text: Default::default(),
             connection,
             path,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4365,6 +4531,7 @@ impl Database {
                 ))
             })?;
             let mut staged = Self {
+                execution_text: Default::default(),
                 connection,
                 path: temporary.clone(),
                 runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4437,6 +4604,7 @@ impl Database {
             ))
         })?;
         Ok(Self {
+            execution_text: Default::default(),
             connection,
             path: target,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4506,6 +4674,7 @@ impl Database {
         })();
         progress("authority_open", started.elapsed());
         let mut database = Self {
+            execution_text: Default::default(),
             connection: connection?,
             path: path.clone(),
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4570,6 +4739,7 @@ impl Database {
                 )
             })?;
         let mut staged = Self {
+            execution_text: Default::default(),
             connection,
             path: path.to_path_buf(),
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4709,6 +4879,7 @@ impl Database {
             |row| row.get(0),
         )?;
         let mut database = Self {
+            execution_text: Default::default(),
             connection,
             path,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
@@ -4782,6 +4953,7 @@ impl Database {
             )?,
         }
         Ok(Self {
+            execution_text: Default::default(),
             connection,
             path,
             runtime_camp_files_root,
@@ -5810,6 +5982,24 @@ impl Database {
             if !self.schema_migration_applied(140)? {
                 migration_step!("migration_140", self.migrate_single_chat_v140());
             }
+            if !self.schema_migration_applied(141)? {
+                migration_step!(
+                    "migration_141",
+                    self.migrate_runtime_image_public_display_source_v141()
+                );
+            }
+            if !self.schema_migration_applied(142)? {
+                migration_step!(
+                    "migration_142",
+                    self.migrate_runtime_activity_classifier_v142()
+                );
+            }
+            if !self.schema_migration_applied(143)? {
+                migration_step!(
+                    "migration_143",
+                    self.migrate_execution_evidence_compaction_v143()
+                );
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -6412,6 +6602,24 @@ impl Database {
         }
         if !self.schema_migration_applied(140)? {
             migration_step!("migration_140", self.migrate_single_chat_v140());
+        }
+        if !self.schema_migration_applied(141)? {
+            migration_step!(
+                "migration_141",
+                self.migrate_runtime_image_public_display_source_v141()
+            );
+        }
+        if !self.schema_migration_applied(142)? {
+            migration_step!(
+                "migration_142",
+                self.migrate_runtime_activity_classifier_v142()
+            );
+        }
+        if !self.schema_migration_applied(143)? {
+            migration_step!(
+                "migration_143",
+                self.migrate_execution_evidence_compaction_v143()
+            );
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -22158,7 +22366,439 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_runtime_image_public_display_source_v141(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (contract, schema, classifier): (String, i64, String) = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if contract != V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || schema != V141_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&contract, schema, &classifier)
+            || !single_chat_v140_schema_matches(&transaction)?
+        {
+            anyhow::bail!(
+                "Runtime image public display source migration requires the exact v1.50/schema 91 source"
+            );
+        }
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE agent_run_image
+                ADD COLUMN public_display_source TEXT
+                CHECK(
+                    public_display_source IS NULL
+                    OR public_display_source IN (
+                        'codex_native_image_generation',
+                        'antigravity_native_generate_image'
+                    )
+                );
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.53', projection_schema_version = 92,
+                updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES(141, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_runtime_activity_classifier_v142(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                    && marker.projection_schema_version == V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                    && marker.classifier_version == V116_CLASSIFIER_VERSION)
+        {
+            anyhow::bail!(
+                "classifier v3 migration requires the exact image-provenance/schema 92 source"
+            );
+        }
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             classifier_version=?3, updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration VALUES(142, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_execution_evidence_compaction_v143(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == V143_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                    && marker.projection_schema_version == V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                    && marker.classifier_version == V142_CLASSIFIER_VERSION)
+        {
+            anyhow::bail!(
+                "Execution Evidence compaction requires the exact v1.53/schema 93 source"
+            );
+        }
+        transaction.execute_batch(
+            r#"
+            CREATE TEMP TABLE temp_v143_canonical_source (
+                agent_run_id TEXT NOT NULL,
+                execution_epoch INTEGER NOT NULL,
+                operation_id TEXT NOT NULL,
+                classifier_version TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                evidence_id TEXT NOT NULL,
+                PRIMARY KEY(
+                    agent_run_id, execution_epoch, operation_id,
+                    classifier_version, ordinal
+                )
+            ) WITHOUT ROWID;
+            INSERT INTO temp_v143_canonical_source
+            SELECT canonical.agent_run_id, canonical.execution_epoch,
+                   canonical.operation_id, canonical.classifier_version,
+                   CAST(source.key AS INTEGER), CAST(source.value AS TEXT)
+            FROM canonical_runtime_activity canonical,
+                 json_each(canonical.source_evidence_ids_json) source;
+            CREATE INDEX temp_v143_canonical_source_evidence_idx
+                ON temp_v143_canonical_source(evidence_id);
+
+            CREATE TEMP TABLE temp_v143_file_projection_source (
+                evidence_id TEXT PRIMARY KEY
+            ) WITHOUT ROWID;
+            INSERT OR IGNORE INTO temp_v143_file_projection_source(evidence_id)
+            SELECT CAST(source.value AS TEXT)
+            FROM agent_run_file_change_projection projection,
+                 json_each(projection.source_evidence_ids_json) source;
+
+            CREATE TEMP TABLE temp_v143_evidence_delete (
+                id TEXT PRIMARY KEY
+            ) WITHOUT ROWID;
+
+            INSERT INTO temp_v143_evidence_delete(id)
+            SELECT delta.id
+            FROM agent_run_execution_evidence delta
+            JOIN temp_v143_canonical_source source
+              ON source.evidence_id = delta.id
+            WHERE delta.event_type = 'command.output.delta'
+              AND COALESCE(
+                    json_extract(delta.payload_preview_json, '$.itemId'),
+                    json_extract(delta.payload_preview_json, '$.item.id')
+                  ) IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                FROM temp_v143_canonical_source terminal_source
+                JOIN agent_run_execution_evidence terminal
+                  ON terminal.id = terminal_source.evidence_id
+                WHERE terminal_source.agent_run_id = source.agent_run_id
+                  AND terminal_source.execution_epoch = source.execution_epoch
+                  AND terminal_source.operation_id = source.operation_id
+                  AND terminal_source.classifier_version = source.classifier_version
+                  AND terminal.sequence > delta.sequence
+                  AND terminal.event_type = 'activity.completed'
+                  AND json_extract(
+                        terminal.payload_preview_json, '$.item.type'
+                      ) = 'commandExecution'
+                  AND json_type(
+                        terminal.payload_preview_json, '$.item.aggregatedOutput'
+                      ) = 'text'
+                  AND json_extract(terminal.payload_preview_json, '$.item.id')
+                      = COALESCE(
+                            json_extract(delta.payload_preview_json, '$.itemId'),
+                            json_extract(delta.payload_preview_json, '$.item.id')
+                        )
+              );
+
+            INSERT OR IGNORE INTO temp_v143_evidence_delete(id)
+            SELECT evidence.id
+            FROM agent_run_execution_evidence evidence
+            WHERE evidence.event_type IN ('activity.started', 'activity.completed')
+              AND evidence.kind IN ('narration', 'reasoning_summary')
+              AND json_extract(evidence.payload_preview_json, '$.item.type')
+                    IN ('userMessage', 'agentMessage', 'reasoning')
+              AND (
+                    json_type(evidence.payload_preview_json, '$.item.text') IS NULL
+                    OR json_type(evidence.payload_preview_json, '$.item.text') = 'null'
+                    OR (
+                        json_type(evidence.payload_preview_json, '$.item.text') = 'text'
+                        AND json_extract(evidence.payload_preview_json, '$.item.text') = ''
+                    )
+                  )
+              AND (
+                    json_type(evidence.payload_preview_json, '$.text') IS NULL
+                    OR json_type(evidence.payload_preview_json, '$.text') = 'null'
+                    OR (
+                        json_type(evidence.payload_preview_json, '$.text') = 'text'
+                        AND json_extract(evidence.payload_preview_json, '$.text') = ''
+                    )
+                  )
+              AND (
+                    json_type(evidence.payload_preview_json, '$.item.summary') IS NULL
+                    OR json_type(evidence.payload_preview_json, '$.item.summary') = 'null'
+                    OR (
+                        json_type(evidence.payload_preview_json, '$.item.summary') = 'array'
+                        AND json_array_length(
+                            evidence.payload_preview_json, '$.item.summary'
+                        ) = 0
+                    )
+                  )
+              AND evidence.content_blob_id IS NULL
+              AND NOT EXISTS (
+                    SELECT 1 FROM temp_v143_canonical_source source
+                    WHERE source.evidence_id = evidence.id
+                  )
+              AND NOT EXISTS (
+                    SELECT 1 FROM temp_v143_file_projection_source source
+                    WHERE source.evidence_id = evidence.id
+                  );
+            "#,
+        )?;
+
+        let emptied_canonical: i64 = transaction.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM canonical_runtime_activity canonical
+            WHERE EXISTS (
+                SELECT 1
+                FROM temp_v143_canonical_source source
+                JOIN temp_v143_evidence_delete candidate
+                  ON candidate.id = source.evidence_id
+                WHERE source.agent_run_id = canonical.agent_run_id
+                  AND source.execution_epoch = canonical.execution_epoch
+                  AND source.operation_id = canonical.operation_id
+                  AND source.classifier_version = canonical.classifier_version
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM temp_v143_canonical_source source
+                WHERE source.agent_run_id = canonical.agent_run_id
+                  AND source.execution_epoch = canonical.execution_epoch
+                  AND source.operation_id = canonical.operation_id
+                  AND source.classifier_version = canonical.classifier_version
+                  AND NOT EXISTS (
+                    SELECT 1 FROM temp_v143_evidence_delete candidate
+                    WHERE candidate.id = source.evidence_id
+                  )
+            )
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(
+            emptied_canonical == 0,
+            "v143 compaction would remove every source from {emptied_canonical} canonical activities"
+        );
+        let projected_candidates: i64 = transaction.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM temp_v143_file_projection_source source
+            JOIN temp_v143_evidence_delete candidate
+              ON candidate.id = source.evidence_id
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(
+            projected_candidates == 0,
+            "v143 compaction found {projected_candidates} file projections that still require candidate Evidence"
+        );
+
+        transaction.execute_batch(
+            r#"
+            UPDATE canonical_runtime_activity AS canonical
+            SET source_evidence_ids_json = (
+                    SELECT json_group_array(retained.evidence_id)
+                    FROM (
+                        SELECT source.evidence_id
+                        FROM temp_v143_canonical_source source
+                        WHERE source.agent_run_id = canonical.agent_run_id
+                          AND source.execution_epoch = canonical.execution_epoch
+                          AND source.operation_id = canonical.operation_id
+                          AND source.classifier_version = canonical.classifier_version
+                          AND NOT EXISTS (
+                            SELECT 1 FROM temp_v143_evidence_delete candidate
+                            WHERE candidate.id = source.evidence_id
+                          )
+                        ORDER BY source.ordinal
+                    ) retained
+                ),
+                first_evidence_sequence = (
+                    SELECT MIN(evidence.sequence)
+                    FROM temp_v143_canonical_source source
+                    JOIN agent_run_execution_evidence evidence
+                      ON evidence.id = source.evidence_id
+                    WHERE source.agent_run_id = canonical.agent_run_id
+                      AND source.execution_epoch = canonical.execution_epoch
+                      AND source.operation_id = canonical.operation_id
+                      AND source.classifier_version = canonical.classifier_version
+                      AND NOT EXISTS (
+                        SELECT 1 FROM temp_v143_evidence_delete candidate
+                        WHERE candidate.id = source.evidence_id
+                      )
+                ),
+                last_evidence_sequence = (
+                    SELECT MAX(evidence.sequence)
+                    FROM temp_v143_canonical_source source
+                    JOIN agent_run_execution_evidence evidence
+                      ON evidence.id = source.evidence_id
+                    WHERE source.agent_run_id = canonical.agent_run_id
+                      AND source.execution_epoch = canonical.execution_epoch
+                      AND source.operation_id = canonical.operation_id
+                      AND source.classifier_version = canonical.classifier_version
+                      AND NOT EXISTS (
+                        SELECT 1 FROM temp_v143_evidence_delete candidate
+                        WHERE candidate.id = source.evidence_id
+                      )
+                )
+            WHERE EXISTS (
+                SELECT 1
+                FROM temp_v143_canonical_source source
+                JOIN temp_v143_evidence_delete candidate
+                  ON candidate.id = source.evidence_id
+                WHERE source.agent_run_id = canonical.agent_run_id
+                  AND source.execution_epoch = canonical.execution_epoch
+                  AND source.operation_id = canonical.operation_id
+                  AND source.classifier_version = canonical.classifier_version
+            );
+            "#,
+        )?;
+
+        let retained_candidate_references: i64 = transaction.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM canonical_runtime_activity canonical,
+                 json_each(canonical.source_evidence_ids_json) source
+            JOIN temp_v143_evidence_delete candidate
+              ON candidate.id = CAST(source.value AS TEXT)
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(
+            retained_candidate_references == 0,
+            "v143 compaction left {retained_candidate_references} candidate Evidence references"
+        );
+        transaction.execute(
+            "DELETE FROM agent_run_execution_evidence
+             WHERE id IN (SELECT id FROM temp_v143_evidence_delete)",
+            [],
+        )?;
+        let dangling_references: i64 = transaction.query_row(
+            r#"
+            SELECT (
+                SELECT COUNT(*)
+                FROM canonical_runtime_activity canonical,
+                     json_each(canonical.source_evidence_ids_json) source
+                LEFT JOIN agent_run_execution_evidence evidence
+                  ON evidence.id = CAST(source.value AS TEXT)
+                WHERE evidence.id IS NULL
+            ) + (
+                SELECT COUNT(*)
+                FROM agent_run_file_change_projection projection,
+                     json_each(projection.source_evidence_ids_json) source
+                LEFT JOIN agent_run_execution_evidence evidence
+                  ON evidence.id = CAST(source.value AS TEXT)
+                WHERE evidence.id IS NULL
+            )
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(
+            dangling_references == 0,
+            "v143 compaction left {dangling_references} dangling Evidence references"
+        );
+        transaction.execute_batch(
+            "DROP TABLE temp_v143_evidence_delete;
+             DROP TABLE temp_v143_file_projection_source;
+             DROP TABLE temp_v143_canonical_source;",
+        )?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             classifier_version=?3, updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration VALUES(143, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn reconcile_deployed_tool_classifier_v141(&mut self) -> Result<bool> {
+        if !matches!(classify_database_contract(&self.connection)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.52"
+                    && marker.projection_schema_version == 92
+                    && marker.classifier_version == V142_CLASSIFIER_VERSION)
+        {
+            return Ok(false);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.52"
+                    && marker.projection_schema_version == 92
+                    && marker.classifier_version == V142_CLASSIFIER_VERSION)
+        {
+            anyhow::bail!("deployed tool-classifier source changed before reconciliation");
+        }
+        // The old 141 is the classifier receipt, not the image migration. Keep
+        // its original applied_at at canonical 142, add the missing image step,
+        // and publish the joined marker atomically; never downgrade activity-v3.
+        transaction.execute_batch(
+            "UPDATE schema_migration SET version=142 WHERE version=141;
+             ALTER TABLE agent_run_image ADD COLUMN public_display_source TEXT
+                CHECK( public_display_source IS NULL OR public_display_source IN (
+                    'codex_native_image_generation', 'antigravity_native_generate_image' ) );
+             INSERT INTO schema_migration VALUES(141, datetime('now'));",
+        )?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        if !matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == V143_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                    && marker.projection_schema_version == V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                    && marker.classifier_version == V142_CLASSIFIER_VERSION)
+        {
+            anyhow::bail!("reconciled tool/image source failed current-schema admission");
+        }
+        transaction.commit()?;
+        Ok(true)
+    }
+
     fn reconcile_legacy_feishu_migration_collision(&mut self) -> Result<bool> {
+        if self.reconcile_deployed_tool_classifier_v141()? {
+            return Ok(true);
+        }
         if self.reconcile_main_camp_migration_collision()? {
             return Ok(true);
         }
@@ -22235,6 +22875,7 @@ impl Database {
             |row| row.get(0),
         )?;
         match classifier.as_str() {
+            V142_CLASSIFIER_VERSION if self.schema_migration_applied(142)? => {}
             V116_CLASSIFIER_VERSION => {}
             V043_CLASSIFIER_VERSION => {
                 self.connection.execute(
@@ -26888,7 +27529,32 @@ fn rebuild_table_to_v135_source_for_test(
 }
 
 #[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v140_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 141)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            "ALTER TABLE agent_run_image DROP COLUMN public_display_source;
+             DELETE FROM schema_migration WHERE version IN (141, 142, 143);
+             UPDATE rovai_data_contract
+             SET contract_version = 'v1.50', projection_schema_version = 91,
+                 classifier_version = 'activity-v2'
+             WHERE singleton = 1;",
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v139_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v140_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 140)",
@@ -27094,9 +27760,10 @@ fn downgrade_current_schema_to_v139_source_for_test(connection: &Connection) {
 
     transaction
         .execute_batch(
-            "DELETE FROM schema_migration WHERE version = 140;
+            "DELETE FROM schema_migration WHERE version IN (140, 141);
              UPDATE rovai_data_contract
-             SET contract_version = 'v1.49', projection_schema_version = 90
+             SET contract_version = 'v1.49', projection_schema_version = 90,
+                 classifier_version = 'activity-v2'
              WHERE singleton = 1;",
         )
         .unwrap();
@@ -29442,6 +30109,7 @@ mod tests {
                 CREATE TABLE skill_projection_observation(id TEXT PRIMARY KEY);").unwrap();
             connection.execute_batch(&format!("CREATE TRIGGER reject_receipt BEFORE INSERT ON schema_migration WHEN NEW.version = {version} BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;")).unwrap();
             let mut database = Database {
+                execution_text: Default::default(),
                 connection,
                 path: PathBuf::from("unused-memory-fixture"),
                 runtime_camp_files_root: PathBuf::new(),
@@ -29677,6 +30345,9 @@ mod tests {
             v138: version >= 138,
             v139: version >= 139,
             v140: version >= 140,
+            v141: version >= 141,
+            v142: version >= 142,
+            v143: version >= 143,
         }
     }
 
@@ -29782,6 +30453,24 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                143,
+            ),
+            (
+                "v1.53/schema-93 before Evidence compaction",
+                V143_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                142,
+            ),
+            (
+                "v1.53/schema-92 image provenance before classifier cutover",
+                V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                141,
+            ),
+            (
+                "v1.50/schema-91 before Runtime image public display provenance",
+                V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V141_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 140,
             ),
             (
@@ -30170,7 +30859,9 @@ mod tests {
             ),
         ];
         for (name, contract, schema, through) in supported {
-            let classifier = if through >= 116 {
+            let classifier = if through >= 142 {
+                V142_CLASSIFIER_VERSION
+            } else if through >= 116 {
                 V116_CLASSIFIER_VERSION
             } else {
                 V043_CLASSIFIER_VERSION
@@ -30181,7 +30872,8 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(140);
+        assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
+        let current = migration_state_through(143);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -30205,69 +30897,103 @@ mod tests {
         missing_pi_native_execution.v139 = false;
         let mut missing_single_chat = current;
         missing_single_chat.v140 = false;
+        let mut missing_runtime_image_display_source = current;
+        missing_runtime_image_display_source.v141 = false;
+        let mut missing_classifier = current;
+        missing_classifier.v142 = false;
+        let mut missing_evidence_compaction = current;
+        missing_evidence_compaction.v143 = false;
         let rejected = [
+            (
+                "current without Evidence compaction receipt",
+                missing_evidence_compaction,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION,
+            ),
+            (
+                "current without classifier receipt",
+                missing_classifier,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION,
+            ),
+            (
+                "deployed source with future receipt",
+                current,
+                "v1.52",
+                92,
+                V142_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without Runtime image public display provenance",
+                missing_runtime_image_display_source,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Single Chat migration",
                 missing_single_chat,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native execution migration",
                 missing_pi_native_execution,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-input migration",
                 missing_pi_native_input,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Source Attachment migration",
                 missing_source_attachments,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-capabilities migration",
                 missing_pi_native_capabilities,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi Runtime migration",
                 missing_pi_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without cancellation dispatch boundary",
                 missing_cancellation_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Runtime image migration",
                 missing_image_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Quick Chat picker migration",
                 missing_quick_chat_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "old picker marker with the new resolved constraint",
@@ -30281,7 +31007,7 @@ mod tests {
                 missing_index_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "old joined marker with a newer index migration",
@@ -30309,7 +31035,7 @@ mod tests {
                 missing_intermediate,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "one marker beyond source",
@@ -30323,14 +31049,14 @@ mod tests {
                 current,
                 "v99.0",
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
             (
                 "future schema",
                 current,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION + 1,
-                V116_CLASSIFIER_VERSION,
+                V142_CLASSIFIER_VERSION,
             ),
         ];
         for (name, state, contract, schema, classifier) in rejected {
@@ -30377,6 +31103,7 @@ mod tests {
                     .unwrap();
             }
             let mut database = Database {
+                execution_text: Default::default(),
                 connection,
                 path: PathBuf::new(),
                 runtime_camp_files_root: PathBuf::new(),
@@ -30501,7 +31228,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(140));
+        assert_eq!(state, migration_state_through(143));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -33019,6 +33746,76 @@ mod tests {
             .unwrap();
         database.migrate_single_chat_v140().unwrap();
         assert!(single_chat_v140_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database
+            .connection()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_runtime_image_display_source_receipt
+             BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 141 BEGIN
+               SELECT RAISE(ABORT, 'Runtime image display source receipt fixture failure');
+             END;",
+            )
+            .unwrap();
+        assert!(
+            database
+                .migrate_runtime_image_public_display_source_v141()
+                .unwrap_err()
+                .to_string()
+                .contains("Runtime image display source receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(141).unwrap());
+        assert!(!runtime_image_v141_schema_matches(database.connection()).unwrap());
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_runtime_image_display_source_receipt")
+            .unwrap();
+        database
+            .migrate_runtime_image_public_display_source_v141()
+            .unwrap();
+        assert!(runtime_image_v141_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_classifier_v3_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 142 BEGIN SELECT RAISE(ABORT, 'Classifier v3 receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_runtime_activity_classifier_v142()
+                .unwrap_err()
+                .to_string()
+                .contains("Classifier v3 receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(142).unwrap());
+        assert_eq!(database.connection().query_row(
+            "SELECT contract_version,projection_schema_version,classifier_version FROM rovai_data_contract",
+            [], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?))).unwrap(),
+            ("v1.53".into(),92,V116_CLASSIFIER_VERSION.into()));
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_classifier_v3_receipt")
+            .unwrap();
+        database.migrate_runtime_activity_classifier_v142().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_evidence_compaction_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 143 BEGIN SELECT RAISE(ABORT, 'Evidence compaction receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_execution_evidence_compaction_v143()
+                .unwrap_err()
+                .to_string()
+                .contains("Evidence compaction receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(143).unwrap());
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_evidence_compaction_receipt")
+            .unwrap();
+        database
+            .migrate_execution_evidence_compaction_v143()
+            .unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -33050,6 +33847,387 @@ mod tests {
                 .prepare("SELECT observed_service_tier FROM runtime_usage_run_summary")
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn deployed_tool_classifier_v141_upgrade_preserves_receipts_and_rolls_back() {
+        // Unlike the marker-only matrix, this regression owns the deployed
+        // branch's complete schema admission and atomic receipt reconciliation.
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        downgrade_current_schema_to_v140_source_for_test(database.connection());
+        database
+            .connection()
+            .execute_batch(
+                "UPDATE rovai_data_contract SET contract_version='v1.52',
+                projection_schema_version=92, classifier_version='activity-v3';
+             INSERT INTO schema_migration VALUES (141, 'original-classifier-cutover');",
+            )
+            .unwrap();
+        assert!(
+            matches!(
+                classify_database_contract(database.connection()).unwrap(),
+                DatabaseContractClassification::SupportedMigrationSource(_)
+            ),
+            "the already-deployed tool-classifier source must be admitted for migration"
+        );
+        for mutation in [
+            "UPDATE rovai_data_contract SET classifier_version='activity-v2'",
+            "UPDATE rovai_data_contract SET projection_schema_version=93",
+            "DELETE FROM schema_migration WHERE version=140",
+            "INSERT INTO schema_migration VALUES(142,'unexpected')",
+            "INSERT INTO schema_migration VALUES(143,'future')",
+            "ALTER TABLE agent_run_image ADD COLUMN public_display_source TEXT",
+            "ALTER TABLE agent_run_image ADD COLUMN unknown_partial_column TEXT",
+        ] {
+            database
+                .connection()
+                .execute_batch("SAVEPOINT source_probe")
+                .unwrap();
+            database.connection().execute_batch(mutation).unwrap();
+            assert!(
+                matches!(
+                    classify_database_contract(database.connection()).unwrap(),
+                    DatabaseContractClassification::Unknown(_)
+                ),
+                "{mutation}"
+            );
+            database
+                .connection()
+                .execute_batch("ROLLBACK TO source_probe; RELEASE source_probe")
+                .unwrap();
+        }
+        let receipts = MigrationReceiptSnapshot::read(database.connection()).unwrap();
+        // Distinct failure points cover receipt remapping, DDL, and the final
+        // marker. None may leave a half-joined source for the next startup.
+        for trigger in [
+            "CREATE TEMP TRIGGER reject_join BEFORE UPDATE ON schema_migration WHEN NEW.version=142 BEGIN SELECT RAISE(ABORT,'join fixture failure'); END;",
+            "CREATE TEMP TRIGGER reject_join BEFORE INSERT ON schema_migration WHEN NEW.version=141 BEGIN SELECT RAISE(ABORT,'join fixture failure'); END;",
+            "CREATE TEMP TRIGGER reject_join BEFORE UPDATE ON rovai_data_contract BEGIN SELECT RAISE(ABORT,'join fixture failure'); END;",
+        ] {
+            database.connection().execute_batch(trigger).unwrap();
+            assert!(
+                database
+                    .reconcile_deployed_tool_classifier_v141()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("join fixture failure")
+            );
+            assert_eq!(
+                MigrationReceiptSnapshot::read(database.connection()).unwrap(),
+                receipts
+            );
+            assert!(deployed_tool_v141_image_schema_matches(database.connection()).unwrap());
+            assert!(
+                matches!(classify_database_contract(database.connection()).unwrap(),
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.contract_version=="v1.52" && marker.classifier_version==V142_CLASSIFIER_VERSION)
+            );
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER reject_join")
+                .unwrap();
+        }
+        database.migrate(false).unwrap();
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT applied_at FROM schema_migration WHERE version=142",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "original-classifier-cutover"
+        );
+        let writes = database.connection().total_changes();
+        assert!(!database.reconcile_deployed_tool_classifier_v141().unwrap());
+        assert_eq!(
+            database.connection().total_changes(),
+            writes,
+            "a retry must not remap or rewrite again"
+        );
+    }
+
+    #[test]
+    fn v141_retains_historical_runtime_images_as_unconfirmed() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        downgrade_current_schema_to_v140_source_for_test(database.connection());
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(_)
+        ));
+        database
+            .connection()
+            .execute_batch(
+                "INSERT INTO camp(
+               id,title,project_binding_kind,project_path,last_message_sequence,version,
+               created_at,updated_at
+             ) VALUES(
+               'legacy-image-camp','Images','directory','/fixture',0,1,
+               '2026-09-06','2026-09-06'
+             );
+             INSERT INTO conversation(id,camp_id,agent_id,created_at,updated_at)
+             VALUES(
+               'legacy-image-conversation','legacy-image-camp','agent_1',
+               '2026-09-06','2026-09-06'
+             );
+             INSERT INTO camp_turn(
+               id,camp_id,trigger_type,trigger_id,status,created_at,updated_at
+             ) VALUES(
+               'legacy-image-turn','legacy-image-camp','system_event','legacy-image-trigger',
+               'running','2026-09-06','2026-09-06'
+             );
+             INSERT INTO agent_run(
+               id,camp_turn_id,conversation_id,initial_camp_context_through_sequence,
+               initial_conversation_context_through_sequence,responsibility_key,start_reason,
+               purpose,completion_role,effective_config_json,workspace_json,status,
+               idempotency_key,runtime_adapter_kind,execution_epoch,created_at,started_at,
+               updated_at
+             ) VALUES(
+               'legacy-image-run','legacy-image-turn','legacy-image-conversation',0,0,
+               'legacy-image-responsibility','initial','test','required','{}',
+               '{\"executionRoot\":\"/fixture\"}','running','legacy-image-run','qoder-cli',1,
+               '2026-09-06','2026-09-06','2026-09-06'
+             );
+             INSERT INTO agent_run_image(
+               id,agent_run_id,execution_epoch,tool_call_id,source_key,source_path,
+               display_name,media_type,byte_size,ordinal,created_at
+             ) VALUES(
+               'legacy-image','legacy-image-run',1,'legacy-tool','path:/fixture/legacy.png',
+               '/fixture/legacy.png','legacy.png','image/png',1,0,'2026-09-06'
+             );",
+            )
+            .unwrap();
+
+        database
+            .migrate_runtime_image_public_display_source_v141()
+            .unwrap();
+
+        assert!(runtime_image_v141_schema_matches(database.connection()).unwrap());
+        database.migrate_runtime_activity_classifier_v142().unwrap();
+        database
+            .migrate_execution_evidence_compaction_v143()
+            .unwrap();
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        let retained: (i64, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*), public_display_source
+                 FROM agent_run_image WHERE id='legacy-image'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, (1, None));
+        assert!(
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_run_image
+                     SET public_display_source='generate_image'
+                     WHERE id='legacy-image'",
+                    [],
+                )
+                .is_err(),
+            "tool display names are outside the persisted source closed set"
+        );
+    }
+
+    #[test]
+    fn v143_compacts_terminal_command_deltas_and_empty_text_shells_atomically() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-db-v143-evidence-compaction-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    default_lead_agent_id, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'v143-camp', 'v143 fixture', 'directory', '/tmp/v143',
+                    'agent_1', 0, 1, '2026-09-06', '2026-09-06'
+                );
+                INSERT INTO conversation(id, camp_id, agent_id, created_at, updated_at)
+                VALUES('v143-conversation', 'v143-camp', 'agent_1', '2026-09-06', '2026-09-06');
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    created_at, updated_at, ended_at
+                ) VALUES (
+                    'v143-turn', 'v143-camp', 'system_event', 'v143-trigger',
+                    'completed', '2026-09-06', '2026-09-06', '2026-09-06'
+                );
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, start_reason, purpose, completion_role,
+                    effective_config_json, workspace_json, status, idempotency_key,
+                    runtime_adapter_kind, execution_epoch, created_at, started_at,
+                    ended_at, updated_at
+                ) VALUES (
+                    'v143-run', 'v143-turn', 'v143-conversation', 0, 0,
+                    'v143-responsibility', 'initial', 'test', 'required', '{}',
+                    '{"executionRoot":"/tmp/v143"}', 'succeeded', 'v143-run',
+                    'codex-cli', 1, '2026-09-06', '2026-09-06', '2026-09-06',
+                    '2026-09-06'
+                );
+                INSERT INTO agent_run_execution_evidence(
+                    id, agent_run_id, execution_epoch, sequence, event_type, kind,
+                    phase, source_event_key, payload_preview_json, content_blob_id,
+                    content_byte_count, is_truncated, occurred_at
+                ) VALUES
+                    ('v143-command-start', 'v143-run', 1, 1, 'activity.started',
+                     'command', 'started', NULL,
+                     '{"item":{"type":"commandExecution","id":"command-1"}}',
+                     NULL, 56, 0, '2026-09-06T00:00:01Z'),
+                    ('v143-command-delta-a', 'v143-run', 1, 2, 'command.output.delta',
+                     'command', 'updated', NULL,
+                     '{"itemId":"command-1","delta":"first"}',
+                     NULL, 39, 0, '2026-09-06T00:00:02Z'),
+                    ('v143-command-delta-b', 'v143-run', 1, 3, 'command.output.delta',
+                     'command', 'updated', NULL,
+                     '{"itemId":"command-1","delta":" second"}',
+                     NULL, 41, 0, '2026-09-06T00:00:03Z'),
+                    ('v143-command-terminal', 'v143-run', 1, 4, 'activity.completed',
+                     'command', 'completed', NULL,
+                     '{"item":{"type":"commandExecution","id":"command-1","aggregatedOutput":"first second"}}',
+                     NULL, 89, 0, '2026-09-06T00:00:04Z'),
+                    ('v143-command-partial', 'v143-run', 1, 5, 'command.output.delta',
+                     'command', 'updated', NULL,
+                     '{"itemId":"command-2","delta":"only surviving output"}',
+                     NULL, 57, 0, '2026-09-06T00:00:05Z'),
+                    ('v143-user-shell', 'v143-run', 1, 6, 'activity.started',
+                     'narration', 'started', NULL,
+                     '{"item":{"type":"userMessage","id":"user-1","text":null}}',
+                     NULL, 57, 0, '2026-09-06T00:00:06Z'),
+                    ('v143-reasoning-shell', 'v143-run', 1, 7, 'activity.completed',
+                     'reasoning_summary', 'completed', NULL,
+                     '{"item":{"type":"reasoning","id":"reasoning-1","summary":[]}}',
+                     NULL, 65, 0, '2026-09-06T00:00:07Z'),
+                    ('v143-text-block', 'v143-run', 1, 8, 'agent.text.block',
+                     'narration', 'completed', NULL,
+                     '{"text":"keep me","status":"completed"}',
+                     NULL, 39, 0, '2026-09-06T00:00:08Z');
+                INSERT INTO canonical_runtime_activity(
+                    agent_run_id, execution_epoch, operation_id, classifier_version,
+                    activity_domain, semantic_kind, phase, outcome, credibility,
+                    coverage_level, source_authority, source_evidence_ids_json,
+                    first_evidence_sequence, last_evidence_sequence, revision,
+                    created_at, updated_at
+                ) VALUES
+                    ('v143-run', 1, 'command-1', 'activity-v3', 'command', 'command',
+                     'terminal', 'succeeded', 'runtime_structured', 'fine_grained',
+                     'runtime',
+                     '["v143-command-start","v143-command-delta-a","v143-command-delta-b","v143-command-terminal"]',
+                     1, 4, 4, '2026-09-06', '2026-09-06'),
+                    ('v143-run', 1, 'command-2', 'activity-v3', 'command', 'command',
+                     'progress', 'unsettled', 'runtime_structured', 'fine_grained',
+                     'runtime', '["v143-command-partial"]', 5, 5, 1,
+                     '2026-09-06', '2026-09-06');
+                DELETE FROM schema_migration WHERE version = 143;
+                UPDATE rovai_data_contract
+                SET projection_schema_version = 93
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(_)
+        ));
+
+        database
+            .connection()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_v143_receipt BEFORE INSERT ON schema_migration
+                 WHEN NEW.version = 143 BEGIN SELECT RAISE(ABORT, 'v143 rollback fixture'); END;",
+            )
+            .unwrap();
+        assert!(
+            database
+                .migrate_execution_evidence_compaction_v143()
+                .unwrap_err()
+                .to_string()
+                .contains("v143 rollback fixture")
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM agent_run_execution_evidence WHERE agent_run_id='v143-run'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            8
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_v143_receipt")
+            .unwrap();
+
+        database
+            .migrate_execution_evidence_compaction_v143()
+            .unwrap();
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        let retained = database
+            .connection()
+            .prepare(
+                "SELECT id FROM agent_run_execution_evidence
+                 WHERE agent_run_id='v143-run' ORDER BY sequence",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            retained,
+            vec![
+                "v143-command-start",
+                "v143-command-terminal",
+                "v143-command-partial",
+                "v143-text-block"
+            ]
+        );
+        let canonical: (String, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                "SELECT source_evidence_ids_json, first_evidence_sequence,
+                        last_evidence_sequence, revision
+                 FROM canonical_runtime_activity
+                 WHERE agent_run_id='v143-run' AND operation_id='command-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            canonical,
+            (
+                "[\"v143-command-start\",\"v143-command-terminal\"]".into(),
+                1,
+                4,
+                4
+            )
+        );
+        let partial_sources: String = database
+            .connection()
+            .query_row(
+                "SELECT source_evidence_ids_json FROM canonical_runtime_activity
+                 WHERE agent_run_id='v143-run' AND operation_id='command-2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(partial_sources, "[\"v143-command-partial\"]");
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -33721,6 +34899,16 @@ mod tests {
                     '2026-08-29T00:00:00Z', '2026-08-29T00:00:01Z',
                     '2026-08-29T00:00:01Z'
                 );
+                INSERT INTO agent_run_execution_evidence(
+                    id, agent_run_id, execution_epoch, sequence, event_type, kind,
+                    phase, source_event_key, payload_preview_json, content_blob_id,
+                    content_byte_count, is_truncated, occurred_at
+                )
+                SELECT 'historical-evidence', id, execution_epoch, 1,
+                    'activity.completed', 'tool_result', 'completed', NULL,
+                    '{"item":{"type":"mcpToolCall","id":"historical-operation"}}',
+                    NULL, 68, 0, '2026-08-29T00:00:01Z'
+                FROM agent_run WHERE id = 'run-v116';
                 INSERT INTO canonical_runtime_activity(
                     agent_run_id, execution_epoch, operation_id, classifier_version,
                     activity_domain, semantic_kind, tool_name, presentation_hint,
@@ -33801,11 +34989,18 @@ mod tests {
             Uuid::new_v4()
         ));
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v140_source_for_test(database.connection());
         database
             .connection()
             .execute(
-                "UPDATE rovai_data_contract SET classifier_version = ?1 WHERE singleton = 1",
-                [V043_CLASSIFIER_VERSION],
+                "UPDATE rovai_data_contract
+                 SET contract_version = ?1, projection_schema_version = ?2, classifier_version = ?3
+                 WHERE singleton = 1",
+                params![
+                    V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                    V141_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                    V043_CLASSIFIER_VERSION,
+                ],
             )
             .unwrap();
         assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
@@ -33834,7 +35029,7 @@ mod tests {
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V116_CLASSIFIER_VERSION.to_string(),
+                V142_CLASSIFIER_VERSION.to_string(),
             )
         );
         assert!(!directory.join("inactive-data-quarantine").exists());
@@ -40832,6 +42027,7 @@ mod tests {
             )
             .unwrap();
         let mut database = Database {
+            execution_text: Default::default(),
             connection,
             path,
             runtime_camp_files_root,

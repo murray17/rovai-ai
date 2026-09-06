@@ -50,3 +50,5 @@ last_updated: 2026-09-06
 - [File Preview v8](../../contracts/file-preview-v8.md)
 - [File Preview Architecture](../../architecture/file-preview.md)
 - [Camp 文件预览区](../../ui/components/file-preview.md)
+
+后续：[v1.53](../v1.53/README.md)。

@@ -234,6 +234,8 @@ impl DomainCommandGateway {
         validate_envelope::<C>(envelope)?;
         let request_digest = request_digest(envelope)?;
 
+        // Retry a failed text flush before replaying the already committed command receipt.
+        crate::execution_text::flush_settled(database)?;
         if let Some(result) = load_stored_result(database.connection(), &envelope.command_id)? {
             return replay_or_conflict(result, C::TYPE, &request_digest);
         }
@@ -263,6 +265,7 @@ impl DomainCommandGateway {
         };
         append_command_result(&transaction, envelope, &stored_result)?;
         transaction.commit()?;
+        crate::execution_text::flush_settled(database)?;
 
         Ok(CommandExecution {
             result: stored_result,

@@ -214,6 +214,32 @@ export function notificationHeadsUpPresentation(
   }
 }
 
+type VisibleAcknowledgementIntent = {
+  key: string
+  request: { commandId: string; command: {
+    campId: string; observedThroughChangeSequence: number; visibleMessageIds: string[];
+    visibleCampTurnIds: string[]; visibleApprovalIds: string[]
+  } }
+}
+
+export function visibleAcknowledgementIntent(
+  sources: VisibleNotificationSources,
+  admittedThrough: number,
+  observedThroughChangeSequence: number,
+  previous: VisibleAcknowledgementIntent | null,
+  newId: () => string = () => crypto.randomUUID()
+): VisibleAcknowledgementIntent {
+  // Both cursors are global fences, not changes to this Camp's visible sources.
+  const key = JSON.stringify({ campId: sources.campId, admittedThrough,
+    messageIds: sources.messageIds, campTurnIds: sources.campTurnIds, approvalIds: sources.approvalIds })
+  if (previous?.key === key) return previous
+  return { key, request: { commandId: newId(), command: {
+    campId: sources.campId, observedThroughChangeSequence,
+    visibleMessageIds: [...sources.messageIds], visibleCampTurnIds: [...sources.campTurnIds],
+    visibleApprovalIds: [...sources.approvalIds]
+  } } }
+}
+
 export function NotificationAttentionController({
   enabled,
   activeCampId,
@@ -244,8 +270,20 @@ export function NotificationAttentionController({
   const pollFailureCount = useRef(0)
   const pollRetryAt = useRef(0)
   const navigationGeneration = useRef(0)
-  const visibleAcknowledgementKey = useRef<string | null>(null)
+  const visibleAcknowledgementKeys = useRef(new Map<string, string>())
   const visibleAcknowledgementRunning = useRef(false)
+  const visibleRetryTimer = useRef<number | null>(null)
+  const mounted = useRef(false)
+  const visibleCampAdmissions = useRef(new Map<string, number>())
+  const visibleCommands = useRef(new Map<string, VisibleAcknowledgementIntent>())
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      if (visibleRetryTimer.current !== null) window.clearTimeout(visibleRetryTimer.current)
+    }
+  }, [])
 
   const loadPreference = useCallback(async (): Promise<NotificationPreference> => {
     const next = await window.rovai.request<NotificationPreference>(
@@ -273,6 +311,9 @@ export function NotificationAttentionController({
     if (generation !== baselineGeneration.current) return
     setHeadsUpState(emptyNotificationHeadsUpState())
     changeCursor.current = inbox.throughChangeSequence
+    visibleAcknowledgementKeys.current.clear()
+    visibleCommands.current.clear()
+    visibleCampAdmissions.current.clear()
     setObservedThroughChangeSequence(inbox.throughChangeSequence)
     baselineReady.current = true
     pollFailureCount.current = 0
@@ -347,6 +388,11 @@ export function NotificationAttentionController({
         return
       }
       const changes = collected.changes
+      for (const change of changes) {
+        if (change.changeCause === 'occurrence_admitted' && change.episode) {
+          visibleCampAdmissions.current.set(change.episode.camp.id, change.changeSequence)
+        }
+      }
       const hasHeadsUpSignal = changes.some((change) => change.headsUpSignal !== null)
       const effectivePreference = hasHeadsUpSignal
         ? preference ?? await loadPreference()
@@ -469,47 +515,40 @@ export function NotificationAttentionController({
       + visibleSources.campTurnIds.length
       + visibleSources.approvalIds.length
     if (sourceCount === 0) return undefined
-    const key = JSON.stringify({
-      observedThroughChangeSequence,
-      ...visibleSources
-    })
-    if (visibleAcknowledgementRunning.current || visibleAcknowledgementKey.current === key) {
+    const intent = visibleAcknowledgementIntent(visibleSources,
+      visibleCampAdmissions.current.get(visibleSources.campId) ?? 0,
+      observedThroughChangeSequence, visibleCommands.current.get(visibleSources.campId) ?? null)
+    const key = intent.key
+    if (visibleAcknowledgementRunning.current
+      || visibleAcknowledgementKeys.current.get(visibleSources.campId) === key) {
       return undefined
     }
     visibleAcknowledgementRunning.current = true
-    visibleAcknowledgementKey.current = key
-    let cancelled = false
-    let retryTimer: number | null = null
+    visibleCommands.current.set(visibleSources.campId, intent)
+    const generation = baselineGeneration.current
+    let applied = false
     void window.rovai.request<StoredCommandResult>(
       'notifications.acknowledgeVisibleSources',
-      {
-        commandId: crypto.randomUUID(),
-        command: {
-          campId: visibleSources.campId,
-          observedThroughChangeSequence,
-          visibleMessageIds: visibleSources.messageIds,
-          visibleCampTurnIds: visibleSources.campTurnIds,
-          visibleApprovalIds: visibleSources.approvalIds
-        }
-      }
+      intent.request
     ).then(async (result) => {
       if (result.status !== 'applied') throw new Error(commandFailure(result))
-      if (cancelled) return
-      await pollChanges()
-      await readUnreadStatus()
+      applied = true
+      if (!mounted.current || generation !== baselineGeneration.current) return
+      visibleAcknowledgementKeys.current.set(visibleSources.campId, key)
+      // A failed refresh does not make the already-acknowledged command uncertain.
+      await Promise.all([pollChanges(), readUnreadStatus()]).catch(() => undefined)
     }).catch(() => {
-      if (cancelled) return
-      visibleAcknowledgementKey.current = null
-      retryTimer = window.setTimeout(() => {
-        setVisibleAcknowledgementRetry((value) => value + 1)
-      }, 2_500)
+      // Keep the original UUID and frozen request for an uncertain-result retry.
     }).finally(() => {
       visibleAcknowledgementRunning.current = false
+      if (!mounted.current) return
+      visibleRetryTimer.current = window.setTimeout(() => {
+        visibleRetryTimer.current = null
+        setVisibleAcknowledgementRetry((value) => value + 1)
+      }, applied ? 0 : 2_500)
     })
-    return () => {
-      cancelled = true
-      if (retryTimer !== null) window.clearTimeout(retryTimer)
-    }
+    // Dependency churn must not cancel receipt handling or an uncertain retry.
+    return undefined
   }, [
     activeCampId,
     activeCampVisible,

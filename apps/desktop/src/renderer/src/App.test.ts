@@ -29,6 +29,7 @@ import {
   activeCampChangeNeedsDraftFlush,
   activeCampSurfaceNeedsLeaveGuard,
   App,
+  AppToast,
   applyCancellationResult,
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
@@ -129,6 +130,7 @@ import {
   groupExecutionEventsByRunId,
   isViewingNonTerminalAgentRun,
   loadCompleteAgentRunExecutionEvidence,
+  loadExecutionNarrationBodies,
   MessageAttachmentGroups,
   memberRuntimeConfigurationPresentation,
   preferredAgentProcessRun,
@@ -245,6 +247,27 @@ function supervisorSnapshot(
     ...overrides
   }
 }
+
+describe('application toast semantics', () => {
+  it('announces file-open failures as a danger alert without changing neutral notifications', () => {
+    const danger = renderToStaticMarkup(createElement(AppToast, {
+      toast: { message: '无法打开该文件', tone: 'danger' },
+      onClose: () => undefined
+    }))
+    const neutral = renderToStaticMarkup(createElement(AppToast, {
+      toast: { message: '已复制会话 ID', tone: 'neutral' },
+      onClose: () => undefined
+    }))
+
+    expect(danger).toContain('class="app-toast is-danger"')
+    expect(danger).toContain('role="alert"')
+    expect(danger).toContain('aria-live="assertive"')
+    expect(danger).toContain('无法打开该文件')
+    expect(neutral).toContain('class="app-toast"')
+    expect(neutral).toContain('role="status"')
+    expect(neutral).toContain('aria-live="polite"')
+  })
+})
 
 describe('availability-first workspace gate', () => {
   it('starts with the ordinary page frame before the first Supervisor snapshot, without loading feedback', () => {
@@ -1430,8 +1453,9 @@ describe('task event projections', () => {
       authorType: 'user'
     }], [], [run('running')], [], [], images)
       .map((item) => item.id)).toEqual(['invalid-user-source'])
-    expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images)
-      .map((item) => item.kind)).toEqual(['run_images', 'run_file_changes'])
+    expect(campConversationTimeline([], [], [run('succeeded')], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images))
+      .toMatchObject([{ kind: 'run_artifacts', run: { id: 'run-claude', agentId: 'agent-claude' },
+        imageGroups: images, fileChanges: [{ agentRunId: 'run-claude' }] }])
   })
 
   it('renders a three-row Files Changed card with a quiet review entry and mixed totals', () => {
@@ -3290,8 +3314,9 @@ describe('task event projections', () => {
     expect(markup).toContain('配置洛可的 Agent 运行时')
     expect(markup.indexOf('class="runtime-recovery-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
     expect(markup).toMatch(
-      /<div class="composer-actions"><span class="composer-hint"><span class="sr-only">Enter 发送，Shift\+Enter 换行<\/span><span class="composer-hint-visual" aria-hidden="true"><kbd>↵<\/kbd><span>发送<\/span><span class="composer-hint-separator">·<\/span><kbd>⇧↵<\/kbd><span>换行<\/span><\/span><\/span><button class="primary-button composer-send"/
+      /<div class="composer-actions"><span class="composer-hint"><span class="sr-only">Enter 发送，Shift\+Enter 换行<\/span><span class="composer-hint-visual" aria-hidden="true"><kbd>↵<\/kbd><span>发送<\/span><span class="composer-hint-separator">·<\/span><kbd>⇧↵<\/kbd><span>换行<\/span><\/span><\/span><button class="composer-primary-action is-send"/
     )
+    expect(markup).toContain('aria-label="发送消息"')
     expect(markup).not.toContain('<span class="composer-hint">Enter</span>')
     expect(markup).not.toContain('agent_run.runtime_not_ready')
     expect(markup).not.toContain('agent_1')
@@ -3742,9 +3767,12 @@ describe('task event projections', () => {
     expect(markup).not.toContain('working-row')
     expect(markup).not.toContain('live-execution-progress')
     expect(markup).toContain('aria-label="停止当前执行"')
-    expect(markup).not.toContain('class="primary-button composer-send"')
-    expect((markup.match(/class="(?:primary-button composer-send|danger-button composer-stop)"/g) ?? []))
-      .toHaveLength(1)
+    expect(markup).toContain('class="composer-primary-action is-stop"')
+    const runningComposerAction = markup.slice(
+      markup.indexOf('class="composer-primary-action is-stop"'),
+      markup.indexOf('</button>', markup.indexOf('class="composer-primary-action is-stop"'))
+    )
+    expect(runningComposerAction).not.toContain('停止</button>')
     expect(markup).not.toContain('加入待发送')
 
     const cachedPreviewMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -3931,7 +3959,12 @@ describe('task event projections', () => {
     expect(cancellingMarkup).toContain('正在提交停止请求，完成后即可继续发送。')
     expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
     expect(cancellingMarkup).toContain('aria-label="正在提交停止请求"')
-    expect(cancellingMarkup).not.toContain('class="primary-button composer-send"')
+    const cancellingComposerAction = cancellingMarkup.slice(
+      cancellingMarkup.indexOf('class="composer-primary-action is-stop"'),
+      cancellingMarkup.indexOf('</button>', cancellingMarkup.indexOf('class="composer-primary-action is-stop"'))
+    )
+    expect(cancellingComposerAction).toContain('composer-primary-action-spinner')
+    expect(cancellingComposerAction).not.toContain('正在提交停止请求…')
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
     expect(cancellingMarkup).not.toContain('execution-disclosure is-running')
 
@@ -3990,8 +4023,8 @@ describe('task event projections', () => {
     const persistentActionsMarkup = terminalMarkup.slice(persistentActionsStart, persistentActionsEnd)
     expect(persistentActionsMarkup.indexOf('class="message-copy-button"'))
       .toBeLessThan(persistentActionsMarkup.indexOf('class="message-reply-button"'))
-    expect(terminalMarkup).not.toContain('class="danger-button composer-stop"')
-    expect(terminalMarkup).toMatch(/class="primary-button composer-send"[^>]*>发送<\/button>/)
+    expect(terminalMarkup).not.toContain('class="composer-primary-action is-stop"')
+    expect(terminalMarkup).toContain('class="composer-primary-action is-send"')
 
     const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
@@ -5290,7 +5323,7 @@ describe('task event projections', () => {
 
     expect(progress.items[0]).toMatchObject({
       kind: 'tool',
-      step: { status: 'recorded' }
+      step: { status: 'skipped' }
     })
   })
 
@@ -5552,7 +5585,7 @@ describe('task event projections', () => {
       focused: true
     }))
     expect(boundaryMarkup).toContain('class="tool-activity-group status-completed"')
-    expect(boundaryMarkup).toContain('aria-label="已执行 1 项操作；状态：全部成功"')
+    expect(boundaryMarkup).toContain('aria-label="完成了 1 个步骤"')
     expect(boundaryMarkup).toContain('<span>正在处理</span>')
   })
 
@@ -5648,7 +5681,7 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     }))
     expect(markup.match(/<details class="tool-activity-group/g)).toHaveLength(1)
-    expect(markup).toContain('aria-label="已执行 2 项操作；状态：全部成功"')
+    expect(markup).toContain('aria-label="完成了 2 个步骤"')
     expect(markup).not.toContain('>全部成功<')
     expect(markup).not.toContain('class="tool-group-count"')
     expect(markup.match(/<details class="process-action tool-call-disclosure/g)).toHaveLength(2)
@@ -5668,6 +5701,8 @@ describe('task event projections', () => {
     const icons = [
       { iconKind: 'terminal' as const, activityDomain: 'shell' },
       { iconKind: 'file' as const, activityDomain: 'file' },
+      { iconKind: 'file-read' as const, activityDomain: 'file' },
+      { iconKind: 'file-write' as const, activityDomain: 'file' },
       { iconKind: 'web' as const, activityDomain: 'tool' },
       { iconKind: 'tool' as const, activityDomain: 'tool' },
       { iconKind: 'rovai' as const, activityDomain: 'tool' },
@@ -5714,7 +5749,7 @@ describe('task event projections', () => {
       expect(markup).toContain(`data-icon-domain="${iconKind}"`)
       expect(markup).not.toContain(`${iconKind} complete result`)
     }
-    expect(markup).toContain('aria-label="已执行 7 项操作；状态：全部成功"')
+    expect(markup).toContain('aria-label="完成了 9 个步骤"')
     expect(markup.match(/class="tool-group-icon"/g)).toHaveLength(1)
     expect(markup.match(/class="tool-call-icon"/g)).toHaveLength(icons.length)
     expect(markup.match(/<svg viewBox="0 0 16 16"/g)?.length).toBeGreaterThanOrEqual(icons.length)
@@ -5918,8 +5953,8 @@ describe('task event projections', () => {
             path: 'src/app.ts', changeKind: 'update', additions: 2, deletions: 1,
             diff: '@@ -1 +1,2 @@\n-old\n+new\n+next\n'
           }, {
-            path: 'src/styles.css', changeKind: 'update', additions: 1, deletions: 1,
-            diff: 'old mode 100644\nnew mode 100755\n@@ -4 +4 @@\n-red\n+green\n'
+            path: 'src/styles.css', changeKind: 'add', additions: 1, deletions: 0,
+            diff: 'new file mode 100644\n@@ -0,0 +1 @@\n+green\n'
           }]
         }
       }),
@@ -5933,7 +5968,7 @@ describe('task event projections', () => {
         currentInstruction: '修改 2 个文件',
         fileChanges: [
           { path: 'src/app.ts', additions: 2, deletions: 1 },
-          { path: 'src/styles.css', additions: 1, deletions: 1 }
+          { path: 'src/styles.css', additions: 1, deletions: 0 }
         ]
       }
     })
@@ -5957,12 +5992,16 @@ describe('task event projections', () => {
     }))
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
-    expect(markup).toContain('aria-label="已执行 1 项操作；状态：全部成功"')
-    expect(markup).toContain('修改 app.ts')
-    expect(markup).toContain('修改 styles.css')
+    expect(markup).toContain('aria-label="完成了 1 个步骤"')
+    expect(markup).toContain('aria-label="编辑 src/app.ts，新增 2 行，删除 1 行"')
+    expect(markup).toContain('aria-label="新增 src/styles.css，新增 1 行，删除 0 行"')
+    expect(markup.match(/data-icon-domain="file-write"/g)).toHaveLength(2)
+    expect(markup.match(/class="tool-file-link"/g)).toHaveLength(2)
+    expect(markup.match(/aria-controls="[^"]+" aria-expanded="false"/g)).toHaveLength(2)
+    expect(markup).toContain('src/app.ts · 打开文件预览')
     expect(markup).toContain('app.ts 的文件差异')
     expect(markup).toContain('modified-file-diff-line is-metadata')
-    expect(markup).toContain('old mode 100644')
+    expect(markup).toContain('new file mode 100644')
     expect(markup).not.toContain('apply_patch')
     expect(markup).not.toContain('编辑了 2 个文件')
   })
@@ -5976,6 +6015,7 @@ describe('task event projections', () => {
         kind: 'edit',
         output: 'Successfully modified file',
         runtimeFileOperation: {
+          schemaVersion: 2,
           status: 'available', operationKind: 'write',
           path: 'rovai-runtime-validation/qoder-cli.txt'
         }
@@ -5995,8 +6035,8 @@ describe('task event projections', () => {
     expect(progress.items[0]).toMatchObject({
       kind: 'tool',
       step: {
-        title: '修改 qoder-cli.txt',
-        currentInstruction: '修改 qoder-cli.txt',
+        title: '编辑 qoder-cli.txt',
+        currentInstruction: '编辑 qoder-cli.txt',
         detail: 'Successfully modified file',
         status: 'completed',
         activityDomain: 'file'
@@ -6056,11 +6096,11 @@ describe('task event projections', () => {
     expect(progress.items).toMatchObject([
       {
         key: 'tool:toolu-edit-1',
-        step: { title: '修改 CampWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+        step: { title: '编辑 CampWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
       },
       {
         key: 'tool:toolu-edit-2',
-        step: { title: '修改 CampWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+        step: { title: '编辑 CampWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
       }
     ])
 
@@ -6084,7 +6124,7 @@ describe('task event projections', () => {
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
     expect(markup.match(/modified-file-diff is-exact-mutation/g)).toHaveLength(2)
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
-    expect(markup).toContain('aria-label="已执行 2 项操作；状态：全部成功"')
+    expect(markup).toContain('aria-label="完成了 2 个步骤"')
     expect(markup).toContain('CampWorkspace.tsx 的修改片段')
     expect(markup).toContain('const enabled = false')
     expect(markup).toContain('const enabled = ready')
@@ -6403,11 +6443,41 @@ describe('task event projections', () => {
       presentationHint: null
     }), {
       runtimeFileOperation: {
+        schemaVersion: 2,
         status: 'available',
         operationKind: 'write',
         path: 'rovai-runtime-validation/qoder-cli.txt'
       }
-    })).toBe('修改 qoder-cli.txt')
+    })).toBe('编辑 qoder-cli.txt')
+    expect(executionActivityTitle(canonicalActivity('file-add', {
+      classifierVersion: 'activity-v3',
+      activityDomain: 'file',
+      semanticKind: 'file.write',
+      toolName: 'Write',
+      presentationHint: null
+    }), {
+      runtimeFileOperation: {
+        schemaVersion: 2,
+        status: 'available',
+        operationKind: 'write',
+        changeKind: 'add',
+        path: 'src/new-file.ts'
+      }
+    })).toBe('新增 new-file.ts')
+    expect(executionActivityTitle(canonicalActivity('file-read', {
+      classifierVersion: 'activity-v3',
+      activityDomain: 'file',
+      semanticKind: 'file.read',
+      toolName: 'Read',
+      presentationHint: null
+    }), {
+      runtimeFileOperation: {
+        schemaVersion: 2,
+        status: 'available',
+        operationKind: 'read',
+        path: 'docs/README.md'
+      }
+    })).toBe('阅读 README.md')
   })
 
   it('prefers concrete active-group instructions without changing generic Tool row fallbacks', () => {
@@ -6459,7 +6529,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('presents a Codex structured read as the observed terminal command', () => {
+  it('keeps historical activity-v2 Codex structured reads as observed terminal commands', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'codex-command', agentRunId: 'run-codex', eventType: 'activity.started',
       payload: {
@@ -6484,6 +6554,101 @@ describe('task event projections', () => {
         activityDomain: 'shell'
       }
     })
+  })
+
+  it('renders activity-v3 typed reads and evidence-backed adds as static linked file rows', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'codex-read-completed', agentRunId: 'run-codex-read', eventType: 'activity.completed',
+      payload: {
+        item: {
+          id: 'command-read-1', type: 'commandExecution', status: 'completed',
+          command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
+          commandActions: [{ type: 'read', path: '/repo/docs/README.md' }],
+          aggregatedOutput: 'private file content must not become row detail'
+        },
+        runtimeFileOperation: {
+          schemaVersion: 2,
+          source: 'runtime_reported',
+          status: 'available',
+          operationKind: 'read',
+          path: 'docs/README.md'
+        }
+      },
+      canonical: canonicalActivity('command-read-1', {
+        classifierVersion: 'activity-v3',
+        activityDomain: 'file', semanticKind: 'file.read', toolName: null,
+        presentationHint: null, phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-09-06T00:00:00Z'
+    }, {
+      id: 'opencode-add-completed', agentRunId: 'run-codex-read', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'write-add-1', status: 'completed', kind: 'write', toolName: 'Write',
+        runtimeFileOperation: {
+          schemaVersion: 2,
+          source: 'runtime_reported',
+          status: 'available',
+          operationKind: 'write',
+          changeKind: 'add',
+          path: 'src/new-file.ts'
+        }
+      },
+      canonical: canonicalActivity('write-add-1', {
+        classifierVersion: 'activity-v3',
+        activityDomain: 'file', semanticKind: 'file.write', toolName: 'Write',
+        presentationHint: null, phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-09-06T00:00:01Z'
+    }], 'run-codex-read')
+
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: '阅读 README.md',
+        detail: '',
+        iconKind: 'file-read',
+        fileOperation: { operationKind: 'read', path: 'docs/README.md' }
+      }
+    })
+    expect(progress.items[1]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: '新增 new-file.ts',
+        iconKind: 'file-write',
+        fileOperation: { operationKind: 'write', changeKind: 'add', path: 'src/new-file.ts' }
+      }
+    })
+
+    const run: AgentRunView = {
+      id: 'run-codex-read', campTurnId: 'turn-codex-read', conversationId: 'conversation-codex-read',
+      agentId: 'agent-codex-read', taskId: null, responsibilityKey: 'direct:agent-codex-read',
+      responsibilityGeneration: 0, purpose: '阅读文件', completionRole: 'required',
+      status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: 'runtime_terminal',
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-09-06T00:00:00Z', startedAt: '2026-09-06T00:00:00Z',
+      endedAt: '2026-09-06T00:00:01Z', updatedAt: '2026-09-06T00:00:01Z'
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-codex-read', focused: true
+    }))
+    expect(markup).toContain('class="process-action tool-call-summary tool-call-static file-operation-row status-completed"')
+    expect(markup).toContain('role="group" aria-label="阅读 docs/README.md，成功"')
+    expect(markup).toContain('role="group" aria-label="新增 src/new-file.ts，成功"')
+    expect(markup).toContain('data-icon-domain="file-read"')
+    expect(markup).toContain('data-icon-domain="file-write"')
+    expect(markup).toContain('class="tool-file-link"')
+    expect(markup).toContain('docs/README.md · 打开文件预览')
+    expect(markup).toContain('>README.md</button>')
+    expect(markup).toContain('>new-file.ts</button>')
+    expect(markup).not.toContain('private file content must not become row detail')
+    expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
+    expect(markup).toContain('class="tool-group-state is-placeholder"')
+    expect(markup).not.toContain('class="tool-group-state status-completed"')
   })
 
   it('selects one terminal full-content entry per logical Tool item', () => {
@@ -6618,7 +6783,7 @@ describe('task event projections', () => {
             agentRunId: 'run-history',
             requestedAfterSequence: 0,
             nextAfterSequence: 2,
-            throughSequence: 3,
+            throughSequence: 30,
             hasMore: true,
             evidence: [evidence(1), evidence(2)]
           }
@@ -6626,10 +6791,10 @@ describe('task event projections', () => {
             schemaVersion: 1,
             agentRunId: 'run-history',
             requestedAfterSequence: 2,
-            nextAfterSequence: 3,
-            throughSequence: 3,
+            nextAfterSequence: 30,
+            throughSequence: 30,
             hasMore: false,
-            evidence: [evidence(3)]
+            evidence: [{ ...evidence(3), sequence: 30 }]
           }
     }, 'camp-history', 'run-history')
 
@@ -6641,6 +6806,24 @@ describe('task event projections', () => {
     const narration = progress.items.find((item) => item.kind === 'narration')
     expect(narration?.body).toHaveLength(deltas.join('').length)
     expect(narration?.body).toBe(deltas.join(''))
+    const requestedContent: string[] = []
+    const fullBody = `${'long narration 🙂'.repeat(2000)} END`
+    const block = { ...events[0], eventType: 'agent.text.block', isTruncated: true,
+      contentBlobId: 'blob-body', payload: { text: 'preview', blockId: events[0].id } }
+    const fullBodies = await loadExecutionNarrationBodies([
+      block,
+      { ...block, id: 'private', eventType: 'agent.thought.block' },
+      { ...block, id: 'tool', eventType: 'activity.completed' },
+      { ...block, id: 'inline', isTruncated: false }
+    ], async (id) => {
+      requestedContent.push(id)
+      return { payload: { text: fullBody } }
+    })
+    expect(requestedContent).toEqual([block.id])
+    expect(fullBodies.get(`narration:${block.id}`)).toBe(fullBody)
+    await expect(loadExecutionNarrationBodies([block], async () => {
+      throw new Error('temporary read failure')
+    })).rejects.toThrow('temporary read failure')
   })
 
   it('classifies diff lines without treating file headers as changes', () => {

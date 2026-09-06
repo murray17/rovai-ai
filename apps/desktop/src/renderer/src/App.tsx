@@ -136,7 +136,7 @@ import {
   createNavigationRefreshCoordinator,
   type NavigationRefreshTrigger
 } from './navigation-refresh-coordinator'
-import { createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
+import { appendLiveRuntimeEventBatch, createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
 
 export { allNavigationCamps }
 
@@ -1046,6 +1046,25 @@ export function bootstrapAuthorityCopy(snapshot: SupervisorSnapshot | null): {
   }
 }
 
+export function AppToast({
+  toast,
+  onClose
+}: {
+  toast: { message: string; tone: 'neutral' | 'danger' }
+  onClose(): void
+}): React.JSX.Element {
+  return (
+    <div
+      className={`app-toast${toast.tone === 'danger' ? ' is-danger' : ''}`}
+      role={toast.tone === 'danger' ? 'alert' : 'status'}
+      aria-live={toast.tone === 'danger' ? 'assertive' : 'polite'}
+    >
+      <span>{toast.message}</span>
+      <button className="icon-button" type="button" aria-label="关闭提示" onClick={onClose}>×</button>
+    </div>
+  )
+}
+
 function AuthoritativeApp({
   initialStartupSnapshot,
   startupStartedAtMs,
@@ -1137,7 +1156,13 @@ function AuthoritativeApp({
   const [newConversationAttention, setNewConversationAttention] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; tone: 'neutral' | 'danger' } | null>(null)
+  const notify = useCallback((message: string): void => {
+    setToast({ message, tone: 'neutral' })
+  }, [])
+  const notifyError = useCallback((message: string): void => {
+    setToast({ message, tone: 'danger' })
+  }, [])
   const [openingCampId, setOpeningCampId] = useState<string | null>(null)
   const [runtimeRecovery, setRuntimeRecovery] = useState<CampRuntimeRecovery | null>(null)
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
@@ -2304,7 +2329,7 @@ function AuthoritativeApp({
 
   useEffect(() => {
     const liveEvents = createLiveRuntimeEventBuffer((batch) => {
-      setLiveRuntimeEvents((current) => [...current, ...batch])
+      setLiveRuntimeEvents((current) => appendLiveRuntimeEventBatch(current, batch))
     })
     const unsubscribe = window.rovai.onEvent((event: CoreEvent) => {
       const params = asRecord(event.params)
@@ -2990,7 +3015,7 @@ function AuthoritativeApp({
         if (removingCurrent || removingActiveCamp) {
           await commitRestorableLocation({ kind: 'quick_chat' })
         }
-        setToast(`已从侧栏移除“${project.name}”`)
+        notify(`已从侧栏移除“${project.name}”`)
       } finally {
         setBusy(null)
       }
@@ -3123,7 +3148,7 @@ function AuthoritativeApp({
         refreshActiveCampSnapshot(campId),
         loadNavigation()
       ])
-      setToast('已按“结果未知”结束运行；原请求没有重发')
+      notify('已按“结果未知”结束运行；原请求没有重发')
     } catch (nextError) {
       setError(errorMessage(nextError))
       throw nextError
@@ -3483,7 +3508,7 @@ function AuthoritativeApp({
       setOptimisticCampMessages((current) =>
         current.filter((entry) => entry.commandId !== commandId)
       )
-      if (!rejectedForRuntime) setToast(errorMessage(nextError))
+      if (!rejectedForRuntime) notify(errorMessage(nextError))
       throw nextError
     } finally {
       setBusy(null)
@@ -3763,7 +3788,7 @@ function AuthoritativeApp({
   }
 
   return (
-    <FilePreviewProvider campId={view === 'camp' ? activeCampId : null}>
+    <FilePreviewProvider campId={view === 'camp' ? activeCampId : null} resolvedTheme={appearance.resolvedTheme}>
     <div className={view === 'camp' ? 'app-shell app-shell-camp' : 'app-shell'}>
       <CampNavigation
         platform={window.rovai.platform}
@@ -3810,7 +3835,7 @@ function AuthoritativeApp({
         onRemoveProject={removeNavigationProject}
         onCampIdCopied={() => {
           setError(null)
-          setToast('已复制会话 ID')
+          notify('已复制会话 ID')
         }}
         onRename={renameCamp}
         onDelete={deleteCamp}
@@ -3835,10 +3860,7 @@ function AuthoritativeApp({
         )}
         {!startupGateVisible && view !== 'members' && view !== 'memory' && inlineNotices}
         {!startupGateVisible && !shuttingDown && toast && (
-          <div className="app-toast" role="status" aria-live="polite">
-            <span>{toast}</span>
-            <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>×</button>
-          </div>
+          <AppToast toast={toast} onClose={() => setToast(null)} />
         )}
 
         {!startupGateVisible && startupFeedbackVisible && startupRoutePending?.kind === 'camp' && view === 'camp' && (
@@ -3906,7 +3928,8 @@ function AuthoritativeApp({
             firstRunCamp={firstRunCamp}
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
-            onNotify={setToast}
+            onNotify={notify}
+            onNotifyError={notifyError}
           />
         )}
 
@@ -4038,7 +4061,7 @@ function AuthoritativeApp({
         onPresentNavigation={presentNotificationNavigation}
         onCancelNavigation={cancelNotificationNavigation}
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
-        onError={setToast}
+        onError={notify}
         visibleSources={visibleNotificationSources}
         onHeadsUpVisibleChange={setNotificationHeadsUpVisible}
       />

@@ -125,6 +125,116 @@ app.whenReady().then(async () => {
     await capture('preview-day-1440x920')
   })
 
+  await check('source preview uses one read-only CodeMirror with real lines, syntax, search and stable theme updates', async () => {
+    const day = await run('window.previewTest.sourceSnapshot(true)')
+    assert.equal(day.fontSize, '14px')
+    assert.equal(day.fontWeight, '400')
+    assert.equal(day.lineHeight, '22.4px')
+    assert.equal(day.contentPaddingTop, '14px')
+    assert.equal(day.contentEditable, 'false')
+    assert.equal(day.readOnly, 'true')
+    assert.equal(day.tabIndex, '0')
+    assert.notEqual(day.keywordColor, day.sourceColor, 'Loaded TS syntax receives the base theme colors')
+    assert.equal(day.horizontalScroll, true, 'Long source lines scroll inside CodeMirror')
+    assert.deepEqual(day.targetLines.map((line) => line.match(/readingLine\d+/)?.[0]), [
+      'readingLine120', 'readingLine121', 'readingLine122'
+    ])
+    assert.ok(day.gutterLines.includes('120'), 'The target keeps its real file line number')
+    assert.match(day.selectedText, /^const readingLine\d+/, 'Native source selection excludes gutter line numbers')
+    await capture('source-reader-day')
+
+    await run('window.previewTest.bookmarkSource()')
+    const readingBeforeTheme = await run('window.previewTest.sourceSnapshot()')
+    await run('window.previewTest.setTheme("night")')
+    const night = await run('window.previewTest.sourceSnapshot()')
+    assert.equal(night.sameEditor, true, 'Theme changes reconfigure the existing editor')
+    assert.equal(night.firstVisibleLine, readingBeforeTheme.firstVisibleLine,
+      'Theme changes preserve the visible source line')
+    assert.notEqual(night.keywordColor, day.keywordColor, 'Night uses the dark base syntax colors')
+    await capture('source-reader-night')
+
+    await run('document.querySelector(".file-preview-tab-panel:not([hidden]) .file-preview-code").focus()')
+    await key('f', [process.platform === 'darwin' ? 'meta' : 'control'])
+    let searching = await run('window.previewTest.sourceSnapshot()')
+    assert.equal(searching.searchVisible, true)
+    assert.equal(searching.replaceVisible, false, 'Read-only search never exposes replace controls')
+    await run('window.previewTest.setSourceSearch("readingLine120")')
+    searching = await run('window.previewTest.sourceSnapshot()')
+    assert.ok(searching.searchMatches >= 1)
+    assert.equal(searching.currentMatches, 1)
+    await capture('source-reader-search-night')
+    await key('Escape')
+    await run('window.previewTest.setTheme("day")')
+  })
+
+  await check('Markdown document mode preserves hierarchy and uses static shared syntax highlighting', async () => {
+    await run('window.previewTest.openMarkdown()')
+    const day = await run('window.previewTest.markdownSnapshot()')
+    assert.equal(day.bodyFontSize, '15px')
+    assert.equal(day.bodyLineHeight, '25.5px')
+    assert.deepEqual([day.h1, day.h2, day.h3], ['26px', '21px', '17px'])
+    assert.equal(day.codeLanguage, 'tsx')
+    assert.equal(day.codeFontSize, '13px')
+    assert.notEqual(day.syntaxColor, day.sourceColor)
+    assert.equal(day.editorCount, 0, 'Fenced blocks render static spans, not editor instances')
+    assert.equal(day.tableFontSize, '14px')
+    assert.equal(day.tableScrolls, true)
+    assert.ok(day.documentWidth <= 780 && day.documentWidth < day.paneWidth)
+    assert.equal(day.pageOverflow, false)
+    await capture('markdown-reader-day')
+
+    await run('window.previewTest.setTheme("night")')
+    const night = await run('window.previewTest.markdownSnapshot()')
+    assert.notEqual(night.syntaxColor, day.syntaxColor)
+    assert.equal(night.editorCount, 0)
+    assert.equal(night.pageOverflow, false)
+    await capture('markdown-reader-night')
+    await run('window.previewTest.setTheme("day"); window.previewTest.closeExtraTabs(); window.previewTest.open()')
+  })
+
+  await check('tool file links commit only after content is readable and preserve the current preview on failure', async () => {
+    const before = await reviewSnapshot()
+    const beforeLayout = await snapshot()
+    await run('window.previewTest.startPendingToolPreview()')
+    const whileReading = await reviewSnapshot()
+    const whileReadingLayout = await snapshot()
+    assert.equal(whileReading.selectedTab, before.selectedTab)
+    assert.equal(whileReadingLayout.visible, beforeLayout.visible)
+    assert.equal(whileReadingLayout.tabCount, beforeLayout.tabCount,
+      'A Tool file link must not expose a provisional Tab while its first content read is pending')
+    const pendingOpened = await run('window.previewTest.finishPendingToolPreview()')
+    assert.equal(pendingOpened.kind, 'preview')
+    assert.equal((await reviewSnapshot()).selectedTab, 'tool-link-preview.ts')
+    await run('window.previewTest.closeExtraTabs()')
+    await open()
+
+    const beforeFailure = await reviewSnapshot()
+    const beforeFailureLayout = await snapshot()
+    const failed = await run('window.previewTest.openToolPreview(true)')
+    const afterFailure = await reviewSnapshot()
+    const afterFailureLayout = await snapshot()
+    assert.equal(failed.kind, 'error')
+    assert.equal(afterFailure.selectedTab, beforeFailure.selectedTab)
+    assert.equal(afterFailureLayout.visible, beforeFailureLayout.visible)
+    assert.equal(afterFailureLayout.tabCount, beforeFailureLayout.tabCount)
+    assert.equal((await run('window.previewTest.recoverySnapshot()')).text, undefined,
+      'A failed tool link must not replace the current file with a preview error page')
+    assert.equal(afterFailure.fileRestores.length, beforeFailure.fileRestores.length + 1)
+    assert.equal(afterFailure.fileReads, beforeFailure.fileReads + 1)
+    assert.equal(afterFailure.releases.length, beforeFailure.releases.length + 1)
+
+    const opened = await run('window.previewTest.openToolPreview(false)')
+    const afterSuccess = await reviewSnapshot()
+    const afterSuccessLayout = await snapshot()
+    assert.equal(opened.kind, 'preview')
+    assert.equal(afterSuccess.selectedTab, 'tool-link-preview.ts')
+    assert.equal(afterSuccessLayout.tabCount, beforeFailureLayout.tabCount + 1)
+    assert.equal(afterSuccess.fileRestores.length, beforeFailure.fileRestores.length + 2)
+    assert.equal(afterSuccess.fileReads, beforeFailure.fileReads + 2)
+    await run('window.previewTest.closeExtraTabs()')
+    await open()
+  })
+
   await check('Camp sessions restore the visible active file first and keep hidden or background files lazy', async () => {
     await run('window.previewTest.openTab(0)')
     const before = await reviewSnapshot()
@@ -183,11 +293,11 @@ app.whenReady().then(async () => {
     assert.ok(state.borderWidths.every((width) => width === '0px'))
     assert.equal(state.background, 'rgba(0, 0, 0, 0)')
     await capture('preview-missing-day')
-    await run('document.documentElement.dataset.theme = "night"')
+    await run('window.previewTest.setTheme("night")')
     await snapshot()
     assert.equal((await run('window.previewTest.recoverySnapshot()')).text, '找不到这个文件')
     await capture('preview-missing-night')
-    await run('document.documentElement.dataset.theme = "day"; window.previewTest.closeAll()')
+    await run('window.previewTest.setTheme("day"); window.previewTest.closeAll()')
     await open()
   })
 
@@ -255,7 +365,7 @@ app.whenReady().then(async () => {
     await viewport(1_200)
     equalWidths(await tabs(), 120)
     assert.equal((await tabs()).overflow, true)
-    await run('document.documentElement.dataset.theme = "night"')
+    await run('window.previewTest.setTheme("night")')
     await snapshot()
     await capture('tabs-minimum-night')
     await viewport(1_440)
@@ -265,7 +375,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(expanded.edges, { left: false, right: false }, 'Widening hides both arrows when all tabs fit')
     assert.ok(expanded.tabs.every(tab => !tab.faded))
     await capture('tabs-shrinking-night')
-    await run('document.documentElement.dataset.theme = "day"; window.previewTest.closeExtraTabs()')
+    await run('window.previewTest.setTheme("day"); window.previewTest.closeExtraTabs()')
     await open()
     equalWidths(await tabs(), 180)
     assert.equal((await snapshot()).stored, null, 'Tab layout does not write preview width preferences')
@@ -288,11 +398,11 @@ app.whenReady().then(async () => {
     const reading = () => run(`({
       selected: document.querySelector('[role="tab"][aria-selected="true"]').id,
       conversation: document.querySelector('.camp-timeline').scrollTop,
-      file: document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-code').scrollTop
+      file: document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-code .cm-scroller').scrollTop
     })`)
     for (let index = 0; index < 8; index += 1) await run(`window.previewTest.openTab(${index})`)
     await run(`document.querySelector('.camp-timeline').scrollTop = 180;
-      document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-code').scrollTop = 360`)
+      document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-code .cm-scroller').scrollTop = 360`)
     const before = await reading()
     const end = await tabs()
     assert.deepEqual(end.edges, { left: true, right: false }, 'Opening the last tab reveals the right endpoint')
@@ -343,11 +453,11 @@ app.whenReady().then(async () => {
     const reduced = await tabs()
     closeTo(reduced.scrollLeft, reduced.maximum, 'Reduced motion jumps directly to the scroll target')
     assert.equal(reduced.tabs.at(-1).focused, true)
-    await run('document.documentElement.dataset.theme = "night"')
+    await run('window.previewTest.setTheme("night")')
     await snapshot()
     await capture('tabs-scroll-end-night')
     await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
-    await run(`document.documentElement.dataset.theme = "day";
+    await run(`window.previewTest.setTheme("day");
       document.querySelector('.camp-timeline').scrollTop = 0;
       window.previewTest.closeExtraTabs()`)
     await open()
@@ -536,7 +646,7 @@ app.whenReady().then(async () => {
   })
 
   await check('wide, night and 200% reduced-motion layouts preserve one boundary without overflow', async () => {
-    await run('document.documentElement.dataset.theme = "night"')
+    await run('window.previewTest.setTheme("night")')
     const wide = await viewport(2_560, 1_440)
     closeTo(wide.width, wide.available * .56, 'Wide preview ratio')
     assert.equal(wide.aligned, true)
@@ -579,7 +689,7 @@ app.whenReady().then(async () => {
   })
 
   await check('File Change opens beside the unchanged conversation with its own tab and immutable evidence', async () => {
-    await run('document.documentElement.dataset.theme = "day"; window.previewTest.bookmark()')
+    await run('window.previewTest.setTheme("day"); window.previewTest.bookmark()')
     const before = await snapshot()
     const reads = (await reviewSnapshot()).fileReads
     const opened = await click('.run-file-change-file')
@@ -654,7 +764,7 @@ app.whenReady().then(async () => {
     await click('[aria-label="关闭 File Change·styles.css"]')
     assert.deepEqual((await reviewSnapshot()).releases, before.releases)
     await viewport(2_560, 1_440)
-    await run('document.documentElement.dataset.theme = "night"')
+    await run('window.previewTest.setTheme("night")')
     assert.equal((await reviewSnapshot()).sidebarVisible, true)
     assert.deepEqual((await reviewSnapshot()).overflow, [])
     await capture('file-change-night-2560x1440')

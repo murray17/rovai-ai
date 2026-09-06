@@ -8,6 +8,7 @@ import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 import { requestNormalApplicationQuit } from './lib/planned-shutdown-app-quit.mjs'
 import { querySqliteRows } from './lib/sqlite.mjs'
+import { acceptExecutionText } from './lib/execution-text-acceptance.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const defaultAppPath = process.platform === 'win32'
@@ -32,6 +33,7 @@ const databasePath = join(coreDataDir, 'rovai.sqlite')
 const runtimeTempDir = process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_RUNTIME_TMP ?? tmpdir()
 const agentId = 'agent_1'
 const runtimeKind = process.env.ROVAI_PLANNED_SHUTDOWN_RUNTIME_KIND?.trim() || 'claude-code-cli'
+const textAcceptanceMode = process.env.ROVAI_EXECUTION_TEXT_ACCEPT
 const shutdownDeadlineMs = 10_000
 const promptCancellationTargetMs = 5_000
 const reportPath = join(outputDir, 'planned-shutdown-acceptance.json')
@@ -72,6 +74,21 @@ try {
   const request = (method, params = {}) => appRequest(firstApp.cdp, method, params)
   const workspace = await request('workspaces.inspect', { path: projectRoot })
   const installation = await configureProductRuntime(request, runtimeKind, [agentId])
+  let textAcceptance = null
+  if (['1', 'text-and-partial'].includes(textAcceptanceMode)) {
+    await evaluate(firstApp.cdp, `(() => {
+      window.__textAcceptFrames = {};
+      window.rovai.onEvent((event) => {
+        const runId = event.params?.agentRunId;
+        if (!runId || !['agent.text.delta', 'agent.thought.delta', 'agent.reasoning.summary.delta'].includes(event.method)) return;
+        const counts = window.__textAcceptFrames[runId] ??= {};
+        counts[event.method] = (counts[event.method] ?? 0) + 1;
+      });
+    })()`)
+    textAcceptance = await acceptExecutionText({ request, workspace, databasePath, waitFor,
+      frames: (runId) => evaluate(firstApp.cdp, `window.__textAcceptFrames[${JSON.stringify(runId)}] ?? {}`) })
+    await writeFile(join(outputDir, 'execution-text-acceptance.json'), JSON.stringify(textAcceptance, null, 2), { mode: 0o600 })
+  }
   const sent = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     name: 'Planned shutdown real Runtime acceptance',
@@ -83,6 +100,7 @@ try {
       'This is a controlled planned-shutdown acceptance run.',
       'Do not call tools, execute commands, inspect files, or modify the workspace.',
       'Write a detailed 4000-word explanation of why process exit alone cannot prove a distributed task was cancelled.',
+      'Emit that explanation as one long streaming commentary block, not as tool arguments. Do not start with a short acknowledgement or call tools before finishing that block.',
       'Stay within this one response and do not send messages through any external tool.'
     ].join(' '),
     purpose: 'Keep one real Runtime turn active while Rovai performs a controlled shutdown.'
@@ -92,7 +110,7 @@ try {
   assert(sent.status === 'accepted' && campId && agentRunId,
     `Real Runtime AgentRun was not accepted: ${JSON.stringify(sent)}`)
 
-  const shutdownReadySnapshot = await waitFor(async () => {
+  await waitFor(async () => {
     const snapshot = await request('camps.snapshot', { campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (['succeeded', 'failed', 'cancelled'].includes(run?.status)) {
@@ -117,6 +135,20 @@ try {
     `Packaged App did not own the expected Core/Runtime process tree: ${liveDescendantPids.join(', ')}`)
 
   await appendComposerText(firstApp.cdp, quitDraftLatestSuffix, quitDraftExpectedBody)
+  const acceptedText = ['1', 'partial-only', 'text-and-partial'].includes(textAcceptanceMode)
+    ? await waitFor(async () => {
+      const snapshot = await request('camps.snapshot', { campId })
+      const text = snapshot.executionEvidence.find((item) => item.agentRunId === agentRunId
+        && item.eventType === 'agent.text.block' && item.payload.status === 'streaming'
+        && item.payload.text?.length >= 512)
+      return text ? { id: text.id, text: text.payload.text } : null
+    }, 'accepted unfinished body immediately before normal App quit', 120_000, 20)
+    : null
+  // Delivery can advance from prepared to accepted while the Composer is being
+  // exercised. Assert against the boundary just before quit, not the first poll.
+  const beforeQuitSnapshot = await request('camps.snapshot', { campId })
+  const inputStatusBeforeShutdown = beforeQuitSnapshot.contextManifests
+    .find((manifest) => manifest.agentRunId === agentRunId)?.delivery?.status ?? null
   const shutdownStartedAt = Date.now()
   const quitRequest = requestAppQuit(firstApp)
   trace(`normal quit requested for pid ${firstApp.child.pid}`)
@@ -153,10 +185,8 @@ try {
     && afterShutdown.run.ended_at !== null
     && afterShutdown.run.terminal_resolution_source === null
     && afterShutdown.run.terminal_reason_code === null
-    && afterShutdown.run.last_error_code === 'planned_shutdown_outcome_unknown',
+    && afterShutdown.run.last_error_code === null,
   `Controlled shutdown did not terminalize the unresolved AgentRun honestly: ${JSON.stringify(afterShutdown.run)}`)
-  const inputStatusBeforeShutdown = shutdownReadySnapshot.contextManifests
-    .find((manifest) => manifest.agentRunId === agentRunId)?.delivery?.status ?? null
   assert(afterShutdown.delivery?.status === (inputStatusBeforeShutdown === 'prepared'
     ? 'delivery_unknown'
     : 'accepted'),
@@ -168,6 +198,12 @@ try {
 
   recoveredApp = await launchApp(await availablePort(), 1040, 700)
   const recoveredRequest = (method, params = {}) => appRequest(recoveredApp.cdp, method, params)
+  if (acceptedText) {
+    const recoveredText = await recoveredRequest('agentRunEvidence.getContent', { campId, evidenceId: acceptedText.id })
+    assert(recoveredText.payload?.status === 'interrupted'
+      && recoveredText.payload?.text?.startsWith(acceptedText.text),
+    'Normal App quit lost accepted partial text or marked it successfully completed')
+  }
   const recoveredDraft = await recoveredRequest('camp.composerDraft.get', { campId })
   assert(recoveredDraft.body === quitDraftExpectedBody
     && recoveredDraft.revision > savedDraftBeforeQuit.revision,
@@ -179,7 +215,7 @@ try {
     const snapshot = await recoveredRequest('camps.snapshot', { campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     return run?.status === 'cancelled'
-      && run.hasUnsettledExternalEffects === true
+      && run.hasUnsettledExternalEffects === false
       ? snapshot
       : null
   }, 'controlled-shutdown terminal after restart', 45_000, 100)
@@ -219,123 +255,142 @@ try {
     && finalFacts.run.cancel_requested_at !== null
     && finalFacts.run.cancel_reason_code === 'app_shutdown_cancel_all'
     && finalFacts.run.cancel_acknowledged_at !== null
-    && finalFacts.run.last_error_code === 'planned_shutdown_outcome_unknown'
+    && finalFacts.run.last_error_code === null
     && finalFacts.run.terminal_resolution_source === null
     && finalFacts.run.terminal_reason_code === null,
   `Restart did not preserve the controlled-shutdown terminal: ${JSON.stringify(finalFacts.run)}`)
 
-  feedbackApp = await launchApp(await availablePort(), 1040, 700, {
-    userDataDirectory: feedbackDataDir,
-    waitForHealth: false
-  })
-  await setTheme(feedbackApp.cdp, 'day')
-  const feedbackDescendantPids = await descendantProcessIds(feedbackApp.child.pid)
-  const feedbackShutdownStartedAt = Date.now()
-  const feedbackQuitRequest = requestAppQuit(feedbackApp)
-  await waitForExpression(feedbackApp.cdp,
-    `Boolean(document.querySelector('.shutdown-scrim.is-visible'))`, 10_000, 20)
-  const shutdownFeedbackElapsedMs = Date.now() - feedbackShutdownStartedAt
-  assert(shutdownFeedbackElapsedMs >= 350,
-    `Safe-exit feedback appeared before the anti-flash window: ${shutdownFeedbackElapsedMs}ms`)
-
-  const dayOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'day', 1040, 700, 1)
-  const dayCapture = join(outputDir, 'planned-shutdown-day-1040x700.png')
-  await capture(feedbackApp.cdp, dayCapture)
-
-  await evaluate(feedbackApp.cdp, `window.rovai.appearance.setPreference('night')`, true)
-  await waitForExpression(feedbackApp.cdp,
-    `document.documentElement.dataset.theme === 'night'`, 2_000, 20)
-  const nightOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'night', 1040, 700, 1)
-  const nightCapture = join(outputDir, 'planned-shutdown-night-1040x700.png')
-  await capture(feedbackApp.cdp, nightCapture)
-
-  await feedbackApp.cdp.send('Emulation.setDeviceMetricsOverride', {
-    width: 520,
-    height: 350,
-    deviceScaleFactor: 2,
-    mobile: false,
-    screenWidth: 1040,
-    screenHeight: 700
-  })
-  await waitForExpression(feedbackApp.cdp,
-    `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`,
-    2_000,
-    20)
-  const zoomOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'night', 520, 350, 2)
-  const zoomCapture = join(outputDir, 'planned-shutdown-night-1040x700-zoom-200.png')
-  await capture(feedbackApp.cdp, zoomCapture)
-
-  const feedbackExit = await waitForChildExit(feedbackApp.child, 18_000)
-  const feedbackShutdownElapsedMs = Date.now() - feedbackShutdownStartedAt
-  await feedbackQuitRequest
-  feedbackApp.cdp.close()
-  const feedbackShutdownResult = parseShutdownResult(feedbackApp.stderr)
-  feedbackApp = null
-  assert(feedbackExit.code === 0 && feedbackExit.signal === null,
-    `Feedback packaged App did not exit naturally: ${JSON.stringify(feedbackExit)}`)
-  assert(feedbackShutdownResult?.forcedSignal === null
-    && feedbackShutdownResult?.report?.status === 'completed',
-  `Feedback Desktop did not observe a natural Core shutdown report: ${JSON.stringify(feedbackShutdownResult)}`)
-  assert(feedbackShutdownElapsedMs < 18_000,
-    `Feedback packaged App exceeded its outer shutdown window: ${feedbackShutdownElapsedMs}ms`)
-  await assertProcessesExited(feedbackDescendantPids)
-
-  const report = {
-    ok: true,
-    mode: `packaged-app-real-${runtimeKind}-runtime`,
-    app: basename(appPath),
-    runtime: {
-      adapterKind: runtimeKind,
-      reportedVersion: installation.snapshot?.reportedVersion ?? null,
-      agentRunId,
-      inputStatusBeforeShutdown
-    },
-    shutdown: {
-      elapsedMs: shutdownElapsedMs,
-      feedbackElapsedMs: shutdownFeedbackElapsedMs,
-      feedbackHostElapsedMs: feedbackShutdownElapsedMs,
-      recoveredElapsedMs: recoveredShutdownElapsedMs,
-      naturalExit: true,
-      forcedSignal: firstShutdownResult.forcedSignal,
-      recoveredForcedSignal: recoveredShutdownResult.forcedSignal,
-      report: firstShutdownResult.report,
-      recoveredReport: recoveredShutdownResult.report,
-      feedbackReport: feedbackShutdownResult.report,
-      observedDescendantProcesses: liveDescendantPids.length,
-      runtimeTerminalFabricated: false,
-      runtimeTerminalSettled: false,
-      executionFencedTerminal: true,
-      campTurnCancellationWritten: false,
-      agentRunCancellationWritten: true
-    },
-    recovery: {
-      status: recoveredRun.status,
-      waitReason: recoveredRun.waitReason,
-      executionEpoch: recoveredRun.executionEpoch,
-      hasUnsettledExternalEffects: recoveredRun.hasUnsettledExternalEffects,
-      terminal
-    },
-    composerDraft: {
-      savedRevisionBeforeQuit: savedDraftBeforeQuit.revision,
-      recoveredRevision: recoveredDraft.revision,
-      recoveredBody: recoveredDraft.body,
-      latestEditorStatePersisted: recoveredDraft.body === quitDraftExpectedBody
-    },
-    overlays: {
-      day: dayOverlay,
-      night: nightOverlay,
-      zoom200: zoomOverlay
-    },
-    captures: {
-      day: dayCapture,
-      night: nightCapture,
-      zoom200: zoomCapture,
-      fencedTerminal: terminalCapture
+  if (['partial-only', 'text-and-partial'].includes(textAcceptanceMode)) {
+    // A focused persistence acceptance does not depend on keeping the unrelated
+    // empty-App shutdown overlay alive long enough for three screenshots.
+    const report = {
+      ok: true, mode: 'execution-text-normal-quit-restart', agentRunId,
+      textAcceptance,
+      partialTextPreservedOnQuit: { characters: acceptedText.text.length, status: 'interrupted' },
+      inputStatusBeforeShutdown, shutdownElapsedMs, recoveredShutdownElapsedMs,
+      shutdown: firstShutdownResult, recoveredShutdown: recoveredShutdownResult,
+      latestComposerDraftPreserved: recoveredDraft.body === quitDraftExpectedBody,
+      terminal, terminalCapture
     }
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
+    console.log(JSON.stringify({ ...report, reportPath }, null, 2))
+    failed = false
+  } else {
+    feedbackApp = await launchApp(await availablePort(), 1040, 700, {
+      userDataDirectory: feedbackDataDir,
+      waitForHealth: false
+    })
+    await setTheme(feedbackApp.cdp, 'day')
+    const feedbackDescendantPids = await descendantProcessIds(feedbackApp.child.pid)
+    const feedbackShutdownStartedAt = Date.now()
+    const feedbackQuitRequest = requestAppQuit(feedbackApp)
+    await waitForExpression(feedbackApp.cdp,
+      `Boolean(document.querySelector('.shutdown-scrim.is-visible'))`, 10_000, 20)
+    const shutdownFeedbackElapsedMs = Date.now() - feedbackShutdownStartedAt
+    assert(shutdownFeedbackElapsedMs >= 350,
+      `Safe-exit feedback appeared before the anti-flash window: ${shutdownFeedbackElapsedMs}ms`)
+
+    const dayOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'day', 1040, 700, 1)
+    const dayCapture = join(outputDir, 'planned-shutdown-day-1040x700.png')
+    await capture(feedbackApp.cdp, dayCapture)
+
+    await evaluate(feedbackApp.cdp, `window.rovai.appearance.setPreference('night')`, true)
+    await waitForExpression(feedbackApp.cdp,
+      `document.documentElement.dataset.theme === 'night'`, 2_000, 20)
+    const nightOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'night', 1040, 700, 1)
+    const nightCapture = join(outputDir, 'planned-shutdown-night-1040x700.png')
+    await capture(feedbackApp.cdp, nightCapture)
+
+    await feedbackApp.cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 520,
+      height: 350,
+      deviceScaleFactor: 2,
+      mobile: false,
+      screenWidth: 1040,
+      screenHeight: 700
+    })
+    await waitForExpression(feedbackApp.cdp,
+      `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`,
+      2_000,
+      20)
+    const zoomOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'night', 520, 350, 2)
+    const zoomCapture = join(outputDir, 'planned-shutdown-night-1040x700-zoom-200.png')
+    await capture(feedbackApp.cdp, zoomCapture)
+
+    const feedbackExit = await waitForChildExit(feedbackApp.child, 18_000)
+    const feedbackShutdownElapsedMs = Date.now() - feedbackShutdownStartedAt
+    await feedbackQuitRequest
+    feedbackApp.cdp.close()
+    const feedbackShutdownResult = parseShutdownResult(feedbackApp.stderr)
+    feedbackApp = null
+    assert(feedbackExit.code === 0 && feedbackExit.signal === null,
+      `Feedback packaged App did not exit naturally: ${JSON.stringify(feedbackExit)}`)
+    assert(feedbackShutdownResult?.forcedSignal === null
+      && feedbackShutdownResult?.report?.status === 'completed',
+    `Feedback Desktop did not observe a natural Core shutdown report: ${JSON.stringify(feedbackShutdownResult)}`)
+    assert(feedbackShutdownElapsedMs < 18_000,
+      `Feedback packaged App exceeded its outer shutdown window: ${feedbackShutdownElapsedMs}ms`)
+    await assertProcessesExited(feedbackDescendantPids)
+
+    const report = {
+      ok: true,
+      executionText: textAcceptance,
+      partialTextPreservedOnQuit: acceptedText ? { characters: acceptedText.text.length, status: 'interrupted' } : null,
+      mode: `packaged-app-real-${runtimeKind}-runtime`,
+      app: basename(appPath),
+      runtime: {
+        adapterKind: runtimeKind,
+        reportedVersion: installation.snapshot?.reportedVersion ?? null,
+        agentRunId,
+        inputStatusBeforeShutdown
+      },
+      shutdown: {
+        elapsedMs: shutdownElapsedMs,
+        feedbackElapsedMs: shutdownFeedbackElapsedMs,
+        feedbackHostElapsedMs: feedbackShutdownElapsedMs,
+        recoveredElapsedMs: recoveredShutdownElapsedMs,
+        naturalExit: true,
+        forcedSignal: firstShutdownResult.forcedSignal,
+        recoveredForcedSignal: recoveredShutdownResult.forcedSignal,
+        report: firstShutdownResult.report,
+        recoveredReport: recoveredShutdownResult.report,
+        feedbackReport: feedbackShutdownResult.report,
+        observedDescendantProcesses: liveDescendantPids.length,
+        runtimeTerminalFabricated: false,
+        runtimeTerminalSettled: false,
+        executionFencedTerminal: true,
+        campTurnCancellationWritten: false,
+        agentRunCancellationWritten: true
+      },
+      recovery: {
+        status: recoveredRun.status,
+        waitReason: recoveredRun.waitReason,
+        executionEpoch: recoveredRun.executionEpoch,
+        hasUnsettledExternalEffects: recoveredRun.hasUnsettledExternalEffects,
+        terminal
+      },
+      composerDraft: {
+        savedRevisionBeforeQuit: savedDraftBeforeQuit.revision,
+        recoveredRevision: recoveredDraft.revision,
+        recoveredBody: recoveredDraft.body,
+        latestEditorStatePersisted: recoveredDraft.body === quitDraftExpectedBody
+      },
+      overlays: {
+        day: dayOverlay,
+        night: nightOverlay,
+        zoom200: zoomOverlay
+      },
+      captures: {
+        day: dayCapture,
+        night: nightCapture,
+        zoom200: zoomCapture,
+        fencedTerminal: terminalCapture
+      }
+    }
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+    console.log(JSON.stringify({ ...report, reportPath }, null, 2))
+    failed = false
   }
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
-  console.log(JSON.stringify({ ...report, reportPath }, null, 2))
-  failed = false
 } finally {
   if (failed && firstApp?.stderr.length) {
     await writeFile(join(outputDir, 'first-app-stderr.log'), firstApp.stderr.join(''))
@@ -402,7 +457,10 @@ async function launchApp(port, width, height, {
     })
     await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
     if (waitForHealth) {
-      const health = await appRequest(cdp, 'health.check')
+      // The shell is intentionally visible before Core startup completes.
+      const health = await waitFor(async () => {
+        try { return await appRequest(cdp, 'health.check') } catch { return null }
+      }, 'isolated Core health after visible shell', 60_000, 100)
       assert(await realpath(health.database.path) === await realpath(databasePath),
         `Isolated packaged App opened the wrong database: ${health.database.path}`)
     } else {
@@ -411,6 +469,7 @@ async function launchApp(port, width, height, {
     return { cdp, child, stderr }
   } catch (error) {
     cdp?.close()
+    await writeFile(join(outputDir, 'launch-failure-stderr.log'), stderr.join(''), { mode: 0o600 })
     await terminateProcessTree(child)
     throw error
   }
@@ -514,7 +573,7 @@ async function openAgentProcess(cdp, targetAgentId) {
     return Boolean(chip)
   })()`)
   assert(opened, `Could not open the recovered process for ${targetAgentId}`)
-  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-uncertain'))`, 10_000)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.process-content'))`, 10_000)
 }
 
 async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight, deviceScaleFactor) {
@@ -594,19 +653,18 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
 
 async function collectFencedTerminal(cdp) {
   const terminal = await evaluate(cdp, `(() => {
-    const value = document.querySelector('.execution-uncertain')
-    const drawer = value?.closest('.process-content')
-    return value ? {
-      text: value.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+    const drawer = document.querySelector('.process-content')
+    return drawer ? {
+      uncertainCount: document.querySelectorAll('.execution-uncertain').length,
       recoveryBlockerCount: drawer?.querySelectorAll('.process-recovery-blocker').length ?? null,
       spinnerCount: drawer?.querySelectorAll('.spinner, [aria-busy="true"]').length ?? null
     } : null
   })()`)
   assert(terminal
-    && terminal.text.includes('外部效果待确认')
+    && terminal.uncertainCount === 0
     && terminal.recoveryBlockerCount === 0
     && terminal.spinnerCount === 0,
-  `Fenced Run did not show an honest terminal warning: ${JSON.stringify(terminal)}`)
+  `Cancelled Run exposed obsolete uncertainty/recovery UI: ${JSON.stringify(terminal)}`)
   return terminal
 }
 

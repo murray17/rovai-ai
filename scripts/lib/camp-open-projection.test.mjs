@@ -13,7 +13,11 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/camp-open-projection')
 
-test('business-only CampOpen keeps cards, earlier pages and reading position across refresh', { timeout: 60_000 }, async (t) => {
+test('business-only CampOpen keeps cards, earlier pages and reading position across refresh', { timeout: 60_000 }, t => runFixture(t))
+test('execution text loads sparse history and complete Blob bodies in place with retry', { timeout: 60_000 }, t => runFixture(t, '--text-evidence'))
+test('terminal Run artifacts retain their authors and layout across themes and widths', { timeout: 60_000 }, t => runFixture(t, '--run-artifacts'))
+
+async function runFixture(t, mode = '--camp-open') {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-camp-open-projection-test-'))
   let child
@@ -29,6 +33,7 @@ test('business-only CampOpen keeps cards, earlier pages and reading position acr
     process.stdout.write(`Automatic acceptance userData: ${join(fixture, 'user-data')}; no Core/SQLite/Skill Library/Runtime\n`)
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
+      mode,
       ...(process.platform === 'linux'
         || process.env.ROVAI_CAMP_OPEN_ACCEPT_NO_SANDBOX === '1'
         ? ['--no-sandbox']
@@ -56,4 +61,4 @@ test('business-only CampOpen keeps cards, earlier pages and reading position acr
       await rm(fixture, { recursive: true, force: true })
     }
   }
-})
+}

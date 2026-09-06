@@ -4,7 +4,7 @@ authority: renderer-ui-routing
 status: accepted
 design_direction: porcelain-day-steel-night
 target_version: cross-version
-last_updated: 2026-09-04
+last_updated: 2026-09-06
 ---
 
 # Rovai AI UI 规范
@@ -17,6 +17,10 @@ last_updated: 2026-09-04
 Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主题。它们共享组件树、功能和
 状态矩阵；`system` 跟随当前宿主 OS 的应用主题解析策略。全局排版、空间、形状、深度、色彩职责和基础组件
 规则由 [`DESIGN.md`](../../DESIGN.md) 统一拥有。
+
+通用弹窗采用单标题、浅色常规字重标签和 1px 浅色表单框，移除顶部彩线与重复页脚说明。
+低频信息折叠后仍保留草稿、验证与错误恢复；危险操作采用淡红底与红字。具体规则见
+[`DESIGN.md` 的 Components](../../DESIGN.md#components)与对应 surface brief。
 
 ## 主题
 

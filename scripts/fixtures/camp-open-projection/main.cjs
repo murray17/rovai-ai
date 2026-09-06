@@ -39,6 +39,105 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--run-artifacts') {
+      await run('window.campOpenTest.showRunArtifacts()')
+      const imageDeadline = Date.now() + 5000
+      while (Date.now() < imageDeadline) {
+        await run('window.campOpenTest.settle()')
+        if (await run('Boolean(document.querySelector(".run-artifact-output .image-tile-preview img")?.naturalWidth)')) break
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      const layouts = []
+      for (const theme of ['day', 'night']) {
+        for (const width of [1440, 1040]) {
+          window.setContentSize(width, 920)
+          await run(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}`)
+          await run('window.campOpenTest.settle()')
+          const layout = await run(`(() => {
+            const rect = node => node.getBoundingClientRect();
+            const outputs = [...document.querySelectorAll('.run-artifact-output')];
+            return {
+              overflow: document.documentElement.scrollWidth > innerWidth,
+              outputs: outputs.map(node => ({
+                id: node.dataset.runArtifactOutputId,
+                name: node.querySelector('.bubble-meta strong').textContent,
+                avatars: node.querySelectorAll('.member-avatar').length,
+                files: node.querySelectorAll('.run-file-changes-card').length,
+                images: node.querySelectorAll('.image-gallery').length,
+                imageWidth: node.querySelector('.image-tile-preview img')
+                  ? rect(node.querySelector('.image-tile-preview img')).width : 0,
+                actions: node.querySelectorAll('.message-actions').length,
+                authorLeft: rect(node.querySelector('.member-avatar')).left,
+                bodyLeft: rect(node.querySelector('.message-body')).left,
+                fileLeft: rect(node.querySelector('.run-file-changes-card')).left,
+                fileTop: rect(node.querySelector('.run-file-changes-card')).top,
+                bodyBottom: rect(node.querySelector('.message-body')).bottom
+              }))
+            };
+          })()`)
+          assert.equal(layout.overflow, false)
+          assert.deepEqual(layout.outputs.map(item => item.name), ['爱丽丝', '奥黛丽'])
+          for (const output of layout.outputs) {
+            assert.equal(output.avatars, 1)
+            assert.equal(output.files, 1)
+            assert.equal(output.actions, 0)
+            assert.ok(Math.abs(output.bodyLeft - output.authorLeft - 42) <= 1)
+            assert.ok(Math.abs(output.fileLeft - output.bodyLeft) <= 1)
+            assert.ok(output.fileTop >= output.bodyBottom)
+          }
+          assert.deepEqual(layout.outputs.map(item => item.images), [1, 0])
+          assert.ok(layout.outputs[0].imageWidth > 100, 'The Runtime image is decoded and visibly sized')
+          await capture(`run-artifacts-${theme}-${width}`)
+          layouts.push({ theme, width, ...layout })
+        }
+      }
+      await run('document.querySelector(".run-artifact-output .message-author-name-trigger").click()')
+      await run('window.campOpenTest.settle()')
+      assert.ok(await run('document.querySelector(".mention-profile-popover")?.textContent.includes("爱丽丝")'))
+      await run('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))')
+      await run('window.campOpenTest.showRunArtifacts(true)')
+      await run('window.campOpenTest.settle()')
+      assert.equal(await run('document.querySelectorAll(".run-artifact-output").length'), 1)
+      assert.equal(await run('document.querySelectorAll(".timeline-track .member-avatar").length'), 2)
+      assert.equal(errors.length, 0, errors.join('\n'))
+      console.log(JSON.stringify({ ok: true, mode, layouts }))
+      app.exit(0)
+      return
+    }
+    if (mode === '--text-evidence') {
+      await run('window.campOpenTest.showTextEvidence()')
+      await run('window.campOpenTest.settle()')
+      await run('document.querySelector(".execution-disclosure summary").click()')
+      const waitForText = async (expression) => {
+        const deadline = Date.now() + 5000
+        while (Date.now() < deadline) {
+          await run('window.campOpenTest.settle()')
+          if (await run(expression)) return
+        }
+        assert.fail(`Execution text condition was not reached: ${expression}`)
+      }
+      await waitForText('Boolean(document.querySelector(".history-load-error button"))')
+      await run('document.querySelector(".history-load-error button").click()')
+      await waitForText('document.querySelector(".process-content").textContent.includes("LONG_BODY_A_END")')
+      const text = await run(`(() => {
+        const bodies = [...document.querySelectorAll('.process-copy')].map(node => node.textContent);
+        return { bodies: bodies.map(body => ({ length: body.length, start: body.slice(0, 12), tail: body.slice(-15) })),
+          hasFailure: Boolean(document.querySelector('.history-load-error')),
+          tools: document.querySelectorAll('.tool-activity-group').length,
+          privateReasoningVisible: document.body.textContent.includes('HIDDEN_REASONING') };
+      })()`)
+      assert.equal(text.bodies.length, 3)
+      assert.ok(text.bodies[0].length > 30_000 && text.bodies[0].tail.includes('LONG_BODY_A_END'))
+      assert.ok(text.bodies[1].start.includes('BODY_B'))
+      assert.ok(text.bodies[2].start.includes('BODY_C'))
+      assert.equal(text.hasFailure, false)
+      assert.equal(text.privateReasoningVisible, false)
+      assert.equal(text.tools, 2)
+      await capture('execution-text-full-history')
+      console.log(JSON.stringify({ ok: true, mode, text }))
+      app.exit(0)
+      return
+    }
     if (attachmentReview) {
       await run(`window.campOpenTest.setComposerText(${JSON.stringify('请按交互稿核对附件尺寸、顺序、图标和视觉层级。')})`)
       await run("window.campOpenTest.scrollAttachmentSurface('agent')")

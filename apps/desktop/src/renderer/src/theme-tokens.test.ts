@@ -30,6 +30,9 @@ const requiredTokens = [
   '--line',
   '--line-strong',
   '--control-line',
+  '--dialog-field-label',
+  '--dialog-field-line',
+  '--dialog-field-line-hover',
   '--new-camp-picker-surface',
   '--new-camp-picker-soft',
   '--new-camp-picker-hover',
@@ -114,6 +117,7 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--ink', '--surface'],
     ['--muted', '--surface'],
     ['--faint', '--surface'],
+    ['--dialog-field-label', '--surface-raised'],
     ['--ink', '--new-camp-picker-surface'],
     ['--faint', '--new-camp-picker-surface'],
     ['--muted', '--new-camp-picker-soft'],
@@ -458,9 +462,8 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.tool-call-icon svg\s*\{[^}]*width:\s*16px[^}]*height:\s*16px[^}]*fill:\s*none/)
     expect(css).toMatch(/\.tool-call-disclosure-slot\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/)
     expect(css).toMatch(/\.tool-call-disclosure-slot\.is-placeholder\s*\{[^}]*visibility:\s*hidden/)
-    expect(css).toMatch(/\.tool-call-detail\s*\{[^}]*position:\s*relative[^}]*margin:\s*5px 0 8px 24px[^}]*padding-right:\s*52px/)
-    expect(css).toMatch(/\.tool-call-disclosure\[data-activity-domain="shell"\] \.tool-call-detail\s*\{[^}]*margin-left:\s*2px/)
-    expect(css).toMatch(/\.tool-call-disclosure\[data-activity-domain="shell"\] \.tool-call-result-scroll\s*\{[^}]*background:\s*var\(--shell-result-canvas\)/)
+    expect(css).toMatch(/\.tool-call-detail\s*\{[^}]*position:\s*relative[^}]*margin:\s*5px 0 8px 2px[^}]*padding-right:\s*52px/)
+    expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*background:\s*var\(--shell-result-canvas\)/)
     expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*max-height:\s*min\(220px, 30vh\)[^}]*overflow:\s*auto[^}]*scrollbar-gutter:\s*stable/)
     expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*white-space:\s*pre-wrap[^}]*overflow-wrap:\s*anywhere/)
     expect(css).toContain('.tool-call-result-scroll:focus-visible')
@@ -480,6 +483,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.composer-hint kbd\s*\{[^}]*min-width:\s*20px[^}]*height:\s*18px[^}]*border:\s*1px solid var\(--line\)/)
     expect(css).toMatch(/@media\s*\(max-width:\s*760px\)\s*\{[^}]*\.composer-hint\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
+    expect(css).toMatch(/\.composer-primary-action\s*\{[^}]*width:\s*32px[^}]*height:\s*32px/)
+    expect(css).toMatch(/\.composer-primary-action\.is-stop\s*\{[^}]*border-color:\s*var\(--control-line\)[^}]*background:\s*var\(--surface-subtle\)/)
+    expect(css).toMatch(/\.composer-primary-action-spinner\s*\{[^}]*animation:\s*composer-primary-action-spin/)
   })
 
   it('keeps long Composer input internally scrollable without covering its actions', () => {

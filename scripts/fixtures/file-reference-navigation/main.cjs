@@ -195,7 +195,7 @@ app.whenReady().then(async () => {
     assert.equal(after.opens.length, before.opens.length + 1)
     assert.equal(after.opens.at(-1).rawReference, '../outside/config.toml')
     assert.equal(after.chooseRootCalls, 0)
-    assert.equal(after.notices.at(-1), '无法打开文件。文件可能已被移动或删除。')
+    assert.equal(after.notices.at(-1), '文件访问已失效')
   })
   const report = { ok: true, cases, measurements }
   writeFileSync(join(dirname(userData), 'report.json'), JSON.stringify(report, null, 2))

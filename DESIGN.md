@@ -134,8 +134,9 @@ Pills are reserved for terse status, filters and identity metadata; they do not 
 Circular shapes are reserved for portraits, small status dots and bounded icon controls.
 
 Borders are semantic: `--line` separates, `--line-strong` establishes structure and
-`--control-line` makes interactive boundaries perceivable. A pale decorative line must not be the
-only boundary of an input or control.
+`--control-line` makes interactive boundaries perceivable. Dialog fields use the paired
+`--dialog-field-line` and `--dialog-field-line-hover` tokens with a clear input surface, visible label
+and persistent focus treatment; higher contrast preferences restore the stronger control boundary.
 
 ## Components
 
@@ -149,8 +150,11 @@ only boundary of an input or control.
   selected state and actions remain understandable from text, placement and focus.
 - **Containers:** prefer one open surface with dividers over card walls. A card is justified only
   when it represents a bounded object, decision or independent state.
-- **Dialogs and Popovers:** raised neutral surface, strong boundary and restrained Steel top/edge
-  accent. Semantic danger or attention may replace the accent when meaning requires it.
+- **Dialogs and Popovers:** one raised neutral surface with a 1px structural boundary and no colored
+  top stripe. Use a single title, regular-weight muted labels and light 1px field borders. Keep common
+  fields visible; disclose optional detail without losing drafts or validation. Footers contain actions
+  and only necessary status. Destructive dialog actions use `--danger-soft` with `--danger` text.
+  Preserve identity portraits and functional context icons.
 - **Evidence:** uses the dedicated evidence and diff tokens, monospaced type where appropriate, and
   structural `+`/`-`, line numbers or labels in addition to color.
 - **Code:** shared SafeMarkdown surfaces use a quiet inline canvas with `0 2px` padding and a `3px`

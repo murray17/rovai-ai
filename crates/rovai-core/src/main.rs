@@ -11905,6 +11905,7 @@ impl Core {
             &execution.camp_id,
             &execution.agent_run_id,
             execution.execution_epoch,
+            &execution.runtime.model.source,
             runtime.observed_model_id().await,
         )
         .await;
@@ -13507,6 +13508,7 @@ impl Core {
             &execution.camp_id,
             &execution.agent_run_id,
             execution.execution_epoch,
+            &execution.runtime.model.source,
             runtime.observed_model_id().await,
         )
         .await;
@@ -15461,6 +15463,14 @@ fn prepare_codex_delta_batch(
             .to_string();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let (event_type, payload) = codex::normalize_event(&native_method, &params);
+        // Text aggregation is stateful. Never put it through the transactional batch
+        // fallback, which may replay the whole batch after a later frame fails.
+        if matches!(
+            event_type,
+            "agent.text.delta" | "agent.reasoning.summary.delta"
+        ) {
+            return Ok(None);
+        }
         let Some(evidence) =
             ExecutionEvidenceService.prepare_runtime_event(event_type, &payload)?
         else {
@@ -15500,6 +15510,9 @@ fn prepare_acp_delta_batch(
             .to_string();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let (event_type, payload) = normalize_acp_event(adapter_kind, &native_method, &params);
+        if matches!(event_type, "agent.text.delta" | "agent.thought.delta") {
+            return Ok(None);
+        }
         let Some(evidence) =
             ExecutionEvidenceService.prepare_runtime_event(event_type, &payload)?
         else {
@@ -15855,7 +15868,7 @@ async fn process_agent_run_pi_message(
             ),
         }
     }
-    let completed_action = runtime.observe(&message).await?;
+    let (message, completed_action) = runtime.observe(message).await?;
     if message_type == "extension_ui_request" {
         match message.get("method").and_then(Value::as_str) {
             Some("setStatus") => return Ok(()),
@@ -15925,44 +15938,49 @@ async fn process_agent_run_pi_message(
             &execution.camp_id,
             &execution.agent_run_id,
             execution.execution_epoch,
+            &execution.runtime.model.source,
             Some(execution.runtime.model.model_id.clone()),
         )
         .await;
     }
-    let (event_type, payload) = pi::normalize_event(&message);
-    if event_type != "runtime.usage" {
-        let evidence = persist_runtime_evidence(
-            core,
-            agent_run_id,
-            execution_epoch,
-            runtime
-                .builtin_tool_process_config()
-                .map(BuiltinToolProcessConfig::run_tmp),
-            event_type,
-            &payload,
-        )
-        .await?;
-        if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type)
-            || evidence.is_some()
-        {
-            let evidence_id = evidence.as_ref().map(|value| value.id.as_str());
-            let public_payload = evidence
-                .as_ref()
-                .map(|value| &value.payload)
-                .unwrap_or(&payload);
-            emit(
-                output,
+    for (event_type, payload) in runtime.normalize_events(&message).await {
+        if event_type != "runtime.usage" {
+            let evidence = persist_runtime_evidence(
+                core,
+                agent_run_id,
+                execution_epoch,
+                runtime
+                    .builtin_tool_process_config()
+                    .map(BuiltinToolProcessConfig::run_tmp),
                 event_type,
-                json!({
-                    "agentRunId": agent_run_id,
-                    "executionEpoch": execution_epoch,
-                    "adapterKind": AdapterKind::Pi,
-                    "nativeMethod": message_type,
-                    "evidenceId": evidence_id,
-                    "payload": public_payload,
-                    "canonical": evidence.as_ref().and_then(|value| value.canonical.as_ref()),
-                }),
-            );
+                &payload,
+            )
+            .await?;
+            if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type)
+                || evidence.is_some()
+            {
+                let evidence_id = evidence.as_ref().map(|value| value.id.as_str());
+                let public_payload = evidence
+                    .as_ref()
+                    .map(|value| &value.payload)
+                    .unwrap_or(&payload);
+                let event_type = evidence
+                    .as_ref()
+                    .map_or(event_type, |value| value.event_type.as_str());
+                emit(
+                    output,
+                    event_type,
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "adapterKind": AdapterKind::Pi,
+                        "nativeMethod": message_type,
+                        "evidenceId": evidence_id,
+                        "payload": public_payload,
+                        "canonical": evidence.as_ref().and_then(|value| value.canonical.as_ref()),
+                    }),
+                );
+            }
         }
     }
     if let Some(completion) = completed_action {
@@ -17199,6 +17217,9 @@ async fn process_agent_run_acp_message(
         .as_ref()
         .map(|evidence| &evidence.payload)
         .unwrap_or(&payload);
+    let event_type = evidence
+        .as_ref()
+        .map_or(event_type, |evidence| evidence.event_type.as_str());
     emit(
         output,
         event_type,
@@ -17379,16 +17400,26 @@ fn normalize_acp_event_with_completion(
             });
             runtime_search_operation::insert_candidate(&mut payload, search_operation_candidate);
             if public_status == "completed"
-                && let Some(path) =
-                    completion.and_then(|value| value.public_file_operation_path.as_ref())
+                && let Some((operation_kind, path)) = completion.and_then(|value| {
+                    value
+                        .public_file_operation_kind
+                        .as_ref()
+                        .zip(value.public_file_operation_path.as_ref())
+                })
             {
                 payload["runtimeFileOperation"] = json!({
                     "adapterKind": adapter_kind.as_str(),
                     "protocolFamily": "acp-v1",
                     "sourceEventKind": "session/update.tool_call_update.completed",
-                    "operationKind": "write",
+                    "operationKind": operation_kind,
                     "path": path,
                 });
+                if let Some(change_kind) =
+                    completion.and_then(|value| value.public_file_operation_change_kind.as_deref())
+                {
+                    payload["runtimeFileOperation"]["changeKind"] =
+                        Value::String(change_kind.to_string());
+                }
             }
             if public_status == "completed"
                 && let Some(changes) =
@@ -17532,8 +17563,12 @@ async fn record_available_runtime_model(
     camp_id: &str,
     agent_run_id: &str,
     execution_epoch: i64,
+    model_source: &str,
     model_id: Option<String>,
 ) {
+    if !runtime_model_observation_admitted(model_source) {
+        return;
+    }
     let Some(model_id) = model_id else {
         return;
     };
@@ -17552,6 +17587,10 @@ async fn record_available_runtime_model(
             "failed to persist {adapter_kind:?} Runtime model observation for AgentRun {agent_run_id}: {error:#}"
         );
     }
+}
+
+fn runtime_model_observation_admitted(model_source: &str) -> bool {
+    model_source == "runtime_default"
 }
 
 #[derive(Clone, Copy)]
@@ -17634,6 +17673,18 @@ async fn process_runtime_event(
             .get("modelId")
             .and_then(Value::as_str)
             .context("Runtime model observation omitted modelId")?;
+        let admitted = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default()
+                .load_agent_run_execution(&database, scope.agent_run_id, scope.execution_epoch)?
+                .is_some_and(|execution| {
+                    execution.runtime.adapter_kind == scope.adapter_kind
+                        && runtime_model_observation_admitted(&execution.runtime.model.source)
+                })
+        };
+        if !admitted {
+            return Ok(());
+        }
         record_runtime_model_observation(
             core,
             output,
@@ -17660,7 +17711,7 @@ async fn process_runtime_event(
     };
     emit(
         output,
-        event_type,
+        &evidence.event_type,
         json!({
             "agentRunId": scope.agent_run_id,
             "executionEpoch": scope.execution_epoch,
@@ -19200,6 +19251,9 @@ async fn process_agent_run_codex_message(
         .as_ref()
         .map(|evidence| &evidence.payload)
         .unwrap_or(&payload);
+    let event_type = evidence
+        .as_ref()
+        .map_or(event_type, |evidence| evidence.event_type.as_str());
     emit(
         output,
         event_type,
@@ -22705,7 +22759,11 @@ while IFS= read -r _ignored; do :; done
         let CodexIncoming::Message { message, .. } = codex_delta else {
             unreachable!()
         };
-        let mut item_bounded_batch = vec![message; RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS];
+        assert!(prepare_codex_delta_batch(&[message]).unwrap().is_none());
+        let mut item_bounded_batch = vec![
+            json!({"method":"item/plan/delta","params":{"delta":"step"}});
+            RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS
+        ];
         assert!(
             prepare_codex_delta_batch(&item_bounded_batch)
                 .unwrap()
@@ -22766,7 +22824,7 @@ while IFS= read -r _ignored; do :; done
                 }]
             )
             .unwrap()
-            .is_some()
+            .is_none()
         );
         let AcpIncoming::Message {
             native_session_id,
@@ -23074,6 +23132,13 @@ while IFS= read -r _ignored; do :; done
             first,
             scoped_runtime_tool_call_id("run-b", "mcp-jsonrpc:same")
         );
+    }
+
+    #[test]
+    fn only_runtime_default_model_selection_submits_observation_commands() {
+        assert!(runtime_model_observation_admitted("runtime_default"));
+        assert!(!runtime_model_observation_admitted("explicit"));
+        assert!(!runtime_model_observation_admitted("inherited"));
     }
 
     fn managed_runtime_fixture(
