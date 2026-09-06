@@ -5,7 +5,7 @@ authority: single-chat-domain-context-operation-output-attachment-and-queue-rout
 status: accepted
 version: 2
 source_version: v1.50
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # Single Chat v2
@@ -264,8 +264,11 @@ delta/final/tool result/ACK/provider completion 只能成为旧 Run 证据或 cl
 
 `SingleChatSnapshot` 包含 typed `conversation/messages/draft/pendingInputs/agentRuns/executionEvidence`。Renderer 不能从
 Camp 公屏或 Runtime 文案重建私有 transcript。用户正文和附件居右；队员回复居左、无头像和消息底色框。执行过程复用
-执行台 narration/plan/command/tool 分组，terminal 后自动折叠，final 始终在独立分隔线下展开；成功为“工作了 {duration}”，
-取消为“你在 {duration}后停止了运行”。
+执行台 narration/plan/command/tool 分组和工具行组件。发送确认前、排队及等待首段输出立即显示 `Thinking`；正文后
+在尾部继续反馈，活动工具或尚未收口的尾组接替该提示。只有 Run terminal 才显示耗时总结并自动折叠过程，不能以首段
+正文或单条工具完成代替；final 始终在独立分隔线下展开。成功为“工作了 {duration}”，取消为“你在 {duration}后停止了运行”。
+审批、重试、停止请求与失败保留明确状态；具体组摘要、Canonical 步骤计数、图标和结果展开规则见
+[Run Process Detail Surface v31](run-process-detail-surface-v31.md)。
 
 Composer 复用 Camp 输入面的附件入口、AttachmentCard、“↵ 发送 · ⇧↵ 换行”提示和发送按钮；`Enter` 发送、
 `Shift+Enter` 换行，IME 合成期间不提交。active Run 时空 Composer 的主要动作是“停止”；一旦有正文或附件，主要动作

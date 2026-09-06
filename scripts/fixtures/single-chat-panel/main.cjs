@@ -108,7 +108,7 @@ app.whenReady().then(async () => {
 
     state = await click('.single-chat-run-history.is-terminal > summary')
     assert.equal(state.terminalOpen, true)
-    assert.match(state.groupLabel, /已执行 3 项操作/)
+    assert.match(state.groupLabel, /完成了 3 个步骤/)
 
     state = await click('.single-chat-target-trigger')
     assert.equal(state.optionAvatars, 3)
@@ -129,23 +129,124 @@ app.whenReady().then(async () => {
     let composerEnter = await dispatchComposerEnter(true)
     assert.equal(composerEnter.defaultPrevented, false)
     assert.equal(composerEnter.state.sendRequests, 0)
+    await run('window.singleChatTest.holdSend(true)')
     composerEnter = await dispatchComposerEnter(false)
     assert.equal(composerEnter.defaultPrevented, true)
     assert.equal(composerEnter.state.sendRequests, 1)
 
-    await run("document.documentElement.dataset.theme = 'night'; window.singleChatTest.setMode('running')")
-    await wait(950)
+    assert.equal(composerEnter.state.sendFeedback, 'Thinking')
+    assert.equal(composerEnter.state.composerDisabled, true)
+    await run('window.singleChatTest.releaseSend()')
+    await waitFor("window.singleChatTest.state().composerDisabled === false")
     state = await settle()
+    assert.equal(state.sendFeedback, '')
+    assert.equal(state.composerValue, '第一行')
+    assert.match(state.body, /fixture.send_rejected/)
+
+    await run('window.singleChatTest.holdSend()')
+    composerEnter = await dispatchComposerEnter(false)
+    assert.equal(composerEnter.state.sendFeedback, 'Thinking')
+    await run('window.singleChatTest.releaseSend()')
+    await waitFor("window.singleChatTest.state().liveText.includes('Thinking')")
+    state = await settle()
+    assert.equal(state.sendFeedback, '')
+    assert.equal(state.liveSummaryVisible, false)
     assert.equal(state.liveOpen, true)
+    assert.match(state.publicText, /Thinking/)
+    assert.doesNotMatch(state.liveText, /工作了|正在工作|等待开始|正在处理/)
+    const dayQueued = await capture('single-chat-day-queued-1180x800')
+
+    const phase = async (value, notify = true) => {
+      await run(`window.singleChatTest.setMode(${JSON.stringify(value)}, ${notify})`)
+      return settle(notify ? 80 : 950)
+    }
+    for (const value of ['thinking', 'narration']) {
+      state = await phase(value, false)
+      assert.match(state.liveText, /Thinking/)
+      assert.match(state.publicText, /Thinking/)
+      assert.equal(state.liveSummaryVisible, false)
+      assert.doesNotMatch(state.liveText + state.publicText, /工作了|正在工作|正在处理|等待开始/)
+    }
+    state = await phase('running')
     assert.equal(state.liveExecutionBackground, 'rgba(0, 0, 0, 0)')
     assert.equal(state.liveExecutionBorderWidth, '0px')
     assert.equal(state.composerDisabled, false)
     assert.equal(state.stopVisible, true)
-    assert.match(state.body, /正在工作/)
-    assert.equal(state.pageOverflow, false)
-    const nightRunning = await capture('single-chat-night-running-1180x800')
+    assert.match(state.liveGroupLabel, /执行中.*pnpm run accept:single-chat-ui/)
+    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|工作了|正在工作/)
+    const singleLive = '.single-chat-run-history.is-live'
+    const publicFixture = '.public-execution-fixture'
+    await click(`${singleLive} .tool-group-summary`)
+    await click(`${singleLive} .tool-call-summary`)
+    await click(`${publicFixture} .tool-group-summary`)
+    await click(`${publicFixture} .tool-call-summary`)
+    await run(`window.fixtureNodes = {
+      singleGroup: document.querySelector('${singleLive} .tool-activity-group'),
+      singleTool: document.querySelector('${singleLive} .tool-call-disclosure'),
+      publicGroup: document.querySelector('${publicFixture} .tool-activity-group'),
+      publicTool: document.querySelector('${publicFixture} .tool-call-disclosure')
+    }`)
+    const dayTools = await capture('single-chat-day-tools-1180x800')
+    await run("document.documentElement.dataset.theme = 'night'")
+    state = await phase('returned')
+    assert.match(state.liveGroupLabel, /执行中/)
+    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|工作了|正在工作/)
+    await waitFor("Boolean(document.querySelector('.single-chat-run-history.is-live .tool-result-retry'))")
+    await click(`${singleLive} .tool-result-retry`)
+    await waitFor("document.querySelector('.single-chat-run-history.is-live .tool-call-result-scroll')?.textContent.includes('PRIVATE_RESULT_END')")
+    state = await settle()
+    assert.equal(state.resultRequests, 2)
+    const resultSelector = `${singleLive} .tool-call-result-scroll`
+    await run(`document.querySelector('${resultSelector}').focus()`)
+    await key('End')
+    assert.equal(await run(`document.querySelector('${resultSelector}').scrollTop > 0`), true)
+    await key('Escape')
+    assert.equal(await run(`document.activeElement === document.querySelector('${singleLive} .tool-call-summary')`), true)
+    assert.equal(await run(`document.querySelector('${singleLive} .tool-call-state').getAttribute('aria-label')`), '成功')
+    const dimensions = await run(`['${singleLive}', '${publicFixture}'].map(selector => {
+      const row = document.querySelector(selector + ' .tool-call-summary')
+      const style = getComputedStyle(row)
+      return { height: row.getBoundingClientRect().height, fontSize: style.fontSize,
+        tracks: style.gridTemplateColumns, icon: row.querySelector('.tool-call-icon').dataset.iconDomain }
+    })`)
+    for (const row of dimensions) {
+      assert.equal(row.height, 28)
+      assert.equal(row.fontSize, '11.5px')
+      assert.equal(row.icon, 'terminal')
+      assert.match(row.tracks, /^16px [\d.]+px 16px 20px$/)
+    }
+    state = await phase('continuation')
+    assert.match(state.liveGroupLabel, /完成了 1 个步骤/)
+    assert.match(state.liveText, /Thinking/)
+    assert.match(state.publicText, /Thinking/)
+    assert.equal(await run(`document.querySelector('${singleLive} .tool-group-state').hasAttribute('role')`), false)
+    assert.equal(await run(`document.querySelector('${singleLive} .tool-call-result-scroll').scrollTop > 0`), true)
+    assert.equal(await run('Object.values(window.fixtureNodes).every(node => node.isConnected && node.open)'), true)
+    assert.equal(state.resultRequests, 2)
+    const nightRunning = await capture('single-chat-night-continuation-1180x800')
 
-    state = await click('.single-chat-composer .composer-actions .danger-button')
+    state = await phase('complete')
+    assert.equal(state.liveOpen, null)
+    assert.equal(state.publicOpen, false)
+    assert.match(state.publicText, /工作了 26 秒/)
+    assert.equal(await run("[...document.querySelectorAll('.single-chat-run-history')].at(-1).open"), false)
+    assert.equal(await run("[...document.querySelectorAll('.single-chat-final')].at(-1).getBoundingClientRect().height > 0"), true)
+    assert.equal(await run('Object.values(window.fixtureNodes).every(node => node.isConnected && node.open)'), true)
+    const nightComplete = await capture('single-chat-night-complete-1180x800')
+    await run("[...document.querySelectorAll('.single-chat-run-history > summary')].at(-1).click()")
+    state = await settle()
+    assert.equal(state.resultRequests, 2)
+
+    state = await phase('waiting')
+    assert.match(state.liveGroupLabel, /等待审批/)
+    assert.doesNotMatch(state.liveText, /Thinking/)
+    state = await phase('failed')
+    assert.equal(state.liveOpen, null)
+    assert.match(state.body, /运行 26 秒后失败/)
+    assert.equal(await run("document.querySelectorAll('.single-chat-final').length"), 1)
+    state = await phase('running')
+
+    state = await click('.single-chat-composer .composer-primary-action.is-stop')
     assert.equal(state.cancelRequests, 1)
     assert.match(state.body, /你在 3 分 12 秒后停止了运行/)
     assert.match(state.body, /单聊正文不会进入 Camp 公屏/)
@@ -168,6 +269,13 @@ app.whenReady().then(async () => {
         chineseTerminalDuration: true,
         terminalExecutionAutoCollapse: true,
         groupedCommands: 3,
+        thinkingLifecycle: true,
+        sendAcknowledgementAndRejection: true,
+        sharedToolRows: true,
+        liveTailAndNarrationBoundary: true,
+        resultRetryKeyboardAndPersistence: true,
+        consoleTerminalAutoCollapse: true,
+        waitingAndFailureStates: true,
         finalMessageExpanded: true,
         directEndConfirmation: true,
         campComposerParity: true,
@@ -178,7 +286,7 @@ app.whenReady().then(async () => {
         dayAndNight: true,
         compactNoOverflow: true
       },
-      captures: { dayMenu, dayDialog, nightRunning, compact }
+      captures: { dayMenu, dayDialog, dayQueued, dayTools, nightRunning, nightComplete, compact }
     }))
     window.destroy()
     app.quit()

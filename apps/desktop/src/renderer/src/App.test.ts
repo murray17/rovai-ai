@@ -5523,7 +5523,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="执行中：检查工作区状态"')
     expect(markup).not.toContain('class="tool-group-count"')
     expect(markup).toContain('aria-live="polite"')
-    expect(markup).not.toContain('<span>正在处理</span>')
+    expect(markup).not.toContain('<span>Thinking</span>')
     expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
     expect(markup).toContain('tool-call-disclosure-slot is-placeholder')
     expect(markup).not.toContain('>execute<')
@@ -5571,7 +5571,7 @@ describe('task event projections', () => {
     expect(liveTailMarkup).toContain('aria-label="执行中：pnpm test"')
     expect(liveTailMarkup).toContain('class="tool-group-current"')
     expect(liveTailMarkup).not.toContain('class="tool-group-count"')
-    expect(liveTailMarkup).not.toContain('<span>正在处理</span>')
+    expect(liveTailMarkup).not.toContain('<span>Thinking</span>')
 
     const boundaryMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run,
@@ -5586,7 +5586,25 @@ describe('task event projections', () => {
     }))
     expect(boundaryMarkup).toContain('class="tool-activity-group status-completed"')
     expect(boundaryMarkup).toContain('aria-label="完成了 1 个步骤"')
-    expect(boundaryMarkup).toContain('<span>正在处理</span>')
+    expect(boundaryMarkup).toContain('<span>Thinking</span>')
+    expect(boundaryMarkup).not.toMatch(/工作了|处理过程 ·|正在工作/)
+
+    const queuedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run: { ...run, status: 'queued', startedAt: null }, campId: 'camp-live-tail', focused: true
+    }))
+    expect(queuedMarkup).toContain('<span>Thinking</span>')
+    expect(queuedMarkup).not.toMatch(/等待开始|正在处理|工作了|处理过程 ·/)
+    const backgroundMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress: { items: [settledTool] }, campId: 'camp-live-tail'
+    }))
+    expect(backgroundMarkup).toContain('process-disclosure-label">Thinking</span>')
+    expect(backgroundMarkup).not.toMatch(/工作了|处理过程 ·/)
+    const terminalMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run: { ...run, status: 'succeeded', endedAt: '2026-08-26T00:00:14Z' },
+      progress: { items: [settledTool] }, campId: 'camp-live-tail'
+    }))
+    expect(terminalMarkup).toContain('工作了 13 秒')
+    expect(terminalMarkup).not.toContain('<span>Thinking</span>')
   })
 
   it('keeps complete Built-in Camp public results behind nested lazy Tool rows', () => {

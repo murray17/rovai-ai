@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in-progress
 model_context_change: false
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 ---
 
 # Rovai-ai v1.53：Runtime 图片来源、工具一致性、正文块持久化与网络恢复
@@ -64,6 +64,12 @@ Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
 - 自动化实现与定向回归已经完成；Claude Code 真实断网原生恢复通过，OpenCode 接管分支仍待实机验证。
   完整资格未通过，操作者已停止继续断网验证并决定先合入实现；本版本继续保持 `in-progress`。
   详见[网络恢复实施与验收](implementation-plan.md#运行中网络恢复补充)和 [V1.53-D04](decisions.md#v1-53-d04)。
+
+## 单聊与执行台反馈补充
+
+单聊与执行台的排队/普通处理统一为 `Thinking`，整轮终态才显示耗时并折叠过程；单聊直接复用执行台工具组、
+命令图标、精确结果和步骤计数。保留审批、重试、网络恢复、停止和失败事实，以及已展开结果状态。
+这是已确认界面的局部修复，不新增 Runtime、数据库或投递合同；验证记录见[实施与验收](implementation-plan.md#单聊与执行台反馈补充)。
 
 ## 跨版本文档影响
 

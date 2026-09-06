@@ -295,9 +295,13 @@ Conversation、Binding 或 Session 状态。选择器和用户消息使用既有
 transcript 采用对话式双轨：用户正文与附件居右，队员回复居左；正文区两侧都不显示头像。用户正文继续使用既有执行
 浮层的 `--execution-running-surface`，队员消息容器不使用背景、边框或气泡，只以开放排版承载执行过程与 final。队员一次回复由“执行过程 +
 final message”组成。运行中过程复用当前执行台的 narration、plan、command/tool 与状态视觉；连续 Command 聚合为一个
-可展开的“完成了 x 个步骤”，而不是平铺多个重边框卡片。运行中默认展开，用户仍可主动收起；Run 进入 terminal 后
-过程自动折叠，summary 使用中文：成功为“工作了 {时长}”，取消为“你在 {时长}后停止了运行”，失败保持明确失败语义。
-summary 下方以一条分隔线连接始终展开的 final message；不得把 final 收进执行 disclosure，也不得保留英文
+可展开的工具组；组件、列表组图标、命令类型图标、28px / 11.5px 四轨工具行、精确结果展开与步骤计数直接复用执行台。
+发送确认前、Run 排队与等待首段输出立即显示 `Thinking`。正文输出后保持正文和尾部 `Thinking`；存在活动工具或
+尚未收口的尾组时，用“执行中 · 当前指令”表达进度，不重复 Thinking。组收口才显示“完成了 x 个步骤”。
+运行中直接展开过程，不提供含耗时的外层 summary；用户仍可独立展开/收起工具组和命令结果。Run 进入 terminal 后
+过程自动折叠，才出现耗时 summary，使用中文：成功为“工作了 {时长}”，取消为“你在 {时长}后停止了运行”，失败保持明确失败语义。
+summary 下方以一条分隔线连接始终展开的 final message；不得把 final 收进执行 disclosure。整轮状态切换保持已展开的工具组、结果 DOM、加载缓存和滚动位置，不重置子级状态；
+单条工具完成不代表整轮完成。审批、重试、停止与失败保留实际状态，不用 Thinking 替代。不得保留英文
 “Working for / You stopped after”。取消或失败没有 final 时只显示诚实终态，不合成队员答案。
 
 Single Chat Composer 与当前 Camp Composer 使用同一输入框风格和操作层级：输入区、附件入口、待发送附件卡片、
@@ -409,6 +413,11 @@ selection 不算“正在查看 non-terminal Run”。从其他 Camp、一级页
 不能滚动公共消息时间线。Drawer 空间不足时收缩、滚动或变为摘要，不能遮住 Approval Dock、
 Composer 或唯一 Stop。
 
+单聊与执行台的普通排队、等待首段输出以及正文后的继续处理统一显示 `Thinking`；需要审批、网络恢复、重试或
+停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要也只显示当前状态。成功后才显示“工作了 {时长}”
+并自动折叠过程；失败保留明确失败摘要及可操作错误，取消保持停止语义。正文或工具首次到达、单条工具返回、步骤组
+收口都不能触发整轮耗时总结。隐藏外层 summary 或切换终态不能卸载已经激活的工具结果。
+
 已加载的正文片段与计划说明完整呈现，不按固定字符数只保留末尾；后续输出追加时不得裁掉正文开头或
 破坏已有 Markdown 结构。实时投影与历史 Evidence 回读、底部与 Inspector 共用此规则；这不改变 Evidence
 分页、显式截断标记或 Managed Blob 的存储与读取边界。
@@ -437,11 +446,11 @@ Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 
 elapsed、Runtime/事件/Session identity、trigger 与 phase 单独存在时保持无箭头、不可点击的静态单行。summary 的完整内容
 沿用本地 Managed Blob 惰性读取，不投影到渠道、局域网执行台、世界地图或公开 Evidence。精确归属、协议和失败关闭边界见
 [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)。
-独立图标沿用普通 command 的 muted 色，不使用品牌色。`imminent` 是一次性 `recorded` 记录，不压掉 Run 的“正在处理”；只有
+独立图标沿用普通 command 的 muted 色，不使用品牌色。`imminent` 是一次性 `recorded` 记录，不压掉 Run 的 `Thinking`；只有
 非终态 Run 的 `started` 显示 running 状态并暂停重复的底部进行中提示，`completed` 使用完成状态。
 
 当已投影的最后一个 process item 是 Tool 组且父 Run 仍为 running 时，该尾组在当前 Tool 已结算后继续保持
-provisional 活动态，显示“执行中 · <最近一条指令>”，也不在下方重复“正在处理”。这里“执行中”表达父 Run
+provisional 活动态，显示“执行中 · <最近一条指令>”，也不在下方重复 `Thinking`。这里“执行中”表达父 Run
 仍在运行，不改写上一条 Tool 的真实终态；下一条连续 Tool 到达后只在同一组原位替换为新指令。
 narration、plan、diagnostic、waiting/cancelling 或 Run 终态才构成真实收口边界。该规则按 process/Run 事实
 判断，不使用时间防抖。

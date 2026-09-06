@@ -13,6 +13,7 @@ import type {
 import {
   SINGLE_CHAT_POLL_INTERVAL_MS,
   SingleChatPanel,
+  SingleChatRunHistory,
   formatSingleChatDuration,
   singleChatChangeRefreshTarget,
   singleChatConversationReady,
@@ -140,6 +141,39 @@ describe('Single Chat presentation', () => {
       endedAt: '2026-09-03T10:05:38.000Z',
       finalConversationMessageId: null
     }), '2026-09-03T11:00:00.000Z')).toBe('你在 5 分 38 秒后停止了运行')
+  })
+
+  it('shows Thinking from queue through narration without an elapsed summary', () => {
+    for (const status of ['queued', 'running'] as const) {
+      const currentRun = run({ status, endedAt: null, finalConversationMessageId: null })
+      for (const items of [[], [evidence('继续核对结果', currentRun.id, currentRun.executionEpoch, 1)]]) {
+        const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
+          campId: 'camp-1', run: currentRun, evidence: items, finalMessage: null,
+          now: '2026-09-03T11:00:00.000Z'
+        }))
+        expect(markup).toContain('single-chat-run-history is-live" open=""')
+        expect(markup).toContain('<summary hidden=""')
+        expect(markup).toContain('<span>Thinking</span>')
+        expect(markup).not.toMatch(/工作了|正在工作|等待开始|正在处理|分.*秒/)
+        if (items.length) expect(markup).toContain('继续核对结果')
+      }
+    }
+  })
+
+  it('preserves waiting, stopping and terminal outcomes', () => {
+    const markupFor = (status: SingleChatRunView['status'], cancelling = false): string =>
+      renderToStaticMarkup(createElement(SingleChatRunHistory, {
+        campId: 'camp-1', run: run({ status }), evidence: [], finalMessage: null,
+        now: '2026-09-03T11:00:00.000Z', cancelling
+      }))
+    expect(markupFor('waiting')).toContain('等待继续')
+    expect(markupFor('waiting')).not.toContain('Thinking')
+    expect(markupFor('running', true)).toContain('正在提交停止请求')
+    expect(markupFor('running', true)).not.toContain('Thinking')
+    expect(markupFor('failed')).toContain('运行 39 分 17 秒后失败')
+    expect(markupFor('failed')).not.toContain('Thinking')
+    expect(markupFor('succeeded')).toContain('工作了 39 分 17 秒')
+    expect(markupFor('succeeded')).not.toContain('open=""')
   })
 
   it('strictly fences rendered evidence by run id and execution epoch', () => {
