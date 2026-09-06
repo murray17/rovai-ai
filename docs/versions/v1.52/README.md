@@ -4,7 +4,7 @@ version: v1.52
 lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: in-progress
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-09-06
 ---
@@ -30,10 +30,6 @@ last_updated: 2026-09-06
 - UI 结构、布局和文案不改；目标删除后的恢复继续显示既有居中轮廓与“找不到这个文件”。
 
 ## 跨版本文档影响
-
-本轮补充正文持久化与维护写放大修复，见 [V1.52-D02](decisions.md#v1-52-d02)和
-[实施与验收](implementation-plan.md#正文持久化补充)。下表的“无需更新”描述原文件预览增量；补充任务已更新
-Runtime Evidence 合同、Camp Open 读取路径及可见通知调用源，未改变 UI 布局或 Runtime 平台准入。
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |

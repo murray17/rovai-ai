@@ -2,11 +2,69 @@
 document_type: implementation-plan
 version: v1.53
 authority: implementation-and-acceptance-status
-status: complete
+status: in-progress
 last_updated: 2026-09-06
 ---
 
 # v1.53 实施与验收
+
+## 正文持久化补充
+
+- [x] Core 以原生消息身份或明确连续边界聚合正文、thought 与 reasoning summary；每块单行、首次位置不变。
+- [x] 原生完成结果覆盖同块累计内容；工具事实、旧历史和已有 reasoning 保留语义不变。
+- [x] 活动读取叠加内存正文；正常关闭、取消、失败保存已收到的中断块；大正文使用既有 Blob。
+- [x] Renderer 数据适配支持块定稿、偏移去重、稀疏历史序号与按需全文读取，不改变 UI 布局。
+- [x] 有效 Lead enter 跳过新 reconcile；可见通知采用 Camp 局部变化和冻结 UUID/request 重试；Roster sweep 尊重已有缓存。
+- [x] Navigation 聚合先过滤实际影响 marker 的事件；CampOpen 业务读继续不访问 event_log。
+- [x] 离线工具默认只操作副本；显式原库模式获得 Core 同款 flock、SQLite 排他锁和完整恢复备份。
+- [x] 本地历史副本逐块内容/序号/状态校验，并验证 event_log、工具投影、封存渠道快照不变。
+- [x] 成品 App 隔离验收及真实新 Run 的正文块/写入量验证。
+- [x] 用户授权的日常 App 升级，保留旧安装备份；当前旧进程未被终止。
+- [ ] 原库一次性聚合：等待日常 App 正常退出，再持锁备份与处理。
+
+### 合同 owner 与最小验证
+
+新增 `execution_text::slow_tests` 拥有跨 Runtime ingress、SQLite/Blob、活动读取和正常关闭的完整 seam。
+原 Evidence 测试只证明单条持久化和取消 fence，不能捕捉 1,000 个片段写放大、多组正文/工具交错与定稿
+原位覆盖；同一集成 owner 同时覆盖失败、epoch 复用、重启读取和重试零写入。UTF-8 有界前缀由低成本纯函数
+owner 覆盖。原生消息矩阵扩展已有 Claude/Pi 测试，批处理、CampOpen 和分页直接扩展既有 owner，不创建平行数据库夹具。
+
+```bash
+cargo test --workspace
+cargo test -p rovai-core --features slow-tests --lib execution_text::
+cargo test -p rovai-core --features slow-tests --lib camp_open_slow_tests:: -- --nocapture
+cargo test -p rovai-core --features slow-tests --lib camp_open::slow_tests::
+pnpm exec vitest run apps/desktop/src/renderer/src/App.test.ts apps/desktop/src/renderer/src/NotificationAttentionController.test.ts apps/desktop/src/shared/execution-presentation/public-result.test.ts apps/desktop/src/main/channel-settings.test.ts
+python3 scripts/aggregate-execution-text.test.py
+```
+
+测量工具 `measure_camp_open` 仅在 `slow-tests` 下以 SQLite READ_ONLY/query_only 打开明确副本，禁止迁移、
+恢复、Runtime 和后台任务；报告首样本及重复分布，不冒充 Renderer 或锁等待的端到端时间。
+`aggregate-execution-text.py` 的报告只包含数量、哈希与操作者本地路径，不记录正文或凭据；含用户数据的
+副本/备份不得提交仓库。重跑必须使用新输出目录，原库模式不能覆盖已有备份或忽略 Core 独占锁。
+
+真实运行验收复用 `accept:planned-shutdown`；设置 `ROVAI_EXECUTION_TEXT_ACCEPT=1` 时先验证三个正文块与
+工具交错，再在下一次运行输出正文期间正常退出并验证中断正文恢复。SQLite 写入计数触发器只安装在该
+自动验收 fixture 中，不进入产品 Schema 或日常数据库。
+
+### 正文补充验证记录
+
+- 合入最新主线后的 `cargo test --workspace` 通过；正文定向 2 个、CampOpen 定向 3 个用例通过。
+- `pnpm test`：154 个 Vitest 文件、1,569 个用例通过；最终 Node 批次 220 通过、1 个 Windows-only 跳过。
+  `pnpm typecheck`、文档治理（base `f4c1bb12082707534243fec4a9f288ce5eeed3df`）、Rust format 与 diff 检查通过。
+- 正文 Core 集成验证 1,000 个片段在首块占位后不新增 SQL 写入，覆盖原生完成覆盖、正文/工具交错、活动
+  读取、取消/失败、旧 epoch fence、Blob 全文和重开。Default Lead 有效 enter 零新增日志、原命令重放和真实修复通过。
+- 独立 Electron 正文场景通过：稀疏 sequence、35,023 字符 Blob 全文、失败重试、3 段正文和 2 组工具、
+  reasoning 不泄漏到公开展示。原完整 CampOpen 图片截图场景仍有图片解码时序断言失败，未调整图片 UI 或删减原覆盖。
+- 真实 Codex 验收：582 个 text/reasoning 流式片段保存为 8 条块记录、16 次正文 SQL 行写入；加上工具等
+  事实共 18 条 Evidence、26 次 SQL 行写入。该指标不是物理磁盘写入字节数。
+- 合入最新主线后重新 `package:mac:daily` 并验签；`ROVAI_EXECUTION_TEXT_ACCEPT=partial-only` 的成品
+  正常退出/重开场景通过：至少 515 字符未完成正文被保留为 interrupted，退出 641ms，无强制信号，最新 Draft 保留。
+  此定向模式不运行无关的空闲退出浮层截图；完整脚本该环节因 App 先退出导致 CDP 关闭，不能计为完整通过。
+- 离线聚合 3 个 Python 用例及真实副本逐块内容、顺序、状态、引用和工具不变校验通过；副本原位重跑零变化。
+- 全量 slow Rust 检查仍有基线已有的 `current_input_skill_links_are_direct_user_siblings_with_canonical_bytes`
+  断言失败；Clippy 在未修改的 `core_subsystems.rs` 报 `let_and_return`。不为本次正文任务修改 Skill 上下文
+  或清理无关模块，完整门禁不宣称全绿。另仅修正旧 Single Chat 测试夹具已经失效的 `draft_revision` 字段。
 
 ## 实施范围
 

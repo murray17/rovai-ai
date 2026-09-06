@@ -5,7 +5,7 @@ authority: active-tool-group-current-instruction-presentation
 status: accepted
 version: 30
 source_version: v1.39
-last_updated: 2026-09-03
+last_updated: 2026-09-06
 ---
 
 # Run Process Detail Surface v30
@@ -55,7 +55,7 @@ Desktop 底部执行台与 Inspector 继续移动同一个 Drawer DOM，并使�
 
 <a id="text-block-evidence"></a>
 
-## 正文块 Evidence（v1.52 补充）
+## 正文块 Evidence（v1.53 补充）
 
 `agent.text.delta`、`agent.thought.delta`、`agent.reasoning.summary.delta` 只用于实时显示，不逐片写入
 SQLite。分别以 `agent.text.block`、`agent.thought.block`、`agent.reasoning.summary.block` 保留每个独立

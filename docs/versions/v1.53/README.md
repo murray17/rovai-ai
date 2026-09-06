@@ -4,7 +4,7 @@ version: v1.53
 lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: complete
+implementation_status: in-progress
 model_context_change: false
 last_updated: 2026-09-06
 ---
@@ -26,6 +26,12 @@ Gallery，只收紧 Runtime 图片自动进入 Camp 公屏的来源准入。
 - Camp 图片 metadata 查询在同一 Core seam 过滤来源；实时更新、刷新、重开、消息合并与无公开消息兜底
   因而使用同一集合，Renderer wire 和 UI 结构不变。
 - `rovai send --file` 的显式图片附件继续走 CampMessage 与 Managed Attachment 链，不读取来源标记，行为不变。
+
+## 正文持久化补充
+
+本轮补充正文持久化与维护写放大修复，见 [V1.53-D02](decisions.md#v1-53-d02)和
+[实施与验收](implementation-plan.md#正文持久化补充)。补充任务更新 Runtime Evidence、Camp Open 读取
+与可见通知调用源；不改变 UI 布局、Runtime 平台准入或本版本原生图片过滤边界。
 
 ## 跨版本文档影响
 

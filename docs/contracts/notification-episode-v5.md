@@ -18,7 +18,7 @@ Renderer 统一添加渠道前缀；闭合绑定不丢来源。来源不写 Epis
 
 旧 reader 可忽略新增字段，新 reader 容许缺失/null；Inbox/Change Journal schema 6 不变。
 
-## v1.52：可见来源 acknowledge 调用去重
+## v1.53：可见来源 acknowledge 调用去重
 
 Renderer 的调用身份取决于当前 Camp、已呈现来源集合与该 Camp 新 occurrence 的 admission；全局
 Change Journal cursor 和 Camp Snapshot watermark 只是冻结请求的读取 fence，不能因其他 Camp 或

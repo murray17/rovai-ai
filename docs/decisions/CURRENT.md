@@ -12,7 +12,7 @@ last_updated: 2026-09-06
 
 ## Core data 与 Read Side
 
-- 正文块与维护写放大当前规范：[正文块 Evidence](../contracts/run-process-detail-surface-v30.md#text-block-evidence)、[Camp Open](../contracts/camp-open-projection-v15.md)、[可见来源确认](../contracts/notification-episode-v5.md)、[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；理由：[V1.52-D02](../versions/v1.52/decisions.md#v1-52-d02)。
+- 正文块与维护写放大当前规范：[正文块 Evidence](../contracts/run-process-detail-surface-v30.md#text-block-evidence)、[Camp Open](../contracts/camp-open-projection-v16.md)、[可见来源确认](../contracts/notification-episode-v5.md)、[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；理由：[V1.53-D02](../versions/v1.53/decisions.md#v1-53-d02)。
 
 - Camp 队员 Fast 当前规范：[Camp Member Fast v1](../contracts/camp-member-fast-v1.md)、[Runtime 边界](../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)、[Usage v4](../contracts/runtime-usage-monitoring-v4.md)；理由：[V1.34-D01](../versions/v1.34/decisions.md#v1-34-d01)。
 
