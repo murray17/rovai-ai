@@ -131,7 +131,7 @@ import {
   persistCurrentProject,
   projectTargetKey,
   readCurrentProject,
-  resolveNewConversationDefaults,
+  resolveAvailableNewConversationDefaults,
   shouldInvalidateNewConversationDefaults,
   type CurrentProject
 } from './new-conversation-preferences'
@@ -2623,7 +2623,7 @@ function AuthoritativeApp({
     workspace: WorkspaceSelection | null
   ): Promise<'created' | 'dialog' | 'ignored'> => {
     if (busy === 'create-camp') return 'ignored'
-    const defaults = resolveNewConversationDefaults(generalPreferences, agents)
+    const defaults = resolveAvailableNewConversationDefaults(generalPreferences, agents)
     if (generalPreferences?.oneClickNewConversationEnabled && defaults) {
       try {
         await createCamp({

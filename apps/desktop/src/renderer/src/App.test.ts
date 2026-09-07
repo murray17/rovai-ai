@@ -2490,13 +2490,21 @@ describe('task event projections', () => {
     expect(markup).not.toContain('<form')
   })
 
-  it('defaults to every present member and recommends the first Runtime Ready Lead', () => {
+  it('defaults to configured usable members without preferring deep readiness', () => {
     const selection = initialCampSelection({
       admissible: true,
       presentMembers: [
         {
           agentId: 'agent-unready', displayName: '未就绪',
           memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'needs_attention'
+        },
+        {
+          agentId: 'agent-light', displayName: '可用',
+          memberOrder: 1, runtimeConfigured: true, runtimeReadiness: 'light_ready'
+        },
+        {
+          agentId: 'agent-unsaved', displayName: '未保存配置',
+          memberOrder: 2, runtimeConfigured: false, runtimeReadiness: 'ready'
         },
         {
           agentId: 'agent-ready', displayName: '已就绪',
@@ -2508,8 +2516,8 @@ describe('task event projections', () => {
     })
 
     expect(selection).toEqual({
-      memberIds: ['agent-unready', 'agent-ready'],
-      leadId: 'agent-ready'
+      memberIds: ['agent-light', 'agent-ready'],
+      leadId: 'agent-light'
     })
   })
 
@@ -2577,7 +2585,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('falls back to every present member when all saved members are unavailable', () => {
+  it('falls back to available members when all saved members are unavailable', () => {
     const preflight = {
       admissible: true,
       presentMembers: [
