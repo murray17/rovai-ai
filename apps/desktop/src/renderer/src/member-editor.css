@@ -16,15 +16,13 @@
   container-type: inline-size;
 }
 .member-editor-roster-shell {
+  position: relative;
   display: flex;
-  flex: 0 0 236px;
+  flex: 0 0 var(--member-roster-width, 256px);
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  background: var(--surface);
-}
-.member-editor-roster-shell:has(.is-collapsed) {
-  flex-basis: 76px;
+  background: var(--home-surface);
 }
 .member-editor-roster-shell .member-sidebar {
   width: 100%;
@@ -799,6 +797,16 @@
 /* Compact roster, preserving presence and runtime state. */
 .member-editor-roster-shell .member-sidebar {
   border-right-color: var(--line);
+  background: var(--home-surface);
+  transition: none;
+}
+.member-editor-roster-shell .member-sidebar-heading {
+  padding-right: 12px;
+  padding-left: 18px;
+  border-bottom-color: transparent;
+}
+.member-editor-roster-shell .member-sidebar-title {
+  gap: 8px;
 }
 .member-editor-roster-shell .member-sidebar-heading strong {
   font-weight: 600;
@@ -806,40 +814,89 @@
 .member-editor-roster-shell .member-sidebar-title > span {
   color: var(--muted);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 400;
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.member-editor-roster-shell .member-sidebar-actions button {
+  border-radius: 5px;
+}
+.member-editor-roster-shell .member-sidebar-filter {
+  padding: 0 14px 10px;
+  border: 0;
+}
+.member-editor-roster-shell .member-sidebar-filter > label,
+.member-roster-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+  border: 0;
+}
+.member-editor-roster-shell .member-sidebar-filter input {
+  height: 30px;
+  padding-left: 30px;
+  border-color: transparent;
+  border-radius: 5px;
+  background: var(--surface-subtle);
+  font-size: 11.5px;
+}
+.member-editor-roster-shell .member-sidebar-filter input:focus {
+  border-color: var(--focus);
+}
+.member-roster-search-icon {
+  position: absolute;
+  top: 7px;
+  left: 9px;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  pointer-events: none;
 }
 .member-editor-roster-shell .member-sidebar-scroll-body {
-  padding: 8px 8px 16px;
+  padding: 2px 8px 16px;
 }
 .member-editor-roster-shell .member-sidebar-group-heading {
+  min-height: 28px;
   padding: 5px 10px 7px;
   color: var(--muted);
+  background: var(--home-surface);
   font-size: 10.5px;
   font-weight: 400;
   letter-spacing: 0;
 }
 .member-editor-roster-shell .member-sidebar-group-heading small {
   font-family: inherit;
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 400;
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.member-editor-roster-shell .member-sidebar-group + .member-sidebar-group {
+  margin-top: 14px;
 }
 .member-editor-roster-shell
   .member-sidebar:not(.is-collapsed)
   .member-sidebar-row {
-  min-height: 64px;
-  margin-bottom: 2px;
-  border-radius: 7px;
+  min-height: 60px;
+  margin-bottom: 0;
+  border-radius: 5px;
 }
 .member-editor-roster-shell
   .member-sidebar:not(.is-collapsed)
   .member-sidebar-select {
-  min-height: 64px;
+  min-height: 60px;
   grid-template-columns: 40px minmax(0, 1fr);
   gap: 10px;
-  padding: 10px 4px 10px 10px;
+  padding: 8px 4px 8px 10px;
+  border-radius: 5px;
 }
 .member-editor-roster-shell
   .member-sidebar:not(.is-collapsed)
@@ -855,7 +912,7 @@
   font-size: 16px;
 }
 .member-editor-roster-shell .member-sidebar-copy {
-  gap: 5px;
+  gap: 4px;
 }
 .member-editor-roster-shell .member-sidebar-copy strong {
   display: flex;
@@ -887,6 +944,77 @@
   bottom: 13px;
   width: 2px;
 }
+.member-editor-roster-shell .member-sidebar-row .member-avatar::after {
+  border-color: var(--home-surface);
+}
+.member-editor-roster-shell .member-sidebar-row.selected .member-avatar::after {
+  border-color: var(--surface-selected);
+}
+.member-editor-roster-shell .member-sidebar-row.presence-away .member-avatar {
+  opacity: 0.8;
+}
+.member-editor-roster-shell .member-sidebar-mode-note,
+.member-editor-roster-shell .member-sidebar-selection-note {
+  font-size: 11px;
+  background: var(--home-surface);
+}
+.member-editor-roster-shell .member-sidebar.is-collapsed .member-sidebar-heading {
+  padding-right: 8px;
+  padding-left: 8px;
+}
+.member-editor-roster-shell .member-sidebar.is-collapsed .member-sidebar-scroll-body {
+  padding-top: 4px;
+}
+.member-roster-options { min-width: 190px; }
+.member-roster-options-label { padding: 7px 9px 5px; color: var(--muted); font-size: 10.5px; }
+.member-roster-width-option { gap: 16px; }
+.member-roster-width-option small { margin-left: auto; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.member-roster-option-check { width: 12px; }
+.member-roster-resizer {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 9px;
+  outline: 0;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+}
+.member-roster-resizer[aria-disabled="true"] { pointer-events: none; }
+.member-roster-resizer::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: '';
+}
+.member-roster-resizer:hover::before,
+.member-roster-resizer:focus-visible::before,
+.member-roster-resizer.is-dragging::before { background: var(--focus); }
+.member-roster-resizer:focus-visible { outline: 0; }
+.member-roster-resize-hint {
+  position: absolute;
+  top: 16px;
+  left: 14px;
+  min-width: 48px;
+  padding: 4px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  font-size: 10.5px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+.member-roster-resizer.is-dragging .member-roster-resize-hint,
+.member-roster-resizer:focus-visible .member-roster-resize-hint { opacity: 1; }
+.members-workspace:has(.member-editor-roster-shell.is-resizing),
+.members-workspace:has(.member-editor-roster-shell.is-resizing) * { cursor: col-resize !important; user-select: none !important; }
 .member-editor-unsaved-mark {
   width: 4px;
   height: 4px;
@@ -921,10 +1049,10 @@
   width: 12px;
   height: 12px;
   place-items: center;
-  border: 2px solid var(--surface);
+  border: 2px solid var(--home-surface);
   border-radius: 50%;
   color: var(--attention);
-  background: var(--surface);
+  background: var(--home-surface);
   font: 700 10px/1 sans-serif;
 }
 @container member-editor (max-width: 620px) {

@@ -139,6 +139,17 @@ window.rovai = {
 }
 window.memberFixture = {
   calls,
+  roster: (away = 0) => {
+    const base = initialMembers()
+    members = Array.from({ length: 16 }, (_, index) => ({
+      ...clone(base[index % base.length]),
+      ...(index >= base.length ? { agentId: `fixture-roster-${index}`, displayName: `队员 ${index + 1}`, teamRole: index === 4 ? '产品设计与用户研究' : '协作队员' } : {}),
+      ...(index === 4 ? { runtimeConfiguration: null, runtimeReadiness: { status: 'runtime_not_configured', blockers: [] } } : {}),
+      memberOrder: index,
+      presence: index >= 16 - away ? 'away' : 'present'
+    }))
+    reload()
+  },
   afterUpdate: (patch) => {
     externalAfterUpdate = patch
   },

@@ -73,6 +73,7 @@ import {
 import { MemberRuntimePicker } from './MemberRuntimePicker'
 
 import { MemberSidebar } from './MemberSidebar'
+import { MemberRosterLayout } from './MemberRosterLayout'
 import {
   MemberIdentityEditor,
   type MemberIdentityEditorHandle
@@ -248,7 +249,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
     }
     return (
       <>
-        <div className="member-editor-roster-shell">
+        <MemberRosterLayout>
           <MemberSidebar
             agents={agents}
             runtimeAvailability={props.runtimeAvailability}
@@ -287,7 +288,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
               </span>
             </button>
           )}
-        </div>
+        </MemberRosterLayout>
         <section className="members-view member-editor-view">
           {ids.map((id) => (
             <div
@@ -951,16 +952,15 @@ function MemberDetailHeader({
               className={`member-header-runtime status-${runtime.status}`}
               type="button"
               onClick={onRuntime}
-              aria-label={`${agent.runtimeConfiguration?.adapterKind ? adapterLabel(agent.runtimeConfiguration.adapterKind) : 'Agent 运行时'}，${runtime.label}；打开运行配置`}
+              aria-label={agent.runtimeConfiguration?.adapterKind ? `${adapterLabel(agent.runtimeConfiguration.adapterKind)}，${runtime.label}；打开运行配置` : '未配置运行时；打开运行配置'}
               title="打开运行配置"
             >
               <i aria-hidden="true" />
               <span>
                 {agent.runtimeConfiguration?.adapterKind
                   ? adapterLabel(agent.runtimeConfiguration.adapterKind)
-                  : 'Agent 运行时'}
+                  : '未配置运行时'}
               </span>
-              <strong>{runtime.label}</strong>
               <svg
                 className="member-runtime-entry-arrow"
                 viewBox="0 0 16 16"
