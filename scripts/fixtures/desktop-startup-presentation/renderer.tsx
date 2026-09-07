@@ -350,8 +350,8 @@ Object.assign(window, { startupTest: {
     let preflight: CampCreationPreflight = {
       admissible: true, blockers: [], initialLeadAgentId: 'agent-a',
       presentMembers: ['agent-a', 'agent-b', 'agent-c', 'agent-d'].map((agentId, index) => ({
-        agentId, displayName: agentId, memberOrder: index, runtimeConfigured: false,
-        runtimeReadiness: 'runtime_not_configured'
+        agentId, displayName: agentId, memberOrder: index, runtimeConfigured: true,
+        runtimeReadiness: index % 2 ? 'ready' : 'light_ready'
       }))
     }
     const renderDraft = () => flushSync(() => root!.render(<NewConversationDialog
@@ -414,7 +414,158 @@ Object.assign(window, { startupTest: {
       'Reopening must reset the opt-in checkbox')
     check(document.getElementById('new-camp-members-value')!.textContent === '4 位队员', 'Reopening starts a fresh draft')
     cases.push('New Conversation preserves edited drafts across candidate refresh and creation failure')
+
+    const openMembers = async () => {
+      document.querySelector<HTMLButtonElement>('[aria-labelledby~="new-camp-members-label"]')!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+      )
+      await advance(0)
+      await flush()
+    }
+    const key = async (key: string) => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+      await advance(0)
+      await flush()
+    }
+    // A candidate disappearing at runtime must block submit, while retaining the user's draft.
+    preflight = structuredClone(preflight)
+    preflight.presentMembers[0].runtimeReadiness = 'needs_attention'
+    renderDraft()
+    await flush()
+    check(document.getElementById('new-camp-members-value')!.textContent === '4 位队员', 'Refresh must not silently drop a selected member')
+    check(document.querySelector<HTMLButtonElement>('.compact-primary')!.disabled, 'An unavailable selection blocks submission')
+    document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flush()
+    check(submissions.length === 1, 'A synthetic submit cannot bypass the availability guard')
+    await openMembers()
+    document.querySelector<HTMLButtonElement>('.compact-menu-heading button')!.click()
+    await flush()
+    await key('Escape')
+    check(document.getElementById('new-camp-members-value')!.textContent === '3 位队员'
+      && document.getElementById('new-camp-lead-value')!.textContent === 'agent-b', 'Explicit all-selection repairs team and Lead')
+
+    dialogOpen = false
+    renderDraft()
+    await flush()
+    preflight = structuredClone(preflight)
+    preflight.presentMembers[0].runtimeConfigured = false
+    preflight.presentMembers[0].runtimeReadiness = 'ready'
+    preflight.presentMembers[1].runtimeReadiness = 'light_ready'
+    preflight.presentMembers[2].runtimeReadiness = 'needs_attention'
+    dialogOpen = true
+    renderDraft()
+    await flush()
+    check(document.getElementById('new-camp-members-value')!.textContent === '2 位队员', 'Only configured and usable teammates start selected')
+    check(document.getElementById('new-camp-lead-value')!.textContent === 'agent-b', 'Light readiness is not ranked below deep readiness')
+    await openMembers()
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')]
+    check(items.length === 4 && items[0].hasAttribute('data-disabled') && items[2].hasAttribute('data-disabled'), 'Unavailable teammates stay visible and disabled')
+    check(items[0].textContent?.includes('未配置运行时') && items[2].textContent?.includes('运行时不可用'), 'Unavailable labels distinguish missing config from unavailable runtime')
+    check(items[1].textContent?.includes('可用') && items[3].textContent?.includes('可用'), 'Usable teammates share one availability label')
+    items[0].click()
+    items[2].click()
+    await flush()
+    check(items[0].getAttribute('aria-checked') === 'false' && items[2].getAttribute('aria-checked') === 'false', 'Disabled clicks cannot add a teammate')
+    items[1].focus()
+    await key('ArrowDown')
+    check(document.activeElement === items[3], 'Vertical arrows preserve the visual column across disabled holes')
+    await key('ArrowRight')
+    check(document.activeElement === items[1], 'Horizontal arrows wrap past disabled teammates')
+    await key('Escape')
+    document.querySelector<HTMLButtonElement>('[aria-labelledby~="new-camp-lead-label"]')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+    )
+    await advance(0)
+    await flush()
+    check(document.querySelectorAll('[role="menuitemradio"]').length === 2, 'Lead menu contains only available selected teammates')
+    await key('Escape')
+    const optIn = document.querySelector<HTMLInputElement>('.new-camp-quick-label input')!
+    const help = document.querySelector<HTMLButtonElement>('[aria-label="一键新建说明"]')!
+    check(!document.querySelector('[role="tooltip"]'), 'Quick-start explanation is hidden by default')
+    help.focus()
+    help.click()
+    await flush()
+    check(document.querySelector('[role="tooltip"]')?.textContent?.includes('可在「设置 → 通用」关闭。'), 'Help opens through focus and click')
+    check(!optIn.checked, 'Opening help must not toggle one-click opt-in')
+    await key('Escape')
+    check(!document.querySelector('[role="tooltip"]') && document.querySelector('.new-camp-dialog'), 'Escape dismisses help without closing the dialog')
+    document.querySelector<HTMLButtonElement>('.compact-cancel')!.focus()
+    help.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: null }))
+    await flush()
+    check(document.querySelector('[role="tooltip"]'), 'Help also opens on hover')
+    document.querySelector('[role="tooltip"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }))
+    await advance(0)
+    check(document.querySelector('.new-camp-dialog'), 'Interacting with tooltip content keeps the dialog open')
+    help.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }))
+    await advance(120)
+    check(!document.querySelector('[role="tooltip"]'), 'Hover help closes after pointer leaves')
+    check(!document.body.textContent?.includes('本次新建成功后生效'), 'No redundant effective-after-creation copy remains')
+    cases.push('New Conversation gates selection, Lead and submit by saved usable runtimes and keeps help independent')
+
+    dialogOpen = false
+    renderDraft()
+    await flush()
+    preflight.presentMembers = preflight.presentMembers.map(member => ({ ...member, runtimeConfigured: false }))
+    dialogOpen = true
+    renderDraft()
+    await flush()
+    check(document.getElementById('new-camp-members-value')!.textContent === '暂无可用队员'
+      && document.querySelector<HTMLButtonElement>('.compact-primary')!.disabled, 'An all-unconfigured roster cannot create a conversation')
+    cases.push('New Conversation handles an all-unconfigured roster')
+    preflight = structuredClone(preflight)
+    preflight.presentMembers[1].runtimeConfigured = true
+    renderDraft()
+    await flush()
+    await openMembers()
+    document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')[1].click()
+    await flush()
+    await key('Escape')
+    check(document.getElementById('new-camp-lead-value')!.textContent === 'agent-b'
+      && !document.querySelector<HTMLButtonElement>('.compact-primary')!.disabled, 'Selecting the first recovered member also establishes a Lead')
+
+
     return { ok: true, cases }
+  },
+  async captureNewConversation(theme: string, state = 'members') {
+    document.documentElement.dataset.theme = theme
+    if (root) flushSync(() => root!.unmount())
+    root = createRoot(document.getElementById('root')!)
+    const preflight: CampCreationPreflight = {
+      admissible: true, blockers: [], initialLeadAgentId: '洛可',
+      presentMembers: ['洛可', '沐瓦', '阿澈', '泽安'].map((displayName, index) => ({
+        agentId: displayName, displayName, memberOrder: index, runtimeConfigured: state !== 'empty' && index < 2,
+        runtimeReadiness: index === 0 ? 'light_ready' : index === 1 ? 'ready' : 'runtime_not_configured'
+      }))
+    }
+    flushSync(() => root!.render(<NewConversationDialog
+      open initialWorkspace={null} projects={[]} preflight={preflight} agents={[]}
+      busy={false} projectAccessReady returnFocusElement={null} onOpenChange={() => undefined}
+      onChooseWorkspaceDirectory={async () => null} onWorkspaceSelected={async () => undefined}
+      onCreate={async () => undefined}
+    />))
+    await advance(0)
+    document.getAnimations().forEach(animation => {
+      if (animation.effect?.getTiming().iterations !== Infinity) animation.finish()
+    })
+    await flush()
+    if (state === 'members') {
+      document.querySelector<HTMLButtonElement>('[aria-labelledby~="new-camp-members-label"]')!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+      )
+      await advance(0)
+    } else if (state === 'help') {
+      const help = document.querySelector<HTMLButtonElement>('[aria-label="一键新建说明"]')!
+      help.scrollIntoView({ block: 'nearest' })
+      await advance(0)
+      help.click()
+    }
+    await flush()
+    const surface = document.querySelector(state === 'members' ? '.new-camp-member-grid' : state === 'help' ? '[role="tooltip"]' : '.new-camp-dialog')!
+    check(surface, `Missing new conversation ${state} capture in ${theme}; focus=${document.activeElement?.outerHTML}`)
+    const bounds = surface.getBoundingClientRect()
+    check(bounds.left >= 0 && bounds.right <= window.innerWidth, 'New conversation overlays stay inside the viewport')
+    check(bounds.top >= 0 && bounds.bottom <= window.innerHeight, 'New conversation overlays remain vertically visible')
+    return { width: window.innerWidth, height: window.innerHeight }
   },
   async capture(theme: string, state = 'loading') {
     appearanceTheme = theme === 'night' ? 'night' : 'day'

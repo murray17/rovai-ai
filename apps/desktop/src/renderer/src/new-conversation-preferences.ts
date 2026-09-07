@@ -1,3 +1,4 @@
+import { isNewConversationMemberAvailable } from './new-conversation-availability'
 import type {
   AgentProfile,
   GeneralPreferencesSnapshot,
@@ -227,6 +228,18 @@ export function resolveNewConversationDefaults(
     || !defaults.memberAgentIds.includes(lead.agentId)
   ) return null
   return { defaults, members, lead }
+}
+
+// A temporary runtime outage blocks one-click creation without invalidating the saved team.
+export function resolveAvailableNewConversationDefaults(
+  preferences: GeneralPreferencesSnapshot | null,
+  agents: AgentProfile[]
+): ResolvedNewConversationDefaults | null {
+  const resolved = resolveNewConversationDefaults(preferences, agents)
+  return resolved?.members.every((agent) => isNewConversationMemberAvailable({
+    runtimeConfigured: agent.runtimeConfiguration !== null,
+    runtimeReadiness: agent.runtimeReadiness.status
+  })) ? resolved : null
 }
 
 export function defaultsNeedInvalidation(
