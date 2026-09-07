@@ -2527,14 +2527,25 @@ export interface SupervisorApi {
 export type ThemePreference = 'system' | 'day' | 'night'
 export type ResolvedTheme = 'day' | 'night'
 
-export interface AppearanceSnapshot {
+export interface AppearancePreferences {
   preference: ThemePreference
+  chatFontSize: number
+  documentFontSize: number
+  codeFontSize: number
+  readingDensity: 'standard' | 'relaxed'
+  motionPreference: 'system' | 'reduce'
+  zoomPercentage: number
+}
+
+export interface AppearanceSnapshot extends AppearancePreferences {
   resolvedTheme: ResolvedTheme
+  degradation?: StructuredError | null
 }
 
 export interface AppearanceApi {
   get(): Promise<AppearanceSnapshot>
   setPreference(preference: ThemePreference): Promise<AppearanceSnapshot>
+  updatePreferences(preferences: Partial<AppearancePreferences>): Promise<AppearanceSnapshot>
   onChanged(listener: (snapshot: AppearanceSnapshot) => void): () => void
 }
 

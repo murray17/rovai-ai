@@ -5,6 +5,7 @@ import {
   type AppQuitPreparationResponse
 } from '../shared/app-lifecycle'
 import type {
+  AppearancePreferences,
   AppearanceSnapshot,
   AppUpdateSnapshot,
   ChannelSettingsSnapshot,
@@ -108,6 +109,9 @@ const api: RovaiApi = {
     },
     setPreference(preference: ThemePreference) {
       return ipcRenderer.invoke('rovai:appearance-set', preference) as Promise<AppearanceSnapshot>
+    },
+    updatePreferences(preferences: Partial<AppearancePreferences>) {
+      return ipcRenderer.invoke('rovai:appearance-update', preferences) as Promise<AppearanceSnapshot>
     },
     onChanged(listener: (snapshot: AppearanceSnapshot) => void): () => void {
       const handler = (

@@ -1,3 +1,4 @@
+import { prefersReducedMotion } from './reduced-motion'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useFilePreview } from './FilePreviewContext'
@@ -148,7 +149,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
       strip.scrollWidth - strip.clientWidth
     ))
     arrowScrollTarget.current = target
-    strip.scrollTo({ left: target, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+    strip.scrollTo({ left: target, behavior: prefersReducedMotion() ? 'instant' : 'smooth' })
   }
 
   const focusConversation = (): void => {

@@ -1,3 +1,4 @@
+import { prefersReducedMotion } from './reduced-motion'
 import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
 import { collapsedMessageProjection } from './conversation-message-collapse'
@@ -2783,7 +2784,7 @@ export function CampWorkspace({
       `[data-message-id="${CSS.escape(messageId)}"]`
     )
     if (existing) {
-      existing.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      existing.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
       existing.focus({ preventScroll: true })
       return
     }
@@ -2802,7 +2803,7 @@ export function CampWorkspace({
         const target = timelineScrollRef.current?.querySelector<HTMLElement>(
           `[data-message-id="${CSS.escape(messageId)}"]`
         )
-        target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        target?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
         target?.focus({ preventScroll: true })
       })
     })
@@ -2908,7 +2909,7 @@ export function CampWorkspace({
         target.classList.add('notification-focus-target')
         target.scrollIntoView({
           block: 'center',
-          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          behavior: prefersReducedMotion()
             ? 'auto'
             : 'smooth'
         })
@@ -6988,7 +6989,7 @@ export function ApprovalDock({
         scrolled = true
         target.scrollIntoView({
           block: 'center',
-          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+          behavior: prefersReducedMotion() ? 'auto' : 'smooth'
         })
       }
       if (focusObserved && document.activeElement === target) {

@@ -44,7 +44,7 @@ const sourceReaderInterface = {
     overscrollBehavior: 'contain',
     backgroundColor: 'var(--conversation-surface)',
     fontFamily: SOURCE_FONT_FAMILY,
-    fontSize: '14px',
+    fontSize: 'var(--code-preview-font-size, 14px)',
     fontWeight: '400',
     lineHeight: '1.6'
   },
