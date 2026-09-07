@@ -1,5 +1,5 @@
 ---
-version: 8
+version: 9
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -43,10 +43,13 @@ Roster order comes from the authoritative Member Order. Reordering is explicit, 
 and preserves selection. Identity color and avatar remain stable across reorder. Loading or partial
 Runtime health must not reorder or hide teammates.
 
-Roster Runtime shortcuts use the approved compact `✓`, `!` and `…` states rather than product logos.
-Each shortcut has a full accessible label and opens that teammate's Runtime configuration.
+Roster rows keep a 40px circular image, 13px name and 11px role in a 64px row with 2px gaps.
+Runtime shortcuts show the existing product logo in a 22px carrier; an unconfigured teammate uses a neutral
+minus glyph. Attention, unsupported and unqualified states add a small `!` marker. Loading retains the
+product identity with a checking label. Each shortcut has a full accessible label/status tooltip and scrolls
+to that teammate's Runtime configuration. A small dirty dot and accessible “有未保存更改” label identify pending edits.
 `light_ready` 可以使用“可用”主状态，但完整 accessible label 说明登录、模型与能力仍待显式检查或首次实际
-任务确认。加载或复扫期间仍使用 `…`，不得把延迟验证画成失败。
+任务确认。加载或复扫期间保留产品图标并标注检查中，不得把延迟验证画成失败。
 
 ## Detail and editing
 
@@ -74,11 +77,11 @@ new draft. Runtime default remains selectable without a catalog. An existing sav
 be checked reads “尚未核对”; a fresh or stale catalog that omits it uses evidence-specific copy instead of the
 absolute “已失效”. This does not add repair semantics for manually modified or technically recovered corrupt data.
 
-After Runtime configuration, keep Memory Capability and the danger zone. Do not expose Installation
-IDs, executable paths or internal bindings in the ordinary profile.
+Keep presence and destructive removal in the header overflow menu. Removal uses its existing confirmation
+and Core preview. Do not expose Installation IDs, executable paths or internal bindings in the ordinary profile.
 
 On Windows, Runtime Platform Admission is evaluated before installation or health. An unqualified row
-uses the compact `!` shortcut with the full label “{Runtime}：Windows 尚未验证”; an unsupported row says
+uses the Runtime logo with a compact `!` marker with the full label “{Runtime}：Windows 尚未验证”; an unsupported row says
 “此平台不支持”. Neither may be shown as not installed, rescannable or temporarily checking. Opening the
 configuration shows frozen historical values but no Runtime/model/permission mutation or execution action.
 Name, role, portrait and other unrelated edits remain available and save while preserving the Runtime
@@ -120,11 +123,36 @@ baseline and [member identity contract](../../../../docs/ui/components/member-id
 cannot change AgentProfile fields, Member Order semantics, Runtime catalogs, removal transactions or
 Memory authority.
 
-## Identity dialog composition
+## Inline configuration composition
 
-Identity editing uses a 560px quiet dialog with a single title. Name and team role share a row;
-professional responsibility and editable trait tags follow. Working principles and growth focus use
-one collapsed disclosure with a filled-field count. Keep draft values when collapsing, show validation
-at its field, and expand/focus the relevant advanced field when validation fails. Counters and short
-input guidance appear on focus. The footer contains cancel and save/new actions without a future-work
-note. Avatar editing remains separate; anchored member cards retain the half-body portrait.
+The right pane is one continuous page: “队员信息” followed by “运行配置”, with no identity/Runtime Tabs
+and no create/edit dialogs. Name and team role share a row; professional responsibility and editable
+trait tags follow. A 182px, 4:5 portrait sits to their right. Working principles and growth focus use one
+collapsed disclosure with a filled-field count. Collapsing preserves draft values; field validation expands
+and focuses the relevant field. Counters and input guidance appear on focus.
+
+Each section owns its “放弃更改” and “保存队员信息 / 保存运行配置” controls. Member selection preserves
+both sections' pending drafts for each visited teammate. Saving one section advances its accepted baseline
+without resetting the other. A conflicting external update preserves the local draft and blocks that section's
+save until the user reloads its saved values. Leaving the workspace confirms discarding pending changes.
+
+New teammates use the same page. The pending draft has a separate bottom roster row and is excluded from
+saved teammate counts and ordering. Only a name is required. Runtime configuration becomes available after
+creation. Presets, upload and native crop editing expand inline and are committed from “保存队员信息”.
+Creation includes the selected image in the existing create command. Existing identity and image changes use
+successive existing commands with receipt versions; partial success explicitly distinguishes committed text
+from an unsaved image, retains the remaining draft and never claims an atomic transaction.
+
+The Runtime picker shows the existing product icons in its trigger and keyboard-accessible menu. Model
+strategy's Runtime-default caption is “默认”; the underlying `runtime_default` mode and Runtime-native fields,
+raw choices, defaults, platform admission, model discovery and recovery remain unchanged. Do not introduce
+an additional Runtime parameters heading in this continuous form.
+
+The 620px detail breakpoint narrows the portrait to 128px and stacks name/role. Below 390px detail width,
+the portrait and all form columns stack. Both themes keep the same geometry, semantic colors and restrained
+1px input borders. Keep destructive removal confirmation and its Core preview, blockers, failures and focus return.
+
+The production-component regression is `node --test scripts/lib/member-editor.test.mjs`. It runs an isolated
+Electron fixture, covers both saves, cross-member drafts, conflicts, inline creation, keyboard focus and
+1440×920 / 1040×700 / 2560×1440 / 200% layouts, and can retain screenshots with
+`ROVAI_KEEP_MEMBER_EDITOR_FIXTURE=1`. This fixture contains explicit test data; production always reads Core.
