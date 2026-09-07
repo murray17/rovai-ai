@@ -209,8 +209,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.54";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 96;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.55";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 97;
+const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
+const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
 const V145_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 95;
 const V144_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -514,6 +516,7 @@ const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 const V116_CLASSIFIER_VERSION: &str = "activity-v2";
 const V142_CLASSIFIER_VERSION: &str = "activity-v3";
+const V147_CLASSIFIER_VERSION: &str = "activity-v4";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DatabaseContractMarker {
@@ -627,6 +630,8 @@ struct CurrentMigrationState {
     v143: bool,
     v144: bool,
     v145: bool,
+    v146: bool,
+    v147: bool,
 }
 
 impl CurrentMigrationState {
@@ -706,47 +711,68 @@ impl CurrentMigrationState {
         }
         let current = contract == CURRENT_DATA_CONTRACT_VERSION
             && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+            && classifier == V147_CLASSIFIER_VERSION
+            && self.v142
+            && self.v143
+            && self.v144
+            && self.v145
+            && self.v146
+            && self.v147;
+        let pi_edit_diff_source = contract == V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             && classifier == V142_CLASSIFIER_VERSION
             && self.v142
             && self.v143
             && self.v144
-            && self.v145;
+            && self.v145
+            && !self.v147;
         let scheduled_automation_source = contract == V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V145_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             && classifier == V142_CLASSIFIER_VERSION
             && self.v142
             && self.v143
             && self.v144
-            && !self.v145;
+            && !self.v145
+            && !self.v146
+            && !self.v147;
         let command_result_storage_source = contract == V144_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V144_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             && classifier == V142_CLASSIFIER_VERSION
             && self.v142
             && self.v143
             && !self.v144
-            && !self.v145;
+            && !self.v145
+            && !self.v146
+            && !self.v147;
         let evidence_compaction_source = contract == V143_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V143_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             && classifier == V142_CLASSIFIER_VERSION
             && self.v142
             && !self.v143
             && !self.v144
-            && !self.v145;
+            && !self.v145
+            && !self.v146
+            && !self.v147;
         let image_source = contract == V142_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V142_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             && classifier == V116_CLASSIFIER_VERSION
             && !self.v142
             && !self.v143
             && !self.v144
-            && !self.v145;
+            && !self.v145
+            && !self.v146
+            && !self.v147;
         let deployed_tool_source = contract == "v1.52"
             && schema == 92
             && classifier == V142_CLASSIFIER_VERSION
             && !self.v142
             && !self.v143
             && !self.v144
-            && !self.v145;
+            && !self.v145
+            && !self.v146
+            && !self.v147;
         if current
+            || pi_edit_diff_source
             || scheduled_automation_source
             || command_result_storage_source
             || evidence_compaction_source
@@ -771,7 +797,7 @@ impl CurrentMigrationState {
                 && self.v131
                 && self.admits_channel_v125(true, through_v113);
         }
-        if self.v141 || self.v142 || self.v143 || self.v144 || self.v145 {
+        if self.v141 || self.v142 || self.v143 || self.v144 || self.v145 || self.v146 || self.v147 {
             return false;
         }
         if contract == V141_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
@@ -2663,7 +2689,7 @@ pub(crate) fn classify_database_contract(
     }
     if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
         && marker.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION
-        && marker.classifier_version == V142_CLASSIFIER_VERSION
+        && marker.classifier_version == V147_CLASSIFIER_VERSION
     {
         Ok(DatabaseContractClassification::Current(marker))
     } else {
@@ -3050,14 +3076,15 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 145)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 146)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 147)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
         params![
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
-            V142_CLASSIFIER_VERSION,
+            V147_CLASSIFIER_VERSION,
         ],
         |row| row.get(0),
     )
@@ -3143,7 +3170,9 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 142),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 143),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 144),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 145)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 145),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 146),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 147)
         "#,
         [],
         |row| {
@@ -3224,6 +3253,8 @@ fn load_current_migration_state(
                 v143: row.get(73)?,
                 v144: row.get(74)?,
                 v145: row.get(75)?,
+                v146: row.get(76)?,
+                v147: row.get(77)?,
             })
         },
     )
@@ -6099,6 +6130,9 @@ impl Database {
                     self.migrate_notification_single_chat_v146()
                 );
             }
+            if !self.schema_migration_applied(147)? {
+                migration_step!("migration_147", self.migrate_pi_edit_diff_classifier_v147());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -6731,6 +6765,9 @@ impl Database {
                 "migration_146",
                 self.migrate_notification_single_chat_v146()
             );
+        }
+        if !self.schema_migration_applied(147)? {
+            migration_step!("migration_147", self.migrate_pi_edit_diff_classifier_v147());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -23158,6 +23195,47 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_pi_edit_diff_classifier_v147(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let notification_migration_applied: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 146)",
+            [],
+            |row| row.get(0),
+        )?;
+        if !notification_migration_applied {
+            anyhow::bail!("Pi edit Diff classifier migration requires notification migration 146");
+        }
+        if !matches!(
+            classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                    && marker.projection_schema_version
+                        == V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                    && marker.classifier_version == V142_CLASSIFIER_VERSION
+        ) {
+            anyhow::bail!(
+                "Pi edit Diff classifier migration requires the exact v1.54/schema 96 source"
+            );
+        }
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             classifier_version=?3, updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration VALUES(147, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn reconcile_deployed_tool_classifier_v141(&mut self) -> Result<bool> {
         if !matches!(classify_database_contract(&self.connection)?,
             DatabaseContractClassification::SupportedMigrationSource(ref marker)
@@ -23288,6 +23366,7 @@ impl Database {
             |row| row.get(0),
         )?;
         match classifier.as_str() {
+            V147_CLASSIFIER_VERSION if self.schema_migration_applied(147)? => {}
             V142_CLASSIFIER_VERSION if self.schema_migration_applied(142)? => {}
             V116_CLASSIFIER_VERSION => {}
             V043_CLASSIFIER_VERSION => {
@@ -27942,7 +28021,41 @@ fn rebuild_table_to_v135_source_for_test(
 }
 
 #[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v146_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 147)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            "DELETE FROM schema_migration WHERE version = 147;
+             UPDATE rovai_data_contract
+             SET contract_version = 'v1.54', projection_schema_version = 96,
+                 classifier_version = 'activity-v3'
+             WHERE singleton = 1;",
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v145_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v146_source_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 146)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
     connection
         .execute_batch(
             r#"
@@ -30834,6 +30947,8 @@ mod tests {
             v143: version >= 143,
             v144: version >= 144,
             v145: version >= 145,
+            v146: version >= 146,
+            v147: version >= 147,
         }
     }
 
@@ -30939,6 +31054,18 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                147,
+            ),
+            (
+                "v1.54/schema-96 after notification migration and before Pi edit Diff classifier",
+                V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                146,
+            ),
+            (
+                "v1.54/schema-96 before notification and Pi edit Diff migrations",
+                V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 145,
             ),
             (
@@ -31357,7 +31484,9 @@ mod tests {
             ),
         ];
         for (name, contract, schema, through) in supported {
-            let classifier = if through >= 142 {
+            let classifier = if through >= 147 {
+                V147_CLASSIFIER_VERSION
+            } else if through >= 142 {
                 V142_CLASSIFIER_VERSION
             } else if through >= 116 {
                 V116_CLASSIFIER_VERSION
@@ -31371,7 +31500,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(145);
+        let current = migration_state_through(147);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -31405,34 +31534,52 @@ mod tests {
         missing_command_result_storage.v144 = false;
         let mut missing_scheduled_automations = current;
         missing_scheduled_automations.v145 = false;
+        let mut missing_notification_single_chat = current;
+        missing_notification_single_chat.v146 = false;
+        let mut missing_pi_edit_diff_classifier = current;
+        missing_pi_edit_diff_classifier.v147 = false;
         let rejected = [
+            (
+                "current marker without notification Single Chat migration",
+                missing_notification_single_chat,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without Pi edit Diff classifier migration",
+                missing_pi_edit_diff_classifier,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Scheduled Automation migration",
                 missing_scheduled_automations,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current without command result storage receipt",
                 missing_command_result_storage,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current without Evidence compaction receipt",
                 missing_evidence_compaction,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current without classifier receipt",
                 missing_classifier,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "deployed source with future receipt",
@@ -31446,70 +31593,70 @@ mod tests {
                 missing_runtime_image_display_source,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Single Chat migration",
                 missing_single_chat,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native execution migration",
                 missing_pi_native_execution,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-input migration",
                 missing_pi_native_input,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Source Attachment migration",
                 missing_source_attachments,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-capabilities migration",
                 missing_pi_native_capabilities,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi Runtime migration",
                 missing_pi_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without cancellation dispatch boundary",
                 missing_cancellation_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Runtime image migration",
                 missing_image_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Quick Chat picker migration",
                 missing_quick_chat_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "old picker marker with the new resolved constraint",
@@ -31523,7 +31670,7 @@ mod tests {
                 missing_index_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "old joined marker with a newer index migration",
@@ -31551,7 +31698,7 @@ mod tests {
                 missing_intermediate,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "one marker beyond source",
@@ -31565,14 +31712,14 @@ mod tests {
                 current,
                 "v99.0",
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
             (
                 "future schema",
                 current,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION + 1,
-                V142_CLASSIFIER_VERSION,
+                V147_CLASSIFIER_VERSION,
             ),
         ];
         for (name, state, contract, schema, classifier) in rejected {
@@ -31744,7 +31891,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(145));
+        assert_eq!(state, migration_state_through(147));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -31844,6 +31991,10 @@ mod tests {
         assert_eq!(after, before);
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_scheduled_automations_v145().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_notification_single_chat_v146().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         assert!(database.schema_migration_applied(144).unwrap());
 
@@ -31903,7 +32054,102 @@ mod tests {
             .unwrap();
         database.migrate_scheduled_automations_v145().unwrap();
         assert!(automation_v145_schema_matches(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_notification_single_chat_v146().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v147_advances_the_classifier_marker_atomically_without_reprojecting_history() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v147-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v146_source_for_test(database.connection());
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "INSERT INTO canonical_runtime_activity(
+                    agent_run_id, execution_epoch, operation_id, classifier_version,
+                    activity_domain, semantic_kind, phase, outcome, credibility,
+                    coverage_level, source_authority, source_evidence_ids_json,
+                    first_evidence_sequence, last_evidence_sequence, revision,
+                    created_at, updated_at
+                 ) VALUES(
+                    'v147-run', 1, 'operation-v3', 'activity-v3',
+                    'file', 'file.write', 'terminal', 'succeeded', 'runtime_structured',
+                    'fine_grained', 'runtime', '[]', 1, 1, 1,
+                    'kept-created-at', 'kept-updated-at'
+                 )",
+                [],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_pi_edit_diff_classifier_receipt
+                 BEFORE INSERT ON schema_migration WHEN NEW.version = 147
+                 BEGIN SELECT RAISE(ABORT, 'Pi edit Diff classifier receipt fixture failure'); END;",
+            )
+            .unwrap();
+
+        assert!(
+            database
+                .migrate_pi_edit_diff_classifier_v147()
+                .unwrap_err()
+                .to_string()
+                .contains("Pi edit Diff classifier receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(147).unwrap());
+        assert!(database.schema_migration_applied(146).unwrap());
+        let source: (String, i64, String) = database
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version, classifier_version
+                 FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            source,
+            (
+                V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_string(),
+                V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V142_CLASSIFIER_VERSION.to_string(),
+            )
+        );
+
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_pi_edit_diff_classifier_receipt")
+            .unwrap();
+        database.migrate_pi_edit_diff_classifier_v147().unwrap();
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        let retained: (String, String, String) = database
+            .connection()
+            .query_row(
+                "SELECT classifier_version, created_at, updated_at
+                 FROM canonical_runtime_activity WHERE agent_run_id = 'v147-run'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            retained,
+            (
+                "activity-v3".to_string(),
+                "kept-created-at".to_string(),
+                "kept-updated-at".to_string(),
+            )
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -34507,6 +34753,10 @@ mod tests {
         database.migrate_command_result_storage_v144().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_scheduled_automations_v145().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_notification_single_chat_v146().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -34703,6 +34953,8 @@ mod tests {
             .unwrap();
         database.migrate_command_result_storage_v144().unwrap();
         database.migrate_scheduled_automations_v145().unwrap();
+        database.migrate_notification_single_chat_v146().unwrap();
+        database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained: (i64, Option<String>) = database
             .connection()
@@ -34874,6 +35126,10 @@ mod tests {
         database.migrate_command_result_storage_v144().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_scheduled_automations_v145().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_notification_single_chat_v146().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained = database
             .connection()
@@ -35728,7 +35984,7 @@ mod tests {
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V142_CLASSIFIER_VERSION.to_string(),
+                V147_CLASSIFIER_VERSION.to_string(),
             )
         );
         assert!(!directory.join("inactive-data-quarantine").exists());
@@ -42396,7 +42652,7 @@ mod tests {
     #[test]
     fn v79_clean_break_discards_unlaunched_notification_rows_without_backfill() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v79-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let mut database = Database::open(&directory).expect("database should open");
         downgrade_current_schema_to_v145_source_for_test(database.connection());
         database
             .connection()
@@ -42443,6 +42699,28 @@ mod tests {
                 "#,
             )
             .expect("test should restore the pre-v79 notification boundary");
+        // This focused legacy fixture intentionally retains all later schema
+        // objects and receipts. Replay the three removed steps here, then
+        // restore the exact pre-v147 marker before exercising reopen.
+        database.migrate_notification_episodes_v79().unwrap();
+        database.migrate_controlled_shutdown_fence_v80().unwrap();
+        database
+            .migrate_notification_heads_up_invalidation_v81()
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE rovai_data_contract
+                 SET contract_version = ?1, projection_schema_version = ?2,
+                     classifier_version = ?3
+                 WHERE singleton = 1",
+                params![
+                    V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                    V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                    V142_CLASSIFIER_VERSION,
+                ],
+            )
+            .unwrap();
         drop(database);
 
         let reopened = Database::open(&directory).expect("v79 database should reopen");
@@ -42822,7 +43100,7 @@ mod tests {
             connection,
             &[
                 58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
-                102, 103, 104, 105, 106, 107, 108, 145,
+                102, 103, 104, 105, 106, 107, 108, 145, 146, 147,
             ],
         );
         for table in [

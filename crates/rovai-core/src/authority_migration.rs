@@ -1276,6 +1276,7 @@ mod tests {
             "evidence_v143",
             "command_result_v144",
             "scheduled_automation_v145",
+            "pi_edit_diff_v147",
         ] {
             let directory = std::env::temp_dir()
                 .join(format!("rovai-authority-migration-test-{}", Uuid::new_v4()));
@@ -1294,7 +1295,11 @@ mod tests {
             INSERT INTO camp_composer_draft(camp_id, body, structured_content_json, revision, created_at, updated_at, expires_at)
             VALUES ('camp-join', 'kept draft', '[{"kind":"text","text":"kept draft"}]', 7, datetime('now'), datetime('now'), datetime('now', '+1 day'));
         "#).unwrap();
-            crate::db::downgrade_current_schema_to_v144_source_for_test(database.connection());
+            if source == "pi_edit_diff_v147" {
+                crate::db::downgrade_current_schema_to_v146_source_for_test(database.connection());
+            } else {
+                crate::db::downgrade_current_schema_to_v144_source_for_test(database.connection());
+            }
             match source {
                 "image_v141" => {
                     database
@@ -1327,6 +1332,7 @@ mod tests {
                         .unwrap();
                 }
                 "scheduled_automation_v145" => {}
+                "pi_edit_diff_v147" => {}
                 "deployed_tool_v141" => {
                     crate::db::downgrade_current_schema_to_v140_source_for_test(
                         database.connection(),
