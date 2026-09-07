@@ -100,7 +100,7 @@ beforeEach(() => {
     closeMany: vi.fn(),
     openInSystem: vi.fn(),
     revealInFolder: vi.fn(),
-    copyDisplayPath: vi.fn(),
+    copyPath: vi.fn(),
     reload: vi.fn(),
     reopen: vi.fn(),
     retry: vi.fn(),
@@ -231,6 +231,54 @@ describe('FilePreviewTabs open feedback', () => {
     expect(markup).toContain('aria-label="docs/hui.html"')
     expect(markup).toContain('aria-label="prototypes/hui.html"')
   })
+
+  it('uses the shortest unique directory suffix for same-name external files', () => {
+    const desktop = tab('desktop-report')
+    const downloads = tab('downloads-report')
+    updateFile(desktop, {
+      fileName: 'report.html',
+      displayPath: '~/Desktop/report.html',
+      pathPresentation: 'external'
+    })
+    updateFile(downloads, {
+      fileName: 'report.html',
+      displayPath: '~/Downloads/report.html',
+      pathPresentation: 'external'
+    })
+    preview.tabs = [desktop, downloads]
+    preview.activeTab = downloads
+    preview.activeTabId = downloads.id
+
+    const markup = renderTabs()
+
+    expect(markup).toContain('aria-label="Desktop/report.html"')
+    expect(markup).toContain('aria-label="Downloads/report.html"')
+    expect(markup).toContain('title="~/Desktop/report.html"')
+    expect(markup).toContain('title="~/Downloads/report.html"')
+  })
+
+  it('adds more parent segments until repeated directory suffixes are unique', () => {
+    const personal = tab('personal-report')
+    const archive = tab('archive-report')
+    updateFile(personal, {
+      fileName: 'report.html',
+      displayPath: '/Users/murray/Desktop/output/report.html',
+      pathPresentation: 'external'
+    })
+    updateFile(archive, {
+      fileName: 'report.html',
+      displayPath: '/Volumes/archive/Desktop/output/report.html',
+      pathPresentation: 'external'
+    })
+    preview.tabs = [personal, archive]
+    preview.activeTab = archive
+    preview.activeTabId = archive.id
+
+    const markup = renderTabs()
+
+    expect(markup).toContain('aria-label="murray/Desktop/output/report.html"')
+    expect(markup).toContain('aria-label="archive/Desktop/output/report.html"')
+  })
 })
 
 describe('FilePreviewPane path presentation', () => {
@@ -248,15 +296,29 @@ describe('FilePreviewPane path presentation', () => {
     const markup = renderPane()
 
     expect(markup).toContain('class="file-preview-path-row"')
-    expect(markup).toContain('aria-label="docs/prototypes/hui.html"')
+    expect(markup).toContain('aria-label="在文件夹中显示 docs/prototypes/hui.html"')
+    expect(markup).toContain('role="tooltip">docs/prototypes/hui.html</span>')
   })
 
   it.each([
-    ['a project-root file', 'project_relative' as const],
-    ['an external file or attachment', 'file_name_only' as const]
-  ])('omits the path row for %s', (_label, pathPresentation) => {
-    const file = tab('filename-only')
-    updateFile(file, { fileName: 'hui.html', displayPath: 'hui.html', pathPresentation })
+    ['a project-root file', 'README.md', 'project_relative' as const],
+    ['an external file', '~/Desktop/report.html', 'external' as const]
+  ])('shows the path row for %s', (_label, displayPath, pathPresentation) => {
+    const file = tab('path-visible')
+    updateFile(file, { fileName: displayPath.split('/').at(-1)!, displayPath, pathPresentation })
+    preview.tabs = [file]
+    preview.activeTab = file
+    preview.activeTabId = file.id
+
+    const markup = renderPane()
+
+    expect(markup).toContain('class="file-preview-path-row"')
+    expect(markup).toContain(`title="${displayPath}"`)
+  })
+
+  it('keeps attachment storage paths out of the path row', () => {
+    const file = tab('attachment')
+    updateFile(file, { fileName: 'report.html', displayPath: 'report.html', pathPresentation: 'file_name_only' })
     preview.tabs = [file]
     preview.activeTab = file
     preview.activeTabId = file.id

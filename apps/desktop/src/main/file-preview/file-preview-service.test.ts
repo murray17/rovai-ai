@@ -17,6 +17,8 @@ vi.mock('node:os', async (importOriginal) => {
   return { ...os, homedir: vi.fn(os.homedir) }
 })
 
+const defaultHomeDirectory = homedir()
+
 class FakeWatcher extends EventEmitter {
   close = vi.fn()
 }
@@ -27,6 +29,7 @@ let services: FilePreviewService[] = []
 beforeEach(() => {
   directories = []
   services = []
+  vi.mocked(homedir).mockReturnValue(defaultHomeDirectory)
 })
 
 afterEach(async () => {
@@ -160,7 +163,7 @@ describe('FilePreviewService', () => {
     for (const rawReference of [`${path}:`, './link.txt:']) {
       const opened = await service.open(1, request(rawReference))
       expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
-        displayPath: 'notes.txt', fileName: 'notes.txt'
+        displayPath: await realpath(path), pathPresentation: 'external', fileName: 'notes.txt'
       } } })
       if (!opened.ok || opened.value.kind !== 'file_preview') continue
       expect(await service.readText(1, {
@@ -265,7 +268,7 @@ describe('FilePreviewService', () => {
   })
 
   it('opens and reads supported files through an opaque handle', async () => {
-    const { root, service, registry } = await fixture()
+    const { root, service, native, registry } = await fixture()
     await writeFile(join(root, 'README.md'), '# Hello')
     const opened = await service.open(1, request('README.md'))
     expect(opened.ok).toBe(true)
@@ -283,6 +286,11 @@ describe('FilePreviewService', () => {
       expectedGeneration: opened.value.file.contentGeneration
     })
     expect(content).toMatchObject({ ok: true, value: { text: '# Hello' } })
+    expect(await service.copyPath(1, {
+      handleId: opened.value.file.handleId,
+      format: 'absolute'
+    })).toEqual({ ok: true, value: { copied: true } })
+    expect(native.copyText).toHaveBeenCalledWith(await realpath(join(root, 'README.md')))
     await service.release(1, { handleId: opened.value.file.handleId })
     expect(registry.rootCount).toBe(0)
   })
@@ -533,13 +541,18 @@ describe('FilePreviewService', () => {
     for (const input of requests) {
       const opened = await service.open(1, input)
       expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
-        displayPath: 'notes.txt', pathPresentation: 'file_name_only', fileName: 'notes.txt', kind: 'text'
+        displayPath: '~/notes.txt', pathPresentation: 'external', fileName: 'notes.txt', kind: 'text'
       } } })
       if (!opened.ok || opened.value.kind !== 'file_preview') continue
       expect(await service.readText(1, {
         handleId: opened.value.file.handleId,
         expectedGeneration: opened.value.file.contentGeneration
       })).toMatchObject({ ok: true, value: { text: 'notes' } })
+      expect(await service.copyPath(1, {
+        handleId: opened.value.file.handleId,
+        format: 'absolute'
+      })).toEqual({ ok: true, value: { copied: true } })
+      expect(native.copyText).toHaveBeenLastCalledWith(await realpath(outsideFile))
     }
 
     expect(service.handleCount).toBe(3)
@@ -562,14 +575,27 @@ describe('FilePreviewService', () => {
       : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
 
     const opened = await service.open(1, input)
+    const expectedDisplayPath = kind === 'attachment' ? 'notes.txt' : await realpath(outsideFile)
+    const expectedPresentation = kind === 'attachment' ? 'file_name_only' : 'external'
     expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
-      displayPath: 'notes.txt', pathPresentation: 'file_name_only', fileName: 'notes.txt'
+      displayPath: expectedDisplayPath, pathPresentation: expectedPresentation, fileName: 'notes.txt'
     } } })
     if (!opened.ok || opened.value.kind !== 'file_preview') return
     expect(await service.readText(1, {
       handleId: opened.value.file.handleId,
       expectedGeneration: opened.value.file.contentGeneration
     })).toMatchObject({ ok: true, value: { text: kind } })
+    if (kind === 'attachment') {
+      expect(await service.copyPath(1, {
+        handleId: opened.value.file.handleId,
+        format: 'absolute'
+      })).toMatchObject({ ok: false, error: { code: 'source_not_authorized' } })
+      expect(await service.copyPath(1, {
+        handleId: opened.value.file.handleId,
+        format: 'display'
+      })).toEqual({ ok: true, value: { copied: true } })
+      expect(native.copyText).toHaveBeenLastCalledWith('notes.txt')
+    }
     expect(native.selectRoot).not.toHaveBeenCalled()
   })
 
@@ -639,7 +665,7 @@ describe('FilePreviewService', () => {
         expectedGeneration: opened.value.file.contentGeneration
       })
       expect(reloaded).toMatchObject({ ok: true, value: {
-        displayPath: 'notes.txt', pathPresentation: 'file_name_only'
+        displayPath: await realpath(path), pathPresentation: 'external'
       } })
       if (!reloaded.ok) return
       expect(await service.readText(1, {
@@ -860,7 +886,8 @@ describe('FilePreviewService', () => {
       allowSystemOpen: true
     })
     expect(child).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
-      displayPath: 'design.md', pathPresentation: 'file_name_only', fileName: 'design.md'
+      displayPath: await realpath(join(outside, 'guides', 'design.md')),
+      pathPresentation: 'external', fileName: 'design.md'
     } } })
     if (!child.ok || child.value.kind !== 'file_preview') return
     expect(child.value.file).not.toHaveProperty('restoreRequest')
@@ -916,7 +943,8 @@ describe('FilePreviewService', () => {
       rawReference: 'details.html', allowSystemOpen: true
     })
     expect(child).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
-      displayPath: 'details.html', pathPresentation: 'file_name_only', fileName: 'details.html'
+      displayPath: await realpath(join(pages, 'details.html')),
+      pathPresentation: 'external', fileName: 'details.html'
     } } })
     expect(native.selectRoot).not.toHaveBeenCalled()
     await service.release(1, { handleId: opened.value.file.handleId })

@@ -122,7 +122,7 @@ export interface FilePreviewContextValue {
   closeMany(tabIds: string[]): void
   openInSystem(tabId: string): Promise<FilePreviewOperationResult<{ opened: true }>>
   revealInFolder(tabId: string): Promise<FilePreviewOperationResult<{ revealed: true }>>
-  copyDisplayPath(tabId: string): Promise<FilePreviewOperationResult<{ copied: true }>>
+  copyPath(tabId: string): Promise<FilePreviewOperationResult<{ copied: true }>>
   reload(tabId: string): Promise<void>
   reopen(tabId: string): Promise<void>
   retry(tabId: string): Promise<void>
@@ -965,10 +965,13 @@ export function FilePreviewProvider({
       : { ok: false as const, error: errorFromUnknown() }
   }, [fileForAction])
 
-  const copyDisplayPath = useCallback(async (tabId: string) => {
+  const copyPath = useCallback(async (tabId: string) => {
     const file = fileForAction(tabId)
     return file
-      ? window.rovai.filePreview.copyPath({ handleId: file.handleId, format: 'display' })
+      ? window.rovai.filePreview.copyPath({
+          handleId: file.handleId,
+          format: file.pathPresentation === 'file_name_only' ? 'display' : 'absolute'
+        })
       : { ok: false as const, error: errorFromUnknown() }
   }, [fileForAction])
 
@@ -1103,12 +1106,12 @@ export function FilePreviewProvider({
     closeMany,
     openInSystem,
     revealInFolder,
-    copyDisplayPath,
+    copyPath,
     reload,
     reopen,
     retry,
     changePage
-  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openFileChanges, openFeedback, openInSystem, paneVisible, reload, reopen, resolvedTheme, revealInFolder, retry, selectChangedFile, showPane, tabs])
+  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyPath, hidePane, move, open, openFileChanges, openFeedback, openInSystem, paneVisible, reload, reopen, resolvedTheme, revealInFolder, retry, selectChangedFile, showPane, tabs])
 
   return (
     <FilePreviewContext.Provider value={value}>

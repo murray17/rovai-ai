@@ -60,7 +60,9 @@ const markdownSource = [
 ].join('\n')
 const tabFiles = ['src/app.ts', 'src/layout.tsx', 'src/theme.ts', 'src/routes.ts', 'src/search.ts',
   'src/settings.tsx', 'src/navigation.ts', 'src/very-long-file-preview-reading-anchor.tsx']
-const fileNameOnlyReference = 'external-preview.ts'
+const attachmentNameOnlyReference = 'attachment-preview.ts'
+const externalReference = '/Users/fixture/Desktop/Reports/report.ts'
+const externalDisplayPath = '~/Desktop/Reports/report.ts'
 const pathReferences = [
   'crates/rovai-core/src/acp.rs',
   'workspace-crates-directory/core-runtime-source-and-language-adapters/source-implementations/acp.rs'
@@ -85,6 +87,7 @@ const fileOpens: OpenFilePreviewRequest[] = []
 const fileRestores: OpenFilePreviewRequest[] = []
 const campBindings: Array<string | null> = []
 const releases: string[] = []
+const revealCalls: string[] = []
 const reviewRequests: Array<{ campId: string; agentRunId: string; executionEpoch: number }> = []
 let failNextReview = false
 let failNextRead = false
@@ -114,9 +117,12 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
     && [...tabFiles, ...pathReferences].includes(request.rawReference)) {
     target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
       fileName: request.rawReference.split('/').at(-1)! }
-  } else if (request.kind === 'message_reference' && request.rawReference === fileNameOnlyReference) {
-    target = { ...file, previewKey: fileNameOnlyReference, displayPath: fileNameOnlyReference,
-      pathPresentation: 'file_name_only', fileName: fileNameOnlyReference }
+  } else if (request.kind === 'attachment') {
+    target = { ...file, previewKey: attachmentNameOnlyReference, displayPath: attachmentNameOnlyReference,
+      pathPresentation: 'file_name_only', fileName: attachmentNameOnlyReference }
+  } else if (request.kind === 'message_reference' && request.rawReference === externalReference) {
+    target = { ...file, previewKey: externalReference, displayPath: externalDisplayPath,
+      pathPresentation: 'external', fileName: 'report.ts' }
   } else if (request.kind === 'message_reference' && request.rawReference === markdownReference) {
     target = markdownFile
   } else if (request.kind === 'message_reference' && ['find.patch', 'find.log', 'find.svg'].includes(request.rawReference)) {
@@ -178,7 +184,9 @@ const api: FilePreviewApi = {
     contentVersion: markdownFile.contentVersion
   } }),
   reload: unsupported,
-  openInSystem: unsupported, revealInFolder: unsupported, copyPath: unsupported,
+  openInSystem: unsupported,
+  revealInFolder: async ({ handleId }) => { revealCalls.push(handleId); return { ok: true, value: { revealed: true } } },
+  copyPath: unsupported,
   chooseAuthorizedRoot: unsupported
 }
 
@@ -448,12 +456,26 @@ Object.assign(window, { previewTest: {
     await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })
     await settle()
   },
-  async openFileNameOnly() {
+  async openAttachment() {
     await previewController.open({
-      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: fileNameOnlyReference
+      kind: 'attachment',
+      campId: 'camp-1',
+      locator: {
+        owner: 'message',
+        campId: 'camp-1',
+        messageId: 'message-1',
+        attachmentRefId: 'attachment-1'
+      }
     })
     await settle()
   },
+  async openExternal() {
+    await previewController.open({
+      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: externalReference
+    })
+    await settle()
+  },
+  revealCalls: () => [...revealCalls],
   async openPath(index: number) {
     const rawReference = pathReferences[index]
     if (!rawReference) throw new Error('Unknown fixture path')
@@ -540,9 +562,15 @@ Object.assign(window, { previewTest: {
     const content = panel.querySelector<HTMLElement>('.file-preview-content')!
     const path = panel.querySelector<HTMLElement>('.file-preview-path-row')
     const update = panel.querySelector<HTMLElement>('.file-preview-update-row')
+    const button = path?.querySelector<HTMLButtonElement>('.file-preview-path-button')
     const parts = path?.querySelector<HTMLElement>('.file-preview-path-parts')
+    const tooltip = path?.querySelector<HTMLElement>('.file-preview-path-tooltip')
     return {
-      pathTitle: parts?.title,
+      pathTitle: button?.title,
+      pathLabel: button?.getAttribute('aria-label'),
+      pathButton: Boolean(button),
+      tooltipText: tooltip?.textContent,
+      tooltipVisible: tooltip ? getComputedStyle(tooltip).visibility === 'visible' : false,
       pathOverflow: Boolean(path && path.scrollWidth > path.clientWidth + 1),
       partsRight: parts?.getBoundingClientRect().right,
       segments: [...(parts?.querySelectorAll<HTMLElement>(
