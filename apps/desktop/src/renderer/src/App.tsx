@@ -8,6 +8,7 @@ import type {
   AgentRunView,
   ActionApprovalView,
   AppUpdatePrompt as AppUpdatePromptValue,
+  AppearancePreferences,
   AppearanceSnapshot,
   CampActivationState,
   CampCreationPreflight,
@@ -3611,18 +3612,11 @@ function AuthoritativeApp({
     }
   }
 
-  const changeThemePreference = async (preference: ThemePreference): Promise<void> => {
-    setBusy('appearance')
-    setError(null)
-    try {
-      const snapshot = await window.rovai.appearance.setPreference(preference)
-      applyAppearanceSnapshot(document.documentElement, snapshot)
-      setAppearance(snapshot)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
+  const changeAppearancePreferences = async (preferences: AppearancePreferences): Promise<AppearanceSnapshot> => {
+    const snapshot = await window.rovai.appearance.updatePreferences(preferences)
+    applyAppearanceSnapshot(document.documentElement, snapshot)
+    setAppearance(snapshot)
+    return snapshot
   }
 
   const runOnboardingMutation = async (
@@ -4058,7 +4052,7 @@ function AuthoritativeApp({
             onReload={async () => {
               await Promise.all([loadOverview(), loadHealth()])
             }}
-            onThemeChange={(preference) => void changeThemePreference(preference)}
+            onAppearanceChange={changeAppearancePreferences}
           />
         )}
 
@@ -4346,7 +4340,7 @@ export function SettingsView({
   updates,
   onDiagnosticsNavigate,
   onReload,
-  onThemeChange
+  onAppearanceChange
 }: {
   platform?: NodeJS.Platform
   appearance: AppearanceSnapshot
@@ -4361,7 +4355,7 @@ export function SettingsView({
   updates: AppUpdatesController
   onDiagnosticsNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
   onReload(): Promise<void>
-  onThemeChange(preference: ThemePreference): void
+  onAppearanceChange(preferences: AppearancePreferences): Promise<AppearanceSnapshot>
 }): React.JSX.Element {
   return (
     <div className="settings-workbench">
@@ -4381,18 +4375,12 @@ export function SettingsView({
         )}
         {section === 'channels' && <ChannelSettings agents={agents} />}
         {section === 'appearance' && (
-          <>
-            <SettingsPageHeader
-              eyebrow="Settings / Appearance"
-              title="外观"
-              description="选择 Rovai AI 的界面主题。"
-            />
-            <AppearanceSettings
-              appearance={appearance}
-              disabled={busy === 'appearance'}
-              onChange={onThemeChange}
-            />
-          </>
+          <AppearanceSettings
+            appearance={appearance}
+            platform={platform}
+            disabled={busy === 'appearance'}
+            onChange={onAppearanceChange}
+          />
         )}
         {section === 'notifications' && (
           <NotificationSettings />

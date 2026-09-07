@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { App } from '../../../apps/desktop/src/renderer/src/App'
 import { NewConversationDialog } from '../../../apps/desktop/src/renderer/src/NewConversationDialog'
+import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
@@ -72,7 +73,7 @@ function api(path = ''): unknown {
       if (path.split('.').at(-1)?.startsWith('on')) return () => undefined
       if (path === 'supervisor.getSnapshot') return initialSupervisor.promise
       if (path === 'desktopSession.getStartupSnapshot') { calls.push(path); return localSession.promise }
-      if (path === 'appearance.get') return Promise.resolve({ preference: 'system', resolvedTheme: appearanceTheme })
+      if (path === 'appearance.get') return Promise.resolve({ ...DEFAULT_APPEARANCE, resolvedTheme: appearanceTheme })
       if (path === 'generalPreferences.get') return Promise.resolve({ schemaVersion: 4,
         startupLocationMode: 'last_location', lastSettingsSection: 'general', executionConsolePlacement: 'bottom',
         newConversationDefaults: null, newConversationDefaultsRequireConfirmation: false,

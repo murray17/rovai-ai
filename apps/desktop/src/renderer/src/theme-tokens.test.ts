@@ -351,7 +351,8 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
 
   it('uses solid, rule-free headers for the approved Memory, Appearance, and Reminder pages', () => {
     expect(css).toMatch(/\.settings-content \.settings-panel:is\([^}]+\)\s*\{[^}]*border-top: 0[^}]*background: var\(--home-surface\)/)
-    expect(css).toMatch(/\.settings-panel:is\([^}]+\) > \.settings-page-heading\s*\{[^}]*border-bottom: 0/)
+    expect(css).toMatch(/\.settings-panel-appearance > \.appearance-settings-page > \.settings-page-heading,[^{]+\{[^}]*border-bottom: 0/)
+    expect(css).toMatch(/\.settings-panel-notifications > \.settings-page-heading\s*\{[^}]*border-bottom: 0/)
     expect(css).toMatch(/\.memory-scope-tabs\s*\{[^}]*border: 0[^}]*background: var\(--workspace-surface-subtle\)/)
     expect(css).toMatch(/\.memory-catalog\s*\{[^}]*background: var\(--workspace-surface-subtle\)/)
     expect(css).toMatch(/\.memory-detail\s*\{[^}]*background: var\(--workspace-surface-subtle\)/)

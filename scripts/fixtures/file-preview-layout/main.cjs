@@ -178,7 +178,7 @@ app.whenReady().then(async () => {
     await run('window.previewTest.openMarkdown()')
     const day = await run('window.previewTest.markdownSnapshot()')
     assert.equal(day.bodyFontSize, '15px')
-    assert.equal(day.bodyLineHeight, '25.5px')
+    assert.equal(day.bodyLineHeight, '24.75px')
     assert.deepEqual([day.h1, day.h2, day.h3], ['26px', '21px', '17px'])
     assert.equal(day.codeLanguage, 'tsx')
     assert.equal(day.codeFontSize, '13px')
@@ -188,6 +188,27 @@ app.whenReady().then(async () => {
     assert.equal(day.tableScrolls, true)
     assert.ok(day.documentWidth <= 780 && day.documentWidth < day.paneWidth)
     assert.equal(day.pageOverflow, false)
+
+    const reader = await run(`(() => {
+      const reader = document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-markdown')
+      const table = document.querySelector('.file-preview-tab-panel:not([hidden]) .markdown-table-scroll')
+      reader.scrollTop = 0
+      const bounds = table.getBoundingClientRect()
+      return {
+        x: Math.round(bounds.left + bounds.width / 2),
+        y: Math.round(bounds.top + bounds.height / 2),
+        scrollHeight: reader.scrollHeight,
+        clientHeight: reader.clientHeight
+      }
+    })()`)
+    assert.ok(reader.scrollHeight > reader.clientHeight, 'The Markdown fixture has vertical reading overflow')
+    await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseWheel', x: reader.x, y: reader.y, deltaX: 0, deltaY: 180
+    })
+    await snapshot()
+    assert.ok(await run(`document.querySelector(
+      '.file-preview-tab-panel:not([hidden]) .file-preview-markdown'
+    ).scrollTop > 0`), 'Vertical wheel input over a wide table continues scrolling the Markdown reader')
     await capture('markdown-reader-day')
 
     await run('window.previewTest.setTheme("night")')
