@@ -7907,7 +7907,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .notification-heads-up[hidden] { display: none; }
 .notification-heads-up-source { display: flex; min-width: 0; white-space: nowrap; }
 .notification-heads-up-source > span { overflow: hidden; text-overflow: ellipsis; }
-.notification-heads-up-source > b { flex: 0 0 auto; font-weight: inherit; }
+.notification-heads-up-source > b { flex: 0 0 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; font-weight: inherit; }
 .notification-heads-up-summary .notification-heads-up-open { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .notification-heads-up-summary .notification-heads-up-open > span:last-child { color: var(--brand-ink); }
 .single-chat-new-reply { margin: 0 auto 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--brand-ink); cursor: pointer; font-size: 12px; }

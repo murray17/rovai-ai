@@ -77,6 +77,11 @@ last_updated: 2026-09-07
   最小命令为 `cargo test -p rovai-core --lib single_chat::tests::successful_final_is_private_and_a_cancelled_run_cannot_append_late_output`。
 - 升级夹具统一先退回 v145 触发器再重建历史表，保留所有历史升级 case；Automation 历史分页的既有测试
   改为按 `(created_at, id)` 合同验证完整跨页结果，去掉“连续创建必定跨秒”的不稳定假设，保留所有状态和分页断言。
+- 同步 `0771e3fc1612988892b57c79049ce60e85fe7380` 主线后的最终复核：`pnpm test` 160 files / 1643 项
+  Vitest、222 项 Node 通过（1 项 Windows 平台跳过），`pnpm typecheck`、`pnpm build:desktop`、
+  `pnpm test:rust:staged`（workspace all-target check 与 536 项 Library）、Rust 格式和差异检查通过。
+  通知及单聊 Electron 回归重新通过，另覆盖长成员名不溢出、同来源更新保留真实 DOM 与键盘焦点；
+  以该不可变 SHA 为 base 的文档 CI 门禁通过。
 
 ### 原版本完成条件
 

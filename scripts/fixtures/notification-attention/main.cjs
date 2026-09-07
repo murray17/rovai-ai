@@ -95,6 +95,17 @@ app.whenReady().then(async () => {
     await state()
     await run("window.notificationTest.invalidate('occurrence-9'); window.notificationTest.attentive(true)")
     assert.equal((await state()).cards.length, 0, 'Background invalidation is reconciled before display')
+    await run("window.notificationTest.admit('turn_completed', 'long-name', 'focus-round', '名称很长的队员'.repeat(12))")
+    await state()
+    assert.equal(await run(`(() => {
+      const card = document.querySelector('.notification-heads-up')
+      const source = card.querySelector('strong')
+      return source.scrollWidth <= source.clientWidth && card.scrollWidth <= card.clientWidth
+    })()`), true, 'Long Camp and member names stay within the card')
+    await run("window.retainedNotification = document.querySelector('.notification-heads-up-open'); window.retainedNotification.focus(); window.notificationTest.admit('approval_pending', 'long-name', 'focus-round')")
+    await state()
+    assert.equal(await run("document.activeElement === window.retainedNotification && window.retainedNotification === document.querySelector('.notification-heads-up-open')"), true,
+      'Updating the same source keeps its DOM identity and keyboard focus')
     console.log(JSON.stringify({ ok: true }))
     app.exit(0)
   } catch (error) { console.error(error); app.exit(1) }

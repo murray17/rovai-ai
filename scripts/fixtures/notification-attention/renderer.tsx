@@ -30,13 +30,13 @@ Object.assign(window, { rovai: {
   },
   onEvent: (callback: (event: { method: string }) => void) => { listeners.add(callback); return () => listeners.delete(callback) }
 }})
-function admit(semantic: NotificationSemantic, privateId: string | null = null, episodeId = `episode-${sequence + 1}`) {
+function admit(semantic: NotificationSemantic, privateId: string | null = null, episodeId = `episode-${sequence + 1}`, agentDisplayName = '洛克') {
   const n = ++sequence
   const action: NotificationActionView = { actionId: `action-${n}`, kind: privateId ? 'open_single_chat' : semantic === 'approval_pending' ? 'open_approval' : 'open_camp_turn',
     available: true, campId: 'camp-target', campTurnId: 'turn-target', messageId: null,
     approvalId: semantic === 'approval_pending' ? `approval-${n}` : null,
     acknowledgementId: `occurrence-${n}`, observedEpisodeVersion: n,
-    singleChat: privateId ? { conversationId: privateId, agentId: 'agent-1', agentDisplayName: '洛克', agentRunId: 'private-run' } : null }
+    singleChat: privateId ? { conversationId: privateId, agentId: 'agent-1', agentDisplayName, agentRunId: 'private-run' } : null }
   const episode: NotificationEpisodeView = { id: episodeId, kind: semantic === 'approval_pending' ? 'approval' : 'collaboration',
     episodeVersion: n, attentionRevision: n, changeSequence: n,
     camp: { id: 'camp-target', title: '通知交互与单聊来源定位方案'.repeat(3) }, campTurnId: 'turn-target',
