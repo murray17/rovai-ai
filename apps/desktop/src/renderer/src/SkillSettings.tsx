@@ -415,6 +415,36 @@ export function settingsVisibleSkills(
     .includes(query))
 }
 
+const SKILL_DELIVERY_GROUP_DISPLAY_RANK: Record<SkillDeliveryGroupKey, number> = {
+  claude_compatible: 0,
+  codex: 1,
+  copilot: 2,
+  opencode: 3,
+  kiro: 4,
+  qoder: 5,
+  codebuddy: 6,
+  qwen: 7,
+  trae: 8,
+  cursor: 9,
+  kimi: 10,
+  grok: 11,
+  antigravity: 12,
+  pi: 13
+}
+
+export function skillDeliveryGroupsForDisplay(
+  groups: SkillDeliveryGroupView[]
+): SkillDeliveryGroupView[] {
+  return groups
+    .map((group, index) => ({ group, index }))
+    .sort((left, right) => (
+      SKILL_DELIVERY_GROUP_DISPLAY_RANK[left.group.key]
+      - SKILL_DELIVERY_GROUP_DISPLAY_RANK[right.group.key]
+      || left.index - right.index
+    ))
+    .map(({ group }) => group)
+}
+
 export function SkillCard({
   skill,
   groups,
@@ -699,7 +729,7 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
             <span>{selected.size} / {groups.length}</span>
           </div>
           <div className="skill-group-options">
-            {groups.map((group) => (
+            {skillDeliveryGroupsForDisplay(groups).map((group) => (
               <DropdownMenu.CheckboxItem
                 className="skill-group-option"
                 key={group.key}

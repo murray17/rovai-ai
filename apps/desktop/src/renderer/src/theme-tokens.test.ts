@@ -509,6 +509,14 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toContain('.approval-card {')
   })
 
+  it('keeps the Single Chat popover on the shared neutral overlay border', () => {
+    const block = css.match(/\.single-chat-popover\s*\{[^}]*\}/)?.[0] ?? ''
+
+    expect(block).toContain('border: 1px solid var(--line-strong)')
+    expect(block).not.toContain('border-top')
+    expect(block).not.toContain('var(--workspace-steel)')
+  })
+
   it('keeps the Composer Skill picker in the accepted native Steel dropdown', () => {
     expect(css).toMatch(/\.skill-picker-menu\s*\{[^}]*max-height:\s*310px/)
     expect(css).toMatch(/\.skill-picker-menu button\s*\{[^}]*min-height:\s*46px[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto/)

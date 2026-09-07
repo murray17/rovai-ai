@@ -4347,8 +4347,10 @@ describe('task event projections', () => {
     expect(agentMarkup).toContain('class="agent-output-file-grid"')
     expect(agentMarkup).toContain('agent-artifact-icon type-pdf')
     expect(agentMarkup).toContain('agent-artifact-icon type-image')
-    expect(agentMarkup).toContain('交付文件')
-    expect(agentMarkup).toContain('>2 个</span>')
+    expect(agentMarkup).toContain('aria-label="Agent 交付文件：2 个"')
+    expect(agentMarkup).not.toContain('agent-delivery-heading')
+    expect(agentMarkup).not.toContain('<strong>交付文件</strong>')
+    expect(agentMarkup).not.toContain('>2 个</span>')
   })
 
   it('renders an attachment-only message shell without an empty body bubble', () => {

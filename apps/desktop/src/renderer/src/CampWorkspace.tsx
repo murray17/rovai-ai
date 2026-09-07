@@ -7885,10 +7885,6 @@ export function MessageAttachmentGroups({
       )}
       {groups.files.length > 0 && (
         <div className="agent-output-files">
-          <div className="agent-delivery-heading">
-            <strong>交付文件</strong>
-            <span>{groups.files.length} 个</span>
-          </div>
           <div className="agent-output-file-grid" role="group" aria-label={`Agent 交付文件：${groups.files.length} 个`}>
             {groups.files.map((attachment) => (
               <AttachmentCard

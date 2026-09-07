@@ -375,8 +375,11 @@ Pi system prompt 不属于压缩的消息历史，compaction strategy 为
 `native_system_prompt_preserved`，因此不加入 redelivery requirement 或 observer lease。
 
 managed Skill target 为 `.pi/skills`，但 extension 不再通过 `resources_discover` 追加路径，Core 也不读取
-`get_commands` 或证明 Runtime catalog；项目原生与 Rovai 投递 Skill 统一由 Pi ResourceLoader 按 workspace trust
-发现，因此 Pi Skill discovery 只声明 `DocumentationOnly`。v7 extension 不固定 Active Tools；所有 Built-in 与用户
+`get_commands` 或证明完整 Runtime catalog；项目原生与 Rovai 投递 Skill 统一由 Pi ResourceLoader 按 workspace trust
+发现。Pi 0.84.4 的真实原生 smoke 已调用带私有随机标记的 Rovai managed Skill，并覆盖 Revision 更新、禁用与恢复、
+取消分配与恢复、Core 重启、project-owned 同名 shadow、同 Host 相邻 Session 无泄漏及硬删除后的不可见性，因此
+Pi managed Skill delivery group discovery 声明为 `Verified`。该等级只证明 `.pi/skills` 投递项的原生发现、调用与
+生命周期，不声明 Rovai attestation 完整 Prompt/Context/Template/Extension catalog。v7 extension 不固定 Active Tools；所有 Built-in 与用户
 Extension Tool 都按 Pi 原生语义执行。Pi 没有 Rovai Approval、sandbox 或 permission option，公共 permission value
 为空对象且 compatibility digest 不含 approval mode。Rovai 消息不是 Pi TUI command input；Formatter 22 payload不解析 `/...`，原样成为
 `prompt.message`。当前已授权图片只从 ContextManifest 结构化 attachment refs 取得，以 exact bytes/MIME/order 经

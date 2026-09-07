@@ -2971,6 +2971,7 @@ export type SkillOrigin = 'official' | 'imported'
 export type SkillRevisionSourceType = 'bundled' | 'local_folder' | 'github'
 export type SkillDeliveryGroupKey =
   | 'codex'
+  | 'pi'
   | 'opencode'
   | 'copilot'
   | 'claude_compatible'
@@ -2982,6 +2983,7 @@ export type SkillDeliveryGroupKey =
   | 'trae'
   | 'cursor'
   | 'kimi'
+  | 'grok'
 
 export interface SkillRiskSummary {
   executableFileCount: number
