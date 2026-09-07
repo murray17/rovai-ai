@@ -3,7 +3,7 @@ document_type: ui-component
 authority: notification-attention-presentation
 status: accepted
 target_version: cross-version
-last_updated: 2026-08-14
+last_updated: 2026-09-07
 ---
 
 # 应用内提醒与会话未读
@@ -19,15 +19,15 @@ Change Journal。Renderer 只呈现短暂应用内提醒和 Camp 行“有新回
 Core 的持久注意力事实。
 
 启动或 reload 先建立当前 Journal high-water，不补弹历史。运行中只有新的 exact `headsUpSignal` 可加入
-内存队列；同时最多显示一条，相同 Episode 的新 signal 原地更新。浮层标题、摘要、点击和精确确认全部
+内存队列；同时最多显示一条，同来源同轮的新高优先级 signal 原地更新，并保留其他精确 Occurrence。浮层标题、摘要、点击和精确确认全部
 使用 signal，不读取 Episode 当前 primary semantic/action 替代。内部 `open_camp` action 在界面统一呈现
 为“打开会话”，不得暴露领域对象名。
 
-应用失焦、隐藏或在后台时，队列可以接收新 signal，但浮层不挂载且 8 秒计时不开始；重新获得前台注意
-后才显示当前一条。Hover、focus 和动作提交期间暂停计时。关闭或超时只移除本次临时呈现，不
-acknowledge、不 clear。更多项以“还有 N 项新提醒 / 查看下一条”逐项推进，不跳转到已隐藏的通知中心。
+应用失焦、隐藏或在后台时，队列可以接收新 signal，但浮层隐藏且剩余 8 秒计时暂停；重新获得前台注意
+后先收敛失效与可见来源，再显示当前一条。Hover、focus 和动作提交期间暂停剩余时间，不重置。关闭或超时只移除本次临时呈现，不
+acknowledge、不 clear。关闭当前卡片后的剩余项以“还有 N 条提醒 / 查看下一条”轻入口按需推进，不跳转到已隐藏的通知中心。
 
-队列 signal 只由 Journal 的 exact acknowledgement、Clear revision 或 Episode remove invalidation 失效。
+队列 signal 由 Journal 的 exact acknowledgement、Clear revision、source resolved 或 Episode remove invalidation 失效；当前已读内容 / 阅读区完成也会抑制并撤下临时呈现。
 resolved Approval 的旧 pending signal 必须删除，即使该 Occurrence 仍未确认；reset/重新建立 baseline
 直接清空队列，不从历史或 Episode 推荐动作恢复。
 
@@ -62,7 +62,19 @@ Occurrence。
 
 ## References
 
-- [Notification Episode v5](../../contracts/notification-episode-v5.md)
-- [Current User Attention v4](../../contracts/current-user-attention-v4.md)
+- [Notification Episode v6](../../contracts/notification-episode-v6.md)
+- [Current User Attention v5](../../contracts/current-user-attention-v5.md)
 - [App Shell 与统一侧栏](app-shell-navigation.md)
 - [DESIGN.md](../../../DESIGN.md)
+
+
+## 卡片与单聊
+
+卡片宽 340px，只展示“会话来源 + 一条信息”，正文最多两行。公屏采用含渠道来源的会话名；单聊采用
+“会话名 · 与成员单聊”，优先保留私有来源标识，完整来源可悬停查看。没有重复类型标题、时间或技术页脚。
+本轮完成文案为“本轮已完成”，不推断必然有最终回复。
+
+公屏与每段单聊分别判断当前阅读区域，当前对话完成不弹，阅读旧消息时用对话内的新回复入口。
+审批 / 失败 / 未完成 / Mention 的精确内容尚不可见时仍弹；不把同 Camp 的另一段单聊当成已读。
+单聊共用四类偏好。点击原始 Conversation / Run 或审批详情，绝不创建 successor；关闭、超时和查看下一条
+都不代表已读或批准。

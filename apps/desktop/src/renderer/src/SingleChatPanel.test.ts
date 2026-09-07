@@ -31,6 +31,7 @@ const source = readFileSync(new URL('./SingleChatPanel.tsx', import.meta.url), '
 function run(overrides: Partial<SingleChatRunView> = {}): SingleChatRunView {
   return {
     id: 'run-1',
+    campTurnId: 'turn-1',
     triggerConversationMessageId: 'message-1',
     status: 'succeeded',
     version: 2,
@@ -116,6 +117,7 @@ function snapshot({
       editSession: null
     },
     agentRuns: runs,
+    approvals: [],
     executionEvidence: []
   }
 }

@@ -138,6 +138,7 @@ pub struct SingleChatMessageView {
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatRunView {
     pub id: String,
+    pub camp_turn_id: String,
     pub trigger_conversation_message_id: String,
     pub status: String,
     pub version: i64,
@@ -155,6 +156,7 @@ pub struct SingleChatRunView {
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatSnapshot {
     pub conversation: SingleChatConversationView,
+    pub approvals: Vec<crate::read_model::ApprovalView>,
     pub messages: Vec<SingleChatMessageView>,
     pub draft: SingleChatComposerDraftView,
     pub pending_inputs: SingleChatPendingInputsView,
@@ -1433,7 +1435,7 @@ impl SingleChatService {
                        agent_run.created_at, agent_run.started_at, agent_run.ended_at,
                        agent_run.final_conversation_message_id,
                        (SELECT COUNT(*) FROM agent_run_execution_evidence AS evidence
-                        WHERE evidence.agent_run_id = agent_run.id)
+                        WHERE evidence.agent_run_id = agent_run.id), agent_run.camp_turn_id
                 FROM agent_run
                 WHERE agent_run.conversation_id = ?1
                   AND agent_run.invocation_kind = 'single_chat'
@@ -1444,6 +1446,7 @@ impl SingleChatService {
                 .query_map([conversation_id], |row| {
                     Ok(SingleChatRunView {
                         id: row.get(0)?,
+                        camp_turn_id: row.get(12)?,
                         trigger_conversation_message_id: row.get(1)?,
                         status: row.get(2)?,
                         version: row.get(3)?,
@@ -1468,6 +1471,13 @@ impl SingleChatService {
         }
         crate::execution_text::overlay(database, &mut execution_evidence)?;
         Ok(Some(SingleChatSnapshot {
+            approvals: crate::read_model::load_conversation_approvals(
+                database.connection(),
+                &conversation.camp_id,
+                Some(conversation_id),
+                true,
+                None,
+            )?,
             conversation,
             messages,
             draft,
@@ -2881,6 +2891,86 @@ mod tests {
                 [&run_id],
             )
             .unwrap();
+        // This existing private/public boundary owner also covers approvals and their counts.
+        database
+            .connection()
+            .execute(
+                r#"INSERT INTO action_execution (
+                id, agent_run_id, action_kind, action_schema_version, action_digest,
+                digest_algorithm, canonicalization_version, canonical_input_json,
+                input_completeness, action_summary, execution_authority, control_mode,
+                source_agent_run_execution_epoch, native_request_method,
+                native_request_id_json, native_request_digest,
+                policy_decision, policy_version, status, created_at, updated_at
+            ) VALUES ('private-action', ?1, 'test.action', '1', 'sha256:private-action',
+                'sha256', 'canonical-json-v1', '{}', 'complete', '单聊审批',
+                'runtime', 'intercepted', 1, 'runtime.permission', '{"id":"private-request"}',
+                'sha256:private-request', 'ask', '1', 'prepared', datetime('now'), datetime('now'))"#,
+                [&run_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch(
+                r#"
+            INSERT INTO approval (
+                id, action_id, action_kind, action_digest, digest_algorithm,
+                canonicalization_version, action_summary, requested_for_user_id,
+                request_policy_version, request_json, reason, status, requested_at, updated_at, native_options_json
+            ) VALUES ('private-approval', 'private-action', 'test.action', 'sha256:private-action',
+                'sha256', 'canonical-json-v1', '单聊审批', 'local_user', '1', '{}', '确认操作',
+                'pending', datetime('now'), datetime('now'),
+                '[{"optionId":"deny","kind":"deny","label":"拒绝","consequence":"拒绝","nativeResponseDigest":"digest"}]');
+        "#,
+            )
+            .unwrap();
+        let private_pending = service
+            .snapshot(&database, &conversation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(private_pending.approvals.len(), 1);
+        assert_eq!(private_pending.approvals[0].id, "private-approval");
+        let public = crate::read_model::ReadModelService
+            .camp_open_projection(&mut database, &camp_id)
+            .unwrap();
+        assert!(public.approvals.is_empty());
+        assert_eq!(public.coverage.approvals.total_count, 0);
+        let pending_changes = crate::notification::NotificationEpisodeService::default()
+            .changes_since(&mut database, "local_user", 0, 100)
+            .unwrap();
+        let private_signal = pending_changes
+            .changes
+            .iter()
+            .filter_map(|change| change.heads_up_signal.as_ref())
+            .find(|signal| signal.action.approval_id.as_deref() == Some("private-approval"))
+            .unwrap();
+        assert_eq!(
+            private_signal
+                .action
+                .single_chat
+                .as_ref()
+                .unwrap()
+                .conversation_id,
+            conversation_id
+        );
+        assert_eq!(
+            private_signal
+                .action
+                .single_chat
+                .as_ref()
+                .unwrap()
+                .agent_run_id,
+            run_id
+        );
+        database
+            .connection()
+            .execute_batch(
+                "UPDATE approval SET status = 'approved', resolved_at = datetime('now'),
+             updated_at = datetime('now'), version = version + 1 WHERE id = 'private-approval';
+             UPDATE action_execution SET status = 'succeeded', updated_at = datetime('now'), ended_at = datetime('now')
+             WHERE id = 'private-action';",
+            )
+            .unwrap();
         let completed = runtime
             .succeed_agent_run(
                 &mut database,
@@ -2904,7 +2994,12 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(completed.result.status, CommandResultStatus::Applied);
+        assert_eq!(
+            completed.result.status,
+            CommandResultStatus::Applied,
+            "{:?}",
+            completed.result
+        );
         assert!(completed.result.payload["finalCampMessageId"].is_null());
         let public_messages: i64 = database
             .connection()
@@ -2925,6 +3020,49 @@ mod tests {
             .unwrap();
         assert_eq!(private_messages, 1);
 
+        let notifications = crate::notification::NotificationEpisodeService::default();
+        let changes = notifications
+            .changes_since(&mut database, "local_user", 0, 100)
+            .unwrap();
+        let signal = changes
+            .changes
+            .iter()
+            .filter_map(|change| change.heads_up_signal.as_ref())
+            .find(|signal| {
+                signal.semantic == crate::notification::NotificationSemantic::TurnCompleted
+            })
+            .unwrap();
+        let source = signal.action.single_chat.as_ref().unwrap();
+        assert_eq!(source.conversation_id, conversation_id);
+        assert_eq!(source.agent_run_id, run_id);
+        assert_eq!(source.agent_id, "agent_1");
+        assert_eq!(
+            signal.action.kind,
+            crate::notification::NotificationActionKind::OpenSingleChat
+        );
+        assert!(signal.action.available);
+        let occurrence_id = signal.action.acknowledgement_id.clone().unwrap();
+        let through = changes.next_change_sequence;
+        let turn_id = signal.action.camp_turn_id.clone().unwrap();
+        let private_snapshot = service
+            .snapshot(&database, &conversation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(private_snapshot.agent_runs[0].camp_turn_id, turn_id);
+        // A public next turn does not satisfy a private result, even in the same Camp.
+        database.connection().execute(
+            r#"INSERT INTO camp_turn(id, camp_id, trigger_type, trigger_id, status, version, created_at, updated_at)
+               VALUES('public-next-turn', ?1, 'system_event', 'next', 'running', 1, '2099-01-01', '2099-01-01')"#, [&camp_id]).unwrap();
+        database.connection().execute(
+            r#"INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body,
+               structured_content_json, content_digest, address_mode, addressed_agent_ids_json, camp_turn_id, version, created_at, updated_at)
+               VALUES('public-next-message', ?1, 999, 'user', 'local_user', 'next',
+               '[{"kind":"text","text":"next"}]', 'next', 'default', '[]', 'public-next-turn', 1, '2099-01-01', '2099-01-01')"#, [&camp_id]).unwrap();
+        let satisfied: bool = database.connection().query_row(
+            "SELECT satisfied_at IS NOT NULL FROM notification_occurrence_disposition WHERE occurrence_id = ?1",
+            [&occurrence_id], |row| row.get(0)).unwrap();
+        assert!(!satisfied);
+
         let (cancel_conversation_id, _) = {
             service
                 .end(
@@ -2941,6 +3079,31 @@ mod tests {
                 .unwrap();
             open(&service, &mut database, &camp_id, "single-chat-open-cancel")
         };
+        let invalidated = notifications
+            .changes_since(&mut database, "local_user", through, 100)
+            .unwrap();
+        assert!(invalidated.changes.iter().any(|change| {
+            change
+                .heads_up_invalidation
+                .as_ref()
+                .is_some_and(|invalidation| {
+                    invalidation.acknowledgement_id.as_deref() == Some(&occurrence_id)
+                })
+        }));
+        assert!(
+            notifications
+                .changes_since(&mut database, "local_user", 0, 100)
+                .unwrap()
+                .changes
+                .iter()
+                .filter_map(|change| change.heads_up_signal.as_ref())
+                .all(|signal| signal
+                    .action
+                    .single_chat
+                    .as_ref()
+                    .is_none_or(|source| source.conversation_id != conversation_id))
+        );
+        assert_ne!(cancel_conversation_id, conversation_id);
         let cancelled_send = send(
             &service,
             &mut database,

@@ -1,3 +1,4 @@
+import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 import { DEFAULT_APPEARANCE } from '../../shared/appearance'
 import { AgentRunFileChangesReviewSurface } from './FileChangesPreview'
 import { CampDetailEntries } from './CampDetailPopover'
@@ -1490,13 +1491,15 @@ describe('task event projections', () => {
 
     const markup = renderToStaticMarkup(createElement(AgentRunFileChangesTimelineCard, {
       changes,
-      onOpenReview: vi.fn()
+      onOpenReview: vi.fn(),
+      onOpenCurrent: vi.fn()
     }))
 
     expect(markup).toContain('Files Changed')
     expect(markup).toContain('4 个文件 · 5 次修改')
     expect(markup).toContain('class="run-file-changes-card-view"')
     expect(markup).toContain('aria-label="查看 src/app.ts 的文件变化"')
+    expect(markup).toContain('aria-label="打开当前文件预览：src/styles.css"')
     expect(markup).toContain('src/card.tsx')
     expect(markup).not.toContain('/tmp/outside-fixture.json')
     expect(markup).toContain('再显示 1 个文件')
@@ -1522,7 +1525,8 @@ describe('task event projections', () => {
 
     const markup = renderToStaticMarkup(createElement(AgentRunFileChangesTimelineCard, {
       changes,
-      onOpenReview: vi.fn()
+      onOpenReview: vi.fn(),
+      onOpenCurrent: vi.fn()
     }))
 
     expect(markup).toContain('1 个文件 · +1 −1')
@@ -1800,6 +1804,16 @@ describe('task event projections', () => {
       campTurnId: null,
       approvalId: 'approval-1'
     }, { ...messageAction, kind: 'open_approval', messageId: null, approvalId: 'approval-1' })).toBe(true)
+    const privateAction = { ...messageAction, kind: 'open_single_chat', approvalId: null,
+      singleChat: { conversationId: 'private-original', agentId: 'agent-1', agentDisplayName: '洛克', agentRunId: 'private-run' }
+    } as NotificationActionView
+    for (const [conversationId, agentRunId, expected] of [
+      ['private-original', 'private-run', true], ['private-successor', 'private-run', false],
+      ['private-original', 'another-run', false]
+    ] as const) {
+      expect(notificationFocusMatchesAction({ requestId: 5, kind: 'single_chat', campTurnId: 'turn-1',
+        conversationId, agentRunId }, privateAction)).toBe(expected)
+    }
   })
 
   it('projects a user message into the conversation before Core acknowledgement', () => {
@@ -6961,10 +6975,9 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('role="tablist"')
-    expect(markup).toContain('class="member-portrait-button"')
-    expect(markup).toContain('aria-label="更换沐瓦的角色图片"')
-    expect(markup).toContain('title="更换角色图片"')
+    expect(markup).not.toContain('role="tablist"')
+    expect(markup).toContain('member-editor-identity-layout')
+    expect(markup).toContain('保存队员信息')
     expect(markup).toContain('class="member-runtime-entry-arrow"')
     expect(markup).toContain('class="member-detail-page"')
     expect(markup).not.toContain('Member / Long-lived identity')
@@ -6972,15 +6985,13 @@ describe('task event projections', () => {
     expect(markup).not.toContain('<h2>沐瓦</h2>')
     expect(markup).not.toContain('member-detail-avatar-button')
     expect(markup).not.toContain('memory-capability-toggle')
-    expect(markup).toContain('>身份</button>')
-    expect(markup).toContain('>运行配置</button>')
     expect(markup).not.toContain('member-list')
     expect(markup).not.toContain('@muwa')
     expect(markup).not.toContain('身份强调色')
     expect(markup).toContain('保存运行配置')
   })
 
-  it('keeps a visible draggable member header skeleton when no member is selected', () => {
+  it('keeps notices and inline creation available with an empty roster', () => {
     const markup = renderToStaticMarkup(createElement(MembersView, {
       agents: [],
       installations: [],
@@ -6996,13 +7007,10 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('member-detail-header-empty')
-    expect(markup).toContain('<h2>队员</h2>')
-    expect(markup).toContain('从左侧选择或创建队员')
-    expect(markup.indexOf('member-detail-header-empty'))
-      .toBeLessThan(markup.indexOf('test-page-notice'))
-    expect(markup.indexOf('test-page-notice'))
-      .toBeLessThan(markup.indexOf('member-empty'))
+    expect(markup).toContain('member-editor-empty')
+    expect(markup).toContain('建立第一位队员')
+    expect(markup).toContain('test-page-notice')
+    expect(markup).toContain('新增队员')
   })
   it('does not expose a standalone context destination in settings navigation', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
@@ -7101,27 +7109,17 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('>Codex CLI</option>')
-    expect(markup).toContain('>PI</option>')
-    expect(markup).toMatch(/>Antigravity<\/option><option[^>]*value="pi"[^>]*>PI<\/option>/)
-    expect(markup).toContain('>OpenCode</option>')
-    expect(markup).toContain('>GitHub Copilot</option>')
-    expect(markup).toContain('>Claude Code</option>')
-    expect(markup).toContain('>Kiro</option>')
-    expect(markup).toContain('>Qoder</option>')
-    expect(markup).toContain('>CodeBuddy</option>')
-    expect(markup).toContain('>Qwen Code</option>')
-    expect(markup).toContain('>TRAE CLI</option>')
-    expect(markup).toContain('>Antigravity</option>')
-    expect(markup).not.toContain('>Cursor Agent</option>')
-    expect(markup).not.toContain('>DeepSeek Harness</option>')
+    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'grok-build', 'antigravity-app', 'pi'])
+    expect(markup).toContain('member-runtime-picker')
+    expect(markup).toContain('aria-label="Agent 运行时，暂不配置"')
+    expect(markup).toContain('aria-haspopup="menu"')
     expect(markup).toContain('未配置 Agent 运行时')
     expect(markup).not.toContain('已找到')
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('Claude Code CLI')
     expect(markup).not.toContain('Antigravity App')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('<label class="field-label" for="member-runtime-select">运行时<select')
+    expect(markup).toContain('Agent 运行时</label>')
     expect(markup).toContain('保存运行配置')
     expect(markup).toContain('放弃更改')
     expect(markup).not.toContain('清除 Agent 运行时')
@@ -7149,10 +7147,9 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('GitHub Copilot')
-    expect(markup).toContain('运行时、模型与权限会作为一份配置共同保存')
     expect(markup).toContain('未安装')
     expect(markup).toContain('前往 Agent 运行时')
-    expect(markup).toContain('<button class="primary-button" disabled="">保存运行配置</button>')
+    expect(markup).toContain('<button class="member-editor-primary" disabled="">保存运行配置</button>')
     expect(markup).toContain('放弃更改')
     expect(markup).not.toContain('清除 Agent 运行时')
   })
@@ -7176,7 +7173,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('<button class="primary-button" disabled="">正在保存…</button>')
+    expect(markup).toContain('<button class="member-editor-primary" disabled="">正在保存…</button>')
   })
 
   it('shows a selected Runtime as checking without leaking discovery stages', () => {
@@ -7200,11 +7197,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('正在检查…')
-    expect(markup).toContain('Codex CLI')
-    expect(markup).toContain('Antigravity')
-    expect(markup).toContain('TRAE CLI')
+    expect(markup).toContain('Agent 运行时，Kiro')
     expect(markup).not.toContain('Cursor Agent')
-    expect(markup).toContain('Kimi Code')
     expect(markup).not.toContain('正在检测')
     expect(markup).not.toContain('已找到')
     expect(markup).not.toContain('尚未检查')
@@ -7226,7 +7220,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('<strong>Kiro</strong>')
+    expect(markup).toContain('Agent 运行时，Kiro')
     expect(markup).toContain('status-available')
     expect(markup).toContain('可用')
     expect(markup).toContain('kiro-cli 1.0.0')
@@ -7257,7 +7251,7 @@ describe('task event projections', () => {
     expect(markup).toContain('Windows 尚未验证')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')
     expect(markup).toContain('当前平台仅可查看这份配置')
-    expect(markup).toContain('<select id="member-runtime-select" disabled="">')
+    expect(markup).toMatch(/class="member-runtime-picker" disabled=""/)
     expect(markup).not.toContain('前往 Agent 运行时')
   })
 
@@ -7275,7 +7269,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('<option value="pi">PI</option>')
+    expect(VISIBLE_PRODUCT_RUNTIMES.at(-1)).toBe('pi')
     expect(markup).not.toContain('PI（实验性）')
     expect(markup).not.toContain('<option value="pi" disabled="">')
   })

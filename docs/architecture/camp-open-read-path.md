@@ -8,7 +8,7 @@ last_updated: 2026-09-06
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v16](../contracts/camp-open-projection-v16.md)与
+字段与窗口见 [Camp Open Projection v17](../contracts/camp-open-projection-v17.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -95,7 +95,7 @@ invalidation，因为后一个终态可能在首个 read transaction 开始后�
 Navigation 仍按真实 publication/terminal event 求活动与完成游标；进入聚合前过滤其他事件，避免对维护
 receipt 执行无效 join/group。它和 Camp Open 共用 Core 数据库锁，但不因此把 event_log 变为 Open 的
 业务依赖。可见来源 acknowledge 的去重也不使用全局 cursor 或 Snapshot watermark 作为来源变化，见
-[Notification Episode v5](../contracts/notification-episode-v5.md)。
+[Notification Episode v6](../contracts/notification-episode-v6.md)。
 
 缓存只保存最近的 Camp 投影；除完整 non-terminal Evidence 外，其他 collection 保持有界。cache hit 可立即
 恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把
@@ -142,6 +142,6 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v16](../contracts/camp-open-projection-v16.md)
+- [Camp Open Projection v17](../contracts/camp-open-projection-v17.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
 - [Desktop Navigation Refresh](desktop-navigation-refresh.md)

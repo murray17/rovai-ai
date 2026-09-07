@@ -15,6 +15,7 @@ import {
 import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { CampMemberFastToggle } from './CampMemberFastToggle'
+import { useCampMemberFast, type CampMemberFastControls } from './useCampMemberFast'
 import type {
   ActionApprovalView,
   AdapterInstallation,
@@ -34,7 +35,6 @@ import type {
   CampMessageFindSnapshot,
   CampMessageView,
   CampMemberRemovalPreview,
-  CampMemberFastView,
   CampOpenCollectionCoverage,
   CampOpenMessageCoverage,
   CampOpenProjection,
@@ -111,7 +111,12 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from './FilePreviewLayout'
 import { useOptionalFilePreview } from './FilePreviewContext'
-import { agentRunFileChangesSummaryLabel } from './file-changes-presentation'
+import {
+  agentRunFileChangeHasReviewableDiff,
+  agentRunFileChangesPreviewTarget,
+  agentRunFileChangesSummaryLabel
+} from './file-changes-presentation'
+import { openAgentRunCurrentFilePreview } from './agent-run-file-preview'
 import { FileReferenceText, type FileReferenceActivation } from './FileReferenceLink'
 import {
   captureTimelineReadingAnchor,
@@ -802,7 +807,9 @@ function scrollExecutionDrawerToLatest(body: HTMLElement): void {
 }
 export type NotificationFocusTarget = {
   requestId: number
-  kind: 'approval' | 'camp_turn' | 'camp_message'
+  conversationId?: string
+  agentRunId?: string
+  kind: 'approval' | 'camp_turn' | 'camp_message' | 'single_chat'
   campTurnId: string | null
   messageId?: string
   approvalId?: string
@@ -810,6 +817,8 @@ export type NotificationFocusTarget = {
 }
 export type VisibleNotificationSources = {
   campId: string
+  conversationId?: string | null
+  surfaceVisible?: boolean
   snapshotSequence: number
   messageIds: string[]
   campTurnIds: string[]
@@ -1431,6 +1440,8 @@ export function CampWorkspace({
   notificationFocus = null,
   onNotificationFocusPresented,
   onVisibleNotificationSources,
+  onVisibleSingleChatSources,
+  singleChatTarget,
   runtimeRecovery = null,
   firstRunCamp = null,
   onConfigureRuntime,
@@ -1481,6 +1492,8 @@ export function CampWorkspace({
   notificationFocus?: NotificationFocusTarget | null
   onNotificationFocusPresented?(requestId: number): void
   onVisibleNotificationSources?(sources: VisibleNotificationSources): void
+  onVisibleSingleChatSources?(sources: VisibleNotificationSources): void
+  singleChatTarget?: import("@contracts").NotificationSingleChatSource & { requestId: number } | null
   runtimeRecovery?: CampRuntimeRecovery | null
   firstRunCamp?: FirstRunCampContext | null
   onConfigureRuntime?(agentId: string): void
@@ -1490,6 +1503,18 @@ export function CampWorkspace({
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
   const notifyError = onNotifyError ?? onNotify
+  const openCurrentAgentRunFile = useCallback((
+    changes: AgentRunFileChangesView,
+    evidenceFileId: string
+  ): void => {
+    void openAgentRunCurrentFilePreview({
+      filePreview,
+      campId: snapshot.camp.id,
+      changes,
+      evidenceFileId,
+      onError: notifyError
+    })
+  }, [filePreview, notifyError, snapshot.camp.id])
   const [, setComposerDraftProjectionVersion] = useState(0)
   const [draftLoadState, setDraftLoadState] = useState<DraftLoadState>({ state: 'loading' })
   const [composerPersistenceError, setComposerPersistenceError] = useState<Error | null>(null)
@@ -1765,6 +1790,8 @@ export function CampWorkspace({
     () => new Map(agents.map((agent) => [agent.agentId, agent])),
     [agents]
   )
+  const memberFast = useCampMemberFast(snapshot, profileById, installations,
+    inspectorVisible && inspectorSurfaceTab === 'members' ? 'members' : executionDrawerAgentId, onNotify)
   const composerMembers = useMemo(
     () => snapshot.members.map((member) => ({
       agentId: member.agentId,
@@ -2885,12 +2912,12 @@ export function CampWorkspace({
   ])
 
   useEffect(() => {
-    if (!notificationFocus?.active || notificationFocus.kind === 'approval') return
+    if (!notificationFocus?.active || ['approval', 'single_chat'].includes(notificationFocus.kind)) return
     setConversationView('conversation')
   }, [notificationFocus])
 
   useEffect(() => {
-    if (!notificationFocus?.active) return undefined
+    if (!notificationFocus?.active || notificationFocus.kind === 'single_chat') return undefined
     let frame: number | null = null
     let preparedTarget: HTMLElement | null = null
     let focusObserved = false
@@ -3225,6 +3252,7 @@ export function CampWorkspace({
       frame = null
       const timeline = timelineScrollRef.current
       const canObserve = conversationView === 'conversation'
+        && !singleChatVisible
         && document.visibilityState === 'visible'
         && document.hasFocus()
         && timeline !== null
@@ -3235,16 +3263,16 @@ export function CampWorkspace({
       if (canObserve && timeline) {
         const viewport = timeline.getBoundingClientRect()
         for (const node of timeline.querySelectorAll<HTMLElement>('[data-message-id]')) {
-          if (!rectanglesOverlap(node.getBoundingClientRect(), viewport)) continue
+          if (!node.getClientRects().length || !rectanglesOverlap(node.getBoundingClientRect(), viewport)) continue
           const messageId = node.dataset.messageId
           const campTurnId = node.dataset.campTurnId
           if (messageId) messageIds.add(messageId)
-          if (campTurnId) campTurnIds.add(campTurnId)
+          if (campTurnId && !node.classList.contains('user')) campTurnIds.add(campTurnId)
         }
         const approvalNode = approvalDockRef.current?.querySelector<HTMLElement>(
           '[data-approval-id]'
         ) ?? null
-        if (approvalNode && rectanglesOverlap(approvalNode.getBoundingClientRect(), {
+        if (approvalNode && approvalNode.getClientRects().length > 0 && rectanglesOverlap(approvalNode.getBoundingClientRect(), {
           top: 0,
           right: window.innerWidth,
           bottom: window.innerHeight,
@@ -3256,6 +3284,7 @@ export function CampWorkspace({
       }
       const sources: VisibleNotificationSources = {
         campId: snapshot.camp.id,
+        surfaceVisible: canObserve,
         snapshotSequence: snapshot.throughGlobalSequence,
         messageIds: [...messageIds].sort(),
         campTurnIds: [...campTurnIds].sort(),
@@ -3271,6 +3300,9 @@ export function CampWorkspace({
       frame = window.requestAnimationFrame(publish)
     }
     const timeline = timelineScrollRef.current
+    const observer = new MutationObserver(schedule)
+    if (timeline) observer.observe(timeline, { subtree: true, childList: true, attributes: true })
+    if (approvalDockRef.current) observer.observe(approvalDockRef.current, { subtree: true, childList: true, attributes: true })
     schedule()
     timeline?.addEventListener('scroll', schedule, { passive: true })
     window.addEventListener('resize', schedule)
@@ -3278,6 +3310,7 @@ export function CampWorkspace({
     document.addEventListener('visibilitychange', schedule)
     return () => {
       if (frame !== null) window.cancelAnimationFrame(frame)
+      observer.disconnect()
       timeline?.removeEventListener('scroll', schedule)
       window.removeEventListener('resize', schedule)
       window.removeEventListener('focus', schedule)
@@ -3285,6 +3318,7 @@ export function CampWorkspace({
     }
   }, [
     conversationView,
+    singleChatVisible,
     onVisibleNotificationSources,
     snapshot.approvals,
     snapshot.camp.id,
@@ -3810,6 +3844,7 @@ export function CampWorkspace({
       key={executionDrawerProcess.agentId}
       placement={executionPlacement}
       process={executionDrawerProcess}
+      memberFast={memberFast}
       member={memberById.get(executionDrawerProcess.agentId) ?? null}
       profile={executionDrawerProfile}
       installation={executionDrawerInstallation}
@@ -4137,7 +4172,7 @@ export function CampWorkspace({
                           <AgentRunFileChangesTimelineCard key={`${changes.agentRunId}:${changes.executionEpoch}`}
                             changes={changes} onOpenReview={(selectedEvidenceFileId) => {
                               return filePreview?.openFileChanges(snapshot.camp.id, changes, selectedEvidenceFileId)
-                            }} />
+                            }} onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(changes, evidenceFileId)} />
                         ))}
                       </section>
                     )
@@ -4163,6 +4198,7 @@ export function CampWorkspace({
                         onOpenReview={(selectedEvidenceFileId) => {
                           return filePreview?.openFileChanges(snapshot.camp.id, timelineItem.changes, selectedEvidenceFileId)
                         }}
+                        onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(timelineItem.changes, evidenceFileId)}
                       />
                     )
                     continue
@@ -4450,6 +4486,10 @@ export function CampWorkspace({
                                 selectedEvidenceFileId
                               )
                             }}
+                            onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(
+                              fileChangeItem.changes,
+                              evidenceFileId
+                            )}
                           />
                         ))}
                         <MessageActions
@@ -4561,7 +4601,7 @@ export function CampWorkspace({
             </section>
             <section className="camp-detail-content tab-scroll camp-members-panel" hidden={inspectorSurfaceTab !== 'members'}>
               <CampMembersPanel key={snapshot.camp.id}
-                visible={inspectorVisible && inspectorSurfaceTab === 'members'}
+                memberFast={memberFast}
                 snapshot={snapshot}
                 profileById={profileById}
                 installations={installations}
@@ -4576,6 +4616,13 @@ export function CampWorkspace({
             </CampDetailPopover>}
             {snapshot.camp.activationState === 'active' && (
               <SingleChatPanel
+                target={singleChatTarget}
+                notificationFocus={notificationFocus?.kind === 'single_chat' ? notificationFocus : null}
+                onNotificationFocusPresented={onNotificationFocusPresented}
+                onVisibleNotificationSources={onVisibleSingleChatSources}
+                profileById={profileById}
+                busy={busy}
+                onResolveApproval={onResolveApproval}
                 campId={snapshot.camp.id}
                 members={snapshot.members}
                 entryHost={detailEntryHost}
@@ -5248,6 +5295,7 @@ function ExecutionPlacementIcon({ target }: { target: ExecutionConsolePlacement 
 }
 
 function ExecutionDrawer({
+  memberFast,
   placement,
   process,
   member,
@@ -5272,6 +5320,7 @@ function ExecutionDrawer({
   memberById,
   onFileOpenError
 }: {
+  memberFast: CampMemberFastControls
   placement: ExecutionConsolePlacement
   process: AgentExecutionProcess
   member: CampSnapshot['members'][number] | null
@@ -5296,6 +5345,7 @@ function ExecutionDrawer({
   memberById: Map<string, CampSnapshot['members'][number]>
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const fastControl = memberFast.get(process.agentId)
   const drawerRef = useRef<HTMLElement>(null)
   const drawerBodyRef = useRef<HTMLDivElement>(null)
   const resizeGestureRef = useRef<{
@@ -5641,6 +5691,10 @@ function ExecutionDrawer({
             </div>
           </div>
           <div className="execution-drawer-actions">
+            {fastControl && <span className="execution-drawer-fast-slot">
+              {fastControl.value && <CampMemberFastToggle value={fastControl.value} displayName={displayName}
+                pending={fastControl.pending} onToggle={next => { void memberFast.save(process.agentId, next) }} />}
+            </span>}
             {stopViewState === 'stopped' ? (
               <span className="execution-run-stop-state tone-neutral" role="status">已停止</span>
             ) : stopViewState === 'stopping' ? (
@@ -6249,7 +6303,7 @@ export function RuntimeRecoveryDock({
 }
 
 function CampMembersPanel({
-  visible,
+  memberFast,
   snapshot,
   profileById,
   installations,
@@ -6260,7 +6314,7 @@ function CampMembersPanel({
   onRemoveMember,
   onNotify
 }: {
-  visible: boolean
+  memberFast: CampMemberFastControls
   snapshot: CampSnapshot
   profileById: Map<string, AgentProfile>
   installations: AdapterInstallation[]
@@ -6271,106 +6325,7 @@ function CampMembersPanel({
   onRemoveMember?(preview: CampMemberRemovalPreview): Promise<CampMemberRemoveOutcome>
   onNotify(message: string): void
 }): JSX.Element {
-  const [fastOverrides, setFastOverrides] = useState<Record<string, CampMemberFastView | null>>({})
-  const [fastPending, setFastPending] = useState<string | null>(null)
-  const fastPendingRef = useRef(false)
-  const fastChecks = useRef(new Map<string, {
-    scope: string
-    projection: CampMemberFastView | undefined
-    value: CampMemberFastView | null | undefined
-    failed: boolean
-  }>())
-  const fastCheckRequests = useRef(new Set<string>())
-  const fastChecksVisible = useRef(false)
-  const fastMounted = useRef(true)
-  const fastBindingGeneration = useRef(0)
   const members = campInspectorMembers(snapshot.members)
-  const fastCheckScopes = new Map(members.map(member => {
-    const profile = profileById.get(member.agentId)
-    const runtime = profile?.runtimeConfiguration
-    const installation = runtime ? runtimeEditorInstallation(installations, runtime.adapterKind) : null
-    return [member.agentId, JSON.stringify([
-      snapshot.camp.id, snapshot.camp.projectPath, member.membershipStatus, member.profilePresence,
-      member.fast?.runtimeBindingRevision, profile?.version, runtime?.adapterKind, runtime?.model,
-      installation?.id, installation?.authScope, installation?.executablePath, installation?.enabled,
-      installation?.generation, installation?.snapshot?.executableFingerprint,
-      installation?.snapshot?.authenticationStatus, installation?.snapshot?.probeStatus,
-      installation?.snapshot?.lastSuccessfulProbeAt, installation?.snapshot?.staleAt
-    ])]
-  }))
-  const fastBindingScope = JSON.stringify([...fastCheckScopes])
-  useEffect(() => {
-    fastMounted.current = true
-    return () => { fastMounted.current = false }
-  }, [])
-  useEffect(() => { setFastOverrides({}) }, [snapshot])
-  useLayoutEffect(() => { fastBindingGeneration.current += 1; setFastOverrides({}) }, [fastBindingScope])
-  // Keep per-member metadata results while the popover is closed or another tab is selected.
-  // Reconcile on render so a superseded request can finish before its replacement is queued.
-  useEffect(() => {
-    const opened = visible && !fastChecksVisible.current
-    fastChecksVisible.current = visible
-    for (const agentId of fastChecks.current.keys()) {
-      if (!fastCheckScopes.has(agentId)) fastChecks.current.delete(agentId)
-    }
-    for (const member of members) {
-      const agentId = member.agentId
-      const adapter = profileById.get(agentId)?.runtimeConfiguration?.adapterKind
-      if (adapter !== 'claude-code-cli' && adapter !== 'codex-cli') {
-        fastChecks.current.delete(agentId)
-        continue
-      }
-      const scope = fastCheckScopes.get(agentId)!
-      let check = fastChecks.current.get(agentId)
-      if (!check || check.scope !== scope) {
-        // Profile/installation refresh can precede the Camp projection after rebinding.
-        const value = check && check.projection === member.fast ? undefined : member.fast
-        check = { scope, projection: member.fast, value, failed: false }
-        fastChecks.current.set(agentId, check)
-      } else if (check.projection !== member.fast) {
-        check.projection = member.fast
-        check.value = member.fast
-        check.failed = false
-      }
-      if (opened && check.failed) {
-        check.value = undefined
-        check.failed = false
-      }
-      if (!visible || check.value !== undefined || fastCheckRequests.current.has(agentId)) continue
-      const target = check
-      fastCheckRequests.current.add(agentId)
-      void window.rovai.request<CampMemberFastView | null>('camps.members.fast.check', {
-        campId: snapshot.camp.id, agentId
-      }).then(value => {
-        if (fastChecks.current.get(agentId) === target) target.value = value
-      }).catch(() => {
-        if (fastChecks.current.get(agentId) !== target) return
-        target.value = null
-        target.failed = true
-      }).finally(() => {
-        fastCheckRequests.current.delete(agentId)
-        if (fastMounted.current) setFastOverrides(current => ({ ...current }))
-      })
-    }
-  })
-  const saveFast = async (agentId: string, value: CampMemberFastView, fastOverride: boolean): Promise<void> => {
-    if (fastPendingRef.current) return
-    fastPendingRef.current = true
-    const generation = fastBindingGeneration.current
-    setFastPending(agentId)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('camps.members.fast.set', {
-        commandId: crypto.randomUUID(),
-        command: { campId: snapshot.camp.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
-      })
-      if (result.status === 'rejected') throw new Error('队员配置已变化，请稍后重试。')
-      if (generation !== fastBindingGeneration.current) return
-      const updated = result.payload as { fast?: CampMemberFastView | null }
-      setFastOverrides(current => ({ ...current, [agentId]: updated.fast ?? null }))
-    } catch (error) {
-      onNotify(readErrorMessage(error, '响应模式未保存，请重试。'))
-    } finally { fastPendingRef.current = false; setFastPending(null) }
-  }
   const presentCount = members.filter(campMemberIsLeadEligible).length
   const awayCount = members.length - presentCount
   const activeAgentIds = useMemo(
@@ -6591,16 +6546,8 @@ function CampMembersPanel({
       <div className="camp-inspector-member-list" role="list" aria-label="会话队员列表">
         {members.map((member) => {
           const profile = profileById.get(member.agentId) ?? null
-          const supportsFastCheck = profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli'
-            || profile?.runtimeConfiguration?.adapterKind === 'codex-cli'
-          const checkedFast = fastChecks.current.get(member.agentId)
-          const fastValue = !checkedFast || checkedFast.projection !== member.fast
-            ? member.fast
-            : checkedFast.scope === fastCheckScopes.get(member.agentId) ? checkedFast.value : undefined
-          const fast = supportsFastCheck
-            ? Object.hasOwn(fastOverrides, member.agentId) ? fastOverrides[member.agentId]
-              : fastValue
-            : undefined
+          const fastControl = memberFast.get(member.agentId)
+          const fast = fastControl?.value
           const present = campMemberIsLeadEligible(member)
           const presenceLabel = member.leaveRequestedAt
             ? '正在暂离'
@@ -6633,8 +6580,8 @@ function CampMembersPanel({
                 </span>
                 <small title={member.teamRole || undefined}>{runtimeLabel}</small>
               </span>
-              {fast && <CampMemberFastToggle value={fast} displayName={member.displayName} pending={fastPending !== null}
-                onToggle={next => { void saveFast(member.agentId, fast, next) }} />}
+              {fast && <CampMemberFastToggle value={fast} displayName={member.displayName} pending={fastControl!.pending}
+                onToggle={next => { void memberFast.save(member.agentId, next) }} />}
               <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
                 <strong>{presenceLabel}</strong>
                 {runtimeTone === 'attention' && profile && <small className="runtime-attention">{runtimeReadinessLabel(profile.runtimeReadiness.status)}</small>}
@@ -7251,15 +7198,19 @@ function FirstRunCampWelcome({
 
 export function AgentRunFileChangesTimelineCard({
   changes,
-  onOpenReview
+  onOpenReview,
+  onOpenCurrent
 }: {
   changes: AgentRunFileChangesView
   onOpenReview(selectedEvidenceFileId: string | undefined, trigger: HTMLButtonElement): string | void
+  onOpenCurrent(evidenceFileId: string, trigger: HTMLButtonElement): void
 }): JSX.Element {
   const find = useOptionalFileFind()
   const [showAllFiles, setShowAllFiles] = useState(false)
   const visibleFiles = showAllFiles ? changes.files : changes.files.slice(0, 3)
   const additionalFileCount = Math.max(0, changes.files.length - 3)
+  const defaultPreviewTarget = agentRunFileChangesPreviewTarget(changes)
+  const hasReviewableDiff = defaultPreviewTarget?.kind === 'review'
   useEffect(() => {
     setShowAllFiles(false)
   }, [changes.agentRunId, changes.executionEpoch])
@@ -7269,8 +7220,20 @@ export function AgentRunFileChangesTimelineCard({
         <button
           className="run-file-changes-card-header"
           type="button"
-          aria-label={`查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
-          onClick={(event) => onOpenReview(undefined, event.currentTarget)}
+          disabled={!defaultPreviewTarget}
+          aria-label={hasReviewableDiff
+            ? `查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`
+            : defaultPreviewTarget
+              ? `打开当前文件 ${defaultPreviewTarget.file.path}，${agentRunFileChangesSummaryLabel(changes)}`
+              : `Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
+          onClick={(event) => {
+            if (!defaultPreviewTarget) return
+            if (defaultPreviewTarget.kind === 'review') {
+              onOpenReview(undefined, event.currentTarget)
+            } else {
+              onOpenCurrent(defaultPreviewTarget.file.evidenceFileId, event.currentTarget)
+            }
+          }}
         >
           <span className="run-file-changes-card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -7282,10 +7245,12 @@ export function AgentRunFileChangesTimelineCard({
             <strong>Files Changed</strong>
             <span>{agentRunFileChangesSummaryLabel(changes)}</span>
           </span>
-          <span className="run-file-changes-card-view" aria-hidden="true">查看变化</span>
+          <span className="run-file-changes-card-view" aria-hidden="true">
+            {hasReviewableDiff ? '查看变化' : '查看文件'}
+          </span>
         </button>
         {find && <button type="button" className="file-find-icon" aria-label="查找这次文件变化" title="查找这次文件变化"
-          disabled={!changes.files.some(file => file.presentationKind !== 'operation_only')}
+          disabled={!hasReviewableDiff}
           onClick={event => { const id = onOpenReview(undefined, event.currentTarget); if (id) find.request(id, true) }}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg>
         </button>}
@@ -7296,8 +7261,16 @@ export function AgentRunFileChangesTimelineCard({
             key={file.evidenceFileId}
             className="run-file-change-file"
             type="button"
-            aria-label={`查看 ${file.path} 的文件变化`}
-            onClick={(event) => onOpenReview(file.evidenceFileId, event.currentTarget)}
+            aria-label={agentRunFileChangeHasReviewableDiff(file)
+              ? `查看 ${file.path} 的文件变化`
+              : `打开当前文件预览：${file.path}`}
+            onClick={(event) => {
+              if (agentRunFileChangeHasReviewableDiff(file)) {
+                onOpenReview(file.evidenceFileId, event.currentTarget)
+              } else {
+                onOpenCurrent(file.evidenceFileId, event.currentTarget)
+              }
+            }}
           >
             <code title={file.path}>{file.path}</code>
             <span className="run-file-change-stats" aria-hidden="true">
