@@ -33,7 +33,7 @@ import {
 } from './attachment-drop'
 import { MemberAvatar } from './MemberAvatar'
 import { CompactionEventRow, RuntimeRetryNotice, ToolActivityGroup, isPresentableExecutionEvidence } from './ExecutionToolGroup'
-import { executionRunSummary } from './execution-run-summary'
+import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { SafeMarkdown } from './SafeMarkdown'
 import { shouldSubmitStructuredComposerOnEnter } from './StructuredMentionComposer'
@@ -344,6 +344,10 @@ export function SingleChatRunHistory({
   )
   const hasActiveCompaction = executionHasActiveCompaction(processItems)
   const retry = !terminal ? processItems.findLast((item) => item.kind === 'diagnostic') : null
+  const feedback = run.status === 'waiting' ? '等待继续'
+    : retry?.kind === 'diagnostic'
+      ? `等待 Claude Code 自动重试（${retry.diagnostic.attempt}/${retry.diagnostic.maxAttempts}）`
+      : executionInitialFeedback(run.status, processItems, finalMessage !== null)
 
   const renderItem = (item: GroupedExecutionProgressItem): React.JSX.Element | null => {
     if (item.kind === 'toolGroup' || item.kind === 'tool') {
@@ -403,13 +407,10 @@ export function SingleChatRunHistory({
           </summary>
           <div className="single-chat-execution-content process-content">
             {grouped.map(renderItem)}
-            {!terminal && !stopping && !hasActiveTool && !hasActiveCompaction && liveTailKey === null && (
+            {!terminal && !stopping && !hasActiveTool && !hasActiveCompaction && liveTailKey === null && feedback && (
               <div className="process-action current" role="status">
                 <span className="process-spinner" aria-hidden="true" />
-                <span>{run.status === 'waiting' ? '等待继续'
-                  : retry?.kind === 'diagnostic'
-                    ? `等待 Claude Code 自动重试（${retry.diagnostic.attempt}/${retry.diagnostic.maxAttempts}）`
-                    : 'Thinking'}</span>
+                <span>{feedback}</span>
               </div>
             )}
             {stopping && <div className="process-action cancelling" role="status">正在提交停止请求，完成后即可继续发送。</div>}
@@ -1587,7 +1588,7 @@ export function SingleChatPanel({
           {!sending && currentSnapshot && currentSnapshot.messages.length === 0 && <div className="single-chat-empty"><strong>和 {selectedMember?.displayName} 单独聊聊</strong><span>发送第一条消息开始这段对话。</span></div>}
           {currentSnapshot && <SingleChatTranscript snapshot={currentSnapshot} now={now} cancelling={cancelling} onNotify={onNotify} />}
           {sending && !activeRun && <div className="process-action current single-chat-send-feedback" role="status">
-            <span className="process-spinner" aria-hidden="true" /><span>Thinking</span>
+            <span className="process-spinner" aria-hidden="true" /><span>连接中</span>
           </div>}
           <div ref={viewportEndRef} aria-hidden="true" />
         </div>
