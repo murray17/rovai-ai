@@ -1,7 +1,8 @@
-import type { CoreEvent, DesktopStartupSnapshot, HealthStatus, OnboardingSnapshot, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
+import type { CampCreationPreflight, CoreEvent, DesktopStartupSnapshot, HealthStatus, OnboardingSnapshot, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { App } from '../../../apps/desktop/src/renderer/src/App'
+import { NewConversationDialog } from '../../../apps/desktop/src/renderer/src/NewConversationDialog'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
@@ -340,6 +341,78 @@ Object.assign(window, { startupTest: {
     check(document.body.textContent?.includes('正在安全退出'),
       'The retained authority surface must use the safe-exit copy')
     cases.push('planned shutdown retains the authoritative surface and safe-exit modal')
+
+    let dialogOpen = true
+    let dialogBusy = false
+    const creation = deferred<void>()
+    const submissions: { draft: unknown; enableOneClick: boolean }[] = []
+    let preflight: CampCreationPreflight = {
+      admissible: true, blockers: [], initialLeadAgentId: 'agent-a',
+      presentMembers: ['agent-a', 'agent-b', 'agent-c', 'agent-d'].map((agentId, index) => ({
+        agentId, displayName: agentId, memberOrder: index, runtimeConfigured: false,
+        runtimeReadiness: 'runtime_not_configured'
+      }))
+    }
+    const renderDraft = () => flushSync(() => root!.render(<NewConversationDialog
+      open={dialogOpen} initialWorkspace={null} projects={[]} preflight={preflight} agents={[]}
+      busy={dialogBusy} projectAccessReady returnFocusElement={null}
+      onOpenChange={open => { dialogOpen = open; renderDraft() }}
+      onChooseWorkspaceDirectory={async () => null} onWorkspaceSelected={async () => undefined}
+      onCreate={(draft, enableOneClick) => { submissions.push({ draft, enableOneClick }); return creation.promise }}
+    />))
+    renderDraft()
+    await flush()
+    document.querySelector<HTMLButtonElement>('[aria-labelledby~="new-camp-members-label"]')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+    )
+    await advance(0)
+    await flush()
+    document.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!.click()
+    await flush()
+    document.querySelector<HTMLElement>('.new-camp-member-grid')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    )
+    await advance(0)
+    document.querySelector<HTMLInputElement>('.new-camp-quick-label input')!.click()
+    await flush()
+    preflight = structuredClone(preflight)
+    preflight.presentMembers[0].runtimeReadiness = 'ready'
+    renderDraft()
+    await flush()
+    check(document.querySelector<HTMLInputElement>('.new-camp-quick-label input')!.checked,
+      'Background candidate refresh must preserve the one-click checkbox')
+    check(document.getElementById('new-camp-members-value')!.textContent === '3 位队员',
+      'Background candidate refresh must preserve the selected team')
+    check(document.getElementById('new-camp-lead-value')!.textContent === 'agent-b',
+      'Background candidate refresh must preserve the selected Lead')
+    const form = document.querySelector<HTMLFormElement>('.new-camp-dialog form')!
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flush()
+    check(submissions.length === 1 && submissions[0].enableOneClick, 'Repeated submit must create only once with the requested quick setting')
+    dialogBusy = true
+    renderDraft()
+    await flush()
+    check(document.querySelector<HTMLInputElement>('.new-camp-quick-label input')!.disabled, 'Submitting locks the quick setting')
+    creation.reject(new Error('Creation rejected by Core'))
+    await flush()
+    dialogBusy = false
+    renderDraft()
+    await flush()
+    check(document.body.textContent?.includes('Creation rejected by Core'), 'Creation failure is recoverable inside the dialog')
+    check(document.querySelector<HTMLInputElement>('.new-camp-quick-label input')!.checked
+      && document.getElementById('new-camp-members-value')!.textContent === '3 位队员',
+      'Creation failure retains the selected team and checkbox')
+    dialogOpen = false
+    renderDraft()
+    await flush()
+    dialogOpen = true
+    renderDraft()
+    await flush()
+    check(!document.querySelector<HTMLInputElement>('.new-camp-quick-label input')!.checked,
+      'Reopening must reset the opt-in checkbox')
+    check(document.getElementById('new-camp-members-value')!.textContent === '4 位队员', 'Reopening starts a fresh draft')
+    cases.push('New Conversation preserves edited drafts across candidate refresh and creation failure')
     return { ok: true, cases }
   },
   async capture(theme: string, state = 'loading') {

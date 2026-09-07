@@ -2809,7 +2809,8 @@ export interface GeneralPreferencesApi {
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot>
   setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot>
   setExecutionConsolePlacement(placement: ExecutionConsolePlacement): Promise<GeneralPreferencesSnapshot>
-  setNewConversationDefaults(defaults: NewConversationDefaults): Promise<GeneralPreferencesSnapshot>
+  /** Saves the team atomically with enabling one-click when requested; otherwise preserves its current flag. */
+  setNewConversationDefaults(defaults: NewConversationDefaults, enableOneClick?: boolean): Promise<GeneralPreferencesSnapshot>
   setOneClickNewConversationEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot>
   setWorldMapEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot>
   invalidateNewConversationDefaults(): Promise<GeneralPreferencesSnapshot>

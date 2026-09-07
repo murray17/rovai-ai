@@ -1,5 +1,5 @@
 ---
-version: 5
+version: 6
 slug: "new-conversation-dialog"
 primary_target: "apps/desktop/src/renderer/src/NewConversationDialog.tsx"
 related_targets:
@@ -20,7 +20,7 @@ Open the same Radix Dialog from every entry point. Width is
 Header and footer remain fixed while the body scrolls. Use the raised theme surface, a 1px neutral
 boundary and no colored top stripe. Semantic errors keep their own color.
 
-Header: title “创建新对话” and an accessibly named close button. Keep the description available to
+Header: title “新对话” and an accessibly named close button. Keep the description available to
 assistive technology without repeating it visually. Use the paired dialog label and field tokens,
 regular-weight labels and 44px picker rows.
 
@@ -42,9 +42,15 @@ arrow-key navigation, `Esc` dismissal and focus return.
    selector. Unavailable saved members are filtered while initializing the draft without adding a
    separate “默认配置已失效” warning block. The Lead trigger shows the current portrait and name, with unavailable status only when needed; menu candidates come only from the currently selected teammates and each shows a
    portrait. A concise runtime-readiness note may appear below the member row; it does not block structural creation.
+   Keep the existing teammate dropdown entry. Its menu uses two columns (four teammates occupy two rows),
+   with portraits, role labels and checkboxes. Arrow keys follow the visual columns; Escape returns focus
+   to the trigger. The heading and selection error span both columns, and larger rosters scroll.
 3. **添加对话名称 / 对话名称** — collapsed by default. Expansion focuses the input. Normalize and count
    Unicode scalars up to 80; align the expanded name editor with the form without a child rail and keep the exact
    placeholder `输入名称...`. Empty means “未命名对话” and is not delegated to a Runtime/LLM.
+4. **以后使用此队伍一键新建** — unchecked on every opening. Explain that it saves the selected teammates
+   and Lead, and that users can disable one-click in Settings → General. Checking shows “本次新建成功后生效”.
+   Do not save the workspace or optional name as defaults.
 
 Footer contains “取消 / 新建”. Do not repeat directory, teammate count or Lead in a summary.
 
@@ -53,6 +59,11 @@ Footer contains “取消 / 新建”. Do not repeat directory, teammate count o
 Submitting locks controls that could mutate the Draft and prevents duplicate create. Close only after
 Core atomically accepts the Active Camp, then refresh Navigation, enter it and focus Composer. A Camp
 with no messages, AgentRun or prebuilt Conversation is valid.
+
+If one-click was requested, persist the team and enable flag in one Main-owned preference write only
+after Core accepts creation. Cancel or creation failure must not change preferences. A preference-write
+failure still opens the accepted Camp and reports that defaults were not saved; it must not invite a
+second creation. Ordinary saves in General settings preserve the existing one-click flag.
 
 Failure preserves directory, teammate selection, Lead, name, scroll and focus. Candidate refresh must
 not silently drop a teammate, replace Lead or fall back to Quick Chat. Esc/close/cancel in non-submitting

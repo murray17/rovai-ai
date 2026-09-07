@@ -164,8 +164,8 @@ const api: RovaiApi = {
     setExecutionConsolePlacement(placement: ExecutionConsolePlacement) {
       return ipcRenderer.invoke('rovai:general-preferences-set-execution-placement', placement)
     },
-    setNewConversationDefaults(defaults) {
-      return ipcRenderer.invoke('rovai:general-preferences-set-new-conversation-defaults', defaults)
+    setNewConversationDefaults(defaults, enableOneClick = false) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-new-conversation-defaults', defaults, enableOneClick)
     },
     setOneClickNewConversationEnabled(enabled: boolean) {
       return ipcRenderer.invoke('rovai:general-preferences-set-one-click-new-conversation', enabled)

@@ -227,15 +227,20 @@ export class GeneralPreferencesStore {
     })
   }
 
-  setNewConversationDefaults(defaults: NewConversationDefaults): Promise<GeneralPreferencesSnapshot> {
+  setNewConversationDefaults(defaults: NewConversationDefaults, enableOneClick = false): Promise<GeneralPreferencesSnapshot> {
     if (!isNewConversationDefaults(defaults)) {
       return Promise.reject(new Error('Default new conversation members and Lead are invalid'))
     }
+    if (typeof enableOneClick !== 'boolean') {
+      return Promise.reject(new Error('Invalid one-click new conversation preference'))
+    }
+    const savedDefaults = structuredClone(defaults)
     return this.#enqueue(async () => {
       const next = {
         ...this.#snapshot,
-        newConversationDefaults: structuredClone(defaults),
-        newConversationDefaultsRequireConfirmation: false
+        newConversationDefaults: savedDefaults,
+        newConversationDefaultsRequireConfirmation: false,
+        oneClickNewConversationEnabled: enableOneClick || this.#snapshot.oneClickNewConversationEnabled
       }
       await writePrivateJson(this.#filePath, next)
       this.#snapshot = next

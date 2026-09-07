@@ -1,5 +1,5 @@
 import { readErrorMessage } from './error-message'
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
@@ -48,7 +48,7 @@ export function NewConversationDialog({
   onOpenChange(open: boolean): void
   onChooseWorkspaceDirectory(): Promise<WorkspaceSelection | null>
   onWorkspaceSelected(workspace: WorkspaceSelection): Promise<void>
-  onCreate(draft: CreateCampDraft): Promise<void>
+  onCreate(draft: CreateCampDraft, enableOneClick: boolean): Promise<void>
 }): React.JSX.Element {
   const [workspace, setWorkspace] = useState<WorkspaceChoice | null>(initialWorkspace)
   const [gitInspectionStatus, setGitInspectionStatus] = useState<GitInspectionStatus>('idle')
@@ -58,11 +58,14 @@ export function NewConversationDialog({
   const [leadId, setLeadId] = useState('')
   const [optionalOpen, setOptionalOpen] = useState(false)
   const [name, setName] = useState('')
+  const [enableOneClick, setEnableOneClick] = useState(false)
   const [memberError, setMemberError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const projectTriggerRef = useRef<HTMLButtonElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const submittingRef = useRef(false)
+  const draftInitializedRef = useRef(false)
   const profileById = useMemo(
     () => new Map(agents.map((agent) => [agent.agentId, agent])),
     [agents]
@@ -84,7 +87,12 @@ export function NewConversationDialog({
   const projectSubmissionBlocked = workspaceSubmissionBlocked(workspace, projectAccessReady)
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      draftInitializedRef.current = false
+      return
+    }
+    if (draftInitializedRef.current) return
+    draftInitializedRef.current = true
     const { memberIds, leadId: recommendedLead } = initialSelectionPlan
     setWorkspace(initialWorkspace)
     setGitInspectionStatus(hasGitObservation(initialWorkspace) ? 'ready' : 'idle')
@@ -94,6 +102,7 @@ export function NewConversationDialog({
     setLeadId(recommendedLead)
     setOptionalOpen(false)
     setName('')
+    setEnableOneClick(false)
     setMemberError(null)
     setSubmitError(null)
   }, [initialSelectionPlan, initialWorkspace, open])
@@ -169,12 +178,13 @@ export function NewConversationDialog({
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (
-      busy
+      busy || submittingRef.current
       || projectSubmissionBlocked
       || selectedMemberIds.length === 0
       || !leadId
       || nameError
     ) return
+    submittingRef.current = true
     setSubmitError(null)
     try {
       await onCreate({
@@ -183,9 +193,11 @@ export function NewConversationDialog({
         memberAgentIds: selectedMemberIds,
         defaultLeadAgentId: leadId,
         collaborationMode: 'peer'
-      })
+      }, enableOneClick)
     } catch (error) {
       setSubmitError(errorMessage(error))
+    } finally {
+      submittingRef.current = false
     }
   }
 
@@ -213,8 +225,8 @@ export function NewConversationDialog({
           onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }}
         >
           <header className="compact-header">
-            <Dialog.Title>创建新对话</Dialog.Title>
-            <Dialog.Close asChild><button ref={closeButtonRef} className="compact-close" type="button" aria-label="关闭创建新对话" disabled={busy}><DialogControlIcon name="close" /></button></Dialog.Close>
+            <Dialog.Title>新对话</Dialog.Title>
+            <Dialog.Close asChild><button ref={closeButtonRef} className="compact-close" type="button" aria-label="关闭新对话" disabled={busy}><DialogControlIcon name="close" /></button></Dialog.Close>
           </header>
           <Dialog.Description id="new-camp-dialog-description" className="sr-only">选择工作目录、队员与负责人。对话名称可选。</Dialog.Description>
           <form className="compact-form" onSubmit={(event) => void submit(event)}>
@@ -257,7 +269,7 @@ export function NewConversationDialog({
                     </button>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
-                    <DropdownMenu.Content className="compact-menu roster-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择队员" loop>
+                    <DropdownMenu.Content className="compact-menu roster-menu new-camp-member-grid" align="end" sideOffset={6} collisionPadding={12} aria-label="选择队员" onKeyDownCapture={navigateMemberGrid} loop>
                       <div className="compact-menu-heading"><span>参与本次对话</span><button type="button" disabled={busy || selectedMembers.length === preflight.presentMembers.length} onClick={() => { setSelectedMemberIds(preflight.presentMembers.map((member) => member.agentId)); setMemberError(null) }}>全选</button></div>
                       {preflight.presentMembers.map((member) => {
                         const profile = profileById.get(member.agentId)
@@ -309,6 +321,14 @@ export function NewConversationDialog({
                   {nameError && <small className="compact-field-error" role="alert">{nameError}</small>}
                 </div>}
               </div>
+              <div className="new-camp-quick-setting">
+                <label className="new-camp-quick-label">
+                  <input type="checkbox" checked={enableOneClick} disabled={busy} aria-describedby="new-camp-quick-hint" onChange={(event) => setEnableOneClick(event.target.checked)} />
+                  <span>以后使用此队伍一键新建</span>
+                </label>
+                <p id="new-camp-quick-hint">保存所选队员和负责人，下次点击「新对话」直接创建。<br />可在「设置 → 通用」关闭。</p>
+                {enableOneClick && <p className="new-camp-quick-effective" role="status">本次新建成功后生效</p>}
+              </div>
               {submitError && <p className="compact-inline-error" role="alert">{submitError}</p>}
             </div>
             <footer className="compact-footer">
@@ -320,6 +340,29 @@ export function NewConversationDialog({
       </Dialog.Portal>
     </Dialog.Root>
   )
+}
+
+function navigateMemberGrid(event: KeyboardEvent<HTMLDivElement>): void {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]:not([data-disabled])'))
+  const index = items.indexOf(document.activeElement as HTMLElement)
+  if (index < 0) return
+  const columns = 2
+  let next: number
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    const step = event.key === 'ArrowRight' ? 1 : -1
+    next = (index + step + items.length) % items.length
+  } else {
+    const column = index % columns
+    const columnItems = items.filter((_, itemIndex) => itemIndex % columns === column)
+    const row = Math.floor(index / columns)
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    next = items.indexOf(columnItems[(row + step + columnItems.length) % columnItems.length])
+  }
+  // Capture before Radix schedules its single-column roving focus.
+  event.preventDefault()
+  event.stopPropagation()
+  items[next]?.focus()
 }
 
 export function projectWorkspaceActionsDisabled(

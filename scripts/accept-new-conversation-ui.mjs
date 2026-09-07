@@ -6,6 +6,8 @@ const height = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
 const scale = Number(process.env.ROVAI_CAPTURE_SCALE ?? 1)
 const theme = process.env.ROVAI_CAPTURE_THEME ?? 'day'
 const createCamp = process.env.ROVAI_ACCEPT_CREATE === '1'
+const enableOneClick = process.env.ROVAI_ACCEPT_ONE_CLICK === '1'
+const expectPreferenceFailure = process.env.ROVAI_ACCEPT_PREFERENCE_FAILURE === '1'
 const reducedMotion = process.env.ROVAI_REDUCED_MOTION === '1'
 const output = process.argv[2] ?? '/tmp/rovai-new-conversation.png'
 
@@ -15,6 +17,8 @@ if (!Number.isFinite(scale) || scale < 1) throw new Error(`Unsupported scale: ${
 const target = await waitForTarget(port)
 const cdp = await connectCdp(target.webSocketDebuggerUrl)
 try {
+  const originalPreferences = await evaluate(cdp, 'window.rovai.generalPreferences.get()')
+  if (originalPreferences.oneClickNewConversationEnabled) throw new Error('Acceptance requires an isolated profile with one-click disabled')
   await cdp.send('Page.bringToFront')
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: Math.floor(width / scale),
@@ -51,7 +55,7 @@ try {
   await waitForExpression(
     cdp,
     `Boolean([...document.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === '新对话' && !button.disabled))`,
-    20_000
+    45_000
   )
   await cdp.send('Runtime.evaluate', {
     expression: `(() => {
@@ -70,7 +74,7 @@ try {
   await cdp.send('Runtime.evaluate', {
     expression: `document.querySelector('button[aria-labelledby~="new-camp-members-label"]')?.focus()`
   })
-  await dispatchDomKey(cdp, 'ArrowDown')
+  await pressKey(cdp, 'ArrowDown')
   await waitForExpression(
     cdp,
     `document.querySelectorAll('.compact-menu[aria-label="选择队员"] [role="menuitemcheckbox"]').length > 0`,
@@ -94,6 +98,14 @@ try {
       const rect = dialog?.getBoundingClientRect()
       return {
         title: dialog?.querySelector('h2')?.textContent,
+        quickSettingUnchecked: dialog?.querySelector('.new-camp-quick-label input')?.checked === false,
+        memberGrid: (() => {
+          const items = [...document.querySelectorAll('.new-camp-member-grid [role=menuitemcheckbox]')]
+          const rects = items.map(item => item.getBoundingClientRect())
+          return rects.every((rect, index) => index < 2 || Math.abs(rect.left - rects[index % 2].left) < 1)
+            && (rects.length < 2 || Math.abs(rects[0].top - rects[1].top) < 1)
+            && (rects.length < 3 || rects[2].top > rects[0].top)
+        })(),
         primary: primary?.textContent?.trim(),
         primaryEnabled: primary?.disabled === false,
         description: document.getElementById(dialog?.getAttribute('aria-describedby') ?? '')?.textContent?.trim(),
@@ -155,7 +167,9 @@ try {
   })
   const value = inspection.result?.result?.value
   if (
-    value?.title !== '创建新对话'
+    value?.title !== '新对话'
+    || value?.quickSettingUnchecked !== true
+    || value?.memberGrid !== true
     || value?.primary !== '新建'
     || value?.primaryEnabled !== true
     || value?.description !== '选择工作目录、队员与负责人。对话名称可选。'
@@ -180,17 +194,39 @@ try {
   ) {
     throw new Error(`New Conversation Dialog acceptance failed: ${JSON.stringify(value)}`)
   }
-  await dispatchDomKey(cdp, 'Escape')
+  if (memberSelectionValue.count >= 4) {
+    const activeIndex = `Array.from(document.querySelectorAll('.new-camp-member-grid [role=menuitemcheckbox]')).indexOf(document.activeElement)`
+    await evaluate(cdp, `document.querySelector('.new-camp-member-grid [role=menuitemcheckbox]').focus()`)
+    await pressKey(cdp, 'ArrowRight')
+    await waitForExpression(cdp, `${activeIndex} === 1`, 5_000)
+    await pressKey(cdp, 'ArrowDown')
+    await waitForExpression(cdp, `${activeIndex} === 3`, 5_000)
+    await pressKey(cdp, 'ArrowLeft')
+    await waitForExpression(cdp, `${activeIndex} === 2`, 5_000)
+    await pressKey(cdp, 'ArrowUp')
+    await waitForExpression(cdp, `${activeIndex} === 0`, 5_000)
+  }
+  if (scale === 1) {
+    const rosterScreenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, fromSurface: true })
+    await writeFile(output.replace(/\.png$/, '-roster.png'), Buffer.from(rosterScreenshot.result.data, 'base64'))
+  }
+  if (enableOneClick && memberSelectionValue.count > 1) {
+    await evaluate(cdp, `document.querySelector('.new-camp-member-grid [role=menuitemcheckbox]').click()`)
+    memberSelectionValue.selected -= 1
+    await waitForExpression(cdp, `document.querySelectorAll('.new-camp-member-grid [aria-checked="true"]').length === ${memberSelectionValue.selected}`, 5_000)
+  }
+  await pressKey(cdp, 'Escape')
   await waitForExpression(
     cdp,
     `document.querySelector('.compact-menu[aria-label="选择队员"]') === null`,
     5_000
   )
+  await waitForExpression(cdp, `document.activeElement?.matches('button[aria-labelledby~="new-camp-members-label"]') === true`, 5_000)
   await cdp.send('Runtime.evaluate', {
     expression: `document.querySelector('button[aria-labelledby~="new-camp-lead-label"]')?.focus()`
   })
   await wait(100)
-  await dispatchDomKey(cdp, 'ArrowDown')
+  await pressKey(cdp, 'ArrowDown')
   await waitForExpression(
     cdp,
     `Boolean(document.querySelector('.compact-menu[aria-label="选择负责人"]'))`,
@@ -219,7 +255,7 @@ try {
   ) {
     throw new Error(`Lead picker acceptance failed: ${JSON.stringify(leadMenuValue)}`)
   }
-  await dispatchDomKey(cdp, 'ArrowDown')
+  await pressKey(cdp, 'ArrowDown')
   if (leadMenuValue.count > 1) {
     await waitForExpression(
       cdp,
@@ -236,9 +272,9 @@ try {
     throw new Error(`Lead picker arrow navigation did not move focus: ${JSON.stringify(leadMenuValue)}`)
   }
   if (leadMenuValue.count > 1) {
-    await dispatchDomKey(cdp, 'Enter')
+    await evaluate(cdp, `[...document.querySelectorAll('.compact-menu[aria-label="选择负责人"] [role=menuitemradio]')].find(option => option.textContent === ${JSON.stringify(navigatedLeadLabel)}).click()`)
   } else {
-    await dispatchDomKey(cdp, 'Escape')
+    await pressKey(cdp, 'Escape')
   }
   await waitForExpression(cdp, `document.querySelector('.compact-menu[aria-label="选择负责人"]') === null`, 5_000)
   await waitForExpression(
@@ -279,6 +315,12 @@ try {
     throw new Error(`Optional name acceptance failed: ${JSON.stringify(optionalValue)}`)
   }
 
+  if (enableOneClick) {
+    await evaluate(cdp, `document.querySelector('.new-camp-quick-label input').click()`)
+    await waitForExpression(cdp, `document.querySelector('.new-camp-quick-effective')?.textContent === '本次新建成功后生效'`, 5_000)
+    const beforeSubmit = await evaluate(cdp, 'window.rovai.generalPreferences.get()')
+    assertSamePreferences(beforeSubmit, originalPreferences, 'Checking alone must not save preferences')
+  }
   await cdp.send('Page.bringToFront')
   await wait(100)
   const screenshot = await cdp.send('Page.captureScreenshot', {
@@ -297,6 +339,7 @@ try {
       10_000
     )
     await waitForExpression(cdp, `document.activeElement?.id === 'camp-message'`, 5_000)
+    await waitForExpression(cdp, `document.querySelector('.camp-nav-row.selected')?.textContent?.includes('未命名对话') === true`, 10_000)
     const created = await cdp.send('Runtime.evaluate', {
       expression: `({
         title: document.querySelector('.topbar h1')?.textContent,
@@ -325,6 +368,47 @@ try {
     )
   }
 
+  const savedPreferences = await evaluate(cdp, 'window.rovai.generalPreferences.get()')
+  if (createCamp && enableOneClick && !expectPreferenceFailure) {
+    const createdCamp = await evaluate(cdp, `(async () => {
+      const target = document.querySelector('.camp-nav-row.selected')?.querySelector('[data-sidebar-menu-target]')?.dataset.sidebarMenuTarget
+      if (!target?.startsWith('camp:')) throw new Error('Missing selected Camp identity')
+      return window.rovai.request('camps.open', { campId: target.slice(5), traceId: crypto.randomUUID() })
+    })()`)
+    if (savedPreferences.oneClickNewConversationEnabled !== true
+      || savedPreferences.newConversationDefaultsRequireConfirmation !== false
+      || savedPreferences.newConversationDefaults?.defaultLeadAgentId !== createdCamp.camp.defaultLeadAgentId
+      || JSON.stringify([...savedPreferences.newConversationDefaults.memberAgentIds].sort())
+        !== JSON.stringify(createdCamp.members.map(member => member.agentId).sort())) {
+      throw new Error('Saved defaults do not match the successfully created Camp')
+    }
+    // The next click must open a new Pending Camp directly, using the saved team.
+    const previousId = createdCamp.camp.id
+    await waitForExpression(cdp, `document.querySelector('button[aria-label="新对话"]')?.disabled === false`, 10_000)
+    await evaluate(cdp, `void (window.__previousAcceptanceComposer = document.getElementById('camp-message'))`)
+    await evaluate(cdp, `document.querySelector('button[aria-label="新对话"]').click()`)
+    await waitForExpression(cdp, `!document.querySelector('.new-camp-dialog') && document.activeElement?.id === 'camp-message' && document.activeElement !== window.__previousAcceptanceComposer`, 10_000)
+    // An empty Pending Camp is intentionally absent from Navigation until it has a draft.
+    await cdp.send('Input.insertText', { text: '一键新建验收草稿（未发送）' })
+    await waitForExpression(cdp, `(() => { const target = document.querySelector('.camp-nav-row.selected')?.querySelector('[data-sidebar-menu-target]')?.dataset.sidebarMenuTarget; return !document.querySelector('.new-camp-dialog') && target?.startsWith('camp:') && target !== ${JSON.stringify('camp:' + previousId)} })()`, 10_000)
+    await waitForExpression(cdp, `document.activeElement?.id === 'camp-message'`, 5_000)
+    const nextCamp = await evaluate(cdp, `(async () => {
+      const target = document.querySelector('.camp-nav-row.selected [data-sidebar-menu-target]').dataset.sidebarMenuTarget
+      return window.rovai.request('camps.open', { campId: target.slice(5), traceId: crypto.randomUUID() })
+    })()`)
+    if (nextCamp.messages.length !== 0 || nextCamp.agentRuns.length !== 0
+      || nextCamp.camp.activationState !== 'pending'
+      || nextCamp.camp.defaultLeadAgentId !== savedPreferences.newConversationDefaults.defaultLeadAgentId
+      || JSON.stringify(nextCamp.members.map(member => member.agentId).sort())
+        !== JSON.stringify([...savedPreferences.newConversationDefaults.memberAgentIds].sort())) {
+      throw new Error('One-click did not create a Pending Camp with the saved team')
+    }
+  } else {
+    assertSamePreferences(savedPreferences, originalPreferences, 'Cancelled, ordinary or failed preference saves must preserve defaults')
+    if (expectPreferenceFailure) {
+      await waitForExpression(cdp, `document.body.textContent.includes('对话已创建，但默认队伍与一键新建设置未保存')`, 5_000)
+    }
+  }
   process.stdout.write(`${output}\n`)
 } finally {
   cdp.close()
@@ -332,7 +416,7 @@ try {
 
 async function waitForTarget(debugPort) {
   const startedAt = Date.now()
-  while (Date.now() - startedAt < 15_000) {
+  while (Date.now() - startedAt < 60_000) {
     try {
       const targets = await fetch(`http://127.0.0.1:${debugPort}/json`)
         .then((response) => response.json())
@@ -356,7 +440,8 @@ async function waitForExpression(cdp, expression, timeoutMs) {
     if (state.result?.result?.value) return
     await wait(80)
   }
-  throw new Error(`Expression did not become true: ${expression}`)
+  const observed = await evaluate(cdp, `({ activeElement: document.activeElement?.outerHTML, menus: [...document.querySelectorAll('[role="menu"]')].map(menu => menu.getAttribute('aria-label')) })`)
+  throw new Error(`Expression did not become true: ${expression}; observed: ${JSON.stringify(observed)}`)
 }
 
 async function connectCdp(url) {
@@ -396,6 +481,9 @@ function wait(milliseconds) {
 async function pressKey(cdp, key) {
   const keyDefinition = {
     ArrowDown: { code: 'ArrowDown', virtualKey: 40 },
+    ArrowUp: { code: 'ArrowUp', virtualKey: 38 },
+    ArrowLeft: { code: 'ArrowLeft', virtualKey: 37 },
+    ArrowRight: { code: 'ArrowRight', virtualKey: 39 },
     Enter: { code: 'Enter', virtualKey: 13 },
     Escape: { code: 'Escape', virtualKey: 27 },
     Tab: { code: 'Tab', virtualKey: 9 }
@@ -404,28 +492,25 @@ async function pressKey(cdp, key) {
     type: 'rawKeyDown',
     key,
     code: keyDefinition.code,
-    windowsVirtualKeyCode: keyDefinition.virtualKey,
-    nativeVirtualKeyCode: keyDefinition.virtualKey
+    windowsVirtualKeyCode: keyDefinition.virtualKey
   })
   await cdp.send('Input.dispatchKeyEvent', {
     type: 'keyUp',
     key,
     code: keyDefinition.code,
-    windowsVirtualKeyCode: keyDefinition.virtualKey,
-    nativeVirtualKeyCode: keyDefinition.virtualKey
+    windowsVirtualKeyCode: keyDefinition.virtualKey
   })
 }
 
-async function dispatchDomKey(cdp, key) {
-  await cdp.send('Runtime.evaluate', {
-    expression: `(() => {
-      const target = document.activeElement
-      if (!target) return false
-      const init = { key: ${JSON.stringify(key)}, code: ${JSON.stringify(key)}, bubbles: true, cancelable: true }
-      target.dispatchEvent(new KeyboardEvent('keydown', init))
-      target.dispatchEvent(new KeyboardEvent('keyup', init))
-      return true
-    })()`,
-    returnByValue: true
-  })
+
+async function evaluate(cdp, expression) {
+  const response = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+  if (response.result?.exceptionDetails) throw new Error(JSON.stringify(response.result.exceptionDetails))
+  return response.result?.result?.value
+}
+
+function assertSamePreferences(actual, expected, message) {
+  for (const key of ['newConversationDefaults', 'newConversationDefaultsRequireConfirmation', 'oneClickNewConversationEnabled']) {
+    if (JSON.stringify(actual[key]) !== JSON.stringify(expected[key])) throw new Error(message)
+  }
 }
