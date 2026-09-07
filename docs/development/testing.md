@@ -393,7 +393,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 
 `pnpm test:notification-attention` 在隔离 Electron 中挂载生产通知 Controller 与 CSS，验证当前公屏 / 精确
 单聊的完成静默、抑制不等于已读、原始来源点击、单卡与手动队列、前后台收敛，以及悬停 / 焦点暂停剩余
-时间。`ROVAI_KEEP_NOTIFICATION_FIXTURE=1` 保留双主题截图。`pnpm test:single-chat-panel` 的既有 owner
+时间。`ROVAI_KEEP_NOTIFICATION_FIXTURE=1` 保留双主题截图。`node --test scripts/lib/single-chat-panel.test.mjs` 的既有 owner
 另验证原 Conversation / Run 定位、结束来源明确失败且不创建后继对话。两者使用临时绝对 userData 和
 封闭 RPC 投影，不启动 Core、Runtime 或日常 App，不代替真实模型 Smoke。
 
