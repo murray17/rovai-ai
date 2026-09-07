@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { FileHandle } from 'node:fs/promises'
 import type {
@@ -81,6 +82,7 @@ export type FilePreviewAuthorityResult =
       candidatePath?: string
       displayName?: string
       openRisk?: 'normal' | 'confirm'
+      canShowPath?: boolean
       allowChildren?: boolean
     }
 
@@ -109,6 +111,7 @@ interface ResolvedTarget {
   displayName?: string
   target?: FileLocationTarget
   openRisk: 'normal' | 'confirm'
+  canShowPath?: boolean
   allowChildren: boolean
   projectRoot?: string | null
 }
@@ -733,11 +736,17 @@ export class FilePreviewService {
   ): Promise<FilePreviewOperationResult<{ copied: true }>> {
     const record = this.#recordOrNull(webContentsId, request.handleId)
     if (!record) return failed('source_not_authorized', '这个文件访问已失效。')
+    if (request.format === 'absolute' && record.pathPresentation === 'file_name_only') {
+      return failed('source_not_authorized', '无法复制这个文件的内部路径。')
+    }
     const binding = this.#captureBinding(webContentsId, record.campId)
     try {
-      const value = request.format === 'absolute'
-        ? (await this.#revalidateRecordPath(record)).canonicalPath
-        : record.displayPath
+      let value = record.displayPath
+      if (request.format === 'absolute') {
+        const target = await this.#revalidateRecordPath(record)
+        if (!target.canShowPath) return failed('source_not_authorized', '无法复制这个文件的内部路径。')
+        value = target.canonicalPath
+      }
       this.#requireBinding(webContentsId, binding, record.campId)
       this.#native.copyText(value)
       return ok({ copied: true })
@@ -1054,15 +1063,31 @@ export class FilePreviewService {
     if (inheritedProjectRoot === undefined && canPresentProjectRelativePath(target.sourceKind)) {
       projectRoot = await canonicalizeExistingPath(target.rootPath).catch(() => null)
     }
-    const pathPresentation: FilePreviewPathPresentation = projectRoot === opened.canonicalRoot
-      ? 'project_relative'
-      : 'file_name_only'
+    if (target.sourceKind === 'attachment' && target.canShowPath !== true) {
+      return {
+        projectRoot,
+        pathPresentation: 'file_name_only',
+        displayPath: target.displayName || opened.fileName
+      }
+    }
+    if (inheritedProjectRoot === undefined && target.sourceKind === 'attachment') {
+      projectRoot = await this.#canonicalWorkspaceRoot(target.campId)
+    }
+    if (projectRoot && pathIsWithin(projectRoot, opened.canonicalPath)) {
+      return {
+        projectRoot,
+        pathPresentation: 'project_relative',
+        displayPath: relative(projectRoot, opened.canonicalPath).split(sep).join('/') || opened.fileName
+      }
+    }
+    const canonicalHome = await canonicalizeExistingPath(homedir()).catch(() => null)
+    const homeRelativePath = canonicalHome && pathIsWithin(canonicalHome, opened.canonicalPath)
+      ? relative(canonicalHome, opened.canonicalPath).split(sep).join('/')
+      : null
     return {
       projectRoot,
-      pathPresentation,
-      displayPath: pathPresentation === 'project_relative'
-        ? opened.displayPath
-        : target.displayName || opened.fileName
+      pathPresentation: 'external',
+      displayPath: homeRelativePath ? `~/${homeRelativePath}` : opened.canonicalPath
     }
   }
 
@@ -1072,6 +1097,12 @@ export class FilePreviewService {
     canonicalPath: string
   ): Promise<RestoreFilePreviewRequest | undefined> {
     if (request.kind !== 'child_of_handle') return undefined
+    const root = await this.#canonicalWorkspaceRoot(campId)
+    const rawReference = root ? workspaceRelativeReference(root, canonicalPath) : null
+    return rawReference ? { kind: 'camp_workspace', campId, rawReference } : undefined
+  }
+
+  async #canonicalWorkspaceRoot(campId: string): Promise<string | null> {
     try {
       const workspace = await this.#authority.resolve({
         kind: 'camp_workspace',
@@ -1084,14 +1115,10 @@ export class FilePreviewService {
         || workspace.campId !== campId
         || workspace.sourceKind !== 'camp_workspace'
         || workspace.allowChildren !== true
-      ) return undefined
-      const canonicalWorkspaceRoot = await canonicalizeExistingPath(workspace.rootPath)
-      const rawReference = workspaceRelativeReference(canonicalWorkspaceRoot, canonicalPath)
-      return rawReference
-        ? { kind: 'camp_workspace', campId, rawReference }
-        : undefined
+      ) return null
+      return await canonicalizeExistingPath(workspace.rootPath)
     } catch {
-      return undefined
+      return null
     }
   }
 
@@ -1295,6 +1322,7 @@ export class FilePreviewService {
   async #revalidateRecordPath(record: PreviewHandleRecord): Promise<{
     canonicalPath: string
     openRisk: 'normal' | 'confirm'
+    canShowPath: boolean
   }> {
     const target = await this.#resolveReopenTarget(record)
     const parsed = this.#parsedReference(target)
@@ -1309,6 +1337,7 @@ export class FilePreviewService {
       if (!contentVersionMatches(record.version, opened.version)) record.hasExternalUpdate = true
       return {
         canonicalPath: opened.canonicalPath,
+        canShowPath: target.sourceKind !== 'attachment' || target.canShowPath === true,
         openRisk: target.openRisk === 'confirm' ? 'confirm' : classification.openRisk
       }
     } finally {

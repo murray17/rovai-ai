@@ -1,8 +1,8 @@
 ---
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
-classifier_version: activity-v3
-last_updated: 2026-09-06
+classifier_version: activity-v4
+last_updated: 2026-09-07
 ---
 
 # Runtime Activity Mapping Registry
@@ -12,7 +12,7 @@ last_updated: 2026-09-06
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；Core v3 不生成 commandActions 标题，但非空、全 read、唯一 path 的 `commandActions` 可形成 typed read；Renderer 从公开 command 生成去 wrapper、保留完整序列并脱敏的 Shell 标题；只有 `item.type=webSearch` 可把 `item.query` 投影为 Search Operation | structured read 正反例、Renderer 跨 Runtime 命令/脱敏/详情、typed query 与普通 query 排除回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；`0.147.0` WebSearch wire 实证通过；[`0.153.4` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
-| `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；同一 ToolCall 的 start/update 精确 `read/write/edit + args.path` 与成功 terminal 可形成 typed read/write；update 作为累计预览，唯一 terminal 结算 Action；所有 Built-in/Extension Tool 按 Pi 原生语义执行，Rovai 不审批或阻断 | Tool started→terminal、结束事件省略参数、read/write/edit、累计输出、重放去重和未知 Tool shape fixture 已建立；Pi 无 Rovai Approval、sandbox 或 MCP proxy | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；[v1.52 read/write 真实结果](../versions/v1.52/runtime-acceptance.md)已通过，未形成的平台证据不提升正式准入 |
+| `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；同一 ToolCall 的 start/update 精确 `read/write/edit + args.path` 与成功 terminal 可形成 typed read/write；成功 `edit` 的 `result.details.patch` 只有在 old/new header 都与同 ToolCall path 完全一致且包含 hunk 时形成 unified diff；`write` 保持 path-only；update 作为累计预览，唯一 terminal 结算 Action；所有 Built-in/Extension Tool 按 Pi 原生语义执行，Rovai 不审批或阻断 | Tool started→terminal、结束事件省略参数、read/write/edit、edit patch 正例、header mismatch、write/失败 edit 反例、累计输出、重放去重和未知 Tool shape fixture 已建立；Pi 无 Rovai Approval、sandbox 或 MCP proxy | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；[v1.52 read/write 真实结果](../versions/v1.52/runtime-acceptance.md)已通过；`0.84.4` native session 的 edit patch wire 已核验，本次 post-fix 模型 smoke 未执行 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text`；`1.18.20` write metadata 的 Boolean `exists` 只在同 ToolCall 路径对齐后区分 add/update | 受控 fixture、固定 `printf` 与 metadata 正反例断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；[`1.18.20` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；`1.0.79 kind=search + query-only rawInput` 可投影 Web 搜索，`kind=read + pattern` 文件搜索不得准入；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | query-only positive、文件搜索 negative、固定 `printf` fixture 已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 Web/file search 与 command-output wire 已核验 |
 | `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；`2.18.1 kind=search + query-only rawInput` 可投影 Web 搜索，`{path,pattern}` 内容搜索与 pattern-only glob 不得准入；成功 Edit/Write 的唯一标准 location 可独立命名文件操作；单 entry Diff 的 rooted-relative path 只在与同 ToolCall location 完全对应时纠正；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | Search Operation positive/negative、path-only、标准 Diff、精确路径对齐与 mismatch fail-closed fixture 通过 | ACP session + Skill turn + MCP projection 通过；[`2.21.1` post-fix 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
@@ -31,16 +31,16 @@ Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。�
 
 ## Classifier cutover
 
-Migration 142 把新 operation 的 current classifier 原子切换到 `activity-v3`，Data Contract 为
-`v1.53 / projection schema 93`。已有 `activity-v1` 或 `activity-v2` row 不回填、不重分类、不删除；同一
-operation 已有旧 projection 时，后续 phase 继续用原 classifier 结算。Read Side 依次接受 v3、v2、v1。
-marker 与 migration receipt 必须在同一事务提交，启动 reconciler 只有在 canonical receipt 142 存在时才接受 v3。
-工具分支已部署的 classifier receipt 141 按 [v3 合同](../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)
-精确识别后原子映射，保留原时间并补齐主线图片迁移；不删除或重写历史执行事实。
+Migration 147 在 Notification Single Chat Migration 146 之后，把新 operation 的 current classifier 原子切换到
+`activity-v4`，Data Contract 为 `v1.55 / projection schema 97`。已有 `activity-v1`、`activity-v2` 或 `activity-v3` row 不回填、不重分类、
+不删除；同一 operation 已有旧 projection 时，后续 phase 继续用原 classifier 结算。Read Side 依次接受
+v4、v3、v2、v1。marker 与 migration receipt 必须在同一事务提交，启动 reconciler 只有在 canonical receipt
+147 存在时才接受 v4。
 
-`activity-v3` 继续只写 `shell | file | tool | runtime | unknown` 顶层域，并新增一条窄规则：available typed
-read 强制为 `file / file.read`。Git、Network、Permission 与 Plan 仍不作为新 Canonical 顶层域；历史 v1 值
-继续只读展示。此切换不声称实现历史 Evidence replay 或平行 reprojection。
+`activity-v4` 继承 v3 的 typed read 与顶层域，只新增 Pi 成功 `edit` 的结构化 terminal patch 映射；`write`
+和未知/不完整 patch 不提升。Migration 142 的 v3 cutover、工具分支 receipt 141 汇合与既有 v1/v2/v3 读取
+兼容继续按 [v3 合同](../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)执行；本次不做历史
+Evidence replay 或平行 reprojection。
 
 ## Terminal file-operation and file-change Evidence matrix
 
@@ -51,7 +51,7 @@ read 强制为 `file / file.read`。Git、Network、Permission 与 Plan 仍不�
 | 协议族与适用 Adapter | 过去/当前实际接入事件 | 可靠文件操作 path | 可靠终态内容 | Command file rows |
 | --- | --- | --- | --- | --- |
 | Codex app-server（`codex-cli`） | `commandExecution` started/completed structured read；成功 terminal `fileChange` | read 只接纳非空、全 read 且唯一 `commandActions[].path`；write 使用 `changes[].path` | `changes[] { path, kind, diff }`；update 为 unified diff，add/delete 为完整新/旧内容 | read 为不可展开“阅读”；add 显示“新增”，其他 write 显示“编辑”并保留 Diff |
-| Pi JSONL RPC（`pi`） | `tool_execution_start/update/end`，只在非错误 terminal 发布 operation | 同 `toolCallId` 的 start/update 中 toolName 精确 `read/write/edit` 且 `args.path` 非空；terminal 可省略参数 | 当前不把 Pi Tool result 推断成完整 before/after diff | read 显示“阅读”；write/edit 保守显示“编辑”，无内容时无计数或 Diff |
+| Pi JSONL RPC（`pi`） | `tool_execution_start/update/end`，只在非错误 terminal 发布 operation | 同 `toolCallId` 的 start/update 中 toolName 精确 `read/write/edit` 且 `args.path` 非空；terminal 可省略参数 | 仅成功 `edit` 的 `result.details.patch`；双侧 header 必须精确等于同 ToolCall `args.path`，至少一个 hunk，规范化后保存 `unified_diff_snapshot`；`write` 没有可靠 before state | read 显示“阅读”；edit patch 显示真实计数与 Diff；write 保守显示“编辑”，无计数或 Diff |
 | ACP v1（`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build`） | ACP `session/update.tool_call_update`；私有 extension 与 run-level fallback 不补造 operation 或 Diff | 成功 terminal native kind 精确 `read | edit | write`；read 要求同 ToolCall 唯一标准 location，write 沿用保守兼容路径准入；OpenCode 的 Boolean `rawOutput.metadata.exists` 仅在 metadata path 与同 ToolCall location/rawInput path 对齐时形成 add/update | terminal 累计 `content.type=diff { path, oldText?, newText }`；只接纳标准 ACP terminal Diff | read 显示“阅读”；明确 add 显示“新增”，其他 write 显示“编辑”；有 Diff 才显示计数并展开 |
 | Claude stream-json（`claude-code-cli`） | 完整 assistant `tool_use(name=Read|Write|Edit)` + 相同 ID 的非错误 user `tool_result` | 完整 `file_path` 形成 typed read/write；Write 的结构化 `type=update` 与同路径 `filePath` 确认 update，create 因 empty-existing 假阳性不确认 add | 只有 Edit 的 `file_path/old_string/new_string` 证明单次 `exact_mutation` | Read 显示“阅读”；Write 显示“编辑”；Edit 保留片段 Diff，不生成 `@@` |
 | Antigravity stream-json（`antigravity-app`） | `step_update` terminal state | 无等价可靠单文件终态 path | step/tool 名与公开 payload 没有可证明完整的 terminal patch | 不支持；不按 edit/write 名称推测 |
@@ -212,9 +212,14 @@ Terminal 不可用，因此不会读取 `terminalId` 或从私有 terminal 猜�
 Pi 的 `tool_execution_start/update/end` 以原生 `toolCallId` 合并。只有同一 ToolCall 的 start/update toolName
 精确为小写 `read | write | edit`、`args.path` 是非空字符串，并最终收到非错误 `tool_execution_end` 时，才发布
 schema 2 operation；真实 `0.84.4` 的结束事件会省略 toolName/args，因此只从该 ToolCall 的已观察开始参数补齐，
-不会跨 Tool 关联。read 映射 read，write/edit 映射 write。大小写不同、grep/find/ls、失败终态、缺 path 和未知
-shape 都不准入；不得从 result 文本、Rovai Approval 或当前磁盘补证。Pi result 当前不证明完整 before/after，
-因此 path-only write 只显示“编辑”且没有虚构 Diff。
+不会跨 Tool 关联。read 映射 read，write/edit 映射 write。
+
+只有成功 `edit` 的 `result.details.patch` 可再形成 Diff 候选。Core 要求 `---` 与 `+++` header 都精确等于同一
+ToolCall 的 `args.path`、正文至少包含一个 unified hunk，并继续执行路径、大小和 managed-output 门禁；准入后把
+header 改写成规范化 display path，以 `unified_diff_snapshot` 保存真实增删计数。大小写不同、`write`、
+grep/find/ls、失败终态、缺 path/patch、header 冲突和未知 shape 都不准入 Diff；不得从 `details.diff`、result
+文本、Tool input replacement、Rovai Approval 或当前磁盘补证。Pi `write` 没有 before state，因此仍只显示“编辑”
+且没有虚构计数或 Diff。
 
 ### Core Team Tool
 
@@ -285,8 +290,8 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。`grep_sea
 
 - Core Action ID → Runtime native ID → Evidence ID；
 - 只有相同 operationId 合并；
-- operation 首次创建的 classifier/version 固定；已有 v1/v2 projection 的 live operation 不切到 v3，新
-  operation 才使用 current v3；历史 v1/v2 与新 v3 都可读取，不做批量重投影；
+- operation 首次创建的 classifier/version 固定；已有 v1/v2/v3 projection 的 live operation 不切到 v4，新
+  operation 才使用 current v4；历史 v1/v2/v3 与新 v4 都可读取，不做批量重投影；
 - lifecycle completion 可以只报告 identity/status；这类稀疏更新只推进 phase/outcome，不得用 Evidence-kind fallback 覆盖同一 operation 已报告的结构化 domain、semantic kind 或 title；
 - terminal 冲突为 `unsettled`；
 - Runtime 明确报告 interruption 时，已 started 且尚未结算的 operation 归约为

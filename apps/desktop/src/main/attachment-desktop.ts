@@ -8,6 +8,7 @@ export interface DesktopAttachmentTarget {
   mediaType: string
   path: string
   openRisk: 'normal' | 'confirm'
+  canShowPath: boolean
 }
 
 export function isAttachmentId(value: unknown): value is string {
@@ -21,7 +22,7 @@ export function parseDesktopAttachmentTarget(
 ): DesktopAttachmentTarget | null {
   if (!value || typeof value !== 'object') return null
   const keys = Object.keys(value).sort()
-  if (keys.join(',') !== 'attachmentId,displayName,kind,mediaType,openRisk,path') return null
+  if (keys.join(',') !== 'attachmentId,canShowPath,displayName,kind,mediaType,openRisk,path') return null
   const target = value as Partial<DesktopAttachmentTarget>
   if (
     target.attachmentId !== requestedAttachmentId
@@ -34,6 +35,7 @@ export function parseDesktopAttachmentTarget(
     || typeof target.path !== 'string'
     || !isAbsolute(target.path)
     || (target.openRisk !== 'normal' && target.openRisk !== 'confirm')
+    || typeof target.canShowPath !== 'boolean'
   ) return null
   return target as DesktopAttachmentTarget
 }

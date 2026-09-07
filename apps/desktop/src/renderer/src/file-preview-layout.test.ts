@@ -76,6 +76,16 @@ describe('File preview reading planes', () => {
     expect(declarations('.file-preview-image-stage img')[0]).toContain('background-image:')
   })
 
+  it('keeps the displayed file path keyboard reachable with a complete-path tooltip', () => {
+    const button = declarations('.file-preview-path-button')[0]
+    const tooltip = declarations('.file-preview-path-tooltip')[0]
+    expect(button).toContain('background: transparent;')
+    expect(button).toContain('cursor: pointer;')
+    expect(tooltip).toContain('background: var(--surface-raised);')
+    expect(styles).toContain('.file-preview-path-button:focus-visible + .file-preview-path-tooltip')
+    expect(styles).toContain('.file-preview-path-button:focus-visible { outline: 2px solid var(--focus);')
+  })
+
   it('keeps header and body tracks equal without reserving a column for Camp details', () => {
     expect(gridTracks('.camp-topbar.has-file-preview')).toEqual([
       'minmax(0, 1fr) var(--file-preview-width, 56%)'

@@ -40,7 +40,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     closeMany,
     openInSystem,
     revealInFolder,
-    copyDisplayPath,
+    copyPath,
     reload,
     reopen
   } = useFilePreview()
@@ -362,9 +362,9 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
               '已在文件夹中定位'
             )}>{revealLabel}</button>
             <button role="menuitem" type="button" disabled={!tab.file} onClick={() => void runSystemAction(
-              () => copyDisplayPath(tab.id),
-              '已复制相对路径'
-            )}>复制相对路径</button>
+              () => copyPath(tab.id),
+              tab.presentation.pathPresentation === 'file_name_only' ? '已复制文件名' : '已复制完整路径'
+            )}>{tab.presentation.pathPresentation === 'file_name_only' ? '复制文件名' : '复制完整路径'}</button>
             <button
               role="menuitem"
               type="button"

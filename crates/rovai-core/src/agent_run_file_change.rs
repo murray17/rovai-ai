@@ -14,8 +14,9 @@ use crate::{
     db::Database,
     managed_blob::ManagedBlobStore,
     runtime_diff::{
-        exact_mutation_fragment, normalize_reported_path_for_display, split_unified_diff_sections,
-        unified_diff_counts, unified_diff_from_complete_states, unified_diff_section_identity,
+        exact_mutation_fragment, fragment_line_count, normalize_reported_path_for_display,
+        split_unified_diff_sections, unified_diff_counts, unified_diff_from_complete_states,
+        unified_diff_section_identity,
     },
 };
 
@@ -1165,6 +1166,16 @@ fn continuous_full_state_detail(
 }
 
 fn operation_block(operation: &ObservedChange) -> AgentRunFileChangeBlockView {
+    if let ObservedSemantics::ExactMutation { old_text, new_text } = &operation.semantics {
+        return AgentRunFileChangeBlockView {
+            sequence: operation.sequence,
+            semantics: "exact_mutation".to_string(),
+            change_kind: operation.change_kind.clone(),
+            additions: Some(fragment_line_count(new_text)),
+            deletions: Some(fragment_line_count(old_text)),
+            diff: Some(exact_mutation_fragment(old_text, new_text)),
+        };
+    }
     let (semantics, diff) = match &operation.semantics {
         ObservedSemantics::FullBeforeAfter { before, after } => (
             "full_before_after",
@@ -1173,10 +1184,7 @@ fn operation_block(operation: &ObservedChange) -> AgentRunFileChangeBlockView {
         ObservedSemantics::UnifiedDiffSnapshot { diff } => {
             ("unified_diff_snapshot", Some(diff.clone()))
         }
-        ObservedSemantics::ExactMutation { old_text, new_text } => (
-            "exact_mutation",
-            Some(exact_mutation_fragment(old_text, new_text)),
-        ),
+        ObservedSemantics::ExactMutation { .. } => unreachable!(),
         ObservedSemantics::OperationOnly => ("operation_only", None),
     };
     let (additions, deletions) = diff

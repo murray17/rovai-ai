@@ -1,4 +1,5 @@
 import { readErrorMessage } from './error-message'
+import * as Menu from '@radix-ui/react-dropdown-menu'
 import {
   useCallback,
   useEffect,
@@ -26,6 +27,7 @@ import {
   type RuntimeUserStatus
 } from './runtime-status'
 import { identityColorToken } from './theme'
+import { useMemberRosterLayout } from './MemberRosterLayout'
 
 export type MemberWorkspaceTab = 'identity' | 'runtime'
 
@@ -42,8 +44,6 @@ export function compactRuntimeState(status: RuntimeUserStatus): CompactRuntimeSt
   ) return 'neutral'
   return 'action'
 }
-
-const MEMBER_ROSTER_STORAGE_KEY = 'rovai-member-roster-width-v1'
 
 export function filterMembers(
   agents: AgentProfile[],
@@ -81,20 +81,12 @@ export function MemberSidebar({
   onCreate(trigger: HTMLButtonElement): void
   onReload(): Promise<void>
 }): React.JSX.Element {
+  const { id, collapsed, setCollapsed, sorting, setSorting } = useMemberRosterLayout()
   const members = useMemo(
     () => agents.filter((agent) => agent.presence !== 'removed' && agent.removedAt === null),
     [agents]
   )
   const [query, setQuery] = useState('')
-  const [sorting, setSorting] = useState(false)
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return false
-    try {
-      return window.localStorage.getItem(MEMBER_ROSTER_STORAGE_KEY) === 'collapsed'
-    } catch {
-      return false
-    }
-  })
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragAgentId, setDragAgentId] = useState<string | null>(null)
@@ -188,23 +180,15 @@ export function MemberSidebar({
 
   const toggleCollapsed = (): void => {
     if (sorting) return
-    setCollapsed((current) => {
-      const next = !current
-      try {
-        window.localStorage.setItem(MEMBER_ROSTER_STORAGE_KEY, next ? 'collapsed' : 'expanded')
-      } catch {
-        // This preference is optional; the roster still works when storage is unavailable.
-      }
-      return next
-    })
+    setCollapsed(!collapsed)
   }
 
   return (
-    <section className={`member-sidebar ${collapsed ? 'is-collapsed' : ''} ${sorting ? 'is-sorting' : ''}`} aria-label="队员名册">
+    <section id={id} className={`member-sidebar ${collapsed ? 'is-collapsed' : ''} ${sorting ? 'is-sorting' : ''}`} aria-label="队员名册">
       <div className="member-sidebar-heading">
         <div className="member-sidebar-title">
           <strong>队员</strong>
-          <span>{members.length}</span>
+          <span>{query.trim() ? `${visibleAgents.length} / ${members.length}` : members.length}</span>
         </div>
         <div className="member-sidebar-actions">
           <button
@@ -214,16 +198,16 @@ export function MemberSidebar({
             title="新增队员"
             onClick={(event) => onCreate(event.currentTarget)}
           ><SidebarIcon name="plus" /></button>
-          {members.length > 0 && (
+          {members.length > 0 && (sorting ? (
             <button
               className="optional-action"
               type="button"
-              aria-label={sorting ? '完成调整队员顺序' : '调整队员顺序'}
-              title={sorting ? '完成调整顺序' : '调整顺序'}
-              aria-pressed={sorting}
+              aria-label="完成调整队员顺序"
+              title="完成调整顺序"
+              aria-pressed="true"
               onClick={toggleSorting}
-            >{sorting ? '完成' : <SidebarIcon name="sort" />}</button>
-          )}
+            >完成</button>
+          ) : <MemberRosterOptions onSort={toggleSorting} />)}
           <button
             type="button"
             aria-label={collapsed ? '展开队员名册' : '折叠队员名册'}
@@ -234,15 +218,16 @@ export function MemberSidebar({
         </div>
       </div>
 
-      {members.length > 20 && !sorting && (
+      {members.length > 8 && !sorting && (
         <div className="member-sidebar-filter">
           <label htmlFor="member-sidebar-filter">筛选队员</label>
           <div>
+            <svg className="member-roster-search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" /><path d="m12.2 12.2 4 4" /></svg>
             <input
               id="member-sidebar-filter"
               type="search"
               value={query}
-              placeholder="名称或团队角色"
+              placeholder="搜索队员"
               onChange={(event) => setQuery(event.target.value)}
             />
             {query && <button type="button" aria-label="清除队员筛选" onClick={() => setQuery('')}>×</button>}
@@ -263,10 +248,10 @@ export function MemberSidebar({
             if (group.length === 0) return null
             const total = members.filter((agent) => agent.presence === presence).length
             return (
-              <section className="member-sidebar-group" key={presence} aria-labelledby={`member-group-${presence}`}>
-                <div className="member-sidebar-group-heading" id={`member-group-${presence}`}>
+              <section className="member-sidebar-group" key={presence} aria-label={presence === 'present' ? '在队队员' : '暂离队员'}>
+                {members.some((member) => member.presence === 'away') && <div className="member-sidebar-group-heading">
                   <span>{presence === 'present' ? '在队' : '暂离'}</span><small>{query.trim() ? `${group.length}/${total}` : total}</small>
-                </div>
+                </div>}
                 {group.map((agent) => (
                   <MemberSidebarRow
                     key={agent.agentId}
@@ -370,7 +355,9 @@ function MemberSidebarRow({
   const product = agent.runtimeConfiguration?.adapterKind
     ? adapterLabel(agent.runtimeConfiguration.adapterKind)
     : 'Agent 运行时'
-  const runtimeLabel = `${agent.displayName}，${product}，${runtime.label}；打开运行配置`
+  const configured = Boolean(agent.runtimeConfiguration?.adapterKind)
+  const runtimeLabel = configured ? `${agent.displayName}，${product}，${runtime.label}；打开运行配置` : `${agent.displayName}，未配置运行时；打开运行配置`
+  const runtimeTooltip = configured ? `${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}` : '未配置运行时'
   return (
     <div
       className={`member-sidebar-row presence-${agent.presence} ${selected ? 'selected' : ''} ${dragOver ? 'drag-over' : ''}`}
@@ -436,8 +423,8 @@ function MemberSidebarRow({
               className={`member-runtime-shortcut runtime-${compact}`}
               type="button"
               aria-label={runtimeLabel}
-              title={`${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}`}
-              data-tooltip={`${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}`}
+              title={runtimeTooltip}
+              data-tooltip={runtimeTooltip}
               onClick={() => onSelect(agent.agentId, 'runtime', true)}
             >
               <RuntimeGlyph kind={agent.runtimeConfiguration?.adapterKind ?? null} />
@@ -448,20 +435,41 @@ function MemberSidebarRow({
   )
 }
 
-function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' }): React.JSX.Element {
+function MemberRosterOptions({ onSort }: { onSort(): void }): React.JSX.Element {
+  const { width, maxWidth, setWidth } = useMemberRosterLayout()
+  return (
+    <Menu.Root>
+      <Menu.Trigger asChild>
+        <button className="optional-action" type="button" aria-label="名册选项" title="名册选项">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4" cy="10" r=".8" /><circle cx="10" cy="10" r=".8" /><circle cx="16" cy="10" r=".8" /></svg>
+        </button>
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Content className="member-editor-menu member-roster-options" sideOffset={6} align="end" collisionPadding={12}>
+          <Menu.Item className="member-editor-menu-item" onSelect={onSort}>调整队员顺序</Menu.Item>
+          <Menu.Separator className="member-editor-menu-separator" />
+          <Menu.Label className="member-roster-options-label">列表宽度</Menu.Label>
+          <Menu.RadioGroup value={String(width)} onValueChange={(value) => setWidth(Number(value))}>
+            {([[192, '较窄'], [256, '默认'], [320, '较宽']] as const).map(([size, name]) => (
+              <Menu.RadioItem key={size} value={String(size)} disabled={size > maxWidth} className="member-editor-menu-item member-roster-width-option">
+                <span>{name}</span><small>{size} px</small>
+                <span className="member-roster-option-check"><Menu.ItemIndicator>✓</Menu.ItemIndicator></span>
+              </Menu.RadioItem>
+            ))}
+          </Menu.RadioGroup>
+        </Menu.Content>
+      </Menu.Portal>
+    </Menu.Root>
+  )
+}
+
+function SidebarIcon({ name }: { name: 'plus' | 'grip' }): React.JSX.Element {
   if (name === 'plus') {
     return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11" /></svg>
   }
-  if (name === 'grip') {
-    return (
-      <svg viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M7 5h.01M13 5h.01M7 10h.01M13 10h.01M7 15h.01M13 15h.01" />
-      </svg>
-    )
-  }
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M4.5 5h11M4.5 10h8M4.5 15h5" />
+      <path d="M7 5h.01M13 5h.01M7 10h.01M13 10h.01M7 15h.01M13 15h.01" />
     </svg>
   )
 }

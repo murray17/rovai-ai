@@ -186,6 +186,7 @@ export function filterAutomations(automations: AutomationView[], filter: Automat
 }
 
 export const AUTOMATION_MIN_LIST_WIDTH = 208
+export const AUTOMATION_DEFAULT_LIST_WIDTH = 248
 
 export function automationListWidth(requested: number, available: number): number {
   return Math.round(Math.max(AUTOMATION_MIN_LIST_WIDTH, Math.min(requested, available - 327)))

@@ -1452,6 +1452,7 @@ export type FilePreviewCapability =
 
 export type FilePreviewPathPresentation =
   | 'project_relative'
+  | 'external'
   | 'file_name_only'
 
 export interface FileContentVersion {

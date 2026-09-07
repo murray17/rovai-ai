@@ -15,10 +15,10 @@ describe('New Conversation dialog presentation contract', () => {
     expect(component).toContain("{busy ? '正在新建…' : '新建'}")
   })
 
-  it('uses an avatar radio menu whose candidates remain the currently selected members', () => {
+  it('uses an avatar radio menu whose candidates remain the currently selected available members', () => {
     expect(component).not.toMatch(/<select[\s>]/)
     expect(component).toContain('<DropdownMenu.RadioGroup value={leadId} onValueChange={setLeadId}>')
-    expect(component).toContain('{selectedMembers.map((member) => {')
+    expect(component).toContain('{selectedAvailableMembers.map((member) => {')
     expect(component).toContain('aria-labelledby="new-camp-lead-label new-camp-lead-value"')
     expect(component).toContain('aria-label="选择负责人"')
     expect(component).toContain('<DropdownMenu.RadioItem className="compact-option"')

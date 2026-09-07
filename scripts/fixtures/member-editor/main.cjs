@@ -41,6 +41,8 @@ app
             )
           })
         ])
+      } catch (error) {
+        throw new Error(`Renderer expression failed: ${expression}`, { cause: error })
       } finally {
         clearTimeout(timer)
       }
@@ -110,6 +112,30 @@ app
       run(
         `(() => { const q = selector => document.querySelector(selector); const box = selector => q(selector).getBoundingClientRect(); return { appRail: box('.unified-sidebar').width, roster: box('.member-sidebar').width, avatar: box('.member-sidebar-select .member-avatar').width, portrait: box('${active}.member-portrait').width, overflow: document.documentElement.scrollWidth > innerWidth || q('.members-view').scrollWidth > q('.members-view').clientWidth, tabCount: q('.members-view').querySelectorAll('[role=tab]').length, modal: !!q('[aria-modal=true]') } })()`
       )
+    const reloadPage = async () => {
+      const loaded = require('node:events').once(window.webContents, 'did-finish-load')
+      window.webContents.reload()
+      await loaded
+      await wait(`document.querySelector(${JSON.stringify(textInput)})`)
+      await settle()
+    }
+    const rosterWidth = () => run('Number(document.querySelector(".member-roster-resizer").getAttribute("aria-valuenow"))')
+    const dragRoster = async (widths) => {
+      const start = await run(`(() => { const node = document.querySelector('.member-roster-resizer'); const box = node.getBoundingClientRect(); return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + 180), width: Number(node.getAttribute('aria-valuenow')) } })()`)
+      window.webContents.sendInputEvent({ type: 'mouseMove', x: start.x, y: start.y })
+      window.webContents.sendInputEvent({ type: 'mouseDown', x: start.x, y: start.y, button: 'left', clickCount: 1 })
+      await settle()
+      const observed = []
+      for (const width of widths) {
+        window.webContents.sendInputEvent({ type: 'mouseMove', x: start.x + width - start.width, y: start.y, button: 'left', modifiers: ['leftButtonDown'] })
+        await settle()
+        observed.push(await rosterWidth())
+      }
+      window.webContents.sendInputEvent({ type: 'mouseUp', x: start.x + widths.at(-1) - start.width, y: start.y, button: 'left', clickCount: 1 })
+      await settle()
+      assert.equal(await run('document.querySelector(".member-editor-roster-shell").classList.contains("is-resizing")'), false)
+      return observed
+    }
     await wait(`document.querySelector(${JSON.stringify(textInput)})`)
     await settle()
     const cases = []
@@ -121,7 +147,7 @@ app
     await check('approved day geometry and native fields', async () => {
       assert.deepEqual(await geometry(), {
         appRail: 270,
-        roster: 236,
+        roster: 256,
         avatar: 40,
         portrait: 182,
         overflow: false,
@@ -144,6 +170,94 @@ app
           ['never', 'never (no approval prompts)']
         ]
       ])
+    })
+    await check('roster snaps in both directions and restores its useful width', async () => {
+      assert.deepEqual(await dragRoster([179, 170, 190, 216]), [192, 76, 76, 216])
+      await key('Home')
+      assert.deepEqual(await dragRoster([170]), [76])
+      assert.equal(await run('!!document.querySelector(".member-sidebar.is-collapsed")'), true)
+      await click('.member-sidebar-actions button[aria-label="展开队员名册"]')
+      assert.equal(await rosterWidth(), 256)
+      assert.deepEqual(await dragRoster([330]), [330])
+      await reloadPage()
+      assert.equal(await rosterWidth(), 330)
+      await click('.member-roster-resizer')
+      await key('Enter')
+      await reloadPage()
+      assert.equal(await rosterWidth(), 76)
+      await click('.member-roster-resizer')
+      await key('Right')
+      assert.equal(await rosterWidth(), 330)
+      await key('Home')
+      await key('Left')
+      assert.equal(await rosterWidth(), 240)
+      await key('Home')
+      await click('.member-sidebar-actions button[aria-label="名册选项"]')
+      await click('.member-roster-width-option', '较窄192 px')
+      assert.equal(await rosterWidth(), 192)
+      await click('.member-roster-resizer')
+      await key('Left')
+      assert.equal(await rosterWidth(), 76)
+      await key('Right')
+      assert.equal(await rosterWidth(), 192)
+      await key('Home')
+      await click('.member-sidebar-actions button[aria-label="名册选项"]')
+      await click('.member-roster-options .member-editor-menu-item', '调整队员顺序')
+      assert.equal(await run('document.querySelector(".member-roster-resizer").getAttribute("aria-disabled")'), 'true')
+      assert.equal(await run(`document.querySelector('.member-sidebar-actions button[aria-label="折叠队员名册"]').disabled`), true)
+      await click('.member-sidebar-actions button[aria-label="完成调整队员顺序"]')
+      assert.equal(await run('document.querySelector(".member-roster-resizer").hasAttribute("aria-disabled")'), false)
+      window.setContentSize(1040, 700)
+      await settle()
+      await click('.member-roster-resizer')
+      await key('End')
+      assert.equal(await rosterWidth(), 360)
+      assert.equal((await geometry()).overflow, false)
+      assert.equal(await run('document.querySelector(".members-view").getBoundingClientRect().width'), 410)
+      await key('Home')
+      window.setContentSize(1440, 920)
+      await settle()
+    })
+    await check('roster preferences preserve old collapse and tolerate corrupt storage', async () => {
+      await run(`localStorage.removeItem('rovai-member-roster-width-v2'); localStorage.setItem('rovai-member-roster-width-v1', 'collapsed')`)
+      await reloadPage()
+      assert.equal(await rosterWidth(), 76)
+      await click('.member-sidebar-actions button[aria-label="展开队员名册"]')
+      assert.equal(await rosterWidth(), 256)
+      await run(`localStorage.setItem('rovai-member-roster-width-v2', '{broken')`)
+      await reloadPage()
+      assert.equal(await rosterWidth(), 76)
+      await run(`localStorage.setItem('rovai-member-roster-width-v2', JSON.stringify({ width: 999999, collapsed: false }))`)
+      await reloadPage()
+      assert.equal(await rosterWidth(), 360)
+      await run(`localStorage.removeItem('rovai-member-roster-width-v1'); localStorage.removeItem('rovai-member-roster-width-v2')`)
+      await reloadPage()
+      assert.equal(await rosterWidth(), 256)
+    })
+    await check('roster counts, filtering and runtime captions match the proposal', async () => {
+      await run('window.memberFixture.roster()')
+      await settle()
+      assert.equal(await run('document.querySelectorAll(".member-sidebar-group-heading").length'), 0)
+      assert.equal(await run('document.querySelector(".member-sidebar-title").textContent'), '队员16')
+      assert.equal(await run('getComputedStyle(document.querySelector(".member-sidebar")).backgroundColor'), 'rgb(255, 255, 255)')
+      assert.equal(await run('document.querySelector(".member-sidebar-row").getBoundingClientRect().height'), 60)
+      await capture('member-roster-day')
+      await fill('#member-sidebar-filter', '产品设计')
+      assert.equal(await run('document.querySelectorAll(".member-sidebar-row").length'), 1)
+      assert.equal(await run('document.querySelector(".member-sidebar-title").textContent'), '队员1 / 16')
+      await click('.member-sidebar-select', '队员 5产品设计与用户研究')
+      assert.equal(await run(`document.querySelector('${active}.member-header-runtime').textContent.trim()`), '未配置运行时')
+      await click('.member-sidebar-filter button[aria-label="清除队员筛选"]')
+      await click('.member-sidebar-select', '芝士鉴定士')
+      assert.equal(await run(`document.querySelector('${active}.member-header-runtime').textContent.trim()`), 'Claude Code')
+      await run('window.memberFixture.roster(2)')
+      await settle()
+      assert.deepEqual(await run('[...document.querySelectorAll(".member-sidebar-group-heading")].map(node => node.textContent)'), ['在队14', '暂离2'])
+      await run("window.memberFixture.theme('night')")
+      await click('.member-sidebar-actions button[aria-label="折叠队员名册"]')
+      await capture('member-roster-night-collapsed')
+      await click('.member-sidebar-actions button[aria-label="展开队员名册"]')
+      await reloadPage()
     })
     await check(
       'runtime menu has every admitted product icon and keyboard focus return',

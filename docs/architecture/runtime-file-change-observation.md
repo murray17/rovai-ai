@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-file-change-observation
 authority: command-and-agent-run-file-change-boundaries
 status: accepted
-last_updated: 2026-08-28
+last_updated: 2026-09-07
 ---
 
 # Runtime File Change Observation 架构
 
-字段、归约与授权接口见 [Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md)。
+字段、归约与授权接口见 [Runtime File Change Observation v4](../contracts/runtime-file-change-observation-v4.md)。
 本架构只消费 Runtime 明确报告的文件变化，不读取当前文件、不扫描工作区，也不依赖 Git。
 
 ## 产品模型
@@ -40,6 +40,8 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 - Adapter 只接纳它能从协议结构化字段证明的成功 read/write 文件操作、完整 before/after、完整 unified diff snapshot 或 exact
   mutation；失败、取消、字段不完整和自由文本保持普通 Tool Evidence；
+- Pi 只把成功 `edit` 终态的 `result.details.patch` 作为内容来源，并要求 patch 文件头与同 ToolCall 的结构化 path
+  完全一致且包含 hunk；`write` 保持 operation-only，不从当前磁盘或 input 反推内容；
 - 路径按 Run 冻结的 execution root 做纯词法规范化，该 root 也是 display root。root 内转换为相对路径；root 外
   保留规范化绝对路径。相对 `..` 可解析到 root 外，但不能越过文件系统根；其他 URI scheme、Git metadata 路径和
   不明确多路径 fail closed；
@@ -103,7 +105,8 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
   operation 的时序、计数和原始序号，但不为 operation-only 记录渲染空白占位块；operation-only 文件显示诚实空态；
 - 卡片和 Review 都只消费 typed projection 与受管 detail blob，不读取当前 workspace 或执行 Git；
 - 没有可靠文件 Evidence 时不显示卡片，不显示 unavailable 占位，也不读取当前 workspace 重建；
-- 历史 v1 Evidence 与既有 projection 不 backfill、不重写；exclusion 只作用于新 ingress，Renderer/read wire 不变。
+- 历史 v1-v3 Evidence、Canonical activity 与既有 projection 不 backfill、不重写；exclusion 和 Pi edit patch 映射只作用于
+  新 ingress，Renderer/read wire 不变。
 
 ## Runtime 边界
 
@@ -132,6 +135,16 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - ToolCall 的唯一 location 命中当前 managed output root 时，path-only 与绑定的单 entry Diff 都 fail closed；
   其他 ToolCall 和普通 root 外路径不受影响。
 
+### Pi JSONL RPC
+
+- 同一 `toolCallId` 累计 start/update 的 `toolName + args.path`，只有成功 `tool_execution_end` 才发布 typed
+  read/write operation；终态缺参只复用本 ToolCall 已观察参数；
+- toolName 精确为 `edit` 且 `result.details.patch` 非空时，patch 的 `---`／`+++` 文件头必须与 reported path
+  完全一致并至少包含一个 `@@ ` hunk，才形成单 entry `unified_diff_snapshot`；规范化后文件头改用展示路径；
+- hunk-aware 统计忽略文件头，只计算 hunk 内的内容变化。`write`、失败 edit、缺 patch、路径冲突、缺 hunk 和零变化
+  都不形成 Diff；不读取 `details.diff`，不从 Edit replacement input 或当前磁盘补全；
+- normalized path 命中 managed output root 时，operation 与绑定 Diff 一并 fail closed；其他 root 外绝对路径仍可展示。
+
 ### Claude Code 与 Antigravity
 
 - Claude Code 只配对 `assistant.tool_use(name=Edit)` 与相同 `tool_use_id` 的非错误 `user.tool_result`，保存
@@ -155,7 +168,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 ## 相关规范
 
-- [Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md)
+- [Runtime File Change Observation v4](../contracts/runtime-file-change-observation-v4.md)
 - [Execution Evidence 与 Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [v1.29 决定](../versions/v1.29/decisions.md#v1-29-d08)

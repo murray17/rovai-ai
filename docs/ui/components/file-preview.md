@@ -59,7 +59,8 @@ last_updated: 2026-09-07
 切换 Camp 时，各 Camp 的 Tab 顺序、当前 Tab 与 Pane 可见性在本窗口内独立记忆；关闭 App 后不恢复。返回 Camp
 先显示安全 Tab shell，只有 Pane 可见时才恢复 active 文件，其他普通文件首次激活时再加载，不用旧正文制造即时假象。
 预览内链接成功打开当前 Camp 工作区内的普通文件后，该子 Tab 使用 Main 签发的独立工作区恢复来源；关闭或删除父 Tab
-不影响它再次重验。项目外或临时授权派生文件仍只保留 unavailable shell，不显示新的恢复入口或状态装饰。
+不影响它再次重验。未取得可重验业务 source 的项目外 child 或临时授权派生文件仍只保留 unavailable shell，
+不显示新的恢复入口或状态装饰。
 
 预览顶栏空白处与会话顶栏共用原生窗口拖拽和双击行为（遵循平台标题栏设置），不另造全屏状态。
 标签、关闭、返回和预览按钮使用 `no-drag`；即使标签溢出横向滚动，也在最右按钮前保留窗口拖拽空白。
@@ -98,8 +99,9 @@ Tabs 使用 Codex toolbar 语法：小间距、无逐项边框、当前项用次
 同一套 14px、1.7px 描边单色 SVG Glyph，覆盖共享资源类型矩阵；File Change 固定复用 Diff/Patch Glyph。
 图标使用继承的中性色，作为装饰隐藏于辅助技术，
 文件名和 File Change 前缀继续提供可访问名称，不用颜色代替类型语义。
-文件名使用 UI 字体；同类 Tab 重名且存在安全父目录时显示 `父目录/文件名`；只有安全文件名的项目外文件、
-Attachment 或项目根目录文件使用当前同名组内的 `文件名 · 1/2` 序号区分，不回推或暴露绝对路径。
+文件名使用 UI 字体；同类 Tab 重名时从 Main 已签发的可见路径末尾逐级增加目录，使用当前同名组内的最短唯一后缀，
+例如 `Desktop/report.html` 和 `Downloads/report.html`。重复后缀继续向上补足；只有安全文件名的 Attachment、
+项目根文件或仍无法区分的项使用 `文件名 · 1/2` 序号。
 历史变更与当前文件不会互相触发重名扩展。
 所有 Tab（含 File Change）默认等宽 180px；空间不足时按可用宽度一起收窄，最小 120px，不随文件名或选中状态改变宽度。
 只有全部 Tab 达到最小宽度后仍放不下时，标签栏才横向滚动；关闭标签或扩大预览后会自动回扩，最大仍为 180px。
@@ -107,8 +109,8 @@ Attachment 或项目根目录文件使用当前同名组内的 `文件名 · 1/2
 点击按一屏内的可视宽度平滑滚动，不切换当前文件；减少动态效果时直接定位。触控板滚动、增减 Tab 和调整分栏宽度都会更新按钮。
 键盘聚焦或新打开的 Tab（含关闭按钮）避开边缘按钮；滚动只作用于标签栏，不移动会话或文件正文。
 只有 Tab 达到 120px 时，溢出的文件名才在末端 16px 内渐隐，不使用省略号。类型图标、更新标记和关闭按钮不缩小。短文件名保持清晰，
-完整文件名保留在可访问名称中；项目内目录路径仍通过悬停提示和选中后的路径行查看，项目外文件与 Attachment
-的悬停提示只保留带同名序号的安全文件名。
+完整文件名保留在可访问名称中；项目内与项目外普通文件的 Main 已签发路径进入 Tab title 和选中后的路径行；
+Attachment 的悬停提示仍只保留安全文件名或同名序号。
 关闭按钮预留固定宽度：当前选中项始终显示；其他项默认透明且
 不响应指针，Tab hover、focus-within 或粗指针环境下显示，因而文件名不位移且键盘/触摸始终可达。
 
@@ -125,7 +127,7 @@ Alt+Shift+左右重排。关闭后优先激活右侧，再回到左侧；最后�
 从预览内部打开另一个文件时，在新标签挂载后交接键盘焦点；等待期间用户已把焦点移到会话输入等其他区域时不抢回。
 
 恢复中的普通 Tab 保留原文件图标、文件名和关闭按钮，不增加可见 Loading／错误 Badge；`opening`、`missing`、
-`unavailable` 与 `error` 只追加到 Tab 的可访问名称。恢复 shell 没有当前 handle 时，默认应用、显示所在位置与复制路径
+`unavailable` 与 `error` 只追加到 Tab 的可访问名称。恢复 shell 没有当前 handle 时，默认应用、显示所在位置与复制完整路径
 操作禁用；有稳定业务 source 时菜单提供明确的“重新打开”，临时 child/root source 不伪造该动作。Main 已确认位于
 Camp 工作区内的 child 会先收敛为独立稳定 source，同一项目文件从消息、预览内链接或恢复入口再次到达时复用既有 Tab ID。
 
@@ -154,16 +156,24 @@ Tab。全 operation-only 卡片使用“查看文件”，header 默认打开第
 
 ## 路径与 Viewer
 
-Tabs 下只在项目内普通文件具有目录层级时显示一行只读项目相对路径，格式为
-`apps > desktop > … > filename`。项目根目录文件、项目外文件与 Attachment 不显示路径行，Viewer 直接紧接 Tabs；
-Attachment 即使引用的 source 当前位于项目内也按 Attachment 处理，不从卡片 metadata、Managed storage 或文件名
-回推原路径或 storage model。项目内判定只信 Main 在 canonical 文件仍位于当前 Camp 项目根目录后签发的呈现语义，
-Renderer 不自行猜测。
+Tabs 下在 ready 的项目内或项目外普通文件上始终显示一行路径。项目内文件使用以 canonical Camp 项目根为
+基准的相对路径，包括只有 `README.md` 的项目根文件；项目外文件使用 canonical 绝对路径，canonical 目标
+位于用户主目录时可使用 `~/`。两者使用一致的字体、颜色和交互，不追加项目内外说明、Badge 或特殊状态颜色。
 
-显示路径时整体从左侧自然排列，文件名紧跟最后一个可见目录，不固定到最右侧。空间不足时从目录中部省略，
-优先完整保留文件名；无水平滚动。完整相对路径进入 title 与可访问名称。路径与 Tabs 间无线，路径与正文间一条
-语义 divider。路径隐藏时同时移除高度、分隔线和空占位；若文件发生外部更新，只按需出现独立更新操作行。
-文件处于 missing、unavailable 或 error 时同样隐藏路径行，避免把上次成功呈现重复为当前文件事实。
+用户 Local Attachment Source Ref 成功打开后采用同一行路径与相同交互。Managed/legacy Attachment 不显示路径行，
+Viewer 直接紧接 Tabs。呈现类型和显示值只信 Main 在成功打开 canonical 文件后签发的语义，不从卡片 metadata、
+存储位置或文件名回推路径。
+
+路径使用平台路径分隔符从左侧自然排列。空间不足时从目录中部省略，优先保留末尾目录和文件名，不产生水平滚动。
+未省略的显示值进入 title、可访问名称与 hover/focus tooltip。路径本身是可聚焦的“在 Finder／文件资源管理器中显示”
+入口；鼠标或键盘激活时使用当前文件 handle 重验并定位，不重新解析可见文本。Tab 右键菜单不新增按钮组，项目内外
+普通文件的原复制入口改为“复制完整路径”，固定复制重验后的 canonical 绝对路径，不复制 `~/`、省略文本或项目
+相对路径。源附件同样复制重验后的完整路径；Managed/legacy Attachment 保留“复制文件名”，Main 拒绝通过其 handle
+复制 absolute 内部路径。
+
+路径与 Tabs 间无线，路径与正文间保留一条语义 divider。路径隐藏时同时移除高度、分隔线和空占位；文件处于
+opening、missing、unavailable 或 error 时隐藏路径行，避免把上次成功呈现重复为当前文件事实。若文件发生外部更新，
+只按需出现既有更新操作。
 
 Viewer 不显示预览/源码切换、右上角复制按钮、整行工具栏或 `Ready` 状态。每个类型只有一个规范阅读视图：
 
@@ -223,11 +233,11 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 才显示／激活目标 Tab 和预览 Pane。文件已移动、删除、无权或读取失败时，当前页只显示红色 Toast `无法打开该文件`，不创建失败预览页、不切换
 当前 Tab、不替换已有 ready 内容，也不抢焦点；不支持应用内预览的类型同样不从这类入口启动系统应用或显示目录。
 精确事务与资源清理边界见
-[File Preview v9](../../contracts/file-preview-v9.md)。
+[File Preview v11](../../contracts/file-preview-v11.md)。
 
 首次打开与恢复使用 cold/opening/ready/missing/unavailable/error；快速成功直接显示正文，耗时后才显示轻量 Loading。
 无法形成当前可读内容时，正文只显示水平、垂直居中的 32px 通用文件轮廓，图标下方相隔 12px 显示一句 13px 常规
-公开文案。错误码到文案的 closed mapping 由 [File Preview v9](../../contracts/file-preview-v9.md) 继承的 v8 失败呈现拥有。
+公开文案。错误码到文案的 closed mapping 由 [File Preview v11](../../contracts/file-preview-v11.md) 继承的 v8 失败呈现拥有。
 该状态不显示路径、尺寸、标题、卡片、边框、按钮、技术详情或内部能力名称；错误内容区之外的 Tabs、Viewer 布局和
 其他 Camp 界面沿用既有视觉，不以本状态为理由重做。
 历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、

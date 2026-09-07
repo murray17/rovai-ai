@@ -3261,7 +3261,7 @@ fn attach_canonical_activity(
         JOIN canonical_runtime_activity AS activity
           ON activity.agent_run_id = requested.agent_run_id
          AND activity.execution_epoch = requested.execution_epoch
-         AND activity.classifier_version IN (?2, ?3, ?4)
+         AND activity.classifier_version IN (?2, ?3, ?4, ?5)
         WHERE EXISTS (
             SELECT 1
             FROM json_each(activity.source_evidence_ids_json) AS source_evidence
@@ -3271,7 +3271,8 @@ fn attach_canonical_activity(
                  CASE activity.classifier_version
                    WHEN ?2 THEN 0
                    WHEN ?3 THEN 1
-                   ELSE 2
+                   WHEN ?4 THEN 2
+                   ELSE 3
                  END
         "#,
     )?;
@@ -3280,6 +3281,7 @@ fn attach_canonical_activity(
             requested_json,
             crate::canonical_activity::CLASSIFIER_VERSION,
             crate::canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
+            crate::canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
             crate::canonical_activity::LEGACY_CLASSIFIER_VERSION,
         ],
         |row| {

@@ -2490,13 +2490,21 @@ describe('task event projections', () => {
     expect(markup).not.toContain('<form')
   })
 
-  it('defaults to every present member and recommends the first Runtime Ready Lead', () => {
+  it('defaults to configured usable members without preferring deep readiness', () => {
     const selection = initialCampSelection({
       admissible: true,
       presentMembers: [
         {
           agentId: 'agent-unready', displayName: '未就绪',
           memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'needs_attention'
+        },
+        {
+          agentId: 'agent-light', displayName: '可用',
+          memberOrder: 1, runtimeConfigured: true, runtimeReadiness: 'light_ready'
+        },
+        {
+          agentId: 'agent-unsaved', displayName: '未保存配置',
+          memberOrder: 2, runtimeConfigured: false, runtimeReadiness: 'ready'
         },
         {
           agentId: 'agent-ready', displayName: '已就绪',
@@ -2508,8 +2516,8 @@ describe('task event projections', () => {
     })
 
     expect(selection).toEqual({
-      memberIds: ['agent-unready', 'agent-ready'],
-      leadId: 'agent-ready'
+      memberIds: ['agent-light', 'agent-ready'],
+      leadId: 'agent-light'
     })
   })
 
@@ -2577,7 +2585,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('falls back to every present member when all saved members are unavailable', () => {
+  it('falls back to available members when all saved members are unavailable', () => {
     const preflight = {
       admissible: true,
       presentMembers: [
@@ -3212,7 +3220,7 @@ describe('task event projections', () => {
     expect(rescan).toBeLessThan(headerEnd)
     expect(headerEnd).toBeLessThan(directory)
     expect(markup).toContain('<h1>运行时</h1>')
-    expect(markup).toContain('管理本机 Agent 运行时及其可用状态。')
+    expect(markup).toContain('管理本机 Agent 运行时，只需安装你准备使用的。')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('高级诊断与自定义启动入口')
   })
@@ -7346,8 +7354,12 @@ describe('task event projections', () => {
     expect(markup).not.toContain('已检查')
     expect(markup).toContain('实验性')
     expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(14)
-    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(14)
-    expect(markup.match(/检查可用性/g)).toHaveLength(13)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(12)
+    expect(markup.match(/检查可用性/g)).toHaveLength(11)
+    expect(markup).toContain('Claude Code 登录指南')
+    expect(markup).toContain('Antigravity 安装指南')
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).not.toContain('runtime-guide-command')
     expect(markup).not.toContain('实验性开放 ·')
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
@@ -7394,6 +7406,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('检查可用性')
     expect(markup).toContain('当前平台尚无可检测 Runtime')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')
+    expect(markup).not.toContain('安装指南')
+    expect(markup).not.toContain('登录指南')
   })
 })
 

@@ -35,7 +35,7 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v9](../contracts/file-preview-v9.md) 的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v11](../contracts/file-preview-v11.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有按 Camp 隔离的窗口内 Tab shell、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web
   入口；inline-code 和正文不进入文件识别，也不读取磁盘。Tab shell 不拥有文件能力或当前文件事实。
 
@@ -54,8 +54,9 @@ Main 对 root 和目标分别 realpath，拒绝特殊文件，并把一次可信
 及 `child_of_handle` 使用同一规则；绝对路径、Home 相对路径、file URI 与 symlink 最终指向的具体文件没有第二次授权交互。
 
 附件入口使用 composer、pending、pending_edit 或 message 的 exact owner locator。Core 在每次显式
-preview/open/reveal 时解析私有 source path 或既有 Managed/legacy path，并返回当前 availability；Renderer 不提交、
-接收或推断绝对路径。SQLite 历史读取不预先 stat 附件，动作结果只更新当前 Renderer 卡片且不持久化。
+preview/open/reveal 时解析私有 source path 或既有 Managed/legacy path，并返回当前 availability。附件卡片不提交、
+接收或推断绝对路径；成功的源文件预览另由 Main 签发路径呈现。SQLite 历史读取不预先 stat 附件，动作结果只更新
+当前 Renderer 卡片且不持久化。
 
 目录不取得文件读取能力：仅在来源已校验的明确用户激活中交给系统文件管理器显示，不创建 Tab、handle 或 watcher。
 消息/工作区中的显式绝对路径、Home 相对路径或本机 file URI 若直接指向项目外目录，可只执行系统显示；相对路径或
@@ -80,6 +81,23 @@ target 显示网页图标。`inlineCode` 始终渲染普通 `<code>`，普通正
 同一视觉类型；未知扩展名使用通用文件图标。它不参与消息语法识别，也不拥有 `FilePreviewKind` 或打开策略。Main 的
 既有 classifier 继续独立结合扩展名、大小、MIME 与内容决定 Preview、系统应用或失败，不支持预览的文件不会因
 已经显示类型图标而创建 Preview Tab。
+
+## 路径呈现与系统操作
+
+Main 在来源校验、path resolution、realpath、普通文件检查和 classifier 成功后，以实际打开的 canonical
+文件生成呈现：canonical 文件位于 canonical Camp 项目根内时签发项目相对路径；项目外普通文件签发
+canonical 绝对路径，位于 canonical Home 内时可投影为 `~/`。Renderer 只使用 Main 签发的
+`project_relative | external | file_name_only` 呈现，不从字符串反推项目归属或文件身份。
+
+Core 的内部 Attachment target 用 canShowPath 区分 Local Attachment Source Ref 和 Managed/legacy storage。
+源引用成功打开后遵循同一 canonical 路径规则，项目根由所属 Camp 的独立 workspace authority 提供，不能使用
+附件父目录替代。无 workspace 时仍可显示有效源目标的绝对路径；OS Temp source 也只呈现实际打开的位置。
+Managed/legacy 附件只签发 authority 给出的安全文件名，即使存储位于项目内也不显示内部路径。普通附件卡片 View
+仍无路径和存储类型；这一呈现选择由 Core/Main 完成，不由 Renderer 猜测。
+
+路径行的系统定位、Tab 菜单的系统打开与复制完整路径都以当前句柄记录为输入。Main 在操作前重验来源、
+binding generation 和 canonical 文件身份；复制始终使用重验后的 canonical 绝对路径。可见 `displayPath`
+不反向进入 Main，不创建 Root Grant，不授权父目录，也不更改 Camp、会话或 Runtime 工作目录。
 
 ## 窗口文件能力
 

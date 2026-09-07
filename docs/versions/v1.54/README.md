@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.54
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -66,7 +66,6 @@ Automation。每次实际执行创建一个普通 Camp，把冻结的 Prompt 交
 - [Built-in Tool Transport v23](../../contracts/builtin-tool-transport-v23.md)
 - [File Preview v9](../../contracts/file-preview-v9.md)
 
-
 ## 通知交互补充
 
 本版本补充本机通知：公屏与每段单聊独立识别，当前阅读区完成不弹卡；精确单聊通知、私有审批、两层
@@ -75,3 +74,5 @@ Automation。每次实际执行创建一个普通 Camp，把冻结的 Prompt 交
 [Single Chat v3](../../contracts/single-chat-v3.md)、[Camp Open Projection v17](../../contracts/camp-open-projection-v17.md)。
 Migration 146 只变更未来 notification source trigger，保留 v1.54 / projection 96 的存储形状和历史处置。
 本地 UI 可逆交互与精确来源约束由合同说明，不新增重复的 Version Decision。验证记录见实施计划。
+
+后续：[v1.55](../v1.55/README.md)。

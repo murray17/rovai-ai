@@ -33,6 +33,19 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
+### 2026-09-07 Pi 0.84.4 edit patch 文件变化证据
+
+对已有 Pi 0.84.4 Native Session 的原始 JSONL 做只读核验：成功 `edit` 的
+`tool_execution_end.result.details.patch` 包含同一 `args.path` 的 `---`／`+++` 文件头与完整 hunk，可直接提供
+逐行新增/删除；成功 `write` 终态没有等价 before/after 或 patch。此前 Core 只保留了两类 Tool 的路径级 operation，
+所以历史 Camp 的 `edit` 行数并非源事件缺失，而是 ingress 未接入；`write` 的行数则无法仅凭该事件诚实恢复。
+
+当前实现只在 toolName 精确为 `edit`、成功终态、reported path 与 patch 双文件头完全一致且存在 hunk 时，把
+`details.patch` 归一为统一 Diff Evidence。路径冲突、缺 hunk、零变化、失败 edit 和 write 均保持保守回退；不读取
+当前文件，不使用 replacement input 或 `details.diff` 补全。Migration 147 以 activity-v4 隔离新映射，不回写既有
+Evidence、Canonical activity 或 AgentRun 投影。该变化增加文件变化观测精度，不改变 Pi 启动、权限、模型、Session
+或三平台资格。
+
 ### 2026-09-05 Pi 三平台正式准入
 
 维护者确认 Pi 已分别在 macOS arm64、macOS x64 与 Windows x64 完成目标主机验证，没有发现阻止发布的问题，并
@@ -65,7 +78,7 @@ External MCP 继续为 accepted `Unsupported`，结构化 Web Search 与 Camp Fa
 | Auth / Model | 官方 native default MiniMax M3 请求成功；Core catalog/default 与 explicit set/get validator 有 deterministic coverage | 正式 Run 只继承 Pi 官方配置；不借 Claude provider/Home |
 | Session / Host | First Run 后停止 Core，重启后同 full Native Session ID cold exact resume；下一 Run 复用同 Host/Session；跨 Camp A→B→A 使用同 workspace Host、两个 full Session ID 严格分离并准确切回；两个并发 Run 使用不同 Host | `resident_multi_session` 实现成立；复用 identity 是 workspace/process，当前 Camp/member invalidation scope 单独更新；公共 Fleet 用计入容量的 Starting reservation 在锁外并发 spawn，同 Run 等待同一结果；Core planned shutdown 后 descendant 与 Host config 为零 |
 | Bootstrap / lifecycle | 历史 smoke 的首次、cold resume、warm reuse 曾通过 managed-input receipt；公开 events/stderr 不含 `sessionFile` 或 `nativeSessionFile` | 当前 v7 每轮重新读取 binding 并追加 `managed_system_prompt`，失败只诊断；新 Run 不生成或读取 Receipt。首个 owner-fenced `agent_start` 接受 Delivery 并发布 started，`agent_settled` 结算 |
-| Action / cancel | 历史受管 smoke 覆盖 stdout、stderr、mixed、empty、exit 7、>50KB/2500 行、allow/deny 与 sleep cancel；这些仍是 wire/lifecycle 证据，不再证明当前审批产品能力 | 当前所有 Built-in/Extension Tool 按 Pi 原生语义执行；无 Rovai Approval、shell envelope、permission option 或 sandbox。Action 继续由原生结构化 Tool events 归一，cancel 仍使用 correlated `abort` |
+| Action / cancel | 历史受管 smoke 覆盖 stdout、stderr、mixed、empty、exit 7、>50KB/2500 行、allow/deny 与 sleep cancel；2026-09-07 只读核验确认成功 edit 终态携带 path-bound 原生 patch，而 write 没有等价内容字段 | 当前所有 Built-in/Extension Tool 按 Pi 原生语义执行；无 Rovai Approval、shell envelope、permission option 或 sandbox。Action 继续由原生结构化 Tool events 归一，cancel 仍使用 correlated `abort`；edit patch 可形成统一 Diff 与真实 `+ / -`，write 保持 path-only |
 | MCP | 上游没有原生 External MCP；通用 Extension Tool API 不作为产品 MCP transport | `Unsupported`；Pi 静默忽略已保存 Assignment，不读取配置、不投影或启动 Server、不注册 proxy Tool，MCP 变化不参与 Host/LRU/resume |
 | Skills / Built-in | 2026-09-07 在 macOS arm64 以 Pi 0.84.4 / `pi://runtime-default` 真实调用 `.pi/skills` 私有随机标记 Skill，并覆盖导入、Revision update、disable/re-enable、unassign/restore、hard delete、Core 重启、project-owned 同名 shadow 与同 Host 相邻 Session no-leak；Built-in CLI 15-operation full Run 与 resumed/new-lease Run 既有证据通过 | Rovai managed `.pi/skills` 投递、原生发现、调用与生命周期为 `Verified + Implemented`。发现仍只由 Pi 原生 ResourceLoader/workspace trust 决定，Rovai 不追加 path、不读取 `get_commands`、不声明完整 native catalog attestation；Built-in 既有 Verified 证据不变 |
 | Final / Usage | `agent_settled` 后唯一成功；terminal assistant `message_end.message.usage` 在 Monitoring 得到 input/output；cancel 不触发成功 | streamed update/session totals 不计量；reasoning/cost 缺失保持 unknown |

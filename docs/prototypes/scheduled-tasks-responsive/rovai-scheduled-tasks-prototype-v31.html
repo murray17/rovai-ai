@@ -1,0 +1,3974 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rovai AI · 定时任务交互稿 v31</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      --rail-width: 270px;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --surface-sunken: #e4e8eb;
+      --conversation-surface: #ffffff;
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, .16);
+      --overlay: rgba(28, 32, 43, .42);
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, .14);
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --channel-feishu: #3370ff;
+      --channel-dingtalk: #0b7cff;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { color: var(--ink); background: var(--canvas); font-size: 13px; }
+    button, input, textarea, select { font: inherit; }
+    button { color: inherit; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled, input:disabled, select:disabled { cursor: default; opacity: .48; }
+    :where(button, input, textarea, select, summary):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+    svg { display: block; }
+
+    .app-shell {
+      display: grid;
+      width: 100vw;
+      height: 100vh;
+      grid-template-columns: var(--rail-width) minmax(0, 1fr);
+      overflow: hidden;
+      background: var(--conversation-surface);
+    }
+
+    /* Current Rovai global rail */
+    .unified-sidebar {
+      position: relative;
+      grid-column: 1;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 0 10px 10px;
+      border-right: 1px solid var(--rail-line);
+      color: var(--rail-ink);
+      background: var(--rail);
+      user-select: none;
+    }
+    .unified-sidebar-drag { flex: 0 0 38px; -webkit-app-region: drag; }
+    .unified-brand { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 14px; }
+    .rail-logo { display: flex; min-width: 0; height: 38px; align-items: center; gap: 10px; color: var(--rail-logo); }
+    .rail-logo strong { color: var(--ink); font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+    .rail-logo-mark { flex: 0 0 auto; }
+    .brand-rendezvous-point { fill: #d3a45f; stroke: var(--rail); stroke-width: .65; }
+    .unified-primary-nav { display: grid; gap: 3px; margin-bottom: 12px; }
+    .rail-button {
+      position: relative;
+      display: flex;
+      width: 100%;
+      min-height: 34px;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--rail-ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .rail-button:hover:not(:disabled) { color: var(--ink); background: var(--surface-muted); }
+    .rail-button.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .rail-button.active .rail-label { font-weight: 500; }
+    .rail-glyph { display: grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; }
+    .rail-glyph svg { width: 16px; height: 16px; }
+    .rail-label { display: inline; min-width: 0; overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+
+    .conversation-jump {
+      display: flex;
+      min-height: 32px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 0 0 4px;
+      padding: 0 9px;
+      border: 1px solid var(--rail-line);
+      border-radius: 7px;
+      color: var(--faint);
+      background: color-mix(in srgb, var(--surface-raised) 76%, transparent);
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .conversation-jump:hover { color: var(--ink); background: var(--surface-raised); }
+    .conversation-jump kbd {
+      min-width: 27px;
+      padding: 1px 5px;
+      border: 1px solid var(--rail-line);
+      border-radius: 4px;
+      color: var(--faint);
+      background: var(--rail);
+      font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-align: center;
+    }
+    .navigation-scroll { min-height: 0; flex: 1; overflow-y: auto; padding: 3px 1px 16px; }
+    .navigation-scroll::-webkit-scrollbar,
+    .task-list-scroll::-webkit-scrollbar,
+    .editor-pane::-webkit-scrollbar { width: 10px; }
+    .navigation-scroll::-webkit-scrollbar-thumb,
+    .task-list-scroll::-webkit-scrollbar-thumb,
+    .editor-pane::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: var(--surface-selected); background-clip: padding-box; }
+    .navigation-section-title {
+      display: grid;
+      min-height: 34px;
+      grid-template-columns: minmax(0, 1fr) 26px;
+      align-items: center;
+      padding: 0 0 3px;
+      color: var(--rail-ink);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .section-create-button { display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--faint); background: transparent; cursor: pointer; font-size: 17px; }
+    .section-create-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .project-group { position: relative; min-width: 0; margin-bottom: 8px; }
+    .project-heading {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 34px;
+      grid-template-columns: 16px 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 8px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .project-heading:hover { background: color-mix(in srgb, var(--surface-muted) 70%, transparent); }
+    .project-chevron { color: var(--faint); transition: transform 120ms ease; }
+    .project-group.collapsed .project-chevron { transform: rotate(-90deg); }
+    .project-icon { display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid var(--rail-line); border-radius: 5px; color: var(--brand-ink); background: var(--surface-raised); }
+    .project-name { min-width: 0; overflow: hidden; font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .project-count { color: var(--faint); font: 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .conversation-list { display: grid; gap: 1px; padding-left: 25px; }
+    .project-group.collapsed .conversation-list { display: none; }
+    .conversation-row {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 30px;
+      grid-template-columns: 6px minmax(0, 1fr) 18px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 7px 0 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--rail-ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .conversation-row:hover { color: var(--ink); background: var(--surface-hover); }
+    .conversation-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--line-strong); }
+    .conversation-dot.unread { background: var(--brand); }
+    .conversation-title { min-width: 0; overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-tail { display: grid; width: 18px; height: 18px; place-items: center; color: var(--faint); }
+    .conversation-tail svg { width: 13px; height: 13px; }
+    .conversation-spinner { width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, var(--brand) 24%, transparent); border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .unified-sidebar-footer { display: grid; flex: 0 0 auto; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+    /* Scheduled workspace: no page title bar */
+    .workspace { grid-column: 2; min-width: 0; min-height: 0; overflow: hidden; background: var(--conversation-surface); }
+    .scheduled-shell { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: 248px minmax(0, 1fr); }
+
+    .task-pane {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-rows: 38px auto auto minmax(0, 1fr);
+      border-right: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .pane-drag-strip { min-height: 38px; -webkit-app-region: drag; }
+    .task-toolbar { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px 7px; }
+    .task-filter-group { display: flex; min-width: 0; align-items: center; gap: 2px; }
+    .filter-button {
+      min-height: 25px;
+      padding: 3px 7px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+      font-size: 9.8px;
+      white-space: nowrap;
+    }
+    .filter-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .filter-button.active { color: var(--ink); background: var(--surface-selected); }
+    .task-search-shell {
+      display: flex;
+      min-height: 31px;
+      align-items: center;
+      gap: 7px;
+      margin: 6px 11px 11px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--faint);
+      background: var(--surface-raised);
+    }
+    .task-search-shell:focus-within { border-color: var(--line-strong); box-shadow: 0 0 0 2px var(--focus-soft); }
+    .task-search-shell svg { width: 13px; height: 13px; flex: 0 0 13px; }
+    .task-search-shell input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 10.2px; }
+    .task-search-shell input::placeholder { color: color-mix(in srgb, var(--faint) 72%, transparent); }
+    .primary-button,
+    .quiet-button,
+    .text-button {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 7px;
+      font-size: 10.5px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .primary-button { border: 1px solid var(--brand); color: var(--brand-contrast); background: var(--brand); }
+    .primary-button:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
+    .quiet-button { border: 1px solid var(--line-strong); color: var(--ink); background: var(--surface); }
+    .quiet-button:hover:not(:disabled) { background: var(--surface-muted); }
+    .text-button { min-height: 28px; padding: 4px 7px; border: 0; color: var(--muted); background: transparent; }
+    .text-button:hover:not(:disabled) { color: var(--ink); background: var(--surface-muted); }
+    .task-toolbar .primary-button { min-height: 27px; padding: 3px 9px; font-size: 10px; }
+    .task-list-scroll { min-height: 0; overflow-y: auto; padding: 2px 8px 18px; }
+
+    .scheduled-task-list { display: grid; gap: 2px; }
+    .scheduled-task-row {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 52px;
+      grid-template-columns: minmax(0, 1fr) 28px;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 8px 6px 10px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .scheduled-task-row:hover { background: var(--surface-hover); }
+    .scheduled-task-row.active { background: var(--surface-selected); }
+    .scheduled-task-copy { min-width: 0; }
+    .scheduled-task-copy strong,
+    .scheduled-task-copy small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .scheduled-task-copy strong { color: var(--ink); font-size: 11px; font-weight: 590; line-height: 1.35; }
+    .scheduled-task-copy small { margin-top: 4px; color: var(--faint); font-size: 9.8px; line-height: 1.35; }
+    .avatar { display: grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; border-radius: 50%; color: #fff; font-size: 9.5px; font-weight: 700; line-height: 1; }
+    .member-alice { background: var(--identity-1); }
+    .member-minato { background: var(--identity-2); }
+    .member-gugu { background: var(--identity-3); }
+
+    .task-suggestions { margin: 18px 5px 0; padding-top: 13px; border-top: 1px solid var(--line); }
+    .task-suggestions h2 { margin: 0 0 7px 3px; color: var(--faint); font-size: 10px; font-weight: 560; }
+    .suggestion-list { display: grid; gap: 1px; }
+    .suggestion-row {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 34px;
+      grid-template-columns: 16px minmax(0, 1fr);
+      align-items: center;
+      gap: 7px;
+      padding: 4px 6px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .suggestion-row:hover { background: var(--surface-hover); }
+    .suggestion-icon { display: grid; width: 16px; height: 16px; place-items: center; color: var(--brand); }
+    .suggestion-icon svg { width: 13px; height: 13px; }
+    .suggestion-copy { display: flex; min-width: 0; align-items: baseline; gap: 6px; }
+    .suggestion-copy strong { min-width: 0; overflow: hidden; font-size: 10px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+    .suggestion-copy small { flex: 0 0 auto; color: var(--faint); font-size: 8.8px; white-space: nowrap; }
+
+    .editor-pane { min-width: 0; min-height: 0; overflow-y: auto; background: var(--conversation-surface); }
+    .editor-inner { display: flex; width: min(980px, calc(100% - 40px)); min-height: calc(100% - 38px); flex-direction: column; margin: 0 20px; padding: 10px 0 18px; }
+    .editor-topline { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
+    .task-name-input {
+      width: 100%;
+      min-width: 0;
+      margin: 0;
+      padding: 0 0 3px;
+      border: 0;
+      border-radius: 4px;
+      color: var(--ink);
+      background: transparent;
+      font-size: 16px;
+      font-weight: 590;
+      line-height: 1.3;
+      letter-spacing: -.018em;
+    }
+    .task-name-input::placeholder { color: color-mix(in srgb, var(--faint) 76%, transparent); }
+    .task-name-input:focus,
+    .task-name-input:focus-visible { outline: 0; outline-offset: 0; box-shadow: inset 0 -2px 0 var(--brand); }
+    .editor-utilities { display: flex; align-items: center; gap: 4px; margin-top: -3px; }
+    .editor-close {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .editor-close:hover { color: var(--ink); background: var(--surface-muted); }
+
+    .template-picker { position: relative; }
+    .template-trigger {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 7px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10px;
+    }
+    .template-trigger:hover { color: var(--ink); background: var(--surface-muted); }
+    .template-menu {
+      position: absolute;
+      z-index: 30;
+      top: calc(100% + 5px);
+      right: 0;
+      display: none;
+      width: 226px;
+      padding: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .template-menu.open { display: grid; }
+    .template-option {
+      display: grid;
+      width: 100%;
+      min-height: 44px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .template-option:hover { background: var(--surface-hover); }
+    .template-option strong { display: block; font-size: 10.5px; font-weight: 620; }
+    .template-option small { display: block; margin-top: 2px; color: var(--faint); font-size: 8.8px; }
+    .template-option > span:last-child { color: var(--faint); font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .task-prompt-input {
+      width: 100%;
+      min-height: 72px;
+      margin-top: 12px;
+      padding: 11px 12px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--ink);
+      background: var(--input);
+      font-size: 11.5px;
+      line-height: 1.62;
+    }
+    .task-prompt-input::placeholder { color: var(--faint); }
+    .task-prompt-input:focus { border-color: var(--control-line); box-shadow: 0 0 0 3px var(--focus-soft); outline: 0; }
+
+    .context-panel {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-top: 14px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-raised);
+    }
+    .context-field {
+      display: grid;
+      min-width: 0;
+      min-height: 43px;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding: 0 13px;
+    }
+    .context-field + .context-field { border-left: 1px solid var(--line); }
+    .context-field > span { color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .context-field select {
+      width: 100%;
+      min-width: 0;
+      min-height: 30px;
+      padding: 4px 24px 4px 6px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.5px;
+      text-align: right;
+      text-align-last: right;
+    }
+    .context-field select:hover { background: var(--surface-muted); }
+
+    .schedule-section { margin-top: 18px; }
+    .field-caption { margin: 0 0 6px; color: var(--faint); font-size: 10px; font-weight: 500; }
+    .schedule-panel { position: relative; overflow: visible; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-raised); }
+    .schedule-row { display: grid; min-height: 42px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 0 14px; }
+    .schedule-row + .schedule-row { border-top: 1px solid var(--line); }
+    .schedule-row > span:first-child { color: var(--ink); font-size: 10.5px; }
+    .schedule-control {
+      position: relative;
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 2px 4px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.5px;
+      text-align: right;
+    }
+    .schedule-control:hover { background: var(--surface-muted); }
+    .schedule-control svg { width: 12px; height: 12px; color: var(--faint); }
+    .schedule-input {
+      width: 172px;
+      min-height: 30px;
+      padding: 4px 7px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--surface-subtle);
+      font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-align: right;
+    }
+    .schedule-input:focus { box-shadow: 0 0 0 2px var(--focus-soft); outline: 0; }
+    .schedule-menu {
+      position: absolute;
+      z-index: 35;
+      top: 38px;
+      right: 8px;
+      display: none;
+      width: 150px;
+      padding: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .schedule-menu.open { display: grid; }
+    .schedule-menu button { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px; border: 0; border-radius: 6px; color: var(--ink); background: transparent; cursor: pointer; font-size: 10.5px; text-align: left; }
+    .schedule-menu button:hover { background: var(--surface-hover); }
+    .schedule-menu button.selected { color: var(--brand-ink); background: var(--surface-selected); }
+    .schedule-check { width: 14px; color: var(--brand-ink); text-align: center; }
+
+    .channel-disclosure { margin-top: 7px; color: var(--muted); }
+    .channel-disclosure summary { display: inline-flex; min-height: 26px; align-items: center; gap: 5px; padding: 2px 3px; border-radius: 5px; cursor: pointer; font-size: 9.8px; list-style: none; }
+    .channel-disclosure summary::-webkit-details-marker { display: none; }
+    .channel-disclosure summary:hover { color: var(--ink); background: var(--surface-subtle); }
+    .channel-disclosure summary svg { width: 11px; height: 11px; color: var(--faint); transition: transform 120ms ease; }
+    .channel-disclosure[open] summary svg { transform: rotate(90deg); }
+    .channel-selected-count { color: var(--faint); }
+    .channel-options { display: flex; flex-wrap: wrap; gap: 7px 18px; padding: 4px 3px 0; }
+    .channel-option { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); cursor: pointer; font-size: 10px; }
+    .channel-option input { width: 14px; height: 14px; margin: 0; accent-color: var(--brand); }
+    .channel-option.disabled { color: var(--faint); cursor: default; opacity: .58; }
+    .channel-mark { display: inline-grid; width: 17px; height: 17px; place-items: center; border-radius: 5px; color: #fff; font-size: 9px; font-weight: 700; }
+    .channel-mark.feishu { background: var(--channel-feishu); }
+    .channel-mark.dingtalk { background: var(--channel-dingtalk); }
+
+    .create-actions { display: flex; margin-top: auto; justify-content: flex-end; padding-top: 24px; }
+    .create-actions .primary-button { min-width: 72px; min-height: 32px; padding-right: 15px; padding-left: 15px; }
+
+    .history-section { margin-top: 30px; }
+    .history-heading { display: flex; min-height: 28px; align-items: center; margin-bottom: 3px; }
+    .history-heading h2 { margin: 0; color: var(--faint); font-size: 10px; font-weight: 520; }
+    .history-list { display: grid; gap: 1px; }
+    .history-row {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 36px;
+      grid-template-columns: 7px 104px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      padding: 4px 7px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .history-row:hover { background: var(--surface-hover); }
+    .run-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .run-dot.failed { background: var(--danger); }
+    .run-when { overflow: hidden; color: var(--muted); font-size: 9.8px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-summary { min-width: 0; overflow: hidden; color: var(--ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-relative { color: var(--faint); font: 9.2px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+
+    .toast {
+      position: fixed;
+      z-index: 100;
+      right: 22px;
+      bottom: 22px;
+      display: none;
+      max-width: min(380px, calc(100vw - 44px));
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: 0 12px 32px color-mix(in srgb, var(--ink) 18%, transparent);
+      font-size: 10.5px;
+    }
+    .toast.show { display: flex; }
+
+    @media (max-width: 1160px) {
+      .scheduled-shell { grid-template-columns: 224px minmax(0, 1fr); }
+      .editor-inner { width: min(760px, calc(100% - 42px)); }
+      .context-panel { grid-template-columns: minmax(0, 1fr); }
+      .context-field + .context-field { border-top: 1px solid var(--line); border-left: 0; }
+    }
+
+    /* v8 — compact task utility row, task-local actions, autosaving detail */
+    .task-pane { grid-template-rows: 38px auto minmax(0, 1fr); }
+    .task-utility-row {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: 58px minmax(0, 1fr) 30px;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 10px 9px;
+    }
+    .task-filter-select {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      min-height: 31px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: var(--surface-raised);
+    }
+    .task-filter-select:hover { border-color: var(--line-strong); }
+    .task-filter-select:focus-within { border-color: var(--line-strong); box-shadow: 0 0 0 2px var(--focus-soft); }
+    .task-filter-select select {
+      width: 100%;
+      min-width: 0;
+      min-height: 29px;
+      padding: 0 22px 0 9px;
+      border: 0;
+      outline: 0;
+      appearance: none;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10px;
+    }
+    .task-filter-select > svg { position: absolute; right: 7px; width: 10px; height: 10px; color: var(--faint); pointer-events: none; }
+    .task-utility-row .task-search-shell { min-width: 0; margin: 0; border-radius: 8px; }
+    .task-create-icon {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      color: var(--brand-ink);
+      background: var(--surface-raised);
+      cursor: pointer;
+    }
+    .task-create-icon:hover { color: var(--brand-hover); background: var(--surface-muted); }
+    .task-create-icon svg { width: 14px; height: 14px; }
+
+    .scheduled-task-list { gap: 2px; }
+    .scheduled-task-item {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      grid-template-columns: minmax(0, 1fr) 24px;
+      align-items: stretch;
+      border-radius: 7px;
+      background: transparent;
+    }
+    .scheduled-task-item:hover { background: var(--surface-hover); }
+    .scheduled-task-item.active { background: var(--surface-selected); }
+    .scheduled-task-open {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 52px;
+      grid-template-columns: minmax(0, 1fr) 28px;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 4px 6px 10px;
+      border: 0;
+      border-radius: 7px 0 0 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .scheduled-task-more {
+      display: grid;
+      width: 24px;
+      min-height: 52px;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      border-radius: 0 7px 7px 0;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+      font-size: 16px;
+      letter-spacing: 1px;
+    }
+    .scheduled-task-more:hover,
+    .scheduled-task-more[aria-expanded="true"] { color: var(--ink); background: color-mix(in srgb, var(--surface-muted) 84%, transparent); }
+    .task-action-menu {
+      position: absolute;
+      z-index: 45;
+      top: 43px;
+      right: 2px;
+      display: none;
+      width: 132px;
+      padding: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .task-action-menu.open { display: grid; }
+    .task-action-menu button {
+      display: flex;
+      width: 100%;
+      min-height: 31px;
+      align-items: center;
+      padding: 5px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.3px;
+      text-align: left;
+    }
+    .task-action-menu button:hover { background: var(--surface-hover); }
+    .task-action-menu button.danger { color: var(--danger); }
+    .task-action-menu button:disabled { color: var(--faint); }
+
+    .task-suggestions { margin-top: 17px; }
+    .task-suggestions h2 { font-weight: 600; }
+    .editor-inner { padding-top: 14px; }
+    .task-name-input { padding-right: 0; }
+    .history-section { margin-top: 27px; }
+    .history-list { gap: 1px; }
+    .history-row {
+      min-height: 32px;
+      grid-template-columns: 7px minmax(0, 1fr) auto;
+      gap: 9px;
+      padding: 3px 6px;
+    }
+    .run-when { color: var(--ink); font-size: 10px; }
+    .run-relative { font-size: 9.1px; }
+    .history-empty { padding: 5px 6px; color: var(--faint); font-size: 9.6px; }
+
+    @media (max-width: 1160px) {
+      .task-utility-row { grid-template-columns: 54px minmax(0, 1fr) 30px; gap: 5px; padding-right: 8px; padding-left: 8px; }
+    }
+
+
+    /* v11 — compact assignment controls, full-width overview, quieter schedule, richer channel delivery */
+    .scheduled-shell.overview { grid-template-columns: minmax(0, 1fr); }
+    .scheduled-shell.overview .task-pane {
+      border-right: 0;
+      background: var(--conversation-surface);
+    }
+    .scheduled-shell.overview .editor-pane { display: none; }
+    .scheduled-shell.overview .task-utility-row,
+    .scheduled-shell.overview .task-list-scroll {
+      width: min(720px, calc(100% - 48px));
+      margin-right: auto;
+      margin-left: auto;
+    }
+    .scheduled-shell.overview .task-utility-row { padding-top: 4px; }
+    .scheduled-shell.overview .task-list-scroll { padding-right: 0; padding-left: 0; }
+    .scheduled-shell.overview .scheduled-task-item { border-radius: 8px; }
+    .scheduled-shell.overview .scheduled-task-open,
+    .scheduled-shell.overview .scheduled-task-more { min-height: 56px; }
+    .scheduled-shell.overview .scheduled-task-copy strong { font-size: 12px; }
+    .scheduled-shell.overview .scheduled-task-copy small { font-size: 10.2px; }
+    .scheduled-shell.overview .task-suggestions { margin-top: 24px; }
+
+    .context-panel { display: none; }
+    .context-compact {
+      display: flex;
+      min-width: 0;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 9px 18px;
+      margin-top: 13px;
+    }
+    .compact-context-field {
+      display: inline-grid;
+      min-width: 0;
+      grid-template-columns: auto auto;
+      align-items: center;
+      gap: 8px;
+    }
+    .compact-context-label { color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .compact-select-shell {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 32px;
+      grid-template-columns: auto minmax(0, 1fr) 12px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--faint);
+      background: transparent;
+    }
+    .compact-select-shell:hover { border-color: var(--line-strong); }
+    .compact-select-shell:focus-within { border-color: var(--control-line); box-shadow: 0 0 0 2px var(--focus-soft); }
+    .compact-context-member .compact-select-shell { width: 218px; }
+    .compact-context-project .compact-select-shell { width: 174px; }
+    .compact-select-shell select {
+      width: 100%;
+      min-width: 0;
+      min-height: 30px;
+      padding: 0;
+      border: 0;
+      outline: 0;
+      appearance: none;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.5px;
+    }
+    .compact-select-shell > svg { width: 11px; height: 11px; pointer-events: none; }
+    .compact-member-avatar { width: 21px; height: 21px; flex-basis: 21px; font-size: 8px; }
+    .compact-project-icon { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 5px; color: var(--brand-ink); background: var(--brand-soft); }
+    .compact-project-icon svg { width: 12px; height: 12px; }
+
+    .schedule-panel { background: transparent; }
+    .schedule-input { background: transparent; }
+    .schedule-input:hover { background: var(--surface-subtle); }
+
+    .task-suggestions h2 { margin: 0 0 9px 4px; font-size: 11.5px; font-weight: 650; }
+    .suggestion-row { min-height: 40px; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; padding: 5px 7px; }
+    .suggestion-icon { width: 18px; height: 18px; }
+    .suggestion-icon svg { width: 14px; height: 14px; }
+    .suggestion-copy { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 6px; }
+    .suggestion-copy strong { font-size: 12px; font-weight: 610; }
+    .suggestion-copy small { font-size: 9.8px; }
+
+    .channel-disclosure { margin-top: 10px; color: var(--muted); }
+    .channel-disclosure > summary {
+      display: grid;
+      min-height: 44px;
+      grid-template-columns: minmax(0, 1fr) auto 12px;
+      align-items: center;
+      gap: 9px;
+      padding: 5px 8px;
+      border-radius: 9px;
+      color: var(--muted);
+      cursor: pointer;
+      list-style: none;
+    }
+    .channel-disclosure > summary::-webkit-details-marker { display: none; }
+    .channel-disclosure > summary:hover { color: var(--ink); background: var(--surface-subtle); }
+    .channel-disclosure[open] > summary { color: var(--ink); background: var(--surface-subtle); }
+    .channel-summary-leading { display: flex; min-width: 0; align-items: center; gap: 9px; }
+    .channel-summary-icon { display: grid; width: 27px; height: 27px; flex: 0 0 27px; place-items: center; border-radius: 7px; color: var(--brand-ink); background: var(--brand-soft); }
+    .channel-summary-icon svg { width: 16px; height: 16px; }
+    .channel-summary-copy { display: grid; min-width: 0; gap: 1px; }
+    .channel-summary-copy strong { color: var(--ink); font-size: 10.5px; font-weight: 620; }
+    .channel-summary-copy small { overflow: hidden; color: var(--faint); font-size: 9.2px; text-overflow: ellipsis; white-space: nowrap; }
+    .channel-selected-count { color: var(--faint); font-size: 9.6px; white-space: nowrap; }
+    .channel-chevron { width: 11px; height: 11px; color: var(--faint); transition: transform 120ms ease; }
+    .channel-disclosure[open] .channel-chevron { transform: rotate(90deg); }
+    .channel-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 188px));
+      gap: 8px;
+      padding: 8px 8px 2px 44px;
+    }
+    .channel-option {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 48px;
+      grid-template-columns: 22px minmax(0, 1fr) 18px;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+    }
+    .channel-option:hover { border-color: var(--line-strong); background: var(--surface-subtle); }
+    .channel-option:has(input:checked) { border-color: color-mix(in srgb, var(--brand) 55%, var(--line)); background: var(--brand-soft); }
+    .channel-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .channel-option input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    .channel-option.disabled { color: var(--faint); background: var(--surface-subtle); cursor: default; opacity: .58; }
+    .channel-option.disabled:hover { border-color: var(--line); }
+    .channel-mark { width: 22px; height: 22px; border-radius: 6px; font-size: 9px; }
+    .channel-option-copy { display: grid; min-width: 0; gap: 1px; }
+    .channel-option-copy strong { font-size: 10.5px; font-weight: 620; }
+    .channel-option-copy small { overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .channel-option-check { display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: transparent; background: var(--surface-raised); font-size: 10px; font-weight: 760; }
+    .channel-option:has(input:checked) .channel-option-check { border-color: var(--brand); color: var(--brand-contrast); background: var(--brand); }
+
+    @media (max-width: 900px) {
+      .channel-options { grid-template-columns: minmax(0, 1fr); }
+    }
+
+
+    /* v12 — descriptive templates, Rovai-native member picker, calendar and time popovers */
+    .suggestion-row {
+      min-height: 58px;
+      align-items: start;
+      padding: 8px 7px;
+    }
+    .suggestion-icon { margin-top: 1px; }
+    .suggestion-copy {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "title time"
+        "description description";
+      align-items: baseline;
+      gap: 3px 8px;
+    }
+    .suggestion-copy strong { grid-area: title; font-size: 12.3px; font-weight: 620; }
+    .suggestion-copy small { grid-area: time; font-size: 9.9px; }
+    .suggestion-description {
+      display: -webkit-box;
+      grid-area: description;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10.2px;
+      line-height: 1.45;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .scheduled-shell.overview .suggestion-row { min-height: 62px; padding: 9px 8px; }
+    .scheduled-shell.overview .suggestion-copy strong { font-size: 12.8px; }
+    .scheduled-shell.overview .suggestion-description { font-size: 10.7px; }
+
+    .compact-context-member { position: relative; }
+    .member-picker { position: relative; width: 214px; }
+    .member-picker-trigger {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 38px;
+      grid-template-columns: 24px minmax(0, 1fr) 12px;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      cursor: pointer;
+      text-align: left;
+    }
+    .member-picker-trigger:hover { border-color: color-mix(in srgb, var(--line-strong) 74%, var(--brand)); background: var(--surface-subtle); }
+    .member-picker-trigger[aria-expanded="true"] { border-color: var(--focus); box-shadow: 0 0 0 2px var(--focus-soft); }
+    .member-picker-trigger[aria-expanded="true"] .member-picker-chevron { transform: rotate(180deg); }
+    .member-picker-trigger-copy { display: grid; min-width: 0; gap: 1px; }
+    .member-picker-trigger-copy strong,
+    .member-picker-trigger-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .member-picker-trigger-copy strong { font-size: 10.8px; font-weight: 620; line-height: 1.25; }
+    .member-picker-trigger-copy small { color: var(--faint); font-size: 9.2px; line-height: 1.25; }
+    .member-picker-chevron { width: 11px; height: 11px; color: var(--faint); transition: transform 120ms ease; }
+    .member-picker-menu {
+      position: absolute;
+      z-index: 60;
+      top: calc(100% + 6px);
+      left: 0;
+      display: none;
+      width: 260px;
+      padding: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .member-picker-menu.open { display: grid; }
+    .member-picker-option {
+      display: grid;
+      width: 100%;
+      min-height: 50px;
+      grid-template-columns: 32px minmax(0, 1fr) 18px;
+      align-items: center;
+      gap: 9px;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .member-picker-option:hover { background: var(--new-camp-picker-hover, var(--surface-hover)); }
+    .member-picker-option[aria-selected="true"] { background: var(--surface-selected); }
+    .member-picker-option-avatar { width: 30px; height: 30px; flex-basis: 30px; font-size: 9px; box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 22%, transparent); }
+    .member-picker-option-copy { display: grid; min-width: 0; gap: 2px; }
+    .member-picker-option-copy strong { overflow: hidden; font-size: 11.5px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+    .member-picker-option-copy small { overflow: hidden; color: var(--faint); font-size: 9.8px; text-overflow: ellipsis; white-space: nowrap; }
+    .member-picker-check { color: var(--brand-ink); font-size: 12px; font-weight: 760; text-align: center; }
+    .compact-context-member .compact-member-avatar { width: 24px; height: 24px; flex-basis: 24px; font-size: 8px; }
+
+    .schedule-row { position: relative; }
+    .schedule-picker { position: relative; }
+    .schedule-value-button {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 5px 4px 7px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.5px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .schedule-value-button:hover { background: var(--surface-subtle); }
+    .schedule-value-button[aria-expanded="true"] { color: var(--brand-ink); background: var(--brand-soft); }
+    .schedule-value-button > svg:first-child { width: 13px; height: 13px; color: var(--muted); }
+    .schedule-value-button > svg:last-child { width: 11px; height: 11px; color: var(--faint); transition: transform 120ms ease; }
+    .schedule-value-button[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+    .schedule-popover {
+      position: absolute;
+      z-index: 55;
+      top: calc(100% + 5px);
+      right: 0;
+      display: none;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .schedule-popover.open { display: block; }
+    .picker-heading {
+      display: flex;
+      min-height: 36px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 9px 6px 11px;
+      border-bottom: 1px solid var(--line);
+    }
+    .picker-heading span { color: var(--muted); font-size: 9.8px; }
+    .picker-heading strong { color: var(--ink); font: 650 10.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+    .time-picker-popover { width: 248px; padding-bottom: 9px; }
+    .time-editor {
+      display: grid;
+      grid-template-columns: 72px 16px 72px;
+      justify-content: center;
+      align-items: center;
+      gap: 7px;
+      padding: 12px 12px 9px;
+    }
+    .time-stepper { display: grid; grid-template-rows: 22px 42px 22px; }
+    .time-stepper button {
+      display: grid;
+      width: 100%;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      border-radius: 5px;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+    }
+    .time-stepper button:hover { color: var(--ink); background: var(--surface-subtle); }
+    .time-stepper button svg { width: 12px; height: 12px; }
+    .time-stepper input {
+      width: 72px;
+      min-width: 0;
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      font: 620 22px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+    }
+    .time-stepper input:focus { border-color: var(--focus); box-shadow: 0 0 0 2px var(--focus-soft); outline: 0; }
+    .time-colon { color: var(--muted); font: 620 20px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+    .time-presets {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 5px;
+      padding: 0 9px;
+    }
+    .time-presets button {
+      min-height: 27px;
+      padding: 3px 4px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font: 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .time-presets button:hover { border-color: var(--line-strong); color: var(--ink); background: var(--surface-subtle); }
+    .time-presets button.selected { border-color: color-mix(in srgb, var(--brand) 55%, var(--line)); color: var(--brand-ink); background: var(--brand-soft); }
+
+    .date-picker-popover { width: 272px; padding: 6px 8px 9px; }
+    .calendar-heading {
+      display: grid;
+      min-height: 34px;
+      grid-template-columns: 28px minmax(0, 1fr) 28px;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+    .calendar-heading strong { font-size: 10.8px; font-weight: 650; text-align: center; }
+    .calendar-heading button {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+    }
+    .calendar-heading button:hover { color: var(--ink); background: var(--surface-subtle); }
+    .calendar-heading svg { width: 12px; height: 12px; }
+    .calendar-weekdays,
+    .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+    .calendar-weekdays { padding: 2px 0 3px; }
+    .calendar-weekdays span { color: var(--faint); font-size: 8.8px; text-align: center; }
+    .calendar-day {
+      display: grid;
+      width: 100%;
+      aspect-ratio: 1;
+      min-height: 30px;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-size: 9.8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .calendar-day:hover { background: var(--surface-hover); }
+    .calendar-day.outside { color: color-mix(in srgb, var(--faint) 48%, transparent); }
+    .calendar-day.selected { color: var(--brand-contrast); background: var(--brand); }
+    .calendar-day.today:not(.selected) { box-shadow: inset 0 0 0 1px var(--brand); color: var(--brand-ink); }
+
+    .weekday-picker-popover { width: 148px; padding: 5px; }
+    .weekday-picker-popover button {
+      display: flex;
+      width: 100%;
+      min-height: 31px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 5px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.3px;
+      text-align: left;
+    }
+    .weekday-picker-popover button:hover { background: var(--surface-hover); }
+    .weekday-picker-popover button.selected { color: var(--brand-ink); background: var(--surface-selected); }
+    .weekday-picker-popover button span:last-child { width: 14px; color: var(--brand-ink); text-align: center; }
+
+    .schedule-cron-input {
+      width: 176px;
+      min-height: 30px;
+      padding: 4px 7px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-align: right;
+    }
+    .schedule-cron-input:hover { background: var(--surface-subtle); }
+    .schedule-cron-input:focus { box-shadow: 0 0 0 2px var(--focus-soft); outline: 0; }
+
+
+
+
+    /* v13 — member configuration on hover, execution-sidecar history states, icon action menu */
+    .member-picker-trigger-copy { display: flex; min-width: 0; align-items: center; }
+    .member-picker-trigger-copy strong { font-size: 10.8px; font-weight: 620; line-height: 1.25; }
+    .member-picker-trigger-copy small,
+    .member-picker-option-copy small { display: none; }
+    .member-picker-option { position: relative; min-height: 44px; }
+    .member-picker-option-copy { display: flex; min-width: 0; align-items: center; }
+    .member-picker-trigger,
+    .member-picker-option { overflow: visible; }
+    .member-picker-trigger::after,
+    .member-picker-option::after {
+      position: absolute;
+      z-index: 90;
+      display: block;
+      max-width: 240px;
+      padding: 5px 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+      content: attr(data-member-config);
+      font: 9.5px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      opacity: 0;
+      pointer-events: none;
+      white-space: nowrap;
+      transition: opacity 90ms ease, transform 90ms ease;
+    }
+    .member-picker-trigger::after {
+      bottom: calc(100% + 7px);
+      left: 0;
+      transform: translateY(2px);
+    }
+    .member-picker-option::after {
+      top: 50%;
+      left: calc(100% + 8px);
+      transform: translate(-2px, -50%);
+    }
+    .member-picker-trigger:hover:not([aria-expanded="true"])::after,
+    .member-picker-trigger:focus-visible:not([aria-expanded="true"])::after,
+    .member-picker-option:hover::after,
+    .member-picker-option:focus-visible::after {
+      opacity: 1;
+    }
+    .member-picker-trigger:hover:not([aria-expanded="true"])::after,
+    .member-picker-trigger:focus-visible:not([aria-expanded="true"])::after { transform: translateY(0); }
+    .member-picker-option:hover::after,
+    .member-picker-option:focus-visible::after { transform: translate(0, -50%); }
+
+    .history-row {
+      grid-template-columns: 16px minmax(0, 1fr) auto;
+      gap: 7px;
+    }
+    .run-dot { display: none; }
+    .run-state-icon {
+      position: relative;
+      display: grid;
+      width: 12px;
+      height: 24px;
+      place-items: center;
+    }
+    .run-state-icon::before {
+      width: 7px;
+      height: 7px;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      background: currentColor;
+      content: "";
+    }
+    .run-state-icon.state-running::after {
+      position: absolute;
+      width: 11px;
+      height: 11px;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      content: "";
+      opacity: .38;
+    }
+    .run-state-icon.state-failed::before,
+    .run-state-icon.state-stopped::before {
+      border-radius: 1px;
+      transform: rotate(45deg);
+    }
+    .run-state-icon.tone-info { color: var(--info, #416c86); }
+    .run-state-icon.tone-success { color: var(--success); }
+    .run-state-icon.tone-danger { color: var(--danger); }
+    .run-state-icon.tone-neutral { color: var(--muted); }
+
+    .task-action-menu { width: 142px; }
+    .task-action-menu button {
+      display: grid;
+      grid-template-columns: 16px minmax(0, 1fr);
+      gap: 8px;
+    }
+    .task-action-icon { display: grid; width: 16px; height: 16px; place-items: center; color: currentColor; }
+    .task-action-icon svg { width: 14px; height: 14px; }
+    .task-action-menu button > span:last-child { min-width: 0; }
+
+
+
+    /* v21 — one creation shelf, shared by blank and template starts */
+    .task-utility-row {
+      grid-template-columns: 58px minmax(0, 1fr);
+    }
+    .creation-starter {
+      margin: 2px 0 13px;
+      color: var(--ink);
+    }
+    .creation-starter > summary {
+      display: grid;
+      min-height: 42px;
+      grid-template-columns: 25px minmax(0, 1fr) 12px;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 7px;
+      border: 0;
+      border-radius: 8px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      list-style: none;
+    }
+    .creation-starter > summary::-webkit-details-marker { display: none; }
+    .creation-starter > summary:hover { color: var(--ink); background: var(--surface-hover); }
+    .creation-starter[open] > summary { color: var(--brand-ink); background: var(--brand-soft); }
+    .creation-starter-icon {
+      display: grid;
+      width: 25px;
+      height: 25px;
+      place-items: center;
+      border-radius: 7px;
+      color: var(--brand-ink);
+      background: var(--surface-raised);
+    }
+    .creation-starter-icon svg { width: 14px; height: 14px; }
+    .creation-starter-summary-copy { display: grid; min-width: 0; gap: 1px; }
+    .creation-starter-summary-copy strong { font-size: 10.8px; font-weight: 650; }
+    .creation-starter-summary-copy small { color: var(--faint); font-size: 9px; }
+    .creation-starter-chevron { width: 11px; height: 11px; color: var(--faint); transition: transform 120ms ease; }
+    .creation-starter[open] .creation-starter-chevron { transform: rotate(90deg); }
+    .creation-choice-grid {
+      display: grid;
+      gap: 2px;
+      margin-top: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-raised);
+    }
+    .creation-choice {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 48px;
+      grid-template-columns: 28px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      padding: 6px 7px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .creation-choice:hover { background: var(--surface-hover); }
+    .creation-choice-icon {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 8px;
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+    }
+    .creation-choice-blank .creation-choice-icon { color: var(--brand-contrast); background: var(--brand); }
+    .creation-choice-icon svg { width: 16px; height: 16px; }
+    .creation-choice > span:last-child { display: grid; min-width: 0; gap: 2px; }
+    .creation-choice strong { overflow: hidden; font-size: 10.7px; font-weight: 630; text-overflow: ellipsis; white-space: nowrap; }
+    .creation-choice small { overflow: hidden; color: var(--faint); font-size: 9px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+    .task-list-heading {
+      margin: 4px 5px 7px;
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 620;
+    }
+
+    .scheduled-shell.overview .task-utility-row {
+      grid-template-columns: 72px minmax(0, 1fr);
+    }
+    .scheduled-shell.overview .creation-starter {
+      margin: 9px 0 27px;
+    }
+    .scheduled-shell.overview .creation-starter > summary { display: none; }
+    .scheduled-shell.overview .creation-choice-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .scheduled-shell.overview .creation-choice {
+      min-height: 74px;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 11px;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-raised);
+    }
+    .scheduled-shell.overview .creation-choice:hover {
+      border-color: var(--line-strong);
+      background: var(--surface-subtle);
+    }
+    .scheduled-shell.overview .creation-choice-icon { width: 34px; height: 34px; }
+    .scheduled-shell.overview .creation-choice-icon svg { width: 18px; height: 18px; }
+    .scheduled-shell.overview .creation-choice strong { font-size: 12.4px; }
+    .scheduled-shell.overview .creation-choice small {
+      display: -webkit-box;
+      overflow: hidden;
+      font-size: 10px;
+      line-height: 1.45;
+      white-space: normal;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .scheduled-shell.overview .task-list-heading {
+      margin: 0 5px 8px;
+      font-size: 11.5px;
+      font-weight: 650;
+    }
+
+    @media (max-width: 900px) {
+      .scheduled-shell.overview .creation-choice-grid { grid-template-columns: minmax(0, 1fr); }
+    }
+
+
+    /* v22 — current Rovai page header, overview/task-page state split */
+    .workspace { background: var(--surface); }
+
+    .automation-page-header {
+      display: none;
+      min-width: 0;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 0 17px;
+    }
+    .automation-page-header > div:first-child { min-width: 0; }
+    .automation-page-header .eyebrow {
+      margin: 0;
+      color: var(--brand-ink);
+      font-size: 9px;
+      font-weight: 690;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .automation-page-header h1 {
+      margin: 4px 0 0;
+      color: var(--ink);
+      font: 620 25px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      letter-spacing: -.03em;
+    }
+    .automation-page-header p:last-child {
+      max-width: 650px;
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 10.5px;
+      line-height: 1.42;
+    }
+    .automation-page-header .primary-button { min-height: 30px; padding: 5px 11px; }
+
+    .task-controls {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "filters create"
+        "search search";
+      align-items: center;
+      gap: 8px;
+      padding: 2px 10px 9px;
+    }
+    .task-filter-tabs {
+      display: inline-flex;
+      width: max-content;
+      min-width: 0;
+      grid-area: filters;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-raised);
+    }
+    .task-filter-tab {
+      min-height: 25px;
+      padding: 3px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+      font-size: 9.8px;
+      white-space: nowrap;
+    }
+    .task-filter-tab:hover { color: var(--ink); background: var(--surface-hover); }
+    .task-filter-tab.active { color: var(--ink); background: var(--surface-selected); }
+    .task-page-create {
+      display: inline-flex;
+      min-height: 29px;
+      grid-area: create;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--brand-ink);
+      background: var(--surface-raised);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    .task-page-create:hover { color: var(--brand-hover); background: var(--surface-muted); }
+    .task-page-create svg { width: 13px; height: 13px; }
+    .task-controls .task-search-shell {
+      width: 100%;
+      min-width: 0;
+      grid-area: search;
+      margin: 0;
+      border-radius: 8px;
+    }
+
+    .task-state-icon {
+      display: grid;
+      width: 18px;
+      height: 18px;
+      place-items: center;
+      color: var(--brand-ink);
+    }
+    .task-state-icon svg { width: 15px; height: 15px; }
+    .task-state-icon.state-closed { color: var(--faint); }
+    .task-state-icon.state-completed { color: var(--muted); }
+
+    .scheduled-task-open {
+      grid-template-columns: 18px minmax(0, 1fr) 28px;
+      gap: 8px;
+    }
+
+    .template-library { display: none; }
+    .template-library-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 10px;
+    }
+    .template-library-heading h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: -.01em;
+    }
+    .template-library-heading p {
+      margin: 0;
+      color: var(--faint);
+      font-size: 9.8px;
+    }
+    .template-card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .template-card {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 126px;
+      grid-template-columns: 34px minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 5px 11px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      cursor: pointer;
+      text-align: left;
+    }
+    .template-card:hover { border-color: var(--line-strong); background: var(--surface-subtle); }
+    .template-card-icon {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      grid-row: 1 / span 2;
+      place-items: center;
+      border-radius: 9px;
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+    }
+    .template-card-icon svg { width: 18px; height: 18px; }
+    .template-card-copy { min-width: 0; padding-right: 20px; }
+    .template-card-copy strong {
+      display: block;
+      overflow: hidden;
+      font-size: 12.4px;
+      font-weight: 650;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .template-card-copy span {
+      display: -webkit-box;
+      margin-top: 6px;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10.2px;
+      line-height: 1.5;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .template-card-meta {
+      grid-column: 2;
+      align-self: end;
+      color: var(--faint);
+      font-size: 9.5px;
+    }
+    .template-card-arrow {
+      position: absolute;
+      top: 14px;
+      right: 13px;
+      width: 14px;
+      height: 14px;
+      color: var(--faint);
+    }
+
+    /* Overview is a page, matching the current Memory workspace structure. */
+    .scheduled-shell.overview {
+      display: block;
+      overflow: hidden;
+      background: var(--surface);
+    }
+    .scheduled-shell.overview .task-pane {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow-y: auto;
+      border-right: 0;
+      background: var(--surface);
+    }
+    .scheduled-shell.overview .editor-pane { display: none; }
+    .scheduled-shell.overview .automation-page-header,
+    .scheduled-shell.overview .task-controls,
+    .scheduled-shell.overview .task-list-scroll,
+    .scheduled-shell.overview .template-library {
+      width: min(1136px, calc(100% - 56px));
+      margin-right: auto;
+      margin-left: auto;
+    }
+    .scheduled-shell.overview .automation-page-header { display: flex; }
+    .scheduled-shell.overview .task-controls {
+      grid-template-columns: auto minmax(260px, 360px);
+      grid-template-areas: "filters search";
+      justify-content: space-between;
+      margin-top: 22px;
+      padding: 0;
+    }
+    .scheduled-shell.overview .task-page-create { display: none; }
+    .scheduled-shell.overview .task-search-shell { min-height: 32px; }
+    .scheduled-shell.overview .task-list-scroll {
+      min-height: 0;
+      margin-top: 10px;
+      padding: 0;
+      overflow: visible;
+    }
+    .scheduled-shell.overview .scheduled-task-list { gap: 4px; }
+    .scheduled-shell.overview .scheduled-task-item { border-radius: 8px; }
+    .scheduled-shell.overview .scheduled-task-open,
+    .scheduled-shell.overview .scheduled-task-more { min-height: 58px; }
+    .scheduled-shell.overview .scheduled-task-open { padding-left: 11px; }
+    .scheduled-shell.overview .scheduled-task-copy strong { font-size: 12px; }
+    .scheduled-shell.overview .scheduled-task-copy small { font-size: 10.2px; }
+    .scheduled-shell.overview .template-library {
+      display: block;
+      margin-top: 30px;
+      padding: 22px 0 36px;
+      border-top: 1px solid var(--line);
+    }
+    .scheduled-shell.overview.no-tasks .template-library {
+      margin-top: 14px;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    /* Task page: compact task index on the left, wide editor on the right. */
+    .scheduled-shell:not(.overview) .task-pane {
+      display: grid;
+      grid-template-rows: 38px auto minmax(0, 1fr);
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .scheduled-shell:not(.overview) .automation-page-header,
+    .scheduled-shell:not(.overview) .template-library { display: none; }
+    .scheduled-shell:not(.overview) .task-list-scroll {
+      min-height: 0;
+      overflow-y: auto;
+      padding: 2px 8px 18px;
+    }
+
+    @media (max-width: 980px) {
+      .template-card-grid { grid-template-columns: minmax(0, 1fr); }
+      .scheduled-shell.overview .automation-page-header,
+      .scheduled-shell.overview .task-controls,
+      .scheduled-shell.overview .task-list-scroll,
+      .scheduled-shell.overview .template-library { width: calc(100% - 32px); }
+    }
+
+
+    /* v23 — task-page creation behavior and Memory-width alignment */
+    .scheduled-shell:not(.overview) {
+      width: min(1136px, 100%);
+      margin-right: auto;
+      margin-left: 0;
+    }
+    .scheduled-shell:not(.overview) .task-pane {
+      grid-template-rows: 38px auto auto minmax(0, 1fr);
+    }
+
+    .dark-new-button,
+    .task-page-create.dark-new-button {
+      min-height: 30px;
+      padding: 5px 12px;
+      border: 1px solid var(--ink);
+      border-radius: 7px;
+      color: var(--surface-raised);
+      background: var(--ink);
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+    .dark-new-button:hover:not(:disabled),
+    .task-page-create.dark-new-button:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--ink) 82%, var(--brand));
+      color: var(--surface-raised);
+      background: color-mix(in srgb, var(--ink) 88%, var(--brand));
+    }
+    .task-page-create.dark-new-button { grid-area: create; }
+    .task-page-create.dark-new-button[hidden] { display: none !important; }
+
+    .task-create-chooser {
+      min-width: 0;
+      margin: 0 8px 8px;
+      padding: 7px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-raised);
+    }
+    .task-create-chooser[hidden] { display: none !important; }
+    .task-create-chooser > p {
+      margin: 1px 4px 6px;
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 620;
+    }
+    .task-create-choice-grid {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .task-create-choice-grid .creation-choice {
+      min-height: 44px;
+      grid-template-columns: 27px minmax(0, 1fr);
+      gap: 8px;
+      padding: 5px 6px;
+    }
+    .task-create-choice-grid .creation-choice-icon {
+      width: 27px;
+      height: 27px;
+      border-radius: 7px;
+    }
+    .task-create-choice-grid .creation-choice-icon svg { width: 15px; height: 15px; }
+    .task-create-choice-grid .creation-choice strong { font-size: 10.4px; }
+    .task-create-choice-grid .creation-choice small { font-size: 8.7px; }
+
+    @media (max-width: 1180px) {
+      .scheduled-shell:not(.overview) { width: 100%; }
+    }
+
+
+    /* v24 — Memory-style filters, semantic run icons, colored templates, resizable task page */
+    :root {
+      --workspace-surface-subtle: #f4f5f4;
+      --workspace-surface-raised: #ffffff;
+      --workspace-surface-hover: #e8ebec;
+      --workspace-surface-selected: #e4eaee;
+      --workspace-line: #d5dadd;
+      --workspace-line-strong: #bdc6ca;
+      --workspace-steel: #476b85;
+      --workspace-steel-ink: #34576f;
+      --workspace-faint: #71808a;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --violet: #74628f;
+      --violet-soft: #efebf6;
+      --ember: #9a6a32;
+      --ember-soft: #f8edda;
+      --task-list-width: 304px;
+    }
+
+    /* The overview uses the same connected filter/search language as Memory. */
+    .task-filter-tabs {
+      display: flex;
+      width: max-content;
+      min-width: 0;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--workspace-surface-subtle);
+    }
+    .task-filter-tab {
+      min-height: 26px;
+      padding: 3px 9px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 9.5px;
+      font-weight: 650;
+    }
+    .task-filter-tab:hover { color: var(--ink); background: var(--workspace-surface-hover); }
+    .task-filter-tab.active { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .task-search-shell {
+      display: grid;
+      min-width: 0;
+      min-height: 38px;
+      grid-template-columns: 18px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      padding: 6px 11px;
+      border: 1px solid var(--workspace-line);
+      border-radius: 9px;
+      color: var(--workspace-faint);
+      background: var(--workspace-surface-raised);
+    }
+    .task-search-shell:focus-within {
+      border-color: var(--workspace-steel);
+      color: var(--workspace-steel-ink);
+      box-shadow: none;
+    }
+    .task-search-shell svg { width: 16px; height: 16px; stroke-width: 1.65; }
+    .task-search-shell input { font-size: 10px; }
+    .task-search-shell input::placeholder { color: var(--workspace-faint); opacity: 1; }
+
+    .scheduled-shell.overview .task-controls {
+      grid-template-columns: auto minmax(180px, 1fr);
+      grid-template-areas: "filters search";
+      gap: 12px;
+      align-items: center;
+      margin-top: 22px;
+      padding: 0;
+    }
+
+    /* Template identity: code / weekly planning / release writing. */
+    .template-card-code .template-card-icon,
+    .creation-choice-code .creation-choice-icon {
+      color: var(--info);
+      background: var(--info-soft);
+    }
+    .template-card-weekly .template-card-icon,
+    .creation-choice-weekly .creation-choice-icon {
+      color: var(--violet);
+      background: var(--violet-soft);
+    }
+    .template-card-release .template-card-icon,
+    .creation-choice-release .creation-choice-icon {
+      color: var(--ember);
+      background: var(--ember-soft);
+    }
+    .template-card-code:hover { border-color: color-mix(in srgb, var(--info) 34%, var(--line)); }
+    .template-card-weekly:hover { border-color: color-mix(in srgb, var(--violet) 34%, var(--line)); }
+    .template-card-release:hover { border-color: color-mix(in srgb, var(--ember) 34%, var(--line)); }
+
+    /* Task page: top controls, a draggable divider, and one continuous surface. */
+    .scheduled-shell:not(.overview) {
+      display: grid;
+      grid-template-columns: var(--task-list-width) 9px minmax(0, 1fr);
+      width: min(1136px, 100%);
+      min-width: 0;
+      background: var(--surface);
+    }
+    .scheduled-shell:not(.overview) .task-pane {
+      grid-column: 1;
+      border-right: 0;
+      background: var(--surface);
+    }
+    .scheduled-shell:not(.overview) .editor-pane {
+      grid-column: 3;
+      background: var(--surface);
+    }
+    .task-pane,
+    .editor-pane { background: var(--surface); }
+
+    .task-splitter { display: none; }
+    .scheduled-shell:not(.overview) .task-splitter {
+      position: relative;
+      z-index: 18;
+      display: block;
+      width: 9px;
+      height: 100%;
+      grid-column: 2;
+      outline: 0;
+      background: transparent;
+      cursor: col-resize;
+      touch-action: none;
+    }
+    .task-splitter::after {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      width: 1px;
+      height: 100%;
+      transform: translateX(-50%);
+      background: var(--conversation-inspector-line, var(--line-strong));
+      content: "";
+      transition: width 120ms ease, background-color 120ms ease;
+    }
+    .task-splitter:hover::after,
+    .task-splitter:focus-visible::after,
+    .task-splitter.is-resizing::after {
+      width: 3px;
+      background: var(--workspace-steel);
+    }
+    .task-splitter.is-resizing::after { transition: none; }
+    .task-splitter-grip {
+      position: absolute;
+      z-index: 1;
+      top: 50%;
+      left: 0;
+      display: grid;
+      width: 9px;
+      height: 34px;
+      place-items: center;
+      transform: translateY(-50%);
+      border-radius: 5px;
+      background: var(--surface);
+    }
+    .task-splitter-grip::after {
+      width: 2px;
+      height: 26px;
+      border-radius: 2px;
+      background: var(--workspace-line-strong);
+      content: "";
+    }
+    .task-splitter:hover .task-splitter-grip::after,
+    .task-splitter:focus-visible .task-splitter-grip::after,
+    .task-splitter.is-resizing .task-splitter-grip::after { background: var(--workspace-steel); }
+    .task-splitter-tip {
+      position: absolute;
+      z-index: 2;
+      top: 50%;
+      left: 18px;
+      display: none;
+      padding: 4px 7px;
+      transform: translateY(-50%);
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+      font-size: 9px;
+      line-height: 1.35;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .task-splitter.is-resizing .task-splitter-tip { display: block; }
+    body.task-splitter-resizing,
+    body.task-splitter-resizing * { cursor: col-resize !important; user-select: none !important; }
+    body.task-splitter-resizing .editor-pane { pointer-events: none; }
+
+    .scheduled-shell:not(.overview) .task-controls {
+      position: relative;
+      z-index: 8;
+      grid-template-columns: auto auto;
+      grid-template-areas:
+        "filters create"
+        "search search";
+      gap: 7px 8px;
+      padding: 2px 11px 10px;
+      background: var(--surface);
+    }
+    .scheduled-shell:not(.overview) .task-filter-tabs { align-self: center; }
+    .scheduled-shell:not(.overview) .task-page-create { justify-self: end; }
+    .scheduled-shell:not(.overview) .task-search-shell { width: 100%; }
+
+    .editor-inner {
+      width: min(820px, calc(100% - 48px));
+      margin-right: auto;
+      margin-left: auto;
+      padding-top: 8px;
+    }
+    .editor-kind-label {
+      margin: 0 0 8px;
+      color: var(--faint);
+      font-size: 9.5px;
+      font-weight: 650;
+      letter-spacing: .02em;
+    }
+
+    /* History uses semantic execution glyphs rather than tiny state dots. */
+    .history-row {
+      min-height: 38px;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 4px 7px;
+    }
+    .run-state-icon {
+      position: relative;
+      display: grid;
+      width: 18px;
+      height: 28px;
+      place-items: center;
+    }
+    .run-state-icon::before,
+    .run-state-icon::after { display: none !important; content: none !important; }
+    .run-state-icon svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.35;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+    .run-state-icon.state-running { color: var(--info); }
+    .run-state-icon.state-completed { color: var(--success); }
+    .run-state-icon.state-failed { color: var(--danger); }
+    .run-state-icon.state-stopped { color: var(--muted); }
+    .run-state-icon.state-running svg { animation: run-state-spin 1.1s linear infinite; }
+    @keyframes run-state-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .run-state-icon.state-running svg { animation: none; }
+    }
+
+    @media (max-width: 860px) {
+      .scheduled-shell:not(.overview) { --task-list-width: 220px; }
+      .editor-inner { width: calc(100% - 32px); }
+    }
+
+
+
+    /* v25 — match the production Member workspace surface and remove the editor drag spacer. */
+    :root { --home-surface: #ffffff; }
+    .workspace,
+    .scheduled-shell,
+    .scheduled-shell.overview,
+    .scheduled-shell.overview .task-pane,
+    .scheduled-shell:not(.overview),
+    .scheduled-shell:not(.overview) .task-pane,
+    .scheduled-shell:not(.overview) .editor-pane,
+    .task-pane,
+    .editor-pane,
+    .scheduled-shell:not(.overview) .task-controls {
+      background: var(--home-surface);
+    }
+    .task-splitter-grip { background: var(--home-surface); }
+    .editor-pane > .pane-drag-strip { display: none; }
+    .editor-inner { min-height: 100%; padding-top: 14px; }
+
+
+
+    /* v26 — production primary action and New Conversation picker parity */
+    .dark-new-button,
+    .task-page-create.dark-new-button {
+      border-color: var(--brand);
+      color: var(--brand-contrast);
+      background: var(--brand);
+    }
+    .dark-new-button:hover:not(:disabled),
+    .task-page-create.dark-new-button:hover:not(:disabled) {
+      border-color: var(--brand-hover);
+      color: var(--brand-contrast);
+      background: var(--brand-hover);
+    }
+
+    .context-compact { align-items: flex-end; gap: 10px 18px; }
+    .compact-context-field { grid-template-columns: auto minmax(0, 1fr); }
+    .compact-context-member .member-picker { width: 232px; }
+    .compact-context-project .project-picker { width: 270px; }
+
+    .member-picker-trigger,
+    .project-picker-trigger {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 44px;
+      grid-template-columns: 30px minmax(0, 1fr) 12px;
+      align-items: center;
+      gap: 9px;
+      padding: 5px 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--ink);
+      background: var(--surface);
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+    }
+    .member-picker-trigger:hover,
+    .project-picker-trigger:hover { border-color: var(--line-strong); background: var(--surface-subtle); }
+    .member-picker-trigger[aria-expanded="true"],
+    .project-picker-trigger[aria-expanded="true"] { border-color: var(--focus); background: var(--surface); box-shadow: 0 0 0 2px var(--focus-soft); }
+    .member-picker-trigger[aria-expanded="true"] .member-picker-chevron,
+    .project-picker-trigger[aria-expanded="true"] .project-picker-chevron { transform: rotate(180deg); }
+
+    .compact-context-member .compact-member-avatar {
+      width: 30px;
+      height: 30px;
+      flex-basis: 30px;
+      font-size: 9px;
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 22%, transparent);
+    }
+    .member-picker-trigger-copy,
+    .project-picker-trigger-copy,
+    .member-picker-option-copy,
+    .project-picker-option-copy { display: grid; min-width: 0; gap: 2px; align-items: initial; }
+    .member-picker-trigger-copy strong,
+    .project-picker-trigger-copy strong,
+    .member-picker-option-copy strong,
+    .project-picker-option-copy strong { overflow: hidden; color: var(--ink); font-size: 11.2px; font-weight: 620; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+    .member-picker-trigger-copy small,
+    .project-picker-trigger-copy small,
+    .member-picker-option-copy small,
+    .project-picker-option-copy small { display: block; overflow: hidden; color: var(--faint); font-size: 9.2px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+    .member-picker-chevron,
+    .project-picker-chevron { width: 11px; height: 11px; color: var(--faint); transition: transform 120ms ease; }
+
+    .member-picker-menu,
+    .project-picker-menu {
+      position: absolute;
+      z-index: 70;
+      top: calc(100% + 6px);
+      left: 0;
+      display: none;
+      padding: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .member-picker-menu { width: 288px; }
+    .project-picker-menu { width: 330px; }
+    .member-picker-menu.open,
+    .project-picker-menu.open { display: grid; }
+
+    .member-picker-option,
+    .project-picker-option {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 50px;
+      grid-template-columns: 32px minmax(0, 1fr) 18px;
+      align-items: center;
+      gap: 9px;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .member-picker-option:hover,
+    .project-picker-option:hover { background: var(--surface-hover); }
+    .member-picker-option[aria-selected="true"],
+    .project-picker-option[aria-selected="true"] { background: var(--surface-selected); }
+    .member-picker-option-avatar { width: 32px; height: 32px; flex-basis: 32px; font-size: 9px; }
+
+    .member-picker-check {
+      display: grid;
+      width: 16px;
+      height: 16px;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 50%;
+      background: var(--surface-raised);
+    }
+    .member-picker-option[aria-selected="true"] .member-picker-check { border-color: var(--brand); }
+    .member-picker-option[aria-selected="true"] .member-picker-check::after { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); content: ""; }
+
+    .project-picker { position: relative; }
+    .project-picker-icon,
+    .project-picker-option-icon {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--brand-ink);
+      background: var(--surface-raised);
+    }
+    .project-picker-icon svg,
+    .project-picker-option-icon svg { width: 17px; height: 17px; }
+    .project-picker-icon.is-quick,
+    .project-picker-option-icon.is-quick { color: var(--brand-ink); background: var(--brand-soft); }
+    .project-picker-icon.is-project,
+    .project-picker-option-icon.is-project { color: var(--brand-ink); background: var(--surface-raised); }
+    .project-picker-check { color: var(--brand-ink); font-size: 12px; font-weight: 760; text-align: center; }
+
+    @media (max-width: 1040px) {
+      .compact-context-member .member-picker { width: 220px; }
+      .compact-context-project .project-picker { width: 250px; }
+    }
+
+
+
+    /* v27 — New Conversation picker parity, non-input creation focus, and a closable task page. */
+    .member-picker-trigger,
+    .project-picker-trigger,
+    .member-picker-menu,
+    .project-picker-menu,
+    .member-picker-option,
+    .project-picker-option {
+      background: var(--surface-raised);
+    }
+    .member-picker-trigger:hover,
+    .project-picker-trigger:hover {
+      border-color: var(--new-camp-picker-line-strong, var(--line-strong));
+      background: var(--new-camp-picker-hover, #edf2f5);
+    }
+    .member-picker-trigger[aria-expanded="true"],
+    .project-picker-trigger[aria-expanded="true"] {
+      background: var(--surface-raised);
+    }
+    .member-picker-option:hover,
+    .project-picker-option:hover { background: var(--new-camp-picker-hover, #edf2f5); }
+    .member-picker-option[aria-selected="true"],
+    .project-picker-option[aria-selected="true"] { background: var(--new-camp-picker-soft, #e9eef3); }
+
+    .member-picker-primary {
+      display: flex;
+      min-width: 0;
+      align-items: baseline;
+      gap: 7px;
+    }
+    .member-picker-primary strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .member-picker-primary em {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 9.3px;
+      font-style: normal;
+      font-weight: 520;
+      line-height: 1.25;
+      white-space: nowrap;
+    }
+    .member-picker-trigger-copy small,
+    .member-picker-option-copy small {
+      color: var(--faint);
+      font: 9.1px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: -.01em;
+    }
+    .editor-pane:focus { outline: 0; }
+
+    .scheduled-shell:not(.overview).editor-closed {
+      grid-template-columns: minmax(0, 1fr) 9px 0;
+    }
+    .scheduled-shell:not(.overview).editor-closed .editor-pane {
+      min-width: 0;
+      overflow: hidden;
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .scheduled-shell:not(.overview).editor-closed .task-pane {
+      width: auto;
+      min-width: 0;
+    }
+    .scheduled-shell:not(.overview).editor-closed .task-splitter-tip {
+      right: 18px;
+      left: auto;
+    }
+
+
+    /* v28 — visually slimmer draggable divider; retain the forgiving hit target. */
+    .task-splitter::after {
+      width: 1px;
+      background: var(--line);
+    }
+    .task-splitter:hover::after,
+    .task-splitter:focus-visible::after,
+    .task-splitter.is-resizing::after {
+      width: 2px;
+      background: var(--workspace-steel);
+    }
+    .task-splitter-grip {
+      height: 28px;
+      background: transparent;
+    }
+    .task-splitter-grip::after {
+      width: 1px;
+      height: 20px;
+      border-radius: 1px;
+      background: var(--workspace-line);
+    }
+
+
+    /* v29 — shift the divider right, compact the editor, and only close after
+       the editor reaches its narrow usable limit. */
+    :root { --task-list-width: 560px; }
+
+    .scheduled-shell:not(.overview) {
+      grid-template-columns: var(--task-list-width) 7px minmax(0, 1fr);
+    }
+    .scheduled-shell:not(.overview).editor-closed {
+      grid-template-columns: minmax(0, 1fr) 7px 0;
+    }
+
+    /* Keep a generous hit target while making the separator nearly disappear
+       into the shared Member-page surface. */
+    .scheduled-shell:not(.overview) .task-splitter {
+      width: 7px;
+    }
+    .task-splitter::after {
+      width: 1px;
+      background: color-mix(in srgb, var(--line) 58%, transparent);
+      opacity: .72;
+    }
+    .task-splitter:hover::after,
+    .task-splitter:focus-visible::after,
+    .task-splitter.is-resizing::after {
+      width: 1px;
+      background: var(--workspace-steel);
+      opacity: 1;
+    }
+    .task-splitter-grip {
+      width: 7px;
+      height: 24px;
+      opacity: 0;
+      transition: opacity 120ms ease;
+    }
+    .task-splitter-grip::after {
+      width: 1px;
+      height: 16px;
+      background: var(--workspace-steel);
+    }
+    .task-splitter:hover .task-splitter-grip,
+    .task-splitter:focus-visible .task-splitter-grip,
+    .task-splitter.is-resizing .task-splitter-grip { opacity: 1; }
+
+    /* The right editor is intentionally compact. The task list can therefore
+       occupy more of the workspace without making the form feel cramped. */
+    .editor-inner {
+      width: min(560px, calc(100% - 28px));
+      margin-right: auto;
+      margin-left: auto;
+      padding-top: 14px;
+    }
+    .task-name-input,
+    .task-prompt-input,
+    .context-compact,
+    .schedule-section,
+    .channel-disclosure,
+    .history-section {
+      width: 100%;
+      max-width: 520px;
+    }
+    .task-prompt-input {
+      min-height: 64px;
+      resize: vertical;
+    }
+
+    /* Assignment controls become two clear rows instead of competing for one
+       horizontal line. */
+    .context-compact {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: stretch;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .compact-context-field {
+      display: grid;
+      width: 100%;
+      grid-template-columns: 66px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+    }
+    .compact-context-member .member-picker,
+    .compact-context-project .project-picker {
+      width: 100%;
+      min-width: 0;
+    }
+    .member-picker-trigger,
+    .project-picker-trigger { min-height: 42px; }
+
+    .schedule-section { margin-top: 16px; }
+    .schedule-row {
+      min-height: 40px;
+      gap: 10px;
+      padding-right: 11px;
+      padding-left: 11px;
+    }
+
+    .channel-disclosure { margin-top: 8px; }
+    .channel-disclosure > summary {
+      min-height: 40px;
+      padding: 4px 6px;
+    }
+    .channel-summary-icon {
+      width: 24px;
+      height: 24px;
+      flex-basis: 24px;
+    }
+    .channel-summary-icon svg { width: 14px; height: 14px; }
+    .channel-options {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      padding: 6px 6px 2px 30px;
+    }
+    .channel-option {
+      min-height: 44px;
+      grid-template-columns: 20px minmax(0, 1fr) 16px;
+      gap: 7px;
+      padding: 5px 7px;
+    }
+    .channel-mark { width: 20px; height: 20px; }
+
+    .history-section { margin-top: 24px; }
+
+    /* React to the actual editor width, not the whole window. This preserves
+       usability while the divider moves toward its closing threshold. */
+    .editor-pane {
+      container-name: scheduled-editor;
+      container-type: inline-size;
+    }
+    @container scheduled-editor (max-width: 430px) {
+      .editor-inner {
+        width: calc(100% - 20px);
+        margin-right: 10px;
+        margin-left: 10px;
+      }
+      .compact-context-field {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px;
+      }
+      .compact-context-label { padding-left: 2px; }
+      .channel-summary-copy small { display: none; }
+      .channel-options {
+        grid-template-columns: minmax(0, 1fr);
+        padding-left: 30px;
+      }
+      .schedule-row { padding-right: 8px; padding-left: 8px; }
+    }
+
+
+    /* v30 — a farther-right split with a deliberately narrower task editor. */
+    .editor-inner {
+      width: min(490px, calc(100% - 24px));
+      margin-right: auto;
+      margin-left: 14px;
+    }
+    .task-name-input,
+    .task-prompt-input { max-width: 440px; }
+    .context-compact { max-width: 392px; }
+    .schedule-section { max-width: 410px; }
+    .channel-disclosure { max-width: 380px; }
+    .history-section { max-width: 440px; }
+    .channel-options {
+      width: min(300px, calc(100% - 30px));
+      grid-template-columns: minmax(0, 1fr);
+      padding-left: 30px;
+    }
+    @container scheduled-editor (max-width: 330px) {
+      .editor-inner {
+        width: calc(100% - 14px);
+        margin-right: 7px;
+        margin-left: 7px;
+      }
+      .task-name-input,
+      .task-prompt-input,
+      .context-compact,
+      .schedule-section,
+      .channel-disclosure,
+      .history-section { max-width: 100%; }
+      .schedule-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+        padding-top: 7px;
+        padding-bottom: 7px;
+      }
+      .schedule-control,
+      .schedule-value-button { justify-self: start; }
+      .channel-options {
+        width: 100%;
+        padding-left: 6px;
+      }
+    }
+
+</style>
+<style>
+  /* v31: Memory-sized overview; explicit selection expands to the full workspace. */
+  :root { --task-list-width: 208px; }
+  .scheduled-shell.overview { width: min(1136px, 100%); margin: 0 auto; }
+  .scheduled-shell.overview .task-pane { padding: 34px 28px 24px; }
+  .scheduled-shell.overview .pane-drag-strip { display: none; }
+  .scheduled-shell.overview .automation-page-header,
+  .scheduled-shell.overview .task-controls,
+  .scheduled-shell.overview .task-list-scroll,
+  .scheduled-shell.overview .template-library { width: 100%; margin-left: 0; margin-right: 0; }
+  .scheduled-shell.overview .automation-page-header { padding: 0 0 17px; }
+  .scheduled-shell.overview .task-controls { margin-top: 14px; }
+  .scheduled-shell.overview .template-library { margin-top: 30px; }
+  .scheduled-shell:not(.overview) { width: 100%; margin: 0; }
+  .scheduled-shell:not(.overview) .task-pane { display: flex; flex-direction: column; }
+  .scheduled-shell:not(.overview) .task-pane > .pane-drag-strip { display: none; }
+  .scheduled-shell:not(.overview) .task-controls {
+    flex: 0 0 auto; grid-template-columns: auto minmax(0, 1fr);
+    margin: 0; padding: 4px 9px 12px; column-gap: 8px; -webkit-app-region: no-drag;
+  }
+  .scheduled-shell:not(.overview) .task-filter-tab { padding: 4px 5px; min-height: 28px; }
+  .scheduled-shell:not(.overview) .task-page-create { min-width: 0; min-height: 32px; padding: 6px 8px; }
+  .scheduled-shell:not(.overview) .task-list-scroll { flex: 1; }
+  .task-filter-tab { font-size: 12px; font-weight: 500; }
+  .task-search-shell input { font-size: 12px; }
+  .scheduled-task-copy strong { font-size: 13px !important; }
+  .scheduled-task-copy small { font-size: 11px !important; }
+  .scheduled-shell:not(.overview) .scheduled-task-open { padding-left: 7px; column-gap: 8px; }
+  .automation-page-header p:last-child { font-size: 12px; line-height: 1.55; }
+  .template-card-copy strong { font-size: 13px; }
+  .template-card-copy small { font-size: 11.5px; }
+  .editor-pane { position: relative; }
+  .editor-page-toolbar {
+    position: sticky; z-index: 25; top: 0; display: flex; min-height: 38px;
+    align-items: center; justify-content: space-between; gap: 12px; padding: 3px 14px 3px 16px;
+    color: var(--muted); background: var(--home-surface); font-size: 11px;
+  }
+  .editor-close-button {
+    display: grid; width: 28px; height: 28px; place-items: center; padding: 5px;
+    border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer;
+  }
+  .editor-close-button:hover { color: var(--ink); background: var(--surface-hover); }
+  .editor-inner { width: min(900px, calc(100% - 32px)); min-height: 0; margin: 0 16px; padding: 0 0 32px; }
+  .task-name-input, .task-prompt-input { width: 100%; max-width: none; }
+  .task-name-input { font-size: 18px; }
+  .task-prompt-input { min-height: 94px; font-size: 13px; line-height: 1.65; }
+  .context-compact, .schedule-section, .channel-disclosure, .history-section { width: 100%; max-width: 440px; }
+  .compact-context-label { font-size: 11.5px; }
+  .member-picker-trigger, .project-picker-trigger { min-height: 48px; }
+  .member-picker-trigger-copy strong, .project-picker-trigger-copy strong { font-size: 12.5px; }
+  .member-picker-primary em, .member-picker-trigger-copy small, .project-picker-trigger-copy small { font-size: 10.5px; }
+  .schedule-row > span, .schedule-control { font-size: 12px; }
+  .channel-options { width: 100%; }
+  .create-actions { width: 100%; max-width: none; gap: 16px; }
+  .create-help { margin-right: auto; color: var(--muted); font-size: 11px; }
+  @container scheduled-editor (min-width: 1100px) {
+    .editor-page-toolbar { padding-left: 32px; padding-right: 24px; }
+    .editor-inner { width: min(1440px, calc(100% - 64px)); margin: 0 32px; }
+    .task-prompt-input { min-height: 118px; }
+    .context-compact { max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .schedule-section, .channel-disclosure, .history-section { max-width: 708px; }
+  }
+  @media (max-width: 820px) {
+    .scheduled-shell:not(.overview) { grid-template-columns: minmax(0, 1fr); }
+    .scheduled-shell:not(.overview) .task-pane, .scheduled-shell:not(.overview) .task-splitter { display: none; }
+    .scheduled-shell:not(.overview) .editor-pane { grid-column: 1; }
+    .scheduled-shell.overview .task-pane { padding-right: 20px; padding-left: 20px; }
+  }
+</style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="unified-sidebar" aria-label="全局导航">
+      <div class="unified-sidebar-drag" aria-hidden="true"></div>
+      <div class="unified-brand">
+        <span class="rail-logo" role="img" aria-label="Rovai AI">
+          <svg class="rail-logo-mark" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor"></path>
+            <path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" stroke-width="2.08" stroke-linecap="round"></path>
+            <circle class="brand-rendezvous-point" cx="12" cy="18.46" r="1.05"></circle>
+          </svg>
+          <span><strong>Rovai AI</strong></span>
+        </span>
+      </div>
+
+      <nav class="unified-primary-nav" aria-label="主要页面">
+        <button class="rail-button" type="button" data-nav-label="新对话">
+          <span class="rail-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"></path></svg></span><span class="rail-label">新对话</span>
+        </button>
+        <button class="rail-button" type="button" data-nav-label="队员">
+          <span class="rail-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path></svg></span><span class="rail-label">队员</span>
+        </button>
+        <button class="rail-button" type="button" data-nav-label="记忆">
+          <span class="rail-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 0 0-5.8 1.1A3.5 3.5 0 0 0 4 9.35v.3A3.5 3.5 0 0 0 6.2 12.9 3 3 0 0 0 12 14Z"></path><path d="M12 5a3 3 0 0 1 5.8 1.1A3.5 3.5 0 0 1 20 9.35v.3a3.5 3.5 0 0 1-2.2 3.25A3 3 0 0 1 12 14Z"></path><path d="M7 12.5V16a3 3 0 0 0 5 2.24V5"></path><path d="M17 12.5V16a3 3 0 0 1-5 2.24"></path></svg></span><span class="rail-label">记忆</span>
+        </button>
+        <button class="rail-button active" id="scheduledNav" type="button" aria-current="page">
+          <span class="rail-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></span><span class="rail-label">定时任务</span>
+        </button>
+      </nav>
+
+      <button class="conversation-jump" type="button"><span>跳转到对话…</span><kbd>⌘K</kbd></button>
+
+      <div class="navigation-scroll">
+        <section aria-labelledby="projects-heading">
+          <div class="navigation-section-title"><span id="projects-heading">项目</span><button class="section-create-button" type="button" aria-label="选择工作目录">＋</button></div>
+
+          <div class="project-group" data-project-group>
+            <button class="project-heading" type="button" data-project-toggle>
+              <svg class="project-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m3 4.5 3 3 3-3"></path></svg>
+              <span class="project-icon" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2.5 4.5h4l1.2 1.4h5.8v6.6h-11Z"></path></svg></span>
+              <span class="project-name">rovai-ai</span><span class="project-count">4</span>
+            </button>
+            <div class="conversation-list">
+              <button class="conversation-row" type="button" data-conversation="Issue #90 无响应排查"><span class="conversation-dot unread"></span><span class="conversation-title">Issue #90 无响应排查</span><span class="conversation-tail"></span></button>
+              <button class="conversation-row" type="button" data-conversation="钉钉多 Bot 验证"><span class="conversation-dot"></span><span class="conversation-title">钉钉多 Bot 验证</span><span class="conversation-tail"></span></button>
+              <button class="conversation-row" type="button" data-conversation="Issue / PR 巡检 · 今天 09:00" title="定时任务会话"><span class="conversation-dot"></span><span class="conversation-title">Issue / PR 巡检 · 今天 09:00</span><span class="conversation-tail" aria-label="定时任务"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v4.8l3 1.7"></path></svg></span></button>
+              <button class="conversation-row" type="button" data-conversation="v1.38 发布收口"><span class="conversation-dot"></span><span class="conversation-title">v1.38 发布收口</span><span class="conversation-tail"></span></button>
+            </div>
+          </div>
+
+          <div class="project-group" data-project-group>
+            <button class="project-heading" type="button" data-project-toggle>
+              <svg class="project-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m3 4.5 3 3 3-3"></path></svg>
+              <span class="project-icon" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.5"></circle><path d="M8 5v6M5 8h6"></path></svg></span>
+              <span class="project-name">快速对话</span><span class="project-count">3</span>
+            </button>
+            <div class="conversation-list">
+              <button class="conversation-row" type="button" data-conversation="自动化产品设计"><span class="conversation-dot"></span><span class="conversation-title">自动化产品设计</span><span class="conversation-tail"></span></button>
+              <button class="conversation-row" type="button" data-conversation="新版更新说明 · 正在运行" title="加载状态优先于定时任务标记"><span class="conversation-dot unread"></span><span class="conversation-title">新版更新说明 · 正在运行</span><span class="conversation-tail" aria-label="正在运行"><span class="conversation-spinner"></span></span></button>
+              <button class="conversation-row" type="button" data-conversation="渠道通知调研"><span class="conversation-dot"></span><span class="conversation-title">渠道通知调研</span><span class="conversation-tail"></span></button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="unified-sidebar-footer">
+        <button class="rail-button" type="button" data-nav-label="设置">
+          <span class="rail-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"></path><circle cx="12" cy="12" r="3"></circle></svg></span><span class="rail-label">设置</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <div class="scheduled-shell" id="scheduledShell">
+        <aside class="task-pane" aria-label="定时任务">
+          <div class="pane-drag-strip" aria-hidden="true"></div>
+
+          <header class="automation-page-header" id="automationPageHeader">
+            <div>
+              <h1>定时任务</h1>
+              <p>让队员按计划创建新对话并完成工作。</p>
+            </div>
+            <button class="primary-button dark-new-button" id="overviewCreateButton" type="button">新建</button>
+          </header>
+
+          <div class="task-controls" id="taskControls">
+            <div class="task-filter-tabs" role="tablist" aria-label="筛选定时任务">
+              <button class="task-filter-tab active" type="button" role="tab" aria-selected="true" data-task-filter="all">全部</button>
+              <button class="task-filter-tab" type="button" role="tab" aria-selected="false" data-task-filter="active">开启</button>
+              <button class="task-filter-tab" type="button" role="tab" aria-selected="false" data-task-filter="paused">关闭</button>
+            </div>
+            <select id="taskFilter" hidden aria-hidden="true">
+              <option value="all">全部</option>
+              <option value="active">开启</option>
+              <option value="paused">关闭</option>
+            </select>
+            <button class="task-page-create dark-new-button" id="taskPageCreateButton" type="button">
+              <span>新建</span>
+            </button>
+            <label class="task-search-shell">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.4 10.4 3 3"></path></svg>
+              <input id="taskSearch" aria-label="搜索定时任务" type="search" placeholder="搜索定时任务" autocomplete="off" />
+            </label>
+          </div>
+
+          <section class="task-create-chooser" id="taskCreateChooser" aria-label="选择创建方式" hidden>
+            <p>从空白或模板开始</p>
+            <div class="creation-choice-grid task-create-choice-grid">
+              <button class="creation-choice creation-choice-blank" id="taskCreateBlank" type="button">
+                <span class="creation-choice-icon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v12M3 9h12"></path></svg></span>
+                <span><strong>从空白开始</strong><small>自己填写执行内容与运行时间</small></span>
+              </button>
+              <button class="creation-choice creation-choice-code" type="button" data-suggestion-template="issues">
+                <span class="creation-choice-icon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="m6.4 4.6-3.2 4.4 3.2 4.4"></path><path d="m11.6 4.6 3.2 4.4-3.2 4.4"></path><path d="m10.3 3.6-2.6 10.8"></path></svg></span>
+                <span><strong>Issue / PR 巡检</strong><small>每天 09:00 · 检查 Issue、PR 与评审进展</small></span>
+              </button>
+              <button class="creation-choice creation-choice-weekly" type="button" data-suggestion-template="weekly">
+                <span class="creation-choice-icon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.25"><rect x="3.5" y="3.2" width="11" height="11.2" rx="1.6"></rect><path d="M6 2.2v2.4M12 2.2v2.4M3.5 6.6h11M6 9.2h6M6 11.6h4.2"></path></svg></span>
+                <span><strong>每周周报总结</strong><small>每周五 17:30 · 汇总进展、阻塞与下周重点</small></span>
+              </button>
+              <button class="creation-choice creation-choice-release" type="button" data-suggestion-template="release">
+                <span class="creation-choice-icon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M4.5 3.2h5.7l3.3 3.3v8H4.5Z"></path><path d="M10.2 3.2v3.3h3.3M6.7 9.2h4.6M6.7 11.7h4.6"></path></svg></span>
+                <span><strong>新版更新说明</strong><small>手动触发 · 根据近期改动生成更新说明</small></span>
+              </button>
+            </div>
+          </section>
+
+          <div class="task-list-scroll" id="taskListScroll">
+            <div class="scheduled-task-list" id="scheduledTaskList"></div>
+          </div>
+
+          <section class="template-library" id="templateLibrary" aria-labelledby="templateLibraryHeading">
+            <div class="template-library-heading">
+              <h2 id="templateLibraryHeading">模板</h2>
+              <p>选择后可在任务页继续调整</p>
+            </div>
+            <div class="template-card-grid">
+              <button class="template-card template-card-code" type="button" data-suggestion-template="issues">
+                <span class="template-card-icon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="m6.4 4.6-3.2 4.4 3.2 4.4"></path><path d="m11.6 4.6 3.2 4.4-3.2 4.4"></path><path d="m10.3 3.6-2.6 10.8"></path></svg></span>
+                <span class="template-card-copy"><strong>Issue / PR 巡检</strong><span>检查新增或更新的 Issue、PR 与评审进展，整理需要关注的事项。</span></span>
+                <span class="template-card-meta">每天 09:00</span>
+                <svg class="template-card-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"></path></svg>
+              </button>
+              <button class="template-card template-card-weekly" type="button" data-suggestion-template="weekly">
+                <span class="template-card-icon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.25"><rect x="3.5" y="3.2" width="11" height="11.2" rx="1.6"></rect><path d="M6 2.2v2.4M12 2.2v2.4M3.5 6.6h11M6 9.2h6M6 11.6h4.2"></path></svg></span>
+                <span class="template-card-copy"><strong>每周周报总结</strong><span>汇总一周完成事项、进展与阻塞，生成可直接分享的周报。</span></span>
+                <span class="template-card-meta">每周五 17:30</span>
+                <svg class="template-card-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"></path></svg>
+              </button>
+              <button class="template-card template-card-release" type="button" data-suggestion-template="release">
+                <span class="template-card-icon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M4.5 3.2h5.7l3.3 3.3v8H4.5Z"></path><path d="M10.2 3.2v3.3h3.3M6.7 9.2h4.6M6.7 11.7h4.6"></path></svg></span>
+                <span class="template-card-copy"><strong>新版更新说明</strong><span>读取近期完成的改动，整理成面向用户的简洁版本更新说明。</span></span>
+                <span class="template-card-meta">手动触发</span>
+                <svg class="template-card-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"></path></svg>
+              </button>
+            </div>
+          </section>
+        </aside>
+
+        <div
+          class="task-splitter"
+          id="taskSplitter"
+          role="separator"
+          aria-label="调整任务列表宽度"
+          aria-orientation="vertical"
+          aria-valuemin="208"
+          aria-valuemax="1127"
+          aria-valuenow="560"
+          tabindex="0"
+        >
+          <span class="task-splitter-grip" aria-hidden="true"></span>
+          <span class="task-splitter-tip" aria-hidden="true">拖动调整宽度</span>
+        </div>
+
+        <section class="editor-pane" id="editorPane" aria-label="定时任务详情" tabindex="-1">
+          <header class="editor-page-toolbar">
+            <span id="editorKindLabel">详情</span>
+            <button id="closeEditorButton" class="editor-close-button" type="button" aria-label="返回定时任务总览" title="关闭详情，返回总览">
+              <svg viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m5 5 8 8M13 5l-8 8" /></svg>
+            </button>
+          </header>
+          <div class="editor-inner">
+            <form id="taskForm" novalidate>
+              <input class="task-name-input" id="taskName" aria-label="定时任务名称" placeholder="定时任务名称" autocomplete="off" />
+
+              <textarea class="task-prompt-input" id="taskPrompt" aria-label="执行内容" placeholder="告诉队员需要按时完成什么…"></textarea>
+
+              <div class="context-compact" aria-label="执行上下文">
+                <div class="compact-context-field compact-context-member">
+                  <span class="compact-context-label">队员</span>
+                  <div class="member-picker" id="memberPicker">
+                    <input id="taskMember" type="hidden" value="alice" />
+                    <button class="member-picker-trigger" id="memberTrigger" type="button" aria-haspopup="listbox" aria-expanded="false" data-member-config="claudecode-cli · Claude Sonnet 4.5">
+                      <span class="avatar compact-member-avatar member-alice" id="memberAvatar" aria-hidden="true">芝</span>
+                      <span class="member-picker-trigger-copy">
+                        <span class="member-picker-primary"><strong id="memberName">芝士</strong><em id="memberRole">鉴定师</em></span>
+                        <small id="memberRuntime">claudecode-cli</small>
+                      </span>
+                      <svg class="member-picker-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
+                    </button>
+                    <div class="member-picker-menu" id="memberMenu" role="listbox" aria-label="选择执行队员">
+                      <button class="member-picker-option" type="button" role="option" data-member-option="alice" data-member-config="claudecode-cli · Claude Sonnet 4.5" aria-selected="true">
+                        <span class="avatar member-picker-option-avatar member-alice" aria-hidden="true">芝</span>
+                        <span class="member-picker-option-copy">
+                          <span class="member-picker-primary"><strong>芝士</strong><em>鉴定师</em></span>
+                          <small>claudecode-cli</small>
+                        </span>
+                        <span class="member-picker-check" aria-hidden="true"></span>
+                      </button>
+                      <button class="member-picker-option" type="button" role="option" data-member-option="minato" data-member-config="codex-cli · GPT-5.6 Luna" aria-selected="false">
+                        <span class="avatar member-picker-option-avatar member-minato" aria-hidden="true">小</span>
+                        <span class="member-picker-option-copy">
+                          <span class="member-picker-primary"><strong>小凑</strong><em>项目分析师</em></span>
+                          <small>codex-cli</small>
+                        </span>
+                        <span class="member-picker-check" aria-hidden="true"></span>
+                      </button>
+                      <button class="member-picker-option" type="button" role="option" data-member-option="gugu" data-member-config="gemini-cli · Gemini 2.5 Pro" aria-selected="false">
+                        <span class="avatar member-picker-option-avatar member-gugu" aria-hidden="true">咕</span>
+                        <span class="member-picker-option-copy">
+                          <span class="member-picker-primary"><strong>咕咕</strong><em>研究员</em></span>
+                          <small>gemini-cli</small>
+                        </span>
+                        <span class="member-picker-check" aria-hidden="true"></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="compact-context-field compact-context-project">
+                  <span class="compact-context-label">运行项目</span>
+                  <div class="project-picker" id="projectPicker">
+                    <input id="taskProject" type="hidden" value="快速对话" />
+                    <button class="project-picker-trigger" id="projectTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="project-picker-icon is-quick" id="projectIcon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="5.7"></circle><path d="M9 6.1v5.8M6.1 9h5.8"></path></svg></span>
+                      <span class="project-picker-trigger-copy"><strong id="projectName">快速对话</strong><small id="projectDetail">Rovai AI 管理的快速对话目录</small></span>
+                      <svg class="project-picker-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
+                    </button>
+                    <div class="project-picker-menu" id="projectMenu" role="listbox" aria-label="选择运行项目">
+                      <button class="project-picker-option" type="button" role="option" data-project-option="快速对话" aria-selected="true">
+                        <span class="project-picker-option-icon is-quick" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="5.7"></circle><path d="M9 6.1v5.8M6.1 9h5.8"></path></svg></span>
+                        <span class="project-picker-option-copy"><strong>使用快速对话</strong><small>Rovai AI 管理的快速对话目录</small></span>
+                        <span class="project-picker-check" aria-hidden="true">✓</span>
+                      </button>
+                      <button class="project-picker-option" type="button" role="option" data-project-option="rovai-ai" aria-selected="false">
+                        <span class="project-picker-option-icon is-project" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 5h4.4l1.25 1.55h6.75v7.1H2.8Z"></path></svg></span>
+                        <span class="project-picker-option-copy"><strong>rovai-ai</strong><small>~/Projects/rovai-ai</small></span>
+                        <span class="project-picker-check" aria-hidden="true"></span>
+                      </button>
+                      <button class="project-picker-option" type="button" role="option" data-project-option="website" aria-selected="false">
+                        <span class="project-picker-option-icon is-project" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 5h4.4l1.25 1.55h6.75v7.1H2.8Z"></path></svg></span>
+                        <span class="project-picker-option-copy"><strong>website</strong><small>~/Projects/website</small></span>
+                        <span class="project-picker-check" aria-hidden="true"></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <section class="schedule-section" aria-labelledby="scheduleCaption">
+                <p class="field-caption" id="scheduleCaption">运行时间</p>
+                <div class="schedule-panel" id="schedulePanel">
+                  <div class="schedule-row">
+                    <span>重复</span>
+                    <button class="schedule-control" id="frequencyTrigger" type="button" aria-haspopup="menu" aria-expanded="false"><span id="frequencyLabel">每天</span><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg></button>
+                    <div class="schedule-menu" id="frequencyMenu" role="menu" aria-label="运行频率">
+                      <button type="button" data-frequency="daily"><span>每天</span><span class="schedule-check">✓</span></button>
+                      <button type="button" data-frequency="workdays"><span>工作日</span><span class="schedule-check"></span></button>
+                      <button type="button" data-frequency="weekly"><span>每周</span><span class="schedule-check"></span></button>
+                      <button type="button" data-frequency="custom"><span>自定义</span><span class="schedule-check"></span></button>
+                      <button type="button" data-frequency="once"><span>仅一次</span><span class="schedule-check"></span></button>
+                      <button type="button" data-frequency="manual"><span>手动触发</span><span class="schedule-check"></span></button>
+                    </div>
+                  </div>
+                  <div id="scheduleDynamicRows"></div>
+                </div>
+              </section>
+
+              <details class="channel-disclosure" id="channelDisclosure">
+                <summary>
+                  <span class="channel-summary-leading">
+                    <span class="channel-summary-icon" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 9a4.8 4.8 0 0 1 9.6 0"></path><path d="M6.6 9a2.4 2.4 0 0 1 4.8 0"></path><circle cx="9" cy="9" r=".9" fill="currentColor" stroke="none"></circle><path d="M9 10.2v4.3"></path></svg></span>
+                    <span class="channel-summary-copy"><strong>通知到渠道</strong><small>由当前队员的渠道 Bot 发送结果</small></span>
+                  </span>
+                  <span class="channel-selected-count" id="channelSelectedCount">未选择</span>
+                  <svg class="channel-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 3 3 3-3 3"></path></svg>
+                </summary>
+                <div class="channel-options">
+                  <label class="channel-option" id="feishuOption" title="通过当前队员的飞书 Bot 发送结果">
+                    <input type="checkbox" id="channelFeishu" />
+                    <span class="channel-mark feishu">飞</span>
+                    <span class="channel-option-copy"><strong>飞书</strong><small id="feishuMeta">爱丽丝 Bot</small></span>
+                    <span class="channel-option-check" aria-hidden="true">✓</span>
+                  </label>
+                  <label class="channel-option" id="dingtalkOption" title="通过当前队员的钉钉 Bot 发送结果">
+                    <input type="checkbox" id="channelDingtalk" />
+                    <span class="channel-mark dingtalk">钉</span>
+                    <span class="channel-option-copy"><strong>钉钉</strong><small id="dingtalkMeta">爱丽丝 Bot</small></span>
+                    <span class="channel-option-check" aria-hidden="true">✓</span>
+                  </label>
+                </div>
+              </details>
+
+            </form>
+
+            <div class="create-actions" id="createActions" hidden>
+              <span class="create-help">名称可留空，创建后自动开启。</span>
+              <button class="primary-button" id="createSubmit" type="button" disabled>创建</button>
+            </div>
+
+            <section class="history-section" id="historySection" aria-labelledby="historyHeading">
+              <div class="history-heading"><h2 id="historyHeading">执行历史</h2></div>
+              <div class="history-list" id="historyList"></div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const members = {
+      alice: { name: '芝士', role: '鉴定师', runtime: 'claudecode-cli', model: 'Claude Sonnet 4.5', avatarClass: 'member-alice', initial: '芝', feishu: true, dingtalk: true },
+      minato: { name: '小凑', role: '项目分析师', runtime: 'codex-cli', model: 'GPT-5.6 Luna', avatarClass: 'member-minato', initial: '小', feishu: true, dingtalk: false },
+      gugu: { name: '咕咕', role: '研究员', runtime: 'gemini-cli', model: 'Gemini 2.5 Pro', avatarClass: 'member-gugu', initial: '咕', feishu: false, dingtalk: false }
+    };
+
+    const projects = {
+      '快速对话': { name: '快速对话', optionName: '使用快速对话', detail: 'Rovai AI 管理的快速对话目录', kind: 'quick' },
+      'rovai-ai': { name: 'rovai-ai', optionName: 'rovai-ai', detail: '~/Projects/rovai-ai', kind: 'project' },
+      'website': { name: 'website', optionName: 'website', detail: '~/Projects/website', kind: 'project' }
+    };
+
+    const templates = {
+      issues: { name: 'Issue / PR 巡检', prompt: '检查项目最近新增或更新的 Issue 和 PR，简要说明需要关注的事项和建议下一步。', frequency: 'daily', time: '09:00' },
+      weekly: { name: '每周周报总结', prompt: '总结本周完成的工作、仍在阻塞的事项，以及下周最值得关注的三件事。', frequency: 'weekly', weekday: '星期五', time: '17:30' },
+      release: { name: '新版更新说明', prompt: '根据近期完成的改动，生成一份简洁、面向用户的新版更新说明。', frequency: 'manual' }
+    };
+
+    let tasks = [
+      {
+        id: 'issues', name: 'Issue / PR 巡检', prompt: '检查 rovai-ai 最近新增或更新的 Issue 和 PR，简要说明需要关注的事项和建议下一步。', project: 'rovai-ai', member: 'alice', frequency: 'daily', time: '09:00', channels: [], paused: false, completed: false,
+        history: [
+          { when: '今天 09:00', relative: '6m', status: 'running' },
+          { when: '昨天 09:00', relative: '1d', status: 'success' },
+          { when: '9 月 1 日 09:00', relative: '2d', status: 'failed' },
+          { when: '8 月 31 日 09:00', relative: '3d', status: 'skipped' }
+        ]
+      },
+      {
+        id: 'weekly', name: '每周周报总结', prompt: '总结本周完成的工作、仍在阻塞的事项，以及下周最值得关注的三件事。', project: '快速对话', member: 'minato', frequency: 'weekly', weekday: '星期五', time: '17:30', channels: [], paused: false, completed: false,
+        history: [
+          { when: '8 月 29 日 17:30', relative: '5d', status: 'success' },
+          { when: '8 月 22 日 17:30', relative: '12d', status: 'success' }
+        ]
+      },
+      {
+        id: 'release', name: '新版更新说明', prompt: '根据近期完成的改动，生成一份简洁、面向用户的新版更新说明。', project: '快速对话', member: 'gugu', frequency: 'manual', channels: [], paused: true, completed: false,
+        history: [{ when: '8 月 30 日 15:42', relative: '4d', status: 'success' }]
+      }
+    ];
+
+    const frequencyNames = { daily: '每天', workdays: '工作日', weekly: '每周', custom: '自定义', once: '仅一次', manual: '手动触发' };
+    let selectedTaskId = null;
+    let currentFrequency = 'daily';
+    let activeFilter = 'all';
+    let toastTimer = null;
+    let suppressAutosave = false;
+    let autosaveTimer = null;
+    let openTaskMenuId = null;
+    let openSchedulePicker = null;
+    let calendarCursor = null;
+    let editorMode = 'detail';
+    let splitterDrag = null;
+    const TASK_LIST_DEFAULT_WIDTH = 208;
+    let lastOpenTaskListWidth = TASK_LIST_DEFAULT_WIDTH;
+
+    const els = {
+      shell: document.getElementById('scheduledShell'),
+      taskPane: document.querySelector('.task-pane'),
+      splitter: document.getElementById('taskSplitter'),
+      editorPane: document.getElementById('editorPane'),
+      editorKindLabel: document.getElementById('editorKindLabel'),
+      scheduledNav: document.getElementById('scheduledNav'),
+      list: document.getElementById('scheduledTaskList'),
+      taskControls: document.getElementById('taskControls'),
+      taskListScroll: document.getElementById('taskListScroll'),
+      templateLibrary: document.getElementById('templateLibrary'),
+      overviewCreate: document.getElementById('overviewCreateButton'),
+      taskPageCreate: document.getElementById('taskPageCreateButton'),
+      taskCreateChooser: document.getElementById('taskCreateChooser'),
+      taskCreateBlank: document.getElementById('taskCreateBlank'),
+      search: document.getElementById('taskSearch'),
+      filter: document.getElementById('taskFilter'),
+      form: document.getElementById('taskForm'),
+      name: document.getElementById('taskName'),
+      prompt: document.getElementById('taskPrompt'),
+      member: document.getElementById('taskMember'),
+      memberPicker: document.getElementById('memberPicker'),
+      memberTrigger: document.getElementById('memberTrigger'),
+      memberMenu: document.getElementById('memberMenu'),
+      memberAvatar: document.getElementById('memberAvatar'),
+      memberName: document.getElementById('memberName'),
+      memberRole: document.getElementById('memberRole'),
+      memberRuntime: document.getElementById('memberRuntime'),
+      project: document.getElementById('taskProject'),
+      projectPicker: document.getElementById('projectPicker'),
+      projectTrigger: document.getElementById('projectTrigger'),
+      projectMenu: document.getElementById('projectMenu'),
+      projectIcon: document.getElementById('projectIcon'),
+      projectName: document.getElementById('projectName'),
+      projectDetail: document.getElementById('projectDetail'),
+      frequencyTrigger: document.getElementById('frequencyTrigger'),
+      frequencyLabel: document.getElementById('frequencyLabel'),
+      frequencyMenu: document.getElementById('frequencyMenu'),
+      scheduleRows: document.getElementById('scheduleDynamicRows'),
+      channelDisclosure: document.getElementById('channelDisclosure'),
+      feishu: document.getElementById('channelFeishu'),
+      dingtalk: document.getElementById('channelDingtalk'),
+      feishuOption: document.getElementById('feishuOption'),
+      dingtalkOption: document.getElementById('dingtalkOption'),
+      feishuMeta: document.getElementById('feishuMeta'),
+      dingtalkMeta: document.getElementById('dingtalkMeta'),
+      channelCount: document.getElementById('channelSelectedCount'),
+      createActions: document.getElementById('createActions'),
+      createSubmit: document.getElementById('createSubmit'),
+      historySection: document.getElementById('historySection'),
+      historyList: document.getElementById('historyList'),
+      toast: document.getElementById('toast')
+    };
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+    }
+    function escapeAttribute(value) { return escapeHtml(value); }
+
+    function memberConfigLabel(member) {
+      return `${member.runtime} · ${member.model}`;
+    }
+
+    function avatarHtml(memberId) {
+      const member = members[memberId] || members.alice;
+      return `<span class="avatar ${member.avatarClass}" title="${escapeAttribute(member.name)} · ${escapeAttribute(memberConfigLabel(member))}">${member.initial}</span>`;
+    }
+
+    function weekdayShort(value) { return String(value || '').replace('星期', ''); }
+
+    function formatTime(value) {
+      const [hourRaw, minute = '00'] = String(value || '09:00').split(':');
+      const hour = Number(hourRaw);
+      const suffix = hour >= 12 ? 'PM' : 'AM';
+      const displayHour = hour % 12 || 12;
+      return `${String(displayHour).padStart(2, '0')}:${minute} ${suffix}`;
+    }
+
+    function scheduleText(task) {
+      if (task.frequency === 'daily') return `每天 ${formatTime(task.time || '09:00')}`;
+      if (task.frequency === 'workdays') return `工作日 ${formatTime(task.time || '09:00')}`;
+      if (task.frequency === 'weekly') return `每周${weekdayShort(task.weekday || '星期五')} ${formatTime(task.time || '17:30')}`;
+      if (task.frequency === 'custom') return task.cron ? `自定义 · ${task.cron}` : '自定义';
+      if (task.frequency === 'once') return `${task.date || '2026-09-05'} ${formatTime(task.time || '09:00')}`;
+      return '手动触发';
+    }
+
+    function selectedTask() {
+      return tasks.find((item) => item.id === selectedTaskId) || null;
+    }
+
+    function taskListWidthBounds() {
+      const shellWidth = Math.max(0, els.shell.getBoundingClientRect().width || 1136);
+      const splitterWidth = 7;
+      const fullWidth = Math.max(208, Math.floor(shellWidth - splitterWidth));
+      // Let the editor shrink to a compact, still-usable column before the
+      // final drag gesture closes it completely.
+      const minimumEditorWidth = 320;
+      const normalMaximum = Math.max(208, fullWidth - minimumEditorWidth);
+      return {
+        fullWidth,
+        normalMaximum,
+        closeThreshold: Math.min(fullWidth, normalMaximum + 32)
+      };
+    }
+
+    function clampTaskListWidth(value) {
+      const bounds = taskListWidthBounds();
+      const numeric = Number(value) || TASK_LIST_DEFAULT_WIDTH;
+      if (numeric >= bounds.closeThreshold) return bounds.fullWidth;
+      return Math.round(Math.min(bounds.normalMaximum, Math.max(208, numeric)));
+    }
+
+    function setTaskListWidth(value) {
+      const bounds = taskListWidthBounds();
+      const width = clampTaskListWidth(value);
+      const editorClosed = width >= bounds.fullWidth;
+      els.shell.classList.toggle('editor-closed', editorClosed);
+      if (!editorClosed) lastOpenTaskListWidth = width;
+      els.shell.style.setProperty('--task-list-width', `${width}px`);
+      els.splitter.setAttribute('aria-valuemax', String(bounds.fullWidth));
+      els.splitter.setAttribute('aria-valuenow', String(width));
+      els.splitter.setAttribute('aria-valuetext', editorClosed ? '创建或详情页已关闭' : `任务列表宽度 ${width} 像素`);
+      const tip = els.splitter.querySelector('.task-splitter-tip');
+      if (tip) tip.textContent = editorClosed ? '向左拖动打开任务页' : '拖到最右侧关闭任务页';
+      return width;
+    }
+
+    function ensureEditorOpen() {
+      if (!els.shell.classList.contains('editor-closed')) return;
+      const bounds = taskListWidthBounds();
+      setTaskListWidth(Math.min(lastOpenTaskListWidth || TASK_LIST_DEFAULT_WIDTH, bounds.normalMaximum));
+    }
+
+    function setWorkspaceMode(mode) {
+      els.shell.classList.toggle('overview', mode === 'overview');
+    }
+
+    function setTaskCreateChooserOpen(open) {
+      const nextOpen = Boolean(open) && editorMode === 'detail';
+      els.taskCreateChooser.hidden = !nextOpen;
+
+    }
+
+    function updateTaskPageCreateVisibility() {
+      const visible = editorMode !== 'overview';
+      els.taskPageCreate.hidden = !visible;
+      if (!visible) setTaskCreateChooserOpen(false);
+    }
+
+    function showOverview() {
+      flushAutosave();
+      editorMode = 'overview';
+      updateTaskPageCreateVisibility();
+      selectedTaskId = null;
+      openTaskMenuId = null;
+      setWorkspaceMode('overview');
+      closeMenus(false);
+      renderTaskList();
+    }
+
+    function updateMemberAvatar() {
+      const member = members[els.member.value] || members.alice;
+      const configLabel = memberConfigLabel(member);
+      els.memberAvatar.className = `avatar compact-member-avatar ${member.avatarClass}`;
+      els.memberAvatar.textContent = member.initial;
+      els.memberAvatar.title = `${member.name} · ${configLabel}`;
+      els.memberName.textContent = member.name;
+      els.memberRole.textContent = member.role;
+      els.memberRuntime.textContent = member.runtime;
+      els.memberTrigger.dataset.memberConfig = configLabel;
+      els.memberTrigger.setAttribute('aria-label', `执行队员：${member.name}，${member.role}。当前配置：${configLabel}`);
+      els.memberMenu.querySelectorAll('[data-member-option]').forEach((option) => {
+        const optionMember = members[option.dataset.memberOption] || members.alice;
+        const selected = option.dataset.memberOption === els.member.value;
+        option.dataset.memberConfig = memberConfigLabel(optionMember);
+        option.setAttribute('aria-label', `${optionMember.name}，${optionMember.role}。当前配置：${memberConfigLabel(optionMember)}`);
+        option.setAttribute('aria-selected', selected ? 'true' : 'false');
+        option.querySelector('.member-picker-check').textContent = '';
+      });
+    }
+
+    function setMemberMenuOpen(open) {
+      els.memberMenu.classList.toggle('open', open);
+      els.memberTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function projectIconMarkup(kind) {
+      return kind === 'quick'
+        ? '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="5.7"></circle><path d="M9 6.1v5.8M6.1 9h5.8"></path></svg>'
+        : '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 5h4.4l1.25 1.55h6.75v7.1H2.8Z"></path></svg>';
+    }
+
+    function updateProjectPicker() {
+      const project = projects[els.project.value] || projects['快速对话'];
+      els.projectName.textContent = project.name;
+      els.projectDetail.textContent = project.detail;
+      els.projectIcon.className = `project-picker-icon is-${project.kind}`;
+      els.projectIcon.innerHTML = projectIconMarkup(project.kind);
+      els.projectTrigger.setAttribute('aria-label', `运行项目：${project.name}。${project.detail}`);
+      els.projectMenu.querySelectorAll('[data-project-option]').forEach((option) => {
+        const optionProject = projects[option.dataset.projectOption] || projects['快速对话'];
+        const selected = option.dataset.projectOption === els.project.value;
+        option.setAttribute('aria-selected', selected ? 'true' : 'false');
+        option.setAttribute('aria-label', `${optionProject.optionName}。${optionProject.detail}`);
+        option.querySelector('.project-picker-check').textContent = selected ? '✓' : '';
+      });
+    }
+
+    function setProjectMenuOpen(open) {
+      els.projectMenu.classList.toggle('open', open);
+      els.projectTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function taskActionIcon(action) {
+      const paths = {
+        run: '<circle cx="8" cy="8" r="5.5"></circle><path d="m6.7 5.45 4.25 2.55-4.25 2.55Z"></path>',
+        close: '<path d="M8 1.8v5.1"></path><path d="M4.6 3.85a5.55 5.55 0 1 0 6.8 0"></path>',
+        open: '<path d="M8 1.8v5.1"></path><path d="M4.6 3.85a5.55 5.55 0 1 0 6.8 0"></path>',
+        delete: '<path d="M3.1 4.3h9.8"></path><path d="M6.2 2.2h3.6l.6 2.1H5.6Z"></path><path d="m4.5 4.3.55 9.1h5.9l.55-9.1"></path><path d="M6.8 6.8v4.2M9.2 6.8v4.2"></path>'
+      };
+      return `<span class="task-action-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${paths[action] || ''}</svg></span>`;
+    }
+
+    function taskStateIcon(task) {
+      if (task.completed) {
+        return '<span class="task-state-icon state-completed" title="已完成" aria-label="已完成"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"></circle><path d="m5.4 8.1 1.6 1.7 3.7-3.8"></path></svg></span>';
+      }
+      if (task.paused) {
+        return '<span class="task-state-icon state-closed" title="已关闭" aria-label="已关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"></circle><path d="M6.4 5.7v4.6M9.6 5.7v4.6"></path></svg></span>';
+      }
+      return '<span class="task-state-icon state-active" title="已开启" aria-label="已开启"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"></circle><path d="M8 4.8v3.4l2.35 1.35"></path></svg></span>';
+    }
+
+    function renderFilterTabs() {
+      document.querySelectorAll('[data-task-filter]').forEach((button) => {
+        const active = button.dataset.taskFilter === activeFilter;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      if (els.filter) els.filter.value = activeFilter;
+    }
+
+    function renderTaskList() {
+      const query = els.search.value.trim().toLowerCase();
+      const visibleTasks = tasks.filter((task) => {
+        const displayName = task.name || '未命名定时任务';
+        const matchesQuery = !query || displayName.toLowerCase().includes(query) || scheduleText(task).toLowerCase().includes(query);
+        const matchesFilter = activeFilter === 'all'
+          || (activeFilter === 'active' && !task.paused && !task.completed)
+          || (activeFilter === 'paused' && (task.paused || task.completed));
+        return matchesQuery && matchesFilter;
+      });
+
+      const overviewWithoutTasks = editorMode === 'overview' && tasks.length === 0;
+      els.shell.classList.toggle('no-tasks', overviewWithoutTasks);
+      if (els.taskControls) els.taskControls.hidden = overviewWithoutTasks;
+      if (els.taskListScroll) els.taskListScroll.hidden = overviewWithoutTasks;
+      renderFilterTabs();
+
+      els.list.innerHTML = visibleTasks.length ? visibleTasks.map((task) => {
+        const active = task.id === selectedTaskId;
+        const incomplete = !task.name.trim() || !task.prompt.trim();
+        return `
+          <div class="scheduled-task-item ${active ? 'active' : ''}" data-task-item="${task.id}">
+            <button class="scheduled-task-open" type="button" data-task-id="${task.id}" aria-current="${active ? 'true' : 'false'}">
+              ${taskStateIcon(task)}
+              <span class="scheduled-task-copy"><strong>${escapeHtml(task.name || '未命名定时任务')}</strong><small>${escapeHtml(scheduleText(task))}</small></span>
+              ${avatarHtml(task.member)}
+            </button>
+            <button class="scheduled-task-more" type="button" data-task-more="${task.id}" aria-label="${escapeAttribute(task.name || '未命名定时任务')}的操作" aria-haspopup="menu" aria-expanded="${openTaskMenuId === task.id ? 'true' : 'false'}">⋯</button>
+            <div class="task-action-menu ${openTaskMenuId === task.id ? 'open' : ''}" role="menu" data-task-menu="${task.id}">
+              <button type="button" role="menuitem" data-task-action="run" data-task-action-id="${task.id}" ${incomplete ? 'disabled title="请先填写名称和执行内容"' : ''}>${taskActionIcon('run')}<span>运行一次</span></button>
+              <button type="button" role="menuitem" data-task-action="close" data-task-action-id="${task.id}">${taskActionIcon(task.paused ? 'open' : 'close')}<span>${task.paused ? '开启' : '关闭'}</span></button>
+              <button class="danger" type="button" role="menuitem" data-task-action="delete" data-task-action-id="${task.id}">${taskActionIcon('delete')}<span>删除</span></button>
+            </div>
+          </div>`;
+      }).join('') : (tasks.length ? '<div style="padding:16px 9px;color:var(--faint);font-size:9.8px;">没有匹配的定时任务</div>' : '');
+
+      els.list.querySelectorAll('[data-task-id]').forEach((button) => button.addEventListener('click', () => openDetail(button.dataset.taskId)));
+      els.list.querySelectorAll('[data-task-more]').forEach((button) => button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const taskId = button.dataset.taskMore;
+        openTaskMenuId = openTaskMenuId === taskId ? null : taskId;
+        renderTaskList();
+      }));
+      els.list.querySelectorAll('[data-task-action]').forEach((button) => button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleTaskAction(button.dataset.taskAction, button.dataset.taskActionId);
+      }));
+    }
+
+    function openDetail(taskId) {
+      flushAutosave();
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task) return;
+      editorMode = 'detail';
+      els.editorKindLabel.textContent = '详情';
+      updateTaskPageCreateVisibility();
+      setTaskCreateChooserOpen(false);
+      setWorkspaceMode('split');
+      ensureEditorOpen();
+      selectedTaskId = task.id;
+      currentFrequency = task.frequency;
+      openTaskMenuId = null;
+      suppressAutosave = true;
+      els.name.value = task.name;
+      els.prompt.value = task.prompt;
+      els.member.value = task.member;
+      els.project.value = task.project;
+      updateProjectPicker();
+      els.feishu.checked = task.channels.includes('feishu');
+      els.dingtalk.checked = task.channels.includes('dingtalk');
+      els.channelDisclosure.open = false;
+      updateMemberChannels(false);
+      renderSchedule(task);
+      renderHistory(task.history || []);
+      els.historySection.hidden = !(task.history && task.history.length);
+      els.createActions.hidden = true;
+      suppressAutosave = false;
+      closeMenus(false);
+      renderTaskList();
+    }
+
+    function beginCreate(templateKey = null) {
+      flushAutosave();
+      const template = templateKey ? templates[templateKey] : null;
+      editorMode = 'create';
+      els.editorKindLabel.textContent = '新建';
+      updateTaskPageCreateVisibility();
+      setTaskCreateChooserOpen(false);
+      setWorkspaceMode('split');
+      ensureEditorOpen();
+      selectedTaskId = null;
+      openTaskMenuId = null;
+      suppressAutosave = true;
+      els.name.value = template?.name || '';
+      els.prompt.value = template?.prompt || '';
+      els.project.value = '快速对话';
+      updateProjectPicker();
+      els.member.value = 'alice';
+      els.feishu.checked = false;
+      els.dingtalk.checked = false;
+      els.channelDisclosure.open = false;
+      currentFrequency = template?.frequency || 'daily';
+      updateMemberChannels(false);
+      renderSchedule({
+        frequency: currentFrequency,
+        time: template?.time || '09:00',
+        weekday: template?.weekday,
+        cron: template?.cron,
+        date: template?.date
+      });
+      els.historySection.hidden = true;
+      els.createActions.hidden = false;
+      suppressAutosave = false;
+      updateCreateButtonState();
+      closeMenus(false);
+      renderTaskList();
+      requestAnimationFrame(() => els.editorPane.focus({ preventScroll: true }));
+    }
+
+    function updateCreateButtonState() {
+      if (editorMode !== 'create') {
+        els.createSubmit.disabled = true;
+        return;
+      }
+      els.createSubmit.disabled = !els.prompt.value.trim();
+    }
+
+    function createCurrentTask() {
+      if (editorMode !== 'create') return;
+      const draft = collectDraft();
+      if (!draft.name) draft.name = draft.prompt.slice(0, 30);
+      if (!draft.prompt) {
+        els.prompt.focus();
+        return;
+      }
+      const task = {
+        id: `task-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        ...draft,
+        paused: false,
+        completed: false,
+        history: []
+      };
+      tasks.unshift(task);
+      editorMode = 'detail';
+      openDetail(task.id);
+      showToast('定时任务已创建');
+    }
+
+    function updateMemberChannels(resetUnavailable = true) {
+      const member = members[els.member.value] || members.alice;
+      updateMemberAvatar();
+      els.feishu.disabled = !member.feishu;
+      els.dingtalk.disabled = !member.dingtalk;
+      els.feishuOption.classList.toggle('disabled', !member.feishu);
+      els.dingtalkOption.classList.toggle('disabled', !member.dingtalk);
+      els.feishuOption.title = member.feishu ? `通过${member.name}的飞书 Bot 发送结果` : `${member.name}尚未开通飞书 Bot`;
+      els.dingtalkOption.title = member.dingtalk ? `通过${member.name}的钉钉 Bot 发送结果` : `${member.name}尚未开通钉钉 Bot`;
+      els.feishuMeta.textContent = member.feishu ? `${member.name} Bot` : '未开通';
+      els.dingtalkMeta.textContent = member.dingtalk ? `${member.name} Bot` : '未开通';
+      if (resetUnavailable) {
+        if (!member.feishu) els.feishu.checked = false;
+        if (!member.dingtalk) els.dingtalk.checked = false;
+      }
+      updateChannelCount();
+    }
+
+    function formatDateLabel(value) {
+      const [year, month, day] = String(value || '2026-09-05').split('-').map(Number);
+      return `${year}年${month}月${day}日`;
+    }
+
+    function clampNumber(value, min, max, fallback) {
+      const parsed = Number.parseInt(String(value), 10);
+      if (!Number.isFinite(parsed)) return fallback;
+      return Math.min(max, Math.max(min, parsed));
+    }
+
+    function normalizeTime(hourValue, minuteValue) {
+      const hour = clampNumber(hourValue, 0, 23, 9);
+      const minute = clampNumber(minuteValue, 0, 59, 0);
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    }
+
+    function timePickerMarkup(value) {
+      const normalized = /^\d{2}:\d{2}$/.test(value || '') ? value : '09:00';
+      const [hour, minute] = normalized.split(':');
+      const presets = ['08:00', '09:00', '12:00', '17:30'];
+      return `
+        <div class="schedule-row">
+          <span>时间</span>
+          <div class="schedule-picker">
+            <input id="scheduleTime" type="hidden" value="${escapeAttribute(normalized)}" />
+            <button class="schedule-value-button" type="button" data-open-schedule-picker="time" aria-haspopup="dialog" aria-expanded="false">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"></circle><path d="M8 4.8v3.4l2.2 1.3"></path></svg>
+              <span id="scheduleTimeLabel">${escapeHtml(normalized)}</span>
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
+            </button>
+            <div class="schedule-popover time-picker-popover" data-schedule-picker="time" role="dialog" aria-label="选择运行时间">
+              <div class="picker-heading"><span>选择时间</span><strong id="timePickerCurrent">${escapeHtml(normalized)}</strong></div>
+              <div class="time-editor">
+                <div class="time-stepper">
+                  <button type="button" data-time-step-unit="hour" data-time-step-value="1" aria-label="小时加一"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="m3 7.5 3-3 3 3"></path></svg></button>
+                  <input id="timeHourInput" inputmode="numeric" maxlength="2" value="${hour}" aria-label="小时" />
+                  <button type="button" data-time-step-unit="hour" data-time-step-value="-1" aria-label="小时减一"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="m3 4.5 3 3 3-3"></path></svg></button>
+                </div>
+                <span class="time-colon">:</span>
+                <div class="time-stepper">
+                  <button type="button" data-time-step-unit="minute" data-time-step-value="5" aria-label="分钟加五"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="m3 7.5 3-3 3 3"></path></svg></button>
+                  <input id="timeMinuteInput" inputmode="numeric" maxlength="2" value="${minute}" aria-label="分钟" />
+                  <button type="button" data-time-step-unit="minute" data-time-step-value="-5" aria-label="分钟减五"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="m3 4.5 3 3 3-3"></path></svg></button>
+                </div>
+              </div>
+              <div class="time-presets">
+                ${presets.map((preset) => `<button type="button" data-time-preset="${preset}" class="${preset === normalized ? 'selected' : ''}">${preset}</button>`).join('')}
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function datePickerMarkup(value) {
+      const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value : '2026-09-05';
+      return `
+        <div class="schedule-row">
+          <span>日期</span>
+          <div class="schedule-picker">
+            <input id="scheduleDate" type="hidden" value="${escapeAttribute(normalized)}" />
+            <button class="schedule-value-button" type="button" data-open-schedule-picker="date" aria-haspopup="dialog" aria-expanded="false">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.7" y="3.4" width="10.6" height="9.4" rx="1.7"></rect><path d="M5 2v2.8M11 2v2.8M2.7 6.2h10.6"></path></svg>
+              <span id="scheduleDateLabel">${escapeHtml(formatDateLabel(normalized))}</span>
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
+            </button>
+            <div class="schedule-popover date-picker-popover" data-schedule-picker="date" role="dialog" aria-label="选择运行日期">
+              <div class="calendar-heading">
+                <button type="button" data-calendar-nav="-1" aria-label="上个月"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="m7.5 3-3 3 3 3"></path></svg></button>
+                <strong id="calendarMonthLabel"></strong>
+                <button type="button" data-calendar-nav="1" aria-label="下个月"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="m4.5 3 3 3-3 3"></path></svg></button>
+              </div>
+              <div class="calendar-weekdays" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+              <div class="calendar-grid" id="calendarGrid"></div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function weekdayPickerMarkup(value) {
+      const weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+      const normalized = weekdays.includes(value) ? value : '星期五';
+      return `
+        <div class="schedule-row">
+          <span>每</span>
+          <div class="schedule-picker">
+            <input id="scheduleWeekday" type="hidden" value="${escapeAttribute(normalized)}" />
+            <button class="schedule-value-button" type="button" data-open-schedule-picker="weekday" aria-haspopup="listbox" aria-expanded="false">
+              <span id="scheduleWeekdayLabel">${escapeHtml(normalized)}</span>
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
+            </button>
+            <div class="schedule-popover weekday-picker-popover" data-schedule-picker="weekday" role="listbox" aria-label="选择星期">
+              ${weekdays.map((weekday) => `<button type="button" data-weekday-value="${weekday}" class="${weekday === normalized ? 'selected' : ''}" role="option" aria-selected="${weekday === normalized ? 'true' : 'false'}"><span>${weekday}</span><span>${weekday === normalized ? '✓' : ''}</span></button>`).join('')}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function closeSchedulePickers() {
+      openSchedulePicker = null;
+      els.scheduleRows.querySelectorAll('[data-schedule-picker]').forEach((popover) => popover.classList.remove('open'));
+      els.scheduleRows.querySelectorAll('[data-open-schedule-picker]').forEach((trigger) => trigger.setAttribute('aria-expanded', 'false'));
+    }
+
+    function renderCalendarPicker() {
+      const dateInput = document.getElementById('scheduleDate');
+      const grid = document.getElementById('calendarGrid');
+      const label = document.getElementById('calendarMonthLabel');
+      if (!dateInput || !grid || !label) return;
+      const selectedParts = dateInput.value.split('-').map(Number);
+      if (!calendarCursor) calendarCursor = new Date(selectedParts[0], selectedParts[1] - 1, 1);
+      const year = calendarCursor.getFullYear();
+      const month = calendarCursor.getMonth();
+      label.textContent = `${year} 年 ${month + 1} 月`;
+      const firstDay = new Date(year, month, 1);
+      const mondayIndex = (firstDay.getDay() + 6) % 7;
+      const start = new Date(year, month, 1 - mondayIndex);
+      const today = new Date();
+      const selected = dateInput.value;
+      grid.innerHTML = Array.from({ length: 42 }, (_, index) => {
+        const day = new Date(start);
+        day.setDate(start.getDate() + index);
+        const value = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+        const outside = day.getMonth() !== month;
+        const isSelected = value === selected;
+        const isToday = day.getFullYear() === today.getFullYear() && day.getMonth() === today.getMonth() && day.getDate() === today.getDate();
+        return `<button class="calendar-day ${outside ? 'outside' : ''} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}" type="button" data-calendar-date="${value}" aria-label="${day.getFullYear()}年${day.getMonth() + 1}月${day.getDate()}日">${day.getDate()}</button>`;
+      }).join('');
+    }
+
+    function updateTimeValue(hourValue, minuteValue, closeAfter = false) {
+      const hidden = document.getElementById('scheduleTime');
+      if (!hidden) return;
+      const normalized = normalizeTime(hourValue, minuteValue);
+      hidden.value = normalized;
+      const label = document.getElementById('scheduleTimeLabel');
+      const current = document.getElementById('timePickerCurrent');
+      const hourInput = document.getElementById('timeHourInput');
+      const minuteInput = document.getElementById('timeMinuteInput');
+      if (label) label.textContent = normalized;
+      if (current) current.textContent = normalized;
+      if (hourInput) hourInput.value = normalized.slice(0, 2);
+      if (minuteInput) minuteInput.value = normalized.slice(3, 5);
+      els.scheduleRows.querySelectorAll('[data-time-preset]').forEach((button) => button.classList.toggle('selected', button.dataset.timePreset === normalized));
+      autosaveCurrentTask();
+      if (closeAfter) closeSchedulePickers();
+    }
+
+    function wireScheduleControls() {
+      closeSchedulePickers();
+      const dateInput = document.getElementById('scheduleDate');
+      if (dateInput) {
+        const [year, month] = dateInput.value.split('-').map(Number);
+        calendarCursor = new Date(year, month - 1, 1);
+        renderCalendarPicker();
+      } else {
+        calendarCursor = null;
+      }
+    }
+
+    function renderSchedule(source) {
+      currentFrequency = source.frequency || currentFrequency;
+      els.frequencyLabel.textContent = frequencyNames[currentFrequency];
+      els.frequencyMenu.querySelectorAll('[data-frequency]').forEach((button) => {
+        const selected = button.dataset.frequency === currentFrequency;
+        button.classList.toggle('selected', selected);
+        button.querySelector('.schedule-check').textContent = selected ? '✓' : '';
+      });
+
+      let rows = '';
+      if (currentFrequency === 'daily' || currentFrequency === 'workdays') {
+        rows = timePickerMarkup(source.time || '09:00');
+      } else if (currentFrequency === 'weekly') {
+        rows = weekdayPickerMarkup(source.weekday || '星期五') + timePickerMarkup(source.time || '17:30');
+      } else if (currentFrequency === 'custom') {
+        rows = `<div class="schedule-row"><span>Cron</span><input class="schedule-cron-input" id="scheduleCron" value="${escapeAttribute(source.cron || '0 9 * * *')}" aria-label="Cron 表达式" spellcheck="false" /></div>`;
+      } else if (currentFrequency === 'once') {
+        rows = datePickerMarkup(source.date || '2026-09-05') + timePickerMarkup(source.time || '09:00');
+      }
+      els.scheduleRows.innerHTML = rows;
+      wireScheduleControls();
+    }
+
+    function collectDraft() {
+      const channels = [];
+      if (els.feishu.checked && !els.feishu.disabled) channels.push('feishu');
+      if (els.dingtalk.checked && !els.dingtalk.disabled) channels.push('dingtalk');
+      const draft = {
+        name: els.name.value.trim(),
+        prompt: els.prompt.value.trim(),
+        project: els.project.value,
+        member: els.member.value,
+        frequency: currentFrequency,
+        channels
+      };
+      const time = document.getElementById('scheduleTime');
+      const weekday = document.getElementById('scheduleWeekday');
+      const cron = document.getElementById('scheduleCron');
+      const date = document.getElementById('scheduleDate');
+      if (time) draft.time = time.value;
+      if (weekday) draft.weekday = weekday.value;
+      if (cron) draft.cron = cron.value.trim();
+      if (date) draft.date = date.value;
+      return draft;
+    }
+
+    function autosaveCurrentTask() {
+      if (suppressAutosave) return;
+      if (editorMode === 'create') {
+        updateCreateButtonState();
+        return;
+      }
+      clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(() => {
+        const task = selectedTask();
+        if (!task) return;
+        Object.assign(task, collectDraft());
+        task.draft = !task.name.trim() || !task.prompt.trim();
+        renderTaskList();
+      }, 220);
+    }
+
+    function flushAutosave() {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+      if (suppressAutosave || editorMode === 'create') return;
+      const task = selectedTask();
+      if (!task) return;
+      Object.assign(task, collectDraft());
+      task.draft = !task.name.trim() || !task.prompt.trim();
+    }
+
+    function runStateIconMarkup(status) {
+      const icons = {
+        running: '<span class="run-state-icon state-running" role="img" aria-label="进行中" title="进行中"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2" opacity=".28"></circle><path d="M8 2.8A5.2 5.2 0 0 1 13.2 8"></path><circle cx="8" cy="8" r="1.15" fill="currentColor" stroke="none"></circle></svg></span>',
+        success: '<span class="run-state-icon state-completed" role="img" aria-label="已完成" title="已完成"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2"></circle><path d="m5.35 8.05 1.7 1.75 3.7-3.75"></path></svg></span>',
+        failed: '<span class="run-state-icon state-failed" role="img" aria-label="已失败" title="已失败"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.4 13.6 8 8 13.6 2.4 8Z"></path><path d="m6.15 6.15 3.7 3.7m0-3.7-3.7 3.7"></path></svg></span>',
+        skipped: '<span class="run-state-icon state-stopped" role="img" aria-label="已跳过" title="已跳过"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2"></circle><path d="M5.25 8h5.5"></path></svg></span>'
+      };
+      return icons[status] || icons.success;
+    }
+
+    function renderHistory(history) {
+      if (!history.length) {
+        els.historyList.innerHTML = '<div class="history-empty">还没有执行记录</div>';
+        return;
+      }
+      const statusPresentation = {
+        success: { label: '已完成' },
+        failed: { label: '已失败' },
+        running: { label: '进行中' },
+        skipped: { label: '已跳过' }
+      };
+      els.historyList.innerHTML = history.map((item, index) => {
+        const status = statusPresentation[item.status] || statusPresentation.success;
+        return `
+          <button class="history-row" type="button" data-history-index="${index}" data-history-status="${escapeAttribute(item.status)}" aria-label="${escapeAttribute(status.label)}，${escapeAttribute(item.when)}${item.status === 'skipped' ? '' : '，点击打开执行对话'}">
+            ${runStateIconMarkup(item.status)}
+            <span class="run-when">${escapeHtml(item.when)}</span>
+            <span class="run-relative">${escapeHtml(item.relative || '')}</span>
+          </button>`;
+      }).join('');
+      els.historyList.querySelectorAll('[data-history-index]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (button.dataset.historyStatus === 'skipped') {
+            showToast('本次已跳过，没有创建对话');
+            return;
+          }
+          showToast('已打开这次运行创建的对话');
+        });
+      });
+    }
+
+    function handleTaskAction(action, taskId) {
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task) return;
+      openTaskMenuId = null;
+      if (action === 'run') {
+        showToast(`已运行一次“${task.name || '未命名定时任务'}”，并创建新对话`);
+      } else if (action === 'close') {
+        task.paused = !task.paused;
+        showToast(task.paused ? '定时任务已关闭' : '定时任务已开启');
+      } else if (action === 'delete') {
+        const index = tasks.findIndex((item) => item.id === taskId);
+        tasks.splice(index, 1);
+        if (selectedTaskId === taskId) {
+          const next = tasks[Math.max(0, Math.min(index, tasks.length - 1))] || null;
+          if (next) openDetail(next.id);
+          else clearEditor();
+        }
+        showToast('定时任务已删除');
+      }
+      renderTaskList();
+    }
+
+    function clearEditor() {
+      showOverview();
+    }
+
+    function updateChannelCount() {
+      const selected = [];
+      if (els.feishu.checked && !els.feishu.disabled) selected.push('飞书');
+      if (els.dingtalk.checked && !els.dingtalk.disabled) selected.push('钉钉');
+      els.channelCount.textContent = selected.length ? selected.join('、') : '未选择';
+    }
+
+    function closeMenus(render = true) {
+      els.frequencyMenu.classList.remove('open');
+      els.frequencyTrigger.setAttribute('aria-expanded', 'false');
+      setMemberMenuOpen(false);
+      setProjectMenuOpen(false);
+      closeSchedulePickers();
+      if (openTaskMenuId !== null) {
+        openTaskMenuId = null;
+        if (render) renderTaskList();
+      }
+    }
+
+    function showToast(message) {
+      clearTimeout(toastTimer);
+      els.toast.textContent = message;
+      els.toast.classList.add('show');
+      toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2200);
+    }
+
+    document.querySelectorAll('[data-project-toggle]').forEach((button) => button.addEventListener('click', () => button.closest('[data-project-group]').classList.toggle('collapsed')));
+    document.querySelectorAll('[data-conversation]').forEach((button) => button.addEventListener('click', () => showToast(`打开“${button.dataset.conversation}”`)));
+    document.querySelectorAll('[data-nav-label]').forEach((button) => button.addEventListener('click', () => showToast(`${button.dataset.navLabel}页面不在本交互稿范围内`)));
+    document.querySelector('.conversation-jump').addEventListener('click', () => showToast('打开对话跳转面板'));
+    document.querySelector('.section-create-button').addEventListener('click', () => showToast('选择工作目录'));
+    els.scheduledNav.addEventListener('click', showOverview);
+
+    document.querySelectorAll('[data-task-filter]').forEach((button) => {
+      button.addEventListener('click', () => {
+        activeFilter = button.dataset.taskFilter;
+        renderTaskList();
+      });
+    });
+    els.search.addEventListener('input', renderTaskList);
+    document.querySelectorAll('[data-suggestion-template]').forEach((button) => {
+      button.addEventListener('click', () => beginCreate(button.dataset.suggestionTemplate));
+    });
+    document.getElementById('closeEditorButton').addEventListener('click', showOverview);
+    els.overviewCreate.addEventListener('click', () => beginCreate());
+    els.taskPageCreate.addEventListener('click', (event) => {
+      event.stopPropagation();
+      beginCreate();
+    });
+    els.taskCreateBlank.addEventListener('click', () => beginCreate());
+    els.createSubmit.addEventListener('click', createCurrentTask);
+
+    [els.name, els.prompt].forEach((control) => control.addEventListener('input', autosaveCurrentTask));
+    els.memberTrigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const open = !els.memberMenu.classList.contains('open');
+      closeSchedulePickers();
+      setProjectMenuOpen(false);
+      els.frequencyMenu.classList.remove('open');
+      els.frequencyTrigger.setAttribute('aria-expanded', 'false');
+      setMemberMenuOpen(open);
+    });
+    els.memberMenu.querySelectorAll('[data-member-option]').forEach((option) => {
+      option.addEventListener('click', (event) => {
+        event.stopPropagation();
+        els.member.value = option.dataset.memberOption;
+        updateMemberChannels(true);
+        autosaveCurrentTask();
+        setMemberMenuOpen(false);
+      });
+    });
+
+    els.projectTrigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const open = !els.projectMenu.classList.contains('open');
+      closeSchedulePickers();
+      setMemberMenuOpen(false);
+      els.frequencyMenu.classList.remove('open');
+      els.frequencyTrigger.setAttribute('aria-expanded', 'false');
+      setProjectMenuOpen(open);
+    });
+    els.projectMenu.querySelectorAll('[data-project-option]').forEach((option) => {
+      option.addEventListener('click', (event) => {
+        event.stopPropagation();
+        els.project.value = option.dataset.projectOption;
+        updateProjectPicker();
+        autosaveCurrentTask();
+        setProjectMenuOpen(false);
+      });
+    });
+    els.feishu.addEventListener('change', () => { updateChannelCount(); autosaveCurrentTask(); });
+    els.dingtalk.addEventListener('change', () => { updateChannelCount(); autosaveCurrentTask(); });
+    els.scheduleRows.addEventListener('input', autosaveCurrentTask);
+    els.scheduleRows.addEventListener('change', autosaveCurrentTask);
+    els.scheduleRows.addEventListener('click', (event) => {
+      const trigger = event.target.closest('[data-open-schedule-picker]');
+      if (trigger) {
+        event.stopPropagation();
+        const pickerName = trigger.dataset.openSchedulePicker;
+        const shouldOpen = openSchedulePicker !== pickerName;
+        closeSchedulePickers();
+        setMemberMenuOpen(false);
+        setProjectMenuOpen(false);
+        els.frequencyMenu.classList.remove('open');
+        els.frequencyTrigger.setAttribute('aria-expanded', 'false');
+        if (shouldOpen) {
+          const popover = els.scheduleRows.querySelector(`[data-schedule-picker="${pickerName}"]`);
+          popover?.classList.add('open');
+          trigger.setAttribute('aria-expanded', 'true');
+          openSchedulePicker = pickerName;
+          if (pickerName === 'date') renderCalendarPicker();
+        }
+        return;
+      }
+
+      const step = event.target.closest('[data-time-step-unit]');
+      if (step) {
+        event.stopPropagation();
+        const hourInput = document.getElementById('timeHourInput');
+        const minuteInput = document.getElementById('timeMinuteInput');
+        if (!hourInput || !minuteInput) return;
+        let hour = clampNumber(hourInput.value, 0, 23, 9);
+        let minute = clampNumber(minuteInput.value, 0, 59, 0);
+        const amount = Number(step.dataset.timeStepValue || 0);
+        if (step.dataset.timeStepUnit === 'hour') hour = (hour + amount + 24) % 24;
+        else {
+          const total = hour * 60 + minute + amount;
+          const wrapped = (total % 1440 + 1440) % 1440;
+          hour = Math.floor(wrapped / 60);
+          minute = wrapped % 60;
+        }
+        updateTimeValue(hour, minute);
+        return;
+      }
+
+      const preset = event.target.closest('[data-time-preset]');
+      if (preset) {
+        event.stopPropagation();
+        const [hour, minute] = preset.dataset.timePreset.split(':');
+        updateTimeValue(hour, minute, true);
+        return;
+      }
+
+      const nav = event.target.closest('[data-calendar-nav]');
+      if (nav) {
+        event.stopPropagation();
+        if (!calendarCursor) calendarCursor = new Date();
+        calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + Number(nav.dataset.calendarNav), 1);
+        renderCalendarPicker();
+        return;
+      }
+
+      const dateButton = event.target.closest('[data-calendar-date]');
+      if (dateButton) {
+        event.stopPropagation();
+        const hidden = document.getElementById('scheduleDate');
+        const label = document.getElementById('scheduleDateLabel');
+        if (!hidden) return;
+        hidden.value = dateButton.dataset.calendarDate;
+        if (label) label.textContent = formatDateLabel(hidden.value);
+        const [year, month] = hidden.value.split('-').map(Number);
+        calendarCursor = new Date(year, month - 1, 1);
+        renderCalendarPicker();
+        autosaveCurrentTask();
+        closeSchedulePickers();
+        return;
+      }
+
+      const weekdayButton = event.target.closest('[data-weekday-value]');
+      if (weekdayButton) {
+        event.stopPropagation();
+        const hidden = document.getElementById('scheduleWeekday');
+        const label = document.getElementById('scheduleWeekdayLabel');
+        if (!hidden) return;
+        hidden.value = weekdayButton.dataset.weekdayValue;
+        if (label) label.textContent = hidden.value;
+        autosaveCurrentTask();
+        closeSchedulePickers();
+      }
+    });
+    els.scheduleRows.addEventListener('focusout', (event) => {
+      if (!event.target.matches('#timeHourInput, #timeMinuteInput')) return;
+      requestAnimationFrame(() => {
+        const hourInput = document.getElementById('timeHourInput');
+        const minuteInput = document.getElementById('timeMinuteInput');
+        if (hourInput && minuteInput) updateTimeValue(hourInput.value, minuteInput.value);
+      });
+    });
+
+    els.frequencyTrigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const open = !els.frequencyMenu.classList.contains('open');
+      setMemberMenuOpen(false);
+      setProjectMenuOpen(false);
+      closeSchedulePickers();
+      els.frequencyMenu.classList.toggle('open', open);
+      els.frequencyTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    els.frequencyMenu.querySelectorAll('[data-frequency]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        currentFrequency = button.dataset.frequency;
+        renderSchedule({ frequency: currentFrequency });
+        els.frequencyMenu.classList.remove('open');
+        els.frequencyTrigger.setAttribute('aria-expanded', 'false');
+        autosaveCurrentTask();
+      });
+    });
+
+    els.form.addEventListener('submit', (event) => event.preventDefault());
+
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('.schedule-panel')) {
+        els.frequencyMenu.classList.remove('open');
+        els.frequencyTrigger.setAttribute('aria-expanded', 'false');
+        closeSchedulePickers();
+      }
+      if (!event.target.closest('.member-picker')) setMemberMenuOpen(false);
+      if (!event.target.closest('.project-picker')) setProjectMenuOpen(false);
+      if (!event.target.closest('#taskCreateChooser') && !event.target.closest('#taskPageCreateButton')) {
+        setTaskCreateChooserOpen(false);
+      }
+      if (!event.target.closest('.scheduled-task-item') && openTaskMenuId !== null) {
+        openTaskMenuId = null;
+        renderTaskList();
+      }
+    });
+    els.splitter.addEventListener('pointerdown', (event) => {
+      if (els.shell.classList.contains('overview') || event.button !== 0) return;
+      event.preventDefault();
+      splitterDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: els.taskPane.getBoundingClientRect().width
+      };
+      els.splitter.setPointerCapture?.(event.pointerId);
+      els.splitter.classList.add('is-resizing');
+      document.body.classList.add('task-splitter-resizing');
+    });
+    els.splitter.addEventListener('pointermove', (event) => {
+      if (!splitterDrag || splitterDrag.pointerId !== event.pointerId) return;
+      setTaskListWidth(splitterDrag.startWidth + event.clientX - splitterDrag.startX);
+    });
+    const finishSplitterDrag = (event) => {
+      if (!splitterDrag || (event.pointerId !== undefined && splitterDrag.pointerId !== event.pointerId)) return;
+      try { els.splitter.releasePointerCapture?.(splitterDrag.pointerId); } catch {}
+      splitterDrag = null;
+      els.splitter.classList.remove('is-resizing');
+      document.body.classList.remove('task-splitter-resizing');
+    };
+    els.splitter.addEventListener('pointerup', finishSplitterDrag);
+    els.splitter.addEventListener('pointercancel', finishSplitterDrag);
+    els.splitter.addEventListener('dblclick', () => setTaskListWidth(TASK_LIST_DEFAULT_WIDTH));
+    els.splitter.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return;
+      event.preventDefault();
+      const current = els.taskPane.getBoundingClientRect().width;
+      if (event.key === 'Home' || event.key === 'Enter') setTaskListWidth(TASK_LIST_DEFAULT_WIDTH);
+      else if (event.key === 'End') setTaskListWidth(Number.MAX_SAFE_INTEGER);
+      else setTaskListWidth(current + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 24 : 8));
+    });
+
+    window.addEventListener('resize', () => {
+      if (els.shell.classList.contains('overview')) return;
+      if (els.shell.classList.contains('editor-closed')) setTaskListWidth(Number.MAX_SAFE_INTEGER);
+      else setTaskListWidth(els.taskPane.getBoundingClientRect().width);
+    });
+
+    window.addEventListener('beforeunload', flushAutosave);
+
+    const params = new URLSearchParams(location.search);
+    if (params.get('empty') === '1') tasks = [];
+    const requestedSplit = Number(params.get('split'));
+    if (Number.isFinite(requestedSplit) && requestedSplit > 0) setTaskListWidth(requestedSplit);
+    const requestedView = params.get('view');
+    const requestedTask = params.get('task');
+    if (requestedView === 'create') {
+      beginCreate(params.get('template'));
+      const requestedFrequency = params.get('frequency');
+      if (requestedFrequency && frequencyNames[requestedFrequency]) {
+        currentFrequency = requestedFrequency;
+        renderSchedule({ frequency: requestedFrequency, date: '2026-09-05', time: '09:00', weekday: '星期五' });
+      }
+    } else if (requestedTask && tasks.some((task) => task.id === requestedTask)) openDetail(requestedTask);
+    else showOverview();
+
+    if (params.get('pane') === 'closed') requestAnimationFrame(() => setTaskListWidth(Number.MAX_SAFE_INTEGER));
+    if (params.get('channels') === 'open') els.channelDisclosure.open = true;
+    const requestedMenu = params.get('menu');
+    if (requestedMenu === 'frequency') requestAnimationFrame(() => {
+      els.frequencyMenu.classList.add('open');
+      els.frequencyTrigger.setAttribute('aria-expanded', 'true');
+    });
+    if (requestedMenu === 'member') requestAnimationFrame(() => setMemberMenuOpen(true));
+    if (['time', 'date', 'weekday'].includes(requestedMenu)) requestAnimationFrame(() => {
+      const trigger = els.scheduleRows.querySelector(`[data-open-schedule-picker="${requestedMenu}"]`);
+      const popover = els.scheduleRows.querySelector(`[data-schedule-picker="${requestedMenu}"]`);
+      if (trigger && popover) {
+        trigger.setAttribute('aria-expanded', 'true');
+        popover.classList.add('open');
+        openSchedulePicker = requestedMenu;
+        if (requestedMenu === 'date') renderCalendarPicker();
+      }
+    });
+    if (params.get('taskMenu')) requestAnimationFrame(() => {
+      openTaskMenuId = params.get('taskMenu');
+      renderTaskList();
+    });
+  </script>
+</body>
+</html>

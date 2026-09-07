@@ -305,6 +305,7 @@ pub struct DesktopAttachmentTarget {
     pub media_type: String,
     pub path: PathBuf,
     pub open_risk: DesktopAttachmentOpenRisk,
+    pub can_show_path: bool,
 }
 
 pub fn preview_source_attachment(
@@ -358,6 +359,7 @@ pub fn desktop_target_for_source_attachment(
         media_type,
         path,
         open_risk,
+        can_show_path: true,
     })
 }
 
@@ -1898,6 +1900,7 @@ impl CampAttachmentStore {
             media_type: candidate.media_type,
             path: candidate.path,
             open_risk,
+            can_show_path: false,
         })
     }
 
@@ -3411,6 +3414,28 @@ mod agent_source_tests {
     use super::*;
 
     #[test]
+    fn source_attachment_desktop_target_allows_path_after_source_validation() {
+        let root = std::env::temp_dir().join(format!("rovai-source-path-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("plan.md");
+        fs::write(&source, b"# plan").unwrap();
+        let source_ref = crate::local_attachment_source::observe_source_attachment(
+            &source,
+            "plan.md",
+            Some("text/markdown"),
+        )
+        .unwrap();
+        let target = desktop_target_for_source_attachment(&source_ref).unwrap();
+        assert!(target.can_show_path);
+        assert_eq!(target.path, source);
+        let wire = serde_json::to_value(target).unwrap();
+        assert_eq!(wire["canShowPath"], true);
+        fs::remove_file(&source).unwrap();
+        assert!(desktop_target_for_source_attachment(&source_ref).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn authority_ingress_gate_is_shared_per_camp_and_exclusive() {
         let directory = std::env::temp_dir().join(format!(
             "rovai-authority-ingress-gate-test-{}",
@@ -3886,6 +3911,7 @@ mod slow_tests {
         assert_eq!(target.kind, "file");
         assert_eq!(target.open_risk, DesktopAttachmentOpenRisk::Normal);
         assert_eq!(target.path, authority_path);
+        assert!(!target.can_show_path);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

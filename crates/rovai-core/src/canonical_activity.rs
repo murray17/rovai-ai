@@ -17,7 +17,8 @@ use crate::{
 };
 
 pub use crate::runtime_activity_mapping::{
-    CLASSIFIER_VERSION, LEGACY_CLASSIFIER_VERSION, PREVIOUS_CLASSIFIER_VERSION,
+    CLASSIFIER_VERSION, INTERMEDIATE_CLASSIFIER_VERSION, LEGACY_CLASSIFIER_VERSION,
+    PREVIOUS_CLASSIFIER_VERSION,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -153,9 +154,12 @@ pub fn classify_evidence_with_version(
         );
     let file_operation = runtime_file_operation::operation_from_evidence(payload);
     let file_operation_path = runtime_file_operation::path_from_evidence(payload);
-    let diff_projection = runtime_diff::projection_from_evidence(payload, evidence_id);
-    if classifier_version == CLASSIFIER_VERSION
-        && file_operation.is_some_and(|operation| operation.operation_kind == "read")
+    let diff_projection = runtime_diff::projection_from_evidence(payload, evidence_id)
+        .filter(|_| classifier_version == CLASSIFIER_VERSION || !is_pi_edit_diff_evidence(payload));
+    if matches!(
+        classifier_version,
+        CLASSIFIER_VERSION | PREVIOUS_CLASSIFIER_VERSION
+    ) && file_operation.is_some_and(|operation| operation.operation_kind == "read")
     {
         activity_domain = "file".to_string();
         semantic_kind = Some("file.read".to_string());
@@ -231,6 +235,25 @@ pub fn classify_evidence_with_version(
         coverage_level: coverage_level.to_string(),
         source_authority,
     }
+}
+
+fn is_pi_edit_diff_evidence(payload: &Value) -> bool {
+    payload
+        .pointer("/runtimeDiff/sourceMetadata/adapterKind")
+        .and_then(Value::as_str)
+        == Some("pi")
+        && payload
+            .pointer("/runtimeDiff/sourceMetadata/protocolFamily")
+            .and_then(Value::as_str)
+            == Some("pi-jsonl-rpc-v1")
+        && payload
+            .pointer("/runtimeDiff/sourceMetadata/sourceEventKind")
+            .and_then(Value::as_str)
+            == Some("tool_execution_end.completed")
+        && payload
+            .pointer("/runtimeDiff/semanticKind")
+            .and_then(Value::as_str)
+            == Some("unified_diff_snapshot")
 }
 
 pub fn new_projection(
@@ -630,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_v3_projects_structured_command_reads_without_rewriting_v2_history() {
+    fn activity_v4_preserves_v3_reads_without_rewriting_v2_history() {
         let payload = json!({
             "item": {
                 "id": "command-read-1",
@@ -666,12 +689,83 @@ mod tests {
             "completed",
             &payload,
         );
+        let intermediate = classify_evidence_with_version(
+            INTERMEDIATE_CLASSIFIER_VERSION,
+            "run-codex",
+            1,
+            "evidence-read",
+            "activity.completed",
+            "command",
+            "completed",
+            &payload,
+        );
 
         assert_eq!(current.operation_id, previous.operation_id);
         assert_eq!(current.activity_domain, "file");
         assert_eq!(current.semantic_kind.as_deref(), Some("file.read"));
-        assert_eq!(previous.activity_domain, "shell");
-        assert_eq!(previous.semantic_kind.as_deref(), Some("shell.execute"));
+        assert_eq!(previous.activity_domain, "file");
+        assert_eq!(previous.semantic_kind.as_deref(), Some("file.read"));
+        assert_eq!(intermediate.activity_domain, "shell");
+        assert_eq!(intermediate.semantic_kind.as_deref(), Some("shell.execute"));
+    }
+
+    #[test]
+    fn pi_edit_diff_is_a_v4_mapping_without_reclassifying_v3_activity() {
+        let payload = json!({
+            "toolCallId": "pi-edit-1",
+            "toolName": "edit",
+            "kind": "edit",
+            "status": "completed",
+            "runtimeFileOperation": {
+                "schemaVersion": 2,
+                "source": "runtime_reported",
+                "status": "available",
+                "operationKind": "write",
+                "path": "src/app.ts"
+            },
+            "runtimeDiff": {
+                "schemaVersion": 1,
+                "source": "runtime_reported",
+                "status": "available",
+                "semanticKind": "unified_diff_snapshot",
+                "entries": [{
+                    "semantics": "unified_diff_snapshot",
+                    "path": "src/app.ts",
+                    "changeKind": "update",
+                    "diff": "--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n"
+                }],
+                "sourceMetadata": {
+                    "adapterKind": "pi",
+                    "protocolFamily": "pi-jsonl-rpc-v1",
+                    "sourceEventKind": "tool_execution_end.completed"
+                }
+            }
+        });
+        let current = classify_evidence_with_version(
+            CLASSIFIER_VERSION,
+            "run-pi",
+            1,
+            "evidence-pi-edit",
+            "runtime.action",
+            "tool_call",
+            "terminal",
+            &payload,
+        );
+        let previous = classify_evidence_with_version(
+            PREVIOUS_CLASSIFIER_VERSION,
+            "run-pi",
+            1,
+            "evidence-pi-edit",
+            "runtime.action",
+            "tool_call",
+            "terminal",
+            &payload,
+        );
+
+        assert!(current.diff_projection.is_some());
+        assert!(previous.diff_projection.is_none());
+        assert_eq!(current.activity_domain, "file");
+        assert_eq!(previous.activity_domain, "file");
     }
 
     #[test]

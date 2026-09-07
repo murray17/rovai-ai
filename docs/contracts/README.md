@@ -117,7 +117,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Skill Content Preview v1（当前）](skill-content-preview-v1.md) | 已安装当前 Revision 或受检导入候选的有界、完整性绑定只读内容与文件列表 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
-| [File Preview v9（当前）](file-preview-v9.md) | v8 来源、恢复与成功后提交不变；Files Changed 有可靠差异时进入不可变 Review，operation-only 直接预览当前文件且失败不切换导航 |
+| [File Preview v11（当前）](file-preview-v11.md) | 在 v10 基础上区分本地源附件与受管附件；源文件成功预览后显示实际路径，Managed/legacy 保持内部路径私有 |
+| [File Preview v10（历史）](file-preview-v10.md) | v9 来源、Files Changed 路由与成功后提交不变；项目根与项目外普通文件显示实际路径，同名 Tab 使用最短唯一目录后缀，复制普通文件返回 canonical 绝对路径 |
+| [File Preview v9（历史）](file-preview-v9.md) | v8 来源、恢复与成功后提交不变；Files Changed 有可靠差异时进入不可变 Review，operation-only 直接预览当前文件且失败不切换导航 |
 | [File Preview v8（历史）](file-preview-v8.md) | v7 会话恢复与副作用边界不变；项目内 child 获得独立 `camp_workspace` 恢复来源；执行过程文件入口成功后才提交导航，失败只显示当前页 danger Toast |
 | [File Preview v7（历史）](file-preview-v7.md) | v6 显式文件入口不变；增加窗口内按 Camp 的无能力 Tab 快照、无原生副作用 restore wire、binding generation fence 与单句失败呈现 |
 | [File Preview v6（历史）](file-preview-v6.md) | v5 owner-scoped 附件与既有打开分类不变；只有显式 Markdown link 产生消息资源入口，删除渲染前存在性探测，共享视觉类型只统一会话链接与 Tab 图标 |
@@ -129,7 +131,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Permanent Deletion v3（当前）](camp-permanent-deletion-v3.md) | 原删除权限/journal 不变；先定向业务终态，再有界 Runtime 清理和物理删除 |
 | [Camp Permanent Deletion v2（历史）](camp-permanent-deletion-v2.md) | v1 删除合同不变；增加 Camp Published Attachment View journal cleanup，并规定先 fence Runtime、再取得 View write gate |
 | [Camp Permanent Deletion v1（历史）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界；不含 Published View cleanup |
-| [Runtime File Change Observation v3（当前）](runtime-file-change-observation-v3.md) | v2 文件变化与临时区排除不变；schema 2 增加 typed read/write，activity-v3 准入可靠单文件阅读且排除 Files Changed |
+| [Runtime File Change Observation v4（当前）](runtime-file-change-observation-v4.md) | v3 typed read/write 与文件汇总不变；准入 Pi 成功 edit 的 path-bound 原生 patch，activity-v4 隔离新映射且不回写历史 |
+| [Runtime File Change Observation v3（历史）](runtime-file-change-observation-v3.md) | v2 文件变化与临时区排除不变；schema 2 增加 typed read/write，activity-v3 准入可靠单文件阅读且排除 Files Changed |
 | [Runtime File Change Observation v2（历史）](runtime-file-change-observation-v2.md) | v1 Evidence/投影/呈现不变；精确排除当前 `ROVAI_RUN_TMP` 临时交付区，mixed evidence 保留普通文件且不迁移历史数据 |
 | [Runtime File Change Observation v1（历史）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation；不含 managed output exclusion |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
