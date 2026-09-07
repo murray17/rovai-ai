@@ -7037,7 +7037,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('>Codex CLI</option>')
-    expect(markup).toContain('>Pi Coding Agent</option>')
+    expect(markup).toContain('>PI</option>')
+    expect(markup).toMatch(/>Antigravity<\/option><option[^>]*value="pi"[^>]*>PI<\/option>/)
     expect(markup).toContain('>OpenCode</option>')
     expect(markup).toContain('>GitHub Copilot</option>')
     expect(markup).toContain('>Claude Code</option>')
@@ -7209,8 +7210,8 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('<option value="pi">Pi Coding Agent</option>')
-    expect(markup).not.toContain('Pi Coding Agent（实验性）')
+    expect(markup).toContain('<option value="pi">PI</option>')
+    expect(markup).not.toContain('PI（实验性）')
     expect(markup).not.toContain('<option value="pi" disabled="">')
   })
 
@@ -7257,7 +7258,9 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('Codex CLI')
-    expect(markup).toContain('Pi Coding Agent')
+    expect(markup).toContain('<strong>PI</strong>')
+    expect(markup.indexOf('<strong>PI</strong>')).toBeGreaterThan(markup.indexOf('<strong>Antigravity</strong>'))
+    expect(markup.indexOf('<strong>PI</strong>')).toBeLessThan(markup.indexOf('<strong>DeepSeek Harness</strong>'))
     expect(markup).toContain('OpenCode')
     expect(markup).toContain('GitHub Copilot')
     expect(markup).toContain('Claude Code')

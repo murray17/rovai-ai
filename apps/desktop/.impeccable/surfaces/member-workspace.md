@@ -96,6 +96,7 @@ provider credentials remain private Core configuration and never appear in this 
 text is not provider-cleaned: when an upstream Runtime emits thinking tags as ordinary assistant text, process
 detail and the resulting final candidate retain that text exactly like every other ACP Runtime.
 
+The member Runtime chooser displays Pi Coding Agent as “PI” immediately after Antigravity; the member sidebar uses the same short label.
 Pi Coding Agent is a qualified Product Runtime on macOS arm64, macOS x64 and Windows x64. Keep it selectable and
 editable through the ordinary Runtime flow on all three platforms, without an experimental suffix, while continuing
 to show real machine availability independently. Qualification does not weaken installation, model or Dispatch checks.

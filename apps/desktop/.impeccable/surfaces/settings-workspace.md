@@ -117,6 +117,8 @@ writes after conflict and refreshes.
 
 ## Agent 运行时与诊断
 
+The Agent Runtime catalog displays Pi Coding Agent as “PI” immediately after Antigravity, matching the member Runtime chooser.
+
 Runtime settings show the reviewed user-facing Runtime catalog, which may omit a closed internal identity that
 has not completed any product qualification. User-facing states are limited to
 checking, installed but awaiting first-run verification, available, needs handling, needs login, not

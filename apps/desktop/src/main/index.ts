@@ -118,6 +118,7 @@ import {
 import { AppQuitCoordinator } from './app-quit-coordinator'
 import { requestRendererQuitPreparation } from './renderer-quit-preparation'
 import { createWindowCloseHandler } from './window-close-guard'
+import { installCloseTabShortcut } from '../shared/close-tab-shortcut'
 import { ChannelSettingsService } from './channel-settings'
 import { ExecutionViewService } from './execution-view-service'
 import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
@@ -713,6 +714,7 @@ function createWindow(): void {
       publishPageZoom()
     }, 0)
   }
+  installCloseTabShortcut(window.webContents, process.platform, () => window.close())
   window.webContents.on('before-input-event', (event, input) => {
     const action = pageZoomAction(input, process.platform)
     if (action === null) return

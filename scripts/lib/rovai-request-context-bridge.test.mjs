@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 import electron from 'electron'
-import ts from 'typescript'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
+const require = createRequire(import.meta.url)
+const esbuild = createRequire(require.resolve('vite'))('esbuild')
 
 test('the production preload preserves structured rejections through a real contextBridge', {
   timeout: 30_000
@@ -20,11 +22,10 @@ test('the production preload preserves structured rejections through a real cont
   let child
   let closed
   try {
-    const source = await readFile(join(root, 'apps/desktop/src/preload/index.ts'), 'utf8')
-    const compiled = ts.transpileModule(source, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
+    await esbuild.build({
+      entryPoints: [join(root, 'apps/desktop/src/preload/index.ts')],
+      outfile: preload, bundle: true, platform: 'node', format: 'cjs', external: ['electron']
     })
-    await writeFile(preload, compiled.outputText)
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
     child = spawn(electron, [

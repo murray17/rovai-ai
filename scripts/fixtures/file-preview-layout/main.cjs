@@ -3,7 +3,8 @@ const { mkdirSync, writeFileSync } = require('node:fs')
 const { isAbsolute, join, dirname } = require('node:path')
 const { app, BrowserWindow } = require('electron')
 
-const [renderer, userData] = process.argv.slice(2)
+const [renderer, userData, shortcutModule, shortcutPreload] = process.argv.slice(2)
+const { installCloseTabShortcut } = require(shortcutModule)
 assert.ok(isAbsolute(renderer) && isAbsolute(userData), 'The preview fixture requires isolated absolute paths')
 mkdirSync(userData, { recursive: true })
 app.setPath('userData', userData)
@@ -14,8 +15,11 @@ app.setPath('sessionData', join(userData, 'session'))
 app.whenReady().then(async () => {
   const window = new BrowserWindow({
     show: process.platform === 'linux', width: 1440, height: 920, useContentSize: true,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false }
+    webPreferences: { preload: shortcutPreload, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false }
   })
+  installCloseTabShortcut(window.webContents, process.platform, () => window.close())
+  let nativeCloseRequests = 0
+  window.on('close', event => { nativeCloseRequests += 1; event.preventDefault() })
   window.webContents.on('console-message', event => console.error(event.message))
   await window.loadFile(renderer)
   const run = async (code) => {
@@ -935,6 +939,35 @@ app.whenReady().then(async () => {
     const safety = await run('window.previewTest.workerSafety()')
     assert.equal(safety.cancelled, 'AbortError')
     assert.match(safety.timeout, /耗时过长/)
+  })
+  await check('primary W closes the active file or review tab, restores focus, and keeps the conversation alive', async () => {
+    const primary = process.platform === 'darwin' ? 'meta' : 'control'
+    for (const width of [1440, 1040]) {
+      await viewport(width)
+      await run('window.previewTest.closeAll(); window.previewTest.open()')
+      await run('window.previewTest.openFindFixture("find.html")')
+      await run('document.querySelector(".file-preview-tab-panel:not([hidden]) iframe").focus()')
+      assert.equal((await snapshot()).tabCount, 2)
+      assert.equal((await key('w', [primary])).tabCount, 1)
+      assert.equal((await snapshot()).focused, 'file-preview-tab-activate')
+      assert.equal(nativeCloseRequests, 0)
+      const last = await key('w', [primary])
+      assert.equal(last.tabCount, 0)
+      assert.equal(last.visible, false)
+      assert.equal(nativeCloseRequests, 0, 'Closing the last file must not close the window')
+    }
+    await viewport(1440)
+    await run('window.previewTest.open()')
+    await click('.run-file-change-file')
+    assert.equal((await snapshot()).tabCount, 2)
+    assert.equal((await key('w', [primary])).tabCount, 1)
+    assert.equal(nativeCloseRequests, 0)
+    await run('window.previewTest.closeAll()')
+    await click('.file-preview-toggle')
+    assert.equal((await key('w', [primary])).visible, false, 'An empty preview closes without closing the window')
+    assert.equal(nativeCloseRequests, 0)
+    await key('w', [primary])
+    assert.equal(nativeCloseRequests, 1, 'With preview hidden, the native window close path remains available')
   })
   console.log(JSON.stringify({ ok: true, cases }))
   app.exit(0)
