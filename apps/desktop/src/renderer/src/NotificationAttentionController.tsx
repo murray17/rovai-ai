@@ -1,5 +1,5 @@
 import { readErrorMessage } from './error-message'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   NotificationActionView,
   NotificationEpisodeChange,
@@ -51,6 +51,7 @@ interface NotificationAttentionControllerProps {
   ): Promise<boolean>
   onError(message: string): void
   visibleSources: VisibleNotificationSources | null
+  singleChatSources?: VisibleNotificationSources | null
   onHeadsUpVisibleChange?(visible: boolean): void
 }
 
@@ -62,7 +63,7 @@ export const emptyNotificationHeadsUpState = (): NotificationHeadsUpState => ({
 export function applyNotificationHeadsUpChanges(
   current: NotificationHeadsUpState,
   incoming: readonly NotificationEpisodeChange[],
-  maximumEntries = 3
+  maximumEntries = 1
 ): NotificationHeadsUpState {
   let nextEntries = current.entries.map((entry) => ({ ...entry }))
   let overflowEntries = current.overflowEntries.map((entry) => ({ ...entry }))
@@ -95,28 +96,55 @@ export function applyNotificationHeadsUpChanges(
       signal: change.headsUpSignal,
       changeSequence: change.changeSequence
     }
-    const existingIndex = nextEntries.findIndex((entry) => entry.episode.id === change.episodeId)
-    if (existingIndex >= 0) {
-      nextEntries[existingIndex] = next
-      continue
-    }
-    const existingOverflowIndex = overflowEntries.findIndex(
-      (entry) => entry.episode.id === change.episodeId
-    )
-    if (existingOverflowIndex >= 0) {
-      overflowEntries[existingOverflowIndex] = next
-    } else if (nextEntries.length < maximumEntries) {
-      nextEntries.push(next)
-    } else {
-      overflowEntries.push(next)
+    const identity = next.signal.action.acknowledgementId
+    const existingIndex = nextEntries.findIndex((entry) => entry.signal.action.acknowledgementId === identity)
+    const existingOverflowIndex = overflowEntries.findIndex((entry) => entry.signal.action.acknowledgementId === identity)
+    if (existingIndex >= 0) nextEntries[existingIndex] = next
+    else if (existingOverflowIndex >= 0) overflowEntries[existingOverflowIndex] = next
+    else {
+      const sameRound = nextEntries.findIndex((entry) => entry.episode.id === next.episode.id
+        && entry.signal.action.singleChat?.conversationId === next.signal.action.singleChat?.conversationId)
+      if (sameRound >= 0 && headsUpPriority(next.signal.semantic) >= headsUpPriority(nextEntries[sameRound].signal.semantic)) {
+        overflowEntries.push(nextEntries[sameRound])
+        nextEntries[sameRound] = next
+      } else if (nextEntries.length < maximumEntries && overflowEntries.length === 0) nextEntries.push(next)
+      else overflowEntries.push(next)
     }
   }
   return { entries: nextEntries, overflowEntries }
 }
 
+function headsUpPriority(semantic: NotificationSemantic): number {
+  return { approval_pending: 5, turn_failed: 4, turn_incomplete: 3, user_mention: 2, turn_completed: 1 }[semantic]
+}
+
+export function filterVisibleNotificationHeadsUp(
+  current: NotificationHeadsUpState,
+  sources: readonly VisibleNotificationSources[],
+  attentive: boolean
+): NotificationHeadsUpState {
+  if (!attentive) return current
+  const retain = (entry: NotificationHeadsUpEntry): boolean => {
+    const action = entry.signal.action
+    if (!action.available) return false
+    return !sources.some((source) => source.campId === action.campId
+      && source.surfaceVisible !== false
+      && (source.conversationId ?? null) === (action.singleChat?.conversationId ?? null)
+      && (entry.signal.semantic === 'turn_completed'
+        || (entry.signal.semantic === 'approval_pending' && action.approvalId !== null && source.approvalIds.includes(action.approvalId))
+        || (entry.signal.semantic === 'user_mention' && action.messageId !== null && source.messageIds.includes(action.messageId))
+        || (['turn_failed', 'turn_incomplete'].includes(entry.signal.semantic)
+          && action.campTurnId !== null && source.campTurnIds.includes(action.campTurnId))))
+  }
+  const entries = current.entries.filter(retain)
+  const overflowEntries = current.overflowEntries.filter(retain)
+  return entries.length === current.entries.length && overflowEntries.length === current.overflowEntries.length
+    ? current : { entries, overflowEntries }
+}
+
 export function promoteNotificationHeadsUpOverflow(
   current: NotificationHeadsUpState,
-  maximumEntries = 3
+  maximumEntries = 1
 ): NotificationHeadsUpState {
   if (current.entries.length > 0 || current.overflowEntries.length === 0) return current
   return {
@@ -164,7 +192,7 @@ export async function readNotificationChangePages(
   let candidateCursor = startCursor
   for (let page = 0; page < maximumPages; page += 1) {
     const batch = await requestPage(candidateCursor)
-    if (batch.schemaVersion !== 6) throw new Error('提醒增量合同不兼容。')
+    if (batch.schemaVersion !== 7) throw new Error('提醒增量合同不兼容。')
     if (batch.requestedAfterChangeSequence !== candidateCursor) {
       throw new Error('提醒增量游标边界不一致。')
     }
@@ -197,13 +225,13 @@ export function notificationHeadsUpPresentation(
 ): { label: string; message: string } {
   switch (signal.semantic) {
     case 'approval_pending':
-      return { label: '待审批', message: '有操作等待你确认' }
+      return { label: '待审批', message: '有操作等待你审批' }
     case 'turn_failed':
-      return { label: '执行失败', message: '本轮协作失败，请返回查看' }
+      return { label: '执行失败', message: '本轮执行失败，请查看详情' }
     case 'turn_incomplete':
-      return { label: '执行未完成', message: '本轮协作未能证明完成，请返回查看' }
+      return { label: '执行未完成', message: '本轮未完成，请查看详情' }
     case 'turn_completed':
-      return { label: '等待你的下一步', message: '本轮协作已经完成' }
+      return { label: '等待你的下一步', message: '本轮已完成' }
     case 'user_mention':
       return {
         label: '提到你',
@@ -250,9 +278,21 @@ export function NotificationAttentionController({
   onCancelNavigation,
   onRefreshVisibleCamp,
   onError,
-  visibleSources,
+  visibleSources: publicSources,
+  singleChatSources = null,
   onHeadsUpVisibleChange
 }: NotificationAttentionControllerProps): React.JSX.Element {
+  const readingSources = useMemo(() => activeCampVisible
+    ? [publicSources, singleChatSources].filter((source): source is VisibleNotificationSources => (
+      source !== null && source.campId === activeCampId && source.surfaceVisible !== false
+    )) : [], [activeCampVisible, activeCampId, publicSources, singleChatSources])
+  const visibleSources = useMemo(() => readingSources.length === 0 ? null : {
+    campId: readingSources[0].campId,
+    snapshotSequence: Math.max(...readingSources.map((source) => source.snapshotSequence)),
+    messageIds: [...new Set(readingSources.flatMap((source) => source.messageIds))].sort(),
+    campTurnIds: [...new Set(readingSources.flatMap((source) => source.campTurnIds))].sort(),
+    approvalIds: [...new Set(readingSources.flatMap((source) => source.approvalIds))].sort()
+  }, [readingSources])
   const [preference, setPreference] = useState<NotificationPreference | null>(null)
   const [headsUpState, setHeadsUpState] = useState<NotificationHeadsUpState>(
     emptyNotificationHeadsUpState
@@ -263,6 +303,7 @@ export function NotificationAttentionController({
   const [visibleAcknowledgementRetry, setVisibleAcknowledgementRetry] = useState(0)
   const [busyAcknowledgementId, setBusyAcknowledgementId] = useState<string | null>(null)
   const windowAttentive = useWindowAttentive()
+  const [foregroundReady, setForegroundReady] = useState(false)
   const changeCursor = useRef(0)
   const baselineReady = useRef(false)
   const baselineGeneration = useRef(0)
@@ -300,7 +341,7 @@ export function NotificationAttentionController({
       'notifications.inbox',
       { filter: 'unread', limit: 1 }
     )
-    if (inbox.schemaVersion !== 6) throw new Error('提醒基线合同不兼容。')
+    if (inbox.schemaVersion !== 7) throw new Error('提醒基线合同不兼容。')
     setHasUnreadAttention(inbox.unreadCount > 0)
     return inbox
   }, [])
@@ -418,6 +459,7 @@ export function NotificationAttentionController({
           && episode.camp.id === activeCampId
           && activeCampVisible
           && windowAttentive
+          && readingSources.some((source) => !source.conversationId)
         if (exactSourceMayBeVisible) {
           const rendered = await onRefreshVisibleCamp(episode, exactMentionAction)
           if (rendered && document.visibilityState === 'visible' && document.hasFocus()) {
@@ -450,6 +492,7 @@ export function NotificationAttentionController({
       setObservedThroughChangeSequence(collected.nextChangeSequence)
       pollFailureCount.current = 0
       pollRetryAt.current = 0
+      if (document.visibilityState === 'visible' && document.hasFocus()) setForegroundReady(true)
     } catch (nextError) {
       pollFailureCount.current += 1
       pollRetryAt.current = Date.now() + Math.min(
@@ -468,6 +511,7 @@ export function NotificationAttentionController({
     loadPreference,
     onRefreshVisibleCamp,
     preference,
+    readingSources,
     windowAttentive
   ])
 
@@ -499,6 +543,18 @@ export function NotificationAttentionController({
       unsubscribe()
     }
   }, [enabled, loadPreference, pollChanges])
+
+  useEffect(() => {
+    if (!windowAttentive || !enabled) {
+      setForegroundReady(false)
+      return
+    }
+    void pollChanges().catch(() => undefined)
+  }, [enabled, pollChanges, windowAttentive, observedThroughChangeSequence])
+
+  useEffect(() => {
+    setHeadsUpState((current) => filterVisibleNotificationHeadsUp(current, readingSources, windowAttentive))
+  }, [readingSources, windowAttentive, observedThroughChangeSequence])
 
   useEffect(() => {
     if (
@@ -613,19 +669,20 @@ export function NotificationAttentionController({
     }
   }
 
-  const currentHeadsUp = headsUpState.entries[0] ?? null
-  const headsUpOverflow = headsUpState.overflowEntries.length
-  const visibleHeadsUp = windowAttentive && (currentHeadsUp !== null || headsUpOverflow > 0)
+  const presentableState = filterVisibleNotificationHeadsUp(headsUpState, readingSources, windowAttentive)
+  const currentHeadsUp = presentableState.entries[0] ?? null
+  const headsUpOverflow = presentableState.overflowEntries.length
+  const visibleHeadsUp = windowAttentive && foregroundReady && (currentHeadsUp !== null || headsUpOverflow > 0)
   useEffect(() => {
     onHeadsUpVisibleChange?.(visibleHeadsUp)
     return () => onHeadsUpVisibleChange?.(false)
   }, [onHeadsUpVisibleChange, visibleHeadsUp])
-  if (!windowAttentive) return <></>
   return (
     <>
       {currentHeadsUp && (
         <NotificationHeadsUp
-          key={currentHeadsUp.episode.id}
+          key={`${currentHeadsUp.episode.id}:${currentHeadsUp.signal.action.singleChat?.conversationId ?? 'public'}`}
+          active={windowAttentive && foregroundReady}
           entry={currentHeadsUp}
           busy={busyAcknowledgementId !== null}
           onOpen={() => void openAction(
@@ -640,6 +697,7 @@ export function NotificationAttentionController({
       )}
       {!currentHeadsUp && headsUpOverflow > 0 && (
         <NotificationHeadsUpSummary
+          active={windowAttentive && foregroundReady}
           count={headsUpOverflow}
           onOpen={() => setHeadsUpState((current) => (
             promoteNotificationHeadsUpOverflow(current)
@@ -654,37 +712,35 @@ export function NotificationAttentionController({
   )
 }
 
-function NotificationHeadsUp({
+export function NotificationHeadsUp({
+  active = true,
   entry,
   busy,
   onOpen,
   onDismiss
 }: {
+  active?: boolean
   entry: NotificationHeadsUpEntry
   busy: boolean
   onOpen(): void
   onDismiss(): void
 }): React.JSX.Element {
-  const [paused, setPaused] = useState(false)
-  const onDismissRef = useRef(onDismiss)
+  const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
   const presentation = notificationHeadsUpPresentation(entry.signal)
-  useEffect(() => {
-    onDismissRef.current = onDismiss
-  }, [onDismiss])
-  useEffect(() => {
-    if (paused || busy) return undefined
-    const timer = window.setTimeout(() => onDismissRef.current(), 8_000)
-    return () => window.clearTimeout(timer)
-  }, [busy, paused, entry.changeSequence])
+  const campTitle = formatCampTitle(entry.episode.camp)
+  const privateTitle = entry.signal.action.singleChat ? ` · 与${entry.signal.action.singleChat.agentDisplayName}单聊` : ''
+  useHeadsUpLifetime(!active || hovered || focused || busy, onDismiss, entry.signal.action.acknowledgementId)
   return (
     <aside
       className="notification-heads-up"
+      hidden={!active}
       aria-live="polite"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocus={() => setPaused(true)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false)
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false)
       }}
     >
       <button
@@ -694,9 +750,8 @@ function NotificationHeadsUp({
         aria-busy={busy ? 'true' : undefined}
         onClick={onOpen}
       >
-        <strong>{presentation.label}</strong>
-        <span>{presentation.message}</span>
-        <small title={formatCampTitle(entry.episode.camp)}>{formatCampTitle(entry.episode.camp)}</small>
+        <strong className="notification-heads-up-source" title={`${campTitle}${privateTitle}`}><span>{campTitle}</span>{privateTitle && <b>{privateTitle}</b>}</strong>
+        <span className="notification-heads-up-message">{presentation.message}</span>
       </button>
       <button
         className="notification-heads-up-close"
@@ -709,38 +764,33 @@ function NotificationHeadsUp({
 }
 
 function NotificationHeadsUpSummary({
+  active,
   count,
   onOpen,
   onDismiss
 }: {
+  active: boolean
   count: number
   onOpen(): void
   onDismiss(): void
 }): React.JSX.Element {
-  const [paused, setPaused] = useState(false)
-  const onDismissRef = useRef(onDismiss)
-  useEffect(() => {
-    onDismissRef.current = onDismiss
-  }, [onDismiss])
-  useEffect(() => {
-    if (paused) return undefined
-    const timer = window.setTimeout(() => onDismissRef.current(), 8_000)
-    return () => window.clearTimeout(timer)
-  }, [paused])
+  const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
+  useHeadsUpLifetime(!active || hovered || focused, onDismiss)
   return (
     <aside
       className="notification-heads-up notification-heads-up-summary"
+      hidden={!active}
       aria-live="polite"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocus={() => setPaused(true)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false)
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false)
       }}
     >
       <button className="notification-heads-up-open" type="button" onClick={onOpen}>
-        <strong>还有 {count} 项新提醒</strong>
-        <span>查看下一条</span>
+        <span>还有 {count} 条提醒</span><span>查看下一条</span>
       </button>
       <button
         className="notification-heads-up-close"
@@ -750,6 +800,26 @@ function NotificationHeadsUpSummary({
       ><CloseIcon /></button>
     </aside>
   )
+}
+
+function useHeadsUpLifetime(paused: boolean, onDismiss: () => void, identity: string | null = null): void {
+  const previousIdentity = useRef(identity)
+  const remaining = useRef(8_000)
+  const onDismissRef = useRef(onDismiss)
+  onDismissRef.current = onDismiss
+  useEffect(() => {
+    if (previousIdentity.current !== identity) {
+      previousIdentity.current = identity
+      remaining.current = 8_000
+    }
+    if (paused) return
+    const start = performance.now()
+    const timer = window.setTimeout(() => onDismissRef.current(), remaining.current)
+    return () => {
+      window.clearTimeout(timer)
+      remaining.current = Math.max(0, remaining.current - (performance.now() - start))
+    }
+  }, [paused, identity])
 }
 
 function useWindowAttentive(): boolean {

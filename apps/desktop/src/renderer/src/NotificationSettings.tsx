@@ -57,17 +57,17 @@ const NOTIFICATION_SCENARIOS: readonly NotificationScenario[] = [
   {
     id: 'outcome',
     title: '本轮结果',
-    description: '协作完成或未完成的结果。',
+    description: '公共会话和单聊的执行结果。',
     categories: [
       {
         key: 'turnCompletedHeadsUpEnabled',
         label: '本轮完成',
-        description: '本轮完成，等待你的下一步'
+        description: '其他会话或单聊完成时提醒'
       },
       {
         key: 'turnIncompleteHeadsUpEnabled',
         label: '执行未完成',
-        description: '本轮失败或无法证明完成'
+        description: '本轮失败或未完成时提醒'
       }
     ]
   }

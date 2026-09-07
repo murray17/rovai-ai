@@ -8,7 +8,7 @@ last_updated: 2026-09-06
 # Single Chat Architecture
 
 Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。字段级合同见
-[Single Chat v2](../contracts/single-chat-v2.md)，当前选择理由见
+[Single Chat v3](../contracts/single-chat-v3.md)，当前选择理由见
 [V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)至
 [V1.50-D04](../versions/v1.50/decisions.md#v1-50-d04)。
 

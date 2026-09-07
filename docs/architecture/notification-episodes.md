@@ -88,7 +88,7 @@ Episode 推荐动作从不参与该来源集合。
   不改变临时队列，reset/重新建立 baseline 时直接清空且不从 Episode actions 恢复。
 - 只有 `notification_episode.changed` 精确信号触发增量读取；其他 Core event 不触发通知扫描，30 秒恢复
   轮询与窗口重新聚焦只用于丢事件、休眠和暂时失败后的收敛。
-- 应用失焦或不可见时 exact signal 仍可进入内存队列，但浮层不挂载、不开始 8 秒计时；重新获得注意后
+- 应用失焦或不可见时 exact signal 仍可进入内存队列，但浮层隐藏并暂停剩余 8 秒计时；重新获得注意并收敛失效来源后
   才显示。队列不是持久状态，reset/重新建立 baseline 时清空。
 - 可见来源确认 applied 后只重读轻量未读状态；失败保持未读并在来源仍可见时退避重试。
 
@@ -101,5 +101,13 @@ cascade 和 Journal trigger 收口。
 ## References
 
 - [通知事实与投影](foundational-invariants.md#core-notifications)
-- [Notification Episode v5](../contracts/notification-episode-v5.md)
-- [Current User Attention v4](../contracts/current-user-attention-v4.md)
+- [Notification Episode v6](../contracts/notification-episode-v6.md)
+- [Current User Attention v5](../contracts/current-user-attention-v5.md)
+
+
+## 公屏与单聊注意力
+
+本机 Owner 通知通过精确 Run 的冻结目的地标识单聊，审批从 Action / Run 解析；不把 Camp ID 当作私有
+阅读身份。单聊的终态摘要与审批 Dock 回报精确可见来源，公屏在单聊面板打开时停止回报可见来源。
+当前阅读区域完成只抑制临时卡片，已读仍要求实际可见内容。Migration 146 限定完成 satisfaction 的对话
+范围，单聊结束按原 Occurrence invalidation 撤回队列。卡片只包含来源与信息，剩余提醒由轻入口按需查看。

@@ -39,7 +39,7 @@ try {
   dayApp = await launchApp(firstPort, 1440, 920, false)
   await setTheme(dayApp.cdp, 'day')
   await assertNotificationCenterHidden(dayApp.cdp)
-  assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
+  assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up:not([hidden])'))`)),
     'Existing Episode history was replayed as a heads-up after launch')
   const initialInbox = await request(dayApp.cdp, 'notifications.inbox', {
     filter: 'all',
@@ -59,7 +59,7 @@ try {
   await wakeReminderController(dayApp.cdp)
   await waitForUnreadCount(dayApp.cdp, 1)
   await wait(600)
-  assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
+  assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up:not([hidden])'))`)),
     'An Episode admitted while heads-up was disabled still opened a heads-up')
   await markAllNotificationsRead(dayApp.cdp)
   await setPrimaryHeadsUpPreference(dayApp.cdp, true)
@@ -70,7 +70,7 @@ try {
   )
   await wakeReminderController(dayApp.cdp)
   await waitForUnreadCount(dayApp.cdp, 1)
-  await waitForSelector(dayApp.cdp, '.notification-heads-up', 15_000)
+  await waitForSelector(dayApp.cdp, '.notification-heads-up:not([hidden])', 15_000)
   const openedCampWithoutNotificationAction = await evaluate(dayApp.cdp, `(() => {
     const button = document.querySelector('.settings-sidebar-back')
     button?.click()
@@ -155,7 +155,7 @@ try {
   compactApp = await launchApp(firstPort + 1, 1040, 700, true)
   await setTheme(compactApp.cdp, 'night')
   await assertNotificationCenterHidden(compactApp.cdp)
-  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
+  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up:not([hidden])'))`)),
     'Unread Episode history was replayed as a heads-up after restart')
   await openNotificationSettings(compactApp.cdp)
   await assertNotificationPreferences(compactApp.cdp)
@@ -182,12 +182,12 @@ try {
   await wakeReminderController(compactApp.cdp)
   await waitForUnreadCount(compactApp.cdp, 1)
   await wait(800)
-  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
+  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up:not([hidden])'))`)),
     'A reminder became visible while Rovai AI was not attentive')
   await simulateWindowAttention(compactApp.cdp, true)
-  await waitForSelector(compactApp.cdp, '.notification-heads-up', 15_000)
+  await waitForSelector(compactApp.cdp, '.notification-heads-up:not([hidden])', 15_000)
   assert(await evaluate(compactApp.cdp, `(() => {
-    window.__notificationAcceptHeadsUp = document.querySelector('.notification-heads-up')
+    window.__notificationAcceptHeadsUp = document.querySelector('.notification-heads-up:not([hidden])')
     return Boolean(window.__notificationAcceptHeadsUp)
   })()`), 'Could not retain the live Episode heads-up identity')
   await wait(75)
@@ -198,11 +198,11 @@ try {
   )
   await wakeReminderController(compactApp.cdp)
   await waitForExpression(compactApp.cdp, `
-    document.querySelector('.notification-heads-up')?.textContent
+    document.querySelector('.notification-heads-up:not([hidden])')?.textContent
       ?.includes('第二条实时消息提到你。') === true
   `, 15_000)
   assert(await evaluate(compactApp.cdp,
-    `window.__notificationAcceptHeadsUp === document.querySelector('.notification-heads-up')`),
+    `window.__notificationAcceptHeadsUp === document.querySelector('.notification-heads-up:not([hidden])')`),
   'A new exact Occurrence signal remounted the existing Episode heads-up instead of updating it in place')
   assert(await evaluate(compactApp.cdp,
     `document.activeElement?.getAttribute('aria-label') === '新对话'`),
@@ -219,25 +219,31 @@ try {
       && liveMentionEpisodes[0].unacknowledgedMentionCount === 2,
   `Same-turn Mentions did not materialize as one partially readable Episode: ${JSON.stringify(aggregateInbox)}`)
   await clickFirstButton(compactApp.cdp, '.notification-heads-up-close')
-  await waitForExpression(compactApp.cdp, `!document.querySelector('.notification-heads-up')`)
+  if (await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up-summary:not([hidden])'))`)) {
+    await clickFirstButton(compactApp.cdp, '.notification-heads-up-close')
+  }
+  await waitForExpression(compactApp.cdp, `!document.querySelector('.notification-heads-up:not([hidden])')`)
   const headsUpCapture = join(outputDir, 'notification-heads-up-compact-reduced-motion.png')
   await simulateWindowAttention(compactApp.cdp, false)
   await insertTerminalTurn('turn-completed-background', 'completed')
   await wakeReminderController(compactApp.cdp)
   await wait(800)
-  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
+  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up:not([hidden])'))`)),
     'A background completion reminder started its timer before the App regained attention')
   await simulateWindowAttention(compactApp.cdp, true)
-  await waitForSelector(compactApp.cdp, '.notification-heads-up', 15_000)
+  await waitForSelector(compactApp.cdp, '.notification-heads-up:not([hidden])', 15_000)
   const headsUpText = await evaluate(compactApp.cdp,
-    `document.querySelector('.notification-heads-up')?.textContent ?? ''`)
-  assert(headsUpText.includes('等待你的下一步')
-      && headsUpText.includes('本轮协作已经完成')
+    `document.querySelector('.notification-heads-up:not([hidden])')?.textContent ?? ''`)
+  assert(headsUpText.includes('本轮已完成')
+      && !headsUpText.includes('等待你的下一步')
       && !headsUpText.includes('README.md'),
   `The deferred heads-up did not use fixed data-minimized copy: ${JSON.stringify(headsUpText)}`)
   await capture(compactApp.cdp, headsUpCapture)
   await clickFirstButton(compactApp.cdp, '.notification-heads-up-close')
-  await waitForExpression(compactApp.cdp, `!document.querySelector('.notification-heads-up')`)
+  if (await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up-summary:not([hidden])'))`)) {
+    await clickFirstButton(compactApp.cdp, '.notification-heads-up-close')
+  }
+  await waitForExpression(compactApp.cdp, `!document.querySelector('.notification-heads-up:not([hidden])')`)
   await assertNotificationCenterHidden(compactApp.cdp)
   await markAllNotificationsRead(compactApp.cdp)
 

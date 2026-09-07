@@ -1172,6 +1172,8 @@ function AuthoritativeApp({
   const campInspectorVisible = activeCampId !== null && campInspectorCampId === activeCampId
   const singleChatVisible = activeCampId !== null && singleChatCampId === activeCampId
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
+  const [singleChatNotificationTarget, setSingleChatNotificationTarget] = useState<(NonNullable<NotificationActionView['singleChat']> & { requestId: number }) | null>(null)
+  const [visibleSingleChatSources, setVisibleSingleChatSources] = useState<VisibleNotificationSources | null>(null)
   const [visibleNotificationSources, setVisibleNotificationSources] = useState<VisibleNotificationSources | null>(null)
   const [notificationAnchor, setNotificationAnchor] = useState<{
     campId: string
@@ -2875,6 +2877,22 @@ function AuthoritativeApp({
           }
           return
         }
+        if (action.kind === 'open_single_chat') {
+          const source = action.singleChat
+          if (!source) throw new Error('单聊通知缺少原始对话标识。')
+          const snapshot = await window.rovai.request<import('@contracts').SingleChatSnapshot | null>('singleChat.get', {
+            conversationId: source.conversationId
+          })
+          if (!snapshot || snapshot.conversation.id !== source.conversationId || snapshot.conversation.status !== 'active'
+            || snapshot.conversation.campId !== action.campId
+            || snapshot.conversation.agentId !== source.agentId
+            || !snapshot.agentRuns.some((run) => run.id === source.agentRunId)) {
+            throw new Error('原单聊已结束或来源不可用。')
+          }
+          if (action.approvalId && !snapshot.approvals.some((approval) => approval.id === action.approvalId && approval.status === 'pending')) {
+            throw new Error('这项审批已经处理。')
+          }
+        }
         let anchoredMessages: readonly CampMessageView[] = []
         if (action.kind === 'open_camp_message') {
           if (!action.messageId) {
@@ -2908,7 +2926,11 @@ function AuthoritativeApp({
           }
           anchoredMessages = around.messages
         }
-        const target: NotificationFocusTarget | null = action.kind === 'open_camp_message'
+        const target: NotificationFocusTarget | null = action.kind === 'open_single_chat' && action.singleChat
+          ? { requestId: ++notificationFocusSequence.current, kind: 'single_chat',
+            conversationId: action.singleChat.conversationId, agentRunId: action.singleChat.agentRunId,
+            campTurnId: action.campTurnId, approvalId: action.approvalId ?? undefined }
+          : action.kind === 'open_camp_message'
           ? action.messageId
             ? {
               requestId: ++notificationFocusSequence.current,
@@ -2958,6 +2980,10 @@ function AuthoritativeApp({
           }
           return
         }
+        if (action.kind === 'open_single_chat' && action.singleChat && target) {
+          setSingleChatNotificationTarget({ ...action.singleChat, requestId: target.requestId })
+          setSingleChatCampId(action.campId)
+        } else setSingleChatCampId(null)
         result = { status: 'navigated' }
       } catch (nextError) {
         result = {
@@ -3713,6 +3739,7 @@ function AuthoritativeApp({
   }
 
   const openSingleChat = (): void => {
+    setSingleChatNotificationTarget(null)
     setCampInspectorCampId(null)
     setSingleChatCampId(activeCampId)
   }
@@ -4005,6 +4032,8 @@ function AuthoritativeApp({
             onOpenInspector={openCampInspector}
             notificationFocus={notificationFocus}
             onNotificationFocusPresented={completeNotificationNavigation}
+            singleChatTarget={singleChatNotificationTarget}
+            onVisibleSingleChatSources={setVisibleSingleChatSources}
             onVisibleNotificationSources={setVisibleNotificationSources}
             runtimeRecovery={runtimeRecovery?.campId === activeCampId ? runtimeRecovery : null}
             firstRunCamp={firstRunCamp}
@@ -4158,6 +4187,7 @@ function AuthoritativeApp({
         onCancelNavigation={cancelNotificationNavigation}
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
         onError={notify}
+        singleChatSources={singleChatVisible ? visibleSingleChatSources : null}
         visibleSources={visibleNotificationSources}
         onHeadsUpVisibleChange={setNotificationHeadsUpVisible}
       />
@@ -4469,6 +4499,12 @@ export function notificationFocusMatchesAction(
   focus: NotificationFocusTarget,
   action: NotificationActionView
 ): boolean {
+  if (focus.kind === 'single_chat') {
+    return action.kind === 'open_single_chat'
+      && focus.conversationId === action.singleChat?.conversationId
+      && focus.agentRunId === action.singleChat?.agentRunId
+      && (focus.approvalId ?? null) === action.approvalId
+  }
   if (focus.kind === 'camp_message') {
     return action.kind === 'open_camp_message'
       && Boolean(focus.messageId)
