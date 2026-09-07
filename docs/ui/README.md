@@ -47,6 +47,8 @@ Camp 内显式 Markdown 文件链接、共享资源图标、独立文件阅读�
 Runtime 终态文件行与会话中的每 Run 文件变化卡片由
 [Camp 会话工作区](components/conversation-workspace.md#runtime-终态文件变更与-agentrun-文件变化)拥有稳定呈现边界。
 
+MCP 与 Skills 的列表/详情、导入、启停和拖拽合同见 [Capability settings](components/capability-settings.md)。
+
 ## 平台差异
 
 - [Windows Interaction Delta](windows-interaction-delta.md)

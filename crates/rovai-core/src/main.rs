@@ -265,7 +265,7 @@ use rovai_core::{
     },
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
-        SetSkillGroupAssignmentsCommand, SkillLibraryService,
+        SetSkillGroupAssignmentsCommand, SkillContentRequest, SkillLibraryService,
     },
     skill_projection::{
         PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionGateBusy,
@@ -6935,6 +6935,17 @@ impl Core {
                     .get(&database, &params.skill_id)?
                     .context("Skill does not exist")?;
                 Ok(serde_json::to_value(skill)?)
+            }
+            "skills.content.read" => {
+                let params: SkillContentRequest = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let content = self
+                    .skill_library
+                    .read_content(&database, params)
+                    .map_err(|_| {
+                        anyhow::anyhow!("Skill 内容暂时无法读取，请刷新列表或重新选择导入文件夹。")
+                    })?;
+                Ok(serde_json::to_value(content)?)
             }
             "skills.deliveryGroups.list" => {
                 let database = self.database.lock().await;

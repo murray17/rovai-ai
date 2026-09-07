@@ -211,6 +211,7 @@ const allowedMethods = new Set<CoreMethod>([
   'runtime.installations.refresh',
   'skills.list',
   'skills.get',
+  'skills.content.read',
   'skills.deliveryGroups.list',
   'skills.import.inspect',
   'skills.import.github.inspect',

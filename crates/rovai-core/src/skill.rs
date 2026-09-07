@@ -260,6 +260,44 @@ pub struct SkillRevisionView {
     pub installed_at: String,
 }
 
+/// A read-only reference to managed content; callers cannot provide a filesystem root.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "source",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum SkillContentRequest {
+    Installed {
+        skill_id: String,
+        revision_id: String,
+        path: Option<String>,
+    },
+    Import {
+        staging_token: String,
+        candidate_name: String,
+        expected_digest: String,
+        path: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillContentFile {
+    pub path: String,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillContentView {
+    pub path: String,
+    pub content: Option<String>,
+    pub status: &'static str,
+    pub files: Vec<SkillContentFile>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillGroupAssignmentView {
@@ -953,6 +991,112 @@ impl SkillLibraryService {
             skill.group_assignments = load_group_assignments(database, &skill.id)?;
         }
         Ok(skill)
+    }
+
+    pub fn read_content(
+        &self,
+        database: &Database,
+        request: SkillContentRequest,
+    ) -> Result<SkillContentView> {
+        let (root, expected_digest, path) = match request {
+            SkillContentRequest::Installed {
+                skill_id,
+                revision_id,
+                path,
+            } => {
+                validate_stable_id(&skill_id, "Skill ID")?;
+                validate_stable_id(&revision_id, "Skill Revision ID")?;
+                let skill = self
+                    .get(database, &skill_id)?
+                    .context("Skill does not exist")?;
+                if skill.lifecycle_status != "active" || skill.current_revision.id != revision_id {
+                    anyhow::bail!("Skill revision is no longer current; refresh the list");
+                }
+                (
+                    self.revision_content_path(&skill_id, &revision_id),
+                    skill.current_revision.content_digest,
+                    path,
+                )
+            }
+            SkillContentRequest::Import {
+                staging_token,
+                candidate_name,
+                expected_digest,
+                path,
+            } => {
+                validate_skill_name(&candidate_name)?;
+                let manifest = self.load_staging_manifest(&staging_token)?;
+                let candidate = manifest
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.name == candidate_name)
+                    .context("Skill import candidate does not exist in this inspection")?;
+                if candidate.content_digest != expected_digest {
+                    anyhow::bail!("Skill import candidate changed; inspect the source again");
+                }
+                (
+                    self.root
+                        .join(".staging")
+                        .join(staging_token)
+                        .join("candidates")
+                        .join(candidate_name),
+                    expected_digest,
+                    path,
+                )
+            }
+        };
+        let path = path.unwrap_or_else(|| "SKILL.md".to_string());
+        ensure_relative_path(Path::new(&path))?;
+        if path.is_empty() || path.contains('\\') {
+            anyhow::bail!("Invalid Skill content path");
+        }
+        let mut collector = CandidateCollector {
+            preview: Some(ContentCapture {
+                path: path.clone(),
+                bytes: Vec::new(),
+            }),
+            ..CandidateCollector::default()
+        };
+        inspect_candidate_node(&root, Path::new(""), 0, &mut collector)?;
+        collector
+            .records
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        if digest_records(&collector.records) != expected_digest {
+            anyhow::bail!("Skill content changed; inspect or refresh it again");
+        }
+        let selected = collector
+            .records
+            .iter()
+            .find(|record| record.path == path)
+            .context("Skill content file does not exist")?;
+        let bytes = collector
+            .preview
+            .take()
+            .expect("content capture is present")
+            .bytes;
+        let (status, content) = if selected.size > MAX_SKILL_PREVIEW_BYTES as u64 {
+            ("too_large", None)
+        } else if bytes.contains(&0) {
+            ("binary", None)
+        } else {
+            match String::from_utf8(bytes) {
+                Ok(content) => ("text", Some(content)),
+                Err(_) => ("binary", None),
+            }
+        };
+        Ok(SkillContentView {
+            path,
+            status,
+            content,
+            files: collector
+                .records
+                .into_iter()
+                .map(|record| SkillContentFile {
+                    path: record.path,
+                    bytes: record.size,
+                })
+                .collect(),
+        })
     }
 
     pub fn reveal_location(&self, database: &Database, skill_id: &str) -> Result<PathBuf> {
@@ -2924,6 +3068,26 @@ struct CandidateCollector {
     executable_file_count: usize,
     script_file_count: usize,
     binary_candidate_count: usize,
+    preview: Option<ContentCapture>,
+}
+
+const MAX_SKILL_PREVIEW_BYTES: usize = 128 * 1024;
+#[derive(Debug)]
+struct ContentCapture {
+    path: String,
+    bytes: Vec<u8>,
+}
+impl CandidateCollector {
+    fn capture_content(&mut self, relative: &Path, bytes: &[u8]) {
+        if let Some(preview) = &mut self.preview
+            && preview.path == relative.to_string_lossy().replace('\\', "/")
+        {
+            let remaining = MAX_SKILL_PREVIEW_BYTES.saturating_sub(preview.bytes.len());
+            preview
+                .bytes
+                .extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -3215,6 +3379,7 @@ fn inspect_candidate_node(
             first_bytes.extend_from_slice(&buffer[..read.min(remaining)]);
         }
         digest.update(&buffer[..read]);
+        collector.capture_content(relative, &buffer[..read]);
     }
     let executable = mode & 0o111 != 0;
     if executable {
@@ -3315,6 +3480,7 @@ fn inspect_candidate_node_windows(
                     first_bytes.extend_from_slice(&buffer[..read.min(remaining)]);
                 }
                 digest.update(&buffer[..read]);
+                collector.capture_content(relative, &buffer[..read]);
             }
             if inspected != before.fingerprint.size {
                 anyhow::bail!("Skill file changed while it was being inspected");
@@ -4131,6 +4297,127 @@ mod slow_tests {
                 definition.name
             );
         }
+    }
+
+    // Owner: the new read-only content contract binds output to an inspected or installed digest.
+    #[test]
+    fn content_preview_reads_only_verified_managed_files_without_changing_skill_state() {
+        let sandbox = temporary_directory("rovai-skill-preview");
+        let mut database = Database::open(&sandbox.join("data")).unwrap();
+        let service = SkillLibraryService::new(sandbox.join("library")).unwrap();
+        let source = write_skill(&sandbox.join("source"), "preview-skill", "Readable body");
+        fs::create_dir(source.join("references")).unwrap();
+        fs::write(source.join("references/说明.md"), "Nested content").unwrap();
+        fs::write(source.join("binary.bin"), [0, 1, 2]).unwrap();
+        fs::write(
+            source.join("large.txt"),
+            vec![b'a'; MAX_SKILL_PREVIEW_BYTES + 1],
+        )
+        .unwrap();
+        let inspection = service.inspect_import(&database, &source).unwrap();
+        let candidate = &inspection.candidates[0];
+        let import_request = |path: Option<&str>| SkillContentRequest::Import {
+            staging_token: inspection.staging_token.clone(),
+            candidate_name: candidate.name.clone(),
+            expected_digest: candidate.content_digest.clone(),
+            path: path.map(str::to_string),
+        };
+        let read = service
+            .read_content(&database, import_request(None))
+            .unwrap();
+        assert_eq!(read.status, "text");
+        assert!(read.content.unwrap().contains("Readable body"));
+        assert_eq!(read.files.len(), 4);
+        assert_eq!(
+            service
+                .read_content(&database, import_request(Some("references/说明.md")))
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("Nested content")
+        );
+        for (path, status) in [("binary.bin", "binary"), ("large.txt", "too_large")] {
+            let read = service
+                .read_content(&database, import_request(Some(path)))
+                .unwrap();
+            assert_eq!(read.status, status);
+            assert!(read.content.is_none());
+        }
+        for path in [
+            "../outside",
+            "/etc/passwd",
+            "references\\outside",
+            "missing.md",
+            "",
+        ] {
+            assert!(
+                service
+                    .read_content(&database, import_request(Some(path)))
+                    .is_err()
+            );
+        }
+        assert!(service.list(&database).unwrap().is_empty());
+        service
+            .commit_import(
+                &mut database,
+                &user_envelope(
+                    "preview-import",
+                    CommitSkillImportCommand {
+                        staging_token: inspection.staging_token.clone(),
+                        candidate_name: candidate.name.clone(),
+                        expected_digest: candidate.content_digest.clone(),
+                        expected_skill_version: None,
+                        confirm_update: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let installed = service.list(&database).unwrap().pop().unwrap();
+        let installed_request = |revision_id: &str| SkillContentRequest::Installed {
+            skill_id: installed.id.clone(),
+            revision_id: revision_id.to_string(),
+            path: None,
+        };
+        let read = service
+            .read_content(&database, installed_request(&installed.current_revision.id))
+            .unwrap();
+        assert!(read.content.unwrap().contains("Readable body"));
+        assert!(
+            service
+                .read_content(&database, installed_request(&Uuid::new_v4().to_string()))
+                .is_err()
+        );
+        let unchanged = service.get(&database, &installed.id).unwrap().unwrap();
+        assert_eq!(unchanged.version, installed.version);
+        assert_eq!(
+            unchanged.group_assignments.len(),
+            SkillDeliveryGroupKey::ALL.len()
+        );
+        let installed_root =
+            service.revision_content_path(&installed.id, &installed.current_revision.id);
+        let original = fs::read(installed_root.join("SKILL.md")).unwrap();
+        fs::write(installed_root.join("SKILL.md"), "tampered").unwrap();
+        assert!(
+            service
+                .read_content(&database, installed_request(&installed.current_revision.id))
+                .is_err()
+        );
+        fs::write(installed_root.join("SKILL.md"), original).unwrap();
+        std::os::unix::fs::symlink(&source, installed_root.join("escape")).unwrap();
+        assert!(
+            service
+                .read_content(&database, installed_request(&installed.current_revision.id))
+                .is_err()
+        );
+        // The wire contract must not admit an arbitrary root/path source or unknown fields.
+        assert!(
+            serde_json::from_value::<SkillContentRequest>(
+                serde_json::json!({"source": "path", "path": "/etc/passwd"})
+            )
+            .is_err()
+        );
+        assert!(serde_json::from_value::<SkillContentRequest>(serde_json::json!({"source": "installed", "skillId": installed.id, "revisionId": installed.current_revision.id, "root": "/tmp"})).is_err());
+        remove_directory_if_present(&sandbox).unwrap();
     }
 
     #[test]

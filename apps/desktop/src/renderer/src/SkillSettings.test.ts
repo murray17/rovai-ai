@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { SkillDeliveryGroupView, SkillView, StoredCommandResult } from '@contracts'
 import {
-  SkillCard,
-  SkillLibraryColumns,
+  SkillListItem,
+  SkillGroupChoices,
   SkillSettings,
   deleteSkillConfirmationCopy,
   formatBytes,
@@ -20,37 +20,23 @@ import {
 import { identityColorToken } from './theme'
 
 describe('Skill settings', () => {
-  it('renders the Skill Library as the safe default settings surface', () => {
+  it('renders a loading-safe white workspace with enabled-state filters', () => {
     const markup = renderToStaticMarkup(createElement(SkillSettings))
-
-    expect(markup).toContain('已安装 Skills')
-    expect(markup).toContain('添加 Skill')
+    expect(markup).toContain('aria-label="Skills 列表"')
     expect(markup).toContain('正在读取 Skill Library')
-    expect(markup).toContain('应用全局配置')
-    expect(markup).toContain('管理 Rovai AI 和队员可使用的 Skill。')
-    expect(markup).toContain('class="settings-page-heading"')
-    expect(markup).toContain('<h1>Skills</h1>')
-    expect(markup).toContain('id="skill-import-local-tab"')
-    expect(markup).toContain('aria-controls="skill-import-local-panel"')
-    expect(markup).toContain('aria-labelledby="skill-import-local-tab"')
-    expect(markup).toContain('aria-expanded="false"')
-    expect(markup).toContain('id="skill-import-panel" class="skill-import-panel" hidden')
-    expect(markup).toContain('检查来源与内容后，再保存到 Rovai 的本机受管仓库。')
-    expect(markup).toContain('先生成安全预览；确认后复制完整内容')
-    expect(markup).toContain('搜索 Skill，调整运行时生效组，或查看来源详情。')
-    expect(markup).toContain('class="skill-library-toolbar"')
-    expect(markup).not.toContain('class="skill-import-help"')
-    expect(markup).not.toContain('允许执行')
+    expect(markup).toContain('已启用')
+    expect(markup).toContain('已停用')
+    expect(markup).toContain('role="separator"')
+    expect(markup).not.toContain('role="dialog"')
+    expect(markup).not.toContain('配置源文件')
   })
 
-  it('names every visible Skill Library column in the same order as its rows', () => {
-    const markup = renderToStaticMarkup(createElement(SkillLibraryColumns))
-
-    expect(markup).toContain('class="skill-library-columns"')
-    expect(markup).toContain('aria-hidden="true"')
-    expect(markup).toContain('<span></span><span>Skill</span>')
-    expect(markup).toContain('<span>生效范围</span><span>状态</span><span>查看</span>')
-    expect(markup).not.toContain('投递范围')
+  it('combines status and search without exposing system Skills', () => {
+    const enabled = skillFixture(true),
+      disabled = { ...skillFixture(false), id: 'disabled' }
+    expect(settingsVisibleSkills([enabled, disabled], '', 'disabled')).toEqual([disabled])
+    expect(settingsVisibleSkills([enabled, disabled], 'missing', 'enabled')).toEqual([])
+    expect(settingsVisibleSkills(null, '', 'all')).toBeNull()
   })
 
   it('keeps system-required Skills out of the settings list and search results', () => {
@@ -68,14 +54,12 @@ describe('Skill settings', () => {
       managementPolicy: 'system_required'
     } satisfies SkillView
 
-    expect(settingsVisibleSkills(
-      [configurable, cliOperations, memoryStewardship],
-      ''
-    )).toEqual([configurable])
-    expect(settingsVisibleSkills(
-      [configurable, cliOperations, memoryStewardship],
-      'memory'
-    )).toEqual([])
+    expect(settingsVisibleSkills([configurable, cliOperations, memoryStewardship], '')).toEqual([
+      configurable
+    ])
+    expect(
+      settingsVisibleSkills([configurable, cliOperations, memoryStewardship], 'memory')
+    ).toEqual([])
   })
 
   it('removes deleting Skills from the visible settings projection', () => {
@@ -105,7 +89,8 @@ describe('Skill settings', () => {
     })
     expect(updateSkillConfirmationCopy('ui-audit')).toEqual({
       title: '更新现有 Skill “ui-audit”？',
-      description: '将把已检查的内容保存为新的 Revision。现有生效组保持不变，已经开始的执行继续使用原版本。',
+      description:
+        '将把已检查的内容保存为新的 Revision。现有生效组保持不变，已经开始的执行继续使用原版本。',
       confirmLabel: '更新 Skill'
     })
   })
@@ -116,52 +101,22 @@ describe('Skill settings', () => {
     expect(formatBytes(2 * 1_024 * 1_024)).toBe('2.0 MB')
   })
 
-  it('uses an accessible switch without visible enabled-state copy', () => {
-    const enabled = renderToStaticMarkup(createElement(SkillCard, {
-      skill: skillFixture(true),
-      groups: [],
-      operation: null,
-      busy: null,
-      onToggleEnabled: () => {},
-      onToggleGroup: () => {},
-      onDelete: () => {}
-    }))
-    const disabled = renderToStaticMarkup(createElement(SkillCard, {
-      skill: skillFixture(false),
-      groups: [],
-      operation: null,
-      busy: null,
-      onToggleEnabled: () => {},
-      onToggleGroup: () => {},
-      onDelete: () => {}
-    }))
-    const saving = renderToStaticMarkup(createElement(SkillCard, {
-      skill: skillFixture(true),
-      groups: [],
-      operation: 'toggle',
-      busy: null,
-      onToggleEnabled: () => {},
-      onToggleGroup: () => {},
-      onDelete: () => {}
-    }))
-
-    expect(enabled).toContain('role="switch"')
-    expect(enabled).toContain('aria-checked="true"')
-    expect(enabled).toContain('aria-label="停用 skill-one"')
-    expect(enabled).toContain('aria-label="skill-one 生效范围，未选择"')
-    expect(enabled).not.toContain('投递范围')
-    expect(disabled).toContain('aria-label="启用 skill-one"')
-    expect(enabled).not.toContain('已启用')
-    expect(disabled).not.toContain('已停用')
-    expect(saving).toContain('aria-label="正在保存 skill-one"')
-    expect(saving).not.toContain('保存中…')
-    expect(enabled).not.toContain('<b>')
-    expect(enabled).not.toContain('status-badge')
-    expect(disabled).not.toContain('status-badge')
-    expect(enabled).toContain('aria-label="查看 skill-one 详情"')
-    expect(enabled).not.toContain('<span>详情</span>')
-    expect(enabled).not.toContain('•••')
-    expect(enabled).not.toContain('更多操作')
+  it('uses avatar group rows as the selection target and retains disabled Skill assignments', () => {
+    const skill = { ...skillFixture(false), groupAssignments: [{ groupKey: 'codex' }] } as SkillView
+    const groups = [
+      {
+        key: 'codex',
+        label: 'Codex',
+        members: [{ agentId: 'member-1', displayName: '沐瓦', avatarRef: null }]
+      }
+    ] as SkillDeliveryGroupView[]
+    const markup = renderToStaticMarkup(
+      createElement(SkillGroupChoices, { skill, groups, disabled: false, onChange: () => {} })
+    )
+    expect(markup).toContain('aria-pressed="true"')
+    expect(markup).toContain('class="member-avatar')
+    expect(markup).toContain('沐瓦')
+    expect(markup).not.toContain('type="checkbox"')
   })
 
   it('distinguishes bundled, pinned third-party, and user-imported provenance', () => {
@@ -241,34 +196,20 @@ describe('Skill settings', () => {
     })
     expect(skillSourcePresentation(importedLocal)).toMatchObject({
       kind: 'imported',
-      badgeLabel: '用户导入',
+      badgeLabel: '本地导入',
       sourceLabel: '本地文件夹导入',
       repositoryUrl: null
     })
     expect(skillSourcePresentation(importedGithub)).toMatchObject({
       kind: 'imported',
-      badgeLabel: '用户导入',
+      badgeLabel: 'GitHub',
       repositoryUrl: 'https://github.com/example/team-skill',
       repositoryLabel: 'example/team-skill',
       revisionLabel: 'abcdef12'
     })
   })
 
-  it('keeps short source labels in the row and full provenance inside named details', () => {
-    const thirdParty = {
-      ...skillFixture(true),
-      name: 'tasteful-ui',
-      currentRevision: {
-        ...skillFixture(true).currentRevision,
-        name: 'tasteful-ui',
-        sourceMetadata: {
-          upstream: {
-            repository: 'https://github.com/DonkeyKing01/tasteful-ui-skill',
-            revision: '159ccd47a320f3a7bd0289d07366d422211895a1'
-          }
-        }
-      }
-    } satisfies SkillView
+  it('keeps source and status beside the name without exposing source paths', () => {
     const imported = {
       ...skillFixture(true),
       origin: 'imported',
@@ -278,51 +219,13 @@ describe('Skill settings', () => {
         sourceMetadata: { source: { sourcePath: '/private/example' } }
       }
     } satisfies SkillView
-    const thirdPartyMarkup = renderToStaticMarkup(createElement(SkillCard, {
-      skill: thirdParty,
-      groups: [],
-      operation: null,
-      busy: null,
-      onToggleEnabled: () => {},
-      onToggleGroup: () => {},
-      onDelete: () => {}
-    }))
-    const importedMarkup = renderToStaticMarkup(createElement(SkillCard, {
-      skill: imported,
-      groups: [],
-      operation: null,
-      busy: null,
-      onToggleEnabled: () => {},
-      onToggleGroup: () => {},
-      onDelete: () => {}
-    }))
-    const detailsStart = thirdPartyMarkup.indexOf('<div class="skill-card-details"')
-    const thirdPartyPrimary = thirdPartyMarkup.slice(0, detailsStart)
-    const thirdPartyDetails = thirdPartyMarkup.slice(detailsStart)
-    const importedDetailsStart = importedMarkup.indexOf('<div class="skill-card-details"')
-    const importedPrimary = importedMarkup.slice(0, importedDetailsStart)
-    const importedDetails = importedMarkup.slice(importedDetailsStart)
-
-    expect(thirdPartyPrimary).toContain('>GitHub<')
-    expect(thirdPartyPrimary).not.toContain('GitHub 三方')
-    expect(thirdPartyPrimary).not.toContain('skill-card-provenance')
-    expect(thirdPartyPrimary).not.toContain('DonkeyKing01/tasteful-ui-skill')
-    expect(thirdPartyPrimary).not.toContain('159ccd47')
-    expect(thirdPartyDetails).toContain('DonkeyKing01/tasteful-ui-skill')
-    expect(thirdPartyDetails).toContain('159ccd47')
-    expect(thirdPartyDetails).toContain('target="_blank"')
-    expect(thirdPartyMarkup).toContain('aria-expanded="false"')
-    expect(thirdPartyMarkup).toContain('随 Rovai 安装的固定上游副本')
-    expect(thirdPartyMarkup).not.toContain('class="skill-delete-button"')
-    expect(importedPrimary).toContain('用户导入')
-    expect(importedPrimary).not.toContain('本地文件夹导入')
-    expect(importedPrimary).not.toContain('Revision r1')
-    expect(importedDetails).toContain('本地文件夹导入')
-    expect(importedDetails).toContain('启停和生效范围仍由你管理')
-    expect(importedDetails).not.toContain('投递范围')
-    expect(importedDetails).toContain('class="skill-delete-button"')
-    expect(importedDetails).toContain('>删除</button>')
-    expect(importedDetails).not.toContain('删除 Skill')
+    const markup = renderToStaticMarkup(
+      createElement(SkillListItem, { skill: imported, selected: true, onSelect: () => {} })
+    )
+    expect(markup).toContain('>本地导入<')
+    expect(markup).toContain('>已启用<')
+    expect(markup).toContain('aria-current="true"')
+    expect(markup).not.toContain('/private/example')
   })
 
   it('derives the identity color from the persistent Skill UUID across edits and revisions', () => {
@@ -347,15 +250,10 @@ describe('Skill settings', () => {
         description: 'Edited without changing identity'
       }
     } satisfies SkillView
-    const render = (skill: SkillView): string => renderToStaticMarkup(createElement(SkillCard, {
-      skill,
-      groups: [],
-      operation: null,
-      busy: null,
-      onToggleEnabled: () => {},
-      onToggleGroup: () => {},
-      onDelete: () => {}
-    }))
+    const render = (skill: SkillView): string =>
+      renderToStaticMarkup(
+        createElement(SkillListItem, { skill, selected: false, onSelect: () => {} })
+      )
     const expectedStyle = `style="--skill-identity:${identityColorToken(skillId)}"`
 
     expect(render(original)).toContain(expectedStyle)

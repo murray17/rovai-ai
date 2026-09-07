@@ -1,31 +1,629 @@
-import { readErrorMessage } from './error-message'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AdapterKind,
   SkillDeliveryGroupKey,
   SkillDeliveryGroupView,
   SkillImportCandidate,
   SkillImportInspection,
-  SkillRiskSummary,
   SkillView,
   StoredCommandResult
 } from '@contracts'
-import {
-  AppDialogBody,
-  AppDialogContent,
-  AppDialogFooter,
-  AppDialogHeader
-} from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
-import { SettingsPageHeader } from './SettingsPageHeader'
 import { SkillIdentityMark } from './SkillIdentityMark'
+import { SkillContentPreview } from './SkillContentPreview'
+import {
+  CapabilityError,
+  CapabilityListItem,
+  CapabilityToggle,
+  CapabilityWorkspace,
+  matchesCapabilityFilter,
+  type CapabilityFilter
+} from './CapabilityWorkspace'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { readErrorMessage } from './error-message'
 
-type ImportTab = 'local' | 'github'
-type SkillRowOperation = 'toggle' | 'groups'
+export function SkillSettings(): React.JSX.Element {
+  const [skills, setSkills] = useState<SkillView[] | null>(null)
+  const [groups, setGroups] = useState<SkillDeliveryGroupView[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedRef = useRef(selectedId)
+  selectedRef.current = selectedId
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<CapabilityFilter>('all')
+  const [tab, setTab] = useState<'content' | 'groups'>('content')
+  const [importTab, setImportTab] = useState<'local' | 'github'>('local')
+  const [githubInput, setGithubInput] = useState('')
+  const [inspection, setInspection] = useState<SkillImportInspection | null>(null)
+  const [candidateName, setCandidateName] = useState<string | null>(null)
+  const [confirmation, setConfirmation] = useState<'delete' | 'update' | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const locked = useRef(false)
+  const generation = useRef(0)
+  const editorSession = useRef(0)
+  const [error, setError] = useState<string | null>(null)
+  const load = useCallback(async (): Promise<void> => {
+    const request = ++generation.current
+    const [nextSkills, nextGroups] = await Promise.all([
+      window.rovai.request<SkillView[]>('skills.list'),
+      window.rovai.request<SkillDeliveryGroupView[]>('skills.deliveryGroups.list')
+    ])
+    if (request !== generation.current) return
+    setSkills(nextSkills)
+    setGroups(nextGroups)
+  }, [])
+  useEffect(() => {
+    const refresh = (): void => {
+      if (!locked.current) void load().catch((reason) => setError(errorMessage(reason)))
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    const unsubscribe = window.rovai.onEvent((event) => {
+      if (
+        !locked.current &&
+        event.method === 'runtime.state' &&
+        (event.params as { status?: string })?.status === 'ready'
+      )
+        void load().catch((reason) => setError(errorMessage(reason)))
+    })
+    return () => {
+      generation.current++
+      choose('')
+      window.removeEventListener('focus', refresh)
+      unsubscribe()
+    }
+  }, [load])
+  const allSkills = useMemo(() => settingsVisibleSkills(skills, '') ?? [], [skills])
+  const visible = useMemo(
+    () => settingsVisibleSkills(skills, search, filter) ?? [],
+    [skills, search, filter]
+  )
+  const selected =
+    selectedId === 'new'
+      ? undefined
+      : (allSkills.find((skill) => skill.id === selectedId) ?? allSkills[0])
+  const candidate =
+    inspection?.candidates.find((value) => value.name === candidateName) ??
+    inspection?.candidates[0]
+  const choose = (id: string): void => {
+    setSelectedId(id)
+    selectedRef.current = id
+    editorSession.current++
+    setInspection(null)
+    setCandidateName(null)
+    setGithubInput('')
+    setImportTab('local')
+    setTab('content')
+    setConfirmation(null)
+    setError(null)
+  }
+  const run = async (key: string, action: () => Promise<void>): Promise<void> => {
+    if (locked.current) return
+    locked.current = true
+    generation.current++
+    setBusy(key)
+    setError(null)
+    try {
+      await action()
+    } catch (reason) {
+      if (['toggle', 'groups', 'delete'].includes(key)) await load().catch(() => undefined)
+      setError(errorMessage(reason))
+    } finally {
+      locked.current = false
+      setBusy(null)
+    }
+  }
+  const inspect = (): void => {
+    const session = editorSession.current
+    void run('inspect', async () => {
+      let next: SkillImportInspection
+      if (importTab === 'local') {
+        const path = await window.rovai.selectSkillImportDirectory()
+        if (!path) return
+        next = await window.rovai.request<SkillImportInspection>('skills.import.inspect', { path })
+      } else
+        next = await window.rovai.request<SkillImportInspection>(
+          'skills.import.github.inspect',
+          parseGithubImportInput(githubInput)
+        )
+      if (editorSession.current !== session) return
+      setInspection(next)
+      setCandidateName(next.candidates[0]?.name ?? null)
+      setConfirmation(null)
+    })
+  }
+  const commit = (confirmUpdate: boolean): void => {
+    if (!candidate || !inspection) return
+    void run('import', async () => {
+      const result = await window.rovai.request<StoredCommandResult>('skills.import.commit', {
+        commandId: crypto.randomUUID(),
+        command: {
+          stagingToken: inspection.stagingToken,
+          candidateName: candidate.name,
+          expectedDigest: candidate.contentDigest,
+          expectedSkillVersion: candidate.existingSkillVersion,
+          confirmUpdate
+        }
+      })
+      assertCommandApplied(result)
+      const remaining = inspection.candidates.filter((value) => value.name !== candidate.name)
+      setInspection(remaining.length ? { ...inspection, candidates: remaining } : null)
+      await load()
+      setFilter('all')
+      setSearch('')
+      if (selectedRef.current === 'new' && remaining.length) {
+        setCandidateName(remaining[0].name)
+        setConfirmation(null)
+      } else if (selectedRef.current === 'new')
+        choose(
+          typeof result.payload.skillId === 'string'
+            ? result.payload.skillId
+            : (candidate.existingSkillId ?? '')
+        )
+    })
+  }
+  const toggle = (skill: SkillView): void => {
+    void run('toggle', async () => {
+      const result = await window.rovai.request<StoredCommandResult>('skills.setEnabled', {
+        commandId: crypto.randomUUID(),
+        command: { skillId: skill.id, expectedVersion: skill.version, enabled: !skill.enabled }
+      })
+      assertCommandApplied(result)
+      setSkills((values) => (values ? patchSkillEnabledResult(values, skill.id, result) : values))
+    })
+  }
+  const assign = (skill: SkillView, keys: SkillDeliveryGroupKey[]): void => {
+    void run('groups', async () => {
+      const result = await window.rovai.request<StoredCommandResult>('skills.setGroupAssignments', {
+        commandId: crypto.randomUUID(),
+        command: { skillId: skill.id, expectedVersion: skill.version, groupKeys: keys }
+      })
+      assertCommandApplied(result)
+      const updated = await window.rovai.request<SkillView>('skills.get', { skillId: skill.id })
+      setSkills((values) => (values ? replaceSkillRow(values, updated) : values))
+    })
+  }
+  const deleteSkill = (skill: SkillView): void => {
+    void run('delete', async () => {
+      const result = await window.rovai.request<StoredCommandResult>('skills.delete', {
+        commandId: crypto.randomUUID(),
+        command: { skillId: skill.id, expectedVersion: skill.version }
+      })
+      assertCommandApplied(result)
+      setSkills((values) => values?.filter((value) => value.id !== skill.id) ?? null)
+      if (selectedRef.current === skill.id) choose('')
+    })
+  }
+  return (
+    <CapabilityWorkspace
+      title="Skills"
+      count={
+        search || filter !== 'all'
+          ? `${visible.length}/${allSkills.length}`
+          : skills
+            ? allSkills.length
+            : '—'
+      }
+      search={search}
+      onSearch={setSearch}
+      filter={filter}
+      onFilter={setFilter}
+      onAdd={() => choose('new')}
+      addDisabled={busy !== null}
+      selectionKey={selectedId === 'new' ? 'new' : (selected?.id ?? null)}
+      list={
+        <>
+          {skills === null ? (
+            <div className="capability-empty" role="status">
+              正在读取 Skill Library…
+            </div>
+          ) : visible.length ? (
+            visible.map((skill) => (
+              <SkillListItem
+                key={skill.id}
+                skill={skill}
+                selected={skill.id === selected?.id}
+                onSelect={() => choose(skill.id)}
+              />
+            ))
+          ) : (
+            <div className="capability-empty">
+              {allSkills.length ? '没有匹配的 Skill。' : '还没有 Skill。'}
+              {(search || filter !== 'all') && (
+                <button
+                  className="quiet-button compact"
+                  type="button"
+                  onClick={() => {
+                    setSearch('')
+                    setFilter('all')
+                  }}
+                >
+                  清除筛选
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      }
+    >
+      <CapabilityError
+        error={error}
+        onRetry={
+          skills === null
+            ? () => {
+                setError(null)
+                void load().catch((reason) => setError(errorMessage(reason)))
+              }
+            : undefined
+        }
+      />
+      {selectedId === 'new' ? (
+        <>
+          <header className="capability-detail-heading">
+            <h2>添加 Skill</h2>
+            <button
+              className="quiet-button compact"
+              type="button"
+              disabled={busy !== null}
+              onClick={() => {
+                setInspection(null)
+                choose('')
+              }}
+            >
+              取消
+            </button>
+          </header>
+          <div className="capability-tabs" role="group" aria-label="Skill 添加方式">
+            <button
+              type="button"
+              aria-pressed={importTab === 'local'}
+              disabled={busy !== null}
+              onClick={() => {
+                if (importTab !== 'local') {
+                  setImportTab('local')
+                  setInspection(null)
+                  setConfirmation(null)
+                }
+              }}
+            >
+              本地文件夹
+            </button>
+            <button
+              type="button"
+              aria-pressed={importTab === 'github'}
+              disabled={busy !== null}
+              onClick={() => {
+                if (importTab !== 'github') {
+                  setImportTab('github')
+                  setInspection(null)
+                  setConfirmation(null)
+                }
+              }}
+            >
+              GitHub
+            </button>
+          </div>
+          {importTab === 'local' ? (
+            <div className="capability-folder-import">
+              <p>选择包含 SKILL.md 的文件夹，预览后导入。</p>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={busy !== null}
+                onClick={inspect}
+              >
+                {busy === 'inspect' ? '正在读取…' : '选择文件夹'}
+              </button>
+            </div>
+          ) : (
+            <div className="capability-import-source">
+              <label>
+                GitHub 链接
+                <input
+                  aria-label="GitHub Skill 链接"
+                  value={githubInput}
+                  placeholder="https://github.com/owner/repository"
+                  onChange={(event) => setGithubInput(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={busy !== null || !githubInput.trim()}
+                onClick={inspect}
+              >
+                {busy === 'inspect' ? '正在读取…' : '预览 Skill'}
+              </button>
+            </div>
+          )}
+          {inspection && (
+            <>
+              {inspection.candidates.length > 1 && (
+                <div className="capability-candidates" role="group" aria-label="待导入 Skills">
+                  {inspection.candidates.map((value) => (
+                    <button
+                      type="button"
+                      key={value.name}
+                      disabled={busy !== null}
+                      aria-pressed={candidate?.name === value.name}
+                      onClick={() => {
+                        setCandidateName(value.name)
+                        setConfirmation(null)
+                      }}
+                    >
+                      {value.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {candidate ? (
+                <section className="capability-section">
+                  <div className="capability-detail-heading">
+                    <h3>{candidate.name}</h3>
+                    <span className="capability-note">{candidate.fileCount} 个文件</span>
+                  </div>
+                  <p className="capability-note">{candidate.description}</p>
+                  <SkillContentPreview
+                    key={`${inspection.stagingToken}:${candidate.name}`}
+                    target={{
+                      source: 'import',
+                      stagingToken: inspection.stagingToken,
+                      candidateName: candidate.name,
+                      expectedDigest: candidate.contentDigest
+                    }}
+                  />
+                  {confirmation === 'update' ? (
+                    <div className="capability-confirm">
+                      <strong>{updateSkillConfirmationCopy(candidate.name).title}</strong>
+                      <p>更新后保留现有启停状态和投递组。</p>
+                      <div className="capability-actions">
+                        <button
+                          className="quiet-button compact"
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => setConfirmation(null)}
+                        >
+                          取消
+                        </button>
+                        <button
+                          className="primary-button"
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => commit(true)}
+                        >
+                          确认更新
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="capability-save">
+                      <span className="capability-note">
+                        {candidate.importAction === 'create'
+                          ? '默认启用 · 全部投递组'
+                          : importActionLabel(candidate.importAction)}
+                      </span>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={busy !== null || candidate.importAction === 'official_conflict'}
+                        onClick={() =>
+                          candidate.importAction === 'update'
+                            ? setConfirmation('update')
+                            : commit(false)
+                        }
+                      >
+                        {busy === 'import'
+                          ? '正在保存…'
+                          : candidate.importAction === 'update'
+                            ? '更新 Skill'
+                            : '导入 Skill'}
+                      </button>
+                    </div>
+                  )}
+                </section>
+              ) : (
+                <p className="capability-note">没有可导入的 Skill。</p>
+              )}
+              {inspection.rejectedCandidates.length > 0 && (
+                <details className="capability-section">
+                  <summary>其他 {inspection.rejectedCandidates.length} 项暂不可导入</summary>
+                  <p className="capability-note">
+                    请检查文件夹是否包含有效的 SKILL.md，且内容不含符号链接或超出大小限制。
+                  </p>
+                </details>
+              )}
+            </>
+          )}
+        </>
+      ) : selected ? (
+        <>
+          <header className="capability-detail-heading">
+            <div className="capability-title">
+              <h2>{selected.name}</h2>
+              <span className="capability-source">
+                {skillSourcePresentation(selected).badgeLabel}
+              </span>
+              <span className="capability-note">r{selected.currentRevision.revision}</span>
+            </div>
+            <CapabilityToggle
+              name={selected.name}
+              enabled={selected.enabled}
+              disabled={busy !== null}
+              onToggle={() => toggle(selected)}
+            />
+          </header>
+          <div className="capability-tabs" role="group" aria-label="Skill 详情">
+            <button
+              type="button"
+              aria-pressed={tab === 'content'}
+              onClick={() => setTab('content')}
+            >
+              内容
+            </button>
+            <button type="button" aria-pressed={tab === 'groups'} onClick={() => setTab('groups')}>
+              生效范围{' '}
+              <span>{groupAssignmentSummary(selected.groupAssignments.length, groups.length)}</span>
+            </button>
+          </div>
+          <div hidden={tab !== 'content'}>
+            <SkillContentPreview
+              key={`${selected.id}:${selected.currentRevision.id}`}
+              target={{
+                source: 'installed',
+                skillId: selected.id,
+                revisionId: selected.currentRevision.id
+              }}
+            />
+          </div>
+          {tab === 'groups' && (
+            <SkillGroupChoices
+              skill={selected}
+              groups={groups}
+              disabled={busy !== null}
+              onChange={(keys) => assign(selected, keys)}
+            />
+          )}
+          {selected.origin === 'imported' && (
+            <section className="capability-section">
+              {confirmation === 'delete' ? (
+                <div className="capability-confirm">
+                  <strong>{deleteSkillConfirmationCopy(selected.name).title}</strong>
+                  <p>{deleteSkillConfirmationCopy(selected.name).description}</p>
+                  <div className="capability-actions">
+                    <button
+                      className="quiet-button compact"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => setConfirmation(null)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      className="danger-button"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => deleteSkill(selected)}
+                    >
+                      {busy === 'delete' ? '正在删除…' : '确认删除'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  className="quiet-button compact capability-danger"
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => setConfirmation('delete')}
+                >
+                  删除 Skill
+                </button>
+              )}
+            </section>
+          )}
+        </>
+      ) : (
+        <div className="capability-empty">从左侧选择 Skill，或添加新的 Skill。</div>
+      )}
+    </CapabilityWorkspace>
+  )
+}
 
+export function SkillListItem({
+  skill,
+  selected,
+  onSelect
+}: {
+  skill: SkillView
+  selected: boolean
+  onSelect(): void
+}): React.JSX.Element {
+  return (
+    <CapabilityListItem
+      name={skill.name}
+      mark={<SkillIdentityMark skillId={skill.id} name={skill.name} />}
+      source={skillSourcePresentation(skill).badgeLabel}
+      enabled={skill.enabled}
+      summary={skill.currentRevision.description || '未提供说明。'}
+      selected={selected}
+      onSelect={onSelect}
+    />
+  )
+}
+export function SkillGroupChoices({
+  skill,
+  groups,
+  disabled,
+  onChange
+}: {
+  skill: SkillView
+  groups: SkillDeliveryGroupView[]
+  disabled: boolean
+  onChange(keys: SkillDeliveryGroupKey[]): void
+}): React.JSX.Element {
+  const selected = new Set(skill.groupAssignments.map((assignment) => assignment.groupKey))
+  return (
+    <section>
+      <div className="capability-scope-heading">
+        <h3>投递组</h3>
+        <button
+          type="button"
+          className="quiet-button compact"
+          disabled={disabled}
+          onClick={() =>
+            onChange(selected.size === groups.length ? [] : groups.map((group) => group.key))
+          }
+        >
+          {selected.size === groups.length ? '清除选择' : '选择全部'}
+        </button>
+      </div>
+      <div className="capability-group-options">
+        {skillDeliveryGroupsForDisplay(groups).map((group) => (
+          <button
+            type="button"
+            className="capability-choice capability-group-choice"
+            key={group.key}
+            aria-pressed={selected.has(group.key)}
+            disabled={disabled}
+            onClick={() =>
+              onChange(
+                groups
+                  .map((value) => value.key)
+                  .filter((key) => (key === group.key ? !selected.has(key) : selected.has(key)))
+              )
+            }
+          >
+            <span>
+              <strong>{group.label}</strong>
+              <span className="capability-group-members">
+                {group.members.length ? (
+                  <>
+                    <span className="skill-member-stack">
+                      {group.members.slice(0, 4).map((member) => (
+                        <MemberAvatar
+                          key={member.agentId}
+                          agentId={member.agentId}
+                          avatarRef={member.avatarRef}
+                          displayName={member.displayName}
+                          size="mention"
+                          decorative
+                        />
+                      ))}
+                    </span>
+                    <span>{group.members.map((member) => member.displayName).join('、')}</span>
+                  </>
+                ) : (
+                  <span>暂无队员</span>
+                )}
+              </span>
+            </span>
+            <span className="capability-check" aria-hidden="true">
+              ✓
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="capability-note">关闭 Skill 会保留这里的选择。</p>
+    </section>
+  )
+}
 export function deleteSkillConfirmationCopy(name: string): {
   title: string
   description: string
@@ -45,374 +643,29 @@ export function updateSkillConfirmationCopy(name: string): {
 } {
   return {
     title: `更新现有 Skill “${name}”？`,
-    description: '将把已检查的内容保存为新的 Revision。现有生效组保持不变，已经开始的执行继续使用原版本。',
+    description:
+      '将把已检查的内容保存为新的 Revision。现有生效组保持不变，已经开始的执行继续使用原版本。',
     confirmLabel: '更新 Skill'
   }
 }
 
-export function SkillSettings(): React.JSX.Element {
-  const [skills, setSkills] = useState<SkillView[] | null>(null)
-  const [groups, setGroups] = useState<SkillDeliveryGroupView[]>([])
-  const [inspection, setInspection] = useState<SkillImportInspection | null>(null)
-  const [deletingSkill, setDeletingSkill] = useState<SkillView | null>(null)
-  const [updatingCandidate, setUpdatingCandidate] = useState<SkillImportCandidate | null>(null)
-  const [importTab, setImportTab] = useState<ImportTab>('local')
-  const [importOpen, setImportOpen] = useState(false)
-  const [githubInput, setGithubInput] = useState('')
-  const [search, setSearch] = useState('')
-  const [busy, setBusy] = useState<string | null>(null)
-  const [skillRowOperations, setSkillRowOperations] = useState<Record<string, SkillRowOperation>>({})
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async (): Promise<void> => {
-    setError(null)
-    const [nextSkills, nextGroups] = await Promise.all([
-      window.rovai.request<SkillView[]>('skills.list'),
-      window.rovai.request<SkillDeliveryGroupView[]>('skills.deliveryGroups.list')
-    ])
-    setSkills(nextSkills)
-    setGroups(nextGroups)
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    void Promise.all([
-      window.rovai.request<SkillView[]>('skills.list'),
-      window.rovai.request<SkillDeliveryGroupView[]>('skills.deliveryGroups.list')
-    ]).then(([nextSkills, nextGroups]) => {
-      if (cancelled) return
-      setSkills(nextSkills)
-      setGroups(nextGroups)
-    }).catch((nextError) => {
-      if (!cancelled) setError(errorMessage(nextError))
-    })
-    return () => { cancelled = true }
-  }, [])
-
-  useEffect(() => window.rovai.onEvent((event) => {
-    if (event.method !== 'runtime.state') return
-    const params = event.params !== null && typeof event.params === 'object'
-      ? event.params as Record<string, unknown>
-      : {}
-    if (params.status === 'ready') void load().catch((nextError) => setError(errorMessage(nextError)))
-  }), [load])
-
-  const visibleSkills = useMemo(
-    () => settingsVisibleSkills(skills, search),
-    [search, skills]
-  )
-  const configurableSkillCount = useMemo(
-    () => settingsVisibleSkills(skills, '')?.length ?? null,
-    [skills]
-  )
-
-  const inspectLocalImport = async (): Promise<void> => {
-    setBusy('inspect-local')
-    setError(null)
-    try {
-      const path = await window.rovai.selectSkillImportDirectory()
-      if (!path) return
-      setInspection(await window.rovai.request<SkillImportInspection>('skills.import.inspect', { path }))
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const inspectGithubImport = async (): Promise<void> => {
-    setBusy('inspect-github')
-    setError(null)
-    try {
-      const params = parseGithubImportInput(githubInput)
-      setInspection(await window.rovai.request<SkillImportInspection>(
-        'skills.import.github.inspect',
-        params
-      ))
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const commitCandidate = async (
-    candidate: SkillImportCandidate,
-    confirmUpdate: boolean
-  ): Promise<void> => {
-    if (!inspection) return
-    setBusy(`import-${candidate.name}`)
-    setError(null)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('skills.import.commit', {
-        commandId: crypto.randomUUID(),
-        command: {
-          stagingToken: inspection.stagingToken,
-          candidateName: candidate.name,
-          expectedDigest: candidate.contentDigest,
-          expectedSkillVersion: candidate.existingSkillVersion,
-          confirmUpdate
-        }
-      })
-      assertCommandApplied(result)
-      setInspection((current) => current
-        ? { ...current, candidates: current.candidates.filter((value) => value.name !== candidate.name) }
-        : null)
-      setUpdatingCandidate(null)
-      await load()
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const setEnabled = async (skill: SkillView): Promise<void> => {
-    const current = skills?.find((value) => value.id === skill.id) ?? skill
-    setSkillRowOperations((operations) => ({ ...operations, [current.id]: 'toggle' }))
-    setError(null)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('skills.setEnabled', {
-        commandId: crypto.randomUUID(),
-        command: {
-          skillId: current.id,
-          expectedVersion: current.version,
-          enabled: !current.enabled
-        }
-      })
-      assertCommandApplied(result)
-      setSkills((currentSkills) => currentSkills
-        ? patchSkillEnabledResult(currentSkills, current.id, result)
-        : currentSkills)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setSkillRowOperations((operations) => withoutSkillRowOperation(operations, current.id))
-    }
-  }
-
-  const toggleGroup = async (skill: SkillView, groupKey: SkillDeliveryGroupKey): Promise<void> => {
-    const current = skills?.find((value) => value.id === skill.id) ?? skill
-    setSkillRowOperations((operations) => ({ ...operations, [current.id]: 'groups' }))
-    setError(null)
-    try {
-      const selected = new Set(current.groupAssignments.map((assignment) => assignment.groupKey))
-      if (selected.has(groupKey)) selected.delete(groupKey)
-      else selected.add(groupKey)
-      const result = await window.rovai.request<StoredCommandResult>('skills.setGroupAssignments', {
-        commandId: crypto.randomUUID(),
-        command: {
-          skillId: current.id,
-          expectedVersion: current.version,
-          groupKeys: groups.map((group) => group.key).filter((key) => selected.has(key))
-        }
-      })
-      assertCommandApplied(result)
-      const updated = await window.rovai.request<SkillView>('skills.get', { skillId: current.id })
-      setSkills((currentSkills) => currentSkills
-        ? replaceSkillRow(currentSkills, updated)
-        : currentSkills)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setSkillRowOperations((operations) => withoutSkillRowOperation(operations, current.id))
-    }
-  }
-
-  const deleteSkill = async (skill: SkillView): Promise<void> => {
-    setBusy(`delete-${skill.id}`)
-    setError(null)
-    try {
-      const current = skills?.find((value) => value.id === skill.id) ?? skill
-      const result = await window.rovai.request<StoredCommandResult>('skills.delete', {
-        commandId: crypto.randomUUID(),
-        command: { skillId: current.id, expectedVersion: current.version }
-      })
-      assertCommandApplied(result)
-      setSkills((currentSkills) => currentSkills
-        ? currentSkills.filter((value) => value.id !== current.id)
-        : currentSkills)
-      setDeletingSkill(null)
-      await load()
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  return (
-    <div className="skill-settings">
-      <SettingsPageHeader
-        eyebrow="Settings / Skills"
-        title="Skills"
-        description="管理 Rovai AI 和队员可使用的 Skill。"
-        aside={(
-          <>
-            <span className="settings-page-note">应用全局配置</span>
-            <button
-              className="primary-button"
-              type="button"
-              aria-expanded={importOpen}
-              aria-controls="skill-import-panel"
-              onClick={() => setImportOpen((open) => !open)}
-            >
-              添加 Skill
-            </button>
-          </>
-        )}
-      />
-
-      {error && (
-        <div className="skill-page-error" role="alert">
-          <strong>操作未完成</strong>
-          <span>{error}</span>
-          <button className="quiet-button compact" type="button" onClick={() => setError(null)}>关闭</button>
-        </div>
-      )}
-
-      <div className="skill-section-stack">
-        <section id="skill-import-panel" className="skill-import-panel" hidden={!importOpen}>
-          <div className="skill-import-heading">
-            <div>
-              <h2>添加 Skill</h2>
-              <p>检查来源与内容后，再保存到 Rovai 的本机受管仓库。</p>
-            </div>
-            <button className="skill-import-close" type="button" aria-label="关闭添加 Skill" onClick={() => setImportOpen(false)}>
-              <CloseIcon />
-            </button>
-          </div>
-          <div
-            className="skill-import-tabs"
-            role="tablist"
-            aria-label="Skill 添加方式"
-            onKeyDown={(event) => {
-              const next = event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'End'
-                ? 'github'
-                : event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'Home'
-                  ? 'local'
-                  : null
-              if (!next) return
-              event.preventDefault()
-              setImportTab(next)
-              requestAnimationFrame(() => document.getElementById(`skill-import-${next}-tab`)?.focus())
-            }}
-          >
-            <button id="skill-import-local-tab" className={importTab === 'local' ? 'active' : ''} type="button" role="tab" aria-selected={importTab === 'local'} aria-controls="skill-import-local-panel" tabIndex={importTab === 'local' ? 0 : -1} onClick={() => setImportTab('local')}>本地文件夹</button>
-            <button id="skill-import-github-tab" className={importTab === 'github' ? 'active' : ''} type="button" role="tab" aria-selected={importTab === 'github'} aria-controls="skill-import-github-panel" tabIndex={importTab === 'github' ? 0 : -1} onClick={() => setImportTab('github')}>GitHub</button>
-          </div>
-          {importTab === 'local'
-            ? (
-              <div id="skill-import-local-panel" className="skill-import-body" role="tabpanel" aria-labelledby="skill-import-local-tab">
-                <div className="skill-import-copy">
-                  <strong>选择包含 <code>SKILL.md</code> 的完整目录</strong>
-                  <small>先生成安全预览；确认后复制完整内容，不再依赖原始文件夹。</small>
-                </div>
-                <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void inspectLocalImport()}>
-                  {busy === 'inspect-local' ? '正在检查…' : '选择文件夹'}
-                </button>
-              </div>
-              )
-            : (
-              <div id="skill-import-github-panel" className="skill-import-body" role="tabpanel" aria-labelledby="skill-import-github-tab">
-                <label className="skill-import-github-field">
-                  <span>GitHub Skill 链接</span>
-                  <input className="skill-text-input" value={githubInput} onChange={(event) => setGithubInput(event.target.value)} placeholder="粘贴仓库或带 ref / 子目录的链接" />
-                </label>
-                <button className="primary-button skill-import-github-submit" type="button" disabled={busy !== null || githubInput.trim().length === 0} onClick={() => void inspectGithubImport()}>
-                  {busy === 'inspect-github' ? '正在检查…' : '检查并导入'}
-                </button>
-              </div>
-              )}
-        </section>
-
-        <section className="skill-section skill-library-section">
-          <div className="skill-section-heading">
-            <div>
-              <h2>已安装 Skills</h2>
-              <p>搜索 Skill，调整运行时生效组，或查看来源详情。</p>
-            </div>
-            <span className="skill-section-count">{configurableSkillCount ?? '—'} 项</span>
-          </div>
-          <div className="skill-library-toolbar">
-            <label className="skill-search-row">
-              <SearchIcon />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill 名称、简介或来源" aria-label="搜索 Skill" />
-            </label>
-          </div>
-          {skills === null && <div className="skill-empty" aria-live="polite">正在读取 Skill Library…</div>}
-          {skills?.length === 0 && <div className="skill-empty">还没有可用的 Skill。可以导入包含 <code>SKILL.md</code> 的目录。</div>}
-          {skills && skills.length > 0 && visibleSkills?.length === 0 && <div className="skill-empty">没有匹配“{search.trim()}”的 Skill。</div>}
-          {visibleSkills && visibleSkills.length > 0 && (
-            <div className="skill-card-grid">
-              <SkillLibraryColumns />
-              {visibleSkills.map((skill) => (
-                <SkillCard
-                  key={skill.id}
-                  skill={skill}
-                  groups={groups}
-                  operation={skillRowOperations[skill.id] ?? null}
-                  busy={busy === `delete-${skill.id}` ? busy : null}
-                  onToggleEnabled={() => void setEnabled(skill)}
-                  onToggleGroup={(groupKey) => void toggleGroup(skill, groupKey)}
-                  onDelete={() => setDeletingSkill(skill)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-
-      <ImportInspectionDialog
-        inspection={inspection}
-        busy={busy}
-        onClose={() => !busy && setInspection(null)}
-        onCommit={(candidate) => {
-          if (candidate.importAction === 'update') setUpdatingCandidate(candidate)
-          else void commitCandidate(candidate, false)
-        }}
-      />
-      <DeleteSkillDialog
-        skill={deletingSkill}
-        busy={busy}
-        onClose={() => !busy && setDeletingSkill(null)}
-        onConfirm={() => deletingSkill && void deleteSkill(deletingSkill)}
-      />
-      <UpdateSkillDialog
-        candidate={updatingCandidate}
-        busy={busy}
-        onClose={() => !busy && setUpdatingCandidate(null)}
-        onConfirm={() => updatingCandidate && void commitCandidate(updatingCandidate, true)}
-      />
-    </div>
-  )
-}
-
-export function SkillLibraryColumns(): React.JSX.Element {
-  return (
-    <div className="skill-library-columns" aria-hidden="true">
-      <span />
-      <span>Skill</span>
-      <div className="skill-card-controls skill-library-legend">
-        <span>生效范围</span><span>状态</span><span>查看</span>
-      </div>
-    </div>
-  )
-}
-
 export function settingsVisibleSkills(
   skills: SkillView[] | null,
-  search: string
+  search: string,
+  filter: CapabilityFilter = 'all'
 ): SkillView[] | null {
   if (!skills) return null
-  const configurable = skills.filter((skill) => (
-    skill.managementPolicy === 'user_managed' && skill.lifecycleStatus === 'active'
-  ))
+  const configurable = skills.filter(
+    (skill) =>
+      skill.managementPolicy === 'user_managed' &&
+      skill.lifecycleStatus === 'active' &&
+      matchesCapabilityFilter(skill.enabled, filter)
+  )
   const query = search.trim().toLocaleLowerCase('zh-CN')
   if (query.length === 0) return configurable
-  return configurable.filter((skill) => skillSearchText(skill)
-    .toLocaleLowerCase('zh-CN')
-    .includes(query))
+  return configurable.filter((skill) =>
+    skillSearchText(skill).toLocaleLowerCase('zh-CN').includes(query)
+  )
 }
 
 const SKILL_DELIVERY_GROUP_DISPLAY_RANK: Record<SkillDeliveryGroupKey, number> = {
@@ -437,103 +690,12 @@ export function skillDeliveryGroupsForDisplay(
 ): SkillDeliveryGroupView[] {
   return groups
     .map((group, index) => ({ group, index }))
-    .sort((left, right) => (
-      SKILL_DELIVERY_GROUP_DISPLAY_RANK[left.group.key]
-      - SKILL_DELIVERY_GROUP_DISPLAY_RANK[right.group.key]
-      || left.index - right.index
-    ))
+    .sort(
+      (left, right) =>
+        SKILL_DELIVERY_GROUP_DISPLAY_RANK[left.group.key] -
+          SKILL_DELIVERY_GROUP_DISPLAY_RANK[right.group.key] || left.index - right.index
+    )
     .map(({ group }) => group)
-}
-
-export function SkillCard({
-  skill,
-  groups,
-  operation,
-  busy,
-  onToggleEnabled,
-  onToggleGroup,
-  onDelete
-}: {
-  skill: SkillView
-  groups: SkillDeliveryGroupView[]
-  operation: SkillRowOperation | null
-  busy: string | null
-  onToggleEnabled(): void
-  onToggleGroup(groupKey: SkillDeliveryGroupKey): void
-  onDelete(): void
-}): React.JSX.Element {
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const selected = new Set(skill.groupAssignments.map((assignment) => assignment.groupKey))
-  const deleting = skill.lifecycleStatus === 'deleting'
-  const rowBusy = operation !== null || busy !== null
-  const source = skillSourcePresentation(skill)
-  const detailsId = `skill-details-${skill.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
-  return (
-    <article
-      className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${detailsOpen ? 'is-expanded' : ''}`}
-      data-skill-name={skill.name}
-      aria-busy={rowBusy}
-    >
-      <div className="skill-card-primary">
-        <SkillIdentityMark skillId={skill.id} name={skill.name} />
-        <div className="skill-card-heading">
-          <div className="skill-card-title">
-            <strong title={skill.name}>{skill.name}</strong>
-            <span className={`skill-source source-${source.kind}`}>{source.badgeLabel}</span>
-          </div>
-          <p>{skill.currentRevision.description || '未提供说明。'}</p>
-        </div>
-        <div className="skill-card-controls">
-          <SkillGroupMenu
-            skill={skill}
-            groups={groups}
-            selected={selected}
-            disabled={rowBusy || deleting}
-            onToggle={onToggleGroup}
-          />
-          <button
-            className="skill-toggle"
-            type="button"
-            role="switch"
-            aria-checked={skill.enabled}
-            aria-label={operation === 'toggle'
-              ? `正在保存 ${skill.name}`
-              : `${skill.enabled ? '停用' : '启用'} ${skill.name}`}
-            disabled={rowBusy || deleting}
-            onClick={onToggleEnabled}
-          >
-            <span aria-hidden="true" />
-          </button>
-          <button
-            className="skill-detail-button"
-            type="button"
-            aria-expanded={detailsOpen}
-            aria-controls={detailsId}
-            aria-label={`${detailsOpen ? '收起' : '查看'} ${skill.name} 详情`}
-            onClick={() => setDetailsOpen((open) => !open)}
-          >
-            <ChevronIcon />
-          </button>
-        </div>
-      </div>
-      <div className="skill-card-details" id={detailsId} hidden={!detailsOpen}>
-        <SkillDetailSource source={source} />
-        <DetailFact label="Library Revision" value={`r${skill.currentRevision.revision}`} mono />
-        <DetailFact
-          label={skill.currentRevision.sourceType === 'bundled' ? '安装时间' : '更新时间'}
-          value={formatTimestamp(skill.currentRevision.installedAt)}
-        />
-        <DetailFact label="内容" value={`${skill.currentRevision.fileCount} 个文件 · ${formatBytes(skill.currentRevision.totalBytes)}`} />
-        <DetailFact label="内容摘要" value={shortDigest(skill.currentRevision.contentDigest)} mono title={skill.currentRevision.contentDigest} />
-        <p className="skill-detail-note">{source.detailNote}</p>
-        {skill.origin === 'imported' && (
-          <div className="skill-detail-footer">
-            <button className="skill-delete-button" type="button" disabled={rowBusy || deleting} onClick={onDelete}>删除</button>
-          </div>
-        )}
-      </div>
-    </article>
-  )
 }
 
 export function patchSkillEnabledResult(
@@ -546,28 +708,16 @@ export function patchSkillEnabledResult(
   if (typeof enabled !== 'boolean' || typeof version !== 'number') {
     throw new Error('Skill 启停结果无效，请重试。')
   }
-  return skills.map((skill) => skill.id === skillId
-    ? { ...skill, enabled, version }
-    : skill)
+  return skills.map((skill) => (skill.id === skillId ? { ...skill, enabled, version } : skill))
 }
 
 function replaceSkillRow(skills: SkillView[], updated: SkillView): SkillView[] {
-  return skills.map((skill) => skill.id === updated.id ? updated : skill)
-}
-
-function withoutSkillRowOperation(
-  operations: Record<string, SkillRowOperation>,
-  skillId: string
-): Record<string, SkillRowOperation> {
-  if (!(skillId in operations)) return operations
-  const next = { ...operations }
-  delete next[skillId]
-  return next
+  return skills.map((skill) => (skill.id === updated.id ? updated : skill))
 }
 
 export type SkillSourcePresentation = {
   kind: 'bundled' | 'third-party' | 'imported'
-  badgeLabel: 'Rovai' | 'GitHub' | '用户导入'
+  badgeLabel: 'Rovai' | 'GitHub' | '本地导入'
   sourceLabel: string
   repositoryUrl: string | null
   repositoryLabel: string | null
@@ -606,15 +756,16 @@ export function skillSourcePresentation(skill: SkillView): SkillSourcePresentati
   }
 
   const importedSource = metadataRecord(metadata?.source)
-  const repository = skill.currentRevision.sourceType === 'github'
-    ? githubRepository(metadataString(importedSource, 'repositoryUrl'))
-    : null
-  const revision = metadataString(importedSource, 'resolvedCommit')
-    ?? metadataString(importedSource, 'gitRef')
+  const repository =
+    skill.currentRevision.sourceType === 'github'
+      ? githubRepository(metadataString(importedSource, 'repositoryUrl'))
+      : null
+  const revision =
+    metadataString(importedSource, 'resolvedCommit') ?? metadataString(importedSource, 'gitRef')
 
   return {
     kind: 'imported',
-    badgeLabel: '用户导入',
+    badgeLabel: skill.currentRevision.sourceType === 'github' ? 'GitHub' : '本地导入',
     sourceLabel: sourceTypeLabel(skill.currentRevision.sourceType),
     repositoryUrl: repository?.url ?? null,
     repositoryLabel: repository?.label ?? null,
@@ -632,46 +783,14 @@ function skillSearchText(skill: SkillView): string {
     source.sourceLabel,
     source.repositoryLabel,
     source.revisionLabel
-  ].filter(Boolean).join('\n')
-}
-
-function SkillDetailSource({ source }: { source: SkillSourcePresentation }): React.JSX.Element {
-  return (
-    <div className="skill-detail-fact skill-detail-source">
-      <span>来源</span>
-      {source.repositoryUrl && source.repositoryLabel
-        ? (
-          <div className="skill-detail-source-value">
-            <a
-              className="skill-source-link"
-              href={source.repositoryUrl}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`${source.repositoryLabel}，在浏览器打开`}
-            >
-              <span>{source.repositoryLabel}</span><ExternalLinkIcon />
-            </a>
-            <span aria-hidden="true">·</span>
-            <code className="skill-detail-source-revision">{source.revisionLabel}</code>
-          </div>
-          )
-        : <strong>{source.sourceLabel}</strong>}
-    </div>
-  )
-}
-
-function DetailFact({ label, value, mono = false, title }: {
-  label: string
-  value: string
-  mono?: boolean
-  title?: string
-}): React.JSX.Element {
-  return <div className="skill-detail-fact"><span>{label}</span><strong className={mono ? 'mono' : ''} title={title}>{value}</strong></div>
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function metadataRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null
 }
 
@@ -685,7 +804,10 @@ function githubRepository(value: string | null): { url: string; label: string } 
   try {
     const url = new URL(value)
     if (url.protocol !== 'https:' || url.hostname !== 'github.com') return null
-    const segments = url.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
+    const segments = url.pathname
+      .replace(/^\/+|\/+$/g, '')
+      .split('/')
+      .filter(Boolean)
     if (segments.length < 2) return null
     const repository = segments[1].endsWith('.git') ? segments[1].slice(0, -4) : segments[1]
     return {
@@ -707,208 +829,28 @@ export function groupAssignmentSummary(selected: number, total: number): string 
   return `${selected} / ${total} 组`
 }
 
-function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
-  skill: SkillView
-  groups: SkillDeliveryGroupView[]
-  selected: Set<SkillDeliveryGroupKey>
-  disabled: boolean
-  onToggle(groupKey: SkillDeliveryGroupKey): void
-}): React.JSX.Element {
-  const summary = groupAssignmentSummary(selected.size, groups.length)
-  return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button className="skill-group-select" type="button" disabled={disabled} aria-label={`${skill.name} 生效范围，${summary}`}>
-          <span>{summary}</span><ChevronIcon />
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content className="skill-group-menu" align="start" sideOffset={5} collisionPadding={12}>
-          <div className="skill-group-menu-header">
-            <div><strong>选择 Agent 运行时生效组</strong><small>可多选。队员根据当前 Agent 运行时实时计算，仅用于展示。</small></div>
-            <span>{selected.size} / {groups.length}</span>
-          </div>
-          <div className="skill-group-options">
-            {skillDeliveryGroupsForDisplay(groups).map((group) => (
-              <DropdownMenu.CheckboxItem
-                className="skill-group-option"
-                key={group.key}
-                checked={selected.has(group.key)}
-                onCheckedChange={() => onToggle(group.key)}
-                onSelect={(event) => event.preventDefault()}
-                disabled={disabled}
-                aria-label={`${selected.has(group.key) ? '取消' : '选择'} ${group.label}`}
-              >
-                <span className="skill-group-checkbox"><DropdownMenu.ItemIndicator><CheckIcon /></DropdownMenu.ItemIndicator></span>
-                <span className="skill-group-main">
-                  <span className="skill-group-name-line">
-                    <strong>{group.label}</strong><code>{group.relativePath}</code>
-                    <i className={group.verification === 'verified' ? 'verified' : 'unverified'}>{group.verification === 'verified' ? '已验证' : '暂未验证'}</i>
-                  </span>
-                  <span className="skill-runtime-line">对应 Agent 运行时：{group.adapterKinds.map(adapterLabel).join('、') || '暂无'}</span>
-                  <span className="skill-member-line">
-                    {group.members.length > 0
-                      ? <><span className="skill-member-stack">{group.members.slice(0, 4).map((member) => <MemberAvatar key={member.agentId} agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative />)}</span><span>{group.members.map((member) => member.displayName).join('、')}</span></>
-                      : <span className="skill-no-member">当前没有对应队员</span>}
-                  </span>
-                </span>
-              </DropdownMenu.CheckboxItem>
-            ))}
-          </div>
-          <div className="skill-group-menu-footer">没有队员的分组仍然显示。关闭 Skill 只暂停投递，不会清除这里的选择。</div>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  )
-}
-
-function SkillRisk({ summary }: { summary: SkillRiskSummary }): React.JSX.Element {
-  const hasRisk = summary.executableFileCount > 0 || summary.scriptFileCount > 0 || summary.binaryCandidateCount > 0 || summary.declaredTools.length > 0
-  return (
-    <div className={`skill-risk ${hasRisk ? 'has-risk' : ''}`}>
-      <strong>{hasRisk ? '内容提示' : '未发现脚本或可执行内容'}</strong>
-      {hasRisk && <span>{summary.scriptFileCount} 个脚本 · {summary.executableFileCount} 个可执行文件 · {summary.binaryCandidateCount} 个二进制候选{summary.declaredTools.length > 0 ? ` · 声明工具：${summary.declaredTools.join('、')}` : ''}</span>}
-    </div>
-  )
-}
-
-function ImportInspectionDialog({ inspection, busy, onClose, onCommit }: {
-  inspection: SkillImportInspection | null
-  busy: string | null
-  onClose(): void
-  onCommit(candidate: SkillImportCandidate): void
-}): React.JSX.Element {
-  return (
-    <Dialog.Root open={inspection !== null} onOpenChange={(open) => !open && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent className="skill-import-dialog" width="wide" tone="info">
-          <AppDialogHeader
-            title="导入 Skill"
-            description="新 Skill 默认启用，并应用到全部 Agent 运行时生效组。"
-            icon="sparkles"
-            kicker="安全预览"
-            closeDisabled={busy !== null}
-          />
-          {inspection && (
-            <AppDialogBody>
-              <details className="app-dialog-disclosure"><summary>来源目录</summary><code className="inspection-path">{inspection.sourcePath}</code></details>
-              <div className="import-candidate-list">
-                {inspection.candidates.map((candidate) => {
-                  const blocked = candidate.importAction === 'official_conflict'
-                  return (
-                    <article className="import-candidate" key={candidate.name}>
-                      <div>
-                        <strong>{candidate.name}</strong><span>{importActionLabel(candidate.importAction)}</span>
-                        <p>{candidate.description || '未提供说明。'}</p>
-                        <small>{candidate.fileCount} 个文件 · {formatBytes(candidate.totalBytes)} · {shortDigest(candidate.contentDigest)}</small>
-                        <SkillRisk summary={candidate.riskSummary} />
-                      </div>
-                      <button className={candidate.importAction === 'update' ? 'approve-button' : 'primary-button'} type="button" disabled={busy !== null || blocked} onClick={() => onCommit(candidate)}>
-                        {busy === `import-${candidate.name}` ? '正在保存…' : blocked ? '与内置 Skill 冲突' : candidate.importAction === 'update' ? '检查并更新' : candidate.importAction === 'unchanged' ? '确认现有版本' : '导入'}
-                      </button>
-                    </article>
-                  )
-                })}
-              </div>
-              {inspection.candidates.length === 0 && <div className="skill-empty">没有可导入的候选 Skill。</div>}
-              {inspection.rejectedCandidates.length > 0 && <div className="rejected-candidates"><strong>未通过检查（{inspection.rejectedCandidates.length}）</strong>{inspection.rejectedCandidates.map((candidate) => <div key={`${candidate.sourcePath}:${candidate.code}`}><code>{candidate.sourcePath}</code><span>{candidate.code}：{candidate.message}</span></div>)}</div>}
-              <p className="inspection-expiry">本次预览有效至 {formatTimestamp(inspection.expiresAt)}。</p>
-            </AppDialogBody>
-          )}
-        </AppDialogContent>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
-export function DeleteSkillDialog({ skill, busy, onClose, onConfirm }: {
-  skill: SkillView | null
-  busy: string | null
-  onClose(): void
-  onConfirm(): void
-}): React.JSX.Element {
-  const copy = deleteSkillConfirmationCopy(skill?.name ?? '')
-  return (
-    <Dialog.Root open={skill !== null} onOpenChange={(open) => !open && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent tone="danger">
-          <AppDialogHeader
-            title={copy.title}
-            description={copy.description}
-            icon="sparkles"
-            kicker="受管内容"
-            closeDisabled={busy !== null}
-          />
-
-          <AppDialogFooter>
-            <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}>取消</button></Dialog.Close>
-            <button className="danger-button" type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith('delete-') ? '正在删除…' : copy.confirmLabel}</button>
-          </AppDialogFooter>
-        </AppDialogContent>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
-export function UpdateSkillDialog({ candidate, busy, onClose, onConfirm }: {
-  candidate: SkillImportCandidate | null
-  busy: string | null
-  onClose(): void
-  onConfirm(): void
-}): React.JSX.Element {
-  const copy = updateSkillConfirmationCopy(candidate?.name ?? '')
-  return (
-    <Dialog.Root open={candidate !== null} onOpenChange={(open) => !open && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent tone="info">
-          <AppDialogHeader
-            title={copy.title}
-            description={copy.description}
-            icon="sparkles"
-            kicker="版本更新"
-            closeDisabled={busy !== null}
-            hideDescription
-          />
-
-          <AppDialogFooter>
-            <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}>取消</button></Dialog.Close>
-            <button className="primary-button" type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith('import-') ? '正在更新…' : copy.confirmLabel}</button>
-          </AppDialogFooter>
-        </AppDialogContent>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
-function SearchIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
-}
-
-function CloseIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-}
-
-function ExternalLinkIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M14 5h5v5M10 14l9-9M19 13v6H5V5h6" /></svg>
-}
-
-function ChevronIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-}
-
-function CheckIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
-}
-
 export function importActionLabel(action: SkillImportCandidate['importAction']): string {
-  return ({ create: '新 Skill', update: '同名 Skill 已存在，将创建新 Revision', unchanged: '内容与当前 Revision 相同', official_conflict: '不能覆盖 Rovai 内置 Skill' } as const)[action]
+  return (
+    {
+      create: '新 Skill',
+      update: '同名 Skill 已存在，将创建新 Revision',
+      unchanged: '内容与当前 Revision 相同',
+      official_conflict: '不能覆盖 Rovai 内置 Skill'
+    } as const
+  )[action]
 }
 
 export function projectionStateLabel(state: string): string {
-  return ({ shadowed: '被项目同名 Skill 遮蔽', stale: '等待下次运行生效', pending_removal: '等待现有运行释放', error: '投递失败' } as Record<string, string>)[state] ?? state
+  return (
+    (
+      {
+        shadowed: '被项目同名 Skill 遮蔽',
+        stale: '等待下次运行生效',
+        pending_removal: '等待现有运行释放',
+        error: '投递失败'
+      } as Record<string, string>
+    )[state] ?? state
+  )
 }
 
 export function formatBytes(value: number): string {
@@ -918,42 +860,50 @@ export function formatBytes(value: number): string {
 }
 
 function sourceTypeLabel(sourceType: SkillView['currentRevision']['sourceType']): string {
-  return ({ bundled: '随 Rovai 安装', local_folder: '本地文件夹导入', github: 'GitHub 导入' } as const)[sourceType]
+  return (
+    { bundled: '随 Rovai 安装', local_folder: '本地文件夹导入', github: 'GitHub 导入' } as const
+  )[sourceType]
 }
 
-function adapterLabel(adapter: AdapterKind): string {
-  return ({ 'codex-cli': 'Codex', pi: 'Pi Coding Agent', 'opencode-cli': 'OpenCode', 'copilot-cli': 'Copilot', 'claude-code-cli': 'Claude Code', 'antigravity-app': 'Antigravity', 'kiro-cli': 'Kiro', 'qoder-cli': 'Qoder', 'codebuddy-cli': 'CodeBuddy', 'qwen-code': 'Qwen', 'trae-cn-cli': 'TRAE CLI', 'cursor-agent': 'Cursor Agent', 'kimi-code-cli': 'Kimi Code', 'grok-build': 'Grok Build' } as Partial<Record<AdapterKind, string>>)[adapter] ?? adapter
-}
-
-function parseGithubImportInput(input: string): { repositoryUrl: string; subdirectory?: string; gitRef?: string } {
+function parseGithubImportInput(input: string): {
+  repositoryUrl: string
+  subdirectory?: string
+  gitRef?: string
+} {
   let url: URL
-  try { url = new URL(input.trim()) } catch { throw new Error('请输入有效的 GitHub HTTPS 链接。') }
-  if (url.protocol !== 'https:' || url.hostname !== 'github.com') throw new Error('仅支持 https://github.com/ 链接。')
-  const segments = url.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
+  try {
+    url = new URL(input.trim())
+  } catch {
+    throw new Error('请输入有效的 GitHub HTTPS 链接。')
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com')
+    throw new Error('仅支持 https://github.com/ 链接。')
+  const segments = url.pathname
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .filter(Boolean)
   if (segments.length < 2) throw new Error('GitHub 链接需要包含 owner 和 repository。')
   const [owner, rawRepository, marker, gitRef, ...subdirectory] = segments
   const repository = rawRepository.endsWith('.git') ? rawRepository.slice(0, -4) : rawRepository
-  if (marker && marker !== 'tree') throw new Error('请使用仓库链接，或 /tree/<ref>/<子目录> 形式的链接。')
-  if (marker === 'tree' && !gitRef) throw new Error('GitHub 子目录链接缺少 branch、tag 或 commit ref。')
+  if (marker && marker !== 'tree')
+    throw new Error('请使用仓库链接，或 /tree/<ref>/<子目录> 形式的链接。')
+  if (marker === 'tree' && !gitRef)
+    throw new Error('GitHub 子目录链接缺少 branch、tag 或 commit ref。')
   return {
     repositoryUrl: `https://github.com/${owner}/${repository}`,
     ...(gitRef ? { gitRef: decodeURIComponent(gitRef) } : {}),
-    ...(subdirectory.length > 0 ? { subdirectory: subdirectory.map(decodeURIComponent).join('/') } : {})
+    ...(subdirectory.length > 0
+      ? { subdirectory: subdirectory.map(decodeURIComponent).join('/') }
+      : {})
   }
-}
-
-function formatTimestamp(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
-}
-
-function shortDigest(value: string): string {
-  return value.length > 20 ? `${value.slice(0, 19)}…` : value
 }
 
 function assertCommandApplied(result: StoredCommandResult): void {
   if (result.status === 'rejected') {
-    const message = typeof result.payload.message === 'string' ? result.payload.message : `操作未完成：${result.code}`
+    const message =
+      typeof result.payload.message === 'string'
+        ? result.payload.message
+        : `操作未完成：${result.code}`
     throw new Error(message)
   }
 }
