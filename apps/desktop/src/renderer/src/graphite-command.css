@@ -1,0 +1,6 @@
+/* Graphite Command is split by responsibility to keep renderer overrides reviewable. */
+@import './graphite-command-foundation.css';
+@import './graphite-command-sidebar.css';
+@import './graphite-command-workspaces.css';
+@import './graphite-command-settings.css';
+@import './graphite-command-overlays.css';

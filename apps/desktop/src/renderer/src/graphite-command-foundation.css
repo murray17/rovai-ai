@@ -1,0 +1,206 @@
+/*
+ * Graphite Command visual layer
+ *
+ * This stylesheet is intentionally imported after styles.css. It changes only
+ * presentation: React component boundaries, IPC calls, keyboard behavior and
+ * persisted Rovai data contracts stay in the existing renderer code.
+ */
+
+:root {
+  color-scheme: light;
+  --rail-width: 272px;
+
+  --canvas: #ececea;
+  --surface: #fbfbf9;
+  --surface-raised: #ffffff;
+  --surface-subtle: #f4f5f2;
+  --surface-muted: #eceeea;
+  --surface-selected: #e2f2ee;
+  --surface-hover: #e8eae6;
+  --surface-sunken: #e5e7e3;
+  --conversation-surface: #fbfbf9;
+  --inspector-surface: #f7f7f4;
+  --conversation-inspector-line: #d7dad5;
+  --home-surface: #fbfbf9;
+  --topbar: #f7f7f4;
+  --input: #f0f1ee;
+
+  --ink: #151920;
+  --muted: #606873;
+  --faint: #7d8690;
+  --line: #e1e3df;
+  --line-strong: #cfd3ce;
+  --control-line: #cfd3ce;
+
+  --brand: #147d6f;
+  --brand-hover: #0d665b;
+  --brand-contrast: #f4fffc;
+  --brand-soft: #e2f2ee;
+  --brand-ink: #0d695e;
+  --mention-ink: #0d695e;
+  --mention-ink-hover: #09584f;
+  --mention-feedback: rgb(20 125 111 / 9%);
+  --mention-popover-portrait-scrim: rgb(21 25 32 / 10%);
+  --mention-popover-label-line: rgb(255 255 255 / 42%);
+  --mention-popover-label-surface: rgb(21 25 32 / 38%);
+  --mention-popover-accent: var(--brand);
+
+  --aurora: #6ed8c3;
+  --aurora-soft: #ddf5ef;
+  --violet: #75698f;
+  --violet-soft: #eeeaf4;
+  --ember: #b66d24;
+  --ember-soft: #fff0df;
+
+  --rail: #171a20;
+  --rail-ink: #aeb6c4;
+  --rail-line: #2a2f38;
+  --rail-logo: #6ed8c3;
+
+  --success: #187157;
+  --success-soft: #e8f5ef;
+  --success-contrast: #ffffff;
+  --attention: #965607;
+  --attention-soft: #fff3df;
+  --attention-contrast: #ffffff;
+  --danger: #a9343c;
+  --danger-soft: #fdebed;
+  --danger-contrast: #ffffff;
+  --info: #28698f;
+  --info-soft: #e9f3fb;
+  --info-contrast: #ffffff;
+  --neutral: #59616c;
+  --neutral-soft: #eceeea;
+  --focus: #147d6f;
+  --focus-soft: rgb(20 125 111 / 16%);
+  --overlay: rgb(16 19 24 / 54%);
+
+  --shadow-float: 0 18px 44px rgb(27 34 51 / 14%);
+  --shadow-menu: 0 14px 34px rgb(27 34 51 / 16%);
+  --shadow-dialog: 0 24px 64px rgb(16 19 24 / 24%);
+  --shadow-card: none;
+
+  --approval-line: #d8b980;
+  --evidence-canvas: #f0f1ee;
+  --evidence-surface: #fbfbf9;
+  --evidence-ink: #1b2028;
+  --evidence-muted: #606873;
+  --evidence-line: #d8dbd6;
+  --diff-add: #246849;
+  --diff-add-soft: #e5f1e9;
+  --diff-remove: #8f3538;
+  --diff-remove-soft: #f8e7e7;
+
+  --graphite-sidebar-title: #f7f8fa;
+  --graphite-sidebar-ink: #aeb6c4;
+  --graphite-sidebar-muted: #929dab;
+  --graphite-sidebar-faint: #7d8796;
+  --graphite-sidebar-hover: #21262e;
+  --graphite-sidebar-active: #272e38;
+  --graphite-accent: #6ed8c3;
+  --graphite-accent-ink: #102c28;
+  --graphite-charcoal-button: #1b2227;
+  --graphite-charcoal-button-hover: #147d6f;
+  --graphite-field: #f0f1ee;
+  --graphite-topbar-line: #d7dad5;
+  --graphite-radius-xs: 4px;
+  --graphite-radius-sm: 6px;
+  --graphite-radius-md: 8px;
+  --graphite-radius-lg: 10px;
+}
+
+html,
+body,
+#root {
+  background: var(--canvas);
+}
+
+body {
+  font-size: 13px;
+  letter-spacing: -0.005em;
+}
+
+button,
+input,
+textarea,
+select {
+  letter-spacing: inherit;
+}
+
+:where(button, input, textarea, select, summary, [role="tab"], [role="button"]):focus-visible {
+  outline-color: color-mix(in srgb, var(--focus) 78%, white);
+}
+
+::selection {
+  color: var(--ink);
+  background: var(--brand-soft);
+}
+
+/* App shell ---------------------------------------------------------------- */
+
+.app-shell {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  grid-template-rows: 56px minmax(0, 1fr);
+  background: var(--canvas);
+}
+
+.topbar {
+  min-height: 56px;
+  gap: 12px;
+  padding: 0 24px;
+  border-bottom-color: var(--graphite-topbar-line);
+  background: var(--topbar);
+}
+
+.window-drag-strip {
+  height: 56px;
+}
+
+.window-drag-strip-members,
+.window-drag-strip-memory {
+  background: color-mix(in srgb, var(--topbar) 96%, transparent);
+  border-bottom: 1px solid var(--graphite-topbar-line);
+}
+
+.context-breadcrumb {
+  gap: 8px;
+}
+
+.context-project,
+.context-sep {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.topbar h1 {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 690;
+  letter-spacing: -0.01em;
+}
+
+.context-day-badge,
+.run-badge,
+.approval-badge,
+.state-chip,
+.status-badge,
+.activity-status,
+.approval-status {
+  border-radius: 999px;
+}
+
+.topbar-inspector-toggle {
+  border-radius: var(--graphite-radius-sm);
+}
+
+.topbar-inspector-toggle:hover {
+  background: var(--surface-hover);
+}
+
+.content {
+  background: var(--surface);
+}
+
+.content.task-content {
+  background: var(--conversation-surface);
+}

@@ -5,6 +5,7 @@ import { PageZoomFeedback } from './PageZoomFeedback'
 import { WindowsApplicationMenu } from './WindowsApplicationMenu'
 import { applyRendererPlatform } from './renderer-platform'
 import './styles.css'
+import './graphite-command.css'
 
 applyRendererPlatform(document.documentElement, window.rovai.platform)
 
