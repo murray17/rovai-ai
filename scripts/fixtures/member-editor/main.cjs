@@ -284,6 +284,37 @@ app
       }
     )
     await check(
+      'an external identity update during save preserves the local draft as a conflict',
+      async () => {
+        await fill(
+          `${active}.member-editor-two-columns > div:nth-child(2) input`,
+          '本地职责'
+        )
+        await run(
+          `window.memberFixture.afterUpdate({ teamRole: '外部更新的职责' })`
+        )
+        await saveIdentity()
+        await wait(
+          `document.querySelector('${active}.member-editor-submit-error')?.textContent.includes('队员信息已在其他操作中更新')`
+        )
+        assert.equal(await roleValue(), '本地职责')
+        assert.equal(
+          await run(
+            `document.querySelector('${active}.member-identity-form button[type=submit]').disabled`
+          ),
+          true
+        )
+        await wait(
+          `!document.querySelector('${active}.member-editor-submit-error button').disabled`
+        )
+        await click(
+          `${active}.member-editor-submit-error button`,
+          '放弃此处修改，读取已保存信息'
+        )
+        assert.equal(await roleValue(), '外部更新的职责')
+      }
+    )
+    await check(
       'external runtime conflict cannot be dismissed by choosing another runtime',
       async () => {
         await selectPermission(0, 'workspace-write')

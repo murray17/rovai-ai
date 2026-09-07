@@ -67,6 +67,7 @@ export const MemberIdentityEditor = forwardRef<
   const [saved, setSaved] = useState(false)
   const [isSaving, setSaving] = useState(false)
   const saving = useRef(false)
+  const conflictDuringSave = useRef(false)
   const busy = parentBusy || isSaving
   const persisted = JSON.stringify({
     ...identityDraftFor(agent),
@@ -77,7 +78,8 @@ export const MemberIdentityEditor = forwardRef<
   const dirty =
     JSON.stringify({ ...draft, avatarRef }) !== baseline ||
     Boolean(traitInput.trim()) ||
-    avatarPending
+    avatarPending ||
+    conflict
   const fieldPrefix = useId()
   const fieldId = (field: string): string => `${fieldPrefix}-${field}`
   const reset = (): void => {
@@ -89,6 +91,7 @@ export const MemberIdentityEditor = forwardRef<
     setTraitError(null)
     setTraitInput('')
     setConflict(false)
+    conflictDuringSave.current = false
     setSaved(false)
     setAvatarOpen(false)
     setAvatarPending(false)
@@ -107,11 +110,14 @@ export const MemberIdentityEditor = forwardRef<
   useEffect(() => {
     if (observed.current === persisted) return
     observed.current = persisted
-    if (dirty && !saving.current) {
+    // Our receipts advance observed before props change. Any different value is
+    // external, including one received while the post-save reload is pending.
+    if (dirty || saving.current) {
+      if (saving.current) conflictDuringSave.current = true
       setConflict(true)
       return
     }
-    if (!saving.current) reset()
+    reset()
   }, [persisted])
   const update = <K extends keyof IdentityDraft>(
     key: K,
@@ -175,6 +181,7 @@ export const MemberIdentityEditor = forwardRef<
       return
     }
     saving.current = true
+    conflictDuringSave.current = false
     setSaving(true)
     try {
       const committed = await onSubmit(next, avatarRef, (profile) => {
@@ -185,11 +192,13 @@ export const MemberIdentityEditor = forwardRef<
         })
         setBaseline(observed.current)
       })
-      setDraft(identityDraftFor(committed))
-      setAvatarRef(committed.avatarRef)
-      setConflict(false)
-      setSaved(true)
-      setAvatarOpen(false)
+      if (!conflictDuringSave.current) {
+        setDraft(identityDraftFor(committed))
+        setAvatarRef(committed.avatarRef)
+        setConflict(false)
+        setSaved(true)
+        setAvatarOpen(false)
+      }
     } catch (issue) {
       setError({ field: 'submit', message: readErrorMessage(issue) })
     } finally {
@@ -437,6 +446,7 @@ export const MemberIdentityEditor = forwardRef<
             <button
               className="member-editor-text-button"
               type="button"
+              disabled={busy}
               onClick={reset}
             >
               放弃此处修改，读取已保存信息

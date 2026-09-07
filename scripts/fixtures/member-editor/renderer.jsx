@@ -19,6 +19,8 @@ let reload,
   openSettings
 const assets = new Map()
 let selectedSource = null
+let externalAfterUpdate = null
+let delayedReload = false
 window.rovai = {
   platform: 'darwin',
   memberAvatars: {
@@ -118,6 +120,15 @@ window.rovai = {
         item.agentId === next.agentId ? next : item
       )
     }
+    if (method === 'members.update' && externalAfterUpdate) {
+      members = members.map((member) =>
+        member.agentId === next.agentId
+          ? { ...member, ...externalAfterUpdate, version: member.version + 1 }
+          : member
+      )
+      externalAfterUpdate = null
+      delayedReload = true
+    }
     return {
       status: 'applied',
       code: method,
@@ -128,6 +139,9 @@ window.rovai = {
 }
 window.memberFixture = {
   calls,
+  afterUpdate: (patch) => {
+    externalAfterUpdate = patch
+  },
   profiles: () => clone(members),
   installations,
   fail: (method) => {
@@ -166,6 +180,10 @@ function Fixture() {
   reload = () => {
     if (failReload) return Promise.reject(new Error('验收模拟读取失败'))
     setAgents(clone(members))
+    if (delayedReload) {
+      delayedReload = false
+      return new Promise((resolve) => setTimeout(resolve, 120))
+    }
     return Promise.resolve()
   }
   openSettings = () => ref.current.requestTransition(() => setView('settings'))
