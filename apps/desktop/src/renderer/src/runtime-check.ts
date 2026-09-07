@@ -9,7 +9,10 @@ export type ProductRuntimeCheckResult = {
   runtimeKind: AdapterKind
 }
 
-export function requestProductRuntimeCheck(runtimeKind: AdapterKind): Promise<ProductRuntimeCheckResult> {
+export async function requestProductRuntimeCheck(runtimeKind: AdapterKind, rediscover = false): Promise<ProductRuntimeCheckResult> {
+  if (rediscover) {
+    await window.rovai.request('runtime.discovery.rescan', { interactiveShell: true })
+  }
   return window.rovai.request<ProductRuntimeCheckResult>('runtime.product.check', { runtimeKind })
 }
 

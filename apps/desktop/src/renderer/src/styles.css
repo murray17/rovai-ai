@@ -7798,6 +7798,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   transition: background-color 140ms ease;
 }
 .runtime-product-row:focus-within { background: var(--workspace-surface-hover); }
+.runtime-product-row:has(.runtime-install-guide) { background: var(--workspace-surface-raised); }
 .runtime-product-logo {
   display: grid;
   width: 40px;
@@ -7815,6 +7816,53 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .runtime-product-status { justify-self: end; white-space: nowrap; }
 .runtime-product-check { width: 110px; justify-content: center; white-space: nowrap; }
 .runtime-product-row > .runtime-failure-notice { grid-column: 2 / -1; }
+.runtime-product-check.runtime-guide-trigger { justify-content: flex-end; gap: 6px; border-color: transparent; background: transparent; color: var(--brand-ink); }
+.runtime-guide-trigger svg { width: 13px; height: 13px; }
+.runtime-guide-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+.runtime-install-guide { grid-column: 2 / -1; min-width: 0; margin-right: 8px; padding: 18px 0 8px; border-top: 1px solid var(--workspace-line); }
+.runtime-install-guide h3 { margin: 0; font-size: 12px; font-weight: 550; }
+.runtime-install-guide p { margin: 0; font-size: 11px; line-height: 1.65; color: var(--muted); }
+.runtime-guide-step { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; }
+.runtime-guide-step + .runtime-guide-step { margin-top: 17px; }
+.runtime-guide-number { display: grid; place-items: center; width: 19px; height: 19px; margin-top: 1px; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--muted); font-size: 10px; }
+.runtime-guide-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; color: var(--muted); font-size: 11px; }
+.runtime-guide-heading h3 { color: var(--ink); }
+.runtime-guide-link { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; color: var(--muted); font-size: 11px; }
+.runtime-guide-link:hover { color: var(--brand-ink); }
+.runtime-guide-command { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 42px; padding: 4px 5px 4px 12px; border: 1px solid var(--conversation-code-line); border-radius: 6px; background: var(--conversation-code-block-canvas); }
+.runtime-guide-command > span:first-child { color: var(--evidence-muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; user-select: none; }
+.runtime-guide-command code { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--evidence-ink); font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; user-select: text; }
+.runtime-guide-copy { flex: 0 0 58px; align-self: stretch; min-height: 32px; padding: 4px; border: 1px solid transparent; border-radius: 4px; color: var(--muted); background: transparent; font-size: 11px; }
+.runtime-guide-copy:hover { border-color: var(--line-strong); background: var(--evidence-surface); color: var(--ink); }
+.runtime-guide-alternatives { margin-top: 5px; }
+.runtime-guide-alternatives > summary { display: flex; align-items: center; gap: 4px; width: fit-content; min-height: 28px; border-radius: 3px; color: var(--muted); font-size: 11px; cursor: pointer; list-style: none; }
+.runtime-guide-alternatives > summary::-webkit-details-marker { display: none; }
+.runtime-guide-alternatives svg { width: 12px; height: 12px; }
+.runtime-guide-alternatives[open] > summary svg { transform: rotate(180deg); }
+.runtime-guide-alternative { margin-top: 9px; }
+.runtime-guide-login { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-width: 0; }
+.runtime-guide-login .runtime-guide-command { width: 176px; min-height: 34px; padding-block: 0; }
+.runtime-guide-login .runtime-guide-copy { min-height: 30px; flex-basis: 48px; }
+.runtime-guide-download { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.runtime-guide-download > div { min-width: 0; }
+.runtime-guide-download p { margin: 6px 0 0; }
+.runtime-guide-download .runtime-guide-command { margin-top: 12px; }
+.runtime-guide-download > a { flex-shrink: 0; }
+.runtime-guide-footer { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin: 18px 0 0 30px; }
+.runtime-guide-footer button { flex-shrink: 0; }
+.runtime-guide-footer button[aria-disabled="true"] { opacity: .6; cursor: default; }
+.runtime-guide-download ~ .runtime-guide-footer { margin-left: 0; }
+.runtime-guide-feedback, .runtime-install-guide .runtime-guide-feedback { grid-column: 2 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.runtime-install-guide .runtime-guide-feedback { margin-top: 14px; }
+.runtime-guide-feedback.is-error, .runtime-install-guide .runtime-guide-feedback.is-error { color: var(--danger); }
+.runtime-install-guide :is(button, a, summary):focus-visible, .runtime-guide-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+@media (max-width: 800px) {
+  .runtime-install-guide { grid-column: 1 / -1; margin-inline: 6px; }
+  .runtime-guide-footer { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .runtime-guide-footer button { align-self: flex-end; }
+  .runtime-guide-download { flex-direction: column; gap: 12px; }
+  .runtime-guide-heading { flex-wrap: wrap; gap: 4px 12px; }
+}
 .runtime-snapshot-badge {
   display: inline-flex;
   min-height: 22px;
