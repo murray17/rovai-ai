@@ -31669,6 +31669,7 @@ mod tests {
     fn v144_advances_storage_authority_without_rewriting_event_history() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v144-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v144_source_for_test(database.connection());
         database
             .connection()
             .execute_batch(
@@ -31741,6 +31742,8 @@ mod tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         assert_eq!(after, before);
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_scheduled_automations_v145().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         assert!(database.schema_migration_applied(144).unwrap());
 
@@ -34402,6 +34405,8 @@ mod tests {
             .execute_batch("DROP TRIGGER reject_command_result_storage_receipt")
             .unwrap();
         database.migrate_command_result_storage_v144().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_scheduled_automations_v145().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -34597,6 +34602,7 @@ mod tests {
             .migrate_execution_evidence_compaction_v143()
             .unwrap();
         database.migrate_command_result_storage_v144().unwrap();
+        database.migrate_scheduled_automations_v145().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained: (i64, Option<String>) = database
             .connection()
@@ -34629,6 +34635,7 @@ mod tests {
             Uuid::new_v4()
         ));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v144_source_for_test(database.connection());
         database
             .connection()
             .execute_batch(
@@ -34765,6 +34772,8 @@ mod tests {
             .unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_command_result_storage_v144().unwrap();
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        database.migrate_scheduled_automations_v145().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained = database
             .connection()

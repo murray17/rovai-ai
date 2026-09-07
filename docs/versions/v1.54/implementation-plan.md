@@ -28,11 +28,11 @@ last_updated: 2026-09-07
 | Gate | 状态 | 证据 |
 | --- | --- | --- |
 | Automation 领域与 schema 定向回归 | `passed` | 名称、幂等原子派发、快照冻结、重启收口、missed/overlap/once 与 schema 对象测试通过 |
-| Rust / Built-in / CLI | `passed` | `cargo fmt --check`、`cargo clippy -D warnings`、workspace all-target check、Core library 500 项、CLI 32 项和 Core binary 219 项通过；5 项手工 Runtime smoke ignored |
-| TypeScript / Renderer / Desktop build | `passed` | `pnpm typecheck`、151 files / 1526 项 Vitest 与 `pnpm build:desktop` 通过 |
+| Rust / Built-in / CLI | `passed` | `cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、workspace all-target check、Core library 535 项、CLI 33 项和 Core binary 232 项通过；5 项手工 Runtime smoke ignored，1 项嵌套 macOS sandbox 用例因当前环境限制显式跳过 |
+| TypeScript / Renderer / Desktop build | `passed` | `pnpm typecheck`、160 files / 1633 项 Vitest、222 项 Node 测试（1 项 Windows 平台跳过）与 `pnpm build:desktop` 通过 |
 | Automation UI finish review | `passed-with-limited-evidence` | 独立代码审查提出的模板、分页、保存恢复、结果入口、窄屏操作、字体、列表宽度和新建态问题已修复；受环境限制没有截图证据 |
 | 双主题真实 App 视觉与键盘 | `environment-blocked` | 隔离 `pnpm dev` 完成 Core、CLI 和 Renderer 构建后，当前嵌套 macOS 环境以 `sandbox_apply: Operation not permitted` 阻止 Electron/Chromium sandbox 初始化；未声称原生视觉通过 |
-| 文档治理与 diff hygiene | `passed` | `pnpm docs:test`、`pnpm docs:check`、基于 v1.54 起点的 diff-aware gate、`git diff --check` 与完整 `pnpm test` 通过 |
+| 文档治理与 diff hygiene | `passed` | `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、`git diff --check` 与完整 `pnpm test` 通过 |
 
 ## 完成条件
 

@@ -1251,10 +1251,10 @@ fn apply_automation_scheduler_control(
     current: &mut Option<AutomationSchedulerControl>,
     next: AutomationSchedulerControl,
 ) -> bool {
-    if let Some(value) = current {
-        if value.epoch > next.epoch || (value.epoch == next.epoch && *value != next) {
-            return false;
-        }
+    if let Some(value) = current
+        && (value.epoch > next.epoch || (value.epoch == next.epoch && *value != next))
+    {
+        return false;
     }
     *current = Some(next);
     true
@@ -18132,6 +18132,7 @@ async fn record_runtime_model_observation(
     Ok(changed)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn record_available_runtime_model(
     core: &Core,
     output: &mpsc::UnboundedSender<String>,

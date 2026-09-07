@@ -614,7 +614,7 @@ impl AutomationService {
                 .unwrap_or(current.notify_channels.clone());
             let enabled = command.enabled.unwrap_or(current.enabled);
             let now = Utc::now();
-            let schedule_changed = command.schedule.is_some();
+            let schedule_changed = schedule != current.schedule;
             let reopened = !current.enabled && enabled;
             let next_run_at = if !enabled {
                 None
@@ -766,9 +766,6 @@ impl AutomationService {
                     "Automation does not exist",
                 ));
             };
-            if !record.enabled {
-                return Ok(rejected("automation.closed", "Automation is closed"));
-            }
             let scheduled_for = Utc::now();
             let occurrence = claim_occurrence_in_tx(
                 transaction,
@@ -969,7 +966,7 @@ impl AutomationService {
     pub fn settle_runs(&self, database: &mut Database, now: DateTime<Utc>) -> Result<bool> {
         let run_ids = {
             let mut statement = database.connection().prepare(
-                "SELECT id FROM automation_run WHERE status IN ('running', 'cancelling') ORDER BY created_at, id LIMIT 32",
+                "SELECT id FROM automation_run WHERE status IN ('running', 'cancelling') ORDER BY created_at, id",
             )?;
             statement
                 .query_map([], |row| row.get::<_, String>(0))?
@@ -2567,7 +2564,7 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_once_overlap_is_skipped_and_consumes_the_definition() {
+    fn scheduled_once_overlap_is_skipped_and_closed_definition_can_run_manually() {
         let service = AutomationService::default();
         let (mut database, directory, quick_chat_path) = test_database();
         let local_due = Local::now() + Duration::days(1);
@@ -2639,14 +2636,60 @@ mod tests {
             .recover_interrupted(&mut database)
             .expect("manual run should settle for cleanup");
 
+        let closed_manual = service
+            .run_now(
+                &mut database,
+                &user_command(
+                    "automation-once-closed-manual-run",
+                    RunAutomationCommand {
+                        automation_id: automation_id.clone(),
+                    },
+                ),
+                CURRENT_USER_ID,
+                &quick_chat_path,
+            )
+            .expect("a closed one-time Automation should run manually");
+        assert_eq!(closed_manual.result.payload["status"], "started");
+        let closed_manual_run_id = closed_manual.result.payload["runId"]
+            .as_str()
+            .expect("manual AutomationRun ID should be returned");
+
+        let overlapping_manual = service
+            .run_now(
+                &mut database,
+                &user_command(
+                    "automation-once-closed-manual-overlap",
+                    RunAutomationCommand {
+                        automation_id: automation_id.clone(),
+                    },
+                ),
+                CURRENT_USER_ID,
+                &quick_chat_path,
+            )
+            .expect("manual overlap should be recorded for a closed Automation");
+        assert_eq!(overlapping_manual.result.payload["status"], "skipped");
+        assert_eq!(overlapping_manual.result.payload["reason"], "overlap");
+
+        let definition = service
+            .get(&database, &automation_id)
+            .unwrap()
+            .expect("Automation should remain readable");
+        assert!(!definition.enabled);
+        assert!(definition.next_run_at.is_none());
+        service
+            .interrupt_before_runtime(&mut database, closed_manual_run_id)
+            .expect("closed manual run should settle for cleanup");
+
         remove_test_database(database, directory);
     }
 
     #[test]
-    fn delayed_tick_during_the_same_active_session_claims_the_due_occurrence() {
+    fn full_form_update_with_unchanged_schedule_preserves_the_due_occurrence() {
         let service = AutomationService::default();
         let (mut database, directory, quick_chat_path) = test_database();
-        let local_due = Local::now() + Duration::days(1);
+        let schedule = AutomationSchedule::Daily {
+            at: "09:00".to_string(),
+        };
         let create = service
             .create(
                 &mut database,
@@ -2657,10 +2700,7 @@ mod tests {
                         prompt: "Run after an ordinary scheduler delay.".to_string(),
                         member_id: "agent_1".to_string(),
                         project_ref: AutomationProjectRef::QuickChat,
-                        schedule: AutomationSchedule::Once {
-                            date: local_due.format("%Y-%m-%d").to_string(),
-                            at: local_due.format("%H:%M").to_string(),
-                        },
+                        schedule: schedule.clone(),
                         notify_channels: Vec::new(),
                     },
                 ),
@@ -2670,27 +2710,75 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        let due = parse_timestamp(create.result.payload["nextRunAt"].as_str().unwrap()).unwrap();
+        let due = Utc::now() - Duration::seconds(1);
+        database
+            .connection()
+            .execute(
+                "UPDATE automation SET next_run_at = ?2 WHERE id = ?1",
+                params![automation_id, timestamp(due)],
+            )
+            .unwrap();
+
+        let updated = service
+            .update(
+                &mut database,
+                &user_command(
+                    "automation-delayed-tick-update",
+                    UpdateAutomationCommand {
+                        automation_id: automation_id.clone(),
+                        expected_version: 1,
+                        name: Some("Delayed tick renamed".to_string()),
+                        prompt: Some(
+                            "Run the edited instruction without losing the due trigger."
+                                .to_string(),
+                        ),
+                        member_id: Some("agent_1".to_string()),
+                        project_ref: Some(AutomationProjectRef::QuickChat),
+                        schedule: Some(schedule),
+                        notify_channels: Some(Vec::new()),
+                        enabled: None,
+                    },
+                ),
+            )
+            .expect("full-form update should succeed");
+        assert_eq!(updated.result.payload["nextRunAt"], timestamp(due));
 
         let dispatches = service
             .claim_due(
                 &mut database,
-                due + Duration::seconds(10),
+                Utc::now(),
                 due - Duration::days(1),
                 &quick_chat_path,
             )
-            .expect("an ordinary delayed tick should claim the occurrence");
+            .expect("the preserved occurrence should still be claimed");
 
         assert_eq!(dispatches.len(), 1);
-        let run: (String, Option<String>, String) = database
+        let run: (String, Option<String>, String, i64, String) = database
             .connection()
             .query_row(
-                "SELECT status, reason, scheduled_for FROM automation_run WHERE automation_id = ?1",
+                "SELECT status, reason, scheduled_for, automation_version, prompt FROM automation_run WHERE automation_id = ?1",
                 [&automation_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
-        assert_eq!(run, ("running".into(), None, timestamp(due)));
+        assert_eq!(
+            run,
+            (
+                "running".into(),
+                None,
+                timestamp(due),
+                2,
+                "Run the edited instruction without losing the due trigger.".into(),
+            )
+        );
         service
             .interrupt_before_runtime(&mut database, &dispatches[0].automation_run_id)
             .expect("test run should settle");
@@ -2734,6 +2822,67 @@ mod tests {
             Some(next)
         );
         assert!(parse_cron_expression("0 9 1 * * 2027").is_err());
+    }
+
+    #[test]
+    fn settle_runs_reaches_a_terminal_run_after_32_older_active_runs() {
+        let service = AutomationService::default();
+        let (mut database, directory, quick_chat_path) = test_database();
+        for index in 0..33 {
+            let (automation_id, _) = create_manual_automation(
+                &service,
+                &mut database,
+                &format!("automation-settlement-create-{index}"),
+                &format!("Keep settlement fixture {index} active."),
+            );
+            let started = service
+                .run_now(
+                    &mut database,
+                    &user_command(
+                        &format!("automation-settlement-run-{index}"),
+                        RunAutomationCommand { automation_id },
+                    ),
+                    CURRENT_USER_ID,
+                    &quick_chat_path,
+                )
+                .expect("Automation should start");
+            assert_eq!(started.result.payload["status"], "started");
+        }
+        let last_run_id: String = database
+            .connection()
+            .query_row(
+                "SELECT id FROM automation_run WHERE status = 'running' ORDER BY created_at DESC, id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        publish_automatic_result(
+            &mut database,
+            &last_run_id,
+            "Result after the first 32 active runs.",
+        );
+
+        assert!(service.settle_runs(&mut database, Utc::now()).unwrap());
+        let status: String = database
+            .connection()
+            .query_row(
+                "SELECT status FROM automation_run WHERE id = ?1",
+                [&last_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "completed");
+        let remaining: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM automation_run WHERE status = 'running'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 32);
+
+        remove_test_database(database, directory);
     }
 
     #[test]

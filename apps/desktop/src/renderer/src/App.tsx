@@ -4039,7 +4039,7 @@ function AuthoritativeApp({
               ?? ''}
             topNotices={inlineNotices}
             onOpenCamp={(campId) => void activateCamp(campId, { reconcileDefaultLead: false })}
-            onNotify={setToast}
+            onNotify={notify}
             onLeaveGuardChange={registerAutomationLeaveGuard}
           />
         )}

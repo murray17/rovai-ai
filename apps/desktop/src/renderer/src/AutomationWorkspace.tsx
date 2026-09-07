@@ -712,7 +712,7 @@ export function AutomationWorkspace({
                     </button>
                   )}
                   {selected && (
-                    <button className="quiet-button" type="button" onClick={() => void runNow()} disabled={!selected.enabled || busy !== null}>
+                    <button className="quiet-button" type="button" onClick={() => void runNow()} disabled={busy !== null}>
                       <AutomationGlyph name="play" />{busy === 'run' ? '正在开始…' : '立即运行'}
                     </button>
                   )}
