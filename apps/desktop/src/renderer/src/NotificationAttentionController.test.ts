@@ -14,7 +14,8 @@ import {
   notificationHeadsUpPresentation,
   readNotificationChangePages,
   shouldPollForNotificationEvent,
-  visibleAcknowledgementIntent
+  visibleAcknowledgementIntent,
+  filterVisibleNotificationHeadsUp
 } from './NotificationAttentionController'
 import { preferenceFromUnknown } from './NotificationSettings'
 
@@ -188,7 +189,8 @@ describe('Notification attention controller', () => {
       change(other, 3)
     ])
 
-    expect(next.entries).toHaveLength(2)
+    expect(next.entries).toHaveLength(1)
+    expect(next.overflowEntries).toHaveLength(1)
     expect(next.entries[0]).toMatchObject({
       episode: { id: first.id, episodeVersion: 2 },
       signal: { semantic: 'turn_failed' },
@@ -239,6 +241,7 @@ describe('Notification attention controller', () => {
 
     expect(retained.entries).toHaveLength(1)
     expect(retained.entries[0].signal.action.acknowledgementId).toBe('mention-b')
+    expect(retained.overflowEntries[0].signal.action.acknowledgementId).toBe('mention-a')
   })
 
   it('removes a pending Approval signal when its exact source state changes', () => {
@@ -376,7 +379,7 @@ describe('Notification attention controller', () => {
     const request = async (cursor: number): Promise<NotificationEpisodeChangeBatch> => {
       requests.push(cursor)
       if (cursor === 0) return {
-        schemaVersion: 6,
+        schemaVersion: 7,
         requestedAfterChangeSequence: 0,
         nextChangeSequence: 1,
         throughChangeSequence: 2,
@@ -390,7 +393,7 @@ describe('Notification attention controller', () => {
     await expect(readNotificationChangePages(0, request)).rejects.toThrow('page two failed')
     expect(requests).toEqual([0, 1])
     const retried = await readNotificationChangePages(0, async (cursor) => ({
-      schemaVersion: 6,
+      schemaVersion: 7,
       requestedAfterChangeSequence: cursor,
       nextChangeSequence: 2,
       throughChangeSequence: 2,
@@ -414,4 +417,37 @@ describe('Notification attention controller', () => {
     }
     expect(preferenceFromUnknown(preference)).toEqual(preference)
   })
+})
+
+
+it('suppresses completion only on its exact reading surface, without changing unread attention', () => {
+  const privateChange = change(episode('turn_completed'), 1)
+  privateChange.headsUpSignal!.action.singleChat = { conversationId: 'private-1', agentId: 'agent-1', agentDisplayName: '洛克', agentRunId: 'run-1' }
+  const state = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, [privateChange])
+  const publicSource = { campId: 'camp-1', snapshotSequence: 1, messageIds: [], campTurnIds: [], approvalIds: [], surfaceVisible: true }
+  for (const conversationId of [undefined, 'private-2', 'successor-1']) {
+    expect(filterVisibleNotificationHeadsUp(state, [{ ...publicSource, conversationId }], true)).toBe(state)
+  }
+  const privateSource = { ...publicSource, conversationId: 'private-1' }
+  expect(filterVisibleNotificationHeadsUp(state, [privateSource], false)).toBe(state)
+  expect(filterVisibleNotificationHeadsUp(state, [{ ...privateSource, surfaceVisible: false }], true)).toBe(state)
+  expect(filterVisibleNotificationHeadsUp(state, [privateSource], true).entries).toEqual([])
+  expect(state.entries[0].episode.unread).toBe(true)
+  const failure = change(episode('turn_failed'), 2)
+  const failedState = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, [failure])
+  expect(filterVisibleNotificationHeadsUp(failedState, [publicSource], true)).toBe(failedState)
+  expect(filterVisibleNotificationHeadsUp(failedState, [{ ...publicSource, campTurnIds: ['turn-1'] }], true).entries).toEqual([])
+})
+
+it('retains exact urgent occurrences when completion arrives, then advances only on request', () => {
+  const approval = change(episode('approval_pending'), 1)
+  approval.headsUpSignal!.action.acknowledgementId = 'approval-occurrence'
+  const completion = change(episode('turn_completed'), 2)
+  completion.headsUpSignal!.action.acknowledgementId = 'completion-occurrence'
+  const queued = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, [approval, completion])
+  expect(queued.entries[0].signal.semantic).toBe('approval_pending')
+  expect(queued.overflowEntries[0].signal.semantic).toBe('turn_completed')
+  const dismissed = { ...queued, entries: [] }
+  expect(applyNotificationHeadsUpChanges(dismissed, []).entries).toEqual([])
+  expect(promoteNotificationHeadsUpOverflow(dismissed).entries[0].signal.action.acknowledgementId).toBe('completion-occurrence')
 })

@@ -10,7 +10,7 @@ last_updated: 2026-09-01
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
 分别见 [Camp Message Send v19](../contracts/camp-message-send-v19.md)、
-[Current User Attention v4](../contracts/current-user-attention-v4.md)、
+[Current User Attention v5](../contracts/current-user-attention-v5.md)、
 [Message Delivery v8](../contracts/message-delivery-v8.md)、
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md)、
 [Camp History Retrieval v2](../contracts/camp-history-v2.md)；决策理由见

@@ -53,6 +53,33 @@ last_updated: 2026-09-07
 
 ## 完成条件
 
+### 通知交互与单聊补充
+
+- 当前阅读区域细分为公屏与精确单聊；当前来源完成静默，其他分类依据精确内容可见性决定，抑制不代替确认。
+- 卡片只保留来源与最多两行信息；一次一张，同来源更新保留焦点，余下提醒由用户主动查看，后台 / 悬停 /
+  焦点暂停剩余时间。保留既有视觉主题与四类偏好。
+- 单聊审批和终态向本机 Owner 提醒，按冻结 Conversation / Run 定位；已结束来源失败且撤下临时队列。
+  公共审批列表与计数排除私有来源。Migration 146 只改变未来来源触发，不改 schema 96 存储形状与历史事实。
+- 合同入口为 [Notification Episode v6](../../contracts/notification-episode-v6.md)、
+  [Current User Attention v5](../../contracts/current-user-attention-v5.md)、
+  [Single Chat v3](../../contracts/single-chat-v3.md)、[Camp Open Projection v17](../../contracts/camp-open-projection-v17.md)。
+
+本轮基线为 `60bfadaaf7285563c9618bb9b6a8e55537579676`，验证范围与此前 Automation 记录独立：
+
+- `pnpm test`：160 files / 1635 项 Vitest、222 项 Node 通过，1 项 Windows 平台跳过；包含文档和 Skill 门禁。
+  最终定向 `App / SingleChatPanel / NotificationAttentionController` 197 项与 TypeScript 检查通过。
+- `cargo test --workspace`：Library 536、CLI 33、Core 232 项通过，5 项人工 Smoke ignored；
+  通知 slow-tests 11 项、单聊 8 项、v93 Context 升级、数据库 66 项及 authority migration 6 项定向通过。
+- 隔离生产组件 Electron 通知与单聊回归通过；验收涵盖原来源定位、失效不创建后继对话、通知抑制、显式
+  队列与焦点 / 悬停剩余计时。日夜主题卡片经截图检查。未运行已打包 App 的 `accept:notification-ui` 或真实模型。
+- Rust 未新增 / 删除独立测试函数；扩展既有单聊私有边界 owner，覆盖本机通知来源、公共审批列表 / 计数
+  排除、原单聊结束 invalidation 与 successor 隔离。只有数据库 seam 能证明这些 SQL 关系，纯映射测试不足；
+  最小命令为 `cargo test -p rovai-core --lib single_chat::tests::successful_final_is_private_and_a_cancelled_run_cannot_append_late_output`。
+- 升级夹具统一先退回 v145 触发器再重建历史表，保留所有历史升级 case；Automation 历史分页的既有测试
+  改为按 `(created_at, id)` 合同验证完整跨页结果，去掉“连续创建必定跨秒”的不稳定假设，保留所有状态和分页断言。
+
+### 原版本完成条件
+
 - 同一 occurrence 和同一 Built-in command 重放都不会创建第二个 AutomationRun、Camp 或 CampTurn。
 - 定义编辑只影响尚未领取的 occurrence；已领取快照和已冻结结果消息保持不可变。
 - 重启、等待交互和超时均先让精确关联 CampTurn 进入权威终态，再释放 Automation 并发门禁；不重新派发 Prompt。

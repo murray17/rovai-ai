@@ -17,7 +17,7 @@ use crate::{
 
 const DEFAULT_PAGE_LIMIT: usize = 50;
 const MAX_PAGE_LIMIT: usize = 100;
-const NOTIFICATION_EPISODE_SCHEMA_VERSION: i64 = 6;
+const NOTIFICATION_EPISODE_SCHEMA_VERSION: i64 = 7;
 const MESSAGE_SUMMARY_MAX_SCALARS: usize = 160;
 
 /// Retention only removes inactive, terminal Episodes. A delete first records a remove
@@ -218,6 +218,7 @@ pub enum NotificationActionKind {
     OpenApproval,
     OpenCampMessage,
     OpenCampTurn,
+    OpenSingleChat,
     OpenCamp,
     AcknowledgeOnly,
 }
@@ -294,6 +295,15 @@ pub struct NotificationMentionView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct NotificationSingleChatSource {
+    pub conversation_id: String,
+    pub agent_id: String,
+    pub agent_display_name: String,
+    pub agent_run_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NotificationActionView {
     pub action_id: String,
     pub kind: NotificationActionKind,
@@ -304,6 +314,7 @@ pub struct NotificationActionView {
     pub approval_id: Option<String>,
     pub acknowledgement_id: Option<String>,
     pub observed_episode_version: i64,
+    pub single_chat: Option<NotificationSingleChatSource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1471,7 +1482,6 @@ fn load_heads_up_signal(
             LEFT JOIN approval ON approval.id = occurrence.approval_id
             WHERE occurrence.episode_id = ?1
               AND occurrence.admitted_change_sequence = ?2
-              AND (occurrence.semantic <> 'turn_completed' OR turn.kind IS NOT 'single_chat')
             "#,
             params![episode_id, change_sequence],
             |row| {
@@ -1545,10 +1555,14 @@ fn load_heads_up_signal(
             summary: message_summary(connection, &occurrence),
             available: occurrence.source_available,
         });
+    let action = action_for_occurrence(connection, &episode, &occurrence, true)?;
+    if !action.available {
+        return Ok(None);
+    }
     Ok(Some(NotificationHeadsUpSignal {
         semantic,
         admitted_attention_revision: occurrence.admitted_attention_revision,
-        action: action_for_occurrence(&episode, &occurrence, true),
+        action,
         mention,
     }))
 }
@@ -1743,15 +1757,26 @@ fn hydrate_episode(
     {
         acknowledge_only_action(&raw, action_occurrence)
     } else {
-        action_for_occurrence(&raw, action_occurrence, attention_occurrence.is_some())
+        action_for_occurrence(
+            connection,
+            &raw,
+            action_occurrence,
+            attention_occurrence.is_some(),
+        )?
     };
     let mut secondary_actions = Vec::new();
     if primary_action.kind != NotificationActionKind::OpenCampMessage
         && let Some(mention_occurrence) = unacknowledged_mentions.first().copied()
     {
-        secondary_actions.push(action_for_occurrence(&raw, mention_occurrence, true));
+        secondary_actions.push(action_for_occurrence(
+            connection,
+            &raw,
+            mention_occurrence,
+            true,
+        )?);
     }
-    if primary_action.kind != NotificationActionKind::OpenCampTurn
+    if primary_action.kind != NotificationActionKind::OpenSingleChat
+        && primary_action.kind != NotificationActionKind::OpenCampTurn
         && let Some(camp_turn_id) = raw.camp_turn_id.as_deref()
     {
         let available = connection
@@ -1896,12 +1921,13 @@ fn message_summary(
 }
 
 fn action_for_occurrence(
+    connection: &rusqlite::Connection,
     episode: &RawEpisode,
     occurrence: &RawOccurrence,
     acknowledge: bool,
-) -> NotificationActionView {
+) -> Result<NotificationActionView> {
     let acknowledgement_id = acknowledge.then(|| occurrence.id.clone());
-    match occurrence.semantic {
+    let mut action = match occurrence.semantic {
         NotificationSemantic::ApprovalPending => action_view(
             episode,
             NotificationActionKind::OpenApproval,
@@ -1934,7 +1960,67 @@ fn action_for_occurrence(
             acknowledgement_id,
             &occurrence.id,
         ),
+    };
+    // Resolve the frozen Run destination, including approval occurrences whose own turn is null.
+    // Missing private identities fail closed; never fall back to a member's successor conversation.
+    let source = connection
+        .query_row(
+            r#"SELECT turn.kind, run.id, run.destination_conversation_id,
+                  conversation.agent_id, profile.display_name,
+                  conversation.ended_at IS NULL AND conversation.id IS NOT NULL
+                    AND member.status = 'active' AND member.leave_requested_at IS NULL
+                    AND profile.profile_status = 'present'
+           FROM camp_turn AS turn
+           LEFT JOIN agent_run AS run ON run.camp_turn_id = turn.id
+           LEFT JOIN conversation ON conversation.id = run.destination_conversation_id
+             AND conversation.kind = 'single_chat' AND conversation.camp_id = turn.camp_id
+           LEFT JOIN agent_profile AS profile ON profile.id = conversation.agent_id
+           LEFT JOIN camp_member AS member ON member.camp_id = turn.camp_id
+             AND member.agent_id = conversation.agent_id
+           WHERE turn.id = COALESCE(?1, (
+             SELECT approval_run.camp_turn_id FROM approval
+             JOIN action_execution ON action_execution.id = approval.action_id
+             JOIN agent_run AS approval_run ON approval_run.id = action_execution.agent_run_id
+             WHERE approval.id = ?2)) AND turn.camp_id = ?3
+           ORDER BY run.id LIMIT 1"#,
+            params![
+                occurrence.camp_turn_id,
+                occurrence.approval_id,
+                episode.camp_id
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<bool>>(5)?.unwrap_or(false),
+                ))
+            },
+        )
+        .optional()?;
+    if let Some((kind, run_id, conversation_id, agent_id, display_name, available)) = source
+        && kind == "single_chat"
+    {
+        action.kind = NotificationActionKind::OpenSingleChat;
+        action.available &= available;
+        action.single_chat = match (run_id, conversation_id, agent_id) {
+            (Some(agent_run_id), Some(conversation_id), Some(agent_id)) => {
+                Some(NotificationSingleChatSource {
+                    conversation_id,
+                    agent_display_name: display_name.unwrap_or_else(|| agent_id.clone()),
+                    agent_id,
+                    agent_run_id,
+                })
+            }
+            _ => {
+                action.available = false;
+                None
+            }
+        };
     }
+    Ok(action)
 }
 
 fn acknowledge_only_action(
@@ -1977,6 +2063,7 @@ fn action_view(
         approval_id,
         acknowledgement_id,
         observed_episode_version: episode.version,
+        single_chat: None,
     }
 }
 
@@ -2837,8 +2924,8 @@ mod slow_tests {
             )
             .unwrap();
 
-        // Single Chat completion stays in the journal but must not produce a popup.
-        // Other terminal attention still uses the exact occurrence's semantics.
+        // Orphaned private turns cannot navigate to public or a successor conversation.
+        // Real private Run destinations are covered by Single Chat terminal integration.
         for status in ["completed", "failed", "cancelled"] {
             database
                 .connection()
@@ -2905,11 +2992,7 @@ mod slow_tests {
                     && signal.action.camp_turn_id.as_deref() == Some("turn-signal")
             })
         }));
-        for (status, expected) in [
-            ("completed", None),
-            ("failed", Some(NotificationSemantic::TurnFailed)),
-            ("cancelled", Some(NotificationSemantic::TurnIncomplete)),
-        ] {
+        for (status, expected) in [("completed", None), ("failed", None), ("cancelled", None)] {
             let turn_id = format!("single-{status}");
             let change = changes
                 .changes

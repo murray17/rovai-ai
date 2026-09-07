@@ -62,3 +62,13 @@ Automation。每次实际执行创建一个普通 Camp，把冻结的 Prompt 交
 - [Scheduled Automation 架构](../../architecture/scheduled-automation.md)
 - [Automation 工作区](../../ui/components/automation-workspace.md)
 - [Built-in Tool Transport v23](../../contracts/builtin-tool-transport-v23.md)
+
+
+## 通知交互补充
+
+本版本补充本机通知：公屏与每段单聊独立识别，当前阅读区完成不弹卡；精确单聊通知、私有审批、两层
+卡片文案、单卡队列与暂停剩余时间按确认交互稿落地。协议入口为
+[Notification Episode v6](../../contracts/notification-episode-v6.md)、[Current User Attention v5](../../contracts/current-user-attention-v5.md)、
+[Single Chat v3](../../contracts/single-chat-v3.md)、[Camp Open Projection v17](../../contracts/camp-open-projection-v17.md)。
+Migration 146 只变更未来 notification source trigger，保留 v1.54 / projection 96 的存储形状和历史处置。
+本地 UI 可逆交互与精确来源约束由合同说明，不新增重复的 Version Decision。验证记录见实施计划。

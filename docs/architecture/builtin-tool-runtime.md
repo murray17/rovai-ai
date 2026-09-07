@@ -15,7 +15,7 @@ last_updated: 2026-09-07
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v19](../contracts/camp-message-send-v19.md)、
 [Gather v5](../contracts/gather-v5.md)、
-[Current User Attention v4](../contracts/current-user-attention-v4.md)与
+[Current User Attention v5](../contracts/current-user-attention-v5.md)与
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md) 为准；v19 及更早 Transport 只保留
 historical 语义。决策理由见
 [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、

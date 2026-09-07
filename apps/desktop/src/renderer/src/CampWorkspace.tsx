@@ -801,7 +801,9 @@ function scrollExecutionDrawerToLatest(body: HTMLElement): void {
 }
 export type NotificationFocusTarget = {
   requestId: number
-  kind: 'approval' | 'camp_turn' | 'camp_message'
+  conversationId?: string
+  agentRunId?: string
+  kind: 'approval' | 'camp_turn' | 'camp_message' | 'single_chat'
   campTurnId: string | null
   messageId?: string
   approvalId?: string
@@ -809,6 +811,8 @@ export type NotificationFocusTarget = {
 }
 export type VisibleNotificationSources = {
   campId: string
+  conversationId?: string | null
+  surfaceVisible?: boolean
   snapshotSequence: number
   messageIds: string[]
   campTurnIds: string[]
@@ -1430,6 +1434,8 @@ export function CampWorkspace({
   notificationFocus = null,
   onNotificationFocusPresented,
   onVisibleNotificationSources,
+  onVisibleSingleChatSources,
+  singleChatTarget,
   runtimeRecovery = null,
   firstRunCamp = null,
   onConfigureRuntime,
@@ -1480,6 +1486,8 @@ export function CampWorkspace({
   notificationFocus?: NotificationFocusTarget | null
   onNotificationFocusPresented?(requestId: number): void
   onVisibleNotificationSources?(sources: VisibleNotificationSources): void
+  onVisibleSingleChatSources?(sources: VisibleNotificationSources): void
+  singleChatTarget?: import("@contracts").NotificationSingleChatSource & { requestId: number } | null
   runtimeRecovery?: CampRuntimeRecovery | null
   firstRunCamp?: FirstRunCampContext | null
   onConfigureRuntime?(agentId: string): void
@@ -2884,12 +2892,12 @@ export function CampWorkspace({
   ])
 
   useEffect(() => {
-    if (!notificationFocus?.active || notificationFocus.kind === 'approval') return
+    if (!notificationFocus?.active || ['approval', 'single_chat'].includes(notificationFocus.kind)) return
     setConversationView('conversation')
   }, [notificationFocus])
 
   useEffect(() => {
-    if (!notificationFocus?.active) return undefined
+    if (!notificationFocus?.active || notificationFocus.kind === 'single_chat') return undefined
     let frame: number | null = null
     let preparedTarget: HTMLElement | null = null
     let focusObserved = false
@@ -3224,6 +3232,7 @@ export function CampWorkspace({
       frame = null
       const timeline = timelineScrollRef.current
       const canObserve = conversationView === 'conversation'
+        && !singleChatVisible
         && document.visibilityState === 'visible'
         && document.hasFocus()
         && timeline !== null
@@ -3234,16 +3243,16 @@ export function CampWorkspace({
       if (canObserve && timeline) {
         const viewport = timeline.getBoundingClientRect()
         for (const node of timeline.querySelectorAll<HTMLElement>('[data-message-id]')) {
-          if (!rectanglesOverlap(node.getBoundingClientRect(), viewport)) continue
+          if (!node.getClientRects().length || !rectanglesOverlap(node.getBoundingClientRect(), viewport)) continue
           const messageId = node.dataset.messageId
           const campTurnId = node.dataset.campTurnId
           if (messageId) messageIds.add(messageId)
-          if (campTurnId) campTurnIds.add(campTurnId)
+          if (campTurnId && !node.classList.contains('user')) campTurnIds.add(campTurnId)
         }
         const approvalNode = approvalDockRef.current?.querySelector<HTMLElement>(
           '[data-approval-id]'
         ) ?? null
-        if (approvalNode && rectanglesOverlap(approvalNode.getBoundingClientRect(), {
+        if (approvalNode && approvalNode.getClientRects().length > 0 && rectanglesOverlap(approvalNode.getBoundingClientRect(), {
           top: 0,
           right: window.innerWidth,
           bottom: window.innerHeight,
@@ -3255,6 +3264,7 @@ export function CampWorkspace({
       }
       const sources: VisibleNotificationSources = {
         campId: snapshot.camp.id,
+        surfaceVisible: canObserve,
         snapshotSequence: snapshot.throughGlobalSequence,
         messageIds: [...messageIds].sort(),
         campTurnIds: [...campTurnIds].sort(),
@@ -3270,6 +3280,9 @@ export function CampWorkspace({
       frame = window.requestAnimationFrame(publish)
     }
     const timeline = timelineScrollRef.current
+    const observer = new MutationObserver(schedule)
+    if (timeline) observer.observe(timeline, { subtree: true, childList: true, attributes: true })
+    if (approvalDockRef.current) observer.observe(approvalDockRef.current, { subtree: true, childList: true, attributes: true })
     schedule()
     timeline?.addEventListener('scroll', schedule, { passive: true })
     window.addEventListener('resize', schedule)
@@ -3277,6 +3290,7 @@ export function CampWorkspace({
     document.addEventListener('visibilitychange', schedule)
     return () => {
       if (frame !== null) window.cancelAnimationFrame(frame)
+      observer.disconnect()
       timeline?.removeEventListener('scroll', schedule)
       window.removeEventListener('resize', schedule)
       window.removeEventListener('focus', schedule)
@@ -3284,6 +3298,7 @@ export function CampWorkspace({
     }
   }, [
     conversationView,
+    singleChatVisible,
     onVisibleNotificationSources,
     snapshot.approvals,
     snapshot.camp.id,
@@ -4575,6 +4590,13 @@ export function CampWorkspace({
             </CampDetailPopover>}
             {snapshot.camp.activationState === 'active' && (
               <SingleChatPanel
+                target={singleChatTarget}
+                notificationFocus={notificationFocus?.kind === 'single_chat' ? notificationFocus : null}
+                onNotificationFocusPresented={onNotificationFocusPresented}
+                onVisibleNotificationSources={onVisibleSingleChatSources}
+                profileById={profileById}
+                busy={busy}
+                onResolveApproval={onResolveApproval}
                 campId={snapshot.camp.id}
                 members={snapshot.members}
                 entryHost={detailEntryHost}

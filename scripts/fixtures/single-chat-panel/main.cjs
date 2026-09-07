@@ -280,6 +280,19 @@ app.whenReady().then(async () => {
     assert.ok(state.panel.right <= 1040 && state.panel.bottom <= 700)
     const compact = await capture('single-chat-night-compact-1040x700')
 
+    // Notification navigation reads an exact existing conversation, never creating its successor.
+    const opensBeforeNotification = state.openRequests
+    await run("window.singleChatTest.notification('missing-ended-conversation')")
+    await waitFor("window.singleChatTest.state().body.includes('原单聊已结束或来源不可用')")
+    assert.equal((await settle()).openRequests, opensBeforeNotification)
+    window.webContents.focus()
+    await run("window.singleChatTest.notification('single-chat-fixture-conversation')")
+    await waitFor('window.singleChatTest.state().notificationPresentations.length === 1')
+    state = await settle()
+    assert.equal(state.notificationFocusedRun, 'run-complete')
+    assert.equal(state.openRequests, opensBeforeNotification)
+    assert.equal(state.notificationGets.at(-1).conversationId, 'single-chat-fixture-conversation')
+
     console.log(JSON.stringify({
       ok: true,
       verified: {

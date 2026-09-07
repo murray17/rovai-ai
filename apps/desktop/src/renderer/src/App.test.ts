@@ -1799,6 +1799,16 @@ describe('task event projections', () => {
       campTurnId: null,
       approvalId: 'approval-1'
     }, { ...messageAction, kind: 'open_approval', messageId: null, approvalId: 'approval-1' })).toBe(true)
+    const privateAction = { ...messageAction, kind: 'open_single_chat', approvalId: null,
+      singleChat: { conversationId: 'private-original', agentId: 'agent-1', agentDisplayName: '洛克', agentRunId: 'private-run' }
+    } as NotificationActionView
+    for (const [conversationId, agentRunId, expected] of [
+      ['private-original', 'private-run', true], ['private-successor', 'private-run', false],
+      ['private-original', 'another-run', false]
+    ] as const) {
+      expect(notificationFocusMatchesAction({ requestId: 5, kind: 'single_chat', campTurnId: 'turn-1',
+        conversationId, agentRunId }, privateAction)).toBe(expected)
+    }
   })
 
   it('projects a user message into the conversation before Core acknowledgement', () => {

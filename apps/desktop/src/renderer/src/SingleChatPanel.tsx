@@ -13,6 +13,9 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AgentRunExecutionEvidenceView,
+  AgentProfile,
+  ActionApprovalView,
+  NotificationSingleChatSource,
   CampMemberView,
   CoreEvent,
   SingleChatPendingInputEditAction,
@@ -32,6 +35,7 @@ import {
   type AttachmentDragKind
 } from './attachment-drop'
 import { MemberAvatar } from './MemberAvatar'
+import { ApprovalDock, rectanglesOverlap, type NotificationFocusTarget, type VisibleNotificationSources } from './CampWorkspace'
 import { CompactionEventRow, RuntimeRetryNotice, ToolActivityGroup, isPresentableExecutionEvidence } from './ExecutionToolGroup'
 import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
@@ -394,7 +398,7 @@ export function SingleChatRunHistory({
   }
 
   return (
-    <section className="single-chat-agent-response" aria-label="队员回复">
+    <section className="single-chat-agent-response" aria-label="队员回复" data-single-chat-run-id={run.id} tabIndex={-1}>
       <div className="single-chat-agent-column">
         <details
           className={`single-chat-run-history${terminal ? ' is-terminal' : ' is-live'}`}
@@ -402,7 +406,7 @@ export function SingleChatRunHistory({
           onToggle={(event) => { if (terminal) setOpen(event.currentTarget.open) }}
         >
           <summary hidden={!terminal}>
-            <span className="single-chat-run-summary">{terminal && executionRunSummary(run, now)}</span>
+            <span className="single-chat-run-summary" data-notification-turn-id={terminal ? run.campTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>
             <span className="single-chat-disclosure" aria-hidden="true"><ChevronGlyph /></span>
           </summary>
           <div className="single-chat-execution-content process-content">
@@ -421,7 +425,7 @@ export function SingleChatRunHistory({
         </details>
         {finalMessage && <>
           <hr className="single-chat-final-rule" />
-          <div className="single-chat-final"><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
+          <div className="single-chat-final" data-notification-turn-id={run.campTurnId}><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
         </>}
       </div>
     </section>
@@ -784,8 +788,22 @@ export function SingleChatPanel({
   visible,
   onOpen,
   onClose,
-  onNotify = () => undefined
+  onNotify = () => undefined,
+  target,
+  notificationFocus,
+  onNotificationFocusPresented,
+  onVisibleNotificationSources,
+  profileById = new Map(),
+  busy = false,
+  onResolveApproval = () => undefined
 }: {
+  target?: (NotificationSingleChatSource & { requestId: number }) | null
+  notificationFocus?: NotificationFocusTarget | null
+  onNotificationFocusPresented?(requestId: number): void
+  onVisibleNotificationSources?(sources: VisibleNotificationSources): void
+  profileById?: Map<string, AgentProfile>
+  busy?: boolean
+  onResolveApproval?(approval: ActionApprovalView, optionId: string): void
   campId: string
   members: CampMemberView[]
   entryHost?: HTMLElement | null
@@ -815,6 +833,9 @@ export function SingleChatPanel({
   } | null>(null)
   const currentReadAgainRef = useRef(false)
   const viewportRef = useRef<HTMLElement>(null)
+  const approvalRef = useRef<HTMLElement>(null)
+  const lastVisibleSources = useRef('')
+  const [hasNewReply, setHasNewReply] = useState(false)
   const viewportEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragLeaveTimer = useRef<number | null>(null)
@@ -942,7 +963,8 @@ export function SingleChatPanel({
             'singleChat.get',
             { conversationId: currentRead.conversationId }
           )
-          const next = !loaded || loaded.conversation.campId === campId ? loaded : null
+          const next = !loaded || (loaded.conversation.campId === campId
+            && loaded.conversation.id === currentRead.conversationId) ? loaded : null
           if (
             currentReadInFlightRef.current === currentRead
             && visibleRef.current
@@ -1029,7 +1051,12 @@ export function SingleChatPanel({
         if (!nextConversations || !requestIsCurrent()) return
         const availableMembers = activeMembersRef.current
         const availableMemberById = memberByIdRef.current
-        let agentId = selectedAgentIdRef.current
+        if (target && (!availableMemberById.has(target.agentId)
+          || !nextConversations.some((conversation) => conversation.id === target.conversationId
+            && conversation.agentId === target.agentId))) {
+          throw new Error('原单聊已结束或来源不可用。')
+        }
+        let agentId = target?.agentId ?? selectedAgentIdRef.current
         if (!agentId || !availableMemberById.has(agentId)) {
           agentId = nextConversations.find((conversation) => availableMemberById.has(conversation.agentId))?.agentId
             ?? availableMembers.find((member) => member.isDefaultLead)?.agentId
@@ -1040,10 +1067,13 @@ export function SingleChatPanel({
         selectedAgentIdRef.current = agentId
         setSelectedAgentId(agentId)
         const conversation = agentId
-          ? nextConversations.find((candidate) => candidate.agentId === agentId) ?? null
+          ? nextConversations.find((candidate) => candidate.agentId === agentId
+            && (!target || candidate.id === target.conversationId)) ?? null
           : null
         currentConversationIdRef.current = conversation?.id ?? null
         if (conversation) await refreshCurrent(conversation.id)
+      } catch (nextError) {
+        if (requestIsCurrent()) setError(readErrorMessage(nextError, '无法打开原单聊。'))
       } finally {
         if (requestIsCurrent()) {
           loadingRef.current = false
@@ -1056,7 +1086,7 @@ export function SingleChatPanel({
       currentReadAgainRef.current = false
     }
   // Only actual target eligibility changes should repeat the panel-open list read.
-  }, [activeMemberIdsKey, campId, refreshCurrent, refreshList, visible])
+  }, [activeMemberIdsKey, campId, refreshCurrent, refreshList, target, visible])
 
   const pollingRequired = singleChatSnapshotNeedsPolling(currentSnapshot)
   useEffect(() => {
@@ -1113,9 +1143,73 @@ export function SingleChatPanel({
   }, [onClose, visible])
 
   useEffect(() => {
-    if (!visible || !followLatestRef.current) return
+    if (!visible) return
+    if (!followLatestRef.current) { setHasNewReply(true); return }
+    setHasNewReply(false)
     viewportEndRef.current?.scrollIntoView({ block: 'end' })
   }, [currentSnapshot?.conversation.lastMessageSequence, activeRun?.executionEvidenceCount, sending, visible])
+
+  useEffect(() => {
+    if (!onVisibleNotificationSources) return
+    let frame: number | null = null
+    const publish = (): void => {
+      frame = null
+      const viewport = viewportRef.current
+      const canObserve = visible && currentSnapshot !== null && viewport !== null
+        && document.visibilityState === 'visible' && document.hasFocus()
+      const campTurnIds = new Set<string>()
+      const approvalIds = new Set<string>()
+      if (canObserve && viewport) {
+        const bounds = viewport.getBoundingClientRect()
+        for (const node of viewport.querySelectorAll<HTMLElement>('[data-notification-turn-id]')) {
+          if (node.getClientRects().length && rectanglesOverlap(node.getBoundingClientRect(), bounds)) {
+            campTurnIds.add(node.dataset.notificationTurnId!)
+          }
+        }
+        for (const node of approvalRef.current?.querySelectorAll<HTMLElement>('[data-approval-id]') ?? []) {
+          if (node.getClientRects().length && rectanglesOverlap(node.getBoundingClientRect(), {
+            top: 0, right: window.innerWidth, bottom: window.innerHeight, left: 0
+          })) approvalIds.add(node.dataset.approvalId!)
+        }
+      }
+      const sources: VisibleNotificationSources = { campId,
+        conversationId: currentSnapshot?.conversation.id ?? null, surfaceVisible: canObserve,
+        snapshotSequence: 0, messageIds: [], campTurnIds: [...campTurnIds].sort(), approvalIds: [...approvalIds].sort() }
+      const signature = JSON.stringify(sources)
+      if (signature !== lastVisibleSources.current) {
+        lastVisibleSources.current = signature
+        onVisibleNotificationSources(sources)
+      }
+    }
+    const schedule = (): void => { if (frame === null) frame = window.requestAnimationFrame(publish) }
+    const viewport = viewportRef.current
+    const observer = new MutationObserver(schedule)
+    if (panelRef.current) observer.observe(panelRef.current, { subtree: true, childList: true, attributes: true })
+    schedule()
+    viewport?.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    window.addEventListener('focus', schedule)
+    document.addEventListener('visibilitychange', schedule)
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+      observer.disconnect()
+      viewport?.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+      window.removeEventListener('focus', schedule)
+      document.removeEventListener('visibilitychange', schedule)
+    }
+  }, [campId, currentSnapshot, onVisibleNotificationSources, visible])
+
+  useEffect(() => {
+    if (!visible || !notificationFocus?.active || notificationFocus.approvalId
+      || currentSnapshot?.conversation.id !== notificationFocus.conversationId) return
+    const node = viewportRef.current?.querySelector<HTMLElement>(
+      `[data-single-chat-run-id="${CSS.escape(notificationFocus.agentRunId ?? '')}"]`)
+    if (!node) return
+    node.scrollIntoView({ block: 'center', behavior: 'auto' })
+    node.focus({ preventScroll: true })
+    if (document.activeElement === node) onNotificationFocusPresented?.(notificationFocus.requestId)
+  }, [currentSnapshot, notificationFocus, onNotificationFocusPresented, visible])
 
   const acceptMutationSnapshot = (next: SingleChatSnapshot): void => {
     acceptSnapshot(next.conversation.id, next)
@@ -1579,6 +1673,7 @@ export function SingleChatPanel({
           const viewport = viewportRef.current
           if (!viewport) return
           followLatestRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 72
+          if (followLatestRef.current) setHasNewReply(false)
         }}
       >
         <div className="single-chat-transcript">
@@ -1593,6 +1688,19 @@ export function SingleChatPanel({
           <div ref={viewportEndRef} aria-hidden="true" />
         </div>
       </section>
+
+      {hasNewReply && <button type="button" className="single-chat-new-reply" onClick={() => {
+        followLatestRef.current = true
+        setHasNewReply(false)
+        viewportEndRef.current?.scrollIntoView({ block: 'end' })
+      }}>有新回复 · 查看</button>}
+      {currentSnapshot && currentSnapshot.approvals.length > 0 && <ApprovalDock
+        approvals={currentSnapshot.approvals} profileById={profileById} busy={busy}
+        onResolve={onResolveApproval} containerRef={approvalRef}
+        focusRequest={notificationFocus?.active && notificationFocus.approvalId ? notificationFocus.requestId : null}
+        focusApprovalId={notificationFocus?.approvalId ?? null}
+        onFocusPresented={onNotificationFocusPresented}
+      />}
 
       {currentSnapshot && (
         <SingleChatPendingQueue

@@ -2650,9 +2650,6 @@ mod tests {
             .unwrap();
         assert_eq!(history.runs.len(), 1);
         assert!(history.truncated);
-        assert_eq!(history.runs[0].run_id, next_run_id);
-        assert_eq!(history.runs[0].status, "failed");
-        assert_eq!(history.runs[0].reason.as_deref(), Some("interrupted"));
         let older = service
             .list_runs(
                 &database,
@@ -2666,9 +2663,20 @@ mod tests {
         assert_eq!(older.runs.len(), 2);
         assert!(!older.truncated);
         assert!(older.next_cursor.is_none());
-        assert!(older.runs.iter().any(|run| run.run_id == automation_run_id
+        // Runs admitted in the same second use ID as the documented ordering tie-breaker.
+        // Check the complete paginated result instead of assuming wall-clock advancement.
+        let all = history.runs.iter().chain(&older.runs).collect::<Vec<_>>();
+        assert!(
+            all.windows(2)
+                .all(|pair| (&pair[0].created_at, &pair[0].run_id)
+                    > (&pair[1].created_at, &pair[1].run_id))
+        );
+        assert!(all.iter().any(|run| run.run_id == next_run_id
+            && run.status == "failed"
+            && run.reason.as_deref() == Some("interrupted")));
+        assert!(all.iter().any(|run| run.run_id == automation_run_id
             && run.camp_id.as_deref() == Some(camp_id.as_str())));
-        assert!(older.runs.iter().any(|run| run.status == "skipped"
+        assert!(all.iter().any(|run| run.status == "skipped"
             && run.reason.as_deref() == Some("overlap")
             && run.camp_id.is_none()));
         assert!(

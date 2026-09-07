@@ -48,7 +48,7 @@ Renderer 在来源 Run 尚未公开发言且未终态时保留已准入图片等
 CampMessage 或 AgentRun。飞书原生消息和附件可独立重试；这次不扩展钉钉附件、登录、发布或 Stream 行为。
 
 接口与限额见 [Runtime Images v5](../contracts/runtime-images-v5.md)、投影见
-[Camp Open Projection v16](../contracts/camp-open-projection-v16.md)、展示见
+[Camp Open Projection v17](../contracts/camp-open-projection-v17.md)、展示见
 [Camp 会话工作区](../ui/components/conversation-workspace.md#runtime-图片与消息图片)。混合保存的理由见
 [V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)，原生生图闭合集与历史 fail-closed 的理由见
 [V1.53-D01](../versions/v1.53/decisions.md#v1-53-d01)。

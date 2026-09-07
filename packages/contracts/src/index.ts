@@ -837,6 +837,7 @@ export interface SingleChatMessageView {
 
 export interface SingleChatRunView {
   id: string
+  campTurnId: string
   triggerConversationMessageId: string
   status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
   version: number
@@ -852,6 +853,7 @@ export interface SingleChatRunView {
 
 export interface SingleChatSnapshot {
   conversation: SingleChatConversationView
+  approvals: ActionApprovalView[]
   messages: SingleChatMessageView[]
   draft: SingleChatComposerDraftView
   pendingInputs: SingleChatPendingInputsView
@@ -2290,6 +2292,7 @@ export type NotificationActionKind =
   | 'open_approval'
   | 'open_camp_message'
   | 'open_camp_turn'
+  | 'open_single_chat'
   | 'open_camp'
   | 'acknowledge_only'
 
@@ -2308,6 +2311,13 @@ export interface NotificationMentionView {
   available: boolean
 }
 
+export interface NotificationSingleChatSource {
+  conversationId: string
+  agentId: string
+  agentDisplayName: string
+  agentRunId: string
+}
+
 export interface NotificationActionView {
   actionId: string
   kind: NotificationActionKind
@@ -2318,6 +2328,7 @@ export interface NotificationActionView {
   approvalId: string | null
   acknowledgementId: string | null
   observedEpisodeVersion: number
+  singleChat?: NotificationSingleChatSource | null
 }
 
 export interface NotificationEpisodeView {
@@ -2348,7 +2359,7 @@ export interface NotificationEpisodeView {
 }
 
 export interface NotificationEpisodeInbox {
-  schemaVersion: 6
+  schemaVersion: 7
   throughChangeSequence: number
   unreadCount: number
   items: NotificationEpisodeView[]
@@ -2399,7 +2410,7 @@ export type NotificationHeadsUpInvalidation =
   }
 
 export interface NotificationEpisodeChangeBatch {
-  schemaVersion: 6
+  schemaVersion: 7
   requestedAfterChangeSequence: number
   nextChangeSequence: number
   throughChangeSequence: number
