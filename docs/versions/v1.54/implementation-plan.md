@@ -21,6 +21,7 @@ last_updated: 2026-09-07
 - [x] 增加 Desktop Automation 一级工作区、模板、自动保存、状态、通知选择和打开结果会话。
 - [x] 收紧恢复边界、统一五段 Cron 求值，保证非计划编辑不重算、关闭定义可显式运行、全部活跃运行公平结算。
 - [x] 全局页面切换在离开 Automation 工作区前等待尚未保存的草稿提交，保存失败保留当前页面。
+- [x] 按 v30 修复默认总览、模板入口、筛选搜索、可调分栏和紧凑详情；增加只读运行历史分页与可见历史刷新。
 - [x] 完成 Rust、TypeScript、Renderer/build、文档治理和 CLI contract 验收；真实 App 双主题视觉保留明确的环境阻断证据。
 
 ## 验收矩阵
@@ -30,9 +31,25 @@ last_updated: 2026-09-07
 | Automation 领域与 schema 定向回归 | `passed` | 名称、幂等原子派发、快照冻结、重启收口、missed/overlap/once 与 schema 对象测试通过 |
 | Rust / Built-in / CLI | `passed` | `cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、workspace all-target check、Core library 535 项、CLI 33 项和 Core binary 232 项通过；5 项手工 Runtime smoke ignored，1 项嵌套 macOS sandbox 用例因当前环境限制显式跳过 |
 | TypeScript / Renderer / Desktop build | `passed` | `pnpm typecheck`、160 files / 1633 项 Vitest、222 项 Node 测试（1 项 Windows 平台跳过）与 `pnpm build:desktop` 通过 |
-| Automation UI finish review | `passed-with-limited-evidence` | 独立代码审查提出的模板、分页、保存恢复、结果入口、窄屏操作、字体、列表宽度和新建态问题已修复；受环境限制没有截图证据 |
+| Automation UI 原实现审查 | `superseded` | 原先只有源码审查，没有与 v30 实际画面对照；固定 260px 分栏、默认打开详情与模板入口不符合原型，不能作为视觉还原通过的证据 |
+| v30 Renderer 交互与视觉修复 | `passed` | [隔离 Renderer 场景与截图](../../../scripts/fixtures/automation-workspace/README.md)：总览/空列表、筛选搜索、创建、历史分页、保存失败与冲突恢复；Day/Night、1040×700、720×460 等效布局与分隔条键盘操作 |
 | 双主题真实 App 视觉与键盘 | `environment-blocked` | 隔离 `pnpm dev` 完成 Core、CLI 和 Renderer 构建后，当前嵌套 macOS 环境以 `sandbox_apply: Operation not permitted` 阻止 Electron/Chromium sandbox 初始化；未声称原生视觉通过 |
 | 文档治理与 diff hygiene | `passed` | `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、`git diff --check` 与完整 `pnpm test` 通过 |
+
+## v30 还原修复的补充验收
+
+本轮基线为 `fd0b80284dccd5c0cd04997f8ddb4397542a0220`，对照用户提供的
+`rovai-scheduled-tasks-prototype-v30.html` 修复入口与详情层级。上表原实现的完整测试记录不代表本轮重新执行全量测试；
+本轮执行的是以下与改动对应的检查：
+
+- `cargo test -p rovai-core --lib --bins automation::tests::`：8 项通过；在既有派发/恢复测试中补充历史跨页、无重复、
+  failed/skipped Camp 链接及无效输入断言，没有新增 Rust 测试夹具。
+- `cargo fmt --check`、`cargo clippy -p rovai-core --all-targets -- -D warnings`。
+- `pnpm typecheck`、`pnpm exec vitest run apps/desktop/src/renderer/src/App.test.ts`：166 项通过，
+  `pnpm build:desktop` 与隔离 Renderer 场景的单独 TypeScript 检查。
+- 文档治理三项门禁与 diff hygiene；真实输入、截图和证据边界记录在隔离场景 README。
+- 后续用户校准：列表初始及恢复默认宽度改为最小 208px，筛选/新建移至顶部；更新双主题截图。
+  补上运行时列表宽度的 CSS 默认声明，修复 PR 首轮 CI 的未声明变量失败，32 项主题回归通过。
 
 ## 完成条件
 

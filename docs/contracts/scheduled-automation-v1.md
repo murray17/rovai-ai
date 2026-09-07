@@ -158,6 +158,20 @@ rovai automation delete <automation-id|current> --expected-version N
 `member=current` 指当前 Agent；`project=current` 继承当前 Camp 的稳定 binding，`quick-chat` 使用托管 Quick Chat，绝对
 路径建立 directory ref。V1 不按 `origin=automation` 对后台 AgentRun 增加额外只读或禁写规则。
 
+## 8. Desktop 读取模型
+
+`automations.list/get` 返回定义和 `lastRun`，不把最近一次摘要作为完整历史。Desktop 另通过只读
+`automations.runs.list({automationId, cursor?, limit?})` 读取指定定义的运行记录：
+
+- 返回 `{runs: AutomationRunSummary[], nextCursor, truncated}`，沿用摘要字段、状态原因和独立通知聚合；
+- 默认每页 20 条，允许 1–50 条，使用 `(createdAt, runId)` 降序的独占 cursor；`truncated=true` 时必须返回续页 cursor；
+- 未知/已删除定义、不合法 cursor 或越界 limit 被拒绝。读取不会领取运行、结算或发送通知；
+- 分页不是冻结快照，Renderer 可重新读取已展开页以更新活跃运行和通知状态。定义更新与历史读取不互相修改；
+- 此读取能力仅加入 Desktop typed RPC，不扩展 Agent Built-in catalog 或 CLI 管理权限。
+
+带 `campId` 的记录可以打开执行对话，包括运行中和失败记录；打开对话不等同于存在结果。
+只有 Core 已冻结的合格 `resultMessageId` 才代表本次成功结果，无 Camp 的跳过/准入失败记录没有对话入口。
+
 ## References
 
 - [Scheduled Automation Architecture](../architecture/scheduled-automation.md)

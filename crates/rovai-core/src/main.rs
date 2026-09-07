@@ -78,11 +78,12 @@ use rovai_core::{
         AUTOMATION_CLOSE_TOOL_NAME, AUTOMATION_CREATE_TOOL_NAME, AUTOMATION_DELETE_TOOL_NAME,
         AUTOMATION_GET_TOOL_NAME, AUTOMATION_LIST_TOOL_NAME, AUTOMATION_RUN_TOOL_NAME,
         AUTOMATION_UPDATE_TOOL_NAME, AutomationCreateToolInput, AutomationGetToolInput,
-        AutomationListQuery, AutomationListToolInput, AutomationProjectRef, AutomationRunToolInput,
-        AutomationService, AutomationUpdateToolInput, AutomationVersionedToolInput,
-        CloseAutomationCommand, CreateAutomationCommand, DeleteAutomationCommand,
-        RunAutomationCommand, UpdateAutomationCommand, resolve_tool_automation_id,
-        resolve_tool_member, resolve_tool_project, schedule_from_tool_fields,
+        AutomationListQuery, AutomationListToolInput, AutomationProjectRef, AutomationRunListQuery,
+        AutomationRunToolInput, AutomationService, AutomationUpdateToolInput,
+        AutomationVersionedToolInput, CloseAutomationCommand, CreateAutomationCommand,
+        DeleteAutomationCommand, RunAutomationCommand, UpdateAutomationCommand,
+        resolve_tool_automation_id, resolve_tool_member, resolve_tool_project,
+        schedule_from_tool_fields,
     },
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
@@ -5701,6 +5702,14 @@ impl Core {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     AutomationService::default().list(&database, &params)?,
+                )?)
+            }
+            "automations.runs.list" => {
+                let params: AutomationRunListQuery =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    AutomationService::default().list_runs(&database, &params)?,
                 )?)
             }
             "automations.get" => {

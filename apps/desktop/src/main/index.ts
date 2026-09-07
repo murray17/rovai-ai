@@ -184,6 +184,7 @@ const allowedMethods = new Set<CoreMethod>([
   'members.remove',
   'members.reorder',
   'automations.list',
+  'automations.runs.list',
   'automations.get',
   'automations.create',
   'automations.update',

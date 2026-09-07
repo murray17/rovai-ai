@@ -31,7 +31,7 @@ Core Automation Scheduler ── claim/settle/recover ─────┤
                   Automation settlement → NotificationDelivery → Channel Host
 ```
 
-- **Renderer** 只编辑和读取定义、请求立即运行、打开返回的 Camp，不计算权威时间或运行状态。
+- **Renderer** 只编辑和读取定义、分页读取运行历史、请求立即运行、打开返回的 Camp，不计算权威时间或运行状态。
 - **AutomationService** 拥有字段规范化、版本、schedule 计算、occurrence 领取、执行快照、并发门禁、结算和恢复。
 - **CollaborationService** 在调用方事务内建立一个普通单队员 Camp 执行图，返回稳定关联；它不自行提交或启动 Runtime。
 - **Runtime Scheduler** 只看到事务提交后的普通 queued AgentRun，继续执行已有 preflight、lease、Native Session 和 fence。
@@ -42,6 +42,9 @@ Core Automation Scheduler ── claim/settle/recover ─────┤
 Automation 定义是未来 occurrence 的可变配置。AutomationRun 是一次领取后不可变的业务证据；其 snapshot 不通过外键
 依赖仍可删除的定义。CampTurn 保存唯一 `automation_run_id`，AutomationRun 保存 Camp、Turn 与 root Run 三个链接，
 数据库触发器拒绝半链接、改绑和终态回写。
+
+定义的 `lastRun` 与 Desktop 历史 RPC 共用 AutomationRun/NotificationDelivery 读取投影。历史按创建时间与运行 ID
+降序分页，读取不触发 scheduler 或 settlement；Renderer 刷新已展开页，确保 newer skipped 不遮住 older active 的状态变化。
 
 计划扫描只处理 `enabled` 且到期的少量定义，并在 immediate transaction 中重新读取。`nextRunAt` 的推进与 occurrence
 行写入处于同一事务，因此重复扫描不会重复消费。活跃运行使用 partial unique index 保护；业务预检查只用于返回清晰的

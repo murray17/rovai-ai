@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": ["renderer.tsx", "../../../apps/desktop/src/preload/global.d.ts"]
+}
