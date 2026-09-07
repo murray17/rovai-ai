@@ -2486,7 +2486,6 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .execution-drawer-inspector .run-live,
 .execution-drawer-inspector .process-content { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .execution-drawer-inspector .process-copy pre { white-space: pre-wrap; }
-.execution-drawer-inspector .tool-call-title { display: block; line-height: 28px; }
 .execution-drawer-inspector .execution-run-model code { max-width: 18ch; }
 .execution-drawer-inspector .tool-group-items { margin-left: 0; padding-left: 0; }
 .inspector-meta { flex: 0 0 auto; overflow: hidden; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--faint); font: 500 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     error::Error as StdError,
     fmt,
     path::{Path, PathBuf},
@@ -885,7 +885,9 @@ struct ClaudeCodeStreamState {
     native_message_id: Option<String>,
     message_text_completed: bool,
     text_delta_emitted: bool,
-    partial_text_items: HashMap<u64, String>,
+    stream_text_items: HashMap<u64, String>,
+    pending_text_items: VecDeque<String>,
+    completed_text_packets: HashMap<String, Vec<String>>,
     tool_names: HashMap<String, String>,
     partial_tools: HashMap<u64, (String, String)>,
     started_tools: HashSet<String>,
@@ -1019,6 +1021,62 @@ fn claude_text_item_id(state: &ClaudeCodeStreamState, index: u64) -> String {
     }
 }
 
+impl ClaudeCodeStreamState {
+    fn reset_text_items(&mut self) {
+        self.stream_text_items.clear();
+        self.pending_text_items.clear();
+        self.message_text_completed = false;
+    }
+
+    fn stream_text_item(&mut self, index: u64) -> String {
+        if let Some(item) = self.stream_text_items.get(&index) {
+            return item.clone();
+        }
+        let item = claude_text_item_id(self, index);
+        self.stream_text_items.insert(index, item.clone());
+        self.pending_text_items.push_back(item.clone());
+        item
+    }
+
+    fn completed_text_items(&mut self, event: &Value, blocks: &[Value]) -> Vec<String> {
+        let packet_id = nonempty_string(event.get("uuid"));
+        if let Some(items) = packet_id
+            .as_ref()
+            .and_then(|id| self.completed_text_packets.get(id))
+        {
+            return items.clone();
+        }
+        // Assistant packets can contain just one completed block, even when its
+        // stream index follows thinking/tool blocks. Pair public text by stream
+        // order, keeping identities after content_block_stop. Never match prose.
+        let items = blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| {
+                block.get("type").and_then(Value::as_str) == Some("text")
+                    && block.get("text").and_then(Value::as_str).is_some()
+            })
+            .map(|(index, _)| {
+                self.pending_text_items.pop_front().unwrap_or_else(|| {
+                    let item = claude_text_item_id(self, index as u64);
+                    if packet_id.is_some() {
+                        // Without partial events, separate packets of the same
+                        // message still need separate identities; UUID replay
+                        // reuses this mapping without exposing the packet UUID.
+                        format!("{item}:packet:{}", self.completed_text_packets.len())
+                    } else {
+                        item
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        if let Some(packet_id) = packet_id {
+            self.completed_text_packets.insert(packet_id, items.clone());
+        }
+        items
+    }
+}
+
 fn normalize_claude_runtime_events(
     event: &Value,
     expected_session_id: &str,
@@ -1098,8 +1156,7 @@ fn normalize_claude_runtime_events(
                 .pointer("/event/message/id")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
-            state.message_text_completed = false;
-            state.partial_text_items.clear();
+            state.reset_text_items();
         }
         Some("stream_event")
             if event.pointer("/event/type").and_then(Value::as_str)
@@ -1112,9 +1169,7 @@ fn normalize_claude_runtime_events(
             if block_type == Some("text") {
                 validate_claude_stream_session(event, expected_session_id)?;
                 if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
-                    state
-                        .partial_text_items
-                        .insert(index, claude_text_item_id(state, index));
+                    state.stream_text_item(index);
                 }
                 return Ok(normalized);
             }
@@ -1171,12 +1226,7 @@ fn normalize_claude_runtime_events(
                 .pointer("/event/index")
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            let stable_item_id = claude_text_item_id(state, index);
-            let item_id = state
-                .partial_text_items
-                .entry(index)
-                .or_insert(stable_item_id)
-                .clone();
+            let item_id = state.stream_text_item(index);
             state.text_delta_emitted = true;
             normalized.push(ClaudeCodeRuntimeEvent {
                 event_type: "agent.text.delta",
@@ -1193,7 +1243,6 @@ fn normalize_claude_runtime_events(
             validate_claude_stream_session(event, expected_session_id)?;
             if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
                 state.partial_tools.remove(&index);
-                state.partial_text_items.remove(&index);
             }
         }
         Some("assistant") => {
@@ -1201,22 +1250,36 @@ fn normalize_claude_runtime_events(
                 return Ok(normalized);
             };
             validate_claude_stream_session(event, expected_session_id)?;
-            if let Some(id) = event.pointer("/message/id").and_then(Value::as_str) {
+            let packet_replay = nonempty_string(event.get("uuid"))
+                .is_some_and(|id| state.completed_text_packets.contains_key(&id));
+            if !packet_replay && let Some(id) = event.pointer("/message/id").and_then(Value::as_str)
+            {
+                if state
+                    .native_message_id
+                    .as_deref()
+                    .is_some_and(|previous| previous != id)
+                {
+                    state.reset_text_items();
+                }
                 state.native_message_id = Some(id.to_owned());
-            } else if state.message_text_completed {
+            } else if !packet_replay && state.message_text_completed {
                 state.message_ordinal = state.message_ordinal.saturating_add(1);
                 state.native_message_id = None;
+                state.reset_text_items();
             }
-            for (index, block) in blocks.iter().enumerate() {
+            let mut text_items = state.completed_text_items(event, blocks).into_iter();
+            for block in blocks {
                 if block.get("type").and_then(Value::as_str) == Some("text")
                     && let Some(text) = block.get("text").and_then(Value::as_str)
                 {
                     state.text_delta_emitted = true;
-                    state.message_text_completed = true;
+                    if !packet_replay {
+                        state.message_text_completed = true;
+                    }
                     normalized.push(ClaudeCodeRuntimeEvent {
                         event_type: "agent.text.completed",
                         payload: serde_json::json!({
-                            "itemId": claude_text_item_id(state, index as u64),
+                            "itemId": text_items.next().context("Claude text packet changed its public block shape")?,
                             "text": text,
                         }),
                     });
@@ -2461,6 +2524,122 @@ exit 1
                 .unwrap()
                 .contains("CLAUDE_PRIVATE_THINKING_MUST_NOT_LEAK")
         );
+
+        // Claude emits assistant packets per content block: the stream text
+        // indices include thinking/tools, while each packet's array starts at 0.
+        let emit = |state: &mut ClaudeCodeStreamState, event: Value| {
+            normalize_claude_runtime_events(&event, session_id, state).unwrap()
+        };
+        for batched_completion in [false, true] {
+            let mut state = ClaudeCodeStreamState::default();
+            emit(
+                &mut state,
+                json!({"type":"stream_event","session_id":session_id,
+                "event":{"type":"message_start","message":{"id":"message-with-thinking"}}}),
+            );
+            for kind in ["content_block_start", "content_block_stop"] {
+                assert!(
+                    emit(
+                        &mut state,
+                        json!({"type":"stream_event","session_id":session_id,
+                    "event":{"type":kind,"index":0,"content_block":{"type":"thinking"}}})
+                    )
+                    .is_empty()
+                );
+            }
+            assert!(emit(&mut state, json!({"type":"assistant","session_id":session_id,"uuid":"thinking-packet",
+                "message":{"id":"message-with-thinking","content":[{"type":"thinking","thinking":"PRIVATE"}]}})).is_empty());
+            let mut delta_ids = Vec::new();
+            let mut completed = Vec::new();
+            let phrase =
+                "三个问题的代码位置已初步确认。继续读取领取、结算和推进逻辑以验证问题 2、3。";
+            for index in [1, 3] {
+                emit(
+                    &mut state,
+                    json!({"type":"stream_event","session_id":session_id,
+                    "event":{"type":"content_block_start","index":index,"content_block":{"type":"text","text":""}}}),
+                );
+                let delta = emit(
+                    &mut state,
+                    json!({"type":"stream_event","session_id":session_id,
+                    "event":{"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":phrase}}}),
+                );
+                delta_ids.push(delta[0].payload["itemId"].clone());
+                emit(
+                    &mut state,
+                    json!({"type":"stream_event","session_id":session_id,
+                    "event":{"type":"content_block_stop","index":index}}),
+                );
+                if !batched_completion {
+                    completed.extend(emit(&mut state, json!({"type":"assistant","session_id":session_id,
+                        "uuid":format!("text-packet-{index}"),"message":{"id":"message-with-thinking",
+                        "content":[{"type":"text","text":phrase}]}})));
+                }
+                if index == 1 {
+                    emit(
+                        &mut state,
+                        json!({"type":"stream_event","session_id":session_id,
+                        "event":{"type":"content_block_start","index":2,
+                        "content_block":{"type":"tool_use","id":"read-tool","name":"Read"}}}),
+                    );
+                    emit(
+                        &mut state,
+                        json!({"type":"stream_event","session_id":session_id,
+                        "event":{"type":"content_block_stop","index":2}}),
+                    );
+                    emit(
+                        &mut state,
+                        json!({"type":"assistant","session_id":session_id,"uuid":"tool-packet",
+                        "message":{"id":"message-with-thinking","content":[{"type":"tool_use","id":"read-tool","name":"Read"}]}}),
+                    );
+                }
+            }
+            let replay_packet = if batched_completion {
+                json!({"type":"assistant","session_id":session_id,"uuid":"batched-text-packet",
+                    "message":{"id":"message-with-thinking","content":[{"type":"text","text":phrase},{"type":"text","text":phrase}]}})
+            } else {
+                json!({"type":"assistant","session_id":session_id,"uuid":"text-packet-1",
+                    "message":{"id":"message-with-thinking","content":[{"type":"text","text":phrase}]}})
+            };
+            if batched_completion {
+                completed.extend(emit(&mut state, replay_packet.clone()));
+            }
+            assert_eq!(completed.len(), 2);
+            assert_eq!(completed[0].payload["itemId"], delta_ids[0]);
+            assert_eq!(completed[1].payload["itemId"], delta_ids[1]);
+            assert_ne!(
+                delta_ids[0], delta_ids[1],
+                "equal text in different blocks remains distinct"
+            );
+            let replay = emit(&mut state, replay_packet.clone());
+            assert_eq!(replay[0].payload["itemId"], delta_ids[0]);
+            assert!(
+                !serde_json::to_string(&completed.iter().map(|e| &e.payload).collect::<Vec<_>>())
+                    .unwrap()
+                    .contains("PRIVATE")
+            );
+            let next = emit(
+                &mut state,
+                json!({"type":"assistant","session_id":session_id,"uuid":"next-packet",
+                "message":{"id":"next-message","content":[{"type":"text","text":phrase}]}}),
+            );
+            assert!(!delta_ids.contains(&next[0].payload["itemId"]));
+            let late_replay = emit(&mut state, replay_packet);
+            assert_eq!(late_replay[0].payload["itemId"], delta_ids[0]);
+            assert_eq!(state.native_message_id.as_deref(), Some("next-message"));
+        }
+        let mut packet_only = ClaudeCodeStreamState::default();
+        let mut packet_ids = Vec::new();
+        for uuid in ["packet-a", "packet-b", "packet-a"] {
+            let events = emit(
+                &mut packet_only,
+                json!({"type":"assistant","session_id":session_id,"uuid":uuid,
+                "message":{"id":"packet-only-message","content":[{"type":"text","text":"same text"}]}}),
+            );
+            packet_ids.push(events[0].payload["itemId"].clone());
+        }
+        assert_ne!(packet_ids[0], packet_ids[1]);
+        assert_eq!(packet_ids[0], packet_ids[2]);
 
         let mut fallback_state = ClaudeCodeStreamState::default();
         let mut complete_only = ClaudeCodeStreamState::default();

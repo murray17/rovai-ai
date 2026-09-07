@@ -249,7 +249,10 @@ Glob/Grep、NotebookEdit 与 ApplyPatch 不进入 typed operation。Claude Code 
 缺 result、失败、取消、字段不完整、no-op、`replace_all=true`、Write、NotebookEdit 与 ApplyPatch 都不产生 Diff。
 
 公开 `text_delta` 以 message/block-scoped item ID 投影为
-`agent.text.delta`；只有整次 Run 没有 text delta 时，才把已经公开的 success `result` 作为 narration
+`agent.text.delta`。Claude 的完整 assistant 事件可以逐块发送，数组下标不等于流式 block index；Adapter
+保留已停止文本块的身份，按同一消息内的文本顺序关联完整正文，并在消息边界清空待关联队列。完整事件 UUID
+只在内部识别 packet 重放；没有 partial 的不同 packet 保持不同身份，相同正文的不同块不合并。只有整次 Run
+没有公开文本事件时，才把已经公开的 success `result` 作为 narration
 fallback。`thinking_delta`、失败 result 和 provider metadata 不进入公开 Evidence；最终 Camp Message、
 Usage 与 Session 校验维持独立边界。
 
