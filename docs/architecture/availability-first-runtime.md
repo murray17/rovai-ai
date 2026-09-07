@@ -70,6 +70,11 @@ Skill/MCP/adapter 对象先无 I/O 构造。ready 后独立初始化其存储与
 初始化结果。状态由 startup frame + generation-fenced event 合并到 Supervisor 完整快照，Renderer 显示原因与原进程重试，
 不卸载健康的权威工作区。重试跳过已健康服务，不能清理或替换已活动的 Runtime/IPC。
 
+`runtime.<AdapterKind>` 只表示 Adapter 自有私有存储与进程内初始化是否可用，不表示第三方 executable 已安装。
+安装缺失、路径失效、版本、认证、capability 和平台资格继续由 Runtime discovery、Availability、Readiness 与 dispatch
+preflight 分层拥有；其中任何结果都不反向污染 optional subsystem health。Adapter 私有存储真实初始化失败仍可只降级
+对应 Runtime，并由原进程内重试修复。
+
 既有 compaction 启动协调保留 best-effort 语义与 replay-before-fence 顺序，在新 Runtime 启动前运行一次；它不进入
 可重试 cleanup 集合。controlled-shutdown、accepted-input 和 delivery recovery 仍在 ready 前，失败通过结构化 refusal
 阻断执行，不能用 optional failure 策略掩盖未收敛的权威状态。

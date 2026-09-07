@@ -248,7 +248,11 @@ last_updated: 2026-09-07
   `scoped_path()` 或拒绝 root 外目录。Rovai 对自有 blob、附件 Authority、私有配置、凭据、IPC 和领域命令的安全
   仍由各自产品边界强制，不把这些边界转换成 Runtime 已知路径的第二层文件或 Shell allowlist。
 - Product Runtime Catalog 是编译时封闭的可执行 Adapter 集合；只有具备 Adapter、所需 built-in/MCP 能力、深检、冻结 Run 配置和必要 evidence 的 Runtime 才能进入。兼容性候选留在研究文档。Renderer-only Settings Preview 仍不是 AdapterKind、Installation、Readiness、成员选项或执行能力；Runtime Platform Admission 的 `preview` 是另一项 Core 合同状态，可以显式开放已实现 Adapter 供主动测试，但必须保留缺失资格证据并禁止伪称 qualified。
-- Catalog 与本机 Availability、成员 Readiness 是三个独立层。Core 拥有 discovery、check attempt、capability snapshot、退避和结果缓存；Renderer 只读缓存、发送 ensure/check 意图并展示一个可操作主状态，不从路径、版本或错误文本自行判定可执行性。
+- Catalog、本机 Availability、成员 Readiness 与进程内 optional subsystem health 是彼此独立的层。Core 拥有
+  discovery、check attempt、capability snapshot、退避和结果缓存；Renderer 只读缓存、发送 ensure/check 意图并展示
+  一个可操作主状态，不从路径、版本或错误文本自行判定可执行性。Runtime executable 缺失或路径失效只形成
+  `missing | path_missing` Availability 和既有执行门禁，不把 `runtime.<AdapterKind>` optional subsystem 标成
+  degraded；后者只表示 Adapter 自有私有存储或初始化失败。
 - Core 在启动和每次 rescan 时构建不可变 Runtime Search Environment。Windows 上，手动绝对路径、Adapter 专用环境 override、自动 PATH/known locations 是依次封闭的 candidate set；显式入口失败不能回退另一个同名 Runtime。Windows 每次 capture 只读合并 inherited process PATH、HKCU User PATH、HKLM Machine PATH 与 known locations，按该顺序稳定、大小写不敏感去重，并忽略无效或不存在目录；Registry 失败不阻断 inherited PATH。冻结 PATH 同时用于发现、version/deep/health Probe、AgentRun 与 Runtime 必要子命令。Windows 同目录候选只允许 `.exe → .cmd → .bat`，不随 PATHEXT 放开 `.ps1`。Codex npm/pnpm `.cmd` 只可作为受限 locator 解析到 package 内真实 native `codex.exe`；解析成功后脚本、Node entrypoint 与 `node.exe` 不成为 Installation 或 launch identity，但 Core 必须内部持久化 canonical shim/content、System32 interpreter identity 及 resolved target identity 的 locator evidence。locator digest 参与 Installation generation、snapshot 与 Host compatibility；shim 改写即使仍指向同一 native executable 也撤销旧 Ready evidence。其他 `.cmd/.bat` 必须保持 `windows_command_shim` identity，其 canonical path、内容 digest 与 canonical System32 interpreter identity 共同 fence snapshot/Host，并只经 Managed Runtime Process 的受控 batch serializer 启动。
 - Managed Process 的普通 capture 只接受已存在的绝对 application file，不替调用方按 cwd 或 PATH 解析可执行文件。
   ACP Terminal 等明确准入的 derived child 可以提交 portable command；Managed Process 必须先形成请求最终 cwd 与环境

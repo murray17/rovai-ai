@@ -4,7 +4,7 @@ contract: desktop-runtime-availability-v2
 authority: desktop-bootstrap-supervisor-authority-admission-and-request-transport
 status: accepted
 version: 2
-last_updated: 2026-08-31
+last_updated: 2026-09-07
 ---
 
 # Desktop Runtime Availability v2 Contract
@@ -197,6 +197,11 @@ interface CoreSubsystemSnapshot {
   error: StructuredError | null
 }
 ```
+
+`runtime.<AdapterKind>` 的状态只覆盖 Adapter 自有私有存储与进程内初始化。第三方 executable 未安装、保存路径失效、
+版本或认证不合格、capability 未验证及平台未准入都属于 Runtime Availability / Readiness / dispatch preflight，不能把
+对应 subsystem 标成 degraded。缺安装仍必须返回 `missing | path_missing` 并阻止实际执行；Adapter 自有初始化失败仍只
+降级该 `runtime.<AdapterKind>`。
 
 ready 帧携带初始完整 `subsystems`；普通 `runtime.subsystemsChanged` event 携带更新后的完整数组。Supervisor 只接受
 当前 ready child 的 event，并在离开 `full_core` 时清空 `coreSubsystems`；旧 generation 不能恢复旧功能状态。

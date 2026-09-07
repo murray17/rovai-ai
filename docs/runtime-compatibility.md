@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-05
+last_updated: 2026-09-07
 ---
 
 # Agent Runtime 兼容性清单
@@ -71,8 +71,9 @@ External MCP 继续为 accepted `Unsupported`，结构化 Web Search 与 Camp Fa
 | Final / Usage | `agent_settled` 后唯一成功；terminal assistant `message_end.message.usage` 在 Monitoring 得到 input/output；cancel 不触发成功 | streamed update/session totals 不计量；reasoning/cost 缺失保持 unknown |
 | Compaction | 上游源码与 wire 定义显示 system prompt 独立于被压缩 message history，且有结构化 compaction lifecycle | 策略为 `native_system_prompt_preserved`；manual/threshold/overflow+retry/cancel 的完整真实产品 smoke 待完成 |
 
-Pi executable 缺失时，独立 optional subsystem 只把 `runtime.pi` 标成 degraded；Core、Skills、MCP 与其他 Runtime
-仍可用。这个安装存在性检查不等于 Ready 或平台资格。
+Pi executable 缺失时，统一 Runtime discovery / Availability 报告 `missing | path_missing`，成员配置与实际执行继续由
+既有 Readiness / dispatch preflight 阻断；`runtime.pi` optional subsystem 保持 ready。只有 Pi 自有私有存储或进程内
+初始化失败才降级 `runtime.pi`，且不影响 Core、Skills、MCP 与其他 Runtime。安装存在性仍不等于 Ready 或平台资格。
 
 本记录在 2026-09-03 当时只形成 `macos-arm64` 开发证据，不是 `Runtime Platform Admission` artifact；当时 Pi 在
 三个目标平台均为 `preview / runtime_platform.qualification_evidence_missing / evidenceRevision=null`。该历史结论已由

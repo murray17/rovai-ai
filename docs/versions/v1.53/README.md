@@ -93,17 +93,28 @@ marker。`events.subscribe` 与完整 Snapshot 在原批量查询中从专用列
 边界与理由见 [V1.53-D05](decisions.md#v1-53-d05)、[User Automation v2](../../contracts/user-automation-v2.md)
 及[实施与验收](implementation-plan.md#新对话创建性能补充)。
 
+## Pi 未安装状态收敛补充
+
+- `runtime.pi` 只初始化 Pi Adapter 自有私有存储，不再以第三方 Pi executable 是否存在决定 subsystem health。
+- Pi 未安装或路径失效继续由统一 Runtime Availability 显示 `missing | path_missing`，成员配置和实际执行仍经既有
+  Readiness / dispatch preflight 阻断。
+- Pi 私有存储真实初始化失败仍只降级 `runtime.pi`，全局 subsystem notice 因而只提示 Rovai 可重试的功能故障。
+- 不修改 Renderer、wire、数据库、平台资格或安装方式；v1.39 历史快照保留，旧缺安装降级条款由
+  [V1.53-D07](decisions.md#v1-53-d07)局部替代。
+
+实现与回归见[实施与验收](implementation-plan.md#pi-未安装状态收敛补充)。
+
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.52 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v1.53，并记录创建性能及命令回执补充 |
-| Decisions | 已更新 | [V1.53-D01](decisions.md#v1-53-d01)拥有图片准入理由，[D02](decisions.md#v1-53-d02)拥有正文块与维护调用理由，[D03](decisions.md#v1-53-d03)拥有部署迁移汇合理由，[D04](decisions.md#v1-53-d04)拥有网络安全续接理由，[D05](decisions.md#v1-53-d05)拥有 Camp 创建与 Git observation 的性能边界，[D06](decisions.md#v1-53-d06)拥有命令结果单份正文与回退理由；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Runtime Images v5](../../contracts/runtime-images-v5.md)、[Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)、[Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)与 [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)分别拥有图片、读取、typed 操作与工具呈现；[Network Interruption Recovery v1](../../contracts/network-interruption-recovery-v1.md)拥有网络恢复；[User Automation v2](../../contracts/user-automation-v2.md)拥有创建和轻量 Git observation 边界；[Domain Command Result v1](../../contracts/domain-command-result-v1.md)拥有回执存储、重放与事件投影 |
-| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[文件操作](../../architecture/runtime-file-change-observation.md)、[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)同步保留式投影与 schema 95 精确升级源汇合；[AgentRun Recovery](../../architecture/agent-run-recovery.md)同步进程内恢复协调与生命周期；[Workspace 不变量](../../architecture/foundational-invariants.md#camp-workspace)与 [User Automation](../../architecture/user-automation.md)同步无工作树扫描边界；[命令不变量](../../architecture/foundational-invariants.md#core-command-transaction)同步命令结果单份正文及双读 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与 [File Preview](../../ui/components/file-preview.md)保留合入分支的工具一致性和文件阅读语义；正文优化不增加界面设计改动；网络恢复补充等待、恢复与需处理状态及 Stop 保留规则；创建性能和命令回执补充均不改变界面 |
+| Decisions | 已更新 | [V1.53-D01](decisions.md#v1-53-d01)拥有图片准入理由，[D02](decisions.md#v1-53-d02)拥有正文块与维护调用理由，[D03](decisions.md#v1-53-d03)拥有部署迁移汇合理由，[D04](decisions.md#v1-53-d04)拥有网络安全续接理由，[D05](decisions.md#v1-53-d05)拥有 Camp 创建与 Git observation 的性能边界，[D06](decisions.md#v1-53-d06)拥有命令结果单份正文与回退理由，[D07](decisions.md#v1-53-d07)拥有 Runtime 安装缺失与 subsystem health 分层理由；CURRENT 已纳入导航 |
+| Contracts | 已更新 | [Runtime Images v5](../../contracts/runtime-images-v5.md)、[Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)、[Runtime File Change Observation v3](../../contracts/runtime-file-change-observation-v3.md)与 [Run Process Detail Surface v31](../../contracts/run-process-detail-surface-v31.md)分别拥有图片、读取、typed 操作与工具呈现；[Network Interruption Recovery v1](../../contracts/network-interruption-recovery-v1.md)拥有网络恢复；[User Automation v2](../../contracts/user-automation-v2.md)拥有创建和轻量 Git observation 边界；[Domain Command Result v1](../../contracts/domain-command-result-v1.md)拥有回执存储、重放与事件投影；[Desktop Runtime Availability v2](../../contracts/desktop-runtime-availability-v2.md#7-authority-ready-and-optional-subsystem-gates)明确安装缺失不降级 Runtime subsystem |
+| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[文件操作](../../architecture/runtime-file-change-observation.md)、[Availability-first Runtime](../../architecture/availability-first-runtime.md)同步保留式投影、schema 95 精确升级源汇合及 optional subsystem / Runtime Availability 分层；[AgentRun Recovery](../../architecture/agent-run-recovery.md)同步进程内恢复协调与生命周期；[Workspace 不变量](../../architecture/foundational-invariants.md#camp-workspace)与 [User Automation](../../architecture/user-automation.md)同步无工作树扫描边界；[Runtime Catalog 不变量](../../architecture/foundational-invariants.md#runtime-catalog-installation)明确安装缺失只属于 Availability；[命令不变量](../../architecture/foundational-invariants.md#core-command-transaction)同步命令结果单份正文及双读 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与 [File Preview](../../ui/components/file-preview.md)保留合入分支的工具一致性和文件阅读语义；正文优化不增加界面设计改动；网络恢复补充等待、恢复与需处理状态及 Stop 保留规则；创建性能、命令回执和 Pi 未安装收敛均不改变界面，后者复用既有“未安装”呈现 |
 | Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)记录 activity-v3、可靠 typed read/write、历史 classifier 冻结和两种部署源兼容 |
-| Runtime compatibility | 确认无需更新 | 不改变 Runtime 启动、协议能力或平台资格；创建性能与命令回执补充也不改变 Runtime 文件变化 Evidence |
+| Runtime compatibility | 已更新 | 不改变 Runtime 启动、协议能力或平台资格；兼容性清单仅更正 Pi 缺安装由统一 Availability 表达、而非 subsystem degraded |
 | Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture 索引、版本指针和当前决定导航已包含 User Automation v2、Domain Command Result v1 与对应边界 |
 | Root README | 确认无需更新 | 项目定位、安装方法与公开 Runtime 支持范围不因本地公屏图片集合、创建路径或命令回执内部优化而变化 |
 

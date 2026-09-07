@@ -377,3 +377,42 @@ git diff --check
   `camps.create` 调用图不含 Git 子进程，因而直接移除该段随工作树增长的创建等待。
 
 真实 Runtime、日常 Electron userData 与用户工作区未参与本轮自动验收。
+
+## Pi 未安装状态收敛补充
+
+- [x] 删除 Pi optional subsystem 对 executable 安装存在性的重复检查，只保留 Pi Adapter 私有存储初始化。
+- [x] 保留统一 Runtime discovery / Availability 的 `missing | path_missing` 与成员 Readiness / dispatch preflight 门禁。
+- [x] 保留 Pi 私有存储初始化失败时 `runtime.pi` 单项 degraded 和进程内 retry，不在 Renderer 过滤真实故障。
+- [x] 扩展既有 Core startup availability owner，在隔离搜索路径下同时断言 `runtime.pi=ready` 与 Pi
+  Availability `missing`；Windows 使用 explicit override 的封闭候选集，Linux 使用空 PATH 并禁用 login-shell PATH
+  补充，macOS 因固定 known locations 可能命中开发机安装而跳过该用例。
+- [x] 同步当前决定、Architecture、Contract、兼容性清单和研究矩阵；v1.39 历史快照不改写。
+
+测试前的失败输入是 Windows x64 fresh Core 加绝对但不存在的 `ROVAI_PI_BIN`：旧实现会把
+`runtime.pi` 标成 degraded，同时 Availability 已经报告 missing。`scripts/lib/core-startup-availability.test.mjs`
+原本就拥有真实 `run_core → ready → optional initialization → RPC` seam，因此直接扩展该 owner，不新增平行 Core
+夹具。`core_subsystems::tests` 继续拥有 Pi 私有初始化失败只影响本 Runtime 的低成本隔离合同。
+
+### 必跑命令
+
+```bash
+cargo fmt --all -- --check
+cargo test -p rovai-core --bin rovai-core core_subsystems::tests:: -- --nocapture
+pnpm test:core-startup
+pnpm docs:test
+pnpm docs:check
+DOCS_BASE_REF=<merge-base-with-main> pnpm docs:check:ci
+git diff --check
+```
+
+### 验证记录
+
+- `cargo fmt --all -- --check`、Core subsystem 定向测试与 Core binary 全量通过：定向 2 个用例，
+  全量 230 个通过、5 个手工真实 Runtime smoke 按设计忽略。
+- Runtime status 与 Core subsystem notice 两份定向 Vitest 通过：25 个用例通过，确认继续复用既有“未安装”呈现，
+  无需 Renderer 特判。
+- `pnpm test:core-startup` 中 optional startup failure 四个子场景及其他 authority 场景通过；当前 macOS 主机的缺 Pi
+  用例按设计跳过。套件另有两个与本次改动无关的既有 queue fixture 失败，均为
+  `invalid type: map, expected u32`；单独重跑仍复现。Windows/Linux 隔离搜索路径回归留给对应 CI/目标主机执行。
+- `pnpm docs:test`（9 个用例）、`pnpm docs:check`、
+  `DOCS_BASE_REF=23bcc06435bd7ea906b562b474030756481e7d67 pnpm docs:check:ci` 与 `git diff --check` 通过。
