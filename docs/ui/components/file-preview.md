@@ -160,15 +160,16 @@ Tabs 下在 ready 的项目内或项目外普通文件上始终显示一行路�
 基准的相对路径，包括只有 `README.md` 的项目根文件；项目外文件使用 canonical 绝对路径，canonical 目标
 位于用户主目录时可使用 `~/`。两者使用一致的字体、颜色和交互，不追加项目内外说明、Badge 或特殊状态颜色。
 
-Attachment 不显示路径行，Viewer 直接紧接 Tabs；即使 source 当前位于项目内，也不从卡片 metadata、用户 source、
-Managed storage、legacy storage、OS Temp 或文件名回推路径。呈现类型和显示值只信 Main 在成功打开 canonical 文件后
-签发的语义，Renderer 不自行猜测。
+用户 Local Attachment Source Ref 成功打开后采用同一行路径与相同交互。Managed/legacy Attachment 不显示路径行，
+Viewer 直接紧接 Tabs。呈现类型和显示值只信 Main 在成功打开 canonical 文件后签发的语义，不从卡片 metadata、
+存储位置或文件名回推路径。
 
 路径使用平台路径分隔符从左侧自然排列。空间不足时从目录中部省略，优先保留末尾目录和文件名，不产生水平滚动。
 未省略的显示值进入 title、可访问名称与 hover/focus tooltip。路径本身是可聚焦的“在 Finder／文件资源管理器中显示”
 入口；鼠标或键盘激活时使用当前文件 handle 重验并定位，不重新解析可见文本。Tab 右键菜单不新增按钮组，项目内外
 普通文件的原复制入口改为“复制完整路径”，固定复制重验后的 canonical 绝对路径，不复制 `~/`、省略文本或项目
-相对路径。Attachment 保留“复制文件名”，只复制安全显示名；Main 拒绝通过该 handle 复制 absolute 内部路径。
+相对路径。源附件同样复制重验后的完整路径；Managed/legacy Attachment 保留“复制文件名”，Main 拒绝通过其 handle
+复制 absolute 内部路径。
 
 路径与 Tabs 间无线，路径与正文间保留一条语义 divider。路径隐藏时同时移除高度、分隔线和空占位；文件处于
 opening、missing、unavailable 或 error 时隐藏路径行，避免把上次成功呈现重复为当前文件事实。若文件发生外部更新，
@@ -232,11 +233,11 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 才显示／激活目标 Tab 和预览 Pane。文件已移动、删除、无权或读取失败时，当前页只显示红色 Toast `无法打开该文件`，不创建失败预览页、不切换
 当前 Tab、不替换已有 ready 内容，也不抢焦点；不支持应用内预览的类型同样不从这类入口启动系统应用或显示目录。
 精确事务与资源清理边界见
-[File Preview v10](../../contracts/file-preview-v10.md)。
+[File Preview v11](../../contracts/file-preview-v11.md)。
 
 首次打开与恢复使用 cold/opening/ready/missing/unavailable/error；快速成功直接显示正文，耗时后才显示轻量 Loading。
 无法形成当前可读内容时，正文只显示水平、垂直居中的 32px 通用文件轮廓，图标下方相隔 12px 显示一句 13px 常规
-公开文案。错误码到文案的 closed mapping 由 [File Preview v10](../../contracts/file-preview-v10.md) 继承的 v8 失败呈现拥有。
+公开文案。错误码到文案的 closed mapping 由 [File Preview v11](../../contracts/file-preview-v11.md) 继承的 v8 失败呈现拥有。
 该状态不显示路径、尺寸、标题、卡片、边框、按钮、技术详情或内部能力名称；错误内容区之外的 Tabs、Viewer 布局和
 其他 Camp 界面沿用既有视觉，不以本状态为理由重做。
 历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、

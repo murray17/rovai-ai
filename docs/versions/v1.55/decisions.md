@@ -21,8 +21,9 @@ last_updated: 2026-09-07
 ### 决定
 
 Main 只在既有打开流程完成来源校验并得到 canonical 普通文件后签发路径：目标在 canonical Camp 项目根内时返回
-项目相对路径；位于项目外时返回 canonical 绝对路径，canonical 主目录内允许使用 ~/ 缩写。Attachment 继续只签发
-authority 提供的安全显示名。
+项目相对路径；位于项目外时返回 canonical 绝对路径，canonical 主目录内允许使用 ~/ 缩写。用户源附件采用相同
+路径呈现；Managed/legacy Attachment 继续只签发 authority 提供的安全显示名。Core 明确签发是否可展示源路径，
+不把所有附件入口等同于受管存储，也不要求 Renderer 从路径猜测存储类型。
 
 路径仅是成功状态的呈现。reveal、默认应用、重新加载和复制完整路径继续使用 opaque handle，在 Main 重验同一
 canonical 文件后执行；显示项目外路径不创建 Root Grant，不授权父目录，也不改变项目或会话工作目录。
@@ -30,7 +31,7 @@ canonical 文件后执行；显示项目外路径不创建 Root Grant，不授�
 ### 后果
 
 项目根和项目外普通文件均能确认实际位置，同名 Tab 可以从 Main 签发的路径生成最短唯一后缀。symlink 按实际打开
-目标呈现，历史引用不依赖 Renderer 当前项目。Attachment 和失败状态仍不会泄漏内部路径。
+目标呈现，历史引用不依赖 Renderer 当前项目。Managed/legacy Attachment 和失败状态仍不会泄漏内部路径。
 
 ### 被拒绝方案
 

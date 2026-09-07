@@ -17,9 +17,15 @@ describe('Desktop Attachment target boundary', () => {
       kind: 'file' as const,
       mediaType: 'text/plain; charset=utf-8',
       path: '/private/var/folders/managed/计划.md',
-      openRisk: 'normal' as const
+      openRisk: 'normal' as const,
+      canShowPath: false
     }
     expect(parseDesktopAttachmentTarget(target, ATTACHMENT_ID)).toEqual(target)
+    expect(parseDesktopAttachmentTarget({ ...target, canShowPath: true }, ATTACHMENT_ID))
+      .toMatchObject({ canShowPath: true })
+    for (const canShowPath of [undefined, null, 'true', 1]) {
+      expect(parseDesktopAttachmentTarget({ ...target, canShowPath }, ATTACHMENT_ID)).toBeNull()
+    }
     expect(parseDesktopAttachmentTarget({ ...target, attachmentId: 'other' }, ATTACHMENT_ID)).toBeNull()
     expect(parseDesktopAttachmentTarget({ ...target, path: '../计划.md' }, ATTACHMENT_ID)).toBeNull()
     expect(parseDesktopAttachmentTarget({ ...target, openRisk: 'unknown' }, ATTACHMENT_ID)).toBeNull()
@@ -51,7 +57,8 @@ describe('Desktop Attachment target boundary', () => {
       kind: 'file',
       mediaType: 'application/vnd.apple.installer+xml',
       path: '/private/managed/setup.pkg',
-      openRisk: 'confirm'
+      openRisk: 'confirm',
+      canShowPath: false
     }, {
       async confirm() {
         return false
@@ -72,7 +79,8 @@ describe('Desktop Attachment target boundary', () => {
       kind: 'file' as const,
       mediaType: 'text/plain',
       path: '/private/managed/计划.md',
-      openRisk: 'normal' as const
+      openRisk: 'normal' as const,
+      canShowPath: false
     }
     await expect(openDesktopAttachmentTarget(target, {
       async confirm() {
@@ -99,7 +107,8 @@ describe('Desktop Attachment target boundary', () => {
       kind: 'file' as const,
       mediaType: 'text/plain',
       path: '/private/managed/计划.md',
-      openRisk: 'normal' as const
+      openRisk: 'normal' as const,
+      canShowPath: false
     }
     let revealRequested = false
     await expect(revealDesktopAttachmentTarget(target, {
