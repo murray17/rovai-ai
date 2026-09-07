@@ -7906,9 +7906,17 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 @keyframes notification-heads-up-in { from { transform: translateY(-7px); opacity: 0; } }
 .notification-heads-up-open { display: grid; min-width: 0; gap: 3px; padding: 13px 8px 13px 15px; border: 0; background: transparent; cursor: pointer; text-align: left; }
 .notification-heads-up-open:disabled { cursor: default; }
-.notification-heads-up-open strong { color: var(--brand-ink); font-size: 11px; }
-.notification-heads-up-open span { color: var(--ink); font-size: 12px; line-height: 1.45; }
-.notification-heads-up-open small { overflow: hidden; color: var(--faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.notification-heads-up-open strong { color: var(--ink); font-size: 12px; font-weight: 600; }
+.notification-heads-up-message { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.notification-heads-up[hidden] { display: none; }
+.notification-heads-up-source { display: flex; min-width: 0; white-space: nowrap; }
+.notification-heads-up-source > span { overflow: hidden; text-overflow: ellipsis; }
+.notification-heads-up-source > b { flex: 0 0 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; font-weight: inherit; }
+.notification-heads-up-summary .notification-heads-up-open { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.notification-heads-up-summary .notification-heads-up-open > span:last-child { color: var(--brand-ink); }
+.single-chat-new-reply { margin: 0 auto 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--brand-ink); cursor: pointer; font-size: 12px; }
+.single-chat-popover .approval-dock { position: static; flex-shrink: 0; width: auto; margin: 8px 12px; }
+@media (prefers-reduced-motion: reduce) { .notification-heads-up { animation: none; } }
 .notification-heads-up-close { width: 28px; height: 28px; margin-top: 7px; border: 0; border-radius: 6px; color: var(--faint); background: transparent; cursor: pointer; }
 .notification-heads-up-close:hover { color: var(--ink); background: var(--surface-muted); }
 .notification-heads-up-summary .notification-heads-up-open strong { color: var(--ink); }

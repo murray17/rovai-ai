@@ -135,6 +135,12 @@ Camp 工作区内的 child 会先收敛为独立稳定 source，同一项目文�
 独立页面替换会话。Tab 按 `Camp + agentRunId + executionEpoch` 去重；文件行预选对应文件，重新打开同一张
 卡片保留上次选择；不同 Run 或 epoch 的历史证据互不覆盖。切换变更文件会同步更新 Tab 名。
 
+上述 Review 入口只适用于至少一个 `presentationKind != operation_only` 的文件。混合卡片 header 选择仍可审查的
+历史选择或第一个可审查文件；点击 operation-only 文件行直接通过 `run_evidence / open_current` 打开普通当前文件
+Tab。全 operation-only 卡片使用“查看文件”，header 默认打开第一项当前文件，逐文件行仍精确打开自身。当前文件入口
+采用成功后提交与 preview-only：失败只在当前页显示“无法打开该文件”，不切换 Pane、留下 Tab 或启动系统应用。
+这一跳转不把当前正文当作历史差异，File Change 查找也不会索引当前文件。
+
 详情沿用不可变 projection/detail 的读取与证据语义，不读取当前文件推测差异。预览自身宽度不大于 760px 时，
 左侧文件列表改为文件选择框，保留上一/下一文件和“打开当前文件”；只有一个文件时不显示多余的文件列表或
 切换控件。长差异行在证据区域内横向滚动，短行不保留原全页 Review 的固定最小宽度。
@@ -217,11 +223,11 @@ HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab�
 才显示／激活目标 Tab 和预览 Pane。文件已移动、删除、无权或读取失败时，当前页只显示红色 Toast `无法打开该文件`，不创建失败预览页、不切换
 当前 Tab、不替换已有 ready 内容，也不抢焦点；不支持应用内预览的类型同样不从这类入口启动系统应用或显示目录。
 精确事务与资源清理边界见
-[File Preview v8](../../contracts/file-preview-v8.md)。
+[File Preview v9](../../contracts/file-preview-v9.md)。
 
 首次打开与恢复使用 cold/opening/ready/missing/unavailable/error；快速成功直接显示正文，耗时后才显示轻量 Loading。
 无法形成当前可读内容时，正文只显示水平、垂直居中的 32px 通用文件轮廓，图标下方相隔 12px 显示一句 13px 常规
-公开文案。错误码到文案的 closed mapping 由 [File Preview v8](../../contracts/file-preview-v8.md#失败呈现) 拥有。
+公开文案。错误码到文案的 closed mapping 由 [File Preview v9](../../contracts/file-preview-v9.md) 继承的 v8 失败呈现拥有。
 该状态不显示路径、尺寸、标题、卡片、边框、按钮、技术详情或内部能力名称；错误内容区之外的 Tabs、Viewer 布局和
 其他 Camp 界面沿用既有视觉，不以本状态为理由重做。
 历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、

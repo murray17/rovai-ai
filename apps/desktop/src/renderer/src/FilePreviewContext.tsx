@@ -23,6 +23,7 @@ import type {
 import { secureFilePreviewHtml } from './file-preview-html-document'
 import { FilePreviewLayoutProvider } from './FilePreviewLayout'
 import { FileFindProvider } from './FilePreviewFind'
+import { agentRunFileChangeHasReviewableDiff } from './file-changes-presentation'
 import {
   filePreviewPresentationFromFile,
   filePreviewPresentationFromRequest,
@@ -418,8 +419,10 @@ export function FilePreviewProvider({
     const id = `file-change:${encodeURIComponent(targetCampId)}:${encodeURIComponent(changes.agentRunId)}:${changes.executionEpoch}`
     const existing = tabsRef.current.find((tab) => tab.id === id)
     const previousSelection = existing?.kind === 'file_change' ? existing.selectedEvidenceFileId : null
+    const previousFile = changes.files.find((file) => file.evidenceFileId === previousSelection)
     const selectedFile = changes.files.find((file) => file.evidenceFileId === evidenceFileId)
-      ?? changes.files.find((file) => file.evidenceFileId === previousSelection)
+      ?? (previousFile && agentRunFileChangeHasReviewableDiff(previousFile) ? previousFile : undefined)
+      ?? changes.files.find(agentRunFileChangeHasReviewableDiff)
       ?? changes.files[0]
     const selectedEvidenceFileId = selectedFile?.evidenceFileId ?? null
     const tab: FileChangesPreviewTabModel = { kind: 'file_change', id, campId: targetCampId, changes, selectedEvidenceFileId }

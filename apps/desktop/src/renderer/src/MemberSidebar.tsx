@@ -15,6 +15,8 @@ import type {
   RuntimePlatformAdmission,
   StoredCommandResult
 } from '@contracts'
+import { RuntimeGlyph } from './MemberRuntimePicker'
+import { adapterLabel } from './runtime-products'
 import { MemberAvatar } from './MemberAvatar'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { localizeExecutionEngineTerms } from './product-copy'
@@ -63,6 +65,7 @@ export function MemberSidebar({
   runtimePlatformAdmission = [],
   runtimeDiscoveryPending,
   selectedAgentId,
+  dirtyAgentIds = new Set<string>(),
   onSelect,
   onCreate,
   onReload
@@ -73,6 +76,7 @@ export function MemberSidebar({
   runtimePlatformAdmission?: RuntimePlatformAdmission[]
   runtimeDiscoveryPending: boolean
   selectedAgentId: string | null
+  dirtyAgentIds?: ReadonlySet<string>
   onSelect(agentId: string, tab: MemberWorkspaceTab, focusRuntime: boolean): void
   onCreate(trigger: HTMLButtonElement): void
   onReload(): Promise<void>
@@ -268,6 +272,7 @@ export function MemberSidebar({
                     key={agent.agentId}
                     agent={agent}
                     selected={selectedAgentId === agent.agentId}
+                    dirty={dirtyAgentIds.has(agent.agentId)}
                     sorting={sorting}
                     busy={busy !== null}
                     dragOver={dragOverAgentId === agent.agentId && dragAgentId !== agent.agentId}
@@ -319,6 +324,7 @@ export function MemberSidebar({
 function MemberSidebarRow({
   agent,
   selected,
+  dirty,
   sorting,
   busy,
   dragOver,
@@ -336,6 +342,7 @@ function MemberSidebarRow({
 }: {
   agent: AgentProfile
   selected: boolean
+  dirty: boolean
   sorting: boolean
   busy: boolean
   dragOver: boolean
@@ -391,7 +398,7 @@ function MemberSidebarRow({
         className="member-sidebar-select"
         type="button"
         aria-current={selected ? 'true' : undefined}
-        aria-label={`${agent.displayName}，${agent.teamRole || '团队角色未设置'}`}
+        aria-label={`${agent.displayName}，${agent.teamRole || '团队角色未设置'}${dirty ? '，有未保存更改' : ''}`}
         title={`${agent.displayName} · ${agent.teamRole || '团队角色未设置'}`}
         onClick={() => onSelect(agent.agentId, 'identity', false)}
       >
@@ -404,7 +411,7 @@ function MemberSidebarRow({
           decorative
         />
         <span className="member-sidebar-copy">
-          <strong>{agent.displayName}</strong>
+          <strong><span className="member-editor-member-name">{agent.displayName}</span>{dirty && <i className="member-editor-unsaved-mark" aria-hidden="true" />}</strong>
           <small>{agent.teamRole || '团队角色未设置'}</small>
         </span>
       </button>
@@ -433,7 +440,8 @@ function MemberSidebarRow({
               data-tooltip={`${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}`}
               onClick={() => onSelect(agent.agentId, 'runtime', true)}
             >
-              <span aria-hidden="true">{compact === 'available' ? '✓' : compact === 'action' ? '!' : '…'}</span>
+              <RuntimeGlyph kind={agent.runtimeConfiguration?.adapterKind ?? null} />
+              {(compact === 'action' || runtime.status === 'not_qualified' || runtime.status === 'unsupported') && <i className="member-runtime-attention" aria-hidden="true">!</i>}
             </button>
           )}
     </div>
@@ -456,25 +464,6 @@ function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' }): React.JSX.El
       <path d="M4.5 5h11M4.5 10h8M4.5 15h5" />
     </svg>
   )
-}
-
-function adapterLabel(kind: AdapterKind): string {
-  return ({
-    'codex-cli': 'Codex CLI',
-    pi: 'PI',
-    'opencode-cli': 'OpenCode',
-    'copilot-cli': 'GitHub Copilot',
-    'claude-code-cli': 'Claude Code',
-    'kiro-cli': 'Kiro',
-    'qoder-cli': 'Qoder',
-    'codebuddy-cli': 'CodeBuddy',
-    'qwen-code': 'Qwen Code',
-    'trae-cn-cli': 'TRAE CLI',
-    'cursor-agent': 'Cursor Agent',
-    'kimi-code-cli': 'Kimi Code',
-    'grok-build': 'Grok Build',
-    'antigravity-app': 'Antigravity'
-  })[kind]
 }
 
 function assertApplied(result: StoredCommandResult): void {

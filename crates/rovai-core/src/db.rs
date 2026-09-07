@@ -6093,6 +6093,12 @@ impl Database {
             if !self.schema_migration_applied(145)? {
                 migration_step!("migration_145", self.migrate_scheduled_automations_v145());
             }
+            if !self.schema_migration_applied(146)? {
+                migration_step!(
+                    "migration_146",
+                    self.migrate_notification_single_chat_v146()
+                );
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -6719,6 +6725,12 @@ impl Database {
         }
         if !self.schema_migration_applied(145)? {
             migration_step!("migration_145", self.migrate_scheduled_automations_v145());
+        }
+        if !self.schema_migration_applied(146)? {
+            migration_step!(
+                "migration_146",
+                self.migrate_notification_single_chat_v146()
+            );
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -22875,6 +22887,65 @@ impl Database {
         Ok(())
     }
 
+    // No storage shape or historical disposition rewrite: only future source transitions change.
+    fn migrate_notification_single_chat_v146(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(r#"
+            DROP TRIGGER notification_completion_satisfied_by_user_turn;
+            CREATE TRIGGER notification_completion_satisfied_by_user_turn
+            AFTER INSERT ON camp_message
+            WHEN NEW.author_type = 'user' AND NEW.author_id = 'local_user'
+              AND NEW.camp_turn_id IS NOT NULL
+            BEGIN
+                UPDATE notification_occurrence_disposition
+                SET satisfied_at = NEW.created_at, updated_at = NEW.created_at
+                WHERE satisfied_at IS NULL AND occurrence_id IN (
+                    SELECT occurrence.id FROM notification_occurrence AS occurrence
+                    JOIN camp_turn ON camp_turn.id = occurrence.camp_turn_id
+                    WHERE occurrence.camp_id = NEW.camp_id AND occurrence.semantic = 'turn_completed'
+                      AND camp_turn.kind <> 'single_chat'
+                      AND occurrence.camp_turn_id <> NEW.camp_turn_id
+                      AND occurrence.occurred_at <= NEW.created_at
+                );
+            END;
+            CREATE TRIGGER notification_single_chat_completion_satisfied
+            AFTER INSERT ON conversation_message
+            WHEN NEW.author_type = 'user' AND NEW.author_id = 'local_user'
+              AND EXISTS(SELECT 1 FROM conversation WHERE id = NEW.conversation_id AND kind = 'single_chat')
+            BEGIN
+                UPDATE notification_occurrence_disposition
+                SET satisfied_at = NEW.created_at, updated_at = NEW.created_at
+                WHERE satisfied_at IS NULL AND occurrence_id IN (
+                    SELECT occurrence.id FROM notification_occurrence AS occurrence
+                    JOIN agent_run ON agent_run.camp_turn_id = occurrence.camp_turn_id
+                    WHERE occurrence.semantic = 'turn_completed'
+                      AND agent_run.destination_conversation_id = NEW.conversation_id
+                      AND occurrence.occurred_at <= NEW.created_at
+                );
+            END;
+            CREATE TRIGGER notification_single_chat_source_ended
+            AFTER UPDATE OF ended_at ON conversation
+            WHEN NEW.kind = 'single_chat' AND OLD.ended_at IS NULL AND NEW.ended_at IS NOT NULL
+            BEGIN
+                UPDATE notification_occurrence_disposition
+                SET resolved_at = NEW.ended_at, updated_at = NEW.ended_at
+                WHERE resolved_at IS NULL AND occurrence_id IN (
+                    SELECT occurrence.id FROM notification_occurrence AS occurrence
+                    LEFT JOIN approval ON approval.id = occurrence.approval_id
+                    LEFT JOIN action_execution ON action_execution.id = approval.action_id
+                    JOIN agent_run ON agent_run.camp_turn_id = occurrence.camp_turn_id
+                       OR agent_run.id = action_execution.agent_run_id
+                    WHERE agent_run.destination_conversation_id = NEW.id
+                );
+            END;
+            INSERT INTO schema_migration(version, applied_at) VALUES(146, datetime('now'));
+        "#)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_scheduled_automations_v145(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -27871,7 +27942,36 @@ fn rebuild_table_to_v135_source_for_test(
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v145_source_for_test(connection: &Connection) {
+    connection
+        .execute_batch(
+            r#"
+        DROP TRIGGER IF EXISTS notification_single_chat_completion_satisfied;
+        DROP TRIGGER IF EXISTS notification_single_chat_source_ended;
+        DROP TRIGGER notification_completion_satisfied_by_user_turn;
+        CREATE TRIGGER notification_completion_satisfied_by_user_turn
+        AFTER INSERT ON camp_message
+        WHEN NEW.author_type = 'user' AND NEW.author_id = 'local_user'
+          AND NEW.camp_turn_id IS NOT NULL
+        BEGIN
+            UPDATE notification_occurrence_disposition
+            SET satisfied_at = NEW.created_at, updated_at = NEW.created_at
+            WHERE satisfied_at IS NULL AND occurrence_id IN (
+                SELECT occurrence.id FROM notification_occurrence AS occurrence
+                WHERE occurrence.camp_id = NEW.camp_id AND occurrence.semantic = 'turn_completed'
+                  AND occurrence.camp_turn_id <> NEW.camp_turn_id
+                  AND occurrence.occurred_at <= NEW.created_at
+            );
+        END;
+        DELETE FROM schema_migration WHERE version = 146;
+    "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 pub(crate) fn downgrade_current_schema_to_v144_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v145_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 145)",
@@ -42297,6 +42397,7 @@ mod tests {
     fn v79_clean_break_discards_unlaunched_notification_rows_without_backfill() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v79-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
+        downgrade_current_schema_to_v145_source_for_test(database.connection());
         database
             .connection()
             .execute_batch(

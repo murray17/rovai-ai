@@ -1883,7 +1883,9 @@ fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result
                JOIN action_execution ON action_execution.id = approval.action_id
                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-               WHERE camp_turn.camp_id = ?1 AND approval.status = 'pending')
+               JOIN conversation ON conversation.id = agent_run.conversation_id
+               WHERE camp_turn.camp_id = ?1 AND approval.status = 'pending'
+                 AND conversation.kind <> 'single_chat')
             "#,
             [camp_id],
             |row| {
@@ -3642,7 +3644,17 @@ fn load_approvals(
     pending_only: bool,
     limit: Option<i64>,
 ) -> Result<Vec<ApprovalView>> {
-    let mut statement = transaction.prepare(
+    load_conversation_approvals(transaction, camp_id, None, pending_only, limit)
+}
+
+pub(crate) fn load_conversation_approvals(
+    connection: &rusqlite::Connection,
+    camp_id: &str,
+    conversation_id: Option<&str>,
+    pending_only: bool,
+    limit: Option<i64>,
+) -> Result<Vec<ApprovalView>> {
+    let mut statement = connection.prepare(
         r#"
         SELECT approval.id, approval.action_id, approval.action_kind,
                approval.action_summary, approval.status,
@@ -3663,54 +3675,60 @@ fn load_approvals(
         JOIN conversation ON conversation.id = agent_run.conversation_id
         WHERE camp_turn.camp_id = ?1
           AND (?2 = 0 OR approval.status = 'pending')
+          AND ((?4 IS NULL AND conversation.kind <> 'single_chat')
+            OR (?4 IS NOT NULL AND conversation.kind = 'single_chat' AND conversation.id = ?4))
         ORDER BY approval.requested_at DESC, approval.id
         LIMIT COALESCE(?3, -1)
         "#,
     )?;
     statement
-        .query_map(params![camp_id, pending_only, limit], |row| {
-            let canonical_input_json = row.get::<_, String>(12)?;
-            let canonical_input = serde_json::from_str(&canonical_input_json).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    12,
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            })?;
-            let native_options_json = row.get::<_, String>(20)?;
-            let options =
-                serde_json::from_str::<Vec<RuntimePermissionOptionView>>(&native_options_json)
-                    .map_err(|error| {
+        .query_map(
+            params![camp_id, pending_only, limit, conversation_id],
+            |row| {
+                let canonical_input_json = row.get::<_, String>(12)?;
+                let canonical_input =
+                    serde_json::from_str(&canonical_input_json).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            20,
+                            12,
                             rusqlite::types::Type::Text,
                             Box::new(error),
                         )
                     })?;
-            Ok(ApprovalView {
-                id: row.get(0)?,
-                action_id: row.get(1)?,
-                action_kind: row.get(2)?,
-                action_summary: row.get(3)?,
-                canonical_input,
-                reason: row.get(13)?,
-                agent_run_id: row.get(14)?,
-                agent_id: row.get(15)?,
-                adapter_kind: row.get(16)?,
-                native_method: row.get(17)?,
-                request_digest: row.get(18)?,
-                permission_semantics: row.get(19)?,
-                options,
-                status: row.get(4)?,
-                requested_for_user_id: row.get(5)?,
-                resolved_by_type: row.get(9)?,
-                resolved_by_id: row.get(10)?,
-                resolution_code: row.get(11)?,
-                version: row.get(6)?,
-                requested_at: row.get(7)?,
-                resolved_at: row.get(8)?,
-            })
-        })?
+                let native_options_json = row.get::<_, String>(20)?;
+                let options =
+                    serde_json::from_str::<Vec<RuntimePermissionOptionView>>(&native_options_json)
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                20,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?;
+                Ok(ApprovalView {
+                    id: row.get(0)?,
+                    action_id: row.get(1)?,
+                    action_kind: row.get(2)?,
+                    action_summary: row.get(3)?,
+                    canonical_input,
+                    reason: row.get(13)?,
+                    agent_run_id: row.get(14)?,
+                    agent_id: row.get(15)?,
+                    adapter_kind: row.get(16)?,
+                    native_method: row.get(17)?,
+                    request_digest: row.get(18)?,
+                    permission_semantics: row.get(19)?,
+                    options,
+                    status: row.get(4)?,
+                    requested_for_user_id: row.get(5)?,
+                    resolved_by_type: row.get(9)?,
+                    resolved_by_id: row.get(10)?,
+                    resolution_code: row.get(11)?,
+                    version: row.get(6)?,
+                    requested_at: row.get(7)?,
+                    resolved_at: row.get(8)?,
+                })
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("failed to load Action Approvals")
 }

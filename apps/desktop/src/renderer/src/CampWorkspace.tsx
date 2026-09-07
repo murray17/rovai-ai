@@ -111,7 +111,12 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from './FilePreviewLayout'
 import { useOptionalFilePreview } from './FilePreviewContext'
-import { agentRunFileChangesSummaryLabel } from './file-changes-presentation'
+import {
+  agentRunFileChangeHasReviewableDiff,
+  agentRunFileChangesPreviewTarget,
+  agentRunFileChangesSummaryLabel
+} from './file-changes-presentation'
+import { openAgentRunCurrentFilePreview } from './agent-run-file-preview'
 import { FileReferenceText, type FileReferenceActivation } from './FileReferenceLink'
 import {
   captureTimelineReadingAnchor,
@@ -802,7 +807,9 @@ function scrollExecutionDrawerToLatest(body: HTMLElement): void {
 }
 export type NotificationFocusTarget = {
   requestId: number
-  kind: 'approval' | 'camp_turn' | 'camp_message'
+  conversationId?: string
+  agentRunId?: string
+  kind: 'approval' | 'camp_turn' | 'camp_message' | 'single_chat'
   campTurnId: string | null
   messageId?: string
   approvalId?: string
@@ -810,6 +817,8 @@ export type NotificationFocusTarget = {
 }
 export type VisibleNotificationSources = {
   campId: string
+  conversationId?: string | null
+  surfaceVisible?: boolean
   snapshotSequence: number
   messageIds: string[]
   campTurnIds: string[]
@@ -1431,6 +1440,8 @@ export function CampWorkspace({
   notificationFocus = null,
   onNotificationFocusPresented,
   onVisibleNotificationSources,
+  onVisibleSingleChatSources,
+  singleChatTarget,
   runtimeRecovery = null,
   firstRunCamp = null,
   onConfigureRuntime,
@@ -1481,6 +1492,8 @@ export function CampWorkspace({
   notificationFocus?: NotificationFocusTarget | null
   onNotificationFocusPresented?(requestId: number): void
   onVisibleNotificationSources?(sources: VisibleNotificationSources): void
+  onVisibleSingleChatSources?(sources: VisibleNotificationSources): void
+  singleChatTarget?: import("@contracts").NotificationSingleChatSource & { requestId: number } | null
   runtimeRecovery?: CampRuntimeRecovery | null
   firstRunCamp?: FirstRunCampContext | null
   onConfigureRuntime?(agentId: string): void
@@ -1490,6 +1503,18 @@ export function CampWorkspace({
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
   const notifyError = onNotifyError ?? onNotify
+  const openCurrentAgentRunFile = useCallback((
+    changes: AgentRunFileChangesView,
+    evidenceFileId: string
+  ): void => {
+    void openAgentRunCurrentFilePreview({
+      filePreview,
+      campId: snapshot.camp.id,
+      changes,
+      evidenceFileId,
+      onError: notifyError
+    })
+  }, [filePreview, notifyError, snapshot.camp.id])
   const [, setComposerDraftProjectionVersion] = useState(0)
   const [draftLoadState, setDraftLoadState] = useState<DraftLoadState>({ state: 'loading' })
   const [composerPersistenceError, setComposerPersistenceError] = useState<Error | null>(null)
@@ -2887,12 +2912,12 @@ export function CampWorkspace({
   ])
 
   useEffect(() => {
-    if (!notificationFocus?.active || notificationFocus.kind === 'approval') return
+    if (!notificationFocus?.active || ['approval', 'single_chat'].includes(notificationFocus.kind)) return
     setConversationView('conversation')
   }, [notificationFocus])
 
   useEffect(() => {
-    if (!notificationFocus?.active) return undefined
+    if (!notificationFocus?.active || notificationFocus.kind === 'single_chat') return undefined
     let frame: number | null = null
     let preparedTarget: HTMLElement | null = null
     let focusObserved = false
@@ -3227,6 +3252,7 @@ export function CampWorkspace({
       frame = null
       const timeline = timelineScrollRef.current
       const canObserve = conversationView === 'conversation'
+        && !singleChatVisible
         && document.visibilityState === 'visible'
         && document.hasFocus()
         && timeline !== null
@@ -3237,16 +3263,16 @@ export function CampWorkspace({
       if (canObserve && timeline) {
         const viewport = timeline.getBoundingClientRect()
         for (const node of timeline.querySelectorAll<HTMLElement>('[data-message-id]')) {
-          if (!rectanglesOverlap(node.getBoundingClientRect(), viewport)) continue
+          if (!node.getClientRects().length || !rectanglesOverlap(node.getBoundingClientRect(), viewport)) continue
           const messageId = node.dataset.messageId
           const campTurnId = node.dataset.campTurnId
           if (messageId) messageIds.add(messageId)
-          if (campTurnId) campTurnIds.add(campTurnId)
+          if (campTurnId && !node.classList.contains('user')) campTurnIds.add(campTurnId)
         }
         const approvalNode = approvalDockRef.current?.querySelector<HTMLElement>(
           '[data-approval-id]'
         ) ?? null
-        if (approvalNode && rectanglesOverlap(approvalNode.getBoundingClientRect(), {
+        if (approvalNode && approvalNode.getClientRects().length > 0 && rectanglesOverlap(approvalNode.getBoundingClientRect(), {
           top: 0,
           right: window.innerWidth,
           bottom: window.innerHeight,
@@ -3258,6 +3284,7 @@ export function CampWorkspace({
       }
       const sources: VisibleNotificationSources = {
         campId: snapshot.camp.id,
+        surfaceVisible: canObserve,
         snapshotSequence: snapshot.throughGlobalSequence,
         messageIds: [...messageIds].sort(),
         campTurnIds: [...campTurnIds].sort(),
@@ -3273,6 +3300,9 @@ export function CampWorkspace({
       frame = window.requestAnimationFrame(publish)
     }
     const timeline = timelineScrollRef.current
+    const observer = new MutationObserver(schedule)
+    if (timeline) observer.observe(timeline, { subtree: true, childList: true, attributes: true })
+    if (approvalDockRef.current) observer.observe(approvalDockRef.current, { subtree: true, childList: true, attributes: true })
     schedule()
     timeline?.addEventListener('scroll', schedule, { passive: true })
     window.addEventListener('resize', schedule)
@@ -3280,6 +3310,7 @@ export function CampWorkspace({
     document.addEventListener('visibilitychange', schedule)
     return () => {
       if (frame !== null) window.cancelAnimationFrame(frame)
+      observer.disconnect()
       timeline?.removeEventListener('scroll', schedule)
       window.removeEventListener('resize', schedule)
       window.removeEventListener('focus', schedule)
@@ -3287,6 +3318,7 @@ export function CampWorkspace({
     }
   }, [
     conversationView,
+    singleChatVisible,
     onVisibleNotificationSources,
     snapshot.approvals,
     snapshot.camp.id,
@@ -4140,7 +4172,7 @@ export function CampWorkspace({
                           <AgentRunFileChangesTimelineCard key={`${changes.agentRunId}:${changes.executionEpoch}`}
                             changes={changes} onOpenReview={(selectedEvidenceFileId) => {
                               return filePreview?.openFileChanges(snapshot.camp.id, changes, selectedEvidenceFileId)
-                            }} />
+                            }} onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(changes, evidenceFileId)} />
                         ))}
                       </section>
                     )
@@ -4166,6 +4198,7 @@ export function CampWorkspace({
                         onOpenReview={(selectedEvidenceFileId) => {
                           return filePreview?.openFileChanges(snapshot.camp.id, timelineItem.changes, selectedEvidenceFileId)
                         }}
+                        onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(timelineItem.changes, evidenceFileId)}
                       />
                     )
                     continue
@@ -4453,6 +4486,10 @@ export function CampWorkspace({
                                 selectedEvidenceFileId
                               )
                             }}
+                            onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(
+                              fileChangeItem.changes,
+                              evidenceFileId
+                            )}
                           />
                         ))}
                         <MessageActions
@@ -4579,6 +4616,13 @@ export function CampWorkspace({
             </CampDetailPopover>}
             {snapshot.camp.activationState === 'active' && (
               <SingleChatPanel
+                target={singleChatTarget}
+                notificationFocus={notificationFocus?.kind === 'single_chat' ? notificationFocus : null}
+                onNotificationFocusPresented={onNotificationFocusPresented}
+                onVisibleNotificationSources={onVisibleSingleChatSources}
+                profileById={profileById}
+                busy={busy}
+                onResolveApproval={onResolveApproval}
                 campId={snapshot.camp.id}
                 members={snapshot.members}
                 entryHost={detailEntryHost}
@@ -7154,15 +7198,19 @@ function FirstRunCampWelcome({
 
 export function AgentRunFileChangesTimelineCard({
   changes,
-  onOpenReview
+  onOpenReview,
+  onOpenCurrent
 }: {
   changes: AgentRunFileChangesView
   onOpenReview(selectedEvidenceFileId: string | undefined, trigger: HTMLButtonElement): string | void
+  onOpenCurrent(evidenceFileId: string, trigger: HTMLButtonElement): void
 }): JSX.Element {
   const find = useOptionalFileFind()
   const [showAllFiles, setShowAllFiles] = useState(false)
   const visibleFiles = showAllFiles ? changes.files : changes.files.slice(0, 3)
   const additionalFileCount = Math.max(0, changes.files.length - 3)
+  const defaultPreviewTarget = agentRunFileChangesPreviewTarget(changes)
+  const hasReviewableDiff = defaultPreviewTarget?.kind === 'review'
   useEffect(() => {
     setShowAllFiles(false)
   }, [changes.agentRunId, changes.executionEpoch])
@@ -7172,8 +7220,20 @@ export function AgentRunFileChangesTimelineCard({
         <button
           className="run-file-changes-card-header"
           type="button"
-          aria-label={`查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
-          onClick={(event) => onOpenReview(undefined, event.currentTarget)}
+          disabled={!defaultPreviewTarget}
+          aria-label={hasReviewableDiff
+            ? `查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`
+            : defaultPreviewTarget
+              ? `打开当前文件 ${defaultPreviewTarget.file.path}，${agentRunFileChangesSummaryLabel(changes)}`
+              : `Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
+          onClick={(event) => {
+            if (!defaultPreviewTarget) return
+            if (defaultPreviewTarget.kind === 'review') {
+              onOpenReview(undefined, event.currentTarget)
+            } else {
+              onOpenCurrent(defaultPreviewTarget.file.evidenceFileId, event.currentTarget)
+            }
+          }}
         >
           <span className="run-file-changes-card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -7185,10 +7245,12 @@ export function AgentRunFileChangesTimelineCard({
             <strong>Files Changed</strong>
             <span>{agentRunFileChangesSummaryLabel(changes)}</span>
           </span>
-          <span className="run-file-changes-card-view" aria-hidden="true">查看变化</span>
+          <span className="run-file-changes-card-view" aria-hidden="true">
+            {hasReviewableDiff ? '查看变化' : '查看文件'}
+          </span>
         </button>
         {find && <button type="button" className="file-find-icon" aria-label="查找这次文件变化" title="查找这次文件变化"
-          disabled={!changes.files.some(file => file.presentationKind !== 'operation_only')}
+          disabled={!hasReviewableDiff}
           onClick={event => { const id = onOpenReview(undefined, event.currentTarget); if (id) find.request(id, true) }}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg>
         </button>}
@@ -7199,8 +7261,16 @@ export function AgentRunFileChangesTimelineCard({
             key={file.evidenceFileId}
             className="run-file-change-file"
             type="button"
-            aria-label={`查看 ${file.path} 的文件变化`}
-            onClick={(event) => onOpenReview(file.evidenceFileId, event.currentTarget)}
+            aria-label={agentRunFileChangeHasReviewableDiff(file)
+              ? `查看 ${file.path} 的文件变化`
+              : `打开当前文件预览：${file.path}`}
+            onClick={(event) => {
+              if (agentRunFileChangeHasReviewableDiff(file)) {
+                onOpenReview(file.evidenceFileId, event.currentTarget)
+              } else {
+                onOpenCurrent(file.evidenceFileId, event.currentTarget)
+              }
+            }}
           >
             <code title={file.path}>{file.path}</code>
             <span className="run-file-change-stats" aria-hidden="true">

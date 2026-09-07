@@ -7,6 +7,7 @@ import type {
   CampMemberView,
   CanonicalRuntimeActivityView,
   SingleChatSnapshot,
+  NotificationSingleChatSource,
   StoredCommandResult
 } from '@contracts'
 import { RunExecutionDisclosure } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
@@ -93,6 +94,7 @@ function command(
 }
 
 const terminalSnapshot: SingleChatSnapshot = {
+  approvals: [],
   conversation: {
     id: conversationId, campId, agentId: 'agent_1', version: 4, status: 'active', lastMessageSequence: 3,
     lastAcceptedPublicBoundarySequence: 19, activeAgentRunId: null,
@@ -125,13 +127,13 @@ const terminalSnapshot: SingleChatSnapshot = {
   pendingInputs: { executionActive: false, items: [], editSession: null },
   agentRuns: [
     {
-      id: 'run-complete', triggerConversationMessageId: 'message-user-1', status: 'succeeded', version: 3,
+      id: 'run-complete', campTurnId: 'turn-run-complete', triggerConversationMessageId: 'message-user-1', status: 'succeeded', version: 3,
       executionEpoch: 1, cancelRequestedAt: null, lastErrorCode: null, createdAt: '2026-09-03T10:00:00.000Z',
       startedAt: '2026-09-03T10:00:00.000Z', endedAt: '2026-09-03T10:39:17.000Z',
       finalConversationMessageId: 'message-agent-1', executionEvidenceCount: 4
     },
     {
-      id: 'run-cancelled', triggerConversationMessageId: 'message-user-2', status: 'cancelled', version: 3,
+      id: 'run-cancelled', campTurnId: 'turn-run-cancelled', triggerConversationMessageId: 'message-user-2', status: 'cancelled', version: 3,
       executionEpoch: 1, cancelRequestedAt: '2026-09-03T11:05:38.000Z', lastErrorCode: null,
       createdAt: '2026-09-03T11:00:00.000Z', startedAt: '2026-09-03T11:00:00.000Z',
       endedAt: '2026-09-03T11:05:38.000Z', finalConversationMessageId: null, executionEvidenceCount: 1
@@ -162,7 +164,7 @@ function runningSnapshot(): SingleChatSnapshot {
       createdAt: '2026-09-03T12:00:00.000Z'
     }],
     agentRuns: [...terminalSnapshot.agentRuns, {
-      id: 'run-running', triggerConversationMessageId: 'message-user-3', status: 'running', version: 2,
+      id: 'run-running', campTurnId: 'turn-run-running', triggerConversationMessageId: 'message-user-3', status: 'running', version: 2,
       executionEpoch: 1, cancelRequestedAt: null, lastErrorCode: null, createdAt: '2026-09-03T12:00:00.000Z',
       startedAt: '2026-09-03T12:00:00.000Z', endedAt: null, finalConversationMessageId: null,
       executionEvidenceCount: 2
@@ -337,10 +339,20 @@ Object.assign(window, {
   }
 })
 
+let locateNotification: (conversation: string) => void
+const notificationPresentations: number[] = []
+let notificationRequest = 0
+
 function Fixture(): React.JSX.Element {
   const [entryHost, setEntryHost] = useState<HTMLDivElement | null>(null)
   const [visible, setVisible] = useState(true)
   const [phase, setPhase] = useState<Phase>('terminal')
+  const [notificationTarget, setNotificationTarget] = useState<(NotificationSingleChatSource & { requestId: number }) | null>(null)
+  locateNotification = conversation => {
+    setVisible(true)
+    setNotificationTarget({ conversationId: conversation, agentId: 'agent_1', agentDisplayName: '爱丽丝',
+      agentRunId: 'run-complete', requestId: ++notificationRequest })
+  }
   useEffect(() => {
     phaseListener = setPhase
     return () => { phaseListener = null }
@@ -353,6 +365,11 @@ function Fixture(): React.JSX.Element {
     <main className="single-chat-fixture-stage">
       <PublicExecutionFixture phase={phase} />
       <SingleChatPanel
+        target={notificationTarget}
+        notificationFocus={notificationTarget ? { requestId: notificationTarget.requestId,
+          kind: 'single_chat', conversationId: notificationTarget.conversationId, agentRunId: notificationTarget.agentRunId,
+          campTurnId: 'turn-run-complete', active: true } : null}
+        onNotificationFocusPresented={requestId => { if (!notificationPresentations.includes(requestId)) notificationPresentations.push(requestId) }}
         campId={campId}
         members={members}
         entryHost={entryHost}
@@ -368,6 +385,7 @@ createRoot(document.getElementById('root')!).render(<Fixture />)
 
 Object.assign(window, {
   singleChatTest: {
+    notification: (conversation: string) => locateNotification(conversation),
     settle: async () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     },
@@ -424,7 +442,11 @@ Object.assign(window, {
         composerActionsBounds: composerActions?.getBoundingClientRect().toJSON() ?? null,
         sendRequests: requests.filter((request) => request.method === 'singleChat.send').length,
         cancelRequests: requests.filter((request) => request.method === 'agentRuns.cancel').length,
-        background: panel ? getComputedStyle(panel).backgroundColor : null
+        background: panel ? getComputedStyle(panel).backgroundColor : null,
+        notificationPresentations,
+        notificationFocusedRun: (document.activeElement as HTMLElement)?.dataset.singleChatRunId,
+        openRequests: requests.filter(request => request.method === 'singleChat.open').length,
+        notificationGets: requests.filter(request => request.method === 'singleChat.get').map(request => request.params)
       }
     }
   }

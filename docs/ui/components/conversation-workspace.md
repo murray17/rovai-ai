@@ -40,7 +40,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v16](../../contracts/camp-open-projection-v16.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v17](../../contracts/camp-open-projection-v17.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -337,13 +337,13 @@ Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即�
 “结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，
 并提供“不再询问”复选框；选择后只把该确认偏好保存在本机。结束成功立即从产品 surface 移除该 transcript，之后与
 同一队员发起单聊显示新的空白 Conversation。具体 ended/审计保留、取消和迟到事件行为由
-[Single Chat v2](../../contracts/single-chat-v2.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
+[Single Chat v3](../../contracts/single-chat-v3.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
 
 panel 保留明确的收起按钮与 `Esc`，对象菜单和确认 Dialog 打开时 `Esc` 先关闭最上层浮层。选择器、Disclosure、停止、
 结束和发送均需可键盘到达并有可见 `focus-visible`；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
 不能遮住全局侧栏或溢出可视区；reduced motion 关闭非必要位移和旋转动画但保留状态变化。
 
-领域、权限与输出路由见 [Single Chat v2](../../contracts/single-chat-v2.md)，组件数据流见
+领域、权限与输出路由见 [Single Chat v3](../../contracts/single-chat-v3.md)，组件数据流见
 [Single Chat Architecture](../../architecture/single-chat.md)。
 
 ## Camp 执行过程
@@ -556,8 +556,12 @@ Run 已成功、失败或取消但没有公开消息时，图片与文件变化�
 
 文件名顶格排列且不使用横线分隔。display root 内文件显示相对路径，Runtime 明确报告的 root 外文件显示规范化
 绝对路径。卡片默认显示三行，更多文件由“再显示 N 个文件 / 收起文件”在原位切换；不增加行间分隔。
-header 右侧是浅边框、非品牌色且没有箭头的“查看变化”，hover/focus 使用轻微底色。点击 header、“查看变化”或任一文件行
-在[文件预览区](file-preview.md#file-change-标签页)打开 `File Change·文件名` 标签页；从文件行进入时预选该文件。
+卡片含可靠差异时，header 右侧是浅边框、非品牌色且没有箭头的“查看变化”，hover/focus 使用轻微底色；点击 header
+进入[文件预览区](file-preview.md#file-change-标签页)的 `File Change·文件名` 标签页，并优先保留仍可审查的历史选择，
+否则选择第一个可审查文件。点击有可靠差异的文件行进入同一 Review 并预选该文件。点击 operation-only 文件行直接以
+既有 `run_evidence / open_current` 来源打开普通当前文件 Tab。整张卡片都没有可靠差异时，header 文案改为“查看文件”
+并打开第一项当前文件；具体文件仍由对应行精确选择。当前文件只有在来源校验和首屏读取成功后才提交导航，失败只显示
+danger Toast“无法打开该文件”，不切换预览或启动系统应用。
 卡片不显示时间、“已保存”、Git 状态、参与运行或
 底部 metadata。
 
@@ -565,8 +569,9 @@ Review 与普通文件共用预览区和标签栏，正常双栏中保留左侧�
 宽预览内部使用文件列表与 Evidence 阅读面；窄预览改用文件选择框，单文件省略切换控件。
 完整净差异显示 unified diff 及可靠 hunk、旧/新行号；exact mutation 不显示 hunk、行号或推测上下文；history
 保留全部 operation 的时序与计数，但只渲染有可靠 diff 的代码块，并将可见代码块从“修改 1”连续编号，不为
-operation-only 记录生成空白占位块。exact mutation 与 history 不显示额外解释提示；operation-only 文件仍可选择，
-右侧显示“没有可审查的差异内容”。“打开当前文件”通过既有来源校验打开普通文件 Tab，历史 Review 保留原
+operation-only 记录生成空白占位块。exact mutation 与 history 不显示额外解释提示；在已经打开的混合 Review 内，
+operation-only 文件仍可选择，右侧显示“没有可审查的差异内容”。卡片上的 operation-only 入口直接打开当前文件，
+不以内联当前正文补齐历史 Review。“打开当前文件”通过既有来源校验打开普通文件 Tab，历史 Review 保留原
 选择和阅读位置；关闭预览或在单 Pane 模式返回时恢复原会话，不默认跳转系统编辑器。
 
 卡片只读取不可变 AgentRun projection 与受管 detail blob，不读取当前 workspace 或重新执行 Git。`no_changes` 和

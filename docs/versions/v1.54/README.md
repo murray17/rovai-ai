@@ -39,6 +39,8 @@ Automation。每次实际执行创建一个普通 Camp，把冻结的 Prompt 交
   AutomationRun 成功状态不受通知失败影响。
 - Agent CLI 增加 `automation list|get|create|run|close|update|delete`，Built-in Tool Transport、CLI command 和
   Runtime capability 同步升级为 v23；管理型 mutation 仍只在用户明确要求时调用。
+- 同版本后续收敛 Files Changed 预览路由：有可靠差异时进入不可变 Review，operation-only 文件直接打开当前文件；
+  当前文件失败不切换预览，也不被用于补造历史差异。
 
 ## 跨版本文档影响
 
@@ -46,12 +48,12 @@ Automation。每次实际执行创建一个普通 Camp，把冻结的 Prompt 交
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.53 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引和前后链接建立唯一 current v1.54 |
 | Decisions | 已更新 | [V1.54-D01](decisions.md#v1-54-d01)记录不可恢复的领取与原子派发；[V1.54-D02](decisions.md#v1-54-d02)记录运行和通知分离；CURRENT 已纳入导航 |
-| Contracts | 已更新 | [Scheduled Automation v1](../../contracts/scheduled-automation-v1.md)定义领域状态、事务、恢复和通知；[Built-in Tool Transport v23](../../contracts/builtin-tool-transport-v23.md)定义七项新增操作 |
+| Contracts | 已更新 | [Scheduled Automation v1](../../contracts/scheduled-automation-v1.md)定义领域状态、事务、恢复和通知；[Built-in Tool Transport v23](../../contracts/builtin-tool-transport-v23.md)定义七项新增操作；[File Preview v9](../../contracts/file-preview-v9.md)定义 Files Changed 的 Diff/当前文件路由与成功后提交边界 |
 | Architecture | 已更新 | [Scheduled Automation 架构](../../architecture/scheduled-automation.md)、Built-in Runtime、基础不变量与 Architecture 索引同步组件职责和控制流 |
-| UI | 已更新 | [Automation 工作区](../../ui/components/automation-workspace.md)、App Shell 与组件索引记录一级入口、表单、状态和响应式行为 |
+| UI | 已更新 | [Automation 工作区](../../ui/components/automation-workspace.md)、App Shell 与组件索引记录一级入口、表单、状态和响应式行为；[Camp 文件预览区](../../ui/components/file-preview.md)与[Camp 会话工作区](../../ui/components/conversation-workspace.md)记录 operation-only 直接文件预览 |
 | Runtime Activity | 确认无需更新 | Automation 创建普通 CampTurn/AgentRun，并复用现有 Canonical Activity；没有新增 Runtime activity kind 或映射 |
 | Runtime compatibility | 确认无需更新 | Runtime 启动、能力、模型、平台准入和 provider wire 均未变化；仅 Built-in catalog compatibility digest 升级 |
-| Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture/UI 索引、版本指针与当前决定导航均加入 Scheduled Automation 当前入口 |
+| Documentation routing | 已更新 | 文档任务导航、Contracts/Architecture/UI 索引、版本指针与当前决定导航均加入 Scheduled Automation 当前入口，并把文件预览入口推进到 File Preview v9 |
 | Root README | 确认无需更新 | README 讲解团队协作主路径而不枚举全部工作台功能；本功能由当前版本和用户指南后续发布说明承载 |
 
 ## References
@@ -62,3 +64,14 @@ Automation。每次实际执行创建一个普通 Camp，把冻结的 Prompt 交
 - [Scheduled Automation 架构](../../architecture/scheduled-automation.md)
 - [Automation 工作区](../../ui/components/automation-workspace.md)
 - [Built-in Tool Transport v23](../../contracts/builtin-tool-transport-v23.md)
+- [File Preview v9](../../contracts/file-preview-v9.md)
+
+
+## 通知交互补充
+
+本版本补充本机通知：公屏与每段单聊独立识别，当前阅读区完成不弹卡；精确单聊通知、私有审批、两层
+卡片文案、单卡队列与暂停剩余时间按确认交互稿落地。协议入口为
+[Notification Episode v6](../../contracts/notification-episode-v6.md)、[Current User Attention v5](../../contracts/current-user-attention-v5.md)、
+[Single Chat v3](../../contracts/single-chat-v3.md)、[Camp Open Projection v17](../../contracts/camp-open-projection-v17.md)。
+Migration 146 只变更未来 notification source trigger，保留 v1.54 / projection 96 的存储形状和历史处置。
+本地 UI 可逆交互与精确来源约束由合同说明，不新增重复的 Version Decision。验证记录见实施计划。

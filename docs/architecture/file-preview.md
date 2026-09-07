@@ -35,12 +35,16 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v8](../contracts/file-preview-v8.md) 的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v9](../contracts/file-preview-v9.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有按 Camp 隔离的窗口内 Tab shell、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web
   入口；inline-code 和正文不进入文件识别，也不读取磁盘。Tab shell 不拥有文件能力或当前文件事实。
 
 预览仅提供阅读能力。文字选择与系统复制是本地阅读行为，不连接 Composer 写入、消息持久化或 Agent input；
 引用能力不在当前组件图内。
+
+`Files Changed` 卡片的入口由 Renderer 根据冻结的 `presentationKind` 路由：可靠差异进入不可变 Review，
+`operation_only` 使用同一 Run Evidence 身份打开普通当前文件 Tab。后者仍经过 Core/Main 当前文件映射与具体文件能力
+校验，并采用成功后提交；它不把当前文件内容写回历史 Evidence，也不改变 Runtime 文件变化投影。
 
 任何打开来源必须先成为封闭 `OpenFilePreviewRequest`。消息来源中的 `rawReference` 必须由 Core 证明是 exact
 CampMessage 的显式本地 Markdown link destination；Core 返回的 root/base/candidate 只在 Core↔Main 内部存在；
