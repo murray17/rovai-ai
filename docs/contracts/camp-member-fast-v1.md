@@ -4,7 +4,7 @@ name: Camp Member Fast
 version: v1
 status: accepted
 source_version: v1.34
-last_updated: 2026-08-31
+last_updated: 2026-09-07
 ---
 
 # Camp Member Fast v1
@@ -50,13 +50,14 @@ Runtime 自动 rebind 保留旧 Run 的冻结偏好及请求档位，不重读�
 - Camp scope 不符返回 `camp_scope_mismatch`；旧绑定返回 `runtime_binding_conflict`；成员不活跃、绑定不支持
   或显式覆盖缺少合格资格返回 `camp_member_fast_unavailable`。显式恢复默认不要求资格仍可用。
 - `camps.members.fast.check { campId, agentId }` 是 metadata 检查，返回可选 Fast view。
-  使用现有 Runtime Check Manager 的队列、同 Runtime 串行和有界进程清理，不新增页面轮询。普通打开 Camp
-  只读缓存；用户展开队员浮层后，Renderer 对尚无有效结果的 Claude/Codex 队员静默调用该接口。
+  使用现有 Runtime Check Manager 的队列、同 Runtime 串行和有界进程清理，不新增页面轮询。Core 的普通 Camp 投影
+  只读缓存；进入当前 Camp 工作区后，Renderer 对尚无有效结果的活跃 Claude/Codex 队员静默调用该接口，
+  不再等待展开队员浮层。执行台与队员浮层共用同一份工作区缓存。
   `light_ready` 尚无完整原生能力，检查接口须先复用 `AvailabilityCheck` 补齐能力快照，再检查 Fast 资格；
   不能把轻检中缺失的 Codex 每轮档位能力当成不支持，也不能记录合格后再被只读投影的 `ready` 门槛挡住。
   每位队员至多一个在途请求；支持与不支持的结果均在当前 Camp 工作区缓存，重复展开或切换浮层 Tab 不重测。
   当前绑定、模型或 Installation 检测依据变化时失效旧结果；旧请求先结束，再检测当前绑定，迟到响应不能恢复旧入口。
-  请求失败只隐藏入口，下次展开可重试，不显示检测占位、成功通知或错误 Toast。下一次真实执行仍会刷新资格；
+  请求失败只隐藏入口，下次展开队员浮层或选择执行队员可重试，不显示检测占位、成功通知或错误 Toast。下一次真实执行仍会刷新资格；
   资格暂时不可用不清除覆盖，也不允许从客户端推断官方认证或能力。
 - `CampMemberView.fast` 为可选字段，只包含 `runtimeBindingRevision`、`fastOverride`、`runtimeDefaultFast`。
   过期、未验证、不合格、已离队和其他 Runtime 不投影该字段。Claude 的默认始终返回未知。
@@ -106,7 +107,7 @@ fallback/cooldown 后下一次 Run 仍消费原三态偏好。既有 Run/epoch �
 
 ## Renderer 合同
 
-沿用成员浮层中的 Fast 胶囊：视觉 20–22px、目标至少 28px、字体至少项目紧凑基线 10.5px。
+成员浮层与共享 ExecutionDrawer 顶栏复用同一个 Fast 胶囊和当前 Camp/member 偏好：视觉 20–22px、目标至少 28px、字体至少项目紧凑基线 10.5px。
 按钮只表达后续执行偏好。未知默认采用中性样式，可访问名称说明继承；开启高亮表示请求 Fast，
 不宣称已生效，不显示实际状态、cooldown 或请求不一致警告。Codex 可信原生默认可用于继承时的初始显示。
 `fastOverride ?? runtimeDefaultFast ?? false` 仅用于视觉，不得用于原生参数；`null` 必须省略覆盖。
@@ -114,3 +115,8 @@ fallback/cooldown 后下一次 Run 仍消费原三态偏好。既有 Run/epoch �
 点击直接切换并保存偏好，不显示费用提示、二次确认、保存成功或运行中切换提醒。
 成员菜单不提供手动检测或恢复默认项；DOM、键盘焦点和草稿保持稳定，保存失败才显示错误并保留旧值；
 长成员列表滚动，1280×720 下浮层不盖住 Composer。
+
+执行台右侧按 Fast、停止、收起排列；Fast 与停止间隔 16px，停止与收起间隔 8px。对支持检查的队员保留
+紧凑 Fast 槽位，未知资格不显示虚假的禁用控件。保存中状态与防重复提交按 Camp/member 隔离；
+只有该队员的两个入口同步变为 busy，其他队员保持外观与可操作性。无关投影刷新不清除已确认偏好或缓存；
+绑定、模型、Installation 依据变化及成员离队仍使旧结果失效，迟到检查/保存不能恢复旧入口。

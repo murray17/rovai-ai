@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AgentProfile, CampComposerDraftView, CampMemberFastView, CampSnapshot } from '@contracts'
+import type { AgentProfile, AgentRunView, CampComposerDraftView, CampMemberFastView, CampSnapshot, ExecutionConsolePlacement } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { CampWorkspace, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -19,7 +19,7 @@ const agents: AgentProfile[] = Array.from({ length: 16 }, (_, index) => ({
 const values = new Map<string, CampMemberFastView>(agents.filter((_, index) => index !== 2 && index !== 3).map(agent => [agent.agentId, {
   runtimeBindingRevision: `binding-${agent.agentId}`, fastOverride: null, runtimeDefaultFast: null
 }]))
-let updateSnapshot: (snapshot: CampSnapshot) => void
+let updateSnapshot: (snapshot: CampSnapshot | ((current: CampSnapshot) => CampSnapshot)) => void
 let updateAgents: (agents: AgentProfile[]) => void
 const initial: CampSnapshot = {
   schemaVersion: 34, throughGlobalSequence: 1,
@@ -31,12 +31,14 @@ const initial: CampSnapshot = {
   membershipReconciliations: [], tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
   executionEvidence: [], agentRunFileChanges: [], contextManifests: [], approvals: [], actions: [], timeline: []
 }
-let draft: CampComposerDraftView = { campId, body: '验收中保留的消息草稿', content: [{ kind: 'text', text: '验收中保留的消息草稿' }],
+let draft: CampComposerDraftView = { campId, body: '验收中保留的消息草稿', content: { version: 2, segments: [{ kind: 'text', text: '验收中保留的消息草稿' }] },
   revision: 1, attachments: [], replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 const requests: Array<{ method: string; params: unknown }> = []
 const checkFailures = new Set(['agent-4'])
 const heldChecks = new Map<string, Promise<void>>()
 const checksInFlight = new Map<string, number>()
+let releaseCheck: (() => void) | null = null
+heldChecks.set('agent-1', new Promise<void>(resolve => { releaseCheck = resolve }))
 let maxChecksPerMember = 0
 let currentAgents = agents
 let bindingSequence = 0
@@ -53,6 +55,7 @@ Object.assign(window, { rovai: {
   request: async (method: string, params?: Record<string, any>): Promise<unknown> => {
     requests.push({ method, params })
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
+    if (method === 'camp.pendingInputs.get') return {campId, executionActive: false, items: [], editSession: null}
     if (method === 'camp.composerDraft.get') return draft
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
     if (method === 'camps.members.fast.check') {
@@ -87,6 +90,7 @@ function Fixture(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState(initial)
   const [profiles, setProfiles] = useState(agents)
   const [open, setOpen] = useState(false)
+  const [placement, setPlacement] = useState<ExecutionConsolePlacement>('inspector')
   const [tab, setTab] = useState<CampInspectorTab>('members')
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   const [notice, setNotice] = useState('')
@@ -98,6 +102,12 @@ function Fixture(): React.JSX.Element {
     <main className="content task-content">
       <CampWorkspace snapshot={snapshot} projectName="隔离验收" agents={profiles} busy={false} stopping={false}
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
+        executionPlacement={placement} onExecutionPlacementChange={async value => { setPlacement(value); return value }}
+        onCancelAgentRun={async run => {
+          await new Promise<void>(resolve => { releaseStop = resolve })
+          setSnapshot(current => ({ ...current, agentRuns: current.agentRuns.map(item => item.id === run.id
+            ? {...item, status: 'cancelled', cancelRequestedAt: now, cancelAcknowledgedAt: now, endedAt: now} : item) }))
+        }}
         onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} inspectorTab={tab} detailEntryHost={entryHost}
         onOpenInspector={next => { setTab(next); setOpen(true) }} onCloseInspector={() => setOpen(false)} onNotify={setNotice} />
       <span className="sr-only" data-fixture-notice>{notice}</span>
@@ -107,7 +117,7 @@ function Fixture(): React.JSX.Element {
 createRoot(document.getElementById('root')!).render(<Fixture />)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let bookmarkedButton: HTMLElement | null = null
-let releaseCheck: (() => void) | null = null
+let releaseStop: (() => void) | null = null
 Object.assign(window, { fastTest: {
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   bookmark: () => { bookmarkedButton = element('.camp-fast-toggle') },
@@ -116,6 +126,33 @@ Object.assign(window, { fastTest: {
     const value = { ...values.get('agent-0')!, observedFastState: state, unavailableReason: 'Fast 暂时不可用，本次按标准速度执行' }
     values.set('agent-0', value)
     updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
+  },
+  releaseStop: () => { releaseStop?.(); releaseStop = null },
+  refresh: () => updateSnapshot(current => ({ ...current, throughGlobalSequence: current.throughGlobalSequence + 1,
+    members: current.members.map(member => ({ ...member, fast: member.fast ? {...member.fast} : undefined })) })),
+  showExecution: () => {
+    const runs: AgentRunView[] = agents.slice(0, 3).map(agent => ({
+      id: `run-${agent.agentId}`, campTurnId: `turn-${agent.agentId}`, conversationId: `conversation-${agent.agentId}`,
+      agentId: agent.agentId, taskId: null, responsibilityKey: `direct:${agent.agentId}`, responsibilityGeneration: 0,
+      purpose: '执行台 Fast 与停止布局验收', completionRole: 'required', status: 'running', waitReason: null,
+      cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, terminalResolutionSource: null,
+      terminalReasonCode: null, failure: null, runtimeModel: {modelId: 'fixture-model'}, executionEpoch: 1,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
+      a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0, executionEvidenceCount: 1,
+      hasUnsettledExternalEffects: false, workspace: {path: '/fixture/workspace'}, startingGitObservation: null,
+      endingGitObservation: null, version: 1, createdAt: now, startedAt: now, endedAt: null, updatedAt: now
+    }))
+    updateSnapshot(current => ({...current, agentRuns: runs, turns: runs.map(run => ({
+      id: run.campTurnId, triggerType: 'camp_message', triggerId: 'fixture-message', status: 'running',
+      cancelRequestedAt: null, aggregateReasonCode: null, version: 1, createdAt: now, updatedAt: now, endedAt: null,
+      executionBudget: {schemaVersion: 1, acceptedAt: now, deadlineAt: '2026-08-31T01:00:00Z', elapsedSeconds: 0,
+        maxAgentRunResponsibilities: 20, maxAcceptedA2a: 100, allocatedAgentRunResponsibilities: 1, acceptedA2a: 0,
+        exhaustedAt: null, exhaustionReason: null, exhaustionCommandId: null}
+    })), executionEvidence: runs.map(run => ({
+      id: `evidence-${run.agentId}`, agentRunId: run.id, executionEpoch: 1, sequence: 1, eventType: 'agent.text.delta',
+      kind: 'narration', phase: 'updated', payload: {itemId: `message-${run.agentId}`, delta: '检查执行台 Fast、停止与收起按钮。'},
+      contentBlobId: null, contentByteCount: 0, isTruncated: false, occurredAt: now
+    }))}))
   },
   failNext: () => { failNext = true },
   holdCheck: (agentId: string) => {
@@ -139,8 +176,8 @@ Object.assign(window, { fastTest: {
   snapshot: () => {
     const panel = element('.camp-detail-popover')
     const button = element('.camp-fast-toggle')
-    const composer = element('.composer')
-    const send = element('.composer-send')
+    const composer = element('.conversation-controls .composer-box')
+    const send = element('.conversation-controls .composer-primary-action')
     const scroll = element('.camp-members-panel')
     const rect = (node: HTMLElement) => node?.getBoundingClientRect().toJSON()
     const sendRect = send?.getBoundingClientRect()
@@ -149,7 +186,7 @@ Object.assign(window, { fastTest: {
       pressed: button?.getAttribute('aria-pressed'), label: button?.getAttribute('aria-label'),
       sameNode: button === bookmarkedButton, focused: document.activeElement === button,
       scrollable: scroll?.scrollHeight > scroll?.clientHeight,
-      sendHit: Boolean(sendRect && document.elementFromPoint(sendRect.x + sendRect.width / 2, sendRect.y + sendRect.height / 2)?.closest('.composer-send')),
+      sendHit: Boolean(sendRect && document.elementFromPoint(sendRect.x + sendRect.width / 2, sendRect.y + sendRect.height / 2)?.closest('.composer-primary-action')),
       toggles: document.querySelectorAll('.camp-fast-toggle').length,
       pageOverflow: document.documentElement.scrollWidth > innerWidth,
       pillHeight: element('.camp-fast-pill')?.getBoundingClientRect().height,
@@ -159,6 +196,10 @@ Object.assign(window, { fastTest: {
       checks: requests.filter(request => request.method === 'camps.members.fast.check').map(request => request.params),
       saves: requests.filter(request => request.method === 'camps.members.fast.set'),
       maxChecksPerMember,
+      memberStates: Array.from(document.querySelectorAll('.camp-inspector-member-row')).map((row, index) => {
+        const button = row.querySelector('.camp-fast-toggle'); return {agentId: agents[index].agentId,
+          pending: button?.getAttribute('aria-busy'), pressed: button?.getAttribute('aria-pressed'), opacity: button ? getComputedStyle(button).opacity : null}
+      }),
       memberFast: Object.fromEntries(Array.from(document.querySelectorAll('.camp-inspector-member-row')).map((row, index) => [agents[index].agentId, Boolean(row.querySelector('.camp-fast-toggle'))])),
       checkingText: /检测响应模式|正在检测响应模式|响应模式检测完成|恢复默认响应模式/.test(document.body.textContent ?? ''),
       saved: values.get('agent-0') }
