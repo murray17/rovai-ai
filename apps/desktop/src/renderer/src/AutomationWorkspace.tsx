@@ -10,9 +10,10 @@ import type {
 import { readErrorMessage } from './error-message'
 import { MemberAvatar } from './MemberAvatar'
 import { AutomationEditor } from './AutomationEditor'
+import { automationScheduleError } from './automation-schedule-validation'
 import { AutomationGlyph, AutomationTemplates } from './AutomationControls'
 import {
-  AUTOMATION_MIN_LIST_WIDTH, AutomationCommandError, automationFromResult, automationListWidth, defaultDraft,
+  AUTOMATION_DEFAULT_LIST_WIDTH, AUTOMATION_MIN_LIST_WIDTH, AutomationCommandError, automationFromResult, automationListWidth, defaultDraft,
   draftFingerprint, draftFromAutomation, filterAutomations, scheduleLabel, templates,
   type AutomationDraft, type AutomationFilter, type AutomationIssue, type SaveState, type TemplateId
 } from './automation-workspace-model'
@@ -53,7 +54,7 @@ export function AutomationWorkspace({
   const [deleteArmed, setDeleteArmed] = useState<string | null>(null)
   const [filter, setFilter] = useState<AutomationFilter>('all')
   const [query, setQuery] = useState('')
-  const [listWidth, setListWidth] = useState(AUTOMATION_MIN_LIST_WIDTH)
+  const [listWidth, setListWidth] = useState(AUTOMATION_DEFAULT_LIST_WIDTH)
   const [editorClosed, setEditorClosed] = useState(false)
   const [availableWidth, setAvailableWidth] = useState(1100)
   const splitRef = useRef<HTMLDivElement>(null)
@@ -181,6 +182,8 @@ export function AutomationWorkspace({
   }, [])
 
   const queueSave = useCallback((automationId: string, snapshot: AutomationDraft): Promise<void> => {
+    const validation = automationScheduleError(snapshot.schedule)
+    if (validation) return Promise.reject(new Error(validation))
     const fingerprint = draftFingerprint(snapshot)
     if (savedFingerprints.current.get(automationId) === fingerprint) return Promise.resolve()
     saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
@@ -239,6 +242,7 @@ export function AutomationWorkspace({
         await saveQueue.current.catch(() => undefined)
         if (selectedIdRef.current !== automationId) return false
         const snapshot = draftRef.current
+        if (automationScheduleError(snapshot.schedule)) return false
         if (savedFingerprints.current.get(automationId) === draftFingerprint(snapshot)) {
           return true
         }
@@ -255,7 +259,7 @@ export function AutomationWorkspace({
   }, [flushBeforeLeave, onLeaveGuardChange])
 
   useEffect(() => {
-    if (!selected || !draft.prompt.trim() || saveState === 'conflict' || saveState === 'failed') return undefined
+    if (!selected || !draft.prompt.trim() || automationScheduleError(draft.schedule) || saveState === 'conflict' || saveState === 'failed') return undefined
     const fingerprint = draftFingerprint(draft)
     if (savedFingerprints.current.get(selected.automationId) === fingerprint) return undefined
     const timer = window.setTimeout(() => {
@@ -328,7 +332,7 @@ export function AutomationWorkspace({
   }
 
   const create = async (): Promise<void> => {
-    if (!draft.prompt.trim() || !draft.memberId) return
+    if (!draft.prompt.trim() || !draft.memberId || automationScheduleError(draft.schedule)) return
     setBusy('create')
     setIssue(null)
     try {
@@ -341,7 +345,7 @@ export function AutomationWorkspace({
       savedFingerprints.current.set(created.automationId, draftFingerprint(normalizedDraft))
       setSelectedId(created.automationId)
       setDraft(normalizedDraft)
-      onNotify('定时任务已创建')
+      onNotify('定时任务已保存')
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
     } finally {
@@ -423,7 +427,7 @@ export function AutomationWorkspace({
   const selectedDirty = selected
     ? savedFingerprints.current.get(selected.automationId) !== draftFingerprint(draft)
     : false
-  const saveLabel = saveState === 'saving'
+  const saveLabel = automationScheduleError(draft.schedule) ? '未保存，请修正运行时间' : saveState === 'saving'
     ? '正在保存…'
     : saveState === 'failed'
       ? '保存失败'
@@ -436,7 +440,6 @@ export function AutomationWorkspace({
   const overview = selectedId === null
   const width = automationListWidth(listWidth, availableWidth)
   const visibleAutomations = useMemo(() => filterAutomations(automations, filter, query), [automations, filter, query])
-  const [createChoicesOpen, setCreateChoicesOpen] = useState(false)
   const closeEditor = async (): Promise<void> => {
     if (await flushBeforeLeave()) setEditorClosed(true)
   }
@@ -469,7 +472,7 @@ export function AutomationWorkspace({
       <div ref={splitRef} className="automation-split" style={{ '--automation-list-width': `${width}px` } as CSSProperties}>
         <aside className="automation-list" aria-label="定时任务列表">
           {overview && <header className="automation-page-header">
-            <div><h1 ref={overviewRef} tabIndex={-1}>定时任务</h1><p>让队员按计划创建新对话并完成工作。</p></div>
+            <div><p className="eyebrow">Automation / Scheduled</p><h1 ref={overviewRef} tabIndex={-1}>定时任务</h1><p>让队员按计划创建新对话并完成工作。</p></div>
             <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}>新建</button>
           </header>}
           {(!overview || automations.length > 0) && <div className="automation-list-controls">
@@ -477,15 +480,10 @@ export function AutomationWorkspace({
               {(['all', 'enabled', 'closed'] as const).map((value, index) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{['全部', '开启', '关闭'][index]}</button>)}
             </div>
             {!overview && <div className="automation-list-navigation">
-              <button className="automation-icon-button" type="button" aria-label="返回定时任务总览" title="返回总览" onClick={() => void showOverview()}><AutomationGlyph name="back" /></button>
-              <button className="primary-button" type="button" aria-expanded={createChoicesOpen} aria-controls="automation-create-choices" disabled={busy !== null} onClick={() => setCreateChoicesOpen((current) => !current)}>新建</button>
+              <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}>新建</button>
             </div>}
             <label className="automation-search"><AutomationGlyph name="search" /><input type="search" aria-label="搜索定时任务" placeholder="搜索定时任务" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           </div>}
-          {!overview && createChoicesOpen && <section id="automation-create-choices" className="automation-create-choices" aria-label="选择创建方式">
-            <p>从空白或模板开始</p>
-            <AutomationTemplates compact onChoose={(id) => { setCreateChoicesOpen(false); void beginNew(id) }} />
-          </section>}
           <div className="automation-list-scroll" aria-busy={loadState === 'loading'}>
             {loadState === 'loading' && automations.length === 0 && <p className="automation-list-message" role="status">正在读取任务…</p>}
             {loadState === 'error' && automations.length === 0 && <p className="automation-list-message">任务列表暂时不可用。</p>}
@@ -527,12 +525,12 @@ export function AutomationWorkspace({
             onPointerMove={(event) => { const drag = dragRef.current; if (drag?.pointerId === event.pointerId) resize(drag.width + event.clientX - drag.x) }}
             onPointerUp={(event) => { dragRef.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
             onPointerCancel={() => { dragRef.current = null }} onLostPointerCapture={() => { dragRef.current = null }}
-            onDoubleClick={() => { setListWidth(AUTOMATION_MIN_LIST_WIDTH); setEditorClosed(false) }}
+            onDoubleClick={() => { setListWidth(AUTOMATION_DEFAULT_LIST_WIDTH); setEditorClosed(false) }}
             onKeyDown={(event) => {
-              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize((editorClosed ? availableWidth - 327 : width) + (event.key === 'ArrowRight' ? 24 : -24)) }
+              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize((editorClosed ? availableWidth - 327 : width) + (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? 24 : 8)) }
               else if (event.key === 'Home') { event.preventDefault(); setListWidth(AUTOMATION_MIN_LIST_WIDTH); setEditorClosed(false) }
               else if (event.key === 'End') { event.preventDefault(); void closeEditor() }
-              else if (event.key === 'Enter') { event.preventDefault(); setEditorClosed(false); setListWidth(AUTOMATION_MIN_LIST_WIDTH) }
+              else if (event.key === 'Enter') { event.preventDefault(); setEditorClosed(false); setListWidth(AUTOMATION_DEFAULT_LIST_WIDTH) }
             }}><span /></div>
           <section className="automation-editor" aria-label={selectedId === 'new' ? '新建定时任务' : '定时任务详情'} hidden={editorClosed}>
             <header className="automation-editor-toolbar"><span>{selectedId === 'new' ? '新建' : '详情'}</span><small role="status">{selected ? saveLabel : ''}</small><button type="button" className="automation-icon-button" aria-label="返回定时任务总览" onClick={() => void showOverview()}><AutomationGlyph name="close" /></button></header>
