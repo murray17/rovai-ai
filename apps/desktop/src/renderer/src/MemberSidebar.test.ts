@@ -1,4 +1,5 @@
-import { createElement } from 'react'
+import { createElement, type ComponentProps } from 'react'
+import { MemberRosterLayout } from './MemberRosterLayout'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { PRODUCT_RUNTIME_LOGOS } from './runtime-products'
@@ -32,7 +33,7 @@ describe('v0.29 member sidebar', () => {
     expect(compactRuntimeState('unknown')).toBe('neutral')
   })
 
-  it('shows an accessible Runtime shortcut and enables local filtering at member 21', () => {
+  it('shows an accessible Runtime shortcut and enables filtering for a growing roster', () => {
     const agents = Array.from({ length: 21 }, (_, index) => (
       index === 0
         ? {
@@ -46,7 +47,7 @@ describe('v0.29 member sidebar', () => {
           }
         : profile(`agent-${index}`, `队员 ${index}`, index % 2 ? '研究员' : '设计师', 'present')
     ))
-    const markup = renderToStaticMarkup(createElement(MemberSidebar, {
+    const markup = renderSidebar({
       agents,
       runtimeAvailability: [availability('codex-cli', 'ready')],
       runtimeDiscoveryPending: false,
@@ -54,11 +55,11 @@ describe('v0.29 member sidebar', () => {
       onSelect: () => undefined,
       onCreate: () => undefined,
       onReload: async () => undefined
-    }))
+    })
 
     expect(markup).toContain('id="member-sidebar-filter"')
     expect(markup).not.toContain('member-context-return')
-    expect(markup).toContain('placeholder="名称或团队角色"')
+    expect(markup).toContain('placeholder="搜索队员"')
     expect(markup).toContain('沐瓦，Codex CLI，可用；打开运行配置')
     expect(markup).toContain('runtime-available')
     expect(markup).toContain('member-runtime-glyph')
@@ -69,11 +70,11 @@ describe('v0.29 member sidebar', () => {
     expect(markup).not.toContain('secret-match')
   })
 
-  it.each([0, 1, 13, 20, 21, 100])('renders %i active members without virtualization', (count) => {
+  it.each([0, 1, 8, 9, 13, 20, 21, 100])('renders %i active members without virtualization', (count) => {
     const agents = Array.from({ length: count }, (_, index) => (
       profile(`agent-${index}`, `队员 ${index}`, '测试角色', index % 3 === 0 ? 'away' : 'present')
     ))
-    const markup = renderToStaticMarkup(createElement(MemberSidebar, {
+    const markup = renderSidebar({
       agents,
       runtimeAvailability: [],
       runtimeDiscoveryPending: false,
@@ -81,14 +82,20 @@ describe('v0.29 member sidebar', () => {
       onSelect: () => undefined,
       onCreate: () => undefined,
       onReload: async () => undefined
-    }))
+    })
     expect(markup.match(/class="member-sidebar-row/g)?.length ?? 0).toBe(count)
-    expect(markup.includes('id="member-sidebar-filter"')).toBe(count > 20)
+    expect(markup.includes('id="member-sidebar-filter"')).toBe(count > 8)
     expect(markup).not.toContain('member-context-return')
     expect(markup).not.toContain('virtualized')
     if (count === 0) expect(markup).toContain('还没有队员')
   })
 })
+
+function renderSidebar(props: ComponentProps<typeof MemberSidebar>): string {
+  return renderToStaticMarkup(createElement(MemberRosterLayout, {
+    children: createElement(MemberSidebar, props)
+  }))
+}
 
 function profile(
   id: string,

@@ -1,9 +1,10 @@
 ---
-version: 9
+version: 10
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
   - "apps/desktop/src/renderer/src/MemberSidebar.tsx"
+  - "apps/desktop/src/renderer/src/MemberRosterLayout.tsx"
   - "apps/desktop/src/renderer/src/MemberAvatar.tsx"
   - "apps/desktop/src/renderer/src/MemberPortrait.tsx"
   - "apps/desktop/src/renderer/src/MemberAvatarCropper.tsx"
@@ -27,15 +28,23 @@ edit or remove a teammate without confusing identity with Runtime state.
 
 ## First view and layout
 
-Keep the shared 270px App rail visible on the teammate page. Inside the content area, keep a 236px
-roster as the stable secondary navigation column and the selected teammate as the flexible detail
-surface. The user can explicitly collapse the roster to 76px; remember that presentation preference
-locally. The detail scrolls internally instead of shrinking identity or actions below usability.
+Keep the shared 270px App rail visible on the teammate page. The roster shares the detail's workspace
+surface (white in Day), with a 1px divider separating the two reading planes. Its default width is 256px;
+expanded widths range from 192px to 360px and protect 400px for the detail when space permits.
+Dragging below 176px snaps to the same 76px avatar rail as the explicit collapse button; dragging a
+collapsed rail past 208px expands it. The different thresholds prevent jitter around the boundary.
+The 9px pointer target stays mounted through collapse so the gesture can reverse without losing capture.
+Expanding with the button restores the useful width before the collapse gesture. Remember width and
+collapse locally, accepting the previous collapse-only preference; viewport clamping does not overwrite
+the chosen width. Double-click or Home restores 256px, arrows resize and collapse/expand at the boundary,
+and Enter toggles collapse. The options menu provides click-based width presets. Reordering disables
+the splitter and collapse button. The detail scrolls internally instead of shrinking identity or actions below usability.
 
 The header uses the controlled portrait plus a separate circular icon. Presence and Runtime are two
-distinct inline facts: “在队” is static; “{Runtime} 可用 →” uses arrow, hover, focus and an accessible
-name to show it opens existing Runtime configuration. Do not put the Runtime fact in a grey card or
-merge the two meanings.
+distinct inline facts: “在队” is static; “{Runtime} →” uses arrow, hover, focus and an accessible name
+to show it opens existing Runtime configuration. An unconfigured teammate says “未配置运行时 →” once.
+Keep full configured Runtime status in the accessible name and in the configuration section. Do not put
+the Runtime fact in a grey card or merge the two meanings.
 
 ## Roster and order
 
@@ -43,7 +52,12 @@ Roster order comes from the authoritative Member Order. Reordering is explicit, 
 and preserves selection. Identity color and avatar remain stable across reorder. Loading or partial
 Runtime health must not reorder or hide teammates.
 
-Roster rows keep a 40px circular image, 13px name and 11px role in a 64px row with 2px gaps.
+Roster rows keep a 40px circular image, 13px name and 11px role in a 60px row without inter-row gaps.
+Use a subtle selected surface, 2px selection rail and aligned Runtime column. The header shows the total
+once; omit the redundant “在队” group when every teammate is present. If any teammate is away, show
+the meaningful presence groups and their counts. Above eight members, offer compact name/role search;
+the title reports matching / total counts while filtering. Keep creation and collapse immediately available,
+with ordering and width presets in the restrained “名册选项” menu.
 Runtime shortcuts show the existing product logo in a 22px carrier; an unconfigured teammate uses a neutral
 minus glyph. Attention, unsupported and unqualified states add a small `!` marker. Loading retains the
 product identity with a checking label. Each shortcut has a full accessible label/status tooltip and scrolls
