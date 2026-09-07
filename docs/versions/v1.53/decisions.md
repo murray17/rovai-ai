@@ -187,3 +187,35 @@ Core，必须先反向物化所有 marker 行并验证清零，再回退 authori
 当前规范见 [Domain Command Result v1](../../contracts/domain-command-result-v1.md)、
 [权威写入与幂等事务](../../architecture/foundational-invariants.md#core-command-transaction)和
 [原位升级](../../architecture/availability-first-runtime.md#migration-switch)。
+
+<a id="v1-53-d07"></a>
+## V1.53-D07：Runtime 安装缺失只属于 Availability，不属于 optional subsystem health
+
+### 背景
+
+Pi 重新接入时，为了让 Core 在本机没有 Pi 的情况下继续启动，把 executable 存在性检查放进了独立
+`runtime.pi` optional subsystem。后来 Product Runtime 已统一具备 discovery、`missing | path_missing`
+Availability、成员 Readiness 与 dispatch preflight；其他 Runtime 未安装只进入这条链。Pi 的旧检查因此重复表达
+同一事实，并在 Windows 常见的未安装场景触发全局“部分功能暂不可用”和无意义的“重试受影响功能”。
+
+### 决定
+
+`runtime.<AdapterKind>` optional subsystem 只表示 Adapter 自有私有存储和进程内初始化是否成功。Pi 与其他需要
+私有目录的 Runtime 一样，只在该阶段初始化自己的 storage；不查找第三方 executable。Pi 未安装、显式路径失效、
+版本或认证不合格、capability 未验证及平台资格不足继续由统一 Runtime discovery / Availability / Readiness /
+dispatch preflight 表达和阻断。
+
+这局部替代 [V1.39-D01](../v1.39/decisions.md#v1-39-d01) 中“缺少 Pi 时 `runtime.pi` degraded”的后果；Pi 的独立
+JSONL transport、独立私有初始化以及不继承 ACP/其他 Runtime 资格 evidence 的决定仍然有效。
+
+### 后果与被拒绝方案
+
+- 未安装 Pi 不再触发全局 subsystem notice；Runtime 设置和成员状态仍明确显示“未安装”，实际执行仍 fail closed。
+- Pi 私有目录创建、权限或其他 Adapter 自有初始化失败仍只降级 `runtime.pi`，并可沿原 subsystem retry 修复。
+- 拒绝只在 Renderer 过滤 `runtime.pi`：那会掩盖真实私有初始化故障，并让 UI 与 Core 门禁分叉。
+- 拒绝让所有未安装 Runtime 都降级 subsystem：可选产品未安装不是 Rovai 进程故障，也不是重试初始化可以安装的功能。
+- 不删除 Pi Catalog 项、不自动安装 Pi、不改变 Runtime wire、数据库、平台资格或现有“未安装”文案。
+
+当前规范见 [Runtime Catalog 与 Installation 不变量](../../architecture/foundational-invariants.md#runtime-catalog-installation)、
+[Availability-first Runtime](../../architecture/availability-first-runtime.md#optional-startup-boundary)与
+[Desktop Runtime Availability v2](../../contracts/desktop-runtime-availability-v2.md#7-authority-ready-and-optional-subsystem-gates)。

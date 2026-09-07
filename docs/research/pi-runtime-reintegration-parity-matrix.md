@@ -4,7 +4,7 @@ runtime: pi
 upstream: earendil-works/pi
 authority: research-evidence-only
 status: implementation-evidence
-last_updated: 2026-09-05
+last_updated: 2026-09-07
 ---
 
 # Pi Runtime 重新接入 Parity Matrix
@@ -39,7 +39,7 @@ Core parser、fence 和状态机，不替代目标版本真实 Runtime smoke。�
 | Built-in `rovai` CLI | 当前 bundled CLI、operation catalog、Charter 与 per-Run lease；真实正式 operation smoke | 通过受管 Bash 与 Fleet builtin process config；旧 smoke 曾受 provider 并发预算中断 | Pi 可通过原生 shell Tool 调用 bundled CLI；无 Pi 专有 Built-in transport | 复用当前 Built-in Tool Runtime/lease/env；真实 0.84.4 完成当前 15-operation full Run 和 resumed/new-lease Run，覆盖三种输入、Gather、exact successor read、conflict 与 lease fencing；Pi shell 本身不经过 Rovai Approval | 另外两个平台及 packaged shutdown 未验证；本机能力本身已是 `Verified + Implemented` |
 | Usage / Cache / Cost | 有结构化 usage 就实现；字段保留 source/scope/counter/input semantics/session/turn；baseline/dedupe；未知保持 NULL；不推价格 | 旧分支因未完成归因而 Disabled | `message_end.message.usage` 是该 assistant response 的权威 usage；字段含 input/output/cacheRead/cacheWrite 与 provider cost；session stats 是全 Session total | 仅 terminal assistant `message_end.message.usage` 形成 `model_call/delta/exclusive_buckets`，按 session+prompt+message digest 去重；session stats/update 不计量。真实 MiniMax Monitoring 观察到 input/output；未知 cache/reasoning/cost 保持 NULL | cache read/write 非零语义、provider cost、retry/compaction/cold resume 去重的真实计量矩阵尚未完成；不消费未证明的 ToolResult/compaction nested usage |
 | Prompt / Images / Queue / Cleanup | accepted 使用 native evidence；图片必须绑定当前授权输入；queue/retry/late event fenced；业务 cancelled 先提交；host quiescent 才进 LRU | 只发送纯文本 prompt；prompt response + V1 receipt 作为 accepted；abort+Fleet stop | RPC 原生支持 `prompt.images`、steer/follow-up/clear_queue、modes、messages/entries、stats/name、compact、auto-compaction 与 export | Formatter 22 payload 不变地发送；图片只从 ContextManifest refs/授权取得，按原顺序发送 exact base64 bytes，模型能力、MIME/digest/size 漂移在 prompt 前失败，每项 schema-2 evidence 直接绑定 Delivery。Prompt response 不接受 Delivery；首个 owner-fenced `agent_start` 原子接受并幂等发布 started。cancel/late fence 和 planned shutdown 保留 | steer/follow-up 产品 ingress、真实 queue/retry late event、compaction/export 授权、crash/invalid JSON/timeout、idle eviction、packaged shutdown 与 Core crash recovery尚未完成 |
-| Ready / Version / Platform | availability、authenticated Ready、capability、platform qualification 分离；专属 immutable evidence；每 shipped platform独立 Golden Flow | 旧分支有 deep probe/validator，但曾提前把 macOS arm64 qualified；后加 exact switch 与独立 session dir | `--version`、RPC state/catalog/extension handshake 可证明 machine ready，但不能自动证明行为资格 | Pi 专属 deep probe 已在本机 0.84.4 真实通过；维护者确认三平台目标主机验收完成后，macOS arm64、macOS x64 与 Windows x64 分别绑定 `macos-arm64-pi-v1`、`macos-x64-pi-v1`、`windows-x64-pi-v1` immutable evidence 并晋升为 `qualified`。缺安装时仍只降级 `runtime.pi`，Fast 仍 hidden | 未来平台或不兼容 Pi 版本必须重新取得独立 artifact；本次晋升不把一个平台结果外推给另一个平台，也不撤销普通 Machine Ready 与 Dispatch 门禁 |
+| Ready / Version / Platform | availability、authenticated Ready、capability、platform qualification 分离；专属 immutable evidence；每 shipped platform独立 Golden Flow | 旧分支有 deep probe/validator，但曾提前把 macOS arm64 qualified；后加 exact switch 与独立 session dir | `--version`、RPC state/catalog/extension handshake 可证明 machine ready，但不能自动证明行为资格 | Pi 专属 deep probe 已在本机 0.84.4 真实通过；维护者确认三平台目标主机验收完成后，macOS arm64、macOS x64 与 Windows x64 分别绑定 `macos-arm64-pi-v1`、`macos-x64-pi-v1`、`windows-x64-pi-v1` immutable evidence 并晋升为 `qualified`。缺安装由统一 Availability 报告 missing，`runtime.pi` 只覆盖私有初始化；Fast 仍 hidden | 未来平台或不兼容 Pi 版本必须重新取得独立 artifact；本次晋升不把一个平台结果外推给另一个平台，也不撤销普通 Machine Ready 与 Dispatch 门禁 |
 
 ## 实施结论
 
@@ -48,7 +48,8 @@ Core parser、fence 和状态机，不替代目标版本真实 Runtime smoke。�
   独占 lease 的 Camp/member invalidation scope 随领取更新。可动态刷新的 Session、Prompt、model、Bootstrap、Skill与
   Built-in lease 不进入 process compatibility digest；MCP Assignment 完全不参与 Pi compatibility。
 - Pi 是独立 `pi-jsonl-rpc` transport，不进入 ACP storage/init，也不继承 ACP capability 或平台资格。
-- Pi 未安装或不在 Runtime search environment 时只把 `runtime.pi` 标成 degraded；Core 与其他 optional subsystem 正常启动。
+- Pi 未安装或不在 Runtime search environment 时由统一 Availability 报告 missing，不降级 `runtime.pi`；Core 与其他
+  optional subsystem 正常启动。Pi 自有私有存储初始化失败仍只降级 `runtime.pi`。
 - External MCP 固定为 `Unsupported`；Pi 静默忽略 Assignment，Core 不为 Pi 建立 transport 或 Tool bridge。
 - 正式 Pi 以本次进程 `--approve` 信任项目并恢复原生 Built-in tools、Extensions、Skills、Context files 与 Prompt
   templates；v7 extension 只上报 Session 状态并逐轮注入 Bootstrap，不再审批 Tool、提交 Receipt 或发现 catalog。

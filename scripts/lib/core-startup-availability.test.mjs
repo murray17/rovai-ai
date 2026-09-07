@@ -78,6 +78,50 @@ test('optional startup failures preserve authority RPC and can recover without r
   }
 })
 
+// This owns the startup subsystem -> Runtime availability separation. Before
+// the regression fix, a missing Pi executable made both layers report a
+// failure even though executable presence belongs only to Runtime discovery.
+test('a missing Pi executable stays in Runtime availability instead of subsystem health', {
+  // macOS adds fixed package-manager locations after PATH, so a developer's
+  // installed Pi cannot be hidden without mutating the host. Linux has no such
+  // locations and Windows closes Pi discovery over the explicit override.
+  skip: process.platform === 'darwin'
+}, async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-missing-pi-availability-')))
+  const dataDir = process.platform === 'win32'
+    ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
+    : join(fixture, 'data')
+  const emptySearchPath = join(fixture, 'empty-runtime-search')
+  await mkdir(emptySearchPath)
+  const missingPi = join(fixture, 'missing-runtime', process.platform === 'win32' ? 'pi.cmd' : 'pi')
+  const core = startCore(
+    dataDir,
+    join(dataDir, 'managed-skill-library'),
+    join(dataDir, 'mcp.json'),
+    [],
+    {
+      PATH: emptySearchPath,
+      ROVAI_PI_BIN: missingPi,
+      SHELL: join(fixture, 'missing-shell')
+    }
+  )
+  try {
+    await core.ready
+    const statuses = await core.settled()
+    assert.equal(statuses.find((entry) => entry.id === 'runtime.pi')?.state, 'ready')
+
+    const health = await core.request('health.check')
+    assert.equal(
+      health.runtimeAvailability.find((entry) => entry.runtimeKind === 'pi')?.status,
+      'missing'
+    )
+  } finally {
+    await core.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 // This owns the Core RPC -> transaction -> private notification seam. Queue
 // ordering/edit semantics remain in pending_camp_input.rs; no Runtime is invoked.
 test('queued input commits notify Desktop without exposing private bodies in public history', async () => {
@@ -338,13 +382,17 @@ test('a startup retry cannot initialize a disappeared authority', async () => {
   }
 })
 
-function startCore(dataDir, skillRoot, mcpPath, extraArgs = []) {
+function startCore(dataDir, skillRoot, mcpPath, extraArgs = [], environment = {}) {
+  const spawnOptions = { cwd: repository, stdio: ['pipe', 'pipe', 'pipe'] }
+  if (Object.keys(environment).length > 0) {
+    spawnOptions.env = { ...process.env, ...environment }
+  }
   const child = spawn(binary, [
     ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root', skillRoot,
     '--mcp-config-path', mcpPath,
     ...extraArgs
-  ], { cwd: repository, stdio: ['pipe', 'pipe', 'pipe'] })
+  ], spawnOptions)
   const pending = new Map()
   const startupFrames = []
   let nextId = 0
