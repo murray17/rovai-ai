@@ -14,6 +14,7 @@ import { StructuredMentionComposer } from '../../../apps/desktop/src/renderer/sr
 import { FileOperationRow, ModifiedFileRow, ToolCallRow } from '../../../apps/desktop/src/renderer/src/ExecutionToolGroup'
 import { buildLiveExecutionProgress } from '../../../apps/desktop/src/shared/execution-presentation'
 import { FILE_PREVIEW_RATIO_STORAGE_KEY } from '../../../apps/desktop/src/renderer/src/file-preview-layout'
+import { openAgentRunCurrentFilePreview } from '../../../apps/desktop/src/renderer/src/agent-run-file-preview'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const file: ResolvedFilePreview = {
@@ -105,7 +106,8 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
   }
   let target = file
   if (request.kind === 'run_evidence' && request.action === 'open_current') {
-    const selected = changes.files.find((entry) => entry.evidenceFileId === request.evidenceFileId)
+    const selected = [...changes.files, ...operationOnlyChanges.files]
+      .find((entry) => entry.evidenceFileId === request.evidenceFileId)
     if (!selected) return unsupported()
     target = { ...file, previewKey: `current:${selected.path}`, displayPath: selected.path, fileName: selected.path.split('/').at(-1)! }
   } else if (request.kind === 'message_reference'
@@ -196,6 +198,21 @@ const changes: AgentRunFileChangesView = {
   })),
   fileCount: 2, operationCount: 2, additions: 247, deletions: 91, completedAt: '2026-08-30T08:00:00Z'
 }
+const operationOnlyChanges: AgentRunFileChangesView = {
+  schemaVersion: 2,
+  agentRunId: 'run-operation-only',
+  executionEpoch: 1,
+  files: [{
+    evidenceFileId: 'file-operation-only',
+    path: 'src/path-only.ts',
+    changeKind: 'update',
+    presentationKind: 'operation_only',
+    operationCount: 1
+  }],
+  fileCount: 1,
+  operationCount: 1,
+  completedAt: '2026-08-30T08:01:00Z'
+}
 Object.assign(window, { rovai: {
   windowControls: (window as unknown as { previewWindowControls: unknown }).previewWindowControls,
   filePreview: api,
@@ -234,6 +251,15 @@ let previewController: FilePreviewContextValue
 function Workspace(): React.JSX.Element {
   const preview = useFilePreview()
   previewController = preview
+  const openCurrent = (targetChanges: AgentRunFileChangesView, evidenceFileId: string): void => {
+    void openAgentRunCurrentFilePreview({
+      filePreview: preview,
+      campId: 'camp-1',
+      changes: targetChanges,
+      evidenceFileId,
+      onError: (message) => toolNotices.push(message)
+    })
+  }
   const [draft] = useState<ComposerDocument>({
     version: 2,
     segments: [{ kind: 'text', text: '保留这条未发送草稿' }]
@@ -284,7 +310,14 @@ function Workspace(): React.JSX.Element {
                 missing-report.ts
               </FileReferenceLink>
               <TaskTimelineCard task={task} assigneeName="未分配" onOpen={() => {}} />
-              <AgentRunFileChangesTimelineCard changes={changes} onOpenReview={(evidenceFileId) => preview.openFileChanges('camp-1', changes, evidenceFileId)} />
+              <AgentRunFileChangesTimelineCard changes={changes}
+                onOpenReview={(evidenceFileId) => preview.openFileChanges('camp-1', changes, evidenceFileId)}
+                onOpenCurrent={(evidenceFileId) => openCurrent(changes, evidenceFileId)} />
+              <div data-diff-card="operation-only">
+                <AgentRunFileChangesTimelineCard changes={operationOnlyChanges}
+                  onOpenReview={(evidenceFileId) => preview.openFileChanges('camp-1', operationOnlyChanges, evidenceFileId)}
+                  onOpenCurrent={(evidenceFileId) => openCurrent(operationOnlyChanges, evidenceFileId)} />
+              </div>
               <div className="safe-markdown">
                 <p>宽代码和表格保持各自的横向滚动，会话仍可以收窄至 420px。</p>
                 <pre><code>{'const keepConversationReadable = '.repeat(12)}</code></pre>
@@ -403,6 +436,7 @@ Object.assign(window, { previewTest: {
   pointerEvents,
   showToolRows: () => showToolRows(),
   toolState: () => ({ requests: [...fileRestores], notices: [...toolNotices], tabs: previewController.tabs.length, activeTabId: previewController.activeTabId }),
+  clearToolNotices: () => { toolNotices.splice(0) },
   failNextToolRead: () => { failNextRead = true },
   async open() {
     element('.message-file-reference')!.click()
@@ -796,7 +830,7 @@ Object.assign(window, { previewTest: {
       toggleExpanded: toggle.getAttribute('aria-expanded'), toggleVisible: visible('.file-preview-toggle'),
       separatorVisible: visible('.file-preview-toggle-divider'),
       reviewRequests: [...reviewRequests], fileOpens: [...fileOpens], fileRestores: [...fileRestores],
-      campBindings: [...campBindings], fileReads, releases: [...releases]
+      campBindings: [...campBindings], fileReads, releases: [...releases], notices: [...toolNotices]
     }
   },
   conversationSnapshot() {
@@ -807,7 +841,8 @@ Object.assign(window, { previewTest: {
       return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
     }
     const style = (selector: string, property: string) => getComputedStyle(element(selector)!).getPropertyValue(property)
-    const stats = [...document.querySelectorAll<HTMLElement>('.run-file-change-stats')]
+    const reviewableCard = element('.run-file-changes-card')!
+    const stats = [...reviewableCard.querySelectorAll<HTMLElement>('.run-file-change-stats')]
     return {
       pane: bounds('.timeline-pane'), track: bounds('.timeline-track'), task: bounds('.task-event-card'), files: bounds('.run-file-changes-card'),
       glyphWidth: bounds('.task-card-glyph')!.width, filesGlyphWidth: bounds('.run-file-changes-card-icon')!.width,

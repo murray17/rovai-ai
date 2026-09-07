@@ -1491,13 +1491,15 @@ describe('task event projections', () => {
 
     const markup = renderToStaticMarkup(createElement(AgentRunFileChangesTimelineCard, {
       changes,
-      onOpenReview: vi.fn()
+      onOpenReview: vi.fn(),
+      onOpenCurrent: vi.fn()
     }))
 
     expect(markup).toContain('Files Changed')
     expect(markup).toContain('4 个文件 · 5 次修改')
     expect(markup).toContain('class="run-file-changes-card-view"')
     expect(markup).toContain('aria-label="查看 src/app.ts 的文件变化"')
+    expect(markup).toContain('aria-label="打开当前文件预览：src/styles.css"')
     expect(markup).toContain('src/card.tsx')
     expect(markup).not.toContain('/tmp/outside-fixture.json')
     expect(markup).toContain('再显示 1 个文件')
@@ -1523,7 +1525,8 @@ describe('task event projections', () => {
 
     const markup = renderToStaticMarkup(createElement(AgentRunFileChangesTimelineCard, {
       changes,
-      onOpenReview: vi.fn()
+      onOpenReview: vi.fn(),
+      onOpenCurrent: vi.fn()
     }))
 
     expect(markup).toContain('1 个文件 · +1 −1')

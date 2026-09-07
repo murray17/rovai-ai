@@ -22,6 +22,8 @@ last_updated: 2026-09-07
 - [x] 收紧恢复边界、统一五段 Cron 求值，保证非计划编辑不重算、关闭定义可显式运行、全部活跃运行公平结算。
 - [x] 全局页面切换在离开 Automation 工作区前等待尚未保存的草稿提交，保存失败保留当前页面。
 - [x] 按 v30 修复默认总览、模板入口、筛选搜索、可调分栏和紧凑详情；增加只读运行历史分页与可见历史刷新。
+- [x] 收敛 Files Changed 预览路由：可靠差异继续进入不可变 Review，operation-only 卡片与文件行直接打开当前文件，
+  并以 preview-only 成功后提交保证失败不改变已有导航。
 - [x] 完成 Rust、TypeScript、Renderer/build、文档治理和 CLI contract 验收；真实 App 双主题视觉保留明确的环境阻断证据。
 
 ## 验收矩阵
@@ -30,9 +32,10 @@ last_updated: 2026-09-07
 | --- | --- | --- |
 | Automation 领域与 schema 定向回归 | `passed` | 名称、幂等原子派发、快照冻结、重启收口、missed/overlap/once 与 schema 对象测试通过 |
 | Rust / Built-in / CLI | `passed` | `cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、workspace all-target check、Core library 535 项、CLI 33 项和 Core binary 232 项通过；5 项手工 Runtime smoke ignored，1 项嵌套 macOS sandbox 用例因当前环境限制显式跳过 |
-| TypeScript / Renderer / Desktop build | `passed` | `pnpm typecheck`、160 files / 1633 项 Vitest、222 项 Node 测试（1 项 Windows 平台跳过）与 `pnpm build:desktop` 通过 |
+| TypeScript / Renderer / Desktop build | `passed` | `pnpm typecheck`、162 files / 1653 项 Vitest、222 项 Node 测试（1 项 Windows 平台跳过）与 `pnpm build:desktop` 通过 |
 | Automation UI 原实现审查 | `superseded` | 原先只有源码审查，没有与 v30 实际画面对照；固定 260px 分栏、默认打开详情与模板入口不符合原型，不能作为视觉还原通过的证据 |
 | v30 Renderer 交互与视觉修复 | `passed` | [隔离 Renderer 场景与截图](../../../scripts/fixtures/automation-workspace/README.md)：总览/空列表、筛选搜索、创建、历史分页、保存失败与冲突恢复；Day/Night、1040×700、720×460 等效布局与分隔条键盘操作 |
+| Files Changed operation-only 文件预览 | `passed` | Renderer 定向单测覆盖混合/无 Diff 路由与成功/失败；Electron 文件预览夹具覆盖真实点击、普通文件 Tab、无 detail 读取及失败保留当前导航 |
 | 双主题真实 App 视觉与键盘 | `environment-blocked` | 隔离 `pnpm dev` 完成 Core、CLI 和 Renderer 构建后，当前嵌套 macOS 环境以 `sandbox_apply: Operation not permitted` 阻止 Electron/Chromium sandbox 初始化；未声称原生视觉通过 |
 | 文档治理与 diff hygiene | `passed` | `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、`git diff --check` 与完整 `pnpm test` 通过 |
 
@@ -90,4 +93,5 @@ last_updated: 2026-09-07
 - 重启、等待交互和超时均先让精确关联 CampTurn 进入权威终态，再释放 Automation 并发门禁；不重新派发 Prompt。
 - 运行失败与通知失败可独立观察，通知重试不会创建新的运行。
 - Desktop 在最小窗口、Day/Night、键盘操作和保存/失败状态下仍提供完整管理路径。
+- Files Changed 不用当前文件补造历史差异；operation-only 直接文件入口只在安全预览成功后改变导航。
 - 自动化门禁全部通过；真实飞书/钉钉凭据与真实模型执行 smoke 未运行，当前证据来自契约、领域回归和构建测试。

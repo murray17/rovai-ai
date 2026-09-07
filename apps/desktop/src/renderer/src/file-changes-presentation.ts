@@ -1,5 +1,33 @@
 import type { AgentRunFileChangesView } from '@contracts'
 
+type AgentRunFileChangeSummary = AgentRunFileChangesView['files'][number]
+
+export type AgentRunFileChangesPreviewTarget = {
+  kind: 'review' | 'current'
+  file: AgentRunFileChangeSummary
+}
+
+export function agentRunFileChangeHasReviewableDiff(file: AgentRunFileChangeSummary): boolean {
+  return file.presentationKind !== 'operation_only'
+}
+
+export function agentRunFileChangesPreviewTarget(
+  changes: AgentRunFileChangesView,
+  evidenceFileId?: string
+): AgentRunFileChangesPreviewTarget | null {
+  const requestedFile = evidenceFileId
+    ? changes.files.find((file) => file.evidenceFileId === evidenceFileId)
+    : undefined
+  const file = requestedFile
+    ?? changes.files.find(agentRunFileChangeHasReviewableDiff)
+    ?? changes.files[0]
+  if (!file) return null
+  return {
+    kind: agentRunFileChangeHasReviewableDiff(file) ? 'review' : 'current',
+    file
+  }
+}
+
 export function agentRunFileChangesSummaryLabel(changes: AgentRunFileChangesView): string {
   if (changes.additions !== undefined && changes.deletions !== undefined) {
     return `${changes.fileCount} 个文件 · +${changes.additions} −${changes.deletions}`
