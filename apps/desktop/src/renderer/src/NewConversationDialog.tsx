@@ -11,6 +11,8 @@ import type {
   WorkspaceInspection,
   WorkspaceSelection
 } from '@contracts'
+import { isNewConversationMemberAvailable, newConversationMemberStatus } from './new-conversation-availability'
+import { NewConversationQuickHelp } from './NewConversationQuickHelp'
 import { MemberAvatar } from './MemberAvatar'
 import { NavigationIcon } from './NavigationIcon'
 import { DialogControlIcon } from './AppDialog'
@@ -58,6 +60,7 @@ export function NewConversationDialog({
   const [leadId, setLeadId] = useState('')
   const [optionalOpen, setOptionalOpen] = useState(false)
   const [name, setName] = useState('')
+  const [quickHelpOpen, setQuickHelpOpen] = useState(false)
   const [enableOneClick, setEnableOneClick] = useState(false)
   const [memberError, setMemberError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -75,13 +78,18 @@ export function NewConversationDialog({
     () => planInitialCampSelection(preflight, preferredInitialSelection),
     [preferredInitialSelection, preflight.presentMembers]
   )
+  const availableMembers = preflight.presentMembers.filter(isNewConversationMemberAvailable)
   const selectedMembers = preflight.presentMembers.filter((member) =>
     selectedMemberIds.includes(member.agentId)
+  )
+  const selectedAvailableMembers = selectedMembers.filter(isNewConversationMemberAvailable)
+  const hasUnavailableSelection = selectedMemberIds.some((id) =>
+    !availableMembers.some((member) => member.agentId === id)
   )
   const normalizedName = normalizeDraftName(name)
   const nameLength = Array.from(normalizedName).length
   const nameError = nameLength > 80 ? '对话名称最多 80 个字符。' : null
-  const lead = selectedMembers.find((member) => member.agentId === leadId) ?? null
+  const lead = selectedAvailableMembers.find((member) => member.agentId === leadId) ?? null
   const leadProfile = lead ? profileById.get(lead.agentId) : undefined
   const projectActionsDisabled = projectWorkspaceActionsDisabled(busy, projectAccessReady)
   const projectSubmissionBlocked = workspaceSubmissionBlocked(workspace, projectAccessReady)
@@ -103,6 +111,7 @@ export function NewConversationDialog({
     setOptionalOpen(false)
     setName('')
     setEnableOneClick(false)
+    setQuickHelpOpen(false)
     setMemberError(null)
     setSubmitError(null)
   }, [initialSelectionPlan, initialWorkspace, open])
@@ -133,7 +142,7 @@ export function NewConversationDialog({
   }, [open, optionalOpen])
 
   const toggleMember = (agentId: string): void => {
-    if (busy) return
+    if (busy || !availableMembers.some((member) => member.agentId === agentId)) return
     setMemberError(null)
     setSelectedMemberIds((current) => {
       const next = toggleCampMemberSelection({
@@ -181,7 +190,8 @@ export function NewConversationDialog({
       busy || submittingRef.current
       || projectSubmissionBlocked
       || selectedMemberIds.length === 0
-      || !leadId
+      || hasUnavailableSelection
+      || !lead
       || nameError
     ) return
     submittingRef.current = true
@@ -222,7 +232,10 @@ export function NewConversationDialog({
             target?.focus()
           }}
           onCloseAutoFocus={(event) => { event.preventDefault(); returnFocusElement?.focus() }}
-          onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }}
+          onEscapeKeyDown={(event) => { if (busy || quickHelpOpen) event.preventDefault() }}
+          onPointerDownOutside={(event) => {
+            if (event.target instanceof Element && event.target.closest('.new-camp-quick-tooltip')) event.preventDefault()
+          }}
         >
           <header className="compact-header">
             <Dialog.Title>新对话</Dialog.Title>
@@ -265,18 +278,17 @@ export function NewConversationDialog({
                   <DropdownMenu.Trigger asChild>
                     <button className="compact-picker member-trigger" type="button" aria-labelledby="new-camp-members-label new-camp-members-value" disabled={busy || !preflight.presentMembers.length}>
                       <span className="compact-avatar-stack">{selectedMembers.slice(0, 3).map((member) => <MemberAvatar key={member.agentId} agentId={member.agentId} avatarRef={profileById.get(member.agentId)?.avatarRef ?? null} displayName={member.displayName} size="mention" decorative />)}</span>
-                      <span id="new-camp-members-value">{selectedMembers.length ? `${selectedMembers.length} 位队员` : '暂无队员'}</span><DialogControlIcon name="chevron" />
+                      <span id="new-camp-members-value">{selectedMembers.length ? `${selectedMembers.length} 位队员` : '暂无可用队员'}</span><DialogControlIcon name="chevron" />
                     </button>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
                     <DropdownMenu.Content className="compact-menu roster-menu new-camp-member-grid" align="end" sideOffset={6} collisionPadding={12} aria-label="选择队员" onKeyDownCapture={navigateMemberGrid} loop>
-                      <div className="compact-menu-heading"><span>参与本次对话</span><button type="button" disabled={busy || selectedMembers.length === preflight.presentMembers.length} onClick={() => { setSelectedMemberIds(preflight.presentMembers.map((member) => member.agentId)); setMemberError(null) }}>全选</button></div>
+                      <div className="compact-menu-heading"><span>参与本次对话</span><button type="button" disabled={busy || availableMembers.length === 0 || (!hasUnavailableSelection && selectedMembers.length === availableMembers.length)} onClick={() => { setSelectedMemberIds(availableMembers.map((member) => member.agentId)); if (!lead) setLeadId(availableMembers[0]?.agentId ?? ''); setMemberError(null) }}>全选</button></div>
                       {preflight.presentMembers.map((member) => {
                         const profile = profileById.get(member.agentId)
-                        return <DropdownMenu.CheckboxItem className="compact-option" key={member.agentId} checked={selectedMemberIds.includes(member.agentId)} disabled={busy} onCheckedChange={() => toggleMember(member.agentId)} onSelect={(event) => event.preventDefault()}>
+                        return <DropdownMenu.CheckboxItem className="compact-option" key={member.agentId} checked={selectedMemberIds.includes(member.agentId)} disabled={busy || !isNewConversationMemberAvailable(member)} onCheckedChange={() => toggleMember(member.agentId)} onSelect={(event) => event.preventDefault()}>
                           <MemberAvatar agentId={member.agentId} avatarRef={profile?.avatarRef ?? null} displayName={member.displayName} size="mention" decorative />
-                          <span>{member.displayName}<small>{profile?.teamRole || '队员'}</small></span>
-                          {member.runtimeReadiness !== 'ready' && <small className="compact-unavailable">{readinessLabel(member.runtimeReadiness)}</small>}
+                          <span className="new-camp-candidate-copy">{member.displayName}<small><span>{profile?.teamRole || '队员'}</span><span aria-hidden="true">·</span><span className={isNewConversationMemberAvailable(member) ? 'compact-ready' : 'new-camp-candidate-unavailable'}>{newConversationMemberStatus(member)}</span></small></span>
                           <span className="compact-checkbox"><DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator></span>
                         </DropdownMenu.CheckboxItem>
                       })}
@@ -285,26 +297,26 @@ export function NewConversationDialog({
                   </DropdownMenu.Portal>
                 </DropdownMenu.Root>
               </div>
-              {!preflight.presentMembers.length && <p className="compact-inline-error" role="alert">当前没有在队的队员，请先前往队员页调整队员状态。</p>}
-              {selectedMembers.some((member) => member.runtimeReadiness !== 'ready') && <p className="compact-inline-note">{selectedMembers.filter((member) => member.runtimeReadiness !== 'ready').length} 位队员的 Agent 运行时尚未就绪</p>}
+              {availableMembers.length === 0 && <p className="new-camp-empty-note">暂无可用队员，请先在「队员」中配置 Agent 运行时。</p>}
+              {hasUnavailableSelection && <p className="compact-inline-error" role="alert">所选队员已不可用，请重新选择。</p>}
               <div className="compact-row">
                 <span id="new-camp-lead-label">负责人</span>
                 <DropdownMenu.Root>
                   <DropdownMenu.Trigger asChild>
-                    <button className="compact-picker" type="button" aria-labelledby="new-camp-lead-label new-camp-lead-value" disabled={busy || !lead}>
+                    <button className="compact-picker" type="button" aria-labelledby="new-camp-lead-label new-camp-lead-value" disabled={busy || selectedAvailableMembers.length === 0}>
                       {lead && <MemberAvatar agentId={lead.agentId} avatarRef={leadProfile?.avatarRef ?? null} displayName={lead.displayName} size="mention" decorative />}
-                      <span id="new-camp-lead-value">{lead?.displayName ?? '未设置'}</span>{lead && lead.runtimeReadiness !== 'ready' && <small className="compact-unavailable">{readinessLabel(lead.runtimeReadiness)}</small>}<DialogControlIcon name="chevron" />
+                      <span id="new-camp-lead-value">{lead?.displayName ?? (selectedAvailableMembers.length ? '选择负责人' : '暂无可选负责人')}</span><DialogControlIcon name="chevron" />
                     </button>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
                     <DropdownMenu.Content className="compact-menu roster-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择负责人" loop>
                       <DropdownMenu.Label className="compact-menu-heading">从已选队员中选择</DropdownMenu.Label>
                       <DropdownMenu.RadioGroup value={leadId} onValueChange={setLeadId}>
-                        {selectedMembers.map((member) => {
+                        {selectedAvailableMembers.map((member) => {
                           const profile = profileById.get(member.agentId)
                           return <DropdownMenu.RadioItem className="compact-option" value={member.agentId} key={member.agentId} disabled={busy}>
                             <MemberAvatar agentId={member.agentId} avatarRef={profile?.avatarRef ?? null} displayName={member.displayName} size="mention" decorative />
-                            <span>{member.displayName}<small>{profile?.teamRole || '队员'}</small></span><small className={member.runtimeReadiness === 'ready' ? 'compact-ready' : 'compact-unavailable'}>{readinessLabel(member.runtimeReadiness)}</small><DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator>
+                            <span>{member.displayName}<small>{profile?.teamRole || '队员'}</small></span><small className="compact-ready">可用</small><DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator>
                           </DropdownMenu.RadioItem>
                         })}
                       </DropdownMenu.RadioGroup>
@@ -322,18 +334,19 @@ export function NewConversationDialog({
                 </div>}
               </div>
               <div className="new-camp-quick-setting">
-                <label className="new-camp-quick-label">
-                  <input type="checkbox" checked={enableOneClick} disabled={busy} aria-describedby="new-camp-quick-hint" onChange={(event) => setEnableOneClick(event.target.checked)} />
-                  <span>以后使用此队伍一键新建</span>
-                </label>
-                <p id="new-camp-quick-hint">保存所选队员和负责人，下次点击「新对话」直接创建。<br />可在「设置 → 通用」关闭。</p>
-                {enableOneClick && <p className="new-camp-quick-effective" role="status">本次新建成功后生效</p>}
+                <div className="new-camp-quick-row">
+                  <label className="new-camp-quick-label">
+                    <input type="checkbox" checked={enableOneClick} disabled={busy || selectedAvailableMembers.length === 0} onChange={(event) => setEnableOneClick(event.target.checked)} />
+                    <span>以后使用此队伍一键新建</span>
+                  </label>
+                  <NewConversationQuickHelp onOpenChange={setQuickHelpOpen} />
+                </div>
               </div>
               {submitError && <p className="compact-inline-error" role="alert">{submitError}</p>}
             </div>
             <footer className="compact-footer">
               <Dialog.Close asChild><button className="compact-cancel" type="button" disabled={busy}>取消</button></Dialog.Close>
-              <button className="compact-primary" type="submit" disabled={busy || projectSubmissionBlocked || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>{busy ? '正在新建…' : '新建'}</button>
+              <button className="compact-primary" type="submit" disabled={busy || projectSubmissionBlocked || selectedMembers.length === 0 || hasUnavailableSelection || !lead || Boolean(nameError)}>{busy ? '正在新建…' : '新建'}</button>
             </footer>
           </form>
         </Dialog.Content>
@@ -344,25 +357,25 @@ export function NewConversationDialog({
 
 function navigateMemberGrid(event: KeyboardEvent<HTMLDivElement>): void {
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
-  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]:not([data-disabled])'))
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]'))
   const index = items.indexOf(document.activeElement as HTMLElement)
   if (index < 0) return
-  const columns = 2
-  let next: number
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-    const step = event.key === 'ArrowRight' ? 1 : -1
-    next = (index + step + items.length) % items.length
-  } else {
-    const column = index % columns
-    const columnItems = items.filter((_, itemIndex) => itemIndex % columns === column)
-    const row = Math.floor(index / columns)
-    const step = event.key === 'ArrowDown' ? 1 : -1
-    next = items.indexOf(columnItems[(row + step + columnItems.length) % columnItems.length])
+  const horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight'
+  const candidates = horizontal ? items : items.filter((_, itemIndex) => itemIndex % 2 === index % 2)
+  const start = candidates.indexOf(items[index])
+  const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+  let next = items[index]
+  for (let offset = 1; offset <= candidates.length; offset++) {
+    const candidate = candidates[(start + step * offset + candidates.length) % candidates.length]
+    if (!candidate.hasAttribute('data-disabled')) {
+      next = candidate
+      break
+    }
   }
   // Capture before Radix schedules its single-column roving focus.
   event.preventDefault()
   event.stopPropagation()
-  items[next]?.focus()
+  next.focus()
 }
 
 export function projectWorkspaceActionsDisabled(
@@ -395,16 +408,6 @@ function WorkspaceIcon({ kind }: { kind: 'quick-chat' | 'project' }): React.JSX.
       <path d="M3.9 9.1h16.2" />
     </svg>
   )
-}
-
-function readinessLabel(status: CampCreationPreflight['presentMembers'][number]['runtimeReadiness']): string {
-  return status === 'ready' || status === 'light_ready'
-    ? '可用'
-    : status === 'installed_unverified'
-      ? '不可用，待检查'
-      : status === 'runtime_not_configured'
-        ? '未配置'
-        : '不可用'
 }
 
 export type WorkspaceGitPresentation =
@@ -473,19 +476,14 @@ export function planInitialCampSelection(
   preflight: CampCreationPreflight,
   preferred: NewConversationDefaults | null = null
 ): InitialCampSelectionPlan {
-  const presentMemberIds = preflight.presentMembers.map((member) => member.agentId)
+  const presentMemberIds = preflight.presentMembers.filter(isNewConversationMemberAvailable).map((member) => member.agentId)
   const preferredMemberIds = preferred?.memberAgentIds.filter((agentId) =>
     presentMemberIds.includes(agentId)
   ) ?? []
   const memberIds = preferredMemberIds.length > 0 ? preferredMemberIds : presentMemberIds
   const leadId = preferred && memberIds.includes(preferred.defaultLeadAgentId)
     ? preferred.defaultLeadAgentId
-    : preflight.presentMembers.find(
-      (member) => memberIds.includes(member.agentId) && member.runtimeReadiness === 'ready'
-    )?.agentId ?? preflight.presentMembers.find(
-      (member) => memberIds.includes(member.agentId)
-        && member.runtimeReadiness === 'light_ready'
-    )?.agentId ?? memberIds[0] ?? ''
+    : memberIds[0] ?? ''
   return {
     memberIds,
     leadId
@@ -522,7 +520,7 @@ export function toggleCampMemberSelection({
       memberIds: stableMemberOrder.filter(
         (id) => id === toggledMemberId || memberIds.includes(id)
       ),
-      leadId,
+      leadId: leadId || toggledMemberId,
       blocked: false
     }
   }

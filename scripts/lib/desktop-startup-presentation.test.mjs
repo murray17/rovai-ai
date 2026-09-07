@@ -55,6 +55,8 @@ test('the production App preserves route-local cold startup feedback and Core ad
     assert.ok(report.cases.includes('Runtime availability refreshes health and installations without reloading members'))
     assert.ok(report.cases.includes('Runtime discovery retains full refresh across mixed debounce events'))
     assert.ok(report.cases.includes('New Conversation preserves edited drafts across candidate refresh and creation failure'))
+    assert.ok(report.cases.includes('New Conversation gates selection, Lead and submit by saved usable runtimes and keeps help independent'))
+    assert.ok(report.cases.includes('New Conversation handles an all-unconfigured roster'))
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')

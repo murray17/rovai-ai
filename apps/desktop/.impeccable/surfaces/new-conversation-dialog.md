@@ -1,5 +1,5 @@
 ---
-version: 6
+version: 7
 slug: "new-conversation-dialog"
 primary_target: "apps/desktop/src/renderer/src/NewConversationDialog.tsx"
 related_targets:
@@ -37,19 +37,24 @@ arrow-key navigation, `Esc` dismissal and focus return.
    uses the semantic success foreground and surface, while the in-progress inspection state remains neutral.
    Before removed-Project authority is ready, keep Project choices disabled, do not inspect or submit a cached
    directory, and identify the wait with neutral loading copy; Quick Chat creation remains available.
-2. **队员 / 负责人** — default to the saved valid team configuration, otherwise all active teammates.
-   The set is non-empty and Lead remains inside it. Runtime availability is guidance, not a structural
-   selector. Unavailable saved members are filtered while initializing the draft without adding a
-   separate “默认配置已失效” warning block. The Lead trigger shows the current portrait and name, with unavailable status only when needed; menu candidates come only from the currently selected teammates and each shows a
-   portrait. A concise runtime-readiness note may appear below the member row; it does not block structural creation.
+2. **队员 / 负责人** — initialize from the saved team filtered to currently available teammates,
+   otherwise all available teammates in Member Order. A candidate is available only when its runtime
+   configuration is saved and readiness is `ready` or `light_ready`; both display green “可用”.
+   Unconfigured candidates display “未配置运行时”; configured but unavailable candidates display
+   “运行时不可用”. Both remain visible, gray and unselectable. All-selection and Lead candidates use
+   the same rule; do not prefer deep readiness over light readiness. No routine explanatory footer or
+   runtime warning appears. When no candidates are available, show the empty state and disable creation.
+   These are Desktop selection rules; they do not change Core structural preflight or dispatch checks.
    Keep the existing teammate dropdown entry. Its menu uses two columns (four teammates occupy two rows),
    with portraits, role labels and checkboxes. Arrow keys follow the visual columns; Escape returns focus
    to the trigger. The heading and selection error span both columns, and larger rosters scroll.
 3. **添加对话名称 / 对话名称** — collapsed by default. Expansion focuses the input. Normalize and count
    Unicode scalars up to 80; align the expanded name editor with the form without a child rail and keep the exact
    placeholder `输入名称...`. Empty means “未命名对话” and is not delegated to a Runtime/LLM.
-4. **以后使用此队伍一键新建** — unchecked on every opening. Explain that it saves the selected teammates
-   and Lead, and that users can disable one-click in Settings → General. Checking shows “本次新建成功后生效”.
+4. **以后使用此队伍一键新建** — unchecked on every opening. Place an independently focusable “?”
+   immediately to the right. Its hover, focus and click tooltip says “保存所选队员和负责人，下次点击「新对话」直接创建。”
+   and “可在「设置 → 通用」关闭。”. Escape closes the tooltip without closing the dialog; opening it must
+   not toggle the checkbox. No inline explanation or effective-after-creation text is shown.
    Do not save the workspace or optional name as defaults.
 
 Footer contains “取消 / 新建”. Do not repeat directory, teammate count or Lead in a summary.
@@ -67,7 +72,10 @@ second creation. Ordinary saves in General settings preserve the existing one-cl
 
 Failure preserves directory, teammate selection, Lead, name, scroll and focus. Candidate refresh must
 not silently drop a teammate, replace Lead or fall back to Quick Chat. Esc/close/cancel in non-submitting
-state returns focus to the exact opener.
+state returns focus to the exact opener. If a selected teammate becomes unavailable during refresh,
+retain the draft and block submission until the user explicitly chooses a valid team (for example, “全选”).
+One-click creation checks the same availability rule and opens this dialog when the saved team is
+unavailable, without permanently invalidating preferences because of a temporary runtime outage.
 
 Do not restore “协作方式 / 并肩协作 / 领队统筹 / 暂未开放”; the request continues to submit the existing
 `peer` semantics. This is a Renderer simplification, not a Core union or SQLite migration.

@@ -17,6 +17,7 @@ import {
   parseCurrentProject,
   projectTargetKey,
   resolveNewConversationDefaults,
+  resolveAvailableNewConversationDefaults,
   shouldInvalidateNewConversationDefaults
 } from './new-conversation-preferences'
 
@@ -197,6 +198,29 @@ describe('new conversation preferences', () => {
       ...preferences,
       newConversationDefaultsRequireConfirmation: true
     }, [present, unready])).toBe(false)
+  })
+
+  it('blocks one-click for unsaved or unavailable runtimes and recovers without invalidating the team', () => {
+    const preferences = configuredPreferences()
+    const members = ['agent-a', 'agent-b'].map(id => profile(id, 'present'))
+    for (const member of members) {
+      member.runtimeConfiguration = {
+        adapterKind: 'codex-cli', model: { mode: 'runtime_default' },
+        permissions: { adapterKind: 'codex-cli', schemaVersion: 1,
+          values: { sandbox_mode: 'workspace-write', approval_policy: 'on-request' } }
+      }
+      member.runtimeReadiness.status = 'light_ready'
+    }
+    members[1].runtimeReadiness.status = 'ready'
+    expect(resolveAvailableNewConversationDefaults(preferences, members)?.lead.agentId).toBe('agent-a')
+    members[1].runtimeReadiness.status = 'needs_attention'
+    expect(resolveAvailableNewConversationDefaults(preferences, members)).toBeNull()
+    expect(defaultsNeedInvalidation(preferences, members)).toBe(false)
+    members[1].runtimeReadiness.status = 'light_ready'
+    expect(resolveAvailableNewConversationDefaults(preferences, members)?.members).toHaveLength(2)
+    members[1].runtimeConfiguration = null
+    expect(resolveAvailableNewConversationDefaults(preferences, members)).toBeNull()
+    expect(defaultsNeedInvalidation(preferences, members)).toBe(false)
   })
 
   it('waits for the authoritative Member overview before invalidating saved defaults', () => {

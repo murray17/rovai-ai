@@ -29,6 +29,12 @@ app.whenReady().then(async () => {
       writeFileSync(join(dirname(userData), `startup-${state}-${theme}-1040x700.png`), capture.toPNG())
     }
   }
+  for (const theme of ['day', 'night']) {
+    for (const state of ['members', 'help', 'empty']) {
+      await window.webContents.executeJavaScript(`window.startupTest.captureNewConversation(${JSON.stringify(theme)}, ${JSON.stringify(state)})`, true)
+      writeFileSync(join(dirname(userData), `new-conversation-${state}-${theme}.png`), (await window.webContents.capturePage()).toPNG())
+    }
+  }
   window.webContents.debugger.attach('1.3')
   await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
@@ -44,6 +50,8 @@ app.whenReady().then(async () => {
     await window.webContents.executeJavaScript(`window.startupTest.capture("night", ${JSON.stringify(state)})`, true)
     writeFileSync(join(dirname(userData), `startup-${state}-night-200-percent.png`), (await window.webContents.capturePage()).toPNG())
   }
+  await window.webContents.executeJavaScript('window.startupTest.captureNewConversation("night", "help")', true)
+  writeFileSync(join(dirname(userData), 'new-conversation-help-200-percent.png'), (await window.webContents.capturePage()).toPNG())
   console.log(JSON.stringify(report))
   app.exit(report.ok ? 0 : 1)
 }).catch(error => { console.error(error); app.exit(1) })
