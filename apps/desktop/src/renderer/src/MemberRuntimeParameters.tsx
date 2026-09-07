@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AdapterInstallation,
@@ -110,6 +110,7 @@ function cloneRuntimeDraft(draft: MemberRuntimeDraft): MemberRuntimeDraft {
 }
 
 export function MemberRuntimeParameters({
+  inline = false,
   adapterKind,
   installation,
   draft,
@@ -117,6 +118,7 @@ export function MemberRuntimeParameters({
   onOpenModelCatalog,
   onChange
 }: {
+  inline?: boolean
   adapterKind: AdapterKind
   installation: AdapterInstallation | null
   draft: MemberRuntimeDraft | null
@@ -124,6 +126,7 @@ export function MemberRuntimeParameters({
   onOpenModelCatalog?: () => Promise<RuntimeModelCatalogView>
   onChange(draft: MemberRuntimeDraft): void
 }): React.JSX.Element {
+  const titleId = useId()
   const snapshot = installation?.snapshot ?? null
   const content = installation && snapshot && draft
     ? runtimeParametersFor(adapterKind, {
@@ -141,12 +144,12 @@ export function MemberRuntimeParameters({
         </p>
       )
   return (
-    <section className="member-runtime-parameters" aria-labelledby="member-runtime-parameters-title">
-      <header className="member-runtime-parameters-heading">
-        <strong id="member-runtime-parameters-title">运行参数</strong>
+    <section className={inline ? 'member-runtime-parameters member-editor-runtime-fields' : 'member-runtime-parameters'} aria-label={inline ? '运行参数' : undefined} aria-labelledby={inline ? undefined : titleId}>
+      {!inline && <header className="member-runtime-parameters-heading">
+        <strong id={titleId}>运行参数</strong>
         <small>模型、模型参数与 Agent 运行时原生权限。</small>
-      </header>
-      <div className="member-runtime-parameters-body" aria-labelledby="member-runtime-parameters-title">
+      </header>}
+      <div className="member-runtime-parameters-body" aria-labelledby={inline ? undefined : titleId}>
         {content}
       </div>
     </section>
@@ -548,7 +551,7 @@ function RuntimeModelPicker({
     ? missingModelLabel(explicit.modelId, cache.status)
     : null
   const triggerLabel = draft.model.mode === 'runtime_default'
-    ? '跟随 Agent 运行时默认'
+    ? '默认'
     : selectedModel?.displayName ?? missingSelectionLabel ?? draft.model.modelId
 
   return (
@@ -567,6 +570,7 @@ function RuntimeModelPicker({
             type="button"
             disabled={disabled}
             aria-label={`模型，${triggerLabel}`}
+            title={statusCopy}
           >
             <span>
               <strong>{triggerLabel}</strong>
@@ -590,7 +594,7 @@ function RuntimeModelPicker({
               <small>{statusCopy}</small>
             </DropdownMenu.Label>
             <DropdownMenu.RadioGroup value={selectedValue} onValueChange={selectModel}>
-              <RuntimeModelPickerItem value="runtime_default" label="跟随 Agent 运行时默认" />
+              <RuntimeModelPickerItem value="runtime_default" label="默认" />
               {missingSelectionLabel && (
                 <RuntimeModelPickerItem
                   value={explicit?.modelId ?? ''}

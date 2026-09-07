@@ -50,10 +50,7 @@ import {
   RuntimeInstallationsPanel,
   type MembersViewHandle
 } from './MemberManagement'
-import {
-  MemberSidebar,
-  type MemberWorkspaceTab
-} from './MemberSidebar'
+import type { MemberWorkspaceTab } from './MemberSidebar'
 import {
   CampWorkspace,
   QuickChatWorkspace,
@@ -2696,20 +2693,6 @@ function AuthoritativeApp({
     })
   }
 
-  const chooseMember = (
-    agentId: string,
-    tab: MemberWorkspaceTab,
-    focusRuntime: boolean
-  ): void => {
-    const commit = (): void => {
-      setSelectedMemberId(agentId)
-      setMemberTab(tab)
-      if (focusRuntime) setMemberRuntimeFocusRequest((request) => request + 1)
-    }
-    if (selectedMemberId === agentId) commit()
-    else void requestMemberTransition(commit)
-  }
-
   const configureMemberRuntime = (agentId: string): void => {
     chooseView('members', () => {
       setRuntimeRecovery(null)
@@ -4093,17 +4076,6 @@ function AuthoritativeApp({
               : null
             : (
                 <div className="members-workspace">
-                  <MemberSidebar
-                    agents={agents}
-                    runtimeAvailability={health?.runtimeAvailability ?? []}
-                    hostPlatform={health?.hostPlatform ?? null}
-                    runtimePlatformAdmission={health?.runtimePlatformAdmission ?? []}
-                    runtimeDiscoveryPending={health === null || healthLoading}
-                    selectedAgentId={selectedMemberId}
-                    onSelect={chooseMember}
-                    onCreate={(trigger) => membersViewRef.current?.requestCreate(trigger)}
-                    onReload={loadMemberData}
-                  />
                   <MembersView
                     ref={membersViewRef}
                     agents={agents}
@@ -4121,6 +4093,15 @@ function AuthoritativeApp({
                       setMemberTab(tab)
                     }}
                     onTabChange={setMemberTab}
+                    onProfileCommitted={(profile) => setAgents((current) => (
+                      current.some((agent) => agent.agentId === profile.agentId)
+                        ? current.map((agent) => (
+                            agent.agentId === profile.agentId && agent.version < profile.version
+                              ? profile
+                              : agent
+                          ))
+                        : [...current, profile]
+                    ))}
                     onReload={loadMemberData}
                     onOpenRuntimeSettings={() => {
                       chooseSettingsSection('runtime')
