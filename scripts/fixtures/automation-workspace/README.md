@@ -21,8 +21,11 @@ pnpm exec tsc -p scripts/fixtures/automation-workspace/tsconfig.json
 - 编辑后立即返回总览会先保存；失败保留草稿，重试成功；冲突阻止离开，“保留草稿并重试”使用新版本保存。
 - 历史从 20 条展开到 24 条，无重复分页按钮；无 Camp 的跳过行禁用，失败运行可以打开执行对话。
 - 分隔条 End 收起 / Enter 恢复，最小窗口 1040×700 与 720×460（200% 等效布局）无横向溢出。
+- 按后续反馈把列表初始宽度设为最小 208px：方向键放宽后双击回到 208px；顶部筛选、返回与新建在同一行完整可见，
+  按钮距页面顶部 5–7px，没有预留空白标题行。Day 1280×720 与 Night 1040×700 截图已更新。
 - Day/Night 使用相同产品结构与语义颜色。下方是渲染截图，不代表原生 App 或真实模型执行已经验收。
 
 ![Day 总览](screenshots/day-overview.png)
 ![Day 首次空列表](screenshots/day-empty.png)
+![Day 最小列表宽度详情](screenshots/day-detail.png)
 ![Night 最小窗口详情](screenshots/night-detail.png)

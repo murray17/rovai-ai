@@ -12,7 +12,7 @@ import { MemberAvatar } from './MemberAvatar'
 import { AutomationEditor } from './AutomationEditor'
 import { AutomationGlyph, AutomationTemplates } from './AutomationControls'
 import {
-  AutomationCommandError, automationFromResult, automationListWidth, defaultDraft,
+  AUTOMATION_MIN_LIST_WIDTH, AutomationCommandError, automationFromResult, automationListWidth, defaultDraft,
   draftFingerprint, draftFromAutomation, filterAutomations, scheduleLabel, templates,
   type AutomationDraft, type AutomationFilter, type AutomationIssue, type SaveState, type TemplateId
 } from './automation-workspace-model'
@@ -53,7 +53,7 @@ export function AutomationWorkspace({
   const [deleteArmed, setDeleteArmed] = useState<string | null>(null)
   const [filter, setFilter] = useState<AutomationFilter>('all')
   const [query, setQuery] = useState('')
-  const [listWidth, setListWidth] = useState(560)
+  const [listWidth, setListWidth] = useState(AUTOMATION_MIN_LIST_WIDTH)
   const [editorClosed, setEditorClosed] = useState(false)
   const [availableWidth, setAvailableWidth] = useState(1100)
   const splitRef = useRef<HTMLDivElement>(null)
@@ -522,17 +522,17 @@ export function AutomationWorkspace({
           </section>}
         </aside>
         {!overview && <>
-          <div className="automation-splitter" role="separator" tabIndex={0} aria-label="调整任务列表宽度" aria-orientation="vertical" aria-valuemin={208} aria-valuemax={Math.max(208, availableWidth - 7)} aria-valuenow={editorClosed ? Math.max(208, availableWidth - 7) : width} aria-valuetext={editorClosed ? '详情已收起，向左调整可重新打开' : `任务列表宽度 ${width} 像素`} title={editorClosed ? '向左拖动打开任务页' : '拖动调整宽度，拖到最右侧收起详情'}
+          <div className="automation-splitter" role="separator" tabIndex={0} aria-label="调整任务列表宽度" aria-orientation="vertical" aria-valuemin={AUTOMATION_MIN_LIST_WIDTH} aria-valuemax={Math.max(AUTOMATION_MIN_LIST_WIDTH, availableWidth - 7)} aria-valuenow={editorClosed ? Math.max(AUTOMATION_MIN_LIST_WIDTH, availableWidth - 7) : width} aria-valuetext={editorClosed ? '详情已收起，向左调整可重新打开' : `任务列表宽度 ${width} 像素`} title={editorClosed ? '向左拖动打开任务页' : '拖动调整宽度，拖到最右侧收起详情'}
             onPointerDown={(event) => { if (event.button !== 0) return; dragRef.current = { pointerId: event.pointerId, x: event.clientX, width: editorClosed ? availableWidth - 7 : width }; event.currentTarget.setPointerCapture(event.pointerId) }}
             onPointerMove={(event) => { const drag = dragRef.current; if (drag?.pointerId === event.pointerId) resize(drag.width + event.clientX - drag.x) }}
             onPointerUp={(event) => { dragRef.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
             onPointerCancel={() => { dragRef.current = null }} onLostPointerCapture={() => { dragRef.current = null }}
-            onDoubleClick={() => { setListWidth(560); setEditorClosed(false) }}
+            onDoubleClick={() => { setListWidth(AUTOMATION_MIN_LIST_WIDTH); setEditorClosed(false) }}
             onKeyDown={(event) => {
               if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize((editorClosed ? availableWidth - 327 : width) + (event.key === 'ArrowRight' ? 24 : -24)) }
-              else if (event.key === 'Home') { event.preventDefault(); setListWidth(208); setEditorClosed(false) }
+              else if (event.key === 'Home') { event.preventDefault(); setListWidth(AUTOMATION_MIN_LIST_WIDTH); setEditorClosed(false) }
               else if (event.key === 'End') { event.preventDefault(); void closeEditor() }
-              else if (event.key === 'Enter') { event.preventDefault(); setEditorClosed(false); setListWidth(560) }
+              else if (event.key === 'Enter') { event.preventDefault(); setEditorClosed(false); setListWidth(AUTOMATION_MIN_LIST_WIDTH) }
             }}><span /></div>
           <section className="automation-editor" aria-label={selectedId === 'new' ? '新建定时任务' : '定时任务详情'} hidden={editorClosed}>
             <header className="automation-editor-toolbar"><span>{selectedId === 'new' ? '新建' : '详情'}</span><small role="status">{selected ? saveLabel : ''}</small><button type="button" className="automation-icon-button" aria-label="返回定时任务总览" onClick={() => void showOverview()}><AutomationGlyph name="close" /></button></header>

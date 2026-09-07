@@ -185,6 +185,8 @@ export function filterAutomations(automations: AutomationView[], filter: Automat
     && (!needle || [item.name, item.prompt, scheduleLabel(item.schedule)].some((value) => value.toLocaleLowerCase().includes(needle))))
 }
 
+export const AUTOMATION_MIN_LIST_WIDTH = 208
+
 export function automationListWidth(requested: number, available: number): number {
-  return Math.round(Math.max(208, Math.min(requested, available - 327)))
+  return Math.round(Math.max(AUTOMATION_MIN_LIST_WIDTH, Math.min(requested, available - 327)))
 }

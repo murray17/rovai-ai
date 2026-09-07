@@ -48,6 +48,8 @@ last_updated: 2026-09-07
 - `pnpm typecheck`、`pnpm exec vitest run apps/desktop/src/renderer/src/App.test.ts`：166 项通过，
   `pnpm build:desktop` 与隔离 Renderer 场景的单独 TypeScript 检查。
 - 文档治理三项门禁与 diff hygiene；真实输入、截图和证据边界记录在隔离场景 README。
+- 后续用户校准：列表初始及恢复默认宽度改为最小 208px，筛选/新建移至顶部；更新双主题截图。
+  补上运行时列表宽度的 CSS 默认声明，修复 PR 首轮 CI 的未声明变量失败，32 项主题回归通过。
 
 ## 完成条件
 
