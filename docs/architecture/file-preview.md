@@ -35,7 +35,7 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v9](../contracts/file-preview-v9.md) 的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v10](../contracts/file-preview-v10.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有按 Camp 隔离的窗口内 Tab shell、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web
   入口；inline-code 和正文不进入文件识别，也不读取磁盘。Tab shell 不拥有文件能力或当前文件事实。
 
@@ -80,6 +80,20 @@ target 显示网页图标。`inlineCode` 始终渲染普通 `<code>`，普通正
 同一视觉类型；未知扩展名使用通用文件图标。它不参与消息语法识别，也不拥有 `FilePreviewKind` 或打开策略。Main 的
 既有 classifier 继续独立结合扩展名、大小、MIME 与内容决定 Preview、系统应用或失败，不支持预览的文件不会因
 已经显示类型图标而创建 Preview Tab。
+
+## 路径呈现与系统操作
+
+Main 在来源校验、path resolution、realpath、普通文件检查和 classifier 成功后，以实际打开的 canonical
+文件生成呈现：canonical 文件位于 canonical Camp 项目根内时签发项目相对路径；项目外普通文件签发
+canonical 绝对路径，位于 canonical Home 内时可投影为 `~/`。Renderer 只使用 Main 签发的
+`project_relative | external | file_name_only` 呈现，不从字符串反推项目归属或文件身份。
+
+Attachment 的原 source、Managed storage、legacy storage 和 OS Temp 路径仍留在 Core/Main；它们只向 Renderer
+签发 authority 给出的安全文件名。这一例外不由 Renderer 判断，也不会因存储当前落在项目目录而变化。
+
+路径行的系统定位、Tab 菜单的系统打开与复制完整路径都以当前句柄记录为输入。Main 在操作前重验来源、
+binding generation 和 canonical 文件身份；复制始终使用重验后的 canonical 绝对路径。可见 `displayPath`
+不反向进入 Main，不创建 Root Grant，不授权父目录，也不更改 Camp、会话或 Runtime 工作目录。
 
 ## 窗口文件能力
 

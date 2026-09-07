@@ -1977,6 +1977,54 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
   font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .file-preview-update-row { justify-content: flex-end; }
+.file-preview-path-control { position: relative; display: flex; min-width: 0; max-width: 100%; flex: 1 1 auto; }
+.file-preview-path-button {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  align-items: center;
+  margin: 0;
+  padding: 2px 3px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.file-preview-path-button:hover { color: var(--muted); background: var(--surface-hover); }
+.file-preview-path-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.file-preview-path-tooltip {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 5px);
+  left: 0;
+  visibility: hidden;
+  width: max-content;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+  font: 500 10.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms;
+  white-space: normal;
+}
+.file-preview-path-control:hover .file-preview-path-tooltip,
+.file-preview-path-button:focus-visible + .file-preview-path-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
 /* Allocate the row before shrinking its segments; content-sized flex boxes truncate even when the row has room. */
 .file-preview-path-parts { display: flex; min-width: 0; max-width: 100%; flex: 1 1 auto; align-items: center; overflow: hidden; white-space: nowrap; }
 .file-preview-path-leading,
@@ -1984,6 +2032,7 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .file-preview-path-middle { min-width: 18px; flex: 0 10 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-preview-path-separator { flex: 0 0 auto; margin: 0 7px; color: var(--workspace-line-strong); }
 .file-preview-path-name { min-width: min(10ch, 45%); max-width: 62%; flex: 0 1 auto; overflow: hidden; color: var(--ink); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-path-error { min-width: 0; max-width: 38%; flex: 0 1 auto; overflow: hidden; color: var(--danger); text-overflow: ellipsis; white-space: nowrap; }
 .file-preview-update-action {
   display: inline-flex;
   min-height: 23px;

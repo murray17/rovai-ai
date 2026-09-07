@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.54
+current_version: v1.55
 last_updated: 2026-09-07
 ---
 
@@ -205,4 +205,5 @@ last_updated: 2026-09-07
 | v1.51 | `historical` | 窗口内按 Camp 恢复文件预览会话，并以无副作用重验和代次 fence 阻断旧能力 | [v1.51/README.md](v1.51/README.md) |
 | v1.52 | `historical` | 项目内预览子文件取得独立工作区恢复来源，不依赖父文件或临时能力 | [v1.52/README.md](v1.52/README.md) |
 | v1.53 | `historical` | 原生生图、正文块持久化、工具一致性与受限网络恢复；兼容已部署迁移来源 | [v1.53/README.md](v1.53/README.md) |
-| v1.54 | `current` | 本机定时 Automation、原子派发、结果冻结与独立渠道通知 | [v1.54/README.md](v1.54/README.md) |
+| v1.54 | `historical` | 本机定时 Automation、原子派发、结果冻结与独立渠道通知 | [v1.54/README.md](v1.54/README.md) |
+| v1.55 | `current` | 文件入口与项目归属解耦、成功路径如实呈现和同名 Tab 区分 | [v1.55/README.md](v1.55/README.md) |

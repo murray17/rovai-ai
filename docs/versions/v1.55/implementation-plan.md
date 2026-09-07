@@ -1,0 +1,43 @@
+---
+document_type: implementation-plan
+version: v1.55
+authority: implementation-and-acceptance-status
+status: complete
+last_updated: 2026-09-07
+---
+
+# v1.55 实施与验收
+
+## 实施范围
+
+- [x] 扩展 FilePreviewPathPresentation，由 Main 按 canonical 文件与 canonical 项目根签发
+  project_relative、external 或 file_name_only。
+- [x] 让项目根文件和项目外普通文件显示路径；主目录内外部路径使用 ~/，其他位置使用绝对路径。
+- [x] 保持 Attachment 的安全文件名投影和复制，不向 Renderer 暴露实际存储路径，并拒绝 absolute 复制请求。
+- [x] 将路径行接入既有 revealInFolder；将可见复制入口改为“复制完整路径”并固定使用绝对格式。
+- [x] 为长路径补齐中间省略、完整 title、hover/focus tooltip、键盘焦点和失败反馈。
+- [x] 为同名普通文件 Tab 计算最短唯一目录后缀，并保留安全序号回退。
+- [x] 保持显式 Markdown 入口、来源工作目录、文档目录解析、restore、Root Grant 和单文件能力边界不变。
+- [x] 更新合同、架构、UI、版本生命周期与决定导航。
+- [x] 完成完整测试、Desktop 构建和文档治理门禁。
+
+## 验收矩阵
+
+| Gate | 状态 | 证据 |
+| --- | --- | --- |
+| Main 路径投影与系统操作 | passed | 定向 Vitest 覆盖项目根、项目外绝对路径、~/、symlink canonical 目标、Attachment 隐私、reveal 与绝对路径复制 |
+| Renderer 路径与同名 Tab | passed | 定向 Vitest 覆盖 ready 可见性、项目根/外部/Attachment、路径按钮与 tooltip、最短唯一后缀和重复后缀扩展 |
+| 消息链接与来源解析 | passed | SafeMarkdown、File Preview session 定向回归及 `pnpm test:file-reference-navigation` 保持显式链接、点击时解析、行范围和阅读锚点 |
+| 真实 Electron 交互与视觉 | passed | 生产 Renderer 场景验证 Day/Night、窄宽路径、~/ 外部路径、hover 完整值、路径 reveal 和 Attachment 无路径行 |
+| TypeScript / Desktop build / 全量测试 | passed | `pnpm typecheck`、162 files / 1657 项 Vitest、223 项 Node 测试（1 项 Windows 平台跳过）和 `pnpm build:desktop` 通过 |
+| 文档治理与 diff hygiene | passed | `pnpm docs:test`、`pnpm docs:check`、固定 base 的 `pnpm docs:check:ci` 和 `git diff --check` 通过 |
+
+## 完成条件
+
+- 项目内、项目根和项目外普通文件成功打开后都显示 Main 签发的实际路径形式。
+- 长路径在窄文件区不产生水平溢出，鼠标和键盘可读取完整值并定位当前文件。
+- 同名 Tab 提供最短的必要目录信息；Attachment 不暴露实际路径。
+- 复制完整路径对项目内外普通文件均得到重验后的 canonical 绝对路径。
+- 项目切换不改变历史文件引用的解析基准，缺少上下文时不搜索或猜测文件。
+- 展示和系统操作不新增 Root Grant、父目录授权、工作目录变更或 Agent 权限。
+- TypeScript、完整测试、Desktop 构建、真实 Electron 场景与文档治理门禁全部通过。

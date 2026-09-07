@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { FileHandle } from 'node:fs/promises'
 import type {
@@ -733,6 +734,9 @@ export class FilePreviewService {
   ): Promise<FilePreviewOperationResult<{ copied: true }>> {
     const record = this.#recordOrNull(webContentsId, request.handleId)
     if (!record) return failed('source_not_authorized', '这个文件访问已失效。')
+    if (request.format === 'absolute' && record.pathPresentation === 'file_name_only') {
+      return failed('source_not_authorized', '无法复制这个文件的内部路径。')
+    }
     const binding = this.#captureBinding(webContentsId, record.campId)
     try {
       const value = request.format === 'absolute'
@@ -1054,15 +1058,28 @@ export class FilePreviewService {
     if (inheritedProjectRoot === undefined && canPresentProjectRelativePath(target.sourceKind)) {
       projectRoot = await canonicalizeExistingPath(target.rootPath).catch(() => null)
     }
-    const pathPresentation: FilePreviewPathPresentation = projectRoot === opened.canonicalRoot
-      ? 'project_relative'
-      : 'file_name_only'
+    if (target.sourceKind === 'attachment') {
+      return {
+        projectRoot,
+        pathPresentation: 'file_name_only',
+        displayPath: target.displayName || opened.fileName
+      }
+    }
+    if (projectRoot && pathIsWithin(projectRoot, opened.canonicalPath)) {
+      return {
+        projectRoot,
+        pathPresentation: 'project_relative',
+        displayPath: relative(projectRoot, opened.canonicalPath).split(sep).join('/') || opened.fileName
+      }
+    }
+    const canonicalHome = await canonicalizeExistingPath(homedir()).catch(() => null)
+    const homeRelativePath = canonicalHome && pathIsWithin(canonicalHome, opened.canonicalPath)
+      ? relative(canonicalHome, opened.canonicalPath).split(sep).join('/')
+      : null
     return {
       projectRoot,
-      pathPresentation,
-      displayPath: pathPresentation === 'project_relative'
-        ? opened.displayPath
-        : target.displayName || opened.fileName
+      pathPresentation: 'external',
+      displayPath: homeRelativePath ? `~/${homeRelativePath}` : opened.canonicalPath
     }
   }
 

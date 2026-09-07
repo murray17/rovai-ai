@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { SafeMarkdown } from './SafeMarkdown'
 import { FileFindScope } from './FilePreviewFind'
 import { FileFindDomAdapter } from './FileFindDomAdapter'
@@ -11,33 +11,82 @@ import { previewPathIsVisible, previewTabLabel, previewTabLabels } from './file-
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 import { parseUnifiedPatch } from './file-preview-patch'
 
-function RelativePath({ path, fileName }: { path: string; fileName: string }): React.JSX.Element {
+function FilePathButton({
+  path,
+  fileName,
+  onReveal
+}: {
+  path: string
+  fileName: string
+  onReveal(): void
+}): React.JSX.Element {
+  const tooltipId = useId()
+  const separator = path.includes('\\') && !path.includes('/') ? '\\' : '/'
   const normalized = path.replace(/\\/gu, '/')
-  const suffix = normalized.endsWith(fileName) ? fileName : normalized.split('/').at(-1) ?? fileName
-  const directories = normalized.split('/').filter(Boolean).slice(0, -1)
-  if (directories.length === 0) {
-    return <span className="file-preview-path-name" title={normalized}>{suffix}</span>
+  let prefix = ''
+  let remainder = normalized
+  if (remainder.startsWith('~/')) {
+    prefix = '~/'
+    remainder = remainder.slice(2)
+  } else if (remainder.startsWith('//')) {
+    prefix = separator === '\\' ? '\\\\' : '//'
+    remainder = remainder.slice(2)
+  } else if (/^[A-Za-z]:\//u.test(remainder)) {
+    prefix = `${remainder.slice(0, 2)}${separator}`
+    remainder = remainder.slice(3)
+  } else if (remainder.startsWith('/')) {
+    prefix = '/'
+    remainder = remainder.slice(1)
   }
-  const leading = directories[0]
+  const segments = remainder.split('/').filter(Boolean)
+  const suffix = segments.at(-1) ?? fileName
+  const directories = segments.slice(0, -1)
+  const pathName = directories.length === 0 ? `${prefix}${suffix}` : suffix
+  if (directories.length === 0) {
+    return <span className="file-preview-path-control">
+      <button
+        type="button"
+        className="file-preview-path-button"
+        title={path}
+        aria-label={`在文件夹中显示 ${path}`}
+        aria-describedby={tooltipId}
+        onClick={onReveal}
+      ><span className="file-preview-path-parts" aria-hidden="true">
+        <strong className="file-preview-path-name">{pathName}</strong>
+      </span></button>
+      <span className="file-preview-path-tooltip" id={tooltipId} role="tooltip">{path}</span>
+    </span>
+  }
+  const leading = `${prefix}${directories[0]}`
   const trailing = directories.length > 1 ? directories.at(-1) : null
-  const middle = directories.length > 2 ? directories.slice(1, -1).join(' > ') : null
+  const middle = directories.length > 2 ? directories.slice(1, -1).join(` ${separator} `) : null
   return (
-    <span className="file-preview-path-parts" title={normalized} aria-label={normalized}>
-      <span className="file-preview-path-leading">{leading}</span>
-      {middle && (
-        <>
-          <span className="file-preview-path-separator" aria-hidden="true">&gt;</span>
-          <span className="file-preview-path-middle">{middle}</span>
-        </>
-      )}
-      {trailing && (
-        <>
-          <span className="file-preview-path-separator" aria-hidden="true">&gt;</span>
-          <span className="file-preview-path-trailing">{trailing}</span>
-        </>
-      )}
-      <span className="file-preview-path-separator" aria-hidden="true">&gt;</span>
-      <strong className="file-preview-path-name">{suffix}</strong>
+    <span className="file-preview-path-control">
+      <button
+        type="button"
+        className="file-preview-path-button"
+        title={path}
+        aria-label={`在文件夹中显示 ${path}`}
+        aria-describedby={tooltipId}
+        onClick={onReveal}
+      ><span className="file-preview-path-parts" aria-hidden="true">
+        <span className="file-preview-path-leading">{leading}</span>
+        {middle && (
+          <>
+            <span className="file-preview-path-separator" aria-hidden="true">{separator}</span>
+            <span className="file-preview-path-middle">{middle}</span>
+          </>
+        )}
+        {trailing && (
+          <>
+            <span className="file-preview-path-separator" aria-hidden="true">{separator}</span>
+            <span className="file-preview-path-trailing">{trailing}</span>
+          </>
+        )}
+        <span className="file-preview-path-separator" aria-hidden="true">{separator}</span>
+        <strong className="file-preview-path-name">{suffix}</strong>
+      </span></button>
+      <span className="file-preview-path-tooltip" id={tooltipId} role="tooltip">{path}</span>
     </span>
   )
 }
@@ -360,7 +409,9 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 }
 
 function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
-  const { reload, changePage } = useFilePreview()
+  const { reload, changePage, revealInFolder } = useFilePreview()
+  const [pathActionError, setPathActionError] = useState<string | null>(null)
+  useEffect(() => setPathActionError(null), [tab.file?.handleId, tab.id])
   const page = tab.content?.kind === 'page' ? tab.content.page : null
   const showPath = tab.loadState === 'ready' && previewPathIsVisible(tab.presentation)
   const showUpdate = tab.loadState === 'ready' && Boolean(tab.file)
@@ -379,7 +430,21 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   return (
     <>
       {showPath && <div className="file-preview-path-row">
-        <RelativePath path={tab.presentation.displayPath} fileName={tab.presentation.fileName} />
+        <FilePathButton
+          path={tab.presentation.displayPath}
+          fileName={tab.presentation.fileName}
+          onReveal={() => {
+            setPathActionError(null)
+            void revealInFolder(tab.id).then((result) => {
+              setPathActionError(result.ok ? null : result.error.message)
+            }).catch(() => {
+              setPathActionError('暂时无法显示这个文件的位置')
+            })
+          }}
+        />
+        {pathActionError && <span className="file-preview-path-error" role="alert" title={pathActionError}>
+          {pathActionError}
+        </span>}
         {updateAction}
       </div>}
       {!showPath && updateAction && <div className="file-preview-update-row">{updateAction}</div>}

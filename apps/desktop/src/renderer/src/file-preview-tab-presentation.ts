@@ -33,8 +33,31 @@ function previewTabNameKey(tab: PreviewTabModel): string {
 export function previewPathIsVisible(
   file: Pick<ResolvedFilePreview, 'displayPath' | 'pathPresentation'>
 ): boolean {
-  return file.pathPresentation === 'project_relative'
-    && normalizedPathParts(file.displayPath).length > 1
+  return file.pathPresentation !== 'file_name_only' && file.displayPath.length > 0
+}
+
+function shortestUniqueTabLabel(
+  tab: PreviewTabModel,
+  duplicates: readonly PreviewTabModel[],
+  duplicateOrdinal: number
+): string {
+  const { fileName, displayPath } = previewTabPresentation(tab)
+  const pathParts = normalizedPathParts(displayPath)
+  for (let depth = 2; depth <= pathParts.length; depth += 1) {
+    const candidate = pathParts.slice(-depth).join('/')
+    const unique = duplicates.every((other) => {
+      if (other.id === tab.id) return true
+      const otherParts = normalizedPathParts(previewTabPresentation(other).displayPath)
+      return otherParts.slice(-Math.min(depth, otherParts.length)).join('/') !== candidate
+    })
+    if (unique) return candidate
+  }
+  if (displayPath !== fileName
+    && duplicates.every((other) => other.id === tab.id
+      || previewTabPresentation(other).displayPath !== displayPath)) {
+    return displayPath
+  }
+  return `${fileName} · ${duplicateOrdinal}`
 }
 
 export function previewTabLabel(
@@ -52,17 +75,22 @@ export function previewTabLabel(
 }
 
 export function previewTabLabels(tabs: readonly PreviewTabModel[]): ReadonlyMap<string, string> {
-  const counts = new Map<string, number>()
+  const groups = new Map<string, PreviewTabModel[]>()
   for (const tab of tabs) {
     const key = previewTabNameKey(tab)
-    counts.set(key, (counts.get(key) ?? 0) + 1)
+    const group = groups.get(key) ?? []
+    group.push(tab)
+    groups.set(key, group)
   }
-  const duplicateNames = new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key))
   const ordinals = new Map<string, number>()
   return new Map(tabs.map((tab) => {
     const key = previewTabNameKey(tab)
     const ordinal = (ordinals.get(key) ?? 0) + 1
     ordinals.set(key, ordinal)
-    return [tab.id, previewTabLabel(tab, duplicateNames, ordinal)]
+    const duplicates = groups.get(key) ?? [tab]
+    const name = duplicates.length > 1
+      ? shortestUniqueTabLabel(tab, duplicates, ordinal)
+      : previewTabPresentation(tab).fileName
+    return [tab.id, tab.kind === 'file_change' ? `File Change·${name}` : name]
   }))
 }
