@@ -3030,6 +3030,17 @@ export interface SkillRevisionView {
   installedAt: string
 }
 
+export type SkillContentRequest =
+  | { source: 'installed'; skillId: string; revisionId: string; path?: string }
+  | { source: 'import'; stagingToken: string; candidateName: string; expectedDigest: string; path?: string }
+
+export interface SkillContentView {
+  path: string
+  content: string | null
+  status: 'text' | 'binary' | 'too_large'
+  files: { path: string; bytes: number }[]
+}
+
 export interface SkillGroupAssignmentView {
   groupKey: SkillDeliveryGroupKey
   revisionId: string
@@ -3531,6 +3542,7 @@ export type CoreMethod =
   | 'runtime.installations.refresh'
   | 'skills.list'
   | 'skills.get'
+  | 'skills.content.read'
   | 'skills.deliveryGroups.list'
   | 'skills.import.inspect'
   | 'skills.import.github.inspect'

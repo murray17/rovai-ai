@@ -1,6 +1,6 @@
 import { readErrorMessage } from './error-message'
 import { CoreSubsystemNotice } from './CoreSubsystemNotice'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Activity, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -4398,8 +4398,8 @@ export function SettingsView({
             onPreferencesChange={onGeneralPreferencesChange}
           />
         )}
-        {section === 'skills' && <SkillSettings />}
-        {section === 'mcp' && <McpSettings agents={agents} platform={platform} />}
+        <Activity mode={section === 'skills' ? 'visible' : 'hidden'}><SkillSettings /></Activity>
+        <Activity mode={section === 'mcp' ? 'visible' : 'hidden'}><McpSettings agents={agents} platform={platform} /></Activity>
         {section === 'runtime' && (
           <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
         )}

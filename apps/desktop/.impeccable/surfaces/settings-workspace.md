@@ -1,5 +1,5 @@
 ---
-version: 7
+version: 8
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -24,10 +24,9 @@ Settings replaces the common 270px App rail with the grouped settings navigation
 [`app-shell-navigation.md`](../../../../docs/ui/components/app-shell-navigation.md). Every category
 uses the shared borderless header, a direct title/description and page-specific actions. Appearance,
 Reminder and Agent Runtime use a solid content plane without a decorative top edge, gradient wash or
-header divider. Agent Runtime shares the same centered `1040px` title/body track as Skills and MCP;
+header divider. Agent Runtime uses a centered `1040px` title/body track;
 its catalog uses one quiet surface with individually raised rows. Other categories retain their
-current composition until they are reviewed separately. The content area does not add a second
-navigation column or page-sized outer card.
+current composition until they are reviewed separately. Skills and MCP instead use the capability library/detail composition below; other categories do not add a second navigation column or page-sized outer card.
 
 All categories implement Loading, Empty, Partial, Error, Disabled, Submitting and Recovery while
 retaining the header and navigation. A save, import, repair or probe failure keeps inputs, selection,
@@ -108,36 +107,29 @@ share a durable Episode card but remain independently acknowledged; the earliest
 message is the current exact action. Settings only affect Journal-qualified transient heads-up and
 never durable Episode admission, acknowledgement, clearing or the Core unread fact.
 
-## Skill
+## Skills and MCP
 
-Use one open list with stable identity mark, name, source, enabled switch and details for supported
-configuration choices. The list contains the nine `user_managed` official Skills, including
-`campfire` and the four pinned GitHub-origin Skills; GitHub provenance changes only the short source
-badge and details, not grouping or lifecycle. `cli-operations` and `memory-stewardship` are
-`system_required`: omit them entirely instead of adding locked rows, disabled controls, a required
-badge or a special built-in group. Imported revisions, enablement and `allowed-tools` do not imply
-extra Runtime permission or proof that a model read the Skill.
+Follow [Capability settings](../../../../docs/ui/components/capability-settings.md): a white day surface,
+compact left library and right content/configuration pane, with the same component tree in Steel Night.
+The divider supports pointer drag, keyboard adjustment, click alternatives and double-click reset.
+Search and 全部 / 已启用 / 已停用 filter together; source and status stay beside the row name.
+Detail headers own enable switches. Add, preview, import and delete/update confirmation stay in the
+right pane. Add and import are peer buttons in the MCP library heading. Only installed items appear in the list. Leaving an editor/import or switching MCP/Skills clears unfinished input; do not create draft placeholders or restore drafts.
 
-The wide-list header follows the MCP Library column model: one blank identity-mark slot, then
-`Skill / 生效范围 / 状态 / 查看`. It lives inside the list and shares the row's outer and control grids;
-at widths below 820px the header is hidden while controls reflow beneath the Skill copy without
-changing DOM or keyboard order.
+Skills show active `user_managed` items only; omit `system_required` Skills entirely. A source badge
+identifies Rovai, GitHub or 本地导入 without exposing configuration paths. Read-only content defaults
+to SKILL.md and supports safe Markdown, raw text and package file navigation. Local import invokes
+the native folder chooser, then previews the inspected candidate. GitHub import uses its existing
+inspection path. The scope tab selects delivery groups using whole rows with member avatars.
+New imports and initial official Skills inherit the canonical all-groups policy; updates preserve
+saved enablement and explicit group choices. Previews never execute or authorize Skill instructions.
 
-On Windows, an ambiguous or interrupted copy projection is a root-level execution blocker, not an
-individual Skill enablement state. Keep the list and saved choices visible, add one actionable recovery
-surface with the affected Runtime/root, and disable execution-dependent actions until Core reports the
-Execution Root Projection Gate admitted. Do not claim that toggling a Skill repairs journal state.
-
-## MCP
-
-Keep the current JSON truth path and import/mutation boundary. The upper assignment workbench has a
-bounded teammate roster and a searchable MCP chooser; the lower Library uses the same open-row family
-as Skill. Only the active teammate receives Steel selection. Checkbox assignment is the sole chooser
-state; do not duplicate risk labels, “assigned/unassigned” badges or a second write surface in details.
-
-Malformed source preserves raw content and blocks overwrite. Secret values stay masked and out of
-normal errors/diagnostics. Mutations honor current digest/CAS order; the Renderer stops subsequent
-writes after conflict and refreshes.
+MCP accepts JSON only, with the existing digest/CAS mutation semantics. The right-side local import
+shows selectable portable candidates and folds unneeded diagnostics. Same-name replacement requires
+an explicit inline choice. Necessary environment reference edits remain visible. Teammate assignment
+uses whole rows with real avatars and a selected check mark. Malformed source blocks overwrite;
+secret values stay masked and out of ordinary errors. Conflicts retain the JSON draft and require
+refresh/review before retrying. Do not display source file paths as routine configuration content.
 
 ## Agent 运行时与诊断
 
