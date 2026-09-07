@@ -11,6 +11,8 @@ import { FilePreviewResizeHandle, FilePreviewWorkspace } from '../../../apps/des
 import { FilePreviewPane } from '../../../apps/desktop/src/renderer/src/FilePreviewPane'
 import { FileReferenceLink } from '../../../apps/desktop/src/renderer/src/FileReferenceLink'
 import { StructuredMentionComposer } from '../../../apps/desktop/src/renderer/src/StructuredMentionComposer'
+import { FileOperationRow, ModifiedFileRow, ToolCallRow } from '../../../apps/desktop/src/renderer/src/ExecutionToolGroup'
+import { buildLiveExecutionProgress } from '../../../apps/desktop/src/shared/execution-presentation'
 import { FILE_PREVIEW_RATIO_STORAGE_KEY } from '../../../apps/desktop/src/renderer/src/file-preview-layout'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
@@ -60,6 +62,19 @@ const pathReferences = [
 ]
 const missingReference = 'src/missing-report.ts'
 const toolPreviewReference = 'src/tool-link-preview.ts'
+const readReferences = ['src/index.ts', 'tests/index.ts']
+const toolNotices: string[] = []
+const readSteps = [readReferences, [toolPreviewReference, toolPreviewReference]].map((paths, index) => {
+  const item = buildLiveExecutionProgress([{
+    id: `tool-read-${index}`, agentRunId: 'tool-run', eventType: 'activity.completed',
+    createdAt: '2026-09-07T00:00:00Z',
+    payload: { item: { type: 'commandExecution', status: 'completed',
+      command: paths.map(path => `sed -n '1,20p' ${path}`).join('; '),
+      commandActions: paths.map(path => ({ type: 'read', path })), aggregatedOutput: '完整读取结果' } }
+  }], 'tool-run').items[0]
+  if (item.kind !== 'tool') throw new Error('Expected a read tool')
+  return item.step
+})
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected fixture API operation') }
 const fileOpens: OpenFilePreviewRequest[] = []
 const fileRestores: OpenFilePreviewRequest[] = []
@@ -103,9 +118,9 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
       kind: request.rawReference === 'find.patch' ? 'patch' : request.rawReference === 'find.log' ? 'paged_text' : 'svg', size: 8 * 1024 * 1024 }
   } else if (request.kind === 'message_reference' && request.rawReference === 'find.html') {
     target = { ...markdownFile, kind: 'html', previewKey: 'html-find', fileName: 'find.html', displayPath: 'find.html', target: undefined }
-  } else if (request.kind === 'camp_workspace' && request.rawReference === toolPreviewReference) {
-    target = { ...file, previewKey: toolPreviewReference, displayPath: toolPreviewReference,
-      fileName: toolPreviewReference.split('/').at(-1)! }
+  } else if (request.kind === 'camp_workspace' && [toolPreviewReference, ...readReferences].includes(request.rawReference)) {
+    target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
+      fileName: request.rawReference.split('/').at(-1)! }
   } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
   const handleId = crypto.randomUUID()
   if (target.kind === 'html') htmlHandles.add(handleId)
@@ -313,9 +328,30 @@ function Workspace(): React.JSX.Element {
 
 let switchCamp: () => void
 let setFixtureTheme: (theme: ResolvedTheme) => void
+let showToolRows: () => void
+function ToolRows(): React.JSX.Element {
+  return <section id="tool-rows" style={{ position: 'fixed', zIndex: 100, inset: 60, padding: 20, background: 'var(--conversation-surface)' }}>
+    <div id="tool-row-content" style={{ width: 420 }}>
+      {readSteps.map((step, index) => <div data-tool-case={`read-${index}`} key={step.id}>
+        <ToolCallRow campId="camp-1" runId="tool-run" runStatus="succeeded" step={step} onFileOpenError={message => toolNotices.push(message)} />
+      </div>)}
+      <div data-tool-case="edit">
+        <ModifiedFileRow campId="camp-1" semanticKind="unified_diff_snapshot" onFileOpenError={message => toolNotices.push(message)}
+          change={{ path: toolPreviewReference, changeKind: 'update', additions: 1, deletions: 1,
+            diff: '@@ -1 +1 @@\n-old content\n+new content' }} />
+      </div>
+      <div data-tool-case="path-only">
+        <FileOperationRow campId="camp-1" runStatus="succeeded" onFileOpenError={message => toolNotices.push(message)}
+          step={{ ...readSteps[0], shellReadSummary: undefined, fileOperation: { operationKind: 'write', path: toolPreviewReference } }} />
+      </div>
+    </div>
+  </section>
+}
 function Fixture(): React.JSX.Element {
   const [camp, setCamp] = useState('camp-1')
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>('day')
+  const [toolRowsVisible, setToolRowsVisible] = useState(false)
+  showToolRows = () => { setCamp('camp-1'); setToolRowsVisible(true) }
   switchCamp = () => setCamp((previous) => previous === 'camp-1' ? 'camp-2' : 'camp-1')
   setFixtureTheme = (theme) => {
     document.documentElement.dataset.theme = theme
@@ -327,6 +363,7 @@ function Fixture(): React.JSX.Element {
       <AppHeader campTitle="文件预览验收" contextLabel="Rovai AI" camp={null} onFocusApprovals={() => {}} />
       <main className="content task-content"><Workspace /></main>
     </div>
+    {toolRowsVisible && <ToolRows />}
   </FilePreviewProvider>
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><Fixture /></StrictMode>)
@@ -360,6 +397,9 @@ async function settle(): Promise<void> {
 Object.assign(window, { previewTest: {
   settle,
   pointerEvents,
+  showToolRows: () => showToolRows(),
+  toolState: () => ({ requests: [...fileRestores], notices: [...toolNotices], tabs: previewController.tabs.length, activeTabId: previewController.activeTabId }),
+  failNextToolRead: () => { failNextRead = true },
   async open() {
     element('.message-file-reference')!.click()
     await settle()

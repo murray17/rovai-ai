@@ -20,7 +20,7 @@ describe('shellReadSummary', () => {
         ]
       }
     })).toEqual({
-      title: 'Read 2 files',
+      title: '阅读 acp.rs，agent_runtime_adapter.rs',
       paths: [
         'crates/rovai-core/src/acp.rs',
         'crates/rovai-core/src/agent_runtime_adapter.rs'
@@ -34,7 +34,7 @@ describe('shellReadSummary', () => {
       "sed -n '1,20p' src/index.ts",
       "sed -n '80,110p' src/index.ts"
     ].join('; ') } })).toEqual({
-      title: 'Read index.ts',
+      title: '阅读 index.ts',
       paths: ['src/index.ts'],
       displayPaths: ['index.ts']
     })
@@ -45,7 +45,7 @@ describe('shellReadSummary', () => {
       { type: 'read', path: 'src/index.ts' },
       { type: 'read', path: 'tests/index.ts' }
     ] } })).toEqual({
-      title: 'Read 2 files',
+      title: '阅读 src/index.ts，tests/index.ts',
       paths: ['src/index.ts', 'tests/index.ts'],
       displayPaths: ['src/index.ts', 'tests/index.ts']
     })
@@ -61,7 +61,7 @@ describe('shellReadSummary', () => {
   it('falls back only when structured actions are unavailable, never when they contradict a pure read', () => {
     expect(shellReadSummary({
       item: { command: repeatedReadCommand, commandActions: [{ type: 'unknown' }] }
-    })?.title).toBe('Read 2 files')
+    })?.title).toBe('阅读 acp.rs，agent_runtime_adapter.rs')
     expect(shellReadSummary({
       item: {
         command: repeatedReadCommand,
@@ -111,7 +111,7 @@ describe('shellReadSummary', () => {
     const step = items[0].kind === 'tool' ? items[0].step : null
     expect(step).toMatchObject({
       shellReadSummary: {
-        title: 'Read 2 files',
+        title: '阅读 acp.rs，agent_runtime_adapter.rs',
         displayPaths: ['acp.rs', 'agent_runtime_adapter.rs']
       },
       publicCommand: repeatedReadCommand,
@@ -146,7 +146,7 @@ describe('shellReadSummary', () => {
       publicCommand: repeatedReadCommand,
       detail: expect.stringContaining(repeatedReadCommand),
       iconKind: 'file-read',
-      shellReadSummary: { title: 'Read 2 files' },
+      shellReadSummary: { title: '阅读 acp.rs，agent_runtime_adapter.rs' },
       status: 'completed'
     })
   })

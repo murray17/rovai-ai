@@ -1744,9 +1744,7 @@ export function shellReadSummary(payload: unknown): ShellReadSummary | null {
   if (uniquePaths.length === 0) return null
   const displayPaths = shortestUniquePathLabels(uniquePaths)
   return {
-    title: uniquePaths.length === 1
-      ? `Read ${displayPaths[0]}`
-      : `Read ${uniquePaths.length} files`,
+    title: `阅读 ${displayPaths.join('，')}`,
     paths: uniquePaths,
     displayPaths
   }

@@ -295,10 +295,15 @@ export function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError 
     if (outcome.kind !== 'preview') onFileOpenError('无法打开该文件')
   }
   return (
-    <div className={`process-action modified-file-row${expanded ? ' is-expanded' : ''}`} data-activity-domain="file">
-      <div
+    <details
+      className={`process-action modified-file-row${expanded ? ' is-expanded' : ''}`}
+      data-activity-domain="file"
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary
         className="modified-file-summary"
-        role="group"
+        aria-controls={diffId}
+        aria-expanded={expanded}
         aria-label={`${verb} ${change.path}，新增 ${change.additions} 行，删除 ${change.deletions} 行`}
       >
         <ToolCallIcon iconKind="file-write" />
@@ -309,7 +314,11 @@ export function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError 
             type="button"
             aria-label={`打开文件预览：${change.path}`}
             title={`${change.path} · 打开文件预览`}
-            onClick={() => void openFile()}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void openFile()
+            }}
           >
             {fileName}
           </button>
@@ -318,20 +327,16 @@ export function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError 
           <span className="diff-addition">+{change.additions}</span>
           <span className="diff-deletion">−{change.deletions}</span>
         </span>
-        <button
+        <span
           className="tool-call-disclosure-slot"
-          type="button"
-          aria-controls={diffId}
-          aria-expanded={expanded}
-          aria-label={`${expanded ? '收起' : '展开'} ${change.path} 的文件差异`}
+          aria-hidden="true"
           title={`${expanded ? '收起' : '展开'}文件差异`}
-          onClick={() => setExpanded((current) => !current)}
         >
           <svg viewBox="0 0 16 16" focusable="false">
             <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
           </svg>
-        </button>
-      </div>
+        </span>
+      </summary>
       <div
         id={diffId}
         className={`modified-file-diff${exactMutation ? ' is-exact-mutation' : ''}`}
@@ -361,7 +366,7 @@ export function ModifiedFileRow({ campId, change, semanticKind, onFileOpenError 
                 </div>
               ))}
       </div>
-    </div>
+    </details>
   )
 }
 
@@ -471,20 +476,15 @@ export function ToolCallRow({
       <ToolCallIcon iconKind={step.iconKind} />
       {readSummary ? (
         <span className="tool-call-title shell-read-summary-copy">
-          <span className="shell-read-summary-title">
-            {readSummary.paths.length === 1
-              ? <><span>Read</span>{readFileLink(readSummary.paths[0], readSummary.displayPaths[0])}</>
-              : readSummary.title}
+          <span className="shell-read-summary-title">阅读</span>
+          <span className="shell-read-file-list" role="list" aria-label="阅读的文件">
+            {readSummary.paths.map((path, index) => (
+              <span role="listitem" key={path}>
+                {index > 0 && <span className="shell-read-file-separator" aria-hidden="true">，</span>}
+                {readFileLink(path, readSummary.displayPaths[index])}
+              </span>
+            ))}
           </span>
-          {readSummary.paths.length > 1 && (
-            <span className="shell-read-file-list" role="list" aria-label="读取的文件">
-              {readSummary.paths.map((path, index) => (
-                <span role="listitem" key={path}>
-                  {readFileLink(path, readSummary.displayPaths[index])}
-                </span>
-              ))}
-            </span>
-          )}
         </span>
       ) : (
         <span className="tool-call-title" title={publicTitle}>{publicTitle}</span>
@@ -878,4 +878,3 @@ function toolCallStatusLabel(status: string): string {
     recorded: '结果未知'
   } as Record<string, string>)[status] ?? status
 }
-

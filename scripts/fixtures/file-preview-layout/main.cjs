@@ -969,6 +969,85 @@ app.whenReady().then(async () => {
     await key('w', [primary])
     assert.equal(nativeCloseRequests, 1, 'With preview hidden, the native window close path remains available')
   })
+  await check('tool reads stay on one Chinese line and file previews do not toggle command details', async () => {
+    await run('window.previewTest.closeAll(); window.previewTest.showToolRows()')
+    await snapshot()
+    for (const theme of ['day', 'night']) {
+      await run(`window.previewTest.setTheme(${JSON.stringify(theme)})`)
+      for (const width of [420, 800]) {
+        const rows = await run(`(() => {
+          document.querySelector('#tool-row-content').style.width = '${width}px';
+          return [...document.querySelectorAll('#tool-rows .shell-read-summary-copy')].map(row => {
+            const links = [...row.querySelectorAll('button')];
+            return { text: row.textContent, height: row.getBoundingClientRect().height,
+              tops: links.map(link => link.getBoundingClientRect().top),
+              right: row.getBoundingClientRect().right, lastRight: links.at(-1).getBoundingClientRect().right,
+              dashed: links.every(link => getComputedStyle(link).textDecorationStyle === 'dashed') };
+          });
+        })()`)
+        assert.deepEqual(rows.map(row => row.text), ['阅读src/index.ts，tests/index.ts', '阅读tool-link-preview.ts'])
+        for (const row of rows) {
+          assert.equal(row.height, 28)
+          assert.ok(row.tops.every(top => top === row.tops[0]))
+          assert.ok(row.lastRight <= row.right + 1)
+          assert.equal(row.dashed, true)
+        }
+      }
+      await capture(`tool-rows-${theme}`)
+    }
+    const read = '[data-tool-case="read-0"]'
+    for (const [index, path] of ['src/index.ts', 'tests/index.ts'].entries()) {
+      await click(`${read} [role="listitem"]:nth-child(${index + 1}) button`)
+      const state = await run('window.previewTest.toolState()')
+      assert.deepEqual(state.requests.at(-1), { kind: 'camp_workspace', campId: 'camp-1', rawReference: path })
+      assert.equal(await run(`document.querySelector('${read} details').open`), false)
+    }
+    await click(`${read} .shell-read-summary-title`)
+    assert.equal(await run(`document.querySelector('${read} details').open`), true)
+    assert.match(await run(`document.querySelector('${read} .tool-call-detail').textContent`), /完整读取结果/)
+    await click(`${read} .shell-read-summary-title`)
+  })
+  await check('edit summary supports pointer and keyboard diff toggles independently of file preview', async () => {
+    const edit = '[data-tool-case="edit"]'
+    const expanded = () => run(`document.querySelector('${edit} details').open`)
+    const before = await run('window.previewTest.toolState()')
+    for (const target of ['.modified-file-title > span', '.tool-call-icon', '.modified-file-stats', '.tool-call-disclosure-slot', '.modified-file-title']) {
+      await click(`${edit} ${target}`)
+      assert.equal(await expanded(), true, `${target} expands the diff`)
+      assert.equal(await run(`document.querySelector('${edit} .modified-file-diff').hidden`), false)
+      assert.notEqual(await run(`getComputedStyle(document.querySelector('${edit} summary')).backgroundColor`), 'rgba(0, 0, 0, 0)')
+      await click(`${edit} ${target}`)
+      assert.equal(await expanded(), false)
+    }
+    assert.deepEqual((await run('window.previewTest.toolState()')).requests, before.requests)
+    await click(`${edit} .tool-file-link`)
+    assert.equal(await expanded(), false)
+    assert.equal((await run('window.previewTest.toolState()')).requests.at(-1).rawReference, 'src/tool-link-preview.ts')
+    for (const code of ['Enter', 'Space']) {
+      await run(`document.querySelector('${edit} summary').focus()`)
+      await key(code)
+      assert.equal(await expanded(), true)
+      await key('Tab')
+      assert.equal(await run(`document.activeElement === document.querySelector('${edit} .tool-file-link')`), true)
+      await key(code)
+      assert.equal(await expanded(), true, 'Keyboard file preview preserves the open diff')
+      await run(`document.querySelector('${edit} summary').focus()`)
+      await key(code)
+      assert.equal(await expanded(), false)
+    }
+    assert.equal(await run('document.querySelector(\'[data-tool-case="path-only"] details\')'), null)
+    assert.deepEqual((await run('window.previewTest.toolState()')).notices, [])
+    const beforeFailure = await run('window.previewTest.toolState()')
+    await run('window.previewTest.failNextToolRead()')
+    await click(`${edit} .tool-file-link`)
+    const afterFailure = await run('window.previewTest.toolState()')
+    assert.equal(afterFailure.tabs, beforeFailure.tabs)
+    assert.equal(afterFailure.activeTabId, beforeFailure.activeTabId)
+    assert.deepEqual(afterFailure.notices, ['无法打开该文件'])
+    assert.equal(await expanded(), false)
+    await click(`${edit} .modified-file-title > span`)
+    await capture('tool-edit-preview-and-diff')
+  })
   console.log(JSON.stringify({ ok: true, cases }))
   app.exit(0)
 }).catch(error => { console.error(error); app.exit(1) })
