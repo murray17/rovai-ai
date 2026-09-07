@@ -1,3 +1,4 @@
+import { prefersReducedMotion } from './reduced-motion'
 import { useCallback, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { MemberAvatar, type MemberAvatarProps } from './MemberAvatar'
 import { ExecutionStatusGlyph, type ExecutionStatusShape } from './ExecutionStatusGlyph'
@@ -13,7 +14,7 @@ const SCROLL_STEP = 176
 const EDGE_INSET = 32
 
 function scrollBehavior(): ScrollBehavior {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+  return prefersReducedMotion() ? 'auto' : 'smooth'
 }
 
 function revealAvatar(rail: HTMLUListElement, button: HTMLButtonElement): void {

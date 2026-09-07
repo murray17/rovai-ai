@@ -1,3 +1,4 @@
+import { APPEARANCE_READING_CHANGED } from './reduced-motion'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
@@ -57,6 +58,12 @@ export function ReadonlyCodeViewer({
       active = false
     }
   }, [fileName])
+
+  useEffect(() => {
+    const measure = (): void => viewRef.current?.requestMeasure()
+    document.addEventListener(APPEARANCE_READING_CHANGED, measure)
+    return () => document.removeEventListener(APPEARANCE_READING_CHANGED, measure)
+  }, [])
 
   const findAdapter = useMemo(() => editor ? codeFileFindAdapter(editor, findScopeLabel) : null, [editor, text, findScopeLabel])
   useFileFindAdapter(findAdapter)

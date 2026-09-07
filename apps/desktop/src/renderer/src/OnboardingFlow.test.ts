@@ -1,3 +1,4 @@
+import { DEFAULT_APPEARANCE } from '../../shared/appearance'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -149,6 +150,7 @@ function renderOnboarding(
   return renderToStaticMarkup(createElement(OnboardingFlow, {
     snapshot: value,
     appearance: {
+      ...DEFAULT_APPEARANCE,
       preference: 'system',
       resolvedTheme: 'day'
     },

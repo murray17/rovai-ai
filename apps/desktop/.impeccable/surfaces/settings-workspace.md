@@ -1,5 +1,5 @@
 ---
-version: 6
+version: 7
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -62,6 +62,30 @@ Appearance presents exactly “跟随系统 / 日间 / 夜间”, with resolved 
 remaining distinguishable in the page header. The quiet theme surfaces describe Porcelain Day and
 Steel Night; switching preserves page state, focus and open overlays. Follow
 [`themes/README.md`](../../../../docs/ui/themes/README.md).
+
+Appearance follows the reviewed three-section composition: 界面主题, 文字与阅读, 显示与动效, on a
+centered 980px track. Theme choices are whole-card native radio labels, with a 16:9 UI thumbnail,
+Chinese/English name, selection outline and check mark. Follow-system uses a diagonal day/night split
+of the same synthetic workspace; day and night show their fixed palettes independently of the selected
+page theme. Preserve keyboard arrows and a visible card focus ring.
+
+The reading section places compact controls beside a bounded conversation/document/code preview.
+Conversation, document and code sizes default to 13/15/14px and accept integer values from 12–24px.
+Valid typing or a stepper change updates the matching preview immediately without transferring focus;
+empty/intermediate input is kept while editing and normalized on blur or Enter. Standard/relaxed density
+changes prose leading and paragraph spacing. Preview tabs use ArrowLeft/Right, Home/End and roving focus.
+Preview messages and files are synthetic examples, never user or Core data.
+
+The display section offers 80–200% zoom choices and follows the existing native Electron zoom shortcuts.
+The broader 10–500% shortcut range remains available and an out-of-list current value stays representable.
+Reduced motion has exactly 跟随系统 and 始终减少; it suppresses motion in CSS, programmatic scrolling
+and the world map while preserving status and progress content. Its one-shot file-tab example can replay.
+
+Preferences apply and save immediately through Desktop Main. Loading legacy theme-only preferences
+retains the theme and supplies reading defaults; malformed source is preserved and reported as degraded.
+Writes serialize and publish only after an atomic save succeeds. Controls retain focus during rapid edits;
+a failure retains the draft and exposes retry with honest unsaved feedback. Restore defaults resets all
+appearance preferences, including theme and native zoom, without touching other settings.
 
 Reminder settings control only accepted transient heads-up categories. The production Renderer does
 not mount the persistent notification drawer, global bell or unread total; the Core notification read
