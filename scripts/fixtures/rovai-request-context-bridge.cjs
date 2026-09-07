@@ -24,6 +24,8 @@ ipcMain.handle('rovai:request', (_event, _method, params) => params?.kind === 'v
   ? { kind: 'value', value: { unchanged: true, values: [1, null, 'ok'] } }
   : { kind: 'failure', failure: failures[params.index] })
 
+ipcMain.handle('rovai:general-preferences-set-new-conversation-defaults', (_event, defaults, enableOneClick) => ({ defaults, enableOneClick }))
+
 app.whenReady().then(async () => {
   const window = new BrowserWindow({
     show: false,
@@ -33,6 +35,9 @@ app.whenReady().then(async () => {
     await window.loadURL('data:text/html,<html><body>Isolated contextBridge regression</body></html>')
     const observations = await window.webContents.executeJavaScript(`(async () => {
       const value = await window.rovai.request('navigation.snapshot', { kind: 'value' })
+      const defaults = { memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }
+      const savedOnly = await window.rovai.generalPreferences.setNewConversationDefaults(defaults)
+      const enabled = await window.rovai.generalPreferences.setNewConversationDefaults(defaults, true)
       const failures = []
       for (let index = 0; index < 4; index++) {
         const pending = window.rovai.request('navigation.snapshot', { index })
@@ -47,10 +52,13 @@ app.whenReady().then(async () => {
           ))
         }
       }
-      return { value, failures }
+      return { value, failures, savedOnly, enabled }
     })()`)
     assert.deepEqual(observations.value, { unchanged: true, values: [1, null, 'ok'] })
     assert.deepEqual(observations.failures, failures, 'Renderer must receive every structured failure field')
+    const defaults = { memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }
+    assert.deepEqual(observations.savedOnly, { defaults, enableOneClick: false })
+    assert.deepEqual(observations.enabled, { defaults, enableOneClick: true })
     console.log(JSON.stringify({
       ok: true,
       electron: process.versions.electron,

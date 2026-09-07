@@ -1159,9 +1159,10 @@ ipcMain.handle('rovai:general-preferences-set-execution-placement', (_event, pla
   )
 })
 
-ipcMain.handle('rovai:general-preferences-set-new-conversation-defaults', (_event, defaults: unknown) => {
+ipcMain.handle('rovai:general-preferences-set-new-conversation-defaults', (_event, defaults: unknown, enableOneClick: unknown = false) => {
   if (!isNewConversationDefaults(defaults)) throw new Error('Invalid default new conversation configuration')
-  return requireGeneralPreferences().setNewConversationDefaults(defaults)
+  if (typeof enableOneClick !== 'boolean') throw new Error('Invalid one-click new conversation preference')
+  return requireGeneralPreferences().setNewConversationDefaults(defaults, enableOneClick)
 })
 
 ipcMain.handle('rovai:general-preferences-set-one-click-new-conversation', (_event, enabled: unknown) => {

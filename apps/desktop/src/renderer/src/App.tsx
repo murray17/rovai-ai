@@ -3390,7 +3390,8 @@ function AuthoritativeApp({
   }
 
   async function createCamp(
-    draft: Omit<CreateCampRequest, 'commandId'>
+    draft: Omit<CreateCampRequest, 'commandId'>,
+    enableOneClick = false
   ): Promise<void> {
     setBusy('create-camp')
     try {
@@ -3405,7 +3406,25 @@ function AuthoritativeApp({
       const campId = stringField(result.payload, 'campId')
       if (!campId) throw new Error('会话已创建，但暂时无法打开。请刷新会话列表后重试。')
       setNewConversationOpen(false)
-      await activateCamp(campId, { reconcileDefaultLead: false })
+      let preferencesSaveFailed = false
+      if (enableOneClick) {
+        try {
+          const saved = await window.rovai.generalPreferences.setNewConversationDefaults({
+            memberAgentIds: draft.memberAgentIds,
+            defaultLeadAgentId: draft.defaultLeadAgentId
+          }, true)
+          setGeneralPreferences(saved)
+        } catch {
+          preferencesSaveFailed = true
+        }
+      }
+      try {
+        await activateCamp(campId, { reconcileDefaultLead: false })
+      } finally {
+        if (preferencesSaveFailed) {
+          notifyError('对话已创建，但默认队伍与一键新建设置未保存。可在「设置 → 通用」重试。')
+        }
+      }
     } finally {
       setBusy(null)
     }
@@ -4045,10 +4064,10 @@ function AuthoritativeApp({
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}
         onWorkspaceSelected={(workspace) => restoreNavigationProject(workspace.projectPath)}
-        onCreate={(draft) => createCamp({
+        onCreate={(draft, enableOneClick) => createCamp({
           ...draft,
           activationState: campActivationStateForCreation('dialog')
-        })}
+        }, enableOneClick)}
       />
       <NotificationAttentionController
         enabled={startupStatus === 'resolved'}

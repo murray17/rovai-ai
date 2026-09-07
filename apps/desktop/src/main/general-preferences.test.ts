@@ -235,6 +235,58 @@ describe('general preferences', () => {
     })
   })
 
+  it('saves the selected team and enables one-click together, preserving other preferences', async () => {
+    const directory = await temporaryDirectory()
+    const filePath = join(directory, 'general-preferences.json')
+    const store = await GeneralPreferencesStore.load(filePath)
+    const defaults = { memberAgentIds: ['agent-a', 'agent-b'], defaultLeadAgentId: 'agent-b' }
+    const saving = store.setNewConversationDefaults(defaults, true)
+    defaults.memberAgentIds.push('agent-c')
+    await Promise.all([saving, store.setLastSettingsSection('runtime')])
+
+    expect(store.get()).toEqual({
+      ...DEFAULT_GENERAL_PREFERENCES,
+      lastSettingsSection: 'runtime',
+      newConversationDefaults: { memberAgentIds: ['agent-a', 'agent-b'], defaultLeadAgentId: 'agent-b' },
+      oneClickNewConversationEnabled: true
+    })
+    expect((await GeneralPreferencesStore.load(filePath)).get()).toEqual(store.get())
+    await store.setNewConversationDefaults({ memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }, false)
+    expect(store.get().oneClickNewConversationEnabled).toBe(true)
+  })
+
+  it('rejects invalid atomic updates without enabling one-click or changing the team', async () => {
+    const directory = await temporaryDirectory()
+    const store = await GeneralPreferencesStore.load(join(directory, 'general-preferences.json'))
+    await expect(store.setNewConversationDefaults({ memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-b' }, true)).rejects.toThrow()
+    await expect(store.setNewConversationDefaults(
+      { memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' },
+      'true' as unknown as boolean
+    )).rejects.toThrow()
+    expect(store.get()).toEqual(DEFAULT_GENERAL_PREFERENCES)
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('keeps both saved team and one-click flag when an atomic save fails, then allows retry', async () => {
+    const directory = await temporaryDirectory()
+    const filePath = join(directory, 'general-preferences.json')
+    const store = await GeneralPreferencesStore.load(filePath)
+    await store.setNewConversationDefaults({ memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' })
+    const previous = store.get()
+    await rm(filePath)
+    await mkdir(filePath)
+    const nextTeam = { memberAgentIds: ['agent-b'], defaultLeadAgentId: 'agent-b' }
+    await expect(store.setNewConversationDefaults(nextTeam, true)).rejects.toBeInstanceOf(Error)
+    expect(store.get()).toEqual(previous)
+    expect((await readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    await rm(filePath, { recursive: true })
+    await store.setNewConversationDefaults(nextTeam, true)
+    expect((await GeneralPreferencesStore.load(filePath)).get()).toMatchObject({
+      newConversationDefaults: nextTeam,
+      oneClickNewConversationEnabled: true
+    })
+  })
+
   it('keeps the last successful value and cleans the temporary file when rename fails', async () => {
     const directory = await temporaryDirectory()
     const filePath = join(directory, 'general-preferences.json')
