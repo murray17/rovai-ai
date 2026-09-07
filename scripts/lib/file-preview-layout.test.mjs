@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { build } from 'vite'
+import ts from 'typescript'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
@@ -19,6 +20,17 @@ test('production file preview keeps split geometry, reading state and stable pre
   let child
   let closed
   try {
+    const shortcutSource = await readFile(join(root, 'apps/desktop/src/shared/close-tab-shortcut.ts'), 'utf8')
+    const shortcutCode = ts.transpileModule(shortcutSource, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
+    }).outputText
+    const shortcutModule = join(fixture, 'close-tab-shortcut.cjs')
+    const shortcutPreload = join(fixture, 'close-tab-preload.cjs')
+    await writeFile(shortcutModule, shortcutCode)
+    await writeFile(shortcutPreload, `${shortcutCode}\nconst { contextBridge, ipcRenderer } = require('electron')
+contextBridge.exposeInMainWorld('previewWindowControls', {
+  onCloseTabRequested: exports.createCloseTabShortcutHandler(ipcRenderer)
+})`)
     await build({
       configFile: false, root: fixtureSource, base: './', logLevel: 'error', plugins: [react()],
       resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } },
@@ -28,6 +40,7 @@ test('production file preview keeps split geometry, reading state and stable pre
     delete environment.ELECTRON_RUN_AS_NODE
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
+      shortcutModule, shortcutPreload,
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])
     ], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')

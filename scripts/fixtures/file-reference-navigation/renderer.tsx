@@ -58,6 +58,7 @@ const draft = { campId, body: '保留原有草稿', content: {
 }, revision: 1,
   attachments: [], replyIntent: null, continuationIntent: null, updatedAt: null, expiresAt: null }
 Object.assign(window, { rovai: {
+  windowControls: { onCloseTabRequested: () => () => {} },
   filePreview: api, platform: 'darwin', onEvent: () => () => {},
   request: async (method: string) => {
     if (method.startsWith('camp.composerDraft.')) return draft

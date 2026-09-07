@@ -182,6 +182,17 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     else focusConversation()
   }
 
+  useEffect(() => window.rovai.windowControls.onCloseTabRequested(() => {
+    if (!paneVisible) return false
+    const index = tabs.findIndex((tab) => tab.id === activeTabId)
+    if (index >= 0) closeAndRestoreFocus(index)
+    else {
+      hidePane()
+      focusConversation()
+    }
+    return true
+  }), [tabs, activeTabId, paneVisible, close, hidePane])
+
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
     if (event.altKey && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       event.preventDefault()

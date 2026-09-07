@@ -2876,6 +2876,7 @@ export interface OnboardingApi {
 }
 
 export interface WindowControlsApi {
+  onCloseTabRequested(listener: () => boolean): () => void
   getResetCapability(): Promise<WindowResetCapability>
   resetBounds(): Promise<WindowResetResult>
   popupApplicationMenu(request: WindowsApplicationMenuPopupRequest): Promise<boolean>

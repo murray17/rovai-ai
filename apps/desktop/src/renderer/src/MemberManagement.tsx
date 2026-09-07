@@ -869,7 +869,6 @@ function ExpandableIdentityField({ label, lines, contentKey, children }: {
 
 const PRODUCT_RUNTIMES: AdapterKind[] = [
   'claude-code-cli',
-  'pi',
   'codex-cli',
   'copilot-cli',
   'opencode-cli',
@@ -881,7 +880,8 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'cursor-agent',
   'kimi-code-cli',
   'grok-build',
-  'antigravity-app'
+  'antigravity-app',
+  'pi'
 ]
 
 const VISIBLE_PRODUCT_RUNTIMES = PRODUCT_RUNTIMES.filter(
@@ -1722,7 +1722,7 @@ function commandCodeLabel(code: string): string {
 function adapterLabel(kind: AdapterKind): string {
   return ({
     'codex-cli': 'Codex CLI',
-    pi: 'Pi Coding Agent',
+    pi: 'PI',
     'opencode-cli': 'OpenCode',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',

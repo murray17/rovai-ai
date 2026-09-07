@@ -178,6 +178,7 @@ const changes: AgentRunFileChangesView = {
   fileCount: 2, operationCount: 2, additions: 247, deletions: 91, completedAt: '2026-08-30T08:00:00Z'
 }
 Object.assign(window, { rovai: {
+  windowControls: (window as unknown as { previewWindowControls: unknown }).previewWindowControls,
   filePreview: api,
   request: async (method: string, request: { campId: string; agentRunId: string; executionEpoch: number }): Promise<AgentRunFileChangesDetailView> => {
     if (method !== 'agentRunFileChanges.get' || request.campId !== 'camp-1' || request.agentRunId !== changes.agentRunId) return unsupported()

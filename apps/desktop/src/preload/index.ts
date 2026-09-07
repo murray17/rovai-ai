@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { createCloseTabShortcutHandler } from '../shared/close-tab-shortcut'
 import {
   APP_PREPARE_QUIT_CHANNEL,
   type AppQuitPreparationResponse
@@ -278,6 +279,7 @@ const api: RovaiApi = {
     }
   },
   windowControls: {
+    onCloseTabRequested: createCloseTabShortcutHandler(ipcRenderer),
     getResetCapability() {
       return ipcRenderer.invoke('rovai:window-reset-capability')
     },

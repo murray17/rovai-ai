@@ -4,7 +4,7 @@ name: Notification Episode
 version: v5
 status: accepted
 source_version: v1.36
-last_updated: 2026-08-31
+last_updated: 2026-09-07
 ---
 
 # Notification Episode v5
@@ -17,6 +17,12 @@ read transaction 中投影，见 [Channel Camp Naming v1](channel-camp-naming-v1
 Renderer 统一添加渠道前缀；闭合绑定不丢来源。来源不写 Episode、Journal 或 attention revision。
 
 旧 reader 可忽略新增字段，新 reader 容许缺失/null；Inbox/Change Journal schema 6 不变。
+
+## 单聊完成提醒
+
+`camp_turn.kind = single_chat` 的 `turn_completed` 不投影 HeadsUpSignal，因此单聊完成不弹出提醒。
+Core 根据精确 Occurrence 对应的 CampTurn 判断，不依赖当前打开的面板；已有 Occurrence、Episode、
+Journal 和未读语义保持不变。Camp 公屏完成、失败、未完成和审批提醒继续按既有规则投影。
 
 ## v1.53：可见来源 acknowledge 调用去重
 

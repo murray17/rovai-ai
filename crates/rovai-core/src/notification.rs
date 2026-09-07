@@ -1471,6 +1471,7 @@ fn load_heads_up_signal(
             LEFT JOIN approval ON approval.id = occurrence.approval_id
             WHERE occurrence.episode_id = ?1
               AND occurrence.admitted_change_sequence = ?2
+              AND (occurrence.semantic <> 'turn_completed' OR turn.kind IS NOT 'single_chat')
             "#,
             params![episode_id, change_sequence],
             |row| {
@@ -2836,6 +2837,25 @@ mod slow_tests {
             )
             .unwrap();
 
+        // Single Chat completion stays in the journal but must not produce a popup.
+        // Other terminal attention still uses the exact occurrence's semantics.
+        for status in ["completed", "failed", "cancelled"] {
+            database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO camp_turn(
+                        id, camp_id, kind, trigger_type, trigger_id, status,
+                        version, created_at, updated_at, ended_at
+                    ) VALUES (
+                        ?1, 'camp-signal', 'single_chat', 'conversation_message', ?1, ?2,
+                        1, '2026-08-01T00:04:00Z', '2026-08-01T00:04:00Z', '2026-08-01T00:04:00Z'
+                    )
+                    "#,
+                    params![format!("single-{status}"), status],
+                )
+                .unwrap();
+        }
         let changes = NotificationEpisodeService::default()
             .changes_since(&mut database, CURRENT_USER_ID, baseline, 50)
             .unwrap();
@@ -2885,6 +2905,29 @@ mod slow_tests {
                     && signal.action.camp_turn_id.as_deref() == Some("turn-signal")
             })
         }));
+        for (status, expected) in [
+            ("completed", None),
+            ("failed", Some(NotificationSemantic::TurnFailed)),
+            ("cancelled", Some(NotificationSemantic::TurnIncomplete)),
+        ] {
+            let turn_id = format!("single-{status}");
+            let change = changes
+                .changes
+                .iter()
+                .find(|change| {
+                    change.episode.as_ref().is_some_and(|episode| {
+                        episode.camp_turn_id.as_deref() == Some(turn_id.as_str())
+                    })
+                })
+                .unwrap();
+            assert_eq!(
+                change
+                    .heads_up_signal
+                    .as_ref()
+                    .map(|signal| signal.semantic),
+                expected
+            );
+        }
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
