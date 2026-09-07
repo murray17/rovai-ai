@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-09-07
+last_updated: 2026-09-08
 ---
 
 # Camp 文件预览区
@@ -73,7 +73,8 @@ last_updated: 2026-09-07
 
 ### 分隔线与比例记忆
 
-- 分隔线视觉宽 1px、命中宽 9px；hover、键盘焦点及拖动时使用 3px Steel，保留安静的居中握柄。
+- 分隔线与 MCP 等工作区保持一致：视觉宽 1px、命中宽 11px；中央使用无底板的 3 × 30px 短握柄。
+  hover、键盘焦点及拖动只将握柄改为 Steel，不加粗整条分隔线；键盘焦点保留 2px 描边。
 - 向左拖动增大文件区，会话进入 480px 后紧凑排版，直到 420px 时停止；不折叠会话。向右拖动时文件区跟手变窄。
 - 文件宽度在 320–420px 时松手，回弹到 420px；小于 320px 时预览降低强调度，分隔线转为 danger，
   显示“松开关闭文件预览”，松手关闭预览。关闭不清空文件 Tab、阅读位置或会话草稿，常驻预览按钮可以恢复它们。
@@ -248,4 +249,4 @@ unreadable 或 kind_changed，不写回历史，也不启动后台监控。
 ## 平台
 
 macOS/Windows 复用同一 DOM、reducer、Viewer 和主题 token，只投影 `⌘/Ctrl`、Finder/文件资源管理器、系统字体和
-既有 window chrome 差异。除分隔线使用上述 3px Steel 外，焦点状态使用现有 2px focus token，焦点不得被 sticky 内容完全遮挡。
+既有 window chrome 差异。焦点状态使用现有 2px focus token，焦点不得被 sticky 内容完全遮挡。

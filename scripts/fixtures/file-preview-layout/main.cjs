@@ -126,7 +126,7 @@ app.whenReady().then(async () => {
     assert.equal(state.aligned, true)
     assert.equal(state.overflow, false)
     assert.equal(state.stored, null, 'Opening must not persist a clamped ratio')
-    assert.equal(state.handle.width, 9)
+    assert.equal(state.handle.width, 11)
     assert.equal(state.lineWidth, '1px')
     assert.deepEqual(state.aria, { min: '420', max: '750', now: '655' })
     await capture('preview-day-1440x920')
@@ -548,7 +548,7 @@ app.whenReady().then(async () => {
   await check('dragging left protects the conversation minimum and commits only on release', async () => {
     const moving = await drag(1_000)
     closeTo(moving.conversation, 420, 'Conversation minimum')
-    assert.equal(moving.lineWidth, '3px')
+    assert.equal(moving.lineWidth, '1px')
     assert.match(moving.hint, /420px/)
     assert.equal(moving.aligned, true)
     assert.equal(moving.stored, null)

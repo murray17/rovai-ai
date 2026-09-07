@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('previewWindowControls', {
     })
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
+    process.stdout.write(`Isolated file preview userData: ${join(fixture, 'user-data')} (no Core/Runtime)\n`)
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
       shortcutModule, shortcutPreload,

@@ -3083,7 +3083,9 @@ impl CandidateCollector {
             && preview.path == relative.to_string_lossy().replace('\\', "/")
         {
             let remaining = MAX_SKILL_PREVIEW_BYTES.saturating_sub(preview.bytes.len());
-            preview.bytes.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+            preview
+                .bytes
+                .extend_from_slice(&bytes[..bytes.len().min(remaining)]);
         }
     }
 }
