@@ -1,6 +1,6 @@
 # 定时任务 Renderer 验收场景
 
-挂载生产 `AutomationWorkspace`、`CampNavigation` 和主题样式，RPC 使用确定性的内存数据。
+挂载生产 `AutomationWorkspace`、`CampNavigation`、`WindowDragStrip` 和主题样式，RPC 使用确定性的内存数据。
 不启动 Core、Electron 或模型，不读写日常用户目录。执行对话入口显示收到的 Camp ID；它只证明 Renderer 路由参数，
 不替代真实 Camp activation、Runtime 或渠道投递验收。
 
@@ -25,7 +25,23 @@ pnpm exec tsc -p scripts/fixtures/automation-workspace/tsconfig.json
   按钮距页面顶部 5–7px，没有预留空白标题行。Day 1280×720 与 Night 1040×700 截图已更新。
 - Day/Night 使用相同产品结构与语义颜色。下方是渲染截图，不代表原生 App 或真实模型执行已经验收。
 
+2026-09-08 v34 落地后通过浏览器真实输入复核：
+
+- 入口已恢复，初始总览最大 1136px 居中，与记忆页页眉一致；已有任务、空列表均不自动打开详情。
+- `accept-create.mjs` 验证包含窗口拖拽层时详情顶部“新建”能够命中，直接打开空白草稿，填写后“保存”成功进入已有任务。
+- 2K（2560×1440）详情表单、运行时间、通知和历史等宽 1440px，队员/项目各占 712px。
+- 1440px 时队员/项目并排；1140、1100、1040px 时各占一行，选择框右边缘与 Prompt 一致；720px 显示单一编辑器，无横向溢出。
+- 输入 `600 9 * * *` 后立即标记错误，新建保存禁用；已有任务保留草稿并阻止离开，验收记录无更新命令。
+  改为 `0 9 * * *` 后保存恢复，离开前只发出有效表达式的更新。
+- 时间直接输入 23:55 后分钟加五变为 00:00；日历默认聚焦选中日期，右方向键移动到翌日，Enter 选择并收起。
+- 保存失败保留草稿，重试后可返回总览；版本冲突阻止离开，“保留草稿并重试”成功保存。
+- 生产类型检查、fixture 类型检查、3 文件 182 项 Vitest、桌面 production build 和文档门禁通过。
+
+以下截图更新到本轮生产 Renderer。这里的内存 RPC 不替代真实 Core、Runtime 或通知投递验收。
+
 ![Day 总览](screenshots/day-overview.png)
 ![Day 首次空列表](screenshots/day-empty.png)
-![Day 最小列表宽度详情](screenshots/day-detail.png)
+![Day 默认 248px 列表详情](screenshots/day-detail.png)
 ![Night 最小窗口详情](screenshots/night-detail.png)
+![Day 2K 详情](screenshots/day-detail-2k.png)
+![Night Cron 错误与禁用保存](screenshots/night-cron-invalid.png)

@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AgentProfile, AutomationRunListPage, AutomationRunSummary, AutomationView, ChannelSettingsSnapshot, ProjectNavigationGroup } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { AutomationGlyph, type AutomationIcon } from './AutomationControls'
 import { dateTimeLabel, projectValue, projectFromValue, runStatus, scheduleKinds, scheduleWithKind, weekdays, type AutomationDraft } from './automation-workspace-model'
 import { readErrorMessage } from './error-message'
+import { automationScheduleError } from './automation-schedule-validation'
+import { AutomationDatePicker, AutomationTimePicker } from './AutomationSchedulePickers'
 import { runtimeAdapterDisplayLabel } from '../../shared/execution-presentation'
 import feishuLogo from './assets/channel-logos/feishu.svg'
 import dingtalkLogo from './assets/channel-logos/dingtalk.svg'
@@ -133,8 +135,10 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
   const projectName = draft.projectRef.kind === 'quick_chat' ? '快速对话' : project?.name ?? draft.projectRef.path.split(/[\\/]/).filter(Boolean).at(-1) ?? draft.projectRef.path
   const projectDetail = draft.projectRef.kind === 'quick_chat' ? 'Rovai AI 管理的快速对话目录' : draft.projectRef.path
   const schedule = draft.schedule
+  const scheduleError = automationScheduleError(schedule)
+  const cronId = useId()
 
-  return <div className="automation-editor-scroll"><form className="automation-form" onSubmit={(event) => { event.preventDefault(); if (!automation && !busy && draft.prompt.trim() && member?.presence === 'present') onCreate() }}>
+  return <div className="automation-editor-scroll"><form className="automation-form" onSubmit={(event) => { event.preventDefault(); if (!automation && !busy && !scheduleError && draft.prompt.trim() && member?.presence === 'present') onCreate() }}>
     <input ref={titleRef} className="automation-name-input" aria-label="定时任务名称" value={draft.name} maxLength={80} placeholder="定时任务名称" disabled={busy} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} />
     <textarea className="automation-prompt-input" aria-label="执行内容" rows={3} value={draft.prompt} placeholder="告诉队员需要按时完成什么…" disabled={busy} onChange={(event) => onChange((current) => ({ ...current, prompt: event.target.value }))} />
     <div className="automation-context" aria-label="执行上下文">
@@ -158,10 +162,15 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
       <div className="automation-schedule-panel">
         <div className="automation-schedule-row"><span>重复</span><Picker label="重复频率" value={schedule.kind} disabled={busy} options={scheduleKinds.map((item) => ({ value: item.value, label: item.label }))} onChange={(value) => onChange((current) => ({ ...current, schedule: scheduleWithKind(value as AutomationDraft['schedule']['kind']) }))}>{scheduleKinds.find((item) => item.value === schedule.kind)?.label}</Picker></div>
         {schedule.kind === 'weekly' && <div className="automation-schedule-row"><span>星期</span><Picker label="星期" value={schedule.weekday} disabled={busy} options={weekdays.map((item) => ({ value: item.value, label: item.label }))} onChange={(value) => onChange((current) => ({ ...current, schedule: { ...schedule, weekday: value as typeof schedule.weekday } }))}>{weekdays.find((day) => day.value === schedule.weekday)?.label}</Picker></div>}
-        {schedule.kind === 'once' && <label className="automation-schedule-row"><span>日期</span><input type="date" aria-label="日期" value={schedule.date} disabled={busy} onChange={(event) => onChange((current) => ({ ...current, schedule: { ...schedule, date: event.target.value } }))} /></label>}
-        {'at' in schedule && <label className="automation-schedule-row"><span>时间</span><input type="time" aria-label="时间" value={schedule.at} disabled={busy} onChange={(event) => onChange((current) => ({ ...current, schedule: { ...schedule, at: event.target.value } }))} /></label>}
-        {schedule.kind === 'cron' && <label className="automation-schedule-row automation-cron-row"><span>Cron</span><input aria-label="5 段 Cron 表达式" placeholder="0 9 * * 1-5" value={schedule.expression} disabled={busy} spellCheck={false} onChange={(event) => onChange((current) => ({ ...current, schedule: { ...schedule, expression: event.target.value } }))} /></label>}
+        {schedule.kind === 'once' && <div className="automation-schedule-row"><span>日期</span><AutomationDatePicker value={schedule.date} disabled={busy} onChange={(date) => onChange((current) => ({ ...current, schedule: { ...schedule, date } }))} /></div>}
+        {'at' in schedule && <div className="automation-schedule-row"><span>时间</span><AutomationTimePicker value={schedule.at} disabled={busy} onChange={(at) => onChange((current) => ({ ...current, schedule: { ...schedule, at } }))} /></div>}
+        {schedule.kind === 'cron' && <div className="automation-schedule-row automation-cron-row"><label htmlFor={cronId}>Cron</label><div className="automation-cron-editor">
+          <input id={cronId} aria-label="5 段 Cron 表达式" aria-invalid={Boolean(scheduleError)} aria-describedby={`${cronId}-hint ${cronId}-error`} placeholder="0 9 * * 1-5" value={schedule.expression} disabled={busy} spellCheck={false} autoComplete="off" onChange={(event) => onChange((current) => ({ ...current, schedule: { ...schedule, expression: event.target.value } }))} />
+          <p className="automation-cron-hint" id={`${cronId}-hint`}>分钟 · 小时 · 日期 · 月份 · 星期</p>
+          <p className="automation-schedule-error" id={`${cronId}-error`} aria-live="polite" hidden={!scheduleError}>{scheduleError}{scheduleError && automation ? ' 修改尚未保存。' : ''}</p>
+        </div></div>}
       </div>
+      {schedule.kind !== 'cron' && scheduleError && <p className="automation-schedule-error" role="alert">{scheduleError}</p>}
       {automation?.nextRunAt && <p className="automation-next-run">下次 <time dateTime={automation.nextRunAt}>{dateTimeLabel(automation.nextRunAt)}</time><span>本地时间</span></p>}
       {automation && !automation.enabled && <p className="automation-next-run">已关闭，可在任务操作中运行一次。</p>}
     </section>
@@ -182,7 +191,7 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
       {channelError && <button type="button" className="quiet-button compact" onClick={() => void loadChannels()}>重试读取渠道</button>}
       <p className="automation-channel-note">发送到你的 Bot 私聊。通知失败只重试通知，不重新运行任务。</p>
     </details>
-    {!automation && <div className="automation-create-actions"><span>名称可留空，创建后自动开启。</span><button className="primary-button" type="submit" disabled={busy || !draft.prompt.trim() || member?.presence !== 'present'}>{busy ? '正在创建…' : '创建'}</button></div>}
+    {!automation && <div className="automation-create-actions"><span>名称可留空，保存后自动开启。</span><button className="primary-button" type="submit" disabled={busy || Boolean(scheduleError) || !draft.prompt.trim() || member?.presence !== 'present'}>{busy ? '正在保存…' : '保存'}</button></div>}
   </form>
     {automation && <RunHistory automation={automation} onOpenCamp={onOpenCamp} />}
   </div>

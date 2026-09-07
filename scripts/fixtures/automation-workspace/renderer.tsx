@@ -1,16 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AgentProfile, AutomationRunSummary, AutomationView, CoreEvent, ProjectNavigationGroup, RovaiApi } from '@contracts'
 import { AutomationWorkspace } from '../../../apps/desktop/src/renderer/src/AutomationWorkspace'
 import { CampNavigation } from '../../../apps/desktop/src/renderer/src/CampNavigation'
+import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
 import { templates } from '../../../apps/desktop/src/renderer/src/automation-workspace-model'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
+import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 // Production Renderer with deterministic, memory-only RPC responses. No Core, credentials or Runtime.
 const params = new URLSearchParams(location.search)
 const theme = params.get('theme') === 'night' ? 'night' : 'day'
-applyAppearanceSnapshot(document.documentElement, { preference: theme, resolvedTheme: theme })
+applyAppearanceSnapshot(document.documentElement, { ...DEFAULT_APPEARANCE, preference: theme, resolvedTheme: theme })
 const now = '2026-09-07T01:00:00Z'
 const agents: AgentProfile[] = [
   ['luoke', '洛克', '工程实现'], ['mianzhi', '棉枝', '技术写作'], ['qilu', '祈露', '产品设计']
@@ -41,6 +43,7 @@ let conflictNextSave = params.has('conflict')
 let failNextList = params.has('load-failure')
 const listeners = new Set<(event: CoreEvent) => void>()
 const calls: Array<{ method: string; command: unknown }> = []
+const callListeners = new Set<() => void>()
 function changed(): void {
   queueMicrotask(() => listeners.forEach(listener => listener({ method: 'automations.updated', params: {} } as CoreEvent)))
 }
@@ -61,6 +64,7 @@ window.rovai = {
       return structuredClone({ runs: records.slice(offset, end), nextCursor: end < records.length ? String(end) : null, truncated: end < records.length })
     }
     calls.push({ method, command: structuredClone(command) })
+    callListeners.forEach(listener => listener())
     const current = automations.find(item => item.automationId === command.automationId)
     if (method === 'automations.update' && failNextSave) { failNextSave = false; throw new Error('测试：保存失败，草稿应保留') }
     if (method === 'automations.update' && conflictNextSave && current) {
@@ -93,10 +97,17 @@ window.rovai = {
 } as unknown as RovaiApi
 
 function Fixture(): React.JSX.Element {
+  const [, setCallRevision] = useState(0)
+  useEffect(() => {
+    const update = (): void => setCallRevision(revision => revision + 1)
+    callListeners.add(update)
+    return () => { callListeners.delete(update) }
+  }, [])
   const [notice, setNotice] = useState('')
   const [key, setKey] = useState(0)
   const idle = (): void => undefined
   return <div className="app-shell">
+    <WindowDragStrip page="automations" />
     <CampNavigation view="automations" state="ready" navigation={{ schemaVersion: 3, throughGlobalSequence: 0, quickChat: { totalCount: 0, recentCamps: [] }, projects }} activeCampId={null}
       onNewConversation={idle} onMembers={idle} onAutomations={() => setKey(value => value + 1)} onMemory={idle} pendingMemoryCount={0} onSettings={idle}
       onOpenProject={idle} onCamp={idle} onRemoveProject={async () => undefined} onRename={async () => undefined} onDelete={async () => undefined} onError={error => setNotice(String(error))} />

@@ -1,0 +1,45 @@
+.automation-schedule-value { min-height: 32px; padding: 5px 8px; background: var(--surface-subtle); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.automation-schedule-value > .automation-glyph:first-child { width: 14px; height: 14px; color: var(--muted); }
+.automation-schedule-value[data-state="open"] { color: var(--brand-ink); background: var(--brand-soft); }
+.automation-schedule-value[data-state="open"] > .automation-glyph:last-child { transform: rotate(180deg); }
+.automation-schedule-popover { z-index: 160; width: 288px; max-width: calc(100vw - 24px); max-height: var(--radix-popover-content-available-height); overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 12px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); font-family: inherit; -webkit-app-region: no-drag; }
+.automation-schedule-popover :where(button, input) { -webkit-app-region: no-drag; }
+.automation-schedule-popover button { cursor: pointer; }
+.automation-schedule-popover button:disabled { opacity: .5; cursor: default; }
+.automation-time-heading { display: flex; min-height: 45px; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 10px; }
+.automation-time-heading strong { font-size: 12px; font-weight: 620; }
+.automation-time-heading > span { color: var(--muted); font-size: 10.5px; }
+.automation-time-editor { position: relative; display: grid; grid-template-columns: 88px 88px; justify-content: center; gap: 36px; padding: 4px 16px 16px; }
+.automation-time-column { display: grid; gap: 7px; }
+.automation-time-column > label { color: var(--muted); font-size: 11px; line-height: 16px; text-align: center; }
+.automation-time-stepper { display: grid; grid-template-rows: 27px 54px 27px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-subtle); }
+.automation-time-stepper:focus-within { border-color: var(--brand); }
+.automation-time-stepper button { display: grid; width: 100%; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; }
+.automation-time-stepper button:hover { color: var(--brand-ink); background: var(--surface-muted); }
+.automation-time-stepper button > svg { width: 13px; height: 13px; }
+.automation-time-stepper button:first-child > svg { transform: rotate(180deg); }
+.automation-time-stepper input { width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 6px; color: var(--ink); background: transparent; font: 500 32px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; font-variant-numeric: tabular-nums; caret-color: var(--brand); }
+.automation-time-stepper input:focus { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--input); }
+.automation-time-colon { position: absolute; top: 72px; left: calc(50% - 8px); width: 16px; color: var(--muted); font: 400 25px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+.automation-time-presets-label { margin: 0 16px 7px; color: var(--muted); font-size: 10.5px; }
+.automation-time-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 0 16px 16px; }
+.automation-time-presets button { min-height: 31px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: transparent; font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.automation-time-presets button:hover { color: var(--ink); background: var(--surface-hover); }
+.automation-time-presets button[aria-pressed="true"] { border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft); }
+.automation-time-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.automation-time-footer > span { color: var(--muted); font-size: 10.5px; }
+.automation-time-footer .primary-button { min-width: 56px; min-height: 30px; padding: 5px 12px; font-size: 11px; }
+.automation-date-popover { padding: 10px 12px 12px; }
+.automation-calendar-heading { display: grid; grid-template-columns: 30px minmax(0, 1fr) 30px; min-height: 36px; align-items: center; gap: 6px; margin-bottom: 8px; }
+.automation-calendar-heading strong { font-size: 12px; font-weight: 650; text-align: center; }
+.automation-calendar-heading button { display: grid; width: 30px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; }
+.automation-calendar-heading button:hover { color: var(--ink); background: var(--surface-hover); }
+.automation-calendar-heading button > svg { width: 12px; height: 12px; }
+.automation-calendar-heading button:last-child > svg { transform: rotate(180deg); }
+.automation-calendar-weekdays, .automation-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.automation-calendar-weekdays { padding-bottom: 7px; color: var(--muted); font-size: 10.5px; text-align: center; }
+.automation-calendar-day { display: grid; min-height: 34px; aspect-ratio: 1; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--ink); background: transparent; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.automation-calendar-day:hover { background: var(--surface-hover); }
+.automation-calendar-day.outside { color: var(--muted); opacity: .65; }
+.automation-calendar-day[aria-pressed="true"] { color: var(--brand-contrast); background: var(--brand); opacity: 1; }
+.automation-calendar-day[aria-current="date"]:not([aria-pressed="true"]) { box-shadow: inset 0 0 0 1px var(--brand); color: var(--brand-ink); }
