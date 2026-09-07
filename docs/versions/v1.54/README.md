@@ -19,6 +19,8 @@ Automation。每次实际执行创建一个普通 Camp，把冻结的 Prompt 交
 
 - 新增 Automation 工作区，支持创建、选择、自动保存、启用/关闭、立即运行、删除以及日、工作日、周、一次、
   五段 Cron 和仅手动六种计划。
+- 按 v30 交互稿补齐默认总览、筛选搜索、模板入口、可调分栏与紧凑详情；执行历史沿 Desktop 只读 RPC 分页读取，
+  支持查看已关联执行对话。Renderer 双主题与失败恢复证据见[实施与验收](implementation-plan.md)。
 - Core 持久化 Automation 定义、不可变执行快照、独立通知投递；`(automationId, scheduledFor)` 是计划触发的唯一身份，
   一个 Automation 同时最多一个 `running | cancelling` 的运行。
 - 领取触发、冻结快照、推进 `nextRunAt`，以及创建并关联 Camp、首条消息、CampTurn、root AgentRun 在同一 SQLite

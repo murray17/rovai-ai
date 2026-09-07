@@ -277,6 +277,23 @@ pub struct AutomationView {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AutomationRunListQuery {
+    pub automation_id: String,
+    pub cursor: Option<String>,
+    #[serde(default = "default_list_limit")]
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRunListPage {
+    pub runs: Vec<AutomationRunSummary>,
+    pub next_cursor: Option<String>,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationListPage {
@@ -786,6 +803,39 @@ impl AutomationService {
 
     pub fn get(&self, database: &Database, automation_id: &str) -> Result<Option<AutomationView>> {
         load_automation_view(database.connection(), automation_id)
+    }
+
+    pub fn list_runs(
+        &self,
+        database: &Database,
+        query: &AutomationRunListQuery,
+    ) -> Result<AutomationRunListPage> {
+        if query.limit == 0 || query.limit > MAX_LIST_LIMIT {
+            anyhow::bail!("Automation history limit must be between 1 and {MAX_LIST_LIMIT}");
+        }
+        if load_automation_record(database.connection(), &query.automation_id)?.is_none() {
+            anyhow::bail!("Automation does not exist");
+        }
+        let cursor = query.cursor.as_deref().map(decode_cursor).transpose()?;
+        let mut runs = load_automation_runs(
+            database.connection(),
+            &query.automation_id,
+            cursor,
+            query.limit + 1,
+        )?;
+        let truncated = runs.len() > query.limit;
+        runs.truncate(query.limit);
+        let next_cursor = if truncated {
+            runs.last()
+                .map(|run| encode_cursor(&run.created_at, &run.run_id))
+        } else {
+            None
+        };
+        Ok(AutomationRunListPage {
+            runs,
+            next_cursor,
+            truncated,
+        })
     }
 
     pub fn current_for_camp(
@@ -1849,14 +1899,13 @@ fn load_automation_record(
     })).transpose()
 }
 
-fn load_automation_view(
+fn load_automation_runs(
     connection: &rusqlite::Connection,
     automation_id: &str,
-) -> Result<Option<AutomationView>> {
-    let Some(record) = load_automation_record(connection, automation_id)? else {
-        return Ok(None);
-    };
-    let last_run = connection.query_row(
+    cursor: Option<(String, String)>,
+    limit: usize,
+) -> Result<Vec<AutomationRunSummary>> {
+    let mut statement = connection.prepare(
         r#"
         SELECT run.id, run.status, run.reason, run.scheduled_for, run.camp_id,
                run.result_message_id, run.created_at, run.ended_at,
@@ -1871,16 +1920,45 @@ fn load_automation_view(
         FROM automation_run AS run
         LEFT JOIN automation_notification_delivery AS delivery ON delivery.automation_run_id = run.id
         WHERE run.automation_id = ?1
+          AND (?2 IS NULL OR run.created_at < ?2 OR (run.created_at = ?2 AND run.id < ?3))
         GROUP BY run.id
-        ORDER BY run.created_at DESC, run.id DESC LIMIT 1
+        ORDER BY run.created_at DESC, run.id DESC LIMIT ?4
         "#,
-        [automation_id],
-        |row| Ok(AutomationRunSummary {
-            run_id: row.get(0)?, status: row.get(1)?, reason: row.get(2)?, scheduled_for: row.get(3)?,
-            camp_id: row.get(4)?, result_message_id: row.get(5)?, created_at: row.get(6)?,
-            ended_at: row.get(7)?, notification_status: row.get(8)?,
-        }),
-    ).optional()?;
+    )?;
+    let rows = statement.query_map(
+        params![
+            automation_id,
+            cursor.as_ref().map(|value| value.0.as_str()),
+            cursor.as_ref().map(|value| value.1.as_str()),
+            i64::try_from(limit)?
+        ],
+        |row| {
+            Ok(AutomationRunSummary {
+                run_id: row.get(0)?,
+                status: row.get(1)?,
+                reason: row.get(2)?,
+                scheduled_for: row.get(3)?,
+                camp_id: row.get(4)?,
+                result_message_id: row.get(5)?,
+                created_at: row.get(6)?,
+                ended_at: row.get(7)?,
+                notification_status: row.get(8)?,
+            })
+        },
+    )?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn load_automation_view(
+    connection: &rusqlite::Connection,
+    automation_id: &str,
+) -> Result<Option<AutomationView>> {
+    let Some(record) = load_automation_record(connection, automation_id)? else {
+        return Ok(None);
+    };
+    let last_run = load_automation_runs(connection, automation_id, None, 1)?
+        .into_iter()
+        .next();
     Ok(Some(AutomationView {
         automation_id: record.id,
         version: record.version,
@@ -2559,6 +2637,76 @@ mod tests {
         service
             .interrupt_before_runtime(&mut database, next_run_id)
             .expect("test run should settle");
+
+        let history = service
+            .list_runs(
+                &database,
+                &AutomationRunListQuery {
+                    automation_id: automation_id.clone(),
+                    cursor: None,
+                    limit: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(history.runs.len(), 1);
+        assert!(history.truncated);
+        assert_eq!(history.runs[0].run_id, next_run_id);
+        assert_eq!(history.runs[0].status, "failed");
+        assert_eq!(history.runs[0].reason.as_deref(), Some("interrupted"));
+        let older = service
+            .list_runs(
+                &database,
+                &AutomationRunListQuery {
+                    automation_id: automation_id.clone(),
+                    cursor: history.next_cursor,
+                    limit: 2,
+                },
+            )
+            .unwrap();
+        assert_eq!(older.runs.len(), 2);
+        assert!(!older.truncated);
+        assert!(older.next_cursor.is_none());
+        assert!(older.runs.iter().any(|run| run.run_id == automation_run_id
+            && run.camp_id.as_deref() == Some(camp_id.as_str())));
+        assert!(older.runs.iter().any(|run| run.status == "skipped"
+            && run.reason.as_deref() == Some("overlap")
+            && run.camp_id.is_none()));
+        assert!(
+            service
+                .list_runs(
+                    &database,
+                    &AutomationRunListQuery {
+                        automation_id: automation_id.clone(),
+                        cursor: Some("invalid".into()),
+                        limit: 20,
+                    }
+                )
+                .is_err()
+        );
+        assert!(
+            service
+                .list_runs(
+                    &database,
+                    &AutomationRunListQuery {
+                        automation_id: "missing-automation".into(),
+                        cursor: None,
+                        limit: 20,
+                    }
+                )
+                .is_err()
+        );
+        assert!(
+            service
+                .list_runs(
+                    &database,
+                    &AutomationRunListQuery {
+                        automation_id,
+                        cursor: None,
+                        limit: 0,
+                    }
+                )
+                .is_err()
+        );
 
         remove_test_database(database, directory);
     }
