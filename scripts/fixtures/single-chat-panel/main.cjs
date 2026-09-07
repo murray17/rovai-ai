@@ -134,7 +134,7 @@ app.whenReady().then(async () => {
     assert.equal(composerEnter.defaultPrevented, true)
     assert.equal(composerEnter.state.sendRequests, 1)
 
-    assert.equal(composerEnter.state.sendFeedback, 'Thinking')
+    assert.equal(composerEnter.state.sendFeedback, '连接中')
     assert.equal(composerEnter.state.composerDisabled, true)
     await run('window.singleChatTest.releaseSend()')
     await waitFor("window.singleChatTest.state().composerDisabled === false")
@@ -145,14 +145,14 @@ app.whenReady().then(async () => {
 
     await run('window.singleChatTest.holdSend()')
     composerEnter = await dispatchComposerEnter(false)
-    assert.equal(composerEnter.state.sendFeedback, 'Thinking')
+    assert.equal(composerEnter.state.sendFeedback, '连接中')
     await run('window.singleChatTest.releaseSend()')
-    await waitFor("window.singleChatTest.state().liveText.includes('Thinking')")
+    await waitFor("window.singleChatTest.state().liveText.includes('连接中')")
     state = await settle()
     assert.equal(state.sendFeedback, '')
     assert.equal(state.liveSummaryVisible, false)
     assert.equal(state.liveOpen, true)
-    assert.match(state.publicText, /Thinking/)
+    assert.match(state.publicText, /连接中/)
     assert.doesNotMatch(state.liveText, /工作了|正在工作|等待开始|正在处理/)
     const dayQueued = await capture('single-chat-day-queued-1180x800')
 
@@ -160,10 +160,29 @@ app.whenReady().then(async () => {
       await run(`window.singleChatTest.setMode(${JSON.stringify(value)}, ${notify})`)
       return settle(notify ? 80 : 950)
     }
+    await run(`(() => {
+      window.feedbackOverlaps = []
+      window.feedbackObserver = new MutationObserver(() => {
+        for (const selector of ['.single-chat-run-history.is-live', '.public-execution-fixture .process-content']) {
+          const surface = document.querySelector(selector)
+          if (surface?.querySelector('.single-chat-narration, .stream-narration')
+            && [...surface.querySelectorAll('.process-action.current')].some(node => /Thinking|思考中|连接中/.test(node.textContent))) {
+            window.feedbackOverlaps.push(selector)
+          }
+        }
+      })
+      window.feedbackObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
+    })()`)
     for (const value of ['thinking', 'narration']) {
       state = await phase(value, false)
-      assert.match(state.liveText, /Thinking/)
-      assert.match(state.publicText, /Thinking/)
+      if (value === 'thinking') {
+        assert.match(state.liveText, /思考中/)
+        assert.match(state.publicText, /思考中/)
+      } else {
+        assert.match(state.liveText, /我正在检查双主题/)
+        assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中/)
+        assert.deepEqual(await run('window.feedbackOverlaps'), [])
+      }
       assert.equal(state.liveSummaryVisible, false)
       assert.doesNotMatch(state.liveText + state.publicText, /工作了|正在工作|正在处理|等待开始/)
     }
@@ -173,7 +192,7 @@ app.whenReady().then(async () => {
     assert.equal(state.composerDisabled, false)
     assert.equal(state.stopVisible, true)
     assert.match(state.liveGroupLabel, /执行中.*pnpm run accept:single-chat-ui/)
-    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|工作了|正在工作/)
+    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中|工作了|正在工作/)
     const singleLive = '.single-chat-run-history.is-live'
     const publicFixture = '.public-execution-fixture'
     await click(`${singleLive} .tool-group-summary`)
@@ -190,7 +209,7 @@ app.whenReady().then(async () => {
     await run("document.documentElement.dataset.theme = 'night'")
     state = await phase('returned')
     assert.match(state.liveGroupLabel, /执行中/)
-    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|工作了|正在工作/)
+    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中|工作了|正在工作/)
     await waitFor("Boolean(document.querySelector('.single-chat-run-history.is-live .tool-result-retry'))")
     await click(`${singleLive} .tool-result-retry`)
     await waitFor("document.querySelector('.single-chat-run-history.is-live .tool-call-result-scroll')?.textContent.includes('PRIVATE_RESULT_END')")
@@ -217,8 +236,9 @@ app.whenReady().then(async () => {
     }
     state = await phase('continuation')
     assert.match(state.liveGroupLabel, /完成了 1 个步骤/)
-    assert.match(state.liveText, /Thinking/)
-    assert.match(state.publicText, /Thinking/)
+    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中/)
+    assert.deepEqual(await run('window.feedbackOverlaps'), [])
+    await run('window.feedbackObserver.disconnect()')
     assert.equal(await run(`document.querySelector('${singleLive} .tool-group-state').hasAttribute('role')`), false)
     assert.equal(await run(`document.querySelector('${singleLive} .tool-call-result-scroll').scrollTop > 0`), true)
     assert.equal(await run('Object.values(window.fixtureNodes).every(node => node.isConnected && node.open)'), true)
@@ -239,7 +259,7 @@ app.whenReady().then(async () => {
 
     state = await phase('waiting')
     assert.match(state.liveGroupLabel, /等待审批/)
-    assert.doesNotMatch(state.liveText, /Thinking/)
+    assert.doesNotMatch(state.liveText, /Thinking|思考中|连接中/)
     state = await phase('failed')
     assert.equal(state.liveOpen, null)
     assert.match(state.body, /运行 26 秒后失败/)

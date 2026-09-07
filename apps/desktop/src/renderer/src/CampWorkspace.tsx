@@ -11,7 +11,7 @@ import {
   CompactionEventRow, FileOperationRow, ModifiedFileRow, RuntimeRetryNotice,
   ToolActivityGroup, ToolCallRow, isPresentableExecutionEvidence, type ToolCallStep
 } from './ExecutionToolGroup'
-import { executionRunSummary } from './execution-run-summary'
+import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { CampMemberFastToggle } from './CampMemberFastToggle'
 import type {
@@ -8202,6 +8202,11 @@ function RunExecutionContent({
         item.kind === 'diagnostic' ? item.diagnostic : latest, null)
     : null
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
+  const feedback = run.status === 'waiting' ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
+    : run.failure?.code === 'runtime_network_interrupted' ? '正在恢复连接'
+      : activeRetryDiagnostic
+        ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
+        : executionInitialFeedback(run.status, processItems, Boolean(finalBody))
 
   return (
     <div className="process-content">
@@ -8359,18 +8364,11 @@ function RunExecutionContent({
         && !hasActiveTool
         && !hasActiveCompaction
         && liveTailToolGroupKey === null
+        && feedback
         && (
           <div className="process-action current" role="status">
             <span className="process-spinner" aria-hidden="true" />
-            <span>{run.status === 'waiting'
-              ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
-              : run.status === 'queued'
-                ? 'Thinking'
-                : run.failure?.code === 'runtime_network_interrupted'
-                  ? '正在恢复连接'
-                : activeRetryDiagnostic
-                  ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
-                  : 'Thinking'}</span>
+            <span>{feedback}</span>
           </div>
         )}
       {cancelling && nonTerminal && (
@@ -8500,7 +8498,8 @@ export function RunExecutionDisclosure({
     >
       <summary hidden={liveOpen}>
         <span className="process-disclosure-label">{!liveOpen && (nonTerminal
-          ? cancelling ? '正在停止' : run.status === 'waiting' ? agentRunWaitDetail(run.waitReason) ?? '等待继续' : 'Thinking'
+          ? cancelling ? '正在停止' : run.status === 'waiting' ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
+            : executionInitialFeedback(run.status, progress?.items ?? [], Boolean(finalBody)) ?? '执行中'
           : executionRunSummary(run, run.updatedAt))}</span>
         <span className="process-disclosure-slot" aria-hidden="true">
           <svg viewBox="0 0 16 16" focusable="false">

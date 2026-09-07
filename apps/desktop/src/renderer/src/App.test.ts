@@ -5586,18 +5586,18 @@ describe('task event projections', () => {
     }))
     expect(boundaryMarkup).toContain('class="tool-activity-group status-completed"')
     expect(boundaryMarkup).toContain('aria-label="完成了 1 个步骤"')
-    expect(boundaryMarkup).toContain('<span>Thinking</span>')
+    expect(boundaryMarkup).not.toMatch(/Thinking|连接中|思考中/)
     expect(boundaryMarkup).not.toMatch(/工作了|处理过程 ·|正在工作/)
 
     const queuedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run: { ...run, status: 'queued', startedAt: null }, campId: 'camp-live-tail', focused: true
     }))
-    expect(queuedMarkup).toContain('<span>Thinking</span>')
+    expect(queuedMarkup).toContain('<span>连接中</span>')
     expect(queuedMarkup).not.toMatch(/等待开始|正在处理|工作了|处理过程 ·/)
     const backgroundMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run, progress: { items: [settledTool] }, campId: 'camp-live-tail'
     }))
-    expect(backgroundMarkup).toContain('process-disclosure-label">Thinking</span>')
+    expect(backgroundMarkup).toContain('process-disclosure-label">执行中</span>')
     expect(backgroundMarkup).not.toMatch(/工作了|处理过程 ·/)
     const terminalMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run: { ...run, status: 'succeeded', endedAt: '2026-08-26T00:00:14Z' },
@@ -5605,6 +5605,26 @@ describe('task event projections', () => {
     }))
     expect(terminalMarkup).toContain('工作了 13 秒')
     expect(terminalMarkup).not.toContain('<span>Thinking</span>')
+
+    const renderLive = (items: ReturnType<typeof buildLiveExecutionProgress>['items'] = [], finalBody: string | null = null): string =>
+      renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+        run, progress: { items }, finalBody, campId: 'camp-live-tail', focused: true
+      }))
+    expect(renderLive()).toContain('<span>思考中</span>')
+    for (const items of [
+      [{ key: 'narration:first', kind: 'narration' as const, body: '第一段流式正文' }],
+      [{ key: 'plan:first', kind: 'plan' as const, explanation: '准备检查', plan: [] }]
+    ]) {
+      expect(renderLive(items)).not.toContain('role="status"')
+      expect(renderLive(items)).not.toContain('工作了')
+    }
+    expect(renderLive([], '最终正文已经到达')).not.toContain('role="status"')
+    const waitingMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run: { ...run, status: 'waiting', waitReason: 'network_recovery' },
+      progress: { items: [{ key: 'narration:previous', kind: 'narration', body: '已有正文' }] },
+      campId: 'camp-live-tail', focused: true
+    }))
+    expect(waitingMarkup).toContain('连接中断，等待恢复')
   })
 
   it('keeps complete Built-in Camp public results behind nested lazy Tool rows', () => {
