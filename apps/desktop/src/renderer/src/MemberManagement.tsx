@@ -32,10 +32,13 @@ import {
   AppDialogFact,
   AppDialogFactGrid,
   AppDialogFooter,
-  AppDialogHeader
+  AppDialogHeader,
+  DialogControlIcon
 } from './AppDialog'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { RuntimeInstallationGuide } from './RuntimeInstallationGuide'
+import { runtimeInstallGuide } from './runtime-install-guide'
 import { invalidateManagedAvatarObjectUrl } from './managed-avatar-cache'
 import {
   MemberRuntimeParameters,
@@ -1429,6 +1432,9 @@ export function RuntimeInstallationsPanel({
 }): React.JSX.Element {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<{ runtimeKind: AdapterKind; mode: 'install' | 'login' } | null>(null)
+  const [checkFeedback, setCheckFeedback] = useState<{ runtimeKind: AdapterKind; error: string | null } | null>(null)
+  const guideId = useId()
   const availability = health?.runtimeAvailability ?? []
   const hasEnabledRuntime =
     health?.runtimePlatformAdmission.some(
@@ -1437,14 +1443,20 @@ export function RuntimeInstallationsPanel({
         runtimePlatformAdmissionAllowsUse(row)
     ) ?? false
 
-  const checkProduct = async (runtimeKind: AdapterKind): Promise<void> => {
+  const checkProduct = async (runtimeKind: AdapterKind, rediscover = false): Promise<void> => {
+    if (busy !== null) return
     setBusy(`check-${runtimeKind}`)
     setError(null)
+    setCheckFeedback(null)
     try {
-      await requestProductRuntimeCheck(runtimeKind)
-      await onReload()
+      try {
+        await requestProductRuntimeCheck(runtimeKind, rediscover)
+      } finally {
+        await onReload()
+      }
+      setCheckFeedback({ runtimeKind, error: null })
     } catch (nextError) {
-      setError(errorMessage(nextError))
+      setCheckFeedback({ runtimeKind, error: errorMessage(nextError) })
     } finally {
       setBusy(null)
     }
@@ -1470,7 +1482,7 @@ export function RuntimeInstallationsPanel({
       <SettingsPageHeader
         eyebrow="Settings / Runtime"
         title="运行时"
-        description="管理本机 Agent 运行时及其可用状态。"
+        description="管理本机 Agent 运行时，只需安装你准备使用的。"
         aside={
           <button
             className="quiet-button"
@@ -1533,6 +1545,21 @@ export function RuntimeInstallationsPanel({
               item ?? null,
               health === null
             )
+            const allowed = runtimePlatformAdmissionAllowsUse(admission)
+            const guide = allowed ? runtimeInstallGuide(runtimeKind, health?.hostPlatform ?? null) : null
+            const mode = presentation.status === 'not_installed' ? 'install'
+              : presentation.status === 'authentication_required' ? 'login' : null
+            const isOpen = guide !== null && expanded?.runtimeKind === runtimeKind
+            const checking = busy === `check-${runtimeKind}`
+            const feedback = checkFeedback?.runtimeKind === runtimeKind ? (
+              <p className={`runtime-guide-feedback${checkFeedback.error ? ' is-error' : ''}`} role={checkFeedback.error ? 'alert' : 'status'}>
+                {checkFeedback.error ?? (presentation.status === 'not_installed'
+                  ? '仍未检测到程序。请确认已在终端完成安装，再重新检测。'
+                  : presentation.status === 'authentication_required'
+                    ? '仍需登录。请在终端完成账号或模型配置后重试。'
+                    : `检测完成：${presentation.label}。${item?.failure ? '' : presentation.detail ?? ''}`)}
+              </p>
+            ) : null
             return (
               <article key={runtimeKind} className="runtime-product-row">
                 <span className="runtime-product-logo" aria-hidden="true">
@@ -1554,23 +1581,24 @@ export function RuntimeInstallationsPanel({
                 >
                   {presentation.label}
                 </span>
-                <button
-                  className="quiet-button runtime-product-check"
-                  disabled={
-                    busy !== null ||
-                    !runtimePlatformAdmissionAllowsUse(admission)
-                  }
-                  onClick={() => void checkProduct(runtimeKind)}
+                {guide && (mode || isOpen) ? <button
+                  type="button" className="quiet-button runtime-product-check runtime-guide-trigger"
+                  aria-label={`${adapterLabel(runtimeKind)} ${isOpen ? '收起指南' : mode === 'login' ? '登录指南' : '安装指南'}`}
+                  aria-expanded={isOpen} aria-controls={isOpen ? `${guideId}-${runtimeKind}` : undefined}
+                  onClick={() => setExpanded(isOpen ? null : { runtimeKind, mode: mode ?? 'install' })}
                 >
-                  {busy === `check-${runtimeKind}`
+                  {isOpen ? '收起' : mode === 'login' ? '登录指南' : '安装指南'}<DialogControlIcon name="chevron" />
+                </button> : <button type="button" className="quiet-button runtime-product-check" disabled={busy !== null || !allowed} onClick={() => void checkProduct(runtimeKind)}>
+                  {checking
                     ? '正在检查…'
-                    : runtimePlatformAdmissionAllowsUse(admission)
-                      ? '检查可用性'
-                      : '不可检查'}
-                </button>
-                {item?.failure && (
-                  <RuntimeFailureNotice failure={item.failure} />
-                )}
+                    : allowed ? '检查可用性' : '不可检查'}
+                </button>}
+                {item?.failure && <RuntimeFailureNotice failure={item.failure} />}
+                {isOpen && guide && expanded ? <RuntimeInstallationGuide
+                  id={`${guideId}-${runtimeKind}`} label={adapterLabel(runtimeKind)} guide={guide}
+                  mode={expanded.mode} busy={busy !== null} checking={checking} feedback={feedback}
+                  onCheck={() => void checkProduct(runtimeKind, expanded.mode === 'install')}
+                /> : feedback}
               </article>
             )
           })}

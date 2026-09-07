@@ -42,4 +42,24 @@ describe('explicit Runtime check targeting', () => {
       runtimeKind: 'copilot-cli'
     })
   })
+
+  it('waits for interactive discovery before checking a newly installed Runtime', async () => {
+    let finishDiscovery!: () => void
+    const discovery = new Promise<void>(resolve => { finishDiscovery = resolve })
+    const request = vi.fn().mockReturnValueOnce(discovery).mockResolvedValueOnce({ ready: false, outcome: 'stable_failure' })
+    vi.stubGlobal('window', { rovai: { request } })
+
+    const check = requestProductRuntimeCheck('codex-cli', true)
+    expect(request).toHaveBeenCalledExactlyOnceWith('runtime.discovery.rescan', { interactiveShell: true })
+    finishDiscovery()
+    await expect(check).resolves.toEqual({ ready: false, outcome: 'stable_failure' })
+    expect(request).toHaveBeenNthCalledWith(2, 'runtime.product.check', { runtimeKind: 'codex-cli' })
+  })
+
+  it('does not check stale discovery after a failed rescan', async () => {
+    const request = vi.fn().mockRejectedValue(new Error('discovery failed'))
+    vi.stubGlobal('window', { rovai: { request } })
+    await expect(requestProductRuntimeCheck('codex-cli', true)).rejects.toThrow('discovery failed')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
 })

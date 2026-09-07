@@ -1,5 +1,5 @@
 ---
-version: 7
+version: 8
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -140,6 +140,16 @@ normal errors/diagnostics. Mutations honor current digest/CAS order; the Rendere
 writes after conflict and refreshes.
 
 ## Agent 运行时与诊断
+
+Missing and authentication-required Runtimes expose a quiet, initially collapsed installation or login
+guide inside their catalog row. Only one guide is open at a time. On admitted macOS platforms, Claude
+Code, Codex CLI and OpenCode show a primary official installation command, collapsed alternatives with
+prerequisites, a launch/login step and a recheck action. Other products and other admitted platforms link
+to official instructions; Antigravity links to its download site. Commands are copied, never executed by
+the Renderer. Admission remains Core-owned; unqualified, unsupported and pending products gain no action.
+The post-install action refreshes interactive-shell discovery before checking the selected product.
+Pending checks preserve focus and the open guide; real status, public failures and retry feedback remain
+in the same row. Guide content and download clicks never imply successful installation or readiness.
 
 The Agent Runtime catalog displays Pi Coding Agent as “PI” immediately after Antigravity, matching the member Runtime chooser.
 
