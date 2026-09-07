@@ -92,6 +92,10 @@ Preview, open and reveal re-read the exact owner and validate existence, readabi
 result may update only the current Renderer card. History, Camp Open pagination and database reads project
 `availability = unknown`; they do not `stat`, watch or persist availability.
 
+The successful file-preview result is separate from this pathless attachment View. [File Preview v11](file-preview-v11.md)
+allows Main to present the opened canonical source path, while Managed/legacy storage paths remain private. The internal
+Desktop target carries Core's `canShowPath` decision; it never becomes a field on this View or the durable source ref.
+
 ## Publication and failure
 
 Immediate publication validates each current source for existence, readability and unchanged `file | directory`

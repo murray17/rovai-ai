@@ -38,7 +38,9 @@ historical Prepared/message_attachment -> existing legacy compatibility only
 
 `LocalAttachmentSourceRef` is not an entity. Core generates its UUID and stores its absolute source path only inside the
 owning JSON. Composer, Pending, Pending Edit and Message do not own or move the referenced physical file. Renderer receives
-only a pathless attachment View and never learns whether the card came from source refs, Managed v2 or legacy rows.
+only a pathless attachment View without a storage-model discriminator. After an explicit successful source-file preview,
+Main may separately issue a canonical display path under [File Preview v11](../contracts/file-preview-v11.md); Managed and
+legacy internal paths remain private.
 
 ## Desktop user-input path
 

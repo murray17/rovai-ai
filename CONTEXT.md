@@ -1635,7 +1635,7 @@ The path, symlink, ownership, permission, size, and atomic-write protections app
 _Avoid_: Agent filesystem permission, Run Workspace boundary, Runtime sandbox
 
 **Local Attachment Source Ref**:
-The Core-private, owner-scoped record of one new Desktop user-input file or directory, stored only as a closed item inside the Composer, Pending, Pending Edit, or CampMessage source-attachment JSON array. It keeps a Core-generated local element ID, absolute `sourcePath`, observed kind and display metadata; Renderer Views omit the path and storage model. A native input keeps its original path, while pathless bytes or Blob are written once to OS Temp. It is mutable-by-reference and weakly durable: later reads may observe changed content or fail after movement, deletion, permission loss, or Temp cleanup.
+The Core-private, owner-scoped record of one new Desktop user-input file or directory, stored only as a closed item inside the Composer, Pending, Pending Edit, or CampMessage source-attachment JSON array. It keeps a Core-generated local element ID, absolute `sourcePath`, observed kind and display metadata; attachment Views omit the path and storage model. An explicit successful file preview may separately receive Main's canonical display path; this does not expose the source record or change file authority. A native input keeps its original path, while pathless bytes or Blob are written once to OS Temp. It is mutable-by-reference and weakly durable: later reads may observe changed content or fail after movement, deletion, permission loss, or Temp cleanup.
 _Avoid_: attachment entity, Managed Attachment, frozen upload, permanent file ownership, Renderer path
 
 **Authority Attachment**:
