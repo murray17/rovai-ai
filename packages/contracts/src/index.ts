@@ -3431,6 +3431,12 @@ export interface AutomationListPage {
   truncated: boolean
 }
 
+export interface AutomationRunListPage {
+  runs: AutomationRunSummary[]
+  nextCursor: string | null
+  truncated: boolean
+}
+
 export interface CreateAutomationCommand {
   name?: string
   prompt: string
@@ -3478,6 +3484,7 @@ export type CoreMethod =
   | 'members.reorder'
   | 'automations.list'
   | 'automations.get'
+  | 'automations.runs.list'
   | 'automations.create'
   | 'automations.update'
   | 'automations.close'
