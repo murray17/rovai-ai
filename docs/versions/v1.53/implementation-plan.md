@@ -420,4 +420,4 @@ git diff --check
   用例按设计跳过。套件另有两个与本次改动无关的既有 queue fixture 失败，均为
   `invalid type: map, expected u32`；单独重跑仍复现。Windows/Linux 隔离搜索路径回归留给对应 CI/目标主机执行。
 - `pnpm docs:test`（9 个用例）、`pnpm docs:check`、
-  `DOCS_BASE_REF=23bcc06435bd7ea906b562b474030756481e7d67 pnpm docs:check:ci` 与 `git diff --check` 通过。
+  `DOCS_BASE_REF=318fcad1a618266bd056170f15490f1b8f8f5a24 pnpm docs:check:ci` 与 `git diff --check` 通过。
