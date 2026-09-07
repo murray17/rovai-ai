@@ -421,3 +421,28 @@ git diff --check
   `invalid type: map, expected u32`；单独重跑仍复现。Windows/Linux 隔离搜索路径回归留给对应 CI/目标主机执行。
 - `pnpm docs:test`（9 个用例）、`pnpm docs:check`、
   `DOCS_BASE_REF=318fcad1a618266bd056170f15490f1b8f8f5a24 pnpm docs:check:ci` 与 `git diff --check` 通过。
+
+## Pi Skill 验证与消息附件收口补充
+
+- [x] 在隔离 Core 数据目录、Skill Library、workspace 与 Pi agent 配置下，用 Pi 0.84.4 真实调用带私有随机标记的
+  managed `.pi/skills` Skill；验证 Revision 更新、禁用/恢复、取消分配/恢复、Core 重启、project-owned 同名
+  shadow、同 Host 相邻 Session 无泄漏及硬删除不可见。
+- [x] 将 Pi managed Skill delivery group discovery 从 `DocumentationOnly` 晋升为 `Verified`，并保持完整 native
+  Prompt、Context、Template 与 Extension catalog attestation 不在本次结论内。
+- [x] Skills 生效组按 Runtime 目录顺序展示，Pi 位于末尾；排序只作用于展示副本，不修改 Core 返回数组。
+- [x] 移除 Agent 消息文件卡前重复的可见“交付文件 N 个”标题，保留文件卡、操作能力和无障碍分组名称。
+- [x] 移除 Single Chat 浮层独有的蓝色顶边，继续使用共享的中性 1px 浮层边界。
+
+### 验证记录（2026-09-07）
+
+- `ROVAI_SKILL_SMOKE_ADAPTERS=pi pnpm smoke:skills` 通过；报告 `ok: true`、Pi 0.84.4、
+  `pi://runtime-default`，真实返回私有随机 marker，且 `piSkillLifecycle` 的更新、禁用、恢复、取消分配、跨 Session
+  隔离和硬删除检查全部为 true。
+- `cargo fmt --all -- --check`、Pi delivery group 定向 Rust 用例与 `cargo check --workspace --all-targets` 通过。
+- `pnpm typecheck`、`pnpm build:desktop` 与四份定向 Vitest 通过；定向共 226 项，全量 `pnpm test` 为 160 个
+  Vitest 文件／1,623 项及 Node 222 项通过／1 项 Windows-only 跳过。
+- Single Chat 原生 Electron fixture 通过并人工复核日夜截图，浮层顶部为共享中性边界；Camp Run artifacts fixture
+  通过并人工复核日夜、1040/1440 宽度截图，文件卡保留且无可见交付文件计数标题。
+- Impeccable detector 对本次改动范围无新增命中；报告的 side-tab 与 layout-transition 均来自未修改的既有规则。
+- `pnpm docs:test`（9 项）、`pnpm docs:check`、以 `8816c324288b440469d5ab3f30b17e4c820bde0d`
+  为基线的 `docs:check:ci` 与 `git diff --check` 通过。

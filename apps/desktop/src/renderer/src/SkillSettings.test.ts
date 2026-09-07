@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { SkillView, StoredCommandResult } from '@contracts'
+import type { SkillDeliveryGroupView, SkillView, StoredCommandResult } from '@contracts'
 import {
   SkillCard,
   SkillLibraryColumns,
@@ -13,6 +13,7 @@ import {
   patchSkillEnabledResult,
   projectionStateLabel,
   settingsVisibleSkills,
+  skillDeliveryGroupsForDisplay,
   skillSourcePresentation,
   updateSkillConfirmationCopy
 } from './SkillSettings'
@@ -365,6 +366,52 @@ describe('Skill settings', () => {
     expect(groupAssignmentSummary(9, 9)).toBe('全部 9 组')
     expect(groupAssignmentSummary(6, 9)).toBe('6 / 9 组')
     expect(groupAssignmentSummary(0, 9)).toBe('未选择')
+  })
+
+  it('orders delivery groups like the Runtime catalog and keeps Pi at the end', () => {
+    const group = (key: SkillDeliveryGroupView['key']): SkillDeliveryGroupView => ({
+      key,
+      label: key,
+      relativePath: `.${key}/skills`,
+      adapterKinds: [],
+      verification: 'verified',
+      members: []
+    })
+    const keys: SkillDeliveryGroupView['key'][] = [
+      'pi',
+      'antigravity',
+      'grok',
+      'kimi',
+      'cursor',
+      'trae',
+      'qwen',
+      'codebuddy',
+      'qoder',
+      'kiro',
+      'opencode',
+      'copilot',
+      'codex',
+      'claude_compatible'
+    ]
+    const groups = keys.map(group)
+
+    expect(skillDeliveryGroupsForDisplay(groups).map(({ key }) => key)).toEqual([
+      'claude_compatible',
+      'codex',
+      'copilot',
+      'opencode',
+      'kiro',
+      'qoder',
+      'codebuddy',
+      'qwen',
+      'trae',
+      'cursor',
+      'kimi',
+      'grok',
+      'antigravity',
+      'pi'
+    ])
+    expect(groups[0]?.key).toBe('pi')
   })
 
   it('patches only the toggled row without reordering the Skill list', () => {

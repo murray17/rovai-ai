@@ -838,7 +838,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CodexCli => self.codex_cli.skill_discovery(),
             AdapterKind::Pi => native_skill_discovery(
                 [SkillDeliveryGroupKey::Pi],
-                SkillDiscoveryVerification::DocumentationOnly,
+                SkillDiscoveryVerification::Verified,
             ),
             AdapterKind::OpencodeCli => self.opencode_cli.skill_discovery(),
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
@@ -4108,7 +4108,7 @@ mod tests {
             (
                 AdapterKind::Pi,
                 &[SkillDeliveryGroupKey::Pi],
-                SkillDiscoveryVerification::DocumentationOnly,
+                SkillDiscoveryVerification::Verified,
             ),
             (
                 AdapterKind::OpencodeCli,
