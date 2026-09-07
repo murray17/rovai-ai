@@ -15,6 +15,7 @@ import {
 import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { CampMemberFastToggle } from './CampMemberFastToggle'
+import { useCampMemberFast, type CampMemberFastControls } from './useCampMemberFast'
 import type {
   ActionApprovalView,
   AdapterInstallation,
@@ -34,7 +35,6 @@ import type {
   CampMessageFindSnapshot,
   CampMessageView,
   CampMemberRemovalPreview,
-  CampMemberFastView,
   CampOpenCollectionCoverage,
   CampOpenMessageCoverage,
   CampOpenProjection,
@@ -1765,6 +1765,8 @@ export function CampWorkspace({
     () => new Map(agents.map((agent) => [agent.agentId, agent])),
     [agents]
   )
+  const memberFast = useCampMemberFast(snapshot, profileById, installations,
+    inspectorVisible && inspectorSurfaceTab === 'members' ? 'members' : executionDrawerAgentId, onNotify)
   const composerMembers = useMemo(
     () => snapshot.members.map((member) => ({
       agentId: member.agentId,
@@ -3810,6 +3812,7 @@ export function CampWorkspace({
       key={executionDrawerProcess.agentId}
       placement={executionPlacement}
       process={executionDrawerProcess}
+      memberFast={memberFast}
       member={memberById.get(executionDrawerProcess.agentId) ?? null}
       profile={executionDrawerProfile}
       installation={executionDrawerInstallation}
@@ -4561,7 +4564,7 @@ export function CampWorkspace({
             </section>
             <section className="camp-detail-content tab-scroll camp-members-panel" hidden={inspectorSurfaceTab !== 'members'}>
               <CampMembersPanel key={snapshot.camp.id}
-                visible={inspectorVisible && inspectorSurfaceTab === 'members'}
+                memberFast={memberFast}
                 snapshot={snapshot}
                 profileById={profileById}
                 installations={installations}
@@ -5248,6 +5251,7 @@ function ExecutionPlacementIcon({ target }: { target: ExecutionConsolePlacement 
 }
 
 function ExecutionDrawer({
+  memberFast,
   placement,
   process,
   member,
@@ -5272,6 +5276,7 @@ function ExecutionDrawer({
   memberById,
   onFileOpenError
 }: {
+  memberFast: CampMemberFastControls
   placement: ExecutionConsolePlacement
   process: AgentExecutionProcess
   member: CampSnapshot['members'][number] | null
@@ -5296,6 +5301,7 @@ function ExecutionDrawer({
   memberById: Map<string, CampSnapshot['members'][number]>
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const fastControl = memberFast.get(process.agentId)
   const drawerRef = useRef<HTMLElement>(null)
   const drawerBodyRef = useRef<HTMLDivElement>(null)
   const resizeGestureRef = useRef<{
@@ -5641,6 +5647,10 @@ function ExecutionDrawer({
             </div>
           </div>
           <div className="execution-drawer-actions">
+            {fastControl && <span className="execution-drawer-fast-slot">
+              {fastControl.value && <CampMemberFastToggle value={fastControl.value} displayName={displayName}
+                pending={fastControl.pending} onToggle={next => { void memberFast.save(process.agentId, next) }} />}
+            </span>}
             {stopViewState === 'stopped' ? (
               <span className="execution-run-stop-state tone-neutral" role="status">已停止</span>
             ) : stopViewState === 'stopping' ? (
@@ -6249,7 +6259,7 @@ export function RuntimeRecoveryDock({
 }
 
 function CampMembersPanel({
-  visible,
+  memberFast,
   snapshot,
   profileById,
   installations,
@@ -6260,7 +6270,7 @@ function CampMembersPanel({
   onRemoveMember,
   onNotify
 }: {
-  visible: boolean
+  memberFast: CampMemberFastControls
   snapshot: CampSnapshot
   profileById: Map<string, AgentProfile>
   installations: AdapterInstallation[]
@@ -6271,106 +6281,7 @@ function CampMembersPanel({
   onRemoveMember?(preview: CampMemberRemovalPreview): Promise<CampMemberRemoveOutcome>
   onNotify(message: string): void
 }): JSX.Element {
-  const [fastOverrides, setFastOverrides] = useState<Record<string, CampMemberFastView | null>>({})
-  const [fastPending, setFastPending] = useState<string | null>(null)
-  const fastPendingRef = useRef(false)
-  const fastChecks = useRef(new Map<string, {
-    scope: string
-    projection: CampMemberFastView | undefined
-    value: CampMemberFastView | null | undefined
-    failed: boolean
-  }>())
-  const fastCheckRequests = useRef(new Set<string>())
-  const fastChecksVisible = useRef(false)
-  const fastMounted = useRef(true)
-  const fastBindingGeneration = useRef(0)
   const members = campInspectorMembers(snapshot.members)
-  const fastCheckScopes = new Map(members.map(member => {
-    const profile = profileById.get(member.agentId)
-    const runtime = profile?.runtimeConfiguration
-    const installation = runtime ? runtimeEditorInstallation(installations, runtime.adapterKind) : null
-    return [member.agentId, JSON.stringify([
-      snapshot.camp.id, snapshot.camp.projectPath, member.membershipStatus, member.profilePresence,
-      member.fast?.runtimeBindingRevision, profile?.version, runtime?.adapterKind, runtime?.model,
-      installation?.id, installation?.authScope, installation?.executablePath, installation?.enabled,
-      installation?.generation, installation?.snapshot?.executableFingerprint,
-      installation?.snapshot?.authenticationStatus, installation?.snapshot?.probeStatus,
-      installation?.snapshot?.lastSuccessfulProbeAt, installation?.snapshot?.staleAt
-    ])]
-  }))
-  const fastBindingScope = JSON.stringify([...fastCheckScopes])
-  useEffect(() => {
-    fastMounted.current = true
-    return () => { fastMounted.current = false }
-  }, [])
-  useEffect(() => { setFastOverrides({}) }, [snapshot])
-  useLayoutEffect(() => { fastBindingGeneration.current += 1; setFastOverrides({}) }, [fastBindingScope])
-  // Keep per-member metadata results while the popover is closed or another tab is selected.
-  // Reconcile on render so a superseded request can finish before its replacement is queued.
-  useEffect(() => {
-    const opened = visible && !fastChecksVisible.current
-    fastChecksVisible.current = visible
-    for (const agentId of fastChecks.current.keys()) {
-      if (!fastCheckScopes.has(agentId)) fastChecks.current.delete(agentId)
-    }
-    for (const member of members) {
-      const agentId = member.agentId
-      const adapter = profileById.get(agentId)?.runtimeConfiguration?.adapterKind
-      if (adapter !== 'claude-code-cli' && adapter !== 'codex-cli') {
-        fastChecks.current.delete(agentId)
-        continue
-      }
-      const scope = fastCheckScopes.get(agentId)!
-      let check = fastChecks.current.get(agentId)
-      if (!check || check.scope !== scope) {
-        // Profile/installation refresh can precede the Camp projection after rebinding.
-        const value = check && check.projection === member.fast ? undefined : member.fast
-        check = { scope, projection: member.fast, value, failed: false }
-        fastChecks.current.set(agentId, check)
-      } else if (check.projection !== member.fast) {
-        check.projection = member.fast
-        check.value = member.fast
-        check.failed = false
-      }
-      if (opened && check.failed) {
-        check.value = undefined
-        check.failed = false
-      }
-      if (!visible || check.value !== undefined || fastCheckRequests.current.has(agentId)) continue
-      const target = check
-      fastCheckRequests.current.add(agentId)
-      void window.rovai.request<CampMemberFastView | null>('camps.members.fast.check', {
-        campId: snapshot.camp.id, agentId
-      }).then(value => {
-        if (fastChecks.current.get(agentId) === target) target.value = value
-      }).catch(() => {
-        if (fastChecks.current.get(agentId) !== target) return
-        target.value = null
-        target.failed = true
-      }).finally(() => {
-        fastCheckRequests.current.delete(agentId)
-        if (fastMounted.current) setFastOverrides(current => ({ ...current }))
-      })
-    }
-  })
-  const saveFast = async (agentId: string, value: CampMemberFastView, fastOverride: boolean): Promise<void> => {
-    if (fastPendingRef.current) return
-    fastPendingRef.current = true
-    const generation = fastBindingGeneration.current
-    setFastPending(agentId)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('camps.members.fast.set', {
-        commandId: crypto.randomUUID(),
-        command: { campId: snapshot.camp.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
-      })
-      if (result.status === 'rejected') throw new Error('队员配置已变化，请稍后重试。')
-      if (generation !== fastBindingGeneration.current) return
-      const updated = result.payload as { fast?: CampMemberFastView | null }
-      setFastOverrides(current => ({ ...current, [agentId]: updated.fast ?? null }))
-    } catch (error) {
-      onNotify(readErrorMessage(error, '响应模式未保存，请重试。'))
-    } finally { fastPendingRef.current = false; setFastPending(null) }
-  }
   const presentCount = members.filter(campMemberIsLeadEligible).length
   const awayCount = members.length - presentCount
   const activeAgentIds = useMemo(
@@ -6591,16 +6502,8 @@ function CampMembersPanel({
       <div className="camp-inspector-member-list" role="list" aria-label="会话队员列表">
         {members.map((member) => {
           const profile = profileById.get(member.agentId) ?? null
-          const supportsFastCheck = profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli'
-            || profile?.runtimeConfiguration?.adapterKind === 'codex-cli'
-          const checkedFast = fastChecks.current.get(member.agentId)
-          const fastValue = !checkedFast || checkedFast.projection !== member.fast
-            ? member.fast
-            : checkedFast.scope === fastCheckScopes.get(member.agentId) ? checkedFast.value : undefined
-          const fast = supportsFastCheck
-            ? Object.hasOwn(fastOverrides, member.agentId) ? fastOverrides[member.agentId]
-              : fastValue
-            : undefined
+          const fastControl = memberFast.get(member.agentId)
+          const fast = fastControl?.value
           const present = campMemberIsLeadEligible(member)
           const presenceLabel = member.leaveRequestedAt
             ? '正在暂离'
@@ -6633,8 +6536,8 @@ function CampMembersPanel({
                 </span>
                 <small title={member.teamRole || undefined}>{runtimeLabel}</small>
               </span>
-              {fast && <CampMemberFastToggle value={fast} displayName={member.displayName} pending={fastPending !== null}
-                onToggle={next => { void saveFast(member.agentId, fast, next) }} />}
+              {fast && <CampMemberFastToggle value={fast} displayName={member.displayName} pending={fastControl!.pending}
+                onToggle={next => { void memberFast.save(member.agentId, next) }} />}
               <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
                 <strong>{presenceLabel}</strong>
                 {runtimeTone === 'attention' && profile && <small className="runtime-attention">{runtimeReadinessLabel(profile.runtimeReadiness.status)}</small>}

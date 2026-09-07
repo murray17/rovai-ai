@@ -32,14 +32,14 @@ app.whenReady().then(async () => {
   try {
     let state = await snapshot()
     assert.equal(state.panel.height, 0, 'Members start collapsed, as in the production workspace')
-    assert.equal(state.checks.length, 0, 'A closed member popover does not check Runtime metadata')
-    await run("window.fastTest.holdCheck('agent-1')")
+    assert.equal(state.checks.length, 3, 'Workspace entry warms uncached metadata before opening either surface')
+    assert.equal(state.memberFast['agent-4'], false, 'A failed background check remains hidden')
     state = await click('.camp-detail-entry[data-detail="members"]')
     assert.ok(state.panel.height > 0, 'Native input opens the production member popover')
-    assert.deepEqual(state.checks.map(check => check.agentId).sort(), ['agent-1', 'agent-3', 'agent-4'], 'Only uncached Claude/Codex members are checked')
+    assert.deepEqual(state.checks.map(check => check.agentId).sort(), ['agent-1', 'agent-3', 'agent-4', 'agent-4'], 'Only uncached Claude/Codex members are checked, with failures retried on opening')
     assert.ok(state.checks.every(check => check.campId === 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'))
     assert.equal(state.memberFast['agent-1'], false, 'Pending checks have no placeholder control')
-    assert.equal(state.memberFast['agent-4'], false, 'A metadata failure stays hidden')
+    assert.equal(state.memberFast['agent-4'], true, 'Opening retries a failed background check')
     assert.equal(state.notice, '', 'Automatic checks and failures are silent')
     assert.equal(state.checkingText, false)
     assert.equal(await run("document.querySelector('.camp-fast-toggle').getAttribute('aria-disabled')"), 'false', 'A background check does not block other Fast controls')
@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
     state = await click('.camp-detail-entry[data-detail="members"]')
     assert.equal(state.checks.filter(check => check.agentId === 'agent-1').length, 1, 'Reopening coalesces an in-flight check')
     assert.equal(state.checks.filter(check => check.agentId === 'agent-3').length, 1, 'A known unsupported account is cached')
-    assert.equal(state.checks.filter(check => check.agentId === 'agent-4').length, 2, 'A failed check retries on the next opening')
+    assert.equal(state.checks.filter(check => check.agentId === 'agent-4').length, 2, 'A successful retry is cached on subsequent openings')
     assert.equal(state.memberFast['agent-4'], true)
     await run('window.fastTest.releaseCheck()')
     state = await snapshot()
@@ -70,7 +70,7 @@ app.whenReady().then(async () => {
     assert.equal(state.saved.fastOverride, null, 'An untouched Camp preference follows the Runtime default')
     assert.equal(state.pressed, 'mixed')
     await run('window.fastTest.bookmark()')
-    state = await click('.camp-fast-toggle')
+    state = await click('.camp-members-panel .camp-fast-toggle')
     assert.equal(state.saves.length, 1, 'The first click saves Fast directly')
     assert.equal(state.pressed, 'true')
     assert.equal(state.notice, '', 'Enabling Fast does not show a success reminder')
@@ -93,6 +93,22 @@ app.whenReady().then(async () => {
       assert.ok(state.label.includes('后续执行请求 Fast'))
       assert.equal(await run("document.querySelector('.camp-fast-warning') !== null"), false)
     }
+    await run('window.fastTest.holdNext()')
+    state = await click('.camp-members-panel .camp-fast-toggle')
+    assert.equal(state.memberStates[0].pending, 'true')
+    assert.ok(state.memberStates.slice(1).filter(member => member.pending !== undefined).every(member => member.pending === 'false' && member.opacity === '1'), 'Saving one member must not dim or block any other member')
+    const concurrentSaves = state.saves.length
+    state = await click('.camp-inspector-member-row:nth-child(2) .camp-fast-toggle')
+    assert.equal(state.saves.length, concurrentSaves + 1, 'A different member can save while the first request is pending')
+    assert.equal(state.memberStates[0].pending, 'true', 'The other completion cannot clear this pending request')
+    assert.equal(state.memberStates[1].pressed, 'true')
+    await run('window.fastTest.release()')
+    state = await snapshot()
+    assert.equal(state.memberStates[0].pending, 'false')
+    assert.equal(state.memberStates[0].pressed, 'false')
+    assert.equal(state.memberStates[1].pressed, 'true', 'The delayed response cannot overwrite another member')
+    state = await click('.camp-members-panel .camp-fast-toggle')
+    assert.equal(state.memberStates[0].pressed, 'true')
     await click('.camp-member-action-button')
     assert.equal((await snapshot()).checkingText, false, 'There are no manual detection or reset menu items')
     state = await key('Escape')
@@ -136,7 +152,7 @@ app.whenReady().then(async () => {
     state = await snapshot()
     assert.equal(state.memberFast['agent-0'], true)
     await run('window.fastTest.holdNext()')
-    await click('.camp-fast-toggle')
+    await click('.camp-members-panel .camp-fast-toggle')
     await run("window.fastTest.rebind('opencode-cli')")
     await snapshot()
     await run('window.fastTest.release()')
@@ -144,7 +160,78 @@ app.whenReady().then(async () => {
     assert.equal(state.toggles, 13, 'A delayed save cannot show Fast on an unsupported Runtime')
     assert.equal(state.maxChecksPerMember, 1)
     assert.equal(state.checkingText, false)
-    console.log(JSON.stringify({ ok: true, requests: state.requests.length, cases: ['1280×720', '1040×700', '1440×920', 'direct toggle', 'native keyboard/focus', 'save failure', 'observations ignored', 'automatic detection', 'silent failure/retry', 'positive/negative cache', 'in-flight coalescing', 'runtime/auth rebind', 'inherited default', 'late check', 'late save'] }))
+    await run("window.fastTest.rebind('claude-code-cli', true)")
+    await snapshot()
+    await click('.camp-detail-entry[data-detail="members"]')
+    await run('window.fastTest.showExecution()')
+    await snapshot()
+    await click('.camp-detail-entry[data-detail="execution"]')
+    await click('.run-pulse [data-agent-id="agent-0"]')
+    const executionFast = '.execution-drawer .camp-fast-toggle'
+    const stopButton = '.execution-drawer [aria-label="停止当前运行"]'
+    const executionState = () => run(`(() => {
+      const fast = document.querySelector('${executionFast}'), stop = document.querySelector('${stopButton}')
+      const close = document.querySelector('.execution-drawer [aria-label="收起执行详情"]')
+      const f = fast?.getBoundingClientRect(), s = stop?.getBoundingClientRect(), c = close?.getBoundingClientRect()
+      const probe = document.createElement('div'); probe.className = 'app-dialog'; probe.style.position = 'fixed'; probe.style.left = '-9999px'
+      probe.innerHTML = '<button class="danger-button">删除对话</button>'; document.body.appendChild(probe)
+      const expected = getComputedStyle(probe.firstElementChild), actual = stop ? getComputedStyle(stop) : null
+      const result = { pressed: fast?.getAttribute('aria-pressed'), pending: fast?.getAttribute('aria-busy'),
+        order: !!s && !!f && s.left-f.right >= 12 && c.left-s.right >= 7,
+        stopHit: !!s && s.height >= 28 && document.elementFromPoint(s.x+s.width/2,s.y+s.height/2)?.closest('[aria-label="停止当前运行"]') === stop,
+        fastHit: !!f && f.height >= 28 && document.elementFromPoint(f.x+f.width/2,f.y+f.height/2)?.closest('.camp-fast-toggle') === fast,
+        deleteColors: actual?.color === expected.color && actual?.backgroundColor === expected.backgroundColor,
+        actions: document.querySelector('.execution-drawer-actions')?.textContent }
+      probe.remove(); return result
+    })()`)
+    assert.equal((await executionState()).pressed, 'mixed')
+    await click(executionFast)
+    assert.equal((await executionState()).pressed, 'true')
+    await click('.camp-detail-entry[data-detail="members"]')
+    state = await snapshot()
+    assert.equal(state.memberStates[0].pressed, 'true', 'Execution Fast saves into the same member preference')
+    await click('.camp-members-panel .camp-fast-toggle')
+    await click('.camp-detail-entry[data-detail="execution"]')
+    assert.equal((await executionState()).pressed, 'false', 'Member Fast also updates execution details')
+    await run('window.fastTest.refresh()')
+    await snapshot()
+    assert.equal((await executionState()).pressed, 'false', 'An unrelated cloned projection does not erase a saved preference')
+    for (const placement of ['inspector', 'bottom']) {
+      if (placement === 'bottom') await click('.run-pulse-inspector .execution-placement-button')
+      for (const theme of ['day', 'night']) {
+        await run(`document.documentElement.dataset.theme = '${theme}'`)
+        for (const [width, height] of [[1040,700], [1440,920]]) {
+          await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false})
+          await snapshot()
+          await run("Promise.all(document.getAnimations().filter(animation => animation instanceof CSSTransition).map(animation => animation.finished.catch(() => {})))")
+          const result = await executionState()
+          assert.ok(result.order && result.stopHit && result.fastHit && result.deleteColors, JSON.stringify({placement, theme, width, result}))
+          await capture(`execution-fast-${placement}-${theme}-${width}`)
+        }
+      }
+    }
+    await click('.camp-detail-entry[data-detail="members"]')
+    await run('window.fastTest.holdNext()')
+    await click('.camp-members-panel .camp-fast-toggle')
+    assert.equal((await executionState()).pending, 'true', 'Both surfaces share this member pending state')
+    const pendingSaves = (await snapshot()).saves.length
+    await click(executionFast)
+    assert.equal((await snapshot()).saves.length, pendingSaves, 'The second surface cannot submit the same member twice')
+    await click('.run-pulse [data-agent-id="agent-1"]')
+    assert.equal((await executionState()).pending, 'false', 'Switching execution member never inherits another pending state')
+    await run('window.fastTest.release()')
+    await snapshot()
+    await click('.camp-detail-entry[data-detail="members"]')
+    await click('.run-pulse [data-agent-id="agent-2"]')
+    assert.equal(await run(`Boolean(document.querySelector('${executionFast}'))`), false, 'An unsupported execution Runtime has no Fast control')
+    await click('.run-pulse [data-agent-id="agent-0"]')
+    await click(stopButton)
+    assert.ok((await executionState()).actions.includes('正在提交停止请求'))
+    await run('window.fastTest.releaseStop()')
+    await snapshot()
+    assert.ok((await executionState()).actions.includes('已停止'))
+    assert.equal((await executionState()).pressed, 'true', 'Stopping the run keeps the next-run preference')
+    console.log(JSON.stringify({ ok: true, requests: state.requests.length, cases: ['1280×720', '1040×700', '1440×920', 'direct toggle', 'native keyboard/focus', 'save failure', 'observations ignored', 'automatic detection', 'silent failure/retry', 'positive/negative cache', 'in-flight coalescing', 'runtime/auth rebind', 'inherited default', 'late check', 'late save', 'member-scoped pending', 'concurrent member saves', 'execution/member sync', 'stop/delete colors', 'execution placement/theme matrix', 'shared duplicate guard', 'projection refresh'] }))
     window.destroy(); app.quit()
   } catch (error) {
     console.error(await snapshot())
