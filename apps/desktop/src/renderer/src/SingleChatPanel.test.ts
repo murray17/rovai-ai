@@ -143,7 +143,19 @@ describe('Single Chat presentation', () => {
     }), '2026-09-03T11:00:00.000Z')).toBe('你在 5 分 38 秒后停止了运行')
   })
 
-  it('shows Thinking from queue through narration without an elapsed summary', () => {
+  it('removes the initial status as soon as narration arrives, before the run completes', () => {
+    const currentRun = run({ status: 'running', endedAt: null, finalConversationMessageId: null })
+    const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
+      campId: 'camp-1', run: currentRun,
+      evidence: [evidence('正在输出的第一段正文', currentRun.id, currentRun.executionEpoch, 1)],
+      finalMessage: null, now: '2026-09-03T11:00:00.000Z'
+    }))
+    expect(markup).toContain('正在输出的第一段正文')
+    expect(markup).not.toContain('role="status"')
+    expect(markup).not.toContain('工作了')
+  })
+
+  it('distinguishes queue and initial processing without an elapsed summary', () => {
     for (const status of ['queued', 'running'] as const) {
       const currentRun = run({ status, endedAt: null, finalConversationMessageId: null })
       for (const items of [[], [evidence('继续核对结果', currentRun.id, currentRun.executionEpoch, 1)]]) {
@@ -153,11 +165,32 @@ describe('Single Chat presentation', () => {
         }))
         expect(markup).toContain('single-chat-run-history is-live" open=""')
         expect(markup).toContain('<summary hidden=""')
-        expect(markup).toContain('<span>Thinking</span>')
-        expect(markup).not.toMatch(/工作了|正在工作|等待开始|正在处理|分.*秒/)
-        if (items.length) expect(markup).toContain('继续核对结果')
+        expect(markup).not.toMatch(/Thinking|工作了|正在工作|等待开始|正在处理|分.*秒/)
+        if (items.length) {
+          expect(markup).toContain('继续核对结果')
+          expect(markup).not.toMatch(/连接中|思考中/)
+        } else {
+          expect(markup).toContain(`<span>${status === 'queued' ? '连接中' : '思考中'}</span>`)
+        }
       }
     }
+  })
+
+  it('does not restore initial feedback when final text replaces narration before settlement', () => {
+    const currentRun = run({ status: 'running', endedAt: null })
+    const body = '已经到达的最终正文'
+    const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
+      campId: 'camp-1', run: currentRun,
+      evidence: [evidence(body, currentRun.id, currentRun.executionEpoch, 1)],
+      finalMessage: {
+        id: 'final-1', sequence: 2, authorType: 'agent', authorId: member.agentId,
+        body, attachments: [], agentRunId: currentRun.id, createdAt: '2026-09-03T11:00:00.000Z'
+      },
+      now: '2026-09-03T11:00:00.000Z'
+    }))
+    expect(markup).toContain(body)
+    expect(markup).not.toContain('single-chat-narration')
+    expect(markup).not.toMatch(/role="status"|Thinking|思考中|连接中|工作了/)
   })
 
   it('preserves waiting, stopping and terminal outcomes', () => {
@@ -167,11 +200,11 @@ describe('Single Chat presentation', () => {
         now: '2026-09-03T11:00:00.000Z', cancelling
       }))
     expect(markupFor('waiting')).toContain('等待继续')
-    expect(markupFor('waiting')).not.toContain('Thinking')
+    expect(markupFor('waiting')).not.toMatch(/Thinking|连接中|思考中/)
     expect(markupFor('running', true)).toContain('正在提交停止请求')
-    expect(markupFor('running', true)).not.toContain('Thinking')
+    expect(markupFor('running', true)).not.toMatch(/Thinking|连接中|思考中/)
     expect(markupFor('failed')).toContain('运行 39 分 17 秒后失败')
-    expect(markupFor('failed')).not.toContain('Thinking')
+    expect(markupFor('failed')).not.toMatch(/Thinking|连接中|思考中/)
     expect(markupFor('succeeded')).toContain('工作了 39 分 17 秒')
     expect(markupFor('succeeded')).not.toContain('open=""')
   })
