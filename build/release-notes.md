@@ -1,20 +1,21 @@
-# Rovai AI v0.1.0
+# Rovai AI v0.2.0
 
-Rovai AI 0.1.0 introduces private member conversations, a substantially stronger file-preview workspace, safer Runtime recovery, and leaner durable execution storage.
+Rovai AI 0.2.0 makes the desktop workspace more personal, easier to configure, and clearer while agents are working.
 
-macOS arm64 and x64 builds use the same fixed Rovai Release Signing certificate as 0.0.7. Windows x64 remains an unsigned Preview build and may show a SmartScreen warning.
+macOS arm64 and x64 builds use the same fixed Rovai Release Signing certificate as 0.1.0. Windows x64 remains an unsigned Preview build and may show a SmartScreen warning.
 
 ## What's Changed
 
-- Add Camp-scoped private Single Chat conversations with attachments, bounded history context, conversation-local pending delivery, precise lifecycle controls, and race-safe target switching.
-- Restore file-preview tabs, order, active state, and pane visibility independently for each Camp, including safe recovery for linked project files and unavailable-file presentation.
-- Add independent Rovai file and diff search with next/previous navigation, case, whole-word and regular-expression options, bounded execution, and support for code, Markdown, HTML, patches, and historical file changes.
-- Unify Single Chat and execution feedback with shared Thinking, terminal duration, tool grouping, final-answer presentation, quieter successful completion, predictable Command/Ctrl+W preview closing, and consistent PI naming.
-- Surface sanitized Runtime failures directly on Agent Runs and safely retry only explicitly unaccepted ACP network failures with fixed backoff, cancellation fencing, and fresh admission checks.
-- Persist Runtime text and reasoning in durable blocks while retaining live deltas and partial output, reducing maintenance write amplification without changing the public timeline.
-- Correlate Claude Code streaming and completed text blocks without duplicating assistant output, while keeping file actions and long filenames readable on one stable row.
-- Store new command-result bodies once while preserving idempotent replay, legacy reads, and the existing public event payload.
-- Restrict public Runtime image galleries to confirmed native image generation while preserving explicit image attachments sent through Rovai.
-- Simplify dialogs and popovers, refine shared send/stop controls, keep pinned Camp loading markers current, restore author headers for standalone Run artifacts, and remove Git-status latency from new conversation creation.
+- Add complete appearance and reading controls for theme, conversation, document and code text sizes, reading density, application zoom, and reduced motion.
+- Redesign teammate configuration as an inline workspace with independent profile and Runtime saves, preserved drafts, clearer status, and safer conflict handling.
+- Refine the teammate roster with a resizable and collapsible rail, search for larger teams, compact grouping, and remembered layout preferences.
+- Speed up new conversations with optional saved team defaults while consistently excluding unavailable or unconfigured teammates from selection and leadership.
+- Guide users through installing and signing in to supported Agent Runtimes, with platform-aware commands, copy feedback, refresh, and recheck actions.
+- Distinguish connecting, thinking, active execution, approvals, retries, and completion without leaving stale status text after real output arrives.
+- Put Fast controls directly in execution details and simplify shared stop and collapse actions while preserving keyboard focus and per-member state.
+- Improve file activity with localized multi-file reads, wider diff click targets, direct previews for operation-only changes, canonical path display, reveal/copy actions, and safe source-attachment paths.
+- Capture verified Pi edit patches as reviewable diffs, keep missing Pi installations out of subsystem health, and finalize Pi Skill availability and delivery ordering.
+- Restore private-chat approval, completion and failure notifications while keeping the conversation currently being read quiet and preserving notification focus.
+- Keep Markdown previews vertically scrollable over wide tables and tighten long notification and file-row layouts across narrow windows.
 
-**Full changelog:** https://github.com/murray17/rovai-ai/compare/v0.0.7...v0.1.0
+**Full changelog:** https://github.com/murray17/rovai-ai/compare/v0.1.0...v0.2.0
