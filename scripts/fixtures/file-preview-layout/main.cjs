@@ -178,7 +178,7 @@ app.whenReady().then(async () => {
     await run('window.previewTest.openMarkdown()')
     const day = await run('window.previewTest.markdownSnapshot()')
     assert.equal(day.bodyFontSize, '15px')
-    assert.equal(day.bodyLineHeight, '25.5px')
+    assert.equal(day.bodyLineHeight, '24.75px')
     assert.deepEqual([day.h1, day.h2, day.h3], ['26px', '21px', '17px'])
     assert.equal(day.codeLanguage, 'tsx')
     assert.equal(day.codeFontSize, '13px')

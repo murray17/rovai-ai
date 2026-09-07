@@ -1,3 +1,4 @@
+import { DEFAULT_APPEARANCE } from '../../shared/appearance'
 import { AgentRunFileChangesReviewSurface } from './FileChangesPreview'
 import { CampDetailEntries } from './CampDetailPopover'
 import { createElement } from 'react'
@@ -3096,7 +3097,7 @@ describe('task event projections', () => {
 
   it('maps each settings category to its corresponding right-side content', () => {
     const baseProps = {
-      appearance: { preference: 'system' as const, resolvedTheme: 'day' as const },
+      appearance: { ...DEFAULT_APPEARANCE, preference: 'system' as const, resolvedTheme: 'day' as const },
       health: null,
       agents: [],
       installations: [],
@@ -3104,7 +3105,7 @@ describe('task event projections', () => {
       updates: testAppUpdatesController(),
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
-      onThemeChange: () => undefined
+      onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }
     const contentBySection: Record<NavigationSettingsSection, string> = {
       general: '通用',
@@ -3128,7 +3129,7 @@ describe('task event projections', () => {
 
   it('keeps only lightweight in-app reminder settings', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
-      appearance: { preference: 'system', resolvedTheme: 'day' },
+      appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'day' },
       health: null,
       agents: [],
       installations: [],
@@ -3137,7 +3138,7 @@ describe('task event projections', () => {
       section: 'notifications',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
-      onThemeChange: () => undefined
+      onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }))
 
     expect(markup).not.toContain('notification-center-link')
@@ -3149,9 +3150,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('持久边界')
   })
 
-  it('keeps the Appearance page header focused on choosing a theme', () => {
+  it('describes theme and reading controls in the shared Appearance header', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
-      appearance: { preference: 'night', resolvedTheme: 'night' },
+      appearance: { ...DEFAULT_APPEARANCE, preference: 'night', resolvedTheme: 'night' },
       health: null,
       agents: [],
       installations: [],
@@ -3160,10 +3161,10 @@ describe('task event projections', () => {
       section: 'appearance',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
-      onThemeChange: () => undefined
+      onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }))
 
-    expect(markup).toContain('选择 Rovai AI 的界面主题。')
+    expect(markup).toContain('调整 Rovai AI 的界面主题、文字大小与阅读体验。')
     expect(markup).not.toContain('当前 · Steel Night')
     expect(markup).not.toContain('当前呈现')
     expect(markup).not.toContain('已生效')
@@ -3172,7 +3173,7 @@ describe('task event projections', () => {
 
   it('places the real Runtime rescan action in the shared page header', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
-      appearance: { preference: 'system', resolvedTheme: 'day' },
+      appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'day' },
       health: null,
       agents: [],
       installations: [],
@@ -3181,7 +3182,7 @@ describe('task event projections', () => {
       section: 'runtime',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
-      onThemeChange: () => undefined
+      onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }))
     const headerEnd = markup.indexOf('</header>')
     const rescan = markup.indexOf('重新检测全部')
@@ -7005,7 +7006,7 @@ describe('task event projections', () => {
   })
   it('does not expose a standalone context destination in settings navigation', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
-      appearance: { preference: 'system', resolvedTheme: 'day' },
+      appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'day' },
       health: null,
       agents: [],
       installations: [],
@@ -7014,7 +7015,7 @@ describe('task event projections', () => {
       section: 'appearance',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
-      onThemeChange: () => undefined
+      onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }))
 
     expect(markup).not.toContain('<strong>上下文</strong>')
@@ -7023,7 +7024,7 @@ describe('task event projections', () => {
 
   it('renders the formal diagnostics center without prototype-only controls', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
-      appearance: { preference: 'system', resolvedTheme: 'day' },
+      appearance: { ...DEFAULT_APPEARANCE, preference: 'system', resolvedTheme: 'day' },
       health: null,
       agents: [],
       installations: [],
@@ -7032,7 +7033,7 @@ describe('task event projections', () => {
       section: 'diagnostics',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
-      onThemeChange: () => undefined
+      onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }))
 
     expect(markup).toContain('<h1>诊断与修复</h1>')

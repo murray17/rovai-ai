@@ -17,6 +17,7 @@ import {
 } from 'electron'
 import { isCampId } from '@contracts'
 import type {
+  AppearancePreferences,
   AppearanceSnapshot,
   ChannelKind,
   CoreMethod,
@@ -31,8 +32,7 @@ import type {
   SettingsSection,
   StartupLocationMode,
   StructuredError,
-  SupervisorSnapshot,
-  ThemePreference
+  SupervisorSnapshot
 } from '@contracts'
 import {
   CoreClient,
@@ -44,11 +44,11 @@ import {
 import {
   isThemePreference,
   nativeThemeSource,
-  readThemePreferenceResult,
+  AppearancePreferencesStore,
   resolvedTheme,
-  themeBackground,
-  writeThemePreference
+  themeBackground
 } from './appearance-preference'
+import { DEFAULT_APPEARANCE } from '../shared/appearance'
 import {
   readWindowStateFile,
   resetWindowBounds,
@@ -357,7 +357,7 @@ if (windowsBootstrap?.kind === 'blocked') {
 }
 let appUpdates: AppUpdatesService | null = null
 let mainWindow: BrowserWindow | null = null
-let themePreference: ThemePreference = 'system'
+let appearanceStore: AppearancePreferencesStore | null = null
 let appearanceFilePath = ''
 let lastDiagnosticsExportPath: string | null = null
 let lastMonitoringExportPath: string | null = null
@@ -629,14 +629,15 @@ function removeRetiredLoginItemRegistration(): void {
 
 function appearanceSnapshot(): AppearanceSnapshot {
   return {
-    preference: themePreference,
-    resolvedTheme: resolvedTheme(nativeTheme.shouldUseDarkColors)
+    ...(appearanceStore?.get() ?? DEFAULT_APPEARANCE),
+    resolvedTheme: resolvedTheme(nativeTheme.shouldUseDarkColors),
+    degradation: appearanceStore?.degradation ?? null
   }
 }
 
 function publishAppearance(): AppearanceSnapshot {
   const snapshot = appearanceSnapshot()
-  const signature = `${snapshot.preference}:${snapshot.resolvedTheme}`
+  const signature = JSON.stringify(snapshot)
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setBackgroundColor(themeBackground(snapshot.resolvedTheme))
     applyWindowChromeAppearance(mainWindow, process.platform, snapshot.resolvedTheme)
@@ -648,6 +649,17 @@ function publishAppearance(): AppearanceSnapshot {
     }
   }
   return snapshot
+}
+
+async function updateAppearancePreferences(patch: Partial<AppearancePreferences>): Promise<AppearanceSnapshot> {
+  if (!appearanceStore) throw new Error('Appearance preferences are not ready')
+  const preferences = await appearanceStore.update(patch)
+  nativeTheme.themeSource = nativeThemeSource(preferences.preference)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.setZoomFactor(preferences.zoomPercentage / 100)
+    mainWindow.webContents.send('rovai:page-zoom-changed', preferences.zoomPercentage)
+  }
+  return publishAppearance()
 }
 
 function removedSkillProjectRoots(): string[] {
@@ -693,7 +705,8 @@ function createWindow(): void {
       preload: join(import.meta.dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      zoomFactor: appearanceSnapshot().zoomPercentage / 100
     }
   })
   const webContentsId = window.webContents.id
@@ -732,6 +745,13 @@ function createWindow(): void {
     if (percentage === null) return
     window.webContents.setZoomFactor(percentage / 100)
     window.webContents.send('rovai:page-zoom-changed', percentage)
+    void updateAppearancePreferences({ zoomPercentage: percentage }).catch((error) => {
+      console.warn('[rovai] Page zoom preference could not be saved.', error)
+      if (!window.isDestroyed()) {
+        window.webContents.setZoomFactor(appearanceSnapshot().zoomPercentage / 100)
+        publishPageZoom()
+      }
+    })
   })
   window.webContents.on('zoom-changed', queuePageZoomFeedback)
   window.webContents.once('did-finish-load', () => {
@@ -855,9 +875,9 @@ if (primaryInstance) void app.whenReady().then(async () => {
   onboarding = OnboardingStore.defaults(onboardingPath)
   restorableLocations = RestorableLocationStore.defaults(restorableLocationPath)
   navigationPreferences = NavigationPreferencesStore.defaults(navigationPreferencesPath)
-  const loadedAppearance = readThemePreferenceResult(appearanceFilePath)
-  themePreference = loadedAppearance.preference
-  nativeTheme.themeSource = nativeThemeSource(themePreference)
+  appearanceStore = new AppearancePreferencesStore(appearanceFilePath)
+  const loadedAppearance = appearanceStore
+  nativeTheme.themeSource = nativeThemeSource(appearanceStore.get().preference)
   nativeTheme.on('updated', publishAppearance)
   powerMonitor.on('resume', wakeNetworkRecoveryAfterSystemResume)
   publishAppearance()
@@ -1092,12 +1112,16 @@ ipcMain.handle('rovai:clipboard-write', (_event, input: unknown) => {
 
 ipcMain.handle('rovai:appearance-get', () => appearanceSnapshot())
 
-ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
+ipcMain.handle('rovai:appearance-set', async (event, preference: unknown) => {
+  requireMainWindow(event.sender)
   if (!isThemePreference(preference)) throw new Error('Unsupported theme preference')
-  await writeThemePreference(appearanceFilePath, preference)
-  themePreference = preference
-  nativeTheme.themeSource = nativeThemeSource(preference)
-  return publishAppearance()
+  return updateAppearancePreferences({ preference })
+})
+
+ipcMain.handle('rovai:appearance-update', async (event, patch: unknown) => {
+  requireMainWindow(event.sender)
+  // The store validates the complete allowlisted patch before queueing a write.
+  return updateAppearancePreferences(patch as Partial<AppearancePreferences>)
 })
 
 ipcMain.handle('rovai:app-updates-get', (event) => {
