@@ -3307,7 +3307,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .safe-markdown.is-document li + li { margin-top: 4px; }
 .safe-markdown.is-document blockquote { margin: 15px 0 17px; padding: 5px 13px; }
 .safe-markdown.is-document pre { margin: 16px 0 19px; padding: 13px 14px; font-size: 13px; line-height: 1.65; }
-.safe-markdown.is-document .markdown-table-scroll { max-width: 100%; margin: 17px 0 20px; overflow-x: auto; overscroll-behavior: contain; }
+.safe-markdown.is-document .markdown-table-scroll { max-width: 100%; margin: 17px 0 20px; overflow-x: auto; overscroll-behavior-x: contain; }
 .safe-markdown.is-document .markdown-table-scroll > table { display: table; width: max-content; min-width: 100%; margin: 0; overflow: visible; font-size: 14px; line-height: 1.55; }
 .safe-markdown.is-document th,
 .safe-markdown.is-document td { padding: 8px 10px; overflow-wrap: normal; word-break: normal; }

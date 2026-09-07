@@ -51,7 +51,11 @@ const markdownSource = [
   '',
   '| 项目 | 说明 |',
   '| --- | --- |',
-  `| 宽表格 | ${'wideTableColumn'.repeat(40)} |`
+  `| 宽表格 | ${'wideTableColumn'.repeat(40)} |`,
+  '',
+  '## 后续阅读',
+  '',
+  '滚轮经过宽表格后仍应继续滚动 Markdown 阅读区。'.repeat(80)
 ].join('\n')
 const tabFiles = ['src/app.ts', 'src/layout.tsx', 'src/theme.ts', 'src/routes.ts', 'src/search.ts',
   'src/settings.tsx', 'src/navigation.ts', 'src/very-long-file-preview-reading-anchor.tsx']
