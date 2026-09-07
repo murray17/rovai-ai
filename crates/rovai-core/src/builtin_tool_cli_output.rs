@@ -112,7 +112,14 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
         | "memory.view"
         | "memory.search"
         | "memory.read"
-        | "single_chat.history" => builtin_tool_definitions()
+        | "single_chat.history"
+        | "automation.list"
+        | "automation.get"
+        | "automation.create"
+        | "automation.run"
+        | "automation.close"
+        | "automation.update"
+        | "automation.delete" => builtin_tool_definitions()
             .into_iter()
             .find(|definition| definition["name"].as_str() == Some(operation))
             .map(|definition| definition["outputSchema"].clone())
@@ -203,7 +210,14 @@ fn project_success(operation: &str, result: &Value) -> Result<Value> {
         | "memory.view"
         | "memory.search"
         | "memory.read"
-        | "single_chat.history" => Ok(result.clone()),
+        | "single_chat.history"
+        | "automation.list"
+        | "automation.get"
+        | "automation.create"
+        | "automation.run"
+        | "automation.close"
+        | "automation.update"
+        | "automation.delete" => Ok(result.clone()),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
 }
@@ -648,7 +662,7 @@ mod tests {
         ))
         .unwrap();
         let documents = golden.as_object().unwrap();
-        assert_eq!(documents.len(), 16);
+        assert_eq!(documents.len(), 23);
         for definition in builtin_tool_definitions() {
             let operation = definition["name"].as_str().unwrap();
             let fixture = documents

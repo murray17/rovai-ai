@@ -74,6 +74,16 @@ use rovai_core::{
     authority_migration::{
         AuthorityMigrationProgress, AuthorityMigrationRunner, trace_startup_stage,
     },
+    automation::{
+        AUTOMATION_CLOSE_TOOL_NAME, AUTOMATION_CREATE_TOOL_NAME, AUTOMATION_DELETE_TOOL_NAME,
+        AUTOMATION_GET_TOOL_NAME, AUTOMATION_LIST_TOOL_NAME, AUTOMATION_RUN_TOOL_NAME,
+        AUTOMATION_UPDATE_TOOL_NAME, AutomationCreateToolInput, AutomationGetToolInput,
+        AutomationListQuery, AutomationListToolInput, AutomationProjectRef, AutomationRunToolInput,
+        AutomationService, AutomationUpdateToolInput, AutomationVersionedToolInput,
+        CloseAutomationCommand, CreateAutomationCommand, DeleteAutomationCommand,
+        RunAutomationCommand, UpdateAutomationCommand, resolve_tool_automation_id,
+        resolve_tool_member, resolve_tool_project, schedule_from_tool_fields,
+    },
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
     },
@@ -261,11 +271,11 @@ use rovai_core::{
         SkillProjectionReconciler,
     },
     team_tool::{
-        BuiltinToolBindingCredential, CampMessageSendInput, CampMessageSendInvocation, GatherInput,
-        GatherInvocation, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
-        TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput,
-        TeamGetTaskInput, TeamListTasksInput, TeamTaskToolInvocation, TeamToolInvocationError,
-        TeamToolService, TeamUpdateTaskInput,
+        AuthenticatedTeamToolRun, BuiltinToolBindingCredential, CampMessageSendInput,
+        CampMessageSendInvocation, GatherInput, GatherInvocation, TEAM_CREATE_TASK_TOOL_NAME,
+        TEAM_GET_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME,
+        TeamCreateTaskInput, TeamGetTaskInput, TeamListTasksInput, TeamTaskToolInvocation,
+        TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput,
     },
     team_tool_catalog::validate_builtin_tool_input,
 };
@@ -621,6 +631,9 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
             | "userAutomation.camp.send"
+            | "automations.schedulerControl"
+            | "automations.schedulerTick"
+            | "automations.run"
             | "camp.sourceAttachments.addFromPath"
             | "camp.pendingInputs.addSourceAttachmentFromPath"
             | "camp.attachments.previewSource"
@@ -1209,6 +1222,49 @@ struct SendUserAutomationCampMessageParams {
     agent_id: String,
     body: String,
     execution: Option<ExecutionRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationGetParams {
+    automation_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationSchedulerControl {
+    epoch: u64,
+    recovery_boundary: chrono::DateTime<chrono::Utc>,
+    paused: bool,
+}
+
+type AutomationSchedulerControlParams = AutomationSchedulerControl;
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationSchedulerTickParams {
+    epoch: u64,
+    now: chrono::DateTime<chrono::Utc>,
+}
+
+fn apply_automation_scheduler_control(
+    current: &mut Option<AutomationSchedulerControl>,
+    next: AutomationSchedulerControl,
+) -> bool {
+    if let Some(value) = current
+        && (value.epoch > next.epoch || (value.epoch == next.epoch && *value != next))
+    {
+        return false;
+    }
+    *current = Some(next);
+    true
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationMutationParams<T> {
+    command_id: String,
+    command: T,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1886,6 +1942,7 @@ struct Core {
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeCheckActivity>>,
     runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckRequest>,
     attachment_projection_requests: mpsc::UnboundedSender<String>,
+    automation_scheduler_control: RwLock<Option<AutomationSchedulerControl>>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
     agent_run_cleanup_inflight: Mutex<HashSet<ActiveExecutionKey>>,
@@ -5134,6 +5191,295 @@ impl Core {
                         }?;
                     serde_json::to_value(output).map_err(Into::into)
                 }
+                AUTOMATION_LIST_TOOL_NAME => {
+                    let input = serde_json::from_value::<AutomationListToolInput>(request.input)
+                        .map_err(|_| {
+                            automation_tool_error(
+                                "automation.invalid_input",
+                                "automation.list input is invalid",
+                            )
+                        })?;
+                    let project = input
+                        .project
+                        .as_deref()
+                        .map(|value| {
+                            resolve_automation_project(&database, &authenticated_run.camp_id, value)
+                        })
+                        .transpose()?;
+                    serde_json::to_value(AutomationService::default().list(
+                        &database,
+                        &AutomationListQuery {
+                            status: input.status,
+                            query: input.query,
+                            project,
+                            cursor: input.cursor,
+                            limit: input.limit,
+                        },
+                    )?)
+                    .map_err(Into::into)
+                }
+                AUTOMATION_GET_TOOL_NAME => {
+                    let input = serde_json::from_value::<AutomationGetToolInput>(request.input)
+                        .map_err(|_| {
+                            automation_tool_error(
+                                "automation.invalid_input",
+                                "automation.get input is invalid",
+                            )
+                        })?;
+                    let automation_id = resolve_automation_id(
+                        &database,
+                        &authenticated_run.camp_id,
+                        &input.automation_id,
+                    )?;
+                    let view = AutomationService::default()
+                        .get(&database, &automation_id)?
+                        .ok_or_else(|| {
+                            automation_tool_error(
+                                "automation.not_found",
+                                "Automation does not exist",
+                            )
+                        })?;
+                    serde_json::to_value(view).map_err(Into::into)
+                }
+                AUTOMATION_CREATE_TOOL_NAME => {
+                    let input = serde_json::from_value::<AutomationCreateToolInput>(request.input)
+                        .map_err(|_| {
+                            automation_tool_error(
+                                "automation.invalid_input",
+                                "automation.create input is invalid",
+                            )
+                        })?;
+                    let member_id = resolve_automation_member(
+                        &database,
+                        &authenticated_run.agent_id,
+                        input.member.as_deref(),
+                    )?;
+                    let project_ref = resolve_automation_project(
+                        &database,
+                        &authenticated_run.camp_id,
+                        input.project.as_deref().unwrap_or("current"),
+                    )?;
+                    let schedule = schedule_from_tool_fields(
+                        &input.repeat,
+                        input.at.as_deref(),
+                        input.weekday,
+                        input.date.as_deref(),
+                        input.cron.as_deref(),
+                    )
+                    .map_err(|error| {
+                        automation_tool_error("automation.invalid_schedule", &error.to_string())
+                    })?;
+                    let execution = AutomationService::default().create(
+                        &mut database,
+                        &automation_agent_envelope(
+                            request.runtime_tool_call_id,
+                            &authenticated_run,
+                            CreateAutomationCommand {
+                                name: input.name,
+                                prompt: input.prompt,
+                                member_id,
+                                project_ref,
+                                schedule,
+                                notify_channels: input.notify,
+                            },
+                        ),
+                    )?;
+                    evidence_replayed = execution.replayed;
+                    command_execution_payload(execution)
+                }
+                AUTOMATION_RUN_TOOL_NAME => {
+                    let input = serde_json::from_value::<AutomationRunToolInput>(request.input)
+                        .map_err(|_| {
+                            automation_tool_error(
+                                "automation.invalid_input",
+                                "automation.run input is invalid",
+                            )
+                        })?;
+                    let automation_id = resolve_automation_id(
+                        &database,
+                        &authenticated_run.camp_id,
+                        &input.automation_id,
+                    )?;
+                    let quick_chat_path = self.data_dir.join("quick-chat");
+                    std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                        format!(
+                            "failed to prepare Quick Chat at {}",
+                            quick_chat_path.display()
+                        )
+                    })?;
+                    let automation_service = AutomationService::default();
+                    let execution = automation_service.run_now(
+                        &mut database,
+                        &automation_agent_envelope(
+                            request.runtime_tool_call_id,
+                            &authenticated_run,
+                            RunAutomationCommand { automation_id },
+                        ),
+                        CURRENT_USER_ID,
+                        &quick_chat_path,
+                    )?;
+                    evidence_replayed = execution.replayed;
+                    if let (Some(run_id), Some(camp_id)) = (
+                        execution
+                            .result
+                            .payload
+                            .get("runId")
+                            .and_then(Value::as_str),
+                        execution
+                            .result
+                            .payload
+                            .get("campId")
+                            .and_then(Value::as_str),
+                    ) && let Err(error) = self
+                        .attachment_views
+                        .ensure_empty_camp_ready(&mut database, camp_id)
+                    {
+                        automation_service
+                            .interrupt_before_runtime(&mut database, run_id)
+                            .context(
+                                "failed to fence an Automation after attachment preparation failed",
+                            )?;
+                        return Err(error);
+                    }
+                    command_execution_payload(execution)
+                }
+                AUTOMATION_CLOSE_TOOL_NAME | AUTOMATION_DELETE_TOOL_NAME => {
+                    let input =
+                        serde_json::from_value::<AutomationVersionedToolInput>(request.input)
+                            .map_err(|_| {
+                                automation_tool_error(
+                                    "automation.invalid_input",
+                                    "Automation mutation input is invalid",
+                                )
+                            })?;
+                    let automation_id = resolve_automation_id(
+                        &database,
+                        &authenticated_run.camp_id,
+                        &input.automation_id,
+                    )?;
+                    let execution = if request.tool_name == AUTOMATION_CLOSE_TOOL_NAME {
+                        AutomationService::default().close(
+                            &mut database,
+                            &automation_agent_envelope(
+                                request.runtime_tool_call_id,
+                                &authenticated_run,
+                                CloseAutomationCommand {
+                                    automation_id,
+                                    expected_version: input.expected_version,
+                                },
+                            ),
+                        )?
+                    } else {
+                        AutomationService::default().delete(
+                            &mut database,
+                            &automation_agent_envelope(
+                                request.runtime_tool_call_id,
+                                &authenticated_run,
+                                DeleteAutomationCommand {
+                                    automation_id,
+                                    expected_version: input.expected_version,
+                                },
+                            ),
+                        )?
+                    };
+                    evidence_replayed = execution.replayed;
+                    command_execution_payload(execution)
+                }
+                AUTOMATION_UPDATE_TOOL_NAME => {
+                    let input = serde_json::from_value::<AutomationUpdateToolInput>(request.input)
+                        .map_err(|_| {
+                            automation_tool_error(
+                                "automation.invalid_input",
+                                "automation.update input is invalid",
+                            )
+                        })?;
+                    if input.clear_notify && !input.notify.is_empty() {
+                        return Err(automation_tool_error(
+                            "automation.invalid_input",
+                            "--notify and --clear-notify cannot be combined",
+                        ));
+                    }
+                    let has_schedule_fields = input.at.is_some()
+                        || input.weekday.is_some()
+                        || input.date.is_some()
+                        || input.cron.is_some();
+                    if input.repeat.is_none() && has_schedule_fields {
+                        return Err(automation_tool_error(
+                            "automation.invalid_input",
+                            "Schedule details require --repeat",
+                        ));
+                    }
+                    let schedule = input
+                        .repeat
+                        .as_deref()
+                        .map(|repeat| {
+                            schedule_from_tool_fields(
+                                repeat,
+                                input.at.as_deref(),
+                                input.weekday,
+                                input.date.as_deref(),
+                                input.cron.as_deref(),
+                            )
+                        })
+                        .transpose()
+                        .map_err(|error| {
+                            automation_tool_error("automation.invalid_schedule", &error.to_string())
+                        })?;
+                    let member_id = input
+                        .member
+                        .as_deref()
+                        .map(|member| {
+                            resolve_automation_member(
+                                &database,
+                                &authenticated_run.agent_id,
+                                Some(member),
+                            )
+                        })
+                        .transpose()?;
+                    let project_ref = input
+                        .project
+                        .as_deref()
+                        .map(|project| {
+                            resolve_automation_project(
+                                &database,
+                                &authenticated_run.camp_id,
+                                project,
+                            )
+                        })
+                        .transpose()?;
+                    let automation_id = resolve_automation_id(
+                        &database,
+                        &authenticated_run.camp_id,
+                        &input.automation_id,
+                    )?;
+                    let notify_channels = if input.clear_notify {
+                        Some(Vec::new())
+                    } else if input.notify.is_empty() {
+                        None
+                    } else {
+                        Some(input.notify)
+                    };
+                    let execution = AutomationService::default().update(
+                        &mut database,
+                        &automation_agent_envelope(
+                            request.runtime_tool_call_id,
+                            &authenticated_run,
+                            UpdateAutomationCommand {
+                                automation_id,
+                                expected_version: input.expected_version,
+                                name: input.name,
+                                prompt: input.prompt,
+                                member_id,
+                                project_ref,
+                                schedule,
+                                notify_channels,
+                                enabled: input.enabled,
+                            },
+                        ),
+                    )?;
+                    evidence_replayed = execution.replayed;
+                    command_execution_payload(execution)
+                }
                 CAMP_LIST_TOOL_NAME => {
                     let input = serde_json::from_value::<CampListInput>(request.input)
                         .map_err(|_| invalid_input_error("camp.list input is invalid"))?;
@@ -5167,6 +5513,27 @@ impl Core {
                 }
                 _ => Err(anyhow::anyhow!("private built-in operation is unsupported")),
             }?;
+            if matches!(
+                evidence_tool_name.as_str(),
+                AUTOMATION_CREATE_TOOL_NAME
+                    | AUTOMATION_RUN_TOOL_NAME
+                    | AUTOMATION_CLOSE_TOOL_NAME
+                    | AUTOMATION_UPDATE_TOOL_NAME
+                    | AUTOMATION_DELETE_TOOL_NAME
+            ) {
+                emit(
+                    &self.output,
+                    "automations.updated",
+                    json!({ "operation": evidence_tool_name }),
+                );
+                if evidence_tool_name == AUTOMATION_RUN_TOOL_NAME {
+                    emit(
+                        &self.output,
+                        "navigation.invalidated",
+                        json!({ "reason": "automation_run" }),
+                    );
+                }
+            }
             Ok(operation_result)
         }
         .await;
@@ -5301,6 +5668,154 @@ impl Core {
                     "status": "observed",
                     "waitingChecksWoken": woken,
                 }))
+            }
+            "automations.schedulerControl" => {
+                let params: AutomationSchedulerControlParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut current = self.automation_scheduler_control.write().await;
+                let applied = apply_automation_scheduler_control(&mut current, params);
+                Ok(json!({
+                    "applied": applied,
+                    "epoch": current.as_ref().map(|value| value.epoch),
+                }))
+            }
+            "automations.schedulerTick" => {
+                let params: AutomationSchedulerTickParams =
+                    serde_json::from_value(request.params.clone())?;
+                let current = self.automation_scheduler_control.read().await;
+                let Some(control) = *current else {
+                    return Ok(json!({ "processed": false }));
+                };
+                if control.paused || control.epoch != params.epoch {
+                    return Ok(json!({ "processed": false }));
+                }
+                // The Desktop timestamp is fixed when the tick is sent. If the
+                // process sleeps while this request is in flight, it cannot turn
+                // into a post-resume claim with the older recovery boundary.
+                self.process_automations(params.now, control.recovery_boundary)
+                    .await;
+                Ok(json!({ "processed": true }))
+            }
+            "automations.list" => {
+                let params: AutomationListQuery = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    AutomationService::default().list(&database, &params)?,
+                )?)
+            }
+            "automations.get" => {
+                let params: AutomationGetParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    AutomationService::default().get(&database, &params.automation_id)?,
+                )?)
+            }
+            "automations.create" => {
+                let params: AutomationMutationParams<CreateAutomationCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AutomationService::default().create(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                emit(
+                    &self.output,
+                    "automations.updated",
+                    json!({ "reason": "created" }),
+                );
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "automations.update" => {
+                let params: AutomationMutationParams<UpdateAutomationCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AutomationService::default().update(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                emit(
+                    &self.output,
+                    "automations.updated",
+                    json!({ "reason": "updated" }),
+                );
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "automations.close" => {
+                let params: AutomationMutationParams<CloseAutomationCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AutomationService::default().close(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                emit(
+                    &self.output,
+                    "automations.updated",
+                    json!({ "reason": "closed" }),
+                );
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "automations.delete" => {
+                let params: AutomationMutationParams<DeleteAutomationCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AutomationService::default().delete(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                emit(
+                    &self.output,
+                    "automations.updated",
+                    json!({ "reason": "deleted" }),
+                );
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "automations.run" => {
+                let params: AutomationMutationParams<RunAutomationCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let automation_service = AutomationService::default();
+                let execution = automation_service.run_now(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                    CURRENT_USER_ID,
+                    &quick_chat_path,
+                )?;
+                if let (Some(run_id), Some(camp_id)) = (
+                    execution
+                        .result
+                        .payload
+                        .get("runId")
+                        .and_then(Value::as_str),
+                    execution
+                        .result
+                        .payload
+                        .get("campId")
+                        .and_then(Value::as_str),
+                ) && let Err(error) = self
+                    .attachment_views
+                    .ensure_empty_camp_ready(&mut database, camp_id)
+                {
+                    automation_service
+                        .interrupt_before_runtime(&mut database, run_id)
+                        .context(
+                            "failed to fence an Automation after attachment preparation failed",
+                        )?;
+                    return Err(error);
+                }
+                emit(
+                    &self.output,
+                    "automations.updated",
+                    json!({ "reason": "run" }),
+                );
+                Ok(serde_json::to_value(execution.result)?)
             }
             "channels.credentials.get" => {
                 let params: GetChannelCredentialParams =
@@ -9106,6 +9621,65 @@ impl Core {
             if let Err(error) = result {
                 eprintln!("AgentRun dispatch preparation worker failed: {error}");
             }
+        }
+    }
+
+    async fn process_automations(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        recovery_boundary: chrono::DateTime<chrono::Utc>,
+    ) {
+        let quick_chat_path = self.data_dir.join("quick-chat");
+        if let Err(error) = std::fs::create_dir_all(&quick_chat_path) {
+            eprintln!(
+                "Scheduled Automation Quick Chat preparation paused at {}: {error}",
+                quick_chat_path.display()
+            );
+            return;
+        }
+        let result = {
+            let mut database = self.database.lock().await;
+            let service = AutomationService::default();
+            service.settle_runs(&mut database, now).and_then(|settled| {
+                let dispatches =
+                    service.claim_due(&mut database, now, recovery_boundary, &quick_chat_path)?;
+                let mut ready = Vec::with_capacity(dispatches.len());
+                for dispatch in dispatches {
+                    match self
+                        .attachment_views
+                        .ensure_empty_camp_ready(&mut database, &dispatch.camp_id)
+                    {
+                        Ok(()) => ready.push(dispatch),
+                        Err(error) => {
+                            eprintln!(
+                                "Scheduled Automation {} attachment preparation failed: {error:#}",
+                                dispatch.automation_run_id
+                            );
+                            service.interrupt_before_runtime(
+                                &mut database,
+                                &dispatch.automation_run_id,
+                            )?;
+                        }
+                    }
+                }
+                let notification_ready = service.has_ready_notification(&database, now)?;
+                Ok((ready, settled, notification_ready))
+            })
+        };
+        match result {
+            Ok((dispatches, settled, notification_ready)) => {
+                if settled || !dispatches.is_empty() {
+                    emit(
+                        &self.output,
+                        "automations.updated",
+                        json!({ "reason": "scheduler", "count": dispatches.len() }),
+                    );
+                }
+                if notification_ready {
+                    emit(&self.output, "automation.notification.available", json!({}));
+                }
+            }
+            Err(error) => eprintln!("Scheduled Automation processing paused: {error:#}"),
         }
     }
 
@@ -14228,6 +14802,7 @@ async fn run_core(
 ) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
+    let automation_scheduler_control = parse_automation_scheduler_control()?;
     let data_dir_lease = match CoreDataDirLease::try_acquire(&data_dir) {
         Ok(CoreDataDirLeaseAcquisition::Acquired(lease)) => lease,
         Ok(CoreDataDirLeaseAcquisition::OwnedByActiveCore { data_dir, owner }) => {
@@ -14454,6 +15029,7 @@ async fn run_core(
     let recovery = (|| -> Result<_> {
         rovai_core::pending_camp_input::recover_edit_sessions(&database)?;
         rovai_core::single_chat::recover_pending_edit_sessions(&database)?;
+        AutomationService::default().recover_interrupted(&mut database)?;
         let controlled = ExecutionRuntimeService::default()
             .recover_interrupted_controlled_shutdowns(&mut database)?;
         // Preserve the existing best-effort observer semantics and ordering:
@@ -14568,6 +15144,7 @@ async fn run_core(
         runtime_check_activity: RwLock::new(BTreeMap::new()),
         runtime_check_requests: runtime_check_tx,
         attachment_projection_requests: attachment_projection_tx,
+        automation_scheduler_control: RwLock::new(automation_scheduler_control),
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
         agent_run_cleanup_inflight: Mutex::new(HashSet::new()),
@@ -17555,6 +18132,7 @@ async fn record_runtime_model_observation(
     Ok(changed)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn record_available_runtime_model(
     core: &Core,
     output: &mpsc::UnboundedSender<String>,
@@ -20977,6 +21555,57 @@ fn scoped_runtime_tool_call_id(agent_run_id: &str, provider_tool_call_id: &str) 
     format!("agent-run:{agent_run_id}:{provider_tool_call_id}")
 }
 
+fn automation_tool_error(code: &str, message: &str) -> anyhow::Error {
+    BuiltinOperationError {
+        code: code.to_string(),
+        message: message.to_string(),
+        details: None,
+    }
+    .into()
+}
+
+fn automation_agent_envelope<P>(
+    command_id: String,
+    run: &AuthenticatedTeamToolRun,
+    payload: P,
+) -> CommandEnvelope<P> {
+    CommandEnvelope {
+        command_id,
+        actor: ActorRef::Agent {
+            agent_id: run.agent_id.clone(),
+            source_agent_run_id: run.agent_run_id.clone(),
+        },
+        camp_id: Some(run.camp_id.clone()),
+        expected_versions: Vec::new(),
+        execution_epoch: Some(run.execution_epoch),
+        payload,
+    }
+}
+
+fn resolve_automation_id(database: &Database, camp_id: &str, requested: &str) -> Result<String> {
+    resolve_tool_automation_id(database, camp_id, requested).map_err(|error| {
+        automation_tool_error("automation.current_unavailable", &error.to_string())
+    })
+}
+
+fn resolve_automation_member(
+    database: &Database,
+    current_agent_id: &str,
+    requested: Option<&str>,
+) -> Result<String> {
+    resolve_tool_member(database, current_agent_id, requested)
+        .map_err(|error| automation_tool_error("automation.member_unavailable", &error.to_string()))
+}
+
+fn resolve_automation_project(
+    database: &Database,
+    camp_id: &str,
+    requested: &str,
+) -> Result<AutomationProjectRef> {
+    resolve_tool_project(database, camp_id, requested)
+        .map_err(|error| automation_tool_error("automation.project_invalid", &error.to_string()))
+}
+
 fn command_execution_payload(execution: CommandExecution) -> Result<Value> {
     if execution.result.status != CommandResultStatus::Rejected {
         return Ok(execution.result.payload);
@@ -21086,6 +21715,64 @@ fn parse_data_dir() -> Result<PathBuf> {
 
 fn parse_runtime_camp_files_root() -> Result<PathBuf> {
     parse_runtime_camp_files_root_from(std::env::args().skip(1))
+}
+
+fn parse_automation_scheduler_control() -> Result<Option<AutomationSchedulerControl>> {
+    parse_automation_scheduler_control_from(std::env::args().skip(1))
+}
+
+fn parse_automation_scheduler_control_from(
+    args: impl IntoIterator<Item = String>,
+) -> Result<Option<AutomationSchedulerControl>> {
+    let mut args = args.into_iter();
+    let mut epoch = None;
+    let mut recovery_boundary = None;
+    let mut paused = false;
+    let mut paused_seen = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--automation-scheduler-epoch" => {
+                let value = args
+                    .next()
+                    .context("--automation-scheduler-epoch requires a non-negative integer")?
+                    .parse::<u64>()
+                    .context("--automation-scheduler-epoch requires a non-negative integer")?;
+                if epoch.replace(value).is_some() {
+                    anyhow::bail!("--automation-scheduler-epoch may be provided only once");
+                }
+            }
+            "--automation-recovery-boundary" => {
+                let value = args
+                    .next()
+                    .context("--automation-recovery-boundary requires an RFC 3339 timestamp")?;
+                let value = chrono::DateTime::parse_from_rfc3339(&value)
+                    .context("--automation-recovery-boundary requires an RFC 3339 timestamp")?
+                    .with_timezone(&chrono::Utc);
+                if recovery_boundary.replace(value).is_some() {
+                    anyhow::bail!("--automation-recovery-boundary may be provided only once");
+                }
+            }
+            "--automation-scheduler-paused" => {
+                if paused_seen {
+                    anyhow::bail!("--automation-scheduler-paused may be provided only once");
+                }
+                paused = true;
+                paused_seen = true;
+            }
+            _ => {}
+        }
+    }
+    match (epoch, recovery_boundary, paused_seen) {
+        (None, None, false) => Ok(None),
+        (Some(epoch), Some(recovery_boundary), _) => Ok(Some(AutomationSchedulerControl {
+            epoch,
+            recovery_boundary,
+            paused,
+        })),
+        _ => anyhow::bail!(
+            "Automation scheduler control requires both --automation-scheduler-epoch and --automation-recovery-boundary"
+        ),
+    }
 }
 
 fn parse_windows_data_root_preparation() -> Result<Option<PathBuf>> {
@@ -22924,6 +23611,88 @@ while IFS= read -r _ignored; do :; done
             )
             .contains("only once")
         );
+    }
+
+    #[test]
+    fn automation_scheduler_control_is_closed_and_monotonic() {
+        let boundary = chrono::DateTime::parse_from_rfc3339("2026-09-05T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let active = parse_automation_scheduler_control_from(vec![
+            "--automation-scheduler-epoch".to_string(),
+            "4".to_string(),
+            "--automation-recovery-boundary".to_string(),
+            boundary.to_rfc3339(),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            active,
+            AutomationSchedulerControl {
+                epoch: 4,
+                recovery_boundary: boundary,
+                paused: false,
+            }
+        );
+        assert!(
+            parse_automation_scheduler_control_from(Vec::new())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            parse_automation_scheduler_control_from(vec![
+                "--automation-scheduler-epoch".to_string(),
+                "4".to_string(),
+            ])
+            .is_err()
+        );
+
+        let mut current = Some(active);
+        assert!(!apply_automation_scheduler_control(
+            &mut current,
+            AutomationSchedulerControl {
+                epoch: 3,
+                recovery_boundary: boundary,
+                paused: true,
+            }
+        ));
+        assert_eq!(current, Some(active));
+        let paused = AutomationSchedulerControl {
+            epoch: 5,
+            recovery_boundary: boundary,
+            paused: true,
+        };
+        assert!(apply_automation_scheduler_control(&mut current, paused));
+        assert_eq!(current, Some(paused));
+    }
+
+    #[tokio::test]
+    async fn automation_scheduler_pause_waits_for_the_inflight_tick_fence() {
+        let boundary = chrono::Utc::now();
+        let control = Arc::new(RwLock::new(Some(AutomationSchedulerControl {
+            epoch: 0,
+            recovery_boundary: boundary,
+            paused: false,
+        })));
+        let claim_fence = control.read().await;
+        let writer_control = control.clone();
+        let pause = tokio::spawn(async move {
+            let mut current = writer_control.write().await;
+            apply_automation_scheduler_control(
+                &mut current,
+                AutomationSchedulerControl {
+                    epoch: 1,
+                    recovery_boundary: boundary,
+                    paused: true,
+                },
+            )
+        });
+
+        tokio::task::yield_now().await;
+        assert!(!pause.is_finished());
+        drop(claim_fence);
+        assert!(pause.await.unwrap());
+        assert!(control.read().await.unwrap().paused);
     }
 
     #[test]

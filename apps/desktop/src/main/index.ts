@@ -183,6 +183,13 @@ const allowedMethods = new Set<CoreMethod>([
   'members.removalPreview',
   'members.remove',
   'members.reorder',
+  'automations.list',
+  'automations.get',
+  'automations.create',
+  'automations.update',
+  'automations.close',
+  'automations.delete',
+  'automations.run',
   'memory.list',
   'memory.get',
   'memory.create',
@@ -359,6 +366,7 @@ let generalPreferences: GeneralPreferencesStore | null = null
 let onboarding: OnboardingStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
+let automationSchedulerTimer: NodeJS.Timeout | null = null
 let localStoresReady = false
 let resolveLocalStoresLoaded: () => void
 const localStoresLoaded = new Promise<void>((resolve) => { resolveLocalStoresLoaded = resolve })
@@ -819,6 +827,21 @@ if (primaryInstance) void app.whenReady().then(async () => {
   console.info(
     `[startup] stage=electron_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
   )
+  powerMonitor.on('suspend', () => {
+    void core.notifyAutomationSystemSuspending().catch((error) => {
+      console.warn('[rovai] Scheduled Automation scheduler was not paused before suspend.', error)
+    })
+  })
+  powerMonitor.on('resume', () => {
+    const resumedAt = new Date().toISOString()
+    void core.notifyAutomationSystemResumed(resumedAt).catch((error) => {
+      console.warn('[rovai] Scheduled Automation resume boundary was not updated.', error)
+    })
+  })
+  automationSchedulerTimer = setInterval(() => {
+    void core.tickAutomationScheduler(new Date().toISOString()).catch(() => undefined)
+  }, 500)
+  automationSchedulerTimer.unref()
   const userDataPath = app.getPath('userData')
   appearanceFilePath = join(userDataPath, 'appearance.json')
   const generalPreferencesPath = join(userDataPath, 'general-preferences.json')
@@ -2143,6 +2166,10 @@ const appQuitCoordinator = new AppQuitCoordinator({
     () => new MessageChannelMain()
   ),
   drain: async () => {
+    if (automationSchedulerTimer) {
+      clearInterval(automationSchedulerTimer)
+      automationSchedulerTimer = null
+    }
     appUpdates?.dispose()
     nativeTheme.removeListener('updated', publishAppearance)
     powerMonitor.removeListener('resume', wakeNetworkRecoveryAfterSystemResume)

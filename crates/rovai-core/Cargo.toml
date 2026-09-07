@@ -13,6 +13,7 @@ legacy-migration-tests = ["slow-tests"]
 anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+croner = "4.0.0"
 dirs = "6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 json5 = "0.4"

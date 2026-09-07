@@ -203,6 +203,7 @@ export function CampNavigation({
   updateSnapshot = null,
   onNewConversation,
   onMembers,
+  onAutomations = () => undefined,
   onMemory,
   pendingMemoryCount,
   onSettings,
@@ -220,7 +221,7 @@ export function CampNavigation({
   onDelete,
   onError
 }: {
-  view: 'compose' | 'camp' | 'members' | 'memory' | 'settings'
+  view: 'compose' | 'camp' | 'members' | 'automations' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
   disabled?: boolean
   navigation: NavigationSnapshot | null
@@ -236,6 +237,7 @@ export function CampNavigation({
   updateSnapshot?: AppUpdateSnapshot | null
   onNewConversation(): void
   onMembers(): void
+  onAutomations?(): void
   onMemory(): void
   pendingMemoryCount: number
   onSettings(): void
@@ -554,6 +556,9 @@ export function CampNavigation({
                   </button>
                   <button className={`rail-button ${view === 'members' ? 'active' : ''}`} type="button" aria-current={view === 'members' ? 'page' : undefined} aria-label="队员" title="队员" onClick={onMembers}>
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="users" /></span><span className="rail-label">队员</span>
+                  </button>
+                  <button className={`rail-button ${view === 'automations' ? 'active' : ''}`} type="button" aria-current={view === 'automations' ? 'page' : undefined} aria-label="定时任务" title="定时任务" onClick={onAutomations}>
+                    <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="calendar-clock" /></span><span className="rail-label">定时任务</span>
                   </button>
                   <button
                     className={`rail-button ${view === 'memory' ? 'active' : ''}`}

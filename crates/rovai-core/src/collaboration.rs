@@ -2859,6 +2859,7 @@ impl CollaborationService {
             QueueCampMessageInput {
                 camp_message_id: &camp_message_id,
                 camp_turn_id: Some(&camp_turn_id),
+                automation_run_id: None,
                 camp_id: &input.camp_id,
                 body: &input.body,
                 structured_content: &input.structured_content,
@@ -2892,6 +2893,167 @@ impl CollaborationService {
             camp_message_id,
             camp_turn_id,
             camp_sequence: queued.camp_sequence,
+        }))
+    }
+
+    /// Atomically materializes the ordinary Camp execution owned by one claimed
+    /// scheduled Automation occurrence. The caller owns the surrounding
+    /// Automation transaction and commits the Runtime-visible AgentRun only after
+    /// linking it to the unique AutomationRun.
+    pub(crate) fn admit_scheduled_automation(
+        &self,
+        transaction: &Transaction<'_>,
+        input: ScheduledAutomationAdmissionInput,
+    ) -> Result<std::result::Result<ScheduledAutomationAdmissionResult, CommandHandlerResult>> {
+        validate_project_path(&input.project_path)?;
+        let member_status = transaction
+            .query_row(
+                "SELECT profile_status FROM agent_profile WHERE id = ?1",
+                [&input.member_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if member_status.as_deref() != Some("present") {
+            return Ok(Err(rejected(
+                "automation.member_unavailable",
+                "The selected member is no longer present",
+            )));
+        }
+
+        let camp_id = CampId::new().to_string();
+        let system_actor = ActorRef::System {
+            component_id: "automation-scheduler".to_string(),
+        };
+        transaction.execute(
+            r#"
+            INSERT INTO camp(
+                id, title, name_origin, collaboration_mode,
+                project_binding_kind, project_path,
+                default_lead_agent_id, activation_state, last_message_sequence,
+                version, created_at, updated_at
+            ) VALUES (?1, ?2, 'user', 'peer', ?3, ?4, ?5, 'active', 0, 1, ?6, ?6)
+            "#,
+            params![
+                camp_id,
+                input.automation_name,
+                input.project_binding_kind.as_str(),
+                input.project_path,
+                input.member_id,
+                input.now,
+            ],
+        )?;
+        transaction.execute(
+            r#"
+            INSERT INTO camp_member(
+                camp_id, agent_id, status, capability_overrides_json,
+                leave_requested_at, leave_request_command_id,
+                pending_default_lead_successor_agent_id,
+                version, joined_at, left_at
+            ) VALUES (?1, ?2, 'active', '{}', NULL, NULL, NULL, 1, ?3, NULL)
+            "#,
+            params![camp_id, input.member_id, input.now],
+        )?;
+        let address = CampMessageAddress::Explicit {
+            agent_ids: vec![input.member_id.clone()],
+        };
+        let mut resolution = match resolve_address(transaction, &camp_id, &address, &system_actor)?
+        {
+            AddressingOutcome::Resolved(resolution) => resolution,
+            AddressingOutcome::Rejected(result) => {
+                transaction.execute("DELETE FROM camp_member WHERE camp_id = ?1", [&camp_id])?;
+                transaction.execute("DELETE FROM camp WHERE id = ?1", [&camp_id])?;
+                return Ok(Err(result));
+            }
+        };
+        let created_conversation_ids =
+            ensure_resolution_conversations(transaction, &camp_id, &mut resolution, &input.now)?;
+        let effective_configs = match prepare_agent_run_configs(transaction, &resolution)? {
+            Ok(configs) => configs,
+            Err(rejection) => {
+                delete_new_conversations(transaction, &created_conversation_ids)?;
+                transaction.execute("DELETE FROM camp_member WHERE camp_id = ?1", [&camp_id])?;
+                transaction.execute("DELETE FROM camp WHERE id = ?1", [&camp_id])?;
+                return Ok(Err(rejection));
+            }
+        };
+        append_domain_event(
+            transaction,
+            "camp.created",
+            Some(&camp_id),
+            Some(("camp", &camp_id)),
+            &system_actor,
+            None,
+            &json!({
+                "title": input.automation_name,
+                "nameOrigin": "user",
+                "projectBindingKind": input.project_binding_kind,
+                "projectPath": input.project_path,
+                "collaborationMode": "peer",
+                "defaultLeadAgentId": input.member_id,
+                "memberCount": 1,
+                "automationRunId": input.automation_run_id,
+            }),
+        )?;
+        let accepted_at =
+            chrono::DateTime::parse_from_rfc3339(&input.now)?.with_timezone(&chrono::Utc);
+        let frozen_execution_budget = freeze_camp_turn_execution_budget(None, accepted_at, 1)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        let camp_message_id = Uuid::new_v4().to_string();
+        let camp_turn_id = Uuid::new_v4().to_string();
+        let content = normalize_content(vec![StructuredCampMessageSegment::Text {
+            text: input.prompt.clone(),
+        }]);
+        let execution = ExecutionRequest {
+            task_id: None,
+            purpose: "This is a scheduled Rovai run. Execute the saved instruction once and return the final result."
+                .to_string(),
+            completion_role: required_completion_role(),
+            budget: None,
+        };
+        let queued = queue_camp_message_and_runs(
+            transaction,
+            QueueCampMessageInput {
+                camp_message_id: &camp_message_id,
+                camp_turn_id: Some(&camp_turn_id),
+                automation_run_id: Some(&input.automation_run_id),
+                camp_id: &camp_id,
+                body: &input.prompt,
+                structured_content: &content,
+                source_attachments: &[],
+                prepared_attachment_ids: &[],
+                legacy_attachment_publication_operation_id: None,
+                managed_attachment_ingest_intent_id: None,
+                consume_composer_draft: false,
+                draft_revision: 1,
+                address_mode: address.mode(),
+                reply_to_camp_message_id: None,
+                resolution: &resolution,
+                execution: Some(&execution),
+                task_admission: None,
+                frozen_execution_budget: Some(&frozen_execution_budget),
+                effective_configs: Some(&effective_configs),
+                workspace: None,
+                actor: &system_actor,
+                message_author: Some(CampMessageAuthor {
+                    author_type: "user",
+                    author_id: &input.user_id,
+                    source_agent_run_id: None,
+                }),
+                execution_epoch: None,
+                command_id: &input.automation_run_id,
+                now: &input.now,
+                generated_camp_name: None,
+            },
+        )?;
+        let root_agent_run_id = queued
+            .agent_run_ids
+            .into_iter()
+            .next()
+            .context("scheduled Automation admission created no root AgentRun")?;
+        Ok(Ok(ScheduledAutomationAdmissionResult {
+            camp_id,
+            camp_turn_id,
+            root_agent_run_id,
         }))
     }
 
@@ -3174,6 +3336,7 @@ impl CollaborationService {
                         QueueCampMessageInput {
                             camp_message_id: &camp_message_id,
                             camp_turn_id: camp_turn_id.as_deref(),
+                            automation_run_id: None,
                             camp_id: &command.camp_id,
                             body: &submission.body,
                             structured_content: &submission.structured_content,
@@ -3278,6 +3441,25 @@ pub(crate) struct ExternalChannelAdmissionResult {
     pub camp_message_id: String,
     pub camp_turn_id: String,
     pub camp_sequence: i64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ScheduledAutomationAdmissionInput {
+    pub automation_run_id: String,
+    pub automation_name: String,
+    pub prompt: String,
+    pub member_id: String,
+    pub project_binding_kind: ProjectBindingKind,
+    pub project_path: String,
+    pub user_id: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ScheduledAutomationAdmissionResult {
+    pub camp_id: String,
+    pub camp_turn_id: String,
+    pub root_agent_run_id: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3587,6 +3769,7 @@ fn load_structured_content_submission(
 struct QueueCampMessageInput<'a> {
     camp_message_id: &'a str,
     camp_turn_id: Option<&'a str>,
+    automation_run_id: Option<&'a str>,
     camp_id: &'a str,
     body: &'a str,
     structured_content: &'a [StructuredCampMessageSegment],
@@ -3678,6 +3861,7 @@ fn queue_camp_message_and_runs(
             r#"
                 INSERT INTO camp_turn(
                     id, camp_id, trigger_type, trigger_id, status,
+                    automation_run_id,
                     cancel_requested_at, cancel_request_command_id,
                     execution_budget_schema_version,
                     execution_budget_accepted_at, execution_budget_deadline_at,
@@ -3690,7 +3874,7 @@ fn queue_camp_message_and_runs(
                     execution_budget_exhaustion_command_id,
                     version, created_at, updated_at, ended_at
                 ) VALUES (
-                    ?1, ?2, 'camp_message', ?3, 'running', NULL, NULL,
+                    ?1, ?2, 'camp_message', ?3, 'running', ?11, NULL, NULL,
                     ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                     NULL, NULL, NULL, 1, ?5, ?5, NULL
                 )
@@ -3706,6 +3890,7 @@ fn queue_camp_message_and_runs(
                 budget.max_agent_run_responsibilities,
                 budget.max_accepted_a2a,
                 budget.root_agent_run_responsibilities,
+                input.automation_run_id,
             ],
         )?;
     }

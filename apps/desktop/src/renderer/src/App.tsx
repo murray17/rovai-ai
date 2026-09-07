@@ -99,6 +99,10 @@ import { ChannelSettings } from './ChannelSettings'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { GeneralSettings } from './GeneralSettings'
 import { MemoryLibrary } from './MemoryLibrary'
+import {
+  AutomationWorkspace,
+  type AutomationLeaveGuard
+} from './AutomationWorkspace'
 import { DiagnosticsCenter } from './DiagnosticsCenter'
 import { RuntimeMonitoring } from './RuntimeMonitoring'
 import { localizeExecutionEngineTerms } from './product-copy'
@@ -256,7 +260,7 @@ type LoadState = 'loading' | 'ready' | 'error'
 export type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export const STARTUP_FEEDBACK_DELAY_MS = 400
 export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
-export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
+export type View = 'compose' | 'camp' | 'members' | 'automations' | 'memory' | 'settings'
 type ActivateCampOptions = {
   reconcileDefaultLead?: boolean
   preserveNotificationFocus?: boolean
@@ -310,12 +314,32 @@ export async function prepareActiveCampForAppQuit(
   preparation.complete(true)
 }
 
+export async function runAutomationLeaveTransition(
+  view: View,
+  guard: AutomationLeaveGuard | null,
+  transition: () => void | Promise<void>
+): Promise<boolean> {
+  if (view === 'automations' && guard && !(await guard())) return false
+  await transition()
+  return true
+}
+
+export async function prepareActiveAutomationForAppQuit(
+  view: View,
+  guard: AutomationLeaveGuard | null
+): Promise<void> {
+  if (view === 'automations' && guard && !(await guard())) {
+    throw new Error('定时任务修改尚未保存')
+  }
+}
+
 export type SettingsSection = NavigationSettingsSection
-export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
+export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'automations' | 'memory' | 'settings'>
 
 export function windowDragStripPage(view: View): WindowDragStripPage | null {
   return view === 'compose'
     || view === 'members'
+    || view === 'automations'
     || view === 'memory'
     || view === 'settings'
     ? view
@@ -874,6 +898,7 @@ function StartupWorkspace({
         pendingMemoryCount={0}
         onNewConversation={ignore}
         onMembers={ignore}
+        onAutomations={ignore}
         onMemory={ignore}
         onSettings={ignore}
         onOpenProject={ignore}
@@ -1195,6 +1220,7 @@ function AuthoritativeApp({
   const runtimeHealthRefreshIncludesMembers = useRef(false)
   const membersViewRef = useRef<MembersViewHandle>(null)
   const campLeaveGuardRef = useRef<{ campId: string; guard: CampLeaveGuard } | null>(null)
+  const automationLeaveGuardRef = useRef<AutomationLeaveGuard | null>(null)
   const startupResolvedSessionId = useRef<string | null>(null)
   const pendingRestorableLocation = useRef<RestorableLocation | null>(null)
   const invalidatingNewConversationDefaults = useRef(false)
@@ -1269,12 +1295,45 @@ function AuthoritativeApp({
     return true
   }, [])
 
+  const registerAutomationLeaveGuard = useCallback((guard: AutomationLeaveGuard | null): void => {
+    automationLeaveGuardRef.current = guard
+  }, [])
+
+  const leaveActiveAutomation = useCallback(async (
+    transition: () => void | Promise<void>
+  ): Promise<boolean> => {
+    try {
+      return await runAutomationLeaveTransition(
+        viewRef.current,
+        automationLeaveGuardRef.current,
+        transition
+      )
+    } catch (nextError) {
+      setError(`离开定时任务前未能保存修改：${errorMessage(nextError)}`)
+      return false
+    }
+  }, [])
+
+  const leaveActiveSurface = useCallback(async (
+    transition: () => void | Promise<void>
+  ): Promise<boolean> => {
+    let automationTransitioned = false
+    const campTransitioned = await leaveActiveCamp(async () => {
+      automationTransitioned = await leaveActiveAutomation(transition)
+    })
+    return campTransitioned && automationTransitioned
+  }, [leaveActiveAutomation, leaveActiveCamp])
+
   const prepareForAppQuit = useCallback(async (): Promise<void> => {
     try {
       await prepareActiveCampForAppQuit(
         viewRef.current,
         activeCampIdRef.current,
         campLeaveGuardRef.current
+      )
+      await prepareActiveAutomationForAppQuit(
+        viewRef.current,
+        automationLeaveGuardRef.current
       )
     } catch (nextError) {
       setError(`退出应用前未能保存草稿：${errorMessage(nextError)}`)
@@ -1787,17 +1846,16 @@ function AuthoritativeApp({
     const transition = async (): Promise<void> => {
       activated = await activateCampWithoutLeaveGuard(campId, options, selectionGeneration)
     }
-    if (activeCampChangeNeedsDraftFlush(
-      viewRef.current,
-      activeCampIdRef.current,
-      campId
-    )) {
-      const transitioned = await leaveActiveCamp(transition)
+    if (
+      viewRef.current === 'automations'
+      || activeCampChangeNeedsDraftFlush(viewRef.current, activeCampIdRef.current, campId)
+    ) {
+      const transitioned = await leaveActiveSurface(transition)
       return transitioned && activated
     }
     await transition()
     return activated
-  }, [activateCampWithoutLeaveGuard, clearCampOpenFeedback, leaveActiveCamp])
+  }, [activateCampWithoutLeaveGuard, clearCampOpenFeedback, leaveActiveSurface])
 
   useEffect(() => window.rovai.userAutomation.onOpenCamp(({ campId }) => {
     void activateCamp(campId, { reconcileDefaultLead: false })
@@ -2634,7 +2692,7 @@ function AuthoritativeApp({
       return
     }
     void requestMemberTransition(async () => {
-      await leaveActiveCamp(commit)
+      await leaveActiveSurface(commit)
     })
   }
 
@@ -2696,11 +2754,11 @@ function AuthoritativeApp({
   }
 
   const navigateToSettings = async (section: SettingsSection): Promise<boolean> => {
-    let campTransitioned = false
+    let surfaceTransitioned = false
     const memberTransitioned = await requestMemberTransition(async () => {
-      campTransitioned = await leaveActiveCamp(() => commitSettingsSurface(section))
+      surfaceTransitioned = await leaveActiveSurface(() => commitSettingsSurface(section))
     })
-    return memberTransitioned && campTransitioned
+    return memberTransitioned && surfaceTransitioned
   }
 
   const openSettings = (): void => {
@@ -3022,7 +3080,7 @@ function AuthoritativeApp({
       }
     }
     if (removingActiveCamp) {
-      const transitioned = await leaveActiveCamp(remove)
+      const transitioned = await leaveActiveSurface(remove)
       if (!transitioned) {
         throw new Error('当前草稿尚未保存，项目未从侧栏移除。请重试。')
       }
@@ -3055,7 +3113,7 @@ function AuthoritativeApp({
     }
   }
 
-  const deleteCamp = async (camp: NavigationCampItem): Promise<void> => {
+  const deleteCampWithoutAutomationLeaveGuard = async (camp: NavigationCampItem): Promise<void> => {
     setBusy(`delete-camp-${camp.id}`)
     setError(null)
     try {
@@ -3077,6 +3135,14 @@ function AuthoritativeApp({
     } finally {
       setBusy(null)
     }
+  }
+
+  const deleteCamp = async (camp: NavigationCampItem): Promise<void> => {
+    if (viewRef.current === 'automations' && activeCampIdRef.current === camp.id) {
+      await leaveActiveAutomation(() => deleteCampWithoutAutomationLeaveGuard(camp))
+      return
+    }
+    await deleteCampWithoutAutomationLeaveGuard(camp)
   }
 
   const stopCampRuns = async (camp: NavigationCampItem | null = null): Promise<void> => {
@@ -3692,6 +3758,7 @@ function AuthoritativeApp({
     compose: 'task-content compose-content',
     camp: 'task-content camp-content',
     members: 'members-content',
+    automations: 'automation-content',
     memory: 'memory-content',
     settings: 'settings-content'
   }
@@ -3826,6 +3893,7 @@ function AuthoritativeApp({
         updateSnapshot={appUpdates.snapshot}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
+        onAutomations={() => chooseView('automations')}
         onMemory={() => chooseView('memory', () => setMemoryFocusId(null))}
         pendingMemoryCount={pendingMemoryCount}
         onSettings={openSettings}
@@ -3878,7 +3946,7 @@ function AuthoritativeApp({
             onRetry={retryStartup}
           />
         )}
-        {!startupGateVisible && view !== 'members' && view !== 'memory' && inlineNotices}
+        {!startupGateVisible && view !== 'members' && view !== 'automations' && view !== 'memory' && inlineNotices}
         {!startupGateVisible && !shuttingDown && toast && (
           <AppToast toast={toast} onClose={() => setToast(null)} />
         )}
@@ -3959,6 +4027,20 @@ function AuthoritativeApp({
             recentCamps={visibleNavigation ? allNavigationCamps(visibleNavigation).slice(0, 5) : []}
             onOpenCamp={chooseCamp}
             onNewConversation={beginNewConversation}
+          />
+        )}
+
+        {!startupGateVisible && view === 'automations' && (
+          <AutomationWorkspace
+            agents={agents}
+            projects={displayNavigation?.projects ?? []}
+            defaultMemberId={campSnapshot?.camp.defaultLeadAgentId
+              ?? agents.find((agent) => agent.presence === 'present')?.agentId
+              ?? ''}
+            topNotices={inlineNotices}
+            onOpenCamp={(campId) => void activateCamp(campId, { reconcileDefaultLead: false })}
+            onNotify={notify}
+            onLeaveGuardChange={registerAutomationLeaveGuard}
           />
         )}
 
