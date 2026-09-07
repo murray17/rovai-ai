@@ -111,7 +111,12 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from './FilePreviewLayout'
 import { useOptionalFilePreview } from './FilePreviewContext'
-import { agentRunFileChangesSummaryLabel } from './file-changes-presentation'
+import {
+  agentRunFileChangeHasReviewableDiff,
+  agentRunFileChangesPreviewTarget,
+  agentRunFileChangesSummaryLabel
+} from './file-changes-presentation'
+import { openAgentRunCurrentFilePreview } from './agent-run-file-preview'
 import { FileReferenceText, type FileReferenceActivation } from './FileReferenceLink'
 import {
   captureTimelineReadingAnchor,
@@ -1498,6 +1503,18 @@ export function CampWorkspace({
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
   const notifyError = onNotifyError ?? onNotify
+  const openCurrentAgentRunFile = useCallback((
+    changes: AgentRunFileChangesView,
+    evidenceFileId: string
+  ): void => {
+    void openAgentRunCurrentFilePreview({
+      filePreview,
+      campId: snapshot.camp.id,
+      changes,
+      evidenceFileId,
+      onError: notifyError
+    })
+  }, [filePreview, notifyError, snapshot.camp.id])
   const [, setComposerDraftProjectionVersion] = useState(0)
   const [draftLoadState, setDraftLoadState] = useState<DraftLoadState>({ state: 'loading' })
   const [composerPersistenceError, setComposerPersistenceError] = useState<Error | null>(null)
@@ -4152,7 +4169,7 @@ export function CampWorkspace({
                           <AgentRunFileChangesTimelineCard key={`${changes.agentRunId}:${changes.executionEpoch}`}
                             changes={changes} onOpenReview={(selectedEvidenceFileId) => {
                               return filePreview?.openFileChanges(snapshot.camp.id, changes, selectedEvidenceFileId)
-                            }} />
+                            }} onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(changes, evidenceFileId)} />
                         ))}
                       </section>
                     )
@@ -4178,6 +4195,7 @@ export function CampWorkspace({
                         onOpenReview={(selectedEvidenceFileId) => {
                           return filePreview?.openFileChanges(snapshot.camp.id, timelineItem.changes, selectedEvidenceFileId)
                         }}
+                        onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(timelineItem.changes, evidenceFileId)}
                       />
                     )
                     continue
@@ -4465,6 +4483,10 @@ export function CampWorkspace({
                                 selectedEvidenceFileId
                               )
                             }}
+                            onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(
+                              fileChangeItem.changes,
+                              evidenceFileId
+                            )}
                           />
                         ))}
                         <MessageActions
@@ -7273,15 +7295,19 @@ function FirstRunCampWelcome({
 
 export function AgentRunFileChangesTimelineCard({
   changes,
-  onOpenReview
+  onOpenReview,
+  onOpenCurrent
 }: {
   changes: AgentRunFileChangesView
   onOpenReview(selectedEvidenceFileId: string | undefined, trigger: HTMLButtonElement): string | void
+  onOpenCurrent(evidenceFileId: string, trigger: HTMLButtonElement): void
 }): JSX.Element {
   const find = useOptionalFileFind()
   const [showAllFiles, setShowAllFiles] = useState(false)
   const visibleFiles = showAllFiles ? changes.files : changes.files.slice(0, 3)
   const additionalFileCount = Math.max(0, changes.files.length - 3)
+  const defaultPreviewTarget = agentRunFileChangesPreviewTarget(changes)
+  const hasReviewableDiff = defaultPreviewTarget?.kind === 'review'
   useEffect(() => {
     setShowAllFiles(false)
   }, [changes.agentRunId, changes.executionEpoch])
@@ -7291,8 +7317,20 @@ export function AgentRunFileChangesTimelineCard({
         <button
           className="run-file-changes-card-header"
           type="button"
-          aria-label={`查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
-          onClick={(event) => onOpenReview(undefined, event.currentTarget)}
+          disabled={!defaultPreviewTarget}
+          aria-label={hasReviewableDiff
+            ? `查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`
+            : defaultPreviewTarget
+              ? `打开当前文件 ${defaultPreviewTarget.file.path}，${agentRunFileChangesSummaryLabel(changes)}`
+              : `Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
+          onClick={(event) => {
+            if (!defaultPreviewTarget) return
+            if (defaultPreviewTarget.kind === 'review') {
+              onOpenReview(undefined, event.currentTarget)
+            } else {
+              onOpenCurrent(defaultPreviewTarget.file.evidenceFileId, event.currentTarget)
+            }
+          }}
         >
           <span className="run-file-changes-card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -7304,10 +7342,12 @@ export function AgentRunFileChangesTimelineCard({
             <strong>Files Changed</strong>
             <span>{agentRunFileChangesSummaryLabel(changes)}</span>
           </span>
-          <span className="run-file-changes-card-view" aria-hidden="true">查看变化</span>
+          <span className="run-file-changes-card-view" aria-hidden="true">
+            {hasReviewableDiff ? '查看变化' : '查看文件'}
+          </span>
         </button>
         {find && <button type="button" className="file-find-icon" aria-label="查找这次文件变化" title="查找这次文件变化"
-          disabled={!changes.files.some(file => file.presentationKind !== 'operation_only')}
+          disabled={!hasReviewableDiff}
           onClick={event => { const id = onOpenReview(undefined, event.currentTarget); if (id) find.request(id, true) }}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg>
         </button>}
@@ -7318,8 +7358,16 @@ export function AgentRunFileChangesTimelineCard({
             key={file.evidenceFileId}
             className="run-file-change-file"
             type="button"
-            aria-label={`查看 ${file.path} 的文件变化`}
-            onClick={(event) => onOpenReview(file.evidenceFileId, event.currentTarget)}
+            aria-label={agentRunFileChangeHasReviewableDiff(file)
+              ? `查看 ${file.path} 的文件变化`
+              : `打开当前文件预览：${file.path}`}
+            onClick={(event) => {
+              if (agentRunFileChangeHasReviewableDiff(file)) {
+                onOpenReview(file.evidenceFileId, event.currentTarget)
+              } else {
+                onOpenCurrent(file.evidenceFileId, event.currentTarget)
+              }
+            }}
           >
             <code title={file.path}>{file.path}</code>
             <span className="run-file-change-stats" aria-hidden="true">

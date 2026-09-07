@@ -906,6 +906,28 @@ app.whenReady().then(async () => {
     assert.match((await run('window.previewTest.findSnapshot()')).error, /正则表达式无效/)
     await key('Escape')
   })
+  await check('operation-only DiffCard opens the current file directly and preserves navigation on failure', async () => {
+    await run('window.previewTest.closeAll()')
+    const before = await reviewSnapshot()
+    assert.equal(await run('document.querySelector("[data-diff-card=operation-only] .run-file-changes-card-view").textContent.trim()'), '查看文件')
+    await click('[data-diff-card="operation-only"] .run-file-changes-card-header')
+    const opened = await reviewSnapshot()
+    assert.equal(opened.reviewVisible, false)
+    assert.equal(opened.selectedTab, 'path-only.ts')
+    assert.equal(opened.reviewRequests.length, before.reviewRequests.length, 'Direct current-file preview does not read immutable detail')
+    assert.deepEqual(opened.fileRestores.at(-1), {
+      kind: 'run_evidence', campId: 'camp-1', agentRunId: 'run-operation-only', executionEpoch: 1,
+      evidenceFileId: 'file-operation-only', action: 'open_current'
+    })
+    const tabCount = opened.tabs.length
+    await run('window.previewTest.failNextToolRead()')
+    await click('[data-diff-card="operation-only"] .run-file-change-file')
+    const failed = await reviewSnapshot()
+    assert.equal(failed.selectedTab, 'path-only.ts')
+    assert.equal(failed.tabs.length, tabCount)
+    assert.equal(failed.notices.at(-1), '无法打开该文件')
+    await run('window.previewTest.clearToolNotices()')
+  })
   await check('DiffCard find opens its own review and searches all immutable changes', async () => {
     await run('window.previewTest.closeAll()')
     await click('.run-file-changes-header-actions [aria-label="查找这次文件变化"]')
