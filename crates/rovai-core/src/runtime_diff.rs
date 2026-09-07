@@ -164,6 +164,11 @@ fn admit_candidate(
                 && source_event_kind == "assistant.tool_use.Edit+user.tool_result.completed"
                 && semantic_kind == "exact_mutation"
         }
+        AdapterKind::Pi => {
+            protocol_family == "pi-jsonl-rpc-v1"
+                && source_event_kind == "tool_execution_end.completed"
+                && semantic_kind == "pi_edit_patch"
+        }
         _ => false,
     };
     if !admitted_source {
@@ -219,7 +224,7 @@ fn admit_candidate(
             source_path.clone()
         };
         let (diff, evidence_entry) = match semantic_kind {
-            "codex_file_change_snapshot" => {
+            "codex_file_change_snapshot" | "pi_edit_patch" => {
                 let content = raw
                     .get("diff")
                     .and_then(Value::as_str)
@@ -227,36 +232,44 @@ fn admit_candidate(
                 if content.len() > MAX_SINGLE_DIFF_BYTES {
                     return Err("runtime_diff_item_limit");
                 }
+                let content = if semantic_kind == "pi_edit_patch" {
+                    if change_kind != "update" {
+                        return Err("runtime_diff_change_kind_invalid");
+                    }
+                    normalize_pi_edit_patch(content, raw_path, &path)?
+                } else {
+                    content.to_string()
+                };
                 match change_kind.as_str() {
                     "add" => (
-                        unified_diff_from_before_after(&path, None, content),
+                        unified_diff_from_before_after(&path, None, &content),
                         serde_json::to_value(FullBeforeAfterEvidenceEntry {
                             semantics: "full_before_after".to_string(),
                             path: path.clone(),
                             change_kind: change_kind.clone(),
                             before: None,
-                            after: Some(content.to_string()),
+                            after: Some(content.clone()),
                         })
                         .map_err(|_| "runtime_diff_entries_invalid")?,
                     ),
                     "delete" => (
-                        unified_diff_for_delete(&source_path, content),
+                        unified_diff_for_delete(&source_path, &content),
                         serde_json::to_value(FullBeforeAfterEvidenceEntry {
                             semantics: "full_before_after".to_string(),
                             path: source_path.clone(),
                             change_kind: change_kind.clone(),
-                            before: Some(content.to_string()),
+                            before: Some(content.clone()),
                             after: None,
                         })
                         .map_err(|_| "runtime_diff_entries_invalid")?,
                     ),
                     "update" if !content.is_empty() => (
-                        content.to_string(),
+                        content.clone(),
                         serde_json::to_value(UnifiedDiffEvidenceEntry {
                             semantics: "unified_diff_snapshot".to_string(),
                             path: path.clone(),
                             change_kind: change_kind.clone(),
-                            diff: content.to_string(),
+                            diff: content,
                         })
                         .map_err(|_| "runtime_diff_entries_invalid")?,
                     ),
@@ -319,7 +332,10 @@ fn admit_candidate(
         return Err(RUNTIME_DIFF_MANAGED_OUTPUT_ROOT);
     }
     Ok(AdmittedCommandDiff {
-        semantic_kind: if semantic_kind == "codex_file_change_snapshot" {
+        semantic_kind: if matches!(
+            semantic_kind,
+            "codex_file_change_snapshot" | "pi_edit_patch"
+        ) {
             "unified_diff_snapshot".to_string()
         } else {
             semantic_kind.to_string()
@@ -327,6 +343,40 @@ fn admit_candidate(
         entries,
         evidence_entries: Value::Array(evidence_entries),
     })
+}
+
+fn normalize_pi_edit_patch(
+    patch: &str,
+    reported_path: &str,
+    normalized_path: &str,
+) -> Result<String, &'static str> {
+    if reported_path
+        .chars()
+        .any(|character| matches!(character, '\r' | '\n' | '\0'))
+    {
+        return Err("runtime_diff_path_invalid");
+    }
+    let Some((old_header, rest)) = patch.split_once('\n') else {
+        return Err("runtime_diff_content_invalid");
+    };
+    let Some((new_header, body)) = rest.split_once('\n') else {
+        return Err("runtime_diff_content_invalid");
+    };
+    if old_header != format!("--- {reported_path}")
+        || new_header != format!("+++ {reported_path}")
+        || !body.lines().any(|line| line.starts_with("@@ "))
+    {
+        return Err("runtime_diff_content_invalid");
+    }
+    let normalized = format!(
+        "--- {}\n+++ {}\n{body}",
+        unified_diff_display_path(normalized_path, "a"),
+        unified_diff_display_path(normalized_path, "b"),
+    );
+    if unified_diff_counts(&normalized) == (0, 0) {
+        return Err("runtime_diff_no_changes");
+    }
+    Ok(normalized)
 }
 
 fn admit_exact_mutations(
@@ -647,8 +697,13 @@ fn reconcile_kiro_rooted_diff_path(
 pub fn unified_diff_counts(diff: &str) -> (u64, u64) {
     let mut additions = 0_u64;
     let mut deletions = 0_u64;
+    let mut in_hunk = false;
     for line in diff.lines() {
-        if line.starts_with("+++") || line.starts_with("---") {
+        if line.starts_with("@@ ") {
+            in_hunk = true;
+            continue;
+        }
+        if !in_hunk {
             continue;
         }
         if line.starts_with('+') {
@@ -756,7 +811,7 @@ fn append_unified_line(output: &mut String, prefix: char, line: &str) {
     }
 }
 
-fn fragment_line_count(value: &str) -> u64 {
+pub(crate) fn fragment_line_count(value: &str) -> u64 {
     if value.is_empty() {
         0
     } else {
@@ -970,6 +1025,66 @@ mod tests {
             (2, 1)
         );
         assert_eq!(result.semantic_kind, "unified_diff_snapshot");
+    }
+
+    #[test]
+    fn pi_edit_patch_is_path_bound_normalized_and_counted_inside_hunks() {
+        let payload = |patch: &str| {
+            json!({
+                "runtimeDiff": {
+                    "adapterKind": "pi",
+                    "protocolFamily": "pi-jsonl-rpc-v1",
+                    "sourceEventKind": "tool_execution_end.completed",
+                    "semanticKind": "pi_edit_patch",
+                    "entries": [{
+                        "path": "/repo/src/app.ts",
+                        "changeKind": "update",
+                        "diff": patch
+                    }]
+                }
+            })
+        };
+        let admitted = admit_runtime_diff(
+            &payload(concat!(
+                "--- /repo/src/app.ts\n",
+                "+++ /repo/src/app.ts\n",
+                "@@ -1,2 +1,3 @@\n",
+                "---old-content\n",
+                "+++new-content\n",
+                "+next\n",
+            )),
+            Path::new("/repo"),
+            Some("pi"),
+        )
+        .expect("candidate should be present")
+        .expect("Pi edit patch should be admitted");
+
+        assert_eq!(admitted.semantic_kind, "unified_diff_snapshot");
+        assert_eq!(admitted.entries[0].path, "src/app.ts");
+        assert_eq!(
+            (admitted.entries[0].additions, admitted.entries[0].deletions),
+            (2, 1)
+        );
+        assert!(
+            admitted.entries[0]
+                .diff
+                .starts_with("--- a/src/app.ts\n+++ b/src/app.ts\n")
+        );
+        assert_eq!(
+            admitted.evidence_entries.pointer("/0/semantics"),
+            Some(&json!("unified_diff_snapshot"))
+        );
+
+        for patch in [
+            "--- /repo/src/other.ts\n+++ /repo/src/other.ts\n@@ -1 +1 @@\n-old\n+new\n",
+            "--- /repo/src/app.ts\n+++ /repo/src/app.ts\n",
+        ] {
+            assert_eq!(
+                admit_runtime_diff(&payload(patch), Path::new("/repo"), Some("pi"))
+                    .expect("candidate should be present"),
+                Err("runtime_diff_content_invalid")
+            );
+        }
     }
 
     #[test]

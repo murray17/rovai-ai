@@ -133,6 +133,22 @@ pub fn normalize_event(message: &Value) -> (&'static str, Value) {
                     "path": path,
                 });
             }
+            if !is_error
+                && tool_name == Some("edit")
+                && let Some((path, patch)) = terminal_edit_patch(message)
+            {
+                payload["runtimeDiff"] = json!({
+                    "adapterKind": "pi",
+                    "protocolFamily": PI_PROTOCOL_VERSION,
+                    "sourceEventKind": "tool_execution_end.completed",
+                    "semanticKind": "pi_edit_patch",
+                    "entries": [{
+                        "path": path,
+                        "changeKind": "update",
+                        "diff": patch,
+                    }],
+                });
+            }
             ("runtime.action", payload)
         }
         Some("agent_settled") => ("runtime.turn.completed", json!({"status": "settled"})),
@@ -294,6 +310,18 @@ fn terminal_file_operation(message: &Value, tool_name: &str) -> Option<(String, 
         .and_then(Value::as_str)
         .filter(|path| !path.trim().is_empty())?;
     Some((operation_kind.to_string(), path.to_string()))
+}
+
+fn terminal_edit_patch(message: &Value) -> Option<(String, String)> {
+    let path = message
+        .pointer("/args/path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.trim().is_empty())?;
+    let patch = message
+        .pointer("/result/details/patch")
+        .and_then(Value::as_str)
+        .filter(|patch| !patch.trim().is_empty())?;
+    Some((path.to_string(), patch.to_string()))
 }
 
 fn reconcile_terminal_tool_message(message: &mut Value, observed: &Value) {
@@ -517,6 +545,47 @@ mod tests {
     }
 
     #[test]
+    fn successful_edit_emits_the_native_patch_but_write_and_failed_edit_do_not() {
+        let patch = concat!(
+            "--- /repo/src/app.ts\n",
+            "+++ /repo/src/app.ts\n",
+            "@@ -1 +1,2 @@\n",
+            "-old\n",
+            "+new\n",
+            "+next\n",
+        );
+        let (_, edited) = normalize_event(&json!({
+            "type": "tool_execution_end",
+            "toolCallId": "tool-edit",
+            "toolName": "edit",
+            "args": {"path": "/repo/src/app.ts"},
+            "isError": false,
+            "result": {
+                "content": [{"type":"text","text":"done"}],
+                "details": {"patch": patch}
+            }
+        }));
+        assert_eq!(edited["runtimeDiff"]["semanticKind"], "pi_edit_patch");
+        assert_eq!(
+            edited["runtimeDiff"]["entries"][0]["path"],
+            "/repo/src/app.ts"
+        );
+        assert_eq!(edited["runtimeDiff"]["entries"][0]["diff"], patch);
+
+        for (tool_name, is_error) in [("write", false), ("edit", true)] {
+            let (_, payload) = normalize_event(&json!({
+                "type": "tool_execution_end",
+                "toolCallId": format!("tool-{tool_name}"),
+                "toolName": tool_name,
+                "args": {"path": "/repo/src/app.ts"},
+                "isError": is_error,
+                "result": {"details": {"patch": patch}}
+            }));
+            assert!(payload.get("runtimeDiff").is_none());
+        }
+    }
+
+    #[test]
     fn terminal_file_tools_reuse_start_arguments_when_pi_omits_them_at_end() {
         let start = json!({
             "type": "tool_execution_start",
@@ -543,6 +612,35 @@ mod tests {
 
         assert_eq!(payload["runtimeFileOperation"]["operationKind"], "read");
         assert_eq!(payload["runtimeFileOperation"]["path"], "/repo/src/app.ts");
+    }
+
+    #[test]
+    fn terminal_edit_patch_reuses_only_the_same_tool_calls_observed_arguments() {
+        let start = json!({
+            "type": "tool_execution_start",
+            "toolCallId": "tool-edit",
+            "toolName": "edit",
+            "args": {"path": "/repo/src/app.ts"}
+        });
+        let mut terminal = json!({
+            "type": "tool_execution_end",
+            "toolCallId": "tool-edit",
+            "isError": false,
+            "result": {"details": {"patch": concat!(
+                "--- /repo/src/app.ts\n",
+                "+++ /repo/src/app.ts\n",
+                "@@ -1 +1 @@\n-old\n+new\n"
+            )}}
+        });
+
+        reconcile_terminal_tool_message(&mut terminal, &start);
+        let (_, payload) = normalize_event(&terminal);
+
+        assert_eq!(payload["runtimeFileOperation"]["path"], "/repo/src/app.ts");
+        assert_eq!(
+            payload["runtimeDiff"]["entries"][0]["path"],
+            "/repo/src/app.ts"
+        );
     }
 
     #[test]

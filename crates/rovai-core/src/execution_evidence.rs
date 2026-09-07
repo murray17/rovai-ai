@@ -264,6 +264,16 @@ impl ExecutionEvidenceService {
                 &evidence.phase,
                 &evidence.payload,
             );
+            let intermediate_facts = canonical_activity::classify_evidence_with_version(
+                canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
+                agent_run_id,
+                execution_epoch,
+                &id,
+                &evidence.event_type,
+                &evidence.kind,
+                &evidence.phase,
+                &evidence.payload,
+            );
             let legacy_facts = canonical_activity::classify_evidence_with_version(
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
                 agent_run_id,
@@ -284,6 +294,7 @@ impl ExecutionEvidenceService {
                 EvidenceActivityClassifications {
                     current: &facts,
                     previous: &previous_facts,
+                    intermediate: &intermediate_facts,
                     legacy: &legacy_facts,
                 },
             )?;
@@ -723,6 +734,16 @@ impl ExecutionEvidenceService {
             phase,
             &payload,
         );
+        let intermediate_facts = canonical_activity::classify_evidence_with_version(
+            canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
+            agent_run_id,
+            execution_epoch,
+            &id,
+            event_type,
+            kind,
+            phase,
+            &payload,
+        );
         let legacy_facts = canonical_activity::classify_evidence_with_version(
             canonical_activity::LEGACY_CLASSIFIER_VERSION,
             agent_run_id,
@@ -743,6 +764,7 @@ impl ExecutionEvidenceService {
             EvidenceActivityClassifications {
                 current: &facts,
                 previous: &previous_facts,
+                intermediate: &intermediate_facts,
                 legacy: &legacy_facts,
             },
         )?;
@@ -1466,6 +1488,7 @@ fn load_by_source_key(
 struct EvidenceActivityClassifications<'a> {
     current: &'a EvidenceActivityFacts,
     previous: &'a EvidenceActivityFacts,
+    intermediate: &'a EvidenceActivityFacts,
     legacy: &'a EvidenceActivityFacts,
 }
 
@@ -1495,11 +1518,12 @@ fn upsert_canonical_activity(
             WHERE agent_run_id = ?1
               AND execution_epoch = ?2
               AND operation_id = ?3
-              AND classifier_version IN (?4, ?5, ?6)
+              AND classifier_version IN (?4, ?5, ?6, ?7)
             ORDER BY CASE classifier_version
                 WHEN ?4 THEN 0
                 WHEN ?5 THEN 1
-                ELSE 2
+                WHEN ?6 THEN 2
+                ELSE 3
             END
             LIMIT 1
             "#,
@@ -1509,6 +1533,7 @@ fn upsert_canonical_activity(
                 facts.operation_id,
                 canonical_activity::CLASSIFIER_VERSION,
                 canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
+                canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
             ],
             canonical_activity_row,
@@ -1519,6 +1544,7 @@ fn upsert_canonical_activity(
         .map(|projection| projection.classifier_version.as_str())
     {
         Some(canonical_activity::PREVIOUS_CLASSIFIER_VERSION) => classifications.previous,
+        Some(canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION) => classifications.intermediate,
         Some(canonical_activity::LEGACY_CLASSIFIER_VERSION) => classifications.legacy,
         _ => facts,
     };
@@ -1628,7 +1654,7 @@ fn load_canonical_for_evidence(
               ON evidence.agent_run_id = activity.agent_run_id
              AND evidence.execution_epoch = activity.execution_epoch
             WHERE evidence.id = ?1
-              AND activity.classifier_version IN (?2, ?3, ?4)
+              AND activity.classifier_version IN (?2, ?3, ?4, ?5)
               AND EXISTS (
                   SELECT 1
                   FROM json_each(activity.source_evidence_ids_json)
@@ -1637,7 +1663,8 @@ fn load_canonical_for_evidence(
             ORDER BY CASE activity.classifier_version
                 WHEN ?2 THEN 0
                 WHEN ?3 THEN 1
-                ELSE 2
+                WHEN ?4 THEN 2
+                ELSE 3
             END
             LIMIT 1
             "#,
@@ -1645,6 +1672,7 @@ fn load_canonical_for_evidence(
                 evidence_id,
                 canonical_activity::CLASSIFIER_VERSION,
                 canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
+                canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
             ],
             canonical_activity_row,
@@ -1886,6 +1914,16 @@ mod tests {
             "terminal",
             &payload,
         );
+        let intermediate_facts = canonical_activity::classify_evidence_with_version(
+            canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
+            "run-v1",
+            1,
+            "terminal-evidence",
+            "runtime.action",
+            "tool_call",
+            "terminal",
+            &payload,
+        );
         let legacy_facts = canonical_activity::classify_evidence_with_version(
             canonical_activity::LEGACY_CLASSIFIER_VERSION,
             "run-v1",
@@ -1939,6 +1977,7 @@ mod tests {
             EvidenceActivityClassifications {
                 current: &current_facts,
                 previous: &previous_facts,
+                intermediate: &intermediate_facts,
                 legacy: &legacy_facts,
             },
         )
@@ -1973,7 +2012,7 @@ mod tests {
     }
 
     #[test]
-    fn an_inflight_v2_command_read_keeps_settling_without_switching_to_v3() {
+    fn inflight_v2_and_v3_command_reads_keep_their_frozen_classifier() {
         let directory = std::env::temp_dir().join(format!(
             "rovai-execution-evidence-v2-continuity-test-{}",
             Uuid::new_v4()
@@ -2008,6 +2047,16 @@ mod tests {
             "terminal",
             &payload,
         );
+        let intermediate = canonical_activity::classify_evidence_with_version(
+            canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
+            "run-v2",
+            1,
+            "terminal",
+            "activity.completed",
+            "command",
+            "terminal",
+            &payload,
+        );
         let legacy = canonical_activity::classify_evidence_with_version(
             canonical_activity::LEGACY_CLASSIFIER_VERSION,
             "run-v2",
@@ -2019,7 +2068,8 @@ mod tests {
             &payload,
         );
         assert_eq!(current.semantic_kind.as_deref(), Some("file.read"));
-        assert_eq!(previous.semantic_kind.as_deref(), Some("shell.execute"));
+        assert_eq!(previous.semantic_kind.as_deref(), Some("file.read"));
+        assert_eq!(intermediate.semantic_kind.as_deref(), Some("shell.execute"));
         database
             .connection()
             .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -2052,6 +2102,7 @@ mod tests {
             EvidenceActivityClassifications {
                 current: &current,
                 previous: &previous,
+                intermediate: &intermediate,
                 legacy: &legacy,
             },
         )
@@ -2059,7 +2110,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             projection.classifier_version,
-            canonical_activity::PREVIOUS_CLASSIFIER_VERSION
+            canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION
         );
         assert_eq!(projection.semantic_kind.as_deref(), Some("shell.execute"));
         assert_eq!(projection.phase, "terminal");
@@ -2070,6 +2121,86 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(count, 1);
+
+        let current_v3 = canonical_activity::classify_evidence(
+            "run-v3",
+            1,
+            "terminal-v3",
+            "activity.completed",
+            "command",
+            "terminal",
+            &payload,
+        );
+        let previous_v3 = canonical_activity::classify_evidence_with_version(
+            canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
+            "run-v3",
+            1,
+            "terminal-v3",
+            "activity.completed",
+            "command",
+            "terminal",
+            &payload,
+        );
+        let intermediate_v3 = canonical_activity::classify_evidence_with_version(
+            canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
+            "run-v3",
+            1,
+            "terminal-v3",
+            "activity.completed",
+            "command",
+            "terminal",
+            &payload,
+        );
+        let legacy_v3 = canonical_activity::classify_evidence_with_version(
+            canonical_activity::LEGACY_CLASSIFIER_VERSION,
+            "run-v3",
+            1,
+            "terminal-v3",
+            "activity.completed",
+            "command",
+            "terminal",
+            &payload,
+        );
+        database
+            .connection()
+            .execute(
+                r#"INSERT INTO canonical_runtime_activity(
+                    agent_run_id, execution_epoch, operation_id, classifier_version,
+                    activity_domain, semantic_kind, tool_name, presentation_hint,
+                    phase, outcome, credibility, coverage_level, source_authority,
+                    source_evidence_ids_json, first_evidence_sequence,
+                    last_evidence_sequence, revision, created_at, updated_at
+                ) VALUES (
+                    'run-v3', 1, ?1, 'activity-v3', 'file', 'file.read', NULL, NULL,
+                    'started', 'unknown', 'runtime_structured', 'fine_grained', 'runtime',
+                    '["started-v3"]', 1, 1, 1, datetime('now'), datetime('now')
+                )"#,
+                [current_v3.operation_id.as_str()],
+            )
+            .unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        let projection_v3 = upsert_canonical_activity(
+            &transaction,
+            "run-v3",
+            1,
+            2,
+            "terminal-v3",
+            "2026-09-07T00:00:00Z",
+            EvidenceActivityClassifications {
+                current: &current_v3,
+                previous: &previous_v3,
+                intermediate: &intermediate_v3,
+                legacy: &legacy_v3,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            projection_v3.classifier_version,
+            canonical_activity::PREVIOUS_CLASSIFIER_VERSION
+        );
+        assert_eq!(projection_v3.semantic_kind.as_deref(), Some("file.read"));
+        transaction.commit().unwrap();
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -2170,6 +2301,76 @@ mod tests {
             "-const enabled = false\n+const enabled = true\n"
         );
         assert!(!entry.diff.contains("@@"));
+    }
+
+    #[test]
+    fn pi_edit_patch_becomes_normalized_append_only_diff_evidence() {
+        let mut payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "pi-edit-1",
+                "toolName": "edit",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeFileOperation": {
+                    "adapterKind": "pi",
+                    "protocolFamily": "pi-jsonl-rpc-v1",
+                    "sourceEventKind": "tool_execution_end.completed",
+                    "operationKind": "write",
+                    "path": "/repo/src/app.ts"
+                },
+                "runtimeDiff": {
+                    "adapterKind": "pi",
+                    "protocolFamily": "pi-jsonl-rpc-v1",
+                    "sourceEventKind": "tool_execution_end.completed",
+                    "semanticKind": "pi_edit_patch",
+                    "entries": [{
+                        "path": "/repo/src/app.ts",
+                        "changeKind": "update",
+                        "diff": concat!(
+                            "--- /repo/src/app.ts\n",
+                            "+++ /repo/src/app.ts\n",
+                            "@@ -1 +1,2 @@\n-old\n+new\n+next\n"
+                        )
+                    }]
+                }
+            }),
+        );
+        normalize_runtime_file_operation_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("pi"),
+            Some("0.84.4"),
+            None,
+        );
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("pi"),
+            Some("0.84.4"),
+            None,
+        );
+
+        assert_eq!(payload["runtimeFileOperation"]["path"], "src/app.ts");
+        assert_eq!(payload["runtimeDiff"]["status"], "available");
+        assert_eq!(
+            payload["runtimeDiff"]["semanticKind"],
+            "unified_diff_snapshot"
+        );
+        assert_eq!(
+            payload.pointer("/runtimeDiff/sourceMetadata/adapterKind"),
+            Some(&json!("pi"))
+        );
+        let projection = runtime_diff::projection_from_evidence(&payload, "evidence-pi-edit")
+            .expect("normalized Pi edit Evidence should project");
+        let entry = &projection.entries.as_ref().unwrap()[0];
+        assert_eq!(entry.path, "src/app.ts");
+        assert_eq!((entry.additions, entry.deletions), (2, 1));
+        assert!(
+            entry
+                .diff
+                .starts_with("--- a/src/app.ts\n+++ b/src/app.ts\n")
+        );
     }
 
     #[test]
