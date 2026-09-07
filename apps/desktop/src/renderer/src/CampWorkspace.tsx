@@ -5723,7 +5723,10 @@ function ExecutionDrawer({
                 停止
               </button>
             )}
-            <button type="button" className="quiet-button compact execution-drawer-action-button" onClick={onClose} aria-label="收起执行详情">收起</button>
+            <button type="button" className="quiet-button compact execution-drawer-action-button execution-drawer-collapse-button" onClick={onClose} aria-label="收起执行详情">
+              <span>收起</span>
+              <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="m4 10 4-4 4 4" /></svg>
+            </button>
           </div>
         </header>
         <div

@@ -2430,6 +2430,9 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .execution-run-stop-state.tone-attention { color: var(--attention); }
 .execution-run-stop-state.tone-neutral { color: var(--muted); }
 .execution-drawer-action-button { min-width: 40px; min-height: 28px; }
+.execution-drawer-collapse-button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; border-color: transparent; color: var(--muted); background: transparent; font-weight: 500; }
+.execution-drawer-collapse-button:hover:not(:disabled) { border-color: transparent; color: var(--ink); background: var(--surface-hover); }
+.execution-drawer-collapse-button svg { width: 12px; height: 12px; flex: 0 0 12px; }
 .execution-drawer .quiet-button.danger-text { border-color: transparent; color: var(--danger); background: var(--danger-soft); box-shadow: none; font-weight: 500; }
 .execution-drawer .quiet-button.danger-text:hover:not(:disabled) { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--danger-soft)); border-color: color-mix(in srgb, var(--danger) 22%, transparent); }
 .execution-drawer .quiet-button.danger-text:active:not(:disabled) { background: color-mix(in srgb, var(--danger) 16%, var(--danger-soft)); }
