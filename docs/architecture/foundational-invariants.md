@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-09-07
+last_updated: 2026-09-08
 ---
 
 # 当前基础架构不变量
@@ -462,6 +462,9 @@ last_updated: 2026-09-07
 - Library desired state、root access ledger 和 per-Run frozen exposure 是三个独立权威。事件只标记精确 root dirty，Reconciler 在 root scope 内去重、串行收敛并以 generation/digest 阻止迟到结果；失败不回滚 Library 真源，但相关新 Run fail closed。Run 启动前必须重新验证 Revision 路径、类型、大小、权限和 digest，不依赖历史目录扫描或 active-Run 引用作为新 Run 准入。
 - Bundled Skill bootstrap 在数据库 digest 与 expected digest 相同时走只读快速验证；只有变化或不一致才在私有 staging 中物化并原子 promote，经失败注入也不能让半成品满足执行门禁。Windows copy projection 使用 operation journal、backup/promote/verify/metadata/cleanup 多阶段恢复；Execution Root Gate 将 launch registration 与 replacement 串行化，崩溃后先按 journal 收敛再准入。
 - Official inventory 是封闭、同名不可被 import 覆盖的产品集合；official provenance、pinned third-party 内容和 system-required management policy 作为产品配置审核。成员创建只由 Agent 发起受控 `member.create` workflow，在一条完整提案中给出身份、Runtime/model/permission/外观，并只在当前用户确认后调用；用户仍拥有最终授权和配置。
+- 默认 inventory 仅保留 Rovai 维护的九项 Skill，包括保留上游许可与署名的两个 Grill Duo 改编。
+  第三方源包不再自动预置；五项已退出预置的旧 official/bundled 副本经既有删除生命周期退役，用户显式导入
+  的同名 Skill 不受影响。具体清单与升级边界见 [Skill Projection Reconciliation](skill-projection-reconciliation.md)。
 - Grill/Review 等协作 Skill 是普通 user-managed Skill，不因 official 身份获得额外领域权限。Grill Duo 保持一位固定搭档、稳定问题编号、开放轮次、迟到/错关联不推进和最终用户确认；Review Duo 保持独立 Spec/Standards 轴、四消息 session 协议、不可变 review range 和合格替补语义。Skill 只编排协作，不成为文档、代码或判定真源。
 
 ## Execution Evidence、Runtime Activity 与 Usage

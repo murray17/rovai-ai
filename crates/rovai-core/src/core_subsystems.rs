@@ -283,6 +283,8 @@ impl super::Core {
                         SkillProjectionReconciler
                             .mark_observed_roots_dirty(&mut database, false)?;
                     }
+                    SkillProjectionReconciler
+                        .finalize_unprojected_deletions(&mut database, &self.skill_library)?;
                     bundled
                 };
                 eprintln!(

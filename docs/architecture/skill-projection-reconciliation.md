@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-31
+last_updated: 2026-09-08
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -47,10 +47,17 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 
 Skill Library view 的 `managementPolicy` 来自 bundled official manifest，而不是用户可改数据库字段。
 `cli-operations` 与 `memory-stewardship` 为 `system_required`：bundled install 以 DB-only 事务恢复 enabled
-与全部当前 Skill Delivery Groups 的 Assignment，命令边界拒绝修改；其余十二项 official Skill 为
-`user_managed`。当前 inventory 为十四项，名称、固定来源、默认启用值和管理策略由
+与全部当前 Skill Delivery Groups 的 Assignment，命令边界拒绝修改；其余七项 official Skill 为
+`user_managed`。当前 inventory 为九项，名称、固定来源、默认启用值和管理策略由
 [`BUNDLED_SKILLS`](../../crates/rovai-core/src/skill.rs)统一声明。该策略只决定 Library desired
 state，不改变 projection ownership、preflight、Snapshot 或 Runtime load 证明。
+
+`analyze-agent-codebase` 首次内置安装时默认停用，仍预选全部当前 Skill Delivery Groups。
+用户已保存的启停与分组选择在 bootstrap、升级或修复时保持原样。
+
+`grill-duo` 与 `grill-duo-with-docs` 作为 Rovai 维护的预置展示；其原有上游 metadata、NOTICE 和 LICENSE
+仍保留用于署名与追溯。`diagnosing-bugs`、`tasteful-ui`、`tdd`、`ui-ux-pro-max`、`writing-for-agents`
+退出默认 inventory，也不再嵌入 Core；仓库中的源包继续供开发与显式手动导入使用。
 
 TRAE delivery group 的 Rovai-owned root 固定为项目 `.trae/skills`。该路径已用唯一名称/内容在
 `traecli 0.120.52` 上同时验证新 Session 的 `available_commands_update` 和精确 `/skill` 调用；warm Host 的新
@@ -128,6 +135,12 @@ Bootstrap report 只服务启动性能诊断，不进入 SkillExposureSnapshot�
 若新版本认领的 official 名称在 bootstrap 前已作为 imported Skill 存在，Core 在发布 bundle 前原地提升：
 保留 Skill ID、enablement 与 group assignments，把 origin 切为 official，追加不可变 bundled Revision 和
 审计事件。official inventory 建立后，同名 import 仍被拒绝；这条迁移不允许 imported 内容覆盖 bundle。
+
+上述五项旧预置只在名称匹配、origin 为 official 且 current Revision 来源为 bundled 时退役。
+Bootstrap 提交阶段原子标记 disabled/deleting、记录退役事件，并把精确已登记的 projection roots 标为
+dirty/pending cleanup；不会按名称删除用户导入的副本。未投递的旧预置使用既有 deletion finalizer 清理私有
+Library；存在 projection 的内容仍由当前 root 的既有 reconciliation 和 active-Run 保护收口，不在启动时扫描
+历史项目目录。重新手动导入的同名 Skill 保持 imported，不再被 bootstrap 认领或退役。
 
 ### Windows Revision v1 逻辑 mode
 

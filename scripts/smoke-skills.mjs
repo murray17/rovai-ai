@@ -112,20 +112,15 @@ try {
       'analyze-agent-codebase',
       'campfire',
       'cli-operations',
-      'diagnosing-bugs',
       'grill-duo',
       'grill-duo-with-docs',
       'member-studio',
       'memory-stewardship',
       'review-duo',
-      'tasteful-ui',
-      'tdd',
-      'ui-ux-pro-max',
       'worktree',
-      'writing-for-agents'
     ])
       && initialSkills.every((skill) => skill.origin === 'official'
-        && skill.enabled === (skill.name !== 'tasteful-ui')
+        && skill.enabled === (skill.name !== 'analyze-agent-codebase')
         && skill.managementPolicy === (
           ['cli-operations', 'memory-stewardship'].includes(skill.name)
             ? 'system_required'
@@ -135,7 +130,7 @@ try {
           === JSON.stringify(allDeliveryGroups)),
     `Fresh Core did not install official Skills with their default enablement and all Runtime groups: ${JSON.stringify(initialSkills)}`
   )
-  const mattSkillNames = new Set(['diagnosing-bugs', 'tdd', 'writing-for-agents'])
+  const mattSkillNames = new Set(['grill-duo', 'grill-duo-with-docs'])
   const mattSkills = initialSkills.filter((skill) => mattSkillNames.has(skill.name))
   assert(
     mattSkills.length === mattSkillNames.size

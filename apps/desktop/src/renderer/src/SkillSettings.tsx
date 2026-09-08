@@ -373,7 +373,7 @@ export function SkillSettings(): React.JSX.Element {
                   {confirmation === 'update' ? (
                     <div className="capability-confirm">
                       <strong>{updateSkillConfirmationCopy(candidate.name).title}</strong>
-                      <p>更新后保留现有启停状态和投递组。</p>
+                      <p>更新后保留现有启停状态和生效组。</p>
                       <div className="capability-actions">
                         <button
                           className="quiet-button compact"
@@ -397,7 +397,7 @@ export function SkillSettings(): React.JSX.Element {
                     <div className="capability-save">
                       <span className="capability-note">
                         {candidate.importAction === 'create'
-                          ? '默认启用 · 全部投递组'
+                          ? '默认启用 · 全部生效组'
                           : importActionLabel(candidate.importAction)}
                       </span>
                       <button
@@ -438,9 +438,11 @@ export function SkillSettings(): React.JSX.Element {
           <header className="capability-detail-heading">
             <div className="capability-title">
               <h2>{selected.name}</h2>
-              <span className="capability-source">
-                {skillSourcePresentation(selected).badgeLabel}
-              </span>
+              {skillSourcePresentation(selected).badgeLabel && (
+                <span className="capability-source">
+                  {skillSourcePresentation(selected).badgeLabel}
+                </span>
+              )}
               <span className="capability-note">r{selected.currentRevision.revision}</span>
             </div>
             <CapabilityToggle
@@ -508,7 +510,7 @@ export function SkillSettings(): React.JSX.Element {
                 </div>
               ) : (
                 <button
-                  className="quiet-button compact capability-danger"
+                  className="quiet-button compact danger-text"
                   type="button"
                   disabled={busy !== null}
                   onClick={() => setConfirmation('delete')}
@@ -562,7 +564,7 @@ export function SkillGroupChoices({
   return (
     <section>
       <div className="capability-scope-heading">
-        <h3>投递组</h3>
+        <h3>生效组</h3>
         <button
           type="button"
           className="quiet-button compact"
@@ -716,8 +718,8 @@ function replaceSkillRow(skills: SkillView[], updated: SkillView): SkillView[] {
 }
 
 export type SkillSourcePresentation = {
-  kind: 'bundled' | 'third-party' | 'imported'
-  badgeLabel: 'Rovai' | 'GitHub' | '本地导入'
+  kind: 'bundled' | 'imported'
+  badgeLabel?: 'Rovai'
   sourceLabel: string
   repositoryUrl: string | null
   repositoryLabel: string | null
@@ -735,13 +737,13 @@ export function skillSourcePresentation(skill: SkillView): SkillSourcePresentati
     const revision = metadataString(upstream, 'revision')
     if (repository && revision) {
       return {
-        kind: 'third-party',
-        badgeLabel: 'GitHub',
-        sourceLabel: '固定上游副本',
+        kind: 'bundled',
+        badgeLabel: 'Rovai',
+        sourceLabel: '随 Rovai 安装',
         repositoryUrl: repository.url,
         repositoryLabel: repository.label,
         revisionLabel: shortGitRevision(revision),
-        detailNote: '随 Rovai 安装的固定上游副本；启动和使用时不访问 GitHub，也不会随上游自动更新。'
+        detailNote: '由 Rovai 维护并随应用更新；包内保留上游来源、许可与署名。'
       }
     }
     return {
@@ -765,7 +767,7 @@ export function skillSourcePresentation(skill: SkillView): SkillSourcePresentati
 
   return {
     kind: 'imported',
-    badgeLabel: skill.currentRevision.sourceType === 'github' ? 'GitHub' : '本地导入',
+    badgeLabel: undefined,
     sourceLabel: sourceTypeLabel(skill.currentRevision.sourceType),
     repositoryUrl: repository?.url ?? null,
     repositoryLabel: repository?.label ?? null,
@@ -824,9 +826,9 @@ function shortGitRevision(value: string): string {
 }
 
 export function groupAssignmentSummary(selected: number, total: number): string {
-  if (total > 0 && selected === total) return `全部 ${total} 组`
+  if (total > 0 && selected === total) return '全部组'
   if (selected === 0) return '未选择'
-  return `${selected} / ${total} 组`
+  return `${selected} 个组`
 }
 
 export function importActionLabel(action: SkillImportCandidate['importAction']): string {
