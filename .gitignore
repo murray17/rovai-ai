@@ -21,6 +21,7 @@ Desktop.ini
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+/mcp-gateway/
 
 # Local environment configuration
 .env
@@ -35,6 +36,7 @@ Desktop.ini
 /apps/desktop/.impeccable/mocks/decision/
 
 # Local workspace caches and design-tool state
+/docs/prototypes/
 /.pnpm-store/
 /.impeccable/
 /.agent/

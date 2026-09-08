@@ -13,7 +13,7 @@ Renderer 继续使用同一组件树、信息架构、Porcelain Day / Steel Nigh
 只读 `HostPlatformKey` 投影到展示层，不复制业务状态机，也不允许 Renderer 自行推断安全或 Runtime 准入。
 
 生产实现状态由代码、自动化和真实 Windows 证据决定；本文 `accepted` 不表示 Windows UI 已完成。原
-[v1.05 HTML 交互稿](../prototypes/windows-interaction-delta/index.html)只保留历史评审上下文，不代表当前
+[v1.05 HTML 交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/windows-interaction-delta/index.html)只保留历史评审上下文，不代表当前
 Windows chrome，也不能成为第三份组件、文案或状态真源。
 
 ## 1. 保持不变的产品结构

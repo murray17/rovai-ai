@@ -49,7 +49,7 @@ and which are historical evidence.
 | [`docs/development/`](docs/development/) | Local development, testing, packaging, and Runtime integration guides |
 | [`docs/ui/`](docs/ui/) | Renderer and interaction contracts |
 | [`docs/research/`](docs/research/) | Runtime research and evidence; not a support promise |
-| [`docs/prototypes/`](docs/prototypes/) | Review artifacts; not production authority |
+| `docs/prototypes/` | Local review artifacts; Git-ignored and excluded from the repository |
 | [`docs/postmortems/`](docs/postmortems/) | Blameless incident history |
 | [`qualification/`](qualification/) | Public demo cases, acceptance evidence, and diagnostics |
 

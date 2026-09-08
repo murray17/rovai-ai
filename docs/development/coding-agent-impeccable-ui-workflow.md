@@ -511,7 +511,6 @@ git check-ignore -v .cursor/agents/impeccable-documenter.md
 | Provider-native instruction adapter | 只有当前 Agent 不读取 `AGENTS.md` 时；内容必须是指针和必要接入说明，不能复制共同规则 |
 | `apps/desktop/.impeccable/config.json` | 团队正式采用共享 detector 规则、扩展名或窄范围豁免时 |
 | `apps/desktop/.impeccable/design.json` | 团队实际使用 Impeccable Live/sidecar，并承诺与 `DESIGN.md` 同步时 |
-| 选中的设计图或交互稿 | 从 `apps/desktop/.impeccable/mocks/` 提升到 `docs/prototypes/` 后，以正式名称提交 |
 
 ### 7.3 本地且不得提交
 
@@ -521,6 +520,7 @@ git check-ignore -v .cursor/agents/impeccable-documenter.md
 | `*/agents/impeccable-*` companion files | Provider-native 第三方 agent，可重装 |
 | `apps/desktop/.impeccable/config.local.json` | 开发者个人 consent 和本地例外 |
 | `apps/desktop/.impeccable/mocks/decision/` | 未选中的生成式方向稿和临时比较素材 |
+| `docs/prototypes/` | 整个目录仅在本地保留；选中与未选中的原型都不提交，结论按[本地原型规则](../README.md#本地原型)归入当前文档 |
 | Impeccable Hook manifest | 本任务明确禁止安装 |
 | Impeccable Plugin | 本任务明确禁止安装 |
 | 未使用 Provider 的 payload | 不应预装，也不应提交 |
@@ -593,7 +593,7 @@ rovai-ai/
     ├── contracts/
     ├── architecture/
     ├── adr/
-    ├── prototypes/
+    ├── prototypes/  # 本地目录，Git 忽略
     └── versions/
 ```
 

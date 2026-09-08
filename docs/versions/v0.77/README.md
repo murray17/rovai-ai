@@ -63,7 +63,7 @@ Mention 后悄悄回退 Default Lead。Composer 原位显示“原作者当前�
 
 ## 已选交互方向
 
-[HTML 交互稿](../../prototypes/message-reply-chain/README.md)保留三个共享同一状态机的布局方向；用户已选择
+[HTML 交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/message-reply-chain/README.md)保留三个共享同一状态机的布局方向；用户已选择
 方案 C 作为生产方向：
 
 1. **平衡型：** Composer 与时间线父引用固定为单行，超出显示省略号；正常回复一步完成，
@@ -132,7 +132,7 @@ Core 合同或安全状态机，失效作者错误与替代成员选择仍可独
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [三方向 HTML 交互稿](../../prototypes/message-reply-chain/README.md)
+- [三方向 HTML 交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/message-reply-chain/README.md)
 - [ADR-0185](decisions.md#adr-0185)
 - [Camp Composer Draft v1](../../contracts/camp-composer-draft-v1.md)
 - [Camp Composer Draft architecture](../../architecture/camp-composer-draft.md)

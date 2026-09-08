@@ -92,6 +92,6 @@ Windows x86/ARM64、WSL Core、Linux、MSIX/Store、企业 MSI、系统服务、
 - [实施与验收计划](implementation-plan.md)
 - [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
-- [Windows Interaction Delta HTML](../../prototypes/windows-interaction-delta/index.html)
+- [Windows Interaction Delta HTML](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/windows-interaction-delta/index.html)
 - [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)
 - [Built-in Tool Transport v14](../../contracts/builtin-tool-transport-v14.md)

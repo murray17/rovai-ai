@@ -95,4 +95,4 @@ last_updated: 2026-08-14
 - [实施与验收计划](implementation-plan.md)
 - [ADR-0187](decisions.md#adr-0187)
 - [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)
-- [延续路由交互稿](../../prototypes/composer-continuation-routing/index.html)
+- [延续路由交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/composer-continuation-routing/index.html)

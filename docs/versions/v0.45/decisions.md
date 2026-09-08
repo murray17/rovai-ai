@@ -322,7 +322,7 @@ superseded_by: ADR-0154
 
 - [Run Process Detail Surface v1](../../contracts/run-process-detail-surface-v1.md)
 - [Camp 会话工作区 UI 合同](../../ui/components/conversation-workspace.md)
-- [v0.45 会话区原型](../../prototypes/run-activity/README.md)
+- [v0.45 会话区原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/run-activity/README.md)
 - [ADR-0084：Conversation surface controls](../v0.26/decisions.md#adr-0084)
 <!-- legacy-adr-body:end id=ADR-0133 -->
 <!-- legacy-adr:end id=ADR-0133 -->

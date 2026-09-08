@@ -54,7 +54,7 @@ Pending 编辑器复用同一接收面、Drag feedback 和附件卡；准备中�
 
 ## References
 
-- [方向原型](../../prototypes/conversation-drop-zone/rovai-conversation-drop-zone.html)
-- [设计说明](../../prototypes/conversation-drop-zone/PROJECT_DESIGN.md)
+- [方向原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/conversation-drop-zone/rovai-conversation-drop-zone.html)
+- [设计说明](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/conversation-drop-zone/PROJECT_DESIGN.md)
 - [Camp Attachment v5](../../contracts/camp-attachment-v5.md)
 - [Camp 资源不变量](../../architecture/foundational-invariants.md#camp-resources)

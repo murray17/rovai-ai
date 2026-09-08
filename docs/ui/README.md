@@ -52,7 +52,7 @@ MCP 与 Skills 的列表/详情、导入、启停和拖拽合同见 [Capability 
 ## 平台差异
 
 - [Windows Interaction Delta](windows-interaction-delta.md)
-- [Windows Interaction Delta v1.05 历史 HTML 评审稿](../prototypes/windows-interaction-delta/index.html)
+- [Windows Interaction Delta v1.05 历史 HTML 评审稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/windows-interaction-delta/index.html)
 
 平台文档只拥有 window chrome、快捷键/文案、系统主题、文件系统反馈和平台准入等展示差异，不创建第二套
 产品结构。v1.05 HTML 保留当时的评审上下文，不代表当前 Windows chrome，也不是生产组件、验收证据或领域状态真源。
@@ -104,9 +104,11 @@ brief 只拥有具体 surface 的信息优先级和构图；它不能覆盖全�
 - 共享色值只扩展语义 Token；不引入新的 UI 框架、CSS-in-JS、字体、图标库、动画库或状态管理库。
 - 变化后运行目标 Typecheck/Renderer 测试、构建和版本要求的真实 App 视觉/键盘验收。
 
+原型素材按[本地原型规则](../README.md#本地原型)保留在 Git 忽略目录；当前 UI 合同须独立说明实现和验收要求。
+
 ## 历史设计
 
 “Arctic Dawn”可在历史版本和原型中作为当时的设计名称保留，但不再是当前文件或路由。
 历史会话事件样例已移入
-[prototype archive](../prototypes/archive/arctic-dawn/README.md)，明确不具有生产权威。理解版本演进请从
+[prototype archive](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/archive/arctic-dawn/README.md)，明确不具有生产权威。理解版本演进请从
 [版本索引](../versions/README.md)进入；历史文档不能覆盖本索引或当前生产事实。
