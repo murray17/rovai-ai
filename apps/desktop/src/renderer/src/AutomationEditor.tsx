@@ -190,7 +190,7 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
       {channelError && <button type="button" className="quiet-button compact" onClick={() => void loadChannels()}>重试读取渠道</button>}
       <p className="automation-channel-note">发送到你的 Bot 私聊。通知失败只重试通知，不重新运行任务。</p>
     </details>
-    {!automation && <div className="automation-create-actions"><span>名称可留空，保存后自动开启。</span><button className="primary-button" type="submit" disabled={busy || Boolean(scheduleError) || !draft.prompt.trim() || member?.presence !== 'present'}>{busy ? '正在保存…' : '保存'}</button></div>}
+    {!automation && <div className="automation-create-actions"><button className="primary-button" type="submit" disabled={busy || Boolean(scheduleError) || !draft.prompt.trim() || member?.presence !== 'present'}>{busy ? '正在保存…' : '保存'}</button></div>}
   </form>
     {automation && <RunHistory automation={automation} onOpenCamp={onOpenCamp} />}
   </div>
