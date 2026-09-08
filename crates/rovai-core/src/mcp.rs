@@ -243,6 +243,44 @@ pub enum McpMutationResult {
     },
 }
 
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RevealMcpServerParams {
+    pub expected_config_digest: String,
+    pub server_id: String,
+}
+
+// Explicit, ephemeral desktop read. Never use this response in a command receipt or event.
+#[derive(Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum McpRevealResult {
+    Ok {
+        server_id: String,
+        config_digest: String,
+        definition_json: String,
+    },
+    Conflict {
+        actual_config_digest: String,
+    },
+    Invalid {
+        issues: Vec<McpConfigIssue>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetMcpMembersParams {
+    pub expected_config_digest: String,
+    pub server_id: String,
+    pub agent_ids: Vec<String>,
+    #[serde(default)]
+    pub acknowledge_high_risk: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateMcpServerParams {
@@ -491,6 +529,108 @@ impl McpConfigStore {
     pub fn inspect(&self, known_agent_ids: &BTreeSet<String>) -> Result<McpConfigView> {
         let loaded = self.load()?;
         self.view(&loaded, known_agent_ids)
+    }
+
+    /// Read only one selected server at the exact revision the user chose to reveal.
+    pub fn reveal(&self, params: RevealMcpServerParams) -> Result<McpRevealResult> {
+        let loaded = self.load()?;
+        if params.expected_config_digest.is_empty()
+            || params.expected_config_digest != loaded.digest
+        {
+            return Ok(McpRevealResult::Conflict {
+                actual_config_digest: loaded.digest,
+            });
+        }
+        if let Some(issue) = loaded.file_issue {
+            return Ok(McpRevealResult::Invalid {
+                issues: vec![issue],
+            });
+        }
+        let entry = loaded.config.as_ref().and_then(|config| {
+            config
+                .metadata_by_id(&params.server_id)
+                .and_then(|(name, _)| {
+                    config
+                        .mcp_servers
+                        .get(name)
+                        .map(|definition| (name, definition))
+                })
+        });
+        let Some((name, definition)) = entry else {
+            return Ok(McpRevealResult::Invalid {
+                issues: vec![McpConfigIssue::new(
+                    "mcp.not_found",
+                    "该 MCP 已不存在，请重新读取。",
+                    Some("serverId".to_string()),
+                )],
+            });
+        };
+        Ok(McpRevealResult::Ok {
+            server_id: params.server_id,
+            config_digest: loaded.digest,
+            definition_json: single_public_json(name, definition, false)?,
+        })
+    }
+
+    /// Member selection is one atomic authorization change; legacy enable/assignment APIs remain valid.
+    pub fn set_members(
+        &self,
+        params: SetMcpMembersParams,
+        known_agent_ids: &BTreeSet<String>,
+    ) -> Result<McpMutationResult> {
+        self.mutate(&params.expected_config_digest, known_agent_ids, |config| {
+            let members: BTreeSet<_> = params.agent_ids.iter().cloned().collect();
+            if !members.is_subset(known_agent_ids) {
+                return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                    "mcp.unknown_agent_profile",
+                    "所选队员已不存在，请重新读取。",
+                    Some("agentIds".to_string()),
+                )]));
+            }
+            let Some((_, metadata)) = config.metadata_by_id(&params.server_id) else {
+                return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                    "mcp.not_found",
+                    "该 MCP 已不存在，请重新读取。",
+                    Some("serverId".to_string()),
+                )]));
+            };
+            let enabled = !members.is_empty();
+            if enabled
+                && metadata.risk_level == McpRiskLevel::High
+                && !metadata.risk_acknowledged
+                && !params.acknowledge_high_risk
+            {
+                return Err(MutationError::RiskAcknowledgementRequired(
+                    params.server_id.clone(),
+                ));
+            }
+            let existing: BTreeSet<_> = config
+                .assignment_ids(&params.server_id)
+                .into_iter()
+                .collect();
+            if metadata.enabled == enabled && existing == members {
+                return Ok(false);
+            }
+            let (_, metadata) = config
+                .metadata_by_id_mut(&params.server_id)
+                .expect("resolved metadata");
+            metadata.enabled = enabled;
+            if enabled && metadata.risk_level == McpRiskLevel::High {
+                metadata.risk_acknowledged = true;
+            }
+            config
+                .rovai
+                .assignments
+                .retain(|assignment| assignment.server_id != params.server_id);
+            config
+                .rovai
+                .assignments
+                .extend(members.into_iter().map(|agent_id| McpAssignment {
+                    server_id: params.server_id.clone(),
+                    agent_id,
+                }));
+            Ok(true)
+        })
     }
 
     pub fn repair_permissions(&self) -> Result<()> {
@@ -1209,9 +1349,7 @@ fn materialize_preserved_values(
         // Unrelated edits cannot erase a hidden value through an omitted/blank field.
         if let Some(stored) = stored {
             for (key, value) in stored {
-                if (field == "headers" || sensitive_key(key))
-                    && values.get(key).is_none_or(String::is_empty)
-                {
+                if sensitive_value(key, value) && values.get(key).is_none_or(String::is_empty) {
                     values.insert(key.clone(), value.clone());
                 }
             }
@@ -1566,13 +1704,13 @@ pub(crate) fn redact_definition(
 
 fn redact_values(
     values: &BTreeMap<String, String>,
-    headers: bool,
+    _headers: bool,
     masked_value: &str,
 ) -> BTreeMap<String, String> {
     values
         .iter()
         .map(|(key, value)| {
-            let sensitive = headers || sensitive_key(key);
+            let sensitive = sensitive_value(key, value);
             (
                 key.clone(),
                 if sensitive {
@@ -1587,6 +1725,43 @@ fn redact_values(
 
 fn is_preservation_marker(value: &str) -> bool {
     value == PRESERVE_STORED_VALUE_MARKER || value == READ_ONLY_MASK
+}
+
+fn sensitive_value(key: &str, value: &str) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    // Classification only: never trim or rewrite stored values or reference syntax.
+    let reference = value.trim();
+    let reference = reference
+        .strip_prefix("Bearer ")
+        .or_else(|| reference.strip_prefix("Basic "))
+        .unwrap_or(reference);
+    if let Some(name) = reference
+        .strip_prefix("${")
+        .and_then(|s| s.strip_suffix('}'))
+    {
+        let mut chars = name.chars();
+        if chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return false;
+        }
+    }
+    sensitive_key(key)
+        || [
+            "Bearer ",
+            "Basic ",
+            "github_pat_",
+            "ghp_",
+            "gho_",
+            "sk-",
+            "xoxb-",
+        ]
+        .iter()
+        .any(|prefix| value.starts_with(prefix))
 }
 
 fn sensitive_key(key: &str) -> bool {
@@ -2108,6 +2283,57 @@ mod slow_tests {
         assert!(server.definition_json.contains(READ_ONLY_MASK));
         assert!(!server.definition_json.contains("Bearer secret"));
         let server_id = server.server_id.clone();
+        let before_reveal = fs::read(store.path()).unwrap();
+        let revealed = store
+            .reveal(RevealMcpServerParams {
+                server_id: server_id.clone(),
+                expected_config_digest: config.config_digest.clone(),
+            })
+            .unwrap();
+        let McpRevealResult::Ok {
+            definition_json, ..
+        } = revealed
+        else {
+            panic!("selected reveal must succeed")
+        };
+        let revealed: serde_json::Value = serde_json::from_str(&definition_json).unwrap();
+        assert!(revealed["mcpServers"].as_object().unwrap().len() == 1);
+        assert!(revealed["mcpServers"]["remote"]["headers"]["Authorization"] == "Bearer secret");
+        assert!(matches!(
+            store
+                .reveal(RevealMcpServerParams {
+                    server_id: server_id.clone(),
+                    expected_config_digest: "stale".into()
+                })
+                .unwrap(),
+            McpRevealResult::Conflict { .. }
+        ));
+        assert!(matches!(
+            store
+                .reveal(RevealMcpServerParams {
+                    server_id: "missing".into(),
+                    expected_config_digest: config.config_digest.clone()
+                })
+                .unwrap(),
+            McpRevealResult::Invalid { .. }
+        ));
+        assert!(fs::read(store.path()).unwrap() == before_reveal);
+        assert!(
+            !serde_json::to_string(&store.get(&agents()).unwrap())
+                .unwrap()
+                .contains("Bearer secret")
+        );
+        // Ordinary headers and supported references remain readable; whitespace is not mutated.
+        let values = BTreeMap::from([
+            ("Authorization".into(), "Bearer ${DOCS_TOKEN}".into()),
+            ("X-Region".into(), "  cn  ".into()),
+            ("X-Empty".into(), "".into()),
+            ("Custom".into(), "Bearer secret".into()),
+        ]);
+        let values = redact_values(&values, true, READ_ONLY_MASK);
+        assert!(values["Authorization"] == "Bearer ${DOCS_TOKEN}");
+        assert!(values["X-Region"] == "  cn  " && values["X-Empty"].is_empty());
+        assert!(values["Custom"] == READ_ONLY_MASK);
         let mut config = *config;
         // Name/endpoint-only edits, missing fields and blank placeholders preserve stored credentials.
         for headers in [
@@ -2226,7 +2452,63 @@ mod slow_tests {
                 &agents(),
             )
             .unwrap();
-        assert!(matches!(acknowledged, McpMutationResult::Ok { .. }));
+        let McpMutationResult::Ok { config, .. } = acknowledged else {
+            panic!("acknowledged activation must succeed")
+        };
+        let before = fs::read(store.path()).unwrap();
+        let invalid = store
+            .set_members(
+                SetMcpMembersParams {
+                    expected_config_digest: config.config_digest.clone(),
+                    server_id: browser.server_id.clone(),
+                    agent_ids: vec!["unknown".into()],
+                    acknowledge_high_risk: true,
+                },
+                &agents(),
+            )
+            .unwrap();
+        assert!(matches!(invalid, McpMutationResult::Invalid { .. }));
+        assert!(fs::read(store.path()).unwrap() == before);
+        let cleared = store
+            .set_members(
+                SetMcpMembersParams {
+                    expected_config_digest: config.config_digest.clone(),
+                    server_id: browser.server_id.clone(),
+                    agent_ids: vec![],
+                    acknowledge_high_risk: false,
+                },
+                &agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = cleared else {
+            panic!("clear members")
+        };
+        let item = config
+            .servers
+            .iter()
+            .find(|s| s.server_id == browser.server_id)
+            .unwrap();
+        assert!(!item.enabled && item.assigned_agent_ids.is_empty());
+        let assigned = store
+            .set_members(
+                SetMcpMembersParams {
+                    expected_config_digest: config.config_digest,
+                    server_id: browser.server_id.clone(),
+                    agent_ids: vec!["agent_2".into(), "agent_2".into()],
+                    acknowledge_high_risk: false,
+                },
+                &agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = assigned else {
+            panic!("member selection activates atomically")
+        };
+        let item = config
+            .servers
+            .iter()
+            .find(|s| s.server_id == browser.server_id)
+            .unwrap();
+        assert!(item.enabled && item.assigned_agent_ids == ["agent_2"]);
         let _ = fs::remove_dir_all(root);
     }
 

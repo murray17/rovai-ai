@@ -2,15 +2,18 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode 
 
 export type CapabilityFilter = 'all' | 'enabled' | 'disabled'
 const WIDTH_KEY = 'rovai.capability-list-width.v1'
-export const DEFAULT_CAPABILITY_WIDTH = 280
+export const DEFAULT_CAPABILITY_WIDTH = 320
+export function defaultCapabilityWidth(viewport: number): number {
+  return viewport >= 2300 ? 400 : viewport >= 1600 ? 360 : DEFAULT_CAPABILITY_WIDTH
+}
 export function capabilityListWidth(preferred: number, available: number): number {
   return Math.round(
     Math.max(
       240,
       Math.min(
         Number.isFinite(preferred) ? preferred : DEFAULT_CAPABILITY_WIDTH,
-        460,
-        Math.max(240, available - 361)
+        560,
+        Math.max(240, available - 391)
       )
     )
   )
@@ -31,27 +34,33 @@ export function CapabilityWorkspace({
   importAction,
   list,
   children,
-  selectionKey
+  selectionKey,
+  header
 }: {
   title: 'MCP' | 'Skills'
   count: ReactNode
   search: string
   onSearch(value: string): void
-  filter: CapabilityFilter
-  onFilter(value: CapabilityFilter): void
+  filter?: CapabilityFilter
+  onFilter?(value: CapabilityFilter): void
   onAdd(): void
   addDisabled?: boolean
   importAction?: ReactNode
   list: ReactNode
   children: ReactNode
   selectionKey: string | null
+  header?: ReactNode
 }): React.JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const divider = useRef<HTMLDivElement>(null)
-  const detail = useRef<HTMLElement>(null)
+  const detail = useRef<HTMLDivElement>(null)
   const previousSelection = useRef<string | null>(null)
-  const drag = useRef<{ pointerId: number; startX: number; width: number } | null>(null)
-  const preferred = useRef(DEFAULT_CAPABILITY_WIDTH)
+  const drag = useRef<{
+    pointerId: number
+    startX: number
+    width: number
+  } | null>(null)
+  const preferred = useRef<number | null>(null)
   const available = useRef(0)
   const currentWidth = useRef(DEFAULT_CAPABILITY_WIDTH)
   const [compact, setCompact] = useState(false)
@@ -64,7 +73,7 @@ export function CapabilityWorkspace({
     divider.current?.setAttribute('aria-valuenow', String(width))
     divider.current?.setAttribute(
       'aria-valuemax',
-      String(Math.max(240, Math.min(460, Math.floor(available.current - 361))))
+      String(Math.max(240, Math.min(560, Math.floor(available.current - 391))))
     )
     divider.current?.setAttribute('aria-valuetext', `列表宽度 ${width} 像素`)
     if (save) {
@@ -79,14 +88,14 @@ export function CapabilityWorkspace({
   useEffect(() => {
     try {
       const stored = Number(window.localStorage.getItem(WIDTH_KEY))
-      if (stored >= 240 && stored <= 460) preferred.current = stored
+      if (stored >= 240 && stored <= 560) preferred.current = stored
     } catch {
       /* Local layout is available without storage. */
     }
     const measure = (): void => {
       available.current = root.current?.getBoundingClientRect().width ?? 0
       setCompact(available.current < 620)
-      setWidth(preferred.current, false)
+      setWidth(preferred.current ?? defaultCapabilityWidth(window.innerWidth), false)
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -120,7 +129,11 @@ export function CapabilityWorkspace({
       className="capability-workspace"
       data-compact={compact}
       data-pane={showDetail ? 'detail' : 'list'}
-      style={{ '--capability-list-width': `${DEFAULT_CAPABILITY_WIDTH}px` } as CSSProperties}
+      style={
+        {
+          '--capability-list-width': `${DEFAULT_CAPABILITY_WIDTH}px`
+        } as CSSProperties
+      }
     >
       <aside className="capability-library" id={`${id}-list`} aria-label={`${title} 列表`}>
         <header className="capability-library-heading">
@@ -138,7 +151,7 @@ export function CapabilityWorkspace({
               }}
               disabled={addDisabled}
             >
-              ＋ 添加
+              {title === 'Skills' ? '↓ 导入' : '＋ 添加'}
             </button>
             {importAction}
           </div>
@@ -153,19 +166,21 @@ export function CapabilityWorkspace({
             onChange={(event) => onSearch(event.target.value)}
           />
         </label>
-        <div className="capability-filters" role="group" aria-label={`${title} 启用状态`}>
-          {(['all', 'enabled', 'disabled'] as const).map((value) => (
-            <button
-              type="button"
-              key={value}
-              aria-pressed={filter === value}
-              aria-controls={`${id}-items`}
-              onClick={() => onFilter(value)}
-            >
-              {{ all: '全部', enabled: '已启用', disabled: '已停用' }[value]}
-            </button>
-          ))}
-        </div>
+        {filter !== undefined && (
+          <div className="capability-filters" role="group" aria-label={`${title} 启用状态`}>
+            {(['all', 'enabled', 'disabled'] as const).map((value) => (
+              <button
+                type="button"
+                key={value}
+                aria-pressed={filter === value}
+                aria-controls={`${id}-items`}
+                onClick={() => onFilter?.(value)}
+              >
+                {{ all: '全部', enabled: '已启用', disabled: '已停用' }[value]}
+              </button>
+            ))}
+          </div>
+        )}
         <div
           id={`${id}-items`}
           className="capability-items"
@@ -185,7 +200,7 @@ export function CapabilityWorkspace({
           aria-label="调整列表宽度"
           aria-orientation="vertical"
           aria-valuemin={240}
-          aria-valuemax={460}
+          aria-valuemax={560}
           aria-valuenow={DEFAULT_CAPABILITY_WIDTH}
           aria-controls={`${id}-list ${id}-detail`}
           title="拖动调整宽度，双击复位；方向键也可调整"
@@ -208,7 +223,13 @@ export function CapabilityWorkspace({
           onPointerUp={() => finish()}
           onPointerCancel={() => finish(true)}
           onLostPointerCapture={() => finish()}
-          onDoubleClick={() => setWidth(DEFAULT_CAPABILITY_WIDTH, true)}
+          onDoubleClick={() => {
+            preferred.current = null
+            try {
+              window.localStorage.removeItem(WIDTH_KEY)
+            } catch {}
+            setWidth(defaultCapabilityWidth(window.innerWidth), false)
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               finish(true)
@@ -216,15 +237,23 @@ export function CapabilityWorkspace({
             }
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return
             event.preventDefault()
+            if (event.key === 'Enter') {
+              preferred.current = null
+              try {
+                window.localStorage.removeItem(WIDTH_KEY)
+              } catch {
+                /* In-window reset remains available. */
+              }
+              setWidth(defaultCapabilityWidth(window.innerWidth), false)
+              return
+            }
             setWidth(
               event.key === 'Home'
                 ? 240
                 : event.key === 'End'
-                  ? 460
-                  : event.key === 'Enter'
-                    ? DEFAULT_CAPABILITY_WIDTH
-                    : currentWidth.current +
-                      (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 24 : 8),
+                  ? 560
+                  : currentWidth.current +
+                    (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 24 : 8),
               true
             )
           }}
@@ -254,7 +283,10 @@ export function CapabilityWorkspace({
         >
           ← 返回列表
         </button>
-        <div className="capability-detail-inner">{children}</div>
+        {header && <div className="capability-detail-header">{header}</div>}
+        <div className="capability-detail-scroll" ref={detail}>
+          <div className="capability-detail-inner">{children}</div>
+        </div>
       </section>
     </div>
   )
@@ -272,7 +304,7 @@ export function CapabilityListItem({
   name: string
   mark: ReactNode
   source?: string
-  enabled: boolean
+  enabled?: boolean
   summary: string
   selected: boolean
   onSelect(): void
@@ -291,7 +323,13 @@ export function CapabilityListItem({
         <span className="capability-item-heading">
           <span className="capability-item-name">{name}</span>
           {source && <span className="capability-source">{source}</span>}
-          <span className="capability-item-state">{enabled ? '已启用' : '已停用'}</span>
+          {enabled !== undefined && (
+            <span
+              className="capability-item-state"
+              data-enabled={enabled}
+              aria-label={enabled ? '已启用' : '已停用'}
+            />
+          )}
         </span>
         <span className="capability-item-summary">{summary}</span>
       </span>

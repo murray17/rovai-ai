@@ -225,7 +225,7 @@ describe('Skill settings', () => {
       createElement(SkillListItem, { skill: imported, selected: true, onSelect: () => {} })
     )
     expect(markup).not.toContain('capability-source')
-    expect(markup).toContain('>已启用<')
+    expect(markup).toContain('aria-label="已启用"')
     expect(markup).toContain('aria-current="true"')
     expect(markup).not.toContain('/private/example')
   })

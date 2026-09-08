@@ -7,6 +7,7 @@ import type {
   SkillView,
   StoredCommandResult
 } from '@contracts'
+import { NewConversationQuickHelp } from './NewConversationQuickHelp'
 import { MemberAvatar } from './MemberAvatar'
 import { SkillIdentityMark } from './SkillIdentityMark'
 import { SkillContentPreview } from './SkillContentPreview'
@@ -37,6 +38,11 @@ export function SkillSettings(): React.JSX.Element {
   const [confirmation, setConfirmation] = useState<'delete' | 'update' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const locked = useRef(false)
+  const deleteTrigger = useRef<HTMLButtonElement>(null)
+  const cancelConfirmation = (): void => {
+    setConfirmation(null)
+    requestAnimationFrame(() => deleteTrigger.current?.focus())
+  }
   const generation = useRef(0)
   const editorSession = useRef(0)
   const [error, setError] = useState<string | null>(null)
@@ -164,7 +170,11 @@ export function SkillSettings(): React.JSX.Element {
     void run('toggle', async () => {
       const result = await window.rovai.request<StoredCommandResult>('skills.setEnabled', {
         commandId: crypto.randomUUID(),
-        command: { skillId: skill.id, expectedVersion: skill.version, enabled: !skill.enabled }
+        command: {
+          skillId: skill.id,
+          expectedVersion: skill.version,
+          enabled: !skill.enabled
+        }
       })
       assertCommandApplied(result)
       setSkills((values) => (values ? patchSkillEnabledResult(values, skill.id, result) : values))
@@ -174,10 +184,16 @@ export function SkillSettings(): React.JSX.Element {
     void run('groups', async () => {
       const result = await window.rovai.request<StoredCommandResult>('skills.setGroupAssignments', {
         commandId: crypto.randomUUID(),
-        command: { skillId: skill.id, expectedVersion: skill.version, groupKeys: keys }
+        command: {
+          skillId: skill.id,
+          expectedVersion: skill.version,
+          groupKeys: keys
+        }
       })
       assertCommandApplied(result)
-      const updated = await window.rovai.request<SkillView>('skills.get', { skillId: skill.id })
+      const updated = await window.rovai.request<SkillView>('skills.get', {
+        skillId: skill.id
+      })
       setSkills((values) => (values ? replaceSkillRow(values, updated) : values))
     })
   }
@@ -209,6 +225,148 @@ export function SkillSettings(): React.JSX.Element {
       onAdd={() => choose('new')}
       addDisabled={busy !== null}
       selectionKey={selectedId === 'new' ? 'new' : (selected?.id ?? null)}
+      header={
+        selectedId === 'new' ? (
+          <>
+            <header className="capability-detail-heading">
+              <div>
+                <h2>导入 Skill</h2>
+                <p className="capability-note">从本地文件夹或 GitHub 导入</p>
+              </div>
+              <div className="capability-actions">
+                <button
+                  className="quiet-button compact"
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => choose('')}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={
+                    busy !== null || !candidate || candidate.importAction === 'official_conflict'
+                  }
+                  onClick={() =>
+                    candidate?.importAction === 'update' ? setConfirmation('update') : commit(false)
+                  }
+                >
+                  {busy === 'import'
+                    ? '正在保存…'
+                    : candidate?.importAction === 'update'
+                      ? '更新 Skill'
+                      : '导入 Skill'}
+                </button>
+              </div>
+            </header>
+            {confirmation === 'update' && candidate && (
+              <div
+                className="capability-confirm capability-header-confirm"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setConfirmation(null)
+                }}
+              >
+                <span>更新 {candidate.name}？现有启停状态和生效组将保留。</span>
+                <div className="capability-actions">
+                  <button
+                    autoFocus
+                    className="quiet-button compact"
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => setConfirmation(null)}
+                  >
+                    取消更新
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => commit(true)}
+                  >
+                    确认更新
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        ) : selected ? (
+          <>
+            <header className="capability-detail-heading">
+              <div className="capability-title">
+                <h2>{selected.name}</h2>
+                {skillSourcePresentation(selected).badgeLabel && (
+                  <span className="capability-source">
+                    {skillSourcePresentation(selected).badgeLabel}
+                  </span>
+                )}
+                <span className="capability-note">r{selected.currentRevision.revision}</span>
+              </div>
+              <div className="capability-actions">
+                <CapabilityToggle
+                  name={selected.name}
+                  enabled={selected.enabled}
+                  disabled={busy !== null}
+                  onToggle={() => toggle(selected)}
+                />
+                {selected.origin === 'imported' && confirmation !== 'delete' && (
+                  <>
+                    <span className="capability-action-divider" aria-hidden="true" />
+                    <button
+                      ref={deleteTrigger}
+                      className="quiet-button compact danger-text"
+                      type="button"
+                      aria-label="删除 Skill"
+                      disabled={busy !== null}
+                      onClick={() => setConfirmation('delete')}
+                    >
+                      删除
+                    </button>
+                  </>
+                )}
+              </div>
+            </header>
+            {confirmation === 'delete' && selected.origin === 'imported' && (
+              <div
+                className="capability-confirm capability-header-confirm"
+                role="group"
+                aria-label={`删除 ${selected.name}`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    cancelConfirmation()
+                  }
+                }}
+              >
+                <span>{deleteSkillConfirmationCopy(selected.name).title}</span>
+                <div className="capability-actions">
+                  <button
+                    autoFocus
+                    className="quiet-button compact"
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={cancelConfirmation}
+                  >
+                    保留
+                  </button>
+                  <button
+                    className="danger-button"
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => deleteSkill(selected)}
+                  >
+                    {busy === 'delete' ? '正在删除…' : '确认删除'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <header className="capability-detail-heading">
+            <h2>Skills</h2>
+          </header>
+        )
+      }
       list={
         <>
           {skills === null ? (
@@ -227,18 +385,6 @@ export function SkillSettings(): React.JSX.Element {
           ) : (
             <div className="capability-empty">
               {allSkills.length ? '没有匹配的 Skill。' : '还没有 Skill。'}
-              {(search || filter !== 'all') && (
-                <button
-                  className="quiet-button compact"
-                  type="button"
-                  onClick={() => {
-                    setSearch('')
-                    setFilter('all')
-                  }}
-                >
-                  清除筛选
-                </button>
-              )}
             </div>
           )}
         </>
@@ -257,21 +403,7 @@ export function SkillSettings(): React.JSX.Element {
       />
       {selectedId === 'new' ? (
         <>
-          <header className="capability-detail-heading">
-            <h2>添加 Skill</h2>
-            <button
-              className="quiet-button compact"
-              type="button"
-              disabled={busy !== null}
-              onClick={() => {
-                setInspection(null)
-                choose('')
-              }}
-            >
-              取消
-            </button>
-          </header>
-          <div className="capability-tabs" role="group" aria-label="Skill 添加方式">
+          <div className="capability-tabs" role="group" aria-label="Skill 导入方式">
             <button
               type="button"
               aria-pressed={importTab === 'local'}
@@ -322,6 +454,9 @@ export function SkillSettings(): React.JSX.Element {
                   value={githubInput}
                   placeholder="https://github.com/owner/repository"
                   onChange={(event) => setGithubInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !busy && githubInput.trim()) inspect()
+                  }}
                 />
               </label>
               <button
@@ -330,7 +465,7 @@ export function SkillSettings(): React.JSX.Element {
                 disabled={busy !== null || !githubInput.trim()}
                 onClick={inspect}
               >
-                {busy === 'inspect' ? '正在读取…' : '预览 Skill'}
+                {busy === 'inspect' ? '正在读取…' : '读取'}
               </button>
             </div>
           )}
@@ -370,54 +505,6 @@ export function SkillSettings(): React.JSX.Element {
                       expectedDigest: candidate.contentDigest
                     }}
                   />
-                  {confirmation === 'update' ? (
-                    <div className="capability-confirm">
-                      <strong>{updateSkillConfirmationCopy(candidate.name).title}</strong>
-                      <p>更新后保留现有启停状态和生效组。</p>
-                      <div className="capability-actions">
-                        <button
-                          className="quiet-button compact"
-                          type="button"
-                          disabled={busy !== null}
-                          onClick={() => setConfirmation(null)}
-                        >
-                          取消
-                        </button>
-                        <button
-                          className="primary-button"
-                          type="button"
-                          disabled={busy !== null}
-                          onClick={() => commit(true)}
-                        >
-                          确认更新
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="capability-save">
-                      <span className="capability-note">
-                        {candidate.importAction === 'create'
-                          ? '默认启用 · 全部生效组'
-                          : importActionLabel(candidate.importAction)}
-                      </span>
-                      <button
-                        type="button"
-                        className="primary-button"
-                        disabled={busy !== null || candidate.importAction === 'official_conflict'}
-                        onClick={() =>
-                          candidate.importAction === 'update'
-                            ? setConfirmation('update')
-                            : commit(false)
-                        }
-                      >
-                        {busy === 'import'
-                          ? '正在保存…'
-                          : candidate.importAction === 'update'
-                            ? '更新 Skill'
-                            : '导入 Skill'}
-                      </button>
-                    </div>
-                  )}
                 </section>
               ) : (
                 <p className="capability-note">没有可导入的 Skill。</p>
@@ -435,23 +522,6 @@ export function SkillSettings(): React.JSX.Element {
         </>
       ) : selected ? (
         <>
-          <header className="capability-detail-heading">
-            <div className="capability-title">
-              <h2>{selected.name}</h2>
-              {skillSourcePresentation(selected).badgeLabel && (
-                <span className="capability-source">
-                  {skillSourcePresentation(selected).badgeLabel}
-                </span>
-              )}
-              <span className="capability-note">r{selected.currentRevision.revision}</span>
-            </div>
-            <CapabilityToggle
-              name={selected.name}
-              enabled={selected.enabled}
-              disabled={busy !== null}
-              onToggle={() => toggle(selected)}
-            />
-          </header>
           <div className="capability-tabs" role="group" aria-label="Skill 详情">
             <button
               type="button"
@@ -483,46 +553,9 @@ export function SkillSettings(): React.JSX.Element {
               onChange={(keys) => assign(selected, keys)}
             />
           )}
-          {selected.origin === 'imported' && (
-            <section className="capability-section">
-              {confirmation === 'delete' ? (
-                <div className="capability-confirm">
-                  <strong>{deleteSkillConfirmationCopy(selected.name).title}</strong>
-                  <p>{deleteSkillConfirmationCopy(selected.name).description}</p>
-                  <div className="capability-actions">
-                    <button
-                      className="quiet-button compact"
-                      type="button"
-                      disabled={busy !== null}
-                      onClick={() => setConfirmation(null)}
-                    >
-                      取消
-                    </button>
-                    <button
-                      className="danger-button"
-                      type="button"
-                      disabled={busy !== null}
-                      onClick={() => deleteSkill(selected)}
-                    >
-                      {busy === 'delete' ? '正在删除…' : '确认删除'}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  className="quiet-button compact danger-text"
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => setConfirmation('delete')}
-                >
-                  删除 Skill
-                </button>
-              )}
-            </section>
-          )}
         </>
       ) : (
-        <div className="capability-empty">从左侧选择 Skill，或添加新的 Skill。</div>
+        <div className="capability-empty">从左侧选择 Skill，或导入新的 Skill。</div>
       )}
     </CapabilityWorkspace>
   )
@@ -564,7 +597,12 @@ export function SkillGroupChoices({
   return (
     <section>
       <div className="capability-scope-heading">
-        <h3>生效组</h3>
+        <div className="capability-title">
+          <h3>生效组</h3>
+          <NewConversationQuickHelp label="Skill 生效组说明">
+            新导入的 Skill 默认对全部组生效。停用后保留已选组。
+          </NewConversationQuickHelp>
+        </div>
         <button
           type="button"
           className="quiet-button compact"
@@ -622,7 +660,6 @@ export function SkillGroupChoices({
           </button>
         ))}
       </div>
-      <p className="capability-note">关闭 Skill 会保留这里的选择。</p>
     </section>
   )
 }
@@ -863,7 +900,11 @@ export function formatBytes(value: number): string {
 
 function sourceTypeLabel(sourceType: SkillView['currentRevision']['sourceType']): string {
   return (
-    { bundled: '随 Rovai 安装', local_folder: '本地文件夹导入', github: 'GitHub 导入' } as const
+    {
+      bundled: '随 Rovai 安装',
+      local_folder: '本地文件夹导入',
+      github: 'GitHub 导入'
+    } as const
   )[sourceType]
 }
 

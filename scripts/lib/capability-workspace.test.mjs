@@ -13,7 +13,7 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/capability-workspace')
 
-test('capability workspaces offer peer add/import actions and discard unfinished forms on navigation', { timeout: 60_000 }, async (t) => {
+test('capability workspaces keep imports, credential reveal and long content usable in one pane', { timeout: 120_000 }, async (t) => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-capability-workspace-test-'))
   let child
@@ -31,7 +31,7 @@ test('capability workspaces offer peer add/import actions and discard unfinished
     let output = ''
     child.stdout.on('data', chunk => { output += chunk.toString() })
     child.stderr.on('data', chunk => { output += chunk.toString() })
-    const timeout = setTimeout(() => child.kill('SIGKILL'), 45_000)
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 90_000)
     let code
     try { [code] = await closed } finally { clearTimeout(timeout) }
     assert.equal(code, 0, `Capability interaction regression failed:\n${output}`)
