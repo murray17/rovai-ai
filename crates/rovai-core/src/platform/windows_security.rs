@@ -27,6 +27,17 @@ use windows_sys::Win32::{
 const ACCESS_ALLOWED_ACE_TYPE_VALUE: u8 = 0;
 const LOCAL_SYSTEM_SID: &str = "S-1-5-18";
 
+#[derive(Debug)]
+struct PrivateDaclMismatch(String);
+
+impl std::fmt::Display for PrivateDaclMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for PrivateDaclMismatch {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PrivateObjectKind {
     Directory,
@@ -102,10 +113,21 @@ impl PrivateSecurityDescriptor {
         security.verify_private_policy(self.kind, &self.principal_sid)
     }
 
+    /// Only an observed DACL mismatch is repairable. Failed reads and unknown
+    /// owners must not become a permission warning or authorize an ACL rewrite.
+    pub(crate) fn file_permissions_need_repair(&self, handle: HANDLE) -> Result<bool> {
+        match self.verify_file_handle(handle) {
+            Ok(()) => Ok(false),
+            Err(error) if error.is::<PrivateDaclMismatch>() => Ok(true),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) fn apply_file_dacl(&self, handle: HANDLE) -> Result<()> {
         if self.kind == PrivateObjectKind::NamedPipe {
             bail!("named-pipe descriptors cannot repair filesystem objects");
         }
+        SecurityInfo::from_file_handle(handle)?.verify_file_owner(&self.principal_sid)?;
         let mut present = 0;
         let mut defaulted = 0;
         let mut dacl = null_mut();
@@ -217,11 +239,16 @@ impl SecurityInfo {
         })
     }
 
-    fn verify_private_policy(&self, kind: PrivateObjectKind, current_user_sid: &str) -> Result<()> {
-        if kind != PrivateObjectKind::NamedPipe
-            && (self.owner.is_null() || sid_to_string(self.owner)? != current_user_sid)
-        {
+    fn verify_file_owner(&self, current_user_sid: &str) -> Result<()> {
+        if self.owner.is_null() || sid_to_string(self.owner)? != current_user_sid {
             bail!("filesystem object owner is not the current Windows user");
+        }
+        Ok(())
+    }
+
+    fn verify_private_policy(&self, kind: PrivateObjectKind, current_user_sid: &str) -> Result<()> {
+        if kind != PrivateObjectKind::NamedPipe {
+            self.verify_file_owner(current_user_sid)?;
         }
 
         let mut control = 0_u16;
@@ -236,10 +263,15 @@ impl SecurityInfo {
                 .context("failed to inspect Windows security descriptor control flags");
         }
         if control & SE_DACL_PROTECTED == 0 {
-            bail!("filesystem object DACL is not protected from inheritance");
+            return Err(PrivateDaclMismatch(
+                "filesystem object DACL is not protected from inheritance".to_string(),
+            )
+            .into());
         }
         if self.dacl.is_null() {
-            bail!("filesystem object has no explicit DACL");
+            return Err(
+                PrivateDaclMismatch("filesystem object has no explicit DACL".to_string()).into(),
+            );
         }
 
         let mut acl_info = ACL_SIZE_INFORMATION::default();
@@ -258,10 +290,11 @@ impl SecurityInfo {
                 .context("failed to inspect Windows DACL entries");
         }
         if acl_info.AceCount != 2 {
-            bail!(
+            return Err(PrivateDaclMismatch(format!(
                 "filesystem object DACL has {} entries; expected exactly 2",
                 acl_info.AceCount
-            );
+            ))
+            .into());
         }
 
         let expected_flags = match kind {
@@ -296,7 +329,7 @@ impl SecurityInfo {
                 || ace.Header.AceFlags != expected_flags
                 || ace.Mask != expected_mask
             {
-                bail!(
+                return Err(PrivateDaclMismatch(format!(
                     "private object DACL contains an unexpected access entry: type={}, flags={:#04x}, mask={:#010x}; expected type={}, flags={:#04x}, mask={:#010x}",
                     ace.Header.AceType,
                     ace.Header.AceFlags,
@@ -304,7 +337,8 @@ impl SecurityInfo {
                     ACCESS_ALLOWED_ACE_TYPE_VALUE,
                     expected_flags,
                     expected_mask
-                );
+                ))
+                .into());
             }
             let sid = std::ptr::addr_of!(ace.SidStart).cast_mut().cast();
             entries.push(sid_to_string(sid)?);
@@ -313,7 +347,11 @@ impl SecurityInfo {
         let mut expected = [LOCAL_SYSTEM_SID.to_string(), current_user_sid.to_string()];
         expected.sort();
         if entries != expected {
-            bail!("private object DACL is not limited to SYSTEM and the admitted principal");
+            return Err(PrivateDaclMismatch(
+                "private object DACL is not limited to SYSTEM and the admitted principal"
+                    .to_string(),
+            )
+            .into());
         }
         Ok(())
     }

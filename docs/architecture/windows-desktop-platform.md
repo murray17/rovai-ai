@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-09-04
+last_updated: 2026-09-08
 ---
 
 # Windows Desktop Platform
@@ -71,6 +71,11 @@ transport-independent.
 [Windows Private Storage v2](../contracts/windows-private-storage-v2.md) places Core and Electron state under separate
 `%LOCALAPPDATA%\Rovai AI` children. Private objects are created with a protected DACL before becoming visible. Opened
 handle identity, verified ancestry and reparse policy—not lowercase strings—own security and deduplication.
+
+MCP 管理初始化按[外部 MCP 配置边界](foundational-invariants.md#skills-external-mcp)默认准备权限：首次创建前
+收紧当前用户拥有的既有父目录；加载格式有效的既有配置时可仅修复其父目录与文件 DACL，随后重新检查，
+不改写 JSON。通用私有存储准入仍拒绝未知对象。权限审计使用元数据句柄，读取失败保留为检查失败；
+诊断自检不调用初始化或修复。
 
 The derived legacy Camp Published Attachment View is the explicit `<data_dir>\runtime-files` private child; Windows never
 uses the macOS Home-based instance directory. Root/managed containers use native private-directory admission, and Runtime

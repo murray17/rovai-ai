@@ -159,3 +159,9 @@ jobs:
           cargo test -p rovai-core --lib
           --target x86_64-pc-windows-msvc
           private_json_replacement
+
+      - name: Exercise Windows MCP configuration permissions
+        run: >-
+          cargo test -p rovai-core --features slow-tests --lib
+          --target x86_64-pc-windows-msvc
+          mcp::slow_tests::
