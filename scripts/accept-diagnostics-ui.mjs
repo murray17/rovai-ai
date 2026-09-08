@@ -12,7 +12,7 @@ const outputDir = process.env.ROVAI_DIAGNOSTICS_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-diagnostics-ui-captures-'))
 const firstPort = Number(process.env.ROVAI_DIAGNOSTICS_ACCEPT_DEBUG_PORT ?? 9491)
 // Cursor remains in the catalog but has no qualified macOS platform evidence.
-const expectedRuntimeCount = 12
+const expectedRuntimeCount = 13
 const expectedCheckCount = 6 + expectedRuntimeCount
 
 await mkdir(outputDir, { recursive: true })
@@ -144,7 +144,8 @@ async function createFixture(name, withPermissionIssue) {
   const fixture = join(fixtureRoot, name)
   const dataDir = join(fixture, 'user-data')
   const homeDir = join(fixture, 'home')
-  const mcpDirectory = join(homeDir, '.rovai')
+  // Isolated Main pins MCP beside its own database, independently of HOME.
+  const mcpDirectory = dataDir
   const mcpPath = join(mcpDirectory, 'mcp.json')
   await mkdir(dataDir, { recursive: true })
   await mkdir(homeDir, { recursive: true })
