@@ -1,6 +1,7 @@
 import { Activity, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SkillSettings } from '../../../apps/desktop/src/renderer/src/SkillSettings'
+import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
 import { McpSettings } from '../../../apps/desktop/src/renderer/src/McpSettings'
 import { agent, server, skillFixture } from './data'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -176,8 +177,9 @@ Object.assign(window, {
 function Fixture() {
   const [page, setPage] = useState<'mcp' | 'skills'>('skills')
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
-      <aside style={{ width: 270, flexShrink: 0, padding: '28px 18px', background: 'var(--rail)' }}>
+    <div className="app-shell">
+      <WindowDragStrip page="settings" />
+      <aside style={{ gridColumn: 1, gridRow: '1 / -1', padding: '28px 18px', background: 'var(--rail)' }}>
         <strong>设置</strong>
         <div style={{ display: 'grid', gap: 8, marginTop: 24 }}>
           <button className="quiet-button" id="nav-skills" onClick={() => setPage('skills')}>
