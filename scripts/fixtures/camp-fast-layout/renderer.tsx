@@ -131,6 +131,11 @@ Object.assign(window, { fastTest: {
   refresh: () => updateSnapshot(current => ({ ...current, throughGlobalSequence: current.throughGlobalSequence + 1,
     members: current.members.map(member => ({ ...member, fast: member.fast ? {...member.fast} : undefined })) })),
   showExecution: () => {
+    currentAgents = currentAgents.map(agent => agent.agentId === 'agent-0' ? { ...agent,
+      runtimeConfiguration: { ...agent.runtimeConfiguration!,
+        model: { mode: 'explicit', modelId: 'claude-sonnet-4-6', options: { effort: 'high' } } }
+    } : agent)
+    updateAgents(currentAgents)
     const runs: AgentRunView[] = agents.slice(0, 3).map(agent => ({
       id: `run-${agent.agentId}`, campTurnId: `turn-${agent.agentId}`, conversationId: `conversation-${agent.agentId}`,
       agentId: agent.agentId, taskId: null, responsibilityKey: `direct:${agent.agentId}`, responsibilityGeneration: 0,
@@ -142,15 +147,17 @@ Object.assign(window, { fastTest: {
       hasUnsettledExternalEffects: false, workspace: {path: '/fixture/workspace'}, startingGitObservation: null,
       endingGitObservation: null, version: 1, createdAt: now, startedAt: now, endedAt: null, updatedAt: now
     }))
+    runs.unshift({ ...runs[0], id: 'previous-agent-0', campTurnId: 'previous-turn-agent-0', status: 'succeeded',
+      createdAt: '2026-08-30T23:55:00Z', startedAt: '2026-08-30T23:55:00Z', endedAt: '2026-08-30T23:59:00Z' })
     updateSnapshot(current => ({...current, agentRuns: runs, turns: runs.map(run => ({
-      id: run.campTurnId, triggerType: 'camp_message', triggerId: 'fixture-message', status: 'running',
+      id: run.campTurnId, triggerType: 'camp_message', triggerId: 'fixture-message', status: run.status === 'succeeded' ? 'completed' : 'running',
       cancelRequestedAt: null, aggregateReasonCode: null, version: 1, createdAt: now, updatedAt: now, endedAt: null,
       executionBudget: {schemaVersion: 1, acceptedAt: now, deadlineAt: '2026-08-31T01:00:00Z', elapsedSeconds: 0,
         maxAgentRunResponsibilities: 20, maxAcceptedA2a: 100, allocatedAgentRunResponsibilities: 1, acceptedA2a: 0,
         exhaustedAt: null, exhaustionReason: null, exhaustionCommandId: null}
     })), executionEvidence: runs.map(run => ({
-      id: `evidence-${run.agentId}`, agentRunId: run.id, executionEpoch: 1, sequence: 1, eventType: 'agent.text.delta',
-      kind: 'narration', phase: 'updated', payload: {itemId: `message-${run.agentId}`, delta: '检查执行台 Fast、停止与收起按钮。'},
+      id: `evidence-${run.id}`, agentRunId: run.id, executionEpoch: 1, sequence: 1, eventType: 'agent.text.delta',
+      kind: 'narration', phase: 'updated', payload: {itemId: `message-${run.id}`, delta: '检查执行台 Fast、停止与收起按钮。'},
       contentBlobId: null, contentByteCount: 0, isTruncated: false, occurredAt: now
     }))}))
   },

@@ -11,7 +11,7 @@ app.setPath('sessionData', join(userData, 'session'))
 app.whenReady().then(async () => {
   const preview = process.argv.includes('--preview')
   const window = new BrowserWindow({ title: 'Rovai 执行台 · 隔离验收', width: 1440, height: 920, useContentSize: true,
-    show: true,
+    show: process.platform === 'linux' || preview || process.env.ROVAI_SHOW_EXECUTION_AVATAR_FIXTURE === '1',
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
   window.webContents.on('console-message', event => console.error(event.message))
   await window.loadFile(renderer)
@@ -50,7 +50,7 @@ app.whenReady().then(async () => {
       title: rect(title), countRect: rect(count), tooltip: document.querySelector('[role="tooltip"]')?.textContent?.trim() ?? null,
       tooltipRect: rect(document.querySelector('[role="tooltip"]')),
       header: document.querySelector('.execution-drawer-header')?.textContent,
-      panel: rect(document.querySelector('.camp-detail-popover')), composer: rect(document.querySelector('.composer')),
+      panel: rect(document.querySelector('.camp-detail-popover')), composer: rect(document.querySelector('.conversation-controls .composer-box')),
       pageOverflow: document.documentElement.scrollWidth > innerWidth,
       timelineTop: document.querySelector('.camp-timeline')?.scrollTop,
       scrollbar: rail ? getComputedStyle(rail).scrollbarWidth : null,
@@ -76,6 +76,11 @@ app.whenReady().then(async () => {
     return expanded ? state() : click(selector)
   }
   const focusWindow = async () => {
+    // Hidden macOS fixtures accept native WebContents input without stealing desktop focus.
+    if (!window.isVisible()) {
+      window.webContents.focus()
+      return
+    }
     // Native keyboard input requires a focused window; DOM activeElement alone is not enough.
     if (window.isFocused() && await run('document.hasFocus()')) return
     if (!window.isFocused()) {
@@ -119,7 +124,8 @@ app.whenReady().then(async () => {
   const assertLayout = value => {
     assert.equal(value.pageOverflow, false)
     assert.ok(value.panel.bottom <= value.composer.top + 1, 'Popover does not cover Composer')
-    assert.ok(value.title.top < value.countRect.bottom && value.countRect.top < value.title.bottom, 'Title and count stay on one line')
+    assert.equal(value.title, null, 'The execution popover does not repeat the execution-console title')
+    assert.ok(value.countRect.height > 0 && value.countRect.bottom <= value.rail.top, 'The compact execution count stays above the avatar rail')
     assert.ok(value.rects.every(rect => Math.abs(rect.y - value.rects[0].y) < 1), 'All avatars stay on one row')
     assert.ok(value.rects.every(rect => Math.abs(rect.width - 38) < 1 && Math.abs(rect.height - 38) < 1))
     assert.equal(value.scrollbar, 'none')
@@ -130,7 +136,9 @@ app.whenReady().then(async () => {
     const widths = await run(`(() => {
       const body = document.querySelector('.execution-drawer-inspector .execution-drawer-body')
       const bounds = body.getBoundingClientRect()
-      const boxes = [body, ...body.querySelectorAll('.execution-process-timeline, .execution-process-card, .execution-disclosure, .process-content, .process-copy, .tool-group-items')]
+      // Inline-code decoration can extend into card padding without clipping prose.
+      // Check the containing surfaces for overflow, then measure every text fragment below.
+      const boxes = [body, ...body.querySelectorAll('.execution-process-timeline, .execution-process-card, .tool-group-items')]
         .filter(node => node.checkVisibility() && node.getBoundingClientRect().height > 0)
         .map(node => ({ className: node.className, width: node.clientWidth, scrollWidth: node.scrollWidth }))
       const prose = [...body.querySelectorAll('.process-copy p, .process-copy pre')].filter(node => node.checkVisibility() && node.getBoundingClientRect().height > 0)
@@ -153,9 +161,9 @@ app.whenReady().then(async () => {
     assertLayout(value)
     await assertExecutionWidth()
 
-    value = await click('.composer-box')
+    value = await click('.conversation-controls .composer-box')
     assert.ok(value.panel.height > 0, 'Outside pointer interaction keeps the execution popover open')
-    await run("document.querySelector('.structured-mention-editor').focus({ preventScroll: true })")
+    await run("document.querySelector('.conversation-controls .structured-mention-editor').focus({ preventScroll: true })")
     await settle()
     value = await state()
     assert.ok(value.panel.height > 0, 'Moving focus outside keeps the execution popover open')
@@ -163,7 +171,7 @@ app.whenReady().then(async () => {
     assert.equal(value.panel.height, 0, 'Escape closes the execution popover')
     value = await click('.camp-detail-entry[data-detail="execution"]')
     assert.ok(value.panel.height > 0, 'The execution entry reopens the popover')
-    await run("document.querySelector('.structured-mention-editor').focus({ preventScroll: true })")
+    await run("document.querySelector('.conversation-controls .structured-mention-editor').focus({ preventScroll: true })")
     await settle()
     value = await key('Escape')
     assert.equal(value.panel.height, 0, 'Escape closes a manually opened execution popover')

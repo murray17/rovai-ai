@@ -106,8 +106,8 @@ export function CampDetailPopover({
     const dismissOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       if (document.querySelector('.app-dialog, [role="menu"][data-state="open"]')) return
-      // Execution details and tool results keep their existing Escape hierarchy.
-      if (event.target instanceof Element && event.target.closest('.execution-drawer')) return
+      // Tool results own their first Escape; the remaining execution surface closes here.
+      if (event.target instanceof Element && event.target.closest('.tool-call-result-scroll')) return
       event.preventDefault()
       onClose()
       triggerRef.current?.focus({ preventScroll: true })

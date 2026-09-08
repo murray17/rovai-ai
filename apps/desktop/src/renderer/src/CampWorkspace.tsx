@@ -488,15 +488,6 @@ export function agentRunCountsAsExecuting(run: Pick<AgentRunView, 'status' | 'wa
     && run.waitReason !== 'network_recovery_blocked'
 }
 
-export function agentRunRuntimeModelPresentation(
-  runtimeModel: AgentRunView['runtimeModel']
-): { modelId: string; observed: boolean } | null {
-  if (!runtimeModel) return null
-  return runtimeModel.modelId
-    ? { modelId: runtimeModel.modelId, observed: true }
-    : { modelId: 'Agent 运行时默认', observed: false }
-}
-
 export type CampMessageSendReceipt = {
   pendingInputId?: string
   publishedMessageSequence?: number
@@ -5540,7 +5531,10 @@ function ExecutionDrawer({
   }, [appliedHeight])
 
   useEffect(() => {
+    if (placement === 'inspector') return
+    const drawer = drawerRef.current
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return
       if (
         event.key === 'Escape'
         && event.target instanceof Element
@@ -5551,11 +5545,11 @@ function ExecutionDrawer({
         onClose()
       }
     }
-    drawerRef.current?.addEventListener('keydown', handleKeyDown)
+    drawer?.addEventListener('keydown', handleKeyDown)
     return () => {
-      drawerRef.current?.removeEventListener('keydown', handleKeyDown)
+      drawer?.removeEventListener('keydown', handleKeyDown)
     }
-  }, [onClose])
+  }, [onClose, placement])
 
   useLayoutEffect(() => {
     const requestedRunId = focusedRunId
@@ -5664,8 +5658,16 @@ function ExecutionDrawer({
             <div>
               <div className="execution-drawer-title-line">
                 <h2 id="execution-drawer-title">{drawerTitle}</h2>
-                {runtimeConfiguration && (
-                  <span className="execution-model-params">{runtimeConfiguration.summary}</span>
+                {(runtimeConfiguration || fastControl) && (
+                  <span className="execution-config-line">
+                    {runtimeConfiguration && (
+                      <span className="execution-model-params" title={runtimeConfiguration.summary}>{runtimeConfiguration.summary}</span>
+                    )}
+                    {fastControl && <span className="execution-drawer-fast-slot">
+                      {fastControl.value && <CampMemberFastToggle value={fastControl.value} displayName={displayName}
+                        pending={fastControl.pending} onToggle={next => { void memberFast.save(process.agentId, next) }} />}
+                    </span>}
+                  </span>
                 )}
               </div>
               <p>
@@ -5674,11 +5676,7 @@ function ExecutionDrawer({
               </p>
             </div>
           </div>
-          <div className="execution-drawer-actions">
-            {fastControl && <span className="execution-drawer-fast-slot">
-              {fastControl.value && <CampMemberFastToggle value={fastControl.value} displayName={displayName}
-                pending={fastControl.pending} onToggle={next => { void memberFast.save(process.agentId, next) }} />}
-            </span>}
+          {(placement === 'bottom' || stopViewState !== 'hidden') && <div className="execution-drawer-actions">
             {stopViewState === 'stopped' ? (
               <span className="execution-run-stop-state tone-neutral" role="status">已停止</span>
             ) : stopViewState === 'stopping' ? (
@@ -5689,7 +5687,7 @@ function ExecutionDrawer({
             {stopViewState === 'available' && resolvedFocusedRun && (
               <button
                 type="button"
-                className="quiet-button compact danger-text execution-drawer-action-button"
+                className="execution-drawer-action-button is-danger"
                 aria-label="停止当前运行"
                 onClick={() => {
                   const runId = resolvedFocusedRun.id
@@ -5704,14 +5702,18 @@ function ExecutionDrawer({
                   })
                 }}
               >
-                停止
+                <span className="execution-drawer-action-face">停止</span>
               </button>
             )}
-            <button type="button" className="quiet-button compact execution-drawer-action-button execution-drawer-collapse-button" onClick={onClose} aria-label="收起执行详情">
-              <span>收起</span>
-              <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="m4 10 4-4 4 4" /></svg>
-            </button>
-          </div>
+            {placement === 'bottom' && (
+              <button type="button" className="execution-drawer-action-button execution-drawer-collapse-button" onClick={onClose} aria-label="收起执行详情">
+                <span className="execution-drawer-action-face">
+                  <span>收起</span>
+                  <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="m4 10 4-4 4 4" /></svg>
+                </span>
+              </button>
+            )}
+          </div>}
         </header>
         <div
           ref={drawerBodyRef}
@@ -5738,7 +5740,6 @@ function ExecutionDrawer({
               const focused = run.id === resolvedFocusedRunId
               const state = agentRunPresentation(run, cancelling)
               const stateShape = runPulseStateShape(run, cancelling)
-              const runtimeModel = agentRunRuntimeModelPresentation(run.runtimeModel)
               return (
                 <li
                   className={`execution-process-stage status-${run.status}${focused ? ' is-focused' : ''}`}
@@ -5761,42 +5762,6 @@ function ExecutionDrawer({
                             <span className="current-run-badge">当前执行</span>
                           )}
                         </div>
-                        <details className="execution-run-information">
-                          <summary>运行信息</summary>
-                          <div className="execution-run-meta">
-                            <span>执行 <code>{shortIdentity(run.id)}</code></span>
-                            <span>
-                              {run.invocationKind === 'a2a'
-                                ? 'A2A'
-                                : run.invocationKind === 'gather_completion'
-                                  ? '统一综合'
-                                  : '直接执行'}
-                            </span>
-                            {run.invocationKind === 'a2a' && <span>深度 {run.a2aDepth}</span>}
-                            <span>本轮 <code>{shortIdentity(run.campTurnId)}</code></span>
-                            {runtimeModel && (
-                              <span
-                                className={`execution-run-model${runtimeModel.observed ? ' is-observed' : ' is-waiting'}`}
-                                role="status"
-                                aria-live="polite"
-                                aria-atomic="true"
-                                aria-label={runtimeModel.observed
-                                  ? `${displayName}，${runIntervalLabel(run)}，实际模型 ${runtimeModel.modelId}，默认策略`
-                                  : `${displayName}，${runIntervalLabel(run)}，实际模型尚未由 Agent 运行时报告，默认策略`}
-                              >
-                                模型{' '}
-                                <code
-                                  dir="ltr"
-                                  tabIndex={0}
-                                  title={runtimeModel.modelId}
-                                >
-                                  {runtimeModel.modelId}
-                                </code>
-                                {runtimeModel.observed && <small>· 默认</small>}
-                              </span>
-                            )}
-                          </div>
-                        </details>
                       </div>
                     </header>
                     {agentRunTerminalNote(run) && (

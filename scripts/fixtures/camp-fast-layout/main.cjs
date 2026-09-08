@@ -167,27 +167,47 @@ app.whenReady().then(async () => {
     await snapshot()
     await click('.camp-detail-entry[data-detail="execution"]')
     await click('.run-pulse [data-agent-id="agent-0"]')
-    const runInformation = '.execution-run-information'
-    assert.equal(await run(`document.querySelector('${runInformation}').open`), false, 'Low-frequency run metadata starts collapsed')
-    await click(`${runInformation} > summary`)
-    assert.equal(await run(`document.querySelector('${runInformation}').open`), true)
-    assert.ok(await run(`document.querySelector('${runInformation}').textContent.includes('fixture-model')`), 'Run evidence remains available in the disclosure')
+    const previousProcess = '[data-agent-run-id="previous-agent-0"] .execution-disclosure'
+    assert.equal(await run("document.querySelector('.execution-run-information')"), null, 'Run metadata no longer occupies a separate disclosure')
+    assert.equal(await run("document.querySelectorAll('.execution-process-card').length"), 2, 'Completed and running Runs remain separate cards')
+    assert.equal(await run(`document.querySelector('${previousProcess}').open`), false, 'Completed process starts collapsed')
+    assert.equal(await run("Boolean(document.querySelector('[data-agent-run-id=\"previous-agent-0\"] .execution-process-node circle'))"), true, 'The completed Run retains its circular status glyph')
+    await click(`${previousProcess} > summary`)
+    await run("window.bookmarkedExecutionDrawer = document.querySelector('.execution-drawer')")
     await run('window.fastTest.refresh()')
     await snapshot()
-    assert.equal(await run(`document.querySelector('${runInformation}').open`), true, 'Projection refresh preserves the reader disclosure')
+    assert.equal(await run(`document.querySelector('${previousProcess}').open`), true, 'Projection refresh preserves the execution process disclosure')
+    state = await key('Escape')
+    assert.equal(state.panel.height, 0, 'Escape from execution details closes the floating panel')
+    assert.equal(await run("document.activeElement.matches('.camp-detail-entry[data-detail=\"execution\"]')"), true, 'Focus returns to the floating panel entry')
+    await click('.camp-detail-entry[data-detail="execution"]')
+    assert.equal(await run("window.bookmarkedExecutionDrawer === document.querySelector('.execution-drawer')"), true, 'Closing the panel does not remount execution details')
+    assert.equal(await run(`document.querySelector('${previousProcess}').open`), true, 'Reopening preserves the completed process disclosure')
+    await click(`${previousProcess} > summary`)
     await key('Enter')
-    assert.equal(await run(`document.querySelector('${runInformation}').open`), false, 'The focused summary closes with native keyboard input')
+    assert.equal(await run(`document.querySelector('${previousProcess}').open`), true, 'The focused process summary opens with native keyboard input')
+    await key('Enter')
     const executionFast = '.execution-drawer .camp-fast-toggle'
     const stopButton = '.execution-drawer [aria-label="停止当前运行"]'
     const executionState = () => run(`(() => {
       const fast = document.querySelector('${executionFast}'), stop = document.querySelector('${stopButton}')
       const close = document.querySelector('.execution-drawer [aria-label="收起执行详情"]')
+      const drawer = document.querySelector('.execution-drawer'), header = drawer.querySelector('.execution-drawer-header')
+      const model = header.querySelector('.execution-model-params'), config = header.querySelector('.execution-config-line')
       const f = fast?.getBoundingClientRect(), s = stop?.getBoundingClientRect(), c = close?.getBoundingClientRect()
+      const m = model?.getBoundingClientRect(), agent = header.querySelector('.execution-drawer-agent').getBoundingClientRect()
+      const fastFace = fast?.querySelector('.camp-fast-pill'), stopFace = stop?.querySelector('.execution-drawer-action-face')
+      const closeFace = close?.querySelector('.execution-drawer-action-face')
       const probe = document.createElement('div'); probe.className = 'app-dialog'; probe.style.position = 'fixed'; probe.style.left = '-9999px'
       probe.innerHTML = '<button class="danger-button">删除对话</button>'; document.body.appendChild(probe)
-      const expected = getComputedStyle(probe.firstElementChild), actual = stop ? getComputedStyle(stop) : null
+      const expected = getComputedStyle(probe.firstElementChild), actual = stopFace ? getComputedStyle(stopFace) : null
       const result = { pressed: fast?.getAttribute('aria-pressed'), pending: fast?.getAttribute('aria-busy'),
-        order: !!s && !!f && s.left-f.right >= 12 && c.left-s.right >= 7,
+        order: !!s && !!f && config.contains(fast) && f.left-m.right >= 9 && s.left-agent.right >= 11 &&
+          (drawer.dataset.placement === 'inspector' ? !close : !!c && c.left-s.right >= 7),
+        equalFaces: Math.abs(fastFace?.getBoundingClientRect().height-stopFace?.getBoundingClientRect().height) < 1 &&
+          (!closeFace || Math.abs(closeFace.getBoundingClientRect().height-stopFace?.getBoundingClientRect().height) < 1),
+        model: model.textContent,
+        openSurface: getComputedStyle(header).backgroundColor === getComputedStyle(drawer).backgroundColor,
         stopHit: !!s && s.height >= 28 && document.elementFromPoint(s.x+s.width/2,s.y+s.height/2)?.closest('[aria-label="停止当前运行"]') === stop,
         fastHit: !!f && f.height >= 28 && document.elementFromPoint(f.x+f.width/2,f.y+f.height/2)?.closest('.camp-fast-toggle') === fast,
         deleteColors: actual?.color === expected.color && actual?.backgroundColor === expected.backgroundColor,
@@ -215,7 +235,8 @@ app.whenReady().then(async () => {
           await snapshot()
           await run("Promise.all(document.getAnimations().filter(animation => animation instanceof CSSTransition).map(animation => animation.finished.catch(() => {})))")
           const result = await executionState()
-          assert.ok(result.order && result.stopHit && result.fastHit && result.deleteColors, JSON.stringify({placement, theme, width, result}))
+          assert.ok(result.order && result.equalFaces && result.stopHit && result.fastHit && result.deleteColors && result.openSurface, JSON.stringify({placement, theme, width, result}))
+          assert.equal(result.model, 'claude-sonnet-4-6 · 思考强度 高')
           await capture(`execution-fast-${placement}-${theme}-${width}`)
         }
       }
