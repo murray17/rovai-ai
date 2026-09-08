@@ -8,7 +8,8 @@ import {
   McpMemberChoices,
   McpImportPanel,
   buildMcpImportDrafts,
-  filterMcpServers
+  filterMcpServers,
+  groupMcpImportCandidates
 } from './McpSettings'
 import { maskMcpJson, materializeMcpDraft } from './McpJsonEditor'
 import { capabilityListWidth, CapabilityToggle } from './CapabilityWorkspace'
@@ -148,8 +149,59 @@ describe('MCP workspace', () => {
       })
     )
     expect(markup).toContain('另存为')
-    expect(markup).toContain('替换现有')
+    expect(markup).toContain('覆盖配置')
     expect(markup).not.toContain('type="checkbox"')
+  })
+
+  it('groups by name in scan order without merging definitions or changing the commit identity', () => {
+    const first = {
+      candidateId: 'codex-first', proposedName: 'docs', sourceKind: 'codex',
+      sourcePath: '/fixture/codex/config.toml', compatibility: 'portable',
+      conflict: 'name_conflict', normalizedDefinitionJson: server().definitionJson, issues: []
+    } as unknown as McpImportInspection['candidates'][number]
+    const second = { ...first, candidateId: 'claude-second', proposedName: 'DOCS', sourceKind: 'claude_code' as const,
+      sourcePath: '/fixture/claude.json', conflict: 'same' as const }
+    const third = { ...second, candidateId: 'claude-third', sourcePath: '/fixture/claude/settings.json' }
+    const candidates = [first, second, third]
+    const groups = groupMcpImportCandidates(candidates)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].candidate).toBe(first)
+    expect(groups[0].origins).toEqual([first, second])
+    expect(first).not.toHaveProperty('duplicateOfCandidateId')
+    const inspection = { configDigest: 'digest', sources: [], candidates } as McpImportInspection
+    const drafts = buildMcpImportDrafts(inspection, [server()], {
+      'claude-second': { selected: true, action: 'replace', definitionJson: 'old hidden edit', open: true }
+    })
+    expect(Object.keys(drafts)).toEqual(['codex-first'])
+    expect(drafts['codex-first'].action).toBeNull()
+    // Equal public/masked JSON is not proof of equal private credentials: retain Core's conflict.
+    expect(groups[0].candidate.conflict).toBe('name_conflict')
+    const markup = renderToStaticMarkup(createElement(McpImportPanel, {
+      inspection, drafts: { ...drafts, 'codex-first': { ...drafts['codex-first'], selected: true, open: true } },
+      busy: false, onChange: () => {}
+    }))
+    expect(markup.match(/class="capability-import-item"/g)).toHaveLength(1)
+    expect(markup).toContain('Claude Code')
+    expect(markup).toContain('来自 Codex')
+    expect(markup).toContain('覆盖配置')
+    expect(markup).not.toContain('部分来源暂未读取')
+  })
+
+  it('honors the first candidate status even when a later runtime has the same name', () => {
+    for (const conflict of ['same', 'none'] as const) {
+      const first = { candidateId: 'first', proposedName: 'docs', sourceName: 'docs', sourceDefinitionJson: '{}', sourceEnabled: true, sourceKind: 'codex', sourcePath: '/fixture/codex',
+        compatibility: conflict === 'same' ? 'portable' : 'unsupported', conflict,
+        normalizedDefinitionJson: server().definitionJson, issues: [] } as McpImportInspection['candidates'][number]
+      const inspection = { configDigest: 'digest', sources: [], candidates: [first,
+        { ...first, candidateId: 'second', sourceKind: 'claude_code', compatibility: 'portable', conflict: 'none' }
+      ] } as McpImportInspection
+      const markup = renderToStaticMarkup(createElement(McpImportPanel, {
+        inspection, drafts: buildMcpImportDrafts(inspection, []), busy: false, onChange: () => {}
+      }))
+      expect(markup).not.toContain('class="capability-import-item"')
+      expect(markup).toContain(conflict === 'same' ? '已添加' : '暂不支持')
+      expect(markup).toContain('Claude Code')
+    }
   })
 
   it('keeps a usable detail minimum when a stored splitter preference is restored', () => {

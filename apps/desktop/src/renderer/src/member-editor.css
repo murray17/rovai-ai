@@ -782,7 +782,7 @@
 
 /* Compact roster, preserving presence and runtime state. */
 .member-editor-roster-shell .member-sidebar {
-  border-right-color: var(--line);
+  border-right: 0;
   background: var(--home-surface);
   transition: none;
 }
@@ -954,29 +954,14 @@
 .member-roster-width-option small { margin-left: auto; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .member-roster-option-check { width: 12px; }
 .member-roster-resizer {
-  position: absolute;
-  z-index: 20;
-  top: 0;
-  right: -4px;
-  bottom: 0;
-  width: 9px;
-  outline: 0;
-  cursor: col-resize;
-  touch-action: none;
-  -webkit-app-region: no-drag;
+  position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; width: 1px;
+  outline: 0; background: var(--line); cursor: col-resize; touch-action: none; -webkit-app-region: no-drag;
 }
 .member-roster-resizer[aria-disabled="true"] { pointer-events: none; }
-.member-roster-resizer::before {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 3px;
-  width: 2px;
-  background: transparent;
-  content: '';
-}
-.member-roster-resizer:hover::before,
-.member-roster-resizer.is-dragging::before { background: var(--focus); }
+.member-roster-resizer::before { position: absolute; inset: 0 -5px; content: ''; }
+.member-roster-resizer::after { position: absolute; top: 50%; left: -1px; width: 3px; height: 30px; border-radius: 2px; background: var(--muted); content: ''; opacity: 0; transform: translateY(-50%); transition: opacity 120ms ease; }
+.member-roster-resizer:hover::after,
+.member-roster-resizer.is-dragging::after { opacity: 1; }
 .member-roster-resize-hint {
   position: absolute;
   top: 16px;
@@ -992,8 +977,7 @@
   opacity: 0;
   pointer-events: none;
 }
-.member-roster-resizer.is-dragging .member-roster-resize-hint,
-.member-roster-resizer:focus-visible .member-roster-resize-hint { opacity: 1; }
+.member-roster-resizer.is-dragging .member-roster-resize-hint { opacity: 1; }
 .members-workspace:has(.member-editor-roster-shell.is-resizing),
 .members-workspace:has(.member-editor-roster-shell.is-resizing) * { cursor: col-resize !important; user-select: none !important; }
 .member-editor-unsaved-mark {

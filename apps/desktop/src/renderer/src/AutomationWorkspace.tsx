@@ -557,10 +557,10 @@ export function AutomationWorkspace({
         </aside>
         {!overview && <>
           <div className="automation-splitter" role="separator" tabIndex={0} aria-label="调整任务列表宽度" aria-orientation="vertical" aria-valuemin={AUTOMATION_MIN_LIST_WIDTH} aria-valuemax={Math.max(AUTOMATION_MIN_LIST_WIDTH, availableWidth - 7)} aria-valuenow={editorClosed ? Math.max(AUTOMATION_MIN_LIST_WIDTH, availableWidth - 7) : width} aria-valuetext={editorClosed ? '详情已收起，向左调整可重新打开' : `任务列表宽度 ${width} 像素`} title={editorClosed ? '向左拖动打开任务页' : '拖动调整宽度，拖到最右侧收起详情'}
-            onPointerDown={(event) => { if (event.button !== 0) return; dragRef.current = { pointerId: event.pointerId, x: event.clientX, width: editorClosed ? availableWidth - 7 : width }; event.currentTarget.setPointerCapture(event.pointerId) }}
+            onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.dataset.resizing = 'true'; dragRef.current = { pointerId: event.pointerId, x: event.clientX, width: editorClosed ? availableWidth - 7 : width }; event.currentTarget.setPointerCapture(event.pointerId) }}
             onPointerMove={(event) => { const drag = dragRef.current; if (drag?.pointerId === event.pointerId) resize(drag.width + event.clientX - drag.x) }}
-            onPointerUp={(event) => { dragRef.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
-            onPointerCancel={() => { dragRef.current = null }} onLostPointerCapture={() => { dragRef.current = null }}
+            onPointerUp={(event) => { delete event.currentTarget.dataset.resizing; dragRef.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
+            onPointerCancel={(event) => { delete event.currentTarget.dataset.resizing; dragRef.current = null }} onLostPointerCapture={(event) => { delete event.currentTarget.dataset.resizing; dragRef.current = null }}
             onDoubleClick={() => { setListWidth(AUTOMATION_DEFAULT_LIST_WIDTH); setEditorClosed(false) }}
             onKeyDown={(event) => {
               if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize((editorClosed ? availableWidth - 327 : width) + (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? 24 : 8)) }

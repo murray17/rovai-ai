@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { SkillContentRequest, SkillContentView } from '@contracts'
+import type { ResolvedTheme, SkillContentRequest, SkillContentView } from '@contracts'
 import { CapabilityError } from './CapabilityWorkspace'
 import { SafeMarkdown } from './SafeMarkdown'
 import { readErrorMessage } from './error-message'
@@ -10,14 +10,16 @@ export function skillReadingContent(content: string): string {
 }
 
 export function SkillContentPreview({
-  target
+  target,
+  theme = 'day'
 }: {
   target: SkillContentRequest
+  theme?: ResolvedTheme
 }): React.JSX.Element {
-  return <SkillContentPreviewSession key={JSON.stringify(target)} target={target} />
+  return <SkillContentPreviewSession key={JSON.stringify(target)} target={target} theme={theme} />
 }
 
-function SkillContentPreviewSession({ target }: { target: SkillContentRequest }): React.JSX.Element {
+function SkillContentPreviewSession({ target, theme }: { target: SkillContentRequest; theme: ResolvedTheme }): React.JSX.Element {
   const preview = useRef<HTMLDivElement>(null)
   const [path, setPath] = useState('SKILL.md')
   const [raw, setRaw] = useState(false)
@@ -89,7 +91,7 @@ function SkillContentPreviewSession({ target }: { target: SkillContentRequest })
         (raw || !/\.(?:md|markdown)$/iu.test(path) ? (
           <pre className="capability-source-code">{view.content}</pre>
         ) : (
-          <SafeMarkdown className="capability-reading">
+          <SafeMarkdown className="capability-reading" mode="document" theme={theme}>
             {skillReadingContent(view.content)}
           </SafeMarkdown>
         ))}

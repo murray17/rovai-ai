@@ -4401,7 +4401,7 @@ export function SettingsView({
             onPreferencesChange={onGeneralPreferencesChange}
           />
         )}
-        <Activity mode={section === 'skills' ? 'visible' : 'hidden'}><SkillSettings /></Activity>
+        <Activity mode={section === 'skills' ? 'visible' : 'hidden'}><SkillSettings theme={appearance.resolvedTheme} /></Activity>
         <Activity mode={section === 'mcp' ? 'visible' : 'hidden'}><McpSettings agents={agents} platform={platform} /></Activity>
         {section === 'runtime' && (
           <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />

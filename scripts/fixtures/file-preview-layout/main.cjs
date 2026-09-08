@@ -126,8 +126,27 @@ app.whenReady().then(async () => {
     assert.equal(state.aligned, true)
     assert.equal(state.overflow, false)
     assert.equal(state.stored, null, 'Opening must not persist a clamped ratio')
-    assert.equal(state.handle.width, 11)
+    assert.equal(state.handle.width, 1)
     assert.equal(state.lineWidth, '1px')
+    const rail = await run(`(() => {
+      const handle = document.querySelector('.file-preview-resize-handle')
+      const top = document.querySelector('.camp-topbar').getBoundingClientRect()
+      const pane = document.querySelector('.file-preview-pane').getBoundingClientRect()
+      const bounds = handle.getBoundingClientRect()
+      return { top: bounds.top, headerTop: top.top, x: bounds.x, paneX: pane.x,
+        bottom: bounds.bottom, paneBottom: pane.bottom, hitWidth: getComputedStyle(handle, '::before').width,
+        oldLine: getComputedStyle(handle, '::after').content, grip: getComputedStyle(handle.querySelector('.file-preview-splitter-grip')).opacity,
+        paneBorder: getComputedStyle(document.querySelector('.file-preview-pane')).borderLeftWidth,
+        tabBorder: getComputedStyle(document.querySelector('.file-preview-tabs')).borderLeftWidth }
+    })()`)
+    closeTo(rail.top, rail.headerTop, 'One rail spans header and body')
+    closeTo(rail.x, rail.paneX, 'Rail and preview start on the same pixel')
+    closeTo(rail.bottom, rail.paneBottom, 'Rail spans the entire reading plane')
+    assert.equal(rail.hitWidth, '11px')
+    assert.equal(rail.oldLine, 'none')
+    assert.equal(rail.paneBorder, '0px')
+    assert.equal(rail.tabBorder, '0px')
+    assert.equal(rail.grip, '0')
     assert.deepEqual(state.aria, { min: '420', max: '750', now: '655' })
     await capture('preview-day-1440x920')
   })
@@ -217,6 +236,25 @@ app.whenReady().then(async () => {
     assert.equal(night.editorCount, 0)
     assert.equal(night.pageOverflow, false)
     await capture('markdown-reader-night')
+    await viewport(2560, 1440)
+    for (const theme of ['day', 'night']) {
+      await run(`window.previewTest.setTheme(${JSON.stringify(theme)})`)
+      await snapshot()
+      const wide = await run(`(() => {
+        const doc = document.querySelector('.file-preview-tab-panel:not([hidden]) .safe-markdown')
+        const paragraph = [...doc.children].find(n => n.tagName === 'P')
+        const table = doc.querySelector('.markdown-table-scroll')
+        return { document: doc.getBoundingClientRect().width, paragraph: paragraph.getBoundingClientRect().width,
+          table: table.getBoundingClientRect().width, scrolls: table.scrollWidth > table.clientWidth,
+          overflow: document.documentElement.scrollWidth > innerWidth }
+      })()`)
+      closeTo(wide.document, 1120, 'Wide preview expands the document track')
+      closeTo(wide.paragraph, 930, 'Ordinary prose retains a readable maximum')
+      closeTo(wide.table, 1120, 'Wide tables can use the full artifact track')
+      assert.equal(wide.overflow, false)
+      await capture(`markdown-reader-${theme}-2k`)
+    }
+    await viewport(1440)
     await run('window.previewTest.setTheme("day"); window.previewTest.closeExtraTabs(); window.previewTest.open()')
   })
 
