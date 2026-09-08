@@ -176,6 +176,18 @@ pub(crate) fn open_private_read_file(path: &Path) -> Result<File> {
     open_private_read_file_platform(path)
 }
 
+/// Inspects an existing file and its parent through metadata-only handles.
+/// Read/open failures remain errors; only a verified DACL mismatch returns true.
+#[cfg(windows)]
+pub(crate) fn private_file_permissions_need_repair(path: &Path) -> Result<bool> {
+    windows::private_file_permissions_need_repair(path)
+}
+
+#[cfg(windows)]
+pub(crate) fn private_directory_permissions_need_repair(path: &Path) -> Result<bool> {
+    windows::private_directory_permissions_need_repair(path)
+}
+
 /// Creates a new private, non-inheritable file and rejects an existing leaf.
 pub(crate) fn create_private_new_file(path: &Path) -> Result<File> {
     create_private_new_file_platform(path)
@@ -512,15 +524,17 @@ mod windows {
                 Some(ERROR_FILE_EXISTS) | Some(ERROR_ALREADY_EXISTS)
             ) {
                 created = false;
-                open_existing_private_file(path).map_err(|open_error| {
-                    blocker(
-                        PRIVATE_ACL_INVALID,
-                        format!(
-                            "failed to open existing private file {}: {open_error:#}",
-                            path.display()
-                        ),
-                    )
-                })?
+                open_existing_private_file(path, GENERIC_READ | GENERIC_WRITE).map_err(
+                    |open_error| {
+                        blocker(
+                            PRIVATE_ACL_INVALID,
+                            format!(
+                                "failed to open existing private file {}: {open_error:#}",
+                                path.display()
+                            ),
+                        )
+                    },
+                )?
             } else {
                 return Err(error)
                     .with_context(|| format!("failed to create private file {}", path.display()));
@@ -561,7 +575,7 @@ mod windows {
         let admitted_parent = admit_private_directory(parent)?;
         let parent_handle = open_path(&admitted_parent, ExpectedObjectKind::Directory)?;
         let parent_identity = file_identity(&parent_handle)?;
-        let handle = open_existing_private_file(path)?;
+        let handle = open_existing_private_file(path, GENERIC_READ)?;
         let identity = inspect_handle(&handle, ExpectedObjectKind::File)?;
         if identity.volume_serial_number != parent_identity.volume_serial_number {
             bail!(
@@ -579,6 +593,32 @@ mod windows {
             )
         })?;
         Ok(File::from(handle))
+    }
+
+    pub(super) fn private_file_permissions_need_repair(path: &Path) -> Result<bool> {
+        validate_native_absolute_path(path)?;
+        let parent = path.parent().context("private file path has no parent")?;
+        admit_volume(parent)?;
+        let parent_handle = open_path(parent, ExpectedObjectKind::Directory)?;
+        let handle = open_path(path, ExpectedObjectKind::File)?;
+        if file_identity(&handle)?.volume_serial_number
+            != file_identity(&parent_handle)?.volume_serial_number
+        {
+            bail!("{IDENTITY_UNAVAILABLE}: private file and parent resolved to different volumes");
+        }
+        let parent_issue = PrivateSecurityDescriptor::new(PrivateObjectKind::Directory)?
+            .file_permissions_need_repair(parent_handle.as_raw_handle() as HANDLE)?;
+        let file_issue = PrivateSecurityDescriptor::new(PrivateObjectKind::File)?
+            .file_permissions_need_repair(handle.as_raw_handle() as HANDLE)?;
+        Ok(parent_issue || file_issue)
+    }
+
+    pub(super) fn private_directory_permissions_need_repair(path: &Path) -> Result<bool> {
+        validate_native_absolute_path(path)?;
+        admit_volume(path)?;
+        let handle = open_path(path, ExpectedObjectKind::Directory)?;
+        PrivateSecurityDescriptor::new(PrivateObjectKind::Directory)?
+            .file_permissions_need_repair(handle.as_raw_handle() as HANDLE)
     }
 
     pub(super) fn create_private_new_file(path: &Path) -> Result<File> {
@@ -843,14 +883,14 @@ mod windows {
         Ok(handle)
     }
 
-    fn open_existing_private_file(path: &Path) -> Result<OwnedHandle> {
+    fn open_existing_private_file(path: &Path, access: u32) -> Result<OwnedHandle> {
         let wide_path = wide_path(path)?;
         let raw = unsafe {
             // SAFETY: wide_path is NUL-terminated. Null security attributes make
             // the existing handle non-inheritable and OPEN_EXISTING never creates.
             CreateFileW(
                 wide_path.as_ptr(),
-                GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+                access | READ_CONTROL,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 null(),
                 OPEN_EXISTING,

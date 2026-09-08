@@ -24,6 +24,7 @@ use uuid::Uuid;
 #[cfg(windows)]
 use crate::platform::private_storage::{
     atomic_write_private_bytes, create_private_bytes, open_private_read_file,
+    private_directory_permissions_need_repair, private_file_permissions_need_repair,
     repair_private_directory, repair_private_file,
 };
 
@@ -1039,7 +1040,15 @@ impl McpConfigStore {
         if !self.path.exists() {
             self.write_new(&McpConfigFile::empty())?;
         }
-        self.load()
+        let loaded = self.load()?;
+        #[cfg(windows)]
+        if loaded.config.is_some() && loaded.permission_issue {
+            // Management initialization admits a valid, current-user-owned
+            // config by tightening ACLs only. `inspect` stays strictly read-only.
+            self.repair_permissions()?;
+            return self.load();
+        }
+        Ok(loaded)
     }
 
     fn load(&self) -> Result<LoadedConfig> {
@@ -1209,6 +1218,15 @@ impl McpConfigStore {
 
     #[cfg(windows)]
     fn write_new(&self, config: &McpConfigFile) -> Result<()> {
+        let parent = self
+            .path
+            .parent()
+            .context("MCP configuration path has no parent directory")?;
+        if parent.exists() && private_directory_permissions_need_repair(parent)? {
+            // The user-owned MCP directory can predate the first config (for
+            // example, an existing Skill Library). Secure it before writing bytes.
+            repair_private_directory(parent)?;
+        }
         let bytes = canonical_bytes(config)?;
         match create_private_bytes(&self.path, &bytes) {
             Ok(()) => Ok(()),
@@ -1290,7 +1308,7 @@ fn private_permission_issue(_path: &Path, metadata: &fs::Metadata) -> Result<boo
 
 #[cfg(windows)]
 fn private_permission_issue(path: &Path, _metadata: &fs::Metadata) -> Result<bool> {
-    Ok(open_private_read_file(path).is_err())
+    private_file_permissions_need_repair(path)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -1950,30 +1968,36 @@ mod slow_tests {
 
     #[test]
     fn missing_file_atomically_materializes_an_exact_empty_library() {
-        let (root, store) = temporary_store("empty-default");
-        assert_eq!(
-            store.migrate_pre_release_config().unwrap(),
-            McpConfigMigrationOutcome::Missing
-        );
-        assert!(!store.path().exists());
-        let view = store.get(&agents()).unwrap();
-        assert!(view.exists);
-        assert!(view.servers.is_empty());
-        assert_eq!(view.public_config_json, "{\n  \"mcpServers\": {}\n}\n");
-        assert!(!view.public_config_json.contains("_rovai"));
-        let raw = fs::read_to_string(store.path()).unwrap();
-        assert_eq!(
-            raw,
-            "{\n  \"mcpServers\": {},\n  \"_rovai\": {\n    \"schemaVersion\": 2,\n    \"servers\": {},\n    \"assignments\": []\n  }\n}\n"
-        );
-        #[cfg(unix)]
-        assert_eq!(
-            fs::metadata(store.path()).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        #[cfg(windows)]
-        assert!(open_private_read_file(store.path()).is_ok());
-        let _ = fs::remove_dir_all(root);
+        for existing_parent in [false, true] {
+            let (root, store) = temporary_store("empty-default");
+            if existing_parent {
+                fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+            }
+            assert_eq!(
+                store.migrate_pre_release_config().unwrap(),
+                McpConfigMigrationOutcome::Missing
+            );
+            assert!(!store.path().exists());
+            let view = store.get(&agents()).unwrap();
+            assert!(view.exists);
+            assert!(!view.permission_issue);
+            assert!(view.servers.is_empty());
+            assert_eq!(view.public_config_json, "{\n  \"mcpServers\": {}\n}\n");
+            assert!(!view.public_config_json.contains("_rovai"));
+            let raw = fs::read_to_string(store.path()).unwrap();
+            assert_eq!(
+                raw,
+                "{\n  \"mcpServers\": {},\n  \"_rovai\": {\n    \"schemaVersion\": 2,\n    \"servers\": {},\n    \"assignments\": []\n  }\n}\n"
+            );
+            #[cfg(unix)]
+            assert_eq!(
+                fs::metadata(store.path()).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            #[cfg(windows)]
+            assert!(open_private_read_file(store.path()).is_ok());
+            let _ = fs::remove_dir_all(root);
+        }
     }
 
     #[test]
@@ -2134,6 +2158,7 @@ mod slow_tests {
         let McpMutationResult::Ok { config, .. } = created else {
             panic!("create should succeed");
         };
+        assert!(!config.permission_issue);
         let server = config
             .servers
             .iter()
@@ -2168,6 +2193,7 @@ mod slow_tests {
         let McpMutationResult::Ok { config, .. } = renamed else {
             panic!("rename should succeed");
         };
+        assert!(!config.permission_issue);
         let server = config
             .servers
             .iter()
@@ -2542,19 +2568,89 @@ mod slow_tests {
     #[cfg(windows)]
     #[test]
     fn windows_permission_repair_restricts_an_owned_inherited_config() {
-        let (root, store) = temporary_store("windows-permission-repair");
-        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
-        fs::write(
-            store.path(),
-            canonical_bytes(&McpConfigFile::empty()).unwrap(),
-        )
-        .unwrap();
-        assert!(store.inspect(&agents()).unwrap().permission_issue);
+        // Keep explicit repair, first management access and invalid-file
+        // preservation together as the owner of existing-config ACL admission.
+        for (automatic, valid_config) in [(false, true), (true, true), (true, false)] {
+            let (root, store) = temporary_store("windows-permission-repair");
+            fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+            let bytes = if valid_config {
+                canonical_bytes(&McpConfigFile::empty()).unwrap()
+            } else {
+                b"{broken".to_vec()
+            };
+            fs::write(store.path(), &bytes).unwrap();
+            assert!(store.inspect(&agents()).unwrap().permission_issue);
+            // Inspection must not repair either the directory or the file.
+            assert!(
+                private_directory_permissions_need_repair(store.path().parent().unwrap()).unwrap()
+            );
 
-        store.repair_permissions().unwrap();
+            if automatic {
+                let view = store.get(&agents()).unwrap();
+                assert_eq!(view.permission_issue, !valid_config);
+                assert_eq!(view.file_issue.is_none(), valid_config);
+            } else {
+                store.repair_permissions().unwrap();
+            }
 
-        assert!(!store.inspect(&agents()).unwrap().permission_issue);
-        assert!(open_private_read_file(store.path()).is_ok());
+            assert_eq!(
+                store.inspect(&agents()).unwrap().permission_issue,
+                !valid_config
+            );
+            assert_eq!(
+                private_directory_permissions_need_repair(store.path().parent().unwrap()).unwrap(),
+                !valid_config
+            );
+            assert_eq!(open_private_read_file(store.path()).is_ok(), valid_config);
+            assert_eq!(fs::read(store.path()).unwrap(), bytes);
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_permission_inspection_does_not_require_write_access() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        // Unlike the repair cases, this owns the false-warning regression:
+        // healthy ACLs with a concurrent reader or a read-only file attribute.
+        let (root, store) = temporary_store("windows-permission-inspection");
+        let initial = store.get(&agents()).unwrap();
+        let original_metadata = fs::metadata(store.path()).unwrap();
+        let bytes = fs::read(store.path()).unwrap();
+        for read_only in [false, true] {
+            let mut permissions = original_metadata.permissions();
+            permissions.set_readonly(read_only);
+            fs::set_permissions(store.path(), permissions).unwrap();
+            // Exercise the sharing conflict and read-only attribute separately.
+            let reader = (!read_only).then(|| {
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(FILE_SHARE_READ)
+                    .open(store.path())
+                    .unwrap()
+            });
+
+            let view = store.inspect(&agents()).unwrap();
+            assert!(!view.permission_issue);
+            assert!(view.file_issue.is_none());
+            assert_eq!(view.config_digest, initial.config_digest);
+            assert!(!store.get(&agents()).unwrap().permission_issue);
+            assert!(open_private_read_file(store.path()).is_ok());
+            assert_eq!(
+                fs::metadata(store.path()).unwrap().permissions().readonly(),
+                read_only
+            );
+            assert_eq!(fs::read(store.path()).unwrap(), bytes);
+            drop(reader);
+        }
+        fs::set_permissions(store.path(), original_metadata.permissions()).unwrap();
+        fs::remove_file(store.path()).unwrap();
+        // A disappearance between stat and ACL observation is an inspection
+        // failure, not evidence that permissions need repair; no file is created.
+        assert!(private_permission_issue(store.path(), &original_metadata).is_err());
+        assert!(!store.path().exists());
         let _ = fs::remove_dir_all(root);
     }
 }

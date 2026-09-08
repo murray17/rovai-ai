@@ -438,6 +438,7 @@ last_updated: 2026-09-08
 ### 外部 MCP 配置与投影
 
 - `~/.rovai/mcp.json` 是用户管理外部 MCP Server、immutable server identity、enablement 和 Assignment 的唯一配置真源；SQLite 不复制 Server/Assignment 真源。已有 env/Header 明文凭证可在本机导入时迁移至既有私有配置存储；Unix 为文件 `0600`、目录 `0700` 的明文，Windows 复用私有 ACL，并不承诺落盘加密或新增密钥库。
+- Windows 的 MCP 管理初始化默认准备私有权限：新建前收紧已存在且属于当前用户的配置父目录；已有配置只有通过完整格式校验、当前用户所有权、普通文件/目录、local NTFS 与非 reparse 检查后，才自动把父目录和文件收紧到当前用户/SYSTEM 的 protected DACL，保持 JSON 字节与 digest 不变。后续保存继续使用创建时私有的临时文件原子替换。损坏配置、未知所有者或检查失败不触发自动修复；`inspect` 与诊断自检保持严格只读。Windows 权限观察只请求元数据与 ACL 读取，只有明确的 DACL 不匹配才产生权限提示，不能把占用、只读属性或 I/O 失败当作权限过宽。
 - 文件是一个封闭、版本化 canonical JSON envelope；Core 在完整校验、规范化和精确 compare-and-swap 后原子替换。管理用 identity/revision/provenance 元数据不投影给 Runtime，Server identity 不因显示名、参数或 secret 变化而改变，删除后不复用。默认前端预览、命令回执、事件、诊断和日志不得暴露完整凭证；后端从选定来源重新读取并校验后完成隐藏值迁移，未修改的掩码不得作为凭证落盘。用户在详情显式点击“显示”时，独立只读 `mcp.servers.reveal` 以所选 Server ID 和预期 digest 读取单项原值，只进入当前编辑会话，不经过通用命令回执或事件，不写入前端持久存储。保存或离开后重新隐藏；日常落盘仍为既有权限收紧的私有配置文件，并非加密存储。Runtime 接收值仍沿用既有 Core-owned 私有投影边界。
 - 本机导入保留 env/Header 的原始值语义（含空值、空白和鉴权前缀），不生成新变量名或强制重复填写。引用按来源语义无损转换，并以 Core 实际启动环境判定缺项；不兼容语法明确拒绝该候选，不影响其他候选。新增仍默认停用且不分配队员；替换保留 identity、启停和分配，失败不破坏旧配置。历史生成的占位符不推测恢复，只有显式重新选取原始来源执行替换才迁移来源值。
 - 新配置从空 `mcpServers`、空管理元数据和无 Assignment 开始；产品不内置、恢复、广告或自动创建第三方 preset/受审定义。所有外部 Server 都来自用户显式创建/导入。
