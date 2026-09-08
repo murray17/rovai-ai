@@ -71,6 +71,7 @@ test('production Single Chat panel preserves private conversation layout and ter
       campComposerParity: true,
       composerKeyboardSemantics: true,
       privateAttachments: true,
+      privateAttachmentDragBoundary: true,
       agentMessagesWithoutFill: true,
       runningStopAndQueueComposer: true,
       dayAndNight: true,
