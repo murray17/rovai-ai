@@ -204,6 +204,9 @@ async function launchApp(width, height) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    // The bootstrap shell is visible before authoritative Core requests are admitted.
+    await waitForExpression(cdp, `window.rovai.supervisor.getSnapshot().then(snapshot =>
+      snapshot.fullCoreState === 'ready' && snapshot.capabilities.coreRequests)`, 45_000)
     const health = await evaluate(cdp, "window.rovai.request('health.check', {})", true)
     assert(await realpath(health.database.path) === await realpath(join(dataDir, 'rovai.sqlite')),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)
@@ -270,7 +273,7 @@ async function waitForSelector(cdp, selector, timeoutMs = 10_000) {
 async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    if (await evaluate(cdp, expression)) return
+    if (await evaluate(cdp, expression, true)) return
     await wait(100)
   }
   throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
