@@ -26,6 +26,17 @@ await mkdir(dataDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
 const canonicalDataDir = await realpath(dataDir)
 seedCompletedOnboardingForAcceptance(dataDir)
+// Map cases opt in explicitly; new installations leave the map disabled.
+await writeFile(join(dataDir, 'general-preferences.json'), `${JSON.stringify({
+  schemaVersion: 4,
+  startupLocationMode: 'last_location',
+  lastSettingsSection: 'general',
+  executionConsolePlacement: 'inspector',
+  newConversationDefaults: null,
+  newConversationDefaultsRequireConfirmation: false,
+  oneClickNewConversationEnabled: false,
+  worldMapEnabled: true
+}, null, 2)}\n`, { mode: 0o600 })
 const fixture = await createFixture()
 
 let app = null
@@ -654,8 +665,6 @@ async function launchApp(port, width, height, reducedMotion) {
     const health = await evaluate(cdp, `window.rovai.request('health.check', {})`, true)
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Packaged App opened the wrong database: ${JSON.stringify(health.database.path)}`)
-    // Map cases opt in explicitly; new installations leave the map disabled.
-    await evaluate(cdp, 'window.rovai.generalPreferences.setWorldMapEnabled(true)', true)
     return { cdp, port, child }
   } catch (error) {
     cdp?.close()
