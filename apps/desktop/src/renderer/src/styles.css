@@ -5119,7 +5119,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .onboarding-selected-copy > strong { color: var(--muted); font-size: 10.5px; font-weight: 400; }
 .onboarding-member-traits { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; color: var(--muted); font-size: 10.5px; }
 .onboarding-member-details { margin-top: 10px; color: var(--muted); font-size: 11px; }
-.onboarding-member-details summary { width: fit-content; padding: 3px 0; cursor: pointer; }
+.onboarding-member-details summary { width: fit-content; min-height: 28px; padding: 3px 0; cursor: pointer; }
 .onboarding-member-details p { margin: 8px 0 0; line-height: 1.65; overflow-wrap: anywhere; }
 .onboarding-member-chooser { min-width: 0; }
 .onboarding-member-list { display: grid; gap: 5px; }
@@ -5196,6 +5196,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .onboarding-install-links:not([hidden]) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); text-align: left; }
 .onboarding-install-links a { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 4px 7px; border-radius: 5px; color: var(--muted); font-size: 11px; text-decoration: none; }
 .onboarding-install-links a:hover { color: var(--ink); background: var(--surface-hover); }
+.onboarding-install-links a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .onboarding-runtime-empty-copy > .onboarding-member-details { text-align: left; }
 .onboarding-runtime-error { display: grid; gap: 4px; margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); overflow-wrap: anywhere; }
 .onboarding-runtime-error strong { font-size: 12px; }
@@ -8934,4 +8935,5 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 @media (forced-colors: active) {
   .onboarding-radio-check { border-color: ButtonText; }
   [aria-checked="true"] > .onboarding-radio-check::after { background: Highlight; }
+  .onboarding-install-links a:focus-visible { outline-color: Highlight; }
 }

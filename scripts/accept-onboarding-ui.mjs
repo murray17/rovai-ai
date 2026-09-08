@@ -114,7 +114,7 @@ try {
   await waitForSelector(running.cdp, '.onboarding-runtime-track', 5_000)
   captures.runtimeScan = join(outputDir, '04-runtime-scan-day-1040x700.png')
   await capture(running.cdp, captures.runtimeScan)
-  await waitForSelector(running.cdp, '.onboarding-runtime-list', 120_000)
+  await waitForSelector(running.cdp, '.onboarding-runtime-list, .onboarding-runtime-empty', 120_000)
   const runtimeAvailability = await evaluate(running.cdp, `
     [...document.querySelectorAll('.onboarding-runtime-row')].map((row) => ({
       label: row.querySelector('strong')?.textContent?.trim(),
@@ -124,14 +124,6 @@ try {
     }))`)
   captures.runtimeReadyDay = join(outputDir, '05-runtime-ready-day-1040x700.png')
   await capture(running.cdp, captures.runtimeReadyDay)
-  await evaluate(running.cdp, `document.querySelector('.onboarding-runtime-row:not(:disabled)').focus()`)
-  await running.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 })
-  await running.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 })
-  await waitForExpression(running.cdp, `(() => {
-    const row = document.querySelector('.onboarding-runtime-row:not(:disabled)')
-    return row?.getAttribute('aria-checked') === 'true' && row?.getAttribute('aria-disabled') !== 'true'
-      && document.activeElement === row
-  })()`)
   await setTheme(running.cdp, 'night')
   captures.runtimeReadyNight = join(outputDir, '05-runtime-ready-night-1040x700.png')
   await capture(running.cdp, captures.runtimeReadyNight)
@@ -157,6 +149,16 @@ try {
   }
   assert(usableRuntime,
     `No usable Runtime was available for packaged acceptance: ${JSON.stringify(runtimeAvailability)}`)
+  if (runtimeAvailability.some((runtime) => !runtime.disabled)) {
+    await evaluate(running.cdp, `document.querySelector('.onboarding-runtime-row:not(:disabled)').focus()`)
+    await running.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 })
+    await running.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 })
+    await waitForExpression(running.cdp, `(() => {
+      const row = document.querySelector('.onboarding-runtime-row:not(:disabled)')
+      return row?.getAttribute('aria-checked') === 'true' && row?.getAttribute('aria-disabled') !== 'true'
+        && document.activeElement === row
+    })()`)
+  }
   const runtimeChoice = await evaluate(running.cdp, `(() => {
     const rows = [...document.querySelectorAll('.onboarding-runtime-row')]
     const available = rows.filter((row) => row.querySelector('.status-available'))

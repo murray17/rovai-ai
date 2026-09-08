@@ -393,7 +393,12 @@ function RuntimeStep({
     const item = availability.find((candidate) => candidate.runtimeKind === kind) ?? null
     const admission = runtimePlatformAdmissionFor(health?.hostPlatform ?? null, health?.runtimePlatformAdmission ?? [], kind)
     const presentation = runtimeProductPresentation(admission, item)
-    return { kind, presentation, selectable: presentation.status === 'available' && runtimePlatformAdmissionAllowsUse(admission) }
+    return {
+      kind,
+      presentation,
+      experimental: admission?.status === 'preview',
+      selectable: presentation.status === 'available' && runtimePlatformAdmissionAllowsUse(admission)
+    }
   })
   const focusRuntime = runtimeChoices.find((row) => row.selectable && row.kind === selection?.adapterKind)?.kind
     ?? runtimeChoices.find((row) => row.selectable)?.kind
@@ -447,12 +452,13 @@ function RuntimeStep({
               ? <RuntimeScanProgress phase={phase} />
               : (
                   <div className="onboarding-runtime-list" role="radiogroup" aria-label="选择运行时" onKeyDown={moveRadioSelection}>
-                    {runtimeChoices.map(({ kind, presentation, selectable }) => {
+                    {runtimeChoices.map(({ kind, presentation, experimental, selectable }) => {
                       return (
                         <RuntimeRow
                           key={kind}
                           kind={kind}
                           presentation={presentation}
+                          experimental={experimental}
                           checked={selection?.adapterKind === kind}
                           tabIndex={focusRuntime === kind ? 0 : -1}
                           disabled={provisioning || !selectable}
@@ -619,6 +625,7 @@ function RuntimeScanProgress({ phase }: { phase: OnboardingRuntimePhase }): Reac
 function RuntimeRow({
   kind,
   presentation,
+  experimental,
   checked,
   tabIndex,
   disabled,
@@ -627,6 +634,7 @@ function RuntimeRow({
 }: {
   kind: AdapterKind
   presentation: RuntimeStatusPresentation
+  experimental: boolean
   checked: boolean
   tabIndex: number
   disabled: boolean
@@ -648,7 +656,7 @@ function RuntimeRow({
       <span className="onboarding-radio-check" aria-hidden="true" />
       <span className="onboarding-runtime-logo"><img src={RUNTIME_LOGOS[kind]} alt="" /></span>
       <span className="onboarding-runtime-copy"><strong>{RUNTIME_LABELS[kind]}</strong>
-        {presentation.status !== 'available' && presentation.status !== 'not_installed' && <small>{runtimeRowDetail(presentation)}</small>}
+        {(experimental || (presentation.status !== 'available' && presentation.status !== 'not_installed')) && <small>{runtimeRowDetail(presentation)}</small>}
       </span>
       <RuntimeState presentation={presentation} />
     </button>

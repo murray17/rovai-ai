@@ -85,6 +85,13 @@ describe('first-run onboarding flow', () => {
     expect(onboardingHasUsableRuntime('ready', emptyHealth(), [])).toBe(false)
   })
 
+  it.each(['ready', 'light_ready'] as const)('keeps experimental admission visible for a %s Runtime', (status) => {
+    const health = healthWithRuntime({ ...readyAvailability(), status }, previewAdmission())
+    const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [codexInstallation()])
+    expect(onboardingHasUsableRuntime('ready', health, [codexInstallation()])).toBe(true)
+    expect(markup).toContain('<small>实验性开放；当前平台尚未完成正式资格验证')
+  })
+
   it('keeps a failed scan distinct from a completed scan even with stale usable health', () => {
     const markup = renderOnboarding(snapshot('runtime'), 'error',
       healthWithRuntime(readyAvailability(), qualifiedAdmission()), [codexInstallation()])
