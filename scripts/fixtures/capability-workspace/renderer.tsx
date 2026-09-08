@@ -39,6 +39,9 @@ const privateHeader = JSON.stringify({
 })
 let toggleWait: Promise<void> | null = null
 let releaseToggle: (() => void) | undefined
+let deleteWait: Promise<void> | null = null
+let releaseDelete: (() => void) | undefined
+let failDelete = false
 const groups = [
   'claude_compatible',
   'codex',
@@ -107,6 +110,16 @@ Object.assign(window, {
     },
     request: async (method: string, params: any = {}) => {
       requests.push({ method, params })
+      if (method === 'skills.delete' || method === 'mcp.servers.delete') {
+        if (deleteWait) {
+          await deleteWait
+          deleteWait = null
+        }
+        if (failDelete) {
+          failDelete = false
+          throw new Error('删除失败，请重试。')
+        }
+      }
       if (method === 'skills.list') return structuredClone(skills)
       if (method === 'skills.deliveryGroups.list') return groups
       if (method === 'skills.content.read')
@@ -213,8 +226,9 @@ Object.assign(window, {
       if (method === 'mcp.import.scan')
         return {
           configDigest: config.configDigest,
-          sources: [],
+          sources: [{ sourceKind: 'cursor', sourcePath: '/fixture/unreadable.json', status: 'invalid', candidateCount: 0, issue: null }],
           candidates: [
+            ...[
             ['local-tools', 'codex'],
             ['playwright', 'claude_code'],
             ['docs', 'cursor'],
@@ -232,7 +246,22 @@ Object.assign(window, {
               mcpServers: { [name]: { command: 'node' } }
             }),
             issues: []
-          }))
+            })),
+            {
+              candidateId: 'blocked-codex', proposedName: 'botmux', sourceKind: 'codex',
+              sourcePath: '/fixture/codex/config.toml', compatibility: 'unsupported', conflict: 'none',
+              normalizedDefinitionJson: null,
+              issues: [{ code: 'mcp.import_unknown_field', kind: 'blocker', blocking: true, field: 'env_vars', message: 'Unrecognized field env_vars blocks automatic import' }]
+            },
+            {
+              candidateId: 'blocked-claude', proposedName: 'botmux', sourceKind: 'claude_code',
+              sourcePath: '/fixture/claude.json', compatibility: 'unsupported', conflict: 'none',
+              normalizedDefinitionJson: null,
+              issues: ['REQUIRED', 'SOCKET'].map(suffix => ({ code: 'mcp.import_reference_unsupported', kind: 'blocker', blocking: true,
+                field: 'env.BOTMUX_MCP_GATEWAY_' + suffix,
+                message: '待配置：此字段使用了无法无损迁移的来源引用语法。' }))
+            }
+          ]
         }
       if (method === 'mcp.servers.update' && conflict) {
         conflict = false
@@ -277,6 +306,8 @@ Object.assign(window, {
           })
         )
       }
+      if (method === 'mcp.servers.delete' && params.expectedConfigDigest !== config.configDigest)
+        return { status: 'conflict', actualConfigDigest: config.configDigest }
       if (method === 'mcp.servers.delete')
         config.servers = config.servers.filter((s) => s.serverId !== params.serverId)
       if (method.startsWith('mcp.')) {
@@ -344,6 +375,16 @@ Object.assign(window, {
       })
     },
     releaseToggle: () => releaseToggle?.(),
+    holdDelete: (fail = false) => {
+      failDelete = fail
+      deleteWait = new Promise(resolve => { releaseDelete = resolve })
+    },
+    releaseDelete: () => releaseDelete?.(),
+    changeMcpWhileDeleting: () => {
+      config.servers = config.servers.map(s => s.name === 'new-connection' ? { ...s, name: 'updated-connection' } : s)
+      config.configDigest += '-external'
+      window.dispatchEvent(new Event('focus'))
+    },
     folderSelections: () => folderSelections,
     cancelFolder: () => {
       folderResult = null

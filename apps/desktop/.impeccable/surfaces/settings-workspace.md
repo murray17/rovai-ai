@@ -1,5 +1,5 @@
 ---
-version: 9
+version: 10
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -112,12 +112,14 @@ never durable Episode admission, acknowledgement, clearing or the Core unread fa
 Follow [Capability settings](../../../../docs/ui/components/capability-settings.md): a white day surface,
 compact left library and right content/configuration pane, with the same component tree in Steel Night.
 The divider supports pointer drag, keyboard adjustment, click alternatives and double-click reset.
-Search and 全部 / 已启用 / 已停用 filter together; source and status stay beside the row name.
-Detail headers own enable switches. Add, preview, import and delete/update confirmation stay in the
-right pane. Add and import are peer buttons in the MCP library heading. Only installed items appear in the list. Leaving an editor/import or switching MCP/Skills clears unfinished input; do not create draft placeholders or restore drafts.
+Skills combine search and 全部 / 已启用 / 已停用 filters, with status beside the row name and an enable
+switch in the detail header. MCP uses teammate assignment without a separate enable switch or filter.
+Add, preview, import and update confirmation stay in the right pane. Deletion uses the shared application
+confirmation dialog, initially focused on Cancel; keep failure feedback in the dialog and restore focus on dismissal.
+Add and import are peer buttons in the MCP library heading. Only installed items appear in the list. Leaving an editor/import or switching MCP/Skills clears unfinished input; do not create draft placeholders or restore drafts.
 
 Skills show active `user_managed` items only; omit `system_required` Skills entirely. A source badge
-identifies Rovai, GitHub or 本地导入 without exposing configuration paths. Read-only content defaults
+identifies Rovai only; imported Skills retain provenance without extra source badges. Read-only content defaults
 to SKILL.md and supports safe Markdown, raw text and package file navigation. Local import invokes
 the native folder chooser, then previews the inspected candidate. GitHub import uses its existing
 inspection path. The scope tab selects delivery groups using whole rows with member avatars.
@@ -125,7 +127,9 @@ New imports and initial official Skills inherit the canonical all-groups policy;
 saved enablement and explicit group choices. Previews never execute or authorize Skill instructions.
 
 MCP accepts JSON only, with the existing digest/CAS mutation semantics. The right-side local import
-shows selectable portable candidates and folds unneeded diagnostics. Same-name replacement requires
+shows selectable portable candidates and folds unneeded diagnostics. Expanded unavailable entries separate
+name/source/status from the reason and wrapping field list; merge repeated reasons within the same candidate.
+Same-name replacement requires
 an explicit inline choice. Necessary environment reference edits remain visible. Teammate assignment
 uses whole rows with real avatars and a selected check mark. Malformed source blocks overwrite;
 secret values stay masked and out of ordinary errors. Conflicts retain the JSON draft and require
