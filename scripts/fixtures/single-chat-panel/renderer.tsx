@@ -342,6 +342,7 @@ Object.assign(window, {
 let locateNotification: (conversation: string) => void
 const notificationPresentations: number[] = []
 let notificationRequest = 0
+const bubbledDragEvents: string[] = []
 
 function Fixture(): React.JSX.Element {
   const [entryHost, setEntryHost] = useState<HTMLDivElement | null>(null)
@@ -362,7 +363,12 @@ function Fixture(): React.JSX.Element {
       <div className="single-chat-fixture-title"><span>rovai-ai</span><strong>单聊样式验收</strong></div>
       <div className="single-chat-fixture-entries" ref={setEntryHost} />
     </header>
-    <main className="single-chat-fixture-stage">
+    <main className="single-chat-fixture-stage"
+      onDragEnter={event => { bubbledDragEvents.push(event.type) }}
+      onDragOver={event => { bubbledDragEvents.push(event.type) }}
+      onDragLeave={event => { bubbledDragEvents.push(event.type) }}
+      onDrop={event => { bubbledDragEvents.push(event.type) }}
+    >
       <PublicExecutionFixture phase={phase} />
       <SingleChatPanel
         target={notificationTarget}
@@ -385,6 +391,7 @@ createRoot(document.getElementById('root')!).render(<Fixture />)
 
 Object.assign(window, {
   singleChatTest: {
+    resetDragEvents: () => { bubbledDragEvents.length = 0 },
     notification: (conversation: string) => locateNotification(conversation),
     settle: async () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
@@ -405,6 +412,8 @@ Object.assign(window, {
       const composerActions = document.querySelector<HTMLElement>('.single-chat-composer .composer-actions')
       const rect = panel?.getBoundingClientRect()
       return {
+        bubbledDragEvents: [...bubbledDragEvents],
+        attachmentDropVisible: Boolean(document.querySelector('.single-chat-drop-layer')),
         body: document.body.textContent ?? '',
         liveText: document.querySelector('.single-chat-run-history.is-live')?.textContent ?? '',
         sendFeedback: document.querySelector('.single-chat-send-feedback')?.textContent ?? '',
