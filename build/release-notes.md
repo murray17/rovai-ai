@@ -1,21 +1,19 @@
-# Rovai AI v0.2.0
+# Rovai AI v0.2.1
 
-Rovai AI 0.2.0 makes the desktop workspace more personal, easier to configure, and clearer while agents are working.
+本次更新重点改善 MCP 与 Skills 管理、定时任务和会话阅读体验，并统一桌面各页面的视觉风格。
 
-macOS arm64 and x64 builds use the same fixed Rovai Release Signing certificate as 0.1.0. Windows x64 remains an unsigned Preview build and may show a SmartScreen warning.
+- **MCP 与 Skills 工作区升级**：采用可调整宽度的列表与详情分栏，添加、导入、配置和预览在页面内完成，保存与删除操作固定在顶部。
+- **MCP 导入更顺畅**：从本机导入时保留已有凭证与环境变量引用，减少重复填写；支持来源筛选、同名项分组和配置查看，错误与冲突提示更清楚。
+- **凭证显示更可控**：敏感字段默认隐藏，点击后查看原值；切换配置或保存后自动隐藏。
+- **Skill 文件浏览更方便**：支持导入前预览包内文件、折叠目录、搜索文件，以及 Markdown 阅读与源码切换。
+- **恢复定时任务入口**：完善总览、空白与模板创建流程，优化日期和时间选择，增加 Cron 即时校验及错误提示。
+- **会话阅读更连贯**：同一队员连续发送的公屏消息按条件分组，减少重复头像与署名，保留每条消息独立的复制和回复操作。
+- **执行操作更清晰**：Fast 移至模型配置旁，统一停止与收起按钮；收起后保留执行选择、展开内容和滚动位置。
+- **统一界面风格**：优化设置、队员、记忆、会话菜单和文件预览的控件与间距，改善宽屏、窄窗口及高倍缩放体验；运行监控支持切换折线图指标。
+- **新手引导更完整**：优化运行时配置与首次会话流程，提供三个起步示例；修复完成引导后意外返回首页的问题。
+- **修复交互问题**：解决 MCP/Skills 顶部按钮无法点击、会话加载时输入区跳动，以及单聊拖入文件时误触发公屏提示的问题。
+- **修复 Windows MCP 权限问题**：自动准备当前用户配置的私有权限，减少权限异常提示，并保留已有配置内容。
 
-## What's Changed
+内置 Skill 调整：移除 5 项旧第三方预置 Skill，保留用户手动导入的内容；`analyze-agent-codebase` 在首次安装时默认关闭，可按需启用。
 
-- Add complete appearance and reading controls for theme, conversation, document and code text sizes, reading density, application zoom, and reduced motion.
-- Redesign teammate configuration as an inline workspace with independent profile and Runtime saves, preserved drafts, clearer status, and safer conflict handling.
-- Refine the teammate roster with a resizable and collapsible rail, search for larger teams, compact grouping, and remembered layout preferences.
-- Speed up new conversations with optional saved team defaults while consistently excluding unavailable or unconfigured teammates from selection and leadership.
-- Guide users through installing and signing in to supported Agent Runtimes, with platform-aware commands, copy feedback, refresh, and recheck actions.
-- Distinguish connecting, thinking, active execution, approvals, retries, and completion without leaving stale status text after real output arrives.
-- Put Fast controls directly in execution details and simplify shared stop and collapse actions while preserving keyboard focus and per-member state.
-- Improve file activity with localized multi-file reads, wider diff click targets, direct previews for operation-only changes, canonical path display, reveal/copy actions, and safe source-attachment paths.
-- Capture verified Pi edit patches as reviewable diffs, keep missing Pi installations out of subsystem health, and finalize Pi Skill availability and delivery ordering.
-- Restore private-chat approval, completion and failure notifications while keeping the conversation currently being read quiet and preserving notification focus.
-- Keep Markdown previews vertically scrollable over wide tables and tighten long notification and file-row layouts across narrow windows.
-
-**Full changelog:** https://github.com/murray17/rovai-ai/compare/v0.1.0...v0.2.0
+**完整更新记录：** https://github.com/murray17/rovai-ai/compare/v0.2.0...v0.2.1
