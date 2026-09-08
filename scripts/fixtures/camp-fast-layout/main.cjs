@@ -167,6 +167,16 @@ app.whenReady().then(async () => {
     await snapshot()
     await click('.camp-detail-entry[data-detail="execution"]')
     await click('.run-pulse [data-agent-id="agent-0"]')
+    const runInformation = '.execution-run-information'
+    assert.equal(await run(`document.querySelector('${runInformation}').open`), false, 'Low-frequency run metadata starts collapsed')
+    await click(`${runInformation} > summary`)
+    assert.equal(await run(`document.querySelector('${runInformation}').open`), true)
+    assert.ok(await run(`document.querySelector('${runInformation}').textContent.includes('fixture-model')`), 'Run evidence remains available in the disclosure')
+    await run('window.fastTest.refresh()')
+    await snapshot()
+    assert.equal(await run(`document.querySelector('${runInformation}').open`), true, 'Projection refresh preserves the reader disclosure')
+    await key('Enter')
+    assert.equal(await run(`document.querySelector('${runInformation}').open`), false, 'The focused summary closes with native keyboard input')
     const executionFast = '.execution-drawer .camp-fast-toggle'
     const stopButton = '.execution-drawer [aria-label="停止当前运行"]'
     const executionState = () => run(`(() => {

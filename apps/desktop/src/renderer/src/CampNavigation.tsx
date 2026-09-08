@@ -27,13 +27,10 @@ import {
   AppDialogBody,
   AppDialogContent,
   AppDialogFooter,
-  AppDialogHeader,
-  AppDialogImpact,
-  AppDialogImpactList
+  AppDialogHeader
 } from './AppDialog'
 import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
 import {
-  localDeviceLabel,
   primaryShortcutLabel,
   shouldHandlePrimaryShortcut
 } from './renderer-platform'
@@ -755,7 +752,7 @@ export function CampNavigation({
           <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
           <AppDialogContent
             className="camp-action-dialog"
-            tone={action?.kind === 'delete' ? 'danger' : action?.kind === 'remove_project' ? 'info' : 'brand'}
+            tone={action?.kind === 'delete' || action?.kind === 'remove_project' ? 'danger' : 'brand'}
             onCloseAutoFocus={(event) => {
               const target = dialogReturnFocusTargetRef.current
               dialogReturnFocusTargetRef.current = null
@@ -786,44 +783,27 @@ export function CampNavigation({
             ) : action?.kind === 'delete' ? (
               <>
                 <AppDialogHeader
-                  title={`永久删除“${formatCampTitle(action.camp)}”？`}
+                  title="删除对话？"
                   description="此操作不可撤销。"
                   icon="trash"
-                  kicker="不可撤销"
                   closeDisabled={actionBusy}
                 />
-                <AppDialogBody>
-                  <AppDialogImpactList>
-                    <AppDialogImpact tone="delete" icon="trash" label="将被删除">消息、队员连续性、运行记录、未决审批及关联数据。</AppDialogImpact>
-                    <AppDialogImpact tone="warning" icon="warning" label="仍在运行">会收到停止请求；删除提交后不再恢复任何会话数据。</AppDialogImpact>
-                    <AppDialogImpact tone="keep" icon="folder" label="保持不变">本地项目目录及其中的文件不会被删除。</AppDialogImpact>
-                  </AppDialogImpactList>
-                </AppDialogBody>
                 <AppDialogFooter>
                   <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={actionBusy}>取消</button></Dialog.Close>
-                  <button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '正在永久删除…' : '永久删除对话'}</button>
+                  <button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '正在删除…' : '删除'}</button>
                 </AppDialogFooter>
               </>
             ) : action?.kind === 'remove_project' ? (
               <>
                 <AppDialogHeader
                   title={`从侧栏移除“${action.project.name}”？`}
-                  description={`只移除${localDeviceLabel(platform)}上的导航入口，并取消项目及其中对话的置顶。`}
+                  description="文件、会话记录和正在进行的执行都会保留。重新选择同一目录即可恢复显示。"
                   icon="folder"
-                  kicker="可恢复"
                   closeDisabled={actionBusy}
-            hideDescription
                 />
-                <AppDialogBody>
-                  <AppDialogImpactList>
-                    <AppDialogImpact icon="folder" label="会改变">项目与其中对话不再显示在{localDeviceLabel(platform)}的侧栏，相关置顶会被取消。</AppDialogImpact>
-                    <AppDialogImpact tone="keep" icon="keep" label="继续保留">本地目录、会话、消息、运行记录、审计以及已经开始的执行。</AppDialogImpact>
-                    <AppDialogImpact icon="info" label="如何恢复">之后重新选择同一工作目录，即可恢复导航入口。</AppDialogImpact>
-                  </AppDialogImpactList>
-                </AppDialogBody>
                 <AppDialogFooter>
                   <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={actionBusy}>取消</button></Dialog.Close>
-                  <button className="primary-button" type="button" onClick={() => void confirmProjectRemoval()} disabled={actionBusy}>{actionBusy ? '正在移除…' : '移除侧栏入口'}</button>
+                  <button className="danger-button" type="button" onClick={() => void confirmProjectRemoval()} disabled={actionBusy}>{actionBusy ? '正在移除…' : '移除'}</button>
                 </AppDialogFooter>
               </>
             ) : null}
@@ -1112,6 +1092,7 @@ function CampGroup({
       key: 'remove-project',
       label: projectMenuLabels[1],
       icon: 'remove',
+      danger: true,
       separatorBefore: projectMenuItems.length > 0,
       onSelect: onRemoveProject
     })

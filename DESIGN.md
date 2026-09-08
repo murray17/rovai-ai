@@ -140,13 +140,14 @@ and persistent focus treatment; higher contrast preferences restore the stronger
 
 ## Components
 
-- **Buttons:** compact, direct and text-first. Primary actions use Steel; danger is reserved for
-  destructive outcomes. Active buttons move down 1px; disabled controls retain legible content at
+- **Buttons:** compact, direct and text-first. Primary actions use Steel by default. Conversation send, task creation and member invitation use
+  the neutral `--conversation-action` family; danger marks destructive actions and sidebar removal. Active buttons move down 1px; disabled controls retain legible content at
   reduced opacity.
 - **Inputs:** use the raised/input surface and a perceivable control boundary. Focus is a 2px
   `--focus` outline with 2px offset, or the equivalent tokenized inner treatment where geometry
   requires it.
-- **Navigation:** rows and short 2px selection rails establish location. Hover is supplementary;
+- **Navigation:** rows and selection surfaces establish location. Selected conversation rows omit
+  the left rail and use neutral text; other navigation surfaces retain their existing selection treatment. Hover is supplementary;
   selected state and actions remain understandable from text, placement and focus.
 - **Containers:** prefer one open surface with dividers over card walls. A card is justified only
   when it represents a bounded object, decision or independent state.
