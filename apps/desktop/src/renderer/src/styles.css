@@ -3253,6 +3253,62 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .mention-group-empty { color: var(--faint); font-size: 10px; }
 .message-surface { position: relative; display: flex; min-width: 0; width: fit-content; max-width: 100%; flex-direction: column; align-items: flex-start; }
 .message-surface.has-delivery { width: 100%; }
+.public-message-readout { display: contents; }
+.public-agent-message .public-message-readout { position: relative; display: flex; width: fit-content; min-width: 0; max-width: 100%; flex-direction: column; align-items: flex-start; }
+.public-agent-message .public-message-readout:has(.message-attachments, .message-delivery-footer) { width: 100%; }
+.public-agent-message > .message-body { grid-column: 2; }
+.public-agent-message .message-surface > :is(.final-copy, .message-bubble) {
+  width: fit-content;
+  max-width: 100%;
+  padding: 9px 12px 10px;
+  border: 1px solid var(--conversation-user-message-line);
+  border-radius: 12px;
+  background: var(--conversation-user-message-surface);
+}
+.public-agent-message .message-surface > :is(.final-copy, .message-bubble) .safe-markdown > :last-child { margin-bottom: 0; }
+.public-agent-message .message-surface > .agent-message-outputs:first-child { margin-top: 0; }
+.public-agent-message.same-author:not(.is-group-continuation),
+.public-message-output.same-author:not(.is-group-continuation) { margin-top: 20px; }
+.public-agent-message.is-group-continuation,
+.public-message-output.is-group-continuation { margin-top: 8px; }
+.public-message-output > .public-agent-message { margin-top: 0; margin-bottom: 0; }
+.public-agent-message.joins-next-message { margin-bottom: 8px; }
+/* Direct message focus also reveals identity while the Electron window is inactive. */
+.public-agent-message.is-group-continuation:not(.conversation-find-current-message):not(:focus-within:not(:has(:focus-within))) > :is(.message-author-avatar-trigger, .member-avatar) { visibility: hidden; }
+.public-agent-message.is-group-continuation:not(.conversation-find-current-message):not(:focus-within:not(:has(:focus-within))) > .message-body > .bubble-meta { display: none; }
+.message-continuation-time { display: none; }
+.public-agent-message.is-group-continuation:not(.conversation-find-current-message):not(:focus-within:not(:has(:focus-within))) > .message-continuation-time {
+  position: absolute;
+  display: block;
+  top: 9px;
+  left: -7px;
+  width: 40px;
+  color: var(--faint);
+  font: 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+}
+.public-agent-message.is-group-continuation:is(:hover, :focus-within) > .message-continuation-time { opacity: 1; }
+@media (min-width: 761px) and (pointer: fine) {
+  .public-agent-message.joins-next-message .public-message-readout > .agent-message-actions {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    right: 0;
+    width: auto;
+    margin: 0;
+    padding: 2px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--surface-raised);
+    transform: translateY(-50%);
+  }
+}
+@media (max-width: 760px), (pointer: coarse) {
+  .public-agent-message .agent-message-actions { opacity: 1; pointer-events: auto; transform: none; }
+  .public-agent-message > .message-continuation-time { opacity: 1; }
+}
 .reply-parent-quote {
   display: flex;
   width: min(100%, var(--conversation-prose-width));
