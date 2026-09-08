@@ -20,7 +20,9 @@ app.whenReady().then(async () => {
   await window.loadFile(renderer)
   const report = await window.webContents.executeJavaScript(mode === '--pending-attachments'
     ? 'window.continuationTest.pendingAttachments()'
-    : 'window.continuationTest.run()', true)
+    : mode === '--route-loading'
+      ? 'window.continuationTest.routeLoading()'
+      : 'window.continuationTest.run()', true)
   console.log(JSON.stringify(report))
   app.exit(report.ok ? 0 : 1)
 }).catch(error => { console.error(error); app.exit(1) })

@@ -4721,6 +4721,12 @@ export function CampWorkspace({
             if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
           }} />
         <div hidden={pendingEditing}>
+        <div className="composer-route-slot">
+        {draftLoadState.state === 'loading' && (
+          <div className="composer-route-rail" aria-label="正在加载接收者路由" aria-busy="true">
+            <span className="composer-route-placeholder" aria-hidden="true"><span /><span /></span>
+          </div>
+        )}
         {(continuationVisible && continuationIntent) || (
           composerDraft
           && recipientSummary
@@ -4762,6 +4768,7 @@ export function CampWorkspace({
               </div>
             )
           : null}
+        </div>
         <div className="composer-box">
           {attachmentDragState && (
             <span className="composer-destination">将添加到这条消息</span>
