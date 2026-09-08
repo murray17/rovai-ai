@@ -14,7 +14,8 @@ import {
   AppDialogBody,
   AppDialogContent,
   AppDialogFooter,
-  AppDialogHeader
+  AppDialogHeader,
+  DialogControlIcon
 } from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
@@ -237,8 +238,8 @@ export function ChannelSettingsView({
       <SettingsPageHeader
         eyebrow="Settings / Channels"
         title="渠道"
-        description="在本机连接协作平台并逐一发布队员 Bot。只有 Rovai Owner 可以从外部渠道触发队员；项目选择与执行管理仍由本机掌控。"
-        aside={<span className="settings-page-note">Owner 本机</span>}
+        description="连接飞书或钉钉，让队员在你常用的平台协作。"
+        aside={<span className="settings-page-note">本机管理</span>}
       />
 
       {loading && !snapshot && <ChannelSettingsState label="正在读取渠道状态…" />}
@@ -264,7 +265,7 @@ export function ChannelSettingsView({
             <ChannelSectionHeading
               id="channel-provider-heading"
               title="渠道"
-              description="选择要连接和管理的平台。账号会话、应用凭据与项目路径都留在这台设备。"
+              description="选择要连接的平台。"
               summary={`${manageableChannels.length} 个可用渠道`}
             />
             <div className="channel-provider-strip" role="tablist" aria-label="渠道">
@@ -297,7 +298,7 @@ export function ChannelSettingsView({
               <ChannelSectionHeading
                 id="channel-connection-heading"
                 title={`${providerName}连接`}
-                description="连接只决定后续 Bot 的发布目标；切换连接不会迁移或停用已发布 Bot。"
+                description="连接后可发布队员 Bot。"
               />
               <ChannelConnectionRow
                 channel={channel}
@@ -305,17 +306,14 @@ export function ChannelSettingsView({
                 onConnect={onConnect}
                 onDisconnect={onDisconnect}
               />
-              <p className="channel-owner-note">
-                <OwnerShieldIcon />
-                <span>{providerName}中的 Owner 消息仍是外部消息身份，不获得本机管理权限。项目绝对路径不会发送到外部渠道。</span>
-              </p>
+              <details className="settings-disclosure channel-policy"><summary><OwnerShieldIcon /><span>连接与权限</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></summary><div><p>只有 Rovai Owner 可以从外部渠道触发队员；项目选择与执行管理仍由本机掌控。</p><p>连接只决定后续 Bot 的发布目标，切换连接不会迁移或停用已发布 Bot。</p><p>账号会话和应用凭据保存在这台设备。项目绝对路径不会发送到外部渠道。</p><p>{providerName}中的 Owner 消息不获得本机管理权限。</p></div></details>
             </section>
 
             <section className="channel-settings-section" aria-labelledby="channel-member-bots-heading">
               <ChannelSectionHeading
                 id="channel-member-bots-heading"
                 title="队员 Bot"
-                description="每次只发布一名队员。每名队员拥有独立 Bot 身份和隔离的长连接。"
+                description="每位队员使用独立的 Bot 身份。"
                 summary={memberSummary(members, channel.memberBots)}
               />
               <ChannelMemberBotTable
@@ -447,7 +445,7 @@ export function ExecutionWebSettingsPanel(): React.JSX.Element {
         {error && <p className="execution-web-error" role="alert">{error}</p>}
         <div className="execution-web-actions">
           <button className="primary-button compact" type="submit" disabled={!dirty || !portValid || saving}>
-            {saving ? '保存中…' : '保存'}
+            <DialogControlIcon name="save" />{saving ? '保存中…' : '保存'}
           </button>
         </div>
       </form>
@@ -561,7 +559,7 @@ export function ChannelConnectionRow({
       <div className="channel-connection-actions">
         {connected && (
           <button
-            className="channel-row-action"
+            className="channel-row-action is-danger"
             type="button"
             disabled={busy !== null || !onDisconnect}
             onClick={() => onDisconnect?.(channel)}
@@ -842,7 +840,7 @@ function PublishBotDialog({
               <p className="channel-publish-note">
                 {boundAppId
                   ? `该队员的${providerName}身份已冻结到此应用；重新发布只恢复原应用的配置、版本和连接。`
-                  : '创建前会再次校验账号和租户；一旦身份变化或会话过期，发布会停止并提示重新连接。'}
+                  : "发布前会验证账号与租户；账号变化或登录失效时，需要重新连接。"}
               </p>
             )}
           </AppDialogBody>

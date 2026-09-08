@@ -1,0 +1,1582 @@
+/* Settings presentation. MCP/Skills keep their existing content and controls. */
+:root :is(.settings-panel:not(.settings-panel-mcp,.settings-panel-skills),.app-dialog:is(.one-click-confirm-dialog,.channel-qr-dialog,.channel-publish-dialog),.general-lead-popover) {
+  --brand: var(--conversation-action);
+  --brand-hover: var(--conversation-action-hover);
+  --brand-ink: var(--conversation-action);
+  --brand-contrast: var(--conversation-action-contrast);
+  --brand-soft: var(--neutral-selected);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(input,textarea,select) {
+  caret-color: var(--ink);
+  accent-color: var(--brand);
+}
+:root :is(.settings-panel:not(.settings-panel-mcp,.settings-panel-skills),.app-dialog:is(.one-click-confirm-dialog,.channel-qr-dialog,.channel-publish-dialog)) select:not([multiple]) {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-left: 11px;
+  padding-right: 32px;
+  border-color: var(--settings-field-line);
+  background-color: var(--input);
+  background-image: var(--settings-select-arrow);
+  background-repeat: no-repeat;
+  background-size: 14px 14px;
+  background-position: right 10px center;
+  color: var(--ink);
+  cursor: pointer;
+}
+:root :is(.settings-panel:not(.settings-panel-mcp,.settings-panel-skills),.app-dialog:is(.one-click-confirm-dialog,.channel-qr-dialog,.channel-publish-dialog)) select:not([multiple]):hover:not(:disabled) {
+  border-color: var(--settings-choice-selected-line);
+}
+:root :is(.settings-panel:not(.settings-panel-mcp,.settings-panel-skills),.app-dialog:is(.one-click-confirm-dialog,.channel-qr-dialog,.channel-publish-dialog)) select:disabled {
+  cursor: default;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) ::selection {
+  color: var(--ink);
+  background: var(--neutral-selected);
+}
+:root .settings-sidebar-menu button.active {
+  color: var(--ink);
+  background: var(--neutral-selected);
+}
+:root .settings-sidebar-menu button.active::before {
+  content: none;
+}
+:root .settings-sidebar-menu button.active>span {
+  color: var(--ink);
+}
+:root .settings-sidebar-menu button strong {
+  font-weight: 500;
+}
+:root .settings-sidebar-menu button.active strong {
+  font-weight: 600;
+}
+:root .settings-content .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) {
+  border-top: 0;
+  padding: 32px 32px 48px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .settings-page-eyebrow {
+  display: none;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .settings-page-heading {
+  align-items: center;
+  gap: 20px;
+  padding-bottom: 24px;
+  border: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .settings-page-heading h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 620;
+  letter-spacing: -.02em;
+  line-height: 1.3;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .settings-page-heading-copy>p:last-child {
+  margin-top: 8px;
+  font-size: 12px;
+  max-width: 68ch;
+  line-height: 1.6;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .settings-page-heading-aside {
+  gap: 7px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.section-heading,.channel-section-heading)::before {
+  content: none;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.section-heading,.channel-section-heading) {
+  padding-left: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.section-heading,.channel-section-heading) h2 {
+  font-size: 15px;
+  color: var(--ink);
+  font-weight: 600;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .quiet-button {
+  min-height: 30px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .quiet-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--ink);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .primary-button {
+  min-height: 30px;
+  border-color: transparent;
+  font-weight: 500;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.settings-page-heading,.general-save-row,.execution-web-actions,.diagnostics-issue-action) .primary-button {
+  background: var(--surface-muted);
+  color: var(--ink);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.settings-page-heading,.general-save-row,.execution-web-actions,.diagnostics-issue-action) .primary-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.primary-button,.quiet-button):disabled {
+  opacity: .43;
+  cursor: default;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings {
+  width: min(880px,100%);
+  max-width: 880px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings-section {
+  padding: 24px 0;
+  gap: 16px;
+  grid-template-columns: minmax(0,1fr);
+  border-bottom: 1px solid var(--line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings-section:last-child {
+  border-bottom: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings-section .section-heading p {
+  display: none;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings-section .section-heading {
+  margin: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings-section:first-child {
+  padding-top: 8px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .startup-location-options legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .startup-location-options {
+  gap: 12px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .startup-location-option {
+  min-height: 70px;
+  padding: 14px 16px;
+  border: 1px solid var(--settings-choice-line);
+  background: var(--home-surface);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .startup-location-option:hover {
+  background: var(--settings-choice-hover);
+  border-color: var(--settings-choice-selected-line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member:has(input:checked) {
+  background: var(--home-surface);
+  border-color: var(--settings-choice-selected-line);
+  color: var(--ink);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-configurator {
+  overflow: visible;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-config-head {
+  padding: 0 0 12px;
+  min-height: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-config-head h3 {
+  font-size: 13px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-config-head p {
+  font-size: 11px;
+  margin-top: 5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-config-head>span {
+  color: var(--muted);
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-list {
+  margin: 0;
+  gap: 8px;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member {
+  min-height: 62px;
+  padding: 10px 12px;
+  gap: 8px;
+  border: 1px solid var(--settings-choice-line);
+  background: var(--home-surface);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member:hover {
+  background: var(--settings-choice-hover);
+  border-color: var(--settings-choice-selected-line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-picker {
+  margin: 0;
+  background: transparent;
+  border: 1px solid var(--settings-choice-line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-picker-panel {
+  padding: 0 10px 10px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-picker-panel .general-default-member-list {
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-picker>summary {
+  min-height: 62px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-picker>summary strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-picker>summary small {
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-picker>summary:hover {
+  background: var(--settings-choice-hover);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-search {
+  background: transparent;
+  border: 1px solid var(--settings-choice-line);
+  border-radius: 7px;
+  min-height: 34px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-lead {
+  margin: 18px 0 0;
+  padding: 0;
+  min-height: 48px;
+  background: transparent;
+  border-radius: 0;
+  grid-template-columns: minmax(0,1fr) minmax(260px,320px);
+  gap: 20px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-lead strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-lead small {
+  font-size: 11px;
+  line-height: 1.6;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .startup-location-option:has(input:checked) {
+  background: var(--home-surface);
+  border-color: var(--settings-choice-selected-line);
+  color: var(--ink);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member small {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member.unavailable {
+  border-color: var(--attention);
+  background: var(--attention-soft);
+  color: var(--attention);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member.unavailable small {
+  color: var(--attention);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-save-row {
+  justify-content: flex-end;
+  margin: 12px 0 0;
+  padding: 0;
+  min-height: 30px;
+  gap: 12px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-save-row .primary-button {
+  min-width: 64px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.general-save-row,.execution-web-actions) .primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.general-save-row,.execution-web-actions) .primary-button .dialog-glyph {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-draft-state {
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-one-click-setting {
+  margin: 18px 0 0;
+  padding: 18px 0 0;
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-one-click-row {
+  min-height: 44px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-one-click-title strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-one-click-row>span>small {
+  font-size: 11px;
+  line-height: 1.6;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-help-mark {
+  width: 17px;
+  height: 17px;
+  border: 0;
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-world-map-setting {
+  padding: 0;
+  min-height: 50px;
+  background: transparent;
+  border-radius: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-world-map-setting:hover {
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-world-map-setting strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-world-map-setting small {
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-window-row {
+  padding: 0;
+  min-height: 34px;
+  background: transparent;
+  border-radius: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-window-row .quiet-button {
+  background: var(--surface-muted);
+  align-self: center;
+  justify-self: end;
+}
+.general-lead-trigger {
+  min-width: 0;
+  width: 100%;
+}
+.general-lead-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px;
+  border: 1px solid var(--settings-field-line);
+  border-radius: 8px;
+  background: var(--input);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.general-lead-trigger:hover:not(:disabled),.general-lead-trigger[aria-expanded="true"] {
+  border-color: var(--settings-choice-selected-line);
+}
+.general-lead-trigger:disabled {
+  opacity: .45;
+  cursor: default;
+}
+.general-lead-value {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+.general-lead-value strong,.general-lead-option strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px!important;
+  font-weight: 550!important;
+  line-height: 1.4;
+}
+.general-lead-value small,.general-lead-option small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px!important;
+  line-height: 1.4!important;
+  color: var(--muted);
+}
+.general-lead-trigger>svg,.general-lead-option>svg,.general-lead-search>svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.general-lead-trigger>svg {
+  color: var(--muted);
+}
+.general-lead-popover {
+  z-index: 450;
+  display: flex;
+  flex-direction: column;
+  padding: 5px;
+  border: 1px solid var(--settings-choice-line);
+  border-radius: 10px;
+  background: var(--home-surface);
+  color: var(--ink);
+  overflow: hidden;
+  box-sizing: border-box;
+  width: var(--radix-popover-trigger-width);
+  max-height: min(340px,var(--radix-popover-content-available-height));
+  box-shadow: var(--shadow-float);
+}
+.general-lead-options {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  scrollbar-gutter: stable;
+}
+.general-lead-option {
+  display: flex;
+  min-height: 48px;
+  gap: 10px;
+  padding: 7px 9px;
+  align-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.general-lead-option-copy {
+  min-width: 0;
+  flex: 1;
+}
+.general-lead-option.is-active,.general-lead-option:hover {
+  background: var(--neutral-hover);
+}
+.general-lead-option[aria-disabled="true"] {
+  opacity: .45;
+  cursor: default;
+}
+.general-lead-option>svg {
+  color: var(--ink);
+}
+.general-lead-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 39px;
+  margin: 0 4px 4px;
+  padding: 0 5px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+.general-lead-search input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  appearance: none;
+}
+.general-lead-empty {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) input[role="switch"] {
+  position: relative;
+  appearance: none;
+  width: 34px;
+  height: 20px;
+  min-width: 34px;
+  flex: 0 0 34px;
+  margin: 0;
+  border: 1px solid var(--settings-switch-off);
+  border-radius: 20px;
+  background: var(--settings-switch-off);
+  cursor: pointer;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) input[role="switch"]::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--settings-switch-thumb);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .14);
+  transform: none;
+  transition: transform 140ms ease,background-color 140ms ease;
+  content: "";
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) input[role="switch"]:checked {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) input[role="switch"]:checked::after {
+  background: var(--brand-contrast);
+  transform: translateX(14px);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) input[role="switch"]:disabled {
+  opacity: .4;
+  cursor: default;
+}
+:root .settings-panel-appearance .appearance-settings-page .appearance-option:has(input:checked) {
+  border-color: var(--settings-choice-selected-line);
+  background: var(--home-surface);
+  box-shadow: none;
+}
+:root .settings-panel-appearance .appearance-settings-page .theme-card-check {
+  width: 17px;
+  height: 17px;
+  flex-basis: 17px;
+}
+:root .settings-panel-appearance .appearance-settings-page .quiet-button {
+  border-color: transparent;
+  background: transparent;
+}
+:root .settings-panel-appearance .appearance-settings-page .theme-card-caption {
+  min-height: 55px;
+}
+:root .settings-panel-appearance .appearance-settings-page .section-heading h2 {
+  font-size: 15px;
+}
+:root .settings-panel-appearance .appearance-settings-page .settings-section {
+  padding: 24px 0;
+}
+:root .settings-panel-appearance #appearance-zoom {
+  min-width: 143px;
+}
+:root .settings-panel-notifications .notification-master-panel {
+  padding: 8px 0 24px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+:root .settings-panel-notifications .notification-scenario-grid {
+  gap: 28px;
+  margin-top: 28px;
+}
+:root .settings-panel-notifications .notification-scenario {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root .settings-panel-notifications .notification-scenario+.notification-scenario {
+  padding-left: 28px;
+  border-left: 1px solid var(--line);
+}
+:root .settings-panel-notifications .notification-scenario-heading {
+  padding: 0 0 4px;
+}
+:root .settings-panel-notifications .notification-scenario-description {
+  margin: 0;
+  min-height: 36px;
+}
+:root .settings-panel-notifications .notification-scenario .notification-switch {
+  padding: 12px 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+:root .settings-panel-notifications .notification-scenario .notification-switch:last-child {
+  border-bottom: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .notification-master-title span {
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .notification-master-icon {
+  color: var(--ink)!important;
+  background: transparent!important;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .notification-master-title h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .notification-switch strong {
+  font-weight: 550;
+  font-size: 13px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .notification-switch small {
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .notification-scenario-heading span {
+  font-size: 10.5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .notification-scenario-description {
+  font-size: 11px;
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-list {
+  padding: 0;
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row {
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  min-height: 72px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row:last-child {
+  border-bottom: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row:focus-within {
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row:hover,:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row:has(.runtime-install-guide) {
+  background: var(--workspace-surface-subtle);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-row:has(.runtime-install-guide) {
+  border-radius: 10px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-copy strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-copy small {
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-status {
+  font-size: 11px;
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-product-check {
+  font-size: 11px;
+  min-width: 96px;
+  padding: 5px 10px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-catalog-platform {
+  font-size: 10.5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-provider-strip {
+  border: 0;
+  gap: 8px;
+  padding: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-provider-tab {
+  width: 184px;
+  min-height: 52px;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-provider-tab.is-selected {
+  color: var(--ink);
+  background: var(--neutral-selected);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-provider-tab strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-provider-tab small {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-settings-section {
+  padding-top: 18px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-settings-section+.channel-settings-section {
+  margin-top: 14px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-section-heading h2 {
+  font-size: 14px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-section-heading p {
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-section-heading>span {
+  font-family: inherit;
+  font-size: 10.5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-member-bot-grid {
+  grid-template-columns: minmax(145px,1.15fr) minmax(135px,1fr) 80px 74px;
+  gap: 12px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-member-bot-head {
+  font-size: 10.5px;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.channel-member-identity,.channel-bot-identity) strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(.channel-member-identity,.channel-bot-identity) small {
+  font-size: 10.5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-row-action {
+  color: var(--ink);
+  font-weight: 500;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-row-action.is-danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-row-action:disabled {
+  color: var(--muted);
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .execution-web-status {
+  font-family: inherit;
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .execution-web-status-dot {
+  box-shadow: none;
+}
+.settings-disclosure {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.settings-disclosure>summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.settings-disclosure>summary::-webkit-details-marker {
+  display: none;
+}
+.settings-disclosure>summary svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.settings-disclosure>summary svg:last-child {
+  transition: transform 140ms ease;
+}
+.settings-disclosure[open]>summary svg:last-child {
+  transform: rotate(180deg);
+}
+.settings-disclosure>summary:hover {
+  color: var(--ink);
+}
+.settings-disclosure>div {
+  padding: 2px 12px 10px 21px;
+  max-width: 75ch;
+}
+.settings-disclosure p {
+  margin: 4px 0;
+}
+.channel-policy {
+  margin-top: 5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .runtime-monitoring-body {
+  padding-top: 10px;
+  gap: 24px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-toolbar {
+  align-items: flex-start;
+  border: 0;
+  padding: 0;
+  gap: 14px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-toolbar>p {
+  display: none;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-filters {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 9px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-filters label {
+  flex: 1 1 110px;
+  min-width: 0;
+  gap: 7px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-filters label:first-child {
+  flex-basis: 140px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-filters label>span {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-filters select {
+  width: 100%;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-keyline {
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  column-gap: 24px;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-keyline>div {
+  padding: 4px 0 22px;
+  min-height: 80px;
+  gap: 8px;
+  border: 0!important;
+  align-content: start;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-keyline>div:nth-child(n+5) {
+  padding: 17px 0 0;
+  min-height: 64px;
+  border-top: 1px solid var(--line)!important;
+  gap: 7px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-keyline dt {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-metric-value {
+  font-family: inherit;
+  font-size: 26px;
+  font-weight: 570;
+  line-height: 1.2;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-keyline>div:nth-child(n+5) .monitoring-metric-value {
+  font-size: 18px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-metric-value.is-compact {
+  font-size: 12px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-usage-trend {
+  background: transparent;
+  border-radius: 0;
+  overflow: visible;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-table-wrap {
+  background: transparent;
+  border-radius: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-table-wrap thead {
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-table-wrap thead th {
+  font-size: 10.5px;
+  color: var(--muted);
+  font-weight: 500;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-table-wrap table {
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-table-wrap :is(td,th) {
+  padding: 13px 10px;
+  font-variant-numeric: tabular-nums;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-table-wrap :is(td,th):first-child {
+  padding-left: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-table-wrap :is(td,th):last-child {
+  padding-right: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-table-wrap th strong {
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-section>.section-heading {
+  margin: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-section>.section-heading p {
+  line-height: 1.6;
+}
+.monitoring-plot {
+  position: relative;
+  width: 100%;
+  padding-top: 4px;
+}
+.monitoring-chart-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 16px;
+  margin: 0 0 12px;
+}
+.monitoring-chart-legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.monitoring-chart-legend button[aria-pressed="false"] {
+  opacity: .38;
+}
+.monitoring-chart-legend button:hover {
+  color: var(--ink);
+}
+.monitoring-chart-legend i,.monitoring-chart-tooltip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 7px;
+}
+.monitoring-chart-legend>span {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.monitoring-chart-svg {
+  display: block;
+  overflow: visible;
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+.monitoring-chart-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+.monitoring-chart-tick {
+  fill: var(--muted);
+  font-size: 10px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.monitoring-chart-guide {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: .5;
+}
+.monitoring-chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  top: 49px;
+  min-width: 182px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--home-surface);
+  box-shadow: var(--shadow-float);
+  pointer-events: none;
+}
+.monitoring-chart-tooltip>strong {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 550;
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+.monitoring-chart-tooltip>div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  margin-top: 7px;
+  font-size: 10.5px;
+}
+.monitoring-chart-tooltip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+}
+.monitoring-chart-tooltip b {
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.monitoring-chart-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%,-50%);
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--home-surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-body {
+  gap: 24px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-policy {
+  order: 4;
+  border-top: 1px solid var(--line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary {
+  grid-template-columns: minmax(0,1.3fr) minmax(280px,1fr);
+  padding: 6px 0 26px;
+  gap: 24px;
+  border-radius: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-primary {
+  background: transparent;
+  padding: 4px 0;
+  min-height: 76px;
+  grid-template-columns: 28px minmax(0,1fr);
+  gap: 12px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-primary>div>span {
+  font-family: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-primary h2 {
+  font-size: 16px;
+  font-weight: 550;
+  line-height: 1.6;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-mark {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-counts>div {
+  background: transparent;
+  border-radius: 0;
+  padding: 10px 4px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-counts dt {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-counts dd {
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 550;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-counts .is-ok dd {
+  color: var(--ink);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-counts .is-unknown dd {
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-boundary {
+  display: none;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue-list {
+  padding: 0;
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue {
+  grid-template-columns: 26px minmax(0,1fr) auto;
+  gap: 10px 12px;
+  border: 1px solid color-mix(in srgb,var(--attention) 28%,var(--line));
+  border-radius: 9px;
+  background: transparent;
+  padding: 18px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue-mark {
+  width: 26px;
+  height: 26px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue-action {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: start;
+  padding-top: 2px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue-action .primary-button {
+  background: var(--attention-soft);
+  color: var(--attention);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue-action .primary-button:hover:not(:disabled) {
+  background: color-mix(in srgb,var(--attention) 15%,var(--home-surface));
+  color: var(--attention);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue-copy>div>span {
+  font-size: 10.5px;
+  font-weight: 400;
+  border-radius: 4px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issue-copy h3 {
+  font-size: 13px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-filters button.is-active {
+  color: var(--ink);
+  background: var(--neutral-selected);
+  border-color: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-filters {
+  padding: 0;
+  gap: 5px;
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-filters button {
+  padding: 5px 11px;
+  min-height: 30px;
+  font-weight: 500;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-results {
+  gap: 18px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-group {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-group-heading {
+  padding: 0 0 9px;
+  min-height: 31px;
+  background: transparent;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-group-heading strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-group-heading span {
+  font-family: inherit;
+  font-size: 10.5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row {
+  grid-template-columns: 20px minmax(130px,.9fr) minmax(0,1.4fr) auto auto;
+  gap: 10px;
+  min-height: 56px;
+  margin: 0;
+  padding: 11px 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row:last-child {
+  border-bottom: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  grid-column: 2;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-name strong {
+  font-size: 11.5px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-name span {
+  font-size: 10px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-detail {
+  grid-column: 3;
+  font-size: 10.5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row>button {
+  grid-column: 4;
+  grid-row: 1;
+  white-space: nowrap;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row>.diagnostics-details {
+  grid-column: 5;
+  grid-row: 1;
+  justify-self: end;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-details>summary {
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row>.diagnostics-details[open] {
+  grid-column: 2/-1;
+  grid-row: 2;
+  justify-self: stretch;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-details dl {
+  background: transparent;
+  border-color: var(--line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-details dl>div {
+  border-color: var(--line);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-details>p {
+  background: transparent;
+  padding: 0 0 5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-issues-empty {
+  padding: 8px 0;
+  background: transparent;
+  min-height: 64px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-results-empty {
+  background: transparent;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-settings {
+  width: min(880px,100%);
+  max-width: 880px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section {
+  padding: 24px 0;
+  grid-template-columns: minmax(0,1fr);
+  gap: 16px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section>.section-heading p {
+  display: none;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section:first-child {
+  padding: 12px 0 30px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section:first-child>.section-heading {
+  display: none;
+}
+.about-identity {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  min-height: 66px;
+}
+.about-mark {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  color: var(--ink);
+}
+.about-identity>div {
+  display: grid;
+  gap: 8px;
+}
+.about-identity strong {
+  font-size: 24px;
+  font-weight: 620;
+  line-height: 1.2;
+  letter-spacing: -.02em;
+  color: var(--ink);
+}
+.about-identity p {
+  display: flex;
+  gap: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.about-identity p>span+span {
+  border-left: 1px solid var(--line-strong);
+  margin-left: 12px;
+  padding-left: 12px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-body {
+  padding: 0;
+  gap: 12px;
+  border-radius: 0;
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control {
+  min-height: 48px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: 18px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control>div {
+  gap: 6px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-download-progress {
+  padding: 8px 0 4px;
+  background: transparent;
+  border-radius: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback {
+  padding: 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback strong {
+  display: none;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback span {
+  font-size: 11px;
+  line-height: 1.6;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback-actions a {
+  padding: 5px 9px;
+  border: 0;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 500;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-fallback-actions a:hover {
+  background: var(--surface-hover);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-section {
+  border-bottom: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-body {
+  gap: 16px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header {
+  padding: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header>div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header h3 {
+  font-size: 13px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header p {
+  font-size: 11px;
+  color: var(--muted);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-header>code {
+  display: none;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-notes,:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-empty {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  font-size: 12px;
+  line-height: 1.85;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-notes> :first-child {
+  margin-top: 0;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-release-notes h3 {
+  font-size: 12px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-product-name strong {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-version-value code {
+  font-family: inherit;
+  font-weight: 550;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-page-state {
+  background: transparent;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-actions .primary-button {
+  background: var(--brand);
+  color: var(--brand-contrast);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-actions .primary-button:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
+.about-status-quiet {
+  position: absolute!important;
+  width: 1px!important;
+  height: 1px!important;
+  min-height: 0!important;
+  overflow: hidden!important;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  padding: 0!important;
+  border: 0!important;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-source {
+  display: none;
+}
+.about-history {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.about-history>summary {
+  padding: 6px 0;
+  justify-content: space-between;
+}
+.about-facts {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 4px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.about-facts>div {
+  display: grid;
+  grid-template-columns: 76px minmax(0,1fr);
+  gap: 16px;
+}
+.about-facts dt {
+  color: var(--muted);
+}
+.about-facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-check-meta,:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-check-meta code {
+  font-family: inherit;
+  font-size: 10.5px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control p {
+  font-size: 12px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control strong {
+  font-size: 14px;
+  font-weight: 550;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .settings-page-note {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) :is(button,input,textarea,select,[role="menuitem"],[role="option"]):is(:focus,:focus-visible) {
+  box-shadow: none!important;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-search:focus-within {
+  border-color: var(--workspace-line);
+  color: var(--faint);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .appearance-option:has(input:focus-visible) {
+  outline: none!important;
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) input:not([type="radio"]):not([type="checkbox"]):focus {
+  border-color: var(--line-strong);
+}
+:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) [aria-invalid="true"]:focus {
+  border-color: var(--danger)!important;
+}
+:root .app-dialog:is(.one-click-confirm-dialog,.channel-qr-dialog,.channel-publish-dialog) .quiet-button {
+  border-color: transparent;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-weight: 500;
+}
+:root .app-dialog:is(.one-click-confirm-dialog,.channel-qr-dialog,.channel-publish-dialog) .primary-button {
+  font-weight: 500;
+}
+@media(max-width:1100px) {
+  :root .settings-content .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) {
+    padding: 28px 24px 40px;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-member-list {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary {
+    grid-template-columns: 1fr;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-primary {
+    min-height: 64px;
+  }
+}
+@media(max-width:760px) {
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-settings-section,:root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-updates-section {
+    gap: 14px;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-control {
+    flex-wrap: wrap;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-actions {
+    margin-left: auto;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .about-update-body {
+    padding: 0;
+  }
+  :root .settings-panel-notifications .notification-scenario-grid {
+    grid-template-columns: 1fr;
+  }
+  :root .settings-panel-notifications .notification-scenario+.notification-scenario {
+    padding-left: 0;
+    padding-top: 24px;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .settings-page-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
+@media(min-width:960px) and (max-width:1100px) {
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary {
+    grid-template-columns: minmax(0,1fr) 250px;
+    gap: 16px;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-primary h2 {
+    font-size: 15px;
+  }
+}
+@media(max-width:850px) {
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-default-lead {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .general-lead-trigger {
+    max-width: 360px;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-keyline {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .monitoring-keyline>div {
+    min-height: 80px;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row {
+    grid-template-columns: 20px minmax(0,1fr) auto auto;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row>.diagnostics-details {
+    grid-column: 4;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row>button {
+    grid-column: 3;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-detail {
+    grid-column: 2/-1;
+    grid-row: 2;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-result-row>.diagnostics-details[open] {
+    grid-column: 2/-1;
+    grid-row: 3;
+  }
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .diagnostics-summary-counts {
+    grid-template-columns: repeat(3,minmax(0,1fr));
+  }
+}
+
+
+/* Keep reviewed settings usable at the existing 200% zoom limit. */
+@media (max-width: 600px) {
+  :root .settings-panel.settings-panel-general .general-default-member-list,
+  :root .settings-panel.settings-panel-general .general-default-member-picker-panel .general-default-member-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :root .settings-panel.settings-panel-general .general-config-head,
+  :root .settings-panel.settings-panel-general .general-save-row { flex-wrap: wrap; }
+  :root .settings-panel.settings-panel-general .general-help-anchor { position: static; }
+  :root .settings-panel.settings-panel-general .general-help-popover { left: 0; width: 100%; }
+  :root .settings-panel.settings-panel-monitoring .monitoring-keyline { grid-template-columns: minmax(0, 1fr); }
+  :root .settings-panel.settings-panel-monitoring .monitoring-keyline > div { min-height: 72px; padding: 12px 0; }
+  :root .settings-panel.settings-panel-diagnostics .diagnostics-issue { grid-template-columns: 26px minmax(0, 1fr); }
+  :root .settings-panel.settings-panel-diagnostics .diagnostics-issue-action { grid-column: 2; grid-row: auto; }
+  :root .settings-panel.settings-panel-diagnostics .diagnostics-result-row { grid-template-columns: 20px minmax(0, 1fr) auto; }
+  :root .settings-panel.settings-panel-diagnostics .diagnostics-result-row > .diagnostics-details { grid-column: 3; }
+  :root .settings-panel.settings-panel-diagnostics .diagnostics-result-row > button { grid-column: 2 / -1; grid-row: auto; justify-self: start; }
+  :root .settings-panel.settings-panel-diagnostics .diagnostics-summary-counts { gap: 4px; }
+  .about-identity { gap: 12px; }
+  .about-identity strong { font-size: 20px; }
+  .about-identity p { flex-direction: column; gap: 6px; }
+  .about-identity p > span + span { margin: 0; padding: 0; border: 0; }
+}
+
+@media (max-width: 600px) {
+  :root .settings-panel.settings-panel-monitoring .monitoring-filters { display: grid; grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,4 +1,19 @@
+@import './settings-workspace.css';
+
 :root {
+  /* Settings controls and observed runtime usage series. */
+  --monitoring-input: #393b3d;
+  --monitoring-output: #657f9b;
+  --monitoring-read: #698273;
+  --monitoring-write: #997b4d;
+  --settings-choice-line: #e0e4e7;
+  --settings-choice-selected-line: #a5adb4;
+  --settings-choice-hover: #fafbfb;
+  --settings-field-line: #cbd1d6;
+  --settings-switch-off: #8c939a;
+  --settings-switch-thumb: #fff;
+  --settings-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4.5 6.25 3.5 3.5 3.5-3.5' fill='none' stroke='%23616b74' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
   color-scheme: light;
   color: var(--ink);
   background: var(--canvas);
@@ -168,6 +183,17 @@
 }
 
 :root[data-theme="night"] {
+  --monitoring-input: #d5d6d8;
+  --monitoring-output: #8ca7c6;
+  --monitoring-read: #86b098;
+  --monitoring-write: #c9aa75;
+  --settings-choice-line: #343e45;
+  --settings-choice-selected-line: #778188;
+  --settings-choice-hover: #1c2429;
+  --settings-field-line: #465159;
+  --settings-switch-off: #535f68;
+  --settings-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4.5 6.25 3.5 3.5 3.5-3.5' fill='none' stroke='%23aeb9c1' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
   color-scheme: dark;
   --canvas: #0d1114;
   --surface: #151a1e;

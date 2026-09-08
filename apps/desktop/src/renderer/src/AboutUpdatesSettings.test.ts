@@ -51,9 +51,9 @@ describe('AboutUpdatesSettingsView', () => {
   it('always shows the installed version and keeps all update mutations user initiated', () => {
     const markup = render(snapshot())
     expect(markup).toContain('<h1>关于与更新</h1>')
-    expect(markup).toContain('<code>v0.0.2</code>')
+    expect(markup).toContain('版本 v0.0.2')
     expect(markup).toContain('>检查更新</button>')
-    expect(markup).toContain('下载、安装和重启始终由你确认')
+    expect(markup).toContain('下载与安装由你决定')
     expect(markup).not.toContain('更新日志</h2>')
     expect(markup).not.toContain('官方 Releases')
   })
@@ -105,19 +105,19 @@ describe('AboutUpdatesSettingsView', () => {
     expect(markup).toContain('<progress max="100" value="42.3"')
     expect(markup).toContain('40.4 MB / 95.4 MB')
     expect(markup).toContain('4.8 MB/s')
-    expect(markup).toContain('同一下载请求会自动合并')
+    expect(markup).toContain('下载期间可以继续使用')
   })
 
   it('offers installation only after the update is downloaded', () => {
     const ready = render(snapshot({ status: 'ready_to_install', availableRelease: release }))
     expect(ready).toContain('>安装并重启</button>')
     expect(ready).toContain('v0.0.3 已准备好')
-    expect(ready).toContain('只有点击“安装并重启”后')
+    expect(ready).toContain('点击后将安装更新并重新启动')
     expect(ready).not.toContain('<progress')
 
     const installing = render(snapshot({ status: 'installing', availableRelease: release }))
     expect(installing).toContain('正在安装…')
-    expect(installing).toContain('受控关闭')
+    expect(installing).toContain('正在结束当前执行')
   })
 
   it('distinguishes current, check, download, and install failure recovery', () => {

@@ -61,12 +61,7 @@ export function AboutUpdatesSettingsView({
       <SettingsPageHeader
         eyebrow="Settings / About & Updates"
         title="关于与更新"
-        description="Rovai AI 会在正式打包版本中主动检查更新；下载、安装和重启始终由你确认。"
-        aside={snapshot && (
-          <span className={`about-update-page-state is-${presentation.tone}`}>
-            <i aria-hidden="true" />{presentation.pageLabel}
-          </span>
-        )}
+        description="自动检查新版本，下载与安装由你决定。"
       />
 
       <div className="about-updates-body">
@@ -74,21 +69,15 @@ export function AboutUpdatesSettingsView({
           <div className="section-heading">
             <div><h2 id="about-version-heading">版本</h2><p>当前安装</p></div>
           </div>
-          <div className="about-version-row">
-            <div className="about-product-name">
-              <strong>Rovai AI</strong>
-              <small>桌面应用</small>
-            </div>
-            <div className="about-version-value">
-              <span>当前版本</span>
-              <code>{snapshot ? displayVersion(snapshot.currentVersion) : loading ? '读取中…' : '暂不可用'}</code>
-            </div>
+          <div className="about-identity">
+            <svg className="about-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor"/><path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" strokeWidth="2.08" strokeLinecap="round"/><circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="12" cy="18.46" r="1.05" fill="currentColor"/></svg>
+            <div><strong>Rovai AI</strong><p><span>版本 {snapshot ? displayVersion(snapshot.currentVersion) : loading ? '读取中…' : '暂不可用'}</span><span>桌面应用</span></p></div>
           </div>
         </section>
 
         <section className="section-block about-updates-section" aria-labelledby="about-update-heading">
           <div className="section-heading">
-            <div><h2 id="about-update-heading">更新</h2><p>检查、下载与安装</p></div>
+            <div><h2 id="about-update-heading">软件更新</h2><p>检查、下载与安装</p></div>
           </div>
           <div className="about-update-body">
             <div className="about-update-control">
@@ -139,7 +128,7 @@ export function AboutUpdatesSettingsView({
 
             <div
               id="about-update-status"
-              className={`about-update-status is-${presentation.tone}`}
+              className={`about-update-status is-${presentation.tone}${!actionError && !loadError && !loading && ["available","up_to_date","ready_to_install","downloading"].includes(snapshot?.status ?? "") ? " about-status-quiet" : ""}`}
               role={presentation.tone === 'error' ? 'alert' : 'status'}
               aria-live="polite"
               tabIndex={-1}
@@ -149,10 +138,7 @@ export function AboutUpdatesSettingsView({
             </div>
 
             {snapshot && (snapshot.checkedAt || snapshot.lastSuccessfulCheckAt) && (
-              <div className="about-update-check-meta" aria-label="更新检查记录">
-                <span>本次检查 <code>{formatCheckAttempt(snapshot)}</code></span>
-                <span>上次成功 <code>{formatTimestamp(snapshot.lastSuccessfulCheckAt)}</code></span>
-              </div>
+              (<details className="settings-disclosure about-history"><summary><span>检查记录</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary><dl className="about-facts" aria-label="更新检查记录"><div><dt>本次检查</dt><dd>{formatCheckAttempt(snapshot)}</dd></div><div><dt>上次成功</dt><dd>{formatTimestamp(snapshot.lastSuccessfulCheckAt)}</dd></div><div><dt>更新来源</dt><dd>Rovai AI 正式 GitHub Releases</dd></div></dl></details>)
             )}
 
             {showFallback && (
@@ -183,7 +169,7 @@ export function AboutUpdatesSettingsView({
             <div className="section-heading">
               <div>
                 <h2 id="about-release-notes-heading" tabIndex={-1}>更新日志</h2>
-                <p>最后一次有效发布信息</p>
+                <p>版本变化</p>
               </div>
             </div>
             <div className="about-release-body">
@@ -294,17 +280,17 @@ function updatePresentation(
     case 'downloading':
       return {
         tone: 'info', pageLabel: '下载中', title: `正在下载 ${displayRelease(snapshot)}`,
-        detail: '同一下载请求会自动合并；下载期间可以继续使用 Rovai AI。'
+        detail: "下载期间可以继续使用 Rovai AI。"
       }
     case 'ready_to_install':
       return {
         tone: 'success', pageLabel: '可安装', title: `${displayRelease(snapshot)} 已准备好`,
-        detail: '只有点击“安装并重启”后，才会进入受控退出与安装。'
+        detail: "点击后将安装更新并重新启动。"
       }
     case 'installing':
       return {
         tone: 'info', pageLabel: '正在重启', title: '正在准备安装更新',
-        detail: 'Updater 已开始退出流程；Rovai 会先等待执行引擎完成受控关闭。'
+        detail: "正在结束当前执行，随后安装并重新启动。"
       }
     case 'up_to_date':
       return {
@@ -364,15 +350,16 @@ function controlTitle(snapshot: AppUpdateSnapshot | null): string {
 }
 
 function controlDetail(snapshot: AppUpdateSnapshot | null): string {
-  if (snapshot?.status === 'available') return '已找到新版本。只有点击“下载更新”后才会开始下载。'
+  if (snapshot?.status === "downloading") return "下载期间可以继续使用 Rovai AI。"
+  if (snapshot?.status === 'available') return "有新版本可供下载。"
   if (snapshot?.status === 'ready_to_install' || snapshot?.status === 'install_failed') {
-    return '更新已下载完成，只有你确认后 Rovai AI 才会安装并重新打开。'
+    return "更新已下载，安装后将重新启动 Rovai AI。"
   }
-  if (snapshot?.status === 'download_failed') return '下载没有完成；重试会继续使用同一个已知版本。'
-  if (snapshot?.status === 'up_to_date') return '需要时可以重新检查正式发布通道。'
-  if (snapshot?.status === 'checking') return '正在更新检查事实，不会自动开始下载。'
+  if (snapshot?.status === 'download_failed') return "下载未完成，可以重试。"
+  if (snapshot?.status === 'up_to_date') return "你正在使用最新版本。"
+  if (snapshot?.status === 'checking') return "正在检查新版本…"
   if (snapshot?.status === 'installing') return '窗口即将关闭；安装前会完成受控退出。'
-  return '主动检查只发现版本；下载、安装和重启始终需要你的确认。'
+  return "检查新版本，下载与安装由你决定。"
 }
 
 function displayRelease(snapshot: AppUpdateSnapshot): string {

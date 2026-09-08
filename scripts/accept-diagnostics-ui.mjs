@@ -36,7 +36,7 @@ try {
   await capture(desktopApp.cdp, desktopAttentionCapture)
 
   const beforeFullCheck = await mcpEvidence(desktopFixture.mcpPath)
-  await clickButton(desktopApp.cdp, '.settings-page-heading button', '运行完整自检')
+  await clickButton(desktopApp.cdp, '.settings-page-heading button', '重新检查')
   await waitForExpression(desktopApp.cdp,
     `document.querySelector('.diagnostics-notice strong')?.textContent === '完整自检已完成'`)
   const afterFullCheck = await mcpEvidence(desktopFixture.mcpPath)
@@ -63,7 +63,7 @@ try {
   assertV5Export(exported, desktopFixture)
 
   await scrollToTop(desktopApp.cdp)
-  await clickButton(desktopApp.cdp, '.diagnostics-issue button', '修复文件权限')
+  await clickButton(desktopApp.cdp, '.diagnostics-issue button', '修复权限')
   await waitForExpression(desktopApp.cdp,
     `document.querySelector('.diagnostics-summary-counts .is-attention dd')?.textContent === '0'
       && document.querySelector('.diagnostics-notice strong')?.textContent === 'MCP 权限已修复'`)
@@ -95,7 +95,7 @@ try {
   })
   assert(!(await exists(compactFixture.mcpPath)),
     'Opening Diagnostics initialized the missing MCP file')
-  await clickButton(compactApp.cdp, '.settings-page-heading button', '运行完整自检')
+  await clickButton(compactApp.cdp, '.settings-page-heading button', '重新检查')
   await waitForExpression(compactApp.cdp,
     `document.querySelector('.diagnostics-notice strong')?.textContent === '完整自检已完成'`)
   assert(!(await exists(compactFixture.mcpPath)),

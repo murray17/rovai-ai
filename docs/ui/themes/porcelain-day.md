@@ -78,6 +78,25 @@ Light. `color-scheme: light`.
 | `--rail-line` | `#dadde0` |
 | `--rail-logo` | `#526f88` |
 
+### Settings controls and usage series
+
+| Token | Value |
+|---|---:|
+| `--settings-choice-line` | `#e0e4e7` |
+| `--settings-choice-selected-line` | `#a5adb4` |
+| `--settings-choice-hover` | `#fafbfb` |
+| `--settings-field-line` | `#cbd1d6` |
+| `--settings-switch-off` | `#8c939a` |
+| `--settings-switch-thumb` | `#ffffff` |
+| `--settings-select-arrow` | SVG chevron stroke `#616b74` |
+| `--monitoring-input` | `#393b3d` |
+| `--monitoring-output` | `#657f9b` |
+| `--monitoring-read` | `#698273` |
+| `--monitoring-write` | `#997b4d` |
+
+Reviewed settings locally alias brand actions to the existing neutral conversation-action tokens.
+MCP/Skills retain their current control tokens; diagnostic/status colors remain semantic.
+
 ### Brand, mention and supporting accents
 
 | Token | Value |

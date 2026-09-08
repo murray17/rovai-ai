@@ -45,7 +45,7 @@ const NOTIFICATION_SCENARIOS: readonly NotificationScenario[] = [
       {
         key: 'approvalHeadsUpEnabled',
         label: '待审批',
-        description: '有新权限请求需要处理'
+        description: '公共会话或单聊有权限请求时提醒'
       },
       {
         key: 'userMentionHeadsUpEnabled',
@@ -57,7 +57,7 @@ const NOTIFICATION_SCENARIOS: readonly NotificationScenario[] = [
   {
     id: 'outcome',
     title: '本轮结果',
-    description: '公共会话和单聊的执行结果。',
+    description: '包含公共会话与单聊。正在查看的对话完成时不弹出提醒。',
     categories: [
       {
         key: 'turnCompletedHeadsUpEnabled',
@@ -67,7 +67,7 @@ const NOTIFICATION_SCENARIOS: readonly NotificationScenario[] = [
       {
         key: 'turnIncompleteHeadsUpEnabled',
         label: '执行未完成',
-        description: '本轮失败或未完成时提醒'
+        description: '公共会话或单聊失败、未完成时提醒'
       }
     ]
   }
@@ -262,7 +262,7 @@ export function NotificationPreferenceEditor({
               {headsUpEnabled ? '已开启' : '已关闭'}
             </span>
           </div>
-          <p>新动态到达时不抢焦点；离开应用期间先保留，重新开启时不补弹旧事项。</p>
+          <p>新动态以浮层提醒，不打断输入；离开应用期间的事项保留，重新开启时不补弹旧提醒。</p>
         </div>
         <div className="notification-master-control">
           <span

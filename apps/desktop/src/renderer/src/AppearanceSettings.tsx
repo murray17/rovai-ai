@@ -3,7 +3,6 @@ import type { AppearancePreferences, AppearanceSnapshot } from '@contracts'
 import { APPEARANCE_ZOOM_OPTIONS, DEFAULT_APPEARANCE, MAX_READING_FONT_SIZE, MIN_READING_FONT_SIZE, appearancePreferencesEqual } from '../../shared/appearance'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { THEME_OPTIONS } from './theme'
-import { usePrefersReducedMotion } from './reduced-motion'
 import systemThumbnail from './assets/appearance/system.svg'
 import dayThumbnail from './assets/appearance/day.svg'
 import nightThumbnail from './assets/appearance/night.svg'
@@ -15,14 +14,14 @@ type Preview = typeof previews[number]
 const previewLabels = { chat: '会话', document: '文档', code: '代码' }
 const sizeKeys = { chat: 'chatFontSize', document: 'documentFontSize', code: 'codeFontSize' } as const
 const sizeLabels = { chat: '会话字号', document: '文档预览字号', code: '代码预览字号' }
-const sizeHints = { chat: 'Camp、单聊正文与输入框', document: 'Markdown 正文，标题与代码块等比例调整', code: '源码、纯文本与文件差异' }
+const sizeHints = { chat: '对话、单聊正文与输入框', document: 'Markdown 正文，标题与代码块等比例调整', code: '源码、纯文本与文件差异' }
 const previewScopes = { chat: '消息正文与输入框', document: 'Markdown 正文、标题、表格与代码块', code: '源码、纯文本与文件差异' }
 
-function Icon({ name }: { name: 'check' | 'reset' | 'minus' | 'plus' | 'arrow' | 'file' | 'play' | 'code' }): React.JSX.Element {
+function Icon({ name }: { name: 'check' | 'reset' | 'minus' | 'plus' | 'arrow' | 'file' | 'code' }): React.JSX.Element {
   const paths = {
     check: 'm5 12 4 4L19 6', reset: 'M3 10a9 9 0 1 1 2 8M3 4v6h6', minus: 'M5 12h14',
     plus: 'M5 12h14M12 5v14', arrow: 'M12 19V5m-6 6 6-6 6 6', file: 'M14 3H6v18h12V7l-4-4ZM14 3v5h4',
-    play: 'm8 5 11 7-11 7Z', code: 'm8 7-5 5 5 5m8-10 5 5-5 5M14 4l-4 16'
+    code: 'm8 7-5 5 5 5m8-10 5 5-5 5M14 4l-4 16'
   }
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg>
 }
@@ -77,10 +76,7 @@ export function AppearanceSettings({ appearance, disabled, platform = 'darwin', 
   const failed = useRef(false)
   const mounted = useRef(true)
   const [preview, setPreview] = useState<Preview>('chat')
-  const [replay, setReplay] = useState(0)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
-  const systemReduced = usePrefersReducedMotion()
-  const reduced = draft.motionPreference === 'reduce' || systemReduced
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     if (!pending.current && !failed.current) {
@@ -179,7 +175,6 @@ export function AppearanceSettings({ appearance, disabled, platform = 'darwin', 
       <div className="section-heading"><h2 id="appearance-display-heading">显示与动效</h2></div>
       <div className="setting-row"><div className="setting-copy"><label htmlFor="appearance-zoom">界面缩放</label><p id="appearance-zoom-hint">按比例调整整个应用，包括导航、按钮与文字。</p></div><div className="setting-action"><span className="shortcut" aria-hidden="true"><kbd>{shortcut} −</kbd><kbd>{shortcut} +</kbd><kbd>{shortcut} 0</kbd></span><select className="setting-select" id="appearance-zoom" aria-describedby="appearance-zoom-hint" value={draft.zoomPercentage} disabled={disabled} onChange={(event) => void change({ zoomPercentage: Number(event.target.value) })}>{zoomOptions.map((zoom) => <option key={zoom} value={zoom}>{zoom === 100 ? '100%（默认）' : `${zoom}%`}</option>)}</select></div></div>
       <div className="setting-row"><div className="setting-copy motion-copy"><label htmlFor="appearance-motion">减少动态效果</label><p id="appearance-motion-hint">减少弹窗位移、标签动画和平滑滚动，保留状态与进度提示。</p></div><select className="setting-select" id="appearance-motion" aria-describedby="appearance-motion-hint" disabled={disabled} value={draft.motionPreference} onChange={(event) => void change({ motionPreference: event.target.value as AppearancePreferences['motionPreference'] })}><option value="system">跟随系统</option><option value="reduce">始终减少</option></select></div>
-      <div className="motion-example"><div className="motion-demo"><Icon name="file"/><span className={replay && !reduced ? 'motion-feedback' : undefined} key={replay}>{replay ? 'README.md 已打开' : reduced ? '已减少动态效果，保留状态提示。' : '打开文件时，标签轻微滑入。'}</span></div><button type="button" className="quiet-button" onClick={() => setReplay((value) => value + 1)}><Icon name="play"/>预览效果</button></div>
     </section>
   </div>
 }

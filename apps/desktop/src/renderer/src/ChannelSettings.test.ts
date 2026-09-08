@@ -81,7 +81,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('class="settings-page-heading"')
     expect(markup).toContain('<h1>渠道</h1>')
     expect(markup).toContain('正在读取渠道状态')
-    expect(markup).toContain('Owner 本机')
+    expect(markup).toContain('本机管理')
     expect(markup).not.toContain('原型工具')
   })
 
@@ -107,7 +107,7 @@ describe('Channel settings', () => {
     expect(markup).not.toContain('channel-provider-tab is-disabled')
     expect(markup).not.toContain('Telegram')
     expect(markup).toContain('只有 Rovai Owner 可以从外部渠道触发队员')
-    expect(markup).toContain('飞书中的 Owner 消息仍是外部消息身份')
+    expect(markup).toContain('飞书中的 Owner 消息不获得本机管理权限')
     expect(markup).toContain('项目绝对路径不会发送到外部渠道')
     expect(markup).not.toContain('已授权用户')
     expect(markup).not.toContain('allowlist')

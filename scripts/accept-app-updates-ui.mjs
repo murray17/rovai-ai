@@ -93,7 +93,7 @@ async function openAboutUpdates(cdp) {
   assert(selected, 'About & Updates Settings entry was unavailable')
   await waitForSelector(cdp, '.about-updates-settings')
   await waitForExpression(cdp,
-    `document.querySelector('.about-version-value code')?.textContent === 'v0.2.0'`)
+    `document.querySelector('.about-identity p > span:first-child')?.textContent === '版本 v0.2.0'`)
 }
 
 async function assertAboutUpdates(cdp, context) {
@@ -115,8 +115,8 @@ async function assertAboutUpdates(cdp, context) {
     return {
       heading: surface?.querySelector('h1')?.textContent ?? '',
       description: surface?.querySelector('.settings-page-heading-copy > p:last-child')?.textContent ?? '',
-      product: surface?.querySelector('.about-product-name strong')?.textContent ?? '',
-      version: surface?.querySelector('.about-version-value code')?.textContent ?? '',
+      product: surface?.querySelector('.about-identity strong')?.textContent ?? '',
+      version: surface?.querySelector('.about-identity p > span:first-child')?.textContent ?? '',
       action: action?.textContent?.trim() ?? '',
       actionTag: action?.tagName ?? '',
       actionFocused: document.activeElement === action,
@@ -134,9 +134,9 @@ async function assertAboutUpdates(cdp, context) {
     }
   })()`)
   assert(state.heading === '关于与更新', `${context} omitted the page heading`)
-  assert(state.description === 'Rovai AI 会在正式打包版本中主动检查更新；下载、安装和重启始终由你确认。',
+  assert(state.description === '自动检查新版本，下载与安装由你决定。',
     `${context} used the wrong description`)
-  assert(state.product === 'Rovai AI' && state.version === 'v0.2.0',
+  assert(state.product === 'Rovai AI' && state.version === '版本 v0.2.0',
     `${context} used the wrong product/version: ${JSON.stringify(state)}`)
   assert(state.action === '检查更新' && state.actionTag === 'BUTTON' && state.actionFocused,
     `${context} did not expose a keyboard-focusable check action`)

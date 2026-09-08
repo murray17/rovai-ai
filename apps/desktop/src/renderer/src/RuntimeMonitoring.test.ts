@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { usageSeriesPath } from './RuntimeUsageChart'
 import type { RuntimeUsageSnapshot } from '@contracts'
 import {
   MONITORING_BACKGROUND_MIN_INTERVAL_MS,
@@ -79,6 +80,28 @@ function snapshot(): RuntimeUsageSnapshot {
 }
 
 describe('RuntimeMonitoring', () => {
+  it('breaks chart paths at unknown observations and retains explicit zero', () => {
+    const point = snapshot().trend[0]
+    const points = [12, 0, null, 8, null].map((value, index) => ({
+      ...point, bucketStartAt: `2026-08-17T0${index}:00:00Z`, promptInputTotalTokens: value
+    }))
+    expect(usageSeriesPath(points, 'promptInputTotalTokens', index => index, value => value).trim())
+      .toBe('M0,12 L1,0  M3,8')
+  })
+
+  it('shows reported zero and cost-only buckets without inventing token observations', () => {
+    const data = snapshot()
+    const point = data.trend[0]
+    point.promptInputTotalTokens = 0
+    point.outputTokens = point.cacheReadTokens = point.cacheWriteTokens = null
+    expect(renderToStaticMarkup(createElement(RuntimeUsageView, { snapshot: data }))).toContain('monitoring-chart-svg')
+    point.promptInputTotalTokens = null
+    point.cost = [{ amount: '1.25', currency: 'USD', kind: 'run', source: 'runtime_reported' }]
+    const markup = renderToStaticMarkup(createElement(RuntimeUsageView, { snapshot: data }))
+    expect(markup).toContain('monitoring-trend-cost')
+    expect(markup).not.toContain('monitoring-chart-svg')
+  })
+
   it('renders one concise Usage surface without legacy monitoring tabs', () => {
     const markup = renderToStaticMarkup(createElement(RuntimeMonitoring))
     expect(markup).toContain('<h1>运行监控</h1>')
@@ -98,7 +121,8 @@ describe('RuntimeMonitoring', () => {
     expect(markup).toContain('Input Token')
     expect(markup).toContain('Cache Write')
     expect(markup).toContain('>0</dd>')
-    expect(markup).toContain('覆盖 2/2 Runs')
+    expect(markup).not.toContain('monitoring-coverage')
+    expect(markup).toContain('<td>2/2</td>')
     expect(markup).toContain('USD 1.25')
     expect(markup).toContain('Codex')
   })
@@ -110,7 +134,8 @@ describe('RuntimeMonitoring', () => {
     value.coverage.cacheReadTokens = { eligibleRuns: 2, observedRuns: 0 }
     const markup = renderToStaticMarkup(createElement(RuntimeUsageView, { snapshot: value }))
     expect(markup).toContain('—')
-    expect(markup).toContain('覆盖 0/2 Runs')
+    expect(markup).not.toContain('monitoring-coverage')
+    expect(value.coverage.cacheReadTokens).toEqual({ eligibleRuns: 2, observedRuns: 0 })
     expect(markup).not.toContain('尚未上报')
   })
 

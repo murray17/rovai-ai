@@ -201,20 +201,17 @@ export function DiagnosticsCenter({
         aside={(
           <>
             <button className="primary-button" type="button" onClick={() => void runFullCheck()} disabled={disabled}>
-              {running ? <><span className="diagnostics-spinner" aria-hidden="true" />正在检查…</> : '运行完整自检'}
+              {running ? <><span className="diagnostics-spinner" aria-hidden="true" />正在检查…</> : "重新检查"}
             </button>
             <button className="quiet-button" type="button" onClick={() => void exportDiagnostics()} disabled={disabled}>
-              {exporting ? '正在导出…' : '导出诊断 JSON'}
+              {exporting ? '正在导出…' : "导出诊断"}
             </button>
           </>
         )}
       />
 
       <div className="diagnostics-body">
-      <div className="diagnostics-privacy-note">
-        <span aria-hidden="true"><DiagnosticGlyph name="shield" /></span>
-        <p><strong>隐私边界：</strong>屏幕和 v5 导出不会包含 Token、Cookie、登录信息、用户消息、记忆正文、附件正文、Tool 输出或绝对 Home、Runtime、项目路径。</p>
-      </div>
+      <details className="settings-disclosure diagnostics-policy"><summary><DiagnosticGlyph name="shield" /><span>诊断会包含哪些内容？</span><DiagnosticGlyph name="chevron" /></summary><div><p>只包含检查状态与必要的诊断信息，敏感内容已排除。</p><p>不包含 Token、Cookie、登录信息、消息与记忆正文、附件内容、工具输出或本机绝对路径。</p><p>检查只读；修复需逐项点击，不会自动登录或替换运行时。</p></div></details>
 
       {loading && <DiagnosticsLoading />}
       {!loading && initialError && !report && (
@@ -254,8 +251,8 @@ export function DiagnosticsCenter({
 
           <section className="diagnostics-section" aria-labelledby="diagnostics-issues-heading">
             <div className="section-heading">
-              <div><h2 id="diagnostics-issues-heading">需要处理的问题</h2><p>按本地依赖、受管内容和 Runtime 排列；安全修复只影响之后启动的 AgentRun。</p></div>
-              <span className={`health-score ${issues.length === 0 ? 'is-ok' : ''}`}>{issues.length === 0 ? '全部正常' : `${issues.length} 项`}</span>
+              <div><h2 id="diagnostics-issues-heading">需要处理的问题</h2><p>逐项处理，修复后会重新检查。</p></div>
+              <span className={`health-score ${issues.length === 0 ? 'is-ok' : ''}`}>{issues.length === 0 ? "无需修复" : `${issues.length} 项`}</span>
             </div>
             {issues.length === 0
               ? <div className="diagnostics-issues-empty"><span aria-hidden="true"><DiagnosticStatusIcon status="ok" /></span><div><strong>当前没有需要处理的问题</strong><p>暂时无法确认的项目仍保留在摘要和完整检查结果中。</p></div></div>
@@ -302,14 +299,14 @@ function DiagnosticsSummary({ report, recovery }: { report: DiagnosticsReport; r
     ? '保留最近一次成功检查结果'
     : healthy
       ? '当前没有发现需要处理的问题'
-      : `发现 ${summary.attention} 项需要处理${summary.unknown ? `，${summary.unknown} 项暂时无法确认` : ''}`
+      : summary.attention === 0 ? `${summary.unknown} 项暂时无法确认` : `发现 ${summary.attention} 项需要处理${summary.unknown ? `，${summary.unknown} 项暂时无法确认` : ''}`
   return (
     <section className="diagnostics-summary" aria-labelledby="diagnostics-summary-title">
       <div className="diagnostics-summary-primary">
         <span className={`diagnostics-summary-mark ${healthy ? 'is-ok' : recovery ? 'is-recovery' : ''}`} aria-hidden="true">
           {recovery ? <DiagnosticGlyph name="refresh" /> : <DiagnosticStatusIcon status={healthy ? 'ok' : 'attention'} />}
         </span>
-        <div><span>最近一次完整自检</span><h2 id="diagnostics-summary-title">{title}</h2><p>检查时间：{formatTimestamp(report.checkedAt)}。刷新失败时保留最近成功证据，并明确标注失败。</p></div>
+        <div><span>最近一次完整自检</span><h2 id="diagnostics-summary-title">{title}</h2><p>检查时间：{formatTimestamp(report.checkedAt)}</p></div>
       </div>
       <dl className="diagnostics-summary-counts">
         <div className="is-ok"><dt>正常</dt><dd>{summary.ok}</dd></div>
@@ -369,7 +366,7 @@ function DiagnosticsResults({
   const visible = diagnosticChecksForFilter(report.checks, filter)
   return (
     <section className="diagnostics-section" aria-labelledby="diagnostics-results-heading">
-      <div className="section-heading"><div><h2 id="diagnostics-results-heading">完整检查结果</h2><p>展开单项查看检查证据；状态同时使用文字、图标和稳定位置表达。</p></div></div>
+      <div className="section-heading"><div><h2 id="diagnostics-results-heading">完整检查结果</h2><p>展开单项查看诊断详情。</p></div></div>
       <div className="diagnostics-results-toolbar">
         <div className="diagnostics-filters" role="group" aria-label="筛选检查结果">
           {([['all', '全部'], ['attention', '需要处理'], ['ok', '正常'], ['unknown', '暂时无法确认']] as const).map(([value, label]) => (
@@ -409,7 +406,7 @@ function DiagnosticsResults({
 function DiagnosticDetails({ check, compact = false }: { check: DiagnosticCheck; compact?: boolean }): React.JSX.Element {
   return (
     <details className={`diagnostics-details ${compact ? 'is-compact' : ''}`}>
-      <summary><span>诊断详情</span><DiagnosticGlyph name="chevron" /></summary>
+      <summary><span>{compact ? "详情" : "诊断详情"}</span><DiagnosticGlyph name="chevron" /></summary>
       <dl>
         <div><dt>状态代码</dt><dd><code>{check.code}</code></dd></div>
         {check.facts.map((fact) => <div key={fact.key}><dt>{factLabel(fact.key)}</dt><dd><code>{fact.value || '—'}</code></dd></div>)}
@@ -452,7 +449,7 @@ export function diagnosticActionForCheck(check: DiagnosticCheck): DiagnosticActi
         : '重新同步 Skill'
     }
   }
-  if (check.id === 'mcp-config' && check.code === 'mcp_config_permissions_too_broad') return { kind: 'repair_mcp', label: '修复文件权限' }
+  if (check.id === 'mcp-config' && check.code === 'mcp_config_permissions_too_broad') return { kind: 'repair_mcp', label: "修复权限" }
   if (check.id === 'mcp-config' && check.status === 'attention') return { kind: 'open_mcp', label: '前往 MCP 设置' }
   if (check.subjectKind === 'runtime' && check.subjectId && check.status === 'attention') return { kind: 'open_runtime', label: '前往 Agent 运行时', runtimeKind: check.subjectId as AdapterKind }
   if (check.subjectKind === 'runtime' && check.subjectId && check.status === 'unknown') return { kind: 'retry_runtime', label: '重新检测', runtimeKind: check.subjectId as AdapterKind }
@@ -485,8 +482,8 @@ export function diagnosticIssueCopy(check: DiagnosticCheck): { title: string; re
   }
   if (check.id === 'mcp-config' && check.code === 'mcp_config_permissions_too_broad') return {
     title: 'MCP 配置权限不安全',
-    reason: '当前配置文件权限比仅当前用户可读写的 0600 更宽。',
-    impact: '新的 AgentRun 暂不应依赖外部 MCP；修复只收紧权限，不改写 JSON。'
+    reason: "MCP 配置的访问权限过宽。",
+    impact: "新执行可能无法使用外部 MCP；修复只收紧文件权限，不改配置内容。"
   }
   if (check.id === 'mcp-config') return {
     title: 'MCP 配置需要人工处理',
