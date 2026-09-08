@@ -8765,10 +8765,48 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .capability-json-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 5px 10px 5px 14px; border-bottom: 1px solid var(--workspace-line); background: var(--home-surface); }
 .capability-json-toolbar code { color: var(--muted); font-size: 11px; }
 .capability-json-shell textarea { display: block; border: 0; border-radius: 0; }
-.capability-file-select { position: relative; display: flex; align-items: center; gap: 8px; width: min(380px, 65%); min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--workspace-line); border-radius: 7px; background: var(--home-surface); }
-.capability-file-select > svg { flex: 0 0 auto; pointer-events: none; }
-.capability-file-select select { min-width: 0; flex: 1; height: 100%; padding-right: 20px; appearance: none; border: 0; outline: none; color: var(--ink); background: transparent; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; text-overflow: ellipsis; }
-.capability-file-chevron { position: absolute; right: 10px; }
+.skill-file-toolbar { position: sticky; top: -1px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; padding: 0 0 11px; border-bottom: 1px solid var(--workspace-line); background: var(--home-surface); }
+.skill-file-location { display: flex; min-width: 0; flex: 1; align-items: center; gap: 10px; }
+.skill-file-current { display: inline-flex; min-width: 0; max-width: 100%; min-height: 32px; align-items: center; gap: 8px; margin-left: -7px; padding: 5px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); text-align: left; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+button.skill-file-current { cursor: pointer; }
+button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { background: var(--workspace-surface-subtle); }
+.skill-file-icon { flex: 0 0 15px; color: var(--muted); pointer-events: none; }
+.skill-file-current > .skill-file-icon-chevron { width: 12px; height: 12px; flex-basis: 12px; margin-left: 2px; transform: rotate(90deg); transition: transform .14s; }
+.skill-file-current[aria-expanded="true"] > .skill-file-icon-chevron { transform: rotate(-90deg); }
+.skill-file-current-path { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+.skill-file-parent { min-width: 0; max-width: 210px; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-file-basename { min-width: 0; overflow: hidden; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.skill-file-total { flex: 0 0 auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.skill-file-directory { margin: -7px 0 22px; padding: 7px; border: 1px solid var(--workspace-line); border-radius: 7px; background: var(--home-surface); }
+.skill-file-directory-list { max-height: 266px; overflow-y: auto; overscroll-behavior: contain; }
+.skill-file-directory ul { margin: 0; padding: 0; list-style: none; }
+.skill-file-folder-children { margin-left: 20px; padding-left: 9px; border-left: 1px solid var(--workspace-line); }
+.skill-file-entry, .skill-file-folder { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 8px; margin: 1px 0; padding: 5px 9px; border: 0; border-radius: 4px; color: var(--ink); background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.skill-file-entry:hover, .skill-file-folder:hover { background: var(--workspace-surface-subtle); }
+.skill-file-entry[aria-current="true"] { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+.skill-file-entry > .skill-file-icon, .skill-file-folder > .skill-file-icon { width: 14px; height: 14px; flex-basis: 14px; }
+.skill-file-entry[aria-current="true"] > .skill-file-icon { color: var(--workspace-steel-ink); }
+.skill-file-entry-name { min-width: 0; overflow-wrap: anywhere; font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.skill-file-entry-meta { margin-left: 3px; color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+.skill-file-entry > .skill-file-icon-check { margin-left: auto; color: var(--workspace-steel); }
+.skill-file-folder .skill-file-icon-chevron { width: 11px; height: 11px; flex-basis: 11px; margin-left: -2px; transition: transform .14s; }
+.skill-file-folder[aria-expanded="true"] .skill-file-icon-chevron { transform: rotate(90deg); }
+.skill-file-folder > span { min-width: 0; overflow-wrap: anywhere; }
+.skill-file-search { display: flex; align-items: center; gap: 7px; margin: 3px 3px 9px; padding: 0 9px; border: 1px solid var(--workspace-line-strong); border-radius: 6px; color: var(--muted); }
+.skill-file-search input { width: 100%; min-width: 0; height: 32px; padding: 5px 0; border: 0; color: var(--ink); background: transparent; font: inherit; font-size: 12px; }
+.skill-file-search-path { min-width: 0; max-width: 55%; margin-left: auto; color: var(--muted); overflow-wrap: anywhere; font-size: 10.5px; }
+.skill-file-empty { padding: 28px 12px; margin: 0; color: var(--muted); text-align: center; font-size: 12px; }
+@container capability-detail (max-width: 570px) {
+  .skill-file-total, .skill-file-entry-meta { display: none; }
+  .skill-file-parent { max-width: 110px; }
+  .skill-file-current-path { gap: 5px; }
+  .skill-file-toolbar, .skill-file-current { gap: 6px; }
+}
+@container capability-detail (max-width: 380px) {
+  .skill-file-parent { display: none; }
+  .skill-file-toolbar .capability-view-modes button { padding-left: 6px; padding-right: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { .skill-file-current > .skill-file-icon-chevron, .skill-file-folder .skill-file-icon-chevron { transition: none; } }
 .capability-view-modes { display: flex; flex-shrink: 0; gap: 2px; padding: 3px; border-radius: 7px; background: var(--workspace-surface-subtle); }
 .capability-view-modes button { min-height: 26px; padding: 4px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 11px; }
 .capability-view-modes button[aria-pressed="true"] { color: var(--ink); background: var(--home-surface); box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 7%, transparent); }

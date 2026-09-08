@@ -10905,6 +10905,30 @@ mod slow_tests {
             .execute("DELETE FROM skill_group_assignment", [])
             .unwrap();
         let official = library.list(&fixture.database).unwrap().remove(0);
+        // The eligible selection below requires explicit opt-in, including for disabled presets.
+        library
+            .set_enabled(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "enable-before-manifest".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SetSkillEnabledCommand {
+                        skill_id: official.id.clone(),
+                        expected_version: official.version,
+                        enabled: true,
+                    },
+                },
+            )
+            .unwrap();
+        let official = library
+            .get(&fixture.database, &official.id)
+            .unwrap()
+            .unwrap();
         library
             .set_group_assignments(
                 &mut fixture.database,
