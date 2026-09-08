@@ -83,8 +83,8 @@ describe('Skill settings', () => {
 
   it('keeps Skill deletion and update as separate confirmation contracts', () => {
     expect(deleteSkillConfirmationCopy('ui-audit')).toEqual({
-      title: '删除导入的 Skill “ui-audit”？',
-      description: '将停止新投递，并在现有执行释放后删除 Rovai 管理的内容。',
+      title: '删除 Skill “ui-audit”？',
+      description: '删除后，此 Skill 将不再对任何生效组可用。原始导入文件会保留。',
       confirmLabel: '确认删除 Skill'
     })
     expect(updateSkillConfirmationCopy('ui-audit')).toEqual({

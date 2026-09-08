@@ -5,6 +5,7 @@ import type {
   McpConfigView,
   McpImportCandidate,
   McpImportInspection,
+  McpImportIssue,
   McpImportSelection,
   McpMutationResult,
   McpServerView
@@ -22,6 +23,7 @@ import { identityColorToken } from './theme'
 import { McpJsonEditor, materializeMcpDraft } from './McpJsonEditor'
 import { PRODUCT_RUNTIME_LOGOS } from './runtime-products'
 import { NewConversationQuickHelp } from './NewConversationQuickHelp'
+import { CapabilityDeleteDialog } from './CapabilityDeleteDialog'
 
 type JsonDraft = {
   text: string
@@ -106,7 +108,11 @@ export function McpSettings({
   const deleteTrigger = useRef<HTMLButtonElement>(null)
   const [inspection, setInspection] = useState<McpImportInspection | null>(null)
   const [importDrafts, setImportDrafts] = useState<Record<string, McpImportDraft>>({})
-  const [deleting, setDeleting] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{
+    serverId: string
+    name: string
+    configDigest: string
+  } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const locked = useRef(false)
@@ -183,7 +189,7 @@ export function McpSettings({
     setEditorEpoch((value) => value + 1)
     setInspection(null)
     setImportDrafts({})
-    setDeleting(false)
+    setDeleteTarget(null)
     setError(null)
   }
   const clearDraft = (id: string): void => {
@@ -271,17 +277,22 @@ export function McpSettings({
       )
     })
   }
-  const remove = (server: McpServerView): void => {
-    if (!config) return
+  const remove = (): void => {
+    if (!deleteTarget) return
+    const target = deleteTarget
     void run('delete', async () => {
-      await apply(
-        await window.rovai.request<McpMutationResult>('mcp.servers.delete', {
-          expectedConfigDigest: config.configDigest,
-          serverId: server.serverId
-        })
-      )
-      clearDraft(server.serverId)
-      if (selectedRef.current === server.serverId || selectedRef.current === null) choose(null)
+      const result = await window.rovai.request<McpMutationResult>('mcp.servers.delete', {
+        expectedConfigDigest: target.configDigest,
+        serverId: target.serverId
+      })
+      if (result.status === 'conflict') {
+        await load()
+        throw new Error('配置已更新，请取消后重新确认要删除的 MCP。')
+      }
+      await apply(result)
+      setDeleteTarget(null)
+      clearDraft(target.serverId)
+      if (selectedRef.current === target.serverId || selectedRef.current === null) choose(null)
     })
   }
   const scan = (): void => {
@@ -342,8 +353,8 @@ export function McpSettings({
       (candidate) => importableMcp(candidate) && importDrafts[candidate.candidateId]?.selected
     ).length ?? 0
   const cancelDelete = () => {
-    setDeleting(false)
-    requestAnimationFrame(() => deleteTrigger.current?.focus())
+    setDeleteTarget(null)
+    setError(null)
   }
   const header =
     selectedId === 'import' ? (
@@ -436,7 +447,7 @@ export function McpSettings({
                     : '已保存'
                   : '添加 MCP'}
             </button>
-            {selected && !deleting && (
+            {selected && (
               <>
                 <span className="capability-action-divider" aria-hidden="true" />
                 <button
@@ -445,7 +456,14 @@ export function McpSettings({
                   className="quiet-button compact danger-text"
                   aria-label="删除 MCP"
                   disabled={disabled}
-                  onClick={() => setDeleting(true)}
+                  onClick={() => {
+                    setError(null)
+                    setDeleteTarget({
+                      serverId: selected.serverId,
+                      name: selected.name,
+                      configDigest: config!.configDigest
+                    })
+                  }}
                 >
                   删除
                 </button>
@@ -453,40 +471,6 @@ export function McpSettings({
             )}
           </div>
         </header>
-        {deleting && selected && (
-          <div
-            className="capability-confirm capability-header-confirm"
-            role="group"
-            aria-label={`删除 ${selected.name}`}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                cancelDelete()
-              }
-            }}
-          >
-            <span>删除 {selected.name} 及其队员分配？</span>
-            <div className="capability-actions">
-              <button
-                autoFocus
-                type="button"
-                className="quiet-button compact"
-                disabled={disabled}
-                onClick={cancelDelete}
-              >
-                保留
-              </button>
-              <button
-                type="button"
-                className="danger-button"
-                disabled={disabled}
-                onClick={() => remove(selected)}
-              >
-                确认删除
-              </button>
-            </div>
-          </div>
-        )}
       </>
     ) : (
       <header className="capability-detail-heading">
@@ -542,8 +526,18 @@ export function McpSettings({
         )
       }
     >
-      <CapabilityError
+      <CapabilityDeleteDialog
+        open={deleteTarget !== null}
+        title={`删除 MCP “${deleteTarget?.name ?? ''}”？`}
+        description="删除后，使用此 MCP 的队员将无法再通过 Rovai 调用它。"
+        busy={busy === 'delete'}
         error={error}
+        triggerRef={deleteTrigger}
+        onCancel={cancelDelete}
+        onConfirm={remove}
+      />
+      <CapabilityError
+        error={deleteTarget ? null : error}
         onRetry={
           !config
             ? () => {
@@ -1018,22 +1012,19 @@ export function McpImportPanel({
         <details className="capability-import-other">
           <summary>其他 {other.length} 项</summary>
           {other.map((candidate) => (
-            <div key={candidate.candidateId}>
-              <span>{candidate.proposedName}</span>
-              <small>
-                {sourceLabel(candidate.sourceKind)} ·{' '}
-                {candidate.conflict === 'same' ? '已添加' : '暂不支持'}
-              </small>
-              {candidate.conflict !== 'same' &&
-                candidate.issues
-                  .filter((issue) => issue.blocking)
-                  .map((issue) => (
-                    <p className="capability-note" key={`${issue.code}:${issue.field}`}>
-                      {issue.message}
-                      {issue.field ? ` 受影响字段：${issue.field}` : ''}
-                    </p>
-                  ))}
-            </div>
+            <article className="capability-import-other-item" key={candidate.candidateId}>
+              <div className="capability-import-other-heading">
+                <strong className="capability-import-other-name">{candidate.proposedName}</strong>
+                <span className="capability-import-source-tag" title={candidate.sourcePath}>
+                  <img src={sourceLogo(candidate.sourceKind)} alt="" />
+                  {sourceLabel(candidate.sourceKind)}
+                </span>
+                <span className="capability-import-other-status">
+                  {candidate.conflict === 'same' ? '已添加' : '暂不支持'}
+                </span>
+              </div>
+              {candidate.conflict !== 'same' && <McpImportIssueList issues={candidate.issues} />}
+            </article>
           ))}
         </details>
       )}
@@ -1043,16 +1034,56 @@ export function McpImportPanel({
           {inspection.sources
             .filter((source) => source.status === 'invalid')
             .map((source, index) => (
-              <div key={index}>
-                {sourceLabel(source.sourceKind)}
-                <small>请检查该应用的 MCP 配置后重新扫描。</small>
-              </div>
+              <article className="capability-import-other-item" key={index}>
+                <div className="capability-import-other-heading">
+                  <span className="capability-import-source-tag" title={source.sourcePath}>
+                    <img src={sourceLogo(source.sourceKind)} alt="" />
+                    {sourceLabel(source.sourceKind)}
+                  </span>
+                </div>
+                <p className="capability-note">请检查该应用的 MCP 配置后重新扫描。</p>
+              </article>
             ))}
         </details>
       )}
     </>
   )
 }
+
+function McpImportIssueList({ issues }: { issues: McpImportIssue[] }): React.JSX.Element {
+  const messages: Record<string, string> = {
+    'mcp.import_unknown_field': '此配置包含暂不支持导入的字段。',
+    'mcp.import_reference_unsupported': '此变量引用的写法暂不支持自动导入。',
+    'mcp.import_tool_policy_unsupported': '此工具权限规则暂不支持自动迁移。',
+    'mcp.import_authority_semantics_unsupported': '此授权配置暂不支持自动迁移。'
+  }
+  const groups = new Map<string, { message: string; fields: Set<string> }>()
+  for (const issue of issues.filter((issue) => issue.blocking)) {
+    const message = messages[issue.code] ?? issue.message
+    const key = `${issue.code}:${message}`
+    const group = groups.get(key) ?? { message, fields: new Set<string>() }
+    if (issue.field) group.fields.add(issue.field)
+    groups.set(key, group)
+  }
+  return (
+    <ul className="capability-import-issues" aria-label="导入限制">
+      {[...groups].map(([key, group]) => (
+        <li key={key}>
+          <p className="capability-note">{group.message}</p>
+          {group.fields.size > 0 && (
+            <div className="capability-import-issue-fields">
+              <span>受影响字段</span>
+              <div>
+                {[...group.fields].map((field) => <code key={field}>{field}</code>)}
+              </div>
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function filterMcpServers(
   servers: McpServerView[],
   query: string,

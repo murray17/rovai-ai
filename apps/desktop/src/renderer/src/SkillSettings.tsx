@@ -21,6 +21,7 @@ import {
 } from './CapabilityWorkspace'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { readErrorMessage } from './error-message'
+import { CapabilityDeleteDialog } from './CapabilityDeleteDialog'
 
 export function SkillSettings(): React.JSX.Element {
   const [skills, setSkills] = useState<SkillView[] | null>(null)
@@ -35,14 +36,13 @@ export function SkillSettings(): React.JSX.Element {
   const [githubInput, setGithubInput] = useState('')
   const [inspection, setInspection] = useState<SkillImportInspection | null>(null)
   const [candidateName, setCandidateName] = useState<string | null>(null)
-  const [confirmation, setConfirmation] = useState<'delete' | 'update' | null>(null)
+  const [confirmation, setConfirmation] = useState<'update' | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Pick<SkillView, 'id' | 'name' | 'version'> | null>(
+    null
+  )
   const [busy, setBusy] = useState<string | null>(null)
   const locked = useRef(false)
   const deleteTrigger = useRef<HTMLButtonElement>(null)
-  const cancelConfirmation = (): void => {
-    setConfirmation(null)
-    requestAnimationFrame(() => deleteTrigger.current?.focus())
-  }
   const generation = useRef(0)
   const editorSession = useRef(0)
   const [error, setError] = useState<string | null>(null)
@@ -99,6 +99,7 @@ export function SkillSettings(): React.JSX.Element {
     setImportTab('local')
     setTab('content')
     setConfirmation(null)
+    setDeleteTarget(null)
     setError(null)
   }
   const run = async (key: string, action: () => Promise<void>): Promise<void> => {
@@ -197,15 +198,18 @@ export function SkillSettings(): React.JSX.Element {
       setSkills((values) => (values ? replaceSkillRow(values, updated) : values))
     })
   }
-  const deleteSkill = (skill: SkillView): void => {
+  const deleteSkill = (): void => {
+    if (!deleteTarget) return
+    const skill = deleteTarget
     void run('delete', async () => {
       const result = await window.rovai.request<StoredCommandResult>('skills.delete', {
         commandId: crypto.randomUUID(),
         command: { skillId: skill.id, expectedVersion: skill.version }
       })
       assertCommandApplied(result)
+      setDeleteTarget(null)
       setSkills((values) => values?.filter((value) => value.id !== skill.id) ?? null)
-      if (selectedRef.current === skill.id) choose('')
+      if (selectedRef.current === skill.id || selectedRef.current === null) choose('')
     })
   }
   return (
@@ -309,7 +313,7 @@ export function SkillSettings(): React.JSX.Element {
                   disabled={busy !== null}
                   onToggle={() => toggle(selected)}
                 />
-                {selected.origin === 'imported' && confirmation !== 'delete' && (
+                {selected.origin === 'imported' && (
                   <>
                     <span className="capability-action-divider" aria-hidden="true" />
                     <button
@@ -318,7 +322,14 @@ export function SkillSettings(): React.JSX.Element {
                       type="button"
                       aria-label="删除 Skill"
                       disabled={busy !== null}
-                      onClick={() => setConfirmation('delete')}
+                      onClick={() => {
+                        setError(null)
+                        setDeleteTarget({
+                          id: selected.id,
+                          name: selected.name,
+                          version: selected.version
+                        })
+                      }}
                     >
                       删除
                     </button>
@@ -326,40 +337,6 @@ export function SkillSettings(): React.JSX.Element {
                 )}
               </div>
             </header>
-            {confirmation === 'delete' && selected.origin === 'imported' && (
-              <div
-                className="capability-confirm capability-header-confirm"
-                role="group"
-                aria-label={`删除 ${selected.name}`}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault()
-                    cancelConfirmation()
-                  }
-                }}
-              >
-                <span>{deleteSkillConfirmationCopy(selected.name).title}</span>
-                <div className="capability-actions">
-                  <button
-                    autoFocus
-                    className="quiet-button compact"
-                    type="button"
-                    disabled={busy !== null}
-                    onClick={cancelConfirmation}
-                  >
-                    保留
-                  </button>
-                  <button
-                    className="danger-button"
-                    type="button"
-                    disabled={busy !== null}
-                    onClick={() => deleteSkill(selected)}
-                  >
-                    {busy === 'delete' ? '正在删除…' : '确认删除'}
-                  </button>
-                </div>
-              </div>
-            )}
           </>
         ) : (
           <header className="capability-detail-heading">
@@ -390,8 +367,21 @@ export function SkillSettings(): React.JSX.Element {
         </>
       }
     >
-      <CapabilityError
+      <CapabilityDeleteDialog
+        open={deleteTarget !== null}
+        title={deleteSkillConfirmationCopy(deleteTarget?.name ?? '').title}
+        description={deleteSkillConfirmationCopy(deleteTarget?.name ?? '').description}
+        busy={busy === 'delete'}
         error={error}
+        triggerRef={deleteTrigger}
+        onCancel={() => {
+          setDeleteTarget(null)
+          setError(null)
+        }}
+        onConfirm={deleteSkill}
+      />
+      <CapabilityError
+        error={deleteTarget ? null : error}
         onRetry={
           skills === null
             ? () => {
@@ -669,8 +659,8 @@ export function deleteSkillConfirmationCopy(name: string): {
   confirmLabel: string
 } {
   return {
-    title: `删除导入的 Skill “${name}”？`,
-    description: '将停止新投递，并在现有执行释放后删除 Rovai 管理的内容。',
+    title: `删除 Skill “${name}”？`,
+    description: '删除后，此 Skill 将不再对任何生效组可用。原始导入文件会保留。',
     confirmLabel: '确认删除 Skill'
   }
 }

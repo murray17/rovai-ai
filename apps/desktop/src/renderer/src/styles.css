@@ -9155,7 +9155,19 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .capability-import-json textarea { min-height: 200px; }
 .capability-import-resolution [aria-pressed="true"] { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
 .capability-import-other { margin-top: 20px; color: var(--muted); font-size: 11px; }
-.capability-import-other > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; }
+.capability-import-other-item { min-width: 0; padding: 14px 0; border-bottom: 1px solid var(--workspace-line); }
+.capability-import-other-item:last-child { border-bottom: 0; }
+.capability-import-other-heading { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; }
+.capability-import-other-name { min-width: 0; max-width: 100%; color: var(--ink); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.capability-import-other-status { flex: 0 0 auto; white-space: nowrap; }
+.capability-import-issues { display: grid; gap: 12px; margin: 10px 0 0; padding: 0; list-style: none; }
+.capability-import-issues .capability-note { margin: 0 0 6px; }
+.capability-import-issue-fields { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; line-height: 1.6; }
+.capability-import-issue-fields > span { flex: 0 0 auto; }
+.capability-import-issue-fields > div { display: grid; min-width: 0; gap: 4px; }
+.capability-import-issue-fields code { min-width: 0; overflow-wrap: anywhere; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.capability-delete-dialog .app-dialog-title { overflow-wrap: anywhere; }
+.capability-delete-dialog .capability-error { margin: 0; }
 .capability-back { display: none; }
 .capability-workspace[data-compact="true"] { display: flex; flex-direction: column; }
 .capability-workspace[data-compact="true"] .capability-divider-rail { display: none; }
