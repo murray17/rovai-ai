@@ -5188,7 +5188,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .onboarding-scan-progress em svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 .onboarding-scan-progress em.done { color: var(--success); }
 .onboarding-scan-progress em i { width: 8px; height: 8px; border: 2px solid var(--line-strong); border-top-color: var(--muted); border-radius: 50%; animation: startup-route-spin 700ms linear infinite; }
-.onboarding-model-body { max-height: 180px; overflow: auto; padding: 0 0 6px; }
+.onboarding-model-body { max-height: 180px; overflow: auto; margin: 0 -4px; padding: 4px 4px 6px; }
 .onboarding-model-parameter-form { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 10px; }
 .onboarding-model-parameter-form .field-label { gap: 5px; margin-top: 10px; font-size: 11px; }
 .onboarding-model-parameter-form .field-label select { min-height: 33px; padding: 6px 8px; font-size: 12px; }
