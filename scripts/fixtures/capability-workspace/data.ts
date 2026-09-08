@@ -75,7 +75,8 @@ export function server(overrides: Partial<McpServerView> = {}): McpServerView {
     source: 'user',
     riskLevel: 'standard',
     riskAcknowledged: false,
-    definitionJson: '{"mcpServers":{"docs":{"command":"node"}}}',
+    definitionJson: '{"mcpServers":{"docs":{"command":"node","env":{"API_TOKEN":"********"}}}}',
+    configurationIssues: [{ code: 'mcp.environment_reference_missing', message: '待配置：环境变量 DOCS_TOKEN 在 MCP 启动环境中不可用。', field: 'env.API_TOKEN' }],
     ...overrides
   }
 }

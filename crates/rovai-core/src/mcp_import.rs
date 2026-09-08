@@ -9,10 +9,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
-use crate::mcp::{McpConfigFile, McpConfigStore, McpServerDefinition, valid_environment_name};
+use crate::mcp::{
+    CommitMcpImportParams, McpConfigFile, McpConfigIssue, McpConfigStore, McpMutationResult,
+    McpServerDefinition, READ_ONLY_MASK, parse_single_public_entry, single_public_json,
+    valid_environment_name,
+};
 
 const MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024;
-const HIDDEN_SOURCE_VALUE: &str = "<敏感值已隐藏>";
+const HIDDEN_SOURCE_VALUE: &str = READ_ONLY_MASK;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
@@ -23,19 +27,6 @@ pub enum McpImportSourceKind {
     Copilot,
     Antigravity,
     Cursor,
-}
-
-impl McpImportSourceKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Codex => "codex",
-            Self::ClaudeCode => "claude_code",
-            Self::Opencode => "opencode",
-            Self::Copilot => "copilot",
-            Self::Antigravity => "antigravity",
-            Self::Cursor => "cursor",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,7 +59,7 @@ pub enum McpImportConflict {
 pub enum McpImportIssueKind {
     Normalized,
     Dropped,
-    SensitiveValue,
+    NeedsConfiguration,
     Blocker,
 }
 
@@ -162,6 +153,64 @@ impl McpImportScanner {
         known_agent_ids: &BTreeSet<String>,
     ) -> Result<McpImportInspection> {
         self.scan_specs(store, known_agent_ids, source_specs()?)
+    }
+
+    /// Re-read only recognized local sources. Credentials never need to round-trip through IPC.
+    pub fn commit(
+        &self,
+        store: &McpConfigStore,
+        params: CommitMcpImportParams,
+        known_agent_ids: &BTreeSet<String>,
+    ) -> Result<McpMutationResult> {
+        self.commit_specs(store, params, known_agent_ids, source_specs()?)
+    }
+
+    fn commit_specs(
+        &self,
+        store: &McpConfigStore,
+        mut params: CommitMcpImportParams,
+        known_agent_ids: &BTreeSet<String>,
+        specs: Vec<SourceSpec>,
+    ) -> Result<McpMutationResult> {
+        let candidates = specs
+            .iter()
+            .filter_map(|spec| scan_source(spec).ok().flatten())
+            .flatten()
+            .collect::<Vec<_>>();
+        for selection in &mut params.selections {
+            let Some(candidate) = candidates
+                .iter()
+                .find(|candidate| candidate.public.candidate_id == selection.candidate_id)
+            else {
+                return Ok(McpMutationResult::Invalid {
+                    issues: vec![McpConfigIssue::new(
+                        "mcp.import_source_changed",
+                        "来源配置已变化或不可读取，请重新扫描后导入。",
+                        Some("candidateId".to_string()),
+                    )],
+                });
+            };
+            if candidate.public.issues.iter().any(|issue| issue.blocking) {
+                return Ok(McpMutationResult::Invalid {
+                    issues: vec![McpConfigIssue::new(
+                        "mcp.import_candidate_unsupported",
+                        "来源配置包含无法兼容的字段，请先处理具体缺项。",
+                        Some("candidateId".to_string()),
+                    )],
+                });
+            }
+            let (name, definition) = match parse_single_public_entry(
+                &selection.definition_json,
+                candidate.definition.as_ref(),
+                &params.expected_config_digest,
+            ) {
+                Ok(parsed) => parsed,
+                Err(issues) => return Ok(McpMutationResult::Invalid { issues }),
+            };
+            selection.definition_json = single_public_json(&name, &definition, false)?;
+            selection.has_blocking_issues = false;
+        }
+        store.commit_import(params, known_agent_ids)
     }
 
     fn scan_specs(
@@ -347,7 +396,7 @@ fn scan_source(spec: &SourceSpec) -> Result<Option<Vec<NormalizedCandidate>>> {
     let mut candidates = Vec::with_capacity(servers.len());
     for (name, value) in servers {
         let mut normalized = normalize_server(spec.kind, &spec.path, name, value);
-        normalized.public.candidate_id = candidate_id(&normalized.public)?;
+        normalized.public.candidate_id = candidate_id(&normalized.public, value)?;
         candidates.push(normalized);
     }
     Ok(Some(candidates))
@@ -426,14 +475,14 @@ fn normalize_server(
     } else if object.contains_key("command")
         || matches!(transport.as_deref(), Some("stdio" | "local"))
     {
-        normalize_stdio(source_name, object, &mut issues)
+        normalize_stdio(source_kind, object, &mut issues)
     } else if object.contains_key("url")
         || matches!(
             transport.as_deref(),
             Some("http" | "streamable_http" | "streamable-http" | "remote")
         )
     {
-        normalize_http(source_name, object, &mut issues)
+        normalize_http(source_kind, object, &mut issues)
     } else {
         issues.push(blocker(
             "mcp.import_transport_unknown",
@@ -442,6 +491,21 @@ fn normalize_server(
         ));
         None
     };
+
+    if let Some(definition) = &definition {
+        issues.extend(
+            crate::mcp_projection::environment_issues(definition)
+                .into_iter()
+                .map(|issue| {
+                    McpImportIssue::new(
+                        issue.code,
+                        issue.message,
+                        issue.field,
+                        McpImportIssueKind::NeedsConfiguration,
+                    )
+                }),
+        );
+    }
 
     let normalized_definition_json = definition
         .as_ref()
@@ -466,7 +530,7 @@ fn normalize_server(
 }
 
 fn normalize_stdio(
-    source_name: &str,
+    source_kind: McpImportSourceKind,
     object: &Map<String, Value>,
     issues: &mut Vec<McpImportIssue>,
 ) -> Option<McpServerDefinition> {
@@ -522,7 +586,7 @@ fn normalize_stdio(
             McpImportIssueKind::Normalized,
         ));
     }
-    let env = normalize_sensitive_map(source_name, values, "env", issues);
+    let env = normalize_value_map(source_kind, values, "env", issues);
     Some(McpServerDefinition::Stdio {
         command,
         args,
@@ -532,7 +596,7 @@ fn normalize_stdio(
 }
 
 fn normalize_http(
-    source_name: &str,
+    source_kind: McpImportSourceKind,
     object: &Map<String, Value>,
     issues: &mut Vec<McpImportIssue>,
 ) -> Option<McpServerDefinition> {
@@ -549,7 +613,7 @@ fn normalize_http(
             McpImportIssueKind::Normalized,
         ));
     }
-    let mut headers = normalize_sensitive_map(source_name, headers_value, "headers", issues);
+    let mut headers = normalize_value_map(source_kind, headers_value, "headers", issues);
     if let Some(env_headers) = object.get("env_http_headers") {
         let Some(env_headers) = env_headers.as_object() else {
             issues.push(invalid_field(
@@ -559,7 +623,10 @@ fn normalize_http(
             return None;
         };
         for (header, variable) in env_headers {
-            let Some(variable) = variable.as_str() else {
+            let Some(variable) = variable
+                .as_str()
+                .filter(|name| valid_environment_name(name))
+            else {
                 issues.push(invalid_field(
                     &format!("env_http_headers.{header}"),
                     "Environment-backed header must name an environment variable",
@@ -581,8 +648,8 @@ fn normalize_http(
     })
 }
 
-fn normalize_sensitive_map(
-    source_name: &str,
+fn normalize_value_map(
+    source_kind: McpImportSourceKind,
     value: Option<&Value>,
     field: &str,
     issues: &mut Vec<McpImportIssue>,
@@ -596,29 +663,74 @@ fn normalize_sensitive_map(
     };
     let mut normalized = BTreeMap::new();
     for (key, value) in values {
+        let field = format!("{field}.{key}");
         let Some(value) = value.as_str() else {
-            issues.push(invalid_field(
-                &format!("{field}.{key}"),
-                "Imported value must be a string",
-            ));
+            issues.push(invalid_field(&field, "Imported value must be a string"));
             continue;
         };
-        if is_environment_reference(value) {
-            normalized.insert(key.clone(), value.to_string());
-            continue;
+        match normalize_reference_syntax(source_kind, value) {
+            Some(value) => {
+                normalized.insert(key.clone(), value);
+            }
+            None => issues.push(blocker(
+                "mcp.import_reference_unsupported",
+                "待配置：此字段使用了无法无损迁移的来源引用语法。",
+                Some(field),
+            )),
         }
-        let variable = suggested_environment_name(source_name, key);
-        normalized.insert(key.clone(), format!("${{{variable}}}"));
-        issues.push(McpImportIssue::new(
-            "mcp.import_sensitive_value_rebound",
-            format!(
-                "The source literal was not copied; review the suggested environment reference ${{{variable}}}"
-            ),
-            Some(format!("{field}.{key}")),
-            McpImportIssueKind::SensitiveValue,
-        ));
     }
     normalized
+}
+
+/// Translate only syntax defined by the source; preserve literal whitespace and dollar signs.
+fn normalize_reference_syntax(source: McpImportSourceKind, value: &str) -> Option<String> {
+    use McpImportSourceKind::*;
+    let mut result = String::with_capacity(value.len());
+    let mut rest = value;
+    while !rest.is_empty() {
+        let prefix = match source {
+            Opencode if rest.starts_with("{env:") => Some("{env:"),
+            Cursor if rest.starts_with("${env:") => Some("${env:"),
+            ClaudeCode | Copilot if rest.starts_with("${") => Some("${"),
+            _ => None,
+        };
+        if let Some(prefix) = prefix {
+            let tail = &rest[prefix.len()..];
+            let end = tail.find('}')?;
+            let name = &tail[..end];
+            if !valid_environment_name(name) {
+                return None;
+            }
+            result.push_str(&format!("${{{name}}}"));
+            rest = &tail[end + 1..];
+            continue;
+        }
+        if source == Opencode && rest.starts_with("{file:") {
+            return None;
+        }
+        if rest.starts_with("${") {
+            match source {
+                // These maps contain literal strings, not Rovai references.
+                Codex | Opencode => {
+                    let end = rest.find('}')?;
+                    result.push('$');
+                    result.push_str(&rest[..=end]);
+                    rest = &rest[end + 1..];
+                    continue;
+                }
+                // Other source placeholders are not silently passed to Rovai's resolver.
+                _ => return None,
+            }
+        }
+        // A source dollar before a reference must not become Rovai's escape operator.
+        if rest.starts_with("$${") && matches!(source, ClaudeCode | Copilot | Cursor) {
+            return None;
+        }
+        let character = rest.chars().next()?;
+        result.push(character);
+        rest = &rest[character.len_utf8()..];
+    }
+    Some(result)
 }
 
 fn detect_fields(object: &Map<String, Value>, issues: &mut Vec<McpImportIssue>) {
@@ -712,9 +824,6 @@ fn masked_source_json(source_name: &str, value: &Value) -> String {
             for field in ["env", "environment", "headers", "http_headers"] {
                 if let Some(values) = masked.get_mut(field).and_then(Value::as_object_mut) {
                     for value in values.values_mut() {
-                        if value.as_str().is_some_and(is_environment_reference) {
-                            continue;
-                        }
                         *value = Value::String(HIDDEN_SOURCE_VALUE.to_string());
                     }
                 }
@@ -744,9 +853,7 @@ fn masked_source_json(source_name: &str, value: &Value) -> String {
 }
 
 fn public_entry_json(name: &str, definition: &McpServerDefinition) -> Result<String> {
-    Ok(serde_json::to_string_pretty(&serde_json::json!({
-        "mcpServers": {name: definition}
-    }))?)
+    single_public_json(name, definition, true)
 }
 
 fn source_enabled(value: &Value) -> Option<bool> {
@@ -792,7 +899,7 @@ fn compatibility(issues: &[McpImportIssue]) -> McpImportCompatibility {
         McpImportCompatibility::Unsupported
     } else if issues
         .iter()
-        .any(|issue| issue.kind == McpImportIssueKind::SensitiveValue)
+        .any(|issue| issue.kind == McpImportIssueKind::NeedsConfiguration)
     {
         McpImportCompatibility::NeedsInput
     } else {
@@ -810,7 +917,7 @@ fn candidate_without_definition(
     source_enabled: Option<bool>,
     issues: Vec<McpImportIssue>,
 ) -> NormalizedCandidate {
-    let mut public = McpImportCandidate {
+    let public = McpImportCandidate {
         candidate_id: String::new(),
         source_kind,
         source_path: display_path(source_path),
@@ -823,25 +930,18 @@ fn candidate_without_definition(
         issues,
         conflict: McpImportConflict::None,
     };
-    public.candidate_id = candidate_id(&public).unwrap_or_else(|_| {
-        format!(
-            "sha256:{:x}",
-            Sha256::digest(format!("{}:{source_name}", source_kind.as_str()))
-        )
-    });
     NormalizedCandidate {
         public,
         definition: None,
     }
 }
 
-fn candidate_id(candidate: &McpImportCandidate) -> Result<String> {
+fn candidate_id(candidate: &McpImportCandidate, source: &Value) -> Result<String> {
     let bytes = serde_json::to_vec(&(
         candidate.source_kind,
         &candidate.source_path,
         &candidate.source_name,
-        &candidate.normalized_definition_json,
-        &candidate.issues,
+        source,
     ))?;
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
@@ -895,34 +995,6 @@ fn normalized_name(name: &str) -> String {
     normalized
 }
 
-fn suggested_environment_name(source_name: &str, key: &str) -> String {
-    let raw = format!("MCP_{source_name}_{key}").to_ascii_uppercase();
-    let mut result = String::with_capacity(raw.len());
-    for byte in raw.bytes() {
-        result.push(if byte.is_ascii_alphanumeric() || byte == b'_' {
-            char::from(byte)
-        } else {
-            '_'
-        });
-    }
-    if !valid_environment_name(&result) {
-        "MCP_IMPORTED_VALUE".to_string()
-    } else {
-        result
-    }
-}
-
-fn is_environment_reference(value: &str) -> bool {
-    let value = value.trim();
-    let Some(variable) = value
-        .strip_prefix("${")
-        .and_then(|value| value.strip_suffix('}'))
-    else {
-        return false;
-    };
-    valid_environment_name(variable)
-}
-
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
@@ -952,7 +1024,7 @@ mod tests {
     }
 
     #[test]
-    fn redacts_literals_and_resets_enablement_and_assignments() {
+    fn preserves_import_values_without_disclosing_credentials_or_inheriting_enablement() {
         let root = fixture_root();
         fs::create_dir_all(&root).unwrap();
         let source = root.join("opencode.jsonc");
@@ -963,7 +1035,7 @@ mod tests {
                 docs: {
                   type: "local",
                   command: ["npx", "-y", "@example/mcp"],
-                  environment: { TOKEN: "do-not-leak", SAFE_REF: "${SAFE_REF}" },
+                  environment: { TOKEN: "do-not-leak", SAFE_REF: "{env:ROVAI_MCP_IMPORT_TEST_MISSING}", REGION: "cn", EMPTY: "", PADDED: "  info  " },
                   enabled: true
                 }
               }
@@ -982,8 +1054,13 @@ mod tests {
         assert_eq!(candidate.compatibility, McpImportCompatibility::NeedsInput);
         let serialized = serde_json::to_string(candidate).unwrap();
         assert!(!serialized.contains("do-not-leak"));
-        assert!(serialized.contains("MCP_DOCS_TOKEN"));
-        assert!(serialized.contains("${SAFE_REF}"));
+        let public: Value =
+            serde_json::from_str(candidate.normalized_definition_json.as_ref().unwrap()).unwrap();
+        assert_eq!(public["mcpServers"]["docs"]["env"]["REGION"], "cn");
+        assert_eq!(public["mcpServers"]["docs"]["env"]["EMPTY"], "");
+        assert_eq!(public["mcpServers"]["docs"]["env"]["PADDED"], "  info  ");
+        assert!(!serialized.contains("MCP_DOCS_TOKEN"));
+        assert!(serialized.contains("${ROVAI_MCP_IMPORT_TEST_MISSING}"));
         assert!(
             candidate
                 .issues
@@ -991,6 +1068,381 @@ mod tests {
                 .any(|issue| issue.code == "mcp.import_enabled_reset")
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn source_reference_syntax_is_preserved_or_explicitly_rejected() {
+        use McpImportSourceKind::*;
+        for source in [ClaudeCode, Copilot] {
+            assert_eq!(
+                normalize_reference_syntax(source, "Bearer ${DOCS_TOKEN}"),
+                Some("Bearer ${DOCS_TOKEN}".into())
+            );
+            assert!(normalize_reference_syntax(source, "${DOCS_TOKEN:-fallback}").is_none());
+        }
+        for (source, original) in [
+            (Cursor, "Bearer ${env:DOCS_TOKEN}"),
+            (Opencode, "Bearer {env:DOCS_TOKEN}"),
+        ] {
+            assert_eq!(
+                normalize_reference_syntax(source, original),
+                Some("Bearer ${DOCS_TOKEN}".into())
+            );
+        }
+        assert_eq!(
+            normalize_reference_syntax(Codex, "  ${LITERAL}  "),
+            Some("  $${LITERAL}  ".into())
+        );
+        assert_eq!(
+            normalize_reference_syntax(Opencode, "${LITERAL}"),
+            Some("$${LITERAL}".into())
+        );
+        assert!(normalize_reference_syntax(Cursor, "${workspaceFolder}/config").is_none());
+        assert!(normalize_reference_syntax(Opencode, "{file:token.txt}").is_none());
+        assert!(normalize_reference_syntax(ClaudeCode, "${BROKEN").is_none());
+        assert!(normalize_reference_syntax(ClaudeCode, "$${ESCAPE}").is_none());
+    }
+
+    // Security owner: source re-read -> masked edit -> atomic replacement -> runtime projection.
+    // Unlike normalization tests, this crosses the private value/IPC boundary and executes inert receivers.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn import_commit_rehydrates_credentials_and_fences_replacement_before_startup() {
+        use crate::{
+            agent_profile::AdapterKind,
+            db::Database,
+            mcp::{
+                McpImportAction, McpImportSelection, SetMcpAssignmentParams,
+                SetMcpServerEnabledParams, UpdateMcpServerParams,
+            },
+            mcp_projection::{McpProjectionRequest, McpProjectionService},
+        };
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            os::unix::fs::PermissionsExt,
+            process::Command,
+            time::Duration,
+        };
+        let root = fixture_root();
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("claude.json");
+        let store = McpConfigStore::new(root.join("private/mcp.json"));
+        let token = format!("test-token-{}", Uuid::new_v4());
+        let auth = format!("Bearer test-header-{}", Uuid::new_v4());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let source_json = serde_json::json!({"mcpServers": {
+            "docs": {"command": "/bin/sh", "args": ["-c", "test \"$API_TOKEN\" = \"$EXPECTED_TOKEN\" && test \"$PADDED\" = '  info  ' && test \"${EMPTY+x}\" = x && test -z \"$EMPTY\""],
+                "env": {"API_TOKEN": token, "EMPTY": "", "PADDED": "  info  ", "REGION": "cn"}},
+            "remote": {"url": url, "headers": {"Authorization": auth, "X-Empty": ""}},
+            "missing": {"command": "/bin/sh", "env": {"API_TOKEN": "${ROVAI_MCP_IMPORT_TEST_MISSING}"}},
+            "incompatible": {"command": "/bin/sh", "env": {"API_TOKEN": "${TOKEN:-fallback}"}}
+        }});
+        fs::write(&source, serde_json::to_vec(&source_json).unwrap()).unwrap();
+        let specs = || {
+            vec![spec(
+                McpImportSourceKind::ClaudeCode,
+                source.clone(),
+                "mcpServers",
+            )]
+        };
+        let scan = || {
+            McpImportScanner
+                .scan_specs(&store, &agents(), specs())
+                .unwrap()
+        };
+        let inspection = scan();
+        let selections = inspection
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.compatibility != McpImportCompatibility::Unsupported)
+            .map(|candidate| McpImportSelection {
+                candidate_id: candidate.candidate_id.clone(),
+                action: McpImportAction::Create,
+                replace_server_id: None,
+                definition_json: candidate.normalized_definition_json.clone().unwrap(),
+                has_blocking_issues: false,
+            })
+            .collect();
+        let result = McpImportScanner
+            .commit_specs(
+                &store,
+                CommitMcpImportParams {
+                    expected_config_digest: inspection.config_digest,
+                    selections,
+                },
+                &agents(),
+                specs(),
+            )
+            .unwrap();
+        let public = serde_json::to_string(&result).unwrap();
+        assert!(
+            !public.contains(&token) && !public.contains(&auth),
+            "public import result must not contain credentials"
+        );
+        let McpMutationResult::Ok { config, .. } = result else {
+            panic!("valid candidates should import together");
+        };
+        assert!(
+            config
+                .servers
+                .iter()
+                .all(|server| !server.enabled && server.assigned_agent_ids.is_empty())
+        );
+        let missing = config
+            .servers
+            .iter()
+            .find(|server| server.name == "missing")
+            .unwrap();
+        assert_eq!(
+            missing.configuration_issues[0].field.as_deref(),
+            Some("env.API_TOKEN")
+        );
+        assert!(
+            missing.configuration_issues[0]
+                .message
+                .contains("ROVAI_MCP_IMPORT_TEST_MISSING")
+        );
+        assert!(
+            config
+                .servers
+                .iter()
+                .filter(|server| server.name != "missing")
+                .all(|server| server.configuration_issues.is_empty())
+        );
+        assert_eq!(
+            fs::metadata(store.path()).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let mut config = *config;
+        for name in ["docs", "remote"] {
+            let server_id = config
+                .servers
+                .iter()
+                .find(|server| server.name == name)
+                .unwrap()
+                .server_id
+                .clone();
+            for result in [store
+                .set_assignment(
+                    SetMcpAssignmentParams {
+                        expected_config_digest: config.config_digest.clone(),
+                        server_id: server_id.clone(),
+                        agent_id: "agent_1".into(),
+                        assigned: true,
+                        acknowledge_high_risk: false,
+                    },
+                    &agents(),
+                )
+                .unwrap()]
+            {
+                let McpMutationResult::Ok {
+                    config: updated, ..
+                } = result
+                else {
+                    panic!("assignment failed");
+                };
+                config = *updated;
+            }
+            let result = store
+                .set_enabled(
+                    SetMcpServerEnabledParams {
+                        expected_config_digest: config.config_digest.clone(),
+                        server_id,
+                        enabled: true,
+                        acknowledge_high_risk: false,
+                    },
+                    &agents(),
+                )
+                .unwrap();
+            let McpMutationResult::Ok {
+                config: updated, ..
+            } = result
+            else {
+                panic!("enablement failed");
+            };
+            config = *updated;
+        }
+        let server_id = config
+            .servers
+            .iter()
+            .find(|server| server.name == "docs")
+            .unwrap()
+            .server_id
+            .clone();
+        let legacy = serde_json::json!({"mcpServers": {"docs": {"command": "/bin/sh", "env": {"API_TOKEN": "${MCP_DOCS_API_TOKEN}"}}}});
+        assert!(matches!(
+            store
+                .update(
+                    UpdateMcpServerParams {
+                        expected_config_digest: config.config_digest,
+                        server_id: server_id.clone(),
+                        definition_json: legacy.to_string()
+                    },
+                    &agents()
+                )
+                .unwrap(),
+            McpMutationResult::Ok { .. }
+        ));
+        let inspection = scan();
+        let candidate = inspection
+            .candidates
+            .iter()
+            .find(|candidate| candidate.source_name == "docs")
+            .unwrap();
+        let params = CommitMcpImportParams {
+            expected_config_digest: inspection.config_digest,
+            selections: vec![McpImportSelection {
+                candidate_id: candidate.candidate_id.clone(),
+                action: McpImportAction::Replace,
+                replace_server_id: Some(server_id.clone()),
+                definition_json: candidate.normalized_definition_json.clone().unwrap(),
+                has_blocking_issues: false,
+            }],
+        };
+        let old_bytes = fs::read(store.path()).unwrap();
+        let mut changed = source_json.clone();
+        changed["mcpServers"]["docs"]["env"]["API_TOKEN"] =
+            Value::String("changed-after-scan".into());
+        fs::write(&source, changed.to_string()).unwrap();
+        let result = McpImportScanner
+            .commit_specs(&store, params.clone(), &agents(), specs())
+            .unwrap();
+        assert!(
+            matches!(result, McpMutationResult::Invalid { .. }),
+            "hidden source changes must invalidate the candidate"
+        );
+        assert!(
+            fs::read(store.path()).unwrap() == old_bytes,
+            "failed replacement must preserve the old bytes"
+        );
+        fs::write(&source, source_json.to_string()).unwrap();
+        let mut invalid = params.clone();
+        invalid.selections[0].definition_json = r#"{"mcpServers":{"docs":{"command":""}}}"#.into();
+        assert!(matches!(
+            McpImportScanner
+                .commit_specs(&store, invalid, &agents(), specs())
+                .unwrap(),
+            McpMutationResult::Invalid { .. }
+        ));
+        assert!(fs::read(store.path()).unwrap() == old_bytes);
+        let result = McpImportScanner
+            .commit_specs(&store, params, &agents(), specs())
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = result else {
+            panic!("explicit re-import should replace legacy references");
+        };
+        let replaced = config
+            .servers
+            .iter()
+            .find(|server| server.server_id == server_id)
+            .unwrap();
+        assert!(replaced.enabled);
+        assert_eq!(replaced.assigned_agent_ids, vec!["agent_1"]);
+        let (_, raw) = store.get_with_raw(&agents()).unwrap();
+        let raw = raw.unwrap();
+        let McpServerDefinition::Stdio { env, .. } = &raw.mcp_servers["docs"] else {
+            panic!();
+        };
+        assert!(
+            env["API_TOKEN"] == token && env["EMPTY"].is_empty() && env["PADDED"] == "  info  "
+        );
+
+        let database = Database::open(&root.join("data")).unwrap();
+        let run_id = Uuid::new_v4().to_string();
+        let prepared = McpProjectionService::new(&root.join("data"))
+            .prepare(
+                &database,
+                &store,
+                &McpProjectionRequest {
+                    agent_run_id: &run_id,
+                    execution_epoch: 1,
+                    agent_id: "agent_1",
+                    adapter_kind: AdapterKind::CodexCli,
+                    reported_runtime_version: None,
+                    execution_root: &root,
+                },
+            )
+            .unwrap();
+        let exposure = serde_json::to_string(&prepared.snapshot).unwrap();
+        assert!(!exposure.contains(&token) && !exposure.contains(&auth));
+        let McpServerDefinition::Stdio {
+            command, args, env, ..
+        } = &prepared.servers["docs"]
+        else {
+            panic!();
+        };
+        let child = Command::new(command)
+            .args(args)
+            .env_clear()
+            .envs(env)
+            .env("EXPECTED_TOKEN", &token)
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success() && child.stdout.is_empty() && child.stderr.is_empty(),
+            "isolated stdio receiver must receive original values without logging them"
+        );
+        let expected_auth = auth.clone();
+        listener.set_nonblocking(true).unwrap();
+        let receiver = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && start.elapsed() < Duration::from_secs(5) =>
+                    {
+                        std::thread::sleep(Duration::from_millis(10))
+                    }
+                    _ => return false,
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 1024];
+            while !bytes.windows(4).any(|part| part == b"\r\n\r\n") && bytes.len() < 16384 {
+                match stream.read(&mut buffer) {
+                    Ok(0) | Err(_) => return false,
+                    Ok(n) => bytes.extend_from_slice(&buffer[..n]),
+                }
+            }
+            let request = String::from_utf8(bytes).unwrap();
+            let matches = request.lines().any(|line| {
+                line.strip_prefix("authorization: ")
+                    .is_some_and(|value| value == expected_auth)
+            });
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            matches
+        });
+        let McpServerDefinition::StreamableHttp { url, headers } = &prepared.servers["remote"]
+        else {
+            panic!();
+        };
+        let mut request = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .post(url);
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        assert!(request.send().await.unwrap().status().is_success());
+        assert!(
+            receiver.join().unwrap(),
+            "isolated HTTP receiver must receive the complete Authorization value"
+        );
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
