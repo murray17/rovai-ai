@@ -42,6 +42,14 @@ let releaseToggle: (() => void) | undefined
 let deleteWait: Promise<void> | null = null
 let releaseDelete: (() => void) | undefined
 let failDelete = false
+let contentHold: { path: string; wait: Promise<void>; release: () => void } | null = null
+let contentFailure: string | null = null
+const longPreviewPath = 'references/project-specific-workflows/acceptance-and-review/long-file-name-long-file-name-long-file-name-checklist.md'
+const previewPaths = [
+  'SKILL.md', 'LICENSE', 'agents/openai.yaml', 'assets/icon.png', 'references/guide.md',
+  'references/large.md', 'notes/guide.md', longPreviewPath,
+  ...Array.from({ length: 4 }, (_, index) => `references/check-${index + 1}.md`)
+]
 const groups = [
   'claude_compatible',
   'codex',
@@ -122,11 +130,16 @@ Object.assign(window, {
       }
       if (method === 'skills.list') return structuredClone(skills)
       if (method === 'skills.deliveryGroups.list') return groups
-      if (method === 'skills.content.read')
-        return {
+      if (method === 'skills.content.read') {
+        const paths = params.source === 'import'
+          ? ['SKILL.md', 'references/guide.md']
+          : params.skillId === 'skill-2' ? ['SKILL.md'] : previewPaths
+        const status = params.path === 'assets/icon.png' ? 'binary'
+          : params.path === 'references/large.md' ? 'too_large' : 'text'
+        const result = {
           path: params.path,
-          status: 'text',
-          content:
+          status,
+          content: status !== 'text' ? null : params.skillId === 'skill-2' ? '# 单文件 Skill\n\n独立的说明内容。' :
             params.path === 'SKILL.md'
               ? text +
                 '\n\n' +
@@ -134,12 +147,16 @@ Object.assign(window, {
                   { length: 24 },
                   (_, i) => '## 参考段落 ' + (i + 1) + '\n\n内容与操作位于同一工作区。'
                 ).join('\n\n')
-              : '参考内容。',
-          files: [
-            { path: 'SKILL.md', bytes: 500 },
-            { path: 'references/guide.md', bytes: 20 }
-          ]
+              : params.path === 'agents/openai.yaml' ? 'interface:\n  display_name: "Fixture Skill"\n' : '参考内容。',
+          files: paths.map(path => ({ path, bytes: 500 }))
         }
+        if (contentHold?.path === params.path) await contentHold.wait
+        if (contentFailure === params.path) {
+          contentFailure = null
+          throw new Error('暂时无法读取该文件，请重试。')
+        }
+        return result
+      }
       if (method === 'skills.import.inspect' || method === 'skills.import.github.inspect')
         return {
           stagingToken: 'stage-1',
@@ -363,6 +380,17 @@ Object.assign(window, {
         requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 60)))
       ),
     requests,
+    longPreviewPath,
+    holdContent: (path: string) => {
+      let release!: () => void
+      const wait = new Promise<void>(resolve => { release = resolve })
+      contentHold = { path, wait, release }
+    },
+    releaseContent: () => {
+      contentHold?.release()
+      contentHold = null
+    },
+    failContent: (path: string) => { contentFailure = path },
     holdReveal: () => {
       revealWait = new Promise((resolve) => {
         releaseReveal = resolve

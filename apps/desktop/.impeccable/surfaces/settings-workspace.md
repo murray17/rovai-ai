@@ -1,5 +1,5 @@
 ---
-version: 10
+version: 11
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -120,7 +120,11 @@ Add and import are peer buttons in the MCP library heading. Only installed items
 
 Skills show active `user_managed` items only; omit `system_required` Skills entirely. A source badge
 identifies Rovai only; imported Skills retain provenance without extra source badges. Read-only content defaults
-to SKILL.md and supports safe Markdown, raw text and package file navigation. Local import invokes
+to SKILL.md and supports safe Markdown, raw text and package file navigation. Omit internal revision
+numbers from the detail heading. Use a compact filename trigger that expands an inline folder directory
+above the document; selecting a file closes it and restores trigger focus. A single file needs no chooser,
+and search appears only above ten files. Keep the file toolbar visible during reading, wrap long directory
+entries and reset navigation on Skill, Revision or import-candidate changes. Local import invokes
 the native folder chooser, then previews the inspected candidate. GitHub import uses its existing
 inspection path. The scope tab selects delivery groups using whole rows with member avatars.
 New imports and initial official Skills inherit the canonical all-groups policy; updates preserve

@@ -304,7 +304,6 @@ export function SkillSettings(): React.JSX.Element {
                     {skillSourcePresentation(selected).badgeLabel}
                   </span>
                 )}
-                <span className="capability-note">r{selected.currentRevision.revision}</span>
               </div>
               <div className="capability-actions">
                 <CapabilityToggle

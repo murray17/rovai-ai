@@ -1275,7 +1275,7 @@ mod tests {
                 .unwrap()
                 .server_id
                 .clone();
-            for result in [store
+            let result = store
                 .set_assignment(
                     SetMcpAssignmentParams {
                         expected_config_digest: config.config_digest.clone(),
@@ -1286,16 +1286,14 @@ mod tests {
                     },
                     &agents(),
                 )
-                .unwrap()]
-            {
-                let McpMutationResult::Ok {
-                    config: updated, ..
-                } = result
-                else {
-                    panic!("assignment failed");
-                };
-                config = *updated;
-            }
+                .unwrap();
+            let McpMutationResult::Ok {
+                config: updated, ..
+            } = result
+            else {
+                panic!("assignment failed");
+            };
+            config = *updated;
             let result = store
                 .set_enabled(
                     SetMcpServerEnabledParams {

@@ -2856,6 +2856,21 @@ mod slow_tests {
         let skill = library
             .install_bundled_skill_for_test(database, "analyze-agent-codebase")
             .unwrap();
+        // Projection fixtures exercise an opted-in Skill, independently of its bundled default.
+        library
+            .set_enabled(
+                database,
+                &user_envelope(
+                    "enable-official-projection-skill",
+                    SetSkillEnabledCommand {
+                        skill_id: skill.id.clone(),
+                        expected_version: skill.version,
+                        enabled: true,
+                    },
+                ),
+            )
+            .unwrap();
+        let skill = library.get(database, &skill.id).unwrap().unwrap();
         database
             .connection()
             .execute("DELETE FROM skill_group_assignment", [])

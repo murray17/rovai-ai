@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SkillContentRequest, SkillContentView } from '@contracts'
 import { CapabilityError } from './CapabilityWorkspace'
 import { SafeMarkdown } from './SafeMarkdown'
 import { readErrorMessage } from './error-message'
+import { SkillFileNavigation } from './SkillFileNavigation'
 
 export function skillReadingContent(content: string): string {
   return content.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u, '')
@@ -13,6 +14,11 @@ export function SkillContentPreview({
 }: {
   target: SkillContentRequest
 }): React.JSX.Element {
+  return <SkillContentPreviewSession key={JSON.stringify(target)} target={target} />
+}
+
+function SkillContentPreviewSession({ target }: { target: SkillContentRequest }): React.JSX.Element {
+  const preview = useRef<HTMLDivElement>(null)
   const [path, setPath] = useState('SKILL.md')
   const [raw, setRaw] = useState(false)
   const [view, setView] = useState<SkillContentView | null>(null)
@@ -20,9 +26,6 @@ export function SkillContentPreview({
   const [error, setError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
   const targetKey = JSON.stringify(target)
-  useEffect(() => {
-    setFiles([])
-  }, [targetKey])
   useEffect(() => {
     let cancelled = false
     setView(null)
@@ -46,56 +49,31 @@ export function SkillContentPreview({
     }
   }, [targetKey, path, retry])
   return (
-    <div className="skill-content-preview">
-      <div className="capability-filebar">
-        <label className="capability-file-select">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            aria-hidden="true"
-          >
-            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6" />
-          </svg>
-          <select
-            aria-label="Skill 预览文件"
-            value={path}
-            onChange={(event) => {
-              setPath(event.target.value)
-              setRaw(false)
-            }}
-          >
-            {(files.length ? files : [{ path }]).map((file) => (
-              <option key={file.path} value={file.path}>
-                {file.path}
-              </option>
-            ))}
-          </select>
-          <svg
-            className="capability-file-chevron"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            aria-hidden="true"
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </label>
-        <div className="capability-view-modes" role="group" aria-label="Skill 预览方式">
-          <button type="button" aria-pressed={!raw} onClick={() => setRaw(false)}>
-            阅读
-          </button>
-          <button type="button" aria-pressed={raw} onClick={() => setRaw(true)}>
-            源码
-          </button>
-        </div>
-      </div>
+    <div ref={preview} className="skill-content-preview">
+      <SkillFileNavigation
+        files={files}
+        path={path}
+        onSelect={(nextPath) => {
+          if (nextPath !== path) {
+            setView(null)
+            setError(null)
+            setPath(nextPath)
+          }
+          setRaw(false)
+          preview.current?.closest('.capability-detail-scroll')?.scrollTo({ top: 0, behavior: 'instant' })
+        }}
+      >
+        {/\.(?:md|markdown)$/iu.test(path) && (
+          <div className="capability-view-modes" role="group" aria-label="Skill 预览方式">
+            <button type="button" aria-pressed={!raw} onClick={() => setRaw(false)}>
+              阅读
+            </button>
+            <button type="button" aria-pressed={raw} onClick={() => setRaw(true)}>
+              源码
+            </button>
+          </div>
+        )}
+      </SkillFileNavigation>
       <CapabilityError error={error} onRetry={() => setRetry((value) => value + 1)} />
       {!view && !error && (
         <div className="capability-empty" role="status">
@@ -108,7 +86,7 @@ export function SkillContentPreview({
       {view?.status === 'binary' && <p className="capability-note">该文件不是文本文件。</p>}
       {view?.content !== null &&
         view?.content !== undefined &&
-        (raw || !/\.md$/iu.test(path) ? (
+        (raw || !/\.(?:md|markdown)$/iu.test(path) ? (
           <pre className="capability-source-code">{view.content}</pre>
         ) : (
           <SafeMarkdown className="capability-reading">
