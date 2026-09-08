@@ -269,7 +269,7 @@ app.whenReady().then(async () => {
     state = await click('.single-chat-composer .composer-primary-action.is-stop')
     assert.equal(state.cancelRequests, 1)
     assert.match(state.body, /你在 3 分 12 秒后停止了运行/)
-    assert.match(state.body, /单聊正文不会进入 Camp 公屏/)
+    assert.match(state.body, /单聊正文不会进入公屏/)
 
     window.webContents.debugger.attach('1.3')
     await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {

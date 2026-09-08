@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-09-06
+last_updated: 2026-09-08
 ---
 
 # Steel Night
@@ -101,6 +101,22 @@ Dark. `color-scheme: dark`.
 | `--violet-soft` | `#272431` |
 | `--ember` | `#d2aa72` |
 | `--ember-soft` | `#302719` |
+
+### Conversation controls
+
+These local tokens cover sidebar selection, Composer and the execution/task/member controls.
+Rail and selected surfaces stay unchanged; status, identity and evidence keep their own colors.
+
+| Token | Value |
+|---|---:|
+| `--conversation-action` | `#e5e5e7` |
+| `--conversation-action-hover` | `#ffffff` |
+| `--conversation-action-contrast` | `#171719` |
+| `--conversation-control-line` | `#767a7e` |
+| `--conversation-focus` | `#d4d4d8` |
+| `--conversation-focus-soft` | `rgba(212, 212, 216, 0.16)` |
+| `--conversation-route-accent` | `#a2a6aa` |
+| `--conversation-unread` | `#5aa7ff` |
 
 ### Semantic state
 

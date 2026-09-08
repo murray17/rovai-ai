@@ -64,9 +64,9 @@ describe('execution console layout', () => {
 
   it('preserves the other detail popovers and semantic selection backgrounds', () => {
     expect(styleBlock('.camp-detail-popover')).toMatch(/background:\s*var\(--inspector-surface\)/)
-    expect(styleBlock('.run-pulse-chip.is-selected')).toMatch(/background:\s*var\(--brand-soft\)/)
+    expect(styleBlock('.run-pulse-chip.is-selected')).toMatch(/background:\s*var\(--surface-selected\)/)
     expect(styleBlock('.run-pulse-inspector .run-pulse-chip.is-selected')).toMatch(
-      /background:\s*var\(--brand-soft\)/
+      /background:\s*var\(--surface-selected\)/
     )
   })
 

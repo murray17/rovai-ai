@@ -5179,14 +5179,14 @@ function RunPulse({
   return (
     <div className={`run-pulse run-pulse-${placement}`} aria-label="Agent 执行台">
       <div className="run-pulse-heading">
-        <span className="run-pulse-title">
+        {placement === 'bottom' && <span className="run-pulse-title">
           <span className="run-pulse-mark" aria-hidden="true">
             <svg viewBox="0 0 26 18">
               <path d="M1.5 9h4.2l2.1-5.2 3.4 10.4 3.1-7.4 2.2 4.1h3.1l1.4-2.1h3.5" />
             </svg>
           </span>
           <strong>执行台</strong>
-        </span>
+        </span>}
         <span className="run-pulse-count" aria-live="polite">
           {stopping ? '正在提交停止请求 · ' : activeProcessCount > 0 ? `${activeProcessCount} 位执行中 · ` : ''}
           {visibleProcesses.length} 位队员
@@ -5691,9 +5691,8 @@ function ExecutionDrawer({
                 )}
               </div>
               <p>
-                {runHistoryComplete ? '共' : '当前载入'} {process.runs.length} 次执行
+                {!runHistoryComplete && '当前载入 '}{process.runs.length} 次执行
                 {!runHistoryComplete && ' · 更早执行尚未载入'}
-                {process.runs.some(agentRunCountsAsExecuting) && ' · 当前正在执行'}
               </p>
             </div>
           </div>
@@ -5784,39 +5783,42 @@ function ExecutionDrawer({
                             <span className="current-run-badge">当前执行</span>
                           )}
                         </div>
-                        <div className="execution-run-meta">
-                          <span>执行 <code>{shortIdentity(run.id)}</code></span>
-                          <span>
-                            {run.invocationKind === 'a2a'
-                              ? 'A2A'
-                              : run.invocationKind === 'gather_completion'
-                                ? '统一综合'
-                                : '直接执行'}
-                          </span>
-                          {run.invocationKind === 'a2a' && <span>深度 {run.a2aDepth}</span>}
-                          <span>本轮 <code>{shortIdentity(run.campTurnId)}</code></span>
-                          {runtimeModel && (
-                            <span
-                              className={`execution-run-model${runtimeModel.observed ? ' is-observed' : ' is-waiting'}`}
-                              role="status"
-                              aria-live="polite"
-                              aria-atomic="true"
-                              aria-label={runtimeModel.observed
-                                ? `${displayName}，${runIntervalLabel(run)}，实际模型 ${runtimeModel.modelId}，默认策略`
-                                : `${displayName}，${runIntervalLabel(run)}，实际模型尚未由 Agent 运行时报告，默认策略`}
-                            >
-                              模型{' '}
-                              <code
-                                dir="ltr"
-                                tabIndex={0}
-                                title={runtimeModel.modelId}
-                              >
-                                {runtimeModel.modelId}
-                              </code>
-                              {runtimeModel.observed && <small>· 默认</small>}
+                        <details className="execution-run-information">
+                          <summary>运行信息</summary>
+                          <div className="execution-run-meta">
+                            <span>执行 <code>{shortIdentity(run.id)}</code></span>
+                            <span>
+                              {run.invocationKind === 'a2a'
+                                ? 'A2A'
+                                : run.invocationKind === 'gather_completion'
+                                  ? '统一综合'
+                                  : '直接执行'}
                             </span>
-                          )}
-                        </div>
+                            {run.invocationKind === 'a2a' && <span>深度 {run.a2aDepth}</span>}
+                            <span>本轮 <code>{shortIdentity(run.campTurnId)}</code></span>
+                            {runtimeModel && (
+                              <span
+                                className={`execution-run-model${runtimeModel.observed ? ' is-observed' : ' is-waiting'}`}
+                                role="status"
+                                aria-live="polite"
+                                aria-atomic="true"
+                                aria-label={runtimeModel.observed
+                                  ? `${displayName}，${runIntervalLabel(run)}，实际模型 ${runtimeModel.modelId}，默认策略`
+                                  : `${displayName}，${runIntervalLabel(run)}，实际模型尚未由 Agent 运行时报告，默认策略`}
+                              >
+                                模型{' '}
+                                <code
+                                  dir="ltr"
+                                  tabIndex={0}
+                                  title={runtimeModel.modelId}
+                                >
+                                  {runtimeModel.modelId}
+                                </code>
+                                {runtimeModel.observed && <small>· 默认</small>}
+                              </span>
+                            )}
+                          </div>
+                        </details>
                       </div>
                     </header>
                     {agentRunTerminalNote(run) && (
@@ -6524,7 +6526,6 @@ function CampMembersPanel({
       <div className="camp-members-summary">
         <div className="camp-members-summary-line">
           <div>
-            <strong>协作队员</strong>
             <small>{presentCount} 位在队 · {awayCount} 位暂离</small>
           </div>
           <div className="camp-members-summary-actions">
@@ -6633,10 +6634,8 @@ function CampMembersPanel({
                       disabled={!runtimeConfiguration}
                       onSelect={() => runtimeConfiguration && toggleRuntimeDetails(member.agentId)}
                     >
-                      <strong>{runtimeConfiguration
-                        ? runtimeDetailsOpen ? '收起模型信息' : '查看模型信息'
-                        : '没有可查看的模型信息'}</strong>
-                      <small>{runtimeConfiguration ? runtimeLabel : '请先配置 Agent 运行时'}</small>
+                      <strong>模型信息</strong>
+                      {!runtimeConfiguration && <small>请先配置 Agent 运行时</small>}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator className="camp-member-menu-separator" />
                     <DropdownMenu.Item
@@ -6645,9 +6644,7 @@ function CampMembersPanel({
                       onSelect={() => openRemovalDialog(member)}
                     >
                       <strong>移出当前会话</strong>
-                      <small>{members.length <= 1
-                        ? '会话至少保留 1 位队员'
-                        : '不会永久移除这位队员'}</small>
+                      {members.length <= 1 && <small>会话至少保留 1 位队员</small>}
                     </DropdownMenu.Item>
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
@@ -6749,7 +6746,7 @@ function CampMembersPanel({
             <AppDialogFooter>
               <Dialog.Close asChild><button className="quiet-button" type="button" disabled={addSubmitting}>取消</button></Dialog.Close>
               <button
-                className="primary-button"
+                className="primary-button conversation-primary-button"
                 type="button"
                 disabled={selectedCandidateIds.size === 0 || addSubmitting}
                 onClick={() => void submitAddMembers()}
@@ -8898,8 +8895,8 @@ export function TaskPanel({
             <option value="completed">已完成</option>
             <option value="cancelled">已取消</option>
           </select>
-          <button className="quiet-button compact task-new-button" type="button" onClick={(event) => beginCreate(event.currentTarget)} disabled={busy}>
-            <span aria-hidden="true">＋</span> 新建任务
+          <button className="primary-button conversation-primary-button compact task-new-button" type="button" onClick={(event) => beginCreate(event.currentTarget)} disabled={busy}>
+            <span aria-hidden="true">＋</span> 新建
           </button>
         </div>
         {formError && !editorOpen && !cancelOpen && <p className="task-form-error" role="alert">{formError}</p>}
@@ -8930,8 +8927,7 @@ export function TaskPanel({
 
       {detailTask && <article className="task-detail" ref={detailRef} tabIndex={-1} aria-label="任务详情" data-task-id={detailTask.taskId}>
         <div className="task-detail-navigation">
-          <button className="quiet-button compact" type="button" onClick={() => setDetailTaskId(null)}><span aria-hidden="true">←</span> 返回任务列表</button>
-          <small>版本 {detailTask.version}</small>
+          <button className="quiet-button compact" type="button" onClick={() => setDetailTaskId(null)}><span aria-hidden="true">←</span> 返回</button>
         </div>
         <h3>{detailTask.title}</h3>
         <div className="task-detail-meta"><span className={`task-detail-status state-${detailTask.status}`}>{taskStatusLabel(detailTask.status)}</span><span>{taskAssigneeName(detailTask, snapshot)}</span></div>
@@ -8945,11 +8941,11 @@ export function TaskPanel({
         {detailTask.completionSummary && <section className="task-detail-section task-outcome is-completed"><strong>完成摘要</strong><p className="task-detail-copy">{detailTask.completionSummary}</p></section>}
         {detailTask.cancelReason && <section className="task-detail-section task-outcome"><strong>取消原因</strong><p className="task-detail-copy">{detailTask.cancelReason}</p></section>}
         <RelatedTaskExecution task={detailTask} snapshot={snapshot} onOpenAgent={onOpenAgent} />
-        <details className="task-audit-disclosure"><summary>审计信息</summary><TaskAuditDetail task={detailTask} /></details>
+        <details className="task-audit-disclosure"><summary>更多信息</summary><TaskAuditDetail task={detailTask} /></details>
         {detailTerminal
           ? <p className="task-terminal-note">已结束的任务保留为只读记录，不能重新打开或删除。</p>
           : <div className="task-detail-actions">
-              <button className="quiet-button" type="button" disabled={busy} onClick={(event) => beginEdit(detailTask, event.currentTarget)}>编辑任务</button>
+              <button className="quiet-button" type="button" disabled={busy} onClick={(event) => beginEdit(detailTask, event.currentTarget)}>编辑</button>
               <button className="quiet-button task-cancel-action" type="button" disabled={busy} onClick={(event) => {
                 editorTriggerRef.current = event.currentTarget
                 setSelectedTaskId(detailTask.taskId)
@@ -8996,7 +8992,7 @@ export function TaskPanel({
               <AppDialogFooter>
                 <small className="task-draft-note">关闭后保留本次草稿</small>
                 <button className="quiet-button" type="button" disabled={submitting} onClick={closeEditor}>收起</button>
-                <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy || (mode === 'edit' && (terminal || !selectedTask))}>
+                <button className="primary-button conversation-primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy || (mode === 'edit' && (terminal || !selectedTask))}>
                   {submitting ? '正在保存…' : mode === 'create' ? '新建' : '保存'}
                 </button>
               </AppDialogFooter>
@@ -9009,15 +9005,15 @@ export function TaskPanel({
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
           <AppDialogContent className="task-cancel-dialog" tone="danger" width="compact" onCloseAutoFocus={restoreEditorFocus}>
-            <AppDialogHeader icon="warning" title="取消任务" description={selectedTask?.title} />
+            <AppDialogHeader icon="warning" title="取消任务？" description={selectedTask?.title} />
             <AppDialogBody>
-              <p className="task-cancel-description">取消任务不会停止已经接受或正在运行的执行。</p>
+              <p className="task-cancel-description">任务将结束，已经接受或正在进行的执行不会停止。</p>
               <label className="task-field"><span>取消原因</span><textarea data-dialog-autofocus value={cancelReason} rows={3} maxLength={4000} required disabled={submitting || busy} onChange={(event) => setCancelReason(event.currentTarget.value)} /></label>
               {formError && <p className="task-form-error" role="alert">{formError}</p>}
             </AppDialogBody>
             <AppDialogFooter>
-              <button className="quiet-button" type="button" disabled={submitting} onClick={() => setCancelOpen(false)}>返回</button>
-              <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy || terminal} onClick={() => void submitCancel()}>{submitting ? '正在取消…' : '确认取消任务'}</button>
+              <button className="quiet-button" type="button" disabled={submitting} onClick={() => setCancelOpen(false)}>取消</button>
+              <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy || terminal} onClick={() => void submitCancel()}>{submitting ? '正在取消…' : '取消任务'}</button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>
@@ -9116,6 +9112,7 @@ function TaskAuditDetail({ task }: { task: TaskView }): JSX.Element {
     <section className="task-detail-section" aria-label="任务审计信息">
       <strong>责任与审计</strong>
       <dl className="task-detail-grid">
+        <div><dt>版本</dt><dd>{task.version}</dd></div>
         <div><dt>任务 ID</dt><dd>{task.taskId}</dd></div>
         <div><dt>创建者</dt><dd>{task.createdByType} · {task.createdById}</dd></div>
         <div><dt>来源执行</dt><dd>{task.sourceAgentRunId ?? '无'}</dd></div>

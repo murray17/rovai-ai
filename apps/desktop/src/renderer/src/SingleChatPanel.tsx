@@ -1644,7 +1644,7 @@ export function SingleChatPanel({
             <DropdownMenu.Content className="single-chat-target-menu" sideOffset={6} align="start" collisionPadding={12}>
               <div className="single-chat-target-menu-heading">
                 <strong>选择单聊对象</strong>
-                <span>单聊正文不会进入 Camp 公屏</span>
+                <span>单聊正文不会进入公屏</span>
               </div>
               {activeMembers.map((member) => (
                 <DropdownMenu.Item className="single-chat-target-option" key={member.agentId} onSelect={() => void chooseTarget(member.agentId)}>
@@ -1820,7 +1820,7 @@ export function SingleChatPanel({
         {error && <div className="single-chat-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>关闭</button></div>}
       </form>
       <footer className="single-chat-footer">
-        <span>单聊正文不会进入 Camp 公屏</span>
+        <span>单聊正文不会进入公屏</span>
         <span><kbd>Esc</kbd> 收起</span>
       </footer>
       {attachmentDragState && (

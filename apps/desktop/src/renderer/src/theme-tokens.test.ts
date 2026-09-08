@@ -20,6 +20,14 @@ const requiredTokens = [
   '--workspace-attention-soft',
   '--workspace-faint',
   '--conversation-surface',
+  '--conversation-action',
+  '--conversation-action-hover',
+  '--conversation-action-contrast',
+  '--conversation-control-line',
+  '--conversation-focus',
+  '--conversation-focus-soft',
+  '--conversation-route-accent',
+  '--conversation-unread',
   '--execution-running-surface',
   '--inspector-surface',
   '--conversation-inspector-line',
@@ -125,6 +133,9 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--muted', '--execution-running-surface'],
     ['--info', '--execution-running-surface'],
     ['--brand-contrast', '--brand'],
+    ['--conversation-action-contrast', '--conversation-action'],
+    ['--conversation-action-contrast', '--conversation-action-hover'],
+    ['--conversation-action', '--surface-selected'],
     ['--success', '--success-soft'],
     ['--attention', '--attention-soft'],
     ['--danger', '--danger-soft'],
@@ -180,6 +191,20 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   it('keeps normal text and semantic labels at WCAG AA contrast', () => {
     expectTextContrast(day)
     expectTextContrast(night)
+  })
+
+  it('keeps conversation controls, focus and unread markers distinguishable in both themes', () => {
+    for (const tokens of [day, night]) {
+      for (const [foreground, background] of [
+        ['--conversation-control-line', '--input'],
+        ['--conversation-focus', '--input'],
+        ['--conversation-focus', '--rail'],
+        ['--conversation-unread', '--rail'],
+        ['--conversation-unread', '--surface-selected']
+      ]) {
+        expect(contrast(tokens[foreground], tokens[background]), `${foreground} on ${background}`).toBeGreaterThanOrEqual(3)
+      }
+    }
   })
 
   it('scopes the approved porcelain surfaces and Steel emphasis', () => {
@@ -485,7 +510,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*760px\)\s*\{[^}]*\.composer-hint\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
     expect(css).toMatch(/\.composer-primary-action\s*\{[^}]*width:\s*32px[^}]*height:\s*32px/)
-    expect(css).toMatch(/\.composer-primary-action\.is-stop\s*\{[^}]*border-color:\s*var\(--control-line\)[^}]*background:\s*var\(--surface-subtle\)/)
+    expect(css).toMatch(/\.composer-primary-action\.is-stop\s*\{[^}]*border-color:\s*var\(--conversation-control-line\)[^}]*background:\s*var\(--surface-subtle\)/)
     expect(css).toMatch(/\.composer-primary-action-spinner\s*\{[^}]*animation:\s*composer-primary-action-spin/)
   })
 

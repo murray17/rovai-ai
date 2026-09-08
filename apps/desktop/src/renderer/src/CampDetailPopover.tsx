@@ -9,12 +9,6 @@ const labels: Record<CampDetailTab, string> = {
   members: '队员'
 }
 
-const footnotes: Record<CampDetailTab, string> = {
-  execution: '连续执行历史',
-  tasks: '任务取消不等于执行停止',
-  members: '仅管理当前会话队员'
-}
-
 function CampDetailIcon({ tab }: { tab: CampDetailTab }): React.JSX.Element {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round">
     {tab === 'execution' && <path d="M3 12h4l3-8 4 16 3-8h4" />}
@@ -171,9 +165,8 @@ export function CampDetailPopover({
       <header className="camp-detail-heading">
         <CampDetailIcon tab={activeTab} />
         <strong id={`${panelId}-title`}>{labels[activeTab]}</strong>
-        <span className="camp-detail-scope">当前会话</span>
         <button
-          className="icon-button"
+          className="camp-detail-collapse"
           type="button"
           aria-label="收起会话详情"
           title="收起 · Esc"
@@ -182,12 +175,12 @@ export function CampDetailPopover({
             triggerRef.current?.focus({ preventScroll: true })
           }}
         >
-          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+          <span>收起</span>
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="m4 10 4-4 4 4" /></svg>
         </button>
       </header>
       {children}
       <footer className="camp-detail-footer">
-        <span>{footnotes[activeTab]}</span>
         <span className="camp-detail-dismiss-hint"><kbd>Esc</kbd> 收起</span>
       </footer>
     </aside>
