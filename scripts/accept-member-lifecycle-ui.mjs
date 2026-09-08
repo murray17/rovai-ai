@@ -508,9 +508,6 @@ try {
       rowCount: productRows?.length ?? 0,
       labels,
       pendingCount: pendingRows.length,
-      pendingActionsDisabled: pendingRows.every(
-        (row) => row.querySelector('button')?.disabled === true
-      ),
       hasAdvancedDiagnostics: Boolean(advanced),
       explainsShell: panel?.textContent?.includes('交互式登录 Shell 初始化'),
       exposesMemberPathPicker: Boolean(
@@ -519,25 +516,24 @@ try {
     }
   })()`)
   assert(
-    runtimeSettingsState.rowCount === 14
+    runtimeSettingsState.rowCount === 13
       && runtimeSettingsState.labels.includes('Codex CLI')
-      && runtimeSettingsState.labels.includes('Pi Coding Agent')
+      && runtimeSettingsState.labels.includes('PI')
       && runtimeSettingsState.labels.includes('Antigravity')
       && runtimeSettingsState.labels.includes('TRAE CLI')
-      && runtimeSettingsState.labels.includes('DeepSeek Harness')
-      && runtimeSettingsState.pendingCount === 1
-      && runtimeSettingsState.pendingActionsDisabled
+      && !runtimeSettingsState.labels.includes('DeepSeek Harness')
+      && runtimeSettingsState.pendingCount === 0
       && !runtimeSettingsState.hasAdvancedDiagnostics
       && !runtimeSettingsState.explainsShell
       && !runtimeSettingsState.exposesMemberPathPicker,
-    `Runtime settings did not preserve thirteen managed products plus one pending preview: ${JSON.stringify(runtimeSettingsState)}`
+    `Runtime settings did not preserve thirteen managed products without pending previews: ${JSON.stringify(runtimeSettingsState)}`
   )
   await setViewport(running.cdp, 1040, 700)
   await setTheme(running.cdp, 'night')
   await assertNoHorizontalOverflow(running.cdp, 'Runtime settings at 1040×700 Night')
   captures.runtimeSettings = join(
     outputDir,
-    'runtime-settings-thirteen-products-one-preview-night-1040x700.png'
+    'runtime-settings-thirteen-products-night-1040x700.png'
   )
   await capture(running.cdp, captures.runtimeSettings)
   const discoveredCodex = (await request(running.cdp, 'runtime.installations.list'))

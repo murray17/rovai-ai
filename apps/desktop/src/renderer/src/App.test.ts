@@ -7287,14 +7287,18 @@ describe('task event projections', () => {
     expect(markup).not.toContain('<option value="pi" disabled="">')
   })
 
-  it('keeps all product checks visible without discovery diagnostics', () => {
+  it.each([
+    ['macos-arm64', 'macOS Apple Silicon'],
+    ['macos-x64', 'macOS Intel'],
+    ['windows-x64', 'Windows x64']
+  ] as const)('renders platform-aware product copy and checks on %s', (hostPlatform, platformLabel) => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
       git: { installed: true, version: 'git version 2.0' },
-      hostPlatform: 'macos-arm64',
+      hostPlatform,
       runtimeCatalog: [],
-      runtimePlatformAdmission: runtimeAdmissionRows('macos-arm64', 'qualified'),
+      runtimePlatformAdmission: runtimeAdmissionRows(hostPlatform, 'qualified'),
       runtimeAvailability: [
         productAvailability('codex-cli', 'ready'),
         productAvailability('opencode-cli', 'found_uninspected'),
@@ -7332,15 +7336,16 @@ describe('task event projections', () => {
     expect(markup).toContain('Codex CLI')
     expect(markup).toContain('<strong>PI</strong>')
     expect(markup.indexOf('<strong>PI</strong>')).toBeGreaterThan(markup.indexOf('<strong>Antigravity</strong>'))
-    expect(markup.indexOf('<strong>PI</strong>')).toBeLessThan(markup.indexOf('<strong>DeepSeek Harness</strong>'))
     expect(markup).toContain('OpenCode')
     expect(markup).toContain('GitHub Copilot')
     expect(markup).toContain('Claude Code')
     expect(markup).toContain('Antigravity')
     expect(markup).toContain('TRAE CLI')
-    expect(markup).toContain('DeepSeek Harness')
-    expect(markup).toContain('待支持')
-    expect(markup).toContain('尚未开放')
+    expect(markup).not.toContain('DeepSeek Harness')
+    expect(markup).not.toContain('Cursor Agent')
+    expect(markup).not.toContain('待支持')
+    expect(markup).not.toContain('尚未开放')
+    expect(markup).toContain(`当前平台：${platformLabel}`)
     expect(markup).toContain('可用')
     expect(markup).toContain('正在检查…')
     expect(markup).toContain('需要登录')
@@ -7352,9 +7357,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('已找到')
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('已检查')
-    expect(markup).toContain('实验性')
-    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(14)
-    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(12)
+    expect(markup).not.toMatch(/稳定|测试|实验性/)
+    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(13)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(11)
     expect(markup.match(/检查可用性/g)).toHaveLength(11)
     expect(markup).toContain('Claude Code 登录指南')
     expect(markup).toContain('Antigravity 安装指南')
@@ -7363,6 +7368,11 @@ describe('task event projections', () => {
     expect(markup).not.toContain('实验性开放 ·')
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
+    expect(markup).toContain('<strong>Kiro</strong></div>')
+    expect(markup).toContain('<strong>Antigravity</strong></div>')
+    expect(markup).toContain('<small title="codex-cli 1.0.0">codex-cli 1.0.0</small>')
+    expect(markup.match(/<small\b/g)).toHaveLength(4)
+    expect(markup).not.toContain('<small></small>')
     expect(markup).not.toContain('来源 inherited_path')
     expect(markup).not.toContain('Version Probe')
     expect(markup).not.toContain('九种已支持产品')
@@ -7371,6 +7381,29 @@ describe('task event projections', () => {
     expect(markup).not.toContain('安装说明')
     expect(markup).not.toContain('高级诊断与自定义启动入口')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
+
+    // Missing versions remove the subtitle; a future preview still discloses admission.
+    for (const status of ['qualified', 'preview'] as const) {
+      for (const reportedVersion of [null, '   ', 'codex-cli 1.0.0']) {
+        const versionMarkup = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
+          health: {
+            ...health,
+            runtimePlatformAdmission: runtimeAdmissionRows(hostPlatform, status),
+            runtimeAvailability: [{ ...productAvailability('codex-cli', 'ready'), reportedVersion }]
+          },
+          installations: [],
+          onReload: async () => undefined
+        }))
+        const version = reportedVersion?.trim()
+        const subtitle = status === 'preview' ? `实验性开放${version ? ` · ${version}` : ''}` : version
+        expect(versionMarkup).toContain(subtitle
+          ? `<strong>Codex CLI</strong><small title="${subtitle}">${subtitle}</small>`
+          : '<strong>Codex CLI</strong></div>')
+        expect(versionMarkup).toContain('status-available">可用</span>')
+        expect(versionMarkup.match(/检查可用性/g)).toHaveLength(13)
+        expect(versionMarkup).not.toContain('DeepSeek Harness')
+      }
+    }
   })
 
   it('renders Windows not-qualified rows without machine checks or rescan actions', () => {

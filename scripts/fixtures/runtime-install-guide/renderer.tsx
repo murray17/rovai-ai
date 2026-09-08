@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AdapterKind, HealthStatus, ProductRuntimeAvailability } from '@contracts'
+import type { AdapterKind, HealthStatus, ProductRuntimeAvailability, RuntimePlatformAdmissionStatus } from '@contracts'
 import { RuntimeInstallationsPanel } from '../../../apps/desktop/src/renderer/src/MemberManagement'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
@@ -8,7 +8,7 @@ const kinds: AdapterKind[] = ['claude-code-cli', 'codex-cli', 'opencode-cli', 'c
 const calls: string[] = []
 let nextResult = 'missing'
 let platform: HealthStatus['hostPlatform'] = 'macos-arm64'
-let admitted = true
+let admissionStatus: RuntimePlatformAdmissionStatus = 'qualified'
 const availability = new Map(kinds.map(kind => [kind, snapshot(kind, kind === 'copilot-cli' ? 'ready' : 'missing')]))
 
 function snapshot(runtimeKind: AdapterKind, status: ProductRuntimeAvailability['status']): ProductRuntimeAvailability {
@@ -26,7 +26,7 @@ function health(): HealthStatus {
     core: { ok: true, version: 'fixture', dataDir: '/tmp/rovai-runtime-install-guide-fixture' },
     database: { ok: true, path: '/tmp/rovai-runtime-install-guide-fixture/unused.db' },
     git: { installed: true, version: 'fixture' }, hostPlatform: platform, runtimeCatalog: [],
-    runtimePlatformAdmission: kinds.map(runtimeKind => ({ runtimeKind, platform, status: admitted ? 'qualified' : 'not_qualified', reasonCode: admitted ? null : 'runtime_platform.qualification_evidence_missing', evidenceRevision: admitted ? 'fixture' : null })),
+    runtimePlatformAdmission: kinds.map(runtimeKind => ({ runtimeKind, platform, status: admissionStatus, reasonCode: admissionStatus === 'qualified' ? null : 'runtime_platform.qualification_evidence_missing', evidenceRevision: admissionStatus === 'qualified' ? 'fixture' : null })),
     runtimeAvailability: [...availability.values()],
     searchEnvironment: { generation: 1, createdAt: '2026-09-07T00:00:00Z', pathEntryCount: 0,
       shell: { status: 'captured', interactive: true, shellName: 'fixture', entryCount: 0, elapsedMillis: 0 } }
@@ -63,8 +63,8 @@ function Fixture(): React.JSX.Element {
       <label>检测结果 <select aria-label="检测结果" onChange={event => { nextResult = event.target.value }}>
         <option value="missing">仍未安装</option><option value="authentication_required">需要登录</option><option value="ready">可用</option><option value="needs_attention">运行环境错误</option><option value="rpc-error">请求失败</option>
       </select></label>
-      <label>平台 <select aria-label="平台" onChange={event => { platform = event.target.value === 'mac' ? 'macos-arm64' : 'windows-x64'; admitted = event.target.value !== 'windows-blocked'; setCurrent(health()); setGeneration(value => value + 1) }}>
-        <option value="mac">macOS</option><option value="windows-blocked">Windows 未验证</option><option value="windows-admitted">Windows 已准入夹具</option>
+      <label>平台 <select aria-label="平台" onChange={event => { platform = event.target.value === 'mac' ? 'macos-arm64' : event.target.value === 'mac-intel' ? 'macos-x64' : 'windows-x64'; admissionStatus = event.target.value === 'windows-blocked' ? 'not_qualified' : event.target.value === 'windows-preview' ? 'preview' : 'qualified'; setCurrent(health()); setGeneration(value => value + 1) }}>
+        <option value="mac">macOS Apple Silicon</option><option value="mac-intel">macOS Intel</option><option value="windows-admitted">Windows 已准入夹具</option><option value="windows-blocked">Windows 未验证夹具</option><option value="windows-preview">Windows 实验性夹具</option>
       </select></label>
       <button className="quiet-button" onClick={() => { document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'night' ? 'day' : 'night' }}>切换主题</button>
       <button className="quiet-button" onClick={() => setLog(calls.join('\n'))}>验收记录</button>

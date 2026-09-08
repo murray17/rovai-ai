@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-07
+last_updated: 2026-09-08
 ---
 
 # Agent Runtime 兼容性清单
@@ -29,9 +29,9 @@ Kimi 或 Grok 的平台结论。
 Grok Build 在 adapter-scoped 证据分别覆盖的 macOS arm64、macOS x64 与 Windows x64 均为 `qualified`；
 三个宿主平台各自绑定独立 evidence digest，不互相外推。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
-目录不展示该项。设置页的
-DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
-Probe、成员选择、诊断或 AgentRun 语义。
+目录不展示该项。DeepSeek Harness 在 macOS arm64、macOS x64 与 Windows x64 的设置页均隐藏，
+不保留“待支持”占位行；它仍是未实现候选，不在这个目录中，也没有 Installation、Probe、成员选择、
+诊断或 AgentRun 语义。本次显示范围调整不改变任何 Runtime 的平台资格或实测证据。
 
 ### 2026-09-07 Pi 0.84.4 edit patch 文件变化证据
 
@@ -1034,7 +1034,7 @@ ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview�
 | Runtime | 调研版本 / 状态 | 观察结果 | 当前边界 / 未接入原因 | 复核条件 |
 |---|---:|---|---|---|
 | Cursor Agent | 2025.09.18-7ae6800 | 支持 headless 与 resume；已验证入口会读取项目 `.cursor/mcp.json` | 尚无稳定的逐 Run additive channel 与同名证据 | 上游提供动态追加入口并完成 native preservation、同名与恢复复核 |
-| DeepSeek Harness | Settings Preview；未实现 | 仅显示名称、图标、`待支持` 与 disabled 状态；没有 executable、Adapter、Probe 或 capability 结论 | Renderer-only preview，不属于 Product Runtime Catalog | 取得明确入口和协议后，完成 Adapter、认证、Session、终态、取消、Approval、Tool ID、MCP、Activity、Migration 与真实 AgentRun 准入 |
+| DeepSeek Harness | 未实现；三平台隐藏 | 设置页不展示；没有 executable、Adapter、Probe 或 capability 结论 | 未接入候选，不属于 Product Runtime Catalog，也不保留 Preview 占位行 | 取得明确入口和协议后，完成 Adapter、认证、Session、终态、取消、Approval、Tool ID、MCP、Activity、Migration 与真实 AgentRun 准入 |
 
 ## 后续准入规则
 

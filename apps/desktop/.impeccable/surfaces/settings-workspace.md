@@ -1,5 +1,5 @@
 ---
-version: 8
+version: 9
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -162,7 +162,12 @@ availability probe, install, rescan, selection or execution action. They must no
 installed, unavailable, a red health failure or synthetic checking. Diagnostics may show the platform row
 and evidence revision without starting that Adapter.
 
-`preview` remains an admitted Product Runtime state, distinct from the Renderer-only `待支持` row below. It enters
+The catalog heading shows the Core-reported host platform once. Qualified rows show only a reported version as
+supporting copy; no version means no subtitle element or placeholder. Never fall back to static “稳定 / 测试 / 实验性”
+labels. Keep the 68px minimum row and vertically center either the name alone or the name/version block with the
+logo, machine-state badge and action. Expanded guides and failure details may grow the row.
+
+`preview` remains an admitted Product Runtime state, distinct from a Renderer-only `待支持` preview. It enters
 normal availability checks, selection, diagnostics and execution while supporting copy says “实验性开放”; its
 machine-state badge remains the real checking/available/login/install/error result. Pi no longer uses this state: its
 three shipped platforms are qualified by platform-specific immutable evidence and follow the ordinary machine flow
@@ -196,11 +201,10 @@ unable to complete. Show the safe summary and optional detail with wrapping; nev
 logs or a digest. Only `origin=rovai` may use the user-facing phrase “Rovai 内部错误”. Startup shallow version
 failures without a public failure keep the existing state copy and last-known-good behavior.
 
-The Runtime settings list may append a separately typed presentation-only preview row after supported
-products. A preview must say `待支持` and `尚未接入 AgentRun`, expose no health/configuration action and
-remain absent from member selection, diagnostics and every execution surface. It is not a Product Runtime
-state or count; logo treatment must not imply readiness. Promotion removes the preview and follows normal
-Adapter admission instead of reinterpreting preview data.
+DeepSeek Harness is hidden on macOS arm64, macOS x64 and Windows x64. The Runtime settings list currently
+contains no presentation-only pending preview rows. DSH remains an unimplemented candidate, absent from
+member selection, diagnostics and every execution surface; restoring an entry requires an explicit product
+decision and normal Adapter admission before it can become executable.
 
 Diagnostics full check is read-only. Summary counts partition all checks into normal, needs attention
 and temporarily unknown. There is no “repair all”; each issue has one bounded next step and is
