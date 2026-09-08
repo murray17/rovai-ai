@@ -168,13 +168,14 @@ export function OnboardingFlow({
     : snapshot.step === 'runtime' && !snapshot.provisioning
       ? onShowMemberSelection
       : null
+  const stepNumber = snapshot.step === 'welcome' ? 1 : snapshot.step === 'member' ? 2 : 3
 
   return (
     <div className="onboarding-shell">
       <header className="onboarding-header">
         <div className="onboarding-lockup" aria-label="Rovai AI">
           <OnboardingBrandMark compact />
-          <span><strong>Rovai</strong><small>AI</small></span>
+          <strong>Rovai AI</strong>
         </div>
         <div className="onboarding-header-actions">
           {backAction && (
@@ -183,6 +184,9 @@ export function OnboardingFlow({
               返回
             </button>
           )}
+          <span className="onboarding-progress" aria-label={`第 ${stepNumber} 步，共 3 步`}>
+            {stepNumber} / 3
+          </span>
           <button
             className="onboarding-theme-toggle"
             type="button"
@@ -402,6 +406,21 @@ function RuntimeStep({
   })
   const focusRuntime = runtimeChoices.find((row) => row.selectable && row.kind === selection?.adapterKind)?.kind
     ?? runtimeChoices.find((row) => row.selectable)?.kind
+  const primaryChoices = runtimeChoices.filter((row, index) => index < 3 || row.selectable || row.experimental || row.kind === selection?.adapterKind)
+  const otherChoices = runtimeChoices.filter((row) => !primaryChoices.includes(row))
+  const renderRuntimeChoice = ({ kind, presentation, experimental, selectable }: typeof runtimeChoices[number]) => (
+    <RuntimeRow
+      key={kind}
+      kind={kind}
+      presentation={presentation}
+      experimental={experimental}
+      checked={selection?.adapterKind === kind}
+      tabIndex={focusRuntime === kind ? 0 : -1}
+      disabled={provisioning || !selectable}
+      busy={busy}
+      onSelect={() => onSelectionChange(onboardingRuntimeSelectionFor(kind, installations))}
+    />
+  )
 
   return (
     <section className="onboarding-track onboarding-runtime-track" aria-labelledby="onboarding-runtime-title">
@@ -410,9 +429,6 @@ function RuntimeStep({
           <h1 id="onboarding-runtime-title">选择运行时</h1>
           <p>使用这台电脑上已安装的运行时，为{member.displayName}提供模型与工具。</p>
         </div>
-        {!scanning && !showingEmpty && hasEnabledRuntime && (
-          <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>重新扫描</button>
-        )}
       </header>
       <div className="onboarding-runtime-layout">
         <aside className="onboarding-runtime-member" data-member-role={member.role}>
@@ -426,7 +442,6 @@ function RuntimeStep({
           <div>
             <h2>{member.displayName}</h2>
             <strong>{member.teamRole}</strong>
-            <p>即将加入你的第一段协作。</p>
           </div>
         </aside>
         <div className="onboarding-runtime-workspace">
@@ -447,28 +462,23 @@ function RuntimeStep({
             <header>
               <span><strong>本机运行时</strong><small>{scanning ? '正在读取本机环境' : hasEnabledRuntime ? '选择一个可用的运行时' : '当前平台的 Runtime 资格状态'}</small></span>
               {scanning && <span className="onboarding-scan-status"><i />正在检查</span>}
+              {!scanning && hasEnabledRuntime && (
+                <button className="onboarding-refresh" type="button" disabled={busy} onClick={onRefresh} aria-label="重新扫描" title="重新扫描">
+                  <RefreshIcon />
+                </button>
+              )}
             </header>
             {scanning
               ? <RuntimeScanProgress phase={phase} />
               : (
-                  <div className="onboarding-runtime-list" role="radiogroup" aria-label="选择运行时" onKeyDown={moveRadioSelection}>
-                    {runtimeChoices.map(({ kind, presentation, experimental, selectable }) => {
-                      return (
-                        <RuntimeRow
-                          key={kind}
-                          kind={kind}
-                          presentation={presentation}
-                          experimental={experimental}
-                          checked={selection?.adapterKind === kind}
-                          tabIndex={focusRuntime === kind ? 0 : -1}
-                          disabled={provisioning || !selectable}
-                          busy={busy}
-                          onSelect={() => onSelectionChange(
-                            onboardingRuntimeSelectionFor(kind, installations)
-                          )}
-                        />
-                      )
-                    })}
+                  <div role="radiogroup" aria-label="选择运行时" onKeyDown={moveRadioSelection}>
+                    <div className="onboarding-runtime-list">{primaryChoices.map(renderRuntimeChoice)}</div>
+                    {otherChoices.length > 0 && (
+                      <details className="onboarding-other-runtimes">
+                        <summary>其他运行时 · {otherChoices.length}</summary>
+                        <div className="onboarding-runtime-list">{otherChoices.map(renderRuntimeChoice)}</div>
+                      </details>
+                    )}
                   </div>
                 )}
           </section>
@@ -557,26 +567,27 @@ function RuntimeEmptyState({
         </header>
         <div className="onboarding-runtime-empty">
           <div className="onboarding-runtime-empty-visual" aria-hidden="true">
-            <svg viewBox="0 0 100 100">
-              <rect x="17" y="18" width="66" height="46" rx="5" />
-              <path d="M33 79h34M40 64v15M60 64v15" />
-              <circle cx="35" cy="40" r="4" />
-              <circle cx="50" cy="40" r="4" />
-              <circle cx="65" cy="40" r="4" />
-              <path d="M31 53h38" />
-            </svg>
+            {scanFailed ? <RefreshIcon /> : (
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="3" width="18" height="14" rx="2" />
+                <path d="m7 7 3 3-3 3m6 0h4M8 21h8m-4-4v4" />
+              </svg>
+            )}
           </div>
           <div className="onboarding-runtime-empty-copy">
             <h2 id="onboarding-runtime-empty-title">{scanFailed ? '这次扫描未完成' : '暂未找到可用的运行时'}</h2>
             <p>{scanFailed ? '请重新扫描，确认这台电脑上的可用运行时。' : '安装或完成运行配置后，回到这里重新扫描。'}</p>
             <div className="onboarding-runtime-empty-actions">
+              {scanFailed && (
+                <button className="primary-button conversation-primary-button" type="button" disabled={busy} onClick={onRefresh}>
+                  <RefreshIcon />重新扫描
+                </button>
+              )}
               <button className={scanFailed ? 'quiet-button' : 'primary-button conversation-primary-button'} type="button"
                 disabled={busy} aria-expanded={guideOpen} aria-controls="onboarding-install-links" onClick={() => setGuideOpen(!guideOpen)}>
                 查看安装引导
               </button>
-              <button className={scanFailed ? 'primary-button conversation-primary-button' : 'quiet-button'} type="button" disabled={busy} onClick={onRefresh}>
-                重新扫描
-              </button>
+              {!scanFailed && <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>重新扫描</button>}
             </div>
             <div id="onboarding-install-links" className="onboarding-install-links" hidden={!guideOpen}>
               {ONBOARDING_PRODUCT_RUNTIMES.map((kind) => {
@@ -756,11 +767,15 @@ function OnboardingBrandMark({ compact = false }: { compact?: boolean }): React.
       viewBox="0 0 72 56"
       aria-hidden="true"
     >
-      <path d="M36 4l2.7 12.3L51 19l-12.3 2.7L36 34l-2.7-12.3L21 19l12.3-2.7L36 4Z" />
-      <path d="M12 43.5c7.8-7.6 15.8-11.4 24-11.4s16.2 3.8 24 11.4" fill="none" />
-      <circle className="brand-rendezvous-point" cx="36" cy="43.5" r="2.4" />
+      <path d="M36 4 L39.6 16.7 L53.9 20.4 L39.6 24.1 L36 36.8 L32.4 24.1 L18.1 20.4 L32.4 16.7 Z" />
+      <path d="M8 49.5 Q36 37.5 64 49.5" fill="none" />
+      <circle className="brand-rendezvous-point" cx="36" cy="43.5" r="2.6" />
     </svg>
   )
+}
+
+function RefreshIcon(): React.JSX.Element {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7" /></svg>
 }
 
 function BackIcon(): React.JSX.Element {
