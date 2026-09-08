@@ -141,7 +141,7 @@ and persistent focus treatment; higher contrast preferences restore the stronger
 ## Components
 
 - **Buttons:** compact, direct and text-first. Primary actions use Steel by default. Conversation send, task creation and member invitation use
-  the neutral `--conversation-action` family; danger marks destructive actions and sidebar removal. Active buttons move down 1px; disabled controls retain legible content at
+  the neutral `--conversation-action` family, as do first-run onboarding actions. Home creation uses a quiet tonal entry; danger marks destructive actions and sidebar removal. Active buttons move down 1px; disabled controls retain legible content at
   reduced opacity.
 - **Inputs:** use the raised/input surface and a perceivable control boundary. Focus is a 2px
   `--focus` outline with 2px offset, or the equivalent tokenized inner treatment where geometry
