@@ -7,6 +7,7 @@ import type {
   CampComposerDraftView,
   CampOpenMessageCoverage,
   CampOpenProjection,
+  LocalAttachmentOwnerLocator,
   NavigationCampItem,
   NavigationSnapshot
 } from '@contracts'
@@ -156,7 +157,7 @@ const attachmentFile = (id: string, displayName: string, mediaType: string, opti
 } = {}) => ({
   id, displayName, kind: options.kind ?? 'file', fileCount: options.fileCount ?? 1,
   mediaType, byteSize: id.length * 2048, previewKind: options.previewKind ?? 'none',
-  availability: 'unknown' as const
+  availability: 'available' as const
 })
 
 function installAttachmentSurfaceState(result: FixtureImageResult): void {
@@ -247,13 +248,17 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
 }
 
 if (attachmentReviewMode) installAttachmentSurfaceState(reviewImages[0])
+let copiedPublicText = ''
+let repliedPublicMessageId: string | null = null
 
 Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: () => () => {},
+  clipboard: { write: async ({ text }: { text: string }) => { copiedPublicText = text } },
   request: async (method: string, params?: {
     imageId?: string
     content?: CampComposerDraftView['content']
     evidenceId?: string
+    replyToCampMessageId?: string
   }): Promise<unknown> => {
     if (method === 'agentRunEvidence.list') return { schemaVersion: 1, agentRunId: 'text-run',
       requestedAfterSequence: 0, nextAfterSequence: 60, throughSequence: 60, hasMore: false, evidence: textEvidence }
@@ -264,6 +269,11 @@ Object.assign(window, { rovai: {
     }
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.composerDraft.get') return draft
+    if (method === 'camp.composerDraft.startReply') {
+      repliedPublicMessageId = params?.replyToCampMessageId ?? null
+      draft = { ...draft, revision: draft.revision + 1 }
+      return draft
+    }
     if (method === 'camp.composerDraft.save') {
       const content = params?.content ?? { version: 2, segments: [] }
       draft = { ...draft, content, body: content.segments.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
@@ -273,10 +283,10 @@ Object.assign(window, { rovai: {
     if (method === 'agentRunImages.read') return imageResultsById.get(params?.imageId ?? '') ?? imageResult
     throw new Error(`Unexpected fixture API: ${method}`)
   },
-  composerAttachments: { preview: async (attachmentId: string) => {
-    const result = imageResultsById.get(attachmentId) ?? imageResult
-    return { mediaType: result.mediaType,
-      bytes: Uint8Array.from(atob(result.data), character => character.charCodeAt(0)) }
+  composerAttachments: { preview: async (locator: LocalAttachmentOwnerLocator) => {
+    const result = imageResultsById.get(locator.attachmentRefId) ?? imageResult
+    return { availability: 'available', preview: { mediaType: result.mediaType,
+      bytes: Uint8Array.from(atob(result.data), character => character.charCodeAt(0)) } }
   } }
 } })
 
@@ -362,6 +372,65 @@ reactRoot.render(<Fixture />)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let anchor: HTMLElement | null = null
 Object.assign(window, { campOpenTest: {
+  showMessageGroups: (scenario: 'short' | 'image' | 'files' | 'long' | 'diff' = 'short') => {
+    const message = (index: number, body: string): CampOpenProjection['messages'][number] => ({
+      ...messages[0], id: `group-${index}`, sequence: index, authorType: 'agent', authorId: agent.agentId,
+      sourceAgentRunId: 'group-run', campTurnId: 'group-turn', body,
+      content: body ? [{ kind: 'text', text: body }] : [],
+      createdAt: new Date(Date.parse(now) + index * 10_000).toISOString()
+    })
+    const groupMessages = [message(1, '我把消息区的层次收紧了一些。'), message(2, '连续发来的短消息共用身份信息。'),
+      message(3, ''), message(4, '这里补充交付说明，复制和回复仍对应这一条消息。'),
+      { ...message(5, '新一轮任务重新显示身份。'), campTurnId: 'next-turn', sourceAgentRunId: null },
+      { ...message(6, '我来检查这些文件。'), authorId: agents[1].agentId, sourceAgentRunId: null }]
+    groupMessages[2].attachments = Array.from({ length: scenario === 'files' ? 6 : 2 }, (_, index) =>
+      attachmentFile(`group-file-${index}`, `设计说明-${index + 1}.md`, 'text/markdown'))
+    if (scenario === 'long') {
+      groupMessages[2].attachments = []
+      groupMessages[2].body = Array.from({ length: 24 }, (_, index) => `第 ${index + 1} 段说明：正文内容按实际呈现高度判断。`).join('\n\n')
+      groupMessages[2].content = [{ kind: 'text', text: groupMessages[2].body }]
+    }
+    if (scenario === 'image') {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="900"><rect width="480" height="900" fill="#eef1f3"/><rect x="35" y="80" width="410" height="700" rx="16" fill="#c7d3dc"/></svg>'
+      imageResult = { displayName: '完整设计图.svg', mediaType: 'image/svg+xml', data: btoa(svg) }
+      imageResultsById.clear()
+      groupMessages[2].attachments = []
+      // Only this message owns the image Run, so its Runtime image stays attached here.
+      groupMessages[2].sourceAgentRunId = 'group-image-run'
+    }
+    current = { ...current, tasks: [], turns: [], agentRuns: [], messageDeliveries: [], timeline: [],
+      camp: { ...current.camp, title: '连续发言与附件归属' }, messages: groupMessages,
+      agentRunImages: scenario === 'image' ? [{ agentRunId: 'group-image-run', executionEpoch: 1,
+        createdAt: groupMessages[2].createdAt,
+        images: [{ id: 'group-image', displayName: imageResult.displayName,
+          mediaType: imageResult.mediaType, byteSize: atob(imageResult.data).length }] }] : [],
+      agentRunFileChanges: scenario === 'diff' ? [{ schemaVersion: 2, agentRunId: 'group-diff-run', executionEpoch: 1,
+        files: [{ evidenceFileId: 'group-diff', path: 'message-layout.ts', changeKind: 'update',
+          presentationKind: 'operation_history', operationCount: 1 }],
+        fileCount: 1, operationCount: 1, completedAt: groupMessages[2].createdAt }] : []
+    }
+    if (scenario === 'diff') groupMessages[2].sourceAgentRunId = 'group-diff-run'
+    updateMessageHistory(null)
+    updateSnapshot(current)
+  },
+  messageGroupState: () => ({
+    copiedPublicText, repliedPublicMessageId,
+    overflow: document.documentElement.scrollWidth > innerWidth,
+    messages: [...document.querySelectorAll<HTMLElement>('.public-agent-message')].map(node => {
+      const content = node.querySelector<HTMLElement>('.message-surface')!
+      const meta = node.querySelector<HTMLElement>('.bubble-meta')!
+      const body = node.querySelector<HTMLElement>('.final-copy, .message-bubble')
+      const actions = node.querySelector<HTMLElement>('.message-actions')
+      return { id: node.dataset.messageId, height: content.getBoundingClientRect().height,
+        head: getComputedStyle(meta).display !== 'none', continuation: node.classList.contains('is-group-continuation'),
+        label: node.getAttribute('aria-label'), background: body ? getComputedStyle(body).backgroundColor : null,
+        contentBackground: getComputedStyle(content).backgroundColor, buttons: actions?.querySelectorAll('button').length,
+        actionPosition: actions ? getComputedStyle(actions).position : null,
+        left: content.getBoundingClientRect().left, top: node.getBoundingClientRect().top,
+        bottom: node.getBoundingClientRect().bottom }
+    }),
+    emptyBubbles: document.querySelectorAll('.final-copy:empty, .message-bubble:empty').length
+  }),
   showRunArtifacts: (withMessage = false) => {
     imageResult = reviewImages[0]
     imageResultsById.clear()
@@ -420,7 +489,7 @@ Object.assign(window, { campOpenTest: {
         ...messages[index], id: `image-message-${index}`, authorType: 'agent', authorId: agent.agentId,
         sourceAgentRunId: index === 0 ? 'tool-run' : 'send-run', body, content: [{ kind: 'text', text: body }],
         attachments: index === 0 ? [] : images.map(image => ({ ...image, kind: 'file', fileCount: 1,
-          previewKind: 'image', availability: 'unknown' }))
+          previewKind: 'image', availability: 'available' }))
       })),
       agentRunImages: [{ agentRunId: 'tool-run', executionEpoch: 1, createdAt: now, images }]
     }
@@ -479,9 +548,7 @@ Object.assign(window, { campOpenTest: {
     const longUserFileName = longUserFileCard?.querySelector<HTMLElement>('.attachment-title-line strong')
     const composerCards = Array.from(document.querySelectorAll<HTMLElement>('.composer-attachment-card'))
     const composerFileCards = composerCards.filter(card => !card.classList.contains('composer-image-attachment'))
-    const heading = agent.querySelector<HTMLElement>('.agent-delivery-heading')!
-    const headingLabel = heading.querySelector<HTMLElement>('strong')!
-    const headingCount = heading.querySelector<HTMLElement>('span')!
+    const fileGroup = agent.querySelector<HTMLElement>('.agent-output-file-grid')!
     const userAttachmentBounds = userAttachments.getBoundingClientRect()
     const userBodyBounds = userBody.getBoundingClientRect()
     const userAvatarBounds = userAvatar.getBoundingClientRect()
@@ -534,7 +601,8 @@ Object.assign(window, { campOpenTest: {
       composerOverflow: element('.composer-attachment-strip').scrollWidth > element('.composer-attachment-strip').clientWidth,
       composerScrollbar: getComputedStyle(element('.composer-attachment-strip')).scrollbarWidth,
       agentOutputWidth: Math.round(agent.querySelector<HTMLElement>('.agent-message-outputs')!.getBoundingClientRect().width),
-      agentHeadingGap: Math.round(headingCount.getBoundingClientRect().left - headingLabel.getBoundingClientRect().right),
+      agentFileGroupLabel: fileGroup.getAttribute('aria-label'),
+      agentVisibleHeadingCount: agent.querySelectorAll('.agent-delivery-heading').length,
       agentOpenCueDisplay: getComputedStyle(agent.querySelector<HTMLElement>('.agent-file-open-cue')!).display,
       agentCardBackground: getComputedStyle(agent.querySelector<HTMLElement>('.agent-timeline')!).backgroundColor,
       surfaceRaised: getComputedStyle(document.documentElement).getPropertyValue('--surface-raised').trim(),

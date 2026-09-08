@@ -4696,8 +4696,9 @@ describe('task event projections', () => {
 
     expect(markup).not.toContain('<h2>会话</h2>')
     expect(markup).toContain('请检查 Downloads 目录里的页面。')
-    expect(markup).toContain('class="agent-message-output"')
-    expect(markup.indexOf('class="timeline-node conversation-bubble agent"'))
+    expect(markup).toMatch(/class="agent-message-output(?: [^"]*)?"/)
+    expect(markup.indexOf('data-message-id="public-a2a-message"')).toBeGreaterThan(0)
+    expect(markup.indexOf('data-message-id="public-a2a-message"'))
       .toBeLessThan(markup.indexOf('class="timeline-node run-file-changes-card"'))
     expect(markup.indexOf('class="timeline-node run-file-changes-card"'))
       .toBeLessThan(markup.indexOf('class="message-actions agent-message-output-actions is-persistent"'))

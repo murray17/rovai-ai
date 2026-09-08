@@ -16,6 +16,7 @@ const fixtureSource = join(root, 'scripts/fixtures/camp-open-projection')
 test('business-only CampOpen keeps cards, earlier pages and reading position across refresh', { timeout: 60_000 }, t => runFixture(t))
 test('execution text loads sparse history and complete Blob bodies in place with retry', { timeout: 60_000 }, t => runFixture(t, '--text-evidence'))
 test('terminal Run artifacts retain their authors and layout across themes and widths', { timeout: 60_000 }, t => runFixture(t, '--run-artifacts'))
+test('public message groups follow rendered content height and preserve individual actions', { timeout: 60_000 }, t => runFixture(t, '--message-groups'))
 
 async function runFixture(t, mode = '--camp-open') {
   if (!admitElectronIntegrationTest(t)) return
