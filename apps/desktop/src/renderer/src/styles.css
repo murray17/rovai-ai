@@ -7820,7 +7820,8 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   margin-top: 8px;
   padding: 0 0 34px;
 }
-.settings-panel-runtime > .runtime-installations > .section-heading { align-items: flex-start; margin: 0; }
+.settings-panel-runtime > .runtime-installations > .section-heading { align-items: center; flex-wrap: wrap; margin: 0; }
+.runtime-catalog-platform { color: var(--workspace-faint); font-size: 11px; }
 .settings-panel-runtime > .runtime-installations > .section-heading h2 {
   margin: 0;
   color: var(--ink);

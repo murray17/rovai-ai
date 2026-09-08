@@ -64,7 +64,6 @@ import {
   submittedRuntimeConfigurationKey
 } from './member-runtime-conflict'
 import type { MemberWorkspaceTab } from './MemberSidebar'
-import deepSeekLogo from './assets/runtime-logos/deepseek-color.svg'
 import {
   VISIBLE_PRODUCT_RUNTIMES,
   PRODUCT_RUNTIME_LOGOS,
@@ -1030,29 +1029,11 @@ function MemberDetailHeader({
   )
 }
 
-type RuntimeCatalogEntry =
-  | { state: 'supported'; runtimeKind: AdapterKind }
-  | {
-      state: 'pending'
-      id: 'deepseek-harness'
-      label: 'DeepSeek Harness'
-      detail: '尚未接入 AgentRun'
-      logo: string
-    }
-
-const RUNTIME_CATALOG: RuntimeCatalogEntry[] = [
-  ...VISIBLE_PRODUCT_RUNTIMES.map((runtimeKind) => ({
-    state: 'supported' as const,
-    runtimeKind
-  })),
-  {
-    state: 'pending',
-    id: 'deepseek-harness',
-    label: 'DeepSeek Harness',
-    detail: '尚未接入 AgentRun',
-    logo: deepSeekLogo
-  }
-]
+const HOST_PLATFORM_LABELS: Record<HostPlatformKey, string> = {
+  'macos-arm64': 'macOS Apple Silicon',
+  'macos-x64': 'macOS Intel',
+  'windows-x64': 'Windows x64'
+}
 
 export type MemberRuntimeFormHandle = {
   discard(): void
@@ -1504,34 +1485,11 @@ export function RuntimeInstallationsPanel({
           <div>
             <h2>Agent 运行时目录</h2>
           </div>
+          {health && <span className="runtime-catalog-platform">当前平台：{HOST_PLATFORM_LABELS[health.hostPlatform]}</span>}
         </div>
 
         <div className="runtime-product-list">
-          {RUNTIME_CATALOG.map((entry) => {
-            if (entry.state === 'pending') {
-              return (
-                <article key={entry.id} className="runtime-product-row">
-                  <span className="runtime-product-logo" aria-hidden="true">
-                    <img src={entry.logo} alt="" />
-                  </span>
-                  <div className="runtime-product-copy">
-                    <strong>{entry.label}</strong>
-                    <small>{entry.detail}</small>
-                  </div>
-                  <span className="runtime-snapshot-badge runtime-product-status status-unknown">
-                    待支持
-                  </span>
-                  <button
-                    className="quiet-button runtime-product-check"
-                    type="button"
-                    disabled
-                  >
-                    尚未开放
-                  </button>
-                </article>
-              )
-            }
-            const runtimeKind = entry.runtimeKind
+          {VISIBLE_PRODUCT_RUNTIMES.map((runtimeKind) => {
             const item = availability.find(
               (candidate) => candidate.runtimeKind === runtimeKind
             )
@@ -1545,6 +1503,10 @@ export function RuntimeInstallationsPanel({
               item ?? null,
               health === null
             )
+            const version = item?.reportedVersion?.trim() || null
+            const subtitle = admission?.status === 'preview'
+              ? `实验性开放${version ? ` · ${version}` : ''}`
+              : admission?.status === 'qualified' ? version : presentation.detail
             const allowed = runtimePlatformAdmissionAllowsUse(admission)
             const guide = allowed ? runtimeInstallGuide(runtimeKind, health?.hostPlatform ?? null) : null
             const mode = presentation.status === 'not_installed' ? 'install'
@@ -1567,14 +1529,7 @@ export function RuntimeInstallationsPanel({
                 </span>
                 <div className="runtime-product-copy">
                   <strong>{adapterLabel(runtimeKind)}</strong>
-                  <small>
-                    {admission?.status === 'preview'
-                      ? `实验性开放 · ${item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}`
-                      : admission?.status !== 'qualified'
-                        ? presentation.detail
-                        : (item?.reportedVersion ??
-                          adapterMaturityLabel(runtimeKind))}
-                  </small>
+                  {subtitle && <small title={subtitle}>{subtitle}</small>}
                 </div>
                 <span
                   className={`runtime-snapshot-badge runtime-product-status status-${presentation.status}`}
@@ -1639,25 +1594,6 @@ function commandCodeLabel(code: string): string {
       } as Record<string, string>
     )[code] ?? `操作未完成：${code}`
   )
-}
-
-function adapterMaturityLabel(kind: AdapterKind): string {
-  return {
-    'codex-cli': '稳定',
-    pi: '稳定',
-    'opencode-cli': '测试',
-    'copilot-cli': '测试',
-    'claude-code-cli': '测试',
-    'kiro-cli': '实验性',
-    'qoder-cli': '实验性',
-    'codebuddy-cli': '实验性',
-    'qwen-code': '实验性',
-    'trae-cn-cli': '实验性',
-    'cursor-agent': '实验性',
-    'kimi-code-cli': '实验性',
-    'grok-build': '实验性',
-    'antigravity-app': '实验性'
-  }[kind]
 }
 
 function memberPresenceLabel(presence: AgentProfile['presence']): string {

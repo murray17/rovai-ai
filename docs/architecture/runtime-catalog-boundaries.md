@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-09-05
+last_updated: 2026-09-08
 ---
 
 # Runtime Catalog Boundaries
@@ -27,12 +27,15 @@ last_updated: 2026-09-05
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
 Product Runtime Catalog 当前包含十四种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
-Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的机器可判数量、全量检查、诊断分母和
+Renderer 当前不展示 Settings Preview row；DeepSeek Harness 在三个目标平台均隐藏，仍是未接入候选。
+产品目录的机器可判数量、全量检查、诊断分母和
 普通执行仍只来自逐平台 Admission。Cursor 虽保留 closed identity 和历史 reader，但未完成产品资格前不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
 selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
 
-`qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 必须标明实验性并保留缺失资格证据，
+`qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 必须标明实验性并保留缺失资格证据。
+`qualified` 行只在有实际 reported version 时显示版本副文案，否则仅显示居中的产品名，不再回退到静态
+“稳定 / 测试 / 实验性”标签。当前主机平台在目录标题旁统一显示，机器状态徽标继续来自 Availability。
 `not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，`unsupported` 显示平台不支持。
 后两者不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
 可以原样读取并在修改无关队员字段时原样保留，但不能修改 Runtime 子对象、重新保存默认值或执行。
@@ -436,7 +439,8 @@ Client FS 是否可执行。
 ## Preview 呈现与晋升
 
 Preview row 必须同时满足：明确“待支持/尚未接入 AgentRun”、无可点击检查或配置入口、不会进入成员页
-或诊断，并在键盘和辅助技术中表现为不可执行状态。DeepSeek Harness 是当前唯一 preview。
+或诊断，并在键盘和辅助技术中表现为不可执行状态。当前没有可见 Preview；DeepSeek Harness 在
+macOS arm64、macOS x64 与 Windows x64 全部隐藏，不保留“待支持”占位入口。
 
 未来接入时不得把 preview identity 写入 Migration 或原地解释为 Installation。实现必须删除 preview row，
 再按完整可执行准入增加新的 AdapterKind 和逐平台 Admission；用户从未保存过 preview 选择，因此没有 preview-to-product
