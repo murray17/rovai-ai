@@ -58,7 +58,6 @@ export function AutomationWorkspace({
   const [editorClosed, setEditorClosed] = useState(false)
   const [availableWidth, setAvailableWidth] = useState(1100)
   const splitRef = useRef<HTMLDivElement>(null)
-  const titleRef = useRef<HTMLInputElement>(null)
   const overviewRef = useRef<HTMLHeadingElement>(null)
   const dragRef = useRef<{ pointerId: number; x: number; width: number } | null>(null)
   const saveStateRef = useRef(saveState)
@@ -292,7 +291,6 @@ export function AutomationWorkspace({
     setSaveState('idle')
     setIssue(null)
     setEditorClosed(false)
-    requestAnimationFrame(() => titleRef.current?.focus())
   }
 
   const prepareAction = async (automationId: string): Promise<AutomationView | null> => {
@@ -534,7 +532,7 @@ export function AutomationWorkspace({
             }}><span /></div>
           <section className="automation-editor" aria-label={selectedId === 'new' ? '新建定时任务' : '定时任务详情'} hidden={editorClosed}>
             <header className="automation-editor-toolbar"><span>{selectedId === 'new' ? '新建' : '详情'}</span><small role="status">{selected ? saveLabel : ''}</small><button type="button" className="automation-icon-button" aria-label="返回定时任务总览" onClick={() => void showOverview()}><AutomationGlyph name="close" /></button></header>
-            <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} titleRef={titleRef} busy={busy !== null} onOpenCamp={onOpenCamp} onCreate={() => void create()} />
+            <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} busy={busy !== null} onOpenCamp={onOpenCamp} onCreate={() => void create()} />
           </section>
         </>}
       </div>

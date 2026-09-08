@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createElement, createRef } from 'react'
+import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { automationScheduleError, validateCron } from './automation-schedule-validation'
 import { automationDateKey, normalizeAutomationTime, stepAutomationTime } from './AutomationSchedulePickers'
@@ -31,7 +31,7 @@ describe('scheduled task input validation', () => {
   it('renders an actionable inline error and a disabled Save for invalid Cron', () => {
     const html = renderToStaticMarkup(createElement(AutomationEditor, {
       draft: { ...defaultDraft(''), prompt: '检查待办', schedule: { kind: 'cron', expression: '600 9 * * *' } },
-      onChange: () => undefined, agents: [], projects: [], automation: null, titleRef: createRef<HTMLInputElement>(),
+      onChange: () => undefined, agents: [], projects: [], automation: null,
       busy: false, onOpenCamp: () => undefined, onCreate: () => undefined
     }))
     expect(html).toContain('aria-invalid="true"')
