@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AgentProfile, AutomationRunListPage, AutomationRunSummary, AutomationView, ChannelSettingsSnapshot, ProjectNavigationGroup } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
@@ -106,13 +106,12 @@ function RunHistory({ automation, onOpenCamp }: { automation: AutomationView; on
   </section>
 }
 
-export function AutomationEditor({ draft, onChange, agents, projects, automation, titleRef, busy, onOpenCamp, onCreate }: {
+export function AutomationEditor({ draft, onChange, agents, projects, automation, busy, onOpenCamp, onCreate }: {
   draft: AutomationDraft
   onChange: Dispatch<SetStateAction<AutomationDraft>>
   agents: AgentProfile[]
   projects: ProjectNavigationGroup[]
   automation: AutomationView | null
-  titleRef: RefObject<HTMLInputElement | null>
   busy: boolean
   onOpenCamp(campId: string): void
   onCreate(): void
@@ -139,7 +138,7 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
   const cronId = useId()
 
   return <div className="automation-editor-scroll"><form className="automation-form" onSubmit={(event) => { event.preventDefault(); if (!automation && !busy && !scheduleError && draft.prompt.trim() && member?.presence === 'present') onCreate() }}>
-    <input ref={titleRef} className="automation-name-input" aria-label="定时任务名称" value={draft.name} maxLength={80} placeholder="定时任务名称" disabled={busy} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} />
+    <input className="automation-name-input" aria-label="定时任务名称" value={draft.name} maxLength={80} placeholder="定时任务名称" disabled={busy} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} />
     <textarea className="automation-prompt-input" aria-label="执行内容" rows={3} value={draft.prompt} placeholder="告诉队员需要按时完成什么…" disabled={busy} onChange={(event) => onChange((current) => ({ ...current, prompt: event.target.value }))} />
     <div className="automation-context" aria-label="执行上下文">
       <div className="automation-context-field"><span>队员</span>
