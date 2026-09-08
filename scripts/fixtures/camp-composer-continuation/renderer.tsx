@@ -72,6 +72,7 @@ Object.assign(window, { rovai: {
   async request(method: string, params: Record<string, unknown> = {}) {
     calls.push(method)
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
+    if (method === 'camps.members.fast.check') return null
     if (method === 'camp.pendingInputs.get') return structuredClone({ ...queue, campId: params.campId })
     if (method === 'camp.pendingInputs.edit') {
       const command = params.command as {
@@ -191,7 +192,7 @@ async function render() {
   await flush()
 }
 
-async function reset(draft = emptyDraft()) {
+async function reset(draft = emptyDraft(), holdInitialRead = false) {
   if (root) {
     flushSync(() => root!.unmount())
     await new Promise(resolve => setTimeout(resolve, 0))
@@ -218,9 +219,15 @@ async function reset(draft = emptyDraft()) {
       profilePresence: 'present', memberOrder: index, isDefaultLead: index === 0, version: 1 })),
     membershipReconciliations: [], tasks: [], messages: [first], messageDeliveries: [], ...running(first),
     executionEvidence: [], agentRunFileChanges: [], contextManifests: [], approvals: [], actions: [], timeline: [] }
+  const held = holdInitialRead ? holdRead() : null
+  if (held) {
+    snapshot = { ...snapshot, turns: [], agentRuns: [] }
+    queue = { ...queue, executionActive: false }
+  }
   root = createRoot(document.getElementById('root')!)
   await render()
   await flush()
+  return held
 }
 
 async function publish(agentId: string, projected: CampComposerDraftView) {
@@ -572,7 +579,42 @@ Object.assign(window, { continuationTest: { async run() {
   cases.push('Markdown caching preserves fresh callbacks, image authority and changed content')
   await flush()
   return { ok: true, cases }
-}, async pendingAttachments() { return { ok: true, cases: await runPendingAttachmentCases() } } } })
+}, async pendingAttachments() { return { ok: true, cases: await runPendingAttachmentCases() } },
+async routeLoading() {
+  const layout = () => ({
+    composerTop: editor().closest('.composer-box')!.getBoundingClientRect().top,
+    timelineBottom: document.querySelector('.timeline-scroll')!.getBoundingClientRect().bottom
+  })
+  const explicit = emptyDraft()
+  explicit.content = { version: 2, segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } }] }
+  explicit.body = '@芝士'
+  const layouts = []
+  for (const theme of ['day', 'night']) {
+    document.documentElement.dataset.theme = theme
+    for (const [name, draft] of [['default', emptyDraft()], ['continuation', continuedDraft('message-1')], ['explicit', explicit]] as const) {
+      const held = await reset(draft, true)
+      check(held && draftReads() === 1, 'The initial Draft read must remain pending')
+      const before = layout()
+      check(before.composerTop > 0 && before.timelineBottom > 0, 'Measure the visible conversation and input')
+      check(editor().getAttribute('aria-disabled') === 'true', 'Loading must keep the editor disabled')
+      check(document.querySelector('.composer-route-placeholder') && document.querySelector('.composer-route-rail')?.getAttribute('aria-busy') === 'true',
+        'Loading must present the placeholder as busy')
+      check(!document.querySelector('.composer-route-rail')?.textContent?.trim(), 'Loading must not guess the recipient')
+      held.resolve(draft)
+      await until(() => editor().getAttribute('aria-disabled') !== 'true', 'The authoritative Draft enables the editor')
+      const after = layout()
+      check(Math.abs(after.composerTop - before.composerTop) <= 1 && Math.abs(after.timelineBottom - before.timelineBottom) <= 1,
+        `Route loading must not move the conversation: ${JSON.stringify({ theme, name, before, after })}`)
+      check(!document.querySelector('.composer-route-placeholder'), 'Ready replaces the placeholder')
+      const route = document.querySelector('.composer-route-rail')?.textContent ?? ''
+      if (name === 'default') check(route.includes('默认由 Lead · 叮叮接收'), 'Show the default recipient')
+      if (name === 'continuation') check(continuation() === '继续发给 芝士', 'Show the authoritative continuation')
+      if (name === 'explicit') check(!route.trim(), 'Explicit recipients hide the route')
+      layouts.push({ theme, name, before, after })
+    }
+  }
+  return { ok: true, cases: ['delayed Draft retains conversation geometry'], layouts }
+} } })
 
 // The same isolated production-Renderer fixture can also run in a browser when
 // the host cannot initialize a nested Electron sandbox. This is not native IPC coverage.

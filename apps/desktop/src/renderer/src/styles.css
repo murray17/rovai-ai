@@ -4156,8 +4156,12 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 
 details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-size: 11px; cursor: pointer; }
 .composer { position: relative; flex: 0 0 auto; margin: 0; padding: 0 27px 14px; background: var(--conversation-surface); }
+.composer-route-slot { display: flow-root; min-height: 39px; }
 .composer-route-rail { display: flex; width: min(var(--conversation-composer-width), 100%); min-height: 34px; margin: 0 auto 5px; align-items: center; gap: 7px; padding: 0 4px 0 2px; color: var(--faint); }
 .composer-route-rail::before { width: 2px; height: 16px; flex: 0 0 2px; border-radius: 3px; background: var(--brand); content: ""; }
+.composer-route-placeholder { display: inline-flex; align-items: center; gap: 6px; filter: blur(2px); opacity: .55; }
+.composer-route-placeholder > span { width: 12px; height: 10px; border-radius: 3px; background: var(--faint); }
+.composer-route-placeholder > span + span { width: 136px; }
 .composer-route-rail .mention-target-summary { display: inline-flex; min-width: 0; align-items: center; gap: 4px; }
 .composer-route-rail .mention-target-summary > svg { width: 12px; height: 12px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
 .composer-route-rail .mention-target-summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

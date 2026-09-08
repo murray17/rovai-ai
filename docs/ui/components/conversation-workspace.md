@@ -730,6 +730,10 @@ Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` �
 都不能建立第二份草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，
 不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入仍保留局部焦点提示。
 
+接收者提示始终预留一行 34px 高度及 5px 底部间距。草稿首次 loading 时显示无接收者文案、无循环动画的模糊占位；
+ready 后原位显示默认 Lead 或 continuation。显式 Mention、reply 或错误状态不显示路由时保留空白行，
+避免路由加载或显隐挤动会话内容。占位不提前声明接收者，也不提前启用编辑或发送。
+
 Draft 首次读取只有 loading、ready 和 error。loading 与 error 时正文、附件、Reply/Continuation 和发送不可操作；
 error 在 Composer 上方原位显示“草稿无法加载”、具体错误与“重新加载草稿”，不能渲染可编辑的 revision-zero 空
 Draft。发送和路由 mutation 在第一个异步等待前同步禁用编辑器；Core 路由 mutation 改变正文时在解除禁用前回写
