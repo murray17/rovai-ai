@@ -178,13 +178,6 @@
 .member-editor-runtime-fields .field-label > select:hover:not(:disabled) {
   border-color: var(--dialog-field-line-hover);
 }
-.member-editor-field > :is(input, textarea, select):focus-visible,
-.member-editor-runtime-fields .field-label > select:focus-visible {
-  border-color: var(--focus);
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  box-shadow: none;
-}
 .member-editor-field :is(input, textarea)::placeholder {
   color: var(--faint);
 }
@@ -204,11 +197,6 @@
 }
 .member-editor-traits:hover {
   border-color: var(--dialog-field-line-hover);
-}
-.member-editor-traits:focus-within {
-  border-color: var(--focus);
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
 }
 .member-editor-traits > input {
   min-width: 74px;
@@ -405,11 +393,11 @@
   cursor: pointer;
 }
 .member-editor-primary {
-  color: var(--brand-contrast);
-  background: var(--brand);
+  color: var(--conversation-action-contrast);
+  background: var(--conversation-action);
 }
 .member-editor-primary:hover:not(:disabled) {
-  background: var(--brand-hover);
+  background: var(--conversation-action-hover);
 }
 .member-editor-secondary {
   color: var(--ink);
@@ -664,7 +652,6 @@
   cursor: pointer;
 }
 .member-editor-menu-item[data-highlighted] {
-  outline: 2px solid var(--focus);
   background: var(--surface-hover);
 }
 .member-editor-menu-separator {
@@ -771,7 +758,6 @@
 }
 .member-runtime-menu-item[data-highlighted] {
   background: var(--surface-hover);
-  box-shadow: inset 0 0 0 1px var(--focus);
 }
 .member-runtime-menu-item[data-disabled] {
   opacity: 0.5;
@@ -844,9 +830,6 @@
   border-radius: 5px;
   background: var(--surface-subtle);
   font-size: 11.5px;
-}
-.member-editor-roster-shell .member-sidebar-filter input:focus {
-  border-color: var(--focus);
 }
 .member-roster-search-icon {
   position: absolute;
@@ -927,7 +910,7 @@
   .member-sidebar-row.selected
   .member-sidebar-copy
   strong {
-  color: var(--brand-ink);
+  color: var(--ink);
 }
 .member-editor-roster-shell .member-editor-member-name {
   min-width: 0;
@@ -948,7 +931,7 @@
   border-color: var(--home-surface);
 }
 .member-editor-roster-shell .member-sidebar-row.selected .member-avatar::after {
-  border-color: var(--surface-selected);
+  border-color: var(--neutral-selected);
 }
 .member-editor-roster-shell .member-sidebar-row.presence-away .member-avatar {
   opacity: 0.8;
@@ -993,9 +976,7 @@
   content: '';
 }
 .member-roster-resizer:hover::before,
-.member-roster-resizer:focus-visible::before,
 .member-roster-resizer.is-dragging::before { background: var(--focus); }
-.member-roster-resizer:focus-visible { outline: 0; }
 .member-roster-resize-hint {
   position: absolute;
   top: 16px;
@@ -1188,10 +1169,6 @@
   opacity: 0.5;
   cursor: default;
 }
-.member-editor-view :is(button, input, textarea, select):focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
 .member-editor-roster-shell .member-runtime-shortcut > .member-runtime-glyph {
   border: 0;
   background: transparent;
@@ -1278,3 +1255,7 @@
 .member-editor-disclosure[aria-expanded='true'] > svg {
   transform: rotate(180deg);
 }
+
+.member-editor-save { min-width: 68px; min-height: 32px; padding: 5px 11px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--ink); background: var(--surface-muted); }
+.member-editor-save:hover:not(:disabled) { background: var(--neutral-hover); }
+.member-editor-save .dialog-glyph { width: 14px; height: 14px; }

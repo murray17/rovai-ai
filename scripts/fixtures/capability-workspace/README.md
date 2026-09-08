@@ -15,5 +15,5 @@ Installed Skills and folder/GitHub import candidates use the same navigation; ch
 the selected file, directory and search. The detail heading omits internal revision numbers.
 Unsupported local imports include same-name Codex/Claude entries, repeated reasons and long fields;
 their layout must wrap independently of the name/source row. MCP and Skill deletion use real application
-dialogs with cancellation, focus return/trapping, pending dismissal guards, errors and stale-target checks.
+dialogs with cancellation, no extra entry focus return, focus trapping, pending dismissal guards, errors and stale-target checks.
 Core's Skill Library suite separately verifies the content/digest and default assignment contracts.

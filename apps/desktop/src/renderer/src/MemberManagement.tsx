@@ -102,13 +102,11 @@ type MembersViewProps = {
 type GuardedTransition = {
   action(): void | Promise<void>
   resolve(continued: boolean): void
-  returnFocus: HTMLElement | null
 }
 
 export type MembersViewHandle = {
   requestTransition(
-    action: () => void | Promise<void>,
-    returnFocus?: HTMLElement | null
+    action: () => void | Promise<void>
   ): Promise<boolean>
   requestCreate(trigger: HTMLButtonElement): void
 }
@@ -187,11 +185,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
     )
     const requestTransition = useCallback(
       (
-        action: () => void | Promise<void>,
-        returnFocus: HTMLElement | null = document.activeElement instanceof
-        HTMLElement
-          ? document.activeElement
-          : null
+        action: () => void | Promise<void>
       ): Promise<boolean> => {
         if (stateRef.current.busy || pendingRef.current)
           return Promise.resolve(false)
@@ -200,7 +194,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
             .then(action)
             .then(() => true)
         return new Promise((resolve) => {
-          const next = { action, resolve, returnFocus }
+          const next = { action, resolve }
           pendingRef.current = next
           setPending(next)
         })
@@ -229,7 +223,6 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
       pendingRef.current = null
       setPending(null)
       value?.resolve(false)
-      requestAnimationFrame(() => value?.returnFocus?.focus())
     }
     const discardAndContinue = async (): Promise<void> => {
       const value = pendingRef.current
@@ -448,7 +441,6 @@ const MemberEditor = forwardRef<
   const identityRef = useRef<MemberIdentityEditorHandle>(null)
   const runtimeRef = useRef<MemberRuntimeFormHandle>(null)
   const pageRef = useRef<HTMLDivElement>(null)
-  const removalReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   useImperativeHandle(ref, () => ({
     discard: () => {
       identityRef.current?.discard()
@@ -592,9 +584,8 @@ const MemberEditor = forwardRef<
     )
   }
 
-  const previewRemoval = async (trigger: HTMLButtonElement): Promise<void> => {
+  const previewRemoval = async (): Promise<void> => {
     if (!selectedAgent) return
-    removalReturnFocusRef.current = trigger
     setBusy('remove-preview')
     setError(null)
     try {
@@ -701,7 +692,7 @@ const MemberEditor = forwardRef<
               }}
               onPresence={changePresence}
               onRuntime={openRuntime}
-              onRemove={(trigger) => void previewRemoval(trigger)}
+              onRemove={() => void previewRemoval()}
             />
           ) : (
             <header className="member-detail-header member-editor-member-header">
@@ -784,17 +775,6 @@ const MemberEditor = forwardRef<
           <AppDialogContent
             tone="danger"
             aria-describedby="remove-member-description"
-            onCloseAutoFocus={(event) => {
-              event.preventDefault()
-              if (removalReturnFocusRef.current?.isConnected)
-                removalReturnFocusRef.current.focus()
-              else
-                document
-                  .querySelector<HTMLButtonElement>(
-                    '.member-sidebar-select[aria-current=true]'
-                  )
-                  ?.focus()
-            }}
           >
             <AppDialogHeader
               title={`永久移除“${removal?.displayName ?? '队员'}”？`}
@@ -1368,12 +1348,14 @@ export const MemberRuntimeForm = forwardRef<
               放弃更改
             </button>
             <button
-              className="member-editor-primary"
+              className="member-editor-primary member-editor-save"
+              aria-label="保存运行配置"
               disabled={!canSave || busy !== null}
             >
+              <DialogControlIcon name="save" />
               {busy === 'runtime' || busy === 'runtime-clear'
                 ? '正在保存…'
-                : '保存运行配置'}
+                : '保存'}
             </button>
           </div>
         </div>

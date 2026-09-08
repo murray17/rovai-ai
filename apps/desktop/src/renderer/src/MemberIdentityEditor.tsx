@@ -486,7 +486,8 @@ export const MemberIdentityEditor = forwardRef<
             </button>
             <button
               type="submit"
-              className="member-editor-primary"
+              className={agent ? 'member-editor-primary member-editor-save' : 'member-editor-primary'}
+              aria-label={agent ? '保存队员信息' : '创建队员'}
               disabled={
                 busy ||
                 conflict ||
@@ -495,7 +496,8 @@ export const MemberIdentityEditor = forwardRef<
                 (Boolean(agent) && !dirty)
               }
             >
-              {busy ? '正在保存…' : agent ? '保存队员信息' : '创建队员'}
+              {agent && <DialogControlIcon name="save" />}
+              {busy ? '正在保存…' : agent ? '保存' : '创建队员'}
             </button>
           </div>
         </footer>

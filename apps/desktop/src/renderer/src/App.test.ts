@@ -7100,7 +7100,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('记忆')
-    expect(markup).toContain('Memory / Library')
+    expect(markup).not.toContain('Memory / Library')
+    expect(markup).not.toContain('导出…')
     expect(markup).toContain('查看、搜索和管理长期记忆。')
     expect(markup).toContain('记忆库')
     expect(markup).toContain('共同记忆')
@@ -7190,7 +7191,7 @@ describe('task event projections', () => {
     expect(markup).toContain('GitHub Copilot')
     expect(markup).toContain('未安装')
     expect(markup).toContain('前往 Agent 运行时')
-    expect(markup).toContain('<button class="member-editor-primary" disabled="">保存运行配置</button>')
+    expect(markup).toMatch(/<button[^>]*aria-label="保存运行配置"[^>]*disabled=""/)
     expect(markup).toContain('放弃更改')
     expect(markup).not.toContain('清除 Agent 运行时')
   })
@@ -7214,7 +7215,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('<button class="member-editor-primary" disabled="">正在保存…</button>')
+    expect(markup).toMatch(/<button[^>]*aria-label="保存运行配置"[^>]*disabled=""/)
   })
 
   it('shows a selected Runtime as checking without leaking discovery stages', () => {

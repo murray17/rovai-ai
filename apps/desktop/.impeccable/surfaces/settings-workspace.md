@@ -66,7 +66,7 @@ Appearance follows the reviewed three-section composition: 界面主题, 文字�
 centered 980px track. Theme choices are whole-card native radio labels, with a 16:9 UI thumbnail,
 Chinese/English name, selection outline and check mark. Follow-system uses a diagonal day/night split
 of the same synthetic workspace; day and night show their fixed palettes independently of the selected
-page theme. Preserve keyboard arrows and a visible card focus ring.
+page theme. Preserve keyboard arrows and the global focus treatment without an extra card focus ring.
 
 The reading section places compact controls beside a bounded conversation/document/code preview.
 Conversation, document and code sizes default to 13/15/14px and accept integer values from 12–24px.
@@ -115,7 +115,7 @@ The divider supports pointer drag, keyboard adjustment, click alternatives and d
 Skills combine search and 全部 / 已启用 / 已停用 filters, with status beside the row name and an enable
 switch in the detail header. MCP uses teammate assignment without a separate enable switch or filter.
 Add, preview, import and update confirmation stay in the right pane. Deletion uses the shared application
-confirmation dialog, initially focused on Cancel; keep failure feedback in the dialog and restore focus on dismissal.
+confirmation dialog, initially focused on Cancel; keep failure feedback in the dialog without extra entry focus return on dismissal.
 Add and import are peer buttons in the MCP library heading. Only installed items appear in the list. Leaving an editor/import or switching MCP/Skills clears unfinished input; do not create draft placeholders or restore drafts.
 
 Skills show active `user_managed` items only; omit `system_required` Skills entirely. A source badge

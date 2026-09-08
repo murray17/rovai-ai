@@ -97,9 +97,9 @@ app
     }
     const textInput = `${active}.member-identity-form input`
     const saveIdentity = () =>
-      click(`${active}.member-identity-form button`, '保存队员信息')
+      click(`${active}.member-identity-form button[aria-label="保存队员信息"]`)
     const saveRuntime = () =>
-      click(`${active}.member-runtime-form button`, '保存运行配置')
+      click(`${active}.member-runtime-form button[aria-label="保存运行配置"]`)
     const selectPermission = async (index, value) => {
       await run(
         `(() => { const select = document.querySelectorAll(${JSON.stringify(active + '.runtime-parameter-form select')})[${index}]; select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change', { bubbles: true })) })()`
@@ -170,6 +170,50 @@ app
           ['never', 'never (no approval prompts)']
         ]
       ])
+    })
+    await check('sidebar dialogs dismiss without refocusing ellipsis and jump search keeps keyboard input', async () => {
+      for (const label of ['重命名', '删除']) {
+        await run("document.querySelector('.camp-menu-trigger').focus()")
+        await key('Space')
+        await wait("document.querySelector('.sidebar-action-menu')")
+        await click('.sidebar-action-menu-item', label)
+        await wait("document.querySelector('.camp-action-dialog')")
+        if (label === '重命名') {
+          assert.equal(await run("document.activeElement.matches('.camp-action-dialog input')"), true)
+          await window.webContents.insertText('中文重命名草稿')
+        }
+        await click('.camp-action-dialog button', '取消')
+        await wait("!document.querySelector('.camp-action-dialog')")
+        await new Promise(resolve => setTimeout(resolve, 350))
+        assert.equal(await run("document.activeElement.matches('.camp-menu-trigger')"), false)
+      }
+      for (const [label, method, action] of [['重命名', 'navigation.rename', '保存名称'], ['删除', 'navigation.delete', '删除']]) {
+        await run("document.querySelector('.camp-menu-trigger').focus()")
+        await key('Space')
+        await wait("document.querySelector('.sidebar-action-menu')")
+        await click('.sidebar-action-menu-item', label)
+        await wait("document.querySelector('.camp-action-dialog')")
+        if (label === '重命名') await fill('#rename-camp-title', '中文草稿保留')
+        await run(`window.memberFixture.fail(${JSON.stringify(method)})`)
+        await click('.camp-action-dialog button', action)
+        await settle()
+        assert.equal(await run("!!document.querySelector('.camp-action-dialog')"), true, 'Failed action keeps the dialog open')
+        if (label === '重命名') assert.equal(await run("document.querySelector('#rename-camp-title').value"), '中文草稿保留')
+        await click('.camp-action-dialog button', action)
+        await wait("!document.querySelector('.camp-action-dialog')")
+        await new Promise(resolve => setTimeout(resolve, 350))
+        assert.equal(await run("document.activeElement.matches('.camp-menu-trigger')"), false)
+        assert.equal(await run(`window.memberFixture.calls.filter(call => call.method === ${JSON.stringify(method)}).length`), 2)
+      }
+      await key('k', ['meta'])
+      await wait("document.activeElement.matches('.command-palette-input')")
+      await window.webContents.insertText('会话')
+      await settle()
+      assert.equal(await run("document.querySelectorAll('.command-palette-item').length"), 1)
+      await capture('jump-search')
+      await key('Enter')
+      await wait("!document.querySelector('.command-palette')")
+      assert.equal(await run("document.activeElement.matches('.conversation-jump')"), false)
     })
     await check('roster snaps in both directions and restores its useful width', async () => {
       assert.deepEqual(await dragRoster([179, 170, 190, 216]), [192, 76, 76, 216])

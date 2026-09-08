@@ -42,7 +42,6 @@ export function SkillSettings(): React.JSX.Element {
   )
   const [busy, setBusy] = useState<string | null>(null)
   const locked = useRef(false)
-  const deleteTrigger = useRef<HTMLButtonElement>(null)
   const generation = useRef(0)
   const editorSession = useRef(0)
   const [error, setError] = useState<string | null>(null)
@@ -316,7 +315,6 @@ export function SkillSettings(): React.JSX.Element {
                   <>
                     <span className="capability-action-divider" aria-hidden="true" />
                     <button
-                      ref={deleteTrigger}
                       className="quiet-button compact danger-text"
                       type="button"
                       aria-label="删除 Skill"
@@ -372,7 +370,6 @@ export function SkillSettings(): React.JSX.Element {
         description={deleteSkillConfirmationCopy(deleteTarget?.name ?? '').description}
         busy={busy === 'delete'}
         error={error}
-        triggerRef={deleteTrigger}
         onCancel={() => {
           setDeleteTarget(null)
           setError(null)

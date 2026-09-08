@@ -31,7 +31,6 @@ export function NewConversationDialog({
   agents,
   busy,
   projectAccessReady,
-  returnFocusElement,
   onOpenChange,
   onChooseWorkspaceDirectory,
   onWorkspaceSelected,
@@ -46,7 +45,6 @@ export function NewConversationDialog({
   agents: AgentProfile[]
   busy: boolean
   projectAccessReady: boolean
-  returnFocusElement: HTMLElement | null
   onOpenChange(open: boolean): void
   onChooseWorkspaceDirectory(): Promise<WorkspaceSelection | null>
   onWorkspaceSelected(workspace: WorkspaceSelection): Promise<void>
@@ -231,7 +229,7 @@ export function NewConversationDialog({
             const target = projectAccessReady ? projectTriggerRef.current : closeButtonRef.current
             target?.focus()
           }}
-          onCloseAutoFocus={(event) => { event.preventDefault(); returnFocusElement?.focus() }}
+          onCloseAutoFocus={(event) => event.preventDefault()}
           onEscapeKeyDown={(event) => { if (busy || quickHelpOpen) event.preventDefault() }}
           onPointerDownOutside={(event) => {
             if (event.target instanceof Element && event.target.closest('.new-camp-quick-tooltip')) event.preventDefault()
@@ -254,7 +252,7 @@ export function NewConversationDialog({
                     </button>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
-                    <DropdownMenu.Content className="compact-menu workspace-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择工作目录" loop>
+                    <DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="compact-menu workspace-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择工作目录" loop>
                       <DropdownMenu.RadioGroup value={workspace?.projectPath ?? ''}>
                         <DropdownMenu.RadioItem className="compact-option" value="" disabled={projectActionsDisabled} onSelect={() => { setWorkspace(null); setProjectMenuOpen(false) }}>
                           <WorkspaceIcon kind="quick-chat" /><span>使用快速对话<small>由 Rovai AI 管理工作目录</small></span><DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator>
@@ -282,7 +280,7 @@ export function NewConversationDialog({
                     </button>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
-                    <DropdownMenu.Content className="compact-menu roster-menu new-camp-member-grid" align="end" sideOffset={6} collisionPadding={12} aria-label="选择队员" onKeyDownCapture={navigateMemberGrid} loop>
+                    <DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="compact-menu roster-menu new-camp-member-grid" align="end" sideOffset={6} collisionPadding={12} aria-label="选择队员" onKeyDownCapture={navigateMemberGrid} loop>
                       <div className="compact-menu-heading"><span>参与本次对话</span><button type="button" disabled={busy || availableMembers.length === 0 || (!hasUnavailableSelection && selectedMembers.length === availableMembers.length)} onClick={() => { setSelectedMemberIds(availableMembers.map((member) => member.agentId)); if (!lead) setLeadId(availableMembers[0]?.agentId ?? ''); setMemberError(null) }}>全选</button></div>
                       {preflight.presentMembers.map((member) => {
                         const profile = profileById.get(member.agentId)
@@ -309,7 +307,7 @@ export function NewConversationDialog({
                     </button>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
-                    <DropdownMenu.Content className="compact-menu roster-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择负责人" loop>
+                    <DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="compact-menu roster-menu" align="end" sideOffset={6} collisionPadding={12} aria-label="选择负责人" loop>
                       <DropdownMenu.Label className="compact-menu-heading">从已选队员中选择</DropdownMenu.Label>
                       <DropdownMenu.RadioGroup value={leadId} onValueChange={setLeadId}>
                         {selectedAvailableMembers.map((member) => {

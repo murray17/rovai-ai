@@ -132,7 +132,6 @@ export function MemoryLibrary({
   const [forgetTarget, setForgetTarget] = useState<MemoryRecord | null>(null)
   const [reviewScheduleEditor, setReviewScheduleEditor] = useState<ReviewScheduleEditor | null>(null)
   const [reviewScheduleBusyAction, setReviewScheduleBusyAction] = useState<ReviewScheduleBusyAction | null>(null)
-  const reviewScheduleTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -406,8 +405,7 @@ export function MemoryLibrary({
     setForgetTarget(null)
   })
 
-  const openReviewSchedule = (memory: MemoryRecord, trigger: HTMLButtonElement): void => {
-    reviewScheduleTriggerRef.current = trigger
+  const openReviewSchedule = (memory: MemoryRecord): void => {
     setReviewScheduleEditor({
       ...createReviewScheduleDraft(memory),
       phase: 'ready',
@@ -573,10 +571,6 @@ export function MemoryLibrary({
     }
   }
 
-  const exportMemory = (): Promise<void> => run('export', async () => {
-    await window.rovai.exportMemory()
-  })
-
   return (
     <section
       className={`memory-library${startupContentVisible ? '' : ' startup-feedback-suppressed'}`}
@@ -588,12 +582,10 @@ export function MemoryLibrary({
     >
       <header className="memory-library-header">
         <div>
-          <p className="eyebrow">Memory / Library</p>
           <h2 id="memory-library-title">记忆</h2>
           <p>查看、搜索和管理长期记忆。</p>
         </div>
         <div className="memory-header-actions">
-          <button className="quiet-button" type="button" onClick={() => void exportMemory()} disabled={!library}>导出…</button>
           <button className="primary-button" type="button" onClick={openCreate} disabled={!library}>新增记忆</button>
         </div>
       </header>
@@ -713,12 +705,6 @@ export function MemoryLibrary({
         }}
         onSubmit={submitReviewSchedule}
         onRetryRefresh={retryReviewScheduleRefresh}
-        onRestoreFocus={() => {
-          const trigger = reviewScheduleTriggerRef.current
-          const fallback = document.querySelector<HTMLButtonElement>('.memory-catalog-item.selected')
-          if (trigger?.isConnected) trigger.focus()
-          else fallback?.focus()
-        }}
       />
 
       <MemoryEditorDialog editor={editor} draft={draft} agents={agents} busy={busy !== null} onDraft={setDraft} onClose={() => setEditor(null)} onSubmit={submitEditor} />
@@ -885,8 +871,7 @@ function ReviewScheduleDialog({
   onChange,
   onClose,
   onSubmit,
-  onRetryRefresh,
-  onRestoreFocus
+  onRetryRefresh
 }: {
   editor: ReviewScheduleEditor | null
   busyAction: ReviewScheduleBusyAction | null
@@ -894,7 +879,6 @@ function ReviewScheduleDialog({
   onClose(): void
   onSubmit(action: ReviewScheduleAction): Promise<void>
   onRetryRefresh(): Promise<void>
-  onRestoreFocus(): void
 }): React.JSX.Element {
   const lastEditor = useRef<ReviewScheduleEditor | null>(null)
   const customInputRef = useRef<HTMLInputElement>(null)
@@ -977,10 +961,6 @@ function ReviewScheduleDialog({
           }}
           onInteractOutside={(event) => {
             if (busy) event.preventDefault()
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            onRestoreFocus()
           }}
         >
           <AppDialogHeader
@@ -1187,7 +1167,7 @@ function ReviewDrawer({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay memory-drawer-overlay" />
-        <Dialog.Content className="memory-review-drawer">
+        <Dialog.Content onCloseAutoFocus={(event) => event.preventDefault()} className="memory-review-drawer">
           <header>
             <div><Dialog.Title>共同记忆审核</Dialog.Title><Dialog.Description>候选在接受后才成为共同记忆。</Dialog.Description></div>
             <Dialog.Close asChild><button className="icon-button" type="button" aria-label="关闭共同记忆审核">×</button></Dialog.Close>

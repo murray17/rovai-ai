@@ -26,6 +26,17 @@ await mkdir(dataDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
 const canonicalDataDir = await realpath(dataDir)
 seedCompletedOnboardingForAcceptance(dataDir)
+// Map cases opt in explicitly; new installations leave the map disabled.
+await writeFile(join(dataDir, 'general-preferences.json'), `${JSON.stringify({
+  schemaVersion: 4,
+  startupLocationMode: 'last_location',
+  lastSettingsSection: 'general',
+  executionConsolePlacement: 'inspector',
+  newConversationDefaults: null,
+  newConversationDefaultsRequireConfirmation: false,
+  oneClickNewConversationEnabled: false,
+  worldMapEnabled: true
+}, null, 2)}\n`, { mode: 0o600 })
 const fixture = await createFixture()
 
 let app = null
@@ -78,7 +89,7 @@ try {
       exactOccurrenceVisibilityInLongMessage: desktop.longMessageOccurrenceVisibility,
       conversationMessageActions: messageActions,
       enterAndShiftEnterWrap: desktop.wrapTraversal,
-      escapeRestoresFocusAndReadingAnchor: desktop.escapeRestore,
+      escapeRestoresReadingAnchorWithoutRefocus: desktop.escapeRestore,
       cssHighlightsAndCurrentMessageRail: desktop.highlightPresentation,
       mapCommandFReturnsToConversation: mapReturn,
       mapButtonRetainsFocusWhenClosingFind: mapButtonFocus,
@@ -318,8 +329,7 @@ async function verifyConversationFind(cdp, fixture, context, screenshotPath) {
     const timeline = document.querySelector('.camp-timeline')
     const viewport = timeline?.getBoundingClientRect()
     const anchor = document.querySelector(${JSON.stringify(`[data-message-id="${baseline.firstVisibleMessageId}"]`)})
-    return document.activeElement === timeline
-      && viewport && anchor
+    return viewport && anchor
       && Math.abs((anchor.getBoundingClientRect().top - viewport.top) - ${baseline.topOffset}) <= 2
   })()`)
   const restored = await evaluate(cdp, `(() => {
@@ -340,12 +350,12 @@ async function verifyConversationFind(cdp, fixture, context, screenshotPath) {
         + Number(Boolean(CSS.highlights?.get('conversation-find-current')))
     }
   })()`)
-  assert(restored.activeTimeline
+  assert(!restored.activeTimeline
     && restored.firstVisibleMessageId === baseline.firstVisibleMessageId
     && Math.abs(restored.topOffset - baseline.topOffset) <= 2
     && restored.findCurrentClassCount === 0
     && restored.highlightCount === 0,
-  `Escape did not restore reading/focus state: ${JSON.stringify({ baseline, restored })}`)
+  `Escape did not restore reading position without refocusing the timeline: ${JSON.stringify({ baseline, restored })}`)
 
   return {
     exactCount: initial,
@@ -582,6 +592,7 @@ async function waitForFindResult(cdp, count, messageId) {
 
 async function chooseConversationView(cdp, view) {
   const label = view === 'world' ? '地图' : '会话'
+  await waitForExpression(cdp, "Boolean(document.querySelector('.camp-conversation-view-controls'))")
   const clicked = await evaluate(cdp, `(() => {
     const button = [...document.querySelectorAll('.camp-conversation-view-controls button')]
       .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
@@ -651,6 +662,8 @@ async function launchApp(port, width, height, reducedMotion) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    await waitForExpression(cdp,
+      `Boolean(document.querySelector('.camp-nav-open'))`, 30_000)
     const health = await evaluate(cdp, `window.rovai.request('health.check', {})`, true)
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Packaged App opened the wrong database: ${JSON.stringify(health.database.path)}`)
@@ -744,7 +757,13 @@ async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
     await wait(100)
   }
   if (await evaluate(cdp, expression)) return
-  throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
+  const state = await evaluate(cdp, `({
+    activeTag: document.activeElement?.tagName,
+    activeClass: document.activeElement?.className,
+    findOpen: Boolean(document.querySelector('.conversation-find-form')),
+    dialogOpen: Boolean(document.querySelector('[role="dialog"]'))
+  })`)
+  throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}; state: ${JSON.stringify(state)}`)
 }
 
 async function waitForTarget(port, stderr) {

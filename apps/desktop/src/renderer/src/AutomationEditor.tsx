@@ -21,7 +21,7 @@ function Picker({ label, value, options, onChange, children, disabled = false }:
 }): React.JSX.Element {
   return <DropdownMenu.Root>
     <DropdownMenu.Trigger asChild><button className="automation-picker" type="button" aria-label={label} disabled={disabled}>{children}<AutomationGlyph name="chevron" /></button></DropdownMenu.Trigger>
-    <DropdownMenu.Portal><DropdownMenu.Content className="automation-menu automation-picker-menu" align="end" sideOffset={5} collisionPadding={12} aria-label={label} loop>
+    <DropdownMenu.Portal><DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="automation-menu automation-picker-menu" align="end" sideOffset={5} collisionPadding={12} aria-label={label} loop>
       <DropdownMenu.RadioGroup value={value} onValueChange={onChange}>
         {options.map((option) => <DropdownMenu.RadioItem key={option.value} className="automation-menu-item automation-picker-option" value={option.value} disabled={option.disabled}>
           {option.label}<DropdownMenu.ItemIndicator><AutomationGlyph name="check" /></DropdownMenu.ItemIndicator>

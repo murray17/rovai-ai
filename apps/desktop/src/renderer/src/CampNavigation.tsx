@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -259,16 +258,8 @@ export function CampNavigation({
   const [renameTitle, setRenameTitle] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [sidebarFocusRequest, setSidebarFocusRequest] = useState<{ id: number; target: string } | null>(null)
   const paginationByGroupRef = useRef(paginationByGroup)
   const loadingGroupsRef = useRef<Set<string>>(new Set())
-  const sidebarRef = useRef<HTMLElement>(null)
-  const settingsButtonRef = useRef<HTMLButtonElement>(null)
-  const updateButtonRef = useRef<HTMLButtonElement>(null)
-  const settingsReturnFocusRef = useRef<'settings' | 'updates'>('settings')
-  const previousViewRef = useRef(view)
-  const dialogReturnFocusTargetRef = useRef<string | null>(null)
-  const nextSidebarFocusRequestIdRef = useRef(1)
   const navigationCamps = useMemo(
     () => navigation ? allNavigationCamps(navigation) : [],
     [navigation]
@@ -302,18 +293,6 @@ export function CampNavigation({
   useEffect(() => {
     paginationByGroupRef.current = paginationByGroup
   }, [paginationByGroup])
-
-  useLayoutEffect(() => {
-    if (previousViewRef.current === 'settings' && view !== 'settings') {
-      // The settings entry is remounted when the ordinary navigation returns.
-      // Restore focus after that render so keyboard users return to their entry point.
-      const returnTarget = settingsReturnFocusRef.current === 'updates'
-        ? updateButtonRef.current ?? settingsButtonRef.current
-        : settingsButtonRef.current
-      returnTarget?.focus()
-    }
-    previousViewRef.current = view
-  }, [view])
 
   useEffect(() => {
     if (disabled) return undefined
@@ -384,59 +363,12 @@ export function CampNavigation({
     setCollapsedProjectGroups((current) => toggleNavigationGroup(current, groupKey))
   }
 
-  const requestSidebarFocus = (target: string): void => {
-    setSidebarFocusRequest({ id: nextSidebarFocusRequestIdRef.current++, target })
-  }
-
-  useLayoutEffect(() => {
-    if (!sidebarFocusRequest) return
-    let frameId = 0
-    let frameCount = 0
-    let cancelled = false
-    const finish = (): void => {
-      setSidebarFocusRequest((current) => current?.id === sidebarFocusRequest.id ? null : current)
-    }
-    const cancelOnUserInput = (): void => {
-      cancelled = true
-      cancelAnimationFrame(frameId)
-      finish()
-    }
-    const restore = (): void => {
-      if (cancelled) return
-      const targetElement = Array.from(
-        sidebarRef.current?.querySelectorAll<HTMLButtonElement>(
-          '[data-sidebar-menu-target], [data-sidebar-focus-target]'
-        ) ?? []
-      ).find((element) => (
-        element.dataset.sidebarMenuTarget === sidebarFocusRequest.target
-        || element.dataset.sidebarFocusTarget === sidebarFocusRequest.target
-      ))
-      targetElement?.focus()
-      frameCount += 1
-      if (frameCount < 16) {
-        frameId = requestAnimationFrame(restore)
-      } else {
-        finish()
-      }
-    }
-    window.addEventListener('pointerdown', cancelOnUserInput, true)
-    window.addEventListener('keydown', cancelOnUserInput, true)
-    restore()
-    return () => {
-      cancelAnimationFrame(frameId)
-      window.removeEventListener('pointerdown', cancelOnUserInput, true)
-      window.removeEventListener('keydown', cancelOnUserInput, true)
-    }
-  }, [sidebarFocusRequest])
-
   const togglePin = async (
     kind: NavigationPin['kind'],
     targetKey: string,
     camp?: NavigationCampItem
   ): Promise<void> => {
-    const focusTarget = `${kind}:${targetKey}`
     await onTogglePin(kind, targetKey, camp)
-    requestSidebarFocus(focusTarget)
   }
 
   const copyCampId = async (camp: NavigationCampItem): Promise<void> => {
@@ -449,13 +381,11 @@ export function CampNavigation({
   }
 
   const openAction = (kind: 'rename' | 'delete', camp: NavigationCampItem): void => {
-    dialogReturnFocusTargetRef.current = `camp:${camp.id}`
     setAction({ kind, camp })
     setRenameTitle(camp.title)
   }
 
   const openProjectRemoval = (project: ProjectNavigationGroup): void => {
-    dialogReturnFocusTargetRef.current = `project:${project.projectKey}`
     setAction({ kind: 'remove_project', project })
   }
 
@@ -504,9 +434,7 @@ export function CampNavigation({
     setActionBusy(true)
     try {
       await onRemoveProject(action.project)
-      dialogReturnFocusTargetRef.current = 'project-row:quick-chat'
       setAction(null)
-      requestSidebarFocus('project-row:quick-chat')
     } catch (error) {
       onError(error)
     } finally {
@@ -516,7 +444,7 @@ export function CampNavigation({
 
   return (
     <>
-      <aside ref={sidebarRef} className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}`} inert={disabled} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
+      <aside className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}`} inert={disabled} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
@@ -704,12 +632,10 @@ export function CampNavigation({
       <div className="unified-sidebar-footer">
         <div className="sidebar-settings-entry" role="group" aria-label="设置与应用更新">
           <button
-            ref={settingsButtonRef}
             className="rail-button sidebar-settings-main"
             type="button"
             aria-label="设置，打开上次保留的设置页面"
             onClick={() => {
-              settingsReturnFocusRef.current = 'settings'
               onSettings()
             }}
           >
@@ -717,13 +643,11 @@ export function CampNavigation({
           </button>
           {updateBadge && (
             <button
-              ref={updateButtonRef}
               className={`app-update-badge is-${updateBadge.kind}`}
               type="button"
               aria-label={`打开关于与更新，${updateBadge.accessibleLabel}`}
               title={updateBadge.accessibleLabel}
               onClick={() => {
-                settingsReturnFocusRef.current = 'updates'
                 onOpenUpdates()
               }}
             >
@@ -753,13 +677,6 @@ export function CampNavigation({
           <AppDialogContent
             className="camp-action-dialog"
             tone={action?.kind === 'delete' || action?.kind === 'remove_project' ? 'danger' : 'brand'}
-            onCloseAutoFocus={(event) => {
-              const target = dialogReturnFocusTargetRef.current
-              dialogReturnFocusTargetRef.current = null
-              if (!target) return
-              event.preventDefault()
-              requestSidebarFocus(target)
-            }}
           >
             {action?.kind === 'rename' ? (
               <>
@@ -976,9 +893,9 @@ function CommandPalette({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="command-palette">
-          <Dialog.Title className="sr-only">跳转到对话</Dialog.Title>
-          <Dialog.Description className="sr-only">输入关键字过滤对话，回车打开第一个匹配。</Dialog.Description>
+        <Dialog.Content className="command-palette" onCloseAutoFocus={(event) => event.preventDefault()}>
+          <Dialog.Title className="command-palette-title">跳转到对话</Dialog.Title>
+          <Dialog.Description className="sr-only">输入关键字过滤对话，使用方向键选择，回车打开选中对话。</Dialog.Description>
           <input
             className="command-palette-input"
             autoFocus
@@ -1018,6 +935,7 @@ function CommandPalette({
             ))}
             {visible.length === 0 && <p className="command-palette-empty">没有匹配的对话。</p>}
           </div>
+          <footer className="command-palette-footer"><span><kbd>↑ ↓</kbd> 选择</span><span><kbd>↵</kbd> 打开</span><span><kbd>Esc</kbd> 关闭</span></footer>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -1083,7 +1001,6 @@ function CampGroup({
       label: projectMenuLabels[0],
       icon: 'pin',
       filled: pinned,
-      deferCloseAutoFocus: true,
       onSelect: onTogglePin
     })
   }
@@ -1189,7 +1106,6 @@ function CampRow({
         label: menuLabels[0],
         icon: 'pin',
         filled: pinned,
-        deferCloseAutoFocus: true,
         onSelect: onTogglePin
       }, {
         key: 'rename',
@@ -1249,7 +1165,6 @@ type SidebarActionMenuItem = {
   filled?: boolean
   danger?: boolean
   separatorBefore?: boolean
-  deferCloseAutoFocus?: boolean
   onSelect(): void
 }
 
@@ -1264,7 +1179,6 @@ function SidebarActionMenu({
   triggerClassName: string
   items: SidebarActionMenuItem[]
 }): JSX.Element {
-  const deferCloseAutoFocusRef = useRef(false)
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -1290,11 +1204,7 @@ function SidebarActionMenu({
           sideOffset={4}
           collisionPadding={8}
           loop
-          onCloseAutoFocus={(event) => {
-            if (!deferCloseAutoFocusRef.current) return
-            deferCloseAutoFocusRef.current = false
-            event.preventDefault()
-          }}
+          onCloseAutoFocus={(event) => event.preventDefault()}
         >
           {items.flatMap((item) => [
             item.separatorBefore
@@ -1304,7 +1214,6 @@ function SidebarActionMenu({
               className={`sidebar-action-menu-item ${item.danger ? 'danger' : ''}`}
               key={item.key}
               onSelect={() => {
-                deferCloseAutoFocusRef.current = item.deferCloseAutoFocus === true
                 item.onSelect()
               }}
             >
