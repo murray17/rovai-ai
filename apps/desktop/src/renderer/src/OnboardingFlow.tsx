@@ -100,6 +100,13 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'antigravity-app': 'Antigravity'
 }
 
+const MEMBER_SUMMARIES: Record<BuiltinMemberPreset['role'], string> = {
+  luoke: '需求理解、项目调查与代码实现。',
+  muwa: '方案与代码评审，核查风险和边界。',
+  mianzhi: '测试与问题复现，验证功能可靠性。',
+  qilu: '交互、视觉设计与前端实现。'
+}
+
 function moveRadioSelection(event: KeyboardEvent<HTMLDivElement>): void {
   if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
   const rows = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="radio"]:not(:disabled):not([aria-disabled="true"])'))
@@ -301,7 +308,7 @@ function MemberStep({
                     <small>{preset.teamRole}</small>
                   </span>
                   <span className="onboarding-member-row-copy">
-                    <small>{preset.professionalResponsibilities}</small>
+                    <small>{MEMBER_SUMMARIES[preset.role]}</small>
                   </span>
                   <span className="onboarding-radio-check" aria-hidden="true" />
                 </button>

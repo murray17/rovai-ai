@@ -2843,7 +2843,8 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .quick-chat-continue { width: min(640px, 100%); text-align: left; }
 .quick-chat-continue-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 7px; padding: 0 7px 14px; border-bottom: 1px solid var(--line); }
 .quick-chat-continue-title h2 { margin: 0; font-size: 19px; font-weight: 550; }
-.quick-chat-continue-title button { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-weight: 400; }
+.quick-chat-continue-title button { display: inline-flex; align-items: center; gap: 6px; border: 0; color: var(--muted); background: transparent; font-weight: 400; }
+.quick-chat-continue-title button:hover { color: var(--ink); background: var(--surface-hover); }
 .quick-chat-continue-row { display: flex; width: 100%; min-height: 48px; align-items: center; gap: 12px; padding: 8px; border: 0; border-radius: 6px; color: var(--ink); background: transparent; cursor: pointer; font-size: 12.5px; text-align: left; }
 .quick-chat-continue-row:hover { background: var(--surface-muted); }
 .quick-chat-continue-row .truncate { min-width: 0; flex: 1 1 auto; }
@@ -5105,6 +5106,9 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .onboarding-welcome > p { max-width: 42ch; margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.8; }
 .onboarding-primary { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 38px; font-weight: 500; }
 .onboarding-primary svg { width: 14px; height: 14px; }
+.onboarding-shell .quiet-button { border-color: transparent; color: var(--muted); background: transparent; font-weight: 400; }
+.onboarding-shell .quiet-button:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
+.onboarding-member-row[aria-disabled="true"], .onboarding-runtime-row[aria-disabled="true"]:not(:disabled) { cursor: default; opacity: .6; }
 .onboarding-welcome > .onboarding-primary { margin-top: 28px; }
 .onboarding-page-heading h1 { font-size: 28px; font-weight: 560; }
 .onboarding-member-layout { display: grid; max-width: 940px; grid-template-columns: 240px minmax(0, 1fr); gap: 42px; align-items: start; margin: 28px auto 0; }
