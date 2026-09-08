@@ -10,7 +10,7 @@ last_updated: 2026-08-07
 
 本合同只约束现有 Arctic Dawn Camp 会话区中 Run 过程详情的层级和交互。视觉 Token、导航、
 Composer、Approval、响应式和无障碍基础继续以 [Camp 会话工作区](../ui/components/conversation-workspace.md) 为准。
-HTML 仅是[会话区原型](../prototypes/run-activity/README.md)，不是数据或状态真源。
+HTML 仅是[会话区原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/run-activity/README.md)，不是数据或状态真源。
 
 ## 1. 三层会话区
 

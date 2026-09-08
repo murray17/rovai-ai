@@ -9,6 +9,7 @@ import {
   normalizeLegacyBody,
   sha256,
   validateDecisionRepository,
+  validateMarkdownLinks,
 } from "./doc-decisions.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -29,6 +30,16 @@ const originalBody = `
 ## Context
 
 Context text.
+
+[Context source](../architecture/current.md#test-decision "Original title")
+
+![Context image](../architecture/current.md)
+
+[Reference source][context]
+
+[context]: ../architecture/current.md#test-decision
+
+\`[Example](../architecture/current.md)\`
 
 ## Decision
 
@@ -56,6 +67,7 @@ async function createFixtureRepo() {
   }
   await writeFile(path.join(root, "README.md"), "# Root\n", "utf8");
   await writeFile(path.join(root, "AGENTS.md"), "# Agents\n", "utf8");
+  await writeFile(path.join(root, "CONTEXT.md"), "# Context\n", "utf8");
   await writeFile(path.join(root, "docs/README.md"), "# Docs\n", "utf8");
   await writeFile(path.join(root, "docs/adr/README.md"), "# Retired ADR\n", "utf8");
   await writeFile(
@@ -227,6 +239,38 @@ test("manifest and migrated-body tampering are rejected", async () => {
     assert.ok(
       (await validate(root)).diagnostics.some((item) => item.rule === "DECISION_LEGACY_BODY")
     );
+  });
+});
+
+test("migrated historical links can be repaired without changing the immutable manifest", async () => {
+  await withFixture(async (root) => {
+    const decisionPath = path.join(root, "docs/versions/v1.0/decisions.md");
+    const manifestPath = path.join(root, "docs/decisions/ADR-MIGRATION-MANIFEST.json");
+    const manifest = await readFile(manifestPath, "utf8");
+    const original = await readFile(decisionPath, "utf8");
+    const repaired = original.replaceAll("../../architecture/current.md", "../../architecture/README.md")
+      .replaceAll("README.md#test-decision", "README.md");
+    await writeFile(decisionPath, repaired, "utf8");
+    assert.deepEqual((await validate(root)).diagnostics, []);
+    assert.deepEqual((await validateMarkdownLinks(root)).diagnostics, []);
+    assert.equal(await readFile(manifestPath, "utf8"), manifest);
+
+    await writeFile(decisionPath, repaired.replaceAll("../../architecture/README.md", "../../missing.md"), "utf8");
+    assert.ok((await validateMarkdownLinks(root)).diagnostics.some((item) => item.rule === "MARKDOWN_LINK_MISSING"));
+
+    for (const [before, after] of [
+      ["Context source", "Changed label"],
+      ["Context image", "Changed alt text"],
+      ["Original title", "Changed title"],
+      ["Context text.", "Changed context."],
+      ["[Example](../architecture/current.md)", "[Example](../architecture/README.md)"],
+    ]) {
+      await writeFile(decisionPath, repaired.replace(before, after), "utf8");
+      assert.ok(
+        (await validate(root)).diagnostics.some((item) => item.rule === "DECISION_LEGACY_BODY"),
+        `Historical content change must be rejected: ${before}`
+      );
+    }
   });
 });
 

@@ -1,7 +1,7 @@
 ---
 document_type: decision-governance
 authority: version-decision-governance
-last_updated: 2026-08-19
+last_updated: 2026-09-08
 ---
 
 # 版本决策治理
@@ -56,7 +56,7 @@ last_updated: 2026-08-19
 
 这是文件 URL clean break：不保留逐 ADR stub，也不承诺旧 GitHub URL 可访问。历史内容、旧 ID 和来源可追溯，但旧路径兼容不属于目标。
 
-Manifest 只证明本次迁移，禁止随着新版本或新决定扩充。历史 ADR block 与 Manifest 的规范化正文必须完全一致；勘误只能追加在 block 外，不得改写迁移正文。
+Manifest 只证明本次迁移，禁止随着新版本或新决定扩充。历史 ADR block 与 Manifest 的规范化正文除 Markdown 链接目标修复外必须完全一致；链接标签、标题与其他正文保持原样，目标继续接受通用链接检查。Manifest 及其 hash 不随链接修复变动；勘误只能追加在 block 外，不得改写当时的决定。
 
 ## 历史勘误
 

@@ -300,6 +300,23 @@ function markdownUrlSpan(raw, nodeType) {
   return { start, end };
 }
 
+function withoutMarkdownLinkTargets(body) {
+  const { tree } = parseMarkdown(body);
+  if (!tree) return body;
+  const spans = [];
+  walkMarkdown(tree, (node) => {
+    if (!["link", "image", "definition"].includes(node.type) || !node.position) return;
+    const { start, end } = node.position;
+    const span = markdownUrlSpan(body.slice(start.offset, end.offset), node.type);
+    if (span) spans.push({ start: start.offset + span.start, end: start.offset + span.end });
+  });
+  let normalized = body;
+  for (const span of spans.sort((left, right) => right.start - left.start)) {
+    normalized = normalized.slice(0, span.start) + "LINK" + normalized.slice(span.end);
+  }
+  return normalized;
+}
+
 function relativeMarkdownPath(fromFile, toFile) {
   const relative = path.posix.relative(path.posix.dirname(fromFile), toFile);
   return relative || path.posix.basename(toFile);
@@ -614,7 +631,10 @@ async function validateVersionDecisionFiles(repoRoot, manifest) {
       const body = findLegacyBody(text, entry.legacy_id);
       if (body === null) {
         diagnostics.push(diagnostic("DECISION_LEGACY_BLOCK", repoFile, `${entry.legacy_id} must have exactly one migrated body block`));
-      } else if (body !== entry.normalized_migrated_body) {
+      } else if (
+        body !== entry.normalized_migrated_body &&
+        withoutMarkdownLinkTargets(body) !== withoutMarkdownLinkTargets(entry.normalized_migrated_body)
+      ) {
         diagnostics.push(diagnostic("DECISION_LEGACY_BODY", repoFile, `${entry.legacy_id} migrated body differs from the manifest`));
       }
       const anchorCount = text.split(`id="${entry.target_anchor}"`).length - 1;

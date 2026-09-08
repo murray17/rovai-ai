@@ -250,7 +250,7 @@ Agent 消息继续左对齐并保持透明开放阅读面，不添加身份色�
 聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
 [Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，评审方向见
-[HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
+[HTML 交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/message-reply-chain/README.md)。
 
 渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
 外部引用没有本地父消息导航关系，因此是不可点击、不可 Tab 聚焦、无交互悬停态的静态预览；保留真实引用作者，
@@ -283,7 +283,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 展开“原接收者当前不可接收，请选择其他成员”，禁用发送并把焦点交给第一个有效替代选择。不得隐藏错误、
 自动插入失效 Mention 或改投 Lead。字段和竞态边界见
 [Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)，交互探索见
-[延续路由原型](../../prototypes/composer-continuation-routing/index.html)。
+[延续路由原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/composer-continuation-routing/index.html)。
 
 ## Camp 内单聊
 

@@ -144,4 +144,4 @@ Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内
 
 改为富文本/Markdown编辑、全局角色 Toast、页面跳转、模态 Dialog、每 Atom React Root 或其他信息架构属于产品
 变更，必须同步更新本文、当前 Contracts/Architecture、Renderer 测试和真实 App 验收。历史原型只解释已确认的
-信息卡选型，不是生产真源：[Mention Popover 原型](../../prototypes/mention-popover/README.md)。
+信息卡选型，不是生产真源：[Mention Popover 原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/mention-popover/README.md)。

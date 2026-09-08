@@ -161,7 +161,7 @@ Codex 此时还没有每轮档位能力快照，会提前被判为不支持。`r
 完整 Rust lib 416 项通过；Core binary 184 项通过，4 项既有真实环境测试忽略。
 
 合入最新主线后重新通过 Fast、执行浮层和文件导航的生产 Electron 回归；
-[Fast 浮层截图](../../prototypes/camp-fast-auto-detection/fast-day-1280.png)来自隔离生产组件 fixture，使用合成队员与草稿，不含真实对话或凭据。
+[Fast 浮层截图](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/camp-fast-auto-detection/fast-day-1280.png)来自隔离生产组件 fixture，使用合成队员与草稿，不含真实对话或凭据。
 
 用户已验收隔离开发版，并授权创建 PR、合并 main 和删除 worktree；最终门禁与合入结果由 PR 和 CI 记录拥有。
 用户验收产生的 Codex 执行确认请求了 `priority`，但当前原生会话日志、完成事件和用量事件未报告实际档位，

@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-09-07
+last_updated: 2026-09-08
 ---
 
 # Rovai-ai 文档导航
@@ -117,6 +117,13 @@ last_updated: 2026-09-07
 
 `docs/postmortems/` 保存中文无责事故复盘、证据与纠正措施跟踪。复盘解释故障如何发生、如何
 降低复发风险；它们不能替代当前架构与合同、当前版本范围或实现证据。
+
+### 本地原型
+
+`docs/prototypes/` 整个目录由 Git 忽略，保留在本机用于 HTML 交互稿、设计比较、截图和评审素材；
+不得强制提交其中的文件。该目录不会随仓库克隆，构建、测试和当前文档不得依赖它存在。
+已确认的交互规则和验收结论分别整理到当前 UI 合同、有效的 surface brief 或版本验收记录。
+历史文档中的原型链接指向取消跟踪前的固定提交，仅用于追溯当时的评审上下文。
 
 ## 权威性与冲突处理
 
