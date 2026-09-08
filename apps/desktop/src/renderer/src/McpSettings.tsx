@@ -13,15 +13,22 @@ import { MemberAvatar } from './MemberAvatar'
 import {
   CapabilityError,
   CapabilityListItem,
-  CapabilityToggle,
   CapabilityWorkspace,
   type CapabilityFilter
 } from './CapabilityWorkspace'
 import { readErrorMessage } from './error-message'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { identityColorToken } from './theme'
+import { McpJsonEditor, materializeMcpDraft } from './McpJsonEditor'
+import { PRODUCT_RUNTIME_LOGOS } from './runtime-products'
+import { NewConversationQuickHelp } from './NewConversationQuickHelp'
 
-type JsonDraft = { text: string; baseDefinition: string }
+type JsonDraft = {
+  text: string
+  baseDefinition: string
+  baseDigest: string
+  preservedDefinition?: string
+}
 export type McpImportDraft = {
   selected: boolean
   action: 'create' | 'replace' | null
@@ -34,6 +41,7 @@ export const NEW_SERVER_JSON =
 
 export function importableMcp(candidate: McpImportCandidate): boolean {
   return (
+    !candidate.duplicateOfCandidateId &&
     candidate.compatibility !== 'unsupported' &&
     candidate.conflict !== 'same' &&
     candidate.normalizedDefinitionJson !== null &&
@@ -89,9 +97,13 @@ export function McpSettings({
   const selectedRef = useRef(selectedId)
   selectedRef.current = selectedId
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<CapabilityFilter>('all')
   const [drafts, setDrafts] = useState<Record<string, JsonDraft>>({})
   const [newJson, setNewJson] = useState<string | null>(null)
+  const [newPreserved, setNewPreserved] = useState<string | undefined>()
+  const [newMembers, setNewMembers] = useState<string[]>([])
+  const [concealed, setConcealed] = useState(false)
+  const [editorEpoch, setEditorEpoch] = useState(0)
+  const deleteTrigger = useRef<HTMLButtonElement>(null)
   const [inspection, setInspection] = useState<McpImportInspection | null>(null)
   const [importDrafts, setImportDrafts] = useState<Record<string, McpImportDraft>>({})
   const [deleting, setDeleting] = useState(false)
@@ -129,6 +141,7 @@ export function McpSettings({
   const run = async (key: string, action: () => Promise<void>): Promise<void> => {
     if (locked.current) return
     locked.current = true
+    generation.current++
     setBusy(key)
     setError(null)
     try {
@@ -157,24 +170,31 @@ export function McpSettings({
     selectedId === 'new' || selectedId === 'import'
       ? undefined
       : (config?.servers.find((server) => server.serverId === selectedId) ?? config?.servers[0])
-  const visible = filterMcpServers(config?.servers ?? [], search, filter)
+  const visible = filterMcpServers(config?.servers ?? [], search, 'all')
   const choose = (id: string | null): void => {
     setSelectedId(id)
     selectedRef.current = id
     editorSession.current++
     setDrafts({})
     setNewJson(id === 'new' ? NEW_SERVER_JSON : null)
+    setNewPreserved(undefined)
+    setNewMembers([])
+    setConcealed(false)
+    setEditorEpoch((value) => value + 1)
     setInspection(null)
     setImportDrafts({})
     setDeleting(false)
     setError(null)
   }
-  const clearDraft = (id: string): void =>
+  const clearDraft = (id: string): void => {
+    setEditorEpoch((value) => value + 1)
+    setConcealed(false)
     setDrafts((current) => {
       const next = { ...current }
       delete next[id]
       return next
     })
+  }
   const save = (): void => {
     if (!config) return
     const adding = selectedId === 'new',
@@ -194,47 +214,60 @@ export function McpSettings({
       const result = await window.rovai.request<McpMutationResult>(
         adding ? 'mcp.servers.create' : 'mcp.servers.update',
         {
-          expectedConfigDigest: config.configDigest,
+          expectedConfigDigest: server
+            ? (drafts[server.serverId]?.baseDigest ?? config.configDigest)
+            : config.configDigest,
           ...(server ? { serverId: server.serverId } : {}),
-          definitionJson: text
+          definitionJson: materializeMcpDraft(
+            text,
+            server ? drafts[server.serverId]?.preservedDefinition : newPreserved
+          )
         }
       )
       const next = await apply(result)
       if (adding) {
         setNewJson(null)
-        setFilter('all')
         setSearch('')
         const created = next.servers.find(
           (value) => !config.servers.some((prior) => prior.serverId === value.serverId)
         )
         if (selectedRef.current === 'new') choose(created?.serverId ?? null)
+        if (created && newMembers.length)
+          await apply(
+            await window.rovai.request<McpMutationResult>('mcp.servers.setMembers', {
+              expectedConfigDigest: next.configDigest,
+              serverId: created.serverId,
+              agentIds: newMembers,
+              acknowledgeHighRisk: true
+            })
+          )
       } else clearDraft(server!.serverId)
     })
   }
-  const toggle = (server: McpServerView): void => {
+  const setMembers = (agentIds: string[]): void => {
+    if (!selected) {
+      setNewMembers(agentIds)
+      return
+    }
     if (!config) return
-    void run('toggle', async () => {
-      await apply(
-        await window.rovai.request<McpMutationResult>('mcp.servers.setEnabled', {
-          expectedConfigDigest: config.configDigest,
+    const server = selected,
+      beforeDigest = config.configDigest
+    void run('assignment', async () => {
+      const next = await apply(
+        await window.rovai.request<McpMutationResult>('mcp.servers.setMembers', {
+          expectedConfigDigest: beforeDigest,
           serverId: server.serverId,
-          enabled: !server.enabled,
+          agentIds,
           acknowledgeHighRisk: true
         })
       )
-    })
-  }
-  const assign = (agent: AgentProfile, server: McpServerView): void => {
-    if (!config) return
-    void run('assignment', async () => {
-      await apply(
-        await window.rovai.request<McpMutationResult>('mcp.assignments.set', {
-          expectedConfigDigest: config.configDigest,
-          serverId: server.serverId,
-          agentId: agent.agentId,
-          assigned: !server.assignedAgentIds.includes(agent.agentId),
-          acknowledgeHighRisk: true
-        })
+      setDrafts((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([id, draft]) => [
+            id,
+            draft.baseDigest === beforeDigest ? { ...draft, baseDigest: next.configDigest } : draft
+          ])
+        )
       )
     })
   }
@@ -248,17 +281,17 @@ export function McpSettings({
         })
       )
       clearDraft(server.serverId)
-      if (selectedRef.current === server.serverId) choose(null)
+      if (selectedRef.current === server.serverId || selectedRef.current === null) choose(null)
     })
   }
   const scan = (): void => {
-    choose('import')
+    if (selectedId !== 'import') choose('import')
     const session = editorSession.current
     void run('scan', async () => {
       const next = await window.rovai.request<McpImportInspection>('mcp.import.scan')
       if (editorSession.current !== session) return
       setInspection(next)
-      setImportDrafts(buildMcpImportDrafts(next, config?.servers ?? []))
+      setImportDrafts((previous) => buildMcpImportDrafts(next, config?.servers ?? [], previous))
     })
   }
   const commitImport = (): void => {
@@ -291,7 +324,6 @@ export function McpSettings({
       )
       setInspection(null)
       setImportDrafts({})
-      setFilter('all')
       setSearch('')
       if (selectedRef.current === 'import')
         choose(
@@ -304,28 +336,183 @@ export function McpSettings({
     })
   }
   const disabled = busy !== null || !config || Boolean(config.fileIssue)
+  const pickedMembers = selected ? (selected.enabled ? selected.assignedAgentIds : []) : newMembers
+  const selectedImports =
+    inspection?.candidates.filter(
+      (candidate) => importableMcp(candidate) && importDrafts[candidate.candidateId]?.selected
+    ).length ?? 0
+  const cancelDelete = () => {
+    setDeleting(false)
+    requestAnimationFrame(() => deleteTrigger.current?.focus())
+  }
+  const header =
+    selectedId === 'import' ? (
+      <>
+        <header className="capability-detail-heading">
+          <h2>从本机导入 MCP</h2>
+          <div className="capability-actions">
+            <button
+              type="button"
+              className="quiet-button compact"
+              disabled={busy !== null}
+              onClick={() => choose(null)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="quiet-button compact"
+              disabled={busy !== null}
+              onClick={scan}
+            >
+              重新扫描
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={busy !== null || !selectedImports}
+              onClick={commitImport}
+            >
+              {busy === 'import'
+                ? '正在导入…'
+                : `导入${selectedImports ? ` ${selectedImports} 项` : ''}`}
+            </button>
+          </div>
+        </header>
+        <p className="capability-header-description">从本机已有应用中选择 MCP</p>
+      </>
+    ) : selectedId === 'new' || selected ? (
+      <>
+        <header className="capability-detail-heading">
+          <div className="capability-title">
+            <h2>{selected?.name ?? '添加 MCP'}</h2>
+            {selected && (
+              <span className="capability-source">
+                {selected.transport === 'stdio' ? 'Stdio' : 'HTTP'}
+              </span>
+            )}
+          </div>
+          <div className="capability-actions">
+            {!selected && (
+              <button
+                type="button"
+                className="quiet-button compact"
+                disabled={busy !== null}
+                onClick={() => choose(null)}
+              >
+                取消
+              </button>
+            )}
+            {selected && drafts[selected.serverId] && (
+              <button
+                type="button"
+                className="quiet-button compact"
+                disabled={busy !== null}
+                onClick={() => {
+                  clearDraft(selected.serverId)
+                  setError(null)
+                }}
+              >
+                {drafts[selected.serverId].baseDigest === config?.configDigest
+                  ? '放弃更改'
+                  : '重新载入'}
+              </button>
+            )}
+            <button
+              type="button"
+              className={
+                selected && !drafts[selected.serverId] ? 'quiet-button compact' : 'primary-button'
+              }
+              disabled={
+                disabled || concealed || (selected ? !drafts[selected.serverId] : !newJson?.trim())
+              }
+              onClick={save}
+            >
+              {busy === 'save'
+                ? '正在保存…'
+                : selected
+                  ? drafts[selected.serverId]
+                    ? '保存更改'
+                    : '已保存'
+                  : '添加 MCP'}
+            </button>
+            {selected && !deleting && (
+              <>
+                <span className="capability-action-divider" aria-hidden="true" />
+                <button
+                  ref={deleteTrigger}
+                  type="button"
+                  className="quiet-button compact danger-text"
+                  aria-label="删除 MCP"
+                  disabled={disabled}
+                  onClick={() => setDeleting(true)}
+                >
+                  删除
+                </button>
+              </>
+            )}
+          </div>
+        </header>
+        {deleting && selected && (
+          <div
+            className="capability-confirm capability-header-confirm"
+            role="group"
+            aria-label={`删除 ${selected.name}`}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                cancelDelete()
+              }
+            }}
+          >
+            <span>删除 {selected.name} 及其队员分配？</span>
+            <div className="capability-actions">
+              <button
+                autoFocus
+                type="button"
+                className="quiet-button compact"
+                disabled={disabled}
+                onClick={cancelDelete}
+              >
+                保留
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={disabled}
+                onClick={() => remove(selected)}
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    ) : (
+      <header className="capability-detail-heading">
+        <h2>MCP</h2>
+      </header>
+    )
   return (
     <CapabilityWorkspace
       title="MCP"
       count={
-        search || filter !== 'all'
+        search
           ? `${visible.length}/${config?.servers.length ?? 0}`
           : (config?.servers.length ?? '—')
       }
       search={search}
       onSearch={setSearch}
-      filter={filter}
-      onFilter={setFilter}
       onAdd={() => choose('new')}
       addDisabled={disabled}
       selectionKey={
         selectedId === 'new' || selectedId === 'import' ? selectedId : (selected?.serverId ?? null)
       }
+      header={header}
       importAction={
         <button
           className="quiet-button compact"
           aria-label="从本机导入 MCP"
-          title="从本机导入 MCP"
           type="button"
           disabled={disabled}
           onClick={scan}
@@ -351,18 +538,6 @@ export function McpSettings({
         ) : (
           <div className="capability-empty">
             {config.servers.length ? '没有匹配的 MCP。' : '还没有 MCP。'}
-            {(search || filter !== 'all') && (
-              <button
-                className="quiet-button compact"
-                type="button"
-                onClick={() => {
-                  setSearch('')
-                  setFilter('all')
-                }}
-              >
-                清除筛选
-              </button>
-            )}
           </div>
         )
       }
@@ -427,195 +602,86 @@ export function McpSettings({
           </button>
         </div>
       )}
+
       {selectedId === 'import' ? (
-        <>
-          <header className="capability-detail-heading">
-            <h2>从本机导入</h2>
-            <button
-              type="button"
-              className="quiet-button compact"
-              disabled={busy !== null}
-              onClick={() => {
-                setInspection(null)
-                setImportDrafts({})
-                choose(null)
-              }}
-            >
-              取消
-            </button>
-          </header>
-          {busy === 'scan' ? (
-            <div className="capability-empty" role="status">
-              正在查找本机配置…
-            </div>
-          ) : inspection ? (
-            <McpImportPanel
-              inspection={inspection}
-              drafts={importDrafts}
-              busy={busy !== null}
-              onChange={setImportDrafts}
-              onScan={scan}
-              onCommit={commitImport}
-            />
-          ) : (
-            <button type="button" className="quiet-button compact" onClick={scan}>
-              重新扫描
-            </button>
-          )}
-        </>
+        busy === 'scan' ? (
+          <div className="capability-empty" role="status">
+            正在查找本机配置…
+          </div>
+        ) : inspection ? (
+          <McpImportPanel
+            inspection={inspection}
+            drafts={importDrafts}
+            busy={busy !== null}
+            onChange={setImportDrafts}
+          />
+        ) : null
       ) : selectedId === 'new' || selected ? (
         <>
-          <header className="capability-detail-heading">
-            <div className="capability-title">
-              <h2>{selected?.name ?? '添加 MCP'}</h2>
-              {selected && (
-                <span className="capability-source">
-                  {selected.transport === 'stdio' ? 'Stdio' : 'HTTP'}
-                </span>
-              )}
-            </div>
-            {selected ? (
-              <CapabilityToggle
-                name={selected.name}
-                enabled={selected.enabled}
-                disabled={disabled}
-                onToggle={() => toggle(selected)}
-              />
-            ) : (
-              <button
-                type="button"
-                className="quiet-button compact"
-                disabled={busy !== null}
-                onClick={() => {
-                  setNewJson(null)
-                  choose(null)
-                }}
-              >
-                取消
-              </button>
-            )}
-          </header>
+          <McpMemberChoices
+            members={members}
+            selectedIds={pickedMembers}
+            disabled={disabled}
+            onAssignment={(member) =>
+              setMembers(
+                pickedMembers.includes(member.agentId)
+                  ? pickedMembers.filter((id) => id !== member.agentId)
+                  : [...pickedMembers, member.agentId]
+              )
+            }
+            onAll={(ids) => setMembers(ids)}
+          />
           {selected && Boolean(selected.configurationIssues?.length) && (
             <div id="mcp-configuration-issues" className="capability-note" role="status">
               {selected.configurationIssues?.map((issue) => (
-                <p key={`${issue.code}:${issue.field}:${issue.message}`}>
-                  {issue.message}<br />受影响字段：{issue.field}
+                <p key={`${issue.code}:${issue.field}`}>
+                  {issue.message}
+                  <br />
+                  受影响字段：{issue.field}
                 </p>
               ))}
             </div>
           )}
-          <label className="capability-json-field">
-            <span>配置 JSON</span>
-            <textarea
-              aria-label="MCP 配置 JSON"
-              aria-describedby={selected?.configurationIssues?.length ? 'mcp-configuration-issues' : undefined}
-              spellCheck={false}
+          <section className="capability-section">
+            <McpJsonEditor
+              key={`${selected?.serverId ?? 'new'}:${editorEpoch}`}
               value={
                 selected
                   ? (drafts[selected.serverId]?.text ?? selected.definitionJson)
                   : (newJson ?? '')
               }
+              isEditing={selected ? Boolean(drafts[selected.serverId]) : true}
+              serverId={selected?.serverId}
+              configDigest={
+                selected
+                  ? (drafts[selected.serverId]?.baseDigest ?? config?.configDigest ?? '')
+                  : (config?.configDigest ?? '')
+              }
               disabled={busy !== null || Boolean(config?.fileIssue)}
-              onChange={(event) => {
-                const text = event.target.value
-                setError(null)
+              issuesId={
+                selected?.configurationIssues?.length ? 'mcp-configuration-issues' : undefined
+              }
+              onConcealed={setConcealed}
+              onError={setError}
+              onChange={(text, preservedDefinition) => {
                 if (selected)
                   setDrafts((current) => ({
                     ...current,
                     [selected.serverId]: {
                       text,
+                      preservedDefinition,
                       baseDefinition:
-                        current[selected.serverId]?.baseDefinition ?? selected.definitionJson
+                        current[selected.serverId]?.baseDefinition ?? selected.definitionJson,
+                      baseDigest: current[selected.serverId]?.baseDigest ?? config!.configDigest
                     }
                   }))
-                else setNewJson(text)
+                else {
+                  setNewJson(text)
+                  setNewPreserved(preservedDefinition)
+                }
               }}
             />
-          </label>
-          <p className="capability-note">
-            {selected ? '敏感值已隐藏；未修改的隐藏值将继续保留。' : '粘贴包含一个 MCP 的 mcpServers JSON。'}
-          </p>
-          <div className="capability-save">
-            <span className="capability-note">
-              {selected
-                ? drafts[selected.serverId]
-                  ? '有未保存更改'
-                  : '已保存'
-                : '新添加的 MCP 默认关闭'}
-            </span>
-            <div className="capability-actions">
-              {selected && drafts[selected.serverId] && (
-                <button
-                  type="button"
-                  className="quiet-button compact"
-                  disabled={busy !== null}
-                  onClick={() => {
-                    clearDraft(selected.serverId)
-                    setError(null)
-                  }}
-                >
-                  {drafts[selected.serverId].baseDefinition === selected.definitionJson
-                    ? '放弃更改'
-                    : '重新载入'}
-                </button>
-              )}
-              <button
-                type="button"
-                className="primary-button"
-                disabled={disabled || (selected ? !drafts[selected.serverId] : !newJson?.trim())}
-                onClick={save}
-              >
-                {busy === 'save' ? '正在保存…' : selected ? '保存' : '添加 MCP'}
-              </button>
-            </div>
-          </div>
-          {selected && (
-            <>
-              <section className="capability-section">
-                <McpMemberChoices
-                  members={members}
-                  server={selected}
-                  disabled={disabled}
-                  onAssignment={(member) => assign(member, selected)}
-                />
-              </section>
-              <section className="capability-section">
-                {deleting ? (
-                  <div className="capability-confirm">
-                    <strong>删除 {selected.name}？</strong>
-                    <p>将删除连接定义及队员分配。</p>
-                    <div className="capability-actions">
-                      <button
-                        type="button"
-                        className="quiet-button compact"
-                        disabled={disabled}
-                        onClick={() => setDeleting(false)}
-                      >
-                        取消
-                      </button>
-                      <button
-                        type="button"
-                        className="danger-button"
-                        disabled={disabled}
-                        onClick={() => remove(selected)}
-                      >
-                        确认删除
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="quiet-button compact capability-danger"
-                    disabled={disabled}
-                    onClick={() => setDeleting(true)}
-                  >
-                    删除 MCP
-                  </button>
-                )}
-              </section>
-            </>
-          )}
+          </section>
         </>
       ) : (
         !config?.fileIssue && (
@@ -643,13 +709,16 @@ export function McpListItem({
       mark={
         <span
           className="capability-mcp-mark"
-          style={{ '--mcp-identity': identityColorToken(server.serverId) } as CSSProperties}
+          style={
+            {
+              '--mcp-identity': identityColorToken(server.serverId)
+            } as CSSProperties
+          }
         >
           {serverInitial(server)}
         </span>
       }
-      enabled={server.enabled}
-      summary={`${dirty ? '未保存 · ' : ''}${server.transport === 'stdio' ? 'Stdio' : 'HTTP'} · ${server.assignedAgentIds.length} 位队员`}
+      summary={`${dirty ? '未保存 · ' : ''}${server.transport === 'stdio' ? 'Stdio' : 'HTTP'} · ${server.enabled ? server.assignedAgentIds.length : 0} 位队员使用`}
       selected={selected}
       onSelect={onSelect}
     />
@@ -658,47 +727,57 @@ export function McpListItem({
 export function McpMemberChoices({
   members,
   server,
+  selectedIds,
   disabled,
-  onAssignment
+  onAssignment,
+  onAll
 }: {
   members: AgentProfile[]
-  server: McpServerView
+  server?: McpServerView
+  selectedIds?: string[]
   disabled: boolean
   onAssignment(agent: AgentProfile): void
+  onAll?(ids: string[]): void
 }): React.JSX.Element {
-  const [query, setQuery] = useState('')
-  const visible = members.filter((member) =>
-    `${member.displayName} ${member.teamRole ?? ''}`
-      .toLocaleLowerCase()
-      .includes(query.trim().toLocaleLowerCase())
-  )
+  const picked = selectedIds ?? (server?.enabled ? server.assignedAgentIds : [])
   return (
-    <>
+    <section className="capability-members-section">
       <div className="capability-scope-heading">
-        <h3>使用队员</h3>
-        <span className="capability-note">
-          {members.filter((member) => server.assignedAgentIds.includes(member.agentId)).length}{' '}
-          位已选
-        </span>
+        <div className="capability-title">
+          <h3>使用队员</h3>
+          <NewConversationQuickHelp label="MCP 使用队员说明">
+            只向所选队员提供此 MCP。不选择任何队员时，不会加载。
+          </NewConversationQuickHelp>
+        </div>
+        {onAll && (
+          <div className="capability-actions">
+            <button
+              type="button"
+              className="quiet-button compact"
+              disabled={disabled}
+              onClick={() => onAll(members.map((member) => member.agentId))}
+            >
+              全选
+            </button>
+            <button
+              type="button"
+              className="quiet-button compact"
+              disabled={disabled}
+              onClick={() => onAll([])}
+            >
+              清空
+            </button>
+          </div>
+        )}
       </div>
-      {members.length > 8 && (
-        <label className="capability-search">
-          <span className="sr-only">搜索队员</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索队员"
-            aria-label="搜索队员"
-          />
-        </label>
-      )}
       <div className="capability-member-options">
-        {visible.map((member) => (
+        {members.map((member) => (
           <button
             type="button"
             className="capability-choice capability-member-choice"
             key={member.agentId}
-            aria-pressed={server.assignedAgentIds.includes(member.agentId)}
+            aria-label={member.displayName}
+            aria-pressed={picked.includes(member.agentId)}
             disabled={disabled}
             onClick={() => onAssignment(member)}
           >
@@ -709,141 +788,230 @@ export function McpMemberChoices({
               size="list"
               decorative
             />
-            <span>
-              <strong>{member.displayName}</strong>
-              <small>{member.teamRole || '队员'}</small>
-            </span>
+            <strong>{member.displayName}</strong>
             <span className="capability-check" aria-hidden="true">
               ✓
             </span>
           </button>
         ))}
       </div>
-      {!visible.length && (
-        <p className="capability-note">{members.length ? '没有匹配的队员。' : '暂无队员。'}</p>
-      )}
-    </>
+      {!members.length && <p className="capability-note">暂无队员。</p>}
+    </section>
   )
 }
 export function McpImportPanel({
   inspection,
   drafts,
   busy,
-  onChange,
-  onScan,
-  onCommit
+  onChange
 }: {
   inspection: McpImportInspection
   drafts: Record<string, McpImportDraft>
   busy: boolean
   onChange(drafts: Record<string, McpImportDraft>): void
-  onScan(): void
-  onCommit(): void
+  onScan?(): void
+  onCommit?(): void
 }): React.JSX.Element {
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
+  const origins = (candidate: McpImportCandidate) =>
+    inspection.candidates.filter(
+      (value) =>
+        value.candidateId === candidate.candidateId ||
+        value.duplicateOfCandidateId === candidate.candidateId
+    )
   const available = inspection.candidates.filter(importableMcp)
-  const other = inspection.candidates.filter((candidate) => !importableMcp(candidate))
+  const other = inspection.candidates.filter(
+    (candidate) => !candidate.duplicateOfCandidateId && !importableMcp(candidate)
+  )
   const selected = available.filter((candidate) => drafts[candidate.candidateId]?.selected)
   const update = (id: string, patch: Partial<McpImportDraft>): void =>
     onChange({ ...drafts, [id]: { ...drafts[id], ...patch } })
   return (
     <>
+      <div className="capability-import-filters" role="group" aria-label="MCP 配置来源">
+        {[
+          'all',
+          ...new Set(
+            available.flatMap((candidate) => origins(candidate).map((origin) => origin.sourceKind))
+          )
+        ].map((source) => (
+          <button
+            key={source}
+            type="button"
+            aria-pressed={sourceFilter === source}
+            onClick={() => setSourceFilter(source)}
+          >
+            {source === 'all'
+              ? '全部来源'
+              : sourceLabel(source as McpImportCandidate['sourceKind'])}
+          </button>
+        ))}
+      </div>
       <div className="capability-scope-heading">
-        <span className="capability-note">{available.length} 项可选择</span>
-        <button type="button" className="quiet-button compact" disabled={busy} onClick={onScan}>
-          重新扫描
+        <span className="capability-note">
+          {available.length} 项可选择 · 已选择 {selected.length} 项
+        </span>
+        <button
+          type="button"
+          className="quiet-button compact"
+          disabled={busy}
+          onClick={() => {
+            const next = { ...drafts }
+            const filtered = available.filter(
+              (candidate) =>
+                sourceFilter === 'all' ||
+                origins(candidate).some((origin) => origin.sourceKind === sourceFilter)
+            )
+            const allSelected = filtered.every(
+              (candidate) => drafts[candidate.candidateId]?.selected
+            )
+            for (const candidate of filtered)
+              next[candidate.candidateId] = {
+                ...next[candidate.candidateId],
+                selected: !allSelected
+              }
+            onChange(next)
+          }}
+        >
+          {available
+            .filter(
+              (candidate) =>
+                sourceFilter === 'all' ||
+                origins(candidate).some((origin) => origin.sourceKind === sourceFilter)
+            )
+            .every((candidate) => drafts[candidate.candidateId]?.selected)
+            ? '取消选择'
+            : '全选'}
         </button>
       </div>
       <div className="capability-import-items">
-        {available.map((candidate) => {
-          const draft = drafts[candidate.candidateId]
-          if (!draft) return null
-          return (
-            <article className="capability-import-item" key={candidate.candidateId}>
-              <div className="capability-import-item-heading">
-                <button
-                  type="button"
-                  className="capability-import-pick"
-                  aria-pressed={draft.selected}
-                  disabled={busy}
-                  onClick={() => update(candidate.candidateId, { selected: !draft.selected })}
-                >
-                  <span>
-                    <strong title={candidate.proposedName}>{candidate.proposedName}</strong>
-                    <small>
-                      {sourceLabel(candidate.sourceKind)}
-                      {candidate.conflict === 'name_conflict' ? ' · 已有同名项' : ''}
-                    </small>
-                  </span>
-                  <span className="capability-check" aria-hidden="true">
-                    ✓
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="quiet-button compact"
-                  aria-expanded={draft.open}
-                  onClick={() => update(candidate.candidateId, { open: !draft.open })}
-                >
-                  {draft.open ? '收起' : '配置'}
-                </button>
-              </div>
-              {draft.selected && candidate.conflict === 'name_conflict' && (
-                <div className="capability-import-resolution">
-                  <span className="capability-note">同名配置如何处理</span>
-                  <div className="capability-actions">
-                    <button
-                      type="button"
-                      className="quiet-button compact"
-                      aria-pressed={draft.action === 'replace'}
-                      disabled={busy}
-                      onClick={() => update(candidate.candidateId, { action: 'replace' })}
-                    >
-                      替换现有
-                    </button>
-                    <button
-                      type="button"
-                      className="quiet-button compact"
-                      aria-pressed={draft.action === 'create'}
-                      disabled={busy}
-                      onClick={() =>
-                        update(candidate.candidateId, { action: 'create', open: true })
-                      }
-                    >
-                      另存为
-                    </button>
-                  </div>
-                  {draft.action === 'create' && (
-                    <p className="capability-note">请在 JSON 中修改 MCP 名称。</p>
-                  )}
-                </div>
-              )}
-              {candidate.compatibility === 'needs_input' && (
-                <div className="capability-note capability-import-resolution" role="status">
-                  {candidate.issues.filter((issue) => issue.kind === 'needs_configuration').map((issue) => (
-                    <p key={`${issue.code}:${issue.field}:${issue.message}`}>
-                      {issue.message}<br />受影响字段：{issue.field}
-                    </p>
-                  ))}
-                  <p>可先导入为停用配置。</p>
-                </div>
-              )}
-              {draft.open && (
-                <label className="capability-json-field capability-import-json">
-                  <span>配置 JSON</span>
-                  <textarea
-                    aria-label={`${candidate.proposedName} 导入 JSON`}
-                    spellCheck={false}
-                    disabled={busy}
-                    value={draft.definitionJson}
-                    onChange={(event) =>
-                      update(candidate.candidateId, { definitionJson: event.target.value })
-                    }
-                  />
-                </label>
-              )}
-            </article>
+        {available
+          .filter(
+            (candidate) =>
+              sourceFilter === 'all' ||
+              origins(candidate).some((origin) => origin.sourceKind === sourceFilter)
           )
-        })}
+          .map((candidate) => {
+            const draft = drafts[candidate.candidateId]
+            if (!draft) return null
+            return (
+              <article
+                className="capability-import-item"
+                data-selected={draft.selected}
+                key={candidate.candidateId}
+              >
+                <div className="capability-import-item-heading">
+                  <button
+                    type="button"
+                    className="capability-import-pick"
+                    aria-pressed={draft.selected}
+                    disabled={busy}
+                    onClick={() =>
+                      update(candidate.candidateId, {
+                        selected: !draft.selected
+                      })
+                    }
+                  >
+                    <span>
+                      <strong title={candidate.proposedName}>{candidate.proposedName}</strong>
+                      <small>
+                        {candidate.normalizedDefinitionJson?.includes('\"command\"')
+                          ? 'Stdio'
+                          : 'HTTP'}
+                        {candidate.conflict === 'name_conflict' ? ' · 已有同名项' : ''}
+                      </small>
+                    </span>
+                    <span className="capability-check" aria-hidden="true">
+                      ✓
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="quiet-button compact"
+                    aria-expanded={draft.open}
+                    onClick={() => update(candidate.candidateId, { open: !draft.open })}
+                  >
+                    {draft.open ? '收起' : 'JSON'}
+                  </button>
+                </div>
+                <div className="capability-import-origins">
+                  {origins(candidate).map((origin) => (
+                    <span
+                      key={origin.candidateId}
+                      className="capability-import-source-tag"
+                      title={origin.sourcePath}
+                    >
+                      <img src={sourceLogo(origin.sourceKind)} alt="" />
+                      {sourceLabel(origin.sourceKind)}
+                    </span>
+                  ))}
+                </div>
+                {draft.selected && candidate.conflict === 'name_conflict' && (
+                  <div className="capability-import-resolution">
+                    <span className="capability-note">同名配置如何处理</span>
+                    <div className="capability-actions">
+                      <button
+                        type="button"
+                        className="quiet-button compact"
+                        aria-pressed={draft.action === 'replace'}
+                        disabled={busy}
+                        onClick={() => update(candidate.candidateId, { action: 'replace' })}
+                      >
+                        替换现有
+                      </button>
+                      <button
+                        type="button"
+                        className="quiet-button compact"
+                        aria-pressed={draft.action === 'create'}
+                        disabled={busy}
+                        onClick={() =>
+                          update(candidate.candidateId, {
+                            action: 'create',
+                            open: true
+                          })
+                        }
+                      >
+                        另存为
+                      </button>
+                    </div>
+                    {draft.action === 'create' && (
+                      <p className="capability-note">请在 JSON 中修改 MCP 名称。</p>
+                    )}
+                  </div>
+                )}
+                {candidate.compatibility === 'needs_input' && (
+                  <div className="capability-note capability-import-resolution" role="status">
+                    {candidate.issues
+                      .filter((issue) => issue.kind === 'needs_configuration')
+                      .map((issue) => (
+                        <p key={`${issue.code}:${issue.field}:${issue.message}`}>
+                          {issue.message}
+                          <br />
+                          受影响字段：{issue.field}
+                        </p>
+                      ))}
+                    <p>可先导入为停用配置。</p>
+                  </div>
+                )}
+                {draft.open && (
+                  <label className="capability-json-field capability-import-json">
+                    <span>配置 JSON</span>
+                    <textarea
+                      aria-label={`${candidate.proposedName} 导入 JSON`}
+                      spellCheck={false}
+                      disabled={busy}
+                      value={draft.definitionJson}
+                      onChange={(event) =>
+                        update(candidate.candidateId, {
+                          definitionJson: event.target.value
+                        })
+                      }
+                    />
+                  </label>
+                )}
+              </article>
+            )
+          })}
       </div>
       {!available.length && <p className="capability-note">没有新的可导入配置。</p>}
       {other.length > 0 && (
@@ -852,12 +1020,19 @@ export function McpImportPanel({
           {other.map((candidate) => (
             <div key={candidate.candidateId}>
               <span>{candidate.proposedName}</span>
-              <small>{candidate.conflict === 'same' ? '已添加' : '需手动配置'}</small>
-              {candidate.conflict !== 'same' && candidate.issues.filter((issue) => issue.blocking).map((issue) => (
-                <p className="capability-note" key={`${issue.code}:${issue.field}`}>
-                  {issue.message}{issue.field ? ` 受影响字段：${issue.field}` : ''}
-                </p>
-              ))}
+              <small>
+                {sourceLabel(candidate.sourceKind)} ·{' '}
+                {candidate.conflict === 'same' ? '已添加' : '暂不支持'}
+              </small>
+              {candidate.conflict !== 'same' &&
+                candidate.issues
+                  .filter((issue) => issue.blocking)
+                  .map((issue) => (
+                    <p className="capability-note" key={`${issue.code}:${issue.field}`}>
+                      {issue.message}
+                      {issue.field ? ` 受影响字段：${issue.field}` : ''}
+                    </p>
+                  ))}
             </div>
           ))}
         </details>
@@ -875,17 +1050,6 @@ export function McpImportPanel({
             ))}
         </details>
       )}
-      <div className="capability-save">
-        <span className="capability-note">新添加的 MCP 默认关闭</span>
-        <button
-          type="button"
-          className="primary-button"
-          disabled={busy || !selected.length}
-          onClick={onCommit}
-        >
-          {busy ? '正在导入…' : `导入${selected.length ? ` ${selected.length} 项` : ''}`}
-        </button>
-      </div>
     </>
   )
 }
@@ -953,4 +1117,19 @@ function issueText(issue: McpConfigIssue | undefined): string {
 
 function errorMessage(error: unknown): string {
   return localizeExecutionEngineTerms(readErrorMessage(error))
+}
+
+function sourceLogo(source: McpImportCandidate['sourceKind']): string {
+  return PRODUCT_RUNTIME_LOGOS[
+    (
+      {
+        codex: 'codex-cli',
+        claude_code: 'claude-code-cli',
+        opencode: 'opencode-cli',
+        copilot: 'copilot-cli',
+        antigravity: 'antigravity-app',
+        cursor: 'cursor-agent'
+      } as const
+    )[source]
+  ]
 }

@@ -116,31 +116,33 @@ describe('Skill settings', () => {
     expect(markup).toContain('aria-pressed="true"')
     expect(markup).toContain('class="member-avatar')
     expect(markup).toContain('沐瓦')
+    expect(markup).toContain('<h3>生效组</h3>')
+    expect(markup).not.toContain('投递组')
     expect(markup).not.toContain('type="checkbox"')
   })
 
-  it('distinguishes bundled, pinned third-party, and user-imported provenance', () => {
+  it('shows only Rovai badges while preserving upstream and imported provenance', () => {
     const bundled = skillFixture(true)
-    const thirdParty = {
+    const grillDuo = {
       ...skillFixture(true),
-      name: 'tasteful-ui',
+      name: 'grill-duo',
       currentRevision: {
         ...skillFixture(true).currentRevision,
-        name: 'tasteful-ui',
+        name: 'grill-duo',
         sourceMetadata: {
           upstream: {
-            repository: 'https://github.com/DonkeyKing01/tasteful-ui-skill',
-            revision: '159ccd47a320f3a7bd0289d07366d422211895a1'
+            repository: 'https://github.com/mattpocock/skills',
+            revision: '84fdeffd12f2ee307994d1eb6feb48173b6e0502'
           }
         }
       }
     } satisfies SkillView
-    const mattThirdParty = {
+    const grillDuoWithDocs = {
       ...skillFixture(true),
-      name: 'diagnosing-bugs',
+      name: 'grill-duo-with-docs',
       currentRevision: {
         ...skillFixture(true).currentRevision,
-        name: 'diagnosing-bugs',
+        name: 'grill-duo-with-docs',
         sourceMetadata: {
           upstream: {
             repository: 'https://github.com/mattpocock/skills',
@@ -180,36 +182,36 @@ describe('Skill settings', () => {
       repositoryUrl: null,
       revisionLabel: 'Revision r1'
     })
-    expect(skillSourcePresentation(thirdParty)).toMatchObject({
-      kind: 'third-party',
-      badgeLabel: 'GitHub',
-      repositoryUrl: 'https://github.com/DonkeyKing01/tasteful-ui-skill',
-      repositoryLabel: 'DonkeyKing01/tasteful-ui-skill',
-      revisionLabel: '159ccd47'
+    expect(skillSourcePresentation(grillDuo)).toMatchObject({
+      kind: 'bundled',
+      badgeLabel: 'Rovai',
+      repositoryUrl: 'https://github.com/mattpocock/skills',
+      repositoryLabel: 'mattpocock/skills',
+      revisionLabel: '84fdeffd'
     })
-    expect(skillSourcePresentation(mattThirdParty)).toMatchObject({
-      kind: 'third-party',
-      badgeLabel: 'GitHub',
+    expect(skillSourcePresentation(grillDuoWithDocs)).toMatchObject({
+      kind: 'bundled',
+      badgeLabel: 'Rovai',
       repositoryUrl: 'https://github.com/mattpocock/skills',
       repositoryLabel: 'mattpocock/skills',
       revisionLabel: '84fdeffd'
     })
     expect(skillSourcePresentation(importedLocal)).toMatchObject({
       kind: 'imported',
-      badgeLabel: '本地导入',
+      badgeLabel: undefined,
       sourceLabel: '本地文件夹导入',
       repositoryUrl: null
     })
     expect(skillSourcePresentation(importedGithub)).toMatchObject({
       kind: 'imported',
-      badgeLabel: 'GitHub',
+      badgeLabel: undefined,
       repositoryUrl: 'https://github.com/example/team-skill',
       repositoryLabel: 'example/team-skill',
       revisionLabel: 'abcdef12'
     })
   })
 
-  it('keeps source and status beside the name without exposing source paths', () => {
+  it('keeps imported status beside the name without a source badge or path', () => {
     const imported = {
       ...skillFixture(true),
       origin: 'imported',
@@ -222,8 +224,8 @@ describe('Skill settings', () => {
     const markup = renderToStaticMarkup(
       createElement(SkillListItem, { skill: imported, selected: true, onSelect: () => {} })
     )
-    expect(markup).toContain('>本地导入<')
-    expect(markup).toContain('>已启用<')
+    expect(markup).not.toContain('capability-source')
+    expect(markup).toContain('aria-label="已启用"')
     expect(markup).toContain('aria-current="true"')
     expect(markup).not.toContain('/private/example')
   })
@@ -261,8 +263,9 @@ describe('Skill settings', () => {
   })
 
   it('summarizes the delivery scope without an ambiguous action label', () => {
-    expect(groupAssignmentSummary(9, 9)).toBe('全部 9 组')
-    expect(groupAssignmentSummary(6, 9)).toBe('6 / 9 组')
+    expect(groupAssignmentSummary(9, 9)).toBe('全部组')
+    expect(groupAssignmentSummary(6, 9)).toBe('6 个组')
+    expect(groupAssignmentSummary(3, 9)).toBe('3 个组')
     expect(groupAssignmentSummary(0, 9)).toBe('未选择')
   })
 

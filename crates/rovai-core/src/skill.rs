@@ -181,7 +181,6 @@ const REVIEW_DUO_FINDINGS_REFERENCE: &str =
     include_str!("../../../skills/review-duo/references/findings.md");
 const REVIEW_DUO_SNAPSHOT_REFERENCE: &str =
     include_str!("../../../skills/review-duo/references/snapshot.md");
-include!(concat!(env!("OUT_DIR"), "/third_party_bundled_files.rs"));
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -695,7 +694,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::UserManaged,
-        enabled_by_default: true,
+        enabled_by_default: false,
     },
     BundledDefinition {
         name: "campfire",
@@ -711,14 +710,6 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::SystemRequired,
-        enabled_by_default: true,
-    },
-    BundledDefinition {
-        name: "diagnosing-bugs",
-        files: DIAGNOSING_BUGS_FILES,
-        upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
-        upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
-        management_policy: SkillManagementPolicy::UserManaged,
         enabled_by_default: true,
     },
     BundledDefinition {
@@ -769,38 +760,15 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         management_policy: SkillManagementPolicy::UserManaged,
         enabled_by_default: true,
     },
-    BundledDefinition {
-        name: "tasteful-ui",
-        files: TASTEFUL_UI_FILES,
-        upstream_repository: Some("https://github.com/DonkeyKing01/tasteful-ui-skill"),
-        upstream_revision: Some("159ccd47a320f3a7bd0289d07366d422211895a1"),
-        management_policy: SkillManagementPolicy::UserManaged,
-        enabled_by_default: false,
-    },
-    BundledDefinition {
-        name: "tdd",
-        files: TDD_FILES,
-        upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
-        upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
-        management_policy: SkillManagementPolicy::UserManaged,
-        enabled_by_default: true,
-    },
-    BundledDefinition {
-        name: "ui-ux-pro-max",
-        files: UI_UX_PRO_MAX_FILES,
-        upstream_repository: Some("https://github.com/nextlevelbuilder/ui-ux-pro-max-skill"),
-        upstream_revision: Some("8bd29e775453ebcae52b6e6514fbf134df0c5770"),
-        management_policy: SkillManagementPolicy::UserManaged,
-        enabled_by_default: true,
-    },
-    BundledDefinition {
-        name: "writing-for-agents",
-        files: WRITING_FOR_AGENTS_FILES,
-        upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
-        upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
-        management_policy: SkillManagementPolicy::UserManaged,
-        enabled_by_default: true,
-    },
+];
+
+// Retire only the former bundled copies; explicit user imports with these names survive.
+const RETIRED_BUNDLED_SKILLS: &[&str] = &[
+    "diagnosing-bugs",
+    "tasteful-ui",
+    "tdd",
+    "ui-ux-pro-max",
+    "writing-for-agents",
 ];
 
 fn bundled_definition(name: &str) -> Option<&'static BundledDefinition> {
@@ -1964,6 +1932,7 @@ impl SkillLibraryService {
         for definition in prepared.definitions {
             self.commit_bundled_definition(database, definition, &mut report)?;
         }
+        report.changed |= retire_third_party_bundled_skills(database)?;
         Ok(report)
     }
 
@@ -2548,6 +2517,63 @@ fn load_existing_skill_by_name(database: &Database, name: &str) -> Result<Option
         )
         .optional()
         .map_err(Into::into)
+}
+
+fn retire_third_party_bundled_skills(database: &mut Database) -> Result<bool> {
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let now = Utc::now().to_rfc3339();
+    let mut changed = false;
+    for name in RETIRED_BUNDLED_SKILLS {
+        let skill_id = transaction
+            .query_row(
+                r#"
+                SELECT skill.id FROM skill
+                JOIN skill_revision AS revision ON revision.id = skill.current_revision_id
+                WHERE skill.name = ?1 AND skill.origin = 'official'
+                  AND skill.lifecycle_status = 'active' AND revision.source_type = 'bundled'
+                "#,
+                [name],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(skill_id) = skill_id else { continue };
+        transaction.execute(
+            r#"
+            UPDATE skill SET enabled = 0, lifecycle_status = 'deleting',
+                deletion_requested_at = ?1, version = version + 1, updated_at = ?1
+            WHERE id = ?2
+            "#,
+            params![now, skill_id],
+        )?;
+        // Defer filesystem cleanup to the existing root-scoped reconciler, which
+        // protects active Runs and project-owned entries. Startup only marks DB state.
+        transaction.execute(
+            r#"
+            INSERT INTO skill_projection_root_state(
+                execution_root, access_state, dirty, cleanup_required, removed_at, updated_at
+            )
+            SELECT DISTINCT execution_root, 'active', 1, 1, NULL, ?1
+            FROM skill_projection_observation WHERE skill_id = ?2
+            ON CONFLICT(execution_root) DO UPDATE SET
+                dirty = 1, cleanup_required = 1, updated_at = excluded.updated_at
+            "#,
+            params![now, skill_id],
+        )?;
+        append_skill_event(
+            &transaction,
+            "skill.bundled_retired",
+            &skill_id,
+            &ActorRef::System {
+                component_id: "skill-library-bootstrap".to_string(),
+            },
+            json!({"skillId": skill_id, "name": name}),
+        )?;
+        changed = true;
+    }
+    transaction.commit()?;
+    Ok(changed)
 }
 
 fn promote_imported_skill_to_official(database: &mut Database, name: &str) -> Result<bool> {
@@ -4683,23 +4709,18 @@ mod slow_tests {
                 "analyze-agent-codebase",
                 "campfire",
                 "cli-operations",
-                "diagnosing-bugs",
                 "grill-duo",
                 "grill-duo-with-docs",
                 "member-studio",
                 "memory-stewardship",
                 "review-duo",
-                "tasteful-ui",
-                "tdd",
-                "ui-ux-pro-max",
                 "worktree",
-                "writing-for-agents"
             ]
         );
         assert!(
             skills
                 .iter()
-                .all(|skill| skill.enabled == (skill.name != "tasteful-ui"))
+                .all(|skill| skill.enabled == (skill.name != "analyze-agent-codebase"))
         );
         assert!(skills.iter().all(|skill| {
             skill.management_policy
@@ -4727,24 +4748,6 @@ mod slow_tests {
                 .unwrap();
             assert_bundled_skill_materialized(&service, skill, definition);
         }
-        let diagnosing_bugs = skills
-            .iter()
-            .find(|skill| skill.name == "diagnosing-bugs")
-            .unwrap();
-        assert_eq!(
-            diagnosing_bugs
-                .current_revision
-                .risk_summary
-                .script_file_count,
-            1
-        );
-        assert_eq!(
-            diagnosing_bugs
-                .current_revision
-                .risk_summary
-                .executable_file_count,
-            0
-        );
         let memory_stewardship = skills
             .iter()
             .find(|skill| skill.name == "memory-stewardship")
@@ -4808,7 +4811,11 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        for (name, enabled) in [("tasteful-ui", true), ("ui-ux-pro-max", false)] {
+        for (name, enabled) in [
+            ("analyze-agent-codebase", true),
+            ("grill-duo", false),
+            ("grill-duo-with-docs", false),
+        ] {
             let skill = skills.iter().find(|skill| skill.name == name).unwrap();
             let changed = service
                 .set_enabled(
@@ -4827,7 +4834,11 @@ mod slow_tests {
             assert_eq!(changed.result.payload["version"], skill.version + 1);
         }
         service.install_bundled_skills(&mut database).unwrap();
-        for (name, enabled) in [("tasteful-ui", true), ("ui-ux-pro-max", false)] {
+        for (name, enabled) in [
+            ("analyze-agent-codebase", true),
+            ("grill-duo", false),
+            ("grill-duo-with-docs", false),
+        ] {
             let initial = skills.iter().find(|skill| skill.name == name).unwrap();
             let refreshed = service.get(&database, &initial.id).unwrap().unwrap();
             assert_eq!(refreshed.enabled, enabled);
@@ -4993,6 +5004,165 @@ mod slow_tests {
             .unwrap();
         drop(database);
         remove_directory_if_present(&root).unwrap();
+    }
+
+    #[test]
+    fn retiring_bundled_github_skills_defers_projection_cleanup_and_preserves_manual_imports() {
+        use crate::skill_projection::SkillProjectionReconciler;
+
+        let sandbox = temporary_directory("rovai-retired-skill-bootstrap");
+        let source = sandbox.join("source");
+        let project = sandbox.join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut database = Database::open(&sandbox.join("data")).unwrap();
+        let service = SkillLibraryService::new(sandbox.join("library")).unwrap();
+        service.install_bundled_skills(&mut database).unwrap();
+        let retained = service.list(&database).unwrap();
+        let import = |database: &mut Database, name: &str| {
+            let folder = write_skill(&source, name, "User-selected import fixture.");
+            let inspection = service.inspect_import(database, &folder).unwrap();
+            let candidate = &inspection.candidates[0];
+            service
+                .commit_import(
+                    database,
+                    &user_envelope(
+                        &Uuid::new_v4().to_string(),
+                        CommitSkillImportCommand {
+                            staging_token: inspection.staging_token.clone(),
+                            candidate_name: candidate.name.clone(),
+                            expected_digest: candidate.content_digest.clone(),
+                            expected_skill_version: candidate.existing_skill_version,
+                            confirm_update: false,
+                        },
+                    ),
+                )
+                .unwrap();
+            service
+                .list(database)
+                .unwrap()
+                .into_iter()
+                .find(|skill| skill.name == name)
+                .unwrap()
+        };
+        let mut retired = Vec::new();
+        for name in RETIRED_BUNDLED_SKILLS {
+            let skill = import(&mut database, name);
+            // Model an older installed release through its persisted origin/source seam.
+            database
+                .connection()
+                .execute(
+                    "UPDATE skill SET origin = 'official' WHERE id = ?1",
+                    [&skill.id],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE skill_revision SET source_type = 'bundled' WHERE id = ?1",
+                    [&skill.current_revision.id],
+                )
+                .unwrap();
+            retired.push(skill);
+        }
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &service,
+                &project,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
+
+        assert!(
+            service
+                .install_bundled_skills(&mut database)
+                .unwrap()
+                .changed
+        );
+        for original in &retired {
+            let current = service.get(&database, &original.id).unwrap().unwrap();
+            assert_eq!(current.lifecycle_status, "deleting");
+            assert!(!current.enabled);
+            assert_eq!(current.current_revision.id, original.current_revision.id);
+            assert!(
+                service
+                    .revision_content_path(&original.id, &original.current_revision.id)
+                    .is_dir()
+            );
+        }
+        let cleanup_pending: (bool, bool) = database.connection().query_row(
+            "SELECT dirty, cleanup_required FROM skill_projection_root_state WHERE execution_root = ?1",
+            [project.canonicalize().unwrap().to_string_lossy().as_ref()],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).unwrap();
+        assert_eq!(cleanup_pending, (true, true));
+        // A repeated bootstrap must not increment versions or emit duplicate retirement events.
+        assert!(
+            !service
+                .install_bundled_skills(&mut database)
+                .unwrap()
+                .changed
+        );
+        let event_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'skill.bundled_retired'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_count, RETIRED_BUNDLED_SKILLS.len() as i64);
+        SkillProjectionReconciler
+            .finalize_unprojected_deletions(&mut database, &service)
+            .unwrap();
+        assert!(
+            retired
+                .iter()
+                .all(|skill| service.get(&database, &skill.id).unwrap().is_some())
+        );
+
+        // Explicit current-root reconciliation releases the old projections before private cleanup.
+        SkillProjectionReconciler
+            .reconcile_root(&mut database, &service, &project, &[])
+            .unwrap();
+        SkillProjectionReconciler
+            .finalize_unprojected_deletions(&mut database, &service)
+            .unwrap();
+        for original in &retired {
+            assert!(service.get(&database, &original.id).unwrap().is_none());
+            assert!(
+                !service
+                    .revision_content_path(&original.id, &original.current_revision.id)
+                    .exists()
+            );
+        }
+        for original in retained {
+            let current = service.get(&database, &original.id).unwrap().unwrap();
+            assert_eq!(current.enabled, original.enabled);
+            assert_eq!(current.group_assignments, original.group_assignments);
+            assert_eq!(current.current_revision.id, original.current_revision.id);
+        }
+
+        let imported = RETIRED_BUNDLED_SKILLS
+            .iter()
+            .map(|name| import(&mut database, name))
+            .collect::<Vec<_>>();
+        assert!(
+            !service
+                .install_bundled_skills(&mut database)
+                .unwrap()
+                .changed
+        );
+        for original in imported {
+            let current = service.get(&database, &original.id).unwrap().unwrap();
+            assert_eq!(current.origin, SkillOrigin::Imported);
+            assert_eq!(current.lifecycle_status, "active");
+            assert_eq!(current.version, original.version);
+            assert_eq!(current.group_assignments, original.group_assignments);
+            assert_eq!(current.current_revision.id, original.current_revision.id);
+        }
+        drop(database);
+        remove_directory_if_present(&sandbox).unwrap();
     }
 
     #[test]

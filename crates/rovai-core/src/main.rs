@@ -179,7 +179,8 @@ use rovai_core::{
     managed_blob::ManagedBlobStore,
     mcp::{
         CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
-        SetMcpAssignmentParams, SetMcpServerEnabledParams, UpdateMcpServerParams,
+        RevealMcpServerParams, SetMcpAssignmentParams, SetMcpMembersParams,
+        SetMcpServerEnabledParams, UpdateMcpServerParams,
     },
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
@@ -7002,6 +7003,18 @@ impl Core {
                 let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
                     self.mcp_config()?.get(&known_agents)?,
+                )?)
+            }
+            "mcp.servers.reveal" => {
+                let params: RevealMcpServerParams = serde_json::from_value(request.params.clone())?;
+                Ok(serde_json::to_value(self.mcp_config()?.reveal(params)?)?)
+            }
+            "mcp.servers.setMembers" => {
+                let params: SetMcpMembersParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_ids(&database)?;
+                Ok(serde_json::to_value(
+                    self.mcp_config()?.set_members(params, &known_agents)?,
                 )?)
             }
             "mcp.config.repairPermissions" => {

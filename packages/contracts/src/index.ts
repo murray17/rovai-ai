@@ -3189,6 +3189,12 @@ export type McpMutationResult =
   | { status: 'invalid'; issues: McpConfigIssue[] }
   | { status: 'risk_acknowledgement_required'; serverId: string }
 
+/** Ephemeral response to the user's explicit Show action; never persist in receipts or events. */
+export type McpRevealResult =
+  | { status: 'ok'; serverId: string; configDigest: string; definitionJson: string }
+  | { status: 'conflict'; actualConfigDigest: string }
+  | { status: 'invalid'; issues: McpConfigIssue[] }
+
 export interface CreateMcpServerParams {
   expectedConfigDigest: string
   definitionJson: string
@@ -3237,6 +3243,8 @@ export interface McpImportIssue {
 }
 
 export interface McpImportCandidate {
+  /** Backend-proven identical name and private definition within this scan. */
+  duplicateOfCandidateId?: string
   candidateId: string
   sourceKind: McpImportSourceKind
   sourcePath: string
@@ -3559,6 +3567,8 @@ export type CoreMethod =
   | 'skills.projectAccess.restore'
   | 'skills.revealLocation'
   | 'mcp.config.get'
+  | 'mcp.servers.reveal'
+  | 'mcp.servers.setMembers'
   | 'mcp.config.repairPermissions'
   | 'mcp.servers.create'
   | 'mcp.servers.update'

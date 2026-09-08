@@ -104,6 +104,8 @@ pub struct McpImportCandidate {
     pub compatibility: McpImportCompatibility,
     pub issues: Vec<McpImportIssue>,
     pub conflict: McpImportConflict,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_of_candidate_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -260,6 +262,20 @@ impl McpImportScanner {
             }
         }
         for index in 0..normalized_candidates.len() {
+            // Link identical named entries using private definitions, never masked previews.
+            let same_named = (0..index).find(|&other| {
+                normalized_candidates[index].public.proposed_name
+                    == normalized_candidates[other].public.proposed_name
+                    && normalized_candidates[index].definition.is_some()
+                    && normalized_candidates[index].definition
+                        == normalized_candidates[other].definition
+            });
+            if let Some(other) = same_named {
+                normalized_candidates[index]
+                    .public
+                    .duplicate_of_candidate_id =
+                    Some(normalized_candidates[other].public.candidate_id.clone());
+            }
             if normalized_candidates[index].public.conflict != McpImportConflict::None {
                 continue;
             }
@@ -524,6 +540,7 @@ fn normalize_server(
             compatibility,
             issues,
             conflict: McpImportConflict::None,
+            duplicate_of_candidate_id: None,
         },
         definition,
     }
@@ -929,6 +946,7 @@ fn candidate_without_definition(
         compatibility: compatibility(&issues),
         issues,
         conflict: McpImportConflict::None,
+        duplicate_of_candidate_id: None,
     };
     NormalizedCandidate {
         public,
@@ -1067,6 +1085,38 @@ mod tests {
                 .iter()
                 .any(|issue| issue.code == "mcp.import_enabled_reset")
         );
+        let original = root.join("opencode.jsonc");
+        let identical = root.join("second.jsonc");
+        fs::copy(&original, &identical).unwrap();
+        let different = root.join("different.jsonc");
+        fs::write(
+            &different,
+            fs::read_to_string(&original)
+                .unwrap()
+                .replace("do-not-leak", "different-secret"),
+        )
+        .unwrap();
+        let grouped = McpImportScanner
+            .scan_specs(
+                &store,
+                &agents(),
+                vec![
+                    spec(McpImportSourceKind::Opencode, original, "mcp"),
+                    spec(McpImportSourceKind::Opencode, identical, "mcp"),
+                    spec(McpImportSourceKind::Opencode, different, "mcp"),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            grouped
+                .candidates
+                .iter()
+                .filter(|c| c.duplicate_of_candidate_id.is_some())
+                .count(),
+            1
+        );
+        let public = serde_json::to_string(&grouped).unwrap();
+        assert!(!public.contains("do-not-leak") && !public.contains("different-secret"));
         let _ = fs::remove_dir_all(root);
     }
 

@@ -2,6 +2,7 @@ import { Activity, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SkillSettings } from '../../../apps/desktop/src/renderer/src/SkillSettings'
 import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
+import { maskMcpJson } from '../../../apps/desktop/src/renderer/src/McpJsonEditor'
 import { McpSettings } from '../../../apps/desktop/src/renderer/src/McpSettings'
 import { agent, server, skillFixture } from './data'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -11,6 +12,31 @@ const requests: { method: string; params: any }[] = []
 let folderSelections = 0
 let folderResult: string | null = '/fixture/skill-folder'
 let conflict = false
+let revealWait: Promise<void> | null = null
+let releaseReveal: (() => void) | undefined
+const privateDefinition = JSON.stringify({
+  mcpServers: {
+    docs: {
+      command: 'node',
+      env: {
+        API_TOKEN: 'fixture-env-credential',
+        EMPTY: '',
+        PADDED: '  info  '
+      }
+    }
+  }
+})
+const privateHeader = JSON.stringify({
+  mcpServers: {
+    Playwright: {
+      url: 'https://example.invalid/mcp',
+      headers: {
+        Authorization: 'Bearer fixture-header-credential',
+        'X-Region': '  cn  '
+      }
+    }
+  }
+})
 let toggleWait: Promise<void> | null = null
 let releaseToggle: (() => void) | undefined
 const groups = [
@@ -41,13 +67,23 @@ let skills = ['ui-ux-pro-max', 'design-review', 'local-skill', 'code-review'].ma
   id: `skill-${i + 1}`,
   name,
   origin: i === 2 ? ('imported' as const) : ('official' as const),
-  groupAssignments: groups.map((group) => ({ groupKey: group.key, revisionId: 'revision-1' }))
+  groupAssignments: groups.map((group) => ({
+    groupKey: group.key,
+    revisionId: 'revision-1'
+  }))
 }))
 let config = {
   configDigest: 'digest-1',
   servers: [
     server(),
-    server({ serverId: 'browser', name: 'Playwright', enabled: false, assignedAgentIds: [] })
+    server({
+      serverId: 'browser',
+      name: 'Playwright',
+      transport: 'streamable_http',
+      definitionJson: maskMcpJson(privateHeader)!,
+      enabled: false,
+      assignedAgentIds: []
+    })
   ]
 }
 const candidate = {
@@ -77,24 +113,62 @@ Object.assign(window, {
         return {
           path: params.path,
           status: 'text',
-          content: params.path === 'SKILL.md' ? text : '参考内容。',
+          content:
+            params.path === 'SKILL.md'
+              ? text +
+                '\n\n' +
+                Array.from(
+                  { length: 24 },
+                  (_, i) => '## 参考段落 ' + (i + 1) + '\n\n内容与操作位于同一工作区。'
+                ).join('\n\n')
+              : '参考内容。',
           files: [
             { path: 'SKILL.md', bytes: 500 },
             { path: 'references/guide.md', bytes: 20 }
           ]
         }
       if (method === 'skills.import.inspect' || method === 'skills.import.github.inspect')
-        return { stagingToken: 'stage-1', candidates: [candidate], rejectedCandidates: [] }
+        return {
+          stagingToken: 'stage-1',
+          candidates:
+            method === 'skills.import.github.inspect'
+              ? [
+                  { ...candidate, name: 'github-skill-one' },
+                  { ...candidate, name: 'github-skill-two' }
+                ]
+              : [candidate],
+          rejectedCandidates: []
+        }
       if (method === 'skills.import.commit') {
-        skills = [...skills, { ...skills[0], id: 'new-skill', name: candidate.name }]
-        return { status: 'applied', payload: { skillId: 'new-skill' } }
+        const id = 'new-' + params.command.candidateName
+        skills = [
+          ...skills,
+          {
+            ...skills[0],
+            id,
+            name: params.command.candidateName,
+            origin: 'imported',
+            enabled: true
+          }
+        ]
+        return { status: 'applied', payload: { skillId: id } }
+      }
+      if (method === 'skills.delete') {
+        skills = skills.filter((s) => s.id !== params.command.skillId)
+        return { status: 'applied', payload: {} }
       }
       if (method === 'skills.setEnabled') {
-      if (toggleWait) { await toggleWait; toggleWait = null }
+        if (toggleWait) {
+          await toggleWait
+          toggleWait = null
+        }
         const item = skills.find((s) => s.id === params.command.skillId)!
         item.enabled = params.command.enabled
         item.version++
-        return { status: 'applied', payload: { enabled: item.enabled, version: item.version } }
+        return {
+          status: 'applied',
+          payload: { enabled: item.enabled, version: item.version }
+        }
       }
       if (method === 'skills.setGroupAssignments') {
         const item = skills.find((s) => s.id === params.command.skillId)!
@@ -107,6 +181,34 @@ Object.assign(window, {
       }
       if (method === 'skills.get')
         return structuredClone(skills.find((s) => s.id === params.skillId))
+      if (method === 'mcp.servers.reveal') {
+        if (revealWait) {
+          await revealWait
+          revealWait = null
+        }
+        if (params.expectedConfigDigest !== config.configDigest)
+          return {
+            status: 'conflict',
+            actualConfigDigest: config.configDigest
+          }
+        return {
+          status: 'ok',
+          serverId: params.serverId,
+          configDigest: config.configDigest,
+          definitionJson: params.serverId === 'browser' ? privateHeader : privateDefinition
+        }
+      }
+      if (method === 'mcp.servers.setMembers') {
+        config.servers = config.servers.map((s) =>
+          s.serverId === params.serverId
+            ? {
+                ...s,
+                enabled: params.agentIds.length > 0,
+                assignedAgentIds: params.agentIds
+              }
+            : s
+        )
+      }
       if (method === 'mcp.config.get') return structuredClone(config)
       if (method === 'mcp.import.scan')
         return {
@@ -123,9 +225,12 @@ Object.assign(window, {
             candidateId: `import-${index + 1}`,
             proposedName: name,
             sourceKind,
+            sourcePath: '/fixture/' + sourceKind + '/mcp.json',
             compatibility: 'portable',
             conflict: name === 'docs' ? 'name_conflict' : 'none',
-            normalizedDefinitionJson: JSON.stringify({ mcpServers: { [name]: { command: 'node' } } }),
+            normalizedDefinitionJson: JSON.stringify({
+              mcpServers: { [name]: { command: 'node' } }
+            }),
             issues: []
           }))
         }
@@ -134,9 +239,16 @@ Object.assign(window, {
         config.configDigest = 'external-digest'
         return { status: 'conflict', actualConfigDigest: config.configDigest }
       }
+      if (method === 'mcp.servers.update' && params.expectedConfigDigest !== config.configDigest)
+        return { status: 'conflict', actualConfigDigest: config.configDigest }
       if (method === 'mcp.servers.update')
         config.servers = config.servers.map((s) =>
-          s.serverId === params.serverId ? { ...s, definitionJson: params.definitionJson } : s
+          s.serverId === params.serverId
+            ? {
+                ...s,
+                definitionJson: maskMcpJson(params.definitionJson) ?? params.definitionJson
+              }
+            : s
         )
       if (method === 'mcp.servers.setEnabled')
         config.servers = config.servers.map((s) =>
@@ -157,10 +269,11 @@ Object.assign(window, {
         const json = params.definitionJson ?? params.selections[0].definitionJson
         config.servers.push(
           server({
-            serverId: 'added',
+            serverId: 'added-' + config.servers.length,
             name: Object.keys(JSON.parse(json).mcpServers)[0],
             definitionJson: json,
-            enabled: false
+            enabled: false,
+            assignedAgentIds: []
           })
         )
       }
@@ -179,7 +292,14 @@ function Fixture() {
   return (
     <div className="app-shell">
       <WindowDragStrip page="settings" />
-      <aside style={{ gridColumn: 1, gridRow: '1 / -1', padding: '28px 18px', background: 'var(--rail)' }}>
+      <aside
+        style={{
+          gridColumn: 1,
+          gridRow: '1 / -1',
+          padding: '28px 18px',
+          background: 'var(--rail)'
+        }}
+      >
         <strong>设置</strong>
         <div style={{ display: 'grid', gap: 8, marginTop: 24 }}>
           <button className="quiet-button" id="nav-skills" onClick={() => setPage('skills')}>
@@ -212,7 +332,17 @@ Object.assign(window, {
         requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 60)))
       ),
     requests,
-    holdToggle: () => { toggleWait = new Promise(resolve => { releaseToggle = resolve }) },
+    holdReveal: () => {
+      revealWait = new Promise((resolve) => {
+        releaseReveal = resolve
+      })
+    },
+    releaseReveal: () => releaseReveal?.(),
+    holdToggle: () => {
+      toggleWait = new Promise((resolve) => {
+        releaseToggle = resolve
+      })
+    },
     releaseToggle: () => releaseToggle?.(),
     folderSelections: () => folderSelections,
     cancelFolder: () => {

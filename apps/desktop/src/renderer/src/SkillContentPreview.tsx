@@ -28,7 +28,10 @@ export function SkillContentPreview({
     setView(null)
     setError(null)
     void window.rovai
-      .request<SkillContentView>('skills.content.read', { ...JSON.parse(targetKey), path })
+      .request<SkillContentView>('skills.content.read', {
+        ...JSON.parse(targetKey),
+        path
+      })
       .then((next) => {
         if (!cancelled) {
           setView(next)
@@ -45,36 +48,54 @@ export function SkillContentPreview({
   return (
     <div className="skill-content-preview">
       <div className="capability-filebar">
-        <code>{path}</code>
-        <button
-          type="button"
-          className="quiet-button compact"
-          aria-pressed={raw}
-          onClick={() => setRaw((value) => !value)}
-        >
-          {raw ? '阅读视图' : '查看源码'}
-        </button>
-      </div>
-      {files.length > 1 && (
-        <details className="capability-files">
-          <summary>文件 · {files.length}</summary>
-          <div>
-            {files.map((file) => (
-              <button
-                type="button"
-                key={file.path}
-                aria-pressed={path === file.path}
-                onClick={() => {
-                  setPath(file.path)
-                  setRaw(false)
-                }}
-              >
+        <label className="capability-file-select">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            aria-hidden="true"
+          >
+            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6" />
+          </svg>
+          <select
+            aria-label="Skill 预览文件"
+            value={path}
+            onChange={(event) => {
+              setPath(event.target.value)
+              setRaw(false)
+            }}
+          >
+            {(files.length ? files : [{ path }]).map((file) => (
+              <option key={file.path} value={file.path}>
                 {file.path}
-              </button>
+              </option>
             ))}
-          </div>
-        </details>
-      )}
+          </select>
+          <svg
+            className="capability-file-chevron"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            aria-hidden="true"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </label>
+        <div className="capability-view-modes" role="group" aria-label="Skill 预览方式">
+          <button type="button" aria-pressed={!raw} onClick={() => setRaw(false)}>
+            阅读
+          </button>
+          <button type="button" aria-pressed={raw} onClick={() => setRaw(true)}>
+            源码
+          </button>
+        </div>
+      </div>
       <CapabilityError error={error} onRetry={() => setRetry((value) => value + 1)} />
       {!view && !error && (
         <div className="capability-empty" role="status">

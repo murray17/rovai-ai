@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-09-07
+last_updated: 2026-09-08
 ---
 
 # 当前基础架构不变量
@@ -438,7 +438,7 @@ last_updated: 2026-09-07
 ### 外部 MCP 配置与投影
 
 - `~/.rovai/mcp.json` 是用户管理外部 MCP Server、immutable server identity、enablement 和 Assignment 的唯一配置真源；SQLite 不复制 Server/Assignment 真源。已有 env/Header 明文凭证可在本机导入时迁移至既有私有配置存储；Unix 为文件 `0600`、目录 `0700` 的明文，Windows 复用私有 ACL，并不承诺落盘加密或新增密钥库。
-- 文件是一个封闭、版本化 canonical JSON envelope；Core 在完整校验、规范化和精确 compare-and-swap 后原子替换。管理用 identity/revision/provenance 元数据不投影给 Runtime，Server identity 不因显示名、参数或 secret 变化而改变，删除后不复用。前端预览、命令回执、事件、诊断和日志不得暴露完整凭证；后端从选定来源重新读取并校验后完成隐藏值迁移，未修改的掩码不得作为凭证落盘。实际运行值仅进入既有 Core-owned 私有配置/投影边界。
+- 文件是一个封闭、版本化 canonical JSON envelope；Core 在完整校验、规范化和精确 compare-and-swap 后原子替换。管理用 identity/revision/provenance 元数据不投影给 Runtime，Server identity 不因显示名、参数或 secret 变化而改变，删除后不复用。默认前端预览、命令回执、事件、诊断和日志不得暴露完整凭证；后端从选定来源重新读取并校验后完成隐藏值迁移，未修改的掩码不得作为凭证落盘。用户在详情显式点击“显示”时，独立只读 `mcp.servers.reveal` 以所选 Server ID 和预期 digest 读取单项原值，只进入当前编辑会话，不经过通用命令回执或事件，不写入前端持久存储。保存或离开后重新隐藏；日常落盘仍为既有权限收紧的私有配置文件，并非加密存储。Runtime 接收值仍沿用既有 Core-owned 私有投影边界。
 - 本机导入保留 env/Header 的原始值语义（含空值、空白和鉴权前缀），不生成新变量名或强制重复填写。引用按来源语义无损转换，并以 Core 实际启动环境判定缺项；不兼容语法明确拒绝该候选，不影响其他候选。新增仍默认停用且不分配队员；替换保留 identity、启停和分配，失败不破坏旧配置。历史生成的占位符不推测恢复，只有显式重新选取原始来源执行替换才迁移来源值。
 - 新配置从空 `mcpServers`、空管理元数据和无 Assignment 开始；产品不内置、恢复、广告或自动创建第三方 preset/受审定义。所有外部 Server 都来自用户显式创建/导入。
 - 对声明 `additive` 的 Runtime，每个 AgentRun 冻结当时已启用且分配给该成员的 server identity/revision 与经脱敏的 projection input；后续文件编辑不改写已冻结 Run。Runtime 投影只能写入 Core-owned 私有边界，不覆盖用户 Global/Project/Workspace 配置，Run 结束按进程复用与所有权规则清理。声明 `unsupported` 的 Runtime 不读取或冻结 Assignment，也不形成 projection。
@@ -462,6 +462,9 @@ last_updated: 2026-09-07
 - Library desired state、root access ledger 和 per-Run frozen exposure 是三个独立权威。事件只标记精确 root dirty，Reconciler 在 root scope 内去重、串行收敛并以 generation/digest 阻止迟到结果；失败不回滚 Library 真源，但相关新 Run fail closed。Run 启动前必须重新验证 Revision 路径、类型、大小、权限和 digest，不依赖历史目录扫描或 active-Run 引用作为新 Run 准入。
 - Bundled Skill bootstrap 在数据库 digest 与 expected digest 相同时走只读快速验证；只有变化或不一致才在私有 staging 中物化并原子 promote，经失败注入也不能让半成品满足执行门禁。Windows copy projection 使用 operation journal、backup/promote/verify/metadata/cleanup 多阶段恢复；Execution Root Gate 将 launch registration 与 replacement 串行化，崩溃后先按 journal 收敛再准入。
 - Official inventory 是封闭、同名不可被 import 覆盖的产品集合；official provenance、pinned third-party 内容和 system-required management policy 作为产品配置审核。成员创建只由 Agent 发起受控 `member.create` workflow，在一条完整提案中给出身份、Runtime/model/permission/外观，并只在当前用户确认后调用；用户仍拥有最终授权和配置。
+- 默认 inventory 仅保留 Rovai 维护的九项 Skill，包括保留上游许可与署名的两个 Grill Duo 改编。
+  第三方源包不再自动预置；五项已退出预置的旧 official/bundled 副本经既有删除生命周期退役，用户显式导入
+  的同名 Skill 不受影响。具体清单与升级边界见 [Skill Projection Reconciliation](skill-projection-reconciliation.md)。
 - Grill/Review 等协作 Skill 是普通 user-managed Skill，不因 official 身份获得额外领域权限。Grill Duo 保持一位固定搭档、稳定问题编号、开放轮次、迟到/错关联不推进和最终用户确认；Review Duo 保持独立 Spec/Standards 轴、四消息 session 协议、不可变 review range 和合格替补语义。Skill 只编排协作，不成为文档、代码或判定真源。
 
 ## Execution Evidence、Runtime Activity 与 Usage

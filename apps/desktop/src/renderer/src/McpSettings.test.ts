@@ -10,21 +10,59 @@ import {
   buildMcpImportDrafts,
   filterMcpServers
 } from './McpSettings'
+import { maskMcpJson, materializeMcpDraft } from './McpJsonEditor'
 import { capabilityListWidth, CapabilityToggle } from './CapabilityWorkspace'
 
 describe('MCP workspace', () => {
-  it('offers a loading-safe split workspace with state filters and inline local import', () => {
+  it('masks credentials while preserving references, empty values and edits to unrelated fields', () => {
+    const raw = JSON.stringify({
+      mcpServers: {
+        docs: {
+          command: 'node',
+          env: {
+            API_TOKEN: 'fixture-token',
+            REF_TOKEN: '${EXISTING}',
+            EMPTY: '',
+            PADDED: '  info  '
+          }
+        }
+      }
+    })
+    const masked = maskMcpJson(raw)!
+    expect(masked.includes('fixture-token')).toBe(false)
+    expect(masked).toContain('${EXISTING}')
+    expect(masked).toContain('  info  ')
+    const renamed = materializeMcpDraft(masked.replace('"docs"', '"new-name"'), raw)
+    const values = JSON.parse(renamed).mcpServers['new-name'].env
+    expect(values.API_TOKEN === 'fixture-token').toBe(true)
+    expect(values.EMPTY).toBe('')
+    const headers = maskMcpJson(
+      JSON.stringify({
+        mcpServers: {
+          remote: {
+            url: 'https://example.invalid',
+            headers: { Authorization: 'Bearer fixture-auth', 'X-Region': 'cn' }
+          }
+        }
+      })
+    )!
+    expect(headers.includes('fixture-auth')).toBe(false)
+    expect(headers).toContain('cn')
+    expect(maskMcpJson('{broken')).toBeNull()
+  })
+
+  it('offers a loading-safe split workspace with member permissions and inline local import', () => {
     const markup = renderToStaticMarkup(createElement(McpSettings, { agents: [agent()] }))
     expect(markup).toContain('aria-label="MCP 列表"')
     expect(markup).toContain('从本机导入')
     expect(markup).toContain('正在读取 MCP 配置')
-    expect(markup).toContain('aria-label="MCP 启用状态"')
+    expect(markup).not.toContain('aria-label="MCP 启用状态"')
     expect(markup).toContain('role="separator"')
     expect(markup).not.toContain('role="dialog"')
     expect(markup).not.toContain('配置源文件')
   })
 
-  it('selects whole member rows with real avatars and text-search, without checkboxes', () => {
+  it('selects whole member rows with real avatars without a member search, without checkboxes', () => {
     const markup = renderToStaticMarkup(
       createElement(McpMemberChoices, {
         members: Array.from({ length: 12 }, (_, index) => agent(index)),
@@ -36,7 +74,7 @@ describe('MCP workspace', () => {
     expect(markup.match(/class="member-avatar"/g)).toHaveLength(12)
     expect(markup.match(/aria-pressed="true"/g)).toHaveLength(1)
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(11)
-    expect(markup).toContain('aria-label="搜索队员"')
+    expect(markup).not.toContain('aria-label="搜索队员"')
     expect(markup).not.toContain('type="checkbox"')
   })
 
@@ -52,13 +90,17 @@ describe('MCP workspace', () => {
     expect(markup).toContain('--mcp-identity:')
     expect(markup).toContain('aria-current="true"')
     expect(markup).toContain('未保存 · Stdio · 1 位队员')
-    expect(markup).toContain('已启用')
+    expect(markup).not.toContain('已启用')
     expect(markup).not.toContain('高权限')
   })
 
   it('combines text with enabled and disabled filters', () => {
     const docs = server(),
-      browser = server({ serverId: 'browser', name: 'Playwright', enabled: false })
+      browser = server({
+        serverId: 'browser',
+        name: 'Playwright',
+        enabled: false
+      })
     expect(filterMcpServers([docs, browser], 'play', 'disabled')).toEqual([browser])
     expect(filterMcpServers([docs, browser], 'play', 'enabled')).toEqual([])
     expect(filterMcpServers([docs, browser], '', 'enabled')).toEqual([docs])
@@ -81,7 +123,10 @@ describe('MCP workspace', () => {
       ]
     } as unknown as McpImportInspection
     const drafts = buildMcpImportDrafts(inspection, [server()])
-    expect(drafts['candidate-1']).toMatchObject({ selected: false, action: null })
+    expect(drafts['candidate-1']).toMatchObject({
+      selected: false,
+      action: null
+    })
     drafts['candidate-1'] = {
       ...drafts['candidate-1'],
       selected: true,
@@ -108,10 +153,10 @@ describe('MCP workspace', () => {
   })
 
   it('keeps a usable detail minimum when a stored splitter preference is restored', () => {
-    expect(capabilityListWidth(460, 720)).toBe(359)
-    expect(capabilityListWidth(Number.NaN, 1000)).toBe(280)
+    expect(capabilityListWidth(460, 720)).toBe(329)
+    expect(capabilityListWidth(Number.NaN, 1000)).toBe(320)
     expect(capabilityListWidth(100, 1000)).toBe(240)
-    expect(capabilityListWidth(700, 1200)).toBe(460)
+    expect(capabilityListWidth(700, 1200)).toBe(560)
     const markup = renderToStaticMarkup(
       createElement(CapabilityToggle, {
         name: 'docs',
@@ -145,7 +190,11 @@ function agent(index = 0): AgentProfile {
         ? {
             adapterKind: 'antigravity-app',
             model: { mode: 'runtime_default' },
-            permissions: { adapterKind: 'antigravity-app', schemaVersion: 1, values: {} }
+            permissions: {
+              adapterKind: 'antigravity-app',
+              schemaVersion: 1,
+              values: {}
+            }
           }
         : null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [] },

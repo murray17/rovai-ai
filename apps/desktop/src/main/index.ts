@@ -223,6 +223,8 @@ const allowedMethods = new Set<CoreMethod>([
   'skills.reconcile',
   'skills.revealLocation',
   'mcp.config.get',
+  'mcp.servers.reveal',
+  'mcp.servers.setMembers',
   'mcp.config.repairPermissions',
   'mcp.servers.create',
   'mcp.servers.update',
