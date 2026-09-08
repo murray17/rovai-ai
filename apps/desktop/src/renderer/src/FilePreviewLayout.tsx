@@ -12,6 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   DEFAULT_FILE_PREVIEW_RATIO,
   FILE_PREVIEW_CLOSE_THRESHOLD,
@@ -34,6 +35,7 @@ interface FilePreviewLayoutValue {
   resizing: boolean
   className: string
   style: CSSProperties
+  workspace: HTMLDivElement | null
   workspaceRef(element: HTMLDivElement | null): void
   previewWidth(width: number): void
   commitWidth(width: number): void
@@ -134,13 +136,14 @@ export function FilePreviewLayoutProvider({
       dragWidth !== null && width < FILE_PREVIEW_CLOSE_THRESHOLD ? 'is-file-preview-close-armed' : '',
       snapping ? 'is-file-preview-snapping' : ''
     ].filter(Boolean).join(' '),
-    style: { '--file-preview-width': `${width}px` } as CSSProperties,
+    style: { '--file-preview-width': `${Math.round(width)}px` } as CSSProperties,
+    workspace,
     workspaceRef: setWorkspace,
     previewWidth,
     commitWidth,
     cancelResize,
     resetRatio
-  }), [availableWidth, cancelResize, commitWidth, compact, dragWidth, previewWidth, resetRatio, snapping, visible, width])
+  }), [availableWidth, cancelResize, commitWidth, compact, dragWidth, previewWidth, resetRatio, snapping, visible, width, workspace])
 
   return <FilePreviewLayoutContext.Provider value={value}>{children}</FilePreviewLayoutContext.Provider>
 }
@@ -256,8 +259,11 @@ export function FilePreviewResizeHandle({ onClose }: { onClose(): void }): React
     })
   }
 
-  return <div
-    className={`file-preview-resize-handle${layout.resizing ? ' is-resizing' : ''}${closeArmed ? ' is-close-armed' : ''}`}
+  // One rail belongs to the shell grid, spanning the shared header and the body without clipping.
+  const shell = layout.workspace?.closest('.app-shell-camp')
+  const handle = <div
+    className={`file-preview-resize-handle${shell ? ' is-shell-divider' : ''}${layout.resizing ? ' is-resizing' : ''}${closeArmed ? ' is-close-armed' : ''}`}
+    style={layout.style}
     role="separator"
     aria-label="调整文件预览宽度"
     aria-orientation="vertical"
@@ -270,7 +276,7 @@ export function FilePreviewResizeHandle({ onClose }: { onClose(): void }): React
     title="拖动调整 · 双击恢复 44/56 · 方向键调整 · Delete 关闭"
     onPointerDown={(event) => {
       if (event.button !== 0 || gestureRef.current) return
-      const workspace = event.currentTarget.parentElement
+      const workspace = layout.workspace
       if (!workspace) return
       event.preventDefault()
       event.currentTarget.focus({ preventScroll: true })
@@ -333,4 +339,5 @@ export function FilePreviewResizeHandle({ onClose }: { onClose(): void }): React
     <span className="sr-only" id={hintId}>左右方向键调整 24px，按住 Shift 调整 80px；Delete 或 Backspace 关闭；双击恢复默认比例；Escape 取消拖动。</span>
     <span className="sr-only" role="status">{closeArmed ? '松开关闭文件预览' : ''}</span>
   </div>
+  return shell ? createPortal(handle, shell) : handle
 }

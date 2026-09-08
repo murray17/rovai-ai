@@ -31,7 +31,7 @@ Diagnostics and About use open content rows and fine separators instead of neste
 Reviewed settings controls use the existing neutral conversation-action tokens. Sidebar background stays
 unchanged, selection uses a neutral fill without a left stripe, and status/provider colors keep their meaning.
 Off switches have a white thumb. Inputs and buttons preserve keyboard behavior and text carets without
-decorative focus rings. MCP/Skills content and member Runtime configuration selects retain their current styles.
+decorative focus rings. Member Runtime configuration selects retain their current styles. MCP/Skills follow the capability composition below.
 Appearance keeps its real reading previews; only the motion demo is removed. Zoom presets are exactly
 80, 90, 100, 110, 125, 150, 175 and 200%; existing nonpreset values and shortcut limits remain valid.
 
@@ -123,19 +123,19 @@ never durable Episode admission, acknowledgement, clearing or the Core unread fa
 
 Follow [Capability settings](../../../../docs/ui/components/capability-settings.md): a white day surface,
 compact left library and right content/configuration pane, with the same component tree in Steel Night.
-The divider supports pointer drag, keyboard adjustment, click alternatives and double-click reset.
+The single 1px divider uses `--line`, with a `--muted` grip revealed on hover or drag. Keep pointer drag, keyboard adjustment and double-click reset; omit floating arrow controls.
 Skills combine search and 全部 / 已启用 / 已停用 filters, with status beside the row name and an enable
 switch in the detail header. MCP uses teammate assignment without a separate enable switch or filter.
 Add, preview, import and update confirmation stay in the right pane. Deletion uses the shared application
 confirmation dialog, initially focused on Cancel; keep failure feedback in the dialog without extra entry focus return on dismissal.
-Add and import are peer buttons in the MCP library heading. Only installed items appear in the list. Leaving an editor/import or switching MCP/Skills clears unfinished input; do not create draft placeholders or restore drafts.
+An empty, successfully loaded MCP library shows a single-pane first-connection guide. Add/import remain single-pane until the first save; cancellation returns to the guide. A read failure has its own retry state. Add and import are peer light icon buttons in the MCP library heading. Only installed items appear in the list. Leaving an editor/import or switching MCP/Skills clears unfinished input; do not create draft placeholders or restore drafts.
 
 Skills show active `user_managed` items only; omit `system_required` Skills entirely. A source badge
 identifies Rovai only; imported Skills retain provenance without extra source badges. Read-only content defaults
 to SKILL.md and supports safe Markdown, raw text and package file navigation. Omit internal revision
 numbers from the detail heading. Use a compact filename trigger that expands an inline folder directory
 above the document; selecting a file closes it and restores trigger focus. A single file needs no chooser,
-and search appears only above ten files. Keep the file toolbar visible during reading, wrap long directory
+and search appears only above ten files. Keep the toolbar and expanded directory in one sticky group, bound directory scrolling to the remaining viewport height (including 200% zoom), wrap long directory
 entries and reset navigation on Skill, Revision or import-candidate changes. Local import invokes
 the native folder chooser, then previews the inspected candidate. GitHub import uses its existing
 inspection path. The scope tab selects delivery groups using whole rows with member avatars.
@@ -145,9 +145,8 @@ saved enablement and explicit group choices. Previews never execute or authorize
 MCP accepts JSON only, with the existing digest/CAS mutation semantics. The right-side local import
 shows selectable portable candidates and folds unneeded diagnostics. Expanded unavailable entries separate
 name/source/status from the reason and wrapping field list; merge repeated reasons within the same candidate.
-Same-name replacement requires
-an explicit inline choice. Necessary environment reference edits remain visible. Teammate assignment
-uses whole rows with real avatars and a selected check mark. Malformed source blocks overwrite;
+Same-name import candidates show the first scanned definition with distinct Runtime badges; these badges do not claim equal content or persistent source binding. Preserve the first candidate ID and Core conflict result. Full-card selection excludes internal editing and disclosure actions. Use “查看配置 / 收起配置” and name the adopted Runtime. Same-name replacement requires an explicit “覆盖配置” or “另存为” choice. Necessary environment reference edits remain visible. Teammate assignment
+uses compact whole-card buttons with real avatars. Like Skill groups, selected choices use a light neutral fill, full border and trailing small check, without a left checkbox or border-width jump. Malformed source blocks overwrite;
 secret values stay masked and out of ordinary errors. Conflicts retain the JSON draft and require
 refresh/review before retrying. Do not display source file paths as routine configuration content.
 

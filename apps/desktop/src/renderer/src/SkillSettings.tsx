@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  ResolvedTheme,
   SkillDeliveryGroupKey,
   SkillDeliveryGroupView,
   SkillImportCandidate,
@@ -22,8 +23,9 @@ import {
 import { localizeExecutionEngineTerms } from './product-copy'
 import { readErrorMessage } from './error-message'
 import { CapabilityDeleteDialog } from './CapabilityDeleteDialog'
+import { AppDialogGlyph, DialogControlIcon } from './AppDialog'
 
-export function SkillSettings(): React.JSX.Element {
+export function SkillSettings({ theme = 'day' }: { theme?: ResolvedTheme }): React.JSX.Element {
   const [skills, setSkills] = useState<SkillView[] | null>(null)
   const [groups, setGroups] = useState<SkillDeliveryGroupView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -328,7 +330,7 @@ export function SkillSettings(): React.JSX.Element {
                         })
                       }}
                     >
-                      删除
+                      <AppDialogGlyph name="trash" />删除
                     </button>
                   </>
                 )}
@@ -483,6 +485,7 @@ export function SkillSettings(): React.JSX.Element {
                   </div>
                   <p className="capability-note">{candidate.description}</p>
                   <SkillContentPreview
+                    theme={theme}
                     key={`${inspection.stagingToken}:${candidate.name}`}
                     target={{
                       source: 'import',
@@ -523,6 +526,7 @@ export function SkillSettings(): React.JSX.Element {
           </div>
           <div hidden={tab !== 'content'}>
             <SkillContentPreview
+              theme={theme}
               key={`${selected.id}:${selected.currentRevision.id}`}
               target={{
                 source: 'installed',
@@ -641,7 +645,7 @@ export function SkillGroupChoices({
               </span>
             </span>
             <span className="capability-check" aria-hidden="true">
-              ✓
+              <DialogControlIcon name="check" />
             </span>
           </button>
         ))}
@@ -656,7 +660,7 @@ export function deleteSkillConfirmationCopy(name: string): {
 } {
   return {
     title: `删除 Skill “${name}”？`,
-    description: '删除后，此 Skill 将不再对任何生效组可用。原始导入文件会保留。',
+    description: '原始导入文件会保留。',
     confirmLabel: '确认删除 Skill'
   }
 }

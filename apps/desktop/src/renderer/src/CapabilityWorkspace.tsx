@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { AppDialogGlyph, DialogControlIcon } from './AppDialog'
 
 export type CapabilityFilter = 'all' | 'enabled' | 'disabled'
 const WIDTH_KEY = 'rovai.capability-list-width.v1'
@@ -35,7 +36,8 @@ export function CapabilityWorkspace({
   list,
   children,
   selectionKey,
-  header
+  header,
+  libraryEmpty = false
 }: {
   title: 'MCP' | 'Skills'
   count: ReactNode
@@ -50,6 +52,7 @@ export function CapabilityWorkspace({
   children: ReactNode
   selectionKey: string | null
   header?: ReactNode
+  libraryEmpty?: boolean
 }): React.JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const divider = useRef<HTMLDivElement>(null)
@@ -101,7 +104,7 @@ export function CapabilityWorkspace({
     const observer = new ResizeObserver(measure)
     if (root.current) observer.observe(root.current)
     return () => observer.disconnect()
-  }, [])
+  }, [libraryEmpty])
   useEffect(() => {
     if (selectionKey && previousSelection.current !== selectionKey) {
       setShowDetail(true)
@@ -127,6 +130,7 @@ export function CapabilityWorkspace({
     <div
       ref={root}
       className="capability-workspace"
+      data-empty-library={libraryEmpty}
       data-compact={compact}
       data-pane={showDetail ? 'detail' : 'list'}
       style={
@@ -135,7 +139,7 @@ export function CapabilityWorkspace({
         } as CSSProperties
       }
     >
-      <aside className="capability-library" id={`${id}-list`} aria-label={`${title} 列表`}>
+      {!libraryEmpty && <aside className="capability-library" id={`${id}-list`} aria-label={`${title} 列表`}>
         <header className="capability-library-heading">
           <h1>
             {title}
@@ -151,7 +155,8 @@ export function CapabilityWorkspace({
               }}
               disabled={addDisabled}
             >
-              {title === 'Skills' ? '↓ 导入' : '＋ 添加'}
+              {title === 'Skills' ? <AppDialogGlyph name="download" /> : <DialogControlIcon name="plus" />}
+              {title === 'Skills' ? '导入' : '添加'}
             </button>
             {importAction}
           </div>
@@ -190,8 +195,8 @@ export function CapabilityWorkspace({
         >
           {list}
         </div>
-      </aside>
-      <div className="capability-divider-rail">
+      </aside>}
+      {!libraryEmpty && <div className="capability-divider-rail">
         <div
           ref={divider}
           className="capability-divider"
@@ -258,23 +263,7 @@ export function CapabilityWorkspace({
             )
           }}
         />
-        <div className="capability-resize-actions">
-          <button
-            type="button"
-            aria-label="缩窄列表"
-            onClick={() => setWidth(currentWidth.current - 20, true)}
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            aria-label="加宽列表"
-            onClick={() => setWidth(currentWidth.current + 20, true)}
-          >
-            ›
-          </button>
-        </div>
-      </div>
+      </div>}
       <section id={`${id}-detail`} className="capability-detail" aria-label={`${title} 内容与配置`}>
         <button
           type="button"

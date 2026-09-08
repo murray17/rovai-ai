@@ -12,6 +12,8 @@ const requests: { method: string; params: any }[] = []
 let folderSelections = 0
 let folderResult: string | null = '/fixture/skill-folder'
 let conflict = false
+let configReadFailure = false
+let remountMcp: () => void = () => {}
 let revealWait: Promise<void> | null = null
 let releaseReveal: (() => void) | undefined
 const privateDefinition = JSON.stringify({
@@ -239,7 +241,10 @@ Object.assign(window, {
             : s
         )
       }
-      if (method === 'mcp.config.get') return structuredClone(config)
+      if (method === 'mcp.config.get') {
+        if (configReadFailure) throw new Error('暂时无法读取 MCP 配置。')
+        return structuredClone(config)
+      }
       if (method === 'mcp.import.scan')
         return {
           configDigest: config.configDigest,
@@ -264,6 +269,11 @@ Object.assign(window, {
             }),
             issues: []
             })),
+            {
+              candidateId: 'local-tools-second', proposedName: 'local-tools', sourceKind: 'claude_code',
+              sourcePath: '/fixture/claude/mcp.json', compatibility: 'portable', conflict: 'none',
+              normalizedDefinitionJson: JSON.stringify({ mcpServers: { 'local-tools': { command: 'different-node' } } }), issues: []
+            },
             {
               candidateId: 'blocked-codex', proposedName: 'botmux', sourceKind: 'codex',
               sourcePath: '/fixture/codex/config.toml', compatibility: 'unsupported', conflict: 'none',
@@ -337,6 +347,8 @@ Object.assign(window, {
 })
 function Fixture() {
   const [page, setPage] = useState<'mcp' | 'skills'>('skills')
+  const [mcpEpoch, setMcpEpoch] = useState(0)
+  remountMcp = () => setMcpEpoch(value => value + 1)
   return (
     <div className="app-shell">
       <WindowDragStrip page="settings" />
@@ -365,7 +377,7 @@ function Fixture() {
               <SkillSettings />
             </Activity>
             <Activity mode={page === 'mcp' ? 'visible' : 'hidden'}>
-              <McpSettings agents={members} />
+              <McpSettings key={mcpEpoch} agents={members} />
             </Activity>
           </div>
         </div>
@@ -380,6 +392,8 @@ Object.assign(window, {
         requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 60)))
       ),
     requests,
+    resetMcp: (fail = false) => { config.servers = []; configReadFailure = fail; remountMcp() },
+    restoreConfigRead: () => { configReadFailure = false },
     longPreviewPath,
     holdContent: (path: string) => {
       let release!: () => void
@@ -425,7 +439,7 @@ Object.assign(window, {
         (n) => n.getBoundingClientRect().width > 0
       )!
       const rect = (selector: string) => {
-        const r = root.querySelector(selector)!.getBoundingClientRect()
+        const r = root.querySelector(selector)?.getBoundingClientRect() ?? { x: 0, y: 0, width: 0, height: 0 }
         return { x: r.x, y: r.y, width: r.width, height: r.height }
       }
       return {

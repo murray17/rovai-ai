@@ -99,7 +99,8 @@ values and evidence.
   meets contrast requirements.
 - Narrative prose is bounded at `76ch`; code, tables and other artifacts may grow to `930px`; the
   shared wide conversation track remains `1040px`, while Composer reaches `1440px` at viewports
-  `>= 1800px`.
+  `>= 1800px`. Independent Markdown previews adapt to their container: a wide preview permits
+  a `1120px` artifact track and `930px` ordinary prose, while narrow previews retain `780px`.
 - Weight, size, placement and whitespace establish hierarchy before color does.
 
 ## Layout
@@ -141,12 +142,14 @@ without extra focus outlines or halos; higher contrast preferences restore the s
 ## Components
 
 - **Buttons:** compact, direct and text-first. Primary actions use Steel by default. Conversation send, task creation and member invitation use
-  the neutral `--conversation-action` family, as do first-run onboarding, teammate save, Memory and Automation actions. Teammate save and workspace creation entries use light tonal buttons. Home creation uses a quiet tonal entry; danger marks destructive actions and sidebar removal. Active buttons move down 1px; disabled controls retain legible content at
+  the neutral `--conversation-action` family, as do first-run onboarding, teammate save, Memory, Automation and MCP/Skills actions. Teammate save and workspace creation entries use light tonal buttons. Home creation uses a quiet tonal entry; danger marks destructive actions and sidebar removal. Active buttons move down 1px; disabled controls retain legible content at
   reduced opacity.
 - **Inputs:** use the raised/input surface and a perceivable control boundary. DOM focus supports typing, IME and keyboard navigation without extra outlines, halos or focus-only border changes. Search inputs do not add a focus underline.
 - **Navigation:** rows and selection surfaces establish location. Selected conversation and teammate rows omit
   the left rail and use neutral text. Memory and Automation use `--neutral-selected` and `--neutral-hover`; sidebar backgrounds stay unchanged. Hover is supplementary;
   selected state and actions remain understandable from text, icons and placement.
+- **Resizable boundaries:** existing splitters share a single `1px` `--line`; the `--muted` grip appears
+  only on hover or drag. Preserve keyboard resizing and reset without floating arrow controls.
 - **Containers:** prefer one open surface with dividers over card walls. A card is justified only
   when it represents a bounded object, decision or independent state.
 - **Dialogs and Popovers:** one raised neutral surface with a 1px structural boundary and no colored

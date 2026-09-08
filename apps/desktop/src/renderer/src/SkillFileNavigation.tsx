@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import type { SkillContentView } from '@contracts'
 
@@ -81,6 +81,7 @@ export function SkillFileNavigation({
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const trigger = useRef<HTMLButtonElement>(null)
   const directory = useRef<HTMLElement>(null)
+  const navigation = useRef<HTMLDivElement>(null)
   const directoryId = useId()
   const paths = useMemo(() => files.map((file) => file.path), [files])
   const tree = useMemo(() => fileTree(paths), [paths])
@@ -89,6 +90,24 @@ export function SkillFileNavigation({
   const multiple = paths.length > 1
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const matches = paths.filter((file) => file.toLocaleLowerCase().includes(normalizedQuery))
+
+  useLayoutEffect(() => {
+    if (!expanded) return
+    const nav = navigation.current
+    const scroll = nav?.closest<HTMLElement>('.capability-detail-scroll')
+    const list = directory.current?.querySelector<HTMLElement>('.skill-file-directory-list')
+    if (!nav || !scroll || !list) return
+    const fit = (): void => {
+      const controlsHeight = nav.offsetHeight - list.offsetHeight
+      list.style.maxHeight = `${Math.max(40, Math.min(266, scroll.clientHeight - controlsHeight - 16))}px`
+      const overflow = nav.getBoundingClientRect().bottom - scroll.getBoundingClientRect().bottom
+      if (overflow > 0) scroll.scrollTop += overflow
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(scroll)
+    return () => observer.disconnect()
+  }, [expanded, files.length])
 
   function close(): void {
     setExpanded(false)
@@ -204,7 +223,7 @@ export function SkillFileNavigation({
     </>
   )
   return (
-    <>
+    <div ref={navigation} className="skill-file-navigation">
       <div className="skill-file-toolbar">
         <div className="skill-file-location">
           {multiple ? (
@@ -258,6 +277,6 @@ export function SkillFileNavigation({
           </div>
         </nav>
       )}
-    </>
+    </div>
   )
 }
