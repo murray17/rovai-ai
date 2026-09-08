@@ -8514,7 +8514,6 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .automation-channel-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-channel-note { margin: 8px 4px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .automation-create-actions { display: flex; width: 100%; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 6px; }
-.automation-create-actions > span { margin-right: auto; color: var(--muted); font-size: 10.5px; }
 .automation-history { width: min(900px, 100%); margin-top: 30px; }
 .automation-history h2 { margin-bottom: 12px; }
 .automation-history-row { display: flex; width: 100%; min-width: 0; min-height: 48px; align-items: center; gap: 10px; padding: 9px 7px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; text-align: left; cursor: pointer; }
