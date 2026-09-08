@@ -36,6 +36,17 @@ describe('onboarding preferences', () => {
     expect(await readFile(filePath, 'utf8')).toBe(malformed)
   })
 
+  it('waits for pending authority classification before returning the first Renderer snapshot', async () => {
+    const filePath = await temporaryFile()
+    const store = await OnboardingStore.load(filePath)
+    const initializing = store.initialize(false)
+    expect(store.get().status).toBe('uninitialized')
+    const snapshot = await store.getAfterPendingWrites()
+    expect(snapshot).toEqual(await initializing)
+    expect(snapshot).toMatchObject({ status: 'in_progress', step: 'welcome' })
+    expect(await readOnboardingSnapshot(filePath)).toEqual(snapshot)
+  })
+
   it('skips onboarding for an installation that already has product data', async () => {
     const filePath = await temporaryFile()
     const store = await OnboardingStore.load(filePath)
