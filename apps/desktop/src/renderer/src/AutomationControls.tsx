@@ -39,7 +39,7 @@ export function AutomationTemplates({ onChoose, compact = false }: {
       const template = templates[id]
       return <button key={id} type="button" className={`automation-template-card ${id}`} onClick={() => onChoose(id)}>
         <span className="automation-template-icon"><AutomationGlyph name={template.icon} /></span>
-        <span className="automation-template-copy"><strong>{template.name}</strong><span>{template.description}</span></span>
+        <span className="automation-template-copy"><strong>{template.name}</strong><span>{compact ? `${scheduleLabel(template.schedule)} · ${template.description}` : template.description}</span></span>
         <small>{scheduleLabel(template.schedule)}</small>
         <span className="automation-template-arrow"><AutomationGlyph name="back" /></span>
       </button>

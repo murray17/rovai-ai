@@ -8438,14 +8438,17 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .automation-template-card > small { grid-column: 2; color: var(--muted); font-size: 11px; }
 .automation-template-arrow { position: absolute; top: 17px; right: 11px; color: var(--muted); transform: rotate(180deg); }
 .automation-template-arrow .automation-glyph { width: 13px; height: 13px; }
-.automation-template-library .automation-scheduler-note { margin-top: 18px; }
-.automation-create-choices { flex: 0 0 auto; padding: 4px 6px 16px; }
-.automation-create-choices > p { margin: 0 0 10px; color: var(--muted); font-size: 11.5px; }
-.automation-template-grid.compact { grid-template-columns: minmax(0, 1fr); gap: 5px; }
-.automation-template-grid.compact .automation-template-card { min-height: 66px; grid-template-rows: auto; gap: 8px 10px; padding: 10px; }
-.automation-template-grid.compact .automation-template-copy { gap: 3px; }
-.automation-template-grid.compact .automation-template-copy > span { font-size: 11px; }
-.automation-template-grid.compact .automation-template-card > small { display: none; }
+.automation-create-choices { min-width: 0; flex: 0 0 auto; margin: 0 0 10px; padding: 7px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-raised); }
+.automation-create-choices[hidden] { display: none; }
+.automation-create-choices > p { margin: 1px 4px 6px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.automation-template-grid.compact { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.automation-template-grid.compact .automation-template-card { min-height: 48px; grid-template-columns: 27px minmax(0, 1fr); grid-template-rows: auto; align-items: center; gap: 8px; padding: 6px; border: 0; border-radius: 6px; background: transparent; }
+.automation-template-grid.compact .automation-template-card:hover { background: var(--surface-hover); }
+.automation-template-grid.compact .automation-template-icon { width: 27px; height: 27px; border-radius: 7px; }
+.automation-template-grid.compact .automation-template-copy { gap: 2px; padding: 0; }
+.automation-template-grid.compact .automation-template-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.automation-template-grid.compact .automation-template-copy > span { overflow: hidden; font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.automation-template-grid.compact .automation-template-card > small, .automation-template-grid.compact .automation-template-arrow { display: none; }
 .automation-splitter { position: relative; z-index: 1; cursor: col-resize; touch-action: none; }
 .automation-splitter::before { position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--line); content: ''; }
 .automation-splitter:hover::before, .automation-splitter:focus-visible::before { background: var(--brand); }
