@@ -26,6 +26,7 @@ async function runFixture(t, mode, expectedCases) {
     })
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
+    process.stdout.write(`Automatic acceptance userData: ${join(fixture, 'user-data')}; no Core/SQLite/Skill Library/Runtime\n`)
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
       mode,
@@ -43,6 +44,7 @@ async function runFixture(t, mode, expectedCases) {
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
     assert.equal(report.cases.length, expectedCases)
+    if (report.layouts) process.stdout.write(`${JSON.stringify(report.layouts)}\n`)
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')
@@ -57,3 +59,6 @@ test('the production Camp Composer refreshes continuation on publication without
 
 test('Pending attachments use Composer cards, body-only queue summaries and active-editor drag routing', { timeout: 60_000 },
   t => runFixture(t, '--pending-attachments', 6))
+
+test('loading the Composer route preserves conversation and input positions', { timeout: 60_000 },
+  t => runFixture(t, '--route-loading', 1))
