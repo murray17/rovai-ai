@@ -13,13 +13,12 @@
 .automation-time-column { display: grid; gap: 7px; }
 .automation-time-column > label { color: var(--muted); font-size: 11px; line-height: 16px; text-align: center; }
 .automation-time-stepper { display: grid; grid-template-rows: 27px 54px 27px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-subtle); }
-.automation-time-stepper:focus-within { border-color: var(--brand); }
 .automation-time-stepper button { display: grid; width: 100%; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; }
 .automation-time-stepper button:hover { color: var(--brand-ink); background: var(--surface-muted); }
 .automation-time-stepper button > svg { width: 13px; height: 13px; }
 .automation-time-stepper button:first-child > svg { transform: rotate(180deg); }
 .automation-time-stepper input { width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 6px; color: var(--ink); background: transparent; font: 500 32px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; font-variant-numeric: tabular-nums; caret-color: var(--brand); }
-.automation-time-stepper input:focus { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--input); }
+.automation-time-stepper input:focus { background: var(--input); }
 .automation-time-colon { position: absolute; top: 72px; left: calc(50% - 8px); width: 16px; color: var(--muted); font: 400 25px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
 .automation-time-presets-label { margin: 0 16px 7px; color: var(--muted); font-size: 10.5px; }
 .automation-time-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 0 16px 16px; }

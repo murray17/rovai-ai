@@ -164,3 +164,7 @@ App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，�
 - [v0.57 Project remove 实施计划](../../versions/v0.57/implementation-plan.md)
 - [v0.58 实施计划](../../versions/v0.58/implementation-plan.md)
 - [v0.61 实施计划](../../versions/v0.61/implementation-plan.md)
+
+## Jump search and overlay closure
+
+⌘K / Ctrl+K opens the existing title/project search, with a small “跳转到对话” title, neutral selected result and “↑ ↓ 选择　↵ 打开　Esc 关闭” footer. Search input has no focus underline or frame; arrows and Enter retain their behavior and respect IME composition. Closing sidebar menus, rename/delete/removal dialogs or settings does not force focus back to the entry button, including after pin mutations. Shared DOM focus for keyboard input and menu navigation remains available.

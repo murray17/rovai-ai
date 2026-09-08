@@ -136,26 +136,24 @@ Circular shapes are reserved for portraits, small status dots and bounded icon c
 Borders are semantic: `--line` separates, `--line-strong` establishes structure and
 `--control-line` makes interactive boundaries perceivable. Dialog fields use the paired
 `--dialog-field-line` and `--dialog-field-line-hover` tokens with a clear input surface, visible label
-and persistent focus treatment; higher contrast preferences restore the stronger control boundary.
+without extra focus outlines or halos; higher contrast preferences restore the stronger control boundary.
 
 ## Components
 
 - **Buttons:** compact, direct and text-first. Primary actions use Steel by default. Conversation send, task creation and member invitation use
-  the neutral `--conversation-action` family, as do first-run onboarding actions. Home creation uses a quiet tonal entry; danger marks destructive actions and sidebar removal. Active buttons move down 1px; disabled controls retain legible content at
+  the neutral `--conversation-action` family, as do first-run onboarding, teammate save, Memory and Automation actions. Teammate save and workspace creation entries use light tonal buttons. Home creation uses a quiet tonal entry; danger marks destructive actions and sidebar removal. Active buttons move down 1px; disabled controls retain legible content at
   reduced opacity.
-- **Inputs:** use the raised/input surface and a perceivable control boundary. Focus is a 2px
-  `--focus` outline with 2px offset, or the equivalent tokenized inner treatment where geometry
-  requires it.
-- **Navigation:** rows and selection surfaces establish location. Selected conversation rows omit
-  the left rail and use neutral text; other navigation surfaces retain their existing selection treatment. Hover is supplementary;
-  selected state and actions remain understandable from text, placement and focus.
+- **Inputs:** use the raised/input surface and a perceivable control boundary. DOM focus supports typing, IME and keyboard navigation without extra outlines, halos or focus-only border changes. Search inputs do not add a focus underline.
+- **Navigation:** rows and selection surfaces establish location. Selected conversation and teammate rows omit
+  the left rail and use neutral text. Memory and Automation use `--neutral-selected` and `--neutral-hover`; sidebar backgrounds stay unchanged. Hover is supplementary;
+  selected state and actions remain understandable from text, icons and placement.
 - **Containers:** prefer one open surface with dividers over card walls. A card is justified only
   when it represents a bounded object, decision or independent state.
 - **Dialogs and Popovers:** one raised neutral surface with a 1px structural boundary and no colored
   top stripe. Use a single title, regular-weight muted labels and light 1px field borders. Keep common
   fields visible; disclose optional detail without losing drafts or validation. Footers contain actions
   and only necessary status. Destructive dialog actions use `--danger-soft` with `--danger` text.
-  Preserve identity portraits and functional context icons.
+  Preserve identity portraits and functional context icons. Closing menus or dialogs does not automatically refocus an entry button; retain input positioning, focus trapping and keyboard navigation. Runtime configuration dropdown bodies remain unchanged.
 - **Evidence:** uses the dedicated evidence and diff tokens, monospaced type where appropriate, and
   structural `+`/`-`, line numbers or labels in addition to color.
 - **Code:** shared SafeMarkdown surfaces use a quiet inline canvas with `0 2px` padding and a `3px`

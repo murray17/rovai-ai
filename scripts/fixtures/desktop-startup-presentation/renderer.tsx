@@ -356,7 +356,7 @@ Object.assign(window, { startupTest: {
     }
     const renderDraft = () => flushSync(() => root!.render(<NewConversationDialog
       open={dialogOpen} initialWorkspace={null} projects={[]} preflight={preflight} agents={[]}
-      busy={dialogBusy} projectAccessReady returnFocusElement={null}
+      busy={dialogBusy} projectAccessReady
       onOpenChange={open => { dialogOpen = open; renderDraft() }}
       onChooseWorkspaceDirectory={async () => null} onWorkspaceSelected={async () => undefined}
       onCreate={(draft, enableOneClick) => { submissions.push({ draft, enableOneClick }); return creation.promise }}
@@ -539,7 +539,7 @@ Object.assign(window, { startupTest: {
     }
     flushSync(() => root!.render(<NewConversationDialog
       open initialWorkspace={null} projects={[]} preflight={preflight} agents={[]}
-      busy={false} projectAccessReady returnFocusElement={null} onOpenChange={() => undefined}
+      busy={false} projectAccessReady onOpenChange={() => undefined}
       onChooseWorkspaceDirectory={async () => null} onWorkspaceSelected={async () => undefined}
       onCreate={async () => undefined}
     />))

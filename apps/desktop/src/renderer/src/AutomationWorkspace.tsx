@@ -62,7 +62,6 @@ export function AutomationWorkspace({
   const createTriggerRef = useRef<HTMLButtonElement>(null)
   const [availableWidth, setAvailableWidth] = useState(1100)
   const splitRef = useRef<HTMLDivElement>(null)
-  const overviewRef = useRef<HTMLHeadingElement>(null)
   const dragRef = useRef<{ pointerId: number; x: number; width: number } | null>(null)
   const saveStateRef = useRef(saveState)
   saveStateRef.current = saveState
@@ -90,7 +89,6 @@ export function AutomationWorkspace({
       if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
       setCreateChooserOpen(false)
-      createTriggerRef.current?.focus({ preventScroll: true })
     }
     document.addEventListener('click', dismissOutside)
     document.addEventListener('keydown', dismissOnEscape)
@@ -306,7 +304,6 @@ export function AutomationWorkspace({
     if (!(await flushBeforeLeave())) return
     setSelectedId(null)
     setEditorClosed(false)
-    requestAnimationFrame(() => overviewRef.current?.focus())
   }
 
   const beginNew = async (templateId?: TemplateId): Promise<void> => {
@@ -480,6 +477,12 @@ export function AutomationWorkspace({
     }
   }
 
+  const filters = (
+    <div className="automation-filter-tabs" role="group" aria-label="筛选定时任务">
+      {(['all', 'enabled', 'closed'] as const).map((value, index) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{['全部', '开启', '关闭'][index]}</button>)}
+    </div>
+  )
+
   return (
     <div className={`automation-workspace ${overview ? 'overview' : 'detail'} ${editorClosed ? 'editor-closed' : ''}`}>
       {topNotices}
@@ -500,19 +503,19 @@ export function AutomationWorkspace({
       <div ref={splitRef} className="automation-split" style={{ '--automation-list-width': `${width}px` } as CSSProperties}>
         <aside className="automation-list" aria-label="定时任务列表">
           {overview && <header className="automation-page-header">
-            <div><p className="eyebrow">Automation / Scheduled</p><h1 ref={overviewRef} tabIndex={-1}>定时任务</h1><p>安排一次，按时执行。</p></div>
-            <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}>新建</button>
+            <div><h1>定时任务</h1><p>安排一次，按时执行。</p></div>
+            <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}><AutomationGlyph name="plus" />新建</button>
           </header>}
           {(!overview || automations.length > 0) && <div className="automation-list-controls">
-            <div className="automation-filter-tabs" role="group" aria-label="筛选定时任务">
-              {(['all', 'enabled', 'closed'] as const).map((value, index) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{['全部', '开启', '关闭'][index]}</button>)}
-            </div>
+            {overview && filters}
+            {!overview && <h2 className="automation-list-title">定时任务<span>{automations.length}</span></h2>}
             {!overview && <div className="automation-list-navigation">
               <button ref={createTriggerRef} className="primary-button" type="button" disabled={busy !== null}
                 aria-expanded={createChooserOpen} aria-controls={createChooserId}
-                onClick={() => setCreateChooserOpen((open) => !open)}>新建</button>
+                onClick={() => setCreateChooserOpen((open) => !open)}><AutomationGlyph name="plus" />新建</button>
             </div>}
             <label className="automation-search"><AutomationGlyph name="search" /><input type="search" aria-label="搜索定时任务" placeholder="搜索定时任务" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+            {!overview && filters}
           </div>}
           {!overview && <section ref={createChooserRef} id={createChooserId} className="automation-create-choices" aria-label="选择创建方式" hidden={!createChooserOpen}>
             <p>从空白或模板开始</p>
@@ -533,7 +536,7 @@ export function AutomationWorkspace({
                 </button>
                 <DropdownMenu.Root onOpenChange={(open) => { if (!open) setDeleteArmed(null) }}>
                   <DropdownMenu.Trigger asChild><button className="automation-icon-button automation-task-more" type="button" aria-label={`${automation.name}的操作`} disabled={busy !== null}><AutomationGlyph name="more" /></button></DropdownMenu.Trigger>
-                  <DropdownMenu.Portal><DropdownMenu.Content className="automation-menu" align="end" sideOffset={4} collisionPadding={12} loop>
+                  <DropdownMenu.Portal><DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="automation-menu" align="end" sideOffset={4} collisionPadding={12} loop>
                     <DropdownMenu.Item className="automation-menu-item" onSelect={() => void runNow(automation.automationId)}><AutomationGlyph name="play" />运行一次</DropdownMenu.Item>
                     <DropdownMenu.Item className="automation-menu-item" onSelect={() => void setEnabled(automation.automationId, !automation.enabled)}><AutomationGlyph name={automation.enabled ? 'pause' : 'clock'} />{automation.enabled ? '关闭' : '开启'}</DropdownMenu.Item>
                     <DropdownMenu.Separator className="automation-menu-separator" />

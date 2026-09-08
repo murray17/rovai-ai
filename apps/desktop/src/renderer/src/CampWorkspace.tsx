@@ -370,7 +370,6 @@ interface ConversationFindRestorePoint {
   scrollTop: number
   followingLatest: boolean
   anchor: TimelineMessageAnchor | null
-  focusedElement: HTMLElement | null
 }
 
 function timelineViewportWidth(timeline: HTMLElement): number {
@@ -1539,7 +1538,6 @@ export function CampWorkspace({
   const routingMutatingRef = useRef(false)
   const composerLockAwaitingDisabledCommitRef = useRef(false)
   const [replyInteractionError, setReplyInteractionError] = useState<string | null>(null)
-  const [suppressPointerFocusRing, setSuppressPointerFocusRing] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [starterNotice, setStarterNotice] = useState<string | null>(null)
   const [mentionPopover, setMentionPopover] = useState<MentionPopoverRequest | null>(null)
@@ -2437,10 +2435,7 @@ export function CampWorkspace({
             timeline.scrollHeight,
             timeline.clientHeight
           ) : true),
-        anchor,
-        focusedElement: document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : null
+        anchor
       }
       if (timeline) {
         timelineReadingPosition.current = {
@@ -2503,12 +2498,6 @@ export function CampWorkspace({
               followingLatest: restorePoint.followingLatest
             }
           }
-        }
-        const previousFocus = restorePoint.focusedElement
-        if (previousFocus?.isConnected && previousFocus.getClientRects().length > 0) {
-          previousFocus.focus({ preventScroll: true })
-        } else {
-          timeline?.focus({ preventScroll: true })
         }
       })
     })
@@ -2668,10 +2657,9 @@ export function CampWorkspace({
   }
 
   const focusComposerAtBoundary = (
-    modality: ReplyFocusModality,
+    _modality: ReplyFocusModality,
     boundary: 'start' | 'end'
   ): void => {
-    setSuppressPointerFocusRing(modality === 'pointer')
     window.requestAnimationFrame(() => {
       composerHandleRef.current?.focus(boundary)
     })
@@ -2695,7 +2683,6 @@ export function CampWorkspace({
     try {
       const draft = await mutateRoutingDraft(() => draftCoordinator.startReply(message.id))
       if (composerDraftNeedsReplyRepair(draft)) {
-        setSuppressPointerFocusRing(false)
         window.requestAnimationFrame(() => {
           window.requestAnimationFrame(() => recipientRepairFirstOptionRef.current?.focus())
         })
@@ -2863,7 +2850,6 @@ export function CampWorkspace({
     setReplyAnchorWindows(new Map())
     replyAnchorLoads.current.clear()
     setReplyInteractionError(null)
-    setSuppressPointerFocusRing(false)
     autoSuppressedContinuationSourceRef.current = null
     draftCampId.current = campId
     void draftCoordinator.load()
@@ -4699,17 +4685,9 @@ export function CampWorkspace({
           <form
         className={[
           'composer',
-          attachmentDragState ? 'is-dragging-attachments' : '',
-          suppressPointerFocusRing ? 'suppress-pointer-focus-ring' : ''
+          attachmentDragState ? 'is-dragging-attachments' : ''
         ].filter(Boolean).join(' ')}
         onSubmit={(event) => void submit(event)}
-        onPointerDownCapture={() => setSuppressPointerFocusRing(true)}
-        onKeyDownCapture={() => setSuppressPointerFocusRing(false)}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-            setSuppressPointerFocusRing(false)
-          }
-        }}
       >
         <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
@@ -6613,7 +6591,7 @@ function CampMembersPanel({
                   </button>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
-                  <DropdownMenu.Content
+                  <DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()}
                     className="camp-member-menu"
                     align="end"
                     sideOffset={5}
@@ -8610,7 +8588,6 @@ export function TaskPanel({
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
   const [editorOpen, setEditorOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
-  const editorTriggerRef = useRef<HTMLElement | null>(null)
   const detailRef = useRef<HTMLElement>(null)
   const drafts = useRef(new Map<string, TaskEditorDraft>())
   const [mode, setMode] = useState<'list' | 'create' | 'edit'>('list')
@@ -8680,14 +8657,7 @@ export function TaskPanel({
     setEditorOpen(false)
   }
 
-  const restoreEditorFocus = (event: Event): void => {
-    event.preventDefault()
-    const trigger = editorTriggerRef.current
-    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
-  }
-
-  const beginCreate = (trigger: HTMLElement): void => {
-    editorTriggerRef.current = trigger
+  const beginCreate = (): void => {
     resetForm()
     const draft = drafts.current.get('new')
     if (draft) applyDraft(draft)
@@ -8695,8 +8665,7 @@ export function TaskPanel({
     setEditorOpen(true)
   }
 
-  const beginEdit = (task: TaskView, trigger: HTMLElement): void => {
-    editorTriggerRef.current = trigger
+  const beginEdit = (task: TaskView): void => {
     setSelectedTaskId(task.taskId)
     applyDraft(drafts.current.get(task.taskId) ?? {
       title: task.title,
@@ -8878,7 +8847,7 @@ export function TaskPanel({
             <option value="completed">已完成</option>
             <option value="cancelled">已取消</option>
           </select>
-          <button className="primary-button conversation-primary-button compact task-new-button" type="button" onClick={(event) => beginCreate(event.currentTarget)} disabled={busy}>
+          <button className="primary-button conversation-primary-button compact task-new-button" type="button" onClick={() => beginCreate()} disabled={busy}>
             <span aria-hidden="true">＋</span> 新建
           </button>
         </div>
@@ -8928,9 +8897,8 @@ export function TaskPanel({
         {detailTerminal
           ? <p className="task-terminal-note">已结束的任务保留为只读记录，不能重新打开或删除。</p>
           : <div className="task-detail-actions">
-              <button className="quiet-button" type="button" disabled={busy} onClick={(event) => beginEdit(detailTask, event.currentTarget)}>编辑</button>
-              <button className="quiet-button task-cancel-action" type="button" disabled={busy} onClick={(event) => {
-                editorTriggerRef.current = event.currentTarget
+              <button className="quiet-button" type="button" disabled={busy} onClick={() => beginEdit(detailTask)}>编辑</button>
+              <button className="quiet-button task-cancel-action" type="button" disabled={busy} onClick={() => {
                 setSelectedTaskId(detailTask.taskId)
                 setExpectedVersion(detailTask.version)
                 setCancelReason('')
@@ -8943,7 +8911,7 @@ export function TaskPanel({
       <Dialog.Root open={editorOpen} onOpenChange={(open) => { if (!open) closeEditor() }}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-          <AppDialogContent className="task-editor-dialog" width="wide" onCloseAutoFocus={restoreEditorFocus}>
+          <AppDialogContent className="task-editor-dialog" width="wide">
             <AppDialogHeader icon="pencil" title={mode === 'create' ? '新建任务' : '编辑任务'} description={mode === 'create' ? '记录需要持续跟踪的责任与验收条件。' : `版本 ${expectedVersion} · 修改任务内容与状态。`}
             hideDescription />
             <form className="task-editor" onSubmit={(event) => void (mode === 'create' ? submitCreate(event) : submitUpdate(event))}>
@@ -8987,7 +8955,7 @@ export function TaskPanel({
       <Dialog.Root open={cancelOpen} onOpenChange={(open) => { if (!submitting) setCancelOpen(open) }}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-          <AppDialogContent className="task-cancel-dialog" tone="danger" width="compact" onCloseAutoFocus={restoreEditorFocus}>
+          <AppDialogContent className="task-cancel-dialog" tone="danger" width="compact">
             <AppDialogHeader icon="warning" title="取消任务？" description={selectedTask?.title} />
             <AppDialogBody>
               <p className="task-cancel-description">任务将结束，已经接受或正在进行的执行不会停止。</p>

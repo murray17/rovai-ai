@@ -224,7 +224,6 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
   const [availability, setAvailability] = useState<CampMessageAttachmentView['availability']>(initialAvailability)
   const [open, setOpen] = useState(false)
   const tile = useRef<HTMLElement>(null)
-  const trigger = useRef<HTMLButtonElement>(null)
   const hadCachedPayload = useRef(false)
   const committedUrl = useRef<string | null>(null)
   const ownedUrls = useRef(new Set<string>())
@@ -341,7 +340,7 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
 
   return (
     <figure className="image-tile" ref={tile}>
-      <button type="button" ref={trigger} className="image-tile-preview"
+      <button type="button" className="image-tile-preview"
         disabled={!url && !waitingForAction}
         aria-label={waitingForAction ? `预览图片 ${source.image.displayName}` : `查看大图 ${source.image.displayName}`}
         aria-busy={loading}
@@ -356,7 +355,7 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
           <Dialog.Portal>
             <Dialog.Overlay className="attachment-lightbox-overlay" />
             <Dialog.Content className="attachment-lightbox image-gallery-lightbox" aria-describedby={undefined}
-              onCloseAutoFocus={(event) => { event.preventDefault(); trigger.current?.focus() }}>
+              onCloseAutoFocus={(event) => { event.preventDefault() }}>
               <Dialog.Title className="sr-only">图片预览</Dialog.Title>
               <img src={url} alt={source.image.displayName} />
               <Dialog.Close className="attachment-lightbox-close" aria-label="关闭图片预览">

@@ -28,7 +28,7 @@ export async function acceptCreateFromDetail(tab) {
   await chooser.waitFor({ state: 'visible', timeoutMs: 1500 })
   await chooser.getByRole('button').first().press('Escape')
   await chooser.waitFor({ state: 'hidden', timeoutMs: 1500 })
-  assert.equal(await createEntry.evaluate(button => button === document.activeElement), true, 'Escape returns focus to New')
+  assert.equal(await createEntry.evaluate(button => button === document.activeElement), false, 'Escape does not refocus New')
   await createEntry.click()
   await tab.playwright.getByRole('searchbox', { name: '搜索定时任务', exact: true }).click()
   await chooser.waitFor({ state: 'hidden', timeoutMs: 1500 })

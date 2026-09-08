@@ -1136,7 +1136,6 @@ export function SingleChatPanel({
       if (document.querySelector('.app-dialog, [role="menu"][data-state="open"]')) return
       event.preventDefault()
       onClose()
-      triggerRef.current?.focus({ preventScroll: true })
     }
     document.addEventListener('keydown', dismissOnEscape)
     return () => document.removeEventListener('keydown', dismissOnEscape)
@@ -1628,7 +1627,6 @@ export function SingleChatPanel({
         <span>当前会话</span>
         <button className="icon-button" type="button" aria-label="收起单聊" title="收起 · Esc" onClick={() => {
           onClose()
-          triggerRef.current?.focus({ preventScroll: true })
         }}><CloseGlyph /></button>
       </header>
 
@@ -1645,7 +1643,7 @@ export function SingleChatPanel({
             </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content className="single-chat-target-menu" sideOffset={6} align="start" collisionPadding={12}>
+            <DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="single-chat-target-menu" sideOffset={6} align="start" collisionPadding={12}>
               <div className="single-chat-target-menu-heading">
                 <strong>选择单聊对象</strong>
                 <span>单聊正文不会进入公屏</span>

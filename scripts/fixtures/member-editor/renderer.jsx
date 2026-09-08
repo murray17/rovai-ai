@@ -199,6 +199,13 @@ function Fixture() {
   }
   openSettings = () => ref.current.requestTransition(() => setView('settings'))
   const noop = () => {}
+  const navigationAction = async (method) => {
+    calls.push({ method })
+    if (failMethod === method) {
+      failMethod = null
+      throw new Error('验收模拟操作失败')
+    }
+  }
   return (
     <div className="app-shell">
       <CampNavigation
@@ -217,8 +224,8 @@ function Fixture() {
         onCamp={noop}
         onCreateInProject={noop}
         onRemoveProject={async () => {}}
-        onRename={async () => {}}
-        onDelete={async () => {}}
+        onRename={() => navigationAction('navigation.rename')}
+        onDelete={() => navigationAction('navigation.delete')}
         onError={noop}
       />
       <div

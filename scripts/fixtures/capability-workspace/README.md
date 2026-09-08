@@ -11,5 +11,5 @@ The test covers imports, scope changes, filtering, invalid JSON, CAS conflicts, 
 native pointer/keyboard resizing, day/night at minimum and wide window sizes, and 200% zoom.
 Unsupported local imports include same-name Codex/Claude entries, repeated reasons and long fields;
 their layout must wrap independently of the name/source row. MCP and Skill deletion use real application
-dialogs with cancellation, focus return/trapping, pending dismissal guards, errors and stale-target checks.
+dialogs with cancellation, no extra entry focus return, focus trapping, pending dismissal guards, errors and stale-target checks.
 Core's Skill Library suite separately verifies the content/digest and default assignment contracts.
