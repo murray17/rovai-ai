@@ -4,7 +4,7 @@ name: Camp Member Fast
 version: v1
 status: accepted
 source_version: v1.34
-last_updated: 2026-09-07
+last_updated: 2026-09-08
 ---
 
 # Camp Member Fast v1
@@ -107,7 +107,8 @@ fallback/cooldown 后下一次 Run 仍消费原三态偏好。既有 Run/epoch �
 
 ## Renderer 合同
 
-成员浮层与共享 ExecutionDrawer 顶栏复用同一个 Fast 胶囊和当前 Camp/member 偏好：视觉 20–22px、目标至少 28px、字体至少项目紧凑基线 10.5px。
+成员浮层与共享 ExecutionDrawer 顶栏复用同一个 Fast 胶囊和当前 Camp/member 偏好：成员浮层视觉 20–22px，
+执行详情视觉 24px，两处目标均至少 28px、字体至少项目紧凑基线 10.5px。
 按钮只表达后续执行偏好。未知默认采用中性样式，可访问名称说明继承；开启高亮表示请求 Fast，
 不宣称已生效，不显示实际状态、cooldown 或请求不一致警告。Codex 可信原生默认可用于继承时的初始显示。
 `fastOverride ?? runtimeDefaultFast ?? false` 仅用于视觉，不得用于原生参数；`null` 必须省略覆盖。
@@ -116,7 +117,9 @@ fallback/cooldown 后下一次 Run 仍消费原三态偏好。既有 Run/epoch �
 成员菜单不提供手动检测或恢复默认项；DOM、键盘焦点和草稿保持稳定，保存失败才显示错误并保留旧值；
 长成员列表滚动，1280×720 下浮层不盖住 Composer。
 
-执行台右侧按 Fast、停止、收起排列；Fast 与停止间隔 16px，停止与收起间隔 8px。对支持检查的队员保留
-紧凑 Fast 槽位，未知资格不显示虚假的禁用控件。保存中状态与防重复提交按 Camp/member 隔离；
+执行台将 Fast 放在队员模型配置旁，与模型间隔 10px；右侧只保留当前 Run 的停止与底部详情收起，间隔 8px。
+执行浮层内部不显示收起，使用浮层顶部入口或 Escape 收起并保留当前选择与已展开记录。执行详情的 Fast、停止与
+底部收起采用 24px 可见按钮面和至少 28px 命中区，停止与收起共用字体、圆角和内边距。对支持检查的队员保留
+配置行内的紧凑 Fast 槽位，未知资格不显示虚假的禁用控件。保存中状态与防重复提交按 Camp/member 隔离；
 只有该队员的两个入口同步变为 busy，其他队员保持外观与可操作性。无关投影刷新不清除已确认偏好或缓存；
 绑定、模型、Installation 依据变化及成员离队仍使旧结果失效，迟到检查/保存不能恢复旧入口。

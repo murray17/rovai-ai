@@ -21,7 +21,7 @@ describe('execution console layout', () => {
     expect(styleBlock(selector)).toMatch(/background:\s*var\(--conversation-surface\)/)
   })
 
-  it('shares the approved execution fill between running Run cards and their action bar without changing view buttons', () => {
+  it('keeps the action bar on the conversation surface and reserves the execution fill for running Run cards', () => {
     expect(styleBlock('.camp-conversation-view-controls button[aria-pressed="true"]')).toMatch(
       /background:\s*var\(--brand-soft\)/
     )
@@ -29,7 +29,7 @@ describe('execution console layout', () => {
       /--execution-running-surface:/
     )
     expect(styleBlock('.execution-drawer-header')).toMatch(
-      /background:\s*var\(--execution-running-surface\)/
+      /background:\s*var\(--conversation-surface\)/
     )
     expect(styleBlock('.execution-process-stage.status-running .execution-process-card')).toMatch(
       /background:\s*var\(--execution-running-surface\)/

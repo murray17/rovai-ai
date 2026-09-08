@@ -100,7 +100,7 @@ function snapshotFor(count: number, revision: number, recipientCount = 0): CampS
   }
 }
 
-let draft: CampComposerDraftView = { campId, body: '', content: [], revision: 1, attachments: [],
+let draft: CampComposerDraftView = { campId, body: '', content: { version: 2, segments: [] }, revision: 1, attachments: [],
   replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: () => () => {},

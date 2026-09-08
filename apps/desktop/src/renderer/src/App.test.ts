@@ -98,7 +98,6 @@ import {
   agentExecutionProcesses,
   agentRunTerminalNote,
   agentRunCountsAsExecuting,
-  agentRunRuntimeModelPresentation,
   agentRunShowsUnsettledWarning,
   attachmentDragKind,
   attachmentDropIsBlocked,
@@ -667,20 +666,6 @@ function canonicalActivity(
     ...overrides
   }
 }
-
-describe('AgentRun Runtime model presentation', () => {
-  it('shows Runtime defaults before observation and ignores fixed-model Runs', () => {
-    expect(agentRunRuntimeModelPresentation({ modelId: null })).toEqual({
-      modelId: 'Agent 运行时默认',
-      observed: false
-    })
-    expect(agentRunRuntimeModelPresentation({ modelId: 'gpt-5.6' })).toEqual({
-      modelId: 'gpt-5.6',
-      observed: true
-    })
-    expect(agentRunRuntimeModelPresentation(null)).toBeNull()
-  })
-})
 
 describe('cold startup route presentation', () => {
   it('removes the global gate as soon as Main Window Session returns a target', () => {
