@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-09-06
+last_updated: 2026-09-08
 ---
 
 # Porcelain Day
@@ -101,6 +101,22 @@ Light. `color-scheme: light`.
 | `--violet-soft` | `#efebf6` |
 | `--ember` | `#d3a45f` |
 | `--ember-soft` | `#f8edda` |
+
+### Conversation controls
+
+These local tokens cover sidebar selection, Composer and the execution/task/member controls.
+Rail and selected surfaces stay unchanged; status, identity and evidence keep their own colors.
+
+| Token | Value |
+|---|---:|
+| `--conversation-action` | `#2b2b2c` |
+| `--conversation-action-hover` | `#1a1a1b` |
+| `--conversation-action-contrast` | `#ffffff` |
+| `--conversation-control-line` | `#949494` |
+| `--conversation-focus` | `#2b2b2c` |
+| `--conversation-focus-soft` | `rgba(43, 43, 44, 0.12)` |
+| `--conversation-route-accent` | `#7a7d80` |
+| `--conversation-unread` | `#1683ff` |
 
 ### Semantic state
 
@@ -199,7 +215,7 @@ higher contrast preferences use the stronger control line and ink. Import MCP so
 - New Conversation workspace, member and Lead controls share the dialog field tokens and
   standard input surface. Optional naming uses the same quiet form treatment.
 - `attention` is for pending user action or approval; warm `ember` is decorative and cannot replace it.
-- `danger` is for stop, permanent deletion, forgetting and confirmed failure—not ordinary disabled state.
+- `danger` is for stop, permanent deletion, sidebar removal, forgetting and confirmed failure—not ordinary disabled state.
 - Stable IDs map to `--identity-1..8`; identity color never signals state or permission.
 - Evidence never inherits brand gradients, identity fills or portraits.
 - Narrative inline code uses the borderless `--inline-code-canvas`; Shell command results use
