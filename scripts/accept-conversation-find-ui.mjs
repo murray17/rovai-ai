@@ -662,6 +662,8 @@ async function launchApp(port, width, height, reducedMotion) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    await waitForExpression(cdp,
+      `Boolean(document.querySelector('.camp-nav-open'))`, 30_000)
     const health = await evaluate(cdp, `window.rovai.request('health.check', {})`, true)
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Packaged App opened the wrong database: ${JSON.stringify(health.database.path)}`)
@@ -755,7 +757,13 @@ async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
     await wait(100)
   }
   if (await evaluate(cdp, expression)) return
-  throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
+  const state = await evaluate(cdp, `({
+    activeTag: document.activeElement?.tagName,
+    activeClass: document.activeElement?.className,
+    findOpen: Boolean(document.querySelector('.conversation-find-form')),
+    dialogOpen: Boolean(document.querySelector('[role="dialog"]'))
+  })`)
+  throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}; state: ${JSON.stringify(state)}`)
 }
 
 async function waitForTarget(port, stderr) {
