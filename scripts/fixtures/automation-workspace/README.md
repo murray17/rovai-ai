@@ -39,6 +39,15 @@ pnpm exec tsc -p scripts/fixtures/automation-workspace/tsconfig.json
 
 以下截图更新到本轮生产 Renderer。这里的内存 RPC 不替代真实 Core、Runtime 或通知投递验收。
 
+2026-09-08 创建选择框还原后，`accept-create.mjs` 通过浏览器真实输入验证：
+
+- 列表“新建”先展开空白与三个模板入口，选定之前保留当前详情；空白可保存，三个模板正确预填名称、内容与计划。
+- 再次点击、框外点击与 Escape 均可收起；Escape 返回“新建”，直接点击已有任务仍能完成切换。
+- 选择空白或模板不聚焦输入框；208px 最小列表在 1040×700 夜间窗口下没有横向溢出。
+- 总览副标题为“安排一次，按时执行。”，已去掉运行与唤醒条件提示；2K 空列表保持 1136px 居中，点击总览“新建”后铺满导航右侧。
+
+下方截图保留 v34 记录；新建选择框与文案以当前生产组件和上述回归为准。
+
 ![Day 总览](screenshots/day-overview.png)
 ![Day 首次空列表](screenshots/day-empty.png)
 ![Day 默认 248px 列表详情](screenshots/day-detail.png)

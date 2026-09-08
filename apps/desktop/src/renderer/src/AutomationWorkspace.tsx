@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AgentProfile,
@@ -56,6 +56,10 @@ export function AutomationWorkspace({
   const [query, setQuery] = useState('')
   const [listWidth, setListWidth] = useState(AUTOMATION_DEFAULT_LIST_WIDTH)
   const [editorClosed, setEditorClosed] = useState(false)
+  const [createChooserOpen, setCreateChooserOpen] = useState(false)
+  const createChooserId = useId()
+  const createChooserRef = useRef<HTMLElement>(null)
+  const createTriggerRef = useRef<HTMLButtonElement>(null)
   const [availableWidth, setAvailableWidth] = useState(1100)
   const splitRef = useRef<HTMLDivElement>(null)
   const overviewRef = useRef<HTMLHeadingElement>(null)
@@ -70,6 +74,31 @@ export function AutomationWorkspace({
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    setCreateChooserOpen(false)
+  }, [selectedId])
+
+  useEffect(() => {
+    if (!createChooserOpen) return
+    const dismissOutside = (event: MouseEvent): void => {
+      if (event.target instanceof Node && !createChooserRef.current?.contains(event.target) && !createTriggerRef.current?.contains(event.target)) {
+        setCreateChooserOpen(false)
+      }
+    }
+    const dismissOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      setCreateChooserOpen(false)
+      createTriggerRef.current?.focus({ preventScroll: true })
+    }
+    document.addEventListener('click', dismissOutside)
+    document.addEventListener('keydown', dismissOnEscape)
+    return () => {
+      document.removeEventListener('click', dismissOutside)
+      document.removeEventListener('keydown', dismissOnEscape)
+    }
+  }, [createChooserOpen])
 
   selectedIdRef.current = selectedId
   draftRef.current = draft
@@ -282,6 +311,7 @@ export function AutomationWorkspace({
 
   const beginNew = async (templateId?: TemplateId): Promise<void> => {
     if (!(await flushBeforeLeave())) return
+    setCreateChooserOpen(false)
     const context = selectedIdRef.current === 'new' ? draftRef.current : defaultDraft(defaultMemberId)
     const template = templateId ? templates[templateId] : null
     const next = { ...context, name: template?.name ?? '', prompt: template?.prompt ?? '', schedule: template?.schedule ?? context.schedule }
@@ -470,7 +500,7 @@ export function AutomationWorkspace({
       <div ref={splitRef} className="automation-split" style={{ '--automation-list-width': `${width}px` } as CSSProperties}>
         <aside className="automation-list" aria-label="定时任务列表">
           {overview && <header className="automation-page-header">
-            <div><p className="eyebrow">Automation / Scheduled</p><h1 ref={overviewRef} tabIndex={-1}>定时任务</h1><p>让队员按计划创建新对话并完成工作。</p></div>
+            <div><p className="eyebrow">Automation / Scheduled</p><h1 ref={overviewRef} tabIndex={-1}>定时任务</h1><p>安排一次，按时执行。</p></div>
             <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}>新建</button>
           </header>}
           {(!overview || automations.length > 0) && <div className="automation-list-controls">
@@ -478,10 +508,16 @@ export function AutomationWorkspace({
               {(['all', 'enabled', 'closed'] as const).map((value, index) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{['全部', '开启', '关闭'][index]}</button>)}
             </div>
             {!overview && <div className="automation-list-navigation">
-              <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}>新建</button>
+              <button ref={createTriggerRef} className="primary-button" type="button" disabled={busy !== null}
+                aria-expanded={createChooserOpen} aria-controls={createChooserId}
+                onClick={() => setCreateChooserOpen((open) => !open)}>新建</button>
             </div>}
             <label className="automation-search"><AutomationGlyph name="search" /><input type="search" aria-label="搜索定时任务" placeholder="搜索定时任务" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           </div>}
+          {!overview && <section ref={createChooserRef} id={createChooserId} className="automation-create-choices" aria-label="选择创建方式" hidden={!createChooserOpen}>
+            <p>从空白或模板开始</p>
+            <AutomationTemplates compact onChoose={(id) => void beginNew(id)} />
+          </section>}
           <div className="automation-list-scroll" aria-busy={loadState === 'loading'}>
             {loadState === 'loading' && automations.length === 0 && <p className="automation-list-message" role="status">正在读取任务…</p>}
             {loadState === 'error' && automations.length === 0 && <p className="automation-list-message">任务列表暂时不可用。</p>}
@@ -514,7 +550,6 @@ export function AutomationWorkspace({
           {overview && <section className="automation-template-library" aria-labelledby="automation-templates-heading">
             <div><h2 id="automation-templates-heading">模板</h2><p>选择后可在任务页继续调整</p></div>
             <AutomationTemplates onChoose={(id) => void beginNew(id)} />
-            <p className="automation-scheduler-note">Rovai 运行且电脑唤醒时按计划触发，错过的任务不会补跑。</p>
           </section>}
         </aside>
         {!overview && <>
