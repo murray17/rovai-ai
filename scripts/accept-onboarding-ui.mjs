@@ -54,8 +54,9 @@ try {
   const welcome = await surfaceState(running.cdp, '.onboarding-welcome')
   assert(welcome.visible && welcome.primaryVisible && welcome.primaryEnabled,
     `Welcome primary action is not visible: ${JSON.stringify(welcome)}`)
-  assert(!welcome.hasSkip && !welcome.hasProgress && !welcome.horizontalOverflow,
+  assert(!welcome.hasSkip && !welcome.hasStepNavigation && !welcome.horizontalOverflow,
     `Welcome exposes a skip/progress control or overflows: ${JSON.stringify(welcome)}`)
+  await assertProgress(running.cdp, 1)
   captures.welcomeDay = join(outputDir, '01-welcome-day-1040x700.png')
   await capture(running.cdp, captures.welcomeDay)
 
@@ -70,14 +71,15 @@ try {
     rows: document.querySelectorAll('.onboarding-member-row').length,
     portraits: document.querySelectorAll('.onboarding-selected-portrait').length,
     hasSkip: document.body.textContent?.includes('跳过') ?? false,
-    hasProgress: Boolean(document.querySelector('.onboarding-step, .onboarding-progress')),
+    hasStepNavigation: Boolean(document.querySelector('.onboarding-step, .onboarding-progress button, .onboarding-progress a')),
     horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
     viewport: [window.innerWidth, window.innerHeight]
   }))()`)
   assert(memberPage.rows === 4 && memberPage.portraits === 1,
     `Member page is not one portrait plus four text rows: ${JSON.stringify(memberPage)}`)
-  assert(!memberPage.hasSkip && !memberPage.hasProgress && !memberPage.horizontalOverflow,
+  assert(!memberPage.hasSkip && !memberPage.hasStepNavigation && !memberPage.horizontalOverflow,
     `Member page exposes skip/progress or overflows: ${JSON.stringify(memberPage)}`)
+  await assertProgress(running.cdp, 2)
   assert(memberPage.viewport[0] === width && memberPage.viewport[1] === height,
     `Member page viewport is not ${width}x${height}: ${JSON.stringify(memberPage.viewport)}`)
   captures.memberDay = join(outputDir, '03-member-day-1040x700.png')
@@ -112,6 +114,7 @@ try {
     `Restart did not resume the unfinished member page: ${JSON.stringify(resumedMember)}`)
   await clickByText(running.cdp, '.onboarding-member-footer button', '下一步')
   await waitForSelector(running.cdp, '.onboarding-runtime-track', 5_000)
+  await assertProgress(running.cdp, 3)
   captures.runtimeScan = join(outputDir, '04-runtime-scan-day-1040x700.png')
   await capture(running.cdp, captures.runtimeScan)
   await waitForSelector(running.cdp, '.onboarding-runtime-list, .onboarding-runtime-empty', 120_000)
@@ -245,6 +248,19 @@ try {
     && !campState.timelineOverflow
     && !campState.horizontalOverflow,
   `First-run Camp surface is incomplete: ${JSON.stringify(campState)}`)
+  const firstRunLayout = await evaluate(running.cdp, `(() => {
+    const welcome = document.querySelector('.first-run-camp-welcome').getBoundingClientRect()
+    const track = document.querySelector('.camp-timeline .timeline-track').getBoundingClientRect()
+    const cards = [...document.querySelectorAll('.first-run-starters button')].map(el => el.getBoundingClientRect())
+    return {
+      width: welcome.width,
+      centerOffset: Math.abs((welcome.top + welcome.bottom) / 2 - (track.top + track.bottom) / 2),
+      cardRows: new Set(cards.map(card => Math.round(card.top))).size
+    }
+  })()`)
+  assert(Math.abs(firstRunLayout.width - 680) < 1 && firstRunLayout.centerOffset < 2 && firstRunLayout.cardRows === 1,
+    `First-run welcome does not match the approved layout: ${JSON.stringify(firstRunLayout)}`)
+  report.firstRunLayout = firstRunLayout
   report.camp = {
     id: beforeProjection.camp.id,
     title: beforeProjection.camp.title,
@@ -501,6 +517,15 @@ async function setTheme(cdp, theme) {
     `document.documentElement.dataset.theme === ${JSON.stringify(theme)}`, 5_000)
 }
 
+async function assertProgress(cdp, step) {
+  const progress = await evaluate(cdp, `(() => {
+    const element = document.querySelector('.onboarding-progress')
+    return { text: element?.textContent?.trim(), label: element?.getAttribute('aria-label'), tag: element?.tagName }
+  })()`)
+  assert(progress.text === `${step} / 3` && progress.label === `第 ${step} 步，共 3 步` && progress.tag === 'SPAN',
+    `Onboarding progress must be read-only and describe the current step: ${JSON.stringify(progress)}`)
+}
+
 async function surfaceState(cdp, selector) {
   return evaluate(cdp, `(() => {
     const surface = document.querySelector(${JSON.stringify(selector)})
@@ -511,7 +536,7 @@ async function surfaceState(cdp, selector) {
       primaryVisible: Boolean(rect && rect.top >= 0 && rect.bottom <= window.innerHeight),
       primaryEnabled: Boolean(primary && !primary.disabled),
       hasSkip: document.body.textContent?.includes('跳过') ?? false,
-      hasProgress: Boolean(document.querySelector('.onboarding-step, .onboarding-progress')),
+      hasStepNavigation: Boolean(document.querySelector('.onboarding-step, .onboarding-progress button, .onboarding-progress a')),
       horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
     }
   })()`)

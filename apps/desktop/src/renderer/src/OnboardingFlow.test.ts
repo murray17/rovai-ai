@@ -20,12 +20,13 @@ import {
 type InProgress = Extract<OnboardingSnapshot, { status: 'in_progress' }>
 
 describe('first-run onboarding flow', () => {
-  it('renders a mandatory welcome without skip or decorative progress navigation', () => {
+  it('renders a mandatory welcome with read-only progress and no skip', () => {
     const markup = renderOnboarding(snapshot('welcome'))
     expect(markup).toContain('欢迎来到 Rovai')
     expect(markup).toContain('选择队员')
     expect(markup).not.toContain('跳过')
     expect(markup).not.toContain('onboarding-step')
+    expect(markup).toContain('aria-label="第 1 步，共 3 步"')
   })
 
   it('uses one selected portrait and a four-row text roster', () => {
@@ -90,6 +91,22 @@ describe('first-run onboarding flow', () => {
     const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [codexInstallation()])
     expect(onboardingHasUsableRuntime('ready', health, [codexInstallation()])).toBe(true)
     expect(markup).toContain('<small>实验性开放；当前平台尚未完成正式资格验证')
+  })
+
+  it('keeps selectable and experimental alternatives outside the collapsed runtime list', () => {
+    const health = healthWithRuntime(readyAvailability(), qualifiedAdmission())
+    health.runtimeAvailability.push({ ...readyAvailability(), runtimeKind: 'qwen-code' })
+    health.runtimePlatformAdmission.push(
+      { ...qualifiedAdmission(), runtimeKind: 'qwen-code' },
+      { ...previewAdmission(), runtimeKind: 'kimi-code-cli' }
+    )
+    const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [codexInstallation()])
+    const [visible, collapsed] = markup.split('<details class="onboarding-other-runtimes">')
+    expect(visible).toContain('Qwen Code')
+    expect(visible).toContain('Kimi Code')
+    expect(collapsed).toContain('GitHub Copilot')
+    expect(collapsed).toContain('Antigravity')
+    expect(collapsed.split('</details>')[0]).not.toContain('aria-disabled="false"')
   })
 
   it('keeps a failed scan distinct from a completed scan even with stale usable health', () => {
