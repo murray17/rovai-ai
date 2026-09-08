@@ -162,7 +162,7 @@ around-window 合入时间线，不触发 earlier page 全量加载，也不改�
 
 `Enter` 前进、`Shift+Enter` 后退并在首尾循环；按钮提供同等能力。空查询显示输入提示，无结果显示
 “无匹配”，读取中保留可理解的忙碌状态，失败说明“暂时无法搜索完整会话”并原位提供“重试”。`Esc`
-或关闭按钮撤下高亮，恢复打开前的消息阅读锚点、follow-latest 状态与仍可见焦点；定位期间输入框保持
+或关闭按钮撤下高亮，恢复打开前的消息阅读锚点和 follow-latest 状态，不额外将焦点送回入口或阅读容器；定位期间输入框保持
 焦点，后台消息不能把时间线拉回最新。
 
 所有已挂载公开正文命中使用主题语义高亮，当前 occurrence 使用更强背景与下划线；当前消息另有 1 px
@@ -231,8 +231,7 @@ Agent 消息继续左对齐并保持透明开放阅读面，不添加身份色�
 底色、阴影或回复图标；作者与有界摘要共用一个可视行，超出可用宽度显示省略号，末尾保留取消按钮。
 
 鼠标点击“回复”后正文编辑器获得焦点和插入光标，但不得因为程序化 focus 改变 Composer 的边框、阴影
-或增加包围框。键盘激活“回复”或通过 Tab 进入编辑器时，必须保留只作用于编辑器的可见
-`focus-visible` 提示；不得用去除全部焦点反馈来实现鼠标无框。
+或增加包围框。键盘激活“回复”或通过 Tab 进入编辑器时也只保留输入光标，不增加额外焦点装饰。
 
 回复当前可寻址 Agent 是一次明确的用户双意图：同一 Draft revision 设置 reply target，并插入或复用
 可见 Member Mention。已有其他 Mention 时全部保留，
@@ -341,7 +340,7 @@ Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即�
 [Single Chat v3](../../contracts/single-chat-v3.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
 
 panel 保留明确的收起按钮与 `Esc`，对象菜单和确认 Dialog 打开时 `Esc` 先关闭最上层浮层。选择器、Disclosure、停止、
-结束和发送均需可键盘到达并有可见 `focus-visible`；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
+结束和发送均需可键盘到达，不添加额外焦点框；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
 不能遮住全局侧栏或溢出可视区；reduced motion 关闭非必要位移和旋转动画但保留状态变化。
 
 领域、权限与输出路由见 [Single Chat v3](../../contracts/single-chat-v3.md)，组件数据流见
@@ -729,7 +728,7 @@ Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` �
 居中、同轴，Inspector 显隐不得改变这些关系。发送、Stop、Approval Dock、
 附件、Skill 候选、Mention、reply intent 和 continuation intent 都使用同一 Core-owned Draft；任何浮层
 都不能建立第二份草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，
-不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入仍保留局部焦点提示。
+不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入保留输入光标，不增加局部焦点框或光晕。
 
 接收者提示始终预留一行 34px 高度及 5px 底部间距。草稿首次 loading 时显示无接收者文案、无循环动画的模糊占位；
 ready 后原位显示默认 Lead 或 continuation。显式 Mention、reply 或错误状态不显示路由时保留空白行，
@@ -878,10 +877,10 @@ Camp Header 显示会话定位、待审批摘要和详情直接入口；文件 T
 ## Theme, keyboard and failure states
 
 Day/Night 复用同一 DOM 和状态矩阵。主要操作支持键盘；Drawer、stage、Dock、menus、disclosure
-和 Stop 均有可见焦点。Loading、Empty、Partial、Error、Disabled、Submitting 与 Recovery 必须
+和 Stop 均可通过键盘操作，不添加额外焦点装饰。Loading、Empty、Partial、Error、Disabled、Submitting 与 Recovery 必须
 保留当前上下文、草稿和可恢复导航，而不是用通用错误页覆盖整个工作区。
 
-主会话与单聊 Composer 共用中性色边界、焦点、光标和路由强调；使用 `--conversation-control-line`、
+主会话与单聊 Composer 共用中性色边界、光标和路由强调，不添加额外焦点框；使用 `--conversation-control-line`、
 `--conversation-focus`、`--conversation-focus-soft`、`--conversation-route-accent` 和主操作 token。
 不改变布局、路由占位、禁用、附件或发送/停止行为；状态与身份颜色保留。
 

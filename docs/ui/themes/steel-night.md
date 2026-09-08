@@ -109,6 +109,8 @@ Rail and selected surfaces stay unchanged; status, identity and evidence keep th
 
 | Token | Value |
 |---|---:|
+| `--neutral-selected` | `#292e32` |
+| `--neutral-hover` | `#23292e` |
 | `--conversation-action` | `#e5e5e7` |
 | `--conversation-action-hover` | `#ffffff` |
 | `--conversation-action-contrast` | `#171719` |
@@ -250,3 +252,5 @@ overridden there intentionally inherit shared geometry and aliases from `:root`.
 
 Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md), including
 first-paint system resolution and switching themes while Draft, focus, selection and overlays are active.
+
+Neutral workspace selection/hover tokens apply to teammate roster, Memory, Automation and jump search. These workspaces reuse the conversation action family for neutral actions; Runtime configuration dropdowns and sidebar backgrounds retain their existing tokens. Focus tokens do not require an extra outline, halo or focused input border.

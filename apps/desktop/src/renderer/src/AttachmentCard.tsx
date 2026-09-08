@@ -291,7 +291,6 @@ export function AttachmentCard({
                     loop
                     onCloseAutoFocus={(event) => {
                       event.preventDefault()
-                      attachmentButtonRef.current?.focus()
                     }}
                   >
                     <DropdownMenu.Label className="attachment-context-menu-label">

@@ -315,7 +315,6 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   it('keeps file references underline-free and shared resource glyphs at one stroke weight', () => {
     expect(css).toMatch(/\.safe-markdown \.markdown-file-reference,[\s\S]*?\.message-file-reference\s*\{[^}]*text-decoration: none/)
     expect(css).toMatch(/\.safe-markdown \.markdown-file-reference:hover,[\s\S]*?\.message-file-reference:active\s*\{[^}]*text-decoration: none/)
-    expect(css).toMatch(/\.safe-markdown \.markdown-file-reference:focus-visible,[\s\S]*?\.message-file-reference:focus-visible\s*\{[^}]*text-decoration: none/)
     expect(css).not.toMatch(/\.inline-code-file-reference:hover \.file-reference-label\s*\{[^}]*text-decoration-(?:line|style): underline/)
     expect(css).toMatch(/\.file-preview-tab-icon\s*\{[^}]*stroke-width: 1\.7[^}]*opacity: \.9/)
     expect(css).toMatch(/\.resource-reference-icon\s*\{[^}]*stroke-width: 1\.7/)
@@ -368,8 +367,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/html\[data-rovai-platform="win32"\] \.app-shell\s*\{[^}]*grid-row: 2[^}]*width: 100%[^}]*min-width: 0[^}]*height: auto/)
   })
 
-  it('keeps focus, selection, and unread state visible in Windows Forced Colors', () => {
-    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*:focus-visible\s*\{[\s\S]*outline: 2px solid Highlight !important/)
+  it('keeps selection and unread state visible in Windows Forced Colors', () => {
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*\.camp-nav-row\.selected[\s\S]*outline: 2px solid Highlight/)
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*\.rail-badge-dot[\s\S]*background: Highlight/)
   })
@@ -428,7 +426,6 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.message-copy-button svg,\s*\.message-reply-button svg\s*\{[^}]*width: 17px[^}]*height: 17px/)
     expect(css).toMatch(/\.message-copy-button \+ \.message-reply-button\s*\{[^}]*margin-left: 1px/)
     expect(css).toMatch(/\.message-long-toggle\s*\{[^}]*min-height: 28px[^}]*margin: 3px 0 -4px -5px[^}]*color: var\(--muted\)/)
-    expect(css).toContain('.message-long-toggle:focus-visible')
     expect(css).toContain('.message-long-toggle[aria-expanded="true"] svg')
     expect(css).not.toContain('.message-long-ellipsis')
     expect(css).toMatch(
@@ -441,9 +438,6 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(
       /\.image-gallery-user-attachment \.image-gallery-grid\s*\{[^}]*justify-content: flex-end/
     )
-    expect(css).toContain('.composer-box:focus-within')
-    expect(css).toContain('.composer.suppress-pointer-focus-ring .composer-box:focus-within')
-    expect(css).toMatch(/\.structured-mention-editor:focus-visible\s*\{[^}]*outline:\s*0/)
     expect(css).toMatch(/\.structured-mention-placeholder\s*\{[^}]*position:\s*absolute[^}]*pointer-events:\s*none/)
     expect(css).not.toContain('.composer.suppress-reply-focus-ring')
     expect(css).toMatch(/\.composer-continuation\s*\{[^}]*background:\s*transparent|\.composer-continuation\s*\{[^}]*color:/)
@@ -492,7 +486,6 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*background:\s*var\(--shell-result-canvas\)/)
     expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*max-height:\s*min\(220px, 30vh\)[^}]*overflow:\s*auto[^}]*scrollbar-gutter:\s*stable/)
     expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*white-space:\s*pre-wrap[^}]*overflow-wrap:\s*anywhere/)
-    expect(css).toContain('.tool-call-result-scroll:focus-visible')
     expect(css).not.toContain('.tool-output-copy-button')
     expect(css).not.toContain('.tool-call-detail.is-truncated')
   })

@@ -65,3 +65,7 @@ Inherit root [`DESIGN.md`](../../../../DESIGN.md), theme evidence tokens and the
 [accessibility baseline](../../../../docs/ui/qa/accessibility.md). This brief owns composition only;
 Memory scope, authority, Hearth Review policy, persistence and concurrency remain in current ADRs,
 Contracts and Core read/write models.
+
+## Neutral workspace actions
+
+The header shows the title and a light tonal add action, without an English eyebrow or export entry. Backend export capability remains available to other consumers. Scope/governance filters and selected memories use neutral surfaces; type/source badges use muted text. Review, active use, errors and permanent forgetting retain their semantic colors. Inputs and overlays follow the shared no-extra-focus-decoration policy.

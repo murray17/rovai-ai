@@ -105,7 +105,6 @@ export function McpSettings({
   const [newMembers, setNewMembers] = useState<string[]>([])
   const [concealed, setConcealed] = useState(false)
   const [editorEpoch, setEditorEpoch] = useState(0)
-  const deleteTrigger = useRef<HTMLButtonElement>(null)
   const [inspection, setInspection] = useState<McpImportInspection | null>(null)
   const [importDrafts, setImportDrafts] = useState<Record<string, McpImportDraft>>({})
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -451,7 +450,6 @@ export function McpSettings({
               <>
                 <span className="capability-action-divider" aria-hidden="true" />
                 <button
-                  ref={deleteTrigger}
                   type="button"
                   className="quiet-button compact danger-text"
                   aria-label="删除 MCP"
@@ -532,7 +530,6 @@ export function McpSettings({
         description="删除后，使用此 MCP 的队员将无法再通过 Rovai 调用它。"
         busy={busy === 'delete'}
         error={error}
-        triggerRef={deleteTrigger}
         onCancel={cancelDelete}
         onConfirm={remove}
       />

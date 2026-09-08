@@ -83,7 +83,6 @@ describe('File preview reading planes', () => {
     expect(button).toContain('cursor: pointer;')
     expect(tooltip).toContain('background: var(--surface-raised);')
     expect(styles).toContain('.file-preview-path-button:focus-visible + .file-preview-path-tooltip')
-    expect(styles).toContain('.file-preview-path-button:focus-visible { outline: 2px solid var(--focus);')
   })
 
   it('keeps header and body tracks equal without reserving a column for Camp details', () => {

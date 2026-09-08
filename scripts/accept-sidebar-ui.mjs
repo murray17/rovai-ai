@@ -50,7 +50,7 @@ try {
   const projectMenuCapture = join(outputDir, 'project-menu-day-1440x920.png')
   await capture(desktopApp.cdp, projectMenuCapture)
   await pressKey(desktopApp.cdp, 'Escape')
-  await assertMenuClosedWithFocus(desktopApp.cdp, projectTarget)
+  await assertMenuClosedWithoutRefocus(desktopApp.cdp, projectTarget)
 
   await openMenuByKeyboard(desktopApp.cdp, projectTarget)
   await pressKey(desktopApp.cdp, 'Enter')
@@ -76,7 +76,7 @@ try {
   await pressKey(desktopApp.cdp, 'ArrowDown')
   await assertHighlightedItem(desktopApp.cdp, '删除')
   await pressKey(desktopApp.cdp, 'Escape')
-  await assertMenuClosedWithFocus(desktopApp.cdp, campTarget)
+  await assertMenuClosedWithoutRefocus(desktopApp.cdp, campTarget)
   await assertCampIdCopy(desktopApp.cdp, campTarget, fixture.actionCampId)
 
   await openMenuByKeyboard(desktopApp.cdp, campTarget)
@@ -99,7 +99,7 @@ try {
   await capture(desktopApp.cdp, deleteDialogCapture)
   await pressKey(desktopApp.cdp, 'Escape')
   await waitForExpression(desktopApp.cdp, `!document.querySelector('.camp-action-dialog')`)
-  await waitForTargetFocus(desktopApp.cdp, deleteTarget)
+  await assertNoTargetRefocus(desktopApp.cdp, deleteTarget)
   await openDeleteDialog(desktopApp.cdp, deleteTarget)
   await clickButton(desktopApp.cdp, '.camp-action-dialog .danger-button', '永久删除对话')
   await waitForExpression(desktopApp.cdp, `(() => {
@@ -156,7 +156,7 @@ try {
   const compactMenuCapture = join(outputDir, 'camp-menu-compact-1040x700-reduced-motion.png')
   await capture(compactApp.cdp, compactMenuCapture)
   await pressKey(compactApp.cdp, 'Escape')
-  await assertMenuClosedWithFocus(compactApp.cdp, compactTarget)
+  await assertMenuClosedWithoutRefocus(compactApp.cdp, compactTarget)
 
   const persistedPins = await evaluate(
     compactApp.cdp,
@@ -695,7 +695,7 @@ async function assertProjectRowAndPagination(cdp) {
   assert(expandedWithMenu.expanded === expandedBeforeActions.expanded,
     `Project menu unexpectedly toggled the directory row: ${JSON.stringify(expandedWithMenu)}`)
   await pressKey(cdp, 'Escape')
-  await assertMenuClosedWithFocus(cdp, menuTarget)
+  await assertMenuClosedWithoutRefocus(cdp, menuTarget)
 
   await clickProjectControl(cdp, selector, '.group-create-button')
   await waitForSelector(cdp, '.new-camp-dialog')
@@ -893,7 +893,7 @@ async function assertHighlightedItem(cdp, label) {
       && document.activeElement.textContent?.trim() === ${JSON.stringify(label)}`)
 }
 
-async function assertMenuClosedWithFocus(cdp, target) {
+async function assertMenuClosedWithoutRefocus(cdp, target) {
   await wait(300)
   const menuStillOpen = await evaluate(cdp, `Boolean(document.querySelector('.sidebar-action-menu'))`)
   if (menuStillOpen) {
@@ -912,7 +912,7 @@ async function assertMenuClosedWithFocus(cdp, target) {
     })`)
     throw new Error(`Escape did not close the sidebar menu: ${JSON.stringify(state)}`)
   }
-  await waitForTargetFocus(cdp, target)
+  await assertNoTargetRefocus(cdp, target)
 }
 
 async function assertCampIdCopy(cdp, target, expectedCampId) {
@@ -943,7 +943,7 @@ async function assertCampIdCopy(cdp, target, expectedCampId) {
     await assertHighlightedItem(cdp, '复制会话 ID')
     await pressKey(cdp, 'Enter')
     await waitForExpression(cdp, `document.querySelector('.app-toast')?.textContent?.includes('已复制会话 ID') === true`)
-    await waitForTargetFocus(cdp, target)
+    await assertNoTargetRefocus(cdp, target)
     const state = await evaluate(cdp, `({
       copiedText: window.__rovaiSidebarCopiedText,
       menuOpen: Boolean(document.querySelector('.sidebar-action-menu[data-state="open"]')),
@@ -977,7 +977,7 @@ async function assertTargetMoved(cdp, target, containerSelector) {
       && document.querySelectorAll('[data-sidebar-menu-target="' + CSS.escape(target) + '"]').length === 1
   })()`, 15_000)
   try {
-    await waitForTargetFocus(cdp, target)
+    await assertNoTargetRefocus(cdp, target)
   } catch {
     const state = await evaluate(cdp, `({
       activeTag: document.activeElement?.tagName ?? null,
@@ -986,7 +986,7 @@ async function assertTargetMoved(cdp, target, containerSelector) {
       targetConnected: [...document.querySelectorAll('[data-sidebar-menu-target]')]
         .some((element) => element.dataset.sidebarMenuTarget === ${JSON.stringify(target)})
     })`)
-    throw new Error(`Migrated sidebar target did not recover focus: ${JSON.stringify(state)}`)
+    throw new Error(`Migrated sidebar target was unnecessarily refocused: ${JSON.stringify(state)}`)
   }
 }
 
@@ -1014,7 +1014,7 @@ async function renameCampFromMenu(cdp, target) {
       .find((element) => element.dataset.sidebarMenuTarget === target)
     return trigger?.getAttribute('aria-label') === ${JSON.stringify(`管理“${renamedTitle}”`)}
   })()`, 15_000)
-  await waitForTargetFocus(cdp, target)
+  await assertNoTargetRefocus(cdp, target)
 }
 
 async function assertClickOutsideClosesMenu(cdp, target) {
@@ -1107,7 +1107,7 @@ async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
   // before the confirmed path is exercised.
   await pressKey(cdp, 'Escape')
   await waitForExpression(cdp, `!document.querySelector('.camp-action-dialog')`)
-  await waitForTargetFocus(cdp, projectTarget)
+  await assertNoTargetRefocus(cdp, projectTarget)
 
   await openMenuByKeyboard(cdp, projectTarget)
   await pressKey(cdp, 'ArrowDown')
@@ -1121,7 +1121,8 @@ async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
       .some((element) => element.dataset.sidebarMenuTarget === target)
       && !document.querySelector('.camp-action-dialog')
   })()`, 15_000)
-  await waitForExpression(cdp, `document.activeElement?.dataset.sidebarFocusTarget === 'project-row:quick-chat'`, 15_000)
+  await wait(350)
+  assert(await evaluate(cdp, `document.activeElement?.dataset.sidebarFocusTarget !== 'project-row:quick-chat'`), 'Project removal must not refocus the Quick Chat entry')
 
   const afterPreferences = await evaluate(cdp, 'window.rovai.navigationPreferences.get()', true)
   assert(afterPreferences.removedProjects.some((project) => project.targetKey === targetKey),
@@ -1214,13 +1215,11 @@ async function focusTarget(cdp, target) {
   assert(focused, `Could not focus sidebar menu target ${JSON.stringify(target)}`)
 }
 
-async function waitForTargetFocus(cdp, target) {
-  await waitForExpression(cdp,
-    `document.activeElement?.dataset.sidebarMenuTarget === ${JSON.stringify(target)}`)
-  await wait(300)
+async function assertNoTargetRefocus(cdp, target) {
+  await wait(350)
   assert(await evaluate(cdp,
-    `document.activeElement?.dataset.sidebarMenuTarget === ${JSON.stringify(target)}`),
-  `Sidebar target ${JSON.stringify(target)} did not retain focus for 300ms`)
+    `document.activeElement?.dataset.sidebarMenuTarget !== ${JSON.stringify(target)}`),
+  `Sidebar target ${JSON.stringify(target)} was unnecessarily refocused`)
 }
 
 async function targetOpacity(cdp, target) {

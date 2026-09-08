@@ -35,7 +35,7 @@ const sourceReaderInterface = {
     backgroundColor: 'var(--conversation-surface)'
   },
   '&.cm-focused': {
-    outline: '2px solid var(--focus)',
+    outline: 'none',
     outlineOffset: '-2px'
   },
   '.cm-scroller': {

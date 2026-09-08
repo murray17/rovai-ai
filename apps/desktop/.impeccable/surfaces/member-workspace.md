@@ -145,28 +145,30 @@ trait tags follow. A 182px, 4:5 portrait sits to their right. Working principles
 collapsed disclosure with a filled-field count. Collapsing preserves draft values; field validation expands
 and focuses the relevant field. Counters and input guidance appear on focus.
 
-Each section owns its “放弃更改” and “保存队员信息 / 保存运行配置” controls. Member selection preserves
+Each section owns its “放弃更改” and light tonal save control: a 14px outline save icon plus “保存”, with full accessible names “保存队员信息” / “保存运行配置”. Member selection preserves
 both sections' pending drafts for each visited teammate. Saving one section advances its accepted baseline
 without resetting the other. A conflicting external update preserves the local draft and blocks that section's
 save until the user reloads its saved values. Leaving the workspace confirms discarding pending changes.
 
 New teammates use the same page. The pending draft has a separate bottom roster row and is excluded from
 saved teammate counts and ordering. Only a name is required. Runtime configuration becomes available after
-creation. Presets, upload and native crop editing expand inline and are committed from “保存队员信息”.
+creation. Presets, upload and native crop editing expand inline and are committed from the identity section’s “保存” control.
 Creation includes the selected image in the existing create command. Existing identity and image changes use
 successive existing commands with receipt versions; partial success explicitly distinguishes committed text
 from an unsaved image, retains the remaining draft and never claims an atomic transaction.
 
-The Runtime picker shows the existing product icons in its trigger and keyboard-accessible menu. Model
+Keep Runtime/model/permission dropdown geometry, colors, borders, menu, selection, options and behavior unchanged; only remove extra focus outlines/halos. The Runtime picker shows the existing product icons in its trigger and keyboard-accessible menu. Model
 strategy's Runtime-default caption is “默认”; the underlying `runtime_default` mode and Runtime-native fields,
 raw choices, defaults, platform admission, model discovery and recovery remain unchanged. Do not introduce
 an additional Runtime parameters heading in this continuous form.
 
 The 620px detail breakpoint narrows the portrait to 128px and stacks name/role. Below 390px detail width,
 the portrait and all form columns stack. Both themes keep the same geometry, semantic colors and restrained
-1px input borders. Keep destructive removal confirmation and its Core preview, blockers, failures and focus return.
+1px input borders. Keep destructive removal confirmation and its Core preview, blockers, failures and keyboard operation without automatically refocusing the entry button.
 
 The production-component regression is `node --test scripts/lib/member-editor.test.mjs`. It runs an isolated
 Electron fixture, covers both saves, cross-member drafts, conflicts, inline creation, keyboard focus and
 1440×920 / 1040×700 / 2560×1440 / 200% layouts, and can retain screenshots with
 `ROVAI_KEEP_MEMBER_EDITOR_FIXTURE=1`. This fixture contains explicit test data; production always reads Core.
+
+Selected roster rows use a neutral surface and text without a left selection rail. Keep the roster background and identity assets unchanged.

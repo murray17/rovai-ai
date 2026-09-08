@@ -1,4 +1,4 @@
-import { useRef, type RefObject } from 'react'
+import { useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { CapabilityError } from './CapabilityWorkspace'
@@ -9,7 +9,6 @@ export function CapabilityDeleteDialog({
   description,
   busy,
   error,
-  triggerRef,
   onCancel,
   onConfirm
 }: {
@@ -18,19 +17,15 @@ export function CapabilityDeleteDialog({
   description: string
   busy: boolean
   error: string | null
-  triggerRef: RefObject<HTMLButtonElement | null>
   onCancel(): void
   onConfirm(): void
 }): React.JSX.Element {
-  const workspace = useRef<HTMLElement | null>(null)
   const cancel = useRef<HTMLButtonElement>(null)
-  const cancelled = useRef(false)
   return (
     <Dialog.Root
       open={open}
       onOpenChange={(next) => {
         if (!next && !busy) {
-          cancelled.current = true
           onCancel()
         }
       }}
@@ -43,22 +38,7 @@ export function CapabilityDeleteDialog({
           aria-busy={busy}
           onOpenAutoFocus={(event) => {
             event.preventDefault()
-            cancelled.current = false
-            workspace.current = triggerRef.current?.closest('.capability-workspace') ?? null
             cancel.current?.focus()
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            const candidates = [
-              cancelled.current ? triggerRef.current : null,
-              workspace.current?.querySelector<HTMLElement>('.capability-item[aria-current="true"]'),
-              ...(workspace.current?.querySelectorAll<HTMLElement>(
-                '.capability-library-heading button, .capability-back'
-              ) ?? [])
-            ]
-            candidates.find((target) =>
-              target?.isConnected && !target.matches(':disabled') && target.getBoundingClientRect().width
-            )?.focus()
           }}
           onEscapeKeyDown={(event) => {
             if (busy) event.preventDefault()

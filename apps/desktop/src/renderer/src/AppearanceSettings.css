@@ -7,7 +7,6 @@
 .settings-panel-appearance .appearance-settings-page .quiet-button { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--home-surface); color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
 .settings-panel-appearance .appearance-settings-page .quiet-button:disabled { opacity: .45; cursor: default; }
 .settings-panel-appearance .appearance-settings-page .quiet-button:hover:not(:disabled) { background: var(--surface-hover); color: var(--ink); }
-.settings-panel-appearance .appearance-settings-page :is(button, input, select):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .settings-panel-appearance .appearance-settings-page .section-heading::before { content: none; }
 .settings-panel-appearance .appearance-settings-page .section-heading { padding-left: 0; }
 .settings-panel-appearance .appearance-settings-page .sr-only, .settings-panel-appearance .appearance-settings-page legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -23,7 +22,6 @@
 .settings-panel-appearance .appearance-settings-page .appearance-option { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 0; min-width: 0; margin: 0; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--home-surface); cursor: pointer; transition: border-color 140ms ease; }
 .settings-panel-appearance .appearance-settings-page .appearance-option:hover { border-color: var(--line-strong); background: var(--workspace-surface-subtle); }
 .settings-panel-appearance .appearance-settings-page .appearance-option:has(input:checked) { border-color: var(--brand); background: var(--home-surface); box-shadow: 0 0 0 1px var(--brand); }
-.settings-panel-appearance .appearance-settings-page .appearance-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 4px; }
 .settings-panel-appearance .appearance-settings-page .appearance-option input { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .settings-panel-appearance .appearance-settings-page .theme-thumbnail { display: block; flex: none; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 7px; background: var(--surface-subtle); }
 .settings-panel-appearance .appearance-settings-page .theme-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
@@ -43,7 +41,6 @@
 .settings-panel-appearance .appearance-settings-page .setting-copy label, .settings-panel-appearance .appearance-settings-page .setting-copy .setting-label { display: block; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 1.5; }
 .settings-panel-appearance .appearance-settings-page .setting-copy p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .settings-panel-appearance .appearance-settings-page .size-stepper { display: flex; flex: none; align-items: center; height: 32px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--input); }
-.settings-panel-appearance .appearance-settings-page .size-stepper:focus-within { border-color: var(--focus); }
 .settings-panel-appearance .appearance-settings-page .size-stepper button { display: grid; width: 29px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
 .settings-panel-appearance .appearance-settings-page .size-stepper button:hover:not(:disabled) { background: var(--surface-hover); color: var(--ink); }
 .settings-panel-appearance .appearance-settings-page .size-stepper button .icon { width: 12px; height: 12px; }
@@ -53,7 +50,6 @@
 .settings-panel-appearance .appearance-settings-page .segments { display: flex; flex: none; margin: 0; padding: 3px; border: 0; border-radius: 6px; background: var(--surface-subtle); }
 .settings-panel-appearance .appearance-settings-page .segments label { position: relative; display: flex; min-height: 28px; align-items: center; justify-content: center; min-width: 55px; padding: 3px 10px; border-radius: 4px; color: var(--muted); font-size: 11px; cursor: pointer; }
 .settings-panel-appearance .appearance-settings-page .segments label:has(input:checked) { background: var(--surface-raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
-.settings-panel-appearance .appearance-settings-page .segments label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .settings-panel-appearance .appearance-settings-page .segments input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .settings-panel-appearance .appearance-settings-page .reading-note { margin: 8px 0 0; font-size: 10.5px; color: var(--faint); line-height: 1.6; }
 .settings-panel-appearance .appearance-settings-page .preview { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--conversation-surface); }
@@ -99,7 +95,6 @@
 .settings-panel-appearance .appearance-settings-page .display-section .setting-row:first-of-type { padding-top: 1px; }
 .settings-panel-appearance .appearance-settings-page .setting-action { display: flex; gap: 12px; align-items: center; flex: none; }
 .settings-panel-appearance .appearance-settings-page .setting-select { min-width: 123px; height: 33px; padding: 0 30px 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background-color: var(--input); font-size: 12px; cursor: pointer; }
-.settings-panel-appearance .appearance-settings-page select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .settings-panel-appearance .appearance-settings-page .shortcut { display: inline-flex; gap: 4px; color: var(--faint); font-size: 10px; }
 .settings-panel-appearance .appearance-settings-page kbd { display: inline-grid; place-items: center; min-width: 25px; min-height: 22px; padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--workspace-surface-subtle); font: inherit; font-size: 10px; line-height: 1.2; }
 .settings-panel-appearance .appearance-settings-page .motion-copy { max-width: 560px; }

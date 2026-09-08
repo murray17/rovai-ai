@@ -1214,7 +1214,6 @@ function AuthoritativeApp({
   const startupTraceId = useRef(crypto.randomUUID())
   const startupStartedAt = useRef(startupStartedAtMs)
   const lastMainView = useRef<View>(startupView(initialTarget))
-  const newConversationReturnFocus = useRef<HTMLElement | null>(null)
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runtimeHealthRefreshIncludesMembers = useRef(false)
@@ -2611,9 +2610,6 @@ function AuthoritativeApp({
     workspace: WorkspaceSelection | null,
     attentionMessage: string | null = null
   ): void => {
-    newConversationReturnFocus.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
     setNewConversationInitialWorkspace(workspace)
     setNewConversationInitialSelection(generalPreferences?.newConversationDefaults ?? null)
     setNewConversationAttention(attentionMessage)
@@ -4154,7 +4150,6 @@ function AuthoritativeApp({
         agents={agents}
         busy={busy === 'create-camp' || busy === 'open-project'}
         projectAccessReady={removedProjectAuthorityReady}
-        returnFocusElement={newConversationReturnFocus.current}
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}
         onWorkspaceSelected={(workspace) => restoreNavigationProject(workspace.projectPath)}

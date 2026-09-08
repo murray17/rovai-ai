@@ -38,11 +38,10 @@ describe('New Conversation dialog presentation contract', () => {
     expect(component).toContain(': closeButtonRef.current')
   })
 
-  it('uses paired light field boundaries without losing focus and contrast support', () => {
+  it('uses paired light field boundaries with contrast support', () => {
     expect(styles).toMatch(/\.compact-picker\s*\{[^}]*border:\s*1px solid var\(--dialog-field-line\)/s)
     expect(styles).toContain('--dialog-field-label: #707070;')
     expect(styles).toContain('--dialog-field-label: #a6abb2;')
     expect(styles).toContain('prefers-contrast: more')
-    expect(styles).toContain('outline:2px solid var(--focus)')
   })
 })

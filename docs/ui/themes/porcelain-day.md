@@ -109,6 +109,8 @@ Rail and selected surfaces stay unchanged; status, identity and evidence keep th
 
 | Token | Value |
 |---|---:|
+| `--neutral-selected` | `#eeeef0` |
+| `--neutral-hover` | `#f3f3f4` |
 | `--conversation-action` | `#2b2b2c` |
 | `--conversation-action-hover` | `#1a1a1b` |
 | `--conversation-action-contrast` | `#ffffff` |
@@ -248,3 +250,5 @@ source. This document is a reviewable contract, not a second CSS source.
 
 Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md), including
 `1040×700`, `1440×920`, `2560×1440`, keyboard focus, 200% zoom and reduced motion.
+
+Neutral workspace selection/hover tokens apply to teammate roster, Memory, Automation and jump search. These workspaces reuse the conversation action family for neutral actions; Runtime configuration dropdowns and sidebar backgrounds retain their existing tokens. Focus tokens do not require an extra outline, halo or focused input border.
