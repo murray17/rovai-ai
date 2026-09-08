@@ -34,10 +34,10 @@ describe('DiagnosticsCenter projections', () => {
     const markup = renderToStaticMarkup(createElement(DiagnosticsCenter, { onNavigate: () => undefined }))
     expect(markup).toContain('Settings / Diagnostics')
     expect(markup).toContain('检查运行环境并处理可安全修复的问题。')
-    expect(markup).toContain('运行完整自检')
-    expect(markup).toContain('导出诊断 JSON')
+    expect(markup).toContain('重新检查')
+    expect(markup).toContain('导出诊断')
     expect(markup).toContain('class="diagnostics-body"')
-    expect(markup).toContain('隐私边界')
+    expect(markup).toContain('诊断会包含哪些内容')
     expect(markup).toContain('正在读取诊断事实')
   })
 
@@ -81,7 +81,7 @@ describe('DiagnosticsCenter projections', () => {
       group: 'managed_content',
       status: 'attention',
       code: 'mcp_config_permissions_too_broad'
-    }))).toEqual({ kind: 'repair_mcp', label: '修复文件权限' })
+    }))).toEqual({ kind: 'repair_mcp', label: '修复权限' })
 
     expect(diagnosticActionForCheck(check({
       id: 'database',

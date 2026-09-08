@@ -12,7 +12,7 @@ const outputDir = process.env.ROVAI_DIAGNOSTICS_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-diagnostics-ui-captures-'))
 const firstPort = Number(process.env.ROVAI_DIAGNOSTICS_ACCEPT_DEBUG_PORT ?? 9491)
 // Cursor remains in the catalog but has no qualified macOS platform evidence.
-const expectedRuntimeCount = 12
+const expectedRuntimeCount = 13
 const expectedCheckCount = 6 + expectedRuntimeCount
 
 await mkdir(outputDir, { recursive: true })
@@ -36,7 +36,7 @@ try {
   await capture(desktopApp.cdp, desktopAttentionCapture)
 
   const beforeFullCheck = await mcpEvidence(desktopFixture.mcpPath)
-  await clickButton(desktopApp.cdp, '.settings-page-heading button', '运行完整自检')
+  await clickButton(desktopApp.cdp, '.settings-page-heading button', '重新检查')
   await waitForExpression(desktopApp.cdp,
     `document.querySelector('.diagnostics-notice strong')?.textContent === '完整自检已完成'`)
   const afterFullCheck = await mcpEvidence(desktopFixture.mcpPath)
@@ -63,7 +63,7 @@ try {
   assertV5Export(exported, desktopFixture)
 
   await scrollToTop(desktopApp.cdp)
-  await clickButton(desktopApp.cdp, '.diagnostics-issue button', '修复文件权限')
+  await clickButton(desktopApp.cdp, '.diagnostics-issue button', '修复权限')
   await waitForExpression(desktopApp.cdp,
     `document.querySelector('.diagnostics-summary-counts .is-attention dd')?.textContent === '0'
       && document.querySelector('.diagnostics-notice strong')?.textContent === 'MCP 权限已修复'`)
@@ -95,7 +95,7 @@ try {
   })
   assert(!(await exists(compactFixture.mcpPath)),
     'Opening Diagnostics initialized the missing MCP file')
-  await clickButton(compactApp.cdp, '.settings-page-heading button', '运行完整自检')
+  await clickButton(compactApp.cdp, '.settings-page-heading button', '重新检查')
   await waitForExpression(compactApp.cdp,
     `document.querySelector('.diagnostics-notice strong')?.textContent === '完整自检已完成'`)
   assert(!(await exists(compactFixture.mcpPath)),
@@ -144,7 +144,8 @@ async function createFixture(name, withPermissionIssue) {
   const fixture = join(fixtureRoot, name)
   const dataDir = join(fixture, 'user-data')
   const homeDir = join(fixture, 'home')
-  const mcpDirectory = join(homeDir, '.rovai')
+  // Isolated Main pins MCP beside its own database, independently of HOME.
+  const mcpDirectory = dataDir
   const mcpPath = join(mcpDirectory, 'mcp.json')
   await mkdir(dataDir, { recursive: true })
   await mkdir(homeDir, { recursive: true })
@@ -337,6 +338,9 @@ async function launchApp(port, width, height, reducedMotion, fixture) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    // The bootstrap shell is visible before authoritative Core requests are admitted.
+    await waitForExpression(cdp, `window.rovai.supervisor.getSnapshot().then(snapshot =>
+      snapshot.fullCoreState === 'ready' && snapshot.capabilities.coreRequests)`, 45_000)
     const health = await request(cdp, 'health.check')
     assert(await realpath(health.database.path) === await realpath(join(fixture.dataDir, 'rovai.sqlite')),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)
@@ -409,10 +413,10 @@ async function waitForSelector(cdp, selector, timeoutMs = 10_000) {
 async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    if (await evaluate(cdp, expression)) return
+    if (await evaluate(cdp, expression, true)) return
     await wait(100)
   }
-  if (await evaluate(cdp, expression)) return
+  if (await evaluate(cdp, expression, true)) return
   throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
 }
 

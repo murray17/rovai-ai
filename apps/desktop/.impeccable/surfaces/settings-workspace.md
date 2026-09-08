@@ -1,5 +1,5 @@
 ---
-version: 11
+version: 12
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -25,8 +25,15 @@ Settings replaces the common 270px App rail with the grouped settings navigation
 uses the shared borderless header, a direct title/description and page-specific actions. Appearance,
 Reminder and Agent Runtime use a solid content plane without a decorative top edge, gradient wash or
 header divider. Agent Runtime uses a centered `1040px` title/body track;
-its catalog uses one quiet surface with individually raised rows. Other categories retain their
-current composition until they are reviewed separately. Skills and MCP instead use the capability library/detail composition below; other categories do not add a second navigation column or page-sized outer card.
+its catalog uses one quiet surface with individually raised rows. General, Notifications, Channels,
+Diagnostics and About use open content rows and fine separators instead of nested gray containers. Skills and MCP instead use the capability library/detail composition below; other categories do not add a second navigation column or page-sized outer card.
+
+Reviewed settings controls use the existing neutral conversation-action tokens. Sidebar background stays
+unchanged, selection uses a neutral fill without a left stripe, and status/provider colors keep their meaning.
+Off switches have a white thumb. Inputs and buttons preserve keyboard behavior and text carets without
+decorative focus rings. MCP/Skills content and member Runtime configuration selects retain their current styles.
+Appearance keeps its real reading previews; only the motion demo is removed. Zoom presets are exactly
+80, 90, 100, 110, 125, 150, 175 and 200%; existing nonpreset values and shortcut limits remain valid.
 
 All categories implement Loading, Empty, Partial, Error, Disabled, Submitting and Recovery while
 retaining the header and navigation. A save, import, repair or probe failure keeps inputs, selection,
@@ -41,8 +48,13 @@ the first Windows release creates no Startup task or Run-key entry. General does
 launch, default Project, recovery or update policy.
 
 New-conversation defaults use the user-facing terms 队员 and 队长. Ten or fewer selectable teammates
-remain directly visible in a two-column chooser; only counts above ten collapse behind a searchable
-disclosure whose expanded chooser stays two-column. Narrow layouts reflow the chooser to one column.
+remain directly visible in a four-column chooser (two columns at narrower desktop widths); only counts above
+ten collapse behind a searchable disclosure whose expanded chooser stays two-column and scrolls within 280px.
+Narrow layouts reflow the chooser to one column. The roughly 320px Lead picker shows portrait, name and role
+for the selected member and candidates. More than eight selected members enables search; the popup is height
+bounded and follows available viewport space. Invalid members stay recognizable and cannot become a new Lead.
+Keep existing invalid-default validation. The local draft/error/save row uses the shared save icon and “保存”;
+there is no duplicate saved-state message in the page header.
 
 World-map availability appears in a 会话 section immediately after 新对话 and before 窗口. A new profile
 with no preferences source starts disabled. Exact schema-v4 saved values remain authoritative, while
@@ -216,7 +228,8 @@ decision and normal Adapter admission before it can become executable.
 
 Diagnostics full check is read-only. Summary counts partition all checks into normal, needs attention
 and temporarily unknown. There is no “repair all”; each issue has one bounded next step and is
-rechecked after action. v5 export remains allowlisted/redacted and uses an explicit Save Dialog.
+rechecked after action. Normal checks are compact rows with evidence disclosure. No actionable issues is
+labeled “无需修复”, including when some checks remain unknown; never call that state fully healthy. v5 export remains allowlisted/redacted and uses an explicit Save Dialog.
 
 Runtime monitoring follows its dedicated [`runtime-monitoring.md`](runtime-monitoring.md) surface
 brief. It shares this workspace's borderless header and content track while keeping sparse Usage,
@@ -225,7 +238,8 @@ Coverage, clean-break and freshness semantics local to that page.
 ## 关于与更新
 
 About & Updates belongs to the Support group and extends the same borderless `1040px` settings track,
-two-column section rhythm and quiet raised rows used by reviewed settings pages. The first viewport
+open section rhythm used by reviewed settings pages. Identity and installed version share one row; update
+actions align with the release summary. Check history is collapsed initially with fixed-width fact labels. The first viewport
 shows the installed Rovai AI version and one primary action. It is a compact updater surface, not an
 updater dashboard or installation wizard.
 

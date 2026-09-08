@@ -3226,8 +3226,8 @@ describe('task event projections', () => {
       onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }))
     const headerEnd = markup.indexOf('</header>')
-    const rescan = markup.indexOf('重新检测全部')
-    const directory = markup.indexOf('Agent 运行时目录')
+    const rescan = markup.indexOf('重新检测')
+    const directory = markup.indexOf('运行时目录')
 
     expect(markup.match(/class="settings-page-heading"/g)).toHaveLength(1)
     expect(rescan).toBeGreaterThan(0)
@@ -7072,8 +7072,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('<h1>诊断与修复</h1>')
-    expect(markup).toContain('运行完整自检')
-    expect(markup).toContain('导出诊断 JSON')
+    expect(markup).toContain('重新检查')
+    expect(markup).toContain('导出诊断')
     expect(markup).toContain('正在读取诊断事实')
     expect(markup).not.toContain('交互稿状态切换器')
     expect(markup).not.toContain('修复全部')

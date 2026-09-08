@@ -1,7 +1,7 @@
 ---
 surface: runtime-monitoring
 status: current
-last_updated: 2026-08-17
+last_updated: 2026-09-08
 ---
 
 # Runtime Monitoring surface brief
@@ -27,14 +27,18 @@ typography.
 Order the content as:
 
 1. range, Runtime, Provider, Model and Cost-kind filters;
-2. eight sparse summary metrics with observed/eligible Coverage;
+2. eight sparse summary metrics, arranged as four primary and four secondary values;
 3. Token/Cache trend and optional Cost ledger;
 4. Runtime breakdown;
 5. Model breakdown;
 6. Provider reconciliation only when compatible saved data exists.
 
 Do not render Session, Tool, Activity, Delivery, Approval, Reliability, Context, Compaction, Probe or terminal-state
-panels. Unknown is `—`, never zero. Partial Coverage is visible next to the value rather than hidden in a tooltip.
+panels. Unknown is `—`, never zero. Summary values omit repeated Coverage captions; the underlying
+observed/eligible facts and breakdown table Coverage columns remain intact. The Token/Cache line chart uses
+straight segments between reported buckets, breaks at nulls, and preserves explicit zero and isolated points.
+Series can be toggled, and pointer or keyboard selection reveals the actual bucket values without interpolation.
+Cost-only buckets remain available in the Cost ledger.
 
 ## States
 
@@ -46,7 +50,7 @@ The page never starts Provider reconciliation, pricing sync, retention, Runtime 
 
 ## Interaction and accessibility
 
-Filters have persistent visible labels, native keyboard behavior and visible focus. A foreground filter request may
+Filters have persistent visible labels, native keyboard behavior without decorative focus rings. A foreground filter request may
 show the loading state; a background failure preserves the last readable snapshot. Status and export feedback use
 appropriate live-region semantics without repeated announcements.
 

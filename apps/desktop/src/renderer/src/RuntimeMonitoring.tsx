@@ -1,3 +1,4 @@
+import { RuntimeUsageChart, USAGE_CHART_SERIES } from './RuntimeUsageChart'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
@@ -5,7 +6,6 @@ import type {
   MonitoringFilter,
   MonitoringRange,
   RuntimeUsageBreakdownRow,
-  RuntimeUsageCoverageValue,
   RuntimeUsageMoneyValue,
   RuntimeUsageSnapshot,
   RuntimeUsageTrendPoint
@@ -379,9 +379,7 @@ export function RuntimeUsageView({ snapshot }: { snapshot: RuntimeUsageSnapshot 
       <dl className="monitoring-keyline">
         {SUMMARY_METRICS.map(([key, label, kind]) => {
           const value = snapshot.summary[key]
-          const coverageKey = key === 'cacheReadShare' ? 'cacheReadTokens' : key
-          const coverage = snapshot.coverage[coverageKey as keyof typeof snapshot.coverage]
-          return <Metric key={key} label={label} value={value} kind={kind} coverage={coverage} />
+          return <Metric key={key} label={label} value={value} kind={kind} />
         })}
         <div>
           <dt>最佳可用成本</dt>
@@ -390,7 +388,6 @@ export function RuntimeUsageView({ snapshot }: { snapshot: RuntimeUsageSnapshot 
               ? snapshot.summary.cost.run.map(formatMoney).join(' · ')
               : '—'}
           </dd>
-          <Coverage coverage={snapshot.coverage.cost} />
         </div>
       </dl>
 
@@ -407,11 +404,10 @@ export function RuntimeUsageView({ snapshot }: { snapshot: RuntimeUsageSnapshot 
   )
 }
 
-function Metric({ label, value, kind, coverage }: {
+function Metric({ label, value, kind }: {
   label: string
   value: number | null
   kind: 'integer' | 'percent'
-  coverage: RuntimeUsageCoverageValue
 }): React.JSX.Element {
   return (
     <div>
@@ -419,51 +415,19 @@ function Metric({ label, value, kind, coverage }: {
       <dd className={`monitoring-metric-value${value === null ? ' is-unavailable' : ''}`}>
         {kind === 'percent' ? formatPercent(value) : formatInteger(value)}
       </dd>
-      <Coverage coverage={coverage} />
     </div>
-  )
-}
-
-function Coverage({ coverage }: { coverage: RuntimeUsageCoverageValue }): React.JSX.Element {
-  const rate = coverage.eligibleRuns > 0 ? coverage.observedRuns / coverage.eligibleRuns : null
-  return (
-    <span className={`monitoring-coverage${rate !== null && rate < 1 ? ' is-partial' : ''}`}>
-      覆盖 {coverage.observedRuns}/{coverage.eligibleRuns} Runs
-    </span>
   )
 }
 
 function UsageTrend({ points }: { points: RuntimeUsageTrendPoint[] }): React.JSX.Element {
   const costPoints = points.filter((point) => point.cost?.length)
-  const maximum = Math.max(0, ...points.flatMap((point) => [
-    point.promptInputTotalTokens ?? 0,
-    point.outputTokens ?? 0,
-    point.cacheReadTokens ?? 0,
-    point.cacheWriteTokens ?? 0
-  ]))
-  if (points.length === 0 || maximum === 0) {
+  const hasTokens = points.some((point) => USAGE_CHART_SERIES.some((series) => point[series.key] !== null))
+  if (!hasTokens && costPoints.length === 0) {
     return <p className="monitoring-inline-unavailable">当前范围没有可展示的用量趋势。</p>
   }
   return (
     <div className="monitoring-usage-trend" role="group" aria-label="Token 与 Cache 用量趋势">
-      <div className="monitoring-usage-bars">
-        {points.map((point) => (
-          <div key={point.bucketStartAt} className="monitoring-usage-bucket" title={trendLabel(point)}>
-            <i className="is-input" style={{ height: barHeight(point.promptInputTotalTokens, maximum) }} />
-            <i className="is-output" style={{ height: barHeight(point.outputTokens, maximum) }} />
-            <i className="is-read" style={{ height: barHeight(point.cacheReadTokens, maximum) }} />
-            <i className="is-write" style={{ height: barHeight(point.cacheWriteTokens, maximum) }} />
-          </div>
-        ))}
-      </div>
-      <div className="monitoring-trend-footer">
-        <time dateTime={points[0].bucketStartAt}>{formatTimestamp(points[0].bucketStartAt)}</time>
-        <div className="monitoring-usage-legend" aria-hidden="true">
-          <span className="is-input">Input</span><span className="is-output">Output</span>
-          <span className="is-read">Cache Read</span><span className="is-write">Cache Write</span>
-        </div>
-        <time dateTime={points.at(-1)?.bucketStartAt}>{formatTimestamp(points.at(-1)?.bucketStartAt ?? '')}</time>
-      </div>
+      {hasTokens && <RuntimeUsageChart points={points} />}
       {costPoints.length > 0 && (
         <div className="monitoring-trend-cost" aria-label="成本趋势">
           <span>成本</span>
@@ -559,15 +523,6 @@ export function hasRuntimeUsage(snapshot: RuntimeUsageSnapshot): boolean {
 
 function uniqueOptions(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort()
-}
-
-function barHeight(value: number | null, maximum: number): string {
-  if (!value || maximum === 0) return '2px'
-  return `${Math.max(4, Math.round(value / maximum * 100))}%`
-}
-
-function trendLabel(point: RuntimeUsageTrendPoint): string {
-  return `${formatTimestamp(point.bucketStartAt)}：Input ${formatInteger(point.promptInputTotalTokens)}，Output ${formatInteger(point.outputTokens)}，Cache Read ${formatInteger(point.cacheReadTokens)}，Cache Write ${formatInteger(point.cacheWriteTokens)}`
 }
 
 function adapterLabel(value: string): string {

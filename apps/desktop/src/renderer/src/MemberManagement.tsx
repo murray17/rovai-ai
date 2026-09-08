@@ -1455,9 +1455,9 @@ export function RuntimeInstallationsPanel({
             {busy === 'rescan'
               ? '正在重新检测…'
               : health === null
-                ? '重新检测全部'
+                ? '重新检测'
                 : hasEnabledRuntime
-                  ? '重新检测全部'
+                  ? '重新检测'
                   : '当前平台尚无可检测 Runtime'}
           </button>
         }
@@ -1465,7 +1465,7 @@ export function RuntimeInstallationsPanel({
       <section className="section-block runtime-installations">
         <div className="section-heading">
           <div>
-            <h2>Agent 运行时目录</h2>
+            <h2>运行时目录</h2>
           </div>
           {health && <span className="runtime-catalog-platform">当前平台：{HOST_PLATFORM_LABELS[health.hostPlatform]}</span>}
         </div>

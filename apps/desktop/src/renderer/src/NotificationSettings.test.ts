@@ -41,7 +41,7 @@ describe('notification settings', () => {
     expect(markup).toContain('id="notification-scenario-response">需要响应</h3>')
     expect(markup).toContain('新的请求或明确提到你的消息')
     expect(markup).toContain('id="notification-scenario-outcome">本轮结果</h3>')
-    expect(markup).toContain('公共会话和单聊的执行结果')
+    expect(markup).toContain('包含公共会话与单聊')
     expect(markup).toContain('aria-label="待审批"')
     expect(markup).toContain('aria-label="提到你"')
     expect(markup).toContain('aria-label="本轮完成"')
