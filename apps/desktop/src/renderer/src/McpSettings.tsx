@@ -495,10 +495,20 @@ export function McpSettings({
               </button>
             )}
           </header>
+          {selected && Boolean(selected.configurationIssues?.length) && (
+            <div id="mcp-configuration-issues" className="capability-note" role="status">
+              {selected.configurationIssues?.map((issue) => (
+                <p key={`${issue.code}:${issue.field}:${issue.message}`}>
+                  {issue.message}<br />受影响字段：{issue.field}
+                </p>
+              ))}
+            </div>
+          )}
           <label className="capability-json-field">
             <span>配置 JSON</span>
             <textarea
               aria-label="MCP 配置 JSON"
+              aria-describedby={selected?.configurationIssues?.length ? 'mcp-configuration-issues' : undefined}
               spellCheck={false}
               value={
                 selected
@@ -522,7 +532,9 @@ export function McpSettings({
               }}
             />
           </label>
-          {!selected && <p className="capability-note">粘贴包含一个 MCP 的 mcpServers JSON。</p>}
+          <p className="capability-note">
+            {selected ? '敏感值已隐藏；未修改的隐藏值将继续保留。' : '粘贴包含一个 MCP 的 mcpServers JSON。'}
+          </p>
           <div className="capability-save">
             <span className="capability-note">
               {selected
@@ -806,9 +818,14 @@ export function McpImportPanel({
                 </div>
               )}
               {candidate.compatibility === 'needs_input' && (
-                <p className="capability-note capability-import-resolution">
-                  请确认 JSON 中的环境变量引用后导入。
-                </p>
+                <div className="capability-note capability-import-resolution" role="status">
+                  {candidate.issues.filter((issue) => issue.kind === 'needs_configuration').map((issue) => (
+                    <p key={`${issue.code}:${issue.field}:${issue.message}`}>
+                      {issue.message}<br />受影响字段：{issue.field}
+                    </p>
+                  ))}
+                  <p>可先导入为停用配置。</p>
+                </div>
               )}
               {draft.open && (
                 <label className="capability-json-field capability-import-json">
@@ -836,6 +853,11 @@ export function McpImportPanel({
             <div key={candidate.candidateId}>
               <span>{candidate.proposedName}</span>
               <small>{candidate.conflict === 'same' ? '已添加' : '需手动配置'}</small>
+              {candidate.conflict !== 'same' && candidate.issues.filter((issue) => issue.blocking).map((issue) => (
+                <p className="capability-note" key={`${issue.code}:${issue.field}`}>
+                  {issue.message}{issue.field ? ` 受影响字段：${issue.field}` : ''}
+                </p>
+              ))}
             </div>
           ))}
         </details>

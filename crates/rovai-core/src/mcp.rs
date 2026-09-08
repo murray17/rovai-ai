@@ -29,7 +29,7 @@ use crate::platform::private_storage::{
 
 pub const MCP_SCHEMA_VERSION: u32 = 2;
 pub const PRESERVE_STORED_VALUE_MARKER: &str = "__ROVAI_PRESERVE_STORED_VALUE__";
-const READ_ONLY_MASK: &str = "********";
+pub(crate) const READ_ONLY_MASK: &str = "********";
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 const MAX_SERVERS: usize = 128;
 const MAX_ARGUMENTS: usize = 256;
@@ -175,6 +175,8 @@ pub struct McpServerView {
     pub risk_level: McpRiskLevel,
     pub risk_acknowledged: bool,
     pub definition_json: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configuration_issues: Vec<McpConfigIssue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -191,7 +193,11 @@ pub struct McpConfigIssue {
 }
 
 impl McpConfigIssue {
-    fn new(code: impl Into<String>, message: impl Into<String>, field: Option<String>) -> Self {
+    pub(crate) fn new(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        field: Option<String>,
+    ) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
@@ -734,7 +740,7 @@ impl McpConfigStore {
         })
     }
 
-    pub fn commit_import(
+    pub(crate) fn commit_import(
         &self,
         params: CommitMcpImportParams,
         known_agent_ids: &BTreeSet<String>,
@@ -753,14 +759,9 @@ impl McpConfigStore {
                         Some("candidateId".to_string()),
                     )]));
                 }
-                let existing = selection
-                    .replace_server_id
-                    .as_deref()
-                    .and_then(|id| config.metadata_by_id(id))
-                    .and_then(|(name, _)| config.mcp_servers.get(name));
                 let (name, definition) = parse_single_public_entry(
                     &selection.definition_json,
-                    existing,
+                    None,
                     &params.expected_config_digest,
                 )
                 .map_err(MutationError::Invalid)?;
@@ -956,7 +957,7 @@ impl McpConfigStore {
                     config: None,
                     file_issue: Some(McpConfigIssue {
                         code: "mcp.config_parse_failed".to_string(),
-                        message: error.to_string(),
+                        message: "MCP JSON 格式或字段类型无效，请检查标记位置。".to_string(),
                         field: None,
                         line: Some(error.line()),
                         column: Some(error.column()),
@@ -1016,6 +1017,7 @@ impl McpConfigStore {
                         risk_level: metadata.risk_level,
                         risk_acknowledged: metadata.risk_acknowledged,
                         definition_json: single_public_json(name, definition, true)?,
+                        configuration_issues: crate::mcp_projection::environment_issues(definition),
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -1156,7 +1158,7 @@ fn private_permission_issue(_path: &Path, _metadata: &fs::Metadata) -> Result<bo
     anyhow::bail!("private MCP storage is unsupported on this platform")
 }
 
-fn parse_single_public_entry(
+pub(crate) fn parse_single_public_entry(
     text: &str,
     existing: Option<&McpServerDefinition>,
     expected_digest: &str,
@@ -1170,7 +1172,7 @@ fn parse_single_public_entry(
         parse_json_no_duplicates::<PublicDocument>(text.as_bytes()).map_err(|error| {
             vec![McpConfigIssue {
                 code: "mcp.definition_json_invalid".to_string(),
-                message: error.to_string(),
+                message: "MCP JSON 格式或字段类型无效，请检查标记位置。".to_string(),
                 field: None,
                 line: Some(error.line()),
                 column: Some(error.column()),
@@ -1204,8 +1206,18 @@ fn materialize_preserved_values(
                         stored: Option<&BTreeMap<String, String>>,
                         field: &str,
                         issues: &mut Vec<McpConfigIssue>| {
+        // Unrelated edits cannot erase a hidden value through an omitted/blank field.
+        if let Some(stored) = stored {
+            for (key, value) in stored {
+                if (field == "headers" || sensitive_key(key))
+                    && values.get(key).is_none_or(String::is_empty)
+                {
+                    values.insert(key.clone(), value.clone());
+                }
+            }
+        }
         for (key, value) in values.iter_mut() {
-            if value != PRESERVE_STORED_VALUE_MARKER {
+            if !is_preservation_marker(value) {
                 continue;
             }
             let replacement = stored.and_then(|stored| stored.get(key)).cloned();
@@ -1444,7 +1456,7 @@ fn validate_map(
                 Some(format!("{field}.{key}")),
             ));
         }
-        if value == PRESERVE_STORED_VALUE_MARKER {
+        if is_preservation_marker(value) {
             issues.push(McpConfigIssue::new(
                 "mcp.preservation_marker_not_materialized",
                 "Sensitive-value preservation markers cannot be persisted",
@@ -1494,13 +1506,13 @@ fn valid_header_name(value: &str) -> bool {
         })
 }
 
-fn single_public_json(
+pub(crate) fn single_public_json(
     name: &str,
     definition: &McpServerDefinition,
     redact: bool,
 ) -> Result<String> {
     let definition = if redact {
-        redact_definition(definition, PRESERVE_STORED_VALUE_MARKER)
+        redact_definition(definition, READ_ONLY_MASK)
     } else {
         definition.clone()
     };
@@ -1527,7 +1539,10 @@ fn public_json(config: &McpConfigFile, redact: bool) -> Result<String> {
     Ok(format!("{}\n", serde_json::to_string_pretty(&document)?))
 }
 
-fn redact_definition(definition: &McpServerDefinition, masked_value: &str) -> McpServerDefinition {
+pub(crate) fn redact_definition(
+    definition: &McpServerDefinition,
+    masked_value: &str,
+) -> McpServerDefinition {
     match definition {
         McpServerDefinition::Stdio {
             command,
@@ -1557,8 +1572,7 @@ fn redact_values(
     values
         .iter()
         .map(|(key, value)| {
-            let sensitive =
-                !contains_environment_reference(value) && (headers || sensitive_key(key));
+            let sensitive = headers || sensitive_key(key);
             (
                 key.clone(),
                 if sensitive {
@@ -1571,26 +1585,30 @@ fn redact_values(
         .collect()
 }
 
-fn contains_environment_reference(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    let mut index = 0;
-    while index + 3 <= bytes.len() {
-        if bytes[index] == b'$'
-            && bytes.get(index + 1) == Some(&b'{')
-            && let Some(end) = value[index + 2..].find('}')
-        {
-            return valid_environment_name(&value[index + 2..index + 2 + end]);
-        }
-        index += 1;
-    }
-    false
+fn is_preservation_marker(value: &str) -> bool {
+    value == PRESERVE_STORED_VALUE_MARKER || value == READ_ONLY_MASK
 }
 
 fn sensitive_key(key: &str) -> bool {
     let normalized = key.to_ascii_uppercase();
-    ["TOKEN", "SECRET", "PASSWORD", "API_KEY", "AUTH", "COOKIE"]
-        .iter()
-        .any(|part| normalized.contains(part))
+    [
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "PASSWD",
+        "API_KEY",
+        "APIKEY",
+        "ACCESSKEY",
+        "PRIVATEKEY",
+        "BEARER",
+        "ACCESS_KEY",
+        "PRIVATE_KEY",
+        "CREDENTIAL",
+        "AUTH",
+        "COOKIE",
+    ]
+    .iter()
+    .any(|part| normalized.contains(part))
 }
 
 #[cfg(any(unix, windows))]
@@ -2087,27 +2105,66 @@ mod slow_tests {
             .iter()
             .find(|server| server.name == "remote")
             .unwrap();
-        assert!(
-            server
-                .definition_json
-                .contains(PRESERVE_STORED_VALUE_MARKER)
-        );
+        assert!(server.definition_json.contains(READ_ONLY_MASK));
         assert!(!server.definition_json.contains("Bearer secret"));
-        let updated = store
-            .update(
-                UpdateMcpServerParams {
-                    expected_config_digest: config.config_digest,
-                    server_id: server.server_id.clone(),
-                    definition_json: server.definition_json.clone(),
-                },
-                &agents(),
-            )
-            .unwrap();
-        assert!(matches!(updated, McpMutationResult::Ok { .. }));
+        let server_id = server.server_id.clone();
+        let mut config = *config;
+        // Name/endpoint-only edits, missing fields and blank placeholders preserve stored credentials.
+        for headers in [
+            serde_json::json!({"Authorization": READ_ONLY_MASK}),
+            serde_json::json!({"Authorization": ""}),
+            serde_json::json!({}),
+            serde_json::json!({"Authorization": PRESERVE_STORED_VALUE_MARKER}),
+        ] {
+            let definition = serde_json::json!({"mcpServers": {"renamed": {
+                "url": "https://example.com/updated", "headers": headers
+            }}});
+            let updated = store
+                .update(
+                    UpdateMcpServerParams {
+                        expected_config_digest: config.config_digest,
+                        server_id: server_id.clone(),
+                        definition_json: definition.to_string(),
+                    },
+                    &agents(),
+                )
+                .unwrap();
+            assert!(
+                !serde_json::to_string(&updated)
+                    .unwrap()
+                    .contains("Bearer secret")
+            );
+            let McpMutationResult::Ok {
+                config: updated, ..
+            } = updated
+            else {
+                panic!("masked update should succeed");
+            };
+            config = *updated;
+            assert!(
+                fs::read_to_string(store.path())
+                    .unwrap()
+                    .contains("Bearer secret")
+            );
+        }
+        let before = fs::read(store.path()).unwrap();
+        let invalid = store.update(UpdateMcpServerParams {
+            expected_config_digest: config.config_digest,
+            server_id,
+            definition_json: serde_json::json!({"mcpServers": {"renamed": {
+                "url": "https://example.com/mcp", "headers": {"X-New-Secret": READ_ONLY_MASK}
+            }}}).to_string(),
+        }, &agents()).unwrap();
+        assert!(matches!(invalid, McpMutationResult::Invalid { .. }));
+        assert!(fs::read(store.path()).unwrap() == before);
+        let invalid_json = parse_single_public_entry(
+            r#"{"mcpServers":{"remote":{"url":"https://example.com/mcp","headers":["private-invalid-value"]}}}"#,
+            None, "digest",
+        ).unwrap_err();
         assert!(
-            fs::read_to_string(store.path())
+            !serde_json::to_string(&invalid_json)
                 .unwrap()
-                .contains("Bearer secret")
+                .contains("private-invalid-value")
         );
         let _ = fs::remove_dir_all(root);
     }

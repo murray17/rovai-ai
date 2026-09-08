@@ -96,6 +96,9 @@ app.whenReady().then(async () => {
     await click('MCP')
     state = await snapshot()
     assert.ok(state.text.includes('配置 JSON'))
+    assert.ok(state.text.includes('待配置：环境变量 DOCS_TOKEN 在 MCP 启动环境中不可用。'))
+    assert.ok(state.text.includes('受影响字段：env.API_TOKEN'))
+    assert.ok((await draft()).includes('********'), 'Details show a mask rather than the stored credential')
     await capture('mcp-day-wide')
     const json = '{\n  "mcpServers": {"docs": {"command": "node", "args": ["draft.mjs"]}}\n}'
     await edit(json)

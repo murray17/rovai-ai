@@ -7065,9 +7065,11 @@ impl Core {
                 let params: CommitMcpImportParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
-                Ok(serde_json::to_value(
-                    self.mcp_config()?.commit_import(params, &known_agents)?,
-                )?)
+                Ok(serde_json::to_value(McpImportScanner.commit(
+                    self.mcp_config()?,
+                    params,
+                    &known_agents,
+                )?)?)
             }
             "skills.import.inspect" => {
                 let params: InspectSkillImportParams =

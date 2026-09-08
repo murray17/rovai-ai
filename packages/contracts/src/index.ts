@@ -3170,6 +3170,7 @@ export interface McpServerView {
   riskLevel: 'standard' | 'high'
   riskAcknowledged: boolean
   definitionJson: string
+  configurationIssues?: McpConfigIssue[]
 }
 
 export interface McpConfigView {
@@ -3231,7 +3232,7 @@ export interface McpImportIssue {
   code: string
   message: string
   field: string | null
-  kind: 'normalized' | 'dropped' | 'sensitive_value' | 'blocker'
+  kind: 'normalized' | 'dropped' | 'needs_configuration' | 'blocker'
   blocking: boolean
 }
 

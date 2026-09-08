@@ -6154,7 +6154,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .mcp-import-json textarea { width: 100%; min-height: 150px; resize: vertical; padding: 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--evidence-ink); background: var(--evidence-canvas); font: 9px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .mcp-import-issues { display: grid; gap: 3px; margin-left: 22px; }
 .mcp-import-issues span { color: var(--muted); font-size: 8px; line-height: 1.45; }
-.mcp-import-issues .issue-dropped, .mcp-import-issues .issue-sensitive_value { color: var(--attention); }
+.mcp-import-issues .issue-dropped, .mcp-import-issues .issue-needs_configuration { color: var(--attention); }
 .mcp-import-issues .issue-blocker, .mcp-import-manual { color: var(--danger); }
 .mcp-import-manual { margin: 0 0 0 22px; font-size: 8px; line-height: 1.5; }
 @media (max-width: 1180px) {

@@ -27,7 +27,7 @@ use crate::{
     },
     command::canonical_json_digest,
     db::Database,
-    mcp::{McpConfigStore, McpServerDefinition},
+    mcp::{McpConfigIssue, McpConfigStore, McpServerDefinition},
 };
 
 #[cfg(windows)]
@@ -623,6 +623,13 @@ fn resolve_values(
 }
 
 fn interpolate_environment(value: &str) -> std::result::Result<String, ResolveError> {
+    interpolate_environment_with(value, |variable| std::env::var(variable).ok())
+}
+
+fn interpolate_environment_with(
+    value: &str,
+    mut lookup: impl FnMut(&str) -> Option<String>,
+) -> std::result::Result<String, ResolveError> {
     let bytes = value.as_bytes();
     let mut output = String::with_capacity(value.len());
     let mut index = 0;
@@ -654,8 +661,7 @@ fn interpolate_environment(value: &str) -> std::result::Result<String, ResolveEr
                     "environment_reference_invalid".to_string(),
                 ));
             }
-            output
-                .push_str(&std::env::var(variable).map_err(|_| ResolveError::MissingEnvironment)?);
+            output.push_str(&lookup(variable).ok_or(ResolveError::MissingEnvironment)?);
             index = end + 1;
             continue;
         }
@@ -667,6 +673,47 @@ fn interpolate_environment(value: &str) -> std::result::Result<String, ResolveEr
         index += character.len_utf8();
     }
     Ok(output)
+}
+
+/// Uses the same interpolation and host environment as projection, without starting a server.
+pub(crate) fn environment_issues(definition: &McpServerDefinition) -> Vec<McpConfigIssue> {
+    environment_issues_with(definition, |variable| std::env::var(variable).ok())
+}
+
+fn environment_issues_with(
+    definition: &McpServerDefinition,
+    mut lookup: impl FnMut(&str) -> Option<String>,
+) -> Vec<McpConfigIssue> {
+    let (field, values) = match definition {
+        McpServerDefinition::Stdio { env, .. } => ("env", env),
+        McpServerDefinition::StreamableHttp { headers, .. } => ("headers", headers),
+    };
+    let mut issues = Vec::new();
+    for (key, value) in values {
+        let mut missing = BTreeSet::new();
+        let parsed = interpolate_environment_with(value, |variable| {
+            Some(lookup(variable).unwrap_or_else(|| {
+                missing.insert(variable.to_string());
+                String::new()
+            }))
+        });
+        if parsed.is_err() {
+            issues.push(McpConfigIssue::new(
+                "mcp.environment_reference_invalid",
+                "待配置：此字段使用了不支持或不完整的环境变量引用。",
+                Some(format!("{field}.{key}")),
+            ));
+        } else {
+            for variable in missing {
+                issues.push(McpConfigIssue::new(
+                    "mcp.environment_reference_missing",
+                    format!("待配置：环境变量 {variable} 在 MCP 启动环境中不可用。"),
+                    Some(format!("{field}.{key}")),
+                ));
+            }
+        }
+    }
+    issues
 }
 
 fn valid_environment_reference(variable: &str) -> bool {
@@ -1222,16 +1269,57 @@ mod tests {
 
     #[test]
     fn environment_interpolation_supports_embedded_references_and_escape_sequences() {
-        unsafe { std::env::set_var("ROVAI_MCP_INTERPOLATION_TEST", "secret") };
-        assert_eq!(
-            interpolate_environment("Bearer ${ROVAI_MCP_INTERPOLATION_TEST}").unwrap(),
-            "Bearer secret"
+        let lookup = |name: &str| match name {
+            "DOCS_TOKEN" => Some("test-credential".to_string()),
+            "EMPTY" => Some(String::new()),
+            _ => None,
+        };
+        assert!(
+            interpolate_environment_with("Bearer ${DOCS_TOKEN}", lookup).unwrap()
+                == "Bearer test-credential"
         );
         assert_eq!(
-            interpolate_environment("$${ROVAI_MCP_INTERPOLATION_TEST}").unwrap(),
-            "${ROVAI_MCP_INTERPOLATION_TEST}"
+            interpolate_environment_with("$${DOCS_TOKEN}", lookup).unwrap(),
+            "${DOCS_TOKEN}"
         );
-        unsafe { std::env::remove_var("ROVAI_MCP_INTERPOLATION_TEST") };
+        for value in [
+            "",
+            "  info  ",
+            "${EMPTY}",
+            "Bearer ${DOCS_TOKEN}",
+            "$${NOT_A_REFERENCE}",
+        ] {
+            let definition = McpServerDefinition::StreamableHttp {
+                url: "https://example.com/mcp".into(),
+                headers: BTreeMap::from([("Authorization".into(), value.into())]),
+            };
+            assert!(environment_issues_with(&definition, lookup).is_empty());
+        }
+        let definition = McpServerDefinition::StreamableHttp {
+            url: "https://example.com/mcp".into(),
+            headers: BTreeMap::from([(
+                "Authorization".into(),
+                "Bearer ${MISSING_A}-${MISSING_B}".into(),
+            )]),
+        };
+        let issues = environment_issues_with(&definition, lookup);
+        assert_eq!(issues.len(), 2);
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.field.as_deref() == Some("headers.Authorization"))
+        );
+        assert!(issues[0].message.contains("MISSING_A") && issues[1].message.contains("MISSING_B"));
+        let definition = McpServerDefinition::StreamableHttp {
+            url: "https://example.com/mcp".into(),
+            headers: BTreeMap::from([(
+                "Authorization".into(),
+                "private-prefix-${INVALID:-private-fallback}".into(),
+            )]),
+        };
+        let issues = environment_issues_with(&definition, lookup);
+        assert_eq!(issues[0].code, "mcp.environment_reference_invalid");
+        assert!(!serde_json::to_string(&issues).unwrap().contains("private-"));
     }
 
     #[test]
