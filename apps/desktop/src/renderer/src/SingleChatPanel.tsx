@@ -1361,8 +1361,10 @@ export function SingleChatPanel({
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
-    if (!kind || attachmentDropBlocked) {
-      if (kind) event.dataTransfer.dropEffect = 'none'
+    if (!kind) return
+    event.stopPropagation()
+    if (attachmentDropBlocked) {
+      event.dataTransfer.dropEffect = 'none'
       return
     }
     event.preventDefault()
@@ -1377,6 +1379,7 @@ export function SingleChatPanel({
   const continueAttachmentDrop = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
     if (!kind) return
+    event.stopPropagation()
     if (attachmentDropBlocked) {
       event.dataTransfer.dropEffect = 'none'
       clearAttachmentDragState()
@@ -1394,6 +1397,7 @@ export function SingleChatPanel({
 
   const leaveAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     if (!dataTransferContainsFiles(event.dataTransfer)) return
+    event.stopPropagation()
     event.preventDefault()
     if (dragLeaveTimer.current !== null) window.clearTimeout(dragLeaveTimer.current)
     dragLeaveTimer.current = window.setTimeout(() => {

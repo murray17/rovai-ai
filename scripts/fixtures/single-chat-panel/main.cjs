@@ -81,6 +81,17 @@ app.whenReady().then(async () => {
     writeFileSync(path, (await window.webContents.capturePage()).toPNG())
     return path
   }
+  const drag = async (type, selector = '.single-chat-composer textarea', files = true) => {
+    const result = await run(`(() => {
+      const dataTransfer = new DataTransfer()
+      if (${files}) dataTransfer.items.add(new File(['private'], 'private.txt', { type: 'text/plain' }))
+      else dataTransfer.setData('text/plain', 'text drag')
+      const event = new DragEvent(${JSON.stringify(type)}, { dataTransfer, bubbles: true, cancelable: true })
+      document.querySelector(${JSON.stringify(selector)}).dispatchEvent(event)
+      return { defaultPrevented: event.defaultPrevented }
+    })()`)
+    return { ...result, state: await settle() }
+  }
 
   try {
     await waitFor("Boolean(document.querySelector('.single-chat-final'))")
@@ -105,6 +116,36 @@ app.whenReady().then(async () => {
     assert.match(state.body, /工作了 39 分 17 秒/)
     assert.match(state.body, /你在 5 分 38 秒后停止了运行/)
     assert.doesNotMatch(state.body, /Working for|You stopped after/)
+
+    // The panel is nested in the Camp drop surface in production. Its file events must stay private.
+    let dragged = await drag('dragenter')
+    assert.equal(dragged.state.attachmentDropVisible, true)
+    assert.deepEqual(dragged.state.bubbledDragEvents, [])
+    dragged = await drag('dragover', '.single-chat-transcript')
+    assert.equal(dragged.defaultPrevented, true)
+    assert.equal(dragged.state.attachmentDropVisible, true)
+    assert.deepEqual(dragged.state.bubbledDragEvents, [])
+    const dayDrop = await capture('single-chat-day-private-drop-1180x800')
+    dragged = await drag('dragleave')
+    assert.equal(dragged.state.attachmentDropVisible, false)
+    assert.deepEqual(dragged.state.bubbledDragEvents, [])
+    await drag('dragenter')
+    dragged = await drag('drop')
+    assert.equal(dragged.defaultPrevented, true)
+    assert.equal(dragged.state.attachmentDropVisible, false)
+    assert.deepEqual(dragged.state.bubbledDragEvents, [])
+
+    // Public-surface and ordinary text drags still propagate normally.
+    for (const type of ['dragenter', 'dragover', 'dragleave', 'drop']) {
+      await drag(type, '.public-execution-fixture')
+      dragged = await drag(type, '.single-chat-composer textarea', false)
+      assert.equal(dragged.defaultPrevented, false)
+      assert.equal(dragged.state.attachmentDropVisible, false)
+    }
+    assert.deepEqual(dragged.state.bubbledDragEvents, [
+      'dragenter', 'dragenter', 'dragover', 'dragover', 'dragleave', 'dragleave', 'drop', 'drop'
+    ])
+    await run('window.singleChatTest.resetDragEvents()')
 
     state = await click('.single-chat-run-history.is-terminal > summary')
     assert.equal(state.terminalOpen, true)
@@ -136,6 +177,11 @@ app.whenReady().then(async () => {
 
     assert.equal(composerEnter.state.sendFeedback, '连接中')
     assert.equal(composerEnter.state.composerDisabled, true)
+    for (const type of ['dragenter', 'dragover', 'dragleave', 'drop']) {
+      dragged = await drag(type, '.single-chat-transcript')
+      assert.equal(dragged.state.attachmentDropVisible, false)
+      assert.deepEqual(dragged.state.bubbledDragEvents, [])
+    }
     await run('window.singleChatTest.releaseSend()')
     await waitFor("window.singleChatTest.state().composerDisabled === false")
     state = await settle()
@@ -314,12 +360,13 @@ app.whenReady().then(async () => {
         campComposerParity: true,
         composerKeyboardSemantics: true,
         privateAttachments: true,
+        privateAttachmentDragBoundary: true,
         agentMessagesWithoutFill: true,
         runningStopAndQueueComposer: true,
         dayAndNight: true,
         compactNoOverflow: true
       },
-      captures: { dayMenu, dayDialog, dayQueued, dayTools, nightRunning, nightComplete, compact }
+      captures: { dayDrop, dayMenu, dayDialog, dayQueued, dayTools, nightRunning, nightComplete, compact }
     }))
     window.destroy()
     app.quit()
