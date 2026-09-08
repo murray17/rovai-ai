@@ -23,7 +23,7 @@ describe('first-run onboarding flow', () => {
   it('renders a mandatory welcome without skip or decorative progress navigation', () => {
     const markup = renderOnboarding(snapshot('welcome'))
     expect(markup).toContain('欢迎来到 Rovai')
-    expect(markup).toContain('开始旅程')
+    expect(markup).toContain('选择队员')
     expect(markup).not.toContain('跳过')
     expect(markup).not.toContain('onboarding-step')
   })
@@ -36,17 +36,19 @@ describe('first-run onboarding flow', () => {
     expect(markup.match(/onboarding-selected-portrait/g)).toHaveLength(1)
     expect(markup.match(/class="onboarding-member-row"/g)).toHaveLength(4)
     expect(markup).not.toContain('onboarding-member-row-portrait')
-    expect(markup).toContain('和芝士一起开始')
+    expect(markup).toContain('下一步')
   })
 
-  it('shows the three actual discovery phases before Runtime selection', () => {
+  it('describes discovery without promising login or model validation', () => {
     const markup = renderOnboarding({
       ...snapshot('runtime'),
       selectedMemberRole: 'luoke'
     }, 'checking')
-    expect(markup).toContain('查找已安装的 Agent 运行时')
-    expect(markup).toContain('检查登录与版本')
-    expect(markup).toContain('读取模型目录')
+    expect(markup).toContain('查找安装入口')
+    expect(markup).toContain('确认运行时身份')
+    expect(markup).toContain('读取运行配置')
+    expect(markup).not.toContain('检查登录与版本')
+    expect(markup).not.toContain('读取模型目录')
     expect(markup).not.toContain('跳过')
   })
 
@@ -55,16 +57,14 @@ describe('first-run onboarding flow', () => {
       ...snapshot('runtime'),
       selectedMemberRole: 'luoke'
     }, 'ready', emptyHealth())
-    expect(markup).toContain('当前没有可用的 Agent 运行时')
-    expect(markup).toContain('查看安装说明')
+    expect(markup).toContain('暂未找到可用的运行时')
+    expect(markup).toContain('查看安装引导')
     expect(markup).toContain('重新扫描')
-    expect(markup).toContain('进入 Rovai')
-    expect(markup).toContain('quiet-button onboarding-runtime-empty-secondary')
+    expect(markup).toContain('稍后配置')
     expect(markup).toContain('Codex CLI')
     expect(markup).toContain('Claude Code')
     expect(markup).toContain('Antigravity')
-    expect(markup).not.toContain('Kimi Code')
-    expect(markup).not.toContain('OpenCode')
+    expect(markup).toContain('https://code.claude.com/docs/en/setup')
     expect(markup).not.toContain('onboarding-runtime-list')
     expect(markup).not.toContain('onboarding-model-panel')
   })
@@ -78,11 +78,28 @@ describe('first-run onboarding flow', () => {
     }, 'ready', health, [installation])
     expect(markup).toContain('onboarding-runtime-list')
     expect(markup).toContain('onboarding-model-panel')
-    expect(markup).not.toContain('当前没有可用的 Agent 运行时')
+    expect(markup).not.toContain('暂未找到可用的运行时')
     expect(markup).not.toContain('Cursor Agent')
     expect(onboardingHasUsableRuntime('ready', health, [installation])).toBe(true)
     expect(onboardingHasUsableRuntime('error', health, [installation])).toBe(false)
     expect(onboardingHasUsableRuntime('ready', emptyHealth(), [])).toBe(false)
+  })
+
+  it.each(['ready', 'light_ready'] as const)('keeps experimental admission visible for a %s Runtime', (status) => {
+    const health = healthWithRuntime({ ...readyAvailability(), status }, previewAdmission())
+    const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [codexInstallation()])
+    expect(onboardingHasUsableRuntime('ready', health, [codexInstallation()])).toBe(true)
+    expect(markup).toContain('<small>实验性开放；当前平台尚未完成正式资格验证')
+  })
+
+  it('keeps a failed scan distinct from a completed scan even with stale usable health', () => {
+    const markup = renderOnboarding(snapshot('runtime'), 'error',
+      healthWithRuntime(readyAvailability(), qualifiedAdmission()), [codexInstallation()])
+    expect(markup).toContain('这次扫描未完成')
+    expect(markup).toContain('重新扫描')
+    expect(markup).toContain('稍后配置')
+    expect(markup).not.toContain('暂未找到可用的运行时')
+    expect(markup).not.toContain('onboarding-model-panel')
   })
 
   it('continues only with a usable Runtime, a model, and matching adapter defaults', () => {

@@ -1586,6 +1586,7 @@ function AuthoritativeApp({
         setOnboardingRuntimePhase('discovering')
         await window.rovai.request('runtime.discovery.rescan', { interactiveShell: true })
 
+        setOnboardingRuntimePhase('checking')
         const nextHealth = await window.rovai.request<HealthStatus>('health.check')
         setHealth(nextHealth)
         setHealthAttempted(true)
@@ -3694,7 +3695,9 @@ function AuthoritativeApp({
       setAgents(nextAgents)
       setInstallations(nextInstallations)
       setState('ready')
-      await activateCamp(result.quickChatCampId, { reconcileDefaultLead: false })
+      const activated = await activateCamp(result.quickChatCampId, { reconcileDefaultLead: false })
+      // The new Camp resolves this startup; do not replay the initial home route afterward.
+      if (activated && startupSnapshot) completeStartup(startupSnapshot.sessionId)
       setOnboardingSnapshot(result.snapshot)
     } catch (nextError) {
       const message = errorMessage(nextError)
@@ -4033,6 +4036,11 @@ function AuthoritativeApp({
             recentCamps={visibleNavigation ? allNavigationCamps(visibleNavigation).slice(0, 5) : []}
             onOpenCamp={chooseCamp}
             onNewConversation={beginNewConversation}
+            onOpenMembers={() => chooseView('members')}
+            onOpenRuntimeSettings={() => {
+              chooseSettingsSection('runtime')
+              void navigateToSettings('runtime')
+            }}
           />
         )}
 

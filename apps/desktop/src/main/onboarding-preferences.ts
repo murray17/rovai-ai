@@ -194,6 +194,12 @@ export class OnboardingStore {
     return structuredClone(this.#snapshot)
   }
 
+  async getAfterPendingWrites(): Promise<OnboardingSnapshot> {
+    // The first Renderer read can arrive while authority classification is being persisted.
+    await this.#writeTail
+    return this.get()
+  }
+
   initialize(
     hasExistingProductData: boolean,
     options: { persist?: boolean } = {}

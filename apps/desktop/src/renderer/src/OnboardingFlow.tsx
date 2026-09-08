@@ -1,8 +1,11 @@
+import { useState, type KeyboardEvent } from 'react'
+import { runtimeInstallGuide } from './runtime-install-guide'
 import type {
   AdapterInstallation,
   AdapterKind,
   AppearanceSnapshot,
   HealthStatus,
+  HostPlatformKey,
   OnboardingRuntimeSelection,
   OnboardingSnapshot,
   ProductRuntimeAvailability,
@@ -97,11 +100,24 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'antigravity-app': 'Antigravity'
 }
 
-const SCAN_PHASES = [
-  ['查找已安装的 Agent 运行时', '读取本机安装入口'],
-  ['检查登录与版本', '确认当前是否可以使用'],
-  ['读取模型目录', '准备可选模型和参数']
-] as const
+const MEMBER_SUMMARIES: Record<BuiltinMemberPreset['role'], string> = {
+  luoke: '需求理解、项目调查与代码实现。',
+  muwa: '方案与代码评审，核查风险和边界。',
+  mianzhi: '测试与问题复现，验证功能可靠性。',
+  qilu: '交互、视觉设计与前端实现。'
+}
+
+function moveRadioSelection(event: KeyboardEvent<HTMLDivElement>): void {
+  if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
+  const rows = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="radio"]:not(:disabled):not([aria-disabled="true"])'))
+  const current = rows.indexOf(event.target as HTMLButtonElement)
+  if (current < 0 || rows.length === 0) return
+  event.preventDefault()
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1
+    : (current + (event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1) + rows.length) % rows.length
+  rows[index].focus()
+  rows[index].click()
+}
 
 type InProgressOnboarding = Extract<OnboardingSnapshot, { status: 'in_progress' }>
 
@@ -224,12 +240,11 @@ function WelcomeStep({
     <section className="onboarding-welcome" aria-labelledby="onboarding-welcome-title">
       <div className="onboarding-welcome-mark"><OnboardingBrandMark /></div>
       <h1 id="onboarding-welcome-title">欢迎来到 Rovai</h1>
-      <p>先选一位队员，准备好运行环境，然后从快速对话开始。</p>
-      <button className="primary-button onboarding-primary" type="button" disabled={busy} onClick={onContinue}>
-        开始旅程
+      <p>选一位队员，开始你的第一次协作。</p>
+      <button className="primary-button conversation-primary-button onboarding-primary" type="button" disabled={busy} onClick={onContinue}>
+        选择队员
         <ForwardIcon />
       </button>
-      <span className="onboarding-note"><i aria-hidden="true" />这些设置之后都可以修改。</span>
     </section>
   )
 }
@@ -248,8 +263,8 @@ function MemberStep({
   return (
     <section className="onboarding-track" aria-labelledby="onboarding-member-title">
       <header className="onboarding-page-heading">
-        <h1 id="onboarding-member-title">先认识一位队员</h1>
-        <p>选好后，它会留在队员名册里。之后也可以随时邀请其他队员。</p>
+        <h1 id="onboarding-member-title">选择第一位队员</h1>
+        <p>之后可以继续邀请其他队员。</p>
       </header>
       <div className="onboarding-member-layout">
         <aside className="onboarding-selected-member" data-member-role={selected.role}>
@@ -261,18 +276,20 @@ function MemberStep({
             className="onboarding-selected-portrait"
           />
           <div className="onboarding-selected-copy">
-            <span>当前选择</span>
             <h2>{selected.displayName}</h2>
             <strong>{selected.teamRole}</strong>
             <div className="onboarding-member-traits">
               {selected.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}
             </div>
-            <p>{selected.professionalResponsibilities}</p>
+            <details key={selected.role} className="onboarding-member-details">
+              <summary>了解工作方式</summary>
+              <p>{selected.professionalResponsibilities}</p>
+            </details>
           </div>
         </aside>
         <div className="onboarding-member-chooser">
-          <div className="onboarding-member-list" role="radiogroup" aria-label="选择第一位队员">
-            {BUILTIN_MEMBER_PRESETS.map((preset, index) => {
+          <div className="onboarding-member-list" role="radiogroup" aria-label="选择第一位队员" onKeyDown={moveRadioSelection}>
+            {BUILTIN_MEMBER_PRESETS.map((preset) => {
               const checked = selected.role === preset.role
               return (
                 <button
@@ -280,34 +297,28 @@ function MemberStep({
                   type="button"
                   role="radio"
                   aria-checked={checked}
+                  tabIndex={checked ? 0 : -1}
                   data-member-role={preset.role}
-                  disabled={busy}
+                  aria-disabled={busy}
                   key={preset.role}
-                  onClick={() => onSelect(preset.role)}
+                  onClick={() => { if (!busy) onSelect(preset.role) }}
                 >
-                  <span className="onboarding-member-row-index" aria-hidden="true">
-                    {String(index + 1).padStart(2, '0')}
-                  </span>
                   <span className="onboarding-member-row-name">
                     <strong>{preset.displayName}</strong>
                     <small>{preset.teamRole}</small>
                   </span>
                   <span className="onboarding-member-row-copy">
-                    <strong>{preset.personalityTraits.join(' · ')}</strong>
-                    <small>{preset.professionalResponsibilities}</small>
+                    <small>{MEMBER_SUMMARIES[preset.role]}</small>
                   </span>
-                  <span className="onboarding-radio-check" aria-hidden="true"><CheckIcon /></span>
+                  <span className="onboarding-radio-check" aria-hidden="true" />
                 </button>
               )
             })}
           </div>
           <footer className="onboarding-member-footer">
-            <span>
-              <strong>{selected.displayName}会成为你的第一位队员</strong>
-              <small>下一步为它准备 Agent 运行时和模型。</small>
-            </span>
-            <button className="primary-button onboarding-primary" type="button" disabled={busy} onClick={onContinue}>
-              和{selected.displayName}一起开始
+            <span>接下来：选择运行时</span>
+            <button className="primary-button conversation-primary-button onboarding-primary" type="button" disabled={busy} onClick={onContinue}>
+              下一步
               <ForwardIcon />
             </button>
           </footer>
@@ -378,15 +389,26 @@ function RuntimeStep({
   const hasEnabledRuntime = health?.runtimePlatformAdmission.some((row) => (
     row.platform === health.hostPlatform && runtimePlatformAdmissionAllowsUse(row)
   )) ?? false
+  const runtimeChoices = ONBOARDING_PRODUCT_RUNTIMES.map((kind) => {
+    const item = availability.find((candidate) => candidate.runtimeKind === kind) ?? null
+    const admission = runtimePlatformAdmissionFor(health?.hostPlatform ?? null, health?.runtimePlatformAdmission ?? [], kind)
+    const presentation = runtimeProductPresentation(admission, item)
+    return {
+      kind,
+      presentation,
+      experimental: admission?.status === 'preview',
+      selectable: presentation.status === 'available' && runtimePlatformAdmissionAllowsUse(admission)
+    }
+  })
+  const focusRuntime = runtimeChoices.find((row) => row.selectable && row.kind === selection?.adapterKind)?.kind
+    ?? runtimeChoices.find((row) => row.selectable)?.kind
 
   return (
     <section className="onboarding-track onboarding-runtime-track" aria-labelledby="onboarding-runtime-title">
       <header className="onboarding-page-heading onboarding-runtime-heading">
         <div>
-          <h1 id="onboarding-runtime-title">为{member.displayName}准备运行环境</h1>
-          <p>{showingEmpty
-            ? 'Rovai 会检查这台电脑上已经安装的 Agent 运行时。找到可用入口后，你可以选择模型；也可以先进入 Rovai，稍后再配置。'
-            : 'Rovai 会检查本机。找到可用的 Agent 运行时后，再选择模型。'}</p>
+          <h1 id="onboarding-runtime-title">选择运行时</h1>
+          <p>使用这台电脑上已安装的运行时，为{member.displayName}提供模型与工具。</p>
         </div>
         {!scanning && !showingEmpty && hasEnabledRuntime && (
           <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>重新扫描</button>
@@ -404,11 +426,7 @@ function RuntimeStep({
           <div>
             <h2>{member.displayName}</h2>
             <strong>{member.teamRole}</strong>
-            <p>{member.professionalResponsibilities}</p>
-            <dl>
-              <div><dt>名册状态</dt><dd>已选定</dd></div>
-              <div><dt>运行配置</dt><dd>{showingEmpty ? '未配置' : canContinue || provisioning ? '已准备' : '未完成'}</dd></div>
-            </dl>
+            <p>即将加入你的第一段协作。</p>
           </div>
         </aside>
         <div className="onboarding-runtime-workspace">
@@ -416,6 +434,9 @@ function RuntimeStep({
             ? (
                 <RuntimeEmptyState
                   busy={busy}
+                  scanFailed={phase === 'error'}
+                  error={error}
+                  platform={health?.hostPlatform ?? null}
                   onRefresh={onRefresh}
                   onDefer={onDefer}
                 />
@@ -424,28 +445,24 @@ function RuntimeStep({
                 <>
           <section className="onboarding-runtime-panel">
             <header>
-              <span><strong>本机 Agent 运行时</strong><small>{scanning ? '正在读取本机环境' : hasEnabledRuntime ? '选择一个可用的运行入口' : '当前平台的 Runtime 资格状态'}</small></span>
+              <span><strong>本机运行时</strong><small>{scanning ? '正在读取本机环境' : hasEnabledRuntime ? '选择一个可用的运行时' : '当前平台的 Runtime 资格状态'}</small></span>
               {scanning && <span className="onboarding-scan-status"><i />正在检查</span>}
             </header>
             {scanning
               ? <RuntimeScanProgress phase={phase} />
               : (
-                  <div className="onboarding-runtime-list" role="radiogroup" aria-label="选择 Agent 运行时">
-                    {ONBOARDING_PRODUCT_RUNTIMES.map((kind) => {
-                      const item = availability.find((candidate) => candidate.runtimeKind === kind) ?? null
-                      const admission = runtimePlatformAdmissionFor(
-                        health?.hostPlatform ?? null,
-                        health?.runtimePlatformAdmission ?? [],
-                        kind
-                      )
-                      const presentation = runtimeProductPresentation(admission, item)
+                  <div className="onboarding-runtime-list" role="radiogroup" aria-label="选择运行时" onKeyDown={moveRadioSelection}>
+                    {runtimeChoices.map(({ kind, presentation, experimental, selectable }) => {
                       return (
                         <RuntimeRow
                           key={kind}
                           kind={kind}
                           presentation={presentation}
+                          experimental={experimental}
                           checked={selection?.adapterKind === kind}
-                          disabled={busy || provisioning || !runtimePlatformAdmissionAllowsUse(admission)}
+                          tabIndex={focusRuntime === kind ? 0 : -1}
+                          disabled={provisioning || !selectable}
+                          busy={busy}
                           onSelect={() => onSelectionChange(
                             onboardingRuntimeSelectionFor(kind, installations)
                           )}
@@ -461,11 +478,9 @@ function RuntimeStep({
               <header>
                 <span>
                   <strong id="onboarding-model-title">
-                    {selection ? `${RUNTIME_LABELS[selection.adapterKind]} · 模型配置` : '模型配置'}
+                    模型
                   </strong>
-                  <small>{selection ? selectedStatus.detail ?? '模型来自本机 Agent 运行时能力快照' : '选择 Agent 运行时后继续'}</small>
                 </span>
-                {selection && <RuntimeState presentation={selectedStatus} />}
               </header>
               <div className="onboarding-model-body">
                 {selection
@@ -479,7 +494,7 @@ function RuntimeStep({
                         onChange={(model) => onSelectionChange({ ...selection, model })}
                       />
                     )
-                  : <p className="onboarding-model-empty">从上方选择一个可用的 Agent 运行时。</p>}
+                  : <p className="onboarding-model-empty">从上方选择一个可用的运行时。</p>}
               </div>
             </section>
           )}
@@ -491,18 +506,18 @@ function RuntimeStep({
             </div>
           )}
 
+          <p className="onboarding-runtime-footnote">登录与模型能力将在首次执行时确认。</p>
           <footer className="onboarding-runtime-footer">
             <span>
-              <strong>{busy ? '正在准备“初次集结”' : provisioning ? '可以从已保存的进度继续' : canContinue ? '配置已准备好' : '完成 Runtime 与模型选择后继续'}</strong>
-              <small>{provisioning ? '队员、运行配置和快速对话会安全地逐项保存，重试不会重复创建。' : canContinue ? '保存后直接进入真实快速对话。' : '当前选择会保留；不可用状态不会被伪装成可用。'}</small>
+              {busy ? '正在准备“初次集结”…' : provisioning ? '可以从已保存的进度继续。' : '准备好后，进入「初次集结」。'}
             </span>
             <button
-              className="primary-button onboarding-primary"
+              className="primary-button conversation-primary-button onboarding-primary"
               type="button"
               disabled={!canContinue || busy}
               onClick={onComplete}
             >
-              {busy ? '正在准备快速对话…' : provisioning ? '继续准备快速对话' : '保存并进入快速对话'}
+              {busy ? '正在准备…' : provisioning ? '继续准备' : '开始对话'}
               {!busy && <ForwardIcon />}
             </button>
           </footer>
@@ -516,13 +531,20 @@ function RuntimeStep({
 
 function RuntimeEmptyState({
   busy,
+  scanFailed,
+  error,
+  platform,
   onRefresh,
   onDefer
 }: {
   busy: boolean
+  scanFailed: boolean
+  error: string | null
+  platform: HostPlatformKey | null
   onRefresh(): void
   onDefer(): void
 }): React.JSX.Element {
+  const [guideOpen, setGuideOpen] = useState(false)
   return (
     <>
       <section
@@ -530,8 +552,8 @@ function RuntimeEmptyState({
         aria-labelledby="onboarding-runtime-empty-title"
       >
         <header>
-          <span><strong>本机 Agent 运行时</strong><small>当前没有可以直接使用的入口</small></span>
-          <span className="onboarding-runtime-state status-unavailable"><i aria-hidden="true" />无可用入口</span>
+          <strong>本机运行时</strong>
+          <span className="onboarding-runtime-state">{scanFailed ? '扫描未完成' : '无可用入口'}</span>
         </header>
         <div className="onboarding-runtime-empty">
           <div className="onboarding-runtime-empty-visual" aria-hidden="true">
@@ -545,77 +567,46 @@ function RuntimeEmptyState({
             </svg>
           </div>
           <div className="onboarding-runtime-empty-copy">
-            <h2 id="onboarding-runtime-empty-title">当前没有可用的 Agent 运行时</h2>
-            <p>可能尚未安装、未完成登录、版本不满足要求，或本次检查没有得到可用结果。你仍然可以进入 Rovai；训练营会在这里正式结束。</p>
-            <div className="onboarding-runtime-evidence-list" aria-label="当前结果边界">
-              <div>
-                <strong><EvidenceInstallIcon />安装入口</strong>
-                <small>未形成可用入口</small>
-              </div>
-              <div>
-                <strong><EvidenceClockIcon />登录与版本</strong>
-                <small>可能需要处理或重试</small>
-              </div>
-              <div>
-                <strong><EvidenceModelIcon />模型目录</strong>
-                <small>尚未选择，因此未读取</small>
-              </div>
+            <h2 id="onboarding-runtime-empty-title">{scanFailed ? '这次扫描未完成' : '暂未找到可用的运行时'}</h2>
+            <p>{scanFailed ? '请重新扫描，确认这台电脑上的可用运行时。' : '安装或完成运行配置后，回到这里重新扫描。'}</p>
+            <div className="onboarding-runtime-empty-actions">
+              <button className={scanFailed ? 'quiet-button' : 'primary-button conversation-primary-button'} type="button"
+                disabled={busy} aria-expanded={guideOpen} aria-controls="onboarding-install-links" onClick={() => setGuideOpen(!guideOpen)}>
+                查看安装引导
+              </button>
+              <button className={scanFailed ? 'primary-button conversation-primary-button' : 'quiet-button'} type="button" disabled={busy} onClick={onRefresh}>
+                重新扫描
+              </button>
             </div>
-            <details className="onboarding-runtime-install-guide">
-              <summary>查看安装说明</summary>
-              <div>
-                <p>安装或登录任一支持的 Runtime 后，可以在设置页重新扫描。以下仅是入口示例：</p>
-                <div className="onboarding-runtime-install-options">
-                  <span><strong>Codex CLI</strong><code>设置 → Agent 运行时</code></span>
-                  <span><strong>Claude Code</strong><code>设置 → Agent 运行时</code></span>
-                  <span><strong>Antigravity</strong><code>设置 → Agent 运行时</code></span>
-                </div>
-              </div>
-            </details>
+            <div id="onboarding-install-links" className="onboarding-install-links" hidden={!guideOpen}>
+              {ONBOARDING_PRODUCT_RUNTIMES.map((kind) => {
+                const guide = runtimeInstallGuide(kind, platform)
+                return guide && <a key={kind} href={guide.docs} target="_blank" rel="noopener noreferrer">{RUNTIME_LABELS[kind]} <span aria-hidden="true">↗</span></a>
+              })}
+            </div>
+            {error && <details className="onboarding-member-details"><summary>查看详情</summary><p>{error}</p></details>}
           </div>
         </div>
       </section>
       <footer className="onboarding-runtime-footer onboarding-runtime-empty-footer">
-        <span>
-          <strong>结束训练营并进入 Rovai</strong>
-          <small>以后不会再次自动进入训练营；需要执行 Agent 工作时，从设置页配置 Runtime。</small>
-        </span>
-        <span className="onboarding-runtime-empty-actions">
-          <button
-            className="quiet-button onboarding-runtime-empty-secondary"
-            type="button"
-            disabled={busy}
-            onClick={onRefresh}
-          >
-            重新扫描
-          </button>
-          <button className="primary-button onboarding-primary" type="button" disabled={busy} onClick={onDefer}>
-            {busy ? '正在进入 Rovai…' : '进入 Rovai'}
-            {!busy && <ForwardIcon />}
-          </button>
-        </span>
+        <span>稍后可在设置中继续配置。</span>
+        <button className="quiet-button onboarding-defer" type="button" disabled={busy} onClick={onDefer}>
+          {busy ? '正在进入…' : '稍后配置'}
+        </button>
       </footer>
     </>
   )
-}
-
-function EvidenceInstallIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.75v10.5M2.75 8h10.5" /></svg>
-}
-
-function EvidenceClockIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="M8 5.2v3.2l2 1.3" /></svg>
-}
-
-function EvidenceModelIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4.5h8v7H4z" /></svg>
 }
 
 function RuntimeScanProgress({ phase }: { phase: OnboardingRuntimePhase }): React.JSX.Element {
   const current = ({ idle: 0, discovering: 0, checking: 1, models: 2, ready: 3, error: 0 })[phase]
   return (
     <div className="onboarding-scan-progress" role="status" aria-live="polite">
-      {SCAN_PHASES.map(([title, detail], index) => {
+      {[
+        ['查找安装入口', '查找这台电脑上已安装的运行时'],
+        ['确认运行时身份', '读取本机运行时的轻度检查结果'],
+        ['读取运行配置', '准备当前安装的默认配置']
+      ].map(([title, detail], index) => {
         const done = index < current
         const active = index === current
         return (
@@ -634,14 +625,20 @@ function RuntimeScanProgress({ phase }: { phase: OnboardingRuntimePhase }): Reac
 function RuntimeRow({
   kind,
   presentation,
+  experimental,
   checked,
+  tabIndex,
   disabled,
+  busy,
   onSelect
 }: {
   kind: AdapterKind
   presentation: RuntimeStatusPresentation
+  experimental: boolean
   checked: boolean
+  tabIndex: number
   disabled: boolean
+  busy: boolean
   onSelect(): void
 }): React.JSX.Element {
   return (
@@ -650,11 +647,17 @@ function RuntimeRow({
       type="button"
       role="radio"
       aria-checked={checked}
+      tabIndex={tabIndex}
+      title={runtimeRowDetail(presentation)}
       disabled={disabled}
-      onClick={onSelect}
+      aria-disabled={disabled || busy}
+      onClick={() => { if (!busy) onSelect() }}
     >
+      <span className="onboarding-radio-check" aria-hidden="true" />
       <span className="onboarding-runtime-logo"><img src={RUNTIME_LOGOS[kind]} alt="" /></span>
-      <span><strong>{RUNTIME_LABELS[kind]}</strong><small>{runtimeRowDetail(presentation)}</small></span>
+      <span className="onboarding-runtime-copy"><strong>{RUNTIME_LABELS[kind]}</strong>
+        {(experimental || (presentation.status !== 'available' && presentation.status !== 'not_installed')) && <small>{runtimeRowDetail(presentation)}</small>}
+      </span>
       <RuntimeState presentation={presentation} />
     </button>
   )
@@ -663,7 +666,6 @@ function RuntimeRow({
 function RuntimeState({ presentation }: { presentation: RuntimeStatusPresentation }): React.JSX.Element {
   return (
     <span className={`onboarding-runtime-state status-${presentation.status}`}>
-      <i aria-hidden="true" />
       {presentation.label}
     </span>
   )
@@ -733,7 +735,7 @@ export function onboardingHasUsableRuntime(
 function runtimeRowDetail(presentation: RuntimeStatusPresentation): string {
   return presentation.detail ?? ({
     checking: '正在读取当前状态',
-    available: '能力与模型目录可读取',
+    available: '登录与模型能力将在首次执行时确认',
     authentication_required: '完成登录后重新扫描',
     not_installed: '本机未找到安装入口',
     version_unsupported: '更新后重新扫描',

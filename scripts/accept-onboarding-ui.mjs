@@ -64,7 +64,7 @@ try {
   await capture(running.cdp, captures.welcomeNight)
   await setTheme(running.cdp, 'day')
 
-  await clickByText(running.cdp, '.onboarding-welcome button', '开始旅程')
+  await clickByText(running.cdp, '.onboarding-welcome button', '选择队员')
   await waitForSelector(running.cdp, '.onboarding-member-layout', 5_000)
   const memberPage = await evaluate(running.cdp, `(() => ({
     rows: document.querySelectorAll('.onboarding-member-row').length,
@@ -83,6 +83,19 @@ try {
   captures.memberDay = join(outputDir, '03-member-day-1040x700.png')
   await capture(running.cdp, captures.memberDay)
 
+  await evaluate(running.cdp, `document.querySelector('.onboarding-member-row[aria-checked="true"]').focus()`)
+  await running.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35 })
+  await running.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'End', code: 'End', windowsVirtualKeyCode: 35 })
+  await waitForExpression(running.cdp, `(() => {
+    const row = document.querySelector('.onboarding-member-row[data-member-role="qilu"]')
+    return row?.getAttribute('aria-checked') === 'true' && row?.getAttribute('aria-disabled') !== 'true'
+      && document.activeElement === row
+  })()`)
+  await setTheme(running.cdp, 'night')
+  captures.memberNight = join(outputDir, '03-member-night-1040x700.png')
+  await capture(running.cdp, captures.memberNight)
+  await setTheme(running.cdp, 'day')
+
   await clickSelector(running.cdp, `.onboarding-member-row[data-member-role="${selectedRole}"]`)
   await waitForExpression(running.cdp,
     `document.querySelector('.onboarding-member-row[data-member-role="${selectedRole}"]')?.getAttribute('aria-checked') === 'true'`)
@@ -97,11 +110,11 @@ try {
   })`)
   assert(resumedMember.selected === selectedRole && resumedMember.welcomeAbsent,
     `Restart did not resume the unfinished member page: ${JSON.stringify(resumedMember)}`)
-  await clickByText(running.cdp, '.onboarding-member-footer button', '一起开始')
+  await clickByText(running.cdp, '.onboarding-member-footer button', '下一步')
   await waitForSelector(running.cdp, '.onboarding-runtime-track', 5_000)
   captures.runtimeScan = join(outputDir, '04-runtime-scan-day-1040x700.png')
   await capture(running.cdp, captures.runtimeScan)
-  await waitForSelector(running.cdp, '.onboarding-runtime-list', 120_000)
+  await waitForSelector(running.cdp, '.onboarding-runtime-list, .onboarding-runtime-empty', 120_000)
   const runtimeAvailability = await evaluate(running.cdp, `
     [...document.querySelectorAll('.onboarding-runtime-row')].map((row) => ({
       label: row.querySelector('strong')?.textContent?.trim(),
@@ -111,6 +124,10 @@ try {
     }))`)
   captures.runtimeReadyDay = join(outputDir, '05-runtime-ready-day-1040x700.png')
   await capture(running.cdp, captures.runtimeReadyDay)
+  await setTheme(running.cdp, 'night')
+  captures.runtimeReadyNight = join(outputDir, '05-runtime-ready-night-1040x700.png')
+  await capture(running.cdp, captures.runtimeReadyNight)
+  await setTheme(running.cdp, 'day')
   const usableRuntime = runtimeAvailability.some((runtime) => (
     runtime.className?.includes('status-available')
     || runtime.className?.includes('status-installed_unverified')
@@ -132,6 +149,16 @@ try {
   }
   assert(usableRuntime,
     `No usable Runtime was available for packaged acceptance: ${JSON.stringify(runtimeAvailability)}`)
+  if (runtimeAvailability.some((runtime) => !runtime.disabled)) {
+    await evaluate(running.cdp, `document.querySelector('.onboarding-runtime-row:not(:disabled)').focus()`)
+    await running.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 })
+    await running.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 })
+    await waitForExpression(running.cdp, `(() => {
+      const row = document.querySelector('.onboarding-runtime-row:not(:disabled)')
+      return row?.getAttribute('aria-checked') === 'true' && row?.getAttribute('aria-disabled') !== 'true'
+        && document.activeElement === row
+    })()`)
+  }
   const runtimeChoice = await evaluate(running.cdp, `(() => {
     const rows = [...document.querySelectorAll('.onboarding-runtime-row')]
     const available = rows.filter((row) => row.querySelector('.status-available'))
@@ -173,7 +200,7 @@ try {
     && resumedRuntime.step === 'runtime'
     && resumedRuntime.runtimeSelection?.adapterKind === runtimeSnapshot.runtimeSelection.adapterKind,
   `Restart did not resume the unfinished Runtime page: ${JSON.stringify(resumedRuntime)}`)
-  await clickByText(running.cdp, '.onboarding-runtime-footer button', '保存并进入快速对话')
+  await clickByText(running.cdp, '.onboarding-runtime-footer button', '开始对话')
   await waitForExpression(running.cdp,
     `Boolean(document.querySelector('.camp-timeline:not([hidden]) .first-run-camp-welcome'))`,
     60_000)
@@ -191,7 +218,7 @@ try {
     campId: completed.quickChatCampId
   })
   const campState = await evaluate(running.cdp, `(() => ({
-    title: document.querySelector('.first-run-camp-intro span')?.textContent?.trim(),
+    title: document.querySelector('#first-run-camp-title')?.textContent?.trim(),
     keys: [...document.querySelectorAll('.first-run-starter-key')].map((node) => node.textContent?.trim()),
     actions: [...document.querySelectorAll('.first-run-starter-action')].map((node) => node.textContent?.trim()),
     starters: document.querySelectorAll('.first-run-starters button').length,
@@ -210,9 +237,9 @@ try {
   `The created Quick Chat Camp is not exact: ${JSON.stringify(beforeProjection)}`)
   assert(beforeProjection.messages.length === 0 && beforeProjection.agentRuns.length === 0,
     `Initial Camp unexpectedly contains work: ${JSON.stringify({ messages: beforeProjection.messages.length, runs: beforeProjection.agentRuns.length })}`)
-  assert(campState.title === '初次集结 · 快速对话'
-    && JSON.stringify(campState.keys) === JSON.stringify(['A', 'B', 'C'])
-    && campState.actions.every((action) => action.includes('填入输入框'))
+  assert(campState.title?.startsWith('你好，我是')
+    && campState.keys.length === 0
+    && campState.actions.length === 0
     && campState.starters === 3
     && campState.composer === ''
     && !campState.timelineOverflow
@@ -234,6 +261,19 @@ try {
   await capture(running.cdp, captures.campNight)
   await setTheme(running.cdp, 'day')
 
+  const additionalStarters = [
+    '我想创建一个定时任务，让你定期帮我处理一件事。请先问我想做什么、多久执行一次、在什么时间执行，再根据我的回答帮我创建。',
+    '帮我做一个能直接预览的小工具网页，比如番茄钟或倒计时。先问我想做哪一种、需要什么功能，再用一个独立 HTML 文件做出第一版。'
+  ]
+  for (const [index, prompt] of additionalStarters.entries()) {
+    await clickSelector(running.cdp, `.first-run-starters button:nth-child(${index + 2})`)
+    await waitForExpression(running.cdp,
+      `document.querySelector('#camp-message')?.textContent === ${JSON.stringify(prompt)}
+        && document.activeElement === document.querySelector('#camp-message')`, 5_000)
+    await waitForExpression(running.cdp,
+      `window.rovai.request('camp.composerDraft.get', { campId: ${JSON.stringify(completed.quickChatCampId)} })
+        .then((draft) => draft.body === ${JSON.stringify(prompt)})`, 10_000)
+  }
   await clickSelector(running.cdp, '.first-run-starters button')
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.textContent === ${JSON.stringify(expectedStarter)}
@@ -272,7 +312,7 @@ try {
     && draftInteraction.focused
     && draftInteraction.collapsed
     && draftInteraction.caretAtEnd
-    && draftInteraction.notice === '已填入输入框，可修改后发送',
+    && draftInteraction.notice === '草稿已准备好，可编辑后发送。',
   `Starter did not only fill/focus the Composer: ${JSON.stringify(draftInteraction)}`)
   report.draft = draftInteraction
   captures.campDraftDay = join(outputDir, '08-first-run-camp-draft-day-1040x700.png')

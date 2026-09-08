@@ -2474,20 +2474,49 @@ describe('task event projections', () => {
       agents: [],
       recentCamps: [],
       onOpenCamp: () => undefined,
-      onNewConversation: () => undefined
+      onNewConversation: () => undefined,
+      onOpenMembers: () => undefined,
+      onOpenRuntimeSettings: () => undefined
     }))
 
     expect(markup).toContain('aria-label="快速对话"')
-    expect(markup).toContain('>Quick Chat<')
     expect(markup).toContain('class="quick-chat-mark" data-brand-mark="horizon" data-brand-layout="separated"')
     expect(markup).toContain('data-brand-point="rendezvous"')
-    expect(markup).toContain('开始下一段协作')
+    expect(markup).toContain('还没有可用的队员')
     expect(markup).not.toContain('Arctic Dawn')
     expect(markup).not.toContain('在晨光里')
-    expect(markup).toContain('这里还没有可继续的对话。')
-    expect(markup).toContain('>新对话</button>')
+    expect(markup).toContain('前往队员')
+    expect(markup).toContain('查看运行时')
     expect(markup).not.toContain('<textarea')
     expect(markup).not.toContain('<form')
+  })
+
+  it('shows the home creation entry only for a present, configured, usable member', () => {
+    const member = { ...agentProfile(), runtimeConfiguration: configuredRuntime('codex-cli'),
+      runtimeReadiness: { status: 'light_ready' as const, blockers: [] } }
+    const render = (agents: AgentProfile[]) => renderToStaticMarkup(createElement(QuickChatWorkspace, {
+      agents, recentCamps: [], onOpenCamp: () => undefined, onNewConversation: () => undefined,
+      onOpenMembers: () => undefined, onOpenRuntimeSettings: () => undefined
+    }))
+    expect(render([member])).toContain('开始一段协作')
+    expect(render([{ ...member, runtimeConfiguration: null }])).toContain('还没有可用的队员')
+    expect(render([{ ...member, presence: 'removed' }])).toContain('还没有可用的队员')
+  })
+
+  it('keeps recent conversations accessible when members become unavailable', () => {
+    const markup = renderToStaticMarkup(createElement(QuickChatWorkspace, {
+      agents: [], recentCamps: [{ id: 'recent-camp', title: '已有对话', activationState: 'active',
+        projectBindingKind: 'quick_chat', projectPath: '/tmp/quick-chat', defaultLead: null,
+        marker: 'unread_completed', lastActivityAt: '2026-09-08T00:00:00Z',
+        lastActivityGlobalSequence: 2, latestCompletionGlobalSequence: 2, version: 1 }],
+      onOpenCamp: () => undefined, onNewConversation: () => undefined,
+      onOpenMembers: () => undefined, onOpenRuntimeSettings: () => undefined
+    }))
+    expect(markup).toContain('最近对话')
+    expect(markup).toContain('已有对话')
+    expect(markup).toContain('camp-marker-unread_completed')
+    expect(markup).not.toContain('开始一段协作')
+    expect(markup).not.toContain('还没有可用的队员')
   })
 
   it('defaults to configured usable members without preferring deep readiness', () => {

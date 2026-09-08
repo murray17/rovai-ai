@@ -50,6 +50,8 @@ import type {
   StructuredCampMessageContent
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
+import { NavigationIcon } from './NavigationIcon'
+import { isNewConversationMemberAvailable } from './new-conversation-availability'
 import {
   StructuredMentionComposer,
   type StructuredMentionComposerHandle
@@ -899,23 +901,13 @@ const EMPTY_CAMP_STARTERS = [
   }
 ] as const
 
-const FIRST_RUN_ROLE_PROMPTS: Record<BuiltinMemberAvatarRole, string> = {
-  luoke: '请帮我读这段材料，先列重点，再指出需要确认的地方。',
-  muwa: '请评审这份方案，分别给出结论、依据、风险和修改建议。',
-  mianzhi: '请检查这个流程，列出可能中断的地方和恢复办法。',
-  qilu: '帮我整理这个页面的信息层级和主操作。'
-}
-
 export interface FirstRunCampStarter {
   title: string
   body: string
   prompt: string
 }
 
-export function firstRunCampStarters(
-  role: BuiltinMemberAvatarRole,
-  displayName: string
-): FirstRunCampStarter[] {
+export function firstRunCampStarters(): FirstRunCampStarter[] {
   return [
     {
       title: '创建一位新队员',
@@ -923,14 +915,14 @@ export function firstRunCampStarters(
       prompt: '我想创建一个新的队员，请用 member-studio 帮我开始。'
     },
     {
-      title: `和${displayName}开始一件事`,
-      body: '先放入一条符合这位队员特长的任务。',
-      prompt: FIRST_RUN_ROLE_PROMPTS[role]
+      title: '创建一个定时任务',
+      body: '日报、巡检，让队员按时完成。',
+      prompt: '我想创建一个定时任务，让你定期帮我处理一件事。请先问我想做什么、多久执行一次、在什么时间执行，再根据我的回答帮我创建。'
     },
     {
-      title: '先认识 Rovai',
-      body: '了解三个最常用的工作入口。',
-      prompt: '先告诉我快速对话、Camp 和队员名册分别适合做什么。'
+      title: '做一个实用小工具',
+      body: '番茄钟、倒计时，或你自己的点子。',
+      prompt: '帮我做一个能直接预览的小工具网页，比如番茄钟或倒计时。先问我想做哪一种、需要什么功能，再用一个独立 HTML 文件做出第一版。'
     }
   ]
 }
@@ -1347,28 +1339,42 @@ export function QuickChatWorkspace({
   agents,
   recentCamps,
   onOpenCamp,
-  onNewConversation
+  onNewConversation,
+  onOpenMembers,
+  onOpenRuntimeSettings
 }: {
   agents: AgentProfile[]
   recentCamps: NavigationCampItem[]
   onOpenCamp(camp: NavigationCampItem): void
   onNewConversation(): void
+  onOpenMembers(): void
+  onOpenRuntimeSettings(): void
 }): JSX.Element {
+  const hasAvailableMember = agents.some((agent) => agent.presence === 'present' && isNewConversationMemberAvailable({
+    runtimeConfigured: agent.runtimeConfiguration !== null,
+    runtimeReadiness: agent.runtimeReadiness.status
+  }))
   return (
     <section className="workspace-shell new-conversation-workspace quick-chat-workspace" aria-label="快速对话">
       <div className="new-conversation-main">
         <div className="new-conversation-stage">
+          {recentCamps.length === 0 && <>
           <svg className="quick-chat-mark" data-brand-mark="horizon" data-brand-layout="separated" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
             <path d="M36 4 L39.6 16.7 L53.9 20.4 L39.6 24.1 L36 36.8 L32.4 24.1 L18.1 20.4 L32.4 16.7 Z" fill="currentColor" />
             <path d="M8 49.5 Q36 37.5 64 49.5" stroke="currentColor" strokeWidth="5" fill="none" strokeLinecap="round" />
             <circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="36" cy="43.5" r="2.6" />
           </svg>
-          <p className="eyebrow quick-chat-eyebrow">Quick Chat</p>
-          <h2>开始下一段协作</h2>
-          <p className="quick-chat-subline">创建一个对话，选好队员与工作区，再写下这次协作的目标。</p>
+          <h2>{hasAvailableMember ? '开始一段协作' : '还没有可用的队员'}</h2>
+          <p className="quick-chat-subline">{hasAvailableMember ? '选好队员，写下你想完成的事。' : '先添加队员或完成运行配置。'}</p>
+          <div className="quick-chat-empty">
+            {hasAvailableMember
+              ? <button className="quick-chat-create" type="button" onClick={onNewConversation}><span aria-hidden="true">＋</span>新对话</button>
+              : <><button className="quick-chat-create" type="button" onClick={onOpenMembers}>前往队员</button><button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>查看运行时</button></>}
+          </div>
+          </>}
           {recentCamps.length > 0 && (
-            <div className="quick-chat-continue" aria-label="继续未完成的事">
-              <div className="quick-chat-continue-title">继续未完成的事</div>
+            <div className="quick-chat-continue" aria-label="最近对话">
+              <header className="quick-chat-continue-title"><h2>最近对话</h2><button className="quiet-button" type="button" onClick={onNewConversation}><span aria-hidden="true">＋</span>新对话</button></header>
               {recentCamps.map((camp) => (
                 <button className="quick-chat-continue-row" type="button" key={camp.id} onClick={() => onOpenCamp(camp)}>
                   <span className="camp-marker-slot" aria-hidden="true">
@@ -1379,12 +1385,6 @@ export function QuickChatWorkspace({
                   <small>{relativeTimeLabel(camp.lastActivityAt)}</small>
                 </button>
               ))}
-            </div>
-          )}
-          {recentCamps.length === 0 && (
-            <div className="quick-chat-empty">
-              <p>这里还没有可继续的对话。</p>
-              <button className="primary-button" type="button" onClick={onNewConversation}>新对话</button>
             </div>
           )}
         </div>
@@ -3585,7 +3585,7 @@ export function CampWorkspace({
 
   const chooseStarterPrompt = (prompt: string, announceDraft = false): void => {
     composerHandleRef.current?.setDocument(composerDocumentFromText(prompt), 'end')
-    if (announceDraft) setStarterNotice('已填入输入框，可修改后发送')
+    if (announceDraft) setStarterNotice('草稿已准备好，可编辑后发送。')
   }
 
   const selectInspectorTab = (tab: CampInspectorTab): void => {
@@ -7083,7 +7083,6 @@ function EmptyCampWelcome({
         displayName={displayName}
         agentId={firstRunCamp.memberAgentId}
         avatarRef={firstMember?.avatarRef ?? profile?.avatarRef ?? null}
-        role={firstRunCamp.memberRole}
         starterNotice={starterNotice}
         onChoosePrompt={onChoosePrompt}
       />
@@ -7139,18 +7138,16 @@ function FirstRunCampWelcome({
   displayName,
   agentId,
   avatarRef,
-  role,
   starterNotice,
   onChoosePrompt
 }: {
   displayName: string
   agentId: string
   avatarRef: string | null
-  role: BuiltinMemberAvatarRole
   starterNotice: string | null
   onChoosePrompt(prompt: string, announceDraft?: boolean): void
 }): JSX.Element {
-  const starters = firstRunCampStarters(role, displayName)
+  const starters = firstRunCampStarters()
   return (
     <section className="empty-camp-welcome first-run-camp-welcome" aria-labelledby="first-run-camp-title">
       <div className="first-run-camp-intro">
@@ -7162,15 +7159,9 @@ function FirstRunCampWelcome({
           className="first-run-camp-portrait"
         />
         <div>
-          <span>初次集结 · 快速对话</span>
           <h2 id="first-run-camp-title">你好，我是{displayName}。</h2>
-          <p>先从下面选一件事。我会先把内容放进输入框，由你确认后再发送。</p>
+          <p>从一件具体的事开始。</p>
         </div>
-      </div>
-
-      <div className="first-run-camp-facts" aria-label="当前快速对话配置">
-        <span><i aria-hidden="true" />对话已保存</span>
-        <span><i aria-hidden="true" />{displayName}是当前队员和负责人</span>
       </div>
 
       <div className="first-run-starters" aria-label="可选的起步内容">
@@ -7180,24 +7171,16 @@ function FirstRunCampWelcome({
             key={starter.title}
             onClick={() => onChoosePrompt(starter.prompt, true)}
           >
-            <span className="first-run-starter-key" aria-hidden="true">
-              {String.fromCharCode(65 + index)}
+            <span className="first-run-starter-glyph" aria-hidden="true">
+              {index < 2 ? <NavigationIcon name={index === 0 ? 'users' : 'calendar-clock'} /> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-12-2 14" /></svg>}
             </span>
             <span><strong>{starter.title}</strong><small>{starter.body}</small></span>
-            <span className="first-run-starter-action">
-              填入输入框
-              <svg className="first-run-starter-arrow" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="m6.25 3.25 4.5 4.75-4.5 4.75M10.5 8h-6" />
-              </svg>
-            </span>
           </button>
         ))}
       </div>
 
-      <p className="first-run-draft-notice" role="status" aria-live="polite">
-        {starterNotice && (
-          <><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.25 8.25 3 3 6.5-6.5" /></svg>{starterNotice}</>
-        )}
+      <p className="first-run-draft-notice sr-only" role="status" aria-live="polite">
+        {starterNotice}
       </p>
     </section>
   )

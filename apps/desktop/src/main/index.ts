@@ -1313,7 +1313,10 @@ ipcMain.handle('rovai:channels-refresh-login-qr', (event, attemptId: unknown) =>
   channelSettings.refreshLoginQr(attemptId)
 })
 
-ipcMain.handle('rovai:onboarding-get', () => requireOnboarding().get())
+ipcMain.handle('rovai:onboarding-get', async () => {
+  await localStoresLoaded
+  return requireOnboarding().getAfterPendingWrites()
+})
 
 ipcMain.handle('rovai:onboarding-show-welcome', () => requireOnboarding().showWelcome())
 
