@@ -39,6 +39,79 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--message-groups') {
+      const settledGroups = async () => {
+        for (let index = 0; index < 4; index += 1) await run('window.campOpenTest.settle()')
+        return run('window.campOpenTest.messageGroupState()')
+      }
+      const layouts = []
+      for (const theme of ['day', 'night']) {
+        for (const width of [1440, 1040]) {
+          window.setContentSize(width, 920)
+          await run(`document.documentElement.dataset.theme = '${theme}'; window.campOpenTest.showMessageGroups('short')`)
+          let grouped = await settledGroups()
+          assert.equal(grouped.overflow, false)
+          assert.equal(grouped.emptyBubbles, 0)
+          assert.deepEqual(grouped.messages.filter(item => item.head).map(item => item.id), ['group-1', 'group-5', 'group-6'])
+          assert.ok(grouped.messages.every(item => item.label && item.buttons === 2))
+          assert.equal(grouped.messages[0].background, theme === 'day' ? 'rgb(242, 243, 244)' : 'rgb(32, 39, 44)')
+          assert.ok(grouped.messages.every(item => item.contentBackground === 'rgba(0, 0, 0, 0)'))
+          assert.ok(grouped.messages.every(item => Math.abs(item.left - grouped.messages[0].left) <= 1))
+          assert.ok(Math.abs(grouped.messages[1].top - grouped.messages[0].bottom - 8) <= 1)
+          await run('document.querySelector("[data-message-id=group-2] .message-copy-button").focus()')
+          await settledGroups()
+          await run('Promise.all(document.querySelector("[data-message-id=group-2] .message-actions").getAnimations().map(animation => animation.finished))')
+          assert.equal(await run('getComputedStyle(document.querySelector("[data-message-id=group-2] .message-actions")).opacity'), '1')
+          await run('document.querySelector("[data-message-id=group-2] .message-copy-button").click()')
+          assert.equal((await settledGroups()).copiedPublicText, '连续发来的短消息共用身份信息。')
+          await run('document.querySelector("[data-message-id=group-3] .message-copy-button").click()')
+          assert.equal((await settledGroups()).copiedPublicText, '设计说明-1.md\n设计说明-2.md')
+          await run('document.querySelector("[data-message-id=group-3] .message-reply-button").click()')
+          assert.equal((await settledGroups()).repliedPublicMessageId, 'group-3')
+          assert.equal(await run('document.activeElement.id'), 'camp-message')
+          await run('document.querySelector("[data-message-id=group-3]").focus()')
+          grouped = await settledGroups()
+          assert.equal(grouped.messages[2].head, true, 'Reply/notification focus restores attachment author')
+          await run('document.activeElement.blur()')
+          await run('document.querySelector("[data-message-id=group-2]").classList.add("conversation-find-current-message")')
+          assert.equal((await settledGroups()).messages[1].head, true, 'Find restores current author')
+          await run('document.querySelector("[data-message-id=group-2]").classList.remove("conversation-find-current-message")')
+          await capture(`message-groups-${theme}-${width}`)
+          layouts.push({ theme, width, heads: grouped.messages.filter(item => item.head).map(item => item.id) })
+        }
+      }
+      window.setContentSize(1440, 920)
+      await run('document.documentElement.dataset.theme = "day"; window.campOpenTest.showMessageGroups("files")')
+      let files = await settledGroups()
+      assert.ok(files.messages[2].height < 320)
+      assert.equal(files.messages[3].head, false)
+      await run('document.querySelector(".timeline-track").style.width = "420px"')
+      files = await settledGroups()
+      assert.ok(files.messages[2].height >= 320, 'Stacked files cross the height boundary')
+      assert.equal(files.messages[3].head, true)
+      await capture('message-groups-narrow-files')
+      await run('document.querySelector(".timeline-track").style.width = ""; window.campOpenTest.showMessageGroups("image")')
+      await settledGroups()
+      await run('document.querySelector("[data-message-id=group-3]").scrollIntoView({block:"center"})')
+      const imageDeadline = Date.now() + 5000
+      while (Date.now() < imageDeadline && !await run('Boolean(document.querySelector("[data-message-id=group-3] img")?.naturalWidth)')) {
+        await run('window.campOpenTest.settle()')
+      }
+      const imageGroup = await settledGroups()
+      assert.ok(imageGroup.messages[2].height >= 320)
+      assert.equal(imageGroup.messages[3].head, true)
+      assert.equal(imageGroup.emptyBubbles, 0)
+      await capture('message-groups-large-image')
+      for (const scenario of ['long', 'diff']) {
+        await run(`window.campOpenTest.showMessageGroups('${scenario}')`)
+        const group = await settledGroups()
+        assert.equal(group.messages[3].head, true, `${scenario} restores the next author`)
+      }
+      assert.equal(errors.length, 0, errors.join('\n'))
+      console.log(JSON.stringify({ ok: true, mode, layouts, fileHeights: files.messages.map(item => item.height) }))
+      app.exit(0)
+      return
+    }
     if (mode === '--run-artifacts') {
       await run('window.campOpenTest.showRunArtifacts()')
       const imageDeadline = Date.now() + 5000
@@ -273,8 +346,8 @@ app.whenReady().then(async () => {
     assert.equal(attachmentState.userFileDetails, 0)
     assert.equal(attachmentState.agentFileCount, 10)
     assert.ok(attachmentState.agentOutputWidth > 650, 'Agent deliveries use the full artifact track')
-    assert.ok(attachmentState.agentHeadingGap >= 6 && attachmentState.agentHeadingGap <= 9,
-      'Delivery count remains beside its heading')
+    assert.equal(attachmentState.agentFileGroupLabel, 'Agent 交付文件：10 个')
+    assert.equal(attachmentState.agentVisibleHeadingCount, 0, 'File count is accessible without an extra visible heading')
     assert.equal(attachmentState.agentOpenCueDisplay, 'grid')
     assert.equal(attachmentState.agentColumns, 2)
     assert.deepEqual(new Set(attachmentState.agentIconTypes), new Set([

@@ -2,6 +2,8 @@ import { prefersReducedMotion } from './reduced-motion'
 import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
 import { collapsedMessageProjection } from './conversation-message-collapse'
+import { samePublicMessageSegment } from './public-message-grouping'
+import { usePublicMessageLayout } from './usePublicMessageLayout'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -2014,6 +2016,14 @@ export function CampWorkspace({
     }
     return null
   }, [conversationTimeline])
+  const groupingFollowsLatest = useCallback(() => !conversationFind.open
+    && (timelineReadingPosition.current?.campId !== snapshot.camp.id
+      || timelineReadingPosition.current.position.followingLatest !== false),
+  [conversationFind.open, snapshot.camp.id])
+  const shortPublicMessages = usePublicMessageLayout(
+    timelineScrollRef, conversationTimeline, snapshot.camp.id,
+    conversationView === 'conversation', groupingFollowsLatest
+  )
   const isCampEmpty = !campConversationHasVisibleHistory(conversationTimeline)
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const replyRepairRequired = composerDraftNeedsReplyRepair(composerDraft)
@@ -4221,6 +4231,20 @@ export function CampWorkspace({
                     : null
                   const followsSameAuthor = messageAuthorKey !== null
                     && previousMessageAuthorKey === messageAuthorKey
+                  const previousItem = conversationTimeline[timelineIndex - 1]
+                  const nextItem = conversationTimeline[timelineIndex + 1]
+                  const groupingMessage = (message: CampMessageView): CampMessageView => ({
+                    ...message,
+                    campTurnId: message.campTurnId
+                      ?? (message.sourceAgentRunId ? runById.get(message.sourceAgentRunId)?.campTurnId : null)
+                      ?? null
+                  })
+                  const isGroupContinuation = previousItem?.kind === 'camp_message'
+                    && shortPublicMessages.has(previousItem.message.id)
+                    && samePublicMessageSegment(groupingMessage(previousItem.message), groupingMessage(campMessage))
+                  const joinsNextMessage = nextItem?.kind === 'camp_message'
+                    && shortPublicMessages.has(campMessage.id)
+                    && samePublicMessageSegment(groupingMessage(campMessage), groupingMessage(nextItem.message))
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                     delivery.deliveryKind === 'public_a2a'
                     && delivery.messageId === campMessage.id
@@ -4258,15 +4282,27 @@ export function CampWorkspace({
                     : (modality: ReplyFocusModality) => void startReply(campMessage, modality)
                   const handleCopy = (): void => copyMessage(
                     campMessage.id,
-                    displayBody,
+                    displayBody.trim() ? displayBody : [
+                      ...campMessage.attachments.map(attachment => attachment.displayName),
+                      ...runtimeImages.map(image => image.displayName)
+                    ].join('\n'),
                     campMessage.content
                   )
+                  const messageClasses = [
+                    'timeline-node conversation-bubble', campMessage.authorType,
+                    campMessage.authorType === 'agent' && 'public-agent-message',
+                    followsSameAuthor && 'same-author',
+                    isGroupContinuation && 'is-group-continuation',
+                    joinsNextMessage && 'joins-next-message',
+                    isConversationFindCurrent && 'conversation-find-current-message'
+                  ].filter(Boolean).join(' ')
                   const messageElement = (
                     <article
-                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${isConversationFindCurrent ? ' conversation-find-current-message' : ''}`}
+                      className={messageClasses}
                       key={campMessage.id}
                       data-message-id={campMessage.id}
                       data-camp-turn-id={campMessage.campTurnId ?? sourceRun?.campTurnId}
+                      aria-label={`${author}，${messageClockTime(campMessage.createdAt)}，第${campMessage.sequence}条消息`}
                       tabIndex={-1}
                       style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
                     >
@@ -4299,6 +4335,11 @@ export function CampWorkspace({
                       {(campMessage.authorType === 'user' || campMessage.authorType === 'external_principal') && (
                         <span className="local-message-avatar" aria-hidden="true">你</span>
                       )}
+                      {campMessage.authorType === 'agent' && (
+                        <time className="message-continuation-time" aria-hidden="true">
+                          {messageClockTime(campMessage.createdAt)}
+                        </time>
+                      )}
                       {(campMessage.authorType === 'user'
                         || campMessage.authorType === 'agent'
                         || campMessage.authorType === 'external_principal')
@@ -4322,6 +4363,7 @@ export function CampWorkspace({
                                 )}
                                 <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
                               </div>
+                              <div className="public-message-readout">
                               <MessageSurface
                                 copied={copied}
                                 hasDelivery={campMessageDeliveries.length > 0}
@@ -4439,6 +4481,7 @@ export function CampWorkspace({
                                     onCopy={handleCopy}
                                   />
                                 )}
+                              </div>
                             </div>
                           )
                         : <p>{displayBody}</p>}
@@ -4447,7 +4490,7 @@ export function CampWorkspace({
                   if (trailingFileChangeItems.length > 0) {
                     items.push(
                       <div
-                        className={`agent-message-output${followsSameAuthor ? ' same-author' : ''}`}
+                        className={`agent-message-output public-message-output${followsSameAuthor ? ' same-author' : ''}${isGroupContinuation ? ' is-group-continuation' : ''}`}
                         data-message-output-id={campMessage.id}
                         key={`agent-message-output:${campMessage.id}`}
                       >
