@@ -17,7 +17,7 @@ last_updated: 2026-09-10
 - Branch：`codex/zcode-runtime`
 - 原始 Base：`23c002585f9a6840e82294b6d9e93667f7386118`；提交前已合并主线 `2ec2adff`（v0.2.2、v1.56 引用合同）。
 - Governance：无先行主线治理提交；版本、合同和实现同一 PR 评审。
-- Status：ready（Preview 实现可评审，未合入；First-Class 资格尚未闭合）
+- Status：ready（[PR #323](https://github.com/murray17/rovai-ai/pull/323) 为 Draft，未合入；First-Class 资格尚未闭合）
 - 主 checkout 的并行文档改动不属于本任务；worktree 在 review/CI 期间保留。
 
 ## 已实现
@@ -71,6 +71,7 @@ last_updated: 2026-09-10
 | `smoke-zcode-context.py auto` + `ROVAI_ZCODE_CONTEXT_COLD_RESUME=1` | compact 后重启 Core，exact Session、原标签、revision 1 requested/acknowledged/accepted 通过 |
 | `smoke-zcode-launch.swift` | 权限、Fleet、冷恢复、压缩后重启、两种强杀的所有被观察产品流程中新 ZCode App 注册数为 0 |
 
+合并主线后的 v0.2.2 / v1.57 构建已重新通过文件矩阵和完整 Fleet 流程，App 注册观察为 0。
 功能流早于最终进程回收 prelude 的证据与 v3 复验分开标记；不能声称每条历史功能流都运行在最终启动器上。
 原始协议研究只用于说明上游字段和行为，不能替代上述 Core 产品路径。
 
@@ -82,7 +83,7 @@ last_updated: 2026-09-10
 - `cargo clippy --workspace --all-targets -- -D warnings`：合并主线后通过。
 - `pnpm typecheck`、`pnpm build:desktop`：通过；构建未启动日常 App。
 - `pnpm test`：通过；Vitest 168 files / 1717 tests，末段 Node tests 223 passed / 1 个既有平台 skip，文档与 Skills 检查通过。
-- 通用文档 CI 门禁与最终 compatibility source SHA 绑定在提交前重新校验。
+- 通用文档 CI 门禁与最终 compatibility source SHA 绑定：合并主线后通过。
 
 新增 Rust 测试按最窄已有 owner 分配：原生事件关联/拒绝终态、结构化 hunk、原生配置/MCP precedence、
 有界且绑定 Session/Tool 的输出 artifact；Migration 使用独立升级 owner。Shared Fleet、Usage、closed catalog 等扩展已有测试。

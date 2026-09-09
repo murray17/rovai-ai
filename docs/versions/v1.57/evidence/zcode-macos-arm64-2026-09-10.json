@@ -10,30 +10,34 @@
   "status": "preview",
   "productEvidence": {
     "files": {
-      "logSha256": "85bb5e911bb0822d096a090bedcc1927083c1f5381316c16d9564e1116370aa0",
+      "logSha256": "15f59674fa93de7fadfd052f76bddda40f5bec41662bf9a4db21d3eb33e1bdcf",
       "passed": true,
       "identities": [
         {
-          "hostInstanceId": "84e37546-4eca-4a32-abb6-e8bb40809b1f"
+          "hostInstanceId": "def37414-14f4-4d92-b1ee-75d8c0b01d52"
         },
         {
-          "nativeSessionId": "sess_807aa186-9074-4674-be71-b6f6055d8ad8"
+          "nativeSessionId": "sess_b4211ac5-a600-42cd-b07f-7fa34c65a5c7"
         },
         {
-          "agentRunId": "9a809a41-0447-4bd4-88b2-cde010d7c6d8"
+          "agentRunId": "b80ad3d9-b056-44f8-ac55-5d2b3db9493c"
         },
         {
-          "agentRunId": "adf44342-fceb-4cf9-94f2-0a529a23ceb3"
+          "agentRunId": "ccf75b68-f93c-49ee-9544-b1a431447a00"
         },
         {
-          "agentRunId": "9b27989b-ad17-41d7-a383-56743f6a1c62"
+          "agentRunId": "1c1a163f-0633-4f2a-82e2-9b26eb930169"
         },
         {
-          "agentRunId": "69b30066-9b1e-4844-bdb0-11ceb09dc303"
+          "agentRunId": "e8ecf3f1-02ae-426d-9f89-9660874a7b27"
         }
       ],
       "smoke": "smoke-acp-runtime.mjs",
-      "stage": "before-stdio-owner"
+      "stage": "zcode-native-node-transport-v3, after main integration",
+      "sourceCommit": "51fc6cc1",
+      "coreVersion": "0.2.2",
+      "dataContractVersion": "v1.57",
+      "zcodeGuiLaunchCount": 0
     },
     "commandOutput": {
       "logSha256": "2565c688c75e93cf5fce0e698adc9e239b3a561219b5e4977c2466e683a68f35",
@@ -178,66 +182,52 @@
       "stage": "before-stdio-owner"
     },
     "fleet": {
-      "logSha256": "eff763bfb6f60d3e831f225b1903e26acadbe7b98e2d0868caec87ef882509c1",
+      "logSha256": "dd17be46c589abcfb050dd622b0581aa0436a8b0be0cd7372743ec92f46187f2",
       "passed": true,
       "identities": [
         {
-          "hostInstanceId": "07873bb7-df67-44ba-88c2-5d35cf59ec03"
+          "hostInstanceId": "91617be8-ef77-4803-8cf1-283115bf1819"
         },
         {
-          "nativeSessionId": "sess_47fcc36e-a4d7-48f5-90cd-4faaef00e492"
+          "nativeSessionId": "sess_be2fb732-4ff4-4d1b-9ffa-7eaa6ee666a5"
         },
         {
-          "agentRunId": "97675d97-0e08-449c-90a0-9dae6722c455"
+          "agentRunId": "6ff92c99-8b98-4663-9b72-19efc66786ab"
         },
         {
-          "hostInstanceId": "07873bb7-df67-44ba-88c2-5d35cf59ec03"
+          "nativeSessionId": "sess_1689574f-fe0c-4260-93bb-85acd36ee8f4"
         },
         {
-          "nativeSessionId": "sess_796fc486-f993-447e-a1b7-71c89aef969d"
+          "agentRunId": "d6ec25b4-ad3e-4a1e-9dce-a01c2ec53a60"
         },
         {
-          "agentRunId": "a71d170a-a3dc-479b-a454-c0fb7708363b"
+          "agentRunId": "efbbe164-386e-4ae5-98e4-73bb3f4c8aaa"
         },
         {
-          "hostInstanceId": "07873bb7-df67-44ba-88c2-5d35cf59ec03"
+          "agentRunId": "f59673de-11eb-40fd-aabe-318bb876cd8d"
         },
         {
-          "nativeSessionId": "sess_47fcc36e-a4d7-48f5-90cd-4faaef00e492"
+          "hostInstanceId": "3a60ebba-13cc-4232-a83d-1291bf3c27db"
         },
         {
-          "agentRunId": "9f0138a5-72f4-41ef-967f-b72a92e3e691"
+          "agentRunId": "d723c5e2-b5b7-464b-b8a6-41020f73c15a"
         },
         {
-          "hostInstanceId": "07873bb7-df67-44ba-88c2-5d35cf59ec03"
+          "hostInstanceId": "b3b3fd28-86f6-4b54-8203-99bf414a0deb"
         },
         {
-          "nativeSessionId": "sess_47fcc36e-a4d7-48f5-90cd-4faaef00e492"
+          "nativeSessionId": "sess_954f909e-cfab-4197-aa1b-b50b7d517a1f"
         },
         {
-          "agentRunId": "69e5f8f2-fb58-40c6-9647-8ccf6ba29c1c"
-        },
-        {
-          "hostInstanceId": "6e5a392e-24c4-4c74-a7e4-41acd50bc894"
-        },
-        {
-          "nativeSessionId": "sess_796fc486-f993-447e-a1b7-71c89aef969d"
-        },
-        {
-          "agentRunId": "57a1c506-bde3-4df9-b0d0-1a558cb0c1ac"
-        },
-        {
-          "hostInstanceId": "514082bd-469d-46ad-97cc-52758eb6393b"
-        },
-        {
-          "nativeSessionId": "sess_377a8d47-15e6-4871-95d2-f468e40b23dc"
-        },
-        {
-          "agentRunId": "f282ccd1-6cb2-4db0-a720-15a68603a4b4"
+          "agentRunId": "daec447c-81d1-44d1-994f-25df7e8b4977"
         }
       ],
       "smoke": "smoke-zcode-runtime.mjs",
-      "stage": "before-stdio-owner"
+      "stage": "zcode-native-node-transport-v3, after main integration",
+      "sourceCommit": "51fc6cc1",
+      "coreVersion": "0.2.2",
+      "dataContractVersion": "v1.57",
+      "zcodeGuiLaunchCount": 0
     },
     "compactionColdResume": {
       "logSha256": "567e1f83e899c4439d2d69fee929afbec7c9dc031a688556e3895f9cc84325b7",
@@ -311,5 +301,20 @@
     "macOS x64 and Windows x64 have no qualification evidence.",
     "Full Core compaction failure/cancellation combined with capability preservation, provider usage retry/resume accounting, and adapter-specific protocol-error/probe-timeout/upgrade drift flows are not yet all qualified."
   ],
-  "evidenceScope": "Earlier functional flows plus final launcher v3 revalidation: exact cold resume, compact then Core restart, native crash and Core crash. Each flow records its stage; no complete platform qualification is claimed."
+  "evidenceScope": "Earlier functional flows plus final launcher v3 revalidation: files and Fleet after main integration, exact cold resume, compact then Core restart, native crash and Core crash. Each flow records its stage; no complete platform qualification is claimed.",
+  "localGates": {
+    "sourceCommit": "51fc6cc1",
+    "rustLibraryPassed": 550,
+    "rustCliPassed": 33,
+    "rustSlowPassed": 309,
+    "rustCorePassed": 234,
+    "rustCoreExistingIgnored": 5,
+    "vitestPassed": 1717,
+    "nodeFinalSuitePassed": 223,
+    "nodeExistingPlatformSkip": 1,
+    "clippyPassed": true,
+    "typecheckPassed": true,
+    "desktopBuildPassed": true,
+    "docsCiPassed": true
+  }
 }
