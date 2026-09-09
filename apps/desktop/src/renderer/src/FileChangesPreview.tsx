@@ -1,4 +1,5 @@
 import { FileFindChangesAdapter } from './FileFindChangesAdapter'
+import { ChangedFileSelect } from './ChangedFileSelect'
 import { fileChangeFindLineId } from './file-find-changes'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type { AgentRunFileChangesDetailView, AgentRunFileChangesView } from '@contracts'
@@ -132,37 +133,37 @@ export function AgentRunFileChangesReviewSurface({
         {changes.files.length > 1 && <div className="agent-run-file-review-navigation" aria-label="切换变更文件">
           <button
             type="button"
+            aria-label="上一文件"
+            title="上一文件"
             disabled={selectedIndex <= 0}
             onClick={() => onSelectEvidenceFileId(
               changes.files[selectedIndex - 1]?.evidenceFileId ?? selectedFile?.evidenceFileId ?? ''
             )}
           >
-            上一文件
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
           </button>
+          <span className="agent-run-file-review-position">{selectedIndex + 1} / {changes.files.length}</span>
           <button
             type="button"
+            aria-label="下一文件"
+            title="下一文件"
             disabled={selectedIndex < 0 || selectedIndex >= changes.files.length - 1}
             onClick={() => onSelectEvidenceFileId(
               changes.files[selectedIndex + 1]?.evidenceFileId ?? selectedFile?.evidenceFileId ?? ''
             )}
           >
-            下一文件
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg>
           </button>
         </div>}
       </header>
 
-      {changes.files.length > 1 && <label className="agent-run-file-review-file-picker">
-        <span>变更文件</span>
-        <select aria-label="变更文件" value={selectedFile?.evidenceFileId ?? ''}
-          onChange={(event) => onSelectEvidenceFileId(event.target.value)}>
-          {changes.files.map((file) => <option key={file.evidenceFileId} value={file.evidenceFileId}>{file.path}</option>)}
-        </select>
-        <small>{selectedIndex + 1} / {changes.files.length}</small>
-      </label>}
+      {changes.files.length > 1 && <div className="agent-run-file-review-file-picker">
+        <ChangedFileSelect key={`${changes.agentRunId}:${changes.executionEpoch}`}
+          files={changes.files} value={selectedFile?.evidenceFileId ?? ''} onChange={onSelectEvidenceFileId} />
+      </div>}
 
       <div className="agent-run-file-review-content">
         <aside className="agent-run-file-review-sidebar" aria-label="变更文件">
-          <header><strong>变更文件</strong><span>{changes.fileCount} files</span></header>
           <div className="agent-run-file-review-file-list">
             {changes.files.map((file) => {
               const pathParts = agentRunFilePathParts(file.path)
@@ -202,7 +203,7 @@ export function AgentRunFileChangesReviewSurface({
           {selectedFile
             ? <>
                 <header className="agent-run-file-review-pane-header">
-                  <div>
+                  <div className="agent-run-file-review-selected-path">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6" /></svg>
                     <code title={selectedFile.path}>{selectedFile.path}</code>
                   </div>
@@ -221,6 +222,7 @@ export function AgentRunFileChangesReviewSurface({
                       disabled={openCurrentStatus === 'opening'}
                       onClick={onOpenCurrent}
                     >
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m0-6L10 14M10 4H4v16h16v-6" /></svg>
                       {openCurrentStatus === 'opening' ? '正在打开…' : '打开当前文件'}
                     </button>
                   </div>

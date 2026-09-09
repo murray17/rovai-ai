@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-09-08
+last_updated: 2026-09-09
 ---
 
 # Steel Night
@@ -191,6 +191,13 @@ Night 为相同十个格式家族提供独立亮度值；它们只表达文件�
 | `--diff-add` / `--diff-add-soft` | `#92c7a5` / `#21412e` |
 | `--diff-remove` / `--diff-remove-soft` | `#e09a94` / `#4c2221` |
 | `--diff-hunk-soft` | `#1b272a` |
+| `--file-change-surface` | `#191e22` |
+| `--file-change-hover` | `#24292d` |
+| `--file-change-selected` | `#303538` |
+| `--file-change-selected-line` | `#4b5257` |
+| `--file-change-add-soft` | `#223029` |
+| `--file-change-remove-soft` | `#342626` |
+| `--file-change-hunk` | `#252b2f` |
 
 ### Overlay and lightbox
 

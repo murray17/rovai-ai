@@ -714,7 +714,7 @@ app.whenReady().then(async () => {
       assert.equal(layout.tableScrolls, true)
       if (conversationWidth <= 480) {
         assert.equal(layout.glyphWidth, 26)
-        assert.equal(layout.filesGlyphWidth, 28)
+        assert.equal(layout.filesGlyphWidth, 24)
         assert.equal(layout.chevronVisible, false)
         assert.equal(layout.hintVisible, false)
         closeTo(layout.task.left, layout.track.left, 'Compact task removes its left indent')
@@ -838,7 +838,8 @@ app.whenReady().then(async () => {
   await check('420px review keeps navigation and current-file access while restoring the review tab state', async () => {
     await drag(420)
     await release()
-    await run('window.previewTest.selectChangedFile(1); window.previewTest.bookmarkReview()')
+    await run('window.previewTest.selectChangedFile(1)')
+    await run('window.previewTest.bookmarkReview()')
     const narrow = await reviewSnapshot()
     assert.equal(narrow.selectedTab, 'File Change·styles.css')
     assert.match(narrow.selectedFile, /styles\.css$/)
@@ -960,6 +961,91 @@ app.whenReady().then(async () => {
     await run('window.previewTest.setSourceSearch("(")')
     assert.match((await run('window.previewTest.findSnapshot()')).error, /正则表达式无效/)
     await key('Escape')
+  })
+  await check('compact changed-file picker filters, scrolls, supports keyboard cancellation, and keeps live code typography', async () => {
+    await viewport(1_440)
+    await run('window.previewTest.openPickerReview()')
+    await drag(420)
+    await release()
+    const before = await reviewSnapshot()
+    const typography = () => run(`(() => {
+      const row = document.querySelector('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-diff-line.is-addition');
+      const code = row.querySelector('code');
+      return { font: getComputedStyle(code).fontSize, lineHeight: getComputedStyle(code).lineHeight,
+        columns: row.children.length, numbersFit: [...row.querySelectorAll('span')].every(node => node.scrollWidth <= node.clientWidth),
+        hunk: !!row.closest('.agent-run-file-review-block').querySelector('.is-hunk') };
+    })()`)
+    for (const size of [14, 24]) {
+      await run(`window.previewTest.setCodeFontSize(${size})`)
+      const text = await typography()
+      assert.equal(text.font, `${size}px`, 'Full diff follows production reading preferences')
+      closeTo(Number.parseFloat(text.lineHeight), size * 1.6, 'Code line height')
+      assert.equal(text.columns, 4)
+      assert.equal(text.numbersFit, true)
+      assert.deepEqual((await reviewSnapshot()).overflow, [])
+    }
+    await run('window.previewTest.setCodeFontSize(14)')
+    await click('.file-preview-tab-panel:not([hidden]) .changed-file-trigger')
+    assert.equal(await run('document.activeElement.getAttribute("aria-label")'), '筛选变更文件')
+    assert.equal(await run('document.querySelectorAll(".changed-file-option").length'), 32)
+    await window.webContents.insertText('no-matching-file')
+    await snapshot()
+    assert.equal(await run('document.querySelectorAll(".changed-file-option").length'), 0)
+    await key('Enter')
+    assert.equal((await reviewSnapshot()).selectedTab, before.selectedTab, 'Empty results do not commit another selection')
+    await key('Escape')
+    assert.equal(await run('!!document.querySelector(".changed-file-popover")'), false)
+    assert.equal(await run('document.activeElement.className'), 'changed-file-trigger')
+    await key('Down')
+    assert.equal(await run('document.querySelectorAll(".changed-file-option").length'), 32, 'Reopening clears only the filter')
+    for (let index = 0; index < 31; index += 1) await key('Down')
+    assert.equal(await run('document.querySelector(".changed-file-option.is-active strong").textContent'), 'file-31.tsx')
+    assert.equal(await run(`(() => {
+      const list = document.querySelector('.changed-file-options');
+      const row = document.querySelector('.changed-file-option.is-active').getBoundingClientRect();
+      const bounds = list.getBoundingClientRect();
+      return list.scrollTop > 0 && row.top >= bounds.top && row.bottom <= bounds.bottom + 1;
+    })()`), true, 'Keyboard selection remains visible in the popup without scrolling the page')
+    await capture('file-change-picker-day-420px')
+    await key('Enter')
+    assert.equal((await reviewSnapshot()).selectedTab, 'File Change·file-31.tsx')
+    for (const size of [14, 24]) {
+      await run(`window.previewTest.setCodeFontSize(${size})`)
+      const text = await typography()
+      assert.equal(text.font, `${size}px`, 'Exact fragments follow the same live font preference')
+      assert.equal(text.columns, 2, 'Exact fragments retain only sign and content')
+      assert.equal(text.hunk, false, 'No line numbers or hunk are invented')
+    }
+    await capture('file-change-exact-day-24px')
+    await run('window.previewTest.setCodeFontSize(14)')
+    await click('.file-preview-tab-panel:not([hidden]) .changed-file-trigger')
+    await window.webContents.insertText('file-12.tsx')
+    await snapshot()
+    assert.equal(await run('document.querySelectorAll(".changed-file-option").length'), 1)
+    await key('Enter')
+    assert.equal((await reviewSnapshot()).selectedTab, 'File Change·file-12.tsx')
+    await click('.file-preview-tab-panel:not([hidden]) .changed-file-trigger')
+    await click('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-header')
+    assert.equal(await run('!!document.querySelector(".changed-file-popover")'), false, 'Outside click cancels the popup')
+    assert.equal((await reviewSnapshot()).selectedTab, 'File Change·file-12.tsx')
+    await click('.file-preview-tab-panel:not([hidden]) .changed-file-trigger')
+    await key('f', [process.platform === 'darwin' ? 'meta' : 'control'])
+    assert.equal((await run('window.previewTest.findSnapshot()')).visible, true, 'A portaled picker still routes shortcuts to file find')
+    assert.equal(await run('!!document.querySelector(".changed-file-popover")'), false)
+    await key('Escape')
+    await click('.file-preview-tab-panel:not([hidden]) .changed-file-trigger')
+    await viewport(2_560, 1_440)
+    assert.equal((await reviewSnapshot()).sidebarVisible, true)
+    assert.equal(await run('!!document.querySelector(".changed-file-popover")'), false, 'Responsive switch closes the hidden picker')
+    await run('window.previewTest.setTheme("night")')
+    const after = await reviewSnapshot()
+    assert.equal(await run('getComputedStyle(document.documentElement).colorScheme'), 'dark')
+    assert.equal(await run('getComputedStyle(document.querySelector(".file-preview-tab-panel:not([hidden]) .agent-run-file-review")).backgroundColor'), 'rgb(25, 30, 34)')
+    await capture('file-change-sidebar-night-2560x1440')
+    assert.equal(after.fileReads, before.fileReads, 'Switching immutable evidence never reads current files')
+    assert.equal(after.reviewRequests.length, before.reviewRequests.length, 'Filtering and navigation reuse the loaded evidence')
+    await run('window.previewTest.setTheme("day")')
+    await viewport(1_440)
   })
   await check('operation-only DiffCard opens the current file directly and preserves navigation on failure', async () => {
     await run('window.previewTest.closeAll()')

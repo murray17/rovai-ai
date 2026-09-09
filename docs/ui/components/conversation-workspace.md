@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-08
+last_updated: 2026-09-09
 ---
 
 # Camp 会话工作区
@@ -577,9 +577,10 @@ Run 已成功、失败或取消但没有公开消息时，图片与文件变化�
 不同 Run 保持各自作者和归属。头像、姓名沿用公开消息的人物信息卡资格与缺失头像回退，离队或移除队员保持静态。
 该区域不创建 CampMessage、不合成正文，也不提供消息复制或回复；来源 Run 未加载时保留文件卡，不猜测作者。
 
-文件名顶格排列且不使用横线分隔。display root 内文件显示相对路径，Runtime 明确报告的 root 外文件显示规范化
-绝对路径。卡片默认显示三行，更多文件由“再显示 N 个文件 / 收起文件”在原位切换；不增加行间分隔。
-卡片含可靠差异时，header 右侧是浅边框、非品牌色且没有箭头的“查看变化”，hover/focus 使用轻微底色；点击 header
+文件行先显示 basename，目录以次级文字呈现，长路径省略并可通过 title 取得完整路径。display root 内文件使用相对路径，
+Runtime 明确报告的 root 外文件使用规范化绝对路径。卡片默认显示三行，更多文件由“再显示 N 个文件 / 收起文件”在原位切换；不增加行间分隔。
+卡片保持细线轮廓，标题图标为 20px 单色 SVG、24px 占位，不加图标底块。
+卡片含可靠差异时，header 右侧是无内边框、非品牌色且没有箭头的轻量“查看变化”文字入口，hover 提升文字对比；点击 header
 进入[文件预览区](file-preview.md#file-change-标签页)的 `File Change·文件名` 标签页，并优先保留仍可审查的历史选择，
 否则选择第一个可审查文件。点击有可靠差异的文件行进入同一 Review 并预选该文件。点击 operation-only 文件行直接以
 既有 `run_evidence / open_current` 来源打开普通当前文件 Tab。整张卡片都没有可靠差异时，header 文案改为“查看文件”
@@ -589,7 +590,8 @@ danger Toast“无法打开该文件”，不切换预览或启动系统应用�
 底部 metadata。
 
 Review 与普通文件共用预览区和标签栏，正常双栏中保留左侧会话、Composer 与审批信息。
-宽预览内部使用文件列表与 Evidence 阅读面；窄预览改用文件选择框，单文件省略切换控件。
+宽预览内部使用文件列表与 Evidence 阅读面；选中项使用中性整行底色与细边框，不加左侧竖线。
+窄预览改用可搜索、可滚动且支持键盘操作的文件选择框，单文件省略切换控件。
 完整净差异显示 unified diff 及可靠 hunk、旧/新行号；exact mutation 不显示 hunk、行号或推测上下文；history
 保留全部 operation 的时序与计数，但只渲染有可靠 diff 的代码块，并将可见代码块从“修改 1”连续编号，不为
 operation-only 记录生成空白占位块。exact mutation 与 history 不显示额外解释提示；在已经打开的混合 Review 内，
