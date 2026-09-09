@@ -75,6 +75,7 @@ last_updated: 2026-09-08
 | 修改主动退出/重启/更新、退出前 Composer Draft fence、Core drain、launch/terminal admission、Runtime planned stop、durable shutdown fence、shutdown deadline 或 Desktop child-exit wait | [Camp Composer Draft v12](contracts/camp-composer-draft-v12.md)、[Planned Shutdown 架构](architecture/planned-shutdown.md)、[Runtime 恢复与关闭不变量](architecture/foundational-invariants.md#runtime-recovery-shutdown)及[Planned Shutdown v6](contracts/planned-shutdown-v6.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | 先读根目录[全局设计系统](../DESIGN.md)和[UI 规范索引](ui/README.md)，再按目标读取对应主题、复杂组件、`apps/desktop/.impeccable/surfaces/` brief 与 QA |
+| 修改当前用户名称/头像、个人资料保存或历史作者/结构化提及展示 | [Current User Profile v1](contracts/current-user-profile-v1.md)、[个人资料 UI](ui/components/member-identity.md#当前用户个人资料)与[Current User Mention](ui/components/structured-mentions.md#current-user-mention) |
 | 修改 Windows x64 Desktop、Named Pipe、Job、DACL、data root、Runtime Files Root、Skill copy、NSIS、签名或 Windows 交互差异 | [Windows Desktop Platform](architecture/windows-desktop-platform.md)、[Windows Private Storage v2](contracts/windows-private-storage-v2.md)、[Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[v1.05](versions/v1.05/README.md)、[Windows Interaction Delta](ui/windows-interaction-delta.md)及相应当前 Contract |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |
 | 创建、复用、交接或清理开发用 Git worktree | [Git Worktree 生命周期与清理](development/worktrees.md) |

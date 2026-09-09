@@ -1,3 +1,4 @@
+import { CurrentUserProfileProvider } from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/desktop/src/renderer/src/member-editor.css'
 import React, { useRef, useState } from 'react'
@@ -23,6 +24,19 @@ let externalAfterUpdate = null
 let delayedReload = false
 window.rovai = {
   platform: 'darwin',
+  currentUserProfile: {
+    get: async () => JSON.parse(localStorage.getItem('fixture-current-user-profile') ?? '{"displayName":"","avatarDataUrl":null}'),
+    save: async (draft) => {
+      await new Promise((resolve) => setTimeout(resolve, 70))
+      if (failMethod === 'currentUserProfile.save') {
+        failMethod = null
+        throw new Error('验收模拟资料保存失败')
+      }
+      const profile = { ...draft, displayName: draft.displayName.trim() }
+      localStorage.setItem('fixture-current-user-profile', JSON.stringify(profile))
+      return profile
+    }
+  },
   memberAvatars: {
     read: async (ref, rendition) => {
       const source = assets.get(ref)
@@ -269,4 +283,4 @@ function Fixture() {
     </div>
   )
 }
-createRoot(document.getElementById('root')).render(<Fixture />)
+createRoot(document.getElementById('root')).render(<CurrentUserProfileProvider><Fixture /></CurrentUserProfileProvider>)

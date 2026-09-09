@@ -1,3 +1,4 @@
+import type { StructuredCampMessageContent } from '@contracts'
 import { describe, expect, it } from 'vitest'
 import {
   createStructuredMessageClipboardData,
@@ -113,4 +114,20 @@ describe('structured message clipboard', () => {
       { kind: 'text', text: '/review-pr' }
     ])
   })
+})
+
+
+it('copies the current display name while preserving literal body text and paste identity boundaries', () => {
+  const content: StructuredCampMessageContent = [
+    { kind: 'current_user_mention', userId: 'local_user' },
+    { kind: 'text', text: '正文 @你 不变' }
+  ]
+  const data = createStructuredMessageClipboardData(content, [], 'Murray 🐻')!
+  expect(data.text).toBe('@Murray 🐻 正文 @你 不变')
+  expect(readStructuredMessageClipboardContent(data.html, data.text, [])).toEqual([
+    { kind: 'text', text: '@Murray 🐻' },
+    { kind: 'text', text: ' ' },
+    { kind: 'text', text: '正文 @你 不变' }
+  ])
+  expect(content[0]).toEqual({ kind: 'current_user_mention', userId: 'local_user' })
 })

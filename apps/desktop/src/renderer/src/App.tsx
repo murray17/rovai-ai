@@ -1,3 +1,4 @@
+import { CurrentUserProfileProvider } from './CurrentUserProfile'
 import { readErrorMessage } from './error-message'
 import { CoreSubsystemNotice } from './CoreSubsystemNotice'
 import { Activity, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -828,11 +829,13 @@ export function App(): React.JSX.Element {
   } else {
     workspace = (
       <div className="authoritative-workspace">
-        <AuthoritativeApp
-          initialStartupSnapshot={startupSnapshot}
-          startupStartedAtMs={startupStartedAt.current}
-          startupFeedbackDelayElapsed={startupFeedbackDelayElapsed}
-        />
+        <CurrentUserProfileProvider>
+          <AuthoritativeApp
+            initialStartupSnapshot={startupSnapshot}
+            startupStartedAtMs={startupStartedAt.current}
+            startupFeedbackDelayElapsed={startupFeedbackDelayElapsed}
+          />
+        </CurrentUserProfileProvider>
         <CoreSubsystemNotice subsystems={presentationSupervisor?.coreSubsystems ?? []} />
       </div>
     )
