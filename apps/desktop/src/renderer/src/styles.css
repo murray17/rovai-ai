@@ -2871,7 +2871,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   margin-left: auto;
   grid-template-columns: minmax(0, 1fr) 32px;
 }
-.conversation-bubble:is(.user, .external_principal) .local-message-avatar {
+.conversation-bubble:is(.user, .external_principal) > :is(.local-message-avatar, .current-user-profile-trigger) {
   grid-column: 2;
   grid-row: 1;
 }
@@ -2913,11 +2913,11 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   place-items: center;
   border-radius: 50%;
 }
-.message-author-avatar-trigger .member-avatar {
+.message-author-avatar-trigger :is(.member-avatar, .local-message-avatar) {
   transition: box-shadow 110ms ease;
 }
-.message-author-avatar-trigger:hover .member-avatar,
-.message-author-avatar-trigger[data-mention-open="true"] .member-avatar {
+.message-author-avatar-trigger:hover :is(.member-avatar, .local-message-avatar),
+.message-author-avatar-trigger[data-mention-open="true"] :is(.member-avatar, .local-message-avatar) {
   box-shadow: 0 0 0 2px var(--mention-feedback);
 }
 .message-author-name-trigger {
@@ -3027,6 +3027,25 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 }
 .mention-profile-popover[data-content-kind="group"] {
   width: min(320px, calc(100vw - 24px));
+}
+.mention-profile-popover[data-content-kind="current_user"] {
+  width: min(240px, calc(100vw - 24px));
+}
+.current-user-profile-card {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 24px;
+  text-align: center;
+}
+.current-user-profile-card h2 {
+  max-width: 100%;
+  margin: 16px 0 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .mention-profile-popover[data-placement="top"] { transform-origin: center bottom; }
 .mention-profile-popover.is-positioned { opacity: 1; transform: translateY(0) scale(1); }

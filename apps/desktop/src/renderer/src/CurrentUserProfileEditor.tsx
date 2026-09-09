@@ -158,7 +158,7 @@ export const CurrentUserProfileEditor = forwardRef<CurrentUserProfileEditorHandl
         <div className="profile-preview-heading"><span>对话中的你</span><small>预览</small></div>
         <div className="profile-preview-message">
           <CurrentUserAvatar profile={draft}/>
-          <div className="profile-preview-body"><div className="profile-preview-meta"><strong title={displayName}>{displayName}</strong>{displayName !== '你' && <span className="profile-self-label">· 你</span>}<time>09:41</time></div><p>帮我梳理一下这个项目。</p></div>
+          <div className="profile-preview-body"><div className="profile-preview-meta"><strong title={displayName}>{displayName}</strong><time>09:41</time></div><p>帮我梳理一下这个项目。</p></div>
         </div>
         <div className="profile-preview-message">
           <MemberAvatar agentId={sampleAgent?.agentId ?? 'preview-agent'} avatarRef={sampleAgent?.avatarRef ?? null} displayName={sampleAgent?.displayName ?? '队员'} size="list" decorative/>
@@ -189,7 +189,7 @@ export function CurrentUserRosterEntry({ dirty, selected, onSelect }: { dirty: b
   return <div className="personal-roster-entry">
     <button type="button" className={`personal-roster-button ${selected ? 'is-selected' : ''}`} aria-current={selected ? 'page' : undefined} aria-label={`你的资料，${displayName}${dirty ? '，有未保存更改' : ''}`} title={collapsed ? `${displayName} · 你的资料` : undefined} onClick={onSelect}>
       <span className="personal-roster-avatar"><CurrentUserAvatar profile={profile} size={40}/>{dirty && <i className="personal-dirty-dot" aria-hidden="true"/>}</span>
-      <span className="personal-roster-copy"><span className="personal-roster-name"><span className="personal-roster-display">{displayName}</span>{displayName !== '你' && <small>· 你</small>}</span><span>个人资料</span></span>
+      <span className="personal-roster-copy"><span className="personal-roster-name"><span className="personal-roster-display">{displayName}</span></span><span>个人资料</span></span>
     </button>
   </div>
 }
