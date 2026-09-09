@@ -42,6 +42,7 @@ observation into a stronger claim.
 ## Current areas
 
 - [Agent governance vision: memory, context evaluation, documentation and member growth](agent-governance-vision.md) — pre-implementation scope and discussion boundaries.
+- [Dual-track evaluation and daily Trace analysis](context-evaluation-and-trace-analysis.md) — source audit, metric boundaries, CLI integration, charts and regression/Judge candidates.
 - [Cursor Agent Runtime research](cursor-agent-runtime-research.md)
 - [DeepSeek Harness Runtime research](deepseek-harness-runtime/README.md)
 - [DingTalk Developer Web Session probe](dingtalk-web-session-probe.md)
