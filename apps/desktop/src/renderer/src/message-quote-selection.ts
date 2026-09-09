@@ -49,7 +49,13 @@ export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text:
     if (node.nodeType === Node.TEXT_NODE) {
       const parent = node.parentElement
       // react-markdown inserts formatting whitespace between HTML blocks, not readable body text.
-      if (plainBody === undefined && !node.textContent?.trim() && parent && ['DIV', 'BLOCKQUOTE', 'UL', 'OL', 'TABLE', 'THEAD', 'TBODY', 'TR'].includes(parent.tagName)) return
+      if (plainBody === undefined && !node.textContent?.trim() && parent) {
+        const layoutContainer = ['DIV', 'BLOCKQUOTE', 'UL', 'OL', 'TABLE', 'THEAD', 'TBODY', 'TR'].includes(parent.tagName)
+        // Loose lists put newline nodes around paragraphs; tight lists need their inline spaces and soft breaks.
+        const listBlockSeparator = parent.tagName === 'LI' && [node.previousSibling, node.nextSibling]
+          .some(sibling => sibling instanceof Element && BLOCKS.has(sibling.tagName))
+        if (layoutContainer || listBlockSeparator) return
+      }
       if (plainBody === undefined && node.previousSibling instanceof Element && node.previousSibling.tagName === 'BR' && node.textContent === '\n') return
       append(node as Text)
       return

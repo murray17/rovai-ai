@@ -54,7 +54,7 @@ function Fixture() {
   const [quotes, setQuotes] = useState<MessageQuoteSnapshot[]>([])
   latest = quotes
   const add = async (selection: MessageQuoteSelection) => {
-    if (fail) throw new Error('quote.limit_exceeded')
+    if (fail) throw { kind: 'infrastructure_failure', code: 'CORE_REQUEST_FAILED', message: 'quote.limit_exceeded', retryable: false, generation: 1, details: {} }
     const locator = { projectionVersion: 1 as const, startScalar: selection.startScalar, endScalar: selection.endScalar, projectionDigest: await quoteProjectionDigest(projectQuoteBody(root(Number(selection.messageId.split('-')[1]))).text) }
     setQuotes(current => [...current, { locator, version: 1, quoteId: crypto.randomUUID(),
       source: { scope: 'camp', campId: 'fixture', messageId: selection.messageId }, authorAtCapture: { type: 'agent', agentId: 'agent_1', displayName: '叮叮' },
@@ -118,6 +118,7 @@ Object.assign(window, { quoteTest: {
     fail = true; select(0, 0, 12); await frames()
     document.querySelector<HTMLButtonElement>('.message-quote-selection-toolbar button')!.click(); await frames()
     check(latest.length === 3 && !!document.querySelector('[role="alert"]') && !window.getSelection()!.isCollapsed, 'failure retains quotes and selection')
+    check(document.querySelector('[role="alert"]')?.textContent?.includes('12,000'), 'contextBridge failure objects retain actionable quote errors')
     document.dispatchEvent(new Event('copy')); await frames()
     check(!document.querySelector('.message-quote-selection-toolbar'), 'copy dismisses')
     document.dispatchEvent(new Event('scroll')); await frames()
