@@ -3,11 +3,13 @@ import { createPortal } from 'react-dom'
 import * as Popover from '@radix-ui/react-popover'
 import type { MessageQuoteAction, MessageQuoteSelection, MessageQuoteSnapshot } from '@contracts'
 import { readMessageQuoteSelection } from './message-quote-selection'
+import { readErrorMessage } from './error-message'
 
 export function quoteErrorMessage(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error)
+  const text = readErrorMessage(error)
   if (text.includes('limit_exceeded')) return '引用选文合计最多 12,000 字，请缩小选区或移除已有引用。'
-  if (text.includes('source_changed') || text.includes('projection_mismatch')) return '原消息内容已变化，请重新选择要引用的文字。'
+  if (text.includes('source_changed')) return '原消息内容已变化，请重新选择要引用的文字。'
+  if (text.includes('projection_mismatch')) return '选文位置未能确认，请重新选择要引用的文字。'
   if (text.includes('source_unavailable') || text.includes('owner_mismatch')) return '原消息暂不可用，已保留已有引用。'
   if (text.includes('question_required')) return '请填写这次的问题后再发送。'
   if (text.includes('draft_changed')) return '草稿已更新，请重试；已有问题和引用已保留。'
