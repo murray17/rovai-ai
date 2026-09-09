@@ -62,6 +62,7 @@ import {
 } from './member-avatar-assets'
 import { legacyUserDataPath } from './user-data-path'
 import { deleteRetiredManagedDirectory } from './quick-chat-cutover'
+import { CurrentUserProfileStore } from './current-user-profile'
 import { NavigationPreferencesStore } from './navigation-preferences'
 import {
   ProjectAccessTransactionCoordinator,
@@ -367,6 +368,7 @@ let lastDiagnosticsExportPath: string | null = null
 let lastMonitoringExportPath: string | null = null
 let lastAppearanceSignature = ''
 let generalPreferences: GeneralPreferencesStore | null = null
+let currentUserProfile: CurrentUserProfileStore | null = null
 let onboarding: OnboardingStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
@@ -869,6 +871,7 @@ if (primaryInstance) void app.whenReady().then(async () => {
   const userDataPath = app.getPath('userData')
   appearanceFilePath = join(userDataPath, 'appearance.json')
   const generalPreferencesPath = join(userDataPath, 'general-preferences.json')
+  const currentUserProfilePath = join(userDataPath, 'current-user-profile.json')
   const onboardingPath = join(userDataPath, 'onboarding.json')
   const restorableLocationPath = join(userDataPath, 'restorable-location.json')
   const navigationPreferencesPath = join(userDataPath, 'navigation.json')
@@ -918,17 +921,20 @@ if (primaryInstance) void app.whenReady().then(async () => {
     loadedGeneralPreferences,
     loadedOnboarding,
     loadedRestorableLocations,
-    loadedNavigationPreferences
+    loadedNavigationPreferences,
+    loadedCurrentUserProfile
   ] = await Promise.all([
     GeneralPreferencesStore.load(generalPreferencesPath),
     OnboardingStore.load(onboardingPath),
     RestorableLocationStore.load(restorableLocationPath),
-    NavigationPreferencesStore.load(navigationPreferencesPath)
+    NavigationPreferencesStore.load(navigationPreferencesPath),
+    CurrentUserProfileStore.load(currentUserProfilePath)
   ])
   generalPreferences = loadedGeneralPreferences
   onboarding = loadedOnboarding
   restorableLocations = loadedRestorableLocations
   navigationPreferences = loadedNavigationPreferences
+  currentUserProfile = loadedCurrentUserProfile
   localStoresReady = true
   resolveLocalStoresLoaded()
   const restorableDegradation: StructuredError | null =
@@ -946,6 +952,7 @@ if (primaryInstance) void app.whenReady().then(async () => {
     loadedGeneralPreferences.loadDegradation,
     loadedOnboarding.loadDegradation,
     loadedNavigationPreferences.loadDegradation,
+    loadedCurrentUserProfile.loadDegradation,
     restorableDegradation
   ].filter((degradation): degradation is StructuredError => degradation !== null))
   console.info(
@@ -1112,6 +1119,20 @@ ipcMain.handle('rovai:file-preview-choose-root', (event, value: unknown) =>
 
 ipcMain.handle('rovai:clipboard-write', (_event, input: unknown) => {
   clipboard.write(parseClipboardWriteRequest(input))
+})
+
+ipcMain.handle('rovai:current-user-profile-get', async (event) => {
+  requireMainWindow(event.sender)
+  await localStoresLoaded
+  if (!currentUserProfile) throw new Error('个人资料尚未加载。')
+  return currentUserProfile.get()
+})
+
+ipcMain.handle('rovai:current-user-profile-save', async (event, input: unknown) => {
+  requireMainWindow(event.sender)
+  await localStoresLoaded
+  if (!currentUserProfile) throw new Error('个人资料尚未加载。')
+  return currentUserProfile.save(input)
 })
 
 ipcMain.handle('rovai:appearance-get', () => appearanceSnapshot())

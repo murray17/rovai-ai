@@ -1,6 +1,9 @@
+import type { CurrentUserProfileApi } from './current-user-profile'
+
 import type { BuiltinMemberAvatarRole } from './member-avatar'
 
 export * from './member-avatar'
+export * from './current-user-profile'
 
 export const CAMP_ID_PATTERN = /^rvcamp_[0-7][0123456789abcdefghjkmnpqrstvwxyz]{25}$/u
 
@@ -3714,6 +3717,7 @@ export interface RovaiApi {
   appearance: AppearanceApi
   appUpdates: AppUpdatesApi
   desktopSession: DesktopSessionApi
+  currentUserProfile: CurrentUserProfileApi
   generalPreferences: GeneralPreferencesApi
   channels: ChannelsApi
   onboarding: OnboardingApi

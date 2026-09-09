@@ -1,3 +1,4 @@
+import { CurrentUserProfileEditor, CurrentUserRosterEntry } from './CurrentUserProfileEditor'
 import { readErrorMessage } from './error-message'
 import {
   forwardRef,
@@ -112,6 +113,7 @@ export type MembersViewHandle = {
 }
 
 type MemberEditorHandle = { discard(): void }
+const PERSONAL_EDITOR_KEY = 'current-user-profile'
 
 export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
   function MembersView(props, ref) {
@@ -119,6 +121,8 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
     const [visited, setVisited] = useState<string[]>([])
     const [hasNewDraft, setHasNewDraft] = useState(false)
     const [creating, setCreating] = useState(false)
+    const [personalSelected, setPersonalSelected] = useState(false)
+    const [personalVisited, setPersonalVisited] = useState(false)
     const creatingRef = useRef(creating)
     creatingRef.current = creating
     const [runtimeFocus, setRuntimeFocus] = useState(0)
@@ -135,6 +139,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
       ...new Set([...visited, ...(selectedAgentId ? [selectedAgentId] : [])])
     ].filter((id) => liveMembers.some((agent) => agent.agentId === id))
     useEffect(() => {
+      setPersonalSelected(false)
       if (selectedAgentId)
         setVisited((current) =>
           current.includes(selectedAgentId)
@@ -144,7 +149,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
     }, [selectedAgentId])
     const activeStates = Object.entries(states)
       .filter(([id]) =>
-        id === 'new-member'
+        id === PERSONAL_EDITOR_KEY ? personalVisited : id === 'new-member'
           ? hasNewDraft
           : liveMembers.some((agent) => agent.agentId === id)
       )
@@ -159,10 +164,12 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
       focusRuntime = false
     ): void => {
       setCreating(false)
+      setPersonalSelected(false)
       onSelectedAgentChange(id, tab)
       if (focusRuntime) setRuntimeFocus((value) => value + 1)
     }
     const create = (): void => {
+      setPersonalSelected(false)
       setHasNewDraft(true)
       setCreating(true)
       requestAnimationFrame(() =>
@@ -183,6 +190,9 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
       },
       []
     )
+    const updatePersonalState = useCallback((dirty: boolean, busy: boolean): void => {
+      updateState(PERSONAL_EDITOR_KEY, dirty, busy)
+    }, [updateState])
     const requestTransition = useCallback(
       (
         action: () => void | Promise<void>
@@ -248,7 +258,12 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
             hostPlatform={props.hostPlatform}
             runtimePlatformAdmission={props.runtimePlatformAdmission}
             runtimeDiscoveryPending={props.runtimeDiscoveryPending}
-            selectedAgentId={creating ? null : selectedAgentId}
+            personalEntry={<CurrentUserRosterEntry
+              dirty={states[PERSONAL_EDITOR_KEY]?.dirty ?? false}
+              selected={personalSelected}
+              onSelect={() => { setPersonalVisited(true); setPersonalSelected(true) }}
+            />}
+            selectedAgentId={creating || personalSelected ? null : selectedAgentId}
             dirtyAgentIds={
               new Set(
                 Object.entries(states)
@@ -263,9 +278,9 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
           {hasNewDraft && (
             <button
               type="button"
-              className={`member-editor-draft-row ${creating ? 'is-selected' : ''}`}
+              className={`member-editor-draft-row ${creating && !personalSelected ? 'is-selected' : ''}`}
               aria-label="继续编辑新队员草稿"
-              aria-current={creating ? 'true' : undefined}
+              aria-current={creating && !personalSelected ? 'true' : undefined}
               onClick={create}
             >
               <MemberAvatar
@@ -282,16 +297,27 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
           )}
         </MemberRosterLayout>
         <section className="members-view member-editor-view">
+          {personalVisited && <div className="member-editor-page personal-editor-page" hidden={!personalSelected}>
+            {props.topNotices}
+            <CurrentUserProfileEditor
+              sampleAgent={liveMembers[0]}
+              onStateChange={updatePersonalState}
+              ref={(value) => {
+                if (value) editors.current.set(PERSONAL_EDITOR_KEY, value)
+                else editors.current.delete(PERSONAL_EDITOR_KEY)
+              }}
+            />
+          </div>}
           {ids.map((id) => (
             <div
               key={id}
               className="member-editor-page"
-              hidden={creating || selectedAgentId !== id}
+              hidden={personalSelected || creating || selectedAgentId !== id}
             >
               <MemberEditor
                 {...props}
                 selectedAgentId={id}
-                active={!creating && selectedAgentId === id}
+                active={!personalSelected && !creating && selectedAgentId === id}
                 runtimeFocusRequest={props.runtimeFocusRequest + runtimeFocus}
                 ref={(value) => {
                   if (value) editors.current.set(id, value)
@@ -304,11 +330,11 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
             </div>
           ))}
           {hasNewDraft && (
-            <div className="member-editor-page" hidden={!creating}>
+            <div className="member-editor-page" hidden={personalSelected || !creating}>
               <MemberEditor
                 {...props}
                 selectedAgentId={null}
-                active={creating}
+                active={!personalSelected && creating}
                 ref={(value) => {
                   if (value) editors.current.set('new-member', value)
                   else editors.current.delete('new-member')
@@ -325,7 +351,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
               />
             </div>
           )}
-          {!creating && !ids.includes(selectedAgentId ?? '') && (
+          {!personalSelected && !creating && !ids.includes(selectedAgentId ?? '') && (
             <div className="member-editor-empty">
               {props.topNotices}
               <h1>建立第一位队员</h1>
@@ -352,8 +378,8 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
               aria-describedby="member-leave-description"
             >
               <AppDialogHeader
-                title="放弃未保存的队员配置？"
-                description="队员信息或运行配置尚未保存，离开后这些修改将丢失。"
+                title="放弃未保存的更改？"
+                description="个人资料、队员信息或运行配置尚未保存，离开后这些修改将丢失。"
                 descriptionId="member-leave-description"
                 icon="warning"
                 closeLabel="继续编辑"

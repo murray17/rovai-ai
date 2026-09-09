@@ -155,6 +155,10 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:desktop-session-commit-location', location)
     }
   },
+  currentUserProfile: {
+    get: () => ipcRenderer.invoke('rovai:current-user-profile-get'),
+    save: (profile) => ipcRenderer.invoke('rovai:current-user-profile-save', profile)
+  },
   generalPreferences: {
     get() {
       return ipcRenderer.invoke('rovai:general-preferences-get')

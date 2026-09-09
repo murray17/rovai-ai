@@ -1,3 +1,5 @@
+import { CurrentUserProfileContext } from './CurrentUserProfile'
+import { DEFAULT_CURRENT_USER_PROFILE, type CurrentUserProfile } from '@contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -8,7 +10,8 @@ import type {
 } from '@contracts'
 import {
   CampWorkspace,
-  projectLeadingCurrentUserMentionMarkdownBody
+  projectLeadingCurrentUserMentionMarkdownBody,
+  structuredCampContentPlainText
 } from './CampWorkspace'
 
 const members: CampSnapshot['members'] = [{
@@ -40,8 +43,9 @@ const members: CampSnapshot['members'] = [{
 function renderMessage(
   content: StructuredCampMessageContent,
   body = 'NON_AUTHORITATIVE_BODY_CACHE',
-  authorType: 'agent' | 'user' = 'agent',
-  campMembers = members
+  authorType: 'agent' | 'user' | 'external_principal' = 'agent',
+  campMembers = members,
+  profile: CurrentUserProfile = DEFAULT_CURRENT_USER_PROFILE
 ): string {
   const message: CampMessageView = {
     id: 'message-current-user-markdown',
@@ -90,7 +94,9 @@ function renderMessage(
     timeline: []
   }
 
-  return renderToStaticMarkup(createElement(CampWorkspace, {
+  return renderToStaticMarkup(createElement(CurrentUserProfileContext.Provider, {
+    value: { profile, ready: true, error: null, reload: () => undefined, save: async () => profile }
+  }, createElement(CampWorkspace, {
     snapshot,
     projectName: null,
     agents: [],
@@ -102,7 +108,7 @@ function renderMessage(
     stopping: false,
     onStop: () => undefined,
     inspectorVisible: false
-  }))
+  })))
 }
 
 describe('Agent Current User Mention Markdown rendering', () => {
@@ -425,5 +431,30 @@ describe('Agent leading Member Mention Markdown rendering', () => {
 
     expect(markup).toContain('BOUNDARY-LINE-20')
     expect(markup).not.toContain('message-long-toggle')
+  })
+})
+
+
+describe('historical current user presentation', () => {
+  it('changes author identity presentation and only structured mentions, keeping canonical content and body intact', () => {
+    const content: StructuredCampMessageContent = [
+      { kind: 'current_user_mention', userId: 'local_user' },
+      { kind: 'text', text: '正文 @你 与 `@你` 保持原样。' }
+    ]
+    const canonical = JSON.stringify(content)
+    const profile = { displayName: 'Murray 🐻', avatarDataUrl: 'data:image/png;base64,cHJvZmlsZQ==' }
+    const markup = renderMessage(content, '@你 旧缓存', 'agent', members, profile)
+    expect(markup).toContain('aria-label="提及当前用户：Murray 🐻"')
+    expect(markup).toContain('>@Murray 🐻</span>')
+    expect(markup).toContain('正文 @你 与 <code>@你</code> 保持原样。')
+    expect(structuredCampContentPlainText(content, members, profile.displayName)).toBe('@Murray 🐻 正文 @你 与 `@你` 保持原样。')
+    expect(JSON.stringify(content)).toBe(canonical)
+    expect(renderMessage([{ kind: 'text', text: '普通正文 @你 保持原样' }], '普通正文 @你 保持原样', 'agent', members, profile)).toContain('普通正文 @你 保持原样')
+    for (const authorType of ['user', 'external_principal'] as const) {
+      const human = renderMessage([{ kind: 'text', text: '旧消息正文' }], '旧消息正文', authorType, members, profile)
+      expect(human).toContain('Murray 🐻')
+      expect(human).toContain(`src="${profile.avatarDataUrl}"`)
+      expect(human).toContain('旧消息正文')
+    }
   })
 })
