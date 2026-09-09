@@ -545,6 +545,7 @@ function SingleChatPendingQueue({
   const [editBody, setEditBody] = useState('')
   const [preparing, setPreparing] = useState(false)
   const pendingFileInputRef = useRef<HTMLInputElement>(null)
+  const pendingEditorRef = useRef<HTMLTextAreaElement>(null)
   const preparePendingFilesRef = useRef<(files: File[]) => void>(() => undefined)
   const queue = snapshot.pendingInputs
   const session = queue.editSession
@@ -731,6 +732,7 @@ function SingleChatPendingQueue({
               disabled={busy || busyOutside || !session || session.recoveryRequired}
               onAdd={(selection) => mutatePendingQuote({ type: 'add', selection })} />
             <MessageQuotes key={editingItem.id} quotes={session?.workingQuotes ?? editingItem.quotes ?? []}
+              onEmptyFocus={() => pendingEditorRef.current?.focus()}
               onReveal={revealPrivateQuote} onMutate={mutatePendingQuote} disabled={busy || busyOutside} />
             {session.recoveryRequired && <p className="pending-input-error">上次编辑未完成，请点击“重新编辑”后继续。</p>}
             {session.workingAttachments.length > 0 && (
@@ -769,6 +771,7 @@ function SingleChatPendingQueue({
               </SingleChatAttachmentStrip>
             )}
             <textarea
+              ref={pendingEditorRef}
               value={editBody}
               disabled={busy || session.recoveryRequired}
               aria-label="编辑单聊待发送消息"
@@ -864,6 +867,7 @@ export function SingleChatPanel({
   const [hasNewReply, setHasNewReply] = useState(false)
   const viewportEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const dragLeaveTimer = useRef<number | null>(null)
   const dragActivityTimer = useRef<number | null>(null)
   const followLatestRef = useRef(true)
@@ -1822,9 +1826,11 @@ export function SingleChatPanel({
               </SingleChatAttachmentStrip>
             )}
             <MessageQuotes key={currentSnapshot?.conversation.id ?? 'empty'} quotes={currentSnapshot?.draft.quotes ?? []}
+              onEmptyFocus={() => composerRef.current?.focus()}
               disabled={sending || quoteBusy} onReveal={revealPrivateQuote} onMutate={mutateDraftQuote} />
             <label className="sr-only" htmlFor={`${panelId}-composer`}>发送单聊消息</label>
             <textarea
+              ref={composerRef}
               id={`${panelId}-composer`}
               value={draft}
               disabled={!selectedMember || !currentTargetReady || sending || ending}

@@ -5022,6 +5022,7 @@ export function CampWorkspace({
             <MessageQuotes key={snapshot.camp.id} quotes={composerDraft?.quotes ?? []}
               disabled={composerInteractionDisabled}
               onReveal={revealQuote}
+              onEmptyFocus={() => composerEditorRef.current?.focus()}
               onMutate={async (action) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote(action)) }} />
             <StructuredMentionComposer
               ref={composerHandleRef}

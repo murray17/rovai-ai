@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { CampSnapshot, StructuredCampMessageContent, MessageQuoteSnapshot, MessageQuoteSelection } from '@contracts'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from '../../../apps/desktop/src/renderer/src/MessageQuotes'
@@ -17,8 +17,8 @@ const errors: string[] = []
 window.addEventListener('error', event => errors.push(String(event.error ?? event.message)))
 window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)))
 let fail = false
+let failRemoval = false
 let latest: MessageQuoteSnapshot[] = []
-const trash = new Map<string, MessageQuoteSnapshot>()
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const frames = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
 // macOS may give another integration window OS focus. Keep DOM focus semantics deterministic.
@@ -52,6 +52,7 @@ function messageBody(index: number): ReactNode {
 }
 function Fixture() {
   const [quotes, setQuotes] = useState<MessageQuoteSnapshot[]>([])
+  const composer = useRef<HTMLTextAreaElement>(null)
   latest = quotes
   const add = async (selection: MessageQuoteSelection) => {
     if (fail) throw { kind: 'infrastructure_failure', code: 'CORE_REQUEST_FAILED', message: 'quote.limit_exceeded', retryable: false, generation: 1, details: {} }
@@ -75,11 +76,11 @@ function Fixture() {
     <div style={{ marginTop: 12 }}><MessageQuotes history quotes={quotes} onReveal={quote => revealMessageQuote(quote, root(Number(quote.source.messageId.split('-')[1])))} /></div>
     <div className="composer-box" style={{ marginTop: 18 }}>
       <div style={{ padding: '8px 12px' }}>回复 叮叮</div>
-      <MessageQuotes quotes={quotes} onReveal={quote => revealMessageQuote(quote, root(Number(quote.source.messageId.split('-')[1])))} onMutate={async action => {
-        if (action.type === 'remove') { trash.set(action.quoteId, latest.find(quote => quote.quoteId === action.quoteId)!); setQuotes(latest.filter(quote => quote.quoteId !== action.quoteId)) }
-        if (action.type === 'restore') setQuotes([...latest, trash.get(action.quoteId)!])
+      <MessageQuotes quotes={quotes} onEmptyFocus={() => composer.current?.focus()} onReveal={quote => revealMessageQuote(quote, root(Number(quote.source.messageId.split('-')[1])))} onMutate={async action => {
+        if (failRemoval) throw new Error('quote.draft_changed')
+        if (action.type === 'remove') setQuotes(latest.filter(quote => quote.quoteId !== action.quoteId))
       }} />
-      <textarea aria-label="本次问题" defaultValue="这几处如何一起调整？" style={{ width: '100%', minHeight: 64, background: 'transparent', border: 0, padding: 12, color: 'inherit' }} />
+      <textarea ref={composer} aria-label="本次问题" defaultValue="这几处如何一起调整？" style={{ width: '100%', minHeight: 64, background: 'transparent', border: 0, padding: 12, color: 'inherit' }} />
     </div>
     <div id="excluded-test" data-message-quote-body="source-0" data-quote-owner="camp:fixture"><span>First</span><button data-quote-exclude>卡片</button><span>code.</span></div>
   </main>
@@ -132,15 +133,20 @@ Object.assign(window, { quoteTest: {
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await frames()
     check(document.activeElement === trigger && !document.querySelector('.message-quotes-popover'), 'escape dismisses and restores trigger')
     trigger.click(); await frames()
+    failRemoval = true
     document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await frames()
-    check(latest.length === 2, 'individual remove')
-    document.querySelector<HTMLButtonElement>('.message-quotes-popover .message-quotes-undo')!.click(); await frames()
-    check(latest.length === 3, 'undo')
+    check(latest.length === 3 && document.querySelector('[role="alert"]')?.textContent?.includes('草稿已更新'), 'failed removal keeps quotes and reports the failure')
+    failRemoval = false
+    const remainingIds = latest.slice(1).map(quote => quote.quoteId)
+    document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await frames()
+    check(latest.length === 2 && latest.every((quote, index) => quote.quoteId === remainingIds[index]), 'individual removal preserves remaining order')
+    check(document.activeElement?.classList.contains('message-quote-jump') && trigger.textContent === '引用 2 段叮叮', 'keyboard removal focuses the remaining row and updates the count')
+    check(!document.querySelector('.message-quotes-undo') && !document.body.textContent?.includes('撤销移除'), 'no undo control in the bubble or composer')
     document.querySelector<HTMLButtonElement>('.message-quote-jump')!.click(); await pause(35); await frames()
     check(!document.querySelector('.message-quotes-popover') && root(0).dataset.quoteLocated === 'true', 'whole row jumps to source')
     const history = document.querySelector<HTMLButtonElement>('.is-history .message-quotes-trigger')!
     focus(history); history.click(); await frames()
-    check(document.querySelectorAll('.message-quote-full-text').length === 3 && !document.querySelector('.message-quote-remove'), 'history full text rows are read only')
+    check(document.querySelectorAll('.message-quote-full-text').length === 2 && !document.querySelector('.message-quote-remove'), 'history full text rows are read only')
     history.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await frames()
 
     // Save a partial selection of two code rows, deserialize it, and use the same production locator.
@@ -195,14 +201,15 @@ Object.assign(window, { quoteTest: {
     while (latest.length) {
       document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await frames()
     }
-    const emptyBubble = document.querySelector('.message-quotes-popover')!
-    check(trigger.isConnected && trigger.getAttribute('aria-expanded') === 'true', 'removing the final quote preserves the bubble anchor')
-    check(Math.abs(emptyBubble.getBoundingClientRect().left - trigger.getBoundingClientRect().left) < 20, 'empty bubble stays at its trigger')
-    document.querySelector<HTMLButtonElement>('.message-quotes-popover .message-quotes-undo')!.click(); await frames()
-    check(latest.length === 1, 'restore the last excerpt from the empty bubble')
-    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await frames()
+    await pause(250)
+    check(!document.querySelector('.message-quotes') && !document.querySelector('.message-quotes-popover'), 'last removal closes the bubble and leaves no empty metadata row')
+    check(document.activeElement === document.querySelector('textarea') && document.querySelector('textarea')!.value === '这几处如何一起调整？', 'last keyboard removal returns to the unchanged question')
+    // Adding another excerpt after clearing starts collapsed and remains available to native hover QA.
+    root(lineSourceIndex).scrollIntoView(); select(lineSourceIndex, start, end); await frames()
+    document.querySelector<HTMLButtonElement>('.message-quote-selection-toolbar button')!.click(); await pause(30); await frames()
+    check(latest.length === 1 && !document.querySelector('.message-quotes-popover'), 'new selection after clearing starts with a collapsed label')
     check(!errors.length, errors.join('\n'))
-    return { ok: true, verified: ['shared projection', 'Unicode and code', 'cross message and cards', 'multiple compact quotes', 'failure retention', 'stale copy selection', 'hover and keyboard disclosure', 'full row navigation and undo', 'persisted code-line anchors', 'duplicate and stale source', 'reflow and multi-block highlights'] }
+    return { ok: true, verified: ['shared projection', 'Unicode and code', 'cross message and cards', 'multiple compact quotes', 'failure retention', 'stale copy selection', 'hover and keyboard disclosure', 'full row navigation and direct removal', 'last removal closes and returns focus', 'persisted code-line anchors', 'duplicate and stale source', 'reflow and multi-block highlights'] }
   },
   async linePreview() {
     await revealMessageQuote(latest.at(-1)!, root(lineSourceIndex)); await frames()
