@@ -21,6 +21,10 @@ test('Windows release verification matches the current Core transport versions',
     'packaged Core health verification must use the current contract version')
   assert.equal(verifier.match(/health\.core\.builtinToolIpcProtocolVersion !== (\d+)/)?.[1], ipc,
     'packaged Core health verification must use the current IPC version')
+  assert.equal(verifier.match(/builtinToolContractVersion: (\d+)/)?.[1], contract,
+    'release manifest must record the current contract version')
+  assert.equal(verifier.match(/builtinToolIpcProtocolVersion: (\d+)/)?.[1], ipc,
+    'release manifest must record the current IPC version')
 })
 
 test('maps only the three shipped sidecar targets', () => {

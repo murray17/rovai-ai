@@ -436,7 +436,7 @@ try {
     packagedCoreSmoke: {
       isolatedDataRoot: true,
       healthCheck: true,
-      builtinToolContractVersion: 23,
+      builtinToolContractVersion: 24,
       builtinToolIpcProtocolVersion: 2
     }
   }
