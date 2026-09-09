@@ -26,6 +26,10 @@ const useProductPermissionDefaults = process.env.ROVAI_ACP_USE_PRODUCT_PERMISSIO
 const plainTwoTurn = process.env.ROVAI_ACP_PLAIN_TWO_TURN === '1'
 const cancelRunningTool = process.env.ROVAI_ACP_CANCEL_RUNNING_TOOL === '1'
 const grokCompactionAcceptance = process.env.ROVAI_GROK_COMPACTION_ACCEPTANCE === '1'
+const zcodeCompactionAcceptance = process.env.ROVAI_ZCODE_COMPACTION_ACCEPTANCE === '1'
+const compactionAcceptance = grokCompactionAcceptance || zcodeCompactionAcceptance
+const compactionAdapter = zcodeCompactionAcceptance ? 'zcode-app' : 'grok-build'
+const compactionSignal = zcodeCompactionAcceptance ? 'zcode.session.compaction.completed.v1' : 'grok.acp.auto_compact_completed.v1'
 let core
 let shuttingDown = false
 
@@ -46,6 +50,7 @@ try {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      ...(zcodeCompactionAcceptance ? { ROVAI_INTERNAL_ZCODE_COMPACTION_ACCEPTANCE: '1' } : {}),
       ...(grokCompactionAcceptance
         ? { ROVAI_INTERNAL_GROK_COMPACTION_ACCEPTANCE: '1' }
         : {})
@@ -159,6 +164,11 @@ try {
       token: 'ROVAI_KIMI_ACP_OK'
     },
     {
+      adapterKind: 'zcode-app',
+      permissionValues: { permission_mode: process.env.ROVAI_ZCODE_PERMISSION_MODE ?? 'yolo' },
+      token: 'ROVAI_ZCODE_NATIVE_OK'
+    },
+    {
       adapterKind: 'grok-build',
       permissionValues: { permission_mode: process.env.ROVAI_GROK_PERMISSION_MODE ?? 'default' },
       token: 'ROVAI_GROK_ACP_OK'
@@ -173,12 +183,12 @@ try {
       token: 'ROVAI_ANTIGRAVITY_TWO_TURN_OK'
     }
   ].filter((specification) => !process.env.ROVAI_ACP_SMOKE_ADAPTER || specification.adapterKind === process.env.ROVAI_ACP_SMOKE_ADAPTER)
-  if (grokCompactionAcceptance
+  if (compactionAcceptance
       && (specifications.length !== 1
-        || specifications[0].adapterKind !== 'grok-build'
+        || specifications[0].adapterKind !== compactionAdapter
         || !plainTwoTurn
         || !commandOutputOnly)) {
-    throw new Error('Grok compaction acceptance requires the isolated grok-build plain two-turn command-output smoke')
+    throw new Error('Compaction acceptance requires the matching isolated plain two-turn command-output smoke')
   }
   const results = []
   for (const specification of specifications) {
@@ -206,6 +216,8 @@ try {
     let profile = await request('members.get', { agentId })
     const explicitModelId = specification.adapterKind === 'codebuddy-cli'
       ? process.env.ROVAI_CODEBUDDY_MODEL?.trim()
+      : specification.adapterKind === 'zcode-app'
+        ? process.env.ROVAI_ZCODE_MODEL?.trim()
       : null
     const permissionsConfigured = await request('members.runtime.set', {
       commandId: crypto.randomUUID(),
@@ -441,7 +453,7 @@ try {
         warmHostReused: commandStart.params.hostInstanceId === results.at(-1).hostInstanceId,
         hostInstanceId: commandStart.params.hostInstanceId
       }
-      if (grokCompactionAcceptance) {
+      if (compactionAcceptance) {
         const runId = commandRunId.replaceAll("'", "''")
         const evidenceOutput = await runCapture('sqlite3', [
           '-batch',
@@ -471,7 +483,7 @@ try {
             FROM native_session_compaction_observation AS observation
             JOIN native_session_compaction_observer_lease AS lease
               ON lease.id = observation.observer_lease_id
-            WHERE lease.adapter_kind = 'grok-build'
+            WHERE lease.adapter_kind = '${compactionAdapter}'
               AND (observation.native_binding_id, observation.native_binding_generation) = (
                   SELECT native_binding_id, native_binding_generation
                   FROM runtime_input_delivery
@@ -489,11 +501,11 @@ try {
         const requirementEvidence = evidence.get('requirement')
         const observationEvidence = evidence.get('observation')
         if (JSON.stringify(deliveryEvidence) !== JSON.stringify(['accepted', '1', '1'])
-            || JSON.stringify(requirementEvidence) !== JSON.stringify(['1', '1', 'grok-build'])
-            || observationEvidence?.[0] !== 'grok.acp.auto_compact_completed.v1'
+            || JSON.stringify(requirementEvidence) !== JSON.stringify(['1', '1', compactionAdapter])
+            || observationEvidence?.[0] !== compactionSignal
             || observationEvidence?.[1] !== 'completed'
-            || !observationEvidence?.[2]?.startsWith('grok.acp.auto_compact_completed.v1:runtime:')) {
-          throw new Error(`Grok compaction redelivery evidence did not converge: ${JSON.stringify({
+            || !observationEvidence?.[2]?.startsWith(`${compactionSignal}:runtime:`)) {
+          throw new Error(`Native compaction redelivery evidence did not converge: ${JSON.stringify({
             deliveryEvidence,
             requirementEvidence,
             observationEvidence,
@@ -530,7 +542,8 @@ try {
         'qwen-code': 'QWEN',
         'trae-cn-cli': 'TRAE',
         'kimi-code-cli': 'KIMI',
-        'grok-build': 'GROK'
+        'grok-build': 'GROK',
+        'zcode-app': 'ZCODE'
       })[specification.adapterKind]
       const writePath = join(projectRoot, `ACP_APPROVED_${adapterFileStem}.txt`)
       if (specification.adapterKind === 'codebuddy-cli') {
@@ -541,11 +554,13 @@ try {
       }
       const writeBody = specification.adapterKind === 'kimi-code-cli'
         ? `Use the Bash tool exactly once to run this command and do not use any other tool: printf '%s\\n' '${writeToken}' > '${writePath}'. Then immediately reply exactly ACP_WRITE_OK.`
+        : specification.adapterKind === 'zcode-app'
+          ? `Use the native Write tool exactly once to create ${writePath} with exactly ${writeToken}, without a trailing newline. Do not call any other tool. Then immediately reply exactly ACP_WRITE_OK.`
         : specification.adapterKind === 'codebuddy-cli'
           ? `Use the terminal tool exactly once to run this command: powershell.exe -NoProfile -Command "Set-Content -LiteralPath '${writePath}' -Value '${writeToken}'". Do not call any other tool before or after it. Then immediately reply exactly ACP_WRITE_OK.`
           : specification.adapterKind === 'qwen-code'
             ? `Use the terminal tool exactly once to run this Windows shell built-in command: echo ${writeToken}> "${writePath}". Do not call any other tool before or after it. Then immediately reply exactly ACP_WRITE_OK.`
-            : `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`
+            : `Use the file editing tool exactly once to create ${writePath} with content equal to the decoded JSON string ${JSON.stringify(`${writeToken}\n`)}. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`
       const writeRequest = await sendExistingCampMessage(
         request,
         camp.id,
@@ -609,7 +624,8 @@ try {
         if (error?.code === 'ENOENT') return null
         throw error
       })
-      const writtenMatches = written === `${writeToken}\n`
+      const expectedWriteText = specification.adapterKind === 'zcode-app' ? writeToken : `${writeToken}\n`
+      const writtenMatches = written === expectedWriteText
         || (specification.adapterKind === 'grok-build' && written === writeToken)
         || (process.platform === 'win32' && written === `${writeToken}\r\n`)
       const requiresNativeSessionContinuation = true
@@ -662,6 +678,7 @@ try {
         || permissionValues.allow_all === 'off'
         || permissionValues.trust_all_tools === 'off'
         || permissionValues.permission_mode === 'default'
+        || (specification.adapterKind === 'zcode-app' && permissionValues.permission_mode === 'build')
         || permissionValues.approval_mode === 'default'
       if (approvalExpected) {
         // Keep the requested content semantically neutral. Some Runtime models
@@ -772,7 +789,11 @@ try {
         )
         const cancelRunId = cancelRequest.commandResult?.payload?.agentRunIds?.[0]
         if (!cancelRunId) throw new Error(`ACP cancel AgentRun was not accepted: ${JSON.stringify(cancelRequest)}`)
-        const cancelled = await cancelAgentRun(request, camp.id, cancelRunId)
+        const cancelled = await cancelAgentRun(request, camp.id, cancelRunId, events)
+        if (specification.adapterKind === 'zcode-app') {
+          if (cancelled.run.status !== 'cancelled') throw new Error('ZCode cancel must reach cancelled')
+          await new Promise((done) => setTimeout(done, 35_000))
+        }
         const cancelledFile = await readFile(cancelPath, 'utf8').catch((error) => {
           if (error?.code === 'ENOENT') return null
           throw error
@@ -864,6 +885,7 @@ async function runFileOperationMatrix({ request, events, campId, adapterKind, pr
       prompt: [
         'This is an isolated local file-operation acceptance test.',
         `Use the native file Write or file editing tool exactly once to create the new file ${createdPath} with exactly ${createdText.trimEnd()} and a trailing newline.`,
+        `The exact content expressed as a JSON string is ${JSON.stringify(createdText)}.`,
         'Do not read, list, search, use shell, or call another tool. Then reply exactly FILE_ADD_DONE.'
       ].join('\n'),
       expectedText: createdText,
@@ -887,6 +909,7 @@ async function runFileOperationMatrix({ request, events, campId, adapterKind, pr
       prompt: [
         'This is an isolated local file-operation acceptance test.',
         `The file ${emptyPath} already exists and is empty. Use native file tools to set it to exactly ${emptyEditedText.trimEnd()} and a trailing newline.`,
+        `The exact content expressed as a JSON string is ${JSON.stringify(emptyEditedText)}.`,
         'If your native Write or Edit tool requires reading the file first, use the native file Read tool once before writing.',
         'Do not list, search, use shell, or call unrelated tools. Then reply exactly FILE_EMPTY_EDIT_DONE.'
       ].join('\n'),
@@ -1079,7 +1102,7 @@ async function waitForFileOperationRun({ request, campId, agentRunId, adapterKin
   throw new Error(`${adapterKind} ${name} file-operation Run timed out: ${JSON.stringify(run)}`)
 }
 
-async function cancelAgentRun(request, campId, agentRunId) {
+async function cancelAgentRun(request, campId, agentRunId, events = []) {
   const resolvedApprovals = new Set()
   const deadline = Date.now() + 180_000
   let cancellationRequested = false
@@ -1107,7 +1130,11 @@ async function cancelAgentRun(request, campId, agentRunId) {
       resolvedApprovals.add(approval.id)
     }
     run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
-    if (!cancellationRequested && resolvedApprovals.size > 0 && run) {
+    const runningNativeTool = events.some((event) => event.method === 'runtime.action'
+      && event.params?.agentRunId === agentRunId
+      && event.params?.payload?.status === 'in_progress'
+      && String(event.params?.payload?.input ?? '').includes('sleep 30'))
+    if (!cancellationRequested && (resolvedApprovals.size > 0 || runningNativeTool) && run) {
       const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
       if (!turn) throw new Error(`ACP cancel smoke has no CampTurn: ${JSON.stringify(run)}`)
       await requestCampTurnCancellation(request, campId, turn)

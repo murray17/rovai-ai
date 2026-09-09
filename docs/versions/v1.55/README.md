@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.55
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -61,3 +61,5 @@ Pi `write` 继续保持路径级操作事实。
 - [Runtime File Change Observation v4](../../contracts/runtime-file-change-observation-v4.md)
 - [Runtime File Change Observation 架构](../../architecture/runtime-file-change-observation.md)
 - [Runtime Activity Registry](../../runtime-activity/registry.md)
+
+后续：[v1.56](../v1.56/README.md)。

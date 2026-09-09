@@ -48,6 +48,7 @@ const GUIDES: Partial<Record<AdapterKind, RuntimeInstallGuide>> = {
   'trae-cn-cli': { docs: 'https://www.trae.cn/' },
   'kimi-code-cli': { docs: 'https://github.com/MoonshotAI/kimi-cli' },
   'grok-build': { docs: 'https://docs.x.ai/build/overview' },
+  'zcode-app': { docs: 'https://zcode.z.ai/en/docs/install' },
   'antigravity-app': { docs: 'https://antigravity.google/', desktop: true },
   pi: { docs: 'https://github.com/earendil-works/pi' }
 }

@@ -2712,6 +2712,7 @@ fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
         SkillDeliveryGroupKey::Cursor => "Cursor",
         SkillDeliveryGroupKey::Kimi => "Kimi Code",
         SkillDeliveryGroupKey::Grok => "Grok Build",
+        SkillDeliveryGroupKey::Zcode => "ZCode",
     }
 }
 

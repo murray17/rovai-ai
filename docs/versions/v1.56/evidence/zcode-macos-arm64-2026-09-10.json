@@ -1,0 +1,315 @@
+{
+  "schemaVersion": 1,
+  "adapterKind": "zcode-app",
+  "platform": "macos-arm64",
+  "appVersion": "3.11.2",
+  "kernelVersion": "0.16.5",
+  "nodeVersion": "26.8.1",
+  "kernelSha256": "e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e1113266b8",
+  "transport": "zcode-native-node-transport-v3",
+  "status": "preview",
+  "productEvidence": {
+    "files": {
+      "logSha256": "85bb5e911bb0822d096a090bedcc1927083c1f5381316c16d9564e1116370aa0",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "84e37546-4eca-4a32-abb6-e8bb40809b1f"
+        },
+        {
+          "nativeSessionId": "sess_807aa186-9074-4674-be71-b6f6055d8ad8"
+        },
+        {
+          "agentRunId": "9a809a41-0447-4bd4-88b2-cde010d7c6d8"
+        },
+        {
+          "agentRunId": "adf44342-fceb-4cf9-94f2-0a529a23ceb3"
+        },
+        {
+          "agentRunId": "9b27989b-ad17-41d7-a383-56743f6a1c62"
+        },
+        {
+          "agentRunId": "69b30066-9b1e-4844-bdb0-11ceb09dc303"
+        }
+      ],
+      "smoke": "smoke-acp-runtime.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "commandOutput": {
+      "logSha256": "2565c688c75e93cf5fce0e698adc9e239b3a561219b5e4977c2466e683a68f35",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "391eadd6-066e-4ca7-adf5-3426610717b5"
+        },
+        {
+          "nativeSessionId": "sess_b5e950c4-ffd0-4820-b4e1-dd637f5b09a7"
+        },
+        {
+          "hostInstanceId": "391eadd6-066e-4ca7-adf5-3426610717b5"
+        }
+      ],
+      "smoke": "smoke-acp-runtime.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "manualCompaction": {
+      "logSha256": "195e08dcbefe256b47e5a52c85aa06dc51256aa9d63a55dfd4ed7632009e24de",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "715095f3-e7f1-4ae4-8c66-fbd89e62b8b9"
+        },
+        {
+          "nativeSessionId": "sess_6c063ec1-4b92-4d24-bde8-b1f3466fded7"
+        },
+        {
+          "hostInstanceId": "715095f3-e7f1-4ae4-8c66-fbd89e62b8b9"
+        },
+        {
+          "occurrenceIdentity": "zcode.session.compaction.completed.v1:runtime:compact_db464d9b-3e07-4eaa-b236-d1849d055fe7"
+        }
+      ],
+      "smoke": "smoke-acp-runtime.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "automaticCompaction": {
+      "logSha256": "54abda0a4cf5a88e8ed1757ef54bbf4e17d67e9de59ba3b9c8903f5229faad17",
+      "passed": true,
+      "identities": [
+        {
+          "nativeSessionId": "sess_c35adcf9-14ab-4f72-abab-c599df0fdece"
+        },
+        {
+          "hostInstanceId": "97ad67cb-844a-4ea3-9b45-30fd8c11c5de"
+        },
+        {
+          "agentRunId": "7d58e69b-9ced-449e-93d1-1b49cdc2d01c"
+        },
+        {
+          "source_observation_id": "zcode.session.compaction.completed.v1:runtime:compact_8be559d2-f72d-463e-91ef-e32a1e433950"
+        }
+      ],
+      "smoke": "smoke-zcode-context.py auto",
+      "stage": "before-stdio-owner"
+    },
+    "reactiveCompaction": {
+      "logSha256": "6c5c9a15298b6c6408baa2063aab5fb2e84faed25afd8177936ae6d1b5ffdedd",
+      "passed": true,
+      "identities": [
+        {
+          "nativeSessionId": "sess_1d8e721d-eab2-43e1-8fd6-8e390d121e06"
+        },
+        {
+          "hostInstanceId": "b5feb3ca-b393-4112-a767-400bfc606fb1"
+        },
+        {
+          "agentRunId": "3fedb617-f8f9-4513-b34e-102646661986"
+        },
+        {
+          "source_observation_id": "zcode.session.compaction.completed.v1:runtime:compact_b6ed1dc2-570e-4228-924b-0c44bc545f4b"
+        }
+      ],
+      "smoke": "smoke-zcode-context.py reactive",
+      "stage": "before-stdio-owner"
+    },
+    "coldResume": {
+      "logSha256": "435e88c6bc5c74dcca4e874c1f064e37fa3b2876b1981226b1039019ccfb05e5",
+      "passed": true,
+      "identities": [
+        {
+          "nativeSessionId": "sess_1c237759-cd50-452b-b2dc-17bab09b5ec2"
+        }
+      ],
+      "smoke": "smoke-trae-cold-resume.mjs",
+      "stage": "zcode-native-node-transport-v3",
+      "zcodeGuiLaunchCount": 0
+    },
+    "builtinCli": {
+      "logSha256": "f225da82cfbd1afeb262aa4b56cb7573898a335f36a5533dd35b133ecfa01f43",
+      "passed": true,
+      "identities": [],
+      "smoke": "smoke-builtin-cli.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "missingSend": {
+      "logSha256": "dbd95b4641f51b399bcaa21516fd38068220df8d3178aff90a2fc56534028b46",
+      "passed": true,
+      "identities": [],
+      "smoke": "smoke-missing-send-recovery.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "skills": {
+      "logSha256": "63d86b88dfdcf512ffc92e98a098eda5031dff10981e5693e01fe0d4df22ee6c",
+      "passed": true,
+      "identities": [
+        {
+          "agentRunId": "cd02b740-47fa-4665-8a45-7e44f11f7ff1"
+        }
+      ],
+      "smoke": "smoke-skills.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "mcp": {
+      "logSha256": "3a8acafa823f6d64152f7323d4cb6dc0beb11ae4f84e020507af85039aa5b968",
+      "passed": true,
+      "identities": [
+        {
+          "agentRunId": "01503925-7699-4139-9936-852d7981fa94"
+        }
+      ],
+      "smoke": "smoke-mcp-projection.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "permissions": {
+      "logSha256": "1ee265ffccd4aa8fa26f0d007d7ab06fd6b4576a165076d41043b282ba121e81",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "25b3dd76-b556-4864-ab6b-2886a77d0a3b"
+        },
+        {
+          "nativeSessionId": "sess_415e2d0a-a242-492c-b464-6461baa70c99"
+        },
+        {
+          "hostInstanceId": "25b3dd76-b556-4864-ab6b-2886a77d0a3b"
+        }
+      ],
+      "smoke": "smoke-acp-runtime.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "fleet": {
+      "logSha256": "eff763bfb6f60d3e831f225b1903e26acadbe7b98e2d0868caec87ef882509c1",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "07873bb7-df67-44ba-88c2-5d35cf59ec03"
+        },
+        {
+          "nativeSessionId": "sess_47fcc36e-a4d7-48f5-90cd-4faaef00e492"
+        },
+        {
+          "agentRunId": "97675d97-0e08-449c-90a0-9dae6722c455"
+        },
+        {
+          "hostInstanceId": "07873bb7-df67-44ba-88c2-5d35cf59ec03"
+        },
+        {
+          "nativeSessionId": "sess_796fc486-f993-447e-a1b7-71c89aef969d"
+        },
+        {
+          "agentRunId": "a71d170a-a3dc-479b-a454-c0fb7708363b"
+        },
+        {
+          "hostInstanceId": "07873bb7-df67-44ba-88c2-5d35cf59ec03"
+        },
+        {
+          "nativeSessionId": "sess_47fcc36e-a4d7-48f5-90cd-4faaef00e492"
+        },
+        {
+          "agentRunId": "9f0138a5-72f4-41ef-967f-b72a92e3e691"
+        },
+        {
+          "hostInstanceId": "07873bb7-df67-44ba-88c2-5d35cf59ec03"
+        },
+        {
+          "nativeSessionId": "sess_47fcc36e-a4d7-48f5-90cd-4faaef00e492"
+        },
+        {
+          "agentRunId": "69e5f8f2-fb58-40c6-9647-8ccf6ba29c1c"
+        },
+        {
+          "hostInstanceId": "6e5a392e-24c4-4c74-a7e4-41acd50bc894"
+        },
+        {
+          "nativeSessionId": "sess_796fc486-f993-447e-a1b7-71c89aef969d"
+        },
+        {
+          "agentRunId": "57a1c506-bde3-4df9-b0d0-1a558cb0c1ac"
+        },
+        {
+          "hostInstanceId": "514082bd-469d-46ad-97cc-52758eb6393b"
+        },
+        {
+          "nativeSessionId": "sess_377a8d47-15e6-4871-95d2-f468e40b23dc"
+        },
+        {
+          "agentRunId": "f282ccd1-6cb2-4db0-a720-15a68603a4b4"
+        }
+      ],
+      "smoke": "smoke-zcode-runtime.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "compactionColdResume": {
+      "logSha256": "567e1f83e899c4439d2d69fee929afbec7c9dc031a688556e3895f9cc84325b7",
+      "passed": true,
+      "identities": [
+        {
+          "nativeSessionId": "sess_1ba599a9-c6ce-44c3-9088-af07a518d2de"
+        },
+        {
+          "hostInstanceId": "00871aa8-5e61-4013-bfef-79912d4e9cea"
+        },
+        {
+          "agentRunId": "9cae5988-9d01-4526-8b9a-5f0f48a2fda0"
+        },
+        {
+          "source_observation_id": "zcode.session.compaction.completed.v1:runtime:compact_e15949ed-5a1b-4d89-8cda-23ceadaaf891"
+        }
+      ],
+      "smoke": "smoke-zcode-context.py auto, ROVAI_ZCODE_CONTEXT_COLD_RESUME=1",
+      "stage": "zcode-native-node-transport-v3",
+      "zcodeGuiLaunchCount": 0
+    },
+    "coreCrash": {
+      "logSha256": "638c925f1a1e23f7cbc83c5bbe2b7f35d0f5d31d5978b67d74f60883a3cfa1b7",
+      "passed": true,
+      "identities": [
+        {
+          "agentRunId": "72a9d1ba-30ae-4582-b154-bf888a857d14"
+        },
+        {
+          "hostInstanceId": "c8259d8a-283c-4907-8be8-10b3670090ff"
+        },
+        {
+          "nativeThreadId": "sess_73fb32a0-eb0e-4155-8f20-b848f6a38473"
+        }
+      ],
+      "smoke": "smoke-zcode-runtime.mjs, ROVAI_ZCODE_FLEET_CRASH=1",
+      "stage": "zcode-native-node-transport-v3",
+      "zcodeGuiLaunchCount": 0
+    },
+    "nativeCrash": {
+      "logSha256": "4a6191e5d9bb34f3aabe3e96111ac714c0b22da316ca86f750a39b1316bfb4e5",
+      "passed": true,
+      "identities": [
+        {
+          "agentRunId": "f112b44d-cc6a-41c2-bb31-b4b9faf3228f"
+        },
+        {
+          "hostInstanceId": "6c63e0c2-49c2-435c-b48c-a88113317991"
+        },
+        {
+          "nativeThreadId": "sess_63345c0f-1de5-4a23-a840-781750adbeab"
+        }
+      ],
+      "smoke": "smoke-zcode-runtime.mjs, ROVAI_ZCODE_FLEET_CRASH=native",
+      "stage": "zcode-native-node-transport-v3",
+      "zcodeGuiLaunchCount": 0
+    }
+  },
+  "launcherObservation": {
+    "tool": "smoke-zcode-launch.swift",
+    "permissionsGuiLaunchCount": 0,
+    "fleetGuiLaunchCount": 0,
+    "electronControlRegisteredAsApp": true,
+    "nodeControlRegisteredAsApp": false
+  },
+  "limits": [
+    "Same-turn compaction retry has no host injection seam; redelivery occurs on the next eligible input.",
+    "Structured prompt images and GUI callbacks are not implemented.",
+    "Account subscription login is outside the explicitly requested BYOK scope.",
+    "macOS x64 and Windows x64 have no qualification evidence.",
+    "Full Core compaction failure/cancellation combined with capability preservation, provider usage retry/resume accounting, and adapter-specific protocol-error/probe-timeout/upgrade drift flows are not yet all qualified."
+  ],
+  "evidenceScope": "Earlier functional flows plus final launcher v3 revalidation: exact cold resume, compact then Core restart, native crash and Core crash. Each flow records its stage; no complete platform qualification is claimed."
+}

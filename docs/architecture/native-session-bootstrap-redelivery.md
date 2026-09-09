@@ -46,6 +46,7 @@ pending。
 | Kiro | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_KIRO_COMPACTION_DETECTOR_POLICY` |
 | Kimi Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_KIMI_COMPACTION_DETECTOR_POLICY` |
 | Grok Build | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_GROK_COMPACTION_DETECTOR_POLICY` |
+| ZCode | `zcode.session.compaction.completed.v1` / `completed` | 官方 NDJSON 的 session.updated 经内部 transport 进入 observer lease | manual/auto/reactive 只认 completed 与非空 operationId/boundaryId，boundaryId 去重；下一 eligible input 补发，不介入同轮原生 retry |
 | Qoder | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QODER_COMPACTION_DETECTOR_POLICY` |
 | CodeBuddy | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_CODEBUDDY_COMPACTION_DETECTOR_POLICY` |
 | Qwen Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY` |

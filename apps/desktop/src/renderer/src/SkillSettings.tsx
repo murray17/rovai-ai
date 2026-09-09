@@ -709,6 +709,7 @@ const SKILL_DELIVERY_GROUP_DISPLAY_RANK: Record<SkillDeliveryGroupKey, number> =
   trae: 8,
   cursor: 9,
   kimi: 10,
+  zcode: 15,
   grok: 11,
   antigravity: 12,
   pi: 13

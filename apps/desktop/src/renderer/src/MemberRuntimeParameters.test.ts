@@ -436,6 +436,8 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
       return { execution_mode: 'agent', approval_policy: 'force' }
     case 'kimi-code-cli':
       return { permission_mode: 'yolo' }
+    case 'zcode-app':
+      return { permission_mode: 'yolo' }
     case 'grok-build':
       return { permission_mode: 'bypassPermissions' }
     case 'antigravity-app':

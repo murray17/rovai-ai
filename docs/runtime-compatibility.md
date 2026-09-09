@@ -1063,3 +1063,35 @@ ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview�
 - [Antigravity MCP Servers](https://antigravity.google/docs/mcp)
 - [Antigravity Plugins](https://antigravity.google/docs/plugins)
 - [Antigravity CLI Permissions](https://antigravity.google/docs/cli/permissions)
+
+## 官方 ZCode App 接入（2026-09-10）
+
+- 来源：Homebrew 官方 cask `zcode` 3.11.2，未修改内核 `glm/zcode.cjs` 0.16.5；独立 Node.js 26.8.1。
+- 启动：所有版本检测、能力 Probe 和正式 Host 均为独立 Node → Rovai 生命周期 prelude → 未修改的官方内核。
+  App 仅提供文件；社区 `zcode-app-cli`、`zcode-acp` 不参与。真实权限/会话/冷恢复/强杀验收的 App 注册监测均为 0。
+  bridge `zcode-native-node-transport-v3` 的独立 companion 回收原生 detached Bash 组；实际 Core 和原生 Host
+  分别 SIGKILL 后，观察到的子进程全部退出，等待 35 秒没有延迟文件。普通 cold resume/取消回归也通过。
+- BYOK：只读官方 `~/.zcode/cli/config.json`、`zcode.json`、`.zcode/config.json`；MiniMax native default
+  和显式 `minimax/MiniMax-M3` 均通过真实 Core 执行。配置、内核和 Node identity 变化使旧 Host 不再复用。
+- 生产路径通过：Camp 内精确 Session A→B→A、并发独立 Host、配置变更、Core 重启后 exact resume、
+  无效 Session 一次 continuity loss、完整 Built-in CLI、Gather/过期 lease、Missing-Send 三种场景。
+- manual、threshold auto、provider overflow + reactive retry 的真实 Core completed observation 与下一 input
+  Bootstrap revision 1 requested/acknowledged/accepted 均通过；auto/reactive 的真实模型请求还确认补发内容。
+  auto compact 后重启 Core，再恢复同一 Session 和 revision 1 补发也已通过；原始协议另有 compact fail/cancel 不触发完成的证据。
+- Skills 更新/禁用/重新启用/取消分配/删除、项目同名保护和重启恢复通过。MCP stdio/HTTP、同名完整定义优先、
+  更新后新 Host、相邻成员隔离、取消分配/重分配/删除后恢复原生 Server 均通过。
+- 文件与输出：Read 不进入 Files Changed；Write 与空文件实际字节、路径事实、Edit 结构化 update Diff、
+  实时与历史投影通过。stdout/stderr/mixed/empty/exit 7/large 六项通过，大输出实际 131100 字节保存到 blob。
+- 权限：build allow-once/deny、plan 无写入、cancelled 终态通过；取消后等待 35 秒仍无延迟文件。
+  原生 permission.resolved deny 无普通 Tool result，已单独终结工具；URL-only MCP 的默认 HTTP 与 http_headers
+  按官方配置规则转换，独立 parser 回归覆盖。
+- Usage：只采集 provider Turn input/output/cacheRead；cacheWrite/reasoning/uncached/cost 保持未知，
+  不把 Turn 聚合伪装成单次请求命中率。真实数据与稀疏字段 parser 已验证。
+- 差异：user FirstPayload 不是 system 注入；重注入发生在下一 eligible input；Write 无原生 before/after 时
+  只有路径事实，不编造 Diff；shell 删除/重命名不推导为原生文件变更。GUI 回调、结构化 Prompt 图片未实现；
+  按用户范围仅接 BYOK，不接账户登录。
+- 平台：macOS arm64 保持 Preview，macOS x64/Windows x64 保持 NotQualified；未冻结的全部资格轴不能由
+  已通过的功能流替代，也不把 Preview 称为 First-Class 完成。
+
+逐项证据与剩余资格项见 [v1.56 验收](versions/v1.56/implementation-plan.md)、
+[脱敏证据清单](versions/v1.56/evidence/zcode-macos-arm64-2026-09-10.json)和[接入矩阵](research/zcode-runtime.md)。

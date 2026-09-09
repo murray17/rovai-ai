@@ -277,6 +277,7 @@ pub enum MissingSendRecoveryBoundary {
     AntigravityPrintStdout,
     AcpEndTurnAssistantSuffix,
     PiAgentSettled,
+    ZcodeCompletedTurn,
 }
 
 impl MissingSendRecoveryBoundary {
@@ -287,6 +288,7 @@ impl MissingSendRecoveryBoundary {
             Self::AntigravityPrintStdout => "antigravity_print_stdout",
             Self::AcpEndTurnAssistantSuffix => "acp_end_turn_assistant_suffix",
             Self::PiAgentSettled => "pi_agent_settled",
+            Self::ZcodeCompletedTurn => "zcode_completed_turn",
         }
     }
 
@@ -295,8 +297,11 @@ impl MissingSendRecoveryBoundary {
             Self::CodexCompletedTurn => matches!(adapter_kind, AdapterKind::CodexCli),
             Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
             Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
-            Self::AcpEndTurnAssistantSuffix => adapter_kind.uses_acp(),
+            Self::AcpEndTurnAssistantSuffix => {
+                adapter_kind.uses_acp() && adapter_kind != AdapterKind::ZcodeApp
+            }
             Self::PiAgentSettled => matches!(adapter_kind, AdapterKind::Pi),
+            Self::ZcodeCompletedTurn => matches!(adapter_kind, AdapterKind::ZcodeApp),
         }
     }
 }
@@ -6470,7 +6475,9 @@ mod tests {
     #[test]
     fn recovery_boundaries_are_closed_over_the_product_adapter_catalog() {
         for adapter_kind in AdapterKind::ALL {
-            let expected = if adapter_kind.uses_acp() {
+            let expected = if adapter_kind == AdapterKind::ZcodeApp {
+                MissingSendRecoveryBoundary::ZcodeCompletedTurn
+            } else if adapter_kind.uses_acp() {
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix
             } else {
                 match adapter_kind {
@@ -6489,6 +6496,7 @@ mod tests {
                 MissingSendRecoveryBoundary::AntigravityPrintStdout,
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
                 MissingSendRecoveryBoundary::PiAgentSettled,
+                MissingSendRecoveryBoundary::ZcodeCompletedTurn,
             ] {
                 assert_eq!(
                     boundary.is_compatible_with(adapter_kind),

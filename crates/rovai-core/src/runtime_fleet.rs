@@ -56,6 +56,7 @@ impl Default for AgentRuntimeFleetConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum RuntimeReuseScope {
+    Camp { camp_id: String },
     Member { camp_id: String, agent_id: String },
     Workspace { workspace_key: String },
 }
@@ -85,6 +86,23 @@ impl RuntimeCompatibilityKey {
             invalidation_camp_id: Some(camp_id),
             invalidation_agent_id: Some(agent_id.clone()),
             residency_bucket: agent_id,
+            runtime_compatibility_digest: runtime_compatibility_digest.into(),
+        }
+    }
+
+    pub(crate) fn camp(
+        camp_id: impl Into<String>,
+        agent_id: impl Into<String>,
+        runtime_compatibility_digest: impl Into<String>,
+    ) -> Self {
+        let camp_id = camp_id.into();
+        Self {
+            reuse_scope: RuntimeReuseScope::Camp {
+                camp_id: camp_id.clone(),
+            },
+            invalidation_camp_id: Some(camp_id.clone()),
+            invalidation_agent_id: Some(agent_id.into()),
+            residency_bucket: format!("camp:{camp_id}"),
             runtime_compatibility_digest: runtime_compatibility_digest.into(),
         }
     }
@@ -2488,37 +2506,46 @@ mod tests {
 
     #[tokio::test]
     async fn warm_hosts_never_cross_camp_compatibility_keys() {
-        let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
-        let camp_a = fleet
-            .acquire(acquire_request("run-a1", "camp-a"), || async {
-                Ok(fake_host("host-a"))
-            })
-            .await
-            .unwrap();
-        assert_eq!(camp_a.host.process_id(), "host-a");
-        fleet
-            .release("run-a1", 1, FleetReleaseDisposition::Reusable)
-            .await;
+        for camp_scope in [false, true] {
+            let request = |run: &str, camp: &str, agent: &str| {
+                let mut request = acquire_request(run, camp);
+                if camp_scope {
+                    request.compatibility = RuntimeCompatibilityKey::camp(camp, agent, "digest-1");
+                }
+                request
+            };
+            let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
+            let camp_a = fleet
+                .acquire(request("run-a1", "camp-a", "agent-a"), || async {
+                    Ok(fake_host("host-a"))
+                })
+                .await
+                .unwrap();
+            assert_eq!(camp_a.host.process_id(), "host-a");
+            fleet
+                .release("run-a1", 1, FleetReleaseDisposition::Reusable)
+                .await;
 
-        let camp_b = fleet
-            .acquire(acquire_request("run-b1", "camp-b"), || async {
-                Ok(fake_host("host-b"))
-            })
-            .await
-            .unwrap();
-        assert_eq!(camp_b.host.process_id(), "host-b");
-        fleet
-            .release("run-b1", 1, FleetReleaseDisposition::Reusable)
-            .await;
+            let camp_b = fleet
+                .acquire(request("run-b1", "camp-b", "agent-b"), || async {
+                    Ok(fake_host("host-b"))
+                })
+                .await
+                .unwrap();
+            assert_eq!(camp_b.host.process_id(), "host-b");
+            fleet
+                .release("run-b1", 1, FleetReleaseDisposition::Reusable)
+                .await;
 
-        let camp_a_again = fleet
-            .acquire(acquire_request("run-a2", "camp-a"), || async {
-                Ok(fake_host("unexpected-host"))
-            })
-            .await
-            .unwrap();
-        assert_eq!(camp_a_again.host.process_id(), "host-a");
-        fleet.shutdown_all().await;
+            let camp_a_again = fleet
+                .acquire(request("run-a2", "camp-a", "agent-c"), || async {
+                    Ok(fake_host("unexpected-host"))
+                })
+                .await
+                .unwrap();
+            assert_eq!(camp_a_again.host.process_id(), "host-a");
+            fleet.shutdown_all().await;
+        }
     }
 
     #[tokio::test]

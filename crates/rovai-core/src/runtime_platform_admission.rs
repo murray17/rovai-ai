@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:901e3d112853b61310f1b960756ab822de535daa199e3975ebaff35e2d388fb2";
+    "sha256:fda00fe60451fd9f5345f8fb9b26bd62a7bd47561fe348ca9b71d9b50539687f";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -279,7 +279,10 @@ mod tests {
                     Some(PI_WINDOWS_X64_EVIDENCE_REVISION)
                 );
                 assert_eq!(admission.blocker_code(), None);
-            } else if runtime_kind != AdapterKind::CursorAgent {
+            } else if !matches!(
+                runtime_kind,
+                AdapterKind::CursorAgent | AdapterKind::ZcodeApp
+            ) {
                 assert!(admission.is_qualified());
                 assert!(admission.allows_runtime_use());
                 assert_eq!(admission.reason_code(), None);
@@ -315,10 +318,25 @@ mod tests {
     fn macos_catalog_qualifies_each_runtime_only_with_its_bound_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
 
+        assert_eq!(
+            registry
+                .platform_admission(AdapterKind::ZcodeApp, HostPlatformKey::MacosArm64)
+                .status(),
+            RuntimePlatformAdmissionStatus::Preview
+        );
+        assert_eq!(
+            registry
+                .platform_admission(AdapterKind::ZcodeApp, HostPlatformKey::MacosX64)
+                .status(),
+            RuntimePlatformAdmissionStatus::NotQualified
+        );
         for runtime_kind in AdapterKind::ALL.into_iter().filter(|kind| {
             !matches!(
                 kind,
-                AdapterKind::CursorAgent | AdapterKind::Pi | AdapterKind::GrokBuild
+                AdapterKind::CursorAgent
+                    | AdapterKind::Pi
+                    | AdapterKind::GrokBuild
+                    | AdapterKind::ZcodeApp
             )
         }) {
             for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {

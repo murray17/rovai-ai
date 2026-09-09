@@ -8,7 +8,7 @@ last_updated: 2026-09-07
 
 # Runtime File Change Observation 架构
 
-字段、归约与授权接口见 [Runtime File Change Observation v4](../contracts/runtime-file-change-observation-v4.md)。
+字段、归约与授权接口见 [Runtime File Change Observation v5](../contracts/runtime-file-change-observation-v5.md)。
 本架构只消费 Runtime 明确报告的文件变化，不读取当前文件、不扫描工作区，也不依赖 Git。
 
 ## 产品模型
@@ -168,8 +168,15 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 ## 相关规范
 
-- [Runtime File Change Observation v4](../contracts/runtime-file-change-observation-v4.md)
+- [Runtime File Change Observation v5](../contracts/runtime-file-change-observation-v5.md)
 - [Execution Evidence 与 Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [v1.29 决定](../versions/v1.29/decisions.md#v1-29-d08)
 - [V1.29-D13 managed output exclusion](../versions/v1.29/decisions.md#v1-29-d13)
+
+### ZCode 原生 NDJSON
+
+`zcode-app` 的 normalizer 只用相同 ToolCall ID 的完整 tool_call 参数与 tool.updated result。Read/Write/Edit 的
+结构化路径产生 typed operation；只有 Edit 原生 display 中完整、路径一致且 hunk/counter 校验通过的 patch 产生
+unified Diff。Write 参数与 Shell git diff 不能证明已应用的文件 Diff。Native success=true 仍须检查 Shell exitCode
+和 timeout。后续文件汇总、managed output 排除与不可变 Review 读取复用现有 projector，来源保持 ZCode 协议。

@@ -21,7 +21,7 @@ pub struct RuntimeActivityMappingDescriptor {
     pub registry_entry: &'static str,
 }
 
-pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 14] = [
+pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 15] = [
     descriptor(
         AdapterKind::CodexCli,
         "codex-app-server",
@@ -29,6 +29,12 @@ pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 14] = [
         "codex",
     ),
     descriptor(AdapterKind::Pi, "pi-jsonl-rpc-v1", "fine_grained", "pi"),
+    descriptor(
+        AdapterKind::ZcodeApp,
+        crate::zcode::PROTOCOL,
+        "fine_grained",
+        "zcode",
+    ),
     descriptor(AdapterKind::OpencodeCli, "acp-v1", "fine_grained", "acp"),
     descriptor(AdapterKind::CopilotCli, "acp-v1", "fine_grained", "acp"),
     descriptor(

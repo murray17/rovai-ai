@@ -32,12 +32,13 @@ const allSpecifications = [
   ['qwen-code', 'Qwen'],
   ['trae-cn-cli', 'TRAE'],
   ['kimi-code-cli', 'Kimi Code'],
-  ['grok-build', 'Grok Build']
+  ['grok-build', 'Grok Build'],
+  ['zcode-app', 'ZCode']
 ].map(([adapterKind, label]) => ({
   adapterKind,
   label,
   slug: adapterKind.replaceAll('-', '_'),
-  acp: !['codex-cli', 'pi', 'claude-code-cli', 'antigravity-app'].includes(adapterKind)
+  acp: !['codex-cli', 'pi', 'claude-code-cli', 'antigravity-app', 'zcode-app'].includes(adapterKind)
 }))
 const selected = selectedAdapters()
 const specifications = allSpecifications.filter(({ adapterKind }) => selected.has(adapterKind))
@@ -152,14 +153,14 @@ for (const specification of specifications) {
 
     let acpProtocol = null
     let nativeToolFinal = null
-    if (specification.acp || specification.adapterKind === 'pi') {
+    if (specification.acp || ['pi', 'zcode-app'].includes(specification.adapterKind)) {
       const toolStart = await startFollowUpRun(
         core.request,
         campId,
         toolThenFinalPrompt(specification),
         specification.acp
           ? 'Exercise a real ACP tool boundary followed by a zero-send final.'
-          : 'Exercise a real Pi tool boundary followed by a zero-send final.'
+          : `Exercise a real ${specification.label} tool boundary followed by a zero-send final.`
       )
       await waitForTerminalRun(
         core,
@@ -308,7 +309,7 @@ async function startFollowUpRun(request, campId, body, purpose) {
   const savedDraft = await request('camp.composerDraft.save', {
     campId,
     expectedRevision: currentDraft.revision,
-    content: [{ kind: 'text', text: body }]
+    content: { version: 2, segments: [{ kind: 'text', text: body }] }
   })
   const sent = await request('camp.messages.send', {
     commandId: crypto.randomUUID(),
@@ -560,6 +561,7 @@ function buildAcpProtocolFixture(events, adapterKind, agentRunId, expectedFinal,
 }
 
 function expectedBoundary(specification) {
+  if (specification.adapterKind === 'zcode-app') return 'zcode_completed_turn'
   if (specification.acp) return 'acp_end_turn_assistant_suffix'
   if (specification.adapterKind === 'pi') return 'pi_agent_settled'
   if (specification.adapterKind === 'codex-cli') return 'codex_completed_turn'

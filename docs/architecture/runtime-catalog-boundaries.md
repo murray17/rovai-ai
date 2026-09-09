@@ -14,7 +14,7 @@ last_updated: 2026-09-08
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)。实测版本和能力只由
+[Runtime Launch and Verification v37](../contracts/runtime-launch-and-verification-v37.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -175,7 +175,7 @@ response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 f
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)。
+[Runtime Launch and Verification v37](../contracts/runtime-launch-and-verification-v37.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -240,7 +240,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)，
+字段级行为见 [Runtime Launch and Verification v37](../contracts/runtime-launch-and-verification-v37.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## ACP Client Terminal 边界
@@ -308,7 +308,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)，证据状态见
+[Runtime Launch and Verification v37](../contracts/runtime-launch-and-verification-v37.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -401,7 +401,7 @@ Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Camp F
 macOS x64 和 Windows x64 各自绑定 Pi 专属 immutable evidence revision，均为 `qualified / reasonCode=null`；普通
 discovery、检查、成员选择、Diagnostics 与 AgentRun 对三平台开放，UI 走正式 Runtime 展示且不再标记实验性。
 平台晋升不新增 Pi 已明确 unsupported/hidden 的能力。字段级行为见
-[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)，
+[Runtime Launch and Verification v37](../contracts/runtime-launch-and-verification-v37.md)，
 证据状态见[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -428,7 +428,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `CoreEnforcedV1 + read_only Workspace` 恢复路径仍强制 `plan`。descriptor 的 `recommendedValue=default` 只是
 保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v36](../contracts/runtime-launch-and-verification-v36.md)。
+[Runtime Launch and Verification v37](../contracts/runtime-launch-and-verification-v37.md)。
 
 ACP Client FS 不把这些权限 descriptor 复制成 Core allowlist。`fs/read_text_file` / `fs/write_text_file` 对当前
 fenced Run 只作协议与参数校验，绝对路径按 Runtime 请求执行，相对路径以 execution root 解析；是否能读写、是否
@@ -445,3 +445,15 @@ macOS arm64、macOS x64 与 Windows x64 全部隐藏，不保留“待支持”�
 未来接入时不得把 preview identity 写入 Migration 或原地解释为 Installation。实现必须删除 preview row，
 再按完整可执行准入增加新的 AdapterKind 和逐平台 Admission；用户从未保存过 preview 选择，因此没有 preview-to-product
 数据迁移。
+
+## 官方 ZCode 当前边界
+
+ZCode 使用独立 Node.js 执行官方 App 自带的未修改内核，不执行 App 主程序。发现绑定官方 bundle，
+fingerprint 同时包含内核与独立 Node；PATH 中的社区
+CLI 不属于这个 Product Runtime。Core 内的协议翻译负责原生 NDJSON、Session/Input/Turn/Tool identity 与 callback，
+已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU 与进程树回收。内部 ACP shape 不改变公开协议来源。
+
+模型与凭据由官方 `.zcode/cli/config.json` 和项目配置拥有；只读生成原生 runtimeModel carrier，不建立 Rovai provider
+配置。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；
+warm resume 不刷新 MCP，所以集合变化不能沿用旧 Host。协议、FirstPayload、权限、Usage 与保留能力见
+[Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)。平台资格与 Machine Ready 分开维护。
