@@ -1695,7 +1695,7 @@ export function SingleChatPanel({
         followLatestRef.current = true
         setHasNewReply(false)
         viewportEndRef.current?.scrollIntoView({ block: 'end' })
-      }}>有新回复 · 查看</button>}
+      }}><span className="single-chat-new-reply-dot" aria-hidden="true" />有新回复 · 查看</button>}
       {currentSnapshot && currentSnapshot.approvals.length > 0 && <ApprovalDock
         approvals={currentSnapshot.approvals} profileById={profileById} busy={busy}
         onResolve={onResolveApproval} containerRef={approvalRef}

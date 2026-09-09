@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ForwardedRef, type JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   CampPendingInputsView, ComposerDocument,
-  LocalAttachmentSourceView, PendingCampInputView, PendingInputEditAction,
+  PendingCampInputView, PendingInputEditAction,
   StoredCommandResult
 } from '@contracts'
 import {
@@ -17,20 +17,17 @@ import { AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { readErrorMessage } from './error-message'
 import { createPendingInputsRefresh, shouldRefreshPendingInputs } from './pending-input-refresh'
 import { AttachmentCard, AttachmentPlaceholder, ComposerAttachmentStrip } from './AttachmentCard'
+import {
+  ownsPendingInputEdit, pendingInputNavigation,
+  type PendingInputLocalEdit as LocalEdit, type PendingInputSnapshot, type PendingInputLeavePreparation
+} from './pending-input-navigation'
+
+export type { PendingInputSnapshot } from './pending-input-navigation'
 
 export type PendingAttachmentDropTarget = ((files: File[]) => void) | null
 
-export type PendingInputSnapshot = {
-  content: ComposerDocument
-  replyToCampMessageId: string | null
-  recipientSelectionRequired: boolean
-  attachments: LocalAttachmentSourceView[]
-}
-
-type LocalEdit = PendingInputSnapshot & {
-  item: PendingCampInputView
-  token: string
-  initial: PendingInputSnapshot
+export interface PendingCampInputsHandle {
+  prepareForLeave(): Promise<PendingInputLeavePreparation>
 }
 
 export function pendingInputSnapshot(item: PendingCampInputView): PendingInputSnapshot {
@@ -75,7 +72,7 @@ function pendingError(code: string): string {
   return `发送未完成（${code}），消息已保留。请检查后编辑并保存，或删除这条消息。`
 }
 
-export function PendingCampInputs({
+export const PendingCampInputs = forwardRef(function PendingCampInputs({
   campId, refreshKey, executionActive, members, skills, skillCatalogStatus,
   onQueueChange, onEditingChange, onAttachmentDropTargetChange, attachmentDragActive
 }: {
@@ -89,10 +86,18 @@ export function PendingCampInputs({
   onEditingChange(editing: boolean): void
   onAttachmentDropTargetChange(target: PendingAttachmentDropTarget): void
   attachmentDragActive: boolean
-}): JSX.Element {
+}, ref: ForwardedRef<PendingCampInputsHandle>): JSX.Element {
   const [queue, setQueue] = useState<CampPendingInputsView | null>(null)
-  const [edit, setEdit] = useState<LocalEdit | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [edit, setEditState] = useState<LocalEdit | null>(null)
+  const editRef = useRef<LocalEdit | null>(null)
+  const setEdit = useCallback((next: LocalEdit | null | ((current: LocalEdit | null) => LocalEdit | null)) => {
+    const value = typeof next === 'function' ? next(editRef.current) : next
+    editRef.current = value
+    setEditState(value)
+  }, [])
+  const [busy, setBusyState] = useState(false)
+  const busyRef = useRef(false)
+  const setBusy = (value: boolean): void => { busyRef.current = value; setBusyState(value) }
   const [preparingAttachments, setPreparingAttachments] = useState<File[]>([])
   const [composerDirty, setComposerDirty] = useState(false)
   const [composerStatus, setComposerStatus] = useState<ComposerLocalStatus>({
@@ -108,8 +113,8 @@ export function PendingCampInputs({
   const mounted = useRef(true)
   const prepareFilesRef = useRef<(files: File[]) => void>(() => undefined)
   const refreshReader = useRef<ReturnType<typeof createPendingInputsRefresh> | null>(null)
-  const callbacks = useRef({ onQueueChange, onEditingChange })
-  callbacks.current = { onQueueChange, onEditingChange }
+  const callbacks = useRef({ onQueueChange, onEditingChange, members, skills })
+  callbacks.current = { onQueueChange, onEditingChange, members, skills }
 
   const refresh = useCallback((): Promise<void> => refreshReader.current?.refresh() ?? Promise.resolve(), [])
 
@@ -120,6 +125,13 @@ export function PendingCampInputs({
       (next) => {
         if (next.campId !== campId) return
         setQueue(next)
+        if (!editRef.current) {
+          const resumed = pendingInputNavigation.resume(next)
+          if (resumed) {
+            setEdit(resumed)
+            setComposerStatus(composerDocumentStatus(resumed.content, callbacks.current.members, callbacks.current.skills))
+          }
+        }
         callbacks.current.onQueueChange(next)
       }
     )
@@ -139,10 +151,10 @@ export function PendingCampInputs({
       unsubscribe()
       window.removeEventListener('focus', foreground)
       document.removeEventListener('visibilitychange', foreground)
-      // Deliberately do not cancel the Core lock on unmount/crash.
-      // Unsaved edits are local and reopening requires an explicit recovery action.
+      // Navigation snapshots are captured by the leave guard, never async cleanup.
+      // A crash/reload still loses local text and requires explicit Core recovery.
     }
-  }, [campId])
+  }, [campId, setEdit])
 
   useEffect(() => { void refresh().catch(() => undefined) }, [refreshKey, executionActive, refresh])
   useEffect(() => { callbacks.current.onEditingChange(edit !== null) }, [edit !== null])
@@ -155,8 +167,39 @@ export function PendingCampInputs({
       : current)
   }, [edit?.item.id, edit?.token, queue?.editSession])
 
-  const ownsEdit = Boolean(edit && queue?.editSession?.pendingInputId === edit.item.id
-    && queue.editSession.editToken === edit.token && !queue.editSession.recoveryRequired)
+  const ownsEdit = Boolean(edit && queue && ownsPendingInputEdit(edit, queue))
+
+  useImperativeHandle(ref, () => ({
+    async prepareForLeave() {
+      if (busyRef.current) throw new Error('待发送消息正在处理变更，请稍后再离开。')
+      const current = editRef.current
+      if (!current) return { complete: () => undefined }
+      const composer = composerHandleRef.current
+      if (!composer) throw new Error('待发送编辑器尚未就绪，请稍后再离开。')
+      setBusy(true)
+      composer.setInteractionLocked(true)
+      try {
+        const flushed = await composer.flush()
+        const forget = pendingInputNavigation.retain({ ...current, content: flushed.document })
+        let completed = false
+        return {
+          complete(didLeave) {
+            if (completed) return
+            completed = true
+            if (!didLeave) {
+              forget()
+              composer.setInteractionLocked(false)
+              if (mounted.current) setBusy(false)
+            }
+          }
+        }
+      } catch (cause) {
+        composer.setInteractionLocked(false)
+        if (mounted.current) setBusy(false)
+        throw cause
+      }
+    }
+  }))
 
   useEffect(() => {
     onAttachmentDropTargetChange(ownsEdit && !busy ? (files) => prepareFilesRef.current(files) : null)
@@ -173,7 +216,7 @@ export function PendingCampInputs({
   }
 
   const perform = async (operation: () => Promise<void>): Promise<void> => {
-    if (busy) return
+    if (busyRef.current) return
     setBusy(true)
     setError(null)
     try { await operation() } catch (cause) { if (mounted.current) setError(readErrorMessage(cause, '操作未完成，请稍后再试。')) }
@@ -431,7 +474,7 @@ export function PendingCampInputs({
       </Dialog.Portal>
     </Dialog.Root>
   </>
-}
+})
 
 export function PendingInputEditorActions({
   busy,

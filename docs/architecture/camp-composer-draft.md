@@ -199,6 +199,12 @@ Pending Edit 使用 `campId:pendingInputId` 作为独立 draft identity，从 ca
 后把完整 V2 与 working refs 置换进 Pending，Cancel 放弃 working state，Delete 取消整条 Pending。所有动作继续由
 pendingInputId、pending revision 与 editToken fencing，且不会消费或覆盖普通 Composer Draft。
 
+同一 Renderer 窗口的正常导航通过统一 Camp leave guard 捕获 Pending 的 V2 编辑快照，单独暂存正文、Reply、
+initial snapshot 与原 edit token/revision；不在普通按键或组件 cleanup 中序列化，不创建 Core Draft 或新锁。
+返回时由最新 Pending projection 校验 Camp、Pending ID、canonical/base revision、token 及 recoveryRequired，
+只在原占用仍有效时恢复本地编辑，并采用 Core 最新 working attachments。校验不通过或窗口重建继续走显式恢复。
+导航中止清除该次快照并恢复交互；编辑 mutation 在途时拒绝离开，避免保存/附件结果跨已卸载 editor 丢失。
+
 ## Legacy and failure boundaries
 
 - 旧 Draft/Pending 用户 Segment 数组只在 Core reader 转成 V2；成功写入只产生 V2，不修改公共历史 Message；

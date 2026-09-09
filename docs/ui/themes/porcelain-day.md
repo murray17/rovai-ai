@@ -52,8 +52,8 @@ Light. `color-scheme: light`.
 | `--workspace-attention-soft` | `#f4ecdf` |
 | `--workspace-faint` | `#71808a` |
 | `--conversation-surface` | `#ffffff` |
-| `--conversation-user-message-surface` | `#f2f3f4` |
-| `--conversation-user-message-line` | `#e3e7e9` |
+| `--conversation-user-message-surface` | `#f5f5f4` |
+| `--conversation-user-message-line` | `#f5f5f4` |
 | `--execution-running-surface` | `#fafafa` |
 | `--conversation-find-match` | `#f4e4c3` |
 | `--conversation-find-current` | `#edc66f` |
@@ -246,9 +246,9 @@ higher contrast preferences use the stronger control line and ink. Import MCP so
   Markdown file previews use the dedicated `--conversation-inline-code-canvas`,
   `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer. Release notes,
   Tool results and other SafeMarkdown surfaces keep the shared defaults.
-- Current-user message bubbles use the dedicated porcelain-gray
-  `--conversation-user-message-surface` and `--conversation-user-message-line`; Agent narrative
-  remains on the transparent conversation surface.
+- Public user and Agent message bodies share the Mist Gray
+  `--conversation-user-message-surface` and matching `--conversation-user-message-line`, retaining a 1px border
+  allocation. Single Chat user bubbles share these tokens; private Agent narrative remains transparent.
 
 ## Contrast requirements
 

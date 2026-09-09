@@ -62,3 +62,6 @@ test('Pending attachments use Composer cards, body-only queue summaries and acti
 
 test('loading the Composer route preserves conversation and input positions', { timeout: 60_000 },
   t => runFixture(t, '--route-loading', 1))
+
+test('Pending edits survive normal Camp navigation while preserving ownership and explicit recovery', { timeout: 60_000 },
+  t => runFixture(t, '--pending-navigation', 7))
