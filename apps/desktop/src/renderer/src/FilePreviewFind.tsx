@@ -34,7 +34,7 @@ export function useFileFindAdapter(adapter: FileFindAdapter | null): void {
   useEffect(() => adapter && register ? register(adapter) : undefined, [adapter, register])
 }
 export function isFileFindTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest('.file-preview-pane,.file-preview-tabs,.file-preview-find-trigger'))
+  return target instanceof Element && Boolean(target.closest('.file-preview-pane,.file-preview-tabs,.file-preview-find-trigger,.changed-file-popover'))
 }
 
 export function FileFindProvider({ activeTabId, visible, children }: { activeTabId: string | null; visible: boolean; children: ReactNode }): React.JSX.Element {
@@ -72,6 +72,8 @@ export function FileFindProvider({ activeTabId, visible, children }: { activeTab
     }
     const shortcut = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.isComposing || event.altKey || !current.current.visible) return
+      // The portaled picker closes itself before handing Cmd/Ctrl+F to this controller.
+      if (event.target instanceof Element && event.target.closest('.changed-file-popover')) return
       const inFile = isFileFindTarget(event.target) || (event.target === document.body && lastRegion === 'file')
       if (!inFile) return
       const controller = controllers.current.get(current.current.activeTabId ?? '')

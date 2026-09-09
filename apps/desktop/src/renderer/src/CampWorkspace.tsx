@@ -119,7 +119,8 @@ import { useOptionalFilePreview } from './FilePreviewContext'
 import {
   agentRunFileChangeHasReviewableDiff,
   agentRunFileChangesPreviewTarget,
-  agentRunFileChangesSummaryLabel
+  agentRunFileChangesSummaryLabel,
+  agentRunFilePathParts
 } from './file-changes-presentation'
 import { openAgentRunCurrentFilePreview } from './agent-run-file-preview'
 import { FileReferenceText, type FileReferenceActivation } from './FileReferenceLink'
@@ -7241,36 +7242,42 @@ export function AgentRunFileChangesTimelineCard({
         </button>}
       </div>
       <div className="run-file-changes-card-files" aria-label="变更文件">
-        {visibleFiles.map((file, index) => (
-          <button
-            key={file.evidenceFileId}
-            className="run-file-change-file"
-            type="button"
-            aria-label={agentRunFileChangeHasReviewableDiff(file)
-              ? `查看 ${file.path} 的文件变化`
-              : `打开当前文件预览：${file.path}`}
-            onClick={(event) => {
-              if (agentRunFileChangeHasReviewableDiff(file)) {
-                onOpenReview(file.evidenceFileId, event.currentTarget)
-              } else {
-                onOpenCurrent(file.evidenceFileId, event.currentTarget)
-              }
-            }}
-          >
-            <code title={file.path}>{file.path}</code>
-            <span className="run-file-change-stats" aria-hidden="true">
-              {file.additions !== undefined && file.deletions !== undefined
-                ? <>
-                    {file.additions > 0 && <i className="addition">+{file.additions}</i>}
-                    {file.deletions > 0 && <i className="deletion">−{file.deletions}</i>}
-                  </>
-                : <i>{file.operationCount} 次修改</i>}
-            </span>
-            <svg className="run-file-change-file-arrow" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="m6.25 3.75 4 4.25-4 4.25" />
-            </svg>
-          </button>
-        ))}
+        {visibleFiles.map((file) => {
+          const { basename, directory } = agentRunFilePathParts(file.path)
+          return (
+            <button
+              key={file.evidenceFileId}
+              className="run-file-change-file"
+              type="button"
+              aria-label={agentRunFileChangeHasReviewableDiff(file)
+                ? `查看 ${file.path} 的文件变化`
+                : `打开当前文件预览：${file.path}`}
+              onClick={(event) => {
+                if (agentRunFileChangeHasReviewableDiff(file)) {
+                  onOpenReview(file.evidenceFileId, event.currentTarget)
+                } else {
+                  onOpenCurrent(file.evidenceFileId, event.currentTarget)
+                }
+              }}
+            >
+              <code title={file.path}>
+                <span className="run-file-change-basename">{basename}</span>
+                <span className="run-file-change-directory">{directory}</span>
+              </code>
+              <span className="run-file-change-stats" aria-hidden="true">
+                {file.additions !== undefined && file.deletions !== undefined
+                  ? <>
+                      {file.additions > 0 && <i className="addition">+{file.additions}</i>}
+                      {file.deletions > 0 && <i className="deletion">−{file.deletions}</i>}
+                    </>
+                  : <i>{file.operationCount} 次修改</i>}
+              </span>
+              <svg className="run-file-change-file-arrow" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m6.25 3.75 4 4.25-4 4.25" />
+              </svg>
+            </button>
+          )
+        })}
         {additionalFileCount > 0 && (
           <button
             className="run-file-changes-more-files"

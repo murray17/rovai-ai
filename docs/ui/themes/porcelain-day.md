@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-09-08
+last_updated: 2026-09-09
 ---
 
 # Porcelain Day
@@ -191,6 +191,13 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 | `--diff-add` / `--diff-add-soft` | `#137333` / `#d9f1e2` |
 | `--diff-remove` / `--diff-remove-soft` | `#b3261e` / `#f5dede` |
 | `--diff-hunk-soft` | `#f3f4f4` |
+| `--file-change-surface` | `#ffffff` |
+| `--file-change-hover` | `#f3f4f4` |
+| `--file-change-selected` | `#eeefef` |
+| `--file-change-selected-line` | `#d6d9dc` |
+| `--file-change-add-soft` | `#ecf7f0` |
+| `--file-change-remove-soft` | `#fcf0ef` |
+| `--file-change-hunk` | `#f5f5f4` |
 
 ### Overlay and lightbox
 

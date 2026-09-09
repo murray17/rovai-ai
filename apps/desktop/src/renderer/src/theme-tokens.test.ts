@@ -585,7 +585,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     const runtimeOwned = new Set([
       '--radix-dropdown-menu-content-transform-origin',
       '--radix-dropdown-menu-content-available-height',
-      '--radix-dropdown-menu-trigger-width'
+      '--radix-dropdown-menu-trigger-width',
+      '--radix-popover-trigger-width',
+      '--radix-popover-content-available-height'
     ])
     expect([...used].filter((token) => !declared.has(token) && !runtimeOwned.has(token))).toEqual([])
   })

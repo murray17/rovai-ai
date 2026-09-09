@@ -15,6 +15,8 @@ import { FileOperationRow, ModifiedFileRow, ToolCallRow } from '../../../apps/de
 import { buildLiveExecutionProgress } from '../../../apps/desktop/src/shared/execution-presentation'
 import { FILE_PREVIEW_RATIO_STORAGE_KEY } from '../../../apps/desktop/src/renderer/src/file-preview-layout'
 import { openAgentRunCurrentFilePreview } from '../../../apps/desktop/src/renderer/src/agent-run-file-preview'
+import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
+import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const file: ResolvedFilePreview = {
@@ -221,18 +223,27 @@ const operationOnlyChanges: AgentRunFileChangesView = {
   operationCount: 1,
   completedAt: '2026-08-30T08:01:00Z'
 }
+const pickerChanges: AgentRunFileChangesView = {
+  ...changes, agentRunId: 'run-picker', fileCount: 32, operationCount: 32, additions: 32, deletions: 32,
+  files: Array.from({ length: 32 }, (_, index) => ({
+    evidenceFileId: `picker-${index}`, path: `apps/desktop/src/renderer/components/long-directory-name/file-${index}.tsx`,
+    changeKind: 'update', presentationKind: index === 31 ? 'exact_mutations' : 'full_net_diff',
+    operationCount: 1, additions: 1, deletions: 1
+  }))
+}
 Object.assign(window, { rovai: {
   windowControls: (window as unknown as { previewWindowControls: unknown }).previewWindowControls,
   filePreview: api,
   request: async (method: string, request: { campId: string; agentRunId: string; executionEpoch: number }): Promise<AgentRunFileChangesDetailView> => {
-    if (method !== 'agentRunFileChanges.get' || request.campId !== 'camp-1' || request.agentRunId !== changes.agentRunId) return unsupported()
+    const source = [changes, pickerChanges].find(card => card.agentRunId === request.agentRunId)
+    if (method !== 'agentRunFileChanges.get' || request.campId !== 'camp-1' || !source) return unsupported()
     reviewRequests.push(request)
     if (failNextReview) { failNextReview = false; throw new Error('Fixture detail unavailable') }
     return {
-      schemaVersion: 2, card: { ...changes, executionEpoch: request.executionEpoch },
-      files: changes.files.map((entry) => ({ ...entry, blocks: [{
-        sequence: 1, semantics: 'full_net_diff', changeKind: 'update',
-        diff: `@@ -1,${entry.deletions} +1,${entry.additions} @@\n`
+      schemaVersion: 2, card: { ...source, executionEpoch: request.executionEpoch },
+      files: source.files.map((entry) => ({ ...entry, blocks: [{
+        sequence: 1, semantics: entry.presentationKind === 'exact_mutations' ? 'exact_mutation' : 'full_net_diff', changeKind: 'update',
+        diff: (entry.presentationKind === 'exact_mutations' ? '' : `@@ -1,${entry.deletions} +1,${entry.additions} @@\n`)
           + Array.from({ length: entry.deletions! }, (_, index) => `-历史旧内容 ${index + 1}`).join('\n') + '\n'
           + Array.from({ length: entry.additions! }, (_, index) => `+历史新内容 ${index + 1}${entry.evidenceFileId === 'file-1' && index === 0 ? ' const preservedLongLine = '.repeat(30) : ''}`).join('\n')
       }] }))
@@ -400,6 +411,7 @@ function Fixture(): React.JSX.Element {
   switchCamp = () => setCamp((previous) => previous === 'camp-1' ? 'camp-2' : 'camp-1')
   setFixtureTheme = (theme) => {
     document.documentElement.dataset.theme = theme
+    document.documentElement.style.colorScheme = theme === 'night' ? 'dark' : 'light'
     setResolvedTheme(theme)
   }
   return <FilePreviewProvider campId={camp} resolvedTheme={resolvedTheme}>
@@ -625,9 +637,17 @@ Object.assign(window, { previewTest: {
   },
   async closeAll() { previewController.closeMany(previewController.tabs.map((tab) => tab.id)); await settle() },
   async selectChangedFile(index: number) {
-    const select = document.querySelector<HTMLSelectElement>('.file-preview-tab-panel:not([hidden]) select')!
-    select.value = changes.files[index].evidenceFileId
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    document.querySelectorAll<HTMLButtonElement>('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-file')[index].click()
+    await settle()
+  },
+  async openPickerReview() {
+    previewController.openFileChanges('camp-1', pickerChanges)
+    await settle()
+  },
+  async setCodeFontSize(codeFontSize: number) {
+    applyAppearanceSnapshot(document.documentElement, {
+      ...DEFAULT_APPEARANCE, codeFontSize, resolvedTheme: document.documentElement.dataset.theme as ResolvedTheme
+    })
     await settle()
   },
   bookmarkReview() {
@@ -878,7 +898,7 @@ Object.assign(window, { previewTest: {
       viewLabel: element('.run-file-changes-card-view')!.textContent,
       fileStatsFit: stats.every(node => node.scrollWidth <= node.clientWidth && node.getBoundingClientRect().right < bounds('.run-file-changes-card')!.right),
       fileStats: stats.map(node => node.textContent),
-      pathTruncated: element('.run-file-change-file code')!.scrollWidth > element('.run-file-change-file code')!.clientWidth,
+      pathTruncated: [...document.querySelectorAll<HTMLElement>('.run-file-change-file code span')].some(node => node.scrollWidth > node.clientWidth),
       overflows: ['.camp-timeline', '.task-event-card', '.run-file-changes-card', '.composer', '.composer-box', '.composer-action-row', '.approval-dock', '.runtime-recovery-dock']
         .filter(selector => { const node = element(selector); return node && node.scrollWidth > node.clientWidth + 1 }),
       composer: bounds('.composer-box'), attachment: bounds('.composer-attachment-button'), send: bounds('.composer-send'), stop: bounds('.composer-stop'),
