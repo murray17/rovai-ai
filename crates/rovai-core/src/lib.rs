@@ -89,3 +89,5 @@ mod runtime_pricing;
 
 #[cfg(test)]
 pub(crate) mod test_support;
+
+pub mod message_quote;

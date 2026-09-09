@@ -280,6 +280,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.pendingInputs.get',
   'camp.pendingInputs.edit',
   'camp.composerDraft.save',
+  'messageQuotes.mutateDraft',
   'camp.composerDraft.startReply',
   'camp.composerDraft.cancelReply',
   'camp.composerDraft.resolveReplyRecipient',

@@ -101,7 +101,8 @@ function snapshot({
       endedAt: null
     },
     messages: [],
-    draft: { revision: 0, attachments: [], updatedAt: null },
+    draft: {
+    quotes: [], revision: 0, attachments: [], updatedAt: null },
     pendingInputs: {
       executionActive: runs.some((item) => ['queued', 'running', 'waiting'].includes(item.status)),
       items: pendingStates.map((state, index) => ({
@@ -110,6 +111,7 @@ function snapshot({
         enqueueSequence: index + 1,
         revision: 1,
         state,
+        quotes: [],
         body: 'next',
         lastAttemptErrorCode: null,
         attachments: []
@@ -148,7 +150,7 @@ describe('Single Chat presentation', () => {
   it('removes the initial status as soon as narration arrives, before the run completes', () => {
     const currentRun = run({ status: 'running', endedAt: null, finalConversationMessageId: null })
     const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
-      campId: 'camp-1', run: currentRun,
+      campId: 'camp-1', conversationId: 'conversation-1', run: currentRun,
       evidence: [evidence('正在输出的第一段正文', currentRun.id, currentRun.executionEpoch, 1)],
       finalMessage: null, now: '2026-09-03T11:00:00.000Z'
     }))
@@ -162,7 +164,7 @@ describe('Single Chat presentation', () => {
       const currentRun = run({ status, endedAt: null, finalConversationMessageId: null })
       for (const items of [[], [evidence('继续核对结果', currentRun.id, currentRun.executionEpoch, 1)]]) {
         const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
-          campId: 'camp-1', run: currentRun, evidence: items, finalMessage: null,
+          campId: 'camp-1', conversationId: 'conversation-1', run: currentRun, evidence: items, finalMessage: null,
           now: '2026-09-03T11:00:00.000Z'
         }))
         expect(markup).toContain('single-chat-run-history is-live" open=""')
@@ -182,11 +184,11 @@ describe('Single Chat presentation', () => {
     const currentRun = run({ status: 'running', endedAt: null })
     const body = '已经到达的最终正文'
     const markup = renderToStaticMarkup(createElement(SingleChatRunHistory, {
-      campId: 'camp-1', run: currentRun,
+      campId: 'camp-1', conversationId: 'conversation-1', run: currentRun,
       evidence: [evidence(body, currentRun.id, currentRun.executionEpoch, 1)],
       finalMessage: {
         id: 'final-1', sequence: 2, authorType: 'agent', authorId: member.agentId,
-        body, attachments: [], agentRunId: currentRun.id, createdAt: '2026-09-03T11:00:00.000Z'
+        body, quotes: [], attachments: [], agentRunId: currentRun.id, createdAt: '2026-09-03T11:00:00.000Z'
       },
       now: '2026-09-03T11:00:00.000Z'
     }))
@@ -198,7 +200,7 @@ describe('Single Chat presentation', () => {
   it('preserves waiting, stopping and terminal outcomes', () => {
     const markupFor = (status: SingleChatRunView['status'], cancelling = false): string =>
       renderToStaticMarkup(createElement(SingleChatRunHistory, {
-        campId: 'camp-1', run: run({ status }), evidence: [], finalMessage: null,
+        campId: 'camp-1', conversationId: 'conversation-1', run: run({ status }), evidence: [], finalMessage: null,
         now: '2026-09-03T11:00:00.000Z', cancelling
       }))
     expect(markupFor('waiting')).toContain('等待继续')

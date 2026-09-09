@@ -14315,6 +14315,8 @@ mod tests {
                                         | "destination_conversation_id"
                                 ))
                             && column != "automation_run_id"
+                            && column != "quotes_json"
+                            && column != "quote_trash_json"
                     })
                     .collect::<Vec<_>>()
                     .join(", ");

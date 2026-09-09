@@ -440,7 +440,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 23,
+    contractVersion: 24,
     ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -485,7 +485,7 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v23')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v24')
       || !snapshot.models.length) {
     throw new Error(`${label} is not ready for Built-in CLI v23: ${JSON.stringify(snapshot)}`)
   }

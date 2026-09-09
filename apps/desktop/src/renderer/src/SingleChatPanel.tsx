@@ -1,3 +1,6 @@
+import { revealMessageQuote } from './message-quote-reveal'
+import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
+import type { MessageQuoteAction, MessageQuoteSnapshot } from '@contracts'
 import {
   useCallback,
   useEffect,
@@ -302,6 +305,7 @@ function memberCanSingleChat(member: CampMemberView): boolean {
 
 export function SingleChatRunHistory({
   campId,
+  conversationId,
   run,
   evidence,
   finalMessage,
@@ -310,6 +314,7 @@ export function SingleChatRunHistory({
   onNotify = () => undefined
 }: {
   campId: string
+  conversationId: string
   run: SingleChatRunView
   evidence: AgentRunExecutionEvidenceView[]
   finalMessage: SingleChatMessageView | null
@@ -425,11 +430,18 @@ export function SingleChatRunHistory({
         </details>
         {finalMessage && <>
           <hr className="single-chat-final-rule" />
-          <div className="single-chat-final" data-notification-turn-id={run.campTurnId}><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
+          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-turn-id={run.campTurnId}><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
         </>}
       </div>
     </section>
   )
+}
+
+async function revealPrivateQuote(quote: MessageQuoteSnapshot): Promise<void> {
+  const root = document.querySelector<HTMLElement>(`[data-single-chat-owner="${CSS.escape(quote.source.conversationId ?? '')}"]`)
+  const target = root?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(quote.source.messageId)}"]`)
+  if (!target) throw new Error('quote.source_unavailable')
+  await revealMessageQuote(quote, target, quote.authorAtCapture.type === 'user' ? target.textContent ?? '' : undefined)
 }
 
 function SingleChatTranscript({
@@ -462,10 +474,11 @@ function SingleChatTranscript({
       }
       const run = runsByTrigger.get(message.id) ?? null
       return (
-        <div className="single-chat-turn" key={message.id}>
+        <div className="single-chat-turn" key={message.id} data-single-chat-message-id={message.id}>
           <div className="single-chat-user-message">
             <div className="single-chat-user-content">
-              {message.body && <div className="single-chat-user-bubble">{message.body}</div>}
+              <MessageQuotes history quotes={message.quotes ?? []} onReveal={revealPrivateQuote} />
+              {message.body && <div className="single-chat-user-bubble" data-message-quote-body={message.id} data-quote-owner={`single_chat:${snapshot.conversation.id}`}>{message.body}</div>}
               {message.attachments.length > 0 && (
                 <div className="single-chat-message-attachments" role="group" aria-label={`附件 ${message.attachments.length} 个`}>
                   {message.attachments.map((attachment) => (
@@ -489,6 +502,7 @@ function SingleChatTranscript({
           </div>
           {run && (
             <SingleChatRunHistory
+              conversationId={snapshot.conversation.id}
               campId={snapshot.conversation.campId}
               cancelling={cancelling && run.id === snapshot.conversation.activeAgentRunId}
               onNotify={onNotify}
@@ -560,6 +574,13 @@ function SingleChatPendingQueue({
     })
     if (result.status === 'rejected') throw new Error(resultMessage(result))
     return result
+  }
+
+  const mutatePendingQuote = async (action: MessageQuoteAction): Promise<void> => {
+    if (!editingItem || !session || session.recoveryRequired || busy || busyOutside) throw new Error('single_chat.pending_input_edit_fenced')
+    setBusy(true)
+    try { await mutate(editingItem, { type: 'quote', action }, session.editToken); await onRefresh() }
+    finally { setBusy(false) }
   }
 
   const perform = async (
@@ -706,6 +727,11 @@ function SingleChatPendingQueue({
       {editingItem && session && (
         <div className="composer-box pending-input-editor single-chat-pending-editor">
           <div className="composer-input">
+            <MessageQuoteSelectionToolbar ownerKey={`single_chat:${snapshot.conversation.id}`} messages={snapshot.messages}
+              disabled={busy || busyOutside || !session || session.recoveryRequired}
+              onAdd={(selection) => mutatePendingQuote({ type: 'add', selection })} />
+            <MessageQuotes key={editingItem.id} quotes={session?.workingQuotes ?? editingItem.quotes ?? []}
+              onReveal={revealPrivateQuote} onMutate={mutatePendingQuote} disabled={busy || busyOutside} />
             {session.recoveryRequired && <p className="pending-input-error">上次编辑未完成，请点击“重新编辑”后继续。</p>}
             {session.workingAttachments.length > 0 && (
               <SingleChatAttachmentStrip>
@@ -844,7 +870,10 @@ export function SingleChatPanel({
   const [conversations, setConversations] = useState<SingleChatConversationView[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(initialAgentId)
   const [snapshot, setSnapshot] = useState<SingleChatSnapshot | null>(null)
-  const [draft, setDraft] = useState('')
+  const [bodyDrafts, setBodyDrafts] = useState<Record<string, string>>({})
+  const [quoteBusy, setQuoteBusy] = useState(false)
+  const quoteTailRef = useRef<Promise<void>>(Promise.resolve())
+  const quoteOperationCount = useRef(0)
   const [loading, setLoading] = useState(false)
   const loadingRef = useRef(false)
   const [sending, setSending] = useState(false)
@@ -875,6 +904,20 @@ export function SingleChatPanel({
   const selectedMember = selectedAgentId ? memberById.get(selectedAgentId) ?? null : null
   const currentTargetReady = singleChatConversationReady(snapshot, selectedAgentId, loading)
   const currentSnapshot = currentTargetReady ? snapshot : null
+  const bodyDraftKey = snapshot?.conversation.agentId === selectedAgentId
+    ? `${campId}:${snapshot.conversation.id}` : `${campId}:pending:${selectedAgentId ?? ''}`
+  const draft = bodyDrafts[bodyDraftKey] ?? ''
+  const setDraft = (value: string): void => setBodyDrafts((current) => ({ ...current, [bodyDraftKey]: value }))
+  useEffect(() => {
+    if (!snapshot || snapshot.conversation.agentId !== selectedAgentId) return
+    const pendingKey = `${campId}:pending:${selectedAgentId ?? ''}`
+    setBodyDrafts((current) => {
+      if (!(pendingKey in current)) return current
+      const next = { ...current, [bodyDraftKey]: current[bodyDraftKey] ?? current[pendingKey] }
+      delete next[pendingKey]
+      return next
+    })
+  }, [campId, selectedAgentId, snapshot?.conversation.id, bodyDraftKey])
   const activeRun = currentSnapshot?.agentRuns.find((run) => NON_TERMINAL_RUNS.has(run.status)) ?? null
   const runningCount = conversations.filter((conversation) => (
     conversation.id === currentSnapshot?.conversation.id
@@ -903,6 +946,8 @@ export function SingleChatPanel({
       || campIdRef.current !== campId
       || currentConversationIdRef.current !== conversationId
     ) return
+    if (next && snapshotRef.current?.conversation.id === conversationId
+      && next.draft.revision < snapshotRef.current.draft.revision) return
     snapshotRef.current = next
     setSnapshot(next)
     setError(null)
@@ -1356,6 +1401,7 @@ export function SingleChatPanel({
     : !currentTargetReady
       || ending
       || sending
+      || quoteBusy
       || preparingAttachments.some((item) => !item.error)
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
@@ -1450,6 +1496,24 @@ export function SingleChatPanel({
     }
   }
 
+  const mutateDraftQuote = (action: MessageQuoteAction): Promise<void> => {
+    const owner = snapshotRef.current?.conversation.id
+    const commandId = crypto.randomUUID()
+    if (!owner) return Promise.reject(new Error('quote.owner_unavailable'))
+    quoteOperationCount.current += 1
+    setQuoteBusy(true)
+    const operation = quoteTailRef.current.then(async () => {
+      const current = snapshotRef.current
+      if (!current || current.conversation.id !== owner || currentConversationIdRef.current !== owner) throw new Error('quote.owner_unavailable')
+      const next = await window.rovai.request<SingleChatSnapshot>('messageQuotes.mutateDraft', {
+        commandId, command: { campId, conversationId: owner, expectedRevision: current.draft.revision, action }
+      })
+      acceptSnapshot(owner, next)
+    })
+    quoteTailRef.current = operation.then(() => undefined, () => undefined)
+    return operation.finally(() => { quoteOperationCount.current -= 1; setQuoteBusy(quoteOperationCount.current > 0) })
+  }
+
   const send = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     const body = draft.trim()
@@ -1458,6 +1522,7 @@ export function SingleChatPanel({
       !agentId
       || !singleChatConversationReady(snapshotRef.current, agentId, loadingRef.current)
       || sending
+      || quoteBusy
       || preparingAttachments.some((item) => !item.error)
     ) return
     followLatestRef.current = true
@@ -1468,6 +1533,7 @@ export function SingleChatPanel({
         ? snapshotRef.current
         : await openConversation(agentId)
       if (!current) throw new Error('无法打开这段单聊。')
+      if (!body && (current.draft.quotes?.length ?? 0) > 0) throw new Error('请填写这次的问题后再发送。')
       if (!body && current.draft.attachments.length === 0) return
       const result = await window.rovai.request<StoredCommandResult>('singleChat.send', {
         commandId: crypto.randomUUID(),
@@ -1610,6 +1676,7 @@ export function SingleChatPanel({
     <aside
       ref={panelRef}
       id={panelId}
+      data-single-chat-owner={currentSnapshot?.conversation.id}
       className={`single-chat-popover${attachmentDragState ? ' is-dragging-attachments' : ''}`}
       role="dialog"
       aria-modal={false}
@@ -1633,7 +1700,7 @@ export function SingleChatPanel({
       <div className="single-chat-target-bar">
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button className={`single-chat-target-trigger${selectedMember ? '' : ' no-target'}`} type="button" disabled={activeMembers.length === 0 || ending || sending || preparingAttachments.some((item) => !item.error)}>
+            <button className={`single-chat-target-trigger${selectedMember ? '' : ' no-target'}`} type="button" disabled={activeMembers.length === 0 || ending || sending || quoteBusy || preparingAttachments.some((item) => !item.error)}>
               {selectedMember && <MemberAvatar agentId={selectedMember.agentId} avatarRef={selectedMember.avatarRef} displayName={selectedMember.displayName} size="mention" decorative />}
               <span className="single-chat-target-copy">
                 <strong>{selectedMember?.displayName ?? '选择单聊对象'}</strong>
@@ -1719,6 +1786,10 @@ export function SingleChatPanel({
         />
       )}
 
+      {currentSnapshot && <MessageQuoteSelectionToolbar key={currentSnapshot.conversation.id}
+        ownerKey={`single_chat:${currentSnapshot.conversation.id}`} messages={currentSnapshot.messages}
+        disabled={!visible || sending || quoteBusy || pendingEditing || preparingAttachments.some((item) => !item.error)}
+        onAdd={(selection) => mutateDraftQuote({ type: 'add', selection })} />}
       <form className="composer single-chat-composer" onSubmit={(event) => void send(event)}>
         <div className={`composer-box single-chat-composer-box${activeRun ? ' is-running' : ''}`}>
           <div className="composer-input">
@@ -1750,6 +1821,8 @@ export function SingleChatPanel({
                 ))}
               </SingleChatAttachmentStrip>
             )}
+            <MessageQuotes key={currentSnapshot?.conversation.id ?? 'empty'} quotes={currentSnapshot?.draft.quotes ?? []}
+              disabled={sending || quoteBusy} onReveal={revealPrivateQuote} onMutate={mutateDraftQuote} />
             <label className="sr-only" htmlFor={`${panelId}-composer`}>发送单聊消息</label>
             <textarea
               id={`${panelId}-composer`}
@@ -1793,7 +1866,7 @@ export function SingleChatPanel({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={!selectedMember || !currentTargetReady || sending || ending || preparingAttachments.some((item) => !item.error)}
+                disabled={!selectedMember || !currentTargetReady || sending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18"><path d="m6.2 9.8 4.65-4.65a2.5 2.5 0 0 1 3.54 3.54l-6.1 6.1a4 4 0 0 1-5.66-5.66l6.1-6.1" /></svg>
@@ -1814,7 +1887,7 @@ export function SingleChatPanel({
                     action="send"
                     type="submit"
                     busy={sending || preparingAttachments.some((item) => !item.error)}
-                    disabled={(!draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || ending || preparingAttachments.some((item) => !item.error)}
+                    disabled={(!draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
                   />}
             </div>
           </div>

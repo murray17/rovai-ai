@@ -100,6 +100,7 @@ Preload 请求 transport 或 Renderer 错误读取改动还须运行 `pnpm test:
 App，以受控本机 API 和时钟验证页面框架、截止时间与 authority 请求门禁，不启动 Core 或访问日常数据。
 修改审批 Dock 的焦点、原生选项或 Reason 展示时运行 `pnpm test:approval-dock`，使用生产组件的隔离 Electron
 夹具验证键盘操作与动态布局，不启动 Core 或模型。
+修改消息选文引用时运行 `pnpm test:message-quotes`：隔离 Electron 使用生产正文、引用组件与共享投影样例，验证选区排除、原生悬浮、键盘、完整选文和整行定位。验收窗口使用独立 userData，不启动 Core 或模型；其他会争用 OS 焦点的 Electron 验收应顺序运行。
 修改钉钉内置扫码与官方原生页时运行 `pnpm test:dingtalk-login`：使用生产 Renderer/preload、Main native view 与本机页面
 验证二维码、刷新、静默取消、旧账号保留、缩放/裁剪和 bridge 隔离；不替代真实扫码、Core 或远端发布验收。
 修改文件预览分栏、Tab 或 File Change 详情时运行 `pnpm test:file-preview-layout`：真实 Electron 中组合生产标题栏、分栏、Tab 和 Viewer，

@@ -1,3 +1,6 @@
+use crate::message_quote::{
+    MessageQuoteSnapshot, QuoteStorage, copy_quotes, load_quotes, store_quotes,
+};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::{Context, Result};
@@ -85,6 +88,8 @@ pub struct SingleChatHistoryInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatHistoryMessage {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub quotes: Vec<Value>,
     pub sequence: i64,
     pub role: String,
     pub body: String,
@@ -124,6 +129,7 @@ pub struct SingleChatConversationView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatMessageView {
+    pub quotes: Vec<MessageQuoteSnapshot>,
     pub id: String,
     pub sequence: i64,
     pub author_type: String,
@@ -167,6 +173,7 @@ pub struct SingleChatSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatComposerDraftView {
+    pub quotes: Vec<MessageQuoteSnapshot>,
     pub revision: i64,
     pub attachments: Vec<LocalAttachmentSourceView>,
     pub updated_at: Option<String>,
@@ -175,6 +182,7 @@ pub struct SingleChatComposerDraftView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatPendingInputView {
+    pub quotes: Vec<MessageQuoteSnapshot>,
     pub id: String,
     pub conversation_id: String,
     pub enqueue_sequence: i64,
@@ -188,6 +196,7 @@ pub struct SingleChatPendingInputView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SingleChatPendingInputEditSessionView {
+    pub working_quotes: Vec<MessageQuoteSnapshot>,
     pub pending_input_id: String,
     pub edit_token: String,
     pub base_pending_revision: i64,
@@ -231,6 +240,9 @@ pub enum SingleChatPendingInputEditAction {
     ReorderAttachments {
         #[serde(rename = "attachmentRefIds")]
         attachment_ref_ids: Vec<String>,
+    },
+    Quote {
+        action: crate::message_quote::QuoteAction,
     },
     Cancel,
     Delete,
@@ -285,7 +297,7 @@ impl SingleChatService {
                 "schemaVersion", "messages", "hasMore", "nextBeforeSequence"
             ],
             "properties": {
-                "schemaVersion": {"const": 1},
+                "schemaVersion": {"const": 2},
                 "messages": {
                     "type": "array",
                     "maxItems": SINGLE_CHAT_HISTORY_MAX_LIMIT,
@@ -297,6 +309,7 @@ impl SingleChatService {
                             "sequence": {"type": "integer", "minimum": 1},
                             "role": {"type": "string", "enum": ["user", "assistant"]},
                             "body": {"type": "string"},
+                            "quotes": crate::message_quote::model_quotes_schema("current_conversation_messages"),
                             "attachments": {
                                 "type": "array",
                                 "items": {
@@ -351,7 +364,7 @@ impl SingleChatService {
             .min(current_input_sequence);
         let mut statement = database.connection().prepare(
             r#"
-            SELECT sequence, author_type, body, source_attachments_json
+            SELECT sequence, author_type, body, source_attachments_json, quotes_json
             FROM conversation_message
             WHERE conversation_id = ?1
               AND sequence < ?2
@@ -369,6 +382,7 @@ impl SingleChatService {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 },
             )?
@@ -377,18 +391,23 @@ impl SingleChatService {
         rows.truncate(limit);
         let mut messages = rows
             .into_iter()
-            .map(|(sequence, author_type, body, attachments_json)| {
-                Ok(SingleChatHistoryMessage {
-                    sequence,
-                    role: if author_type == "user" {
-                        "user".to_string()
-                    } else {
-                        "assistant".to_string()
-                    },
-                    body,
-                    attachments: history_attachment_views(&attachments_json)?,
-                })
-            })
+            .map(
+                |(sequence, author_type, body, attachments_json, quotes_json)| {
+                    Ok(SingleChatHistoryMessage {
+                        quotes: crate::message_quote::model_quotes(
+                            &crate::message_quote::parse_quotes(&quotes_json)?,
+                        ),
+                        sequence,
+                        role: if author_type == "user" {
+                            "user".to_string()
+                        } else {
+                            "assistant".to_string()
+                        },
+                        body,
+                        attachments: history_attachment_views(&attachments_json)?,
+                    })
+                },
+            )
             .collect::<Result<Vec<_>>>()?;
         messages.reverse();
         let next_before_sequence = has_more.then(|| {
@@ -398,7 +417,7 @@ impl SingleChatService {
                 .sequence
         });
         Ok(SingleChatHistoryOutput {
-            schema_version: 1,
+            schema_version: 2,
             messages,
             has_more,
             next_before_sequence,
@@ -559,6 +578,15 @@ impl SingleChatService {
                 ));
             }
             let body = envelope.payload.body.trim();
+            let quotes = load_quotes(
+                transaction,
+                QuoteStorage::PrivateDraft,
+                &target.conversation_id,
+            )?;
+            anyhow::ensure!(
+                quotes.is_empty() || !body.is_empty(),
+                "quote.question_required"
+            );
             if body.is_empty() && source_attachments.is_empty() {
                 return Ok(rejected(
                     "single_chat.empty_message",
@@ -584,6 +612,12 @@ impl SingleChatService {
                     body,
                     &source_attachments,
                     user_id,
+                )?;
+                store_quotes(
+                    transaction,
+                    QuoteStorage::PrivatePending,
+                    &pending_input_id,
+                    &quotes,
                 )?;
                 consume_single_chat_draft(transaction, &target.conversation_id, draft_revision)?;
                 append_domain_event(
@@ -634,6 +668,7 @@ impl SingleChatService {
                 user_id,
                 body,
                 &source_attachments,
+                &quotes,
                 &runtime,
                 &envelope.command_id,
                 Some(draft_revision),
@@ -1055,6 +1090,8 @@ impl SingleChatService {
                             source_attachments_json,
                         ],
                     )?;
+                    copy_quotes(transaction, QuoteStorage::PrivatePending, &command.pending_input_id, QuoteStorage::PrivateEdit, &command.conversation_id)?;
+                    transaction.execute("UPDATE single_chat_pending_input_edit_session SET quote_trash_json='[]' WHERE conversation_id=?1", [&command.conversation_id])?;
                     return Ok(CommandHandlerResult::applied(
                         "single_chat.pending_input_edit_started",
                         json!({ "editToken": edit_token }),
@@ -1081,6 +1118,8 @@ impl SingleChatService {
                         .working_source_attachments_json
                         .clone();
                     let refs = parse_source_attachments(&working_json)?;
+                    let working_quotes = load_quotes(transaction, QuoteStorage::PrivateEdit, &command.conversation_id)?;
+                    anyhow::ensure!(working_quotes.is_empty() || !body.trim().is_empty(), "quote.question_required");
                     if body.trim().is_empty() && refs.is_empty() {
                         return Ok(rejected(
                             "single_chat.empty_message",
@@ -1101,6 +1140,15 @@ impl SingleChatService {
                             chrono::Utc::now().to_rfc3339(),
                         ],
                     )?;
+                    store_quotes(transaction, QuoteStorage::PrivatePending, &command.pending_input_id, &working_quotes)?;
+                }
+                SingleChatPendingInputEditAction::Quote { action } => {
+                    if !owns_session || session.as_ref().is_some_and(|session| session.recovery_required) {
+                        return Ok(rejected("single_chat.pending_input_edit_fenced", "Reopen the pending input before editing quotes"));
+                    }
+                    crate::message_quote::mutate_quotes(transaction, QuoteStorage::PrivateEdit, &command.conversation_id,
+                        &command.camp_id, Some(&command.conversation_id), action)?;
+                    return Ok(CommandHandlerResult::applied("single_chat.pending_input_quotes_updated", json!({"pendingInputId":command.pending_input_id}), None));
                 }
                 SingleChatPendingInputEditAction::RemoveAttachment { attachment_ref_id } => {
                     let Some(session) = session
@@ -1308,6 +1356,11 @@ impl SingleChatService {
                 user_id,
                 &pending.body,
                 &pending.source_attachments,
+                &load_quotes(
+                    transaction,
+                    QuoteStorage::PrivatePending,
+                    &command.pending_input_id,
+                )?,
                 &runtime,
                 &envelope.command_id,
                 None,
@@ -1411,6 +1464,11 @@ impl SingleChatService {
                         created_at,
                     )| {
                         Ok(SingleChatMessageView {
+                            quotes: load_quotes(
+                                database.connection(),
+                                QuoteStorage::PrivateMessage,
+                                &id,
+                            )?,
                             id,
                             sequence,
                             author_type,
@@ -1601,11 +1659,17 @@ fn load_single_chat_draft(
         .optional()?;
     match stored {
         Some((revision, value, updated_at)) => Ok(SingleChatComposerDraftView {
+            quotes: load_quotes(
+                database.connection(),
+                QuoteStorage::PrivateDraft,
+                conversation_id,
+            )?,
             revision,
             attachments: source_attachment_views(&value)?,
             updated_at: Some(updated_at),
         }),
         None => Ok(SingleChatComposerDraftView {
+            quotes: Vec::new(),
             revision: 0,
             attachments: Vec::new(),
             updated_at: None,
@@ -1862,6 +1926,7 @@ fn read_single_chat_pending_inputs(
                 last_attempt_error_code,
             )| {
                 Ok(SingleChatPendingInputView {
+                    quotes: load_quotes(database.connection(), QuoteStorage::PrivatePending, &id)?,
                     id,
                     conversation_id: conversation_id.to_string(),
                     enqueue_sequence,
@@ -1908,6 +1973,11 @@ fn read_single_chat_pending_inputs(
             )| {
                 Ok::<SingleChatPendingInputEditSessionView, anyhow::Error>(
                     SingleChatPendingInputEditSessionView {
+                        working_quotes: load_quotes(
+                            database.connection(),
+                            QuoteStorage::PrivateEdit,
+                            conversation_id,
+                        )?,
                         pending_input_id,
                         edit_token,
                         base_pending_revision,
@@ -1937,7 +2007,7 @@ fn consume_single_chat_draft(
     if expected_revision == 0 {
         let updated = transaction.execute(
             "UPDATE single_chat_composer_draft
-             SET source_attachments_json = '[]', revision = 1, updated_at = ?2
+             SET source_attachments_json = '[]', quotes_json='[]', quote_trash_json='[]', revision = 1, updated_at = ?2
              WHERE conversation_id = ?1 AND revision = 0",
             params![conversation_id, now],
         )?;
@@ -1953,7 +2023,7 @@ fn consume_single_chat_draft(
     }
     let updated = transaction.execute(
         "UPDATE single_chat_composer_draft
-         SET source_attachments_json = '[]', revision = revision + 1, updated_at = ?3
+         SET source_attachments_json = '[]', quotes_json='[]', quote_trash_json='[]', revision = revision + 1, updated_at = ?3
          WHERE conversation_id = ?1 AND revision = ?2",
         params![conversation_id, expected_revision, now],
     )?;
@@ -2039,11 +2109,16 @@ fn admit_single_chat_message(
     user_id: &str,
     body: &str,
     source_attachments: &[LocalAttachmentSourceRef],
+    quotes: &[MessageQuoteSnapshot],
     runtime: &crate::agent_profile::FrozenAgentRuntimeConfig,
     command_id: &str,
     draft_revision: Option<i64>,
     actor: &ActorRef,
 ) -> Result<AdmittedSingleChatMessage> {
+    anyhow::ensure!(
+        quotes.is_empty() || !body.trim().is_empty(),
+        "quote.question_required"
+    );
     let accepted_at = chrono::Utc::now();
     let now = accepted_at.to_rfc3339();
     let budget = freeze_camp_turn_execution_budget(None, accepted_at, 1)?;
@@ -2191,6 +2266,12 @@ fn admit_single_chat_message(
             source_attachments_json,
             now,
         ],
+    )?;
+    store_quotes(
+        transaction,
+        QuoteStorage::PrivateMessage,
+        &conversation_message_id,
+        quotes,
     )?;
     append_domain_event(
         transaction,
@@ -3410,6 +3491,38 @@ mod tests {
         service
             .add_source_attachment(&mut database, &conversation_id, 1, source_ref)
             .unwrap();
+        crate::message_quote::mutate_draft(
+            &mut database,
+            &user_envelope(
+                "private-quote-add",
+                Some(&camp_id),
+                crate::message_quote::MutateQuoteDraftCommand {
+                    camp_id: camp_id.clone(),
+                    conversation_id: Some(conversation_id.clone()),
+                    expected_revision: 2,
+                    action: crate::message_quote::QuoteAction::Add {
+                        selection: crate::message_quote::QuoteSelection {
+                            current_user_display_name: None,
+                            message_id: first.result.payload["conversationMessageId"]
+                                .as_str()
+                                .unwrap()
+                                .to_string(),
+                            body_at_selection: "请检查这一处设计".into(),
+                            start_scalar: 3,
+                            end_scalar: 8,
+                            text: "这一处设计".into(),
+                        },
+                    },
+                },
+            ),
+        )
+        .unwrap();
+        let captured = load_quotes(
+            database.connection(),
+            QuoteStorage::PrivateDraft,
+            &conversation_id,
+        )
+        .unwrap();
         let queued = service
             .send(
                 &mut database,
@@ -3420,7 +3533,7 @@ mod tests {
                         camp_id: camp_id.clone(),
                         conversation_id: conversation_id.clone(),
                         body: "读取排队附件".to_string(),
-                        draft_revision: 2,
+                        draft_revision: 3,
                     },
                 ),
             )
@@ -3430,6 +3543,24 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        assert_eq!(
+            load_quotes(
+                database.connection(),
+                QuoteStorage::PrivatePending,
+                &pending_input_id
+            )
+            .unwrap(),
+            captured
+        );
+        assert!(
+            load_quotes(
+                database.connection(),
+                QuoteStorage::PrivateDraft,
+                &conversation_id
+            )
+            .unwrap()
+            .is_empty()
+        );
         let queued_locator = LocalAttachmentOwnerLocator::SingleChatPending {
             camp_id: camp_id.clone(),
             conversation_id: conversation_id.clone(),
@@ -3498,6 +3629,7 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.messages.len(), 3);
         assert_eq!(snapshot.messages[2].body, "读取排队附件");
+        assert_eq!(snapshot.messages[2].quotes, captured);
         assert_eq!(snapshot.messages[2].attachments.len(), 1);
         assert!(snapshot.pending_inputs.items.is_empty());
         let public_messages: i64 = database
@@ -3805,8 +3937,9 @@ mod tests {
         assert_eq!(
             newest,
             SingleChatHistoryOutput {
-                schema_version: 1,
+                schema_version: 2,
                 messages: vec![SingleChatHistoryMessage {
+                    quotes: Vec::new(),
                     sequence: 2,
                     role: "assistant".to_string(),
                     body: "第一轮回答".to_string(),

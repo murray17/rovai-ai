@@ -1,3 +1,7 @@
+import type { MessageQuoteSnapshot } from '@contracts'
+import { revealMessageQuote } from './message-quote-reveal'
+import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
+import { dismissMessageQuoteSelection } from './message-quote-selection'
 import { currentUserDisplayName } from '@contracts'
 import { CurrentUserAvatar, useCurrentUserProfile } from './CurrentUserProfile'
 import { prefersReducedMotion } from './reduced-motion'
@@ -415,6 +419,11 @@ async function mutateComposerDraft(
 ): Promise<CampComposerDraftView> {
   const common = { campId: draft.campId, expectedRevision: draft.revision }
   switch (mutation.kind) {
+    case 'quote':
+      return window.rovai.request<CampComposerDraftView>('messageQuotes.mutateDraft', {
+        commandId: mutation.commandId,
+        command: { ...common, conversationId: null, action: mutation.action }
+      })
     case 'save_content':
       return window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
         ...common,
@@ -1622,6 +1631,7 @@ export function CampWorkspace({
   conversationFindOpenRef.current = conversationFind.open
   const recipientRepairFirstOptionRef = useRef<HTMLButtonElement>(null)
   const autoSuppressedContinuationSourceRef = useRef<string | null>(null)
+  const [quoteSourceId, setQuoteSourceId] = useState<string | null>(null)
   const [anchoredMessages, setAnchoredMessages] = useState<CampMessageView[]>([])
   const [replyAnchorWindows, setReplyAnchorWindows] = useState(
     () => new Map<string, CampMessageView[] | null>()
@@ -2808,6 +2818,27 @@ export function CampWorkspace({
     routingMutating
   ])
 
+  const revealQuote = async (quote: MessageQuoteSnapshot): Promise<void> => {
+    const campId = snapshot.camp.id
+    if (quote.source.scope !== 'camp' || quote.source.campId !== campId) throw new Error('quote.owner_mismatch')
+    const messageId = quote.source.messageId
+    setConversationView('conversation')
+    setQuoteSourceId(messageId)
+    let source = visibleMessageById.get(messageId)
+    if (!source) {
+      const messages = replyAnchorWindows.get(messageId) ?? await loadReplyAnchorWindow(messageId)
+      if (activeCampIdRef.current !== campId) return
+      source = messages?.find(message => message.id === messageId)
+      if (!source || !messages) throw new Error('quote.source_unavailable')
+      setAnchoredMessages(current => [...new Map([...current, ...messages].map(message => [message.id, message])).values()])
+    }
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    if (activeCampIdRef.current !== campId) return
+    const target = timelineScrollRef.current?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(messageId)}"][data-quote-owner="camp:${CSS.escape(campId)}"]`)
+    if (!target) throw new Error('quote.source_unavailable')
+    await revealMessageQuote(quote, target, source.authorType === 'user' ? source.body.replace(/\r\n/gu, '\n') : undefined)
+  }
+
   const revealReplyParent = async (messageId: string): Promise<void> => {
     setConversationView('conversation')
     const existing = timelineScrollRef.current?.querySelector<HTMLElement>(
@@ -2843,6 +2874,7 @@ export function CampWorkspace({
     const campId = snapshot.camp.id
     let cancelled = false
     setPendingEditing(false)
+    setQuoteSourceId(null)
     setPendingQueue(null)
     conversationFindRequestGeneration.current += 1
     if (conversationFindDebounceTimer.current !== null) {
@@ -4403,6 +4435,7 @@ export function CampWorkspace({
                                 onReply={humanAuthored ? undefined : handleReply}
                                 onCopy={handleCopy}
                               >
+                                <MessageQuotes history quotes={campMessage.quotes ?? []} onReveal={revealQuote} />
                                 {replyParentId && (
                                   <ReplyParentQuote
                                     parent={replyParent}
@@ -4432,7 +4465,7 @@ export function CampWorkspace({
                                     segment.kind === 'current_user_mention'
                                   )
                                     ? (
-                                        <div className="final-copy">
+                                        <div className="final-copy" data-message-quote-body={campMessage.id} data-quote-owner={`camp:${snapshot.camp.id}`}>
                                           <AgentMessageMarkdownBody
                                             body={displayBody}
                                             content={campMessage.content}
@@ -4454,13 +4487,13 @@ export function CampWorkspace({
                                         </div>
                                       )
                                     : (
-                                        <div className="message-bubble">
+                                        <div className="message-bubble" data-message-quote-body={campMessage.authorType === 'user' || campMessage.authorType === 'agent' ? campMessage.id : undefined} data-quote-owner={`camp:${snapshot.camp.id}`}>
                                           <TruncatedStructuredMessageBody
                                             body={displayBody}
                                             content={campMessage.content}
                                             members={snapshot.members}
                                             truncate={humanAuthored}
-                                            forceExpanded={isConversationFindCurrent}
+                                            forceExpanded={isConversationFindCurrent || quoteSourceId === campMessage.id}
                                             renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
                                             onActivateCurrentUserMention={openCurrentUserProfilePopover}
                                             onActivateMemberMention={openMemberProfilePopover}
@@ -4760,6 +4793,7 @@ export function CampWorkspace({
         onSubmit={(event) => void submit(event)}
       >
         <PendingCampInputs ref={pendingInputsRef} key={snapshot.camp.id} campId={snapshot.camp.id}
+          quoteMessages={visibleCampMessages} onRevealQuote={revealQuote}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
           attachmentDragActive={pendingEditing && attachmentDragState !== null}
@@ -4817,6 +4851,12 @@ export function CampWorkspace({
             )
           : null}
         </div>
+        <MessageQuoteSelectionToolbar
+          ownerKey={`camp:${snapshot.camp.id}`}
+          messages={visibleCampMessages}
+          disabled={composerInteractionDisabled || pendingEditing}
+          onAdd={async (selection) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote({ type: 'add', selection })) }}
+        />
         <div className="composer-box">
           {attachmentDragState && (
             <span className="composer-destination">将添加到这条消息</span>
@@ -4979,6 +5019,10 @@ export function CampWorkspace({
                 </button>
               </div>
             )}
+            <MessageQuotes key={snapshot.camp.id} quotes={composerDraft?.quotes ?? []}
+              disabled={composerInteractionDisabled}
+              onReveal={revealQuote}
+              onMutate={async (action) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote(action)) }} />
             <StructuredMentionComposer
               ref={composerHandleRef}
               id="camp-message"
@@ -7579,7 +7623,7 @@ function TruncatedStructuredMessageBody({
   )
 }
 
-function AgentMessageMarkdownBody({
+export function AgentMessageMarkdownBody({
   body,
   content,
   members,
@@ -7633,7 +7677,7 @@ function AgentMessageMarkdownBody({
   )
 }
 
-function StructuredMessageBody({
+export function StructuredMessageBody({
   body,
   content,
   members,
@@ -7805,6 +7849,7 @@ function CurrentUserMentionToken({ onActivate }: {
   return (
     <span
       className={`message-mention-token current-user${onActivate ? ' is-interactive' : ''}`}
+      data-quote-current-user-name={displayName}
       role={onActivate ? 'button' : undefined}
       tabIndex={onActivate ? 0 : undefined}
       aria-label={onActivate ? `查看${displayName}的个人资料` : `提及当前用户：${displayName}`}
@@ -7838,7 +7883,7 @@ function MessageCopyButton({
       type="button"
       aria-label={copied ? '已复制这条消息' : '复制这条消息'}
       title="复制"
-      onClick={onCopy}
+      onClick={() => { dismissMessageQuoteSelection(); onCopy() }}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
         {copied ? <path d="m5 12 4 4 10-10" /> : <>

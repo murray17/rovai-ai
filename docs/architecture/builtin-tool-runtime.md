@@ -9,9 +9,9 @@ last_updated: 2026-09-07
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v23](../contracts/builtin-tool-transport-v23.md)、
+[Built-in Tool Transport v24](../contracts/builtin-tool-transport-v24.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
-[Camp History Retrieval v4](../contracts/camp-history-v4.md)、
+[Camp History Retrieval v5](../contracts/camp-history-v5.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v19](../contracts/camp-message-send-v19.md)、
 [Gather v5](../contracts/gather-v5.md)、
@@ -36,7 +36,7 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 omission 的 bounded aggregate 边界见
 [公共上下文不变量](foundational-invariants.md#context-public-history)和
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、
-[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)及
+[ContextManifest Evidence v23](../contracts/context-manifest-evidence-v23.md)及
 [Run Facts v2](../contracts/run-facts-v2.md)。Task authority 与
 self-active awareness 见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)；真实空集合
@@ -190,10 +190,10 @@ Domain Service 保留 line-leading 连续有效 mention 的兼容 parser，未�
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 grammar。`--public-only` 在任何 alias/member lookup 前绕过正文寻址，并与显式
 `to/taskId` 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 该 schema 继续进入当前 catalog digest。
-当前 v23 contract/CLI command version、`builtin_cli.transport.v23` capability 与 IPC protocol 2 必须同时进入
-Binding compatibility 和 digest。Camp History 使用 v4；Native Binding context contract 加入内部
-`sessionCharterRevision: 5`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
-继续使用 Formatter 22 / ContextManifest 22，不做 endpoint 猜测并 fail closed。
+当前 v24 contract/CLI command version、`builtin_cli.transport.v24` capability 与 IPC protocol 2 必须同时进入
+Binding compatibility 和 digest。Camp History 使用 v5；Native Binding context contract 加入内部
+`sessionCharterRevision: 6`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
+使用 Formatter 23 / ContextManifest 23，不做 endpoint 猜测并 fail closed。
 
 `ROVAI_RUN_TMP` 是 Runtime Host 启动时继承的稳定精确路径，不是 process root、Camp workspace 或附件存储。
 每次新 lease 在 active context 写入前 fail-closed 清空并重建该目录；unbind/fence 只做 best-effort 清理，后继

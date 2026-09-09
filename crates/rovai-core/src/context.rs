@@ -1,3 +1,6 @@
+use crate::message_quote::{
+    MessageQuoteSnapshot, QuoteStorage, load_quotes, model_quotes, quote_scalar_count,
+};
 use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result};
@@ -617,10 +620,19 @@ impl ContextService {
             load_originating_public_user_message(database, &snapshot, profile, None)?;
         if originating_public_user_message
             .as_ref()
-            .is_some_and(|message| closure_message_ids.contains(&message.message_id))
+            .is_some_and(|message| {
+                message.quotes.is_empty() && closure_message_ids.contains(&message.message_id)
+            })
         {
             originating_public_user_message = None;
         }
+        retain_complete_quote_history(
+            &mut recent_messages,
+            &originating_public_user_message,
+            &mut reference_closure,
+            &mut omission_entries,
+            profile.max_message_body_chars,
+        );
         apply_public_history_budget(
             &mut recent_messages,
             &mut originating_public_user_message,
@@ -749,7 +761,7 @@ impl ContextService {
                 ));
                 continue;
             }
-            if let Some(origin) = originating_public_user_message.take() {
+            if let Some(origin) = take_optional_origin(&mut originating_public_user_message) {
                 omission_entries.push(ContextOmission::exact(
                     "public_history",
                     vec![origin.message_id],
@@ -851,6 +863,8 @@ impl ContextService {
             "conversationMessageId": current_input.source_conversation_message_id,
             "sourceContentDigest": current_input.source_content_digest,
             "projectedBodyDigest": current_input.projected_body_digest,
+            "projectedInputDigest": canonical_json_digest(&current_input_value)?,
+            "quotedInputEvidence": current_input.quote_evidence(),
             "mentionsCurrentUser": current_input.mentions_current_user,
             "gatherCompletion": gather_completion_manifest_evidence(&snapshot, &current_input)?,
         });
@@ -1159,6 +1173,13 @@ impl ContextService {
         {
             originating_public_user_message = None;
         }
+        retain_complete_quote_history(
+            &mut recent_messages,
+            &originating_public_user_message,
+            &mut reference_closure,
+            &mut omission_entries,
+            profile.max_message_body_chars,
+        );
         apply_public_history_budget(
             &mut recent_messages,
             &mut originating_public_user_message,
@@ -1257,7 +1278,8 @@ impl ContextService {
                     vec![removed.message_id],
                     "runtime_payload_budget",
                 ));
-            } else if let Some(origin) = originating_public_user_message.take() {
+            } else if let Some(origin) = take_optional_origin(&mut originating_public_user_message)
+            {
                 omission_entries.push(ContextOmission::exact(
                     "public_history",
                     vec![origin.message_id],
@@ -1383,6 +1405,8 @@ impl ContextService {
                 "conversationMessageId": current_input.source_conversation_message_id,
                 "sourceContentDigest": current_input.source_content_digest,
                 "projectedBodyDigest": current_input.projected_body_digest,
+            "projectedInputDigest": canonical_json_digest(&current_input_value)?,
+            "quotedInputEvidence": current_input.quote_evidence(),
                 "mentionsCurrentUser": current_input.mentions_current_user,
                 "gatherCompletion": gather_completion_manifest_evidence(&snapshot, &current_input)?,
             },
@@ -1883,7 +1907,7 @@ impl ContextService {
         if row.5 != "running" || row.6 != execution_epoch {
             anyhow::bail!("AgentRun or Native Binding changed before input delivery");
         }
-        if row.10 != CONTEXT_MANIFEST_VERSION || row.11 != CONTEXT_FORMATTER_VERSION {
+        if !matches!((row.10, row.11), (22, 22) | (23, 23)) {
             anyhow::bail!("Legacy ContextManifest cannot be dispatched");
         }
         let manifest_view_receipt_digest = row
@@ -2614,7 +2638,7 @@ fn build_session_charter(
     };
     Ok(format!(
         "Rovai-ai Session Charter\n\n\
-         Authority boundaries\n\
+         Authority boundaries\n{quote_guidance}\n\
          - MEMBER_IDENTITY is the sole self-identity projection for this Native Session. COLLABORATION_STATE describes peers only and never updates, patches, or overrides self identity.\n\
          - CURRENT_INPUT is the immediate work item. Its source and current Core authorization determine its authority.\n\
          - The Principal is the single human user who owns the Camp objective. `--to-principal` addresses that human, never the currently running Agent; it requests human attention without scheduling Agent work or constituting approval.\n\
@@ -2627,6 +2651,7 @@ fn build_session_charter(
         BUILTIN_CLI_CHARTER.trim(),
         file_guidance,
         adapter_guidance,
+        quote_guidance = include_str!("../resources/charter-message-quotes.md").trim(),
     ))
 }
 
@@ -3570,6 +3595,8 @@ struct SharedMessageAttachment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SharedMessage {
+    quotes: Vec<MessageQuoteSnapshot>,
+    quote_scope_current: bool,
     camp_id: String,
     message_id: String,
     sequence: i64,
@@ -3672,6 +3699,8 @@ struct ModelSharedMessageAttachment<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ModelSharedMessage<'a> {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    quotes: Vec<Value>,
     message_id: &'a str,
     sequence: i64,
     sender_type: &'a str,
@@ -3688,8 +3717,22 @@ struct ModelSharedMessage<'a> {
 }
 
 impl SharedMessage {
+    fn input_scalars(&self) -> usize {
+        unicode_scalar_count(&self.body) + quote_scalar_count(&self.quotes)
+    }
     fn model_projection(&self) -> ModelSharedMessage<'_> {
         ModelSharedMessage {
+            quotes: self
+                .quotes
+                .iter()
+                .map(|quote| {
+                    let mut value = quote.model_projection();
+                    if !self.quote_scope_current {
+                        value["source"]["scope"] = json!("camp_messages");
+                    }
+                    value
+                })
+                .collect(),
             message_id: &self.message_id,
             sequence: self.sequence,
             sender_type: &self.sender_type,
@@ -3831,6 +3874,9 @@ struct SharedMessageAttachmentEvidence {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedMessageProjectionEvidence {
+    quoted_input_evidence: Vec<Value>,
+    projected_input_digest: String,
+    quote_scalar_count: usize,
     selection_kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     reference_distance: Option<usize>,
@@ -3860,6 +3906,10 @@ impl SharedMessageProjectionEvidence {
         message: &SharedMessage,
     ) -> Self {
         Self {
+            quoted_input_evidence: message.quotes.iter().map(|quote| json!({"quoteId":quote.quote_id,"source":quote.source,
+                "sourceContentDigest":quote.source_content_digest,"snapshotDigest":quote.snapshot_digest})).collect(),
+            projected_input_digest: sha256_text(&serde_json::to_string(&message.model_projection()).expect("serializable shared message")),
+            quote_scalar_count: quote_scalar_count(&message.quotes),
             selection_kind,
             reference_distance,
             camp_id: message.camp_id.clone(),
@@ -3944,10 +3994,51 @@ fn render_run_facts(run_facts: &RunFacts) -> Result<RenderedRunFacts> {
     })
 }
 
-/// Apply the Profile v2 public-history contract before any transport-specific
+/// Apply the Profile v5 public-history contract before any transport-specific
 /// Runtime byte gate. Both direct/user Runs and pre-Run A2A Delivery use this
 /// seam, so neither path can silently exceed the 24,000 Unicode-scalar
 /// history budget while still fitting its larger serialized payload limit.
+fn retain_complete_quote_history(
+    recent: &mut Vec<SharedMessage>,
+    origin: &Option<SharedMessage>,
+    references: &mut Vec<ReferenceClosureMessage>,
+    omissions: &mut Vec<ContextOmission>,
+    max_body: usize,
+) {
+    let required = origin
+        .as_ref()
+        .filter(|message| !message.quotes.is_empty())
+        .map(|message| message.message_id.as_str());
+    let mut keep = |message: &SharedMessage, kind| {
+        if required == Some(message.message_id.as_str()) {
+            return false;
+        }
+        if !message.quotes.is_empty() && message.input_scalars() > max_body {
+            omissions.push(ContextOmission::exact(
+                kind,
+                vec![message.message_id.clone()],
+                "quote_message_over_body_budget",
+            ));
+            false
+        } else {
+            true
+        }
+    };
+    recent.retain(|message| keep(message, "public_history"));
+    references.retain(|entry| keep(&entry.message, "reference_closure"));
+}
+
+fn take_optional_origin(origin: &mut Option<SharedMessage>) -> Option<SharedMessage> {
+    if origin
+        .as_ref()
+        .is_some_and(|message| message.quotes.is_empty())
+    {
+        origin.take()
+    } else {
+        None
+    }
+}
+
 fn apply_public_history_budget(
     recent_messages: &mut Vec<SharedMessage>,
     originating_public_user_message: &mut Option<SharedMessage>,
@@ -3965,15 +4056,15 @@ fn apply_public_history_budget(
             });
         let history_chars = recent_messages
             .iter()
-            .map(|message| unicode_scalar_count(&message.body))
+            .map(SharedMessage::input_scalars)
             .sum::<usize>()
             + originating_public_user_message
                 .as_ref()
                 .filter(|_| !origin_is_recent)
-                .map_or(0, |message| unicode_scalar_count(&message.body))
+                .map_or(0, SharedMessage::input_scalars)
             + reference_closure
                 .iter()
-                .map(|entry| unicode_scalar_count(&entry.message.body))
+                .map(|entry| entry.message.input_scalars())
                 .sum::<usize>();
         if history_chars <= max_public_history_chars {
             return;
@@ -3985,7 +4076,7 @@ fn apply_public_history_budget(
                 vec![removed.message_id],
                 "history_budget",
             ));
-        } else if let Some(origin) = originating_public_user_message.take() {
+        } else if let Some(origin) = take_optional_origin(originating_public_user_message) {
             omission_entries.push(ContextOmission::exact(
                 "public_history",
                 vec![origin.message_id],
@@ -4120,6 +4211,7 @@ fn load_public_reference_closure<R: ContextReadConnection>(
             body,
             mentions_current_user,
             profile,
+            snapshot.invocation_kind != "single_chat",
         )?;
         next_parent_id = row.8;
         messages.push(ReferenceClosureMessage { distance, message });
@@ -4225,6 +4317,7 @@ fn load_recent_public_messages<R: ContextReadConnection>(
             body,
             mentions_current_user,
             profile,
+            snapshot.invocation_kind != "single_chat",
         )?);
     }
     Ok(messages)
@@ -4243,6 +4336,7 @@ fn project_shared_message<R: ContextReadConnection>(
     body: String,
     mentions_current_user: bool,
     profile: ContextDeliveryProfile,
+    quote_scope_current: bool,
 ) -> Result<SharedMessage> {
     let content_digest = database.context_connection().query_row(
         "SELECT content_digest FROM camp_message WHERE id = ?1 AND camp_id = ?2",
@@ -4305,8 +4399,22 @@ fn project_shared_message<R: ContextReadConnection>(
             legacy_view_backed,
         });
     }
-    let prefix = body_prefix(&body, profile.max_message_body_chars);
+    let quotes = load_quotes(
+        database.context_connection(),
+        QuoteStorage::CampMessage,
+        &message_id,
+    )?;
+    let prefix = body_prefix(
+        &body,
+        if quotes.is_empty() {
+            profile.max_message_body_chars
+        } else {
+            usize::MAX
+        },
+    );
     Ok(SharedMessage {
+        quotes,
+        quote_scope_current,
         camp_id,
         message_id,
         sequence,
@@ -4521,6 +4629,7 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
         body,
         mentions_current_user,
         profile,
+        snapshot.invocation_kind != "single_chat",
     )
     .map(Some)
 }
@@ -4646,6 +4755,7 @@ fn projected_current_camp_message(
 
 #[derive(Debug)]
 struct CurrentInput {
+    quotes: Vec<MessageQuoteSnapshot>,
     id: String,
     payload: Value,
     source_camp_message_id: Option<String>,
@@ -4656,6 +4766,11 @@ struct CurrentInput {
 }
 
 impl CurrentInput {
+    fn quote_evidence(&self) -> Vec<Value> {
+        self.quotes.iter().map(|quote| json!({"quoteId":quote.quote_id,"source":quote.source,
+            "sourceContentDigest":quote.source_content_digest,"snapshotDigest":quote.snapshot_digest})).collect()
+    }
+
     fn as_payload(
         &self,
         attachment_paths: &[String],
@@ -4966,6 +5081,47 @@ fn load_current_input<R: ContextReadConnection>(
     database: &R,
     snapshot: &RunSnapshot,
 ) -> Result<CurrentInput> {
+    let mut input = load_current_input_body(database, snapshot)?;
+    input.quotes = if let Some(id) = input.source_camp_message_id.as_deref() {
+        load_quotes(database.context_connection(), QuoteStorage::CampMessage, id)?
+    } else if let Some(id) = input.source_conversation_message_id.as_deref() {
+        load_quotes(
+            database.context_connection(),
+            QuoteStorage::PrivateMessage,
+            id,
+        )?
+    } else {
+        Vec::new()
+    };
+    if !input.quotes.is_empty() {
+        for quote in &input.quotes {
+            anyhow::ensure!(
+                quote.source.camp_id == snapshot.camp_id
+                    && if snapshot.invocation_kind == "single_chat" {
+                        quote.source.conversation_id.as_deref()
+                            == Some(snapshot.conversation_id.as_str())
+                    } else {
+                        quote.source.conversation_id.is_none()
+                    },
+                "quote.owner_mismatch"
+            );
+        }
+        input.source_content_digest = canonical_json_digest(
+            &json!({"bodyContentDigest":input.source_content_digest,"quotes":input.quotes}),
+        )?;
+        input
+            .payload
+            .as_object_mut()
+            .context("Current Input must be an object")?
+            .insert("quotes".into(), json!(model_quotes(&input.quotes)));
+    }
+    Ok(input)
+}
+
+fn load_current_input_body<R: ContextReadConnection>(
+    database: &R,
+    snapshot: &RunSnapshot,
+) -> Result<CurrentInput> {
     if snapshot.invocation_kind == "gather_completion" {
         let delivery_id = snapshot
             .trigger_message_delivery_id
@@ -5098,6 +5254,7 @@ fn load_current_input<R: ContextReadConnection>(
             }
         }
         return Ok(CurrentInput {
+            quotes: Vec::new(),
             id: row.0,
             payload,
             source_camp_message_id: Some(row.2),
@@ -5121,6 +5278,7 @@ fn load_current_input<R: ContextReadConnection>(
             )?;
             let projected_body_digest = sha256_text(&body);
             Ok(CurrentInput {
+                quotes: Vec::new(),
                 id: camp_message.id,
                 payload: json!({
                     "source": source,
@@ -5183,6 +5341,7 @@ fn load_current_input<R: ContextReadConnection>(
                 }
                 let body_digest = sha256_text(&body);
                 return Ok(CurrentInput {
+                    quotes: Vec::new(),
                     id,
                     payload: json!({
                         "source": { "type": "user" },
@@ -5218,6 +5377,7 @@ fn load_current_input<R: ContextReadConnection>(
                 .context("Member Call Current Input author profile is unavailable")?;
             let body_digest = sha256_text(&body);
             Ok(CurrentInput {
+                quotes: Vec::new(),
                 id,
                 payload: json!({
                     "source": {
@@ -5829,10 +5989,10 @@ fn load_existing_manifest(
     if row.2 != snapshot.camp_message_boundary_sequence {
         anyhow::bail!("Stored ContextManifest no longer matches its frozen AgentRun input");
     }
-    if row.15 != CONTEXT_FORMATTER_VERSION {
+    if !matches!(row.15, 22 | 23) {
         anyhow::bail!("Stored ContextManifest uses an obsolete context formatter");
     }
-    if snapshot.invocation_kind == "gather_completion" && row.15 != CONTEXT_FORMATTER_VERSION {
+    if snapshot.invocation_kind == "gather_completion" && !matches!(row.15, 22 | 23) {
         anyhow::bail!("Gather completion requires a Gather-capable context formatter");
     }
     if row.31 != AGENT_MESSAGE_PROJECTION_AUDIENCE {
@@ -5877,7 +6037,11 @@ fn load_existing_manifest(
     )?;
     let stored_profile: ContextDeliveryProfile = serde_json::from_str(&row.17)
         .context("Stored ContextManifest delivery profile is invalid")?;
-    let current_profile = current_context_delivery_profile()?;
+    let mut current_profile = current_context_delivery_profile()?;
+    // Frozen v22 bytes retain Profile 4. Only newly formatted input uses Profile 5.
+    if row.15 == 22 {
+        current_profile.profile_version = 4;
+    }
     if row.16 != current_profile.profile_version
         || stored_profile != current_profile
         || row.18 != current_profile.canonical_digest()?
@@ -6072,8 +6236,12 @@ fn validate_frozen_view_receipt(
         .manifest_selection
         .as_object()
         .context("Frozen Delivery Context has no manifest selection")?;
-    if selection.get("contextManifestVersion") != Some(&json!(CONTEXT_MANIFEST_VERSION))
-        || selection.get("runFactsSchemaVersion") != Some(&json!(2))
+    if !matches!(
+        selection
+            .get("contextManifestVersion")
+            .and_then(Value::as_i64),
+        Some(22 | 23)
+    ) || selection.get("runFactsSchemaVersion") != Some(&json!(2))
         || selection.get("campAttachmentViewReceiptVersion")
             != Some(&json!(CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION))
     {
@@ -6265,7 +6433,7 @@ fn materialize_frozen_delivery_context(
     let camp_attachment_view_receipt_digest = required("campAttachmentViewReceiptDigest")?
         .as_str()
         .context("Frozen Delivery Context View receipt digest is invalid")?;
-    if context_manifest_version != CONTEXT_MANIFEST_VERSION
+    if !matches!(context_manifest_version, 22 | 23)
         || run_facts_schema_version != 2
         || camp_attachment_view_receipt_version != CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION
         || canonical_json_digest(required("campAttachmentViewReceipt")?)?
@@ -6382,7 +6550,7 @@ fn materialize_frozen_delivery_context(
             camp_attachment_view_receipt_version,
             camp_attachment_view_receipt_json,
             camp_attachment_view_receipt_digest,
-            CONTEXT_FORMATTER_VERSION,
+            context_manifest_version,
             blob.id,
             payload_digest,
             created_at,
@@ -6865,7 +7033,7 @@ mod slow_tests {
             pending_redelivery_revision, reconcile_detector_policies,
             submit_compaction_observation,
         },
-        context_delivery::CONTEXT_DELIVERY_PROFILE_V4,
+        context_delivery::CONTEXT_DELIVERY_PROFILE_V5,
         current_input_skill::{
             CurrentInputSkillResolution, SkillSelectionEntry, SkillSelectionSnapshot,
         },
@@ -6981,6 +7149,7 @@ mod slow_tests {
     #[test]
     fn resolved_skill_links_are_payload_siblings_with_canonical_bytes() {
         let direct = CurrentInput {
+            quotes: Vec::new(),
             id: "message-1".to_string(),
             payload: json!({
                 "source": { "type": "user" },
@@ -7070,7 +7239,7 @@ mod slow_tests {
     fn single_chat_contract_bytes_and_dynamic_section_order_are_exact() {
         assert_eq!(
             sha256_text(SINGLE_CHAT_SESSION_CHARTER),
-            "sha256:2b32ee67029322b9e864024a09a09b42c1aa741947ba80df03cc673321d0a173"
+            "sha256:1e1af588a02e926b0ca49c2fb2078bd2a2f9ba53e7c3538f3220b6c60519fb9e"
         );
         assert_eq!(
             sha256_text(SINGLE_CHAT_GUIDANCE),
@@ -9003,7 +9172,7 @@ mod slow_tests {
             .unwrap();
         assert!(manifest_schema.contains("run_fact_payload_json"));
         assert!(!manifest_schema.contains("run_notice_"));
-        assert!(manifest_schema.contains("formatter_version IN (20, 21, 22)"));
+        assert!(manifest_schema.contains("formatter_version IN (20, 21, 22, 23)"));
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         let contract: (String, i64, i64) = reopened
@@ -13962,7 +14131,7 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(manifest.0, 0);
-        assert_eq!(manifest.1, 4);
+        assert_eq!(manifest.1, 5);
         assert_eq!(manifest.2.len(), 64);
         assert_eq!((manifest.3, manifest.4, manifest.5), (5, 2, 6));
         fixture.cleanup();
@@ -14392,7 +14561,7 @@ mod slow_tests {
                 .iter()
                 .map(|message| message["body"].as_str().unwrap().chars().count())
                 .sum::<usize>(),
-            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars
+            CONTEXT_DELIVERY_PROFILE_V5.max_public_history_chars
         );
         assert_eq!(shared["omittedMessages"]["count"], 3);
         assert_eq!(shared["omittedMessages"]["sequenceStart"], 2);
@@ -14401,10 +14570,12 @@ mod slow_tests {
     }
 
     #[test]
-    fn public_history_budget_is_shared_and_profile_v4_bounded() {
+    fn public_history_budget_is_shared_and_quote_groups_remain_atomic() {
         fn message(id: &str) -> SharedMessage {
-            let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V4.max_message_body_chars);
+            let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V5.max_message_body_chars);
             SharedMessage {
+                quotes: Vec::new(),
+                quote_scope_current: true,
                 camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 message_id: id.to_string(),
                 sequence: 0,
@@ -14439,7 +14610,7 @@ mod slow_tests {
             &mut originating_public_user_message,
             &mut reference_closure,
             &mut omission_entries,
-            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars,
+            CONTEXT_DELIVERY_PROFILE_V5.max_public_history_chars,
         );
 
         assert_eq!(recent_messages.len(), 8);
@@ -14448,16 +14619,16 @@ mod slow_tests {
         assert_eq!(
             recent_messages
                 .iter()
-                .map(|message| unicode_scalar_count(&message.body))
+                .map(SharedMessage::input_scalars)
                 .sum::<usize>()
                 + originating_public_user_message
                     .as_ref()
-                    .map_or(0, |message| unicode_scalar_count(&message.body))
+                    .map_or(0, SharedMessage::input_scalars)
                 + reference_closure
                     .iter()
-                    .map(|entry| unicode_scalar_count(&entry.message.body))
+                    .map(|entry| entry.message.input_scalars())
                     .sum::<usize>(),
-            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars
+            CONTEXT_DELIVERY_PROFILE_V5.max_public_history_chars
         );
         assert_eq!(omission_entries.len(), 7);
         assert!(omission_entries.iter().all(|entry| {
@@ -14467,6 +14638,60 @@ mod slow_tests {
         }));
         assert_eq!(omission_entries[0].message_ids, vec!["recent-0"]);
         assert_eq!(omission_entries[6].message_ids, vec!["recent-6"]);
+
+        // The same budget seam owns complete quote groups, including the exact scalar boundary.
+        let mut quoted = message("quoted");
+        quoted.body = "界".repeat(1_990);
+        quoted
+            .quotes
+            .push(crate::message_quote::MessageQuoteSnapshot {
+                version: 1,
+                quote_id: "quote".into(),
+                source: crate::message_quote::MessageQuoteSource {
+                    scope: "camp".into(),
+                    camp_id: quoted.camp_id.clone(),
+                    conversation_id: None,
+                    message_id: "source".into(),
+                },
+                author_at_capture: crate::message_quote::MessageQuoteAuthor::User {
+                    display_name: "用户".into(),
+                },
+                text: "语".repeat(10),
+                format: "plain_text".into(),
+                captured_at: "fixture".into(),
+                source_content_digest: "fixture".into(),
+                locator: None,
+                snapshot_digest: "fixture".into(),
+            });
+        let mut over = quoted.clone();
+        over.message_id = "over".into();
+        over.quotes[0].text.push('界');
+        let mut recent = vec![quoted.clone(), over.clone()];
+        let mut references = vec![ReferenceClosureMessage {
+            distance: 1,
+            message: over.clone(),
+        }];
+        let mut omissions = vec![];
+        retain_complete_quote_history(&mut recent, &None, &mut references, &mut omissions, 2_000);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].input_scalars(), 2_000);
+        assert!(references.is_empty());
+        assert!(
+            omissions
+                .iter()
+                .all(|item| item.reason == "quote_message_over_body_budget")
+        );
+        assert_eq!(omissions.len(), 2);
+
+        // A required quoted origin is full, even beyond optional history limits; only the final
+        // Runtime payload gate can reject it. Its duplicate optional entry is omitted.
+        let mut origin = Some(over.clone());
+        recent = vec![over];
+        retain_complete_quote_history(&mut recent, &origin, &mut references, &mut omissions, 2_000);
+        assert!(recent.is_empty());
+        apply_public_history_budget(&mut recent, &mut origin, &mut references, &mut omissions, 1);
+        assert_eq!(origin.as_ref().unwrap().input_scalars(), 2_001);
+        assert!(take_optional_origin(&mut origin).is_none());
     }
 
     #[test]
@@ -14594,7 +14819,7 @@ mod slow_tests {
         let origin = load_originating_public_user_message(
             &fixture.database,
             &snapshot,
-            CONTEXT_DELIVERY_PROFILE_V4,
+            CONTEXT_DELIVERY_PROFILE_V5,
             None,
         )
         .unwrap()
@@ -14616,7 +14841,7 @@ mod slow_tests {
             load_originating_public_user_message(
                 &fixture.database,
                 &snapshot,
-                CONTEXT_DELIVERY_PROFILE_V4,
+                CONTEXT_DELIVERY_PROFILE_V5,
                 None,
             )
             .unwrap()
@@ -14634,7 +14859,7 @@ mod slow_tests {
         let error = load_originating_public_user_message(
             &fixture.database,
             &snapshot,
-            CONTEXT_DELIVERY_PROFILE_V4,
+            CONTEXT_DELIVERY_PROFILE_V5,
             None,
         )
         .unwrap_err();
@@ -14706,7 +14931,7 @@ mod slow_tests {
                 .as_str()
                 .is_some_and(|digest| digest.starts_with("sha256:"))
         );
-        assert!(body.chars().count() > CONTEXT_DELIVERY_PROFILE_V4.max_message_body_chars);
+        assert!(body.chars().count() > CONTEXT_DELIVERY_PROFILE_V5.max_message_body_chars);
         assert!(!context.rendered_payload.contains("[SHARED_CONVERSATION]"));
         fixture.cleanup();
     }

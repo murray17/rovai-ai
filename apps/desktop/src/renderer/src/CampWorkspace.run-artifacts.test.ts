@@ -77,7 +77,8 @@ function renderTimeline(candidate: CampSnapshot): string {
 }
 
 function publicMessage(source: AgentRunView): CampMessageView {
-  return { id: 'public-message', sequence: 1, timelineGlobalSequence: null, authorType: 'agent',
+  return {
+    quotes: [], id: 'public-message', sequence: 1, timelineGlobalSequence: null, authorType: 'agent',
     authorId: source.agentId, sourceAgentRunId: source.id, body: '已完成部分修改。',
     content: [{ kind: 'text', text: '已完成部分修改。' }], attachments: [], addressMode: 'default',
     addressedAgentIds: [], replyToCampMessageId: null, campTurnId: source.campTurnId,

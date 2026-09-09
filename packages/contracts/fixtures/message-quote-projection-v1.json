@@ -1,0 +1,13 @@
+[
+  {"name":"paragraphs and inline markup", "source":"First **bold** and [label](https://example.com).\n\nSecond `code`.", "text":"First bold and label.\n\nSecond code."},
+  {"name":"code whitespace and Unicode", "source":"段落 🧑🏽‍💻。\r\n\r\n```js\r\n  const x = 1;\r\n\r\n  next();\r\n```", "text":"段落 🧑🏽‍💻。\n\n  const x = 1;\n\n  next();\n"},
+  {"name":"list", "source":"- one\n- two", "text":"one\n\ntwo"},
+  {"name":"table", "source":"| A | B |\n| - | - |\n| 甲 | 😀 |", "text":"A\tB\n甲\t😀"},
+  {"name":"line break", "source":"a  \nb", "text":"a\nb"},
+  {"name":"blockquote", "source":"> first\n>\n> second\n\nafter", "text":"first\n\nsecond\n\nafter"},
+  {"name":"local user prefix with custom display name", "source":"@你 **Hello**\n\n```js\ngo();\n```", "text":"@Murray* \n\nHello\n\ngo();\n", "currentUserName":"Murray*", "content":[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"**Hello**\n\n```js\ngo();\n```"}]},
+  {"name":"nonleading local user tokens stay plain", "source":"*literal* @你 and @你", "text":"*literal* @你 and @你", "content":[{"kind":"text","text":"*literal* "},{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":" and "},{"kind":"current_user_mention","userId":"local_user"}]},
+  {"name":"member prefix and inline paragraph", "source":"@芝士* **Hello**\n\nNext", "text":"@芝士* Hello\n\nNext", "content":[{"kind":"member_mention","agentId":"agent_a"},{"kind":"text","text":" **Hello**\n\nNext"}]},
+  {"name":"member prefix before a code block", "source":"@芝士*```ts\n  hello();\n```", "text":"@芝士*\n\n  hello();\n", "content":[{"kind":"member_mention","agentId":"agent_a"},{"kind":"text","text":"```ts\n  hello();\n```"}]},
+  {"name":"user plain text CRLF and Unicode", "authorType":"user", "source":"Text 😀\r\nnext **literal**", "text":"Text 😀\nnext **literal**"}
+]
