@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.56
+current_version: v1.57
 last_updated: 2026-09-07
 ---
 
@@ -208,4 +208,4 @@ last_updated: 2026-09-07
 | v1.54 | `historical` | 本机定时 Automation、原子派发、结果冻结与独立渠道通知 | [v1.54/README.md](v1.54/README.md) |
 | v1.55 | `historical` | 文件入口与项目归属解耦、成功路径如实呈现和同名 Tab 区分 | [v1.55/README.md](v1.55/README.md) |
 
-| v1.56 | `current` | 官方 ZCode App 内核与 BYOK Runtime 接入；实现与资格验收进行中 | [v1.56/README.md](v1.56/README.md) |
+| v1.57 | `current` | 官方 ZCode App 内核与 BYOK Runtime 接入；实现与资格验收进行中 | [v1.57/README.md](v1.57/README.md) |

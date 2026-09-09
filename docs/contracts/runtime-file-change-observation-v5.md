@@ -3,7 +3,7 @@ document_type: contract
 contract: runtime-file-change-observation
 version: v5
 status: accepted
-source_version: v1.56
+source_version: v1.57
 last_updated: 2026-09-09
 ---
 
@@ -28,6 +28,6 @@ structuredPatch。每个 hunk 的 old/new 起点、长度与内容行数必须�
 
 ## 迁移与历史
 
-Migration 148 从 `v1.55/schema 97/activity-v4` 原子升级到 `v1.56/schema 98/activity-v4`，扩展 Runtime、Skill、
+Migration 149 从 `v1.56/schema 98/activity-v4` 原子升级到 `v1.57/schema 99/activity-v4`，扩展 Runtime、Skill、
 Bootstrap Redelivery 与 Compaction 闭集，保留数据、索引、触发器和外键。所有既有 Activity 分类输入与规则不变；
 新增 Runtime 使用已存在的 kind=read/write/edit/execute 语义，因此不重分类或回写历史。

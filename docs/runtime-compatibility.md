@@ -1093,5 +1093,5 @@ ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview�
 - 平台：macOS arm64 保持 Preview，macOS x64/Windows x64 保持 NotQualified；未冻结的全部资格轴不能由
   已通过的功能流替代，也不把 Preview 称为 First-Class 完成。
 
-逐项证据与剩余资格项见 [v1.56 验收](versions/v1.56/implementation-plan.md)、
-[脱敏证据清单](versions/v1.56/evidence/zcode-macos-arm64-2026-09-10.json)和[接入矩阵](research/zcode-runtime.md)。
+逐项证据与剩余资格项见 [v1.57 验收](versions/v1.57/implementation-plan.md)、
+[脱敏证据清单](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)和[接入矩阵](research/zcode-runtime.md)。

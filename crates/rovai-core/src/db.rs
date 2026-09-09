@@ -276,8 +276,8 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.56";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 98;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.57";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 99;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -699,7 +699,7 @@ struct CurrentMigrationState {
     v145: bool,
     v146: bool,
     v147: bool,
-    v148: bool,
+    v149: bool,
 }
 
 impl CurrentMigrationState {
@@ -786,9 +786,9 @@ impl CurrentMigrationState {
             && self.v145
             && self.v146
             && self.v147
-            && self.v148;
-        let zcode_source = contract == "v1.55"
-            && schema == 97
+            && self.v149;
+        let zcode_source = contract == "v1.56"
+            && schema == 98
             && classifier == V147_CLASSIFIER_VERSION
             && self.v142
             && self.v143
@@ -796,7 +796,7 @@ impl CurrentMigrationState {
             && self.v145
             && self.v146
             && self.v147
-            && !self.v148;
+            && !self.v149;
         let pi_edit_diff_source = contract == V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             && classifier == V142_CLASSIFIER_VERSION
@@ -2751,7 +2751,7 @@ pub(crate) fn classify_database_contract(
         || (migrations.v139 && !pi_native_execution_v139_schema_matches(connection)?)
         || (migrations.v140 && !single_chat_v140_schema_matches(connection)?)
         || (migrations.v145 && !automation_v145_schema_matches(connection)?)
-        || (migrations.v148 && !zcode_runtime_v148_schema_matches(connection)?)
+        || (migrations.v149 && !zcode_runtime_v149_schema_matches(connection)?)
         || (migrations.v141
             && if deployed_tool_source {
                 !deployed_tool_v141_image_schema_matches(connection)?
@@ -2780,7 +2780,7 @@ pub(crate) fn classify_database_contract(
     }
 }
 
-fn zcode_runtime_v148_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+fn zcode_runtime_v149_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
     for (table, token) in [
         ("adapter_installation", "'zcode-app'"),
         ("agent_profile", "'zcode-app'"),
@@ -3278,7 +3278,7 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 145),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 146),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 147),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 148)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 149)
         "#,
         [],
         |row| {
@@ -3361,7 +3361,7 @@ fn load_current_migration_state(
                 v145: row.get(75)?,
                 v146: row.get(76)?,
                 v147: row.get(77)?,
-                v148: row.get(78)?,
+                v149: row.get(78)?,
             })
         },
     )
@@ -6240,8 +6240,8 @@ impl Database {
             if !self.schema_migration_applied(147)? {
                 migration_step!("migration_147", self.migrate_pi_edit_diff_classifier_v147());
             }
-            if !self.schema_migration_applied(148)? {
-                migration_step!("migration_148", self.migrate_zcode_runtime_v148());
+            if !self.schema_migration_applied(149)? {
+                migration_step!("migration_149", self.migrate_zcode_runtime_v149());
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -6879,8 +6879,8 @@ impl Database {
         if !self.schema_migration_applied(147)? {
             migration_step!("migration_147", self.migrate_pi_edit_diff_classifier_v147());
         }
-        if !self.schema_migration_applied(148)? {
-            migration_step!("migration_148", self.migrate_zcode_runtime_v148());
+        if !self.schema_migration_applied(149)? {
+            migration_step!("migration_149", self.migrate_zcode_runtime_v149());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -23279,16 +23279,16 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_zcode_runtime_v148(&mut self) -> Result<()> {
+    fn migrate_zcode_runtime_v149(&mut self) -> Result<()> {
         self.connection.execute_batch("PRAGMA foreign_keys=OFF;")?;
         let result = (|| -> Result<()> {
             let transaction = self
                 .connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
             if !matches!(classify_database_contract(&transaction)?, DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                if marker.contract_version == "v1.55" && marker.projection_schema_version == 97 && marker.classifier_version == V147_CLASSIFIER_VERSION)
+                if marker.contract_version == "v1.56" && marker.projection_schema_version == 98 && marker.classifier_version == V147_CLASSIFIER_VERSION)
             {
-                anyhow::bail!("ZCode migration requires the exact v1.55/schema 97 source");
+                anyhow::bail!("ZCode migration requires the exact v1.56/schema 98 source");
             }
             // Cross-table trigger bodies cannot refer to a table during its
             // replacement. Preserve every trigger and reinstall in this same
@@ -23334,7 +23334,7 @@ impl Database {
             }
             transaction.execute("UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2, updated_at=datetime('now') WHERE singleton=1", params![CURRENT_DATA_CONTRACT_VERSION, CURRENT_PROJECTION_SCHEMA_VERSION])?;
             transaction.execute(
-                "INSERT INTO schema_migration VALUES(148, datetime('now'))",
+                "INSERT INTO schema_migration VALUES(149, datetime('now'))",
                 [],
             )?;
             transaction.commit()?;
@@ -28129,10 +28129,10 @@ fn rebuild_table_to_v135_source_for_test(
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v147_source_for_test(connection: &Connection) {
+fn downgrade_current_schema_to_v148_source_for_test(connection: &Connection) {
     if !connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=148)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=149)",
             [],
             |row| row.get::<_, bool>(0),
         )
@@ -28200,14 +28200,14 @@ fn downgrade_current_schema_to_v147_source_for_test(connection: &Connection) {
     for (_, sql) in triggers {
         transaction.execute_batch(&sql).unwrap();
     }
-    transaction.execute_batch("DELETE FROM schema_migration WHERE version=148; UPDATE rovai_data_contract SET contract_version='v1.55',projection_schema_version=97 WHERE singleton=1;").unwrap();
+    transaction.execute_batch("DELETE FROM schema_migration WHERE version=149; UPDATE rovai_data_contract SET contract_version='v1.56',projection_schema_version=98 WHERE singleton=1;").unwrap();
     transaction.commit().unwrap();
     connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
 }
 
 #[cfg(test)]
 pub(crate) fn downgrade_current_schema_to_v146_source_for_test(connection: &Connection) {
-    downgrade_current_schema_to_v147_source_for_test(connection);
+    downgrade_current_schema_to_v148_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 147)",
@@ -31135,7 +31135,7 @@ mod tests {
             v145: version >= 145,
             v146: version >= 146,
             v147: version >= 147,
-            v148: version >= 148,
+            v149: version >= 149,
         }
     }
 
@@ -31241,9 +31241,9 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                148,
+                149,
             ),
-            ("v1.55/schema 97 before ZCode", "v1.55", 97, 147),
+            ("v1.56/schema 98 before ZCode", "v1.56", 98, 148),
             (
                 "v1.54/schema-96 after notification migration and before Pi edit Diff classifier",
                 V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
@@ -31688,7 +31688,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(148);
+        let current = migration_state_through(149);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -32079,7 +32079,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(148));
+        assert_eq!(state, migration_state_through(149));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -32184,7 +32184,7 @@ mod tests {
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
-        database.migrate_zcode_runtime_v148().unwrap();
+        database.migrate_zcode_runtime_v149().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         assert!(database.schema_migration_applied(144).unwrap());
 
@@ -32249,7 +32249,7 @@ mod tests {
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
-        database.migrate_zcode_runtime_v148().unwrap();
+        database.migrate_zcode_runtime_v149().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
 
         drop(database);
@@ -32327,7 +32327,7 @@ mod tests {
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         assert!(
             matches!(classify_database_contract(database.connection()).unwrap(),
-            DatabaseContractClassification::SupportedMigrationSource(marker) if marker.contract_version == "v1.55" && marker.projection_schema_version == 97 && marker.classifier_version == V147_CLASSIFIER_VERSION)
+            DatabaseContractClassification::SupportedMigrationSource(marker) if marker.contract_version == "v1.56" && marker.projection_schema_version == 98 && marker.classifier_version == V147_CLASSIFIER_VERSION)
         );
         let retained: (String, String, String) = database
             .connection()
@@ -32352,12 +32352,12 @@ mod tests {
     }
 
     #[test]
-    fn v148_admits_zcode_atomically_and_preserves_existing_rows_and_triggers() {
+    fn v149_admits_zcode_atomically_and_preserves_existing_rows_and_triggers() {
         // Independent migration owner: receipt failure must roll back all seven
         // rebuilt closed sets, their dependent triggers, and the authority marker.
-        let directory = std::env::temp_dir().join(format!("rovai-db-v148-test-{}", Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("rovai-db-v149-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
-        downgrade_current_schema_to_v147_source_for_test(database.connection());
+        downgrade_current_schema_to_v148_source_for_test(database.connection());
         let snapshot = |connection: &Connection| {
             [
                 "adapter_installation",
@@ -32398,16 +32398,16 @@ mod tests {
         };
         let before = snapshot(database.connection());
         let before_triggers = triggers(database.connection());
-        database.connection().execute_batch("CREATE TEMP TRIGGER reject_zcode_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=148 BEGIN SELECT RAISE(ABORT, 'ZCode receipt fixture failure'); END;").unwrap();
+        database.connection().execute_batch("CREATE TEMP TRIGGER reject_zcode_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=149 BEGIN SELECT RAISE(ABORT, 'ZCode receipt fixture failure'); END;").unwrap();
         assert!(
             database
-                .migrate_zcode_runtime_v148()
+                .migrate_zcode_runtime_v149()
                 .unwrap_err()
                 .to_string()
                 .contains("ZCode receipt fixture failure")
         );
-        assert!(!database.schema_migration_applied(148).unwrap());
-        assert!(!zcode_runtime_v148_schema_matches(database.connection()).unwrap());
+        assert!(!database.schema_migration_applied(149).unwrap());
+        assert!(!zcode_runtime_v149_schema_matches(database.connection()).unwrap());
         assert_eq!(snapshot(database.connection()), before);
         assert_eq!(triggers(database.connection()), before_triggers);
         assert_eq!(
@@ -32421,9 +32421,9 @@ mod tests {
             .connection()
             .execute_batch("DROP TRIGGER reject_zcode_receipt;")
             .unwrap();
-        database.migrate_zcode_runtime_v148().unwrap();
+        database.migrate_zcode_runtime_v149().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
-        assert!(zcode_runtime_v148_schema_matches(database.connection()).unwrap());
+        assert!(zcode_runtime_v149_schema_matches(database.connection()).unwrap());
         assert_eq!(snapshot(database.connection()), before);
         assert_eq!(triggers(database.connection()), before_triggers);
         drop(database);
@@ -35041,7 +35041,7 @@ mod tests {
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
-        database.migrate_zcode_runtime_v148().unwrap();
+        database.migrate_zcode_runtime_v149().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -35241,7 +35241,7 @@ mod tests {
         database.migrate_notification_single_chat_v146().unwrap();
         database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
-        database.migrate_zcode_runtime_v148().unwrap();
+        database.migrate_zcode_runtime_v149().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained: (i64, Option<String>) = database
             .connection()
@@ -35418,7 +35418,7 @@ mod tests {
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_pi_edit_diff_classifier_v147().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
-        database.migrate_zcode_runtime_v148().unwrap();
+        database.migrate_zcode_runtime_v149().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained = database
             .connection()
@@ -36285,7 +36285,7 @@ mod tests {
     fn v108_adds_grok_compaction_closed_sets_and_preserves_observer_state() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v108-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
-        downgrade_current_schema_to_v147_source_for_test(database.connection());
+        downgrade_current_schema_to_v148_source_for_test(database.connection());
 
         fn restore_v107_closed_set(
             connection: &rusqlite::Connection,

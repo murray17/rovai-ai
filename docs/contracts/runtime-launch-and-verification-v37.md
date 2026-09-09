@@ -3,7 +3,7 @@ document_type: contract
 name: Runtime Launch and Verification
 version: v37
 status: accepted
-source_version: v1.56
+source_version: v1.57
 last_updated: 2026-09-10
 ---
 

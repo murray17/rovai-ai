@@ -1,16 +1,16 @@
 ---
 document_type: version-decisions
-version: v1.56
+version: v1.57
 lifecycle: current
 authority: decision-rationale
 last_updated: 2026-09-10
 ---
 
-# v1.56 版本决定
+# v1.57 版本决定
 
-<a id="v1-56-d01"></a>
+<a id="v1-57-d01"></a>
 
-## V1.56-D01：官方 ZCode 内核与既有 Host/Fleet 共享生命周期
+## V1.57-D01：官方 ZCode 内核与既有 Host/Fleet 共享生命周期
 
 ### 背景
 
@@ -43,9 +43,9 @@ provider broker。原生能力缺口和平台资格独立记录，不用共享 t
 - 为 ZCode 复制独立 Fleet/Run 生命周期：会重复已有并发、取消、恢复与租约边界。
 - GUI 自动化驱动官方 App：无法提供可靠的原生 input/turn/tool identity 和可恢复事件通道。
 
-<a id="v1-56-d02"></a>
+<a id="v1-57-d02"></a>
 
-## V1.56-D02：macOS arm64 以明确披露的 Preview 供主动验证
+## V1.57-D02：macOS arm64 以明确披露的 Preview 供主动验证
 
 ### 背景
 

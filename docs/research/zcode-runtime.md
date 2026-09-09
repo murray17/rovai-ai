@@ -76,5 +76,5 @@ bundle 身份定位，不能把对它的发现误解为启动 GUI。与 Pi 的 w
 `options.apiKey` 和 `models` 由 ZCode 拥有。也支持原生 main 对象及 model alias；Rovai 不写入 provider 文件。
 秘密只传内存 RPC，不放 argv、Prompt、产品数据库、公开 Evidence 或日志；测试使用独立 Home、Core data、Skill Library。
 
-当前权威与最终验收见 [v1.56](../versions/v1.56/README.md)、[Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)
+当前权威与最终验收见 [v1.57](../versions/v1.57/README.md)、[Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)
 及 [Runtime Compatibility](../runtime-compatibility.md)。本文记录来源与比较，不授予平台资格。

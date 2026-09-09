@@ -1,6 +1,6 @@
 ---
 document_type: implementation-plan
-version: v1.56
+version: v1.57
 lifecycle: current
 status: in-progress
 last_updated: 2026-09-10
@@ -9,7 +9,7 @@ last_updated: 2026-09-10
 # 官方 ZCode 实施与验收
 
 官方 BYOK Adapter 已实现并经过真实 Core 验证；当前为 macOS arm64 Preview，完整 First-Class 资格仍未完成。
-[接入矩阵](../../research/zcode-runtime.md)逐项描述用户可观察差异；[D02](decisions.md#v1-56-d02)明确 Preview 的可见性边界。
+[接入矩阵](../../research/zcode-runtime.md)逐项描述用户可观察差异；[D02](decisions.md#v1-57-d02)明确 Preview 的可见性边界。
 
 ## Worktree 交接
 
@@ -28,7 +28,7 @@ last_updated: 2026-09-10
 - user FirstPayload、completed Compaction observer、标准审批、原生 Skills 与 additive MCP。
 - narration/reasoning 隔离、Missing-Send、bundled CLI lease、稀疏 Usage、Read/Write/Edit 与 path-bound patch。
 - 原生 detached Bash 的 pipe-owned cleanup companion；官方内核原样加载，Core/原生强杀后回收已记录的进程组。
-- Migration 148 与 schema 98 的 Runtime/Skill/Compaction 闭集；目录、成员参数、安装导航、监控和活动统一呈现。
+- Migration 149 与 schema 99 的 Runtime/Skill/Compaction 闭集；目录、成员参数、安装导航、监控和活动统一呈现。
 
 ## 能力轴与验证状态
 
