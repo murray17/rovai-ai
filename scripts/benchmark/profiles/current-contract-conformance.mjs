@@ -30,7 +30,7 @@ const criteria = [
     test('crates/rovai-core/src/context.rs', 'public_context_uses_latest_raw_window_prefixes_and_explicit_omission')
   ]),
   criterion('CCC-008', 'History budget, runtime budget, and reference closure retain bounded exact IDs', [
-    test('crates/rovai-core/src/context.rs', 'public_history_budget_is_shared_and_profile_v4_bounded')
+    test('crates/rovai-core/src/context.rs', 'public_history_budget_is_shared_and_quote_groups_remain_atomic')
   ]),
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')

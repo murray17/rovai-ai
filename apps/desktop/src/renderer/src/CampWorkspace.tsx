@@ -1,3 +1,5 @@
+import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
+import { dismissMessageQuoteSelection } from './message-quote-selection'
 import { prefersReducedMotion } from './reduced-motion'
 import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
@@ -413,6 +415,11 @@ async function mutateComposerDraft(
 ): Promise<CampComposerDraftView> {
   const common = { campId: draft.campId, expectedRevision: draft.revision }
   switch (mutation.kind) {
+    case 'quote':
+      return window.rovai.request<CampComposerDraftView>('messageQuotes.mutateDraft', {
+        commandId: mutation.commandId,
+        command: { ...common, conversationId: null, action: mutation.action }
+      })
     case 'save_content':
       return window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
         ...common,
@@ -4381,6 +4388,7 @@ export function CampWorkspace({
                                 onReply={humanAuthored ? undefined : handleReply}
                                 onCopy={handleCopy}
                               >
+                                <MessageQuotes history quotes={campMessage.quotes ?? []} onReveal={(quote) => revealReplyParent(quote.source.messageId)} />
                                 {replyParentId && (
                                   <ReplyParentQuote
                                     parent={replyParent}
@@ -4407,7 +4415,7 @@ export function CampWorkspace({
                                     segment.kind === 'current_user_mention'
                                   )
                                     ? (
-                                        <div className="final-copy">
+                                        <div className="final-copy" data-message-quote-body={campMessage.id} data-quote-owner={`camp:${snapshot.camp.id}`}>
                                           <AgentMessageMarkdownBody
                                             body={displayBody}
                                             content={campMessage.content}
@@ -4429,7 +4437,7 @@ export function CampWorkspace({
                                         </div>
                                       )
                                     : (
-                                        <div className="message-bubble">
+                                        <div className="message-bubble" data-message-quote-body={campMessage.authorType === 'user' || campMessage.authorType === 'agent' ? campMessage.id : undefined} data-quote-owner={`camp:${snapshot.camp.id}`}>
                                           <TruncatedStructuredMessageBody
                                             body={displayBody}
                                             content={campMessage.content}
@@ -4791,6 +4799,12 @@ export function CampWorkspace({
             )
           : null}
         </div>
+        <MessageQuoteSelectionToolbar
+          ownerKey={`camp:${snapshot.camp.id}`}
+          messages={snapshot.messages}
+          disabled={composerInteractionDisabled || pendingEditing}
+          onAdd={async (selection) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote({ type: 'add', selection })) }}
+        />
         <div className="composer-box">
           {attachmentDragState && (
             <span className="composer-destination">将添加到这条消息</span>
@@ -4953,6 +4967,10 @@ export function CampWorkspace({
                 </button>
               </div>
             )}
+            <MessageQuotes key={snapshot.camp.id} quotes={composerDraft?.quotes ?? []}
+              disabled={composerInteractionDisabled}
+              onReveal={(quote) => revealReplyParent(quote.source.messageId)}
+              onMutate={async (action) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote(action)) }} />
             <StructuredMentionComposer
               ref={composerHandleRef}
               id="camp-message"
@@ -7779,7 +7797,7 @@ function MessageCopyButton({
       type="button"
       aria-label={copied ? '已复制这条消息' : '复制这条消息'}
       title="复制"
-      onClick={onCopy}
+      onClick={() => { dismissMessageQuoteSelection(); onCopy() }}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
         {copied ? <path d="m5 12 4 4 10-10" /> : <>

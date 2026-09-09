@@ -1,0 +1,8 @@
+[
+  {"name":"paragraphs and inline markup", "source":"First **bold** and [label](https://example.com).\n\nSecond `code`.", "text":"First bold and label.\n\nSecond code."},
+  {"name":"code whitespace and Unicode", "source":"段落 🧑🏽‍💻。\r\n\r\n```js\r\n  const x = 1;\r\n\r\n  next();\r\n```", "text":"段落 🧑🏽‍💻。\n\n  const x = 1;\n\n  next();\n"},
+  {"name":"list", "source":"- one\n- two", "text":"one\n\ntwo"},
+  {"name":"table", "source":"| A | B |\n| - | - |\n| 甲 | 😀 |", "text":"A\tB\n甲\t😀"},
+  {"name":"line break", "source":"a  \nb", "text":"a\nb"},
+  {"name":"blockquote", "source":"> first\n>\n> second\n\nafter", "text":"first\n\nsecond\n\nafter"}
+]

@@ -601,7 +601,7 @@ function assertCapabilitySnapshot(snapshot) {
     'context.charter.managed_system_prompt',
     'context.compaction.native_system_prompt_preserved',
     'usage.model_call.structured',
-    'builtin_cli.transport.v23'
+    'builtin_cli.transport.v24'
   ]
   if (snapshot?.probeStatus !== 'ready'
       || !snapshot.protocols?.includes('pi-jsonl-rpc-v1')

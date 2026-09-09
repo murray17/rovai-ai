@@ -16,7 +16,7 @@ pub struct ContextDeliveryProfile {
 
 impl ContextDeliveryProfile {
     pub fn validate(self) -> Result<Self> {
-        if self.profile_version != 4 {
+        if self.profile_version != 5 {
             anyhow::bail!("unsupported Context Delivery Profile version");
         }
         if self.max_public_messages == 0
@@ -42,8 +42,8 @@ impl ContextDeliveryProfile {
     }
 }
 
-pub const CONTEXT_DELIVERY_PROFILE_V4: ContextDeliveryProfile = ContextDeliveryProfile {
-    profile_version: 4,
+pub const CONTEXT_DELIVERY_PROFILE_V5: ContextDeliveryProfile = ContextDeliveryProfile {
+    profile_version: 5,
     max_public_messages: 15,
     max_public_history_chars: 24_000,
     max_message_body_chars: 2_000,
@@ -52,7 +52,7 @@ pub const CONTEXT_DELIVERY_PROFILE_V4: ContextDeliveryProfile = ContextDeliveryP
 };
 
 pub fn current_context_delivery_profile() -> Result<ContextDeliveryProfile> {
-    CONTEXT_DELIVERY_PROFILE_V4.validate()
+    CONTEXT_DELIVERY_PROFILE_V5.validate()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,14 +88,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn profile_v4_is_current_and_has_a_stable_digest() {
+    fn profile_v5_is_current_and_has_a_stable_digest() {
         assert_eq!(
             current_context_delivery_profile().unwrap(),
-            CONTEXT_DELIVERY_PROFILE_V4
+            CONTEXT_DELIVERY_PROFILE_V5
         );
         assert_eq!(
-            CONTEXT_DELIVERY_PROFILE_V4.canonical_digest().unwrap(),
-            "022688d6f133ea3bb6e6d5773cd30aec1db7a184e4419bbc0fe9c554518bc8d9"
+            CONTEXT_DELIVERY_PROFILE_V5.canonical_digest().unwrap(),
+            "707f88f4ed1c657b59b48f77ab82d1baf5b2663f3b8faf997a4802402e981352"
         );
     }
 
@@ -104,23 +104,23 @@ mod tests {
         for invalid in [
             ContextDeliveryProfile {
                 profile_version: 3,
-                ..CONTEXT_DELIVERY_PROFILE_V4
+                ..CONTEXT_DELIVERY_PROFILE_V5
             },
             ContextDeliveryProfile {
                 max_public_messages: 0,
-                ..CONTEXT_DELIVERY_PROFILE_V4
+                ..CONTEXT_DELIVERY_PROFILE_V5
             },
             ContextDeliveryProfile {
                 max_message_body_chars: 24_001,
-                ..CONTEXT_DELIVERY_PROFILE_V4
+                ..CONTEXT_DELIVERY_PROFILE_V5
             },
             ContextDeliveryProfile {
                 max_public_reference_chain_messages: 4,
-                ..CONTEXT_DELIVERY_PROFILE_V4
+                ..CONTEXT_DELIVERY_PROFILE_V5
             },
             ContextDeliveryProfile {
                 max_self_active_tasks: 9,
-                ..CONTEXT_DELIVERY_PROFILE_V4
+                ..CONTEXT_DELIVERY_PROFILE_V5
             },
         ] {
             assert!(invalid.validate().is_err());

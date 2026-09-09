@@ -825,6 +825,7 @@ export interface SingleChatConversationView {
 }
 
 export interface SingleChatMessageView {
+  quotes: MessageQuoteSnapshot[]
   id: string
   sequence: number
   authorType: 'user' | 'agent' | 'system'
@@ -862,12 +863,14 @@ export interface SingleChatSnapshot {
 }
 
 export interface SingleChatComposerDraftView {
+  quotes: MessageQuoteSnapshot[]
   revision: number
   attachments: LocalAttachmentSourceView[]
   updatedAt: string | null
 }
 
 export interface SingleChatPendingInputView {
+  quotes: MessageQuoteSnapshot[]
   id: string
   conversationId: string
   enqueueSequence: number
@@ -879,6 +882,7 @@ export interface SingleChatPendingInputView {
 }
 
 export interface SingleChatPendingInputEditSessionView {
+  workingQuotes: MessageQuoteSnapshot[]
   pendingInputId: string
   editToken: string
   basePendingRevision: number
@@ -894,6 +898,7 @@ export interface SingleChatPendingInputsView {
 }
 
 export type SingleChatPendingInputEditAction =
+  | { type: 'quote'; action: MessageQuoteAction }
   | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
   | { type: 'save'; body: string }
   | { type: 'remove_attachment'; attachmentRefId: string }
@@ -1182,6 +1187,7 @@ export interface CurrentInputSkillResolution {
 }
 
 export interface CampMessageView {
+  quotes: MessageQuoteSnapshot[]
   id: string
   sequence: number
   timelineGlobalSequence: number | null
@@ -1260,7 +1266,32 @@ export type LocalAttachmentOwnerLocator =
       attachmentRefId: string
     }
 
+export interface MessageQuoteSnapshot {
+  version: 1
+  quoteId: string
+  source: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string }
+  authorAtCapture: { type: 'user'; displayName: string } | { type: 'agent'; agentId: string; displayName: string }
+  text: string
+  format: 'plain_text'
+  capturedAt: string
+  sourceContentDigest: string
+  snapshotDigest: string
+}
+
+export interface MessageQuoteSelection {
+  messageId: string
+  bodyAtSelection: string
+  startScalar: number
+  endScalar: number
+  text: string
+}
+
+export type MessageQuoteAction =
+  | { type: 'add'; selection: MessageQuoteSelection }
+  | { type: 'remove' | 'restore'; quoteId: string }
+
 export interface CampComposerDraftView {
+  quotes: MessageQuoteSnapshot[]
   campId: string
   body: string
   content: ComposerDocument
@@ -1273,6 +1304,7 @@ export interface CampComposerDraftView {
 }
 
 export interface PendingCampInputView {
+  quotes: MessageQuoteSnapshot[]
   id: string
   campId: string
   enqueueSequence: number
@@ -1287,6 +1319,7 @@ export interface PendingCampInputView {
 }
 
 export interface PendingInputEditSession {
+  workingQuotes: MessageQuoteSnapshot[]
   pendingInputId: string
   editToken: string
   basePendingRevision: number
@@ -1302,6 +1335,7 @@ export interface CampPendingInputsView {
 }
 
 export type PendingInputEditAction =
+  | { type: 'quote'; action: MessageQuoteAction }
   | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
   | {
       type: 'save'
@@ -1917,9 +1951,9 @@ export interface ContextManifestView {
   historyCamps: ContextManifestHistoryCampView[]
   rawMessageCount: number
   previousAcceptedPublicBoundarySequence: number
-  contextDeliveryProfileVersion: 4
+  contextDeliveryProfileVersion: 4 | 5
   contextDeliveryProfile: {
-    profileVersion: 4
+    profileVersion: 4 | 5
     maxPublicMessages: number
     maxPublicHistoryChars: number
     maxMessageBodyChars: number
@@ -1955,7 +1989,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 22
+  formatterVersion: 22 | 23
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -3680,6 +3714,7 @@ export type CoreMethod =
   | 'camp.pendingInputs.get'
   | 'camp.pendingInputs.edit'
   | 'camp.composerDraft.save'
+  | 'messageQuotes.mutateDraft'
   | 'camp.composerDraft.startReply'
   | 'camp.composerDraft.cancelReply'
   | 'camp.composerDraft.resolveReplyRecipient'

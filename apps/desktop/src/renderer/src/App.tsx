@@ -4596,6 +4596,7 @@ export function optimisticCampMessage(
     authorType: 'user',
     authorId: 'local_user',
     sourceAgentRunId: null,
+    quotes: draft.quotes,
     body: draft.body,
     content: composerDocumentToStructuredContent(draft.content),
     attachments: draft.attachments,

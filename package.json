@@ -45,6 +45,7 @@
     "test:desktop-bridge": "node --test scripts/lib/rovai-request-context-bridge.test.mjs",
     "test:window-close": "node --test scripts/lib/window-close-guard.test.mjs",
     "test:dingtalk-login": "node --test scripts/lib/dingtalk-login-presentation.test.mjs",
+    "test:message-quotes": "node --test scripts/lib/message-quotes.test.mjs",
     "test:composer-input": "node --test scripts/lib/structured-mention-composer.test.mjs",
     "test:composer-continuation": "node --test scripts/lib/camp-composer-continuation.test.mjs",
     "test:startup-presentation": "node --test scripts/lib/desktop-startup-presentation.test.mjs",

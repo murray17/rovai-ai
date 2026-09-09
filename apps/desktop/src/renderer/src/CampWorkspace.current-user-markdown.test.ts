@@ -44,6 +44,7 @@ function renderMessage(
   campMembers = members
 ): string {
   const message: CampMessageView = {
+    quotes: [],
     id: 'message-current-user-markdown',
     sequence: 1,
     timelineGlobalSequence: 1,

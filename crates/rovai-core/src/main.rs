@@ -695,6 +695,7 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "camps.enter"
             | "camps.delete"
             | "camp.composerDraft.save"
+            | "messageQuotes.mutateDraft"
             | "camp.composerDraft.startReply"
             | "camp.composerDraft.cancelReply"
             | "camp.composerDraft.resolveReplyRecipient"
@@ -729,6 +730,7 @@ fn navigation_invalidation_requires_pending_camp(method: &str) -> bool {
     matches!(
         method,
         "camp.composerDraft.save"
+            | "messageQuotes.mutateDraft"
             | "camp.composerDraft.startReply"
             | "camp.composerDraft.cancelReply"
             | "camp.composerDraft.resolveReplyRecipient"
@@ -8100,6 +8102,34 @@ impl Core {
                     emit_pending_inputs_changed(&self.output, &camp_id, "edited");
                 }
                 Ok(serde_json::to_value(execution.result)?)
+            }
+            "messageQuotes.mutateDraft" => {
+                let params: UserCommandParams<rovai_core::message_quote::MutateQuoteDraftCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let conversation_id = params.command.conversation_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::message_quote::mutate_draft(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
+                )?;
+                if execution.result.status == CommandResultStatus::Rejected {
+                    anyhow::bail!("{}", execution.result.code);
+                }
+                if let Some(conversation_id) = conversation_id {
+                    let snapshot =
+                        SingleChatService::default().snapshot(&database, &conversation_id)?;
+                    emit(
+                        &self.output,
+                        "single_chat.changed",
+                        json!({"campId":camp_id,"conversationId":conversation_id}),
+                    );
+                    Ok(serde_json::to_value(snapshot)?)
+                } else {
+                    Ok(serde_json::to_value(
+                        CampAttachmentStore::new(&self.data_dir).load_draft(&database, &camp_id)?,
+                    )?)
+                }
             }
             "camp.composerDraft.get" => {
                 let params: CampComposerDraftParams =

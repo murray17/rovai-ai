@@ -8956,3 +8956,48 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .command-palette-title { margin:0; padding:14px 16px 0; color:var(--muted); font-size:11px; font-weight:500; }
 .command-palette-footer { display:flex; gap:20px; border-top:1px solid var(--line); padding:10px 16px; color:var(--muted); font-size:11px; }
 .command-palette-footer kbd { font:inherit; }
+
+/* Quotes stay collapsed in both the composer and history; selected text lives in the dialog. */
+.message-quotes { min-width: 0; }
+.message-quotes-row { display: flex; align-items: center; gap: 8px; min-width: 0; height: 36px; }
+.message-quotes button { font: inherit; cursor: pointer; }
+.message-quotes button:disabled { cursor: default; opacity: .5; }
+.message-quotes-trigger {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 28px;
+  padding: 0 9px; border: 0; border-radius: 8px; background: var(--neutral-hover); color: var(--muted);
+  font-size: 12px !important; white-space: nowrap; transition: background-color 120ms, color 120ms;
+}
+.message-quotes-trigger > svg, .message-quote-selection-toolbar svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.message-quotes-trigger > svg:last-child { width: 12px; height: 12px; }
+.message-quotes-label { flex: 0 0 auto; }
+.message-quotes-authors { max-width: 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.message-quotes-authors::before { content: '·'; padding-right: 6px; color: var(--faint); }
+.message-quotes-trigger:hover { background: var(--neutral-selected); color: var(--ink); }
+.message-quotes-undo { flex: 0 0 auto; min-height: 28px; padding: 3px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px !important; }
+.message-quotes button:hover, .message-quotes-dialog button:hover { color: var(--ink); }
+.message-quote-error { padding: 2px 5px 5px; color: var(--danger); font-size: 11px; }
+.message-quotes.is-history { margin-bottom: 6px; }
+.message-quotes.is-history .message-quotes-row { height: 28px; }
+.message-quote-source { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; min-height: 24px; border: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.message-quote-source span { color: var(--faint); font-size: 11px; }
+@media (prefers-reduced-motion: reduce) { .message-quotes-trigger { transition: none; } }
+.message-quotes-overlay { position: fixed; inset: 0; z-index: 200; background: var(--overlay); }
+.message-quotes-dialog { position: fixed; z-index: 201; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 40px)); max-height: min(680px, calc(100vh - 64px)); display: flex; flex-direction: column; padding: 20px; border: 1px solid var(--line-strong); border-radius: 13px; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-float); }
+.message-quotes-dialog-heading { display: flex; align-items: center; gap: 8px; }
+.message-quotes-dialog-heading h2 { margin: 0; font-size: 14px; font-weight: 600; flex: 1; }
+.message-quotes-close, .message-quotes-back { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 22px; cursor: pointer; }
+.message-quotes-description { margin: 4px 0 16px; color: var(--faint); font-size: 11px; }
+.message-quotes-dialog-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.message-quote-detail + .message-quote-detail { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.message-quote-detail-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.message-quote-number { color: var(--faint); font-size: 10.5px; }
+.message-quotes-remove-detail { margin-left: auto; border: 0; background: transparent; color: var(--muted); min-height: 26px; font-size: 11px; cursor: pointer; }
+.message-quote-detail-excerpt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; width: 100%; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; line-height: 1.7; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.message-quote-detail-excerpt span { margin-left: 8px; color: var(--faint); font-size: 10.5px; }
+.message-quote-full-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.7; user-select: text; }
+.message-quotes-dialog-footer { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--danger); font-size: 11px; }
+.message-quotes-empty { color: var(--faint); font-size: 12px; }
+.message-quote-selection-toolbar { position: fixed; z-index: 190; }
+.message-quote-selection-toolbar > button { display: flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-float); font-size: 12px; cursor: pointer; }
+.message-quote-selection-error { position: absolute; right: 0; width: min(280px, calc(100vw - 24px)); margin-top: 5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--danger); font-size: 11px; box-shadow: var(--shadow-float); }
+.message-quotes button:focus-visible, .message-quotes-dialog button:focus-visible, .message-quote-selection-toolbar button:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 2px; }

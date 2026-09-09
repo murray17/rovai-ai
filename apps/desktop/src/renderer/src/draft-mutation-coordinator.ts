@@ -1,11 +1,13 @@
 import type {
   CampComposerDraftView,
   CampComposerReplyRecipient,
-  ComposerDocument
+  ComposerDocument,
+  MessageQuoteAction
 } from '@contracts'
 import { composerDocumentsEqualDirect } from './composer-document'
 
 export type DraftMutation =
+  | { kind: 'quote'; action: MessageQuoteAction; commandId: string }
   | { kind: 'save_content'; content: ComposerDocument }
   | { kind: 'add_source_attachment'; file: File }
   | { kind: 'remove_source_attachment'; attachmentId: string }
@@ -156,6 +158,11 @@ export class DraftMutationCoordinator {
       current,
       { kind: 'resolve_continuation_recipient', agentId }
     ))
+  }
+
+  mutateQuote(action: MessageQuoteAction): Promise<CampComposerDraftView> {
+    const commandId = crypto.randomUUID()
+    return this.enqueue('quote', (current) => this.bindings.mutate(current, { kind: 'quote', action, commandId }))
   }
 
   async waitForIdle(): Promise<CampComposerDraftView> {

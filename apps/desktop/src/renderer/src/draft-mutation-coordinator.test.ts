@@ -16,6 +16,7 @@ function document(text: string): ComposerDocument {
 
 function draft(campId: string, revision: number, text = ''): CampComposerDraftView {
   return {
+    quotes: [],
     campId,
     body: text,
     content: document(text),

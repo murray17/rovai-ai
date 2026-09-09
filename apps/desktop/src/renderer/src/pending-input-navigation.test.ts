@@ -5,13 +5,14 @@ import { createPendingInputNavigationStore, type PendingInputLocalEdit } from '.
 function fixture(campId = 'camp-a'): { edit: PendingInputLocalEdit; queue: CampPendingInputsView } {
   const content = { version: 2 as const, segments: [{ kind: 'text' as const, text: 'canonical' }] }
   const item = { id: 'pending-1', campId, enqueueSequence: 1, revision: 3, state: 'queued' as const,
-    body: 'canonical', content, attachments: [], replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null }
-  const initial = { content, attachments: [], replyToCampMessageId: null, recipientSelectionRequired: false }
+    body: 'canonical', content, quotes: [], attachments: [], replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null }
+  const initial = { content, quotes: [], attachments: [], replyToCampMessageId: null, recipientSelectionRequired: false }
   return {
-    edit: { ...initial, item, token: 'owner-a', initial, replyToCampMessageId: 'reply-1',
+    edit: {
+      ...initial, item, token: 'owner-a', initial, replyToCampMessageId: 'reply-1',
       content: { version: 2, segments: [{ kind: 'atom', atom: { type: 'member', agentId: 'agent-1' } }, { kind: 'text', text: 'unsaved' }] } },
     queue: { campId, executionActive: true, items: [item], editSession: { pendingInputId: item.id,
-      editToken: 'owner-a', basePendingRevision: 3, recoveryRequired: false, workingAttachments: [] } }
+      editToken: 'owner-a', basePendingRevision: 3, recoveryRequired: false, workingQuotes: [], workingAttachments: [] } }
   }
 }
 

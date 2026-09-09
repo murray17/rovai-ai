@@ -14,6 +14,7 @@ use crate::local_attachment_snapshot::{
 pub(crate) use crate::local_attachment_snapshot::{
     RuntimeAttachmentCopyReceipt, inspect_runtime_attachment_copy,
 };
+use crate::message_quote::{MessageQuoteSnapshot, QuoteStorage, load_quotes};
 #[cfg(all(test, feature = "slow-tests"))]
 use std::fs::File;
 
@@ -50,7 +51,7 @@ use crate::{
     },
 };
 
-const DRAFT_RETENTION_DAYS: i64 = 7;
+pub(crate) const DRAFT_RETENTION_DAYS: i64 = 7;
 const ATTACHMENT_METADATA_FILE: &str = ".rovai-attachment.json";
 const ATTACHMENT_METADATA_SCHEMA_VERSION: u32 = 1;
 type CampAuthorityIngressGate = Arc<Mutex<()>>;
@@ -172,6 +173,7 @@ pub struct CampComposerDraftView {
     pub camp_id: String,
     pub body: String,
     pub content: ComposerDocument,
+    pub quotes: Vec<MessageQuoteSnapshot>,
     pub revision: i64,
     pub attachments: Vec<LocalAttachmentSourceView>,
     pub reply_intent: Option<CampComposerReplyIntentView>,
@@ -643,6 +645,7 @@ impl CampAttachmentStore {
                 )?;
                 CampComposerDraftView {
                     camp_id: camp_id.to_string(),
+                    quotes: load_quotes(database.connection(), QuoteStorage::CampDraft, camp_id)?,
                     body: render_composer_document_for_connection(database.connection(), &content)?,
                     content,
                     revision,
@@ -673,6 +676,7 @@ impl CampAttachmentStore {
                 )?;
                 CampComposerDraftView {
                     camp_id: camp_id.to_string(),
+                    quotes: load_quotes(database.connection(), QuoteStorage::CampDraft, camp_id)?,
                     body: String::new(),
                     content: ComposerDocument::default(),
                     revision: 0,

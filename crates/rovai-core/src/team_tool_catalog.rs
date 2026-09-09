@@ -139,7 +139,8 @@ fn camp_search_success_schema(include_camp_title: bool) -> Value {
         "authorId": {"type": "string"},
         "replyToMessageId": {"type": ["string", "null"]},
         "createdAt": {"type": "string", "format": "date-time"},
-        "snippet": {"type": "string", "maxLength": 200}
+        "snippet": {"type": "string", "maxLength": 200},
+        "quotes": crate::message_quote::model_quotes_schema("camp_messages")
     });
     let mut required = vec![
         "campId",
@@ -192,6 +193,7 @@ fn collection_message_schema() -> Value {
             "replyToMessageId": {"type": ["string", "null"]},
             "createdAt": {"type": "string", "format": "date-time"},
             "body": {"type": "string", "maxLength": 500},
+            "quotes": crate::message_quote::model_quotes_schema("camp_messages"),
             "bodyOffset": {"const": 0},
             "bodyLength": {"type": "integer", "minimum": 0},
             "bodyTruncated": {"type": "boolean"},
@@ -237,6 +239,7 @@ fn item_message_schema() -> Value {
             "replyToMessageId": {"type": ["string", "null"]},
             "createdAt": {"type": "string", "format": "date-time"},
             "body": {"type": "string", "maxLength": 4000},
+            "quotes": crate::message_quote::model_quotes_schema("camp_messages"),
             "bodyOffset": {"type": "integer", "minimum": 0},
             "bodyLength": {"type": "integer", "minimum": 0},
             "bodyTruncated": {"type": "boolean"},
