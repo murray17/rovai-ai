@@ -113,7 +113,7 @@ export async function revealMessageQuote(quote: MessageQuoteSnapshot, root: HTML
   if (!bounds) { clear(); throw new Error('quote.selection_unavailable') }
   clearActive = clear
   root.dataset.quoteLocated = 'true'
-  const timeline = root.closest<HTMLElement>('.conversation-timeline, .single-chat-transcript')
+  const timeline = root.closest<HTMLElement>('.conversation-timeline, .single-chat-viewport')
   if (timeline) {
     const viewport = timeline.getBoundingClientRect()
     const padding = 40
