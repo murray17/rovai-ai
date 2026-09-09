@@ -154,7 +154,7 @@ describe('Agent Current User Mention Markdown rendering', () => {
     )
   })
 
-  it('renders a non-interactive prefix plus sanitized GFM from Structured Content', () => {
+  it('renders a profile-card trigger plus sanitized GFM from Structured Content', () => {
     const content: StructuredCampMessageContent = [{
       kind: 'current_user_mention',
       userId: 'local_user'
@@ -193,14 +193,14 @@ describe('Agent Current User Mention Markdown rendering', () => {
 
     const markup = renderMessage(content)
     const token = markup.match(
-      /<span class="message-mention-token current-user"[^>]*>@你<\/span>/
+      /<span class="message-mention-token current-user is-interactive"[^>]*>@你<\/span>/
     )?.[0]
 
     expect(token).toBeDefined()
-    expect(token).toContain('aria-label="提及当前用户：你"')
-    expect(token).not.toContain('role=')
-    expect(token).not.toContain('tabindex=')
-    expect(token).not.toContain('aria-haspopup=')
+    expect(token).toContain('aria-label="查看你的个人资料"')
+    expect(token).toContain('role="button"')
+    expect(token).toContain('tabindex="0"')
+    expect(token).toContain('aria-haspopup="dialog"')
     expect(markup.indexOf(token!)).toBeLessThan(markup.indexOf('data-markdown-heading="请确认"'))
     expect(markup).toContain('current-user-mention-prefix')
     expect(markup).toContain('current-user-markdown-content')
@@ -444,7 +444,7 @@ describe('historical current user presentation', () => {
     const canonical = JSON.stringify(content)
     const profile = { displayName: 'Murray 🐻', avatarDataUrl: 'data:image/png;base64,cHJvZmlsZQ==' }
     const markup = renderMessage(content, '@你 旧缓存', 'agent', members, profile)
-    expect(markup).toContain('aria-label="提及当前用户：Murray 🐻"')
+    expect(markup).toContain('aria-label="查看Murray 🐻的个人资料"')
     expect(markup).toContain('>@Murray 🐻</span>')
     expect(markup).toContain('正文 @你 与 <code>@你</code> 保持原样。')
     expect(structuredCampContentPlainText(content, members, profile.displayName)).toBe('@Murray 🐻 正文 @你 与 `@你` 保持原样。')
@@ -453,6 +453,7 @@ describe('historical current user presentation', () => {
     for (const authorType of ['user', 'external_principal'] as const) {
       const human = renderMessage([{ kind: 'text', text: '旧消息正文' }], '旧消息正文', authorType, members, profile)
       expect(human).toContain('Murray 🐻')
+      expect(human).toContain('aria-label="查看Murray 🐻的个人资料"')
       expect(human).toContain(`src="${profile.avatarDataUrl}"`)
       expect(human).toContain('旧消息正文')
     }

@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-09-06
+last_updated: 2026-09-09
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -130,7 +130,10 @@ Current User Mention 从 Desktop 当前个人资料解析名称；保存后历�
 [Current User Profile v1](../../contracts/current-user-profile-v1.md)，不改变 Core 的 Agent 上下文投影。
 
 只有 Core Structured Content 能生成历史消息中的 `@当前用户`。它与 Member Mention 使用相同行内色彩语言，
-但不可交互、不进入 tab 顺序、不打开信息卡；可访问名称包含当前显示名称。它不是 Composer V2 Atom。
+点击或聚焦后按 Enter/Space 打开当前用户资料卡；可访问名称包含当前显示名称。它不是 Composer V2 Atom。
+会话中的本人消息头像打开同一卡片。卡片宽 240px，仅显示 160px 圆形头像和名称，不显示“个人资料”文案；
+保存资料后，已打开卡片同步刷新。点击外部或 Escape 关闭；键盘打开时焦点进入卡片，Escape 将焦点返回触发点。
+沿用队员信息卡的视口避让和单卡片互斥，选中文字时不因点击误打开。
 
 Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内结构化前缀；其余权威 Structured Content
 继续通过 sanitized GFM 呈现。正文里的 Agent Mention 在该路径只投影可见文本，显示名先按 Markdown literal

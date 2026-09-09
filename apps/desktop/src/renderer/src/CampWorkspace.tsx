@@ -843,6 +843,7 @@ export interface CampRuntimeRecovery {
 type MentionPopoverRequest = {
   target:
     | { kind: 'member'; agentId: string }
+    | { kind: 'current_user' }
     | { kind: 'all_members'; context: 'composer' | 'history'; agentIds: string[] }
   trigger: HTMLElement
   focusPanel: boolean
@@ -1838,6 +1839,13 @@ export function CampWorkspace({
       window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
     }
   }, [mentionPopover?.trigger])
+  const openCurrentUserProfilePopover = (trigger: HTMLElement, focusPanel: boolean): void => {
+    if (mentionPopover?.trigger === trigger) {
+      closeMentionPopover(true)
+      return
+    }
+    setMentionPopover({ target: { kind: 'current_user' }, trigger, focusPanel })
+  }
   const openMemberProfilePopover = (
     agentId: string,
     trigger: HTMLElement,
@@ -4348,7 +4356,16 @@ export function CampWorkspace({
                             />
                           ))}
                       {(campMessage.authorType === 'user' || campMessage.authorType === 'external_principal') && (
-                        <CurrentUserAvatar profile={currentUserProfile} className="local-message-avatar" />
+                        <button
+                          type="button"
+                          className="message-author-trigger message-author-avatar-trigger current-user-profile-trigger"
+                          aria-label={`查看${currentUserDisplayName(currentUserProfile)}的个人资料`}
+                          aria-haspopup="dialog"
+                          aria-expanded={false}
+                          onClick={(event) => openCurrentUserProfilePopover(event.currentTarget, event.detail === 0)}
+                        >
+                          <CurrentUserAvatar profile={currentUserProfile} className="local-message-avatar" />
+                        </button>
                       )}
                       {campMessage.authorType === 'agent' && (
                         <time className="message-continuation-time" aria-hidden="true">
@@ -4445,6 +4462,7 @@ export function CampWorkspace({
                                             truncate={humanAuthored}
                                             forceExpanded={isConversationFindCurrent}
                                             renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
+                                            onActivateCurrentUserMention={openCurrentUserProfilePopover}
                                             onActivateMemberMention={openMemberProfilePopover}
                                             onActivateAllMembersMention={(trigger, focusPanel) =>
                                               openAllMembersMentionPopover(
@@ -5979,6 +5997,8 @@ function MentionProfilePopover({
   profiles: AgentProfile[]
   onClose(returnFocus: boolean): void
 }): JSX.Element {
+  const { profile: currentUserProfile } = useCurrentUserProfile()
+  const currentUser = request.target.kind === 'current_user'
   const panelRef = useRef<HTMLDivElement>(null)
   const focusedPanelRef = useRef(false)
   const [position, setPosition] = useState<{
@@ -6097,9 +6117,9 @@ function MentionProfilePopover({
     '--mention-popover-arrow-x': `${position?.arrowX ?? 28}px`,
     '--mention-popover-accent': member?.accent ?? 'var(--brand)'
   } as CSSProperties
-  const ariaLabel = profile
-    ? `${profile.displayName}的基础信息`
-    : '所有队员范围'
+  const ariaLabel = currentUser
+    ? `${currentUserDisplayName(currentUserProfile)}的个人资料`
+    : profile ? `${profile.displayName}的基础信息` : '所有队员范围'
 
   return createPortal(
     <div
@@ -6108,13 +6128,19 @@ function MentionProfilePopover({
       role="dialog"
       aria-modal="false"
       aria-label={ariaLabel}
-      data-content-kind={profile ? 'member' : 'group'}
+      data-content-kind={currentUser ? 'current_user' : profile ? 'member' : 'group'}
       data-placement={position?.placement ?? 'bottom'}
       tabIndex={-1}
       style={style}
     >
       <div className="mention-profile-popover-arrow" aria-hidden="true" />
       <div className="mention-profile-popover-inner">
+        {currentUser && (
+          <div className="current-user-profile-card">
+            <CurrentUserAvatar profile={currentUserProfile} size={160} />
+            <h2>{currentUserDisplayName(currentUserProfile)}</h2>
+          </div>
+        )}
         {profile && member
           ? (
               <div className="mention-profile-side-shell">
@@ -7487,6 +7513,7 @@ function TruncatedStructuredMessageBody({
   truncate,
   forceExpanded,
   renderLeadingCurrentUserMarkdown = false,
+  onActivateCurrentUserMention,
   onActivateMemberMention,
   onActivateAllMembersMention,
   onFileReference
@@ -7497,6 +7524,7 @@ function TruncatedStructuredMessageBody({
   truncate: boolean
   forceExpanded: boolean
   renderLeadingCurrentUserMarkdown?: boolean
+  onActivateCurrentUserMention?(trigger: HTMLElement, focusPanel: boolean): void
   onActivateMemberMention?(
     agentId: string,
     trigger: HTMLElement,
@@ -7521,6 +7549,7 @@ function TruncatedStructuredMessageBody({
       content={displayContent}
       members={members}
       renderLeadingCurrentUserMarkdown={renderLeadingCurrentUserMarkdown}
+      onActivateCurrentUserMention={onActivateCurrentUserMention}
       onActivateMemberMention={onActivateMemberMention}
       onActivateAllMembersMention={onActivateAllMembersMention}
       onFileReference={onFileReference}
@@ -7610,6 +7639,7 @@ function StructuredMessageBody({
   members,
   inline = false,
   renderLeadingCurrentUserMarkdown = false,
+  onActivateCurrentUserMention,
   onActivateMemberMention,
   onActivateAllMembersMention,
   onFileReference
@@ -7619,6 +7649,7 @@ function StructuredMessageBody({
   members: CampSnapshot['members']
   inline?: boolean
   renderLeadingCurrentUserMarkdown?: boolean
+  onActivateCurrentUserMention?(trigger: HTMLElement, focusPanel: boolean): void
   onActivateMemberMention?(
     agentId: string,
     trigger: HTMLElement,
@@ -7637,7 +7668,7 @@ function StructuredMessageBody({
     return (
       <div className="current-user-markdown-body">
         <span className="current-user-mention-prefix">
-          <CurrentUserMentionToken />
+          <CurrentUserMentionToken onActivate={onActivateCurrentUserMention} />
           {markdownBody.length > 0 ? ' ' : ''}
         </span>
         {markdownBody.length > 0 && (
@@ -7668,7 +7699,7 @@ function StructuredMessageBody({
         if (segment.kind === 'current_user_mention') {
           return (
             <span key={`current-user-${index}`}>
-              <CurrentUserMentionToken />
+              <CurrentUserMentionToken onActivate={onActivateCurrentUserMention} />
               {index === 0 && content.slice(1).some((candidate) => (
                 candidate.kind !== 'text' || candidate.text.length > 0
               )) ? ' ' : ''}
@@ -7766,13 +7797,28 @@ function StructuredMessageBody({
   )
 }
 
-function CurrentUserMentionToken(): JSX.Element {
+function CurrentUserMentionToken({ onActivate }: {
+  onActivate?(trigger: HTMLElement, focusPanel: boolean): void
+}): JSX.Element {
   const { profile } = useCurrentUserProfile()
   const displayName = currentUserDisplayName(profile)
   return (
     <span
-      className="message-mention-token current-user"
-      aria-label={`提及当前用户：${displayName}`}
+      className={`message-mention-token current-user${onActivate ? ' is-interactive' : ''}`}
+      role={onActivate ? 'button' : undefined}
+      tabIndex={onActivate ? 0 : undefined}
+      aria-label={onActivate ? `查看${displayName}的个人资料` : `提及当前用户：${displayName}`}
+      aria-haspopup={onActivate ? 'dialog' : undefined}
+      aria-expanded={onActivate ? false : undefined}
+      onClick={(event) => {
+        if (window.getSelection()?.toString()) return
+        onActivate?.(event.currentTarget, false)
+      }}
+      onKeyDown={(event) => {
+        if (!onActivate || (event.key !== 'Enter' && event.key !== ' ')) return
+        event.preventDefault()
+        onActivate(event.currentTarget, true)
+      }}
     >
       @{displayName}
     </span>
