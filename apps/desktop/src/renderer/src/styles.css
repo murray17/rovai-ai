@@ -44,8 +44,8 @@
   --workspace-faint: #71808a;
   --runtime-logo-surface: #ffffff;
   --conversation-surface: #ffffff;
-  --conversation-user-message-surface: #f2f3f4;
-  --conversation-user-message-line: #e3e7e9;
+  --conversation-user-message-surface: #f5f5f4;
+  --conversation-user-message-line: #f5f5f4;
   --execution-running-surface: #fafafa;
   --conversation-find-match: #f4e4c3;
   --conversation-find-current: #edc66f;
@@ -215,8 +215,8 @@
   --workspace-faint: #8998a1;
   --runtime-logo-surface: #ffffff;
   --conversation-surface: #181d21;
-  --conversation-user-message-surface: #20272c;
-  --conversation-user-message-line: #2f3a41;
+  --conversation-user-message-surface: #24282b;
+  --conversation-user-message-line: #24282b;
   --execution-running-surface: #1b2024;
   --conversation-find-match: #5a4725;
   --conversation-find-current: #845f23;
@@ -1651,7 +1651,7 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 .single-chat-turn { display: contents; }
 .single-chat-user-message { display: flex; max-width: 82%; align-self: flex-end; }
 .single-chat-user-content { display: grid; min-width: 0; justify-items: end; gap: 7px; }
-.single-chat-user-bubble { padding: 8px 11px; border: 1px solid var(--line); border-radius: 9px 9px 3px 9px; background: var(--execution-running-surface); font-size: 12.5px; line-height: 1.62; overflow-wrap: anywhere; white-space: pre-wrap; }
+.single-chat-user-bubble { padding: 8px 11px; border: 1px solid var(--conversation-user-message-line); border-radius: 12px; background: var(--conversation-user-message-surface); font-size: 12.5px; line-height: 1.62; overflow-wrap: anywhere; white-space: pre-wrap; }
 .single-chat-message-attachments { display: grid; width: min(296px, 100%); justify-items: stretch; gap: 6px; }
 .single-chat-message-attachments .user-timeline { width: 100%; max-width: 100%; }
 .single-chat-agent-response { width: 100%; align-self: flex-start; border: 0; background: transparent; }
@@ -3402,12 +3402,6 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   justify-content: flex-start;
   margin: 3px 0 0 37px;
 }
-.conversation-bubble.agent .message-actions .copy-feedback,
-.agent-message-output > .agent-message-output-actions .copy-feedback {
-  order: 3;
-  margin-right: 0;
-  margin-left: 3px;
-}
 .conversation-bubble:hover .message-actions,
 .conversation-bubble:focus-within .message-actions,
 .agent-message-output:hover > .message-actions,
@@ -3440,30 +3434,20 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .message-copy-button:hover,
 .message-reply-button:hover { border-color: var(--line); color: var(--brand-ink); background: var(--surface-hover); }
 .message-surface.copied .message-copy-button,
-.message-actions.copied .message-copy-button { color: var(--success); background: var(--success-soft); }
+.message-actions.copied .message-copy-button { color: var(--ink); background: var(--surface-subtle); }
 @media (hover: none), (pointer: coarse) {
   .message-actions { opacity: 1; pointer-events: auto; transform: translateY(0); }
   .message-copy-button, .message-reply-button { width: 40px; height: 40px; flex-basis: 40px; }
 }
 .copy-feedback {
-  display: inline-flex;
-  min-height: 22px;
-  align-items: center;
-  margin-right: 3px;
-  padding: 3px 6px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  opacity: 0;
-  color: var(--muted);
-  background: var(--surface-raised);
-  font-size: 9px;
-  pointer-events: none;
-  transform: translateY(2px);
-  transition: opacity 120ms ease, transform 120ms ease;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
-.copy-feedback:empty { display: none; }
-.message-surface.copied .copy-feedback,
-.message-actions.copied .copy-feedback { opacity: 1; transform: translateY(0); }
 .message-long-copy { min-width: 0; }
 .message-long-toggle {
   display: inline-flex;
@@ -7709,12 +7693,17 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .notification-heads-up-open strong { color: var(--ink); font-size: 12px; font-weight: 600; }
 .notification-heads-up-message { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .notification-heads-up[hidden] { display: none; }
-.notification-heads-up-source { display: flex; min-width: 0; white-space: nowrap; }
+.notification-heads-up-source { display: flex; align-items: center; min-width: 0; white-space: nowrap; }
+.notification-heads-up-dot, .single-chat-new-reply-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--conversation-unread); }
+.notification-heads-up-dot { margin-right: 7px; }
+.notification-heads-up[data-semantic="approval_pending"] .notification-heads-up-dot { background: var(--attention); }
+.notification-heads-up[data-semantic="turn_incomplete"] .notification-heads-up-dot { background: var(--attention); }
+.notification-heads-up[data-semantic="turn_failed"] .notification-heads-up-dot { background: var(--danger); }
 .notification-heads-up-source > span { overflow: hidden; text-overflow: ellipsis; }
 .notification-heads-up-source > b { flex: 0 0 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; font-weight: inherit; }
 .notification-heads-up-summary .notification-heads-up-open { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .notification-heads-up-summary .notification-heads-up-open > span:last-child { color: var(--brand-ink); }
-.single-chat-new-reply { margin: 0 auto 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--brand-ink); cursor: pointer; font-size: 12px; }
+.single-chat-new-reply { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 0 auto 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--ink); cursor: pointer; font-size: 12px; }
 .single-chat-popover .approval-dock { position: static; flex-shrink: 0; width: auto; margin: 8px 12px; }
 @media (prefers-reduced-motion: reduce) { .notification-heads-up { animation: none; } }
 .notification-heads-up-close { width: 28px; height: 28px; margin-top: 7px; border: 0; border-radius: 6px; color: var(--faint); background: transparent; cursor: pointer; }

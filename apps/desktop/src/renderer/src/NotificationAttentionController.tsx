@@ -734,6 +734,7 @@ export function NotificationHeadsUp({
   return (
     <aside
       className="notification-heads-up"
+      data-semantic={entry.signal.semantic}
       hidden={!active}
       aria-live="polite"
       onMouseEnter={() => setHovered(true)}
@@ -750,7 +751,7 @@ export function NotificationHeadsUp({
         aria-busy={busy ? 'true' : undefined}
         onClick={onOpen}
       >
-        <strong className="notification-heads-up-source" title={`${campTitle}${privateTitle}`}><span>{campTitle}</span>{privateTitle && <b>{privateTitle}</b>}</strong>
+        <strong className="notification-heads-up-source" title={`${campTitle}${privateTitle}`}><i className="notification-heads-up-dot" aria-hidden="true" /><span>{campTitle}</span>{privateTitle && <b>{privateTitle}</b>}</strong>
         <span className="notification-heads-up-message">{presentation.message}</span>
       </button>
       <button

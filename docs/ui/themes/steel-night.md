@@ -52,8 +52,8 @@ Dark. `color-scheme: dark`.
 | `--workspace-attention-soft` | `#302617` |
 | `--workspace-faint` | `#8998a1` |
 | `--conversation-surface` | `#181d21` |
-| `--conversation-user-message-surface` | `#20272c` |
-| `--conversation-user-message-line` | `#2f3a41` |
+| `--conversation-user-message-surface` | `#24282b` |
+| `--conversation-user-message-line` | `#24282b` |
 | `--execution-running-surface` | `#1b2024` |
 | `--conversation-find-match` | `#5a4725` |
 | `--conversation-find-current` | `#845f23` |
@@ -247,9 +247,9 @@ Camp message prose, Runtime process copy in the bottom and Inspector execution s
 Markdown file previews use the dedicated `--conversation-inline-code-canvas`,
 `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer; release notes,
 Tool results and other SafeMarkdown surfaces keep the shared defaults.
-Current-user message bubbles use the dedicated neutral Steel pair
-`--conversation-user-message-surface` / `--conversation-user-message-line`; Agent narrative remains
-transparent.
+Public user and Agent message bodies share the Mist Gray
+`--conversation-user-message-surface` / matching `--conversation-user-message-line`, retaining a 1px border allocation.
+Single Chat user bubbles share these tokens; private Agent narrative remains transparent.
 
 ## Contrast requirements
 

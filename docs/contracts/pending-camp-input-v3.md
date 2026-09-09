@@ -51,6 +51,12 @@ attachments under the existing pendingInputId/revision/editToken fence, incremen
 returns the row to `queued` and closes the edit session. Save permits an empty document when working attachments are
 non-empty. Cancel/Delete and add/remove/reorder attachment behavior remain v2.
 
+Normal navigation within one Renderer window may retain a local edit snapshot without any Core mutation. Resuming
+requires a fresh queue projection with the same Camp, Pending ID, canonical and base revisions, editToken, and
+`recoveryRequired = false`; working attachments come from that projection. This continues the existing owned edit,
+never implicitly begins or takes over one. Failed navigation retains the mounted editor. Reload/crash or a changed
+owner/revision retains explicit recovery; local unsaved text is not persisted by this protocol.
+
 ## Publication and repair
 
 Only the FIFO head may publish. Core resolves and validates current Atom identity and source availability, then maps

@@ -20,6 +20,8 @@ app.whenReady().then(async () => {
   await window.loadFile(renderer)
   const report = await window.webContents.executeJavaScript(mode === '--pending-attachments'
     ? 'window.continuationTest.pendingAttachments()'
+    : mode === '--pending-navigation'
+      ? 'window.continuationTest.pendingNavigation()'
     : mode === '--route-loading'
       ? 'window.continuationTest.routeLoading()'
       : 'window.continuationTest.run()', true)

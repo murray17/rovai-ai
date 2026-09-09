@@ -1,7 +1,7 @@
 import type { AgentProfile, CampComposerDraftView, CampMessageView, CampPendingInputsView, CampSnapshot, CoreEvent, LocalAttachmentOwnerLocator, LocalAttachmentSourceView, PendingInputEditAction, RovaiApi } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
-import { CampWorkspace, type CampMessageSendReceipt } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import { CampWorkspace, type CampMessageSendReceipt, type CampLeaveGuard } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import { SafeMarkdown } from '../../../apps/desktop/src/renderer/src/SafeMarkdown'
 import { composerDocumentFromText, emptyComposerDocument } from '../../../apps/desktop/src/renderer/src/composer-document'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -17,6 +17,8 @@ const attachmentCalls: { owner: string; file: string }[] = []
 const previewLocators: LocalAttachmentOwnerLocator[] = []
 let releasePreparation: (() => void) | null = null
 let pausePreparation = false
+let leaveGuard: CampLeaveGuard | null = null
+let failPendingSave = false
 const listeners = new Set<(event: CoreEvent) => void>()
 const emit = (method: string, params: Record<string, unknown>) => {
   for (const listener of listeners) listener({ method, params })
@@ -81,6 +83,7 @@ Object.assign(window, { rovai: {
       const item = queue.items.find(item => item.id === command.pendingInputId)!
       check(item?.revision === command.expectedRevision, 'Pending edit must use the canonical revision')
       const action = command.action
+      if (action.type === 'save' && failPendingSave) throw new Error('保存失败，请重试')
       if (action.type === 'begin') {
         queue.editSession = { pendingInputId: item.id, editToken: 'fixture-edit-token', basePendingRevision: item.revision,
           recoveryRequired: false, workingAttachments: structuredClone(item.attachments) }
@@ -188,7 +191,8 @@ async function render() {
   flushSync(() => root!.render(<CampWorkspace snapshot={snapshot} projectName={null} agents={agents}
     busy={false} stopping={false} worldMapEnabled={false}
     onSend={(draft) => send(draft)} onStop={() => undefined}
-    onChangeLead={async () => undefined} onTasksChanged={async () => undefined} onResolveApproval={() => undefined} />))
+    onChangeLead={async () => undefined} onTasksChanged={async () => undefined} onResolveApproval={() => undefined}
+    onCampLeaveGuardChange={(_campId, guard) => { leaveGuard = guard }} />))
   await flush()
 }
 
@@ -379,6 +383,105 @@ async function runPendingAttachmentCases(): Promise<string[]> {
   check(fenced.dataTransfer?.dropEffect === 'none' && !attachmentCalls.some(call => call.file === 'fenced.txt'), 'Fenced edit must reject drops, not fall back to the normal Draft')
   check(JSON.stringify(drafts.get(campId)) === JSON.stringify(draft), 'Failure and fenced paths must leave the ordinary Draft intact')
   cases.push('attachment-only Save and fenced-edit drag guards remain intact')
+  return cases
+}
+
+async function runPendingNavigationCases(): Promise<string[]> {
+  const cases: string[] = []
+  const draft = await setupPendingAttachments()
+  const originalSnapshot = snapshot
+  queue.items[0].content.segments.unshift({ kind: 'atom', atom: { type: 'member', agentId: 'agent_1' } })
+  emit('camp.pendingInputs.changed', { campId, reason: 'fixture-ready' })
+  await flush()
+  await beginPending()
+  const canonical = JSON.stringify(queue.items[0].content)
+  pendingEditor().focus()
+  const selection = window.getSelection()!
+  selection.selectAllChildren(pendingEditor())
+  selection.collapseToEnd()
+  document.execCommand('insertText', false, '，回来后继续修改')
+  pausePreparation = true
+  dragFiles(pendingEditor(), [textFile('导航前补充.txt')])
+  await until(() => releasePreparation !== null, 'Working attachment preparation must start')
+  let leaveBlocked = false
+  try { await leaveGuard!() } catch { leaveBlocked = true }
+  check(leaveBlocked && pendingEditor(), 'Navigation must wait for the in-flight Pending mutation')
+  pausePreparation = false
+  releasePreparation!()
+  await until(() => pendingReady() && pendingCards().length === 3, 'Working attachment preparation must finish')
+  cases.push('in-flight Pending attachment changes block navigation until they finish')
+  const text = pendingEditor().textContent
+
+  const aborted = await leaveGuard!()
+  aborted.complete(false)
+  await until(pendingReady, 'An aborted transition must unlock the same editor')
+  check(pendingEditor().textContent === text, 'Aborted navigation must preserve unsaved text')
+  cases.push('aborted navigation retains and unlocks the active edit')
+
+  const remount = async (nextSnapshot: CampSnapshot, nextQueue: CampPendingInputsView) => {
+    flushSync(() => root!.unmount())
+    snapshot = nextSnapshot
+    queue = nextQueue
+    root = createRoot(document.getElementById('root')!)
+    await render()
+    await until(() => editor()?.getAttribute('aria-disabled') !== 'true', 'Ordinary Draft must be ready')
+  }
+  const originalQueue = queue
+  const otherId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec1'
+  drafts.set(otherId, { ...emptyDraft(otherId), content: composerDocumentFromText('另一会话草稿'), body: '另一会话草稿' })
+  const mutations = calls.filter(call => call === 'camp.pendingInputs.edit').length
+  const leave = await leaveGuard!()
+  leave.complete(true)
+  await remount({ ...snapshot, camp: { ...snapshot.camp, id: otherId } }, { campId: otherId, executionActive: false, items: [], editSession: null })
+  check(!pendingEditor() && editor().textContent?.includes('另一会话草稿'), 'Pending text cannot leak into another Camp')
+  const back = await leaveGuard!()
+  back.complete(true)
+  await remount(originalSnapshot, originalQueue)
+  await until(pendingReady, 'Returning must resume the original edit without an explicit recovery click')
+  check(pendingEditor().textContent === text && pendingCards().length === 3, 'Unsaved body and working attachments must return together')
+  check(pendingEditor().querySelector('[data-token-kind="member_mention"][data-agent-id="agent_1"]'), 'Member identity must survive navigation')
+  check(calls.filter(call => call === 'camp.pendingInputs.edit').length === mutations, 'Navigation must not begin, takeover, save or cancel')
+  check(JSON.stringify(queue.items[0].content) === canonical, 'Navigation cannot update canonical Pending text')
+  check(JSON.stringify(drafts.get(campId)) === JSON.stringify(draft), 'The hidden ordinary Draft remains independent')
+  cases.push('Camp navigation restores the exact local edit, Atom and attachments without mutation')
+
+  failPendingSave = true
+  pendingButton('保存').click()
+  await until(() => pendingReady() && Boolean(document.querySelector('.pending-input-notice')?.textContent?.includes('保存失败')), 'Failed save must recover the editor')
+  check(pendingEditor().textContent === text, 'Save failure must retain the edited document')
+  failPendingSave = false
+  pendingButton('保存').click()
+  await until(() => !pendingEditor(), 'Retry must save and close the edit')
+  check(queue.items[0].body.includes('回来后继续修改') && queue.items[0].attachments.length === 3, 'Explicit Save must commit the retained edit')
+  check(editor().textContent?.includes('独立保留的普通草稿'), 'Saving the Pending edit restores the ordinary Composer')
+  cases.push('save failure retains the resumed edit and explicit retry commits it')
+
+  await beginPending()
+  const cancelled = await leaveGuard!()
+  cancelled.complete(true)
+  await remount(originalSnapshot, queue)
+  await until(pendingReady, 'A second edit can resume after page navigation')
+  pendingButton('取消').click()
+  await until(() => !pendingEditor(), 'Cancel still closes an unchanged resumed edit')
+  cases.push('cancel after navigation preserves the normal Draft')
+
+  await beginPending()
+  const fenced = await leaveGuard!()
+  fenced.complete(true)
+  queue.editSession!.editToken = 'another-owner'
+  await remount(originalSnapshot, queue)
+  check(!pendingEditor() && document.querySelector('.pending-input-list')?.textContent?.includes('重新编辑'), 'A changed owner must retain explicit recovery, never resume the cached draft')
+  cases.push('changed edit ownership requires explicit recovery')
+
+  // New explicit begin in a fresh projection, then an unguarded teardown models
+  // reload/crash: there is deliberately no navigation snapshot to resume.
+  queue.editSession = null
+  emit('camp.pendingInputs.changed', { campId, reason: 'fixture-reset' })
+  await flush()
+  await beginPending()
+  await remount(originalSnapshot, queue)
+  check(!pendingEditor() && document.querySelector('.pending-input-list')?.textContent?.includes('重新编辑'), 'Unguarded teardown must keep the existing recovery mechanism')
+  cases.push('reload/crash without navigation preparation still requires recovery')
   return cases
 }
 
@@ -580,6 +683,7 @@ Object.assign(window, { continuationTest: { async run() {
   await flush()
   return { ok: true, cases }
 }, async pendingAttachments() { return { ok: true, cases: await runPendingAttachmentCases() } },
+async pendingNavigation() { return { ok: true, cases: await runPendingNavigationCases() } },
 async routeLoading() {
   const layout = () => ({
     composerTop: editor().closest('.composer-box')!.getBoundingClientRect().top,

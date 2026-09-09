@@ -69,7 +69,8 @@ import {
   draftCoordinatorChangeRefreshesProjection,
   type DraftMutation
 } from './draft-mutation-coordinator'
-import { PendingCampInputs, type PendingAttachmentDropTarget } from './PendingCampInputs'
+import { PendingCampInputs, type PendingAttachmentDropTarget, type PendingCampInputsHandle } from './PendingCampInputs'
+import type { PendingInputLeavePreparation } from './pending-input-navigation'
 import { AttachmentCard, AttachmentPlaceholder, ComposerAttachmentStrip } from './AttachmentCard'
 export { attachmentRevealLabel } from './AttachmentCard'
 import {
@@ -1517,6 +1518,7 @@ export function CampWorkspace({
   })
   const [pendingQueue, setPendingQueue] = useState<CampPendingInputsView | null>(null)
   const [pendingEditing, setPendingEditing] = useState(false)
+  const pendingInputsRef = useRef<PendingCampInputsHandle>(null)
   const [pendingAttachmentDropTarget, setPendingAttachmentDropTarget] = useState<PendingAttachmentDropTarget>(null)
   const updatePendingAttachmentDropTarget = useCallback((target: PendingAttachmentDropTarget): void => {
     setPendingAttachmentDropTarget(() => target)
@@ -2170,15 +2172,20 @@ export function CampWorkspace({
   }
 
   const prepareForCampLeave = useCallback(async (): Promise<CampLeavePreparation> => {
-    if (draftLoadState.state !== 'ready') {
-      return { complete: () => undefined }
-    }
     if (composerSubmittingRef.current || routingMutatingRef.current) {
       throw new Error('Composer 正在提交变更，请稍后再离开当前会话。')
     }
     const composerHandle = composerHandleRef.current
     composerHandle?.setInteractionLocked(true)
+    let pendingPreparation: PendingInputLeavePreparation | undefined
     try {
+      pendingPreparation = await pendingInputsRef.current?.prepareForLeave()
+      if (draftLoadState.state !== 'ready') {
+        return { complete(didLeave) {
+          pendingPreparation?.complete(didLeave)
+          if (!didLeave) composerHandle?.setInteractionLocked(false)
+        } }
+      }
       await attachmentPreparationQueue.current
       const flushed = await composerHandle?.flush()
       const draft = flushed?.draft ?? await draftCoordinator.waitForIdle()
@@ -2190,6 +2197,7 @@ export function CampWorkspace({
         complete(didLeave) {
           if (completed) return
           completed = true
+          pendingPreparation?.complete(didLeave)
           if (!didLeave) composerHandle?.setInteractionLocked(false)
           if (didLeave && settlePending) {
             void settlePending(draft).catch(() => undefined)
@@ -2197,6 +2205,7 @@ export function CampWorkspace({
         }
       }
     } catch (error) {
+      pendingPreparation?.complete(false)
       composerHandle?.setInteractionLocked(false)
       const normalized = error instanceof Error ? error : new Error(readErrorMessage(error))
       setComposerPersistenceError(normalized)
@@ -4723,7 +4732,7 @@ export function CampWorkspace({
         ].filter(Boolean).join(' ')}
         onSubmit={(event) => void submit(event)}
       >
-        <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
+        <PendingCampInputs ref={pendingInputsRef} key={snapshot.camp.id} campId={snapshot.camp.id}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
           attachmentDragActive={pendingEditing && attachmentDragState !== null}
@@ -7762,12 +7771,14 @@ function MessageCopyButton({
       className="message-copy-button"
       type="button"
       aria-label={copied ? '已复制这条消息' : '复制这条消息'}
-      title={copied ? '已复制' : '复制'}
+      title="复制"
       onClick={onCopy}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="8" y="8" width="11" height="11" rx="2" />
-        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+        {copied ? <path d="m5 12 4 4 10-10" /> : <>
+          <rect x="8" y="8" width="11" height="11" rx="2" />
+          <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+        </>}
       </svg>
     </button>
   )
