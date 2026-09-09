@@ -69,7 +69,8 @@ to that teammate's Runtime configuration. A small dirty dot and accessible “�
 
 Keep a fixed personal-profile entry above the teammate roster, outside counts, search and ordering.
 It selects an ordinary detail page with avatar, name and a conversation preview. Both defaults are “你”;
-renaming keeps that glyph until an image is uploaded. Reuse the existing circular cropper. Save both fields
+renaming keeps that glyph until an image is uploaded. Show the name without an added “· 你” suffix;
+keep “个人资料” as the entry subtitle. Reuse the existing circular cropper. Save both fields
 together, keep drafts when selecting teammates, and include this editor in the workspace leave guard.
 The entry remains clickable above the native window drag strip. Its production semantics are owned by
 [Current User Profile v1](../../../../docs/contracts/current-user-profile-v1.md).

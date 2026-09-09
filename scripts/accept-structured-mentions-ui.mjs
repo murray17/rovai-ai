@@ -1280,24 +1280,27 @@ try {
     currentUserMentionInspection
       && currentUserMentionInspection.messageText === currentUserMentionBody
       && currentUserMentionInspection.tokenText === '@你'
-      && currentUserMentionInspection.label === '提及当前用户：你'
-      && currentUserMentionInspection.role === null
-      && currentUserMentionInspection.tabIndex === null
-      && currentUserMentionInspection.hasPopup === null
-      && !currentUserMentionInspection.interactive
+      && currentUserMentionInspection.label === '查看你的个人资料'
+      && currentUserMentionInspection.role === 'button'
+      && currentUserMentionInspection.tabIndex === '0'
+      && currentUserMentionInspection.hasPopup === 'dialog'
+      && currentUserMentionInspection.interactive
       && currentUserMentionInspection.display === 'inline'
       && currentUserMentionInspection.borderTopWidth === '0px'
       && currentUserMentionInspection.backgroundColor === 'rgba(0, 0, 0, 0)'
       && currentUserMentionInspection.color === currentUserMentionInspection.mentionInkColor
       && currentUserMentionInspection.theme === 'night',
-    `Current User Mention is not the accepted non-interactive inline token: ${JSON.stringify(currentUserMentionInspection)}`
+    `Current User Mention is not the accepted profile-card trigger: ${JSON.stringify(currentUserMentionInspection)}`
   )
   await evaluate(running.cdp, `(() => {
     document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-mention-token.current-user')?.click()
     return true
   })()`)
-  assert(!(await evaluate(running.cdp, `Boolean(document.querySelector('.mention-profile-popover'))`)),
-    'Current User Mention incorrectly opened a member profile popover')
+  await waitForExpression(running.cdp, `Boolean(document.querySelector('.current-user-profile-card'))`, 3_000)
+  assert(await evaluate(running.cdp, `document.querySelector('.current-user-profile-card').textContent === '你你'`),
+    'Current User profile card must contain only the default avatar and name')
+  await evaluate(running.cdp, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+  await waitForExpression(running.cdp, `!document.querySelector('.mention-profile-popover')`, 3_000)
 
   const currentUserMentionCapture = join(outputDir, 'current-user-mention-sent.png')
   await capture(running.cdp, currentUserMentionCapture)

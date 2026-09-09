@@ -35,7 +35,6 @@
 .profile-preview-meta { display: flex; gap: 7px; align-items: baseline; min-height: 20px; }
 .profile-preview-meta strong { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .profile-preview-meta time { color: var(--faint); font-size: 10px; flex-shrink: 0; }
-.profile-self-label { flex-shrink: 0; color: var(--muted); font-size: 10.5px; }
 .profile-preview-body p { margin: 3px 0 0; color: var(--ink); font-size: 12px; line-height: 1.7; }
 .profile-mention { display: inline; padding: 1px 3px; border-radius: 3px; background: var(--neutral-selected); color: var(--ink); overflow-wrap: anywhere; }
 .profile-preview-caption { display: block; margin-top: 20px; color: var(--faint); font-size: 10.5px; line-height: 1.6; }
@@ -66,9 +65,7 @@
 .personal-roster-avatar { position: relative; flex: 0 0 40px; }
 .personal-roster-copy { display: grid; min-width: 0; gap: 4px; font: 11px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; color: var(--muted); }
 .personal-roster-name { display: flex; align-items: baseline; gap: 7px; min-width: 0; overflow: hidden; font-size: 13px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; color: var(--ink); }
-.personal-roster-name small { font-size: 10.5px; color: var(--muted); font-weight: 400; }
 .personal-roster-display { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.personal-roster-name small { flex: 0 0 auto; }
 .personal-detail-scroll { height: 100%; }
 .personal-dirty-dot { position: absolute; right: -2px; bottom: 0; width: 7px; height: 7px; background: var(--muted); border: 2px solid var(--home-surface); box-sizing: content-box; border-radius: 50%; }
 .member-sidebar.is-collapsed .personal-roster-entry { margin: 0 7px; padding: 12px 0; }

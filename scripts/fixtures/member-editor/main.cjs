@@ -576,6 +576,8 @@ app
       assert.equal(await run('document.querySelector(".personal-roster-display").textContent'), '你')
       await click('button[aria-label="重试保存个人资料"]')
       await wait('document.querySelector(".personal-roster-display").textContent === "Murray"')
+      assert.equal(await run('document.querySelector(".personal-roster-name").textContent'), 'Murray')
+      assert.equal(await run('document.querySelector(".profile-preview-meta").textContent'), 'Murray09:41')
       const png = nativeImage.createFromBuffer(readFileSync(join(__dirname, '../../../apps/desktop/src/renderer/src/assets/characters/muwa/icon-192.png'))).resize({ width: 512, height: 512 }).toPNG().toString('base64')
       await run(`window.memberFixture.source({ bytes: Uint8Array.from(atob('${png}'), c => c.charCodeAt(0)), byteLength: atob('${png}').length, inspectedWidth: 512, inspectedHeight: 512, mediaType: 'image/png', displayName: 'fixture.png' })`)
       await click('.profile-avatar-actions button', '更换头像')
