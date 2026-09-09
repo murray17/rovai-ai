@@ -52,6 +52,8 @@ app.whenReady().then(async () => {
         await settle()
         const point = await run('(() => { const r = document.querySelector(' + JSON.stringify(selector) +
           ').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()')
+        point.x = Math.round(point.x * window.webContents.getZoomFactor())
+        point.y = Math.round(point.y * window.webContents.getZoomFactor())
         window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
         window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
         await settle()
@@ -148,6 +150,7 @@ app.whenReady().then(async () => {
           await settle()
           await click(mention)
           opened = await card()
+          assert.ok(opened, theme + ' ' + width + ' zoom ' + zoom + ' opens the card')
           assert.equal(opened.bounded, true, theme + ' ' + width + ' zoom ' + zoom)
           assert.equal(Math.round(opened.width), 240)
           assert.equal(await run('document.documentElement.scrollWidth > innerWidth'), false)
