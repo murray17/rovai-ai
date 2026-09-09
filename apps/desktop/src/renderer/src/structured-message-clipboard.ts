@@ -22,7 +22,7 @@ type PrivateClipboardSegment =
   | { kind: 'text'; text: string }
   | { kind: 'member_mention'; agentId: string; fallbackText: string }
   | { kind: 'all_members_mention'; fallbackText: '@所有队员' }
-  | { kind: 'current_user_mention'; userId: 'local_user'; fallbackText: '@你' }
+  | { kind: 'current_user_mention'; userId: 'local_user'; fallbackText: string }
 
 interface PrivateClipboardPayload {
   version: 1
@@ -73,7 +73,12 @@ function isPrivateClipboardSegment(value: unknown): value is PrivateClipboardSeg
       && segment.fallbackText.length <= MAX_SEGMENT_TEXT_LENGTH
   }
   if (segment.kind === 'current_user_mention') {
-    return segment.userId === 'local_user' && segment.fallbackText === '@你'
+    return segment.userId === 'local_user'
+      && typeof segment.fallbackText === 'string'
+      && segment.fallbackText.startsWith('@')
+      && segment.fallbackText.length > 1
+      && [...segment.fallbackText].length <= 33
+      && !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(segment.fallbackText)
   }
   return segment.kind === 'all_members_mention' && segment.fallbackText === '@所有队员'
 }
@@ -107,7 +112,8 @@ function privatePayloadFromHtml(html: string): PrivateClipboardPayload | null {
 
 export function createStructuredMessageClipboardData(
   content: StructuredCampMessageContent | null,
-  members: readonly StructuredClipboardMember[]
+  members: readonly StructuredClipboardMember[],
+  currentUserName = '你'
 ): StructuredMessageClipboardData | null {
   if (!content?.some((segment) => segment.kind !== 'text')) return null
   const memberById = new Map(members.map((member) => [member.agentId, member]))
@@ -117,7 +123,7 @@ export function createStructuredMessageClipboardData(
       return { kind: 'all_members_mention', fallbackText: '@所有队员' }
     }
     if (segment.kind === 'current_user_mention') {
-      return { kind: 'current_user_mention', userId: 'local_user', fallbackText: '@你' }
+      return { kind: 'current_user_mention', userId: 'local_user', fallbackText: `@${currentUserName}` }
     }
     if (segment.kind === 'skill_mention') {
       // Paste is intentionally identity-free: a copied Skill token becomes

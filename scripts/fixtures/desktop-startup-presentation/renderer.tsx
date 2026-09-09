@@ -73,6 +73,7 @@ function api(path = ''): unknown {
       if (path.split('.').at(-1)?.startsWith('on')) return () => undefined
       if (path === 'supervisor.getSnapshot') return initialSupervisor.promise
       if (path === 'desktopSession.getStartupSnapshot') { calls.push(path); return localSession.promise }
+      if (path === 'currentUserProfile.get') return Promise.resolve({ displayName: '', avatarDataUrl: null })
       if (path === 'appearance.get') return Promise.resolve({ ...DEFAULT_APPEARANCE, resolvedTheme: appearanceTheme })
       if (path === 'generalPreferences.get') return Promise.resolve({ schemaVersion: 4,
         startupLocationMode: 'last_location', lastSettingsSection: 'general', executionConsolePlacement: 'bottom',

@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type CSSProperties
 } from 'react'
 import type {
@@ -59,6 +60,7 @@ export function filterMembers(
 }
 
 export function MemberSidebar({
+  personalEntry,
   agents,
   runtimeAvailability,
   hostPlatform = null,
@@ -70,6 +72,7 @@ export function MemberSidebar({
   onCreate,
   onReload
 }: {
+  personalEntry?: ReactNode
   agents: AgentProfile[]
   runtimeAvailability: ProductRuntimeAvailability[]
   hostPlatform?: HostPlatformKey | null
@@ -185,6 +188,7 @@ export function MemberSidebar({
 
   return (
     <section id={id} className={`member-sidebar ${collapsed ? 'is-collapsed' : ''} ${sorting ? 'is-sorting' : ''}`} aria-label="队员名册">
+      {personalEntry}
       <div className="member-sidebar-heading">
         <div className="member-sidebar-title">
           <strong>队员</strong>

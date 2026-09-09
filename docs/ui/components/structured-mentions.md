@@ -125,6 +125,10 @@ replace。失败保留现有正文并恢复交互。
 
 ## Current User Mention 与历史消息
 
+Current User Mention 从 Desktop 当前个人资料解析名称；保存后历史结构化 `@你` 立即显示为新名称。
+普通文本、代码和外部引用中的同名字面字符不替换。作者栏、复制投影和历史回复预览的当前资料规则见
+[Current User Profile v1](../../contracts/current-user-profile-v1.md)，不改变 Core 的 Agent 上下文投影。
+
 只有 Core Structured Content 能生成历史消息中的 `@当前用户`。它与 Member Mention 使用相同行内色彩语言，
 但不可交互、不进入 tab 顺序、不打开信息卡；可访问名称包含当前显示名称。它不是 Composer V2 Atom。
 

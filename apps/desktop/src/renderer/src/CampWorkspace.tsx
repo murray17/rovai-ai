@@ -1,3 +1,5 @@
+import { currentUserDisplayName } from '@contracts'
+import { CurrentUserAvatar, useCurrentUserProfile } from './CurrentUserProfile'
 import { prefersReducedMotion } from './reduced-motion'
 import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
@@ -1241,13 +1243,14 @@ export function campMemberIsLeadEligible(
 
 export function structuredCampContentPlainText(
   content: StructuredCampMessageContent,
-  members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentId' | 'displayName'>>
+  members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentId' | 'displayName'>>,
+  currentUserName = '你'
 ): string {
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
-  const text = content.map((segment) => {
+  const parts = content.map((segment) => {
     if (segment.kind === 'text') return segment.text
     if (segment.kind === 'all_members_mention') return '@所有队员'
-    if (segment.kind === 'current_user_mention') return '@你'
+    if (segment.kind === 'current_user_mention') return `@${currentUserName}`
     if (segment.kind === 'skill_mention') return `/${segment.nameAtSend}`
     if (segment.kind === 'external_quote') {
       const attachments = segment.attachmentSummaries
@@ -1259,10 +1262,10 @@ export function structuredCampContentPlainText(
       return `引用 ${segment.senderDisplayName}：\n> ${body}${attachments}`
     }
     return `@${names.get(segment.agentId) ?? '不可用队员'}`
-  }).join('')
-  return content[0]?.kind === 'current_user_mention' && content.length > 1
-    ? `${text.slice(0, 2)} ${text.slice(2)}`
-    : text
+  })
+  return content[0]?.kind === 'current_user_mention' && parts.slice(1).some(Boolean)
+    ? `${parts[0]} ${parts.slice(1).join('')}`
+    : parts.join('')
 }
 
 export function projectLeadingCurrentUserMentionMarkdownBody(
@@ -1495,6 +1498,8 @@ export function CampWorkspace({
   onNotify?(message: string): void
   onNotifyError?(message: string): void
 }): JSX.Element {
+  const { profile: currentUserProfile } = useCurrentUserProfile()
+  const currentUserName = currentUserDisplayName(currentUserProfile)
   const filePreview = useOptionalFilePreview()
   const notifyError = onNotifyError ?? onNotify
   const openCurrentAgentRunFile = useCallback((
@@ -3567,7 +3572,7 @@ export function CampWorkspace({
     body: string,
     content: StructuredCampMessageContent | null
   ): void => {
-    const structuredClipboard = createStructuredMessageClipboardData(content, composerMembers)
+    const structuredClipboard = createStructuredMessageClipboardData(content, composerMembers, currentUserName)
     void writeClipboardText(
       structuredClipboard?.text ?? body,
       structuredClipboard?.html
@@ -4218,7 +4223,7 @@ export function CampWorkspace({
                   }
                   const campMessage = timelineItem.message
                   const member = memberById.get(campMessage.authorId)
-                  const author = campMessageAuthorLabel(campMessage, memberById)
+                  const author = campMessageAuthorLabel(campMessage, memberById, currentUserName)
                   const authorProfile = profileById.get(campMessage.authorId) ?? null
                   const authorProfileAvailable = Boolean(
                     campMessage.authorType === 'agent'
@@ -4343,7 +4348,7 @@ export function CampWorkspace({
                             />
                           ))}
                       {(campMessage.authorType === 'user' || campMessage.authorType === 'external_principal') && (
-                        <span className="local-message-avatar" aria-hidden="true">你</span>
+                        <CurrentUserAvatar profile={currentUserProfile} className="local-message-avatar" />
                       )}
                       {campMessage.authorType === 'agent' && (
                         <time className="message-continuation-time" aria-hidden="true">
@@ -4384,8 +4389,11 @@ export function CampWorkspace({
                                 {replyParentId && (
                                   <ReplyParentQuote
                                     parent={replyParent}
+                                    projectedBody={replyParent?.content
+                                      ? structuredCampContentPlainText(replyParent.content, snapshot.members, currentUserName)
+                                      : replyParent?.body ?? ''}
                                     authorLabel={replyParent
-                                      ? campMessageAuthorLabel(replyParent, memberById)
+                                      ? campMessageAuthorLabel(replyParent, memberById, currentUserName)
                                       : null}
                                     unavailable={replyParentUnavailable}
                                     loading={!replyParent && !replyParentUnavailable}
@@ -7320,22 +7328,25 @@ function StopOutcomeEvent({
 
 function campMessageAuthorLabel(
   message: CampMessageView,
-  memberById: ReadonlyMap<string, CampSnapshot['members'][number]>
+  memberById: ReadonlyMap<string, CampSnapshot['members'][number]>,
+  currentUserName: string
 ): string {
   // Channel admission is Owner-only; this label does not change the stored author.
-  if (message.authorType === 'user' || message.authorType === 'external_principal') return '你'
+  if (message.authorType === 'user' || message.authorType === 'external_principal') return currentUserName
   if (message.authorType === 'system') return '系统'
   return memberById.get(message.authorId)?.displayName ?? message.authorId
 }
 
 function ReplyParentQuote({
   parent,
+  projectedBody,
   authorLabel,
   unavailable,
   loading,
   onReveal
 }: {
   parent: CampMessageView | null
+  projectedBody: string
   authorLabel: string | null
   unavailable: boolean
   loading: boolean
@@ -7352,7 +7363,7 @@ function ReplyParentQuote({
   return (
     <MessageQuotePreview
       authorLabel={authorLabel ?? '原消息'}
-      body={parent.body}
+      body={projectedBody}
       onReveal={onReveal}
     />
   )
@@ -7756,12 +7767,14 @@ function StructuredMessageBody({
 }
 
 function CurrentUserMentionToken(): JSX.Element {
+  const { profile } = useCurrentUserProfile()
+  const displayName = currentUserDisplayName(profile)
   return (
     <span
       className="message-mention-token current-user"
-      aria-label="提及当前用户：你"
+      aria-label={`提及当前用户：${displayName}`}
     >
-      @你
+      @{displayName}
     </span>
   )
 }
