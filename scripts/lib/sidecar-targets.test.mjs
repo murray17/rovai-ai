@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -7,6 +8,20 @@ import {
   sidecarTarget,
   stagedSidecarPath
 } from './sidecar-targets.mjs'
+
+test('Windows release verification matches the current Core transport versions', () => {
+  const transport = readFileSync(new URL('../../crates/rovai-core/src/builtin_tool_transport.rs', import.meta.url), 'utf8')
+  const verifier = readFileSync(new URL('../verify-windows-release.mjs', import.meta.url), 'utf8')
+  const contract = transport.match(/BUILTIN_TOOL_CONTRACT_VERSION: u32 = (\d+);/)?.[1]
+  const ipc = transport.match(/BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = (\d+);/)?.[1]
+  assert.ok(contract && ipc, 'Core transport version constants must be present')
+  assert.deepEqual(verifier.match(/contract-v(\d+) ipc-v(\d+)/)?.slice(1), [contract, ipc],
+    'packaged CLI verification must use current transport versions')
+  assert.equal(verifier.match(/health\.core\.builtinToolContractVersion !== (\d+)/)?.[1], contract,
+    'packaged Core health verification must use the current contract version')
+  assert.equal(verifier.match(/health\.core\.builtinToolIpcProtocolVersion !== (\d+)/)?.[1], ipc,
+    'packaged Core health verification must use the current IPC version')
+})
 
 test('maps only the three shipped sidecar targets', () => {
   assert.equal(hostSidecarTargetKey('darwin', 'arm64'), 'macos-arm64')
