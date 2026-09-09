@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.56
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -36,3 +36,5 @@ last_updated: 2026-09-09
 - [实施计划](implementation-plan.md)
 - [版本决定](decisions.md)
 - [已确认模型上下文变更](model-context-change-partial-message-quotes.md)
+
+后续版本：[v1.57](../v1.57/README.md)。

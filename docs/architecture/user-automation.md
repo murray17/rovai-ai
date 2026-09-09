@@ -9,7 +9,7 @@ last_updated: 2026-09-07
 # User Automation Architecture
 
 本文说明普通用户终端自动化与 Runtime Diagnostic Trial 的长期组件边界。字段、命令、错误和 bundle 以
-[User Automation v2](../contracts/user-automation-v2.md)为准；决定理由见
+[User Automation v3](../contracts/user-automation-v3.md)为准；决定理由见
 [v1.21 决策](../versions/v1.21/decisions.md)。
 
 ## 进程结构
@@ -96,3 +96,7 @@ Runtime launch fail closed。CLI 根据受管 Run 环境隐藏并拒绝 `app` na
 V1 的产品资格仅覆盖 macOS Unix Socket。Windows 必须在受保护 Named Pipe ACL、实例发现、安装 CLI 与真实
 host acceptance 完成后独立准入，不能将 Unix 权限语义机械映射。未来添加 operation 时必须同时更新 closed
 dispatcher、Contract、CLI help、错误/安全测试与版本影响记录；不得先加入 generic invoke 再依靠文档约束。
+
+## 每日运行分析
+
+`trace.export` 只调用 Core 的有界元数据查询。Host 按用户配置的范围将规则报告准备到既有 Automation 工作区，分析 Agent 不获得用户 IPC；组件与失败边界见[双轨执行评测](execution-evaluation.md)。

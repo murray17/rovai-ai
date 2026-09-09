@@ -13,6 +13,7 @@ last_updated: 2026-09-07
 | 架构 | 内容 |
 | --- | --- |
 | [Runtime 图片](runtime-images.md) | 结构化观察与保留、Adapter 确认的原生生图公屏来源、混合文件生命周期、Camp-scoped 按需读取、消息内来源合并及作者感知 Gallery variant；与显式渠道文件交付分离 |
+| [双轨执行评测](execution-evaluation.md) | 真实任务 Gate／每周回归、每日只读 Trace、规则曲线与分析 Agent 的权限边界 |
 | [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting、Process/Outcome/Tool-Use Judge、Tool Interaction、typed Resource 与 paired counterfactual 模块 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
 | [Desktop App Updates](desktop-app-updates.md) | Main 单一更新快照、完成后递归调度、检查来源合并、提醒代次、显式下载/安装、Renderer 深链与 updater-first 受控退出边界 |

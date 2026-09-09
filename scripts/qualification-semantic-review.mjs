@@ -36,7 +36,7 @@ if (result.validity !== 'valid' || result.evaluationState !== 'complete') {
 }
 const caseRecord = await verifyStoredCaseSeal(options.caseDirectory, result.case?.seal)
 const configurationInput = JSON.parse(await readFile(options.configurationPath, 'utf8'))
-const adapter = await loadAdapter(options.adapterPath, result.mode)
+const adapter = await loadAdapter(options.adapterPath, result.mode, configurationInput)
 const producerDigest = await computeQualificationEvaluatorDigest()
 const sourceConfiguration = buildSemanticJudgeConfiguration({
   provider: configurationInput.provider,
@@ -186,11 +186,10 @@ console.log(JSON.stringify({
   ]))
 }, null, 2))
 
-async function loadAdapter(path, mode) {
+async function loadAdapter(path, mode, configuration) {
   const module = await import(pathToFileURL(path).href)
-  const invokeReplica = module.invokeReplica ?? module.default?.invokeReplica
-  const capabilities = module.capabilities ?? module.default?.capabilities
-  const assurance = module.assurance ?? module.default?.assurance
+  const adapter = typeof module.createAdapter === 'function' ? module.createAdapter(configuration, { evidenceDirectory }) : module.default ?? module
+  const { invokeReplica, capabilities, assurance } = adapter
   if (typeof invokeReplica !== 'function'
       || JSON.stringify(capabilities) !== JSON.stringify({
         tools: 'none',

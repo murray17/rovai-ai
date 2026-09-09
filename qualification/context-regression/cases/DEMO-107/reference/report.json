@@ -1,0 +1,10 @@
+{
+  "sections": [
+    "时间线",
+    "影响",
+    "原因",
+    "后续措施"
+  ],
+  "durationMinutes": 12,
+  "affectedService": "api"
+}

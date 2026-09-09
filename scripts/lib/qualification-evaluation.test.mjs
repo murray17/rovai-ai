@@ -148,7 +148,7 @@ test('Qualification dispatch consumes one persisted structured composer draft re
       params: {
         campId: 'camp-1',
         expectedRevision: 4,
-        content: [{ kind: 'text', text: 'Implement the task.' }]
+        content: { version: 2, segments: [{ kind: 'text', text: 'Implement the task.' }] }
       }
     },
     {
@@ -291,12 +291,15 @@ test('Delivered Workspace Snapshot excludes Runner projections and survives live
   await writeFile(join(workspace, 'src', 'value.txt'), 'delivered\n')
   await writeFile(join(workspace, '.agent', 'projection.txt'), 'runner-owned\n')
   await writeFile(join(workspace, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+  await mkdir(join(workspace, '.codex', 'skills'), { recursive: true })
+  await symlink(evidence, join(workspace, '.codex', 'skills', 'managed'))
   try {
     const first = await captureDeliveredWorkspaceSnapshot(workspace, evidence)
     await writeFile(join(workspace, 'src', 'value.txt'), 'mutated later\n')
     assert.equal(await readFile(join(first.path, 'src', 'value.txt'), 'utf8'), 'delivered\n')
     assert.equal(first.manifest.entries.some((entry) => entry.path.startsWith('.agent')), false)
     assert.equal(first.manifest.entries.some((entry) => entry.path.startsWith('.git')), false)
+    assert.equal(first.manifest.entries.some((entry) => entry.path.startsWith('.codex')), false)
 
     await writeFile(join(workspace, 'src', 'value.txt'), 'delivered\n')
     const replay = await captureDeliveredWorkspaceSnapshot(workspace, evidence)
@@ -637,6 +640,37 @@ test('Human intervention and durable Member Call effect coverage stay explicit',
     observedDurableMemberCallEffects(snapshot, 'turn-1').map((receipt) => receipt.id),
     ['receipt-1']
   )
+})
+
+test('history created before the durable dispatch watermark is not post-dispatch intervention', () => {
+  const snapshot = hardEvidenceSnapshot()
+  snapshot.messages[0].timelineGlobalSequence = 11
+  snapshot.messages.unshift({ id: 'historical-user-message', authorType: 'user', timelineGlobalSequence: 9 })
+  const boundary = { campTurnId: 'turn-1', rootAgentRunId: 'run-root', rootCampMessageId: 'message-1', rootAgentRunIds: ['run-root'], preDispatchThroughGlobalSequence: 10 }
+  assert.equal(deriveHumanInterventionEvidence(snapshot, boundary, { mode: 'demo' }).status, 'absent')
+  snapshot.messages.push({ id: 'intervention', authorType: 'user', timelineGlobalSequence: 14 })
+  const observed = deriveHumanInterventionEvidence(snapshot, boundary, { mode: 'demo' })
+  assert.equal(observed.status, 'present')
+  assert.deepEqual(observed.evidence[0].messageIds, ['intervention'])
+})
+
+test('public A2A budgets exclude completion deliveries while convergence still waits for them', () => {
+  const snapshot = hardEvidenceSnapshot()
+  snapshot.schemaVersion = 34
+  snapshot.turns[0].executionBudget = { acceptedA2a: 2 }
+  snapshot.messageDeliveries = [
+    { id: 'forward-1', campTurnId: 'turn-1', deliveryKind: 'public_a2a', dispatchDisposition: 'dispatch', status: 'settled' },
+    { id: 'forward-2', campTurnId: 'turn-1', deliveryKind: 'public_a2a', dispatchDisposition: 'dispatch', status: 'settled' },
+    { id: 'captured-reply', campTurnId: 'turn-1', deliveryKind: 'public_a2a', dispatchDisposition: 'gather_captured', status: 'settled' },
+    { id: 'completion', campTurnId: 'turn-1', deliveryKind: 'gather_completion', status: 'settled' }
+  ]
+  const input = { snapshot, dispatchBoundary: { campTurnId: 'turn-1', rootAgentRunId: 'run-root' }, budgetEvent: null, termination: { converged: true } }
+  assert.deepEqual(observedDurableMemberCallEffects(snapshot, 'turn-1').map(delivery => delivery.id), ['forward-1', 'forward-2'])
+  assert.equal(deriveConvergenceEvidence(input).facts.conversationInputs, 'settled')
+  snapshot.messageDeliveries.at(-1).status = 'pending'
+  assert.equal(deriveConvergenceEvidence(input).facts.conversationInputs, 'unsettled')
+  snapshot.messageDeliveries.at(-1).status = 'cancelled'
+  assert.equal(deriveConvergenceEvidence({ ...input, budgetEvent: { reason: 'elapsed' } }).status, 'fail')
 })
 
 test('Formal External Effect Settlement requires continuous isolation and disabled mutation channels', () => {

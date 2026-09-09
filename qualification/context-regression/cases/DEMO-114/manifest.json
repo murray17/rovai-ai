@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "id": "DEMO-114",
+  "version": "1.0.0",
+  "visibility": "demo",
+  "title": "审查咨询不触发队员任务",
+  "tags": [
+    "context-regression"
+  ],
+  "fixtureDirectory": "fixture",
+  "promptFile": "prompt.txt",
+  "verifierFile": "verifier.mjs",
+  "referenceDirectory": "reference",
+  "requirements": [
+    {
+      "requirementId": "REQ-DELIVERY",
+      "criticality": "critical",
+      "categoryId": "functional",
+      "statement": "这里只询问 review-duo 的两个审查方向，不要求审查代码或联系队员。输出 axes，使用 standards 和 spec 这两个值。无需创建任务、修改代码、调用队员。"
+    },
+    {
+      "requirementId": "REQ-BOUNDARY",
+      "criticality": "critical",
+      "categoryId": "change_boundary",
+      "statement": "Only report.json may be written; preserve every supplied file."
+    }
+  ],
+  "verificationCatalog": [
+    {
+      "checkId": "CHK-DELIVERY",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "functional",
+      "requirementIds": [
+        "REQ-DELIVERY"
+      ],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-BOUNDARY",
+      "kind": "hard",
+      "observationAuthority": "runner",
+      "runnerCheck": "change_boundary",
+      "categoryId": "change_boundary",
+      "requirementIds": [
+        "REQ-BOUNDARY"
+      ],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    }
+  ],
+  "expectedInitialFailureCheckIds": [
+    "CHK-DELIVERY"
+  ],
+  "publicChecks": [],
+  "allowedPaths": [
+    "report.json"
+  ],
+  "forbiddenPaths": [
+    "README.md",
+    ".git/**"
+  ],
+  "toolchain": [
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "--version"
+      ]
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 240,
+    "maxAgentRuns": 8,
+    "maxAcceptedA2a": 0
+  }
+}

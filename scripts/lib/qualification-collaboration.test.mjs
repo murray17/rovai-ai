@@ -138,6 +138,25 @@ test('current Public A2A evidence fails closed when the accepted counter is not 
   assert.equal(evidence.metrics.coverage, 'partial_message_delivery_receipt_coverage')
 })
 
+test('current delivery kinds and per-message recipient positions do not create phantom or duplicate A2A calls', () => {
+  const snapshot = currentPublicA2aSnapshot()
+  snapshot.schemaVersion = 34
+  snapshot.messageDeliveries[0].deliveryKind = 'public_a2a'
+  snapshot.messageDeliveries[0].dispatchDisposition = 'dispatch'
+  snapshot.messageDeliveries.push({ ...snapshot.messageDeliveries[0], id: 'delivery-2', messageId: 'message-a2a-2' },
+    { ...snapshot.messageDeliveries[0], id: 'captured-reply', dispatchDisposition: 'gather_captured' },
+    { ...snapshot.messageDeliveries[0], id: 'gather-completion', deliveryKind: 'gather_completion', recipientCanonicalPosition: null })
+  snapshot.messages.push({ ...snapshot.messages[0], id: 'message-a2a-2', sequence: 3 })
+  snapshot.timeline.push({ ...snapshot.timeline[0], eventId: 'event-delivery-2', createdAt: '2026-08-10T00:00:03.000Z', payload: { ...snapshot.timeline[0].payload, deliveryId: 'delivery-2', messageId: 'message-a2a-2' } })
+  snapshot.turns[0].executionBudget.acceptedA2a = 2
+  const evidence = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-current' })
+  assert.equal(evidence.metrics.observedDurableMemberCalls, 2)
+  assert.equal(evidence.metrics.coverage, 'complete_with_message_delivery_receipts')
+  assert.deepEqual(evidence.a2a.map(call => call.slot), [1, 2])
+  assert.deepEqual(evidence.a2a.map(call => call.recipientCanonicalPosition), [0, 0])
+  assert.equal(evidence.a2a.every(call => call.slotAuthority === 'derived_public_delivery_order'), true)
+})
+
 test('a settled Message Delivery without its target Run is not counted as mechanically settled', () => {
   const snapshot = currentPublicA2aSnapshot()
   snapshot.messageDeliveries[0].targetAgentRunId = null

@@ -3703,6 +3703,7 @@ export type CoreMethod =
   | 'campTurns.cancel'
   | 'agentRuns.cancel'
   | 'agentRuns.diagnostic.get'
+  | 'executionTrace.export'
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
   | 'agentRunFileChanges.get'

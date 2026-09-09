@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "id": "DEMO-109",
+  "version": "1.0.0",
+  "visibility": "demo",
+  "title": "超出最近历史窗口后的定位恢复",
+  "tags": [
+    "context-regression"
+  ],
+  "fixtureDirectory": "fixture",
+  "promptFile": "prompt.txt",
+  "verifierFile": "verifier.mjs",
+  "referenceDirectory": "reference",
+  "requirements": [
+    {
+      "requirementId": "REQ-DELIVERY",
+      "criticality": "critical",
+      "categoryId": "functional",
+      "statement": "请找到 Camp 中较早的“Falcon API 验收约定”，据此输出 region 和 retryLimit。当前 workspace 不包含该约定，不能根据常见默认值猜测。"
+    },
+    {
+      "requirementId": "REQ-BOUNDARY",
+      "criticality": "critical",
+      "categoryId": "change_boundary",
+      "statement": "Only report.json may be written; preserve every supplied file."
+    }
+  ],
+  "verificationCatalog": [
+    {
+      "checkId": "CHK-DELIVERY",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "functional",
+      "requirementIds": [
+        "REQ-DELIVERY"
+      ],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-BOUNDARY",
+      "kind": "hard",
+      "observationAuthority": "runner",
+      "runnerCheck": "change_boundary",
+      "categoryId": "change_boundary",
+      "requirementIds": [
+        "REQ-BOUNDARY"
+      ],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    }
+  ],
+  "expectedInitialFailureCheckIds": [
+    "CHK-DELIVERY"
+  ],
+  "publicChecks": [],
+  "allowedPaths": [
+    "report.json"
+  ],
+  "forbiddenPaths": [
+    "README.md",
+    ".git/**"
+  ],
+  "toolchain": [
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "--version"
+      ]
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 240,
+    "maxAgentRuns": 8,
+    "maxAcceptedA2a": 0
+  }
+}

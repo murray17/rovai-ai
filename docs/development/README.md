@@ -44,6 +44,10 @@ pnpm dev
 pnpm core:build:debug
 ```
 
+## 执行评测
+
+修改上下文或内置 Skill、运行每周回归、配置每日 Trace 分析时，读取[Gate 与双轨评测](evaluation.md)。规则、实际执行、Judge 与统计覆盖分别保留证据。
+
 ## 日常验证
 
 当前仓库没有聚合的 `pnpm check` 命令。日常提交前分别运行：

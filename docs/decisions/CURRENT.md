@@ -155,3 +155,8 @@ last_updated: 2026-09-07
 - 理由：[V1.37-D02](../versions/v1.37/decisions.md#v1-37-d02)。
 
 - [V1.56-D01](../versions/v1.56/decisions.md#v1-56-d01)：选文快照独立于 Reply 与派发。
+
+## 双轨执行评测
+
+- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v1](../contracts/execution-evaluation-v1.md)、[User Automation v3](../contracts/user-automation-v3.md)与[操作指南](../development/evaluation.md)。
+- 理由来源：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)。

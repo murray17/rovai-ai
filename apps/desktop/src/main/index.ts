@@ -81,6 +81,7 @@ import { RestorableLocationStore, parseRestorableLocation } from './restorable-l
 import { DesktopSessionRegistry } from './desktop-session'
 import { parseClipboardWriteRequest } from './clipboard-write'
 import { OnboardingStore } from './onboarding-preferences'
+import { DailyAnalysisService } from './daily-analysis'
 import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
 import { applyWindowChromeAppearance, windowChromeOptions } from './window-chrome'
 import {
@@ -374,6 +375,7 @@ let onboarding: OnboardingStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
 let automationSchedulerTimer: NodeJS.Timeout | null = null
+let dailyAnalysis: DailyAnalysisService | null = null
 let localStoresReady = false
 let resolveLocalStoresLoaded: () => void
 const localStoresLoaded = new Promise<void>((resolve) => { resolveLocalStoresLoaded = resolve })
@@ -867,6 +869,7 @@ if (primaryInstance) void app.whenReady().then(async () => {
   })
   automationSchedulerTimer = setInterval(() => {
     void core.tickAutomationScheduler(new Date().toISOString()).catch(() => undefined)
+    void dailyAnalysis?.tick().catch(() => undefined)
   }, 500)
   automationSchedulerTimer.unref()
   const userDataPath = app.getPath('userData')
@@ -970,10 +973,13 @@ if (primaryInstance) void app.whenReady().then(async () => {
     ) ?? undefined
   })
   maybeInitializeOnboarding(core.getSnapshot())
+  dailyAnalysis = coreDataPath === null ? null : new DailyAnalysisService(
+    userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory), core
+  )
   userAutomation = coreDataPath === null ? null : await startUserAutomationOptional(
     () => new UserAutomationServer(
       userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
-      { core, openCamp: openCampFromAutomation, appVersion: app.getVersion() }
+      { core, openCamp: openCampFromAutomation, appVersion: app.getVersion(), dailyAnalysis: dailyAnalysis ?? undefined }
     )
   )
   if (userAutomation) {

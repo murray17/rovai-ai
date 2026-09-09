@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.56
+current_version: v1.57
 last_updated: 2026-09-09
 ---
 
@@ -208,4 +208,6 @@ last_updated: 2026-09-09
 | v1.54 | `historical` | 本机定时 Automation、原子派发、结果冻结与独立渠道通知 | [v1.54/README.md](v1.54/README.md) |
 | v1.55 | `historical` | 文件入口与项目归属解耦、成功路径如实呈现和同名 Tab 区分 | [v1.55/README.md](v1.55/README.md) |
 
-| v1.56 | `current` | Camp 与私聊多段消息选文引用、非模态悬浮与整行定位，已实现并完成隔离 Runtime 验收 | [v1.56/README.md](v1.56/README.md) |
+| v1.56 | `historical` | Camp 与私聊多段消息选文引用、非模态悬浮与整行定位，已实现并完成隔离 Runtime 验收 | [v1.56/README.md](v1.56/README.md) |
+
+| v1.57 | `current` | 上下文 Gate、分层真实回归与每日 Trace 规则分析 | [v1.57/README.md](v1.57/README.md) |

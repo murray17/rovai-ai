@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "id": "DEMO-105",
+  "version": "1.0.0",
+  "visibility": "demo",
+  "title": "Gather 方案比较与有依据的选择",
+  "tags": [
+    "context-regression"
+  ],
+  "fixtureDirectory": "fixture",
+  "promptFile": "prompt.txt",
+  "verifierFile": "verifier.mjs",
+  "referenceDirectory": "reference",
+  "requirements": [
+    {
+      "requirementId": "REQ-DELIVERY",
+      "criticality": "critical",
+      "categoryId": "functional",
+      "statement": "我们需要一个单机离线报告存储，要求断电后已确认记录不丢失、不运行独立服务、支持按日期查询。options.json 给出已核实的能力。请征集至少两位队员从可靠性和运维成本分析后选择，输出 selected，且列出 rejected 按字母排序。不要只拼接意见。"
+    },
+    {
+      "requirementId": "REQ-BOUNDARY",
+      "criticality": "critical",
+      "categoryId": "change_boundary",
+      "statement": "Only report.json may be written; preserve every supplied file."
+    }
+  ],
+  "verificationCatalog": [
+    {
+      "checkId": "CHK-DELIVERY",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "functional",
+      "requirementIds": [
+        "REQ-DELIVERY"
+      ],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-BOUNDARY",
+      "kind": "hard",
+      "observationAuthority": "runner",
+      "runnerCheck": "change_boundary",
+      "categoryId": "change_boundary",
+      "requirementIds": [
+        "REQ-BOUNDARY"
+      ],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    }
+  ],
+  "expectedInitialFailureCheckIds": [
+    "CHK-DELIVERY"
+  ],
+  "publicChecks": [],
+  "allowedPaths": [
+    "report.json"
+  ],
+  "forbiddenPaths": [
+    "options.json",
+    ".git/**"
+  ],
+  "toolchain": [
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "--version"
+      ]
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 240,
+    "maxAgentRuns": 8,
+    "maxAcceptedA2a": 6
+  }
+}

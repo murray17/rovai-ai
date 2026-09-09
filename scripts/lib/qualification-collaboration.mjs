@@ -1,4 +1,5 @@
 import { digestJson, sha256 } from './qualification-common.mjs'
+import { isBudgetedPublicA2aDelivery } from './qualification-evaluation.mjs'
 
 export function extractEvidenceIdentity(payload) {
   if (!payload || typeof payload !== 'object') return null
@@ -144,15 +145,22 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
     : []).filter((manifest) => runIds.has(manifest.agentRunId)).map((manifest) => [manifest.id, manifest]))
   const deliveriesAvailable = Array.isArray(snapshot.messageDeliveries)
   const deliveries = deliveriesAvailable
-    ? snapshot.messageDeliveries.filter((delivery) => delivery.campTurnId === dispatchBoundary.campTurnId)
+    ? snapshot.messageDeliveries.filter((delivery) => delivery.campTurnId === dispatchBoundary.campTurnId && isBudgetedPublicA2aDelivery(snapshot, delivery))
     : []
+  const deliveryIds = new Set(deliveries.map(delivery => delivery.id))
   const receiptEvents = (Array.isArray(snapshot.timeline) ? snapshot.timeline : []).filter((event) => (
     event.eventType === 'message_delivery.accepted'
       && event.payload?.campTurnId === dispatchBoundary.campTurnId
+      && deliveryIds.has(event.payload?.deliveryId)
   ))
   const receiptByDeliveryId = new Map(receiptEvents.flatMap((event) => (
     event.payload?.deliveryId ? [[event.payload.deliveryId, event]] : []
   )))
+  deliveries.sort((a, b) => {
+    const left = receiptByDeliveryId.get(a.id), right = receiptByDeliveryId.get(b.id)
+    if (Number.isSafeInteger(left?.globalSequence) && Number.isSafeInteger(right?.globalSequence)) return left.globalSequence - right.globalSequence
+    return String(left?.createdAt ?? a.createdAt).localeCompare(String(right?.createdAt ?? b.createdAt)) || a.id.localeCompare(b.id)
+  })
   const taskFacts = (Array.isArray(snapshot.tasks) ? snapshot.tasks : []).map((task) => ({
     id: task.id,
     status: task.status,
@@ -177,10 +185,14 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
       acceptanceReceiptCoverage: message && receipt ? 'complete' : 'unavailable',
       acceptedAt: receipt?.createdAt ?? delivery.createdAt ?? null,
       inboxMessageId: null,
-      slot: Number.isSafeInteger(receipt?.payload?.recipientCanonicalPosition)
-        ? receipt.payload.recipientCanonicalPosition + 1
+      // The legacy ledger needs a unique presentation slot. A recipient's
+      // position is local to one message, never a global A2A quota slot.
+      slot: index + 1,
+      slotAuthority: 'derived_public_delivery_order',
+      recipientCanonicalPosition: Number.isSafeInteger(receipt?.payload?.recipientCanonicalPosition)
+        ? receipt.payload.recipientCanonicalPosition
         : Number.isSafeInteger(delivery.recipientCanonicalPosition)
-          ? delivery.recipientCanonicalPosition + 1
+          ? delivery.recipientCanonicalPosition
           : null,
       observedOrder: index + 1,
       senderAgentId: message?.authorId ?? message?.senderAgentId ?? null,

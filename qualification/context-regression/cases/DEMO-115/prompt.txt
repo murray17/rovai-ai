@@ -1,0 +1,2 @@
+请使用 review-duo 审查 candidate.mjs 与 spec.txt 的符合度及质量，和一位队员分工。只报告，不修改实现。输出 criticalFindingCode；只有有具体反例支持才报告问题。
+请将最终产物保存为 report.json，只允许修改该文件。保留所给文件。最终回复说明依据、验证和限制。

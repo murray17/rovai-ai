@@ -1,0 +1,7 @@
+{
+  "selected": "sqlite",
+  "rejected": [
+    "flat-json",
+    "postgres"
+  ]
+}

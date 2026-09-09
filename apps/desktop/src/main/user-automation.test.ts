@@ -32,6 +32,30 @@ async function socketRequest(path: string, request: unknown): Promise<Record<str
 }
 
 describe('User Automation transport', () => {
+  it('exports Trace only through a bounded Core read operation with explicit source filters', async () => {
+    const calls: Array<{ method: CoreMethod; params: unknown }> = []
+    const dependencies = {
+      core: { async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
+        calls.push({ method, params })
+        return { schemaVersion: 1, facts: {}, metrics: {} } as T
+      } },
+      openCamp: async () => { throw new Error('Trace export must not navigate') },
+      appVersion: 'test'
+    }
+    await dispatchUserAutomation('trace.export', {
+      since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z',
+      excludeAutomationIds: ['daily-analysis'], excludeCampIds: ['rvcamp_trial']
+    }, dependencies)
+    expect(calls).toEqual([{ method: 'executionTrace.export', params: {
+      since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z', campIds: [],
+      excludeAutomationIds: ['daily-analysis'], excludeCampIds: ['rvcamp_trial']
+    } }])
+    await expect(dispatchUserAutomation('trace.export', {
+      since: '2020-01-01T16:00:00Z', until: '2020-01-02T16:00:00Z', rawSql: 'SELECT 1'
+    }, dependencies)).rejects.toMatchObject({ code: 'automation_invalid_input' })
+    expect(calls).toHaveLength(1)
+  })
+
   it('sends through one atomic Core operation and maps only the closed V1 launch shape', async () => {
     const calls: Array<{ method: CoreMethod; params: unknown }> = []
     const core = {
