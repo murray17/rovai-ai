@@ -501,6 +501,7 @@ describe('active Camp event invalidation', () => {
         membershipReconciliations: [],
         tasks: [],
         messages: [{
+    quotes: [],
           id: 'message-terminal-refresh', sequence: 1, timelineGlobalSequence: null,
           authorType: 'user', authorId: 'local_user', sourceAgentRunId: null,
           body: '完成验收', content: [{ kind: 'text', text: '完成验收' }], attachments: [],
@@ -808,6 +809,7 @@ describe('Camp snapshot cache', () => {
 
   it('adapts the bounded open projection without restoring heavy history', () => {
     const message = (id: string, sequence: number): CampMessageView => ({
+    quotes: [],
       id,
       sequence,
       timelineGlobalSequence: sequence,
@@ -933,6 +935,7 @@ describe('task event projections', () => {
 
   it('requires explicit repair only until an unavailable reply author is visibly replaced', () => {
     const base: CampComposerDraftView = {
+    quotes: [],
       campId: 'camp-1', body: '继续', revision: 4, attachments: [],
       updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
       content: {
@@ -1089,6 +1092,7 @@ describe('task event projections', () => {
       createdAt: string,
       presentation: CampSnapshot['messages'][number]['presentation'] = null
     ): CampSnapshot['messages'][number] => ({
+    quotes: [],
       id,
       sequence,
       timelineGlobalSequence: sequence,
@@ -1222,6 +1226,7 @@ describe('task event projections', () => {
     }])
 
     const message = (sequence: number, createdAt = task.createdAt): CampMessageView => ({
+    quotes: [],
       id: `message-${sequence}`, sequence, timelineGlobalSequence: null,
       authorType: 'user', authorId: 'local_user', sourceAgentRunId: null,
       body: 'message', content: [{ kind: 'text', text: 'message' }], attachments: [],
@@ -1310,6 +1315,7 @@ describe('task event projections', () => {
       authorId: string,
       createdAt: string
     ): CampSnapshot['messages'][number] => ({
+    quotes: [],
       id,
       sequence,
       timelineGlobalSequence: sequence,
@@ -1697,6 +1703,7 @@ describe('task event projections', () => {
 
   it('merges an anchored message window without replacing newer snapshot messages', () => {
     const campMessage = (id: string, sequence: number, body: string): CampMessageView => ({
+    quotes: [],
       id,
       sequence,
       timelineGlobalSequence: sequence,
@@ -1806,6 +1813,7 @@ describe('task event projections', () => {
       null,
       'command-optimistic',
       {
+    quotes: [],
         campId: 'camp-optimistic',
         body: '立即显示这条消息',
         content: { version: 2, segments: [
@@ -1865,6 +1873,7 @@ describe('task event projections', () => {
 
   it('submits only the exact Core Draft revision as message content authority', () => {
     const params = campMessageSendParams('command-1', 'camp-1', {
+    quotes: [],
       campId: 'camp-1',
       body: '请 @沐瓦 检查',
       content: {
@@ -2049,6 +2058,7 @@ describe('task event projections', () => {
 
   it('keeps attachment-only message bytes empty while supplying a non-empty execution purpose', () => {
     const draft: CampComposerDraftView = {
+    quotes: [],
       campId: 'camp-attachment-only',
       body: '',
       content: { version: 2, segments: [] },
@@ -2255,6 +2265,7 @@ describe('task event projections', () => {
 
   it('projects one terminal Stop outcome at the authoritative cancellation boundary', () => {
     const userMessage: CampMessageView = {
+    quotes: [],
       id: 'message-stop',
       sequence: 1,
       timelineGlobalSequence: 10,
@@ -2357,6 +2368,7 @@ describe('task event projections', () => {
       profilePresence: 'away', memberOrder: 1, isDefaultLead: false, version: 1
     }]
     const draft: CampComposerDraftView = {
+    quotes: [],
       campId: 'camp-1', body: '继续', revision: 3, attachments: [],
       updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
       content: { version: 2, segments: [{ kind: 'text', text: '继续' }] }, replyIntent: null,
@@ -3597,6 +3609,7 @@ describe('task event projections', () => {
       tasks: [],
       messageDeliveries: [],
       messages: [{
+    quotes: [],
         id: 'message-user', sequence: 1, timelineGlobalSequence: 1,
         authorType: 'user', authorId: 'local_user',
         sourceAgentRunId: null, body: '请 @沐瓦 实现复制。',
@@ -4057,14 +4070,14 @@ describe('task event projections', () => {
         messages: [...snapshot.messages, {
           id: 'message-agent', sequence: 2, timelineGlobalSequence: 4,
           authorType: 'agent' as const, authorId: 'agent_2',
-          sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', content: [{ kind: 'text', text: '复制入口已完成。' }], addressMode: 'broadcast' as const,
+          quotes: [], sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', content: [{ kind: 'text', text: '复制入口已完成。' }], addressMode: 'broadcast' as const,
           attachments: [],
           addressedAgentIds: [], replyToCampMessageId: 'message-user',
           campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
         }, {
           id: 'message-user-follow-up', sequence: 3, timelineGlobalSequence: 5,
           authorType: 'user' as const, authorId: 'local_user',
-          sourceAgentRunId: null, body: '我再确认一下。', content: [{ kind: 'text', text: '我再确认一下。' }], addressMode: 'default' as const,
+          quotes: [], sourceAgentRunId: null, body: '我再确认一下。', content: [{ kind: 'text', text: '我再确认一下。' }], addressMode: 'default' as const,
           attachments: [],
           addressedAgentIds: ['agent_2'], replyToCampMessageId: null,
           campTurnId: null, presentation: null, createdAt: '2026-07-28T05:03:00Z'
@@ -4438,6 +4451,7 @@ describe('task event projections', () => {
 
   it('renders an attachment-only message shell without an empty body bubble', () => {
     const attachmentOnlyMessage: CampMessageView = {
+    quotes: [],
       id: 'message-attachment-only',
       sequence: 1,
       timelineGlobalSequence: 1,
@@ -4535,6 +4549,7 @@ describe('task event projections', () => {
 
   it('renders a public A2A message with the Scheme C handoff footer', () => {
     const publicMessage: CampMessageView = {
+    quotes: [],
       id: 'public-a2a-message',
       sequence: 1,
       timelineGlobalSequence: 2,

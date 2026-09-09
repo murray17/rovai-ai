@@ -1,3 +1,4 @@
+use crate::message_quote::{MessageQuoteSnapshot, QuoteStorage, load_quotes};
 use std::{cmp::Ordering, collections::BTreeMap, path::Path};
 
 use anyhow::{Context, Result};
@@ -234,6 +235,7 @@ pub struct TaskView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CampMessageView {
+    pub quotes: Vec<MessageQuoteSnapshot>,
     pub id: String,
     pub sequence: i64,
     pub timeline_global_sequence: Option<i64>,
@@ -2487,6 +2489,7 @@ fn hydrate_message_views(
                 None
             };
             Ok(CampMessageView {
+                quotes: load_quotes(transaction, QuoteStorage::CampMessage, &row.id)?,
                 id: row.id,
                 sequence: row.sequence,
                 timeline_global_sequence: row.timeline_global_sequence,

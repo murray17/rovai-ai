@@ -187,14 +187,14 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Accepted Input Recovery v2（历史）](accepted-input-recovery-v2.md) | v1 正常恢复边界不变；增加 Migration 99 对旧 Formatter 20 非终态输入的 evidence-aware clean break |
 | [Accepted Input Recovery v1（历史）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛；不含 Migration 99 |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Camp History Retrieval v4（当前）](camp-history-v4.md) | v3 读取/授权/身份语义不变；CLI 在 Schema 前把省略 mode 安全补全为 timeline/before/20，消息锚点模式仍显式 |
+| [Camp History Retrieval v5（当前）](camp-history-v5.md) | v3 读取/授权/身份语义不变；CLI 在 Schema 前把省略 mode 安全补全为 timeline/before/20，消息锚点模式仍显式 |
 | [Camp History Retrieval v3（历史）](camp-history-v3.md) | v2 Agent projection/授权/读取语义不变；所有显式 target 与输出只接受唯一 canonical Camp ID |
 | [Camp History Retrieval v2（历史）](camp-history-v2.md) | v1 查询、授权、publication fence 与附件边界不变；Agent body/snippet/offset 使用 `agent_v1` Principal 投影，并为 `@Principal` 提供结构化候选路径 |
 | [Camp History Retrieval v1（历史）](camp-history-v1.md) | `camp.search/read/history.search` 的 single-Camp target、Manifest/live authorization、Public A2A publication fence 与旧 Human-body Agent 投影 |
 | [Memory Capture v3（当前）](memory-capture-v3.md) | v2 边界加 complete exact-Scope View、copyable Revision target、active body aggregate quota、64 KiB production projection limit 与 Memory-domain clean break |
 | [Memory Capture v2 (historical)](memory-capture-v2.md) | v1 捕获/Review/Forget 边界加 flat Agent-relative Scope identity、revise target assertion、durable domain rejection 与 Supersession 原子顺序 |
 | [Memory Capture v1 (historical)](memory-capture-v1.md) | 初版 best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除与 Forget safeguard；不含 Scope-identified revise |
-| [Built-in Tool Transport v23（当前）](builtin-tool-transport-v23.md) | v22 transport 与 Single Chat history 不变；新增七项 Scheduled Automation 操作，catalog 扩为二十三项 |
+| [Built-in Tool Transport v24（当前）](builtin-tool-transport-v24.md) | v22 transport 与 Single Chat history 不变；新增七项 Scheduled Automation 操作，catalog 扩为二十三项 |
 | [Built-in Tool Transport v22（历史）](builtin-tool-transport-v22.md) | v21 transport 不变；新增只在当前有效 Single Chat Run 可用的 `single_chat.history`，catalog 扩为十六项 |
 | [Built-in Tool Transport v21（历史）](builtin-tool-transport-v21.md) | v20 IPC/Envelope 不变；当前 lease 根目录与 CLI 外部附件快照 |
 | [Built-in Tool Transport v20（历史）](builtin-tool-transport-v20.md) | v19 transport/Send v12 不变；Charter 按需复用 help 并精简 Principal/catalog 指导，`sessionCharterRevision: 2` 轮换旧 Native Session Binding |
@@ -303,7 +303,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Message Delivery v2 (historical)](message-delivery-v2.md) | `forward | return` 冻结边、target lineage、caller continuation，以及 v1 queue/attempt/recovery/settlement |
 | [Message Delivery v1 (historical)](message-delivery-v1.md) | 无 caller-return 分类的 recipient queue、dispatch attempt、waitCondition、retry/cancel 与 settlement |
 | [Current Input Skill Links v1（当前）](current-input-skill-links-v1.md) | Structured Skill Mention、per-Run send snapshot、start-time resolver 与 optional sibling `CURRENT_INPUT.skills[{name,path}]` |
-| [ContextManifest Evidence v22（当前）](context-manifest-evidence-v22.md) | v21 selection/evidence 不变；Formatter/Manifest 22 增加 ExternalPrincipal direct source 与 ExternalQuote deterministic projection |
+| [ContextManifest Evidence v23（当前）](context-manifest-evidence-v23.md) | v21 selection/evidence 不变；Formatter/Manifest 22 增加 ExternalPrincipal direct source 与 ExternalQuote deterministic projection |
 | [ContextManifest Evidence v21（历史）](context-manifest-evidence-v21.md) | Formatter 21 bytes 不变；View receipt v2 只冻结稳定附件语义；不含 ExternalPrincipal/ExternalQuote |
 | [ContextManifest Evidence v20（历史）](context-manifest-evidence-v20.md) | Formatter 21、mandatory Run Facts v2、Published View paths/physical receipt、schema 54 与 Migration 99 clean break |
 | [ContextManifest Evidence v19（历史）](context-manifest-evidence-v19.md) | Formatter v20 与 v18 wire 不变；冻结 Profile v4 的自身 recent 作者过滤、eligible omission、schema 53 与 Migration 98 clean break；不含 View receipt |
@@ -316,7 +316,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v14（历史）](context-manifest-evidence-v14.md) | Formatter v16、Gather result notice、完整 request/current generation evidence 与旧 v14/v15 exact recovery |
 | [ContextManifest Evidence v13（历史）](context-manifest-evidence-v13.md) | Formatter v15、`gather_completion` 与 completion input v1 frozen evidence |
 | [ContextManifest Evidence v12 (historical)](context-manifest-evidence-v12.md) | v11 self-active semantics 加 Formatter v14 的 `mentionsCurrentUser`、Structured Content/projected body evidence 与 frozen recovery |
-| [Context Delivery Profile v4（当前）](context-delivery-profile-v4.md) | v3 数值与 Task/reference 语义不变；当前 Agent 自身消息在 recent top-15 和 whole-history omission 前失去候选资格 |
+| [Context Delivery Profile v5（当前）](context-delivery-profile-v5.md) | v3 数值与 Task/reference 语义不变；当前 Agent 自身消息在 recent top-15 和 whole-history omission 前失去候选资格 |
 | [Context Delivery Profile v3（历史）](context-delivery-profile-v3.md) | v2 public context 加 self-active Task selection/order/max 8 与 public-history-first budget priority；自身消息仍属于 recent candidate |
 | [ContextManifest Evidence v11 (historical)](context-manifest-evidence-v11.md) | Formatter v13 与 self-active empty/omission 语义；不含 Current User Mention metadata |
 | [ContextManifest Evidence v10 (historical)](context-manifest-evidence-v10.md) | self-active Task evidence 的旧空集合语义；不作为 Formatter v13 恢复入口 |
@@ -354,3 +354,5 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Run Process Detail Surface v3 (historical)](run-process-detail-surface-v3.md) | Agent 级连续执行过程、任务/队员 Inspector、Approval Dock 与 CampTurn Stop；不含当前 recovery blocker surface |
 | [Run Process Detail Surface v2 (historical)](run-process-detail-surface-v2.md) | Agent 级连续执行过程与三 Tab Inspector；不作为当前 Renderer 入口 |
 | [Run Process Detail Surface v1 (historical)](run-process-detail-surface-v1.md) | Scheme C 的逐 AgentRun Run Pulse/Drawer 与四 Tab Inspector；不作为当前 Renderer 入口 |
+
+- [Message Quotes v1](message-quotes-v1.md)：多段消息选文、草稿与不可变输入快照。

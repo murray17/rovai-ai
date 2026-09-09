@@ -1,3 +1,4 @@
+use crate::message_quote::{QuoteStorage, load_quotes, store_quotes};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     path::Path,
@@ -3331,6 +3332,12 @@ impl CollaborationService {
                         None
                     };
 
+                    let input_quotes = match attachment_commit.source {
+                        UserCampMessageSource::Composer => load_quotes(transaction, QuoteStorage::CampDraft, &command.camp_id)?,
+                        UserCampMessageSource::Pending(pending) => load_quotes(transaction, QuoteStorage::CampPending, &pending.pending_input_id)?,
+                        _ => Vec::new(),
+                    };
+                    anyhow::ensure!(input_quotes.is_empty() || !submission.body.trim().is_empty(), "quote.question_required");
                     let queued = queue_camp_message_and_runs(
                         transaction,
                         QueueCampMessageInput {
@@ -3367,6 +3374,7 @@ impl CollaborationService {
                                 .then(|| submission.generated_camp_name.clone()),
                         },
                     )?;
+                    store_quotes(transaction, QuoteStorage::CampMessage, &camp_message_id, &input_quotes)?;
                     if let UserCampMessageSource::Pending(pending) = attachment_commit.source {
                         pending_camp_input::record_published(
                             transaction,
@@ -3664,6 +3672,10 @@ fn load_structured_draft_submission(
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let source_attachments = parse_source_attachments(&source_attachments_json)?;
+    if !load_quotes(transaction, QuoteStorage::CampDraft, camp_id)?.is_empty() {
+        let body = crate::camp_content::render_current_plain_text(transaction, &content)?;
+        anyhow::ensure!(!body.trim().is_empty(), "quote.question_required");
+    }
     if !prepared_attachment_ids.is_empty() && !source_attachments.is_empty() {
         anyhow::bail!("Camp Composer Draft mixes legacy Prepared and Source Attachments");
     }
