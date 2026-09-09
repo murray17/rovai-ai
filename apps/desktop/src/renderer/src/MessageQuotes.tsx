@@ -178,7 +178,7 @@ export function MessageQuoteSelectionToolbar({ ownerKey, messages, disabled, onA
         if (!next || same(dismissed.current, next.range)) { setCandidate(null); return }
         const rects = [...next.range.getClientRects()]
         const rect = rects.at(-1) ?? next.range.getBoundingClientRect()
-        const viewport = next.root.closest('.conversation-timeline, .single-chat-transcript')?.getBoundingClientRect()
+        const viewport = next.root.closest('.conversation-timeline, .single-chat-viewport')?.getBoundingClientRect()
         if (!rect.width || rect.bottom < Math.max(0, viewport?.top ?? 0) || rect.top > Math.min(window.innerHeight, viewport?.bottom ?? window.innerHeight)) { setCandidate(null); return }
         setPosition({ x: Math.max(8, Math.min(window.innerWidth - 100, rect.right - 50)), y: Math.max(8, Math.min(window.innerHeight - 44, rect.bottom + 7)) })
         setCandidate(next); setError(null)

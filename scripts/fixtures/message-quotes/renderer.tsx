@@ -62,12 +62,14 @@ function Fixture() {
   }
   return <main style={{ maxWidth: 780, margin: '24px auto', padding: 20 }}>
     <div className="conversation-timeline" style={{ maxHeight: 410, overflow: 'auto' }}>
-      {messages.map((message, index) => <section key={message.id}>
-        <div className="final-copy" data-message-quote-body={message.id} data-quote-owner="camp:fixture">
-          {messageBody(index)}
-        </div>
-        {index === 0 && <div data-quote-exclude>文件卡片 <button>复制文件</button></div>}
-      </section>)}
+      <div className="single-chat-transcript" style={{ display: 'block', padding: 0 }}>
+        {messages.map((message, index) => <section key={message.id}>
+          <div className="final-copy" data-message-quote-body={message.id} data-quote-owner="camp:fixture">
+            {messageBody(index)}
+          </div>
+          {index === 0 && <div data-quote-exclude>文件卡片 <button>复制文件</button></div>}
+        </section>)}
+      </div>
     </div>
     <MessageQuoteSelectionToolbar ownerKey="camp:fixture" messages={messages} onAdd={add} disabled={false} />
     <div style={{ marginTop: 12 }}><MessageQuotes history quotes={quotes} onReveal={quote => revealMessageQuote(quote, root(Number(quote.source.messageId.split('-')[1])))} /></div>
@@ -175,6 +177,19 @@ Object.assign(window, { quoteTest: {
     await revealMessageQuote({ ...saved, locator: { ...saved.locator!, projectionDigest: 'changed' } }, root(lineSourceIndex)).then(() => { throw new Error('stale anchor must fail') }, error => check(String(error).includes('selection_unavailable'), 'stale digest'))
     check(!document.querySelector('.message-quote-line-band'), 'stale source is unhighlighted')
     trigger.scrollIntoView(); await frames()
+    // Single Chat has a scrolling viewport outside its non-scrolling transcript.
+    const viewport = document.querySelector<HTMLElement>('.conversation-timeline')!
+    viewport.className = 'single-chat-viewport'
+    viewport.scrollTop = 0
+    await revealMessageQuote(saved, root(lineSourceIndex)); await pause(400); await frames()
+    const located = root(lineSourceIndex).querySelector('.message-quote-line-band')!.getBoundingClientRect()
+    const visible = viewport.getBoundingClientRect()
+    check(viewport.scrollTop > 0 && located.top >= visible.top && located.bottom <= visible.bottom, 'private jump scrolls the actual viewport into view')
+    const clippedRange = select(lineSourceIndex, start + 1, end)
+    viewport.scrollTop += clippedRange.getBoundingClientRect().top - (visible.bottom + 20)
+    document.dispatchEvent(new Event('scroll')); await frames()
+    check(!document.querySelector('.message-quote-selection-toolbar'), 'clipped private selection has no floating toolbar outside the viewport')
+    viewport.className = 'conversation-timeline'
     trigger.click(); await frames()
     while (latest.length) {
       document.querySelector<HTMLButtonElement>('.message-quote-remove')!.click(); await frames()
