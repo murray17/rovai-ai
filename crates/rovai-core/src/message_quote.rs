@@ -1,6 +1,9 @@
 //! Immutable, owner-scoped excerpts. This module never resolves recipients or executable intent.
 use crate::{
-    camp_content::{StructuredCampMessageContent, render_current_plain_text},
+    camp_content::{
+        StructuredCampMessageContent, StructuredCampMessageSegment, render_current_plain_text,
+        render_plain_text_with_current_user,
+    },
     command::canonical_json_digest,
 };
 use anyhow::{Context, Result, ensure};
@@ -8,6 +11,7 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub const MAX_QUOTE_SCALARS: usize = 12_000;
@@ -39,6 +43,15 @@ pub enum MessageQuoteAuthor {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessageQuoteLocator {
+    pub projection_version: u32,
+    pub start_scalar: usize,
+    pub end_scalar: usize,
+    pub projection_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MessageQuoteSnapshot {
     pub version: u32,
     pub quote_id: String,
@@ -48,6 +61,9 @@ pub struct MessageQuoteSnapshot {
     pub format: String,
     pub captured_at: String,
     pub source_content_digest: String,
+    /// Presentation-only anchor, bound to the snapshot digest and omitted from model context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locator: Option<MessageQuoteLocator>,
     pub snapshot_digest: String,
 }
 
@@ -233,6 +249,9 @@ pub struct QuoteSelection {
     pub start_scalar: usize,
     pub end_scalar: usize,
     pub text: String,
+    /// Only the presentation of a structured local-user token, never arbitrary source text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_user_display_name: Option<String>,
 }
 
 pub fn capture_quote(
@@ -305,6 +324,35 @@ pub fn capture_quote(
     };
     let projection = if author_type == "user" {
         body.replace("\r\n", "\n")
+    } else if let Some(content) = revision.get("content") {
+        let content: StructuredCampMessageContent = serde_json::from_value(content.clone())?;
+        let name = selection
+            .current_user_display_name
+            .as_deref()
+            .unwrap_or("你");
+        ensure!(
+            !name.trim().is_empty()
+                && name.chars().count() <= 32
+                && !name
+                    .chars()
+                    .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}')),
+            "quote.invalid_selection"
+        );
+        project_structured_quote_text(
+            &content,
+            |id| {
+                transaction
+                    .query_row(
+                        "SELECT display_name FROM agent_profile WHERE id=?1",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .ok()
+                    .flatten()
+            },
+            name,
+        )?
     } else {
         project_quote_text(&body)
     };
@@ -340,10 +388,102 @@ pub fn capture_quote(
         format: "plain_text".into(),
         captured_at: chrono::Utc::now().to_rfc3339(),
         source_content_digest,
+        locator: Some(MessageQuoteLocator {
+            projection_version: 1,
+            start_scalar: selection.start_scalar,
+            end_scalar: selection.end_scalar,
+            projection_digest: format!("{:x}", Sha256::digest(projection.as_bytes())),
+        }),
         snapshot_digest: String::new(),
     };
     quote.snapshot_digest = quote.digest()?;
     Ok(quote)
+}
+
+/// Mirrors the two production structured-prefix rendering seams; plain Markdown keeps its own parser.
+pub fn project_structured_quote_text(
+    content: &StructuredCampMessageContent,
+    mut member_name: impl FnMut(&str) -> Option<String>,
+    current_user: &str,
+) -> Result<String> {
+    use StructuredCampMessageSegment as Segment;
+    let render = |parts: &[Segment], names: &mut dyn FnMut(&str) -> Option<String>| {
+        render_plain_text_with_current_user(parts, names, current_user)
+    };
+    let markdown =
+        |parts: &[Segment], names: &mut dyn FnMut(&str) -> Option<String>| -> Result<String> {
+            let mut text = String::new();
+            for part in parts {
+                if let Segment::Text { text: body } = part {
+                    text.push_str(body);
+                } else {
+                    for c in render(std::slice::from_ref(part), names)?.chars() {
+                        if "\\`*_{}[]()<>#+-.!|".contains(c) {
+                            text.push('\\');
+                        }
+                        text.push(if matches!(c, '\r' | '\n') { ' ' } else { c });
+                    }
+                }
+            }
+            Ok(text)
+        };
+    let has_current_user = content
+        .iter()
+        .any(|part| matches!(part, Segment::CurrentUserMention { .. }));
+    if has_current_user {
+        if matches!(content.first(), Some(Segment::CurrentUserMention { .. }))
+            && !content[1..]
+                .iter()
+                .any(|part| matches!(part, Segment::CurrentUserMention { .. }))
+        {
+            let tail = markdown(&content[1..], &mut member_name)?;
+            let prefix = render(&content[..1], &mut member_name)?;
+            let projected = project_quote_text(&tail);
+            return Ok(if tail.is_empty() {
+                prefix
+            } else if projected.is_empty() {
+                format!("{prefix} ")
+            } else {
+                format!("{prefix} \n\n{projected}")
+            });
+        }
+        return render(content, &mut member_name).map(|text| text.replace("\r\n", "\n"));
+    }
+    let mut prefix_length = 0;
+    for (index, part) in content.iter().enumerate() {
+        match part {
+            Segment::MemberMention { .. } => prefix_length = index + 1,
+            Segment::Text { text } if text.trim().is_empty() => {}
+            _ => break,
+        }
+    }
+    if prefix_length > 0 {
+        let prefix = render(&content[..prefix_length], &mut member_name)?;
+        let tail = markdown(&content[prefix_length..], &mut member_name)?;
+        if tail.trim().is_empty() {
+            return Ok(prefix);
+        }
+        let inline = !tail
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .any(|c| matches!(c, '\r' | '\n'))
+            && matches!(
+                Parser::new_ext(
+                    &tail,
+                    Options::ENABLE_TABLES
+                        | Options::ENABLE_STRIKETHROUGH
+                        | Options::ENABLE_TASKLISTS
+                )
+                .next(),
+                Some(Event::Start(Tag::Paragraph))
+            );
+        return Ok(format!(
+            "{prefix}{}{text}",
+            if inline { " " } else { "\n\n" },
+            text = project_quote_text(&tail)
+        ));
+    }
+    Ok(project_quote_text(&render(content, &mut member_name)?))
 }
 
 /// MessageQuoteTextProjection v1. Pair with Renderer DOM projection and shared fixtures.
@@ -522,7 +662,7 @@ pub fn mutate_draft(
     envelope: &crate::command::CommandEnvelope<MutateQuoteDraftCommand>,
 ) -> Result<crate::command::CommandExecution> {
     use crate::command::{ActorRef, CommandHandlerResult, DomainCommandGateway};
-    DomainCommandGateway::default().execute(database, envelope, |transaction| {
+    DomainCommandGateway.execute(database, envelope, |transaction| {
         let command = &envelope.payload;
         ensure!(matches!(envelope.actor, ActorRef::User { .. }) && envelope.camp_id.as_deref() == Some(&command.camp_id), "quote.local_user_required");
         let (storage, owner_id) = match command.conversation_id.as_deref() {
@@ -571,7 +711,18 @@ mod tests {
         .unwrap();
         for case in cases {
             assert_eq!(
-                project_quote_text(case["source"].as_str().unwrap()),
+                if case["authorType"].as_str() == Some("user") {
+                    case["source"].as_str().unwrap().replace("\r\n", "\n")
+                } else if let Some(content) = case.get("content") {
+                    project_structured_quote_text(
+                        &serde_json::from_value(content.clone()).unwrap(),
+                        |_| Some("芝士*".into()),
+                        case["currentUserName"].as_str().unwrap_or("你"),
+                    )
+                    .unwrap()
+                } else {
+                    project_quote_text(case["source"].as_str().unwrap())
+                },
                 case["text"].as_str().unwrap(),
                 "{}",
                 case["name"]
@@ -598,6 +749,7 @@ mod tests {
         let transaction = connection.transaction().unwrap();
         let text = project_quote_text(body);
         let selection = QuoteSelection {
+            current_user_display_name: None,
             message_id: "message_a".into(),
             body_at_selection: body.into(),
             start_scalar: 0,
@@ -606,6 +758,13 @@ mod tests {
         };
         let quote = capture_quote(&transaction, "camp_a", None, &selection).unwrap();
         assert_eq!(quote.text, text);
+        let locator = quote.locator.as_ref().unwrap();
+        assert_eq!(locator.start_scalar, selection.start_scalar);
+        assert_eq!(locator.end_scalar, selection.end_scalar);
+        assert_eq!(
+            locator.projection_digest,
+            format!("{:x}", Sha256::digest(text.as_bytes()))
+        );
         assert!(
             capture_quote(&transaction, "camp_b", None, &selection)
                 .unwrap_err()
@@ -624,6 +783,47 @@ mod tests {
                 .contains("source_changed")
         );
         let saved = serde_json::to_string(&vec![quote.clone()]).unwrap();
+        // The same capture seam also owns structured prefixes and presentation-only local names.
+        let projection_cases: Vec<Value> = serde_json::from_str(include_str!(
+            "../../../packages/contracts/fixtures/message-quote-projection-v1.json"
+        ))
+        .unwrap();
+        for case in projection_cases
+            .iter()
+            .filter(|case| case.get("content").is_some())
+        {
+            transaction
+                .execute("UPDATE agent_profile SET display_name='芝士*'", [])
+                .unwrap();
+            transaction
+                .execute(
+                    "UPDATE camp_message SET structured_content_json=?1",
+                    [case["content"].to_string()],
+                )
+                .unwrap();
+            let content: StructuredCampMessageContent =
+                serde_json::from_value(case["content"].clone()).unwrap();
+            let text = case["text"].as_str().unwrap();
+            let captured = capture_quote(
+                &transaction,
+                "camp_a",
+                None,
+                &QuoteSelection {
+                    message_id: "message_a".into(),
+                    body_at_selection: render_current_plain_text(&transaction, &content).unwrap(),
+                    start_scalar: 0,
+                    end_scalar: text.chars().count(),
+                    text: text.into(),
+                    current_user_display_name: case["currentUserName"].as_str().map(str::to_owned),
+                },
+            )
+            .unwrap();
+            assert_eq!(captured.text, text);
+            assert_eq!(
+                captured.locator.unwrap().projection_digest,
+                format!("{:x}", Sha256::digest(text.as_bytes()))
+            );
+        }
         transaction
             .execute("UPDATE agent_profile SET display_name='renamed'", [])
             .unwrap();
@@ -635,6 +835,14 @@ mod tests {
         assert!(model["source"].get("campId").is_none());
         assert_eq!(model["text"], text);
         assert!(model.get("skills").is_none());
+        assert!(model.get("locator").is_none());
+        let mut legacy = quote.clone();
+        legacy.locator = None;
+        legacy.snapshot_digest = legacy.digest().unwrap();
+        assert_eq!(
+            parse_quotes(&serde_json::to_string(&vec![legacy.clone()]).unwrap()).unwrap(),
+            vec![legacy]
+        );
         let mut tampered = serde_json::to_value(&frozen).unwrap();
         tampered[0]["text"] = json!("changed");
         assert!(parse_quotes(&tampered.to_string()).is_err());

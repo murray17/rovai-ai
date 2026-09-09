@@ -14660,6 +14660,7 @@ mod slow_tests {
                 format: "plain_text".into(),
                 captured_at: "fixture".into(),
                 source_content_digest: "fixture".into(),
+                locator: None,
                 snapshot_digest: "fixture".into(),
             });
         let mut over = quoted.clone();

@@ -848,6 +848,7 @@ mod tests {
                     expected_revision: 0,
                     action: crate::message_quote::QuoteAction::Add {
                         selection: crate::message_quote::QuoteSelection {
+                            current_user_display_name: None,
                             message_id: first.result.payload["campMessageId"]
                                 .as_str()
                                 .unwrap()

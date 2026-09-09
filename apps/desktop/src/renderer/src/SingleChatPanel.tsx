@@ -1,3 +1,4 @@
+import { revealMessageQuote } from './message-quote-reveal'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import type { MessageQuoteAction, MessageQuoteSnapshot } from '@contracts'
 import {
@@ -438,11 +439,9 @@ export function SingleChatRunHistory({
 
 async function revealPrivateQuote(quote: MessageQuoteSnapshot): Promise<void> {
   const root = document.querySelector<HTMLElement>(`[data-single-chat-owner="${CSS.escape(quote.source.conversationId ?? '')}"]`)
-  const target = root?.querySelector<HTMLElement>(`[data-single-chat-message-id="${CSS.escape(quote.source.messageId)}"]`)
+  const target = root?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(quote.source.messageId)}"]`)
   if (!target) throw new Error('quote.source_unavailable')
-  target.scrollIntoView({ block: 'center', behavior: 'auto' })
-  target.tabIndex = -1
-  target.focus({ preventScroll: true })
+  await revealMessageQuote(quote, target, quote.authorAtCapture.type === 'user' ? target.textContent ?? '' : undefined)
 }
 
 function SingleChatTranscript({
@@ -874,6 +873,7 @@ export function SingleChatPanel({
   const [bodyDrafts, setBodyDrafts] = useState<Record<string, string>>({})
   const [quoteBusy, setQuoteBusy] = useState(false)
   const quoteTailRef = useRef<Promise<void>>(Promise.resolve())
+  const quoteOperationCount = useRef(0)
   const [loading, setLoading] = useState(false)
   const loadingRef = useRef(false)
   const [sending, setSending] = useState(false)
@@ -1500,6 +1500,7 @@ export function SingleChatPanel({
     const owner = snapshotRef.current?.conversation.id
     const commandId = crypto.randomUUID()
     if (!owner) return Promise.reject(new Error('quote.owner_unavailable'))
+    quoteOperationCount.current += 1
     setQuoteBusy(true)
     const operation = quoteTailRef.current.then(async () => {
       const current = snapshotRef.current
@@ -1510,7 +1511,7 @@ export function SingleChatPanel({
       acceptSnapshot(owner, next)
     })
     quoteTailRef.current = operation.then(() => undefined, () => undefined)
-    return operation.finally(() => setQuoteBusy(false))
+    return operation.finally(() => { quoteOperationCount.current -= 1; setQuoteBusy(quoteOperationCount.current > 0) })
   }
 
   const send = async (event: FormEvent): Promise<void> => {

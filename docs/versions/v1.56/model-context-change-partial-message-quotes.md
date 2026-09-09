@@ -9,7 +9,7 @@ confirmed_by: murray.xue
 confirmed_at: 2026-09-09
 authority: confirmed-model-input-change-statement
 implementation_baseline: a7668a335cc553defdfd3ef68261de59193edf41
-implementation_status: in-progress
+implementation_status: complete
 last_updated: 2026-09-09
 ---
 
@@ -406,3 +406,9 @@ UI-UX-PRO-MAX 用于本次增量交互检查，实际读取了本机 Skill 与 q
 ## 实施版本分配与验证
 
 基线 main 为 a7668a335cc553defdfd3ef68261de59193edf41，承载版本 v1.56。Formatter 23、Manifest 23、Delivery Profile 5、Charter revision 6；Migration 在实施时记录实际分配。验证结果持续记录于[实施计划](implementation-plan.md)。
+
+## 后续界面修订与实施结论
+
+开发者随后确认 revision 9 交互：草稿和历史均只显示段数/作者的小型标签，悬浮显示完整选文，点击整条选文行回跳，按涉及的完整视觉行短暂铺底色。最后再次明确授权 worktree 实施、PR 合入 main 与打包安装。此修订不改变已确认的模型投影。内部 locator 和结构化当前用户名称的选取呈现仅用于捕获/回跳，不作为新增字段投递给模型。
+
+实际分配 Migration 148、Data Contract v1.56 / schema 98、Built-in Transport 24、Camp History 5。Core 来源捕获、冻结重放、预算、两主题 Electron 与群聊/私聊 Codex Runtime 验收已通过，详见实施计划。

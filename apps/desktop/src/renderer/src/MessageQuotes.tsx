@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type JSX } from 'react'
+import { useEffect, useId, useRef, useState, type JSX } from 'react'
 import { createPortal } from 'react-dom'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Popover from '@radix-ui/react-popover'
 import type { MessageQuoteAction, MessageQuoteSelection, MessageQuoteSnapshot } from '@contracts'
 import { readMessageQuoteSelection } from './message-quote-selection'
 
@@ -21,7 +21,6 @@ function QuoteGlyph(): JSX.Element {
 function ExpandGlyph(): JSX.Element {
   return <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m5.5 6.5 2.5 2.5 2.5-2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
 }
-const excerpt = (text: string): string => text.replace(/\s+/gu, ' ').trim()
 
 type QuoteProps = {
   quotes: MessageQuoteSnapshot[]
@@ -32,74 +31,119 @@ type QuoteProps = {
 }
 
 export function MessageQuotes({ quotes, onReveal, onMutate, disabled = false, history = false }: QuoteProps): JSX.Element | null {
-  const restoreFocus = useRef<HTMLElement | null>(null)
-  const [view, setView] = useState<'list' | string | null>(null)
-  const openView = (next: string): void => { if (view === null) restoreFocus.current = document.activeElement as HTMLElement | null; setView(next) }
+  const id = useId()
+  const trigger = useRef<HTMLButtonElement>(null)
+  const bubble = useRef<HTMLDivElement>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const suppressFocusOpen = useRef(false)
+  const [open, setOpen] = useState(false)
   const [undo, setUndo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const active = quotes.find((quote) => quote.quoteId === view)
-  const mutate = async (action: MessageQuoteAction): Promise<void> => {
+  const cancelTimer = (): void => { clearTimeout(timer.current) }
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const close = (): void => { cancelTimer(); setOpen(false) }
+  const leave = (): void => {
+    cancelTimer()
+    timer.current = setTimeout(() => {
+      if (!bubble.current?.contains(document.activeElement)) setOpen(false)
+    }, 220)
+  }
+  const blur = (next: EventTarget | null): void => {
+    if (!(next instanceof Node) || (!trigger.current?.contains(next) && !bubble.current?.contains(next))) leave()
+  }
+  const escape = (): void => {
+    close()
+    suppressFocusOpen.current = document.activeElement !== trigger.current
+    trigger.current?.focus({ preventScroll: true })
+  }
+  const enterRows = (): void => {
+    cancelTimer(); setOpen(true)
+    requestAnimationFrame(() => requestAnimationFrame(() => bubble.current?.querySelector<HTMLButtonElement>('.message-quote-jump')?.focus()))
+  }
+  const mutate = async (action: MessageQuoteAction, retainFocus = false): Promise<void> => {
     if (!onMutate || disabled || busy) return
     setBusy(true); setError(null)
     try {
       await onMutate(action)
-      if (action.type === 'remove') { setUndo(action.quoteId); if (view === action.quoteId) setView('list') }
+      if (action.type === 'remove') {
+        setUndo(action.quoteId)
+        if (retainFocus) requestAnimationFrame(() => bubble.current?.querySelector<HTMLButtonElement>('.message-quote-jump, .message-quotes-undo')?.focus())
+      }
       if (action.type === 'restore') setUndo(null)
     } catch (nextError) { setError(quoteErrorMessage(nextError)) }
     finally { setBusy(false) }
   }
   const reveal = async (quote: MessageQuoteSnapshot): Promise<void> => {
     setError(null)
-    try { await onReveal(quote); restoreFocus.current = null; setView(null) }
-    catch { setError('原消息暂不可用，已保留引用选文。') }
+    try { await onReveal(quote); close() }
+    catch (failure) {
+      setError(String(failure).includes('selection_unavailable')
+        ? '已跳到原消息，选文位置已变化；引用文字仍保留。'
+        : '原消息暂不可用，已保留引用选文。')
+    }
   }
   if (!quotes.length && !undo && !error) return null
   const undoControl = undo && onMutate ? <button type="button" className="message-quotes-undo" disabled={disabled || busy} onClick={() => void mutate({ type: 'restore', quoteId: undo })}>撤销移除</button> : null
   const authors = [...new Set(quotes.map((quote) => quote.authorAtCapture.displayName))].join('、')
   return <div className={`message-quotes${history ? ' is-history' : ''}`} data-quote-exclude>
-    <div className="message-quotes-row" aria-label={`已引用 ${quotes.length} 段`}>
-      {quotes.length > 0 && <button
-        type="button"
-        className="message-quotes-trigger"
-        onClick={() => openView(quotes.length === 1 ? quotes[0].quoteId : 'list')}
-        aria-label={`${history ? '查看' : '管理'} ${quotes.length} 段引用，来自${authors}`}
-        aria-haspopup="dialog"
-        aria-expanded={view !== null}
-      >
-        <QuoteGlyph />
-        <span className="message-quotes-label">引用 {quotes.length} 段</span>
-        <span className="message-quotes-authors">{authors}</span>
-        <ExpandGlyph />
-      </button>}
-      {undoControl}
-    </div>
-    {error && <div className="message-quote-error" role="alert">{error}</div>}
-    <Dialog.Root open={view !== null} onOpenChange={(open) => { if (!open) setView(null) }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="message-quotes-overlay" />
-        <Dialog.Content className="message-quotes-dialog" onCloseAutoFocus={(event) => { event.preventDefault(); if (restoreFocus.current?.isConnected) restoreFocus.current.focus() }}>
-          <div className="message-quotes-dialog-heading">
-            {active && <button type="button" className="message-quotes-back" onClick={() => openView('list')} aria-label="返回引用列表">‹</button>}
-            <Dialog.Title>{active ? '引用全文' : `引用 · ${quotes.length} 段`}</Dialog.Title>
-            <Dialog.Close className="message-quotes-close" aria-label="关闭引用详情">×</Dialog.Close>
-          </div>
-          <Dialog.Description className="message-quotes-description">{active ? '已保留选取时的文字' : '按添加顺序随本次问题发送'}</Dialog.Description>
-          <div className="message-quotes-dialog-body">
-            {(active ? [active] : quotes).map((quote, index) => <section className="message-quote-detail" key={quote.quoteId}>
-              <div className="message-quote-detail-heading">
-                {!active && <span className="message-quote-number">{index + 1}</span>}
-                <button type="button" className="message-quote-source" onClick={() => void reveal(quote)}>{quote.authorAtCapture.displayName}<span>原消息 ↗</span></button>
-                {onMutate && <button type="button" disabled={disabled || busy} className="message-quotes-remove-detail" onClick={() => void mutate({ type: 'remove', quoteId: quote.quoteId })}>移除</button>}
-              </div>
-              {active ? <div className="message-quote-full-text">{quote.text}</div> : <button type="button" className="message-quote-detail-excerpt" onClick={() => openView(quote.quoteId)}>{excerpt(quote.text)}<span>查看全文</span></button>}
-            </section>)}
+    <Popover.Root open={open} onOpenChange={(next) => { cancelTimer(); setOpen(next) }} modal={false}>
+      <div className="message-quotes-row" aria-label={`已引用 ${quotes.length} 段`}>
+        {(quotes.length > 0 || open) && <Popover.Anchor asChild><button
+          ref={trigger} type="button" className="message-quotes-trigger"
+          onPointerEnter={(event) => {
+            if (event.pointerType === 'touch') return
+            cancelTimer(); timer.current = setTimeout(() => setOpen(true), 160)
+          }}
+          onPointerLeave={leave}
+          onFocus={() => { if (suppressFocusOpen.current) suppressFocusOpen.current = false; else { cancelTimer(); setOpen(true) } }}
+          onBlur={(event) => blur(event.relatedTarget)}
+          onClick={() => { cancelTimer(); setOpen(true) }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') { event.preventDefault(); escape() }
+            if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey && open)) { event.preventDefault(); enterRows() }
+          }}
+          aria-label={`${history ? '查看' : '管理'} ${quotes.length} 段引用，来自${authors}`}
+          aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
+        >
+          <QuoteGlyph /><span className="message-quotes-label">引用 {quotes.length} 段</span>
+          {authors && <span className="message-quotes-authors">{authors}</span>}<ExpandGlyph />
+        </button></Popover.Anchor>}
+        {undoControl}
+      </div>
+      <Popover.Portal>
+        <Popover.Content ref={bubble} id={id} className="message-quotes-popover" side="top" align="start" sideOffset={7} collisionPadding={12}
+          aria-label={`引用 · ${quotes.length} 段`} data-quote-exclude
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onInteractOutside={(event) => {
+            const target = event.detail.originalEvent.target
+            if (target instanceof Node && trigger.current?.contains(target)) event.preventDefault()
+          }}
+          onEscapeKeyDown={(event) => { event.preventDefault(); escape() }}
+          onPointerEnter={cancelTimer} onPointerLeave={leave} onFocusCapture={cancelTimer}
+          onBlur={(event) => blur(event.relatedTarget)}
+        >
+          <div className="message-quotes-popover-heading">引用 · {quotes.length} 段<span>点击选文定位</span></div>
+          <div className="message-quotes-popover-body">
+            {quotes.map((quote, index) => <div className="message-quote-entry" key={quote.quoteId}>
+              <button type="button" className="message-quote-jump" onClick={(event) => {
+                const selection = window.getSelection()
+                if (selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode)) return
+                void reveal(quote)
+              }} aria-label={`定位第 ${index + 1} 段引用，来自${quote.authorAtCapture.displayName}`}>
+                <span className="message-quote-entry-author"><span>{index + 1}</span>{quote.authorAtCapture.displayName}</span>
+                <span className="message-quote-full-text">{quote.text}</span>
+              </button>
+              {onMutate && <button type="button" className="message-quote-remove" disabled={disabled || busy} onClick={(event) => void mutate({ type: 'remove', quoteId: quote.quoteId }, event.detail === 0)} aria-label={`移除第 ${index + 1} 段引用`}>×</button>}
+            </div>)}
             {!quotes.length && <p className="message-quotes-empty">当前没有引用</p>}
           </div>
-          {(undoControl || error) && <div className="message-quotes-dialog-footer">{undoControl}{error && <p role="alert">{error}</p>}</div>}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+          {(undoControl || error) && <div className="message-quotes-popover-footer">{undoControl}{error && <p role="alert">{error}</p>}</div>}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+    {error && !open && <div className="message-quote-error" role="alert">{error}</div>}
   </div>
 }
 

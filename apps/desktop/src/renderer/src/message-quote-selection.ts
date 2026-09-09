@@ -5,11 +5,23 @@ const EXCLUDED = '[data-quote-exclude], [aria-hidden="true"], img, input, button
 const INVALID_RANGE = '[data-quote-exclude], img, input:not([type=checkbox]), button:not(.message-mention-token), .message-quote-preview, .external-quote'
 type TextPosition = { node: Text; start: number; end: number }
 
+/** Converts normalized Unicode scalar offsets back into the DOM's UTF-16 offsets. */
+export function quoteDomOffset(text: string, scalar: number): number {
+  let offset = 0
+  for (let count = 0; count < scalar && offset < text.length; count++) {
+    const code = text.codePointAt(offset)!
+    offset += code > 0xffff ? 2 : 1
+    if (code === 13 && text.charCodeAt(offset) === 10) offset++
+  }
+  return offset
+}
+
 /** Mirrors MessageQuoteTextProjection v1; positions address actual DOM text, never card/UI copy. */
 export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text: string; positions: TextPosition[] } {
   let text = ''
   let boundary = 0
   let sourceCursor = 0
+  let scalarLength = 0
   const positions: TextPosition[] = []
   const boundaryAt = (amount: number): void => { boundary = Math.max(boundary, amount) }
   const append = (node: Text): void => {
@@ -17,15 +29,21 @@ export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text:
     if (plainBody !== undefined) {
       const at = plainBody.indexOf(value, sourceCursor)
       if (at < 0) throw new Error('quote.projection_mismatch')
-      positions.push({ node, start: Array.from(plainBody.slice(0, at)).length, end: Array.from(plainBody.slice(0, at + value.length)).length })
+      const start = scalarLength + Array.from(plainBody.slice(sourceCursor, at)).length
+      scalarLength = start + Array.from(value).length
+      positions.push({ node, start, end: scalarLength })
       sourceCursor = at + value.length
       return
     }
-    if (text) text += '\n'.repeat(Math.max(0, boundary - (text.match(/\n*$/u)?.[0].length ?? 0)))
+    if (text && boundary) {
+      const separator = '\n'.repeat(Math.max(0, boundary - (text.match(/\n*$/u)?.[0].length ?? 0)))
+      text += separator; scalarLength += separator.length
+    }
     boundary = 0
-    const start = Array.from(text).length
+    const start = scalarLength
     text += value
-    positions.push({ node, start, end: Array.from(text).length })
+    scalarLength += Array.from(value).length
+    positions.push({ node, start, end: scalarLength })
   }
   const walk = (node: Node): void => {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -37,11 +55,11 @@ export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text:
       return
     }
     if (!(node instanceof Element) || node.matches(EXCLUDED)) return
-    if (node.tagName === 'BR') { text += '\n'; return }
+    if (node.tagName === 'BR') { text += '\n'; scalarLength++; return }
     if (BLOCKS.has(node.tagName) && text) boundaryAt(2)
     for (const child of node.childNodes) walk(child)
     if (node.tagName === 'TD' || node.tagName === 'TH') {
-      if (node.nextElementSibling) text += '\t'
+      if (node.nextElementSibling) { text += '\t'; scalarLength++ }
     } else if (node.tagName === 'TR') boundaryAt(1)
     else if (BLOCKS.has(node.tagName) || node.tagName === 'HR') boundaryAt(2)
   }
@@ -52,7 +70,7 @@ export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text:
 function rangePoint(positions: TextPosition[], node: Node, offset: number, end: boolean): number | null {
   if (node.nodeType === Node.TEXT_NODE) {
     const position = positions.find((entry) => entry.node === node)
-    return position ? position.start + Array.from((node.textContent ?? '').slice(0, offset)).length : null
+    return position ? position.start + Array.from((node.textContent ?? '').slice(0, offset).replace(/\r\n/gu, '\n')).length : null
   }
   const children = [...node.childNodes]
   if (end && offset > 0) {
@@ -88,7 +106,9 @@ export function readMessageQuoteSelection(
     if (startScalar === null || endScalar === null || endScalar <= startScalar) return null
     const text = Array.from(projection.text).slice(startScalar, endScalar).join('')
     if (!text.trim()) return null
-    return { selection: { messageId: source.id, bodyAtSelection: source.body, startScalar, endScalar, text }, range: range.cloneRange(), root }
+    const currentUserDisplayName = root.querySelector<HTMLElement>('[data-quote-current-user-name]')?.dataset.quoteCurrentUserName
+    return { selection: { messageId: source.id, bodyAtSelection: source.body, startScalar, endScalar, text,
+      ...(currentUserDisplayName ? { currentUserDisplayName } : {}) }, range: range.cloneRange(), root }
   } catch { return null }
 }
 

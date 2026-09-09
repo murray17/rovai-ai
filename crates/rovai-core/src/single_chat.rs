@@ -3502,6 +3502,7 @@ mod tests {
                     expected_revision: 2,
                     action: crate::message_quote::QuoteAction::Add {
                         selection: crate::message_quote::QuoteSelection {
+                            current_user_display_name: None,
                             message_id: first.result.payload["conversationMessageId"]
                                 .as_str()
                                 .unwrap()
