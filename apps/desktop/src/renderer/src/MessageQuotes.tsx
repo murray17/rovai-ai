@@ -28,22 +28,25 @@ type QuoteProps = {
   quotes: MessageQuoteSnapshot[]
   onReveal(quote: MessageQuoteSnapshot): void | Promise<void>
   onMutate?(action: MessageQuoteAction): Promise<void>
+  onEmptyFocus?(): void
   disabled?: boolean
   history?: boolean
 }
 
-export function MessageQuotes({ quotes, onReveal, onMutate, disabled = false, history = false }: QuoteProps): JSX.Element | null {
+export function MessageQuotes({ quotes, onReveal, onMutate, onEmptyFocus, disabled = false, history = false }: QuoteProps): JSX.Element | null {
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
   const bubble = useRef<HTMLDivElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const suppressFocusOpen = useRef(false)
   const [open, setOpen] = useState(false)
-  const [undo, setUndo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const cancelTimer = (): void => { clearTimeout(timer.current) }
   useEffect(() => () => clearTimeout(timer.current), [])
+  useEffect(() => {
+    if (!quotes.length) { clearTimeout(timer.current); setOpen(false); setError(null) }
+  }, [quotes.length])
   const close = (): void => { cancelTimer(); setOpen(false) }
   const leave = (): void => {
     cancelTimer()
@@ -63,16 +66,16 @@ export function MessageQuotes({ quotes, onReveal, onMutate, disabled = false, hi
     cancelTimer(); setOpen(true)
     requestAnimationFrame(() => requestAnimationFrame(() => bubble.current?.querySelector<HTMLButtonElement>('.message-quote-jump')?.focus()))
   }
-  const mutate = async (action: MessageQuoteAction, retainFocus = false): Promise<void> => {
+  const remove = async (quoteId: string, retainFocus: boolean): Promise<void> => {
     if (!onMutate || disabled || busy) return
     setBusy(true); setError(null)
     try {
-      await onMutate(action)
-      if (action.type === 'remove') {
-        setUndo(action.quoteId)
-        if (retainFocus) requestAnimationFrame(() => bubble.current?.querySelector<HTMLButtonElement>('.message-quote-jump, .message-quotes-undo')?.focus())
-      }
-      if (action.type === 'restore') setUndo(null)
+      await onMutate({ type: 'remove', quoteId })
+      if (retainFocus) requestAnimationFrame(() => {
+        const rows = bubble.current?.querySelectorAll<HTMLButtonElement>('.message-quote-jump')
+        if (rows?.length) rows[Math.min(quotes.findIndex(quote => quote.quoteId === quoteId), rows.length - 1)]?.focus()
+        else onEmptyFocus?.()
+      })
     } catch (nextError) { setError(quoteErrorMessage(nextError)) }
     finally { setBusy(false) }
   }
@@ -85,13 +88,12 @@ export function MessageQuotes({ quotes, onReveal, onMutate, disabled = false, hi
         : '原消息暂不可用，已保留引用选文。')
     }
   }
-  if (!quotes.length && !undo && !error) return null
-  const undoControl = undo && onMutate ? <button type="button" className="message-quotes-undo" disabled={disabled || busy} onClick={() => void mutate({ type: 'restore', quoteId: undo })}>撤销移除</button> : null
+  if (!quotes.length) return null
   const authors = [...new Set(quotes.map((quote) => quote.authorAtCapture.displayName))].join('、')
   return <div className={`message-quotes${history ? ' is-history' : ''}`} data-quote-exclude>
     <Popover.Root open={open} onOpenChange={(next) => { cancelTimer(); setOpen(next) }} modal={false}>
       <div className="message-quotes-row" aria-label={`已引用 ${quotes.length} 段`}>
-        {(quotes.length > 0 || open) && <Popover.Anchor asChild><button
+        <Popover.Anchor asChild><button
           ref={trigger} type="button" className="message-quotes-trigger"
           onPointerEnter={(event) => {
             if (event.pointerType === 'touch') return
@@ -110,8 +112,7 @@ export function MessageQuotes({ quotes, onReveal, onMutate, disabled = false, hi
         >
           <QuoteGlyph /><span className="message-quotes-label">引用 {quotes.length} 段</span>
           {authors && <span className="message-quotes-authors">{authors}</span>}<ExpandGlyph />
-        </button></Popover.Anchor>}
-        {undoControl}
+        </button></Popover.Anchor>
       </div>
       <Popover.Portal>
         <Popover.Content ref={bubble} id={id} className="message-quotes-popover" side="top" align="start" sideOffset={7} collisionPadding={12}
@@ -137,11 +138,10 @@ export function MessageQuotes({ quotes, onReveal, onMutate, disabled = false, hi
                 <span className="message-quote-entry-author"><span>{index + 1}</span>{quote.authorAtCapture.displayName}</span>
                 <span className="message-quote-full-text">{quote.text}</span>
               </button>
-              {onMutate && <button type="button" className="message-quote-remove" disabled={disabled || busy} onClick={(event) => void mutate({ type: 'remove', quoteId: quote.quoteId }, event.detail === 0)} aria-label={`移除第 ${index + 1} 段引用`}>×</button>}
+              {onMutate && <button type="button" className="message-quote-remove" disabled={disabled || busy} onClick={(event) => void remove(quote.quoteId, event.detail === 0)} aria-label={`移除第 ${index + 1} 段引用`}>×</button>}
             </div>)}
-            {!quotes.length && <p className="message-quotes-empty">当前没有引用</p>}
           </div>
-          {(undoControl || error) && <div className="message-quotes-popover-footer">{undoControl}{error && <p role="alert">{error}</p>}</div>}
+          {error && <div className="message-quotes-popover-footer"><p role="alert">{error}</p></div>}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

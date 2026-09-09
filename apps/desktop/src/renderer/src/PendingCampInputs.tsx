@@ -431,6 +431,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
         <MessageQuoteSelectionToolbar ownerKey={`camp:${campId}`} messages={quoteMessages} disabled={busy || !ownsEdit}
           onAdd={(selection) => mutateQuote({ type: 'add', selection })} />
         <MessageQuotes key={edit.item.id} quotes={queue?.editSession?.workingQuotes ?? edit.quotes ?? []}
+          onEmptyFocus={() => editorRef.current?.focus()}
           onReveal={onRevealQuote} disabled={busy || !ownsEdit} onMutate={mutateQuote} />
         <StructuredMentionComposer ref={composerHandleRef} id="pending-camp-message"
           draftIdentity={`${campId}:${edit.item.id}`} document={edit.content}

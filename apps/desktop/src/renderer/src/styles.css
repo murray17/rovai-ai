@@ -8992,7 +8992,6 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .message-quotes-authors { max-width: 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .message-quotes-authors::before { content: '·'; padding-right: 6px; color: var(--faint); }
 .message-quotes-trigger:hover, .message-quotes-trigger[aria-expanded=true] { background: var(--neutral-selected); color: var(--ink); }
-.message-quotes-undo { flex: 0 0 auto; min-height: 28px; padding: 3px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px !important; }
 .message-quote-error { padding: 2px 5px 5px; color: var(--danger); font-size: 11px; }
 .message-quotes.is-history { margin-bottom: 6px; }
 .message-quotes.is-history .message-quotes-row { height: 28px; }
@@ -9010,7 +9009,6 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .message-quote-remove:hover { background: var(--neutral-selected); color: var(--ink); }
 .message-quotes-popover-footer { display: flex; align-items: center; gap: 8px; padding: 5px 6px 0; color: var(--danger); font-size: 11px; }
 .message-quotes-popover-footer p { margin: 0; }
-.message-quotes-empty { padding: 0 9px; color: var(--faint); font-size: 12px; }
 .message-quote-line-target { position: relative; isolation: isolate; }
 .message-quote-line-layer { position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 1; transition: opacity 650ms; }
 .message-quote-line-layer.is-fading { opacity: 0; }

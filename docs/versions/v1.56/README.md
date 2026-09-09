@@ -15,7 +15,7 @@ last_updated: 2026-09-09
 
 ## 范围与当前状态
 
-已确认 [revision 6 模型上下文变更](model-context-change-partial-message-quotes.md)，Core、Renderer 和 Runtime 链路已实现并通过验收。引用位于输入框内的单行圆角标签区，历史与草稿均默认隐藏具体选文，悬浮显示完整选文，点击整行回跳并以底色定位涉及的完整视觉行，支持移除/撤销；复制卡片/文件或跨正文选择不出现入口。Draft、Pending、发布消息、历史与冻结 Context Evidence 共同携带完整有序快照。引用不激活 Mention、Skill、命令或自动派发。
+已确认 [revision 6 模型上下文变更](model-context-change-partial-message-quotes.md)，Core、Renderer 和 Runtime 链路已实现并通过验收。引用位于输入框内的单行圆角标签区，历史与草稿均默认隐藏具体选文，悬浮显示完整选文，点击整行回跳并以底色定位涉及的完整视觉行。草稿支持直接移除，不提供撤销，移除最后一段后标签消失；复制卡片/文件或跨正文选择不出现入口。Draft、Pending、发布消息、历史与冻结 Context Evidence 共同携带完整有序快照。引用不激活 Mention、Skill、命令或自动派发。
 
 ## 跨版本文档影响
 
