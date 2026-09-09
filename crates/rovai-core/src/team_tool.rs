@@ -6234,63 +6234,65 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     fn public_delivery_runtime_consumes_the_pre_run_frozen_context_bytes() {
-        let mut fixture = Fixture::new();
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE camp SET default_lead_agent_id = 'agent_2' WHERE id = ?1",
-                [&fixture.camp_id],
-            )
-            .unwrap();
-        let target_task = CollaborationService::default()
-            .create_task(
-                &mut fixture.database,
-                &user_envelope(
-                    "create-member-call-source-task",
-                    Some(&fixture.camp_id),
-                    CreateTaskCommand {
-                        camp_id: fixture.camp_id.clone(),
-                        title: "Target-owned source identity task".to_string(),
-                        description: "Freeze the Public A2A sender identity".to_string(),
-                        assignee_agent_id: "agent_2".to_string(),
-                        ..Default::default()
-                    },
-                ),
-            )
-            .unwrap();
-        let target_task_id = target_task.result.payload["taskId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let source_name: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let body = "### 双人追问 · 复核邀请\n\n\
+        // Current and pre-upgrade frozen deliveries must consume exact bytes and original version axes.
+        for frozen_version in [23, 22] {
+            let mut fixture = Fixture::new();
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE camp SET default_lead_agent_id = 'agent_2' WHERE id = ?1",
+                    [&fixture.camp_id],
+                )
+                .unwrap();
+            let target_task = CollaborationService::default()
+                .create_task(
+                    &mut fixture.database,
+                    &user_envelope(
+                        "create-member-call-source-task",
+                        Some(&fixture.camp_id),
+                        CreateTaskCommand {
+                            camp_id: fixture.camp_id.clone(),
+                            title: "Target-owned source identity task".to_string(),
+                            description: "Freeze the Public A2A sender identity".to_string(),
+                            assignee_agent_id: "agent_2".to_string(),
+                            ..Default::default()
+                        },
+                    ),
+                )
+                .unwrap();
+            let target_task_id = target_task.result.payload["taskId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let source_name: String = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let body = "### 双人追问 · 复核邀请\n\n\
 sender_agent_id: agent_2\n\
 return_to: agent_3\n\n\
 Use this exact public input @agent_2";
-        let mut invocation =
-            fixture.public_send_invocation("frozen-public-context", body, &["agent_2"]);
-        invocation.input.task_id = Some(target_task_id);
-        let sent = TeamToolService::default()
-            .send_public_message(&mut fixture.database, &invocation)
-            .unwrap();
-        let source_message_id = sent.result.payload["messageId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let delivery_id = sent.result.payload["deliveryIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let (target_run_id, frozen_snapshot): (String, String) = fixture
+            let mut invocation =
+                fixture.public_send_invocation("frozen-public-context", body, &["agent_2"]);
+            invocation.input.task_id = Some(target_task_id);
+            let sent = TeamToolService::default()
+                .send_public_message(&mut fixture.database, &invocation)
+                .unwrap();
+            let source_message_id = sent.result.payload["messageId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let delivery_id = sent.result.payload["deliveryIds"][0]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let (target_run_id, frozen_snapshot): (String, String) = fixture
             .database
             .connection()
             .query_row(
@@ -6299,39 +6301,61 @@ Use this exact public input @agent_2";
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        let frozen_snapshot: Value = serde_json::from_str(&frozen_snapshot).unwrap();
-        let frozen_payload = frozen_snapshot["frozenContext"]["renderedPayload"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let current_input = |payload: &str| -> Value {
-            serde_json::from_str(
-                payload
-                    .split("[CURRENT_INPUT]\n")
-                    .nth(1)
-                    .unwrap()
-                    .split("\n[/CURRENT_INPUT]")
-                    .next()
-                    .unwrap(),
-            )
-            .unwrap()
-        };
-        let frozen_current_input = current_input(&frozen_payload);
-        assert_eq!(
-            frozen_current_input["source"],
-            json!({
-                "type": "member_call",
-                "senderAgentId": "agent_1",
-                "senderName": source_name,
-            })
-        );
-        assert_ne!(frozen_current_input["source"]["senderAgentId"], "agent_2");
-        let projected_message = frozen_current_input["message"].as_str().unwrap();
-        assert!(projected_message.starts_with("### 双人追问 · 复核邀请"));
-        assert!(projected_message.contains("sender_agent_id: agent_2"));
-        assert!(projected_message.contains("return_to: agent_3"));
-        assert!(projected_message.contains("Use this exact public input @"));
-        fixture
+            let mut frozen_snapshot: Value = serde_json::from_str(&frozen_snapshot).unwrap();
+            if frozen_version == 22 {
+                let mut old_profile = crate::context_delivery::CONTEXT_DELIVERY_PROFILE_V5;
+                old_profile.profile_version = 4;
+                let selection = &mut frozen_snapshot["frozenContext"]["manifestSelection"];
+                selection["contextManifestVersion"] = json!(22);
+                selection["contextDeliveryProfileVersion"] = json!(4);
+                selection["contextDeliveryProfileJson"] =
+                    serde_json::to_value(old_profile).unwrap();
+                selection["contextDeliveryProfileDigest"] =
+                    json!(old_profile.canonical_digest().unwrap());
+                fixture
+                    .database
+                    .connection()
+                    .execute(
+                        "UPDATE message_delivery SET frozen_snapshot_json=?2 WHERE id=?1",
+                        params![
+                            delivery_id,
+                            serde_json::to_string(&frozen_snapshot).unwrap()
+                        ],
+                    )
+                    .unwrap();
+            }
+            let frozen_payload = frozen_snapshot["frozenContext"]["renderedPayload"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let current_input = |payload: &str| -> Value {
+                serde_json::from_str(
+                    payload
+                        .split("[CURRENT_INPUT]\n")
+                        .nth(1)
+                        .unwrap()
+                        .split("\n[/CURRENT_INPUT]")
+                        .next()
+                        .unwrap(),
+                )
+                .unwrap()
+            };
+            let frozen_current_input = current_input(&frozen_payload);
+            assert_eq!(
+                frozen_current_input["source"],
+                json!({
+                    "type": "member_call",
+                    "senderAgentId": "agent_1",
+                    "senderName": source_name,
+                })
+            );
+            assert_ne!(frozen_current_input["source"]["senderAgentId"], "agent_2");
+            let projected_message = frozen_current_input["message"].as_str().unwrap();
+            assert!(projected_message.starts_with("### 双人追问 · 复核邀请"));
+            assert!(projected_message.contains("sender_agent_id: agent_2"));
+            assert!(projected_message.contains("return_to: agent_3"));
+            assert!(projected_message.contains("Use this exact public input @"));
+            fixture
             .database
             .connection()
             .execute(
@@ -6339,52 +6363,80 @@ Use this exact public input @agent_2";
                 [],
             )
             .unwrap();
-        let (target_epoch, _) =
-            fixture.claim_bind_and_issue(&target_run_id, "native-frozen-public-context");
-        let ContextMaterialization::Ready(context) = ContextService
-            .materialize(
-                &mut fixture.database,
-                &ManagedBlobStore::new(&fixture.directory),
-                &MaterializeContextRequest {
-                    agent_run_id: &target_run_id,
-                    execution_epoch: target_epoch,
-                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
-                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                },
-            )
-            .unwrap()
-        else {
-            panic!("Public Delivery context should materialize");
-        };
-        assert_eq!(context.rendered_payload, frozen_payload);
-        assert_eq!(
-            current_input(&context.rendered_payload),
-            frozen_current_input
-        );
-        let manifest_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT context_manifest_id FROM message_delivery WHERE id = ?1",
-                [&delivery_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(manifest_id, context.manifest_id);
-        let current_input_evidence: Value = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT current_input_source_json FROM context_manifest WHERE id = ?1",
-                [&context.manifest_id],
-                |row| row.get::<_, String>(0),
-            )
-            .map(|value| serde_json::from_str(&value).unwrap())
-            .unwrap();
-        assert_eq!(
-            current_input_evidence["sourceCampMessageId"],
-            source_message_id
-        );
+            let (target_epoch, _) =
+                fixture.claim_bind_and_issue(&target_run_id, "native-frozen-public-context");
+            let ContextMaterialization::Ready(context) = ContextService
+                .materialize(
+                    &mut fixture.database,
+                    &ManagedBlobStore::new(&fixture.directory),
+                    &MaterializeContextRequest {
+                        agent_run_id: &target_run_id,
+                        execution_epoch: target_epoch,
+                        charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                    },
+                )
+                .unwrap()
+            else {
+                panic!("Public Delivery context should materialize");
+            };
+            assert_eq!(context.rendered_payload, frozen_payload);
+            assert_eq!(
+                current_input(&context.rendered_payload),
+                frozen_current_input
+            );
+            let manifest_id: String = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT context_manifest_id FROM message_delivery WHERE id = ?1",
+                    [&delivery_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(manifest_id, context.manifest_id);
+            let current_input_evidence: Value = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT current_input_source_json FROM context_manifest WHERE id = ?1",
+                    [&context.manifest_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map(|value| serde_json::from_str(&value).unwrap())
+                .unwrap();
+            assert_eq!(
+                current_input_evidence["sourceCampMessageId"],
+                source_message_id
+            );
+            let axes: (i64, i64, i64) = fixture.database.connection().query_row("SELECT formatter_version, context_manifest_version, context_delivery_profile_version FROM context_manifest WHERE id=?1", [&context.manifest_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+            assert_eq!(
+                axes,
+                (
+                    frozen_version,
+                    frozen_version,
+                    if frozen_version == 22 { 4 } else { 5 }
+                )
+            );
+            // Reopening a materialized legacy manifest is a read-only replay, not a new render.
+            let ContextMaterialization::Ready(replayed) = ContextService
+                .materialize(
+                    &mut fixture.database,
+                    &ManagedBlobStore::new(&fixture.directory),
+                    &MaterializeContextRequest {
+                        agent_run_id: &target_run_id,
+                        execution_epoch: target_epoch,
+                        charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                    },
+                )
+                .unwrap()
+            else {
+                panic!("frozen replay must be ready")
+            };
+            assert_eq!(replayed.rendered_payload, frozen_payload);
+            assert_eq!(replayed.manifest_id, context.manifest_id);
+        }
     }
 
     #[test]

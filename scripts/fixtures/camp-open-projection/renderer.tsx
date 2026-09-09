@@ -14,6 +14,8 @@ import type {
 import { AppHeader, campOpenProjectionAsSnapshot } from '../../../apps/desktop/src/renderer/src/App'
 import { CampWorkspace, RunExecutionDisclosure, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import { CampNavigation } from '../../../apps/desktop/src/renderer/src/CampNavigation'
+import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
+import { DEFAULT_CURRENT_USER_PROFILE, type CurrentUserProfile } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const now = '2026-08-31T00:00:00Z'
@@ -116,6 +118,7 @@ const earlier = { ...campOpenProjectionAsSnapshot(projection(60)),
   messages: messages.slice(0, 40).map(message => ({ ...message, timelineGlobalSequence: message.sequence })) }
 let current = campOpenProjectionAsSnapshot(projection(60), earlier)
 let updateSnapshot: (snapshot: typeof current) => void
+let updateCurrentUserProfile: (profile: CurrentUserProfile) => void
 let updateMessageHistory: (coverage: CampOpenMessageCoverage | null) => void
 let closeTask: () => void
 type FixtureImageResult = { displayName: string; mediaType: string; data: string }
@@ -331,14 +334,19 @@ const navigation: NavigationSnapshot = {
 
 function Fixture(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState(current)
+  const [profile, setProfile] = useState(DEFAULT_CURRENT_USER_PROFILE)
   const [messageHistory, setMessageHistory] = useState<CampOpenMessageCoverage | null>(null)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<CampInspectorTab>(attachmentReviewMode ? 'members' : 'tasks')
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   updateSnapshot = setSnapshot
+  updateCurrentUserProfile = setProfile
   updateMessageHistory = setMessageHistory
   closeTask = () => setOpen(false)
-  return <div className="app-shell app-shell-camp">
+  return <CurrentUserProfileContext.Provider value={{
+    profile, ready: true, error: null, reload: () => {},
+    save: async (next) => { setProfile(next); return next }
+  }}><div className="app-shell app-shell-camp">
     <CampNavigation view="camp" state="ready" navigation={navigation} activeCampId={campId}
       currentProjectKey="directory:/fixture/workspace" pendingMemoryCount={2}
       onNewConversation={() => {}} onMembers={() => {}} onMemory={() => {}} onSettings={() => {}}
@@ -365,13 +373,31 @@ function Fixture(): React.JSX.Element {
         onInspectorTabChange={setTab}
         onOpenInspector={next => { setTab(next); setOpen(true) }} onCloseInspector={() => setOpen(false)} />
     </main>
-  </div>
+  </div></CurrentUserProfileContext.Provider>
 }
 const reactRoot = createRoot(document.getElementById('root')!)
 reactRoot.render(<Fixture />)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let anchor: HTMLElement | null = null
 Object.assign(window, { campOpenTest: {
+  showCurrentUserProfile: () => {
+    current = { ...current, tasks: [], turns: [], agentRuns: [], messageDeliveries: [], timeline: [],
+      agentRunImages: [], agentRunFileChanges: [],
+      camp: { ...current.camp, title: '当前用户资料卡' },
+      messages: [
+        { ...messages[0], id: 'profile-user', body: '请确认这版设计。',
+          content: [{ kind: 'text', text: '请确认这版设计。' }] },
+        { ...messages[1], id: 'profile-agent', body: '@你 正文 @你 与 `@你` 保持原样。',
+          content: [{ kind: 'current_user_mention', userId: 'local_user' },
+            { kind: 'text', text: '正文 @你 与 `@你` 保持原样。' }] },
+        { ...messages[2], id: 'profile-external', authorType: 'external_principal', authorId: 'owner',
+          body: '从已绑定的个人渠道回复。', content: [{ kind: 'text', text: '从已绑定的个人渠道回复。' }] }
+      ] }
+    updateMessageHistory(null)
+    updateSnapshot(current)
+  },
+  updateCurrentUserProfile: (profile: CurrentUserProfile) => updateCurrentUserProfile(profile),
+  currentUserMessages: () => JSON.stringify(current.messages),
   showMessageGroups: (scenario: 'short' | 'image' | 'files' | 'long' | 'diff' = 'short') => {
     const message = (index: number, body: string): CampOpenProjection['messages'][number] => ({
       ...messages[0], id: `group-${index}`, sequence: index, authorType: 'agent', authorId: agent.agentId,

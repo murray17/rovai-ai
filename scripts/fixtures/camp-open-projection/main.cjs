@@ -39,6 +39,132 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--current-user-profile') {
+      const settle = () => run('window.campOpenTest.settle()')
+      const key = async keyCode => {
+        window.webContents.sendInputEvent({ type: 'keyDown', keyCode })
+        if (keyCode === 'Enter') window.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
+        window.webContents.sendInputEvent({ type: 'keyUp', keyCode })
+        await settle()
+      }
+      const click = async selector => {
+        await run('document.querySelector(' + JSON.stringify(selector) + ').scrollIntoView({block:"nearest"})')
+        await settle()
+        const point = await run('(() => { const r = document.querySelector(' + JSON.stringify(selector) +
+          ').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()')
+        point.x = Math.round(point.x * window.webContents.getZoomFactor())
+        point.y = Math.round(point.y * window.webContents.getZoomFactor())
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+        await settle()
+      }
+      const card = async () => {
+        await run('Promise.all(document.querySelector(".mention-profile-popover")?.getAnimations().map(animation => animation.finished) ?? [])')
+        return run('(() => { const p = document.querySelector(".current-user-profile-card"); if (!p) return null; ' +
+        'const r = p.closest("[role=dialog]").getBoundingClientRect(); const a = p.querySelector(".profile-portrait"); ' +
+        'return { name: p.querySelector("h2").textContent, text: p.textContent, avatarText: a.textContent, ' +
+        'avatarWidth: a.getBoundingClientRect().width, imageLoaded: Boolean(a.querySelector("img")?.naturalWidth), ' +
+        'width: r.width, bounded: r.left >= 11 && r.top >= 11 && r.right <= innerWidth - 11 && r.bottom <= innerHeight - 11, ' +
+        'focused: document.activeElement === p.closest("[role=dialog]"), count: document.querySelectorAll(".mention-profile-popover").length } })()')
+      }
+      const user = '[data-message-id=profile-user] .current-user-profile-trigger'
+      const external = '[data-message-id=profile-external] .current-user-profile-trigger'
+      const mention = '[data-message-id=profile-agent] .message-mention-token.current-user'
+      await run('window.campOpenTest.showCurrentUserProfile()')
+      await settle()
+      const canonical = await run('window.campOpenTest.currentUserMessages()')
+      await click(user)
+      let opened = await card()
+      assert.equal(opened.name, '你')
+      assert.equal(opened.text, '你你', 'Only the avatar glyph and name are visible')
+      assert.equal(opened.avatarWidth, 160)
+      assert.equal(opened.count, 1)
+      assert.equal(opened.focused, false, 'Pointer activation keeps focus on the trigger')
+      await capture('current-user-profile-default')
+      await key('Escape')
+      assert.equal(await card(), null)
+      assert.equal(await run('document.activeElement.matches(' + JSON.stringify(user) + ')'), true)
+
+      for (const selector of [user, external, mention]) {
+        for (const activation of ['Enter', 'Space']) {
+          await run('document.querySelector(' + JSON.stringify(selector) + ').focus()')
+          await key(activation)
+          opened = await card()
+          assert.ok(opened, selector + ' ' + activation + ' opens the card')
+          assert.equal(opened.focused, true, selector + ' ' + activation + ' focuses the card')
+          assert.equal(await run('document.querySelector(' + JSON.stringify(selector) + ').getAttribute("aria-expanded")'), 'true')
+          await key('Escape')
+          assert.equal(await card(), null)
+          assert.equal(await run('document.activeElement.matches(' + JSON.stringify(selector) + ')'), true)
+          assert.equal(await run('document.querySelector(' + JSON.stringify(selector) + ').getAttribute("aria-expanded")'), 'false')
+        }
+      }
+      await click(mention)
+      const avatarDataUrl = 'data:image/png;base64,' + readFileSync(join(__dirname,
+        '../../../apps/desktop/src/renderer/src/assets/characters/muwa/icon-192.png')).toString('base64')
+      await run('window.campOpenTest.updateCurrentUserProfile(' + JSON.stringify({ displayName: 'Murray', avatarDataUrl }) + ')')
+      const imageDeadline = Date.now() + 3000
+      do {
+        await settle()
+        opened = await card()
+      } while (!opened.imageLoaded && Date.now() < imageDeadline)
+      assert.equal(opened.name, 'Murray')
+      assert.equal(opened.text, 'Murray')
+      assert.equal(opened.imageLoaded, true)
+      assert.equal(await run('document.querySelector(' + JSON.stringify(mention) + ').textContent'), '@Murray')
+      assert.deepEqual(await run('[...document.querySelectorAll(".conversation-bubble.user .bubble-meta strong, ' +
+        '.conversation-bubble.external_principal .bubble-meta strong")].map(node => node.textContent)'), ['Murray', 'Murray'])
+      assert.equal(await run('document.querySelectorAll(".message-mention-token.current-user").length'), 1)
+      assert.equal(await run('document.querySelector(".current-user-markdown-content").textContent'), '正文 @你 与 @你 保持原样。')
+      await capture('current-user-profile-custom')
+
+      await click('[data-message-id=profile-agent] .message-author-name-trigger')
+      assert.equal(await card(), null)
+      assert.equal(await run('document.querySelectorAll(".mention-profile-popover[data-content-kind=member]").length'), 1)
+      await click(user)
+      assert.equal((await card()).count, 1, 'Personal and teammate cards are mutually exclusive')
+      window.webContents.sendInputEvent({ type: 'mouseDown', x: 2, y: 2, button: 'left', clickCount: 1 })
+      window.webContents.sendInputEvent({ type: 'mouseUp', x: 2, y: 2, button: 'left', clickCount: 1 })
+      await settle()
+      assert.equal(await card(), null, 'Outside click closes the card')
+      await run('(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector(".current-user-markdown-content")); ' +
+        'getSelection().removeAllRanges(); getSelection().addRange(r); document.querySelector(' + JSON.stringify(mention) + ').click() })()')
+      await settle()
+      assert.equal(await card(), null, 'Selecting body text does not accidentally open the profile')
+      await run('getSelection().removeAllRanges()')
+      await run('window.campOpenTest.updateCurrentUserProfile(' +
+        JSON.stringify({ displayName: 'Murray', avatarDataUrl: null }) + ')')
+      await settle()
+      await click(external)
+      assert.equal((await card()).avatarText, '你', 'A custom name keeps the default avatar glyph')
+      await key('Escape')
+
+      const layouts = []
+      await run('window.campOpenTest.updateCurrentUserProfile(' +
+        JSON.stringify({ displayName: 'MurrayABCDEFGHIJKLMNOPQRSTUVWX123', avatarDataUrl }) + ')')
+      for (const theme of ['day', 'night']) {
+        for (const [width, height, zoom] of [[1440, 920, 1], [1040, 700, 1], [2560, 1440, 1], [1440, 920, 2]]) {
+          window.setContentSize(width, height)
+          window.webContents.setZoomFactor(zoom)
+          await run('document.documentElement.dataset.theme = ' + JSON.stringify(theme))
+          await settle()
+          await click(mention)
+          opened = await card()
+          assert.ok(opened, theme + ' ' + width + ' zoom ' + zoom + ' opens the card')
+          assert.equal(opened.bounded, true, theme + ' ' + width + ' zoom ' + zoom)
+          assert.equal(Math.round(opened.width), 240)
+          assert.equal(await run('document.documentElement.scrollWidth > innerWidth'), false)
+          await capture('current-user-profile-' + theme + '-' + width + '-' + zoom)
+          layouts.push({ theme, width, zoom, bounded: opened.bounded })
+          await key('Escape')
+        }
+      }
+      assert.equal(await run('window.campOpenTest.currentUserMessages()'), canonical, 'Historical content is unchanged')
+      assert.equal(errors.length, 0, errors.join('\n'))
+      console.log(JSON.stringify({ ok: true, mode, layouts }))
+      app.exit(0)
+      return
+    }
     if (mode === '--message-groups') {
       const settledGroups = async () => {
         for (let index = 0; index < 4; index += 1) await run('window.campOpenTest.settle()')
@@ -54,7 +180,10 @@ app.whenReady().then(async () => {
           assert.equal(grouped.emptyBubbles, 0)
           assert.deepEqual(grouped.messages.filter(item => item.head).map(item => item.id), ['group-1', 'group-5', 'group-6'])
           assert.ok(grouped.messages.every(item => item.label && item.buttons === 2))
-          assert.equal(grouped.messages[0].background, theme === 'day' ? 'rgb(242, 243, 244)' : 'rgb(32, 39, 44)')
+          const bubbleSurface = await run('(() => { const probe = document.createElement("span"); ' +
+            'probe.style.color = "var(--conversation-user-message-surface)"; document.body.append(probe); ' +
+            'const color = getComputedStyle(probe).color; probe.remove(); return color })()')
+          assert.equal(grouped.messages[0].background, bubbleSurface)
           assert.ok(grouped.messages.every(item => item.contentBackground === 'rgba(0, 0, 0, 0)'))
           assert.ok(grouped.messages.every(item => Math.abs(item.left - grouped.messages[0].left) <= 1))
           assert.ok(Math.abs(grouped.messages[1].top - grouped.messages[0].bottom - 8) <= 1)

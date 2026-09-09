@@ -300,7 +300,6 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(
           {personalVisited && <div className="member-editor-page personal-editor-page" hidden={!personalSelected}>
             {props.topNotices}
             <CurrentUserProfileEditor
-              sampleAgent={liveMembers[0]}
               onStateChange={updatePersonalState}
               ref={(value) => {
                 if (value) editors.current.set(PERSONAL_EDITOR_KEY, value)

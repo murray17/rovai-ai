@@ -1,6 +1,8 @@
+import type { MessageQuoteSnapshot } from '@contracts'
 import type { CampPendingInputsView, ComposerDocument, LocalAttachmentSourceView, PendingCampInputView } from '@contracts'
 
 export type PendingInputSnapshot = {
+  quotes: MessageQuoteSnapshot[]
   content: ComposerDocument
   replyToCampMessageId: string | null
   recipientSelectionRequired: boolean
@@ -40,7 +42,7 @@ export function createPendingInputNavigationStore() {
       const edit = drafts.get(queue.campId)
       drafts.delete(queue.campId)
       if (!edit || !ownsPendingInputEdit(edit, queue)) return null
-      return { ...edit, attachments: queue.editSession!.workingAttachments }
+      return { ...edit, attachments: queue.editSession!.workingAttachments, quotes: queue.editSession!.workingQuotes }
     }
   }
 }

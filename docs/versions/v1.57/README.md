@@ -11,7 +11,7 @@ last_updated: 2026-09-10
 
 # Rovai-ai v1.57：官方 ZCode Runtime
 
-前置：[v1.55](../v1.55/README.md)。本版本新增官方 ZCode App 内置 Runtime，使用原生 BYOK 配置，
+前置：[v1.56](../v1.56/README.md)。本版本新增官方 ZCode App 内置 Runtime，使用原生 BYOK 配置，
 复用现有 Runtime Fleet、Context FirstPayload、审批与文件 Evidence 链路。
 
 ## 范围与当前状态
@@ -29,7 +29,7 @@ last_updated: 2026-09-10
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v1.55 冻结为 historical；本概览、实施计划和版本索引建立 current v1.57 |
+| Version lifecycle | 已更新 | v1.56 冻结为 historical；本概览、实施计划和版本索引建立 current v1.57 |
 | Decisions | 已更新 | [V1.57-D01](decisions.md#v1-57-d01)解释官方内核与共享生命周期，[D02](decisions.md#v1-57-d02)明确 Preview 资格边界 |
 | Contracts | 已更新 | [Runtime Launch v37](../../contracts/runtime-launch-and-verification-v37.md)、[File Change v5](../../contracts/runtime-file-change-observation-v5.md)定义新增 Runtime 的 wire 与证据边界 |
 | Architecture | 已更新 | [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md)、[Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)、[File Change](../../architecture/runtime-file-change-observation.md)增加 ZCode |

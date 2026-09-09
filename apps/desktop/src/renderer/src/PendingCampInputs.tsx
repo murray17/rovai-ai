@@ -1,3 +1,5 @@
+import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
+import type { CampMessageView, MessageQuoteSnapshot, MessageQuoteAction } from '@contracts'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ForwardedRef, type JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -32,6 +34,7 @@ export interface PendingCampInputsHandle {
 
 export function pendingInputSnapshot(item: PendingCampInputView): PendingInputSnapshot {
   return {
+    quotes: item.quotes ?? [],
     content: item.content,
     replyToCampMessageId: item.replyIntent?.replyToCampMessageId ?? null,
     recipientSelectionRequired: item.recipientSelectionRequired,
@@ -40,7 +43,8 @@ export function pendingInputSnapshot(item: PendingCampInputView): PendingInputSn
 }
 
 export function pendingInputIsDirty(initial: PendingInputSnapshot, current: PendingInputSnapshot): boolean {
-  return JSON.stringify(initial.content) !== JSON.stringify(current.content)
+  return JSON.stringify(initial.quotes.map((quote) => quote.snapshotDigest)) !== JSON.stringify(current.quotes.map((quote) => quote.snapshotDigest))
+    || JSON.stringify(initial.content) !== JSON.stringify(current.content)
     || initial.replyToCampMessageId !== current.replyToCampMessageId
     || initial.recipientSelectionRequired !== current.recipientSelectionRequired
     || JSON.stringify(initial.attachments.map(({ id }) => id))
@@ -73,9 +77,11 @@ function pendingError(code: string): string {
 }
 
 export const PendingCampInputs = forwardRef(function PendingCampInputs({
-  campId, refreshKey, executionActive, members, skills, skillCatalogStatus,
+  campId, refreshKey, executionActive, members, skills, skillCatalogStatus, quoteMessages = [], onRevealQuote = async () => { throw new Error('quote.source_unavailable') },
   onQueueChange, onEditingChange, onAttachmentDropTargetChange, attachmentDragActive
 }: {
+  quoteMessages?: CampMessageView[]
+  onRevealQuote?(quote: MessageQuoteSnapshot): void | Promise<void>
   campId: string
   refreshKey: number
   executionActive: boolean
@@ -163,7 +169,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
     const session = queue?.editSession
     if (!edit || !session || session.pendingInputId !== edit.item.id || session.editToken !== edit.token) return
     setEdit((current) => current && current.item.id === edit.item.id
-      ? { ...current, attachments: session.workingAttachments }
+      ? { ...current, attachments: session.workingAttachments, quotes: session.workingQuotes }
       : current)
   }, [edit?.item.id, edit?.token, queue?.editSession])
 
@@ -224,6 +230,13 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
       await refresh().catch(() => undefined)
       if (mounted.current) setBusy(false)
     }
+  }
+
+  const mutateQuote = async (action: MessageQuoteAction): Promise<void> => {
+    if (!edit || !ownsEdit || busyRef.current) throw new Error('pending_input.edit_fenced')
+    setBusy(true)
+    try { await mutate(edit.item, { type: 'quote', action }, edit.token); await refresh() }
+    finally { if (mounted.current) setBusy(false) }
   }
 
   const prepareFiles = (files: File[]): void => {
@@ -347,6 +360,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
             <div className="pending-input-preview" title={itemLabel}>
               <span className="pending-input-mark" aria-hidden="true" />
               <span className="pending-input-copy">{itemLabel}</span>
+              {(item.quotes?.length ?? 0) > 0 && <small>引用 {item.quotes.length} 段</small>}
               {(selected || recovery || item.state === 'needs_repair') && <small>
                 {selected ? '正在编辑' : recovery ? '未完成的编辑 · 重新编辑' : '需要处理'}
               </small>}
@@ -414,6 +428,11 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
           {preparingAttachments.map((file, index) => <AttachmentPlaceholder
             key={`preparing-${index}`} name={file.name || '粘贴图片'} kind="file" state="preparing" />)}
         </ComposerAttachmentStrip>}
+        <MessageQuoteSelectionToolbar ownerKey={`camp:${campId}`} messages={quoteMessages} disabled={busy || !ownsEdit}
+          onAdd={(selection) => mutateQuote({ type: 'add', selection })} />
+        <MessageQuotes key={edit.item.id} quotes={queue?.editSession?.workingQuotes ?? edit.quotes ?? []}
+          onEmptyFocus={() => editorRef.current?.focus()}
+          onReveal={onRevealQuote} disabled={busy || !ownsEdit} onMutate={mutateQuote} />
         <StructuredMentionComposer ref={composerHandleRef} id="pending-camp-message"
           draftIdentity={`${campId}:${edit.item.id}`} document={edit.content}
           members={members} skills={skills} skillCatalogStatus={skillCatalogStatus}

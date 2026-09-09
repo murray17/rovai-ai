@@ -26,7 +26,7 @@ Preload 暴露 `currentUserProfile.get()` 和 `currentUserProfile.save(profile)`
   写入串行化；保存失败保留旧内存快照和用户草稿，后续允许重试。
 - 首次读取缺失文件时只使用内存默认值，不写入文件。损坏或不可读文件产生本地降级提示，
   不自动修复或覆盖；只有用户显式保存才替换资料。
-- 重启重新读取已保存资料。Renderer 仅在保存回执成功后更新共享资料状态；编辑中的预览
+- 重启重新读取已保存资料。Renderer 仅在保存回执成功后更新共享资料状态；编辑中的草稿
   不提前更改历史消息或名册。
 
 ## 历史展示与上下文边界
@@ -37,6 +37,8 @@ Desktop 历史消息作者栏按现有 `authorType` 识别当前用户。`user` 
 Agent 历史消息中 `{ kind: 'current_user_mention', userId: 'local_user' }` 使用当前显示名称。
 普通 text segment、Markdown、代码和外部引用中的字面 `@你` 保持不变；不从文本猜测 identity，
 不批量检索或替换历史正文。当前已加载消息随共享资料状态刷新，后续加载的历史页使用同一资料。
+本人消息头像和结构化 Current User Mention 可打开只读资料卡，使用同一份当前资料；
+此交互不发起 Core 请求，不创建 AgentProfile，也不将个人资料写入历史上下文。
 
 整条消息复制及已解析的历史回复预览按结构投影最新名称，前缀间隔按 segment 边界生成，
 不能按固定字符数切分。剪贴板中的 Current User Mention 粘贴回 Composer 时继续降级为普通文本，
@@ -47,6 +49,8 @@ Agent 历史消息中 `{ kind: 'current_user_mention', userId: 'local_user' }` �
 存储、输入边界、失败恢复和重启由 `current-user-profile.test.ts` 覆盖；历史展示与正文隔离由
 `CampWorkspace.current-user-markdown.test.ts`、剪贴板测试覆盖。真实 Renderer 的编辑、裁剪、保存失败、
 草稿保护和双主题布局由现有 `member-editor` 隔离 Electron 夹具覆盖。
+会话资料卡的头像、结构化 Mention、键盘焦点、关闭和资料刷新由 `camp-open-projection`
+夹具的 `--current-user-profile` 模式覆盖。
 
 入口和构图见[队员身份与图像](../ui/components/member-identity.md#当前用户个人资料)；历史 token 呈现见
 [Current User Mention](../ui/components/structured-mentions.md#current-user-mention)。

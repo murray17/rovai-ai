@@ -1,6 +1,9 @@
 //! Private next-turn inputs. Publishing uses CollaborationService's existing message kernel.
 //! Edit tokens only fence explicit saves/cancels; keystrokes never leave the Renderer.
 
+use crate::message_quote::{
+    MessageQuoteSnapshot, QuoteStorage, copy_quotes, load_quotes, store_quotes,
+};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -29,6 +32,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingCampInputView {
+    pub quotes: Vec<MessageQuoteSnapshot>,
     pub id: String,
     pub camp_id: String,
     pub enqueue_sequence: i64,
@@ -45,6 +49,7 @@ pub struct PendingCampInputView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingInputEditSession {
+    pub working_quotes: Vec<MessageQuoteSnapshot>,
     pub pending_input_id: String,
     pub edit_token: String,
     pub base_pending_revision: i64,
@@ -91,6 +96,9 @@ pub enum PendingInputEditAction {
     ReorderAttachments {
         #[serde(rename = "attachmentRefIds")]
         attachment_ref_ids: Vec<String>,
+    },
+    Quote {
+        action: crate::message_quote::QuoteAction,
     },
     Cancel,
     Delete,
@@ -206,6 +214,7 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
         let stored = load_input(connection, &id, camp_id)?;
         let body = render_input_body(connection, &stored.document)?;
         items.push(PendingCampInputView {
+            quotes: load_quotes(connection, QuoteStorage::CampPending, &id)?,
             id,
             camp_id: camp_id.to_string(),
             enqueue_sequence,
@@ -276,6 +285,7 @@ fn load_edit_session(
         .map(
             |(pending_input_id, edit_token, base_pending_revision, recovery_required, json)| {
                 Ok(PendingInputEditSession {
+                    working_quotes: load_quotes(connection, QuoteStorage::CampEdit, camp_id)?,
                     pending_input_id,
                     edit_token,
                     base_pending_revision,
@@ -408,6 +418,8 @@ pub fn edit_input(
                      working_source_attachments_json = excluded.working_source_attachments_json",
                     params![command.camp_id, command.pending_input_id, token, revision, source_attachments_json],
                 )?;
+                copy_quotes(transaction, QuoteStorage::CampPending, &command.pending_input_id, QuoteStorage::CampEdit, &command.camp_id)?;
+                transaction.execute("UPDATE pending_input_edit_session SET quote_trash_json='[]' WHERE camp_id=?1", [&command.camp_id])?;
                 return Ok(CommandHandlerResult::applied("pending_input.edit_started", json!({"editToken": token}), None));
             }
             PendingInputEditAction::Save { content, reply_to_camp_message_id, recipient_selection_required } => {
@@ -424,6 +436,8 @@ pub fn edit_input(
                     |row| row.get::<_, String>(0),
                 )?;
                 let working_source_attachments = parse_source_attachments(&working_source_attachments_json)?;
+                let working_quotes = load_quotes(transaction, QuoteStorage::CampEdit, &command.camp_id)?;
+                anyhow::ensure!(working_quotes.is_empty() || !body.trim().is_empty(), "quote.question_required");
                 if body.trim().is_empty() && working_source_attachments.is_empty() { return Ok(reject("camp_message.empty_body", "Pending input must contain text or an attachment")); }
                 // Reply identity can only be retained or explicitly removed by this editor.
                 let stored = load_input(transaction, &command.pending_input_id, &command.camp_id)?;
@@ -447,6 +461,14 @@ pub fn edit_input(
                         recipient_selection_required, serde_json::to_string(&execution)?,
                         serialize_source_attachments(&working_source_attachments)?, chrono::Utc::now().to_rfc3339()],
                 )?;
+                store_quotes(transaction, QuoteStorage::CampPending, &command.pending_input_id, &working_quotes)?;
+            }
+            PendingInputEditAction::Quote { action } => {
+                if !owns_session || session.as_ref().is_some_and(|session| session.recovery_required) {
+                    return Ok(reject("pending_input.edit_fenced", "The edit session changed; reopen it before editing quotes"));
+                }
+                crate::message_quote::mutate_quotes(transaction, QuoteStorage::CampEdit, &command.camp_id, &command.camp_id, None, action)?;
+                return Ok(CommandHandlerResult::applied("pending_input.quotes_updated", json!({"pendingInputId":command.pending_input_id}), None));
             }
             PendingInputEditAction::RemoveAttachment { attachment_ref_id } => {
                 if !owns_session || session.as_ref().is_some_and(|session| session.recovery_required) {
@@ -524,6 +546,13 @@ pub(crate) fn insert_input(
             user_id,
             now
         ],
+    )?;
+    copy_quotes(
+        transaction,
+        QuoteStorage::CampDraft,
+        camp_id,
+        QuoteStorage::CampPending,
+        &id,
     )?;
     transaction.execute(
         "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
@@ -807,8 +836,43 @@ mod tests {
     #[test]
     fn fifo_admission_publication_receipts_and_private_draft_are_atomic() {
         let (mut database, camp_id) = setup();
-        let first = send(&mut database, &camp_id, text("A"));
+        let first = send(&mut database, &camp_id, text("A @agent_2 /campfire"));
         assert_eq!(first.result.code, "camp_turn.queued");
+        let quoted = crate::message_quote::mutate_draft(
+            &mut database,
+            &envelope(
+                &camp_id,
+                crate::message_quote::MutateQuoteDraftCommand {
+                    camp_id: camp_id.clone(),
+                    conversation_id: None,
+                    expected_revision: 0,
+                    action: crate::message_quote::QuoteAction::Add {
+                        selection: crate::message_quote::QuoteSelection {
+                            current_user_display_name: None,
+                            message_id: first.result.payload["campMessageId"]
+                                .as_str()
+                                .unwrap()
+                                .to_string(),
+                            body_at_selection: "A @agent_2 /campfire".into(),
+                            start_scalar: 2,
+                            end_scalar: 20,
+                            text: "@agent_2 /campfire".into(),
+                        },
+                    },
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            quoted.result.status,
+            crate::command::CommandResultStatus::Applied
+        );
+        let captured = crate::message_quote::load_quotes(
+            database.connection(),
+            crate::message_quote::QuoteStorage::CampDraft,
+            &camp_id,
+        )
+        .unwrap();
         let second = send(&mut database, &camp_id, text("B"));
         assert_eq!(second.result.code, "pending_input.queued");
         complete_fixture_runs(&database);
@@ -834,6 +898,8 @@ mod tests {
                 .unwrap(),
             1
         );
+        assert_eq!(queue.items[0].quotes, captured);
+        assert!(queue.items[1].quotes.is_empty());
         let b = &queue.items[0];
         let c = &queue.items[1];
         assert_eq!(
@@ -848,6 +914,16 @@ mod tests {
             .unwrap();
         let published = publish(&mut database, &camp_id, &b.id, b.revision);
         assert_eq!(published.result.code, "camp_turn.queued");
+        let saved = crate::message_quote::load_quotes(
+            database.connection(),
+            crate::message_quote::QuoteStorage::CampMessage,
+            published.result.payload["campMessageId"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            saved, captured,
+            "promotion must use the queued snapshot, not the current draft"
+        );
         let duplicate = publish(&mut database, &camp_id, &b.id, b.revision);
         assert_eq!(duplicate.result.code, "pending_input.already_published");
         assert_eq!(

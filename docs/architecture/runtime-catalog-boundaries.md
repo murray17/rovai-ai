@@ -439,7 +439,8 @@ Client FS 是否可执行。
 ## Preview 呈现与晋升
 
 Preview row 必须同时满足：明确“待支持/尚未接入 AgentRun”、无可点击检查或配置入口、不会进入成员页
-或诊断，并在键盘和辅助技术中表现为不可执行状态。当前没有可见 Preview；DeepSeek Harness 在
+或诊断，并在键盘和辅助技术中表现为不可执行状态。此处的 Settings Preview row 不等于可执行 Adapter 的
+Runtime Platform preview（如 ZCode）。当前没有可见 Settings Preview row；DeepSeek Harness 在
 macOS arm64、macOS x64 与 Windows x64 全部隐藏，不保留“待支持”占位入口。
 
 未来接入时不得把 preview identity 写入 Migration 或原地解释为 Installation。实现必须删除 preview row，
@@ -451,7 +452,9 @@ macOS arm64、macOS x64 与 Windows x64 全部隐藏，不保留“待支持”�
 ZCode 使用独立 Node.js 执行官方 App 自带的未修改内核，不执行 App 主程序。发现绑定官方 bundle，
 fingerprint 同时包含内核与独立 Node；PATH 中的社区
 CLI 不属于这个 Product Runtime。Core 内的协议翻译负责原生 NDJSON、Session/Input/Turn/Tool identity 与 callback，
-已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU 与进程树回收。内部 ACP shape 不改变公开协议来源。
+已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU；Host 复用以 Camp 为授权边界。Node prelude 的
+pipe-owned companion 补充回收原生 detached Bash 进程组，生命周期细节由 Runtime Launch v37 拥有。
+内部 ACP shape 不改变公开协议来源。
 
 模型与凭据由官方 `.zcode/cli/config.json` 和项目配置拥有；只读生成原生 runtimeModel carrier，不建立 Rovai provider
 配置。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；

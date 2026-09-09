@@ -15,7 +15,7 @@ last_updated: 2026-09-10
 
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-zcode-runtime`
 - Branch：`codex/zcode-runtime`
-- Base：`23c002585f9a6840e82294b6d9e93667f7386118`
+- 原始 Base：`23c002585f9a6840e82294b6d9e93667f7386118`；提交前已合并主线 `2ec2adff`（v0.2.2、v1.56 引用合同）。
 - Governance：无先行主线治理提交；版本、合同和实现同一 PR 评审。
 - Status：ready（Preview 实现可评审，未合入；First-Class 资格尚未闭合）
 - 主 checkout 的并行文档改动不属于本任务；worktree 在 review/CI 期间保留。
@@ -76,12 +76,12 @@ last_updated: 2026-09-10
 
 ## 本地回归
 
-- Rust library：548 passed。
-- Rust Core binary：234 passed，5 个既有 ignored；CLI binary：33 passed。
-- Rust slow：全量 308 passed、1 个 Runtime 闭集期望遗漏；修正期望后该唯一失败项定向通过。没有禁用或删除测试。
-- `cargo clippy --workspace --all-targets -- -D warnings`：通过。
+- `pnpm test:rust:pr`：合并主线后完整通过；library 550 passed，CLI 33 passed，slow 309 passed。
+- Rust Core binary：合并主线后 234 passed，5 个既有 ignored。
+- 没有禁用或删除测试；原有 Runtime 闭集期望遗漏已修正，并在合并后的完整 slow 门禁通过。
+- `cargo clippy --workspace --all-targets -- -D warnings`：合并主线后通过。
 - `pnpm typecheck`、`pnpm build:desktop`：通过；构建未启动日常 App。
-- `pnpm test`：通过；Vitest 168 files / 1717 tests，末段 Node tests 222 passed / 1 个既有平台 skip，文档与 Skills 检查通过。
+- `pnpm test`：通过；Vitest 168 files / 1717 tests，末段 Node tests 223 passed / 1 个既有平台 skip，文档与 Skills 检查通过。
 - 通用文档 CI 门禁与最终 compatibility source SHA 绑定在提交前重新校验。
 
 新增 Rust 测试按最窄已有 owner 分配：原生事件关联/拒绝终态、结构化 hunk、原生配置/MCP precedence、

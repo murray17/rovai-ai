@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v22.json'
+import fixture from '../fixtures/agent-run-context-v23.json'
 import { isCampId, type ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v22 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 22
+  it('uses the shared frozen v23 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 23
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
-    expect(fixture.contextDeliveryProfileVersion).toBe(4)
-    expect(fixture.contextManifestVersion).toBe(22)
+    expect(fixture.contextDeliveryProfileVersion).toBe(5)
+    expect(fixture.contextManifestVersion).toBe(23)
     expect(fixture.messageProjectionAudience).toBe('agent_v1')
     expect(fixture.dynamicContextSectionOrder.slice(-2)).toEqual(['A2A_GUIDANCE?', 'CURRENT_INPUT'])
     expect(fixture.dynamicContextSectionOrder.at(-1)).toBe('CURRENT_INPUT')
@@ -66,6 +66,7 @@ describe('AgentRun context contract', () => {
       },
     })
     expect(fixture.directUserCurrentInputOptionalFields.skills[0].path).toMatch(/\/SKILL\.md$/u)
+    expect(fixture.directUserCurrentInputOptionalFields.quotes[0].source).toEqual({scope: "current_conversation_messages", messageId: "original-message", author: {type: "agent", agentId: "agent-id", displayName: "Agent"}})
     expect(fixture.skillSelectionSnapshot.empty).toEqual({schemaVersion: 1, entries: []})
     expect(fixture.currentInputSkillResolutionEvidence.outcomes).toEqual(['included', 'omitted'])
     expect(fixture.gatherCompletionManifestEvidence).toContain('completionInputDigest')

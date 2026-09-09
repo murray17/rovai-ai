@@ -1,5 +1,4 @@
-.profile-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(265px, 1fr); gap: 36px; align-items: start; }
-.profile-form { min-width: 0; }
+.profile-form { width: 100%; max-width: 520px; min-width: 0; }
 .profile-avatar-row { display: flex; gap: 16px; align-items: center; }
 .profile-avatar-button { position: relative; flex: 0 0 64px; width: 64px; height: 64px; padding: 0; border: 0; border-radius: 50%; color: var(--ink); background: transparent; cursor: pointer; }
 .profile-portrait { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--line); border-radius: 50%; background: var(--surface-subtle); color: var(--muted); font-weight: 550; line-height: 1; }
@@ -27,18 +26,6 @@
 .profile-text-button { display: inline-flex; justify-content: center; align-items: center; flex-shrink: 0; min-height: 28px; padding: 0 3px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
 .profile-text-button:hover:not(:disabled) { color: var(--ink); }
 .profile-text-button:disabled { opacity: .5; cursor: default; }
-.profile-preview { min-width: 0; padding-left: 28px; border-left: 1px solid var(--line); }
-.profile-preview-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 21px; color: var(--muted); font-size: 11px; }
-.profile-preview-heading small { font-size: 10.5px; color: var(--faint); }
-.profile-preview-message { display: flex; gap: 10px; align-items: flex-start; margin-top: 19px; }
-.profile-preview-body { flex: 1; min-width: 0; padding-top: 1px; }
-.profile-preview-meta { display: flex; gap: 7px; align-items: baseline; min-height: 20px; }
-.profile-preview-meta strong { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.profile-preview-meta time { color: var(--faint); font-size: 10px; flex-shrink: 0; }
-.profile-self-label { flex-shrink: 0; color: var(--muted); font-size: 10.5px; }
-.profile-preview-body p { margin: 3px 0 0; color: var(--ink); font-size: 12px; line-height: 1.7; }
-.profile-mention { display: inline; padding: 1px 3px; border-radius: 3px; background: var(--neutral-selected); color: var(--ink); overflow-wrap: anywhere; }
-.profile-preview-caption { display: block; margin-top: 20px; color: var(--faint); font-size: 10.5px; line-height: 1.6; }
 .dialog-content.app-dialog.profile-crop-dialog { width: min(560px, calc(100vw - 64px)); max-height: calc(100vh - 48px); overflow: auto; padding: 22px 24px 20px; --brand: var(--conversation-action); --brand-hover: var(--conversation-action-hover); --brand-contrast: var(--conversation-action-contrast); }
 .profile-crop-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .profile-crop-heading h2 { margin: 0; font-size: 17px; font-weight: 600; }
@@ -48,14 +35,6 @@
 .profile-crop-dialog .avatar-crop-stage { width: 280px; height: 280px; margin-inline: auto; }
 .profile-crop-dialog .avatar-crop-quality { display: none; }
 .profile-crop-footer { display: flex; justify-content: flex-end; gap: 9px; padding-top: 18px; margin-top: 10px; border-top: 1px solid var(--line); }
-@media(max-width: 1120px) {
-  .profile-layout { grid-template-columns: minmax(0, 1.1fr) minmax(230px, 1fr); gap: 24px; }
-  .profile-preview { padding-left: 20px; }
-}
-@media(max-width: 900px) {
-  .profile-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
-  .profile-preview { padding: 18px 0 0; border-top: 1px solid var(--line); border-left: 0; }
-}
 @media(prefers-reduced-motion: reduce) { .profile-section *, .profile-crop-dialog * { transition: none !important; animation: none !important; } }
 
 /* New personal-profile surface; the roster and member editor keep production CSS. */
@@ -66,9 +45,7 @@
 .personal-roster-avatar { position: relative; flex: 0 0 40px; }
 .personal-roster-copy { display: grid; min-width: 0; gap: 4px; font: 11px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; color: var(--muted); }
 .personal-roster-name { display: flex; align-items: baseline; gap: 7px; min-width: 0; overflow: hidden; font-size: 13px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; color: var(--ink); }
-.personal-roster-name small { font-size: 10.5px; color: var(--muted); font-weight: 400; }
 .personal-roster-display { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.personal-roster-name small { flex: 0 0 auto; }
 .personal-detail-scroll { height: 100%; }
 .personal-dirty-dot { position: absolute; right: -2px; bottom: 0; width: 7px; height: 7px; background: var(--muted); border: 2px solid var(--home-surface); box-sizing: content-box; border-radius: 50%; }
 .member-sidebar.is-collapsed .personal-roster-entry { margin: 0 7px; padding: 12px 0; }
@@ -79,8 +56,6 @@
 .personal-detail-header .member-detail-heading h1 { font-size: 24px; }
 .personal-detail-header .member-detail-heading p { margin: 8px 0 0; color: var(--muted); }
 .personal-editor-page .profile-section { padding: 0; }
-.personal-editor-page .profile-layout { grid-template-columns: minmax(280px, 1.15fr) minmax(245px, 1fr); gap: 32px; }
-.personal-editor-page .profile-preview { padding-left: 26px; }
 .personal-editor-page .profile-field-label { font-size: 12px; font-weight: 400; color: var(--dialog-field-label); }
 .personal-editor-page .profile-name-control { border-color: var(--dialog-field-line); }
 .personal-editor-page .profile-name-control:hover { border-color: var(--dialog-field-line-hover); }
@@ -93,13 +68,6 @@
 .personal-editor-page .profile-save-row .profile-text-button { font-size: 11.5px; }
 .personal-editor-page .profile-save-state { flex: 1 1 120px; }
 .personal-editor-page .profile-avatar-actions .quiet-button { min-height: 30px; font-size: 11.5px; }
-.personal-editor-page .profile-preview-meta time { font-size: 10.5px; }
-@container member-editor (max-width: 700px) {
-  .personal-editor-page .profile-layout { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-  .personal-editor-page .profile-preview { padding: 22px 0 0; border-left: 0; border-top: 1px solid var(--line); }
-  .personal-editor-page .profile-preview-heading { margin-bottom: 16px; }
-  .personal-editor-page .profile-preview-message { margin-top: 14px; }
-}
 
 .profile-default-avatar { color: var(--muted); }
 

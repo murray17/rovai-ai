@@ -1,0 +1,18 @@
+[
+  {"name":"paragraphs and inline markup", "source":"First **bold** and [label](https://example.com).\n\nSecond `code`.", "text":"First bold and label.\n\nSecond code."},
+  {"name":"code whitespace and Unicode", "source":"段落 🧑🏽‍💻。\r\n\r\n```js\r\n  const x = 1;\r\n\r\n  next();\r\n```", "text":"段落 🧑🏽‍💻。\n\n  const x = 1;\n\n  next();\n"},
+  {"name":"list", "source":"- one\n- two", "text":"one\n\ntwo"},
+  {"name":"tight list inline spaces and soft breaks", "source":"1. **First** *second* and `code`.\n2. **Third**\n   *fourth*.", "text":"First second and code.\n\nThird\nfourth."},
+  {"name":"tight list inline spaces before a nested list", "source":"- **First** *second*.\n  - Nested.\n- Last.", "text":"First second.\n\nNested.\n\nLast."},
+  {"name":"loose list with paragraphs", "source":"Intro.\n\n1. **First** with `code`.\n\n2. Second.\n\nAfter.", "text":"Intro.\n\nFirst with code.\n\nSecond.\n\nAfter."},
+  {"name":"nested loose list and continuation", "source":"- First.\n\n  Continued.\n\n  - Nested one.\n\n  - Nested two.\n\n- Last.\n\nAfter.", "text":"First.\n\nContinued.\n\nNested one.\n\nNested two.\n\nLast.\n\nAfter."},
+  {"name":"local user prefix and loose list", "source":"@你 Before.\n\n1. First.\n\n2. Second.\n\nAfter.", "text":"@Murray \n\nBefore.\n\nFirst.\n\nSecond.\n\nAfter.", "currentUserName":"Murray", "content":[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"Before.\n\n1. First.\n\n2. Second.\n\nAfter."}]},
+  {"name":"table", "source":"| A | B |\n| - | - |\n| 甲 | 😀 |", "text":"A\tB\n甲\t😀"},
+  {"name":"line break", "source":"a  \nb", "text":"a\nb"},
+  {"name":"blockquote", "source":"> first\n>\n> second\n\nafter", "text":"first\n\nsecond\n\nafter"},
+  {"name":"local user prefix with custom display name", "source":"@你 **Hello**\n\n```js\ngo();\n```", "text":"@Murray* \n\nHello\n\ngo();\n", "currentUserName":"Murray*", "content":[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"**Hello**\n\n```js\ngo();\n```"}]},
+  {"name":"nonleading local user tokens stay plain", "source":"*literal* @你 and @你", "text":"*literal* @你 and @你", "content":[{"kind":"text","text":"*literal* "},{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":" and "},{"kind":"current_user_mention","userId":"local_user"}]},
+  {"name":"member prefix and inline paragraph", "source":"@芝士* **Hello**\n\nNext", "text":"@芝士* Hello\n\nNext", "content":[{"kind":"member_mention","agentId":"agent_a"},{"kind":"text","text":" **Hello**\n\nNext"}]},
+  {"name":"member prefix before a code block", "source":"@芝士*```ts\n  hello();\n```", "text":"@芝士*\n\n  hello();\n", "content":[{"kind":"member_mention","agentId":"agent_a"},{"kind":"text","text":"```ts\n  hello();\n```"}]},
+  {"name":"user plain text CRLF and Unicode", "authorType":"user", "source":"Text 😀\r\nnext **literal**", "text":"Text 😀\nnext **literal**"}
+]

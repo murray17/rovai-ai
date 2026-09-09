@@ -28,7 +28,7 @@ pub const CAMP_LIST_TOOL_NAME: &str = "camp.list";
 pub const CAMP_SEARCH_TOOL_NAME: &str = "camp.search";
 pub const HISTORY_SEARCH_TOOL_NAME: &str = "history.search";
 pub const CAMP_READ_TOOL_NAME: &str = "camp.read";
-pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 4;
+pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 5;
 
 const CAMP_LIST_DEFAULT_LIMIT: usize = 20;
 const CAMP_LIST_MAX_LIMIT: usize = 50;
@@ -49,7 +49,7 @@ const DEFAULT_PAGE_LIMIT: usize = 20;
 const MAX_PAGE_LIMIT: usize = 20;
 const COLLECTION_BODY_PREFIX_CHARS: usize = 500;
 const MAX_ATTACHMENTS: usize = 10;
-const MAX_RESPONSE_CHARS: usize = 16_000;
+const MAX_RESPONSE_CHARS: usize = 80_000;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -398,7 +398,10 @@ impl CampHistoryService {
             &mut candidates,
         )?;
         reproject_search_candidates(&transaction, &query, &mut candidates)?;
-        let result = ranked_search_response(candidates, &query, limit, false, search_incomplete)?;
+        let result = attach_search_quotes(
+            &transaction,
+            ranked_search_response(candidates, &query, limit, false, search_incomplete)?,
+        )?;
         transaction.commit()?;
         Ok(result)
     }
@@ -460,7 +463,10 @@ impl CampHistoryService {
             &mut candidates,
         )?;
         reproject_search_candidates(&transaction, &query, &mut candidates)?;
-        let result = ranked_search_response(candidates, &query, limit, true, search_incomplete)?;
+        let result = attach_search_quotes(
+            &transaction,
+            ranked_search_response(candidates, &query, limit, true, search_incomplete)?,
+        )?;
         transaction.commit()?;
         Ok(result)
     }
@@ -1509,6 +1515,36 @@ fn snippet(body: &str, first_match: Option<usize>) -> String {
     result
 }
 
+fn attach_message_quotes(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+    value: &mut Value,
+) -> Result<()> {
+    let quotes = crate::message_quote::load_quotes(
+        transaction,
+        crate::message_quote::QuoteStorage::CampMessage,
+        message_id,
+    )?;
+    if !quotes.is_empty() {
+        value["quotes"] = json!(crate::message_quote::public_history_quotes(&quotes));
+    }
+    Ok(())
+}
+
+fn attach_search_quotes(transaction: &Transaction<'_>, mut response: Value) -> Result<Value> {
+    for value in response["results"]
+        .as_array_mut()
+        .context("invalid search result")?
+    {
+        let message_id = value["messageId"]
+            .as_str()
+            .context("search result has no message")?
+            .to_owned();
+        attach_message_quotes(transaction, &message_id, value)?;
+    }
+    cap_top_k_response(response, "results")
+}
+
 fn cap_top_k_response(mut response: Value, key: &str) -> Result<Value> {
     loop {
         if json_chars(&response)? <= MAX_RESPONSE_CHARS {
@@ -1556,7 +1592,7 @@ fn read_item(
     let next_offset = body_offset + returned;
     let (attachments, attachment_count) = load_attachments(transaction, message_id)?;
     let addressing = load_exact_addressing(transaction, message_id)?;
-    let value = json!({
+    let mut value = json!({
         "campId": target.camp_id,
         "mode": "item",
         "items": [{
@@ -1578,6 +1614,7 @@ fn read_item(
             "addressing": addressing,
         }]
     });
+    attach_message_quotes(transaction, message_id, &mut value["items"][0])?;
     if json_chars(&value)? > MAX_RESPONSE_CHARS {
         return Err(tool_error(
             "camp.response_overloaded",
@@ -2193,7 +2230,7 @@ fn collection_item(
     let body_length = row.body.chars().count();
     let body = row.body.chars().take(prefix_limit).collect::<String>();
     let returned = body.chars().count();
-    Ok(json!({
+    let mut value = json!({
         "messageId": row.id,
         "sequence": row.sequence,
         "authorType": row.author_type,
@@ -2206,7 +2243,9 @@ fn collection_item(
         "bodyTruncated": returned < body_length,
         "nextBodyOffset": (returned < body_length).then_some(returned),
         "attachmentCount": attachment_count(transaction, &row.id)?,
-    }))
+    });
+    attach_message_quotes(transaction, &row.id, &mut value)?;
+    Ok(value)
 }
 
 fn truncate_metadata(value: String) -> String {
@@ -2306,6 +2345,7 @@ mod slow_tests {
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL DEFAULT '[]',
                     source_attachments_json TEXT NOT NULL DEFAULT '[]',
+                    quotes_json TEXT NOT NULL DEFAULT '[]',
                     effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
@@ -2400,6 +2440,7 @@ mod slow_tests {
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL,
                     source_attachments_json TEXT NOT NULL DEFAULT '[]',
+                    quotes_json TEXT NOT NULL DEFAULT '[]',
                     effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
@@ -2500,6 +2541,7 @@ mod slow_tests {
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL,
                     source_attachments_json TEXT NOT NULL DEFAULT '[]',
+                    quotes_json TEXT NOT NULL DEFAULT '[]',
                     effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
@@ -2711,6 +2753,7 @@ mod slow_tests {
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL DEFAULT '[]',
                     source_attachments_json TEXT NOT NULL DEFAULT '[]',
+                    quotes_json TEXT NOT NULL DEFAULT '[]',
                     effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT

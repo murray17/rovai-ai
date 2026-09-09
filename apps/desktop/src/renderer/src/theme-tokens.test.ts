@@ -403,7 +403,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toMatch(/\.message-bubble\s*\{[^}]*background: var\(--brand-soft\)/)
     expect(css).not.toContain('.conversation-bubble:is(.user, .agent):hover::before')
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\)\s*\{[^}]*margin-left: auto[^}]*grid-template-columns: minmax\(0, 1fr\) 32px/)
-    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.local-message-avatar\s*\{[^}]*grid-column: 2/)
+    expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) > :is\(\.local-message-avatar, \.current-user-profile-trigger\)\s*\{[^}]*grid-column: 2/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*border-radius: 12px;[^}]*background: var\(--conversation-user-message-surface\)/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-surface\s*\{[^}]*width: fit-content[^}]*max-width: min\([^}]*var\(--conversation-user-message-max-width\)[^}]*66\.667cqw[^}]*align-items: flex-end/)
     expect(css).toMatch(/\.conversation-bubble:is\(\.user, \.external_principal\) \.message-bubble\s*\{[^}]*width: fit-content[^}]*max-width: 100%/)

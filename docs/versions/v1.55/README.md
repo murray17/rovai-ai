@@ -62,4 +62,4 @@ Pi `write` 继续保持路径级操作事实。
 - [Runtime File Change Observation 架构](../../architecture/runtime-file-change-observation.md)
 - [Runtime Activity Registry](../../runtime-activity/registry.md)
 
-后续：[v1.57](../v1.57/README.md)。
+后续：[v1.56](../v1.56/README.md)。
