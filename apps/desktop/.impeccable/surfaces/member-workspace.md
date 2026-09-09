@@ -1,5 +1,5 @@
 ---
-version: 10
+version: 11
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -68,7 +68,7 @@ to that teammate's Runtime configuration. A small dirty dot and accessible “�
 ## Detail and editing
 
 Keep a fixed personal-profile entry above the teammate roster, outside counts, search and ordering.
-It selects an ordinary detail page with avatar, name and a conversation preview. Both defaults are “你”;
+It selects an ordinary detail page with a single-column avatar and name form, capped at 520px. Both defaults are “你”;
 renaming keeps that glyph until an image is uploaded. Show the name without an added “· 你” suffix;
 keep “个人资料” as the entry subtitle. Reuse the existing circular cropper. Save both fields
 together, keep drafts when selecting teammates, and include this editor in the workspace leave guard.
