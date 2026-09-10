@@ -11,9 +11,11 @@ last_updated: 2026-09-10
 
 # Rovai-ai v1.57：上下文 Gate 与双轨评测
 
-前置：[v1.56](../v1.56/README.md)。本版本实现[四项治理愿景](../../research/agent-governance-vision.md)中的第二项：Gate／每周真实任务回归与每日 Trace 规则分析。长期规则见 [Execution Evaluation v1](../../contracts/execution-evaluation-v1.md)，操作见[开发指南](../../development/evaluation.md)。
+前置：[v1.56](../v1.56/README.md)。本版本实现[四项治理愿景](../../research/agent-governance-vision.md)中的第二项：Gate／每周真实任务回归与每日 Trace 规则分析。长期规则见 [Execution Evaluation v2](../../contracts/execution-evaluation-v2.md)，操作见[开发指南](../../development/evaluation.md)。
 
 ## 范围与状态
+
+评测指标和离线报告的后续修订范围、旧检查项映射与验收边界见[指标修订计划](evaluation-metrics-revision.md)。
 
 复用 Qualification Runner、Case admission、合同测试、双 View Judge、Core 持久证据、用户 CLI 和 Rovai Automation。新增受限只读 Trace 导出、日报与曲线、Host 报告准备、两级 Gate 及每周报告历史。通用集 12 个 Case；Memory 与 Review Duo 各有 3 个专属 Case。没有专属集的其他 Skill 先补样本，不能默认为已覆盖。
 
@@ -29,9 +31,9 @@ last_updated: 2026-09-10
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.56 冻结，本概览、实施计划及[版本索引](../README.md)建立唯一 current v1.57 |
 | Decisions | 已更新 | [V1.57-D01](decisions.md#v1-57-d01)记录元数据与分析 Agent 的权限分离 |
-| Contracts | 已更新 | [Execution Evaluation v1](../../contracts/execution-evaluation-v1.md)、[User Automation v3](../../contracts/user-automation-v3.md)及索引 |
+| Contracts | 已更新 | [Execution Evaluation v2](../../contracts/execution-evaluation-v2.md)、[User Automation v3](../../contracts/user-automation-v3.md)及索引 |
 | Architecture | 已更新 | [双轨执行评测](../../architecture/execution-evaluation.md)、User Automation 当前路由 |
-| UI | 确认无需更新 | 复用 Camp、文件与报告入口，只生成离线 SVG/Markdown/JSON，无 Renderer 界面改动 |
+| UI | 已更新 | 复用 Camp 与文件入口，增加离线 HTML、质量和协作对照；保留 SVG/Markdown/JSON，无 Renderer 或 App 沙箱改动 |
 | Runtime Activity | 确认无需更新 | 只读取当前 classifier 既有证据，不修改分类、事件或 Activity 投影 |
 | Runtime compatibility | 确认无需更新 | 复用现有 Runtime Adapter；局部评测验证不提升平台或 Runtime 资格 |
 | Documentation routing | 已更新 | 文档导航、开发入口、上下文治理、Contracts、Architecture 与 CURRENT 纳入双轨评测 |

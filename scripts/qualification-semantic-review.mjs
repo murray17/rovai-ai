@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { taskJudgeProfile } from './lib/context-judge-profile.mjs'
 import { readFile, realpath } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -64,6 +65,7 @@ const sourcePack = buildJudgeEvidencePack({
   untrustedEvidence,
   forbiddenCanaries: configurationInput.forbiddenCanaries ?? []
 })
+const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
 const viewCommon = {
   provider: configurationInput.provider,
   snapshotId: configurationInput.snapshotId,
@@ -76,12 +78,14 @@ const judgeExecutionId = `judge-execution:${randomUUID()}`
 const processConfiguration = buildJudgeViewConfiguration({
   view: 'process',
   ...viewCommon,
+  taskProfile: caseEvaluation ? taskJudgeProfile(caseEvaluation, 'process') : null,
   configurationId: configurationInput.processConfigurationId
     ?? `${configurationInput.configurationId ?? 'semantic-judge-v1'}-process`
 })
 const outcomeConfiguration = buildJudgeViewConfiguration({
   view: 'outcome',
   ...viewCommon,
+  taskProfile: caseEvaluation ? taskJudgeProfile(caseEvaluation, 'outcome') : null,
   outcomeTreatmentCanaries: configurationInput.outcomeTreatmentCanaries ?? [],
   configurationId: configurationInput.outcomeConfigurationId
     ?? `${configurationInput.configurationId ?? 'semantic-judge-v1'}-outcome`
@@ -223,12 +227,13 @@ function parseArguments(args) {
     const argument = args.shift()
     if (!argument.startsWith('--')) usage()
     const key = argument.slice(2)
-    if (!['evidence-dir', 'case', 'configuration', 'adapter'].includes(key)) usage()
+    if (!['evidence-dir', 'case', 'configuration', 'adapter', 'case-evaluation'].includes(key)) usage()
     values[key] = args.shift()
     if (!values[key]) usage()
   }
   if (!values['evidence-dir'] || !values.case || !values.configuration || !values.adapter) usage()
   return {
+    caseEvaluation: values['case-evaluation'] ? resolve(values['case-evaluation']) : null,
     evidenceDirectory: resolve(values['evidence-dir']),
     caseDirectory: resolve(values.case),
     configurationPath: resolve(values.configuration),

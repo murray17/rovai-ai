@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { TASK_OUTCOME_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -184,6 +185,7 @@ export function buildJudgeViewConfiguration({
   producerDigest,
   configurationId = `semantic-${view}-judge-v1`,
   outcomeTreatmentCanaries = [],
+  taskProfile = null,
   decodingParameters = {
     temperature: 0,
     topP: 1,
@@ -205,8 +207,10 @@ export function buildJudgeViewConfiguration({
         requireBoundedString(canary, 'Outcome treatment canary', 240)
       )))
     : []
+  validateTaskJudgeProfile(taskProfile, view)
   const checklist = VIEW_CHECKLISTS[view]
   const payload = {
+    ...(taskProfile ? { taskProfile: structuredClone(taskProfile) } : {}),
     configurationId,
     view,
     model: {
@@ -215,20 +219,20 @@ export function buildJudgeViewConfiguration({
       snapshotDigest: withSha256Prefix(snapshotDigest)
     },
     promptTemplates: {
-      replicaA: digest(promptTemplate(view, 'A')),
-      replicaB: digest(promptTemplate(view, 'B')),
+      replicaA: digest(promptTemplate(view, 'A', taskProfile)),
+      replicaB: digest(promptTemplate(view, 'B', taskProfile)),
       counterbalanceRuleDigest: digest({
         rule: 'replica_a_frozen_order_replica_b_exact_reverse',
         orderA: checklist,
         orderB: [...checklist].reverse()
       })
     },
-    rubricDigest: digest(VIEW_RUBRICS[view]),
+    rubricDigest: digest(viewRubric(view, taskProfile)),
     checklist: [...checklist],
     decodingParameters: structuredClone(decodingParameters),
     retrySchedule: structuredClone(retrySchedule),
     projectionPolicy: {
-      policyId: VIEW_POLICIES[view],
+      policyId: viewPolicy(view, taskProfile),
       adapterReceivesModelInputOnly: true,
       localEvidenceIds: true,
       actualEvidenceReferencesModelHidden: true,
@@ -255,7 +259,7 @@ export function buildJudgeViewConfiguration({
     }
   }
   const artifact = envelope({
-    artifactId: `semantic-judge-view-configuration:${stableId(configurationId)}`,
+    artifactId: `semantic-judge-view-configuration:${stableId(configurationId)}${taskProfile ? `:${digest(taskProfile).slice(-24)}` : ''}`,
     schemaId: JUDGE_VIEW_CONFIGURATION_SCHEMA_ID,
     producer: runnerProducer(producerDigest),
     binding: { caseId: `semantic-${view}-judge-v1` },
@@ -272,18 +276,19 @@ export function buildJudgeViewConfiguration({
 
 export function validateJudgeViewConfiguration(artifact) {
   validateEnvelope(artifact, JUDGE_VIEW_CONFIGURATION_SCHEMA_ID, 'Judge View Configuration')
-  const { view } = artifact.payload
+  const { view, taskProfile } = artifact.payload
   assertView(view)
+  validateTaskJudgeProfile(taskProfile, view)
   const checklist = VIEW_CHECKLISTS[view]
   if (!exactSet(artifact.payload.checklist, checklist)) {
     throw new Error('Judge View Configuration checklist is not exact')
   }
-  if (artifact.payload.promptTemplates.replicaA !== digest(promptTemplate(view, 'A'))
-      || artifact.payload.promptTemplates.replicaB !== digest(promptTemplate(view, 'B'))
-      || artifact.payload.rubricDigest !== digest(VIEW_RUBRICS[view])) {
+  if (artifact.payload.promptTemplates.replicaA !== digest(promptTemplate(view, 'A', taskProfile))
+      || artifact.payload.promptTemplates.replicaB !== digest(promptTemplate(view, 'B', taskProfile))
+      || artifact.payload.rubricDigest !== digest(viewRubric(view, taskProfile))) {
     throw new Error('Judge View Configuration prompt or rubric digest is not frozen')
   }
-  if (artifact.payload.projectionPolicy?.policyId !== VIEW_POLICIES[view]
+  if (artifact.payload.projectionPolicy?.policyId !== viewPolicy(view, taskProfile)
       || artifact.payload.projectionPolicy?.adapterReceivesModelInputOnly !== true
       || artifact.payload.projectionPolicy?.localEvidenceIds !== true
       || artifact.payload.projectionPolicy?.actualEvidenceReferencesModelHidden !== true
@@ -328,10 +333,10 @@ export function buildJudgeViewPack({
       || !Array.isArray(sourcePack.payload.checklistCoverage)) {
     throw new Error('Judge View Pack requires a validated source Judge Evidence Pack')
   }
-  const { modelInput, evidenceMap } = projectJudgeViewPayload(view, sourcePack.payload)
+  const { modelInput, evidenceMap } = projectJudgeViewPayload(view, sourcePack.payload, configuration.payload.taskProfile)
   const payload = {
     view,
-    policyId: VIEW_POLICIES[view],
+    policyId: viewPolicy(view, configuration.payload.taskProfile),
     configurationArtifact: artifactReference(configuration),
     sourcePackArtifact: artifactReference(sourcePack),
     modelInputDigest: digest(modelInput),
@@ -379,16 +384,16 @@ export function validateJudgeViewPack(artifact, { configuration, sourcePack = nu
     throw new Error('Judge View Pack source Pack reference is invalid')
   }
   if (sourcePack) {
-    const expected = projectJudgeViewPayload(view, sourcePack.payload)
+    const expected = projectJudgeViewPayload(view, sourcePack.payload, configuration.payload.taskProfile)
     if (canonicalJson(modelInput) !== canonicalJson(expected.modelInput)
         || canonicalJson(evidenceMap) !== canonicalJson(expected.evidenceMap)) {
       throw new Error('Judge View Pack is not the deterministic projection of its source Pack')
     }
   }
-  if (artifact.payload.policyId !== VIEW_POLICIES[view]
+  if (artifact.payload.policyId !== viewPolicy(view, configuration.payload.taskProfile)
       || artifact.payload.modelInputDigest !== digest(modelInput)
       || modelInput?.view !== view
-      || modelInput?.policyId !== VIEW_POLICIES[view]) {
+      || modelInput?.policyId !== viewPolicy(view, configuration.payload.taskProfile)) {
     throw new Error('Judge View Pack model projection identity is invalid')
   }
   if (!Array.isArray(evidenceMap)) throw new Error('Judge View Pack Evidence Map is invalid')
@@ -426,11 +431,20 @@ export function validateJudgeViewPack(artifact, { configuration, sourcePack = nu
       throw new Error('Judge View Pack item coverage is invalid')
     }
   }
+  if (configuration.payload.taskProfile) {
+    if (modelInput.taskProfileVersion !== configuration.payload.taskProfile.version
+        || canonicalJson(modelInput.case?.acceptance) !== canonicalJson(configuration.payload.taskProfile.items)) throw new Error('Task Judge profile is not bound to its model-visible acceptance')
+    for (const item of modelInput.checklistCoverage) {
+      const declared = configuration.payload.taskProfile.items.find(entry => entry.checklistItem === item.checklistItem)
+      if ((item.coverage.state === 'not_applicable') !== !declared.applicable) throw new Error('Task Judge applicability differs from the frozen Case')
+      if (view === 'process' && declared.applicable && !modelInput.interactions?.length && item.coverage.state !== 'unavailable') throw new Error('Missing required collaboration needs unavailable process evidence')
+    }
+  }
   const kinds = new Set((modelInput.evidenceSegments ?? []).map((segment) => segment.kind))
-  if (view === 'outcome' && [...kinds].some((kind) => !['code', 'final_response'].includes(kind))) {
+  if (view === 'outcome' && [...kinds].some((kind) => !(configuration.payload.taskProfile ? ['artifact', 'final_response'] : ['code', 'final_response']).includes(kind))) {
     throw new Error('Outcome Judge model input contains process evidence')
   }
-  if (view === 'process') {
+  if (view === 'process' && !configuration.payload.taskProfile) {
     const processApplicable = (modelInput.interactions ?? []).length > 0
     const allNotApplicable = modelInput.checklistCoverage.every((item) => (
       item.coverage.state === 'not_applicable'
@@ -477,7 +491,7 @@ export async function executeJudgeView({
   ))
   const processUnavailable = pack.payload.view === 'process'
     && pack.payload.modelInput.checklistCoverage.every((item) => (
-      item.coverage.state === 'unavailable'
+      item.coverage.state === 'unavailable' || configuration.payload.taskProfile && item.coverage.state === 'not_applicable'
     ))
   const replicas = nonApplicable
     ? ['A', 'B'].map((replica) => buildNonInvokedReplica({
@@ -865,7 +879,7 @@ export function attachSemanticJudgeViewSuite(result, resultReference) {
   return next
 }
 
-function buildOutcomeModelInput(source, registry) {
+function buildOutcomeModelInput(source, registry, taskProfile) {
   const segments = projectEvidenceSegments(source, registry, 'outcome')
   const { workspaceChanges, verificationFacts, finalResponse } = projectDeliveryFacts(
     source,
@@ -877,17 +891,19 @@ function buildOutcomeModelInput(source, registry) {
   const codeIds = uniqueStrings(segments.filter((segment) => segment.kind === 'code')
     .flatMap((segment) => segment.evidenceIds))
   const finalIds = finalResponse.evidenceIds
+  // The source's historical code segment includes bounded UTF-8 artifacts.
+  const deliveredIds = taskProfile ? uniqueStrings([...codeIds, ...finalIds]) : codeIds
   const coverage = [
     coverageItem('SER.requirements.understanding', uniqueStrings([
       ...verificationIds,
-      ...codeIds
+      ...deliveredIds
     ])),
-    coverageItem('SER.design.solution_fit', uniqueStrings([...workspaceIds, ...codeIds])),
-    coverageItem('SER.implementation.quality', codeIds),
-    coverageItem('SER.testing.strategy', verificationIds),
-    coverageItem('SER.scope.discipline', uniqueStrings([...workspaceIds, ...codeIds])),
-    coverageItem('SER.response.claim_accuracy', uniqueStrings([...finalIds, ...verificationIds])),
-    coverageItem('SER.response.limitations', finalIds)
+    coverageItem('SER.design.solution_fit', uniqueStrings([...workspaceIds, ...deliveredIds])),
+    coverageItem('SER.implementation.quality', deliveredIds),
+    coverageItem('SER.testing.strategy', taskProfile ? uniqueStrings([...verificationIds, ...deliveredIds]) : verificationIds),
+    coverageItem('SER.scope.discipline', uniqueStrings([...workspaceIds, ...deliveredIds])),
+    coverageItem('SER.response.claim_accuracy', uniqueStrings([...finalIds, ...verificationIds, ...(taskProfile ? codeIds : [])])),
+    coverageItem('SER.response.limitations', taskProfile ? uniqueStrings([...finalIds, ...verificationIds, ...codeIds]) : finalIds)
   ]
   return {
     view: 'outcome',
@@ -1017,11 +1033,27 @@ function buildProcessModelInput(source, registry) {
   }
 }
 
-function projectJudgeViewPayload(view, source) {
+function projectJudgeViewPayload(view, source, taskProfile = null) {
   const registry = localEvidenceRegistry()
   const modelInput = view === 'outcome'
-    ? buildOutcomeModelInput(source, registry)
+    ? buildOutcomeModelInput(source, registry, taskProfile)
     : buildProcessModelInput(source, registry)
+  if (taskProfile) {
+    modelInput.policyId = viewPolicy(view, taskProfile)
+    modelInput.taskProfileVersion = taskProfile.version
+    modelInput.case.acceptance = structuredClone(taskProfile.items)
+    for (const item of modelInput.checklistCoverage) {
+      const frozen = taskProfile.items.find(entry => entry.checklistItem === item.checklistItem)
+      if (!frozen.applicable) item.coverage = { state: 'not_applicable', reason: { code: 'task_profile.predeclared_not_applicable' } }
+      else if (item.coverage.state === 'not_applicable') item.coverage = { state: 'unavailable', reason: { code: 'task_profile.required_collaboration_not_observed' } }
+    }
+    // Keep the source envelope readable, but give the new Judge a task-neutral name.
+    for (const segment of modelInput.evidenceSegments) if (segment.kind === 'code') segment.kind = 'artifact'
+    for (const change of modelInput.workspaceChanges) {
+      change.artifactSegmentId = change.codeSegmentId
+      delete change.codeSegmentId
+    }
+  }
   return { modelInput, evidenceMap: registry.entries() }
 }
 
@@ -1206,7 +1238,7 @@ async function executeViewReplica({
         replica,
         presentationOrder: presentationOrder(view, replica),
         systemPrompt: VIEW_PROMPTS[view],
-        userPrompt: promptTemplate(view, replica),
+        userPrompt: promptTemplate(view, replica, configuration.payload.taskProfile),
         evidencePack: structuredClone(pack.payload.modelInput),
         decodingParameters: structuredClone(configuration.payload.decodingParameters),
         capabilities: structuredClone(configuration.payload.capabilities)
@@ -1422,6 +1454,9 @@ function validateViewReplicaEvidence(items, pack) {
     if (itemCoverage.coverage.state === 'unavailable' && item.verdict !== 'indeterminate') {
       throw invalidOutput('semantic_judge_view.unavailable_requires_abstention')
     }
+    if (pack.payload.modelInput.taskProfileVersion && item.verdict === 'not_applicable' && itemCoverage.coverage.state !== 'not_applicable') {
+      throw invalidOutput('semantic_judge_view.unexpected_not_applicable')
+    }
     if (itemCoverage.coverage.state === 'not_applicable' && item.verdict !== 'not_applicable') {
       throw invalidOutput('semantic_judge_view.not_applicable_requires_abstention')
     }
@@ -1568,10 +1603,19 @@ function collectLocalEvidenceIds(value) {
   }
 }
 
-function promptTemplate(view, replica) {
+function viewPolicy(view, taskProfile) {
+  return taskProfile ? `semantic-${view}-generic-task-pack-2` : VIEW_POLICIES[view]
+}
+
+function viewRubric(view, taskProfile) {
+  return taskProfile && view === 'outcome' ? TASK_OUTCOME_RUBRIC : VIEW_RUBRICS[view]
+}
+
+function promptTemplate(view, replica, taskProfile = null) {
   return canonicalJson({
     system: VIEW_PROMPTS[view],
-    rubric: VIEW_RUBRICS[view],
+    rubric: viewRubric(view, taskProfile),
+    ...(taskProfile ? { taskProfile, applicability: 'frozen_before_execution_never_exclude_to_improve_results' } : {}),
     presentationOrder: presentationOrder(view, replica),
     output: `exact_${VIEW_CHECKLISTS[view].length}_item_array_without_aggregate_score`,
     evidenceCitation: 'local_evidence_ids_only'

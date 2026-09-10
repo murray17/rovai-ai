@@ -3,6 +3,9 @@ import { join, resolve, isAbsolute } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { digestFile, digestJson, runCaptured, verifyStoredCaseSeal, writePrivateJsonExclusive } from './qualification-common.mjs'
 import { loadQualificationResultHistory, computeQualificationEvaluatorDigest } from './qualification-recovery.mjs'
+import { validateScoring, evaluateQualityAndCollaboration, semanticVerdict } from './context-quality.mjs'
+import { renderGateHtml, renderReportIndex, sanitizeReportLinks } from '../../packages/evaluation/src/report-html.ts'
+import { TASK_OUTCOME_RUBRIC } from './context-judge-profile.mjs'
 import { PROCESS_JUDGE_RUBRIC, OUTCOME_JUDGE_RUBRIC } from './qualification-judge-views.mjs'
 import { validateRegressionConfiguration } from './context-regression-fixture.mjs'
 import { runCurrentContractConformance } from '../benchmark/execution/current-contract-runner.mjs'
@@ -10,7 +13,7 @@ import { runCurrentContractConformance } from '../benchmark/execution/current-co
 const root = resolve(import.meta.dirname, '../..')
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
 const terminal = status => ['passed', 'failed', 'indeterminate'].includes(status)
-export const POLICY = Object.freeze({ version: 1, noCompositeScore: true, noPassAtK: true, hardFailuresBlock: true, missingEvidence: 'insufficient', maximumAttempts: 2, semanticCriticalVerdict: 'satisfied', counterbalancedReplicas: 2, latencyRegression: { relativeIncrease: 0.5, minimumIncreaseMilliseconds: 15_000 } })
+export const POLICY = Object.freeze({ version: 2, qualityScore: 'generic_task_v2', collaborationScore: 'none', scoreCompensation: 'forbidden', noPassAtK: true, hardFailuresBlock: true, missingEvidence: 'insufficient', maximumAttempts: 2, semanticCriticalVerdict: 'satisfied', counterbalancedReplicas: 2, latencyRegression: { relativeIncrease: 0.5, minimumIncreaseMilliseconds: 15_000 } })
 
 export async function sourceFingerprint(repository) {
   const git = await runCaptured('git', ['rev-parse', 'HEAD'], { cwd: repository })
@@ -71,6 +74,9 @@ export async function freezePlan(config, output) {
   if (suite.partition !== 'regression') throw new Error('Routine Gate/weekly runs use the regression partition; holdout is reserved for independent acceptance')
   if (config.mode === 'weekly') config = { ...config, change: { kind: 'context', document: join(resolve(suitePath, '..'), 'README.md'), revision: suite.version, before: 'current version', after: 'current version', invariants: 'Fixed weekly task set; no product change.', confirmation: { status: 'not_applicable', reason: 'weekly_regression' } } }
   const selected = selectCases(suite, config.change)
+  if (typeof suite.scoring !== 'string') throw new Error('Suite requires a versioned scoring configuration')
+  const scoringPath = resolve(suitePath, '..', suite.scoring)
+  const scoring = validateScoring(await json(scoringPath), selected.cases)
   const products = {}
   for (const label of config.mode === 'gate' ? ['baseline', 'candidate'] : ['candidate']) {
     const product = await json(resolve(config[label]))
@@ -102,8 +108,8 @@ export async function freezePlan(config, output) {
     if ((adapter.assurance ?? adapter.default?.assurance) !== 'tool_disabled_external_sandbox') throw new Error('Gate forbids fixture Judges; configure a real tool-disabled adapter or retain Judge as unavailable')
   }
   const plan = { schemaVersion: 1, createdAt: new Date().toISOString(), mode: config.mode, change: { ...config.change, document: resolve(config.change.document), documentDigest: digestJson(document) },
-    tier: selected.tier, suite: { id: suite.id, version: suite.version, partition: suite.partition, digest: digestJson(suite), path: suitePath }, cases, products, team, repetitions: config.repetitions, budget: config.budget, judge, policy: POLICY,
-    rubricDigest: digestJson({ process: PROCESS_JUDGE_RUBRIC, outcome: OUTCOME_JUDGE_RUBRIC }), evaluatorDigest: await evaluatorDigest(),
+    scoring, scoringPath, scoringDigest: digestJson(scoring), tier: selected.tier, suite: { id: suite.id, version: suite.version, partition: suite.partition, digest: digestJson(suite), path: suitePath }, cases, products, team, repetitions: config.repetitions, budget: config.budget, judge, policy: POLICY,
+    rubricDigest: digestJson({ process: PROCESS_JUDGE_RUBRIC, outcome: TASK_OUTCOME_RUBRIC, scoring }), evaluatorDigest: await evaluatorDigest(),
     environment: { platform: process.platform, architecture: process.arch, node: process.version },
     holdout: { status: 'not_run', reason: 'Independent acceptance cases are separate from the regression suite.' } }
   const sealed = { ...plan, planDigest: digestJson(plan) }
@@ -117,7 +123,7 @@ async function validateProduct(product) {
   if (digestJson(await sourceFingerprint(product.repository)) !== digestJson(product.source)) throw new Error('Product source changed after its build')
 }
 async function evaluatorDigest() {
-  return digestJson({ qualification: await computeQualificationEvaluatorDigest(), files: await Promise.all(['scripts/lib/context-evaluation.mjs', 'scripts/lib/context-regression-fixture.mjs', 'scripts/benchmark/execution/contract-test-evidence.mjs', 'scripts/benchmark/execution/current-contract-runner.mjs', 'scripts/benchmark/profiles/current-contract-conformance.mjs'].map(async path => [path, await digestFile(join(root, path))])) })
+  return digestJson({ qualification: await computeQualificationEvaluatorDigest(), files: await Promise.all(['scripts/lib/context-evaluation.mjs', 'scripts/lib/context-quality.mjs', 'packages/evaluation/src/report-html.ts', 'scripts/lib/context-judge-profile.mjs', 'scripts/lib/context-regression-fixture.mjs', 'scripts/benchmark/execution/contract-test-evidence.mjs', 'scripts/benchmark/execution/current-contract-runner.mjs', 'scripts/benchmark/profiles/current-contract-conformance.mjs'].map(async path => [path, await digestFile(join(root, path))])) })
 }
 export function validatePlanSeal(plan) {
   const { planDigest, ...payload } = plan
@@ -173,24 +179,42 @@ export function compareResults(plan, slots, contracts) {
       if (regressed) regressions.push({ caseId: item.id, repeat, code: 'elapsed_time_regression', beforeMilliseconds: beforeMs, afterMilliseconds: afterMs })
     }
     for (const checklistItem of item.criticalSemantic) {
-      const after = semanticItem(candidate, checklistItem), before = baseline ? semanticItem(baseline, checklistItem) : null
+      const normalized = slot => { const item = semanticVerdict(slot, checklistItem); return { ...item, state: item.verdict === 'indeterminate' ? 'unavailable' : 'agreed' } }
+      const after = plan.scoring ? normalized(candidate) : semanticItem(candidate, checklistItem), before = baseline ? plan.scoring ? normalized(baseline) : semanticItem(baseline, checklistItem) : null
       if (!after || after.verdict === 'indeterminate' || after.state !== 'agreed') problems.push({ caseId: item.id, repeat, code: 'semantic_evidence_insufficient', checklistItem })
-      else if (after.verdict !== 'satisfied') regressions.push({ caseId: item.id, repeat, code: 'semantic_acceptance_failed', checklistItem, newRegression: comparableEnvironment && before?.state === 'agreed' && before.verdict === 'satisfied' })
+      else if (after.verdict !== 'satisfied') regressions.push({ caseId: item.id, repeat, code: 'semantic_acceptance_failed', checklistItem, newRegression: comparableEnvironment && baseline?.hardOutcome === 'pass' && baseline.rules.every(rule => rule.status === 'passed') && before?.state === 'agreed' && before.verdict === 'satisfied' })
       if (plan.mode === 'gate' && (!before || before.state !== 'agreed' || before.verdict === 'indeterminate')) problems.push({ caseId: item.id, repeat, code: 'baseline_semantic_evidence_insufficient', checklistItem })
     }
-    for (const after of candidate.semanticItems ?? []) {
+    for (const after of plan.scoring ? [] : candidate.semanticItems ?? []) {
       const before = baseline ? semanticItem(baseline, after.checklistItem) : null
       if (before && digestJson({ state: before.state, verdict: before.verdict }) !== digestJson({ state: after.state, verdict: after.verdict })) changes.push({ caseId: item.id, repeat, checklistItem: after.checklistItem, before: before.verdict, after: after.verdict })
       const rank = { satisfied: 2, partially_satisfied: 1, not_satisfied: 0 }
       if (comparableEnvironment && before?.state === 'agreed' && after.state === 'agreed' && rank[after.verdict] < rank[before.verdict]) regressions.push({ caseId: item.id, repeat, code: 'semantic_regression', checklistItem: after.checklistItem, before: before.verdict, after: after.verdict })
     }
   }
-  return { status: regressions.length ? 'degraded' : problems.length ? 'insufficient' : 'passed', regressions, evidenceGaps: problems, semanticChanges: changes, resourceChanges }
+  const assessment = plan.scoring ? evaluateQualityAndCollaboration(plan, slots) : null
+  if (assessment) {
+    problems.push(...assessment.qualityGaps)
+    for (const item of assessment.criticalFailures) {
+      if (item.verdict === 'indeterminate') problems.push({ ...item, code: 'critical_collaboration_evidence_insufficient' })
+      else if (item.arm === 'candidate' && !regressions.some(row => row.caseId === item.caseId && row.repeat === item.repeat && row.checklistItem === item.checklistItem)) regressions.push({ ...item, code: 'critical_collaboration_acceptance_failed', newRegression: false })
+    }
+    for (const change of assessment.changes) {
+      if (change.kind === 'regression') {
+        const before = slots.find(slot => slot.arm === 'baseline' && slot.caseId === change.caseId && slot.repeat === change.repeat)
+        regressions.push({ ...change, code: 'quality_or_process_regression', newRegression: before?.state === 'complete' && before.hardOutcome === 'pass' && before.rules.every(rule => rule.status === 'passed') })
+      }
+      if (change.kind !== 'unchanged') changes.push(change)
+    }
+  }
+  return { status: regressions.length ? 'degraded' : problems.length ? 'insufficient' : 'passed', regressions, evidenceGaps: problems, semanticChanges: changes, resourceChanges, ...(assessment ? { assessment } : {}) }
 }
 function semanticItem(slot, id) { return slot.semanticItems?.find(item => item.checklistItem === id) }
 
 export async function runPlan(planPath, outputRoot) {
   const plan = await json(resolve(planPath)); validatePlanSeal(plan)
+  if (!plan.scoring || digestJson(plan.scoring) !== plan.scoringDigest || digestJson(await json(plan.scoringPath)) !== plan.scoringDigest) throw new Error('Scoring changed or is missing; freeze a new plan')
+  validateScoring(plan.scoring, plan.cases)
   if (plan.evaluatorDigest !== await evaluatorDigest()) throw new Error('Evaluator changed after the plan was frozen')
   if (digestJson(await readFile(plan.change.document, 'utf8')) !== plan.change.documentDigest || digestJson(await json(plan.suite.path)) !== plan.suite.digest) throw new Error('Change document or suite changed after confirmation/freezing')
   if (plan.judge && (await digestFile(plan.judge.adapter) !== plan.judge.adapterDigest || await digestFile(plan.judge.configuration) !== plan.judge.configurationDigest)) throw new Error('Judge configuration changed after freezing')
@@ -202,7 +226,7 @@ export async function runPlan(planPath, outputRoot) {
     const attempts = (await readdir(output)).filter(name => /^attempt-\d+$/.test(name)).sort()
     if (attempts.length >= POLICY.maximumAttempts) throw new Error('The retained campaign has exhausted its two attempts; do not discard failures or change standards to pass')
     const campaignPath = join(output, 'campaign.json')
-    const campaign = { evaluatorDigest: plan.evaluatorDigest, rubricDigest: plan.rubricDigest, changeDocumentDigest: plan.change.documentDigest, tier: plan.tier, changeDocument: plan.change.document, revision: plan.change.revision, suiteDigest: plan.suite.digest, policy: plan.policy, repetitions: plan.repetitions, team: plan.team, budget: plan.budget, judge: plan.judge, baseline: plan.products.baseline?.coreDigest ?? null }
+    const campaign = { scoringDigest: plan.scoringDigest, evaluatorDigest: plan.evaluatorDigest, rubricDigest: plan.rubricDigest, changeDocumentDigest: plan.change.documentDigest, tier: plan.tier, changeDocument: plan.change.document, revision: plan.change.revision, suiteDigest: plan.suite.digest, policy: plan.policy, repetitions: plan.repetitions, team: plan.team, budget: plan.budget, judge: plan.judge, baseline: plan.products.baseline?.coreDigest ?? null }
     if (attempts.length && digestJson(await json(campaignPath)) !== digestJson(campaign)) throw new Error('Campaign scope, baseline, rubric or budget changed; update and reconfirm the plan instead of silently retrying')
     if (!attempts.length) await writePrivateJsonExclusive(campaignPath, campaign)
     const directory = join(output, `attempt-${String(attempts.length + 1).padStart(2, '0')}`)
@@ -241,31 +265,51 @@ export async function runPlan(planPath, outputRoot) {
           slot.rules = evaluateCaseRules(item.rules, { collaboration: await read('collaboration-ledger.json'), tools: await read('tool-call-ledger.json'), memoryBefore: await read('context-memory-before.json'), memoryAfter: await read('context-memory-after.json') })
           const environment = await read('environment-manifest.json')
           slot.environmentKey = environment ? digestJson({ host: environment.host, runtimeInstallations: environment.runtimeInstallations, team: environment.team.map(({ readiness, ...member }) => member), ambientMcpIsolation: environment.ambientMcpIsolation }) : null
+          slot.checks = result.deliveryLayer?.checkResults ?? []
+          const ledger = await read('collaboration-ledger.json')
+          slot.collaborationObservation = { accepted: ledger?.payload?.metrics?.acceptedCalls ?? null, complete: ledger?.payload?.metrics?.coverage?.state === 'complete' }
           slot.resources = result.resourceObservation ?? null
           slot.budget = result.budget ?? null
           if (result.budget?.event || result.budget?.watchdogEvent) slot.rules.push({ id: 'executionBudget', status: 'failed', evidence: 'result.json#/budget', reason: result.budget.event?.reason ?? result.budget.watchdogEvent?.reason ?? 'budget_exhausted' })
           const expectedExitCode = slot.hardOutcome === 'pass' ? 0 : slot.hardOutcome === 'fail' ? 1 : 2
           if (execution.code !== expectedExitCode || execution.signal) throw new Error('Runner exit does not match its retained result; publication or cleanup may be incomplete')
           if (plan.judge && slot.state === 'complete') {
-            const judged = await runCaptured(process.execPath, [join(root, 'scripts/qualification-semantic-review.mjs'), '--evidence-dir', trialDirectory, '--case', item.directory, '--configuration', plan.judge.configuration, '--adapter', plan.judge.adapter], { cwd: root, timeoutMs: Math.min(240_000, deadline - Date.now()), maxOutputBytes: 4 * 1024 * 1024 })
+            const caseEvaluation = join(directory, `${id}-evaluation.json`)
+            await writePrivateJsonExclusive(caseEvaluation, plan.scoring.cases[item.id])
+            slot.failureDomain = 'evaluator'
+            const judged = await runCaptured(process.execPath, [join(root, 'scripts/qualification-semantic-review.mjs'), '--evidence-dir', trialDirectory, '--case', item.directory, '--configuration', plan.judge.configuration, '--adapter', plan.judge.adapter, '--case-evaluation', caseEvaluation], { cwd: root, timeoutMs: Math.min(240_000, deadline - Date.now()), maxOutputBytes: 4 * 1024 * 1024 })
             await writePrivateJsonExclusive(join(directory, `${id}-judge-execution.json`), judged)
             if (judged.code !== 0 || judged.timedOut || judged.outputOverflow || judged.signal) throw new Error('Judge process did not finish with complete retained evidence')
             const views = await read('semantic-judge-view-suite.json')
             slot.semanticItems = views?.payload?.views?.flatMap(view => view.items) ?? []
             slot.judgeStatus = views?.payload?.state ?? 'unavailable'
+            slot.failureDomain = slot.judgeStatus === 'unavailable' ? 'evaluator' : null
           } else { slot.semanticItems = []; slot.judgeStatus = 'not_run' }
-        } catch (error) { slot.state = 'insufficient'; slot.reason = error.message }
+        } catch (error) { if (slot.failureDomain !== 'evaluator') slot.state = 'insufficient'; slot.failureDomain ??= 'runner_or_environment'; slot.judgeStatus ??= 'unavailable'; slot.reason = error.message }
         await writePrivateJsonExclusive(join(directory, `${id}-slot.json`), slot)
       }
     }
-    const report = { schemaVersion: 1, kind: plan.mode === 'weekly' ? 'weekly_regression' : 'context_change_gate', planDigest: plan.planDigest, change: plan.change, products: plan.products, suite: plan.suite, configuration: { evaluatorDigest: plan.evaluatorDigest, rubricDigest: plan.rubricDigest, policy: plan.policy, team: plan.team, repetitions: plan.repetitions, budget: plan.budget, judge: plan.judge }, completedAt: new Date().toISOString(), ...compareResults(plan, slots, contracts), contracts, slots, holdout: plan.holdout, earlierAttempts: attempts, limits: ['Diagnostic isolation uses fresh data/Skill/workspace/MCP paths on a shared host; not dedicated-host Formal qualification.', 'Small repeated samples cannot establish statistical non-inferiority.', 'No automatic user task replay or repair. All attempts must remain retained.'] }
+    const report = { schemaVersion: 2, kind: plan.mode === 'weekly' ? 'weekly_regression' : 'context_change_gate', planDigest: plan.planDigest, change: plan.change, products: plan.products, suite: plan.suite, configuration: { scoringDigest: plan.scoringDigest, scoringVersion: plan.scoring.version, evaluatorDigest: plan.evaluatorDigest, rubricDigest: plan.rubricDigest, policy: plan.policy, team: plan.team, repetitions: plan.repetitions, budget: plan.budget, judge: plan.judge }, completedAt: new Date().toISOString(), ...compareResults(plan, slots, contracts), contracts, slots, holdout: plan.holdout, earlierAttempts: attempts, limits: ['Diagnostic isolation uses fresh data/Skill/workspace/MCP paths on a shared host; not dedicated-host Formal qualification.', 'Small repeated samples cannot establish statistical non-inferiority.', 'No automatic user task replay or repair. All attempts must remain retained.'] }
     await writePrivateJsonExclusive(join(directory, 'report.json'), report)
     await writeFile(join(directory, 'README.md'), renderGateReport(report), { mode: 0o600, flag: 'wx' })
+    await writeFile(join(directory, 'report.html'), await sanitizeReportLinks(directory, renderGateHtml(report)), { mode: 0o600, flag: 'wx' })
+    const entries = []
+    for (const attempt of [...attempts, directory.split(/[\\/]/).at(-1)]) {
+      let status = 'insufficient'
+      try { status = (await json(join(output, attempt, 'report.json'))).status } catch (error) { if (error.code !== 'ENOENT') throw error }
+      entries.push({ path: `${attempt}/report.html`, label: attempt, status })
+    }
+    const { rename } = await import('node:fs/promises')
+    const indexTemporary = join(output, `.index-${Date.now()}.html`)
+    await writeFile(indexTemporary, await sanitizeReportLinks(output, renderReportIndex('上下文评测尝试', entries)), { mode: 0o600, flag: 'wx' })
+    await rename(indexTemporary, join(output, 'index.html'))
     return { directory, report }
   } finally { await lock.close(); await unlink(join(output, '.gate.lock')) }
 }
 
 export function renderGateReport(report) {
+  const assessment = report.assessment
+  const quality = assessment ? `\n通用质量：基线 ${assessment.arms.baseline?.quality.total ?? '评价未完成'} → 候选 ${assessment.arms.candidate.quality.total ?? '评价未完成'}；评分版本 ${assessment.scoring.version}。协作只保留分项状态，不计综合分。\n\n| 协作组 | 满足/适用计划 | 未知/适用计划 | 独立适用 Case |\n|---|---|---|---|\n${Object.entries(assessment.arms.candidate.collaboration.groups).map(([id, d]) => `| ${id} | ${d.counts.satisfied}/${d.applicableTrials} | ${d.counts.indeterminate}/${d.applicableTrials} | ${d.applicableCases} |`).join('\n')}\n` : '\n此历史报告未使用当前评分标准，不换算新分数。\n'
   const rows = report.slots.map(slot => `| ${slot.caseId} | ${slot.repeat} | ${slot.arm} | ${slot.state} | ${slot.hardOutcome ?? 'unknown'} | ${slot.rules?.length ? slot.rules.filter(rule => rule.status !== 'passed').map(rule => `${rule.id}: ${rule.status}`).join(', ') || 'passed' : 'unknown'} | ${slot.judgeStatus ?? 'not_run'} |`).join('\n')
-  return `# ${report.kind === 'weekly_regression' ? '每周真实任务回归' : '上下文改动 Gate'}\n\n结论：**${report.status}**。仅对应计划 ${report.planDigest} 与报告中的实际版本。\n\n[完整报告](report.json) · [冻结计划](plan.json)\n\n| Case | 重复 | 版本 | 执行证据 | HardOutcome | 专项规则 | 语义评价 |\n|---|---|---|---|---|---|---|\n${rows}\n\n退化或验收失败：${report.regressions.length}；证据缺口：${report.evidenceGaps.length}。硬性错误不可由语义得分抵消。Judge 的缺失、分歧或不足不算通过。历史失败保留，不使用 pass@k。\n\n独立验收保留集：${report.holdout.status}。本报告不声称用户任务成功率或实际能力提升。\n`
+  return `# ${report.kind === 'weekly_regression' ? '每周真实任务回归' : '上下文改动 Gate'}\n\n结论：**${report.status}**。仅对应计划 ${report.planDigest} 与报告中的实际版本。\n\n[交互报告](report.html) · [完整报告](report.json) · [冻结计划](plan.json)${quality}\n\n| Case | 重复 | 版本 | 执行证据 | HardOutcome | 专项规则 | 语义评价 |\n|---|---|---|---|---|---|---|\n${rows}\n\n退化或验收失败：${report.regressions.length}；证据缺口：${report.evidenceGaps.length}。硬性错误不可由语义得分抵消。Judge 的缺失、分歧或不足不算通过。历史失败保留，不使用 pass@k。\n\n独立验收保留集：${report.holdout.status}。本报告不声称用户任务成功率或实际能力提升。\n`
 }

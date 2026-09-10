@@ -1,11 +1,22 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { runCaptured } from './lib/qualification-common.mjs'
+import { recordDailyAnalysis } from '../packages/evaluation/src/daily-analysis.ts'
 import { dailyWindow, runDaily } from '../packages/evaluation/src/daily.ts'
 
 const args = process.argv.slice(2)
 if (args.includes('--help') || args.length === 0) {
-  console.log('Usage: node scripts/eval-daily.mjs --config <json> [--date YYYY-MM-DD] [--trace <exported-trace.json>]\n  node scripts/eval-daily.mjs prepared --output <report-root> --timezone <IANA-zone>\nConfig: { timezone, output, cli, scope: { campIds, excludeCampIds, excludeAutomationIds } }. Defaults to the previous local calendar day. No task replay or model call.')
+  console.log('Usage: node scripts/eval-daily.mjs --config <json> [--date YYYY-MM-DD] [--trace <exported-trace.json>]\n  node scripts/eval-daily.mjs prepared --output <report-root> --timezone <IANA-zone>\n  node scripts/eval-daily.mjs analysis --report <directory> --input <analysis-submission.json>\nConfig: { timezone, output, cli, scope: { campIds, excludeCampIds, excludeAutomationIds } }. Defaults to the previous local calendar day. No task replay or model call.')
+} else if (args[0] === 'analysis') {
+  const options = {}
+  for (let index = 1; index < args.length; index += 2) {
+    if (!['--report', '--input'].includes(args[index]) || !args[index + 1] || options[args[index]]) throw new Error('Invalid analysis-record option')
+    options[args[index]] = args[index + 1]
+  }
+  if (!options['--report'] || !options['--input']) throw new Error('Analysis requires --report <directory> --input <structured-analysis.json>')
+  const result = await recordDailyAnalysis(options['--report'], JSON.parse(await readFile(resolve(options['--input']), 'utf8')))
+  console.log(JSON.stringify({ id: result.id, reportId: result.reportId, status: result.status, failureCode: result.failureCode ?? null }, null, 2))
+  if (result.status !== 'complete') process.exitCode = 2
 } else if (args[0] === 'prepared') {
   const options = {}
   for (let index = 1; index < args.length; index += 2) {
@@ -20,7 +31,8 @@ if (args.includes('--help') || args.length === 0) {
   const directory = resolve(root, latest.reportId)
   const pack = JSON.parse(await readFile(resolve(directory, 'analysis-input.json'), 'utf8'))
   if (pack.window.date !== expected.date || pack.window.timezone !== expected.timezone || pack.unavailableReason) throw new Error('Prepared report identity or timezone mismatch')
-  console.log(JSON.stringify({ directory, analysisInput: pack, analysisOutput: resolve(directory, 'analysis.md') }, null, 2))
+  const report = JSON.parse(await readFile(resolve(directory, 'report.json'), 'utf8'))
+  console.log(JSON.stringify({ directory, analysisInput: pack, inputDigest: report.analysisInputDigest ?? null, analysisOutput: resolve(directory, 'analysis-submission.json'), completionCommand: 'eval:daily analysis --report <directory> --input <analysis-submission.json>' }, null, 2))
 } else {
   const options = {}
   for (let index = 0; index < args.length; index += 2) {

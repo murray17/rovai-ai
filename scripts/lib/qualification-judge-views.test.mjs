@@ -749,3 +749,46 @@ function artifactReference(artifactId) {
     payloadDigest: `sha256:${'c'.repeat(64)}`
   }
 }
+
+test('generic task profile uses delivered report evidence, frozen applicability, and preserves blinding', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.json', import.meta.url)))
+  for (const caseId of ['DEMO-105', 'DEMO-115']) {
+    const acceptance = taskJudgeProfile(scoring.cases[caseId], 'outcome')
+    assert.doesNotMatch(acceptance.items.find(item => item.checklistItem === 'SER.requirements.understanding').criterion, /队员|征集|分工|review-duo/)
+  }
+  const fixture = dualViewFixture({buildPacks:false})
+  const configuration = buildJudgeViewConfiguration({view:'outcome',provider:'fixture',snapshotId:'fixture-2026-09-10',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome')})
+  const source = fixture.sourcePack
+  source.payload.workspaceChanges[0].path='report.json'
+  source.payload.untrustedEvidence.find(item=>item.kind==='code').content='{"failuresByService":{"api":3}}'
+  source.payloadDigest=`sha256:${digestJson(source.payload)}`
+  const pack=buildJudgeViewPack({view:'outcome',sourcePack:source,configuration,producerDigest:'a'.repeat(64)})
+  assert.ok(pack.payload.modelInput.evidenceSegments.some(item=>item.kind==='artifact'))
+  assert.equal(JSON.stringify(pack.payload.modelInput).includes('participant_message'),false)
+  assert.ok(pack.payload.modelInput.checklistCoverage.every(item=>item.coverage.state==='complete'))
+  const seen=[]
+  const execution=await executeJudgeView({configuration,pack,producerDigest:'a'.repeat(64),invokeReplica:async request=>{seen.push(request);const items=replicaItems(pack);items[0].verdict='not_applicable';items[0].abstainReason={code:'fixture.exclude'};return{items}}})
+  assert.equal(execution.review.payload.state,'unavailable')
+  assert.match(seen[0].userPrompt,/Non-code work does not require code/)
+  assert.doesNotMatch(seen[0].userPrompt,/maintainability from the bounded delivered code/)
+})
+
+test('frozen required collaboration cannot become N/A when no interaction was executed', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const {readFile}=await import('node:fs/promises')
+  const scoring=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.json',import.meta.url)))
+  const fixture=dualViewFixture({buildPacks:false}),source=fixture.sourcePack
+  source.payload.collaborationFacts=[]
+  source.payload.untrustedEvidence=source.payload.untrustedEvidence.filter(item=>item.kind!=='participant_message')
+  source.payload.checklistCoverage=PROCESS_JUDGE_CHECKLIST.map(checklistItem=>({checklistItem,coverage:{state:'not_applicable'}}))
+  source.payloadDigest=`sha256:${digestJson(source.payload)}`
+  for(const caseId of ['DEMO-102','DEMO-103']){
+    const configuration=buildJudgeViewConfiguration({view:'process',provider:'fixture',snapshotId:'fixture-2026-09-10',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile(scoring.cases[caseId],'process')})
+    const pack=buildJudgeViewPack({view:'process',sourcePack:source,configuration,producerDigest:'a'.repeat(64)})
+    let calls=0;const result=await executeJudgeView({configuration,pack,producerDigest:'a'.repeat(64),invokeReplica:async()=>{calls++;throw Error('must not call')}})
+    assert.equal(calls,0)
+    assert.equal(result.review.payload.state,caseId==='DEMO-102'?'complete':'unavailable')
+  }
+})

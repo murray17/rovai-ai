@@ -126,7 +126,7 @@ last_updated: 2026-09-07
 
 ## Qualification 与 Benchmark
 
-- 当前规范：[Qualification/Benchmark 基础不变量](../architecture/foundational-invariants.md#qualification-evidence)、[Benchmark Protocol](../architecture/benchmark-protocol.md)、[Benchmark Protocol v3](../contracts/benchmark-protocol-v3.md)、[Semantic Judge Views v1](../contracts/semantic-judge-views-v1.md)、[Tool Interaction Measurement v2](../contracts/tool-interaction-measurement-v2.md)、[Paired Collaboration Experiment v1](../contracts/paired-collaboration-experiment-v1.md)。
+- 当前规范：[Qualification/Benchmark 基础不变量](../architecture/foundational-invariants.md#qualification-evidence)、[Benchmark Protocol](../architecture/benchmark-protocol.md)、[Benchmark Protocol v3](../contracts/benchmark-protocol-v3.md)、[Semantic Judge Views v2](../contracts/semantic-judge-views-v2.md)、[Tool Interaction Measurement v2](../contracts/tool-interaction-measurement-v2.md)、[Paired Collaboration Experiment v1](../contracts/paired-collaboration-experiment-v1.md)。
 - 理由来源：[v0.31](../versions/v0.31/decisions.md)、[v0.34](../versions/v0.34/decisions.md)、[v0.36](../versions/v0.36/decisions.md)、[v0.53](../versions/v0.53/decisions.md)、[v0.55](../versions/v0.55/decisions.md)、[v0.68](../versions/v0.68/decisions.md)。
 
 ## Product 与 Renderer
@@ -158,5 +158,5 @@ last_updated: 2026-09-07
 
 ## 双轨执行评测
 
-- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v1](../contracts/execution-evaluation-v1.md)、[User Automation v3](../contracts/user-automation-v3.md)与[操作指南](../development/evaluation.md)。
+- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v2](../contracts/execution-evaluation-v2.md)、[User Automation v3](../contracts/user-automation-v3.md)与[操作指南](../development/evaluation.md)。
 - 理由来源：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)。

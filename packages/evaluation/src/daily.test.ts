@@ -39,6 +39,15 @@ describe('daily calendar and evidence contract', () => {
     expect(JSON.parse(await readFile(join(output, 'latest.json'), 'utf8')).date).toBe('2026-09-09')
     await expect(runDaily({ ...options, scope: { ...scope, campIds: ['new-camp'] }, exportTrace: async () => null })).rejects.toThrow('scope changed')
   })
+  it('rejects exported window fields or scalar filters before collecting a daily report', async () => {
+    const output = await mkdtemp(join(tmpdir(), 'rovai-daily-test-')); roots.push(output)
+    let exported = false
+    for (const invalid of [{ ...scope, since: '2026-09-08T16:00:00Z' }, { ...scope, campIds: 'camp-1' }]) {
+      await expect(runDaily({ output, timezone: 'Asia/Shanghai', now, scope: invalid as unknown as DailyScope,
+        exportTrace: async () => { exported = true; return null } })).rejects.toThrow('Daily scope requires only')
+    }
+    expect(exported).toBe(false)
+  })
   it('keeps unknown memory values and gaps out of the plotted lines', () => {
     const metrics = { runs: { terminalOutcomesInWindow: { succeeded: 2 } }, memory: { bodyReads: null, formalRevisions: null } }
     const points = ['2026-09-01', '2026-09-03'].map(date => ({ date, metrics, reportId: date, sourceDigest: 'x', status: 'available', comparisonKey: 'same' }))

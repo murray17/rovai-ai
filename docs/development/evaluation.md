@@ -6,7 +6,7 @@ last_updated: 2026-09-10
 
 # Gate、每周回归与每日分析
 
-本页拥有开发者操作流程。判断规则见 [Execution Evaluation v1](../contracts/execution-evaluation-v1.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+本页拥有开发者操作流程。判断规则见 [Execution Evaluation v2](../contracts/execution-evaluation-v2.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
 
 ## 上下文改动 Gate
 
@@ -14,7 +14,7 @@ last_updated: 2026-09-10
 2. 保存独立基线 checkout。用 `eval:gate build --source <checkout> --output <new-directory>` 构建基线；实施后用另一新目录构建候选。源码、产品二进制与评测资产分别冻结；运行期间保持两份 checkout 不变。
 3. 根据[回归目录](../../qualification/context-regression/README.md)选择影响层级。上下文、共享机制或 `cli-operations` 跑 12 个通用 Case；其他 Skill 跑专属小集，无专属集先补 Case 并通过 `qualification:case admit`，不能空集通过。先冻结标准，再查看候选结果。
 4. 按下面配置生成 `eval:gate freeze --config <json> --output <new-plan.json>`，再运行 `eval:gate run --plan <plan.json> --output <campaign-directory>`。规则检查实际合同测试、产物、写入边界、A2A、工具／记忆与预算；Judge 评价语义并引用证据。相同 campaign 保留所有尝试。
-5. 提交前阅读 README 和 JSON 中的 `regressions`、`evidenceGaps`、`resourceChanges` 及每个 slot。修复实现偏差后重新构建、冻结并在原 campaign 重跑；方案语义改变时更新 revision 和确认。每个 campaign 最多两次，不能删失败目录、改标准或挑成功副本收口。
+5. 提交前打开 campaign 的 `index.html`，从版本、Gate 结论、质量和协作分布进入每次尝试的 `report.html`，核对 `regressions`、`evidenceGaps`、`resourceChanges` 及每个 slot。修复实现偏差后重新构建、冻结并在原 campaign 重跑；方案语义改变时更新 revision 和确认。每个 campaign 最多两次，不能删失败目录、改标准或挑成功副本收口。
 
 配置中的路径均使用绝对路径。以下是结构示例，替换占位项、明确实际 Runtime 模型与预算后才能执行：
 
@@ -66,6 +66,14 @@ API 凭据仅通过命名环境变量读取；不写进配置或报告。默认�
 
 耗时门槛冻结在 `POLICY`：同环境、同 Case 的 dispatch-to-terminal 同时增加超过 50% 和 15 秒，记为资源退化；硬预算仍由 Runner/Core 检查。小样本不能证明统计上的非劣性，Token／费用缺少统一 receipt 时明确不可用。固定规则与 rubric 的改动属于新的评测配置，不允许在同一 campaign 内换标准。
 
+### 质量、协作与有界修正
+
+评分配置随 suite 冻结为 `generic-task-quality@2.0.0`。任务质量按目标达成 50、证据一致性 25、边界遵守 25 汇总；Case 验收依据随任务定义，非代码任务不要求代码测试。三个维度中的未知会使该维度和总分未完成，页面保留已有分项与覆盖率。边界分只覆盖 Case 声明且能观察的检查，不能据此声称覆盖全部权限行为。
+
+协作三组保留五个细项的原始 Judge 判定、理由和证据，分母是适用的计划 Case × repetition，未知仍在分母。部分满足不算满足，零分母为 N/A；分组已有不满足时，其他细项的证据缺口也保留。Case 的关键协作项必须满足，不能用高质量分或其他 Case 的改善抵消。
+
+开发 Agent 可以在已授权、已确认的上下文改动范围内执行“运行 → 分析证据 → 修正实现偏差 → 重建／冻结 → 重跑”。CLI 负责冻结、留证与两次尝试上限，不自行编辑代码。停止条件是完整 Gate 通过；证据不足、预算耗尽或两次仍未通过时保留全部结果并停止。改变方案语义必须回到现有 Skill 的确认流程。每周定时观察本身不授权 Agent 修改上下文，不能把追分作为无限编辑理由。
+
 ## 每周真实任务回归
 
 用户侧可直接运行每周 CLI。接入 Rovai 现有 Automation 前，先验证其受管 Runtime 能在目标平台启动隔离 Runner。**本次 macOS 验收发现 nested `sandbox-exec` 返回 exit 71 / `sandbox_apply: Operation not permitted`，因此第一版在该平台的每周 Agent 定时执行受阻。**不解除 Core 的用户 IPC 隔离来获得通过；CLI 的实际执行与定时调度分别记证据。
@@ -89,9 +97,11 @@ rovai app trace schedules --json
 
 这是“哪些元数据可以准备给这个工作区”的配置，不是新增审批系统，也不是让分析 Agent 获得用户 IPC。Host 自动排除所有已注册分析 Automation，按配置排除回归、Smoke 和开发任务；隔离 Core 的评测记录天然不在日常数据库里。来源无法识别的旧记录保留 coverage=unknown，不承诺已经全部排除。
 
-Main 先把规则统计、SVG 和分析输入写入指定工作区；每天的 Automation 只执行：
+Main 先把规则统计、HTML／SVG 和分析输入写入指定工作区；每天的 Automation 只执行：
 
-> 在指定仓库执行 `node scripts/eval-daily.mjs prepared --output /analysis-workspace/reports --timezone Asia/Shanghai`。输入必须是前一自然日的完整报告。根据 yesterday、comparableHistory、changes、versions、coverage 和样本解释变化、证据、可能原因及建议，区分事实与假设。引用指标路径或 evidenceId，将分析保存到命令给出的 analysisOutput 并在 Camp 汇报。缺失或陈旧时报受阻，不从全部日志估算比例，不执行原任务或修复。
+> 在指定仓库执行 `node scripts/eval-daily.mjs prepared --output /analysis-workspace/reports --timezone Asia/Shanghai`。输入必须是前一自然日的完整报告。根据 yesterday、comparableHistory、changes、versions、coverage 和样本解释变化、证据、可能原因及建议，区分事实与假设。将结构化 JSON 保存到命令给出的 analysisOutput，再执行 `node scripts/eval-daily.mjs analysis --report <directory> --input <analysisOutput>` 登记结果。引用指标路径或 evidenceId，在 Camp 提供本地报告入口。缺失或陈旧时报受阻，不从全部日志估算比例，不执行原任务或修复。
+
+结构化分析包含 `schemaVersion: 1`、`reportId`、`inputDigest`、`model: { provider, snapshotId }` 和 `facts`／`hypotheses`／`recommendations` 数组。每项为 `{ text, metricPaths, evidenceIds }`，至少引用一个存在的路径或样本 ID；路径示例为 `yesterday.runs.failureRate`、`changes.0.deltaPercentagePoints`。模型身份是提交者声明，不能伪造缺失的版本证据。登记器保留每次原始提交和成功／失败记录，只更新分析状态指针与 HTML，不改写统计 JSON，也不证明解释正确。
 
 在后续部署时设置实际时间，建议当地时间 08:00 给 Host 留出准备时间。Host 在 App 内每分钟检查，失败退避一小时；如果当天尚无完整输入，分析应诚实失败，不能把旧报告当成昨天。关闭对应 Automation 即停止准备。当前版本未提供外部后台常驻保证。
 
@@ -99,7 +109,7 @@ Main 先把规则统计、SVG 和分析输入写入指定工作区；每天的 A
 
 ## 报告解读与维护
 
-- 日曲线：Run 完成／失败／取消、A2A 失败比例、Core／Runtime 可观测工具失败比例、两项记忆计数。数量与分母在 JSON 中；未知不补零，当前记忆计数保持不可用。
+- 日曲线分两组：Run 失败率、A2A 失败率及终态覆盖率、Core／Runtime 工具失败率；Run 数量／取消、未结束交接、两项记忆计数。HTML 直接显示比例、分子／分母、可比变化和覆盖，支持最近 7／30／90 天；未知不补零，当前记忆计数保持不可用。
 - 工具失败比例为 `failed / (failed + succeeded)`；`denied`、`cancelled`、`not_executed` 等观测状态分别保留，不计入这个分母。应连同这些数量和 coverage 阅读，不能把低比例解释成权限检查或用户任务都成功。
 - 值得追查的异常：失败原因集中、A2A pending 等待堆积、先失败再 retry 的增长、工具覆盖降低导致比例看似改善、Runtime／模型版本变化后的异常。已有时间字段可作样本定位，第一版不发布未经定义的延迟或成本曲线。
 - `runtimeVersions` 汇总已有 Runtime／模型字段及未知数量，分析输入同时提供历史分布。日曲线按统计口径分组，不把“可比较指标”解释为模型总体一致；分布变化需要连同任务数量一起说明。
@@ -108,3 +118,9 @@ Main 先把规则统计、SVG 和分析输入写入指定工作区；每天的 A
 - `.daily.lock`、`.weekly.lock`、`.gate.lock` 是本地生成器互斥文件。异常退出后先确认对应进程已停止、保留不完整尝试，再移除该输出目录的锁。不要把它们与 Core 的 OS data-dir lease 混淆；Core 锁遵循本地隔离合同。
 
 报告会保存真实执行产物和证据，默认私有。仓库只提交 Case、规则、说明与脱敏验收索引；将报告作为附件分享前按既有 Qualification 导出边界处理。
+
+每个报告目录的 `report.html` 和报告根目录的 `index.html` 可离线打开。Rovai 文件预览能显示自包含内容；相对证据链接如果被预览隔离限制，用系统浏览器打开，不能为报告放宽 App 沙箱。页面只链接报告范围内存在的惰性证据，任务 HTML、脚本、symlink 和越界路径不执行或导航。
+
+**离线报告阅读约定：** 页面沿用 Porcelain／Steel 的开放阅读平面与平台字体；筛选 Case、切换时间窗和展开证据只改变当前阅读视图，数据依据仍是 JSON 与保留证据。趋势点按真实日期间隔定位，跨多日／多周的距离如实保留；可展开数值表核对具体日期。窄屏下，质量与协作明细在表内横向滚动，保留判定列和证据列的可读宽度。
+
+历史 Gate／每周 JSON 可用 `eval:gate render --report <report.json>` 补生成 HTML，保留旧评分语义；该命令不重新评分、不改写 JSON。新旧评分不能连续连线；需要新标准对照时重新生成两侧相同 profile 的 Judge 证据，证据不足则重新执行。

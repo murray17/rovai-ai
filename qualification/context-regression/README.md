@@ -27,3 +27,9 @@
 新增 Case 时创建独立目录，提供 prompt、fixture、reference、verifier 和 manifest；运行 `pnpm qualification:case admit --case <directory>`，再更新 suite 版本及映射。Case/标准修改后重新准入、冻结计划。已经运行的 Case、标准、失败样本和报告不能原地替换以获得通过。
 
 独立验收保留集使用单独的私有目录与 `partition: holdout` 注册表，不进入本回归 manifest、不作为调试材料。第一版未交付或运行独立保留集，报告固定标记 `not_run`；不能把公开 reference 验证当成独立验收。
+
+## 评分与报告口径
+
+新执行使用 [scoring-v2.json](scoring-v2.json)：目标达成 50、证据一致性 25、边界遵守 25；协作保留五项状态与三组统计，不设总分。每个 Case 的权重、适用项、判定来源和具体依据均在运行前冻结。
+
+Suite 2.0.0 只升级评价和报告配置；题目、fixture、verifier 与 seals 保持原样。通用集仍为 12 个 Case。无真实 Judge 的旧结果不可直接换算新分数。规则与限制见 [Execution Evaluation v2](../../docs/contracts/execution-evaluation-v2.md)。

@@ -148,6 +148,7 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-semantic-judge.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-semantic-evidence.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-judge-views.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'context-judge-profile.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-evidence.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-ledger.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-workspace-mutation-ledger.mjs'),
