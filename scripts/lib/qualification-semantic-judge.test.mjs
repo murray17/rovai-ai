@@ -57,6 +57,14 @@ test('Judge Configuration and allowlist Pack are schema-valid, pseudonymized, an
   assert.equal(coverage.get('SER.collaboration.lead_integration').state, 'partial')
 })
 
+test('receipt configuration identities distinguish evaluator revisions without replacing history', () => {
+  const common={provider:'fixture',snapshotId:'fixture-model',snapshotDigest:'b'.repeat(64),configurationId:'fixed-logical-name',evaluationContextPolicy:'bounded-evaluation-context-v1'}
+  const before=buildSemanticJudgeConfiguration({...common,producerDigest:'a'.repeat(64)})
+  const after=buildSemanticJudgeConfiguration({...common,producerDigest:'c'.repeat(64)})
+  assert.notEqual(before.artifactId,after.artifactId)
+  assert.deepEqual(before.payload,after.payload)
+})
+
 test('validated legacy source Pack projects into disjoint Process and blinded Outcome model inputs', () => {
   const fixture = judgeFixture()
   const common = {

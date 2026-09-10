@@ -273,7 +273,7 @@ export function buildJudgeViewConfiguration({
     }
   }
   const artifact = envelope({
-    artifactId: `semantic-judge-view-configuration:${stableId(configurationId)}${taskProfile ? `:${digest(taskProfile).slice(-24)}` : ''}`,
+    artifactId: `semantic-judge-view-configuration:${stableId(configurationId)}${taskProfile ? `:${digest(taskProfile).slice(-24)}` : ''}${taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE ? `:${digest({ payload, producerDigest }).slice(-24)}` : ''}`,
     schemaId: JUDGE_VIEW_CONFIGURATION_SCHEMA_ID,
     producer: runnerProducer(producerDigest),
     binding: { caseId: `semantic-${view}-judge-v1` },

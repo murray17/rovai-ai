@@ -29,3 +29,5 @@ Outcome 的声明准确性检查交付事实、产物、完成状态及已提供
 原 A/B 判定、理由、引用始终保留；新项状态为 `adjudicated`，保留裁决理由、引用和已绑定原副本摘要的执行记录。Review 内嵌完整裁决 artifact，绑定同一 pack、configuration、原执行身份及提示摘要；原始 provider 调用继续落盘。每项引用经过原有闭包检查，错误引用被隔离为未知。
 
 新 Suite 使用 `semantic-dual-view-judge-2`、envelope schemaVersion `2.0.0` 及 [Suite v2 Schema](schemas/semantic-judge-view-suite-v2.schema.json)。旧 Suite v1 保留独立 Schema 和解析路径。裁决结果仍为可复核的模型评价，不声称客观真值或保证完整总分。
+
+有界回执源配置及 v5 View 配置的 artifact ID 同时绑定完整配置与评测器摘要，防止重评时逻辑配置名相同、内容或 producer 不同而发生不可变归档冲突。逻辑配置名和历史 artifact 保留；仅归档身份变化不改变模型可见输入。恢复归档时，只有请求输入摘要完全相同、模型与工具能力配置相同且可从原始成功执行重新解析的真实响应可复用；恢复记录必须标明没有新增模型调用。

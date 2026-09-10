@@ -215,7 +215,7 @@ export function buildSemanticJudgeConfiguration({
     }
   }
   const artifact = envelope({
-    artifactId: `semantic-judge-configuration:${configurationId}`,
+    artifactId: `semantic-judge-configuration:${configurationId}${evaluationContextPolicy ? `:${digest({ payload, producerDigest }).slice(-24)}` : ''}`,
     schemaId: SEMANTIC_JUDGE_CONFIGURATION_SCHEMA_ID,
     producer: runnerProducer(producerDigest),
     binding: { caseId: 'semantic-judge-v0.34' },

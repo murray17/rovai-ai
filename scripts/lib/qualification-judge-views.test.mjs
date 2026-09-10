@@ -911,3 +911,16 @@ test('v5 adjudication retains unknown, invalid citation and transport failure wi
     validateJudgeViewReview(result.review,{configuration,pack,replicas:result.replicas})
   }
 })
+
+test('v5 configuration artifact revisions change identity without changing model-visible evidence', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const {readFile}=await import('node:fs/promises')
+  const scoring=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.3.json',import.meta.url)))
+  const args={view:'outcome',provider:'fixture',snapshotId:'fixture',snapshotDigest:'a'.repeat(64),taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome')}
+  const first=buildJudgeViewConfiguration({...args,producerDigest:'a'.repeat(64)})
+  const second=buildJudgeViewConfiguration({...args,producerDigest:'b'.repeat(64)})
+  assert.notEqual(first.artifactId,second.artifactId)
+  assert.deepEqual(first.payload,second.payload)
+  const pack=configuration=>buildJudgeViewPack({view:'outcome',sourcePack:sourcePackFixture(),configuration,producerDigest:'a'.repeat(64)})
+  assert.deepEqual(pack(first).payload.modelInput,pack(second).payload.modelInput)
+})
