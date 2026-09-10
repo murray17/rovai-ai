@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "context-regression",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "partition": "regression",
   "coreSkills": [
     "cli-operations"
@@ -424,5 +424,5 @@
       "visibility": "demo"
     }
   ],
-  "scoring": "scoring-v2.6.json"
+  "scoring": "scoring-v2.7.json"
 }

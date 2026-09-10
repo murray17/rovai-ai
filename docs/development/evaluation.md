@@ -6,7 +6,7 @@ last_updated: 2026-09-10
 
 # Gate、每周回归与每日分析
 
-本页拥有开发者操作流程。判断规则见 [Execution Evaluation v10](../contracts/execution-evaluation-v10.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+本页拥有开发者操作流程。判断规则见 [Execution Evaluation v11](../contracts/execution-evaluation-v11.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
 
 ## 上下文改动 Gate
 
@@ -156,4 +156,4 @@ node scripts/eval-judge-cli.mjs --executable /absolute/codex --model gpt-5.6-sol
 
 准备会使用本地假 HTTP 接口核验实际请求没有工具，随后所有真实评价只接收指定 evidence pack。CLI 的能力和参数依据[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)及实际命令探测；不依赖提示词单独限制工具。沿用 CLI 自己的登录，不把凭据导出到报告。其目录摘要是模型声明，不是提供者权重；固定 snapshot 未可观测时 Gate 保留证据不足，周回归仍可展示真实诊断结果。
 
-新评分的每项证据范围及一次分歧裁决见 [Semantic Judge Views v8](../contracts/semantic-judge-views-v8.md)。质量覆盖率表示有效判定的权重占比，不表示任务执行率。历史证据重评需独立目录与来源绑定，不能作为新的每周运行样本。
+新评分的每项证据范围及一次分歧裁决见 [Semantic Judge Views v9](../contracts/semantic-judge-views-v9.md)。质量覆盖率表示有效判定的权重占比，不表示任务执行率。历史证据重评需独立目录与来源绑定，不能作为新的每周运行样本。

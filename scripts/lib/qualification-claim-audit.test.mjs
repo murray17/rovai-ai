@@ -72,3 +72,29 @@ test('v7 permits actual read or status receipts for artifact facts without certi
   Object.assign(f.claim,{text:'已运行检查且通过',kind:'verification_success',evidenceIds:['EV-0002']})
   assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
 })
+
+test('v4 separates having executed a failed command from claiming that it passed', () => {
+  const f=fixture('node verify.mjs','required input unavailable',42)
+  f.pack.taskProfileVersion='generic-task-v9'
+  f.pack.evidenceSegments[0].content='I ran node verify.mjs. It passed.'
+  Object.assign(f.claim,{text:'I ran node verify.mjs',kind:'execution_fact',evidenceIds:['EV-0003']})
+  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'satisfied')
+  Object.assign(f.claim,{text:'It passed',kind:'verification_success'})
+  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate','a failed command cannot certify claimed success')
+  f.claim.result='contradicted'
+  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'not_satisfied')
+})
+
+test('v4 recognizes encoded output citations but never command-only or fabricated output quotes', async () => {
+  const {outputQuoteSupported}=await import('./qualification-claim-audit.mjs')
+  assert.equal(outputQuoteSupported('"output":"true\\n?? report.json\\n"','true\n?? report.json\n'),true)
+  assert.equal(outputQuoteSupported('"true\\n"','true\n?? report.json\n'),true)
+  assert.equal(outputQuoteSupported('"command":"node verify.mjs"','true\n'),false)
+  assert.equal(outputQuoteSupported('"output":"CHECK_OK"','CHECK_FAILED'),false)
+  const f=fixture('node check.mjs || true','true\n?? report.json\n')
+  Object.assign(f.claim,{text:'已运行检查且通过',kind:'verification_success',evidenceIds:['EV-0003'],evidenceQuote:'"output":"true\\n?? report.json\\n"'})
+  f.pack.taskProfileVersion='generic-task-v8'
+  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate','old policy is unchanged')
+  f.pack.taskProfileVersion='generic-task-v9'
+  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'satisfied')
+})

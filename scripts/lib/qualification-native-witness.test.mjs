@@ -85,3 +85,14 @@ test('v2 binds each parallel result independently and rejects mixed, ambiguous o
   assert.equal(nativeOutputProjection('shasum -a 256 guard.txt','abc guard.txt','abc guard.txt'),null)
   assert.ok(nativeOutputProjection('shasum -a 256 guard.txt','abc guard.txt','abc guard.txt','bound-native-command-witness-v2'))
 })
+
+test('v4 derives scoped ordering from Core events without inventing whole-host chronology', () => {
+  const f=fixture();Object.assign(f.core,{agentRunId:'private-run',executionEpoch:1,sequence:4})
+  const records=extractNativeWitnesses(f.rows,[f.item],[f.core],f.workspace)
+  const snapshot={executionEvidence:[{id:'other-file',agentRunId:'other-run',executionEpoch:1,sequence:1,kind:'file_change'},{id:'started-command',payloadDigest:digestJson({synthetic:'started'}),agentRunId:'private-run',executionEpoch:1,sequence:2,kind:'command',safeIdentity:{nativeItemStatus:'inProgress'}},f.core],evaluationContext:{policyId:'bounded-evaluation-context-v1',receipts:[],omitted:[],tasks:[],deliveryMessageIds:[]}}
+  const context=supplementEvaluationContext(snapshot,{state:'captured',records},[],'f'.repeat(64),'bounded-evaluation-context-v4')
+  const order=JSON.parse(context.receipts[0].content).observedOrder
+  assert.equal(order.eventSequence,4);assert.equal(order.earlierCommandCompletions,0);assert.equal(order.earlierFileChangeEvents,0)
+  assert.equal(order.scope,'captured_events_within_same_run_and_epoch_only')
+  assert.equal(JSON.stringify(order).includes('private-run'),false)
+})

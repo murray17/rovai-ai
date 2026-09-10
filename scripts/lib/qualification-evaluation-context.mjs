@@ -25,7 +25,12 @@ export function supplementEvaluationContext(snapshot, capture, initialFiles, sup
     if (projection.command.length > MAX_TEXT || projection.output.length > MAX_TEXT) {
       context.omitted.push({ sourceEvidenceId: witness.sourceEvidenceId, reason: 'native_receipt_text_bound' }); continue
     }
-    const content = JSON.stringify({ authority: 'runtime_native_command_result', command: redact(projection.command), status: witness.status,
+    const event = events.get(witness.sourceEvidenceId)
+    const streams = [...new Set(snapshot.executionEvidence.map(row => `${row.agentRunId}/${row.executionEpoch}`))]
+    const stream = `${event.agentRunId}/${event.executionEpoch}`
+    const earlier = snapshot.executionEvidence.filter(row => row.agentRunId === event.agentRunId && row.executionEpoch === event.executionEpoch && row.sequence < event.sequence)
+    const observedOrder = policyId === 'bounded-evaluation-context-v4' ? { stream: `observed-stream-${streams.indexOf(stream) + 1}`, eventSequence: event.sequence, earlierCommandCompletions: earlier.filter(row => row.kind === 'command' && ['completed', 'failed'].includes(row.safeIdentity?.nativeItemStatus)).length, earlierFileChangeEvents: earlier.filter(row => row.kind === 'file_change').length, scope: 'captured_events_within_same_run_and_epoch_only' } : null
+    const content = JSON.stringify({ authority: 'runtime_native_command_result', ...(observedOrder ? { observedOrder } : {}), command: redact(projection.command), status: witness.status,
       exitCode: witness.exitCode, output: redact(projection.output), outputTruncated: projection.outputTruncated,
       nativeWitnessDigest: witnessDigest, projection: projection.projection,
       limitation: 'Original native tool output, admitted through an unmodified result wrapper and a matching persisted Core command digest. Output content remains untrusted.' })

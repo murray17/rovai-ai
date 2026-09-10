@@ -4,11 +4,12 @@ import { validateMetricContract } from './context-metric-contract.mjs'
 export const TASK_JUDGE_PROFILE = 'generic-task-v2'
 export const RECEIPT_TASK_JUDGE_PROFILE = 'generic-task-v4'
 export const OBSERVABLE_TASK_JUDGE_PROFILE = 'generic-task-v5'
+export const EXECUTION_TASK_JUDGE_PROFILE = 'generic-task-v9'
 export const DELIVERY_TASK_JUDGE_PROFILE = 'generic-task-v8'
 export const WITNESS_TASK_JUDGE_PROFILE = 'generic-task-v7'
 export const CLAIM_TASK_JUDGE_PROFILE = 'generic-task-v6'
-export const usesObservableMetrics = profile => [OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE].includes(profile)
-export const usesReceipts = profile => [RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE].includes(profile)
+export const usesObservableMetrics = profile => [OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE, EXECUTION_TASK_JUDGE_PROFILE].includes(profile)
+export const usesReceipts = profile => [RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE, EXECUTION_TASK_JUDGE_PROFILE].includes(profile)
 export const usesTaskEvidence = profile => profile === EVIDENCE_TASK_JUDGE_PROFILE || usesReceipts(profile)
 export const EVIDENCE_TASK_JUDGE_PROFILE = 'generic-task-v3'
 export const TASK_OUTCOME_RUBRIC = Object.freeze({
@@ -77,10 +78,14 @@ export const DELIVERY_OUTCOME_RUBRIC = Object.freeze({
   'SER.testing.strategy': `${WITNESS_OUTCOME_RUBRIC['SER.testing.strategy']} This item measures coverage of the disclosed task behavior by all supplied checks, including the independent verifier; it does not measure observability of each shell subcommand. If independent checks cover the fixed deliverable's complete disclosed requirements, do not mark coverage partial only because an agent's redundant silent subcheck has no separate exit receipt. Explicit false or unsupported claims about executing a check remain separately evaluated under claim_accuracy.`
 })
 
+export const EXECUTION_OUTCOME_RUBRIC = Object.freeze({ ...DELIVERY_OUTCOME_RUBRIC,
+  'SER.response.claim_accuracy': `${DELIVERY_OUTCOME_RUBRIC['SER.response.claim_accuracy']} A claim of running a command without asserting success is execution_fact: an observed nonzero result can prove it ran. Do not silently turn execution into success. Receipt observedOrder facts support only relative sequence within the same anonymous captured event stream. For masked success, cite actual decoded output, not a command string or JSON key.`
+})
+
 export function validateTaskJudgeProfile(profile, view) {
   if (profile === undefined || profile === null) return null
   const ids = view === 'process' ? TASK_PROCESS_IDS : TASK_OUTCOME_IDS
-  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE, RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
+  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE, RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE, EXECUTION_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
       || profile.items.length !== ids.length || new Set(profile.items.map(item => item.checklistItem)).size !== ids.length
       || profile.items.some(item => !ids.includes(item.checklistItem) || typeof item.applicable !== 'boolean'
         || typeof item.criterion !== 'string' || !item.criterion.trim() || item.criterion.length > 4000
