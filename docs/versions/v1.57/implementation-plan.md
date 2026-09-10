@@ -8,7 +8,7 @@ last_updated: 2026-09-10
 
 # 官方 ZCode 实施与验收
 
-官方 BYOK Adapter 已实现并经过真实 Core 验证；当前为 macOS arm64 Preview，完整 First-Class 资格仍未完成。
+官方 Runtime Adapter 已实现并经过真实 Core 验证；当前为 macOS arm64 Preview，完整 First-Class 资格仍未完成。
 [接入矩阵](../../research/zcode-runtime.md)逐项描述用户可观察差异；[D02](decisions.md#v1-57-d02)明确 Preview 的可见性边界。
 
 ## Worktree 交接
@@ -130,5 +130,22 @@ Desktop 构建与其余历史 Golden Flows 本次未全量重跑，不能把下�
 - Adapter 专属协议损坏、Probe timeout、idle eviction 和版本/Node 升级 drift 组合；现有共享安全回归不能替代该官方版本的全部真实流程。
 - macOS x64、Windows x64 没有目标平台证据；不得因 arm64 功能通过而开放。
 
-结构化 Prompt 图片与 GUI/Computer Use 回调为 NotImplemented，账户订阅登录在用户指定 BYOK 范围之外。
+GUI/Computer Use 回调为 NotImplemented。账号登录与 BYOK 都在范围内；图片沿用现有附件路径，经原生 Read 看图，不能因没有结构化 Prompt 图片而标为不支持。
 不把这些限制声明为上游 Unsupported，不把 Preview 或代码可评审等同于正式第一版接入完成。
+
+
+## v5：账号范围与图片能力纠正
+
+- 原生终端账号登录生成的 Z.ai／BigModel 配置与 BYOK 共用模型解析，普通 Probe 改为记录
+  `zcode.native_configuration`，不把配置加载表述为仅 BYOK。缺少配置时提供官方 `/login` 指引。
+- App-only `.zcode/v2` 登录态尚不能直接替代终端配置；真实 OAuth 登录/订阅余额未验收。
+- 按用户要求，图片和其他 Runtime 一样投递授权文件路径，由 ZCode 原生 Read 读取/处理并给模型。
+  保留官方模型 `supportsImages` 配置；不预上传，不改变共享 Runtime、ContextManifest 或 schema 99。
+- 图片上传方案已撤回。其临时协议/迁移测试不作为本次交付证据，不把它们的结果算到路径方式。
+- `scripts/smoke-zcode-images.mjs` 用普通 Camp 附件投递两张随机数字图片，证明原生 Read、实际视觉理解、
+  Read 不形成 Files Changed、无 attachment upload 和原 Session 冷恢复；MiniMax-M3 实测通过，GUI 注册数为 0。
+- 首轮点阵字体造成一个数字误读，答案断言失败；换成系统字体后按原准确性断言通过。失败记录与撤回的
+  上传方案测试均不冒充最终通过证据。未覆盖真实 OAuth/订阅、App-only 登录复用、所有图片格式/尺寸和其他平台。
+- 最终路径实现验证：ZCode Library 5 项、普通 Probe 1 项、平台准入 5 项通过；Vitest 1717 项、
+  末段 Node 224 项通过（保留 1 项平台 skip）；Clippy、格式与通用文档 CI 通过。最终差异未重跑全部 Rust slow 套件，
+  不沿用已撤回方案的测试数量。隔离凭据、原生 Home/历史已清理，14 个改动文件和 17 份本轮日志的密钥匹配为 0。

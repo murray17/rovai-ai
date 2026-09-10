@@ -2230,7 +2230,7 @@ fn acp_observed_capabilities(
         return if session.is_some() {
             vec![
                 "acp.initialize".to_string(),
-                "zcode.native_byok".to_string(),
+                "zcode.native_configuration".to_string(),
                 "session.new".to_string(),
             ]
         } else {
@@ -2300,10 +2300,14 @@ fn acp_observed_capabilities(
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
     if kind == AdapterKind::ZcodeApp {
         // Probe observations, distinct from AdapterCapabilitySnapshot support.
-        return ["acp.initialize", "zcode.native_byok", "session.new"]
-            .into_iter()
-            .map(str::to_string)
-            .collect();
+        return [
+            "acp.initialize",
+            "zcode.native_configuration",
+            "session.new",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
     }
     if kind == AdapterKind::TraeCnCli {
         return trae_machine_ready_requirements();
@@ -4088,7 +4092,11 @@ printf '%s\n' "$resume" >> "$request_log"
         assert_eq!(observed, acp_required_capabilities(AdapterKind::ZcodeApp));
         assert_eq!(
             observed,
-            ["acp.initialize", "zcode.native_byok", "session.new"]
+            [
+                "acp.initialize",
+                "zcode.native_configuration",
+                "session.new"
+            ]
         );
         assert_eq!(
             acp_observed_capabilities(

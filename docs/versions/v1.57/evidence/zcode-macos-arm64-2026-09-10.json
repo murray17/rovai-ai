@@ -296,8 +296,8 @@
   },
   "limits": [
     "Same-turn compaction retry has no host injection seam; redelivery occurs on the next eligible input.",
-    "Structured prompt images and GUI callbacks are not implemented.",
-    "Account subscription login is outside the explicitly requested BYOK scope.",
+    "Images use authorized file paths and native Read, not structured prompt attachments; GUI callbacks are not implemented.",
+    "Official terminal account-login configuration and BYOK are in scope. App-only login state is not directly reused; real OAuth and subscription flows have not been accepted.",
     "macOS x64 and Windows x64 have no qualification evidence.",
     "Full Core compaction failure/cancellation combined with capability preservation, provider usage retry/resume accounting, and adapter-specific protocol-error/probe-timeout/upgrade drift flows are not yet all qualified."
   ],
@@ -489,6 +489,70 @@
       "changedFilesCredentialScanCount": 25,
       "taskLogsCredentialScanCount": 173,
       "credentialMatches": 0
+    }
+  },
+  "v5Revision": {
+    "transport": "zcode-native-node-transport-v5",
+    "sourceBaseCommit": "3df3c7a7b161e27ab684625042af612d9dc0819a",
+    "sourceScope": "ZCode native config/auth guidance and model capability preservation; existing v3/v4 lifecycle evidence retains its recorded stage. No shared image pipeline or schema change.",
+    "coreExecutableSha256": "c2f566e6f768c6e4505f0af102ea46dfb02e758313148934b945753e12812984",
+    "pathImages": {
+      "smoke": "smoke-zcode-images.mjs via smoke-zcode-launch.swift",
+      "passed": true,
+      "model": "minimax/MiniMax-M3",
+      "logSha256": "7e0a420a5fbca2b8661e3da3fd14ec1747a94c571507884103d4acb44cefc13a",
+      "agentRunId": "ba28d212-a64e-4b39-a543-1ed7655fe652",
+      "nativeSessionId": "sess_45146798-a868-4d77-aead-66512e307e0e",
+      "imageCount": 2,
+      "nativeUploads": 0,
+      "exactColdResume": true,
+      "nativeReadOnly": true,
+      "probeDidNotGenerateOrUpload": true,
+      "noModificationDiff": true,
+      "zcodeGuiLaunchCount": 0
+    },
+    "accountConfiguration": {
+      "nativeLoginProviders": [
+        "zai",
+        "bigmodel"
+      ],
+      "officialConfigShapeRegressionPassed": true,
+      "missingCredentialGuidancePassed": true,
+      "publicCatalogExcludesSecrets": true,
+      "realOAuthOrSubscriptionAcceptance": false,
+      "appOnlyLoginReuse": false
+    },
+    "failedAttempt": {
+      "stage": "Path images with tiny bitmap glyphs",
+      "reason": "Native Read returned both images; model misread one digit. Exact-answer assertion failed. Replaced ambiguous fixture font, retaining the exact-answer assertion.",
+      "logSha256": "67ec6e948497cfb0aae7f8f10c6e579b5d8465d0dd889cdb511993c4ad9de58f"
+    },
+    "uncovered": [
+      "Real OAuth login, account subscription generation and App-only credential reuse.",
+      "All image formats, extreme dimensions/limits and models other than MiniMax-M3.",
+      "No repeated full background/compaction/Skills/MCP/permission Golden Flows for v5; lifecycle code is unchanged from v4.",
+      "No macOS x64, Windows x64 or newer-kernel qualification."
+    ],
+    "withdrawnApproach": "Temporary structured upload, shared Pi image refactor and schema 100/Migration 150 were withdrawn; their temporary tests are not evidence for this revision.",
+    "cleanup": {
+      "isolatedCredentialCopiesRemoved": true,
+      "isolatedNativeHomeAndStorageRemoved": true,
+      "changedFilesScanned": 14,
+      "taskLogsScanned": 17,
+      "credentialMatches": 0
+    },
+    "localGates": {
+      "zcodeLibraryTestsPassed": 5,
+      "zcodeProbeTestPassed": 1,
+      "platformAdmissionTestsPassed": 5,
+      "vitestPassed": 1717,
+      "vitestFilesPassed": 168,
+      "nodeFinalSuitePassed": 224,
+      "nodeExistingPlatformSkip": 1,
+      "clippyPassed": true,
+      "formatPassed": true,
+      "docsCiPassed": true,
+      "fullRustWorkspaceAndSlowSuiteRepeatedForFinalDiff": false
     }
   }
 }

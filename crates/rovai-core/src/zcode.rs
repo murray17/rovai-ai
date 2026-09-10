@@ -14,7 +14,7 @@ pub mod transport;
 
 pub const PROTOCOL: &str = "zcode-app-server-v1";
 pub const MINIMUM_VERSION: &str = "0.16.5";
-pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v4";
+pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v5";
 
 pub fn supported_version(version: Option<&str>) -> bool {
     version
@@ -307,7 +307,7 @@ impl NativeConfig {
         let target = selected.unwrap_or(&default);
         let (provider_id, model_id) = target
             .split_once('/')
-            .context("Configure a BYOK provider and model in ~/.zcode/cli/config.json")?;
+            .context("Sign in through official ZCode terminal /login (Z.ai or BigModel), or configure a provider and model in ~/.zcode/cli/config.json")?;
         let provider = &self.value["provider"][provider_id];
         let models = provider["models"].as_object();
         let model = models
@@ -342,6 +342,9 @@ impl NativeConfig {
                 }
             }
         }
+        if let Some(supports_images) = model.and_then(|model| model.get("supportsImages")) {
+            entry["supportsImages"] = supports_images.clone();
+        }
         let mut native = json!({"providerId":provider_id,"kind":kind,"models":[entry]});
         if let Some(base_url) = self
             .value
@@ -375,7 +378,9 @@ impl NativeConfig {
             native["apiKey"] = json!({"source":"inline","value":key});
             native["apiKeyRequired"] = json!(true);
         } else {
-            bail!("ZCode BYOK apiKey is missing from official provider options");
+            bail!(
+                "ZCode native provider credentials are missing; sign in through official ZCode terminal /login or configure the provider API key"
+            );
         }
         Ok(
             json!({"revision":self.digest,"generatedAt":chrono::Utc::now().timestamp_millis(),"model":{"providerId":provider_id,"modelId":model_id},"provider":native}),
@@ -545,7 +550,7 @@ mod tests {
         ] {
             fs::create_dir_all(path).unwrap();
         }
-        let config = json!({"model":{"main":"byok/alias"},"provider":{"byok":{"kind":"anthropic","options":{"apiKey":"PRIVATE_CANARY","baseURL":"https://example.invalid"},"models":{"friendly":{"id":"alias","limit":{"context":32000}}}}},
+        let config = json!({"model":{"main":"byok/alias"},"provider":{"byok":{"kind":"anthropic","options":{"apiKey":"PRIVATE_CANARY","baseURL":"https://example.invalid"},"models":{"friendly":{"id":"alias","supportsImages":true,"limit":{"context":32000}}}}},
             "mcp":{"servers":{"same":{"type":"stdio","command":"user-server"}}}});
         fs::write(home.join(".zcode/cli/config.json"), config.to_string()).unwrap();
         fs::write(project.join("zcode.json"),json!({"memory":{"use":false},"mcp":{"servers":{"same":{"type":"stdio","command":"project-server"},"relative":{"command":"local-server","cwd":"tools"},"remote":{"url":"https://example.invalid/mcp","http_headers":{"X-Probe":"native"}}}}}).to_string()).unwrap();
@@ -560,6 +565,7 @@ mod tests {
         assert_eq!(model["provider"]["apiKey"]["value"], "PRIVATE_CANARY");
         assert_eq!(model["provider"]["baseURL"], "https://project.invalid");
         assert_eq!(model["model"]["modelId"], "alias");
+        assert_eq!(model["provider"]["models"][0]["supportsImages"], true);
         let servers = native.mcp_servers(None).unwrap();
         assert_eq!(
             servers.iter().find(|s| s["name"] == "same").unwrap()["command"],
@@ -619,6 +625,55 @@ mod tests {
             ("unknown", false),
         ] {
             assert_eq!(supported_version(Some(version)), valid);
+        }
+        // Official terminal /login writes these Coding Plan provider shapes.
+        // Account login and manual BYOK share the native config carrier; no
+        // caller-supplied key or separate Rovai provider record is required.
+        for (provider, endpoint) in [
+            ("zai", "https://api.z.ai/api/anthropic"),
+            ("bigmodel", "https://open.bigmodel.cn/api/anthropic"),
+        ] {
+            let key = format!("PRIVATE_ACCOUNT_{provider}");
+            let account = json!({"provider":{provider:{"kind":"anthropic","name":"Coding Plan",
+                "options":{"apiKeyRequired":true,"baseURL":endpoint,"apiKey":key},
+                "models":{"glm-5.1":{"name":"GLM-5.1"},"glm-4.7":{"name":"GLM-4.7"}}}},
+                "model":{"main":format!("{provider}/glm-5.1"),"lite":format!("{provider}/glm-4.7")}});
+            fs::write(home.join(".zcode/cli/config.json"), account.to_string()).unwrap();
+            let signed_in = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+            let selected = signed_in.runtime_model(None).unwrap();
+            assert_eq!(selected["model"]["providerId"], provider);
+            assert_eq!(selected["provider"]["apiKey"]["value"], key);
+            assert_eq!(selected["provider"]["baseURL"], endpoint);
+            let snapshot = json!({"settings":{"model":{"current":selected["model"],"available":[
+                {"ref":{"providerId":provider,"modelId":"glm-5.1"}},
+                {"ref":{"providerId":provider,"modelId":"glm-4.7"}}]}}});
+            let catalog = signed_in
+                .session_catalog("account-session", &snapshot)
+                .unwrap();
+            assert_eq!(
+                catalog["models"]["availableModels"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+            assert!(!catalog.to_string().contains(&key));
+            assert!(!signed_in.digest.contains(&key));
+            let mut missing = account;
+            missing["provider"][provider]["options"]
+                .as_object_mut()
+                .unwrap()
+                .remove("apiKey");
+            fs::write(home.join(".zcode/cli/config.json"), missing.to_string()).unwrap();
+            let unsigned = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+            assert_ne!(signed_in.digest, unsigned.digest);
+            assert!(
+                unsigned
+                    .runtime_model(None)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("/login")
+            );
         }
         fs::remove_dir_all(root).unwrap();
     }

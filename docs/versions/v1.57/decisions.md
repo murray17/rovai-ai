@@ -68,6 +68,6 @@ provider broker。原生能力缺口和平台资格独立记录，不用共享 t
 
 ### 后果
 
-本次按用户明确范围只读取 ZCode 官方 BYOK 配置，账户订阅登录不接入。user FirstPayload 及下一 eligible input
-压缩补发沿用用户接受的策略；同一原生轮次内部重试没有 Host 注入位置。GUI/结构化图片未实现，不能伪装为上游不支持。
+用户已纠正范围：账号登录与 BYOK 都接入，配置仍由官方 ZCode 拥有。user FirstPayload 及下一 eligible input
+压缩补发沿用用户接受的策略；同一原生轮次内部重试没有 Host 注入位置。GUI 回调仍未实现；图片沿用既有附件路径和原生 Read，不改变模型上下文合同；不能把没有预上传通道声明为上游不支持。
 只有补齐核心轴证据并更新平台准入后，才可以称为 First-Class 完成。

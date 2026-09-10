@@ -11,7 +11,7 @@ last_updated: 2026-09-10
 
 # Rovai-ai v1.57：官方 ZCode Runtime
 
-前置：[v1.56](../v1.56/README.md)。本版本新增官方 ZCode App 内置 Runtime，使用原生 BYOK 配置，
+前置：[v1.56](../v1.56/README.md)。本版本新增官方 ZCode App 内置 Runtime，支持原生账号登录配置与 BYOK，
 复用现有 Runtime Fleet、Context FirstPayload、审批与文件 Evidence 链路。
 
 ## 范围与当前状态

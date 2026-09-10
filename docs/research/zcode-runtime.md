@@ -10,7 +10,7 @@ last_updated: 2026-09-10
 `app-server`。官方 App 只提供内核文件，不执行 App 主程序。社区 `zcode-app-cli`、`zcode-acp` 不属于产品入口。
 本机 Homebrew cask 安装的是官方 App；命令行启动内核不代表上游另行发布了官方 npm CLI，也不代表 GUI 被 Rovai 控制。
 
-官方公开说明：[安装](https://zcode.z.ai/en/docs/install)、[BYOK 配置](https://zcode.z.ai/en/docs/configuration)。
+官方公开说明：[安装](https://zcode.z.ai/en/docs/install)、[账号与 API 配置](https://zcode.z.ai/en/docs/configuration)。
 NDJSON、原生配置细节和事件字段另外依据本机官方内核源码与隔离实验核实；这是 App 内置协议，升级仍需重新验证。
 App 内核 SHA-256：`e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e1113266b8`。
 界面图标直接取自该官方 App 的 `Contents/Resources/icon.png`，未改变品牌图形。
@@ -22,14 +22,15 @@ App 内核 SHA-256：`e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e111
 
 | 能力轴 | 实现与证据 | 一致性与差异 |
 | --- | --- | --- |
-| 官方入口 / BYOK | 官方 bundle identity、官方 bundle/cjs/Node composite fingerprint；用户和项目原生配置只读；真实 MiniMax BYOK AgentRun | 不增加 Rovai provider/密钥配置，不支持本次范围外的账户订阅登录 |
+| 官方入口 / 认证 | 官方 bundle identity、官方 bundle/cjs/Node composite fingerprint；用户和项目原生配置只读；真实 MiniMax BYOK AgentRun | 原生终端账号登录与 BYOK 均可提供配置；App-only 登录态不能直接替代终端配置，不增加 Rovai provider/密钥配置 |
+| 图片输入 | 现有附件路径经原生 Read 读取并生成 image tool content | 与 Codex、Claude 和普通 ACP 的路径投递方式一致；不新增上传或图片证据表。真实看图与冷恢复证据另记 |
 | Host / Fleet / owner | 复用 AcpHost/Fleet、独占 lease、兼容性 digest 和 ManagedProcess；Camp 范围内按进程配置复用、精确切换成员 Session | Core 内部转换成现有 Session transport；上游协议仍标为 `zcode-app-server-v1`，不声称原生支持 ACP |
 | Session / continuation | exact ID；真实 Core 重启后恢复同一 Session；无历史动作/审批重放；无效 ID 仅一次显式 continuity loss 后重建 | 不使用 latest Session，不猜私有历史；已 accepted 的输入不自动重发 |
 | Bootstrap / Context | 复用 user FirstPayload assembler、成员身份和动态协作输入 | 官方内核无 `--system`、`--system-prompt`、`--append-system-prompt`。与其他 FirstPayload Runtime 一致，指令层级不同于支持 system 注入的 Runtime |
 | Compaction | manual/auto/reactive completed 事件按 Session/operation/boundary 关联；真实 Core manual/threshold auto/overflow reactive compact 后 revision 1 requested/acknowledged，下一 input accepted；auto compact 后 Core 重启仍恢复同一 Session 和补发 | started/failed/cancelled 不触发。auto/reactive 经本地 provider 观察确认真实请求携带补发；不承诺在同一原生轮次内部 compact/retry 之间插入 Bootstrap |
 | Skills | `.zcode/skills` 原生投影、调用、项目冲突保护、重启恢复与删除通过共享 Skills smoke | 更新、禁用、重新启用、取消分配、硬删除均经过真实调用/缺席验收；不覆盖项目自有 Skill |
 | External MCP | 原生 + assigned union，stdio/HTTP 与同名覆盖真实通过 | 原生 user MCP 优先于 project；Rovai assignment 优先于原生同名完整定义。真实更新、取消分配、重新分配、删除、相邻成员隔离通过；集合变化 fence Host，避免原生 warm resume 不刷新 MCP |
-| Permission / Cancel | 原生 plan/build/edit/yolo/auto，默认 yolo；回调 optionId 精确映射；真实审批允许/拒绝、plan 无写入、取消后等待 35 秒无延迟副作用 | 未实现 GUI/Computer Use、结构化图片输入和其他桌面交互回调；未知回调安全拒绝，不自动批准 |
+| Permission / Cancel | 原生 plan/build/edit/yolo/auto，默认 yolo；回调 optionId 精确映射；真实审批允许/拒绝、plan 无写入、取消后等待 35 秒无延迟副作用 | 未实现 GUI/Computer Use 和其他桌面交互回调；未知回调安全拒绝，不自动批准 |
 | Narration / Final | text_delta 作为公开执行叙述，reasoning_delta 隔离；匹配 input 的成功 terminal 才形成 Final | Narration 是执行中说明；Final 是最终回答。`Missing-Send` 是没有业务 send 时由 Core 补发最终回答，已有 accepted send 则抑制补发；三种真实场景已通过 |
 | 内置 rovai CLI | 复用当前 bundled CLI 与 active Run lease；共享完整 operation、Gather、后续 Run 和过期租约验收 | 不安装第二套 CLI 或借用历史上下文。完整操作集、Gather 返回、续接与过期 lease 验收通过 |
 | 后台执行 | 前台终态与前台 Tool/审批收口后完成 Run；原生 taskId 固定关联原 Session/Input/Turn/Tool，晚到结果写回原 Run Evidence | 有任务的 Host 保留并优先匹配原成员，禁止空闲/容量回收和跨成员复用；取消只作用当前 input，关闭 Host 才全面清理其受管组。缺失 exitCode 保持未知，lost 不证明退出；无 Rovai Input 的原生自动模型通知轮次按精确执行 ID 停止并诊断，未当作新 Run 接入 |
@@ -71,7 +72,7 @@ bundle 身份定位，不能把对它的发现误解为启动 GUI。与 Pi 的 w
 
 读取 `~/.zcode/cli/config.json`；项目按最近 Git root 到 cwd 合并 `zcode.json` 与 `.zcode/config.json`，
 无 Git root 时仅 cwd。原生 `ZCODE_MODEL`、`ZCODE_BASE_URL` 覆盖纳入兼容性 digest。配置更新使旧 Host/Binding
-不再复用。模型列表仍取自官方 Session snapshot；只有官方配置中可解析的 BYOK 模型可选。
+不再复用。模型列表仍取自官方 Session snapshot；只有官方配置中可解析的模型可选，包括账号登录生成的 Coding Plan provider。
 
 普通 BYOK 形式是 `model.main = "providerId/modelId"`，`provider.<id>.kind`、`options.baseURL`、
 `options.apiKey` 和 `models` 由 ZCode 拥有。也支持原生 main 对象及 model alias；Rovai 不写入 provider 文件。
@@ -79,3 +80,19 @@ bundle 身份定位，不能把对它的发现误解为启动 GUI。与 Pi 的 w
 
 当前权威与最终验收见 [v1.57](../versions/v1.57/README.md)、[Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)
 及 [Runtime Compatibility](../runtime-compatibility.md)。本文记录来源与比较，不授予平台资格。
+
+
+## 账号与看图源码核实
+
+内核 0.16.5 的 `loginZCodeCli`、`loginBigmodelCodingPlan` 完成官方授权流程后调用
+`updateCodingPlanProviderInFileConfig`，写入 `zai`／`bigmodel` 的 kind、endpoint、凭据与 main/lite 模型。
+配置中存在 `apiKey` 不等于只支持用户手动 BYOK。账号流程生成的两类配置、公开模型目录不含秘密和配置变化
+已纳入既有配置 owner 回归；真实 OAuth 和订阅余额不由该 fixture 证明。
+
+官方 App 的 `.zcode/v2` 与终端 `.zcode/cli` 是不同配置载体。只存在 App 登录态时，当前仍需在官方终端
+执行 `/login`；未实现 App-only 登录态直接复用。终端依然由独立 Node 加载官方内核，不启动 GUI。
+
+原生 Read 的声明明确支持文本和图片，`readImageFile` 经 `fileSystemPort.readBinaryFile` 和
+`imageProcessorPort.prepareForModel` 读取并处理图片，`formatModelContent` 输出原生 image 内容给模型。
+所以不能因为 Rovai `session/prompt` 只发送 text，就断言 ZCode 无法看图。图片继续使用现有授权路径；
+本次撤回预上传、Core 图片字节通道及额外证据表方案，不改共享 Runtime 或上下文合同。

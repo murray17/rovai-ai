@@ -51,6 +51,8 @@ pub async fn probe(
         std::fs::set_permissions(&root.0, std::fs::Permissions::from_mode(0o700))?;
     }
     let mut config = NativeConfig::load(&std::env::current_dir()?)?;
+    // Native login and BYOK both resolve here. Report setup guidance before spawning.
+    config.runtime_model(None)?;
     config.value["mcp"] = json!({"enabled":false,"servers":{}});
     config.value["memory"] = json!({"use":false});
     let mut command = super::command(executable)?;
@@ -96,7 +98,7 @@ pub async fn probe(
             .await?
             .context("ZCode probe closed")?;
         if initialize.get("error").is_some() {
-            bail!("ZCode BYOK capability probe failed");
+            bail!("ZCode native configuration and connection check failed");
         }
         let session = if include_session {
             write_frame(

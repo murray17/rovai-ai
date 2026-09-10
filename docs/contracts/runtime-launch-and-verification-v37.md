@@ -17,10 +17,10 @@ last_updated: 2026-09-10
 `ZCode.app/Contents/MacOS/ZCode` 定位 bundle，实际启动独立 Node.js 执行同 bundle 的
 `Resources/glm/zcode.cjs app-server`。不执行 App 主程序；`ELECTRON_RUN_AS_NODE=1` 不能阻止 macOS 注册 App。
 Node 从 Runtime PATH 或 `ROVAI_ZCODE_NODE_BIN` 解析，拒绝 `.app` 内程序。验证 bundle identifier `dev.zcode.app`，
-fingerprint 包含官方定位文件、内核与独立 Node，bridge revision 为 `zcode-native-node-transport-v4`。
+fingerprint 包含官方定位文件、内核与独立 Node，bridge revision 为 `zcode-native-node-transport-v5`。
 默认发现 `/Applications` 与用户 Applications；不通过 PATH 选择社区 `zcode`、`zcode-app-cli` 或 `zcode-acp`。
 
-BYOK 由官方 `~/.zcode/cli/config.json` 和项目 `zcode.json`、`.zcode/config.json` 提供。
+账号登录与 BYOK 均使用官方 `~/.zcode/cli/config.json` 和项目 `zcode.json`、`.zcode/config.json` 提供。
 项目搜索从最近 Git root 到 cwd；无 Git root 时只读取 cwd。配置变化进入 Host 与 Native Binding compatibility digest。
 秘密只在内存与原生 `runtimeModel` RPC 中传递，不进入 argv、Prompt、数据库、诊断或公开 Evidence。
 Rovai 不修改用户 provider 配置，不建立额外密钥配置入口。原生模型目录仍须通过无 Prompt 的官方 workspace/session 交换。
@@ -33,7 +33,7 @@ Probe 只做版本、workspace/readState、无消息 deferred Session 创建、�
 不发 session/prompt、V4 sendText、workspace/generateText、compact 或测试工具调用。初始化可以正常联网/落盘，
 不承诺零写入；结束只删除本次临时资源，不扫描或删除用户原生 Session 数据库。
 
-Probe 实测结果只包含 initialize、native BYOK 配置加载、session.new；AdapterCapabilitySnapshot 另存代码已实现
+Probe 实测结果只包含 initialize、native 配置加载、session.new；AdapterCapabilitySnapshot 另存代码已实现
 的映射能力，发布 Smoke 证据按版本/平台独立记录。用户“基础连接正常”不保证余额、模型生成或高级能力已实测。
 保留最低 kernel 0.16.5、程序指纹变化复查和关键返回值校验；不因版本新于已测试版本而无条件禁止使用。
 
@@ -99,6 +99,27 @@ Usage 只读取唯一匹配终态、source=provider 的本轮 input/output/cache
 cacheWrite/reasoning 原生缺值可能被补零，因此保持 NULL；不能由缺少 cacheWrite 的总量推导 uncached，
 也不能由 Turn 聚合推导单次请求命中率。没有价格证据不补造 cost。
 
-本次仅接 BYOK，不接 Z.ai/BigModel 账户登录、GUI 浏览器/Computer Use 回调或结构化 prompt 图片。
+账号登录与 BYOK 均在范围内。图片沿用附件路径与原生 Read；GUI 浏览器/Computer Use 回调未接入。
 macOS arm64 在完整资格证据冻结前为 Preview；其他平台 NotQualified。Read/Write/Edit 与 Diff 见
 [File Change v5](runtime-file-change-observation-v5.md)。
+
+
+## 账号与图片输入
+
+官方终端 `/login` 支持 Z.ai／BigModel。原生流程解析 Coding Plan 凭据后写入
+`~/.zcode/cli/config.json` 的 provider/model；Rovai 只读加载，与 BYOK 共用相同的 `runtimeModel`，
+不要求用户再向 Rovai 手工填写 key。普通 Probe 不发起交互登录；缺少原生配置或凭据时给出官方登录指引。
+登录或配置变化后重新检查，旧配置 digest 对应的 Host 不复用。
+
+App `.zcode/v2` 登录态和终端配置不是同一个载体。仅在 App 中登录、尚无终端配置时，当前 Adapter
+不能据此宣称可用，仍需在官方终端完成 `/login`。Rovai 不自行解密或复制 App 凭据，也不启动 GUI 补做登录。
+该边界与真实 OAuth 登录、订阅额度验证分别报告，配置 fixture 不等于真实账号验收。
+
+图片与 Codex、Claude Code 及现有 ACP Runtime 一样，从现有 Attachment 授权/解析进入
+`CURRENT_INPUT.attachments` 路径数组。ZCode 原生 Read 自行读取图片，按原生格式、压缩与大小规则处理，
+将 image tool content 交给模型。Rovai 不预上传图片、不新增图片发送证据表、不改变 ContextManifest、
+Bootstrap、Formatter、Profile 或 Schema。Pi 的 `prompt.images` 属于其既有专属协议，不作为全局附件规范。
+
+原生配置的 `models.<id>.supportsImages` 经 runtimeModel 保留；未声明时由原生能力决定，Rovai 不伪造支持。
+读取图片产生正常 Read 活动和文件路径，不形成 Files Changed 或修改 Diff，也不成为图片生成的公开发布来源。
+原生读取失败或模型不能理解图片时保留真实错误，不能把看到路径等同于已成功看图。

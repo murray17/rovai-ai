@@ -1088,8 +1088,8 @@ ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview�
 - Usage：只采集 provider Turn input/output/cacheRead；cacheWrite/reasoning/uncached/cost 保持未知，
   不把 Turn 聚合伪装成单次请求命中率。真实数据与稀疏字段 parser 已验证。
 - 差异：user FirstPayload 不是 system 注入；重注入发生在下一 eligible input；Write 无原生 before/after 时
-  只有路径事实，不编造 Diff；shell 删除/重命名不推导为原生文件变更。GUI 回调、结构化 Prompt 图片未实现；
-  按用户范围仅接 BYOK，不接账户登录。
+  只有路径事实，不编造 Diff；shell 删除/重命名不推导为原生文件变更。GUI 回调未接入。
+  账号登录与 BYOK 共用原生终端配置；图片沿用授权路径和原生 Read，见下方 v5 补充。
 - 平台：macOS arm64 保持 Preview，macOS x64/Windows x64 保持 NotQualified；未冻结的全部资格轴不能由
   已通过的功能流替代，也不把 Preview 称为 First-Class 完成。
 
@@ -1118,3 +1118,23 @@ Read 不进入 Files Changed，缺少原生 patch 的 Write 不编造行数。�
 关闭 Host 回收这些确切组且不触及夹具外独立进程；该测试不等同于任意自行脱离已登记进程组的后代都可回收。
 实际执行记录与长后台服务验收见 [v4 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。
 本次没有重跑全部历史 Golden Flows，也未验证 x64/Windows 或授予新的平台资格。
+
+
+### PR #323 v5：账号范围与路径图片验收
+
+官方终端 `/login` 生成的 Z.ai／BigModel Coding Plan 配置与 BYOK 共用原生配置读取和 runtimeModel。
+已用官方配置结构做解析、目录、缺失凭据指引和秘密不出公开结果的回归；普通 Probe 使用
+`zcode.native_configuration` 记录配置加载，不再把它标成仅 BYOK。App-only `.zcode/v2` 登录态尚不能
+直接替代终端配置；本轮没有完成真实 OAuth 登录或账号订阅验收，不能把配置 fixture 算作真实账号通过。
+
+图片沿用 Codex、Claude Code 和普通 ACP 的授权文件路径，由 ZCode 原生 Read 处理图片并交给模型；
+保留模型原生 `supportsImages` 字段，不新增上传、图片发送证据表或共享 Context/schema 改动。
+在相同官方版本、独立 Node、隔离 HOME/Core/Skill Library 和 MiniMax-M3 下，真实产品流程通过：
+两张普通 Camp 附件的随机六位数字均被准确识别；只有原生 Read 工具，没有 attachment upload 或结构化图片 Prompt。
+Read 活动可查询，不产生 Files Changed 或修改 Diff；重启 Core 后精确恢复同一 Session，并正确回答之前的图片内容。
+该流程同时观察到普通 Probe 仅连接/初始化、ZCode GUI 注册数为 0。
+
+首轮使用低分辨率点阵字体时，原生 Read 成功但模型误读一个数字，因此该次答案断言失败，未算通过。
+改用清晰系统字体后保留相同准确识别断言并通过。此前撤回的上传方案测试也不计入路径方案证据。
+这只证明当前模型/图片夹具和恢复流程，不代表全部图片格式、上限尺寸或所有模型均完成视觉资格化。
+最终路径实现的本地门禁与脱敏运行摘要见 [v5 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。
