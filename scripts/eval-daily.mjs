@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { runCaptured } from './lib/qualification-common.mjs'
-import { recordDailyAnalysis } from '../packages/evaluation/src/daily-analysis.ts'
+import { dailyAnalysisSchema, recordDailyAnalysis } from '../packages/evaluation/src/daily-analysis.ts'
 import { dailyWindow, digest, runDaily } from '../packages/evaluation/src/daily.ts'
 
 const args = process.argv.slice(2)
@@ -35,7 +35,7 @@ if (args.includes('--help') || args.length === 0) {
   if (pack.reportId !== latest.reportId || report.reportId !== latest.reportId || report.status !== 'available'
       || report.window?.since !== expected.since || report.window?.until !== expected.until
       || report.analysisInputDigest !== digest(pack)) throw new Error('Prepared report digest or identity mismatch; do not analyze altered statistics')
-  console.log(JSON.stringify({ directory, analysisInput: pack, inputDigest: report.analysisInputDigest ?? null, analysisOutput: resolve(directory, 'analysis-submission.json'), completionCommand: 'eval:daily analysis --report <directory> --input <analysis-submission.json>' }, null, 2))
+  console.log(JSON.stringify({ directory, analysisInput: pack, inputDigest: report.analysisInputDigest ?? null, analysisSchema: dailyAnalysisSchema(pack,report.analysisInputDigest), analysisOutput: resolve(directory, 'analysis-submission.json'), completionCommand: 'eval:daily analysis --report <directory> --input <analysis-submission.json>' }, null, 2))
 } else {
   const options = {}
   for (let index = 0; index < args.length; index += 2) {

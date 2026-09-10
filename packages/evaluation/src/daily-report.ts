@@ -20,7 +20,13 @@ export function reportMetrics(input: unknown): Record<string,unknown> {
   const failed=terminal.failed===undefined?0:terminal.failed,succeeded=terminal.succeeded===undefined?0:terminal.succeeded
   const known=runs.terminalOutcomesInWindow!==null&&typeof runs.terminalOutcomesInWindow==='object'&&valid(failed)&&valid(succeeded)
   runs.failureRate=known?{numerator:failed,denominator:failed+succeeded,value:failed+succeeded?failed/(failed+succeeded):null}:{numerator:null,denominator:null,value:null}
+  if(known)runs.terminalOutcomesInWindow={succeeded:0,failed:0,cancelled:0,...terminal}
   metrics.runs=runs
+  const sources=obj(obj(metrics.tools).bySource)
+  for(const source of ['core','runtime']){
+    const tool=obj(sources[source]),states=tool.terminalOutcomesInWindow
+    if(states!==null&&typeof states==='object'&&!Array.isArray(states)&&Object.values(states).every(valid))tool.terminalOutcomesInWindow={succeeded:0,failed:0,denied:0,cancelled:0,not_executed:0,unknown:0,...obj(states)}
+  }
   const a2a=obj(metrics.a2a),coverage=obj(a2a.terminalCoverage)
   a2a.cohortOpenCountAsOf=valid(coverage.numerator)&&valid(coverage.denominator)&&coverage.denominator>=coverage.numerator?coverage.denominator-coverage.numerator:null
   const waits=a2a.openWaitReasonsAsOf

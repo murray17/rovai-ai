@@ -10,6 +10,31 @@ const obj=(v:unknown):Obj=>v&&typeof v==='object'&&!Array.isArray(v)?v as Obj:{}
 const read=async(path:string):Promise<unknown>=>JSON.parse(await readFile(path,'utf8'))
 const text=(v:unknown,max:number):v is string=>typeof v==='string'&&v.trim().length>0&&v.length<=max
 
+// This same finite reference vocabulary is given to the analysis model and
+// checked at registration. It does not rewrite a model's invalid references.
+export function dailyAnalysisSchema(pack:unknown,inputDigest:string):Obj {
+  const source=obj(pack),paths:string[]=[]
+  const visit=(value:unknown,path:string,maximumDepth:number):void=>{
+    if(path.includes('.')&&path.length<=240&&at(source,path)!==undefined)paths.push(path)
+    if(paths.length>4096)throw new Error('analysis.reference_vocabulary_limit')
+    if(path.split('.').length>=maximumDepth)return
+    if(value&&typeof value==='object')for(const [key,child] of Object.entries(value)){
+      if(/^[A-Za-z0-9_-]+$/.test(key))visit(child,`${path}.${key}`,maximumDepth)
+    }
+  }
+  // Cite complete deeper subtrees instead of multiplying every historical leaf
+  // in the schema. All values remain available in the frozen analysis input.
+  for(const key of ['yesterday','comparableHistory','changes','versions','coverage'])visit(source[key],key,key==='comparableHistory'?3:5)
+  const ids=Array.isArray(source.samples)?source.samples.map(sample=>obj(sample).evidenceId).filter((id):id is string=>typeof id==='string'):[]
+  const item={type:'object',additionalProperties:false,required:['text','metricPaths','evidenceIds'],properties:{
+    text:{type:'string',minLength:1,maxLength:2000},metricPaths:{type:'array',maxItems:paths.length?12:0,items:paths.length?{type:'string',enum:paths}:{type:'string'}},
+    evidenceIds:{type:'array',maxItems:ids.length?12:0,items:ids.length?{type:'string',enum:ids}:{type:'string'}}}}
+  return {type:'object',additionalProperties:false,$defs:{statement:item},required:['schemaVersion','reportId','inputDigest','model','facts','hypotheses','recommendations'],properties:{
+    schemaVersion:{type:'integer',const:1},reportId:{type:'string',const:source.reportId},inputDigest:{type:'string',const:inputDigest},
+    model:{type:'object',additionalProperties:false,required:['provider','snapshotId'],properties:{provider:{type:'string',minLength:1,maxLength:160},snapshotId:{type:'string',minLength:1,maxLength:240}}},
+    facts:{type:'array',minItems:1,maxItems:12,items:{$ref:'#/$defs/statement'}},hypotheses:{type:'array',maxItems:12,items:{$ref:'#/$defs/statement'}},recommendations:{type:'array',maxItems:12,items:{$ref:'#/$defs/statement'}}}}
+}
+
 export function validateAnalysis(submission:unknown,pack:unknown,expectedDigest:string):Obj {
   const input=obj(submission),source=obj(pack)
   if(input.schemaVersion!==1||input.reportId!==source.reportId||input.inputDigest!==expectedDigest||digest(pack)!==expectedDigest)throw new Error('analysis.input_identity_mismatch')

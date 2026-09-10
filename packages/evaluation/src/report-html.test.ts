@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { evidenceLink, lineChart, ratioText, renderGateHtml, sanitizeReportLinks } from './report-html'
 import { reportMetrics, renderDailyHtml } from './daily-report'
 import { digest, runDaily } from './daily'
-import { recordDailyAnalysis, validateAnalysis } from './daily-analysis'
+import { dailyAnalysisSchema, recordDailyAnalysis, validateAnalysis } from './daily-analysis'
 const roots:string[]=[]
 afterEach(async()=>{await Promise.all(roots.splice(0).map(root=>rm(root,{recursive:true,force:true})))})
 const temp=async():Promise<string>=>{const path=await mkdtemp(join(tmpdir(),'rovai-report-test-'));roots.push(path);return path}
@@ -20,6 +20,12 @@ describe('offline report contract — synthetic fixtures only',()=>{
     const html=renderDailyHtml({window:{date:'2026-09-09',timezone:'UTC'},metrics:{tools:{bySource:{runtime:{terminalOutcomesInWindow:{succeeded:10,failed:1,unsettled:22},failureRate:{numerator:1,denominator:11,value:1/11}}}}}},[],{})
     const toolTable=html.slice(html.indexOf('>工具来源</th>')).split('</table>')[0]
     expect(toolTable).toContain('unsettled');expect(toolTable).toContain('22')
+  })
+  it('makes absent states in a known sparse distribution explicit without filling unavailable sources',()=>{
+    const source={runs:{terminalOutcomesInWindow:{succeeded:2}},tools:{bySource:{core:{terminalOutcomesInWindow:{failed:1,unsettled:2}},runtime:{terminalOutcomesInWindow:null}}}}
+    expect(reportMetrics(source)).toMatchObject({runs:{terminalOutcomesInWindow:{succeeded:2,failed:0,cancelled:0}},tools:{bySource:{core:{terminalOutcomesInWindow:{succeeded:0,failed:1,denied:0,cancelled:0,not_executed:0,unknown:0,unsettled:2}},runtime:{terminalOutcomesInWindow:null}}}})
+    expect(source.tools.bySource.core.terminalOutcomesInWindow).toEqual({failed:1,unsettled:2})
+    expect(reportMetrics({}).tools).toBeUndefined()
   })
   it('calculates terminal-window Run rate and preserves null, zero-denominator, and as-of A2A states',()=>{
     expect(reportMetrics({runs:{terminalOutcomesInWindow:{failed:2,succeeded:8,cancelled:3},createdInWindow:100},a2a:{terminalCoverage:{numerator:3,denominator:10}}})).toMatchObject({runs:{failureRate:{value:0.2,numerator:2,denominator:10}},a2a:{cohortOpenCountAsOf:7,openCountAsOf:null}})
@@ -71,6 +77,13 @@ describe('offline report contract — synthetic fixtures only',()=>{
     expect(validateAnalysis(input,pack,digest(pack))).toEqual(input)
     for(const path of ['yesterday.missing','yesterday.constructor','comparableHistory.1.date'])expect(()=>validateAnalysis({...input,facts:[{...input.facts[0],metricPaths:[path]}]},pack,digest(pack))).toThrow()
     expect(()=>validateAnalysis({...input,facts:[{...input.facts[0],evidenceIds:['run:missing']}]},pack,digest(pack))).toThrow()
+    const schema=dailyAnalysisSchema(pack,digest(pack)) as {$defs:{statement:{properties:{metricPaths:{items:{enum:string[]}},evidenceIds:{items:{enum:string[]}}}}}}
+    const references=schema.$defs.statement.properties
+    expect(references.metricPaths.items.enum).toContain('yesterday.runs.failureRate.value')
+    for(const path of references.metricPaths.items.enum)expect(()=>validateAnalysis({...input,facts:[{...input.facts[0],metricPaths:[path]}]},pack,digest(pack))).not.toThrow()
+    expect(references.metricPaths.items.enum).not.toContain('runs.failureRate.value')
+    expect(references.evidenceIds.items.enum).toEqual(['run:a'])
+    expect(dailyAnalysisSchema({reportId:'empty',yesterday:{},samples:[]},'digest')).toMatchObject({$defs:{statement:{properties:{metricPaths:{maxItems:0},evidenceIds:{maxItems:0}}}}})
   })
   it('retains failed and successful analysis attempts without changing statistics',async()=>{
     const root=await temp()
