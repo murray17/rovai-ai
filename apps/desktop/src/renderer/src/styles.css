@@ -6485,6 +6485,10 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .camp-action-dialog { width: min(520px, calc(100vw - 48px)); }
 .camp-action-dialog > .dialog-close { position: absolute; top: 14px; right: 14px; }
+.rename-project-context { display: grid; gap: 4px; margin-top: 14px; color: var(--muted); font-size: 11.5px; }
+.rename-project-context code { font: 11.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.rename-project-error { margin: 10px 0 0; color: var(--danger); font-size: 12px; line-height: 1.6; }
+.rename-project-error:empty { display: none; }
 .camp-action-dialog h2 { margin: 0 40px 6px 0; font: 700 19px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
 .camp-action-dialog [data-radix-dialog-description] { margin: 0 0 16px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .inline-error { margin-top: 12px; padding: 9px 11px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 12px; }

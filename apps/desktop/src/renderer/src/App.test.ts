@@ -2738,8 +2738,8 @@ describe('task event projections', () => {
   it('defines the final unified Camp and Project menu labels', () => {
     expect(campNavigationMenuLabels(false)).toEqual(['置顶', '重命名', '复制会话 ID', '删除'])
     expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '重命名', '复制会话 ID', '删除'])
-    expect(projectNavigationMenuLabels(false)).toEqual(['置顶项目', '移除项目'])
-    expect(projectNavigationMenuLabels(true)).toEqual(['取消置顶项目', '移除项目'])
+    expect(projectNavigationMenuLabels(false)).toEqual(['置顶项目', '重命名', '移除项目'])
+    expect(projectNavigationMenuLabels(true)).toEqual(['取消置顶项目', '重命名', '移除项目'])
   })
 
   it('copies only the exact Camp ID and reports clipboard failures', async () => {

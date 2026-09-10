@@ -7,12 +7,14 @@ import type {
   StructuredError
 } from '@contracts'
 import { writePrivateJson } from './general-preferences'
+import { normalizeProjectDisplayName, projectDisplayNameError } from '../shared/project-display-name'
 
 const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   pins: [],
   removedProjects: [],
-  projectOrder: null
+  projectOrder: null,
+  projectNames: {}
 }
 
 export async function readNavigationPreferences(
@@ -63,6 +65,14 @@ function sourceMatchesSupportedSnapshot(
       schemaVersion: 2,
       pins: snapshot.pins,
       removedProjects: snapshot.removedProjects
+    })
+  }
+  if (source.schemaVersion === 3) {
+    return JSON.stringify(source) === JSON.stringify({
+      schemaVersion: 3,
+      pins: snapshot.pins,
+      removedProjects: snapshot.removedProjects,
+      projectOrder: snapshot.projectOrder
     })
   }
   return JSON.stringify(source) === JSON.stringify(snapshot)
@@ -122,6 +132,24 @@ export class NavigationPreferencesStore {
     })
   }
 
+  setProjectName(targetKey: string, name: string | null): Promise<NavigationPreferencesSnapshot> {
+    if (!isProjectTargetKey(targetKey)) {
+      return Promise.reject(new Error('Unsupported Project navigation key'))
+    }
+    if (name !== null && (typeof name !== 'string' || projectDisplayNameError(name))) {
+      return Promise.reject(new Error(typeof name === 'string'
+        ? projectDisplayNameError(name)!
+        : 'Invalid Project display name'))
+    }
+    return this.#enqueue(async () => {
+      const projectNames = { ...this.#snapshot.projectNames }
+      if (name === null) delete projectNames[targetKey]
+      else projectNames[targetKey] = normalizeProjectDisplayName(name)
+      await this.#commit({ ...this.#snapshot, projectNames })
+      return this.get()
+    })
+  }
+
   synchronizeProjectOrder(projectKeys: string[]): Promise<NavigationPreferencesSnapshot> {
     if (
       !Array.isArray(projectKeys)
@@ -165,7 +193,7 @@ export class NavigationPreferencesStore {
         (project) => project.targetKey === targetKey
       )
       const next = sanitizeSnapshot({
-        schemaVersion: 3,
+        ...this.#snapshot,
         pins: this.#snapshot.pins.filter((pin) => !(
           (pin.kind === 'project' && pin.targetKey === targetKey)
           || (pin.kind === 'camp' && relatedCampIdSet.has(pin.targetKey))
@@ -245,18 +273,19 @@ function navigationDegradation(code: string, message: string): StructuredError {
 function sanitizeSnapshot(source: unknown): NavigationPreferencesSnapshot {
   if (!isRecord(source)) return structuredClone(EMPTY_SNAPSHOT)
   const pins = sanitizePins(source)
-  const removedProjects = source.schemaVersion === 2 || source.schemaVersion === 3
+  const removedProjects = source.schemaVersion === 2 || source.schemaVersion === 3 || source.schemaVersion === 4
     ? sanitizeRemovedProjects(source.removedProjects)
     : []
-  const projectOrder = source.schemaVersion === 3
+  const projectOrder = source.schemaVersion === 3 || source.schemaVersion === 4
     ? sanitizeProjectOrder(source.projectOrder)
     : null
-  return { schemaVersion: 3, pins, removedProjects, projectOrder }
+  const projectNames = source.schemaVersion === 4 ? sanitizeProjectNames(source.projectNames) : {}
+  return { schemaVersion: 4, pins, removedProjects, projectOrder, projectNames }
 }
 
 function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
   if (
-    (source.schemaVersion !== 1 && source.schemaVersion !== 2 && source.schemaVersion !== 3)
+    (source.schemaVersion !== 1 && source.schemaVersion !== 2 && source.schemaVersion !== 3 && source.schemaVersion !== 4)
     || !Array.isArray(source.pins)
   ) return []
   const seen = new Set<string>()
@@ -300,6 +329,15 @@ function sanitizeProjectOrder(source: unknown): string[] | null {
     projectOrder.push(projectKey)
   }
   return projectOrder
+}
+
+function sanitizeProjectNames(source: unknown): Record<string, string> {
+  if (!isRecord(source)) return {}
+  return Object.fromEntries(Object.entries(source).flatMap(([key, name]) =>
+    isProjectTargetKey(key) && typeof name === 'string' && !projectDisplayNameError(name)
+      ? [[key, normalizeProjectDisplayName(name)]]
+      : []
+  ))
 }
 
 function sanitizeRemovedProjects(source: unknown): RemovedNavigationProject[] {

@@ -125,6 +125,21 @@ export function navigationWithProjectOrder(
     : { ...navigation, projects }
 }
 
+// Display overrides never mutate Core snapshots, workspace bindings, or Camp identity.
+export function navigationWithProjectNames(
+  navigation: NavigationSnapshot | null,
+  projectNames: Readonly<Record<string, string>>
+): NavigationSnapshot | null {
+  if (!navigation) return null
+  const projects = navigation.projects.map((project) => {
+    const name = projectNames[project.projectKey] ?? project.name
+    return name === project.name ? project : { ...project, name }
+  })
+  return projects.every((project, index) => project === navigation.projects[index])
+    ? navigation
+    : { ...navigation, projects }
+}
+
 export function navigationWithProjectAuthority(
   navigation: NavigationSnapshot | null,
   removedProjectKeys: ReadonlySet<string>,
