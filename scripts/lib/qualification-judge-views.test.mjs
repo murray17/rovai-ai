@@ -814,3 +814,17 @@ test('v3 accepts relevant in-view boundary evidence and quarantines only a malfo
   assert.equal(execution.review.payload.items.find(item => item.checklistItem === 'SER.response.claim_accuracy').verdict, 'indeterminate')
   assert.match(execution.review.payload.items.find(item => item.checklistItem === 'SER.response.claim_accuracy').reason, /evidence_out_of_pack/)
 })
+
+
+test('v3 nested task file IDs project their original path without crossing the Outcome boundary', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.1.json', import.meta.url)))
+  const sourcePack = sourcePackFixture(), path = 'src/original.mjs'
+  sourcePack.payload.untrustedEvidence.push({segmentId:`task-file-base64:${Buffer.from(path).toString('base64url')}`,kind:'code',authorPseudonym:null,visibility:'workspace',content:'export const unchanged = 0',evidenceReference:{artifactId:'evidence-index:fixture',evidenceId:'runner.workspace-content:original'}})
+  sourcePack.payloadDigest = `sha256:${digestJson(sourcePack.payload)}`
+  const configuration = buildJudgeViewConfiguration({ view:'outcome', provider:'fixture', snapshotId:'fixture', snapshotDigest:'a'.repeat(64), producerDigest:'a'.repeat(64), taskProfile:taskJudgeProfile(scoring.cases['DEMO-106'],'outcome') })
+  const pack = buildJudgeViewPack({view:'outcome',sourcePack,configuration,producerDigest:'a'.repeat(64)})
+  assert.match(JSON.stringify(pack.payload.modelInput), /src\/original\.mjs/)
+  assert.doesNotMatch(JSON.stringify(pack.payload.modelInput), /Review the boundary cases and report concrete risks/)
+})

@@ -1102,7 +1102,7 @@ function projectEvidenceSegments(source, registry, view) {
         ? { visibility: segment.visibility }
         : {}),
       ...(segment.kind === 'code'
-        ? { path: codePaths.get(segment.segmentId) ?? (segment.segmentId.startsWith('task-file:') ? segment.segmentId.slice('task-file:'.length) : null) }
+        ? { path: codePaths.get(segment.segmentId) ?? (segment.segmentId.startsWith('task-file-base64:') ? Buffer.from(segment.segmentId.slice('task-file-base64:'.length), 'base64url').toString('utf8') : segment.segmentId.startsWith('task-file:') ? segment.segmentId.slice('task-file:'.length) : null) }
         : {}),
       content: requireBoundedString(segment.content, 'Judge View evidence content', 50_000),
       evidenceIds: registry.ids([segment.evidenceReference])

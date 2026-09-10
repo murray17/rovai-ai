@@ -424,7 +424,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
       } catch {
         continue
       }
-      if (content.length > SEMANTIC_JUDGE_CONTENT_ALLOWLIST.changedWorkspaceCode.maximumCharacters) continue
+      // Empty-file creation remains in boundary facts, without an invalid text segment.
+      if (!content.length || content.length > SEMANTIC_JUDGE_CONTENT_ALLOWLIST.changedWorkspaceCode.maximumCharacters) continue
       segments.push({
         segmentId: `code:${mutation.mutationId}:${digestJson(path).slice(0, 16)}`,
         kind: 'code',
@@ -474,7 +475,7 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
     try { content = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { continue }
     if (!content || content.length > 50_000 || totalCharacters + content.length > 150_000) continue
     totalCharacters += content.length
-    segments.push({ segmentId: `task-file:${path}`, kind: 'code', path, authorAgentProfileId: null, visibility: 'workspace', content, evidenceReference })
+    segments.push({ segmentId: `task-file-base64:${Buffer.from(path).toString('base64url')}`, kind: 'code', path, authorAgentProfileId: null, visibility: 'workspace', content, evidenceReference })
   }
   const raw = await readFile(join(evidenceDirectory, 'observations.ndjson'), 'utf8')
   if (sha256(raw) !== result.observationDigest) throw new Error('Task observation digest mismatch')

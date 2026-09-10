@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -334,6 +334,14 @@ test('Semantic evidence reads exact delivered code only through its content-boun
     assert.equal(codeSegment.content, code)
     assert.equal(codeSegment.evidenceReference.evidenceId, 'runner.workspace-content:answer')
 
+    await writeFile(join(directory, 'delivered', 'empty.txt'), '')
+    evidenceIndex.payload.records.push(contentRecord('runner.workspace-content:empty', ''))
+    result.workspaceDiff.changed.push({ path: 'empty.txt', before: null, after: { type: 'file', digest: sha256('') } })
+    workspaceMutationLedger.payload.records.push({ mutationId: 'workspace-mutation:empty', paths: ['empty.txt'], evidenceReferences: [ref('runner.workspace-content:empty')] })
+    const withEmpty = await buildSemanticJudgeUntrustedEvidence({ evidenceDirectory: directory, result, evidenceIndex, workspaceMutationLedger })
+    assert.equal(withEmpty.some(segment => segment.content.length === 0), false, 'Empty-file boundary facts must not become invalid Judge text')
+    assert.equal(result.workspaceDiff.changed.some(change => change.path === 'empty.txt'), true)
+
     await writeFile(join(directory, 'delivered', 'src', 'answer.mjs'), 'tampered\n')
     await assert.rejects(buildSemanticJudgeUntrustedEvidence({
       evidenceDirectory: directory,
@@ -388,6 +396,8 @@ test('task v3 includes unchanged captured files and Gather public returns with e
     const segments = await buildTaskJudgeSegments(args)
     assert.equal(segments.length, 2)
     assert.equal(segments[0].path, 'src/source.mjs')
+    const envelope = JSON.parse(await readFile(new URL('../../docs/versions/v0.34/schemas/artifact-envelope.schema.json', import.meta.url)))
+    assert.match(segments[0].segmentId, new RegExp(envelope.$defs.stableId.pattern))
     assert.equal(segments[1].content, body)
     assert.doesNotMatch(JSON.stringify(segments), /FOREIGN_CANARY/)
     await writeFile(join(directory, 'delivered', 'src/source.mjs'), 'tampered')
