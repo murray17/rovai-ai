@@ -13,7 +13,7 @@ const ratio = (numerator, denominator) => ({ numerator, denominator, value: deno
 const unknown = (reason, raw = null) => ({ verdict: 'indeterminate', reasonCode: reason, raw })
 
 export function validateScoring(scoring, cases) {
-  if (scoring?.schemaVersion !== 1 || !['2.0.0', '2.1.0'].includes(scoring.version) || scoring.id !== 'generic-task-quality'
+  if (scoring?.schemaVersion !== 1 || !['2.0.0', '2.1.0', '2.2.0'].includes(scoring.version) || scoring.id !== 'generic-task-quality'
       || scoring.aggregation !== 'repetitions_then_fixed_case_weights' || scoring.collaborationAggregation !== 'failure_unknown_partial_satisfied_v1'
       || scoring.gate?.minimumQuality !== null || scoring.gate?.maximumItemDowngrade !== 0
       || Object.keys(scoring.dimensions ?? {}).sort().join(',') !== 'boundary,evidence,goal'
@@ -21,7 +21,7 @@ export function validateScoring(scoring, cases) {
       || Object.values(scoring.dimensions).reduce((a, b) => a + b, 0) !== 100) throw new Error('Invalid versioned quality scoring policy')
   for (const spec of cases) {
     const config = scoring.cases?.[spec.id]
-    if (scoring.version === '2.1.0' && (config?.judgeProfile !== 'generic-task-v3' || !Array.isArray(config.evidenceFiles)
+    if (['2.1.0', '2.2.0'].includes(scoring.version) && (config?.judgeProfile !== (scoring.version === '2.2.0' ? 'generic-task-v4' : 'generic-task-v3') || !Array.isArray(config.evidenceFiles)
         || config.evidenceFiles.length > 64 || new Set(config.evidenceFiles).size !== config.evidenceFiles.length
         || config.evidenceFiles.some(path => typeof path !== 'string' || path.startsWith('/') || path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..')))) throw new Error(`Invalid frozen task evidence scope: ${spec.id}`)
     if (!config || !Number.isFinite(config.weight) || config.weight <= 0 || !Array.isArray(config.quality)

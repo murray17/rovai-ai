@@ -437,8 +437,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
       })
     }
   }
-  if (caseEvaluation?.judgeProfile === 'generic-task-v3') {
-    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [] })
+  if (['generic-task-v3', 'generic-task-v4'].includes(caseEvaluation?.judgeProfile)) {
+    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], includeEvaluationContext: caseEvaluation.judgeProfile === 'generic-task-v4' })
     const seen = new Set(segments.map(segment => segment.evidenceReference.evidenceId))
     for (const segment of extra) if (!seen.has(segment.evidenceReference.evidenceId)) {
       segments.push(segment)
@@ -456,7 +456,7 @@ export async function buildSemanticJudgeUntrustedEvidence({
 
 // Sources are retained public messages and frozen workspace files, not live
 // workspaces, private Runtime logs or model reasoning. Every body is hash-bound.
-export async function buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles }) {
+export async function buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles, includeEvaluationContext = false }) {
   if (!Array.isArray(evidenceFiles) || evidenceFiles.length > 64 || new Set(evidenceFiles).size !== evidenceFiles.length) throw new Error('Invalid task evidence file allowlist')
   const indexRecords = new Map(evidenceIndex.payload.records.map(record => [record.evidenceId, record]))
   const segments = []
@@ -483,15 +483,38 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
   if (digestJson(observation.snapshot) !== observation.digest) throw new Error('Task snapshot digest mismatch')
   const snapshot = observation.snapshot
   const runs = new Set(snapshot.agentRuns.filter(run => run.campTurnId === result.dispatchBoundary.campTurnId).map(run => run.id))
+  const context = includeEvaluationContext && snapshot.evaluationContext?.policyId === 'bounded-evaluation-context-v1' ? snapshot.evaluationContext : null
+  if (context) {
+    const events = new Map((snapshot.executionEvidence ?? []).filter(event => runs.has(event.agentRunId)).map(event => [event.id, event]))
+    const tasks = new Map((snapshot.tasks ?? []).filter(task => runs.has(task.sourceAgentRunId)).map(task => [task.taskId ?? task.id, task]))
+    for (const receipt of context.receipts) {
+      if (events.get(receipt.sourceEvidenceId)?.payloadDigest !== receipt.sourcePayloadDigest || sha256(receipt.content) !== receipt.contentDigest) throw new Error('Evaluation receipt source digest mismatch')
+      addContextSegment('runtime.command-receipt', receipt.sourceEvidenceId, 'test_output', 'verification-receipt', receipt.content)
+    }
+    for (const task of context.tasks) {
+      const source = tasks.get(task.taskId), body = JSON.parse(task.content)
+      if (!source || source.titleDigest !== sha256(body.title) || source.descriptionDigest !== sha256(body.description)) throw new Error('Evaluation Task source digest mismatch')
+      addContextSegment('core.task-description', task.taskId, 'comment', 'task-description', task.content)
+    }
+  }
+  function addContextSegment(prefix, sourceId, kind, segmentPrefix, content) {
+    const evidenceReference = { artifactId: evidenceIndex.artifactId, evidenceId: stableEvidenceId(prefix, sourceId) }
+    const record = indexRecords.get(evidenceReference.evidenceId)
+    if (record?.safeForJudge !== true || record.contentDigest !== `sha256:${sha256(content)}`) throw new Error('Evaluation context index digest mismatch')
+    if (!content || content.length > 50_000 || totalCharacters + content.length > 310_000) return
+    totalCharacters += content.length
+    segments.push({ segmentId: `${segmentPrefix}:${sourceId}`, kind, authorAgentProfileId: null, visibility: 'public_to_camp', content, evidenceReference })
+  }
   for (const message of snapshot.messages) {
     if (message.authorType !== 'agent' || !runs.has(message.sourceAgentRunId) || message.campTurnId !== result.dispatchBoundary.campTurnId) continue
     const body = typeof message.body === 'string' ? message.body : (message.content ?? []).filter(part => part.kind === 'text').map(part => part.text).join('')
     const evidenceReference = { artifactId: evidenceIndex.artifactId, evidenceId: stableEvidenceId('core.message-content', message.id) }
     const record = indexRecords.get(evidenceReference.evidenceId)
-    if (record?.safeForJudge !== true || !body || body.length > 50_000 || totalCharacters + body.length > 150_000) continue
+    if (record?.safeForJudge !== true || !body || body.length > 50_000 || totalCharacters + body.length > (includeEvaluationContext ? 310_000 : 150_000)) continue
     if (record.contentDigest !== `sha256:${sha256(body)}`) throw new Error('Task public message digest mismatch')
     totalCharacters += body.length
-    segments.push({ segmentId: `participant-message:${message.id}`, kind: 'participant_message', messageId: message.id, sequence: message.sequence, replyToMessageId: message.replyToCampMessageId ?? null,
+    const delivery = context?.deliveryMessageIds.includes(message.id) && !(message.addressedAgentIds?.length)
+    segments.push({ segmentId: `${delivery ? 'delivery-message' : 'participant-message'}:${message.id}`, kind: delivery ? 'comment' : 'participant_message', messageId: message.id, sequence: message.sequence, replyToMessageId: message.replyToCampMessageId ?? null,
       callIds: [], taskIds: [], createdAt: message.createdAt, authorAgentProfileId: message.authorId, visibility: 'public_to_camp', content: body, evidenceReference })
   }
   return segments

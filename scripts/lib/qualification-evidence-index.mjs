@@ -335,6 +335,14 @@ export function buildEvidenceIndex({
         stableEvidenceId('core.inbox', message.id)
       )
     }
+    for (const receipt of snapshot.evaluationContext?.receipts ?? []) {
+      addSourceRecord({ evidenceId: stableEvidenceId('runtime.command-receipt', receipt.sourceEvidenceId), evidenceType: 'runtime_activity', authorityClass: 'runtime',
+        sourceId: 'core.agent-run-execution-evidence', content: receipt.content, contentDigestOverride: sha256(receipt.content), safeForJudge: true })
+    }
+    for (const task of snapshot.evaluationContext?.tasks ?? []) {
+      addSourceRecord({ evidenceId: stableEvidenceId('core.task-description', task.taskId), evidenceType: 'core_domain', authorityClass: 'core',
+        sourceId: 'core.camp-snapshot', content: task.content, contentDigestOverride: sha256(task.content), safeForJudge: true })
+    }
     for (const task of snapshot.tasks ?? []) {
       if (!trialRunIds.has(task.sourceAgentRunId)) continue
       const taskId = task.taskId ?? task.id

@@ -66,3 +66,12 @@ last_updated: 2026-09-10
 这说明相同函数要求可以在既定预算内实际完成，支持优先检查审查结束后继续修复的责任衔接，而非降低函数复杂度。原版 A2A 返回的冻结上下文已包含完整原始用户需求，故不支持“整个原请求没有传入”的解释。一次诊断成功不能证明唯一原因、稳定改善或正式 Gate 放行；本轮未修改产品上下文、内置 Skill 或正式 Suite，诊断变体不替换原 106 成绩，不与其他轮成功拼成十二项通过。
 
 独立证据目录为仓库外 `rovai-evaluation-evidence/completion-rerun-20260910-yc62eqhg`。`index.html` / `summary.md` 连接原版复跑报告与 `phase-clarity-diagnostic/` 报告；`summary.json` 绑定各份原始结果和计划摘要，`diagnosis.json` 与 `complexity-audit.md` 说明诊断依据、验收覆盖限制及变体边界。三页 32 个链接检查通过，十二次真实 Judge 调用无进程失败，临时 Runtime 目录已清理。浏览器视觉验收仍未完成，未绕过既有 URL 策略。原始十二项报告保持不变。
+
+
+## 2026-09-10：完整评分证据方案 revision 3
+
+本轮在用户要求再次运行完整评分评测的授权内实施。隔离 Runner 在丢弃原始 Runtime payload 前保留有界验证回执，补充 Task 描述和面向用户的 Lead 公开交付集合。证据边界与 rubric 见 [Semantic Judge Views v4](../../contracts/semantic-judge-views-v4.md)，套件与评分见 [Execution Evaluation v6](../../contracts/execution-evaluation-v6.md)。产品模型上下文、共享 Skill、权重、硬验收及日常数据不变。
+
+106 采用上轮实际验证过的阶段说明，版本 1.2.0；不简化函数或删除失败样本。回归集 12 项、每项一次、最多两个 Case 并行，真实 Runtime 使用 gpt-5.6-sol / medium，Judge 为真实 CLI 的同模型反序双副本。Case 使用既有 480/600 秒预算，Judge 总阶段最多 600 秒，整轮预算 7200 秒；本轮不实施选择性重评或分歧裁决。最终总分仅在所有必需项有有效判定时发布。
+
+验证范围：源数据摘要与跨 Trial 排除，成功/失败/缺失/截断回执，Task 仅 Process 可见，公开交付不包含定向交接，旧 profile 不改变，未知分母与硬门槛不变；完成本地检查后运行真实 12 项。真实结果尚待本轮执行，测试通过不代表任务效果改善。普通用户无新增字段或自动采集，仅评测目录增大。

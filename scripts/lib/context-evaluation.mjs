@@ -5,7 +5,7 @@ import { digestFile, digestJson, runCaptured, verifyStoredCaseSeal, writePrivate
 import { loadQualificationResultHistory, computeQualificationEvaluatorDigest } from './qualification-recovery.mjs'
 import { validateScoring, evaluateQualityAndCollaboration, semanticVerdict } from './context-quality.mjs'
 import { renderGateHtml, renderReportIndex, sanitizeReportLinks } from '../../packages/evaluation/src/report-html.ts'
-import { TASK_OUTCOME_RUBRIC, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC } from './context-judge-profile.mjs'
+import { TASK_OUTCOME_RUBRIC, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC } from './context-judge-profile.mjs'
 import { PROCESS_JUDGE_RUBRIC, OUTCOME_JUDGE_RUBRIC } from './qualification-judge-views.mjs'
 import { validateRegressionConfiguration } from './context-regression-fixture.mjs'
 import { runCurrentContractConformance } from '../benchmark/execution/current-contract-runner.mjs'
@@ -131,7 +131,7 @@ export async function freezePlan(config, output) {
   }
   const plan = { schemaVersion: 1, createdAt: new Date().toISOString(), mode: config.mode, change: { ...config.change, document: resolve(config.change.document), documentDigest: digestJson(document) },
     scoring, scoringPath, scoringDigest: digestJson(scoring), tier: selected.tier, suite: { id: suite.id, version: suite.version, partition: suite.partition, digest: digestJson(suite), path: suitePath }, cases, products, team, repetitions: config.repetitions, budget: config.budget, execution, judge, policy: POLICY,
-    rubricDigest: digestJson({ process: scoring.version === '2.1.0' ? EVIDENCE_PROCESS_RUBRIC : PROCESS_JUDGE_RUBRIC, outcome: scoring.version === '2.1.0' ? EVIDENCE_OUTCOME_RUBRIC : TASK_OUTCOME_RUBRIC, scoring }), evaluatorDigest: await evaluatorDigest(),
+    rubricDigest: digestJson({ process: scoring.version === '2.2.0' ? RECEIPT_PROCESS_RUBRIC : scoring.version === '2.1.0' ? EVIDENCE_PROCESS_RUBRIC : PROCESS_JUDGE_RUBRIC, outcome: scoring.version === '2.2.0' ? RECEIPT_OUTCOME_RUBRIC : scoring.version === '2.1.0' ? EVIDENCE_OUTCOME_RUBRIC : TASK_OUTCOME_RUBRIC, scoring }), evaluatorDigest: await evaluatorDigest(),
     environment: { platform: process.platform, architecture: process.arch, node: process.version },
     holdout: { status: 'not_run', reason: 'Independent acceptance cases are separate from the regression suite.' } }
   const sealed = { ...plan, planDigest: digestJson(plan) }

@@ -633,3 +633,16 @@ function untrustedEvidenceFixture(evidenceIndex) {
     }
   ]
 }
+
+test('receipt source policy admits only exact content-bound evaluation receipts and preserves legacy rejection', () => {
+  const fixture = judgeFixture({buildPack:false})
+  const configuration=buildSemanticJudgeConfiguration({provider:'fixture',snapshotId:'fixture-receipt',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),evaluationContextPolicy:'bounded-evaluation-context-v1'})
+  const content='Observed command: npm test; exit 0; pass 5', evidenceId='runtime.command-receipt:receipt'
+  fixture.evidenceIndex.payload.records.push({...fixture.evidenceIndex.payload.records[0],evidenceId,safeForJudge:true,contentDigest:`sha256:${sha256(content)}`})
+  fixture.untrustedEvidence.push({segmentId:'verification-receipt:receipt',kind:'test_output',authorAgentProfileId:null,visibility:'public_to_camp',content,evidenceReference:{artifactId:fixture.evidenceIndex.artifactId,evidenceId}})
+  const pack=buildJudgeEvidencePack({...fixture,configuration})
+  assert.ok(pack.payload.untrustedEvidence.some(s=>s.kind==='test_output'))
+  assert.throws(()=>buildJudgeEvidencePack(fixture),/current content policy excludes/)
+  fixture.untrustedEvidence.at(-1).content+=' tampered'
+  assert.throws(()=>buildJudgeEvidencePack({...fixture,configuration}),/digest/)
+})

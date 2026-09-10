@@ -39,7 +39,9 @@ const caseRecord = await verifyStoredCaseSeal(options.caseDirectory, result.case
 const configurationInput = JSON.parse(await readFile(options.configurationPath, 'utf8'))
 const adapter = await loadAdapter(options.adapterPath, result.mode, configurationInput)
 const producerDigest = await computeQualificationEvaluatorDigest()
+const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
 const sourceConfiguration = buildSemanticJudgeConfiguration({
+  evaluationContextPolicy: caseEvaluation?.judgeProfile === 'generic-task-v4' ? 'bounded-evaluation-context-v1' : null,
   provider: configurationInput.provider,
   snapshotId: configurationInput.snapshotId,
   snapshotDigest: configurationInput.snapshotDigest,
@@ -49,7 +51,6 @@ const sourceConfiguration = buildSemanticJudgeConfiguration({
   retrySchedule: configurationInput.retrySchedule
 })
 const artifacts = await loadRetainedArtifacts(evidenceDirectory)
-const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
 const untrustedEvidence = await buildSemanticJudgeUntrustedEvidence({
   evidenceDirectory,
   result,

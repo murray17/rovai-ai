@@ -142,6 +142,7 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-artifacts.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-core.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-evidence-index.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-evaluation-context.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-isolation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-public-report.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-schema-validation.mjs'),

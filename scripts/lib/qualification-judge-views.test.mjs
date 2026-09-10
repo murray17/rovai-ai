@@ -828,3 +828,23 @@ test('v3 nested task file IDs project their original path without crossing the O
   assert.match(JSON.stringify(pack.payload.modelInput), /src\/original\.mjs/)
   assert.doesNotMatch(JSON.stringify(pack.payload.modelInput), /Review the boundary cases and report concrete risks/)
 })
+
+test('v4 adds bounded receipts and public delivery, while Task descriptions stay Process-only and v3 stays unchanged', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.2.json',import.meta.url)))
+  const sourcePack=sourcePackFixture()
+  for(const [prefix,kind,content] of [['verification-receipt','test_output','OBSERVED_TEST_RECEIPT'],['task-description','comment','TASK_BODY_CANARY'],['delivery-message','comment','PUBLIC_DELIVERY_CANARY']]) {
+    sourcePack.payload.untrustedEvidence.push({segmentId:prefix+':one',kind,authorPseudonym:null,visibility:'public_to_camp',content,evidenceReference:{artifactId:'evidence-index:fixture',evidenceId:prefix+':one'}})
+  }
+  sourcePack.payloadDigest=`sha256:${digestJson(sourcePack.payload)}`
+  for(const version of ['generic-task-v3','generic-task-v4']) for(const view of ['process','outcome']) {
+    const config={...scoring.cases['DEMO-106'],judgeProfile:version}
+    const configuration=buildJudgeViewConfiguration({view,provider:'fixture',snapshotId:'fixture',snapshotDigest:'a'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile(config,view)})
+    const pack=buildJudgeViewPack({view,sourcePack,configuration,producerDigest:'a'.repeat(64)})
+    const serialized=JSON.stringify(pack.payload.modelInput)
+    assert.equal(serialized.includes('OBSERVED_TEST_RECEIPT'),version==='generic-task-v4')
+    assert.equal(serialized.includes('PUBLIC_DELIVERY_CANARY'),version==='generic-task-v4')
+    assert.equal(serialized.includes('TASK_BODY_CANARY'),version==='generic-task-v4'&&view==='process')
+  }
+})

@@ -88,7 +88,7 @@ test('case workers cap parallelism, preserve paired arm ordering and drain after
 test('budget calibration keeps original task and verifier bytes, while sealing doubled time limits', async () => {
   const suite = JSON.parse(await readFile('qualification/context-regression/suite.json', 'utf8'))
   for (const item of suite.cases.filter(item => suite.general.includes(item.id))) {
-    const current = resolve('qualification/context-regression', item.directory)
+    const current = resolve('qualification/context-regression/cases', `${item.id}-budget-v2`)
     const old = resolve('qualification/context-regression/cases', item.id === 'DEMO-111' ? 'DEMO-111-v2' : item.id)
     for (const file of ['prompt.txt', 'verifier.mjs']) assert.equal(await readFile(`${current}/${file}`, 'utf8'), await readFile(`${old}/${file}`, 'utf8'))
     const before = JSON.parse(await readFile(`${old}/manifest.json`, 'utf8'))
@@ -97,4 +97,15 @@ test('budget calibration keeps original task and verifier bytes, while sealing d
     assert.equal(after.budget.maxAcceptedA2a, before.budget.maxAcceptedA2a)
     assert.equal(after.budget.maxAgentRuns, before.budget.maxAgentRuns)
   }
+})
+
+
+test('106 phase clarification preserves every functional requirement, verifier, fixture and budget', async () => {
+  const { treeManifest } = await import('./qualification-common.mjs')
+  const before=resolve('qualification/context-regression/cases/DEMO-106-budget-v2'), after=resolve('qualification/context-regression/cases/DEMO-106-phase-v3')
+  assert.equal(await readFile(`${after}/verifier.mjs`,'utf8'),await readFile(`${before}/verifier.mjs`,'utf8'))
+  assert.ok((await readFile(`${after}/prompt.txt`,'utf8')).endsWith(await readFile(`${before}/prompt.txt`,'utf8')))
+  const old=JSON.parse(await readFile(`${before}/manifest.json`)), current=JSON.parse(await readFile(`${after}/manifest.json`))
+  for(const key of ['requirements','verificationCatalog','allowedPaths','forbiddenPaths','budget']) assert.deepEqual(current[key],old[key])
+  for(const dir of ['fixture','reference']) assert.deepEqual(await treeManifest(`${after}/${dir}`),await treeManifest(`${before}/${dir}`))
 })

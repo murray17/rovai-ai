@@ -1,3 +1,4 @@
+import { buildEvaluationContext } from './lib/qualification-evaluation-context.mjs'
 import { appendFile, chmod, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { arch, platform, release, type as osType } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -1447,6 +1448,7 @@ async function observeTrial({
       runs
     )
     snapshot.executionEvidence = executionEvidenceCoverage.evidence
+    snapshot.evaluationContext = buildEvaluationContext(snapshot, { campTurnId, rootAgentRunId })
     if (coverageOverride) executionEvidenceCoverage.coverage = coverageOverride
     const finalObservation = normalizeSnapshot(snapshot)
     const finalObservationDigest = digestJson(finalObservation)
@@ -1520,6 +1522,7 @@ function normalizeSnapshot(snapshot) {
   const timeline = Array.isArray(snapshot.timeline) ? snapshot.timeline : []
   return {
     schemaVersion: snapshot.schemaVersion,
+    ...(snapshot.evaluationContext ? { evaluationContext: snapshot.evaluationContext } : {}),
     throughGlobalSequence: snapshot.throughGlobalSequence,
     camp: snapshot.camp,
     members: snapshot.members,

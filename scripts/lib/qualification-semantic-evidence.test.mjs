@@ -405,3 +405,27 @@ test('task v3 includes unchanged captured files and Gather public returns with e
     await assert.rejects(buildTaskJudgeSegments({ ...args, evidenceFiles: ['../outside'] }), /relative|locator|path|escapes/i)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
+
+test('v4 receipt and Task bodies require matching frozen observation and Evidence Index', async () => {
+  const { buildTaskJudgeSegments } = await import('./qualification-semantic-evidence.mjs')
+  const directory=await mkdtemp(join(tmpdir(),'rovai-receipt-evidence-'))
+  try {
+    await mkdir(join(directory,'delivered'))
+    const receiptBody=JSON.stringify({command:'npm test',exitCode:0,output:'pass 5'}), taskBody=JSON.stringify({title:'Repair',description:'Respect rollback',status:'completed'})
+    const snapshot={agentRuns:[{id:'run',campTurnId:'turn'}],messages:[],executionEvidence:[{id:'receipt',agentRunId:'run',payloadDigest:'a'.repeat(64)}],tasks:[{taskId:'task',sourceAgentRunId:'run',titleDigest:sha256('Repair'),descriptionDigest:sha256('Respect rollback')}],evaluationContext:{policyId:'bounded-evaluation-context-v1',receipts:[{sourceEvidenceId:'receipt',sourcePayloadDigest:'a'.repeat(64),content:receiptBody,contentDigest:sha256(receiptBody)}],tasks:[{taskId:'task',content:taskBody}],deliveryMessageIds:[]}}
+    const raw=JSON.stringify({snapshot,digest:digestJson(snapshot)})+'\n'
+    await writeFile(join(directory,'observations.ndjson'),raw)
+    const evidenceIndex={artifactId:'index',payload:{records:[contentRecord('runtime.command-receipt:receipt',receiptBody),contentRecord('core.task-description:task',taskBody)]}}
+    const result={observationDigest:sha256(raw),dispatchBoundary:{campTurnId:'turn'},deliveredWorkspaceSnapshot:{directory:'delivered'}}
+    const args={evidenceDirectory:directory,result,evidenceIndex,evidenceFiles:[],includeEvaluationContext:true}
+    assert.deepEqual((await buildTaskJudgeSegments(args)).map(s=>s.kind),['test_output','comment'])
+    assert.equal((await buildTaskJudgeSegments({...args,includeEvaluationContext:false})).length,0)
+    evidenceIndex.payload.records[0].contentDigest='sha256:'+'0'.repeat(64)
+    await assert.rejects(buildTaskJudgeSegments(args),/index digest mismatch/)
+    evidenceIndex.payload.records[0]=contentRecord('runtime.command-receipt:receipt',receiptBody)
+    snapshot.executionEvidence[0].agentRunId='foreign'
+    const tampered=JSON.stringify({snapshot,digest:digestJson(snapshot)})+'\n'
+    await writeFile(join(directory,'observations.ndjson'),tampered);result.observationDigest=sha256(tampered)
+    await assert.rejects(buildTaskJudgeSegments(args),/source digest mismatch/)
+  } finally {await rm(directory,{recursive:true,force:true})}
+})
