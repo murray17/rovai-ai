@@ -282,6 +282,8 @@ Rovai 的设计始终保持克制，不会为了世界观增加无关流程或�
 
 - [**安装指南**](docs/guides/installation.md)：下载安装、首次启动与常见问题
 - [**操作指南**](docs/guides/operations.md)：配置队友、选择 Runtime 与设置权限
+- [**产品展示**](docs/product-showcase.md)：协作工作台、队员管理、定时自动化与能力接入
+- [**系统架构图解**](docs/architecture/system-views.md)：身份、协作、上下文、记忆与执行机制
 - [**架构决策**](docs/decisions/CURRENT.md)：当前有效的架构选择与约束
 - [**开发环境与依赖**](docs/development/environment.md)：本地开发所需环境与工具
 
