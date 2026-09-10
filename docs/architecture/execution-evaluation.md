@@ -8,7 +8,7 @@ last_updated: 2026-09-10
 
 # 双轨执行评测
 
-当前字段与判断规则由 [Execution Evaluation v3](../contracts/execution-evaluation-v3.md)拥有；操作见[开发指南](../development/evaluation.md)。
+当前字段与判断规则由 [Execution Evaluation v4](../contracts/execution-evaluation-v4.md)拥有；操作见[开发指南](../development/evaluation.md)。
 
 ```mermaid
 flowchart LR

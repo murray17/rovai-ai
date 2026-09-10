@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.6.0",
+  "catalogVersion": "1.7.0",
   "hashAlgorithm": "sha256",
   "digestInput": "raw_file_bytes",
   "schemas": [
@@ -80,6 +80,12 @@
       "schemaUri": "https://schemas.rovai.invalid/contracts/collaboration-ledger-v1.1.schema.json",
       "schemaVersion": "1.1.0",
       "digest": "sha256:bd4dd664150c9f0a7f04509efb1a4582b0bf761b8cea1c11ce5d7307fc840d99"
+    },
+    {
+      "file": "semantic-judge-configuration-v1.1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/semantic-judge-configuration-v1.1.schema.json",
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:678d7a763c534ad958a88c83b4428c0530972d31715c2a65cd2d84f8a6dcbf28"
     }
   ]
 }

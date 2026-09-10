@@ -22,3 +22,5 @@ Schema version 与 raw-byte SHA-256；实现必须先验证 catalog，再按唯�
 - `tool-use-review-v1.schema.json`：不投票、不平均的逐项 agreement/disagreement reconciliation。
 - `resource-measurement-v1.schema.json`：typed Resource Profile/Measurement descriptor、authority 与 coverage。
 - `paired-collaboration-experiment-v1.schema.json`：paired Definition、arm plan 和 outcome-conditioned comparison。
+
+- [Semantic Judge Configuration 1.1](semantic-judge-configuration-v1.1.schema.json)：只记录 CLI 实际支持的解码配置；旧 API 配置 1.0 保留。当前执行边界见 [Execution Evaluation v4](../execution-evaluation-v4.md)。

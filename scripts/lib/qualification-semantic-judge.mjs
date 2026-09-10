@@ -11,7 +11,8 @@ import {
 } from './qualification-common.mjs'
 import {
   qualificationSchemaReference,
-  validateQualificationArtifactSchema
+  validateQualificationArtifactSchema,
+  validateQualificationContractArtifactSchema
 } from './qualification-schema-validation.mjs'
 import {
   SEMANTIC_JUDGE_CONTENT_ALLOWLIST,
@@ -209,6 +210,7 @@ export function buildSemanticJudgeConfiguration({
     )],
     payload
   })
+  if (decodingParameters.reasoningEffort !== undefined) artifact.schemaVersion = '1.1.0'
   validateSemanticJudgeConfiguration(artifact)
   return artifact
 }
@@ -219,7 +221,8 @@ export function validateSemanticJudgeConfiguration(artifact) {
     SEMANTIC_JUDGE_CONFIGURATION_SCHEMA_ID,
     'Semantic Judge Configuration'
   )
-  validateQualificationArtifactSchema('semantic-judge-configuration.schema.json', artifact)
+  if (artifact.schemaVersion === '1.1.0') validateQualificationContractArtifactSchema('semantic-judge-configuration-v1.1.schema.json', artifact)
+  else validateQualificationArtifactSchema('semantic-judge-configuration.schema.json', artifact)
   if (canonicalJson(artifact.payload.checklist) !== canonicalJson(SEMANTIC_CHECKLIST)) {
     throw new Error('Semantic Judge Configuration checklist is not the frozen v0.34 checklist')
   }
@@ -1241,7 +1244,7 @@ function envelope({ artifactId, schemaId, producer, binding, sourceBoundaries, p
 
 function validateEnvelopeIdentity(artifact, schemaId, label) {
   if (artifact?.schemaId !== schemaId
-      || artifact.schemaVersion !== SEMANTIC_JUDGE_SCHEMA_VERSION
+      || !(artifact.schemaVersion === SEMANTIC_JUDGE_SCHEMA_VERSION || schemaId === SEMANTIC_JUDGE_CONFIGURATION_SCHEMA_ID && artifact.schemaVersion === '1.1.0')
       || artifact.payloadDigest !== digest(artifact.payload)) {
     throw new Error(`${label} envelope identity is invalid`)
   }

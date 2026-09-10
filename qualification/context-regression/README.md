@@ -32,4 +32,6 @@
 
 新执行使用 [scoring-v2.json](scoring-v2.json)：目标达成 50、证据一致性 25、边界遵守 25；协作保留五项状态与三组统计，不设总分。每个 Case 的权重、适用项、判定来源和具体依据均在运行前冻结。
 
-Suite 2.0.0 只升级评价和报告配置；Suite 2.1.0 将 DEMO-111 指向独立的 v2 目录，公开结构化状态取值并修正错误文案完全匹配造成的误判，保留原 v1 目录和 seal。评分权重及工具失败要求保持；通用集仍为 12 个 Case。无真实 Judge 的旧结果不可直接换算新分数。规则与限制见 [Execution Evaluation v2](../../docs/contracts/execution-evaluation-v2.md)。
+Suite 2.0.0 只升级评价和报告配置；Suite 2.1.0 将 DEMO-111 指向独立的 v2 目录，公开结构化状态取值并修正错误文案完全匹配造成的误判，保留原 v1 目录和 seal。评分权重及工具失败要求保持；通用集仍为 12 个 Case。无真实 Judge 的旧结果不可直接换算新分数。规则与限制见 [Execution Evaluation v4](../../docs/contracts/execution-evaluation-v4.md)。
+
+Suite 2.2.0 仅将十二个通用 Case 指向独立的 budget-v2 目录，时间上限由 240／300 秒提高到 480／600 秒。任务与验收规则字节保持，旧版本目录和报告不改写；配置并行度进入环境身份，不将预算或并行变化归为产品收益。

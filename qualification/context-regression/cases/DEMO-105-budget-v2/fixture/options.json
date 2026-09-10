@@ -1,0 +1,20 @@
+[
+  {
+    "id": "flat-json",
+    "atomicAcknowledgement": false,
+    "dateQuery": true,
+    "serviceRequired": false
+  },
+  {
+    "id": "postgres",
+    "atomicAcknowledgement": true,
+    "dateQuery": true,
+    "serviceRequired": true
+  },
+  {
+    "id": "sqlite",
+    "atomicAcknowledgement": true,
+    "dateQuery": true,
+    "serviceRequired": false
+  }
+]

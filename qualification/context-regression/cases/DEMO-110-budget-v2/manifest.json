@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "id": "DEMO-110",
+  "version": "1.1.0",
+  "visibility": "demo",
+  "title": "长消息前缀与正文续读",
+  "tags": [
+    "context-regression"
+  ],
+  "fixtureDirectory": "fixture",
+  "promptFile": "prompt.txt",
+  "verifierFile": "verifier.mjs",
+  "referenceDirectory": "reference",
+  "requirements": [
+    {
+      "requirementId": "REQ-DELIVERY",
+      "criticality": "critical",
+      "categoryId": "functional",
+      "statement": "请从历史消息“Falcon 大型验收附件”中读取末尾的签收条件，输出 acceptanceCode 和 minimumReplicas。若只看到前缀，应通过历史读取入口续读，不要猜测。"
+    },
+    {
+      "requirementId": "REQ-BOUNDARY",
+      "criticality": "critical",
+      "categoryId": "change_boundary",
+      "statement": "Only report.json may be written; preserve every supplied file."
+    }
+  ],
+  "verificationCatalog": [
+    {
+      "checkId": "CHK-DELIVERY",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "functional",
+      "requirementIds": [
+        "REQ-DELIVERY"
+      ],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-BOUNDARY",
+      "kind": "hard",
+      "observationAuthority": "runner",
+      "runnerCheck": "change_boundary",
+      "categoryId": "change_boundary",
+      "requirementIds": [
+        "REQ-BOUNDARY"
+      ],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    }
+  ],
+  "expectedInitialFailureCheckIds": [
+    "CHK-DELIVERY"
+  ],
+  "publicChecks": [],
+  "allowedPaths": [
+    "report.json"
+  ],
+  "forbiddenPaths": [
+    "README.md",
+    ".git/**"
+  ],
+  "toolchain": [
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "--version"
+      ]
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 480,
+    "maxAgentRuns": 8,
+    "maxAcceptedA2a": 0
+  }
+}

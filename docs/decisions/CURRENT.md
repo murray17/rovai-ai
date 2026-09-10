@@ -158,5 +158,5 @@ last_updated: 2026-09-07
 
 ## 双轨执行评测
 
-- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v3](../contracts/execution-evaluation-v3.md)、[User Automation v4](../contracts/user-automation-v4.md)与[操作指南](../development/evaluation.md)。
+- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v4](../contracts/execution-evaluation-v4.md)、[User Automation v4](../contracts/user-automation-v4.md)与[操作指南](../development/evaluation.md)。
 - 理由来源：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)。

@@ -3,7 +3,7 @@ import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
-import { compareResults, evaluateCaseRules, selectCases, validatePlanSeal, POLICY } from './context-evaluation.mjs'
+import { compareResults, evaluateCaseRules, selectCases, validatePlanSeal, POLICY, evaluationExecution, runCaseWorkers } from './context-evaluation.mjs'
 import { digestJson, runCaptured } from './qualification-common.mjs'
 import { validateRegressionConfiguration } from './context-regression-fixture.mjs'
 
@@ -40,6 +40,7 @@ test('hard violations cannot be offset, absent replicas cannot pass, and environ
   const slot = arm => ({ caseId: 'one', repeat: 1, arm, state: 'complete', hardOutcome: 'pass', environmentKey: 'frozen', resources: { dispatchToTerminal: { valueMilliseconds: 20_000, coverage: { state: 'complete' } } }, rules: [{ status: 'passed' }], semanticItems: [{ checklistItem: 'coverage', state: 'agreed', verdict: 'satisfied' }] })
   const contracts = { baseline: { status: 'passed' }, candidate: { status: 'passed' } }
   assert.equal(compareResults(plan, [slot('baseline'), slot('candidate')], contracts).status, 'passed')
+  assert.equal(compareResults({ ...plan, judge: { modelVersionPolicy: 'catalog_bound_alias' } }, [slot('baseline'), slot('candidate')], contracts).status, 'insufficient')
   for (const candidate of [{ ...slot('candidate'), state: 'not_run' }, { ...slot('candidate'), semanticItems: [] }, { ...slot('candidate'), environmentKey: 'changed' }, { ...slot('candidate'), rules: [{ status: 'indeterminate' }] }]) assert.equal(compareResults(plan, [slot('baseline'), candidate], contracts).status, 'insufficient')
   assert.equal(compareResults(plan, [slot('baseline'), { ...slot('candidate'), resources: { dispatchToTerminal: { valueMilliseconds: 36_000, coverage: { state: 'complete' } } } }], contracts).status, 'degraded')
   assert.equal(compareResults(plan, [slot('baseline'), { ...slot('candidate'), hardOutcome: 'fail' }], contracts).status, 'degraded')
@@ -59,4 +60,41 @@ test('frozen plans reject changed policies and content', () => {
   assert.throws(() => validatePlanSeal({ ...plan, repetitions: 1 }))
   const changed = { ...payload, policy: { ...POLICY, noPassAtK: false } }
   assert.throws(() => validatePlanSeal({ ...changed, planDigest: digestJson(changed) }))
+})
+
+
+test('case workers cap parallelism, preserve paired arm ordering and drain after failure', async () => {
+  let active = 0, peak = 0
+  const events = [], releases = []
+  const work = runCaseWorkers(['one', 'two', 'three'], 2, async id => {
+    peak = Math.max(peak, ++active); events.push(`${id}:baseline`)
+    await new Promise(resolve => releases.push(resolve))
+    events.push(`${id}:candidate`); active--
+    if (id === 'one') throw new Error('retained failure')
+  })
+  const rejection = assert.rejects(work, /retained failure/)
+  assert.equal(active, 2)
+  releases.shift()(); releases.shift()()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(active, 1); releases.shift()()
+  await rejection
+  assert.equal(active, 0); assert.equal(peak, 2)
+  assert.deepEqual(events.filter(event => event.startsWith('three')), ['three:baseline', 'three:candidate'])
+  assert.equal(evaluationExecution().maxParallelCases, 1)
+  assert.throws(() => evaluationExecution({ maxParallelCases: 3 }))
+  assert.throws(() => evaluationExecution({ judgeSeconds: 0 }))
+})
+
+test('budget calibration keeps original task and verifier bytes, while sealing doubled time limits', async () => {
+  const suite = JSON.parse(await readFile('qualification/context-regression/suite.json', 'utf8'))
+  for (const item of suite.cases.filter(item => suite.general.includes(item.id))) {
+    const current = resolve('qualification/context-regression', item.directory)
+    const old = resolve('qualification/context-regression/cases', item.id === 'DEMO-111' ? 'DEMO-111-v2' : item.id)
+    for (const file of ['prompt.txt', 'verifier.mjs']) assert.equal(await readFile(`${current}/${file}`, 'utf8'), await readFile(`${old}/${file}`, 'utf8'))
+    const before = JSON.parse(await readFile(`${old}/manifest.json`, 'utf8'))
+    const after = JSON.parse(await readFile(`${current}/manifest.json`, 'utf8'))
+    assert.equal(after.budget.elapsedSeconds, before.budget.elapsedSeconds * 2)
+    assert.equal(after.budget.maxAcceptedA2a, before.budget.maxAcceptedA2a)
+    assert.equal(after.budget.maxAgentRuns, before.budget.maxAgentRuns)
+  }
 })

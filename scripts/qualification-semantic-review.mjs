@@ -120,7 +120,7 @@ const [processExecution, outcomeExecution] = await Promise.all([
     timeoutMilliseconds: configurationInput.timeoutMilliseconds
   })
 ])
-const process = {
+const processView = {
   configuration: processConfiguration,
   pack: processPack,
   ...processExecution
@@ -130,11 +130,11 @@ const outcome = {
   pack: outcomePack,
   ...outcomeExecution
 }
-const suite = buildSemanticJudgeViewSuite({ process, outcome, producerDigest })
+const suite = buildSemanticJudgeViewSuite({ process: processView, outcome, producerDigest })
 const retained = await retainSemanticJudgeViewArtifacts(evidenceDirectory, {
   sourceConfiguration,
   sourcePack,
-  process,
+  process: processView,
   outcome,
   suite
 })
@@ -205,7 +205,7 @@ async function loadAdapter(path, mode, configuration) {
   if (mode === 'formal' && assurance !== 'tool_disabled_external_sandbox') {
     throw new Error('Formal Semantic Review requires a tool-disabled external sandbox assurance')
   }
-  if (!['tool_disabled_external_sandbox', 'fixture'].includes(assurance)) {
+  if (!['tool_disabled_external_sandbox', 'tool_disabled_cli', 'fixture'].includes(assurance)) {
     throw new Error('Semantic Judge adapter assurance is unsupported')
   }
   return { invokeReplica }

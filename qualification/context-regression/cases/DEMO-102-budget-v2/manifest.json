@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "id": "DEMO-102",
+  "version": "1.1.0",
+  "visibility": "demo",
+  "title": "直接交付与不使用控制",
+  "tags": [
+    "context-regression"
+  ],
+  "fixtureDirectory": "fixture",
+  "promptFile": "prompt.txt",
+  "verifierFile": "verifier.mjs",
+  "referenceDirectory": "reference",
+  "requirements": [
+    {
+      "requirementId": "REQ-DELIVERY",
+      "criticality": "critical",
+      "categoryId": "functional",
+      "statement": "阅读 incidents.json，按服务名合并失败次数，输出 failuresByService；按 incident ID 去重，相同 ID 的后续条目是重复记录。无需记忆和队员协作。"
+    },
+    {
+      "requirementId": "REQ-BOUNDARY",
+      "criticality": "critical",
+      "categoryId": "change_boundary",
+      "statement": "Only report.json may be written; preserve every supplied file."
+    }
+  ],
+  "verificationCatalog": [
+    {
+      "checkId": "CHK-DELIVERY",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "functional",
+      "requirementIds": [
+        "REQ-DELIVERY"
+      ],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-BOUNDARY",
+      "kind": "hard",
+      "observationAuthority": "runner",
+      "runnerCheck": "change_boundary",
+      "categoryId": "change_boundary",
+      "requirementIds": [
+        "REQ-BOUNDARY"
+      ],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    }
+  ],
+  "expectedInitialFailureCheckIds": [
+    "CHK-DELIVERY"
+  ],
+  "publicChecks": [],
+  "allowedPaths": [
+    "report.json"
+  ],
+  "forbiddenPaths": [
+    "incidents.json",
+    ".git/**"
+  ],
+  "toolchain": [
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "--version"
+      ]
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 480,
+    "maxAgentRuns": 8,
+    "maxAcceptedA2a": 0
+  }
+}

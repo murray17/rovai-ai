@@ -64,11 +64,31 @@ export function selectCases(suite, change) {
   return { tier: core ? 'general' : 'skill', cases }
 }
 
+export function evaluationExecution(value = {}) {
+  const configuration = { version: 1, maxParallelCases: 1, judgeSeconds: 240, ...value }
+  if (Object.keys(configuration).some(key => !['version', 'maxParallelCases', 'judgeSeconds'].includes(key)) || configuration.version !== 1 || ![1, 2].includes(configuration.maxParallelCases) || !Number.isInteger(configuration.judgeSeconds) || configuration.judgeSeconds < 240 || configuration.judgeSeconds > 600) throw new Error('Execution requires version 1, 1–2 parallel cases and a 240–600 second Judge budget')
+  return configuration
+}
+
+// A worker owns the whole Case × repetition, including both paired arms.
+// Result order stays frozen even when another worker finishes first. A failure
+// drains every worker before the caller releases its campaign lock.
+export async function runCaseWorkers(items, parallelism, run) {
+  if (![1, 2].includes(parallelism)) throw new Error('Expected 1–2 case workers')
+  let next = 0
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(parallelism, items.length) }, async () => {
+    while (next < items.length) { const index = next++; await run(items[index], index) }
+  }))
+  const failure = workers.find(result => result.status === 'rejected')
+  if (failure) throw failure.reason
+}
+
 export async function freezePlan(config, output) {
   if (config.schemaVersion !== 1 || !['gate', 'weekly'].includes(config.mode)) throw new Error('Expected Gate/weekly configuration schema 1')
   if (!Number.isInteger(config.repetitions) || config.repetitions < 1 || config.repetitions > 3) throw new Error('Freeze 1–3 repetitions before execution')
   if (!Number.isInteger(config.budget?.wallSeconds) || config.budget.wallSeconds < 60 || config.budget.wallSeconds > 86_400) throw new Error('An explicit 60–86400 second total budget is required')
   if (Object.keys(config.budget).some(key => key !== 'wallSeconds')) throw new Error('Only wallSeconds is supported at campaign level; per-case Run/A2A limits are sealed in Case budgets')
+  const execution = evaluationExecution(config.execution)
   const suitePath = resolve(config.suite)
   const suite = await json(suitePath)
   if (suite.partition !== 'regression') throw new Error('Routine Gate/weekly runs use the regression partition; holdout is reserved for independent acceptance')
@@ -105,10 +125,12 @@ export async function freezePlan(config, output) {
   const judge = config.judge ? { ...config.judge, adapter: resolve(config.judge.adapter), configuration: resolve(config.judge.configuration), adapterDigest: await digestFile(resolve(config.judge.adapter)), configurationDigest: await digestFile(resolve(config.judge.configuration)) } : null
   if (judge) {
     const adapter = await import(pathToFileURL(judge.adapter).href)
-    if ((adapter.assurance ?? adapter.default?.assurance) !== 'tool_disabled_external_sandbox') throw new Error('Gate forbids fixture Judges; configure a real tool-disabled adapter or retain Judge as unavailable')
+    const configuration = await json(judge.configuration)
+    if (adapter.assurance === 'tool_disabled_cli') { adapter.createAdapter(configuration); judge.modelVersionPolicy = configuration.cli.modelVersionPolicy }
+    if (!['tool_disabled_external_sandbox', 'tool_disabled_cli'].includes(adapter.assurance ?? adapter.default?.assurance)) throw new Error('Gate forbids fixture Judges; configure a real tool-disabled adapter or retain Judge as unavailable')
   }
   const plan = { schemaVersion: 1, createdAt: new Date().toISOString(), mode: config.mode, change: { ...config.change, document: resolve(config.change.document), documentDigest: digestJson(document) },
-    scoring, scoringPath, scoringDigest: digestJson(scoring), tier: selected.tier, suite: { id: suite.id, version: suite.version, partition: suite.partition, digest: digestJson(suite), path: suitePath }, cases, products, team, repetitions: config.repetitions, budget: config.budget, judge, policy: POLICY,
+    scoring, scoringPath, scoringDigest: digestJson(scoring), tier: selected.tier, suite: { id: suite.id, version: suite.version, partition: suite.partition, digest: digestJson(suite), path: suitePath }, cases, products, team, repetitions: config.repetitions, budget: config.budget, execution, judge, policy: POLICY,
     rubricDigest: digestJson({ process: PROCESS_JUDGE_RUBRIC, outcome: TASK_OUTCOME_RUBRIC, scoring }), evaluatorDigest: await evaluatorDigest(),
     environment: { platform: process.platform, architecture: process.arch, node: process.version },
     holdout: { status: 'not_run', reason: 'Independent acceptance cases are separate from the regression suite.' } }
@@ -192,6 +214,7 @@ export function compareResults(plan, slots, contracts) {
       if (comparableEnvironment && before?.state === 'agreed' && after.state === 'agreed' && rank[after.verdict] < rank[before.verdict]) regressions.push({ caseId: item.id, repeat, code: 'semantic_regression', checklistItem: after.checklistItem, before: before.verdict, after: after.verdict })
     }
   }
+  if (plan.mode === 'gate' && plan.judge?.modelVersionPolicy === 'catalog_bound_alias') problems.push({ code: 'judge_provider_snapshot_not_pinned' })
   const assessment = plan.scoring ? evaluateQualityAndCollaboration(plan, slots) : null
   if (assessment) {
     problems.push(...assessment.qualityGaps)
@@ -213,6 +236,7 @@ function semanticItem(slot, id) { return slot.semanticItems?.find(item => item.c
 
 export async function validatePlanInputs(plan, { products = true } = {}) {
   validatePlanSeal(plan)
+  evaluationExecution(plan.execution)
   if (!plan.scoring || digestJson(plan.scoring) !== plan.scoringDigest || digestJson(await json(plan.scoringPath)) !== plan.scoringDigest) throw new Error('Scoring changed or is missing; freeze a new plan')
   validateScoring(plan.scoring, plan.cases)
   if (plan.evaluatorDigest !== await evaluatorDigest()) throw new Error('Evaluator changed after the plan was frozen')
@@ -230,7 +254,7 @@ export async function runPlan(planPath, outputRoot) {
     const attempts = (await readdir(output)).filter(name => /^attempt-\d+$/.test(name)).sort()
     if (attempts.length >= POLICY.maximumAttempts) throw new Error('The retained campaign has exhausted its two attempts; do not discard failures or change standards to pass')
     const campaignPath = join(output, 'campaign.json')
-    const campaign = { scoringDigest: plan.scoringDigest, evaluatorDigest: plan.evaluatorDigest, rubricDigest: plan.rubricDigest, changeDocumentDigest: plan.change.documentDigest, tier: plan.tier, changeDocument: plan.change.document, revision: plan.change.revision, suiteDigest: plan.suite.digest, policy: plan.policy, repetitions: plan.repetitions, team: plan.team, budget: plan.budget, judge: plan.judge, baseline: plan.products.baseline?.coreDigest ?? null }
+    const campaign = { scoringDigest: plan.scoringDigest, evaluatorDigest: plan.evaluatorDigest, rubricDigest: plan.rubricDigest, changeDocumentDigest: plan.change.documentDigest, tier: plan.tier, changeDocument: plan.change.document, revision: plan.change.revision, suiteDigest: plan.suite.digest, policy: plan.policy, repetitions: plan.repetitions, team: plan.team, budget: plan.budget, execution: evaluationExecution(plan.execution), judge: plan.judge, baseline: plan.products.baseline?.coreDigest ?? null }
     if (attempts.length && digestJson(await json(campaignPath)) !== digestJson(campaign)) throw new Error('Campaign scope, baseline, rubric or budget changed; update and reconfirm the plan instead of silently retrying')
     if (!attempts.length) await writePrivateJsonExclusive(campaignPath, campaign)
     const directory = join(output, `attempt-${String(attempts.length + 1).padStart(2, '0')}`)
@@ -244,15 +268,18 @@ export async function runPlan(planPath, outputRoot) {
         contracts[arm] = { status: result.benchmarkRun.outcome.hardOutcome === 'pass' ? 'passed' : result.benchmarkRun.outcome.hardOutcome === 'fail' ? 'failed' : 'indeterminate', locator: `contracts-${arm}/benchmark-run.json` }
       } catch (error) { contracts[arm] = { status: 'indeterminate', reason: error.message } }
     }
-    for (const item of plan.cases) for (let repeat = 1; repeat <= plan.repetitions; repeat++) {
+    const executionConfiguration = evaluationExecution(plan.execution)
+    const groups = plan.cases.flatMap(item => Array.from({ length: plan.repetitions }, (_, index) => ({ item, repeat: index + 1, slots: [] })))
+    await runCaseWorkers(groups, executionConfiguration.maxParallelCases, async group => {
+      const { item, repeat } = group
       const arms = plan.mode === 'weekly' ? ['candidate'] : (repeat + plan.cases.indexOf(item)) % 2 ? ['baseline', 'candidate'] : ['candidate', 'baseline']
       for (const arm of arms) {
         const slot = { caseId: item.id, repeat, arm, state: 'not_run', reason: null }
-        slots.push(slot)
+        group.slots.push(slot)
         const id = `${item.id}-${repeat}-${arm}`, trialDirectory = join(directory, 'trials', id)
         if (contracts[arm]?.status !== 'passed') { slot.reason = 'Contract checks did not pass'; continue }
         const remaining = deadline - Date.now()
-        const reserved = (item.budget.elapsedSeconds + 240 + (plan.judge ? 240 : 0)) * 1000
+        const reserved = (item.budget.elapsedSeconds + 240 + (plan.judge ? executionConfiguration.judgeSeconds : 0)) * 1000
         if (remaining < reserved) { slot.reason = 'Insufficient remaining campaign budget for a full trial and cleanup'; continue }
         try {
           const regressionConfig = join(directory, `${id}.json`)
@@ -268,7 +295,7 @@ export async function runPlan(planPath, outputRoot) {
           const read = async name => { try { return await json(join(trialDirectory, name)) } catch (error) { if (error.code === 'ENOENT') return null; throw error } }
           slot.rules = evaluateCaseRules(item.rules, { collaboration: await read('collaboration-ledger.json'), tools: await read('tool-call-ledger.json'), memoryBefore: await read('context-memory-before.json'), memoryAfter: await read('context-memory-after.json') })
           const environment = await read('environment-manifest.json')
-          slot.environmentKey = environment ? digestJson({ host: environment.host, runtimeInstallations: environment.runtimeInstallations, team: environment.team.map(({ readiness, ...member }) => member), ambientMcpIsolation: environment.ambientMcpIsolation }) : null
+          slot.environmentKey = environment ? digestJson({ host: environment.host, runtimeInstallations: environment.runtimeInstallations, team: environment.team.map(({ readiness, ...member }) => member), execution: executionConfiguration, ambientMcpIsolation: environment.ambientMcpIsolation }) : null
           slot.checks = result.deliveryLayer?.checkResults ?? []
           const ledger = await read('collaboration-ledger.json')
           slot.collaborationObservation = { accepted: ledger?.payload?.metrics?.acceptedCalls ?? null, complete: ledger?.payload?.metrics?.coverage?.state === 'complete' }
@@ -281,7 +308,7 @@ export async function runPlan(planPath, outputRoot) {
             const caseEvaluation = join(directory, `${id}-evaluation.json`)
             await writePrivateJsonExclusive(caseEvaluation, plan.scoring.cases[item.id])
             slot.failureDomain = 'evaluator'
-            const judged = await runCaptured(process.execPath, [join(root, 'scripts/qualification-semantic-review.mjs'), '--evidence-dir', trialDirectory, '--case', item.directory, '--configuration', plan.judge.configuration, '--adapter', plan.judge.adapter, '--case-evaluation', caseEvaluation], { cwd: root, timeoutMs: Math.min(240_000, deadline - Date.now()), maxOutputBytes: 4 * 1024 * 1024 })
+            const judged = await runCaptured(process.execPath, [join(root, 'scripts/qualification-semantic-review.mjs'), '--evidence-dir', trialDirectory, '--case', item.directory, '--configuration', plan.judge.configuration, '--adapter', plan.judge.adapter, '--case-evaluation', caseEvaluation], { cwd: root, timeoutMs: Math.min(executionConfiguration.judgeSeconds * 1000, deadline - Date.now()), maxOutputBytes: 4 * 1024 * 1024 })
             await writePrivateJsonExclusive(join(directory, `${id}-judge-execution.json`), judged)
             if (judged.code !== 0 || judged.timedOut || judged.outputOverflow || judged.signal) throw new Error('Judge process did not finish with complete retained evidence')
             const views = await read('semantic-judge-view-suite.json')
@@ -292,8 +319,9 @@ export async function runPlan(planPath, outputRoot) {
         } catch (error) { if (slot.failureDomain !== 'evaluator') slot.state = 'insufficient'; slot.failureDomain ??= 'runner_or_environment'; slot.judgeStatus ??= 'unavailable'; slot.reason = error.message }
         await writePrivateJsonExclusive(join(directory, `${id}-slot.json`), slot)
       }
-    }
-    const report = { schemaVersion: 2, kind: plan.mode === 'weekly' ? 'weekly_regression' : 'context_change_gate', planDigest: plan.planDigest, change: plan.change, products: plan.products, suite: plan.suite, configuration: { scoringDigest: plan.scoringDigest, scoringVersion: plan.scoring.version, evaluatorDigest: plan.evaluatorDigest, rubricDigest: plan.rubricDigest, policy: plan.policy, team: plan.team, repetitions: plan.repetitions, budget: plan.budget, judge: plan.judge }, completedAt: new Date().toISOString(), ...compareResults(plan, slots, contracts), contracts, slots, holdout: plan.holdout, earlierAttempts: attempts, limits: ['Diagnostic isolation uses fresh data/Skill/workspace/MCP paths on a shared host; not dedicated-host Formal qualification.', 'Small repeated samples cannot establish statistical non-inferiority.', 'No automatic user task replay or repair. All attempts must remain retained.'] }
+    })
+    slots.push(...groups.flatMap(group => group.slots))
+    const report = { schemaVersion: 2, kind: plan.mode === 'weekly' ? 'weekly_regression' : 'context_change_gate', planDigest: plan.planDigest, change: plan.change, products: plan.products, suite: plan.suite, configuration: { scoringDigest: plan.scoringDigest, scoringVersion: plan.scoring.version, evaluatorDigest: plan.evaluatorDigest, rubricDigest: plan.rubricDigest, policy: plan.policy, team: plan.team, repetitions: plan.repetitions, budget: plan.budget, execution: executionConfiguration, judge: plan.judge }, completedAt: new Date().toISOString(), ...compareResults(plan, slots, contracts), contracts, slots, holdout: plan.holdout, earlierAttempts: attempts, limits: ['Diagnostic isolation uses fresh data/Skill/workspace/MCP paths on a shared host; not dedicated-host Formal qualification.', 'Small repeated samples cannot establish statistical non-inferiority.', 'No automatic user task replay or repair. All attempts must remain retained.', ...(plan.judge?.modelVersionPolicy === 'catalog_bound_alias' ? ['Judge uses a frozen CLI/catalog/model alias; immutable provider snapshot and weights are not observable. Diagnostic semantic results do not establish pinned-snapshot Gate acceptance.'] : [])] }
     await writePrivateJsonExclusive(join(directory, 'report.json'), report)
     await writeFile(join(directory, 'README.md'), renderGateReport(report), { mode: 0o600, flag: 'wx' })
     await writeFile(join(directory, 'report.html'), await sanitizeReportLinks(directory, renderGateHtml(report)), { mode: 0o600, flag: 'wx' })

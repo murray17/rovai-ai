@@ -6,7 +6,7 @@ last_updated: 2026-09-10
 
 # Gate、每周回归与每日分析
 
-本页拥有开发者操作流程。判断规则见 [Execution Evaluation v3](../contracts/execution-evaluation-v3.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+本页拥有开发者操作流程。判断规则见 [Execution Evaluation v4](../contracts/execution-evaluation-v4.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
 
 ## 上下文改动 Gate
 
@@ -52,6 +52,7 @@ last_updated: 2026-09-10
   ],
   "repetitions": 1,
   "budget": {"wallSeconds": 14400},
+  "execution": {"version": 1, "maxParallelCases": 2, "judgeSeconds": 600},
   "judge": null
 }
 ```
@@ -139,3 +140,18 @@ Main 先把规则统计、HTML／SVG 和分析输入写入指定工作区；每�
 **离线报告阅读约定：** 页面沿用 Porcelain／Steel 的开放阅读平面与平台字体；筛选 Case、切换时间窗和展开证据只改变当前阅读视图，数据依据仍是 JSON 与保留证据。趋势点按真实日期间隔定位，跨多日／多周的距离如实保留；可展开数值表核对具体日期。窄屏下，质量与协作明细在表内横向滚动，保留判定列和证据列的可读宽度。
 
 历史 Gate／每周 JSON 可用 `eval:gate render --report <report.json>` 补生成 HTML，保留旧评分语义；该命令不重新评分、不改写 JSON。新旧评分不能连续连线；需要新标准对照时重新生成两侧相同 profile 的 Judge 证据，证据不足则重新执行。
+
+
+## 预算校准与订阅 CLI Judge
+
+十二个通用 Case 的时间上限已在 Suite 2.2.0 翻倍至 8／10 分钟；任务、评分及 A2A 限额保持。先按实际耗时校准，不能看候选分数后修改同一 campaign 的预算。`execution.maxParallelCases` 可设 1 或 2；基线／候选成对顺序执行，Case 间独立，启动前仍保留完整任务、Judge 和清理余量。定时宿主总预算上限仍为 45 分钟，无法容纳的任务明确 not_run；手动开发者 campaign 可设更长总预算。
+
+没有 API Key 时，可以用已登录的 Codex CLI 准备诊断 Judge：
+
+```bash
+node scripts/eval-judge-cli.mjs --executable /absolute/codex --model gpt-5.6-sol --output /private/new-judge-directory
+```
+
+将输出 `configuration.json` 与 `scripts/lib/qualification-cli-judge-adapter.mjs` 写入已有 judge 配置，再冻结计划。默认中等推理、每副本最多 240 秒、无自动重试；建议 `execution.judgeSeconds=600`，为双 View 并行和产物登记留余量。实际需要的副本按已冻结适用性调用；不适用的 Process 不调用。
+
+准备会使用本地假 HTTP 接口核验实际请求没有工具，随后所有真实评价只接收指定 evidence pack。CLI 的能力和参数依据[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)及实际命令探测；不依赖提示词单独限制工具。沿用 CLI 自己的登录，不把凭据导出到报告。其目录摘要是模型声明，不是提供者权重；固定 snapshot 未可观测时 Gate 保留证据不足，周回归仍可展示真实诊断结果。

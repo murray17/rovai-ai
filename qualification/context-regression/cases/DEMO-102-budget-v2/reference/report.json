@@ -1,0 +1,6 @@
+{
+  "failuresByService": {
+    "api": 4,
+    "worker": 2
+  }
+}

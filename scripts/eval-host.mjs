@@ -72,7 +72,7 @@ try {
     await mkdir(buildRoot, { mode: 0o700 })
     const product = await buildProduct(template.products.candidate.repository, join(buildRoot, 'product'))
     planPath = join(buildRoot, 'plan.json')
-    await freezePlan({ schemaVersion: 1, mode: 'weekly', suite: template.suite.path, candidate: join(dirname(product.core), 'product.json'), team: template.team, repetitions: template.repetitions, budget: template.budget, judge: template.judge && { adapter: template.judge.adapter, configuration: template.judge.configuration } }, planPath)
+    await freezePlan({ schemaVersion: 1, mode: 'weekly', suite: template.suite.path, candidate: join(dirname(product.core), 'product.json'), team: template.team, repetitions: template.repetitions, budget: template.budget, execution: template.execution, judge: template.judge && { adapter: template.judge.adapter, configuration: template.judge.configuration } }, planPath)
   }
   const result = await (job.mode === 'weekly' ? runWeekly : runPlan)(planPath, job.output)
   if (!stopping) await writeFile(join(dirname(jobFile), 'result.json'), JSON.stringify({ directory: result.directory, status: result.report.status, planDigest: result.report.planDigest }), { flag: 'wx', mode: 0o600 })
