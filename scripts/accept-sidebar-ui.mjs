@@ -46,7 +46,7 @@ try {
 
   const projectTarget = await firstProjectTarget(desktopApp.cdp)
   await openMenuByKeyboard(desktopApp.cdp, projectTarget)
-  await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目', '移除项目'], 1, '置顶项目')
+  await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目', '重命名', '移除项目'], 1, '置顶项目')
   const projectMenuCapture = join(outputDir, 'project-menu-day-1440x920.png')
   await capture(desktopApp.cdp, projectMenuCapture)
   await pressKey(desktopApp.cdp, 'Escape')
@@ -57,7 +57,7 @@ try {
   await assertTargetMoved(desktopApp.cdp, projectTarget, '.pinned-navigation')
   await assertProjectPaginationCount(desktopApp.cdp, '.pinned-navigation', 15)
   await openMenuByKeyboard(desktopApp.cdp, projectTarget)
-  await assertOpenMenu(desktopApp.cdp, projectTarget, ['取消置顶项目', '移除项目'], 1, '取消置顶项目')
+  await assertOpenMenu(desktopApp.cdp, projectTarget, ['取消置顶项目', '重命名', '移除项目'], 1, '取消置顶项目')
   await pressKey(desktopApp.cdp, 'Enter')
   await assertTargetMoved(desktopApp.cdp, projectTarget, '.navigation-projects')
   await assertProjectPaginationCount(desktopApp.cdp, '.navigation-projects', 15)
@@ -115,7 +115,7 @@ try {
   // both the Project and a Camp first so the acceptance also proves removal
   // clears local pins without touching Core-owned navigation data.
   await openMenuByKeyboard(desktopApp.cdp, projectTarget)
-  await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目', '移除项目'], 1, '置顶项目')
+  await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目', '重命名', '移除项目'], 1, '置顶项目')
   await pressKey(desktopApp.cdp, 'Enter')
   await assertTargetMoved(desktopApp.cdp, projectTarget, '.pinned-navigation')
   await openMenuByKeyboard(desktopApp.cdp, campTarget)
@@ -1073,7 +1073,7 @@ async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
     `Could not resolve the Core Camp before Project removal: ${JSON.stringify(beforeCamp)}`)
 
   await openMenuByKeyboard(cdp, projectTarget)
-  await assertOpenMenu(cdp, projectTarget, ['取消置顶项目', '移除项目'], 1, '取消置顶项目')
+  await assertOpenMenu(cdp, projectTarget, ['取消置顶项目', '重命名', '移除项目'], 1, '取消置顶项目')
   await pressKey(cdp, 'ArrowDown')
   await assertHighlightedItem(cdp, '移除项目')
   await pressKey(cdp, 'Enter')

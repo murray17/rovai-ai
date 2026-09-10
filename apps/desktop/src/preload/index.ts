@@ -318,6 +318,13 @@ const api: RovaiApi = {
         projectKeys
       ) as Promise<NavigationPreferencesSnapshot>
     },
+    setProjectName(targetKey: string, name: string | null) {
+      return ipcRenderer.invoke(
+        'rovai:navigation-preferences-set-project-name',
+        targetKey,
+        name
+      ) as Promise<NavigationPreferencesSnapshot>
+    },
     removeProject(targetKey: string, relatedCampIds: string[]) {
       return ipcRenderer.invoke(
         'rovai:navigation-preferences-remove-project',

@@ -128,6 +128,7 @@ import {
   currentProjectWorkspace,
   navigationIncludingCurrentWorkspace,
   navigationWithProjectAuthority,
+  navigationWithProjectNames,
   navigationWithProjectOrder,
   persistCurrentProject,
   projectTargetKey,
@@ -1117,6 +1118,8 @@ function AuthoritativeApp({
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
   const [removedProjectAuthorityReady, setRemovedProjectAuthorityReady] = useState(false)
   const [projectOrder, setProjectOrder] = useState<string[] | null>(null)
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({})
+  const projectNamesGeneration = useRef(0)
   const [pinnedCampItems, setPinnedCampItems] = useState<NavigationCampItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryReviewNotice, setMemoryReviewNotice] = useState(false)
@@ -1505,6 +1508,7 @@ function AuthoritativeApp({
             )
             return nextMemoryReviewItems
           })
+        const namesGeneration = projectNamesGeneration.current
         const nextNavigationPreferencesPromise = window.rovai.navigationPreferences.get()
 
         const navigationOverviewPromise = (async (): Promise<void> => {
@@ -1534,6 +1538,9 @@ function AuthoritativeApp({
           setNavigationPins(resolvedPins.pins)
           setRemovedProjectKeys(removedProjectKeySet)
           setProjectOrder(resolvedNavigationPreferences.projectOrder)
+          if (namesGeneration === projectNamesGeneration.current) {
+            setProjectNames(resolvedNavigationPreferences.projectNames)
+          }
           setRemovedProjectAuthorityReady(true)
           setPinnedCampItems(resolvedPins.camps)
         })()
@@ -2013,15 +2020,15 @@ function AuthoritativeApp({
     ? currentProject.projectPath
     : null
   const visibleNavigation = useMemo(
-    () => navigationWithProjectOrder(
+    () => navigationWithProjectNames(navigationWithProjectOrder(
       navigationWithProjectAuthority(
         navigation,
         removedProjectKeys,
         removedProjectAuthorityReady
       ),
       projectOrder
-    ),
-    [navigation, projectOrder, removedProjectAuthorityReady, removedProjectKeys]
+    ), projectNames),
+    [navigation, projectOrder, projectNames, removedProjectAuthorityReady, removedProjectKeys]
   )
   const currentProjectAccess = currentProjectAccessDecision({
     currentProject,
@@ -2476,11 +2483,11 @@ function AuthoritativeApp({
     setConfirmingRunIds((current) => reconcileRunCancellationIds(current, campSnapshot))
   }, [campSnapshot])
 
-  const displayNavigation = navigationIncludingCurrentWorkspace(
+  const displayNavigation = navigationWithProjectNames(navigationIncludingCurrentWorkspace(
     visibleNavigation,
     currentProject,
     currentWorkspaceHint
-  )
+  ), projectNames)
   const activeCamp = navigation
     ? allNavigationCamps(navigation).find((camp) => camp.id === activeCampId) ?? null
     : null
@@ -3097,6 +3104,14 @@ function AuthoritativeApp({
     } else {
       await remove()
     }
+  }
+
+  const renameProject = async (project: ProjectNavigationGroup, name: string | null): Promise<void> => {
+    // Invalidate older Overview reads; order/pin responses never own display names.
+    ++projectNamesGeneration.current
+    const snapshot = await window.rovai.navigationPreferences.setProjectName(project.projectKey, name)
+    setProjectNames(snapshot.projectNames)
+    notify('项目名称已保存')
   }
 
   const renameCamp = async (camp: NavigationCampItem, title: string): Promise<void> => {
@@ -3927,6 +3942,7 @@ function AuthoritativeApp({
         onCamp={chooseCamp}
         onTogglePin={toggleNavigationPin}
         onRemoveProject={removeNavigationProject}
+        onRenameProject={renameProject}
         onCampIdCopied={() => {
           setError(null)
           notify('已复制会话 ID')
@@ -4148,7 +4164,7 @@ function AuthoritativeApp({
         initialWorkspace={newConversationInitialWorkspace}
         initialSelection={newConversationInitialSelection}
         attentionMessage={newConversationAttention}
-        projects={visibleNavigation?.projects ?? []}
+        projects={displayNavigation?.projects ?? []}
         preflight={campCreationPreflight}
         agents={agents}
         busy={busy === 'create-camp' || busy === 'open-project'}

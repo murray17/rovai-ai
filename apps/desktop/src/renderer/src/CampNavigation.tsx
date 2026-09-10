@@ -35,6 +35,7 @@ import {
 } from './renderer-platform'
 import { allNavigationCamps } from './ui-model'
 import { formatCampTitle } from './camp-title'
+import { ProjectRenameDialog } from './ProjectRenameDialog'
 
 export type NavigationSettingsSection = SettingsSection
 
@@ -64,7 +65,7 @@ export async function copyCampIdToClipboard(
 }
 
 export function projectNavigationMenuLabels(pinned: boolean): string[] {
-  return [pinned ? '取消置顶项目' : '置顶项目', '移除项目']
+  return [pinned ? '取消置顶项目' : '置顶项目', '重命名', '移除项目']
 }
 
 export function toggleNavigationGroup(groups: ReadonlySet<string>, groupKey: string): Set<string> {
@@ -212,6 +213,7 @@ export function CampNavigation({
   onCamp,
   onTogglePin = () => undefined,
   onRemoveProject,
+  onRenameProject,
   onCampIdCopied = () => undefined,
   onRename,
   onDelete,
@@ -245,6 +247,7 @@ export function CampNavigation({
   onCreateInProject?(project: ProjectNavigationGroup | null): void
   onCamp(camp: NavigationCampItem): void
   onTogglePin?(kind: NavigationPin['kind'], targetKey: string, camp?: NavigationCampItem): void | Promise<void>
+  onRenameProject?(project: ProjectNavigationGroup, name: string | null): Promise<void>
   onRemoveProject(project: ProjectNavigationGroup): Promise<void>
   onCampIdCopied?(): void
   onRename(camp: NavigationCampItem, title: string): Promise<void>
@@ -256,6 +259,7 @@ export function CampNavigation({
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
   const [action, setAction] = useState<NavigationAction>(null)
   const [renameTitle, setRenameTitle] = useState('')
+  const [renameProject, setRenameProject] = useState<ProjectNavigationGroup | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const paginationByGroupRef = useRef(paginationByGroup)
@@ -551,6 +555,7 @@ export function CampNavigation({
                 onTogglePin={project.projectPath === shellOnlyProjectPath
                   ? undefined
                   : () => void togglePin('project', project.projectKey)}
+                onRenameProject={onRenameProject ? () => setRenameProject(project) : undefined}
                 onRemoveProject={() => openProjectRemoval(project)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCopyCampId={(camp) => void copyCampId(camp)}
@@ -595,6 +600,7 @@ export function CampNavigation({
                 onTogglePin={project.projectPath === shellOnlyProjectPath
                   ? undefined
                   : () => void togglePin('project', project.projectKey)}
+                onRenameProject={onRenameProject ? () => setRenameProject(project) : undefined}
                 onRemoveProject={() => openProjectRemoval(project)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCopyCampId={(camp) => void copyCampId(camp)}
@@ -660,6 +666,8 @@ export function CampNavigation({
               </>
             )}
       </aside>
+
+      {renameProject && onRenameProject && <ProjectRenameDialog project={renameProject} onClose={() => setRenameProject(null)} onSave={onRenameProject} />}
 
       <CommandPalette
         open={paletteOpen}
@@ -963,6 +971,7 @@ function CampGroup({
   onCreate,
   onTogglePin,
   onRemoveProject,
+  onRenameProject,
   onToggleCampPin,
   onCopyCampId,
   onCamp,
@@ -987,6 +996,7 @@ function CampGroup({
   onSelectProject(): void
   onCreate(): void
   onTogglePin?(): void
+  onRenameProject?(): void
   onRemoveProject?(): void
   onToggleCampPin(camp: NavigationCampItem): void
   onCopyCampId(camp: NavigationCampItem): void
@@ -1004,10 +1014,13 @@ function CampGroup({
       onSelect: onTogglePin
     })
   }
+  if (onRenameProject) {
+    projectMenuItems.push({ key: 'rename-project', label: projectMenuLabels[1], icon: 'edit', onSelect: onRenameProject })
+  }
   if (onRemoveProject) {
     projectMenuItems.push({
       key: 'remove-project',
-      label: projectMenuLabels[1],
+      label: projectMenuLabels[2],
       icon: 'remove',
       danger: true,
       separatorBefore: projectMenuItems.length > 0,

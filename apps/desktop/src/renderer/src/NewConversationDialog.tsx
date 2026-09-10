@@ -210,7 +210,8 @@ export function NewConversationDialog({
   }
 
   const projectLabel = projectAccessReady
-    ? workspace?.name ?? '使用快速对话'
+    ? projects.find((project) => project.projectPath === workspace?.projectPath)?.name
+      ?? workspace?.name ?? '使用快速对话'
     : '正在载入项目…'
   const projectDetail = projectAccessReady
     ? workspace?.projectPath ?? 'Rovai AI 管理的快速对话目录'

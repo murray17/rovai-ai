@@ -3,14 +3,14 @@ document_type: architecture
 architecture: desktop-navigation-refresh
 authority: desktop-navigation-invalidation-and-refresh-boundaries
 status: accepted
-last_updated: 2026-09-04
+last_updated: 2026-09-10
 ---
 
 # Desktop Navigation Refresh 架构
 
 本架构规定 Desktop 侧栏 Navigation Snapshot 的失效、刷新、失败恢复、前后台与 Sidecar Project 顺序边界。
 Core Navigation Read Model 拥有 Project 聚合、Camp 活动排序与活动字段；Main-owned Navigation Preferences
-拥有当前设备的 Sidecar Project 顺序。Renderer 只组合两份完整快照，不从增量事件猜测位置。
+拥有当前设备的 Sidecar Project 顺序和项目显示名称。Renderer 只组合两份完整快照，不从增量事件猜测位置。
 
 ## Component authority
 
@@ -18,7 +18,7 @@ Core Navigation Read Model 拥有 Project 聚合、Camp 活动排序与活动字
 | --- | --- |
 | Core Navigation Read Model | 在一个 SQLite 读事务中投影 Project 聚合、Project 内 Camp 活动顺序、标题、Lead、活动时间、运行标记与完成未读标记；Project 数组保留旧活动顺序，作为首次冻结和新项发现输入，不是 Sidecar 已保存顺序 |
 | Core mutation boundary | 影响 Navigation 投影的请求型写操作在权威事务提交后发 `navigation.invalidated`；异步 AgentRun 生命周期在对应事务成功后发同一提示 |
-| Electron Main | 原样转发 Core event；以 schema 3 私有原子 JSON 保存 `projectOrder`，串行完成首次冻结、既有项保序、新项追加与消失项清理，不缓存或改写 Core Snapshot |
+| Electron Main | 原样转发 Core event；以 schema 4 私有原子 JSON 保存 `projectOrder` 与 `projectNames`，串行完成本机偏好写入，不缓存或改写 Core Snapshot |
 | Renderer `NavigationRefreshCoordinator` | 全局唯一地合并失效信号、串行 `navigation.snapshot`、处理 trailing generation、退避重试与可见性；Snapshot 提交后另行触发 Project membership 同步 |
 | Foreground safety refresh | 前台可见时约 20 秒低频重读；App 隐藏时停止，窗口重新获得焦点时立即重读 |
 | Overview loader | 并行加载 Navigation、Members、Runtime Installation、Memory Review 与本机 Navigation preference；首次用当前可见 Project 顺序初始化 `projectOrder`，各模块失败不关闭 Navigation 协调器 |
@@ -67,7 +67,7 @@ Promise 完成只表示新 Snapshot 已提交到 Renderer state，不承诺浏�
 
 ## Sidecar Project order synchronization
 
-`navigation.json` schema 3 的 `projectOrder: string[] | null` 只保存 canonical
+`navigation.json` schema 4 的 `projectOrder: string[] | null` 只保存 canonical
 `directory:<projectPath>` key。合法 schema 2 以 `null` 读取而不被视为损坏；`null` 与空数组不同，前者表示尚未
 首次冻结，后者表示已经在空列表上完成冻结。第一次同步按 Core 当前 Project 数组顺序写入所有未被本机移除的
 Project。后续每次同步执行同一确定性规则：
@@ -83,6 +83,23 @@ Renderer 作为新项追加到当前列表尾部；形成 Camp 后再进入相�
 Project 本机移除会同时清理其顺序 key；重新选择或恢复后，它作为新发现项追加。偏好同步由与 pin/移除/恢复相同的
 Main 串行队列保护，Renderer 用 generation 忽略迟到返回。同步失败可以显示本机保存错误，但已经提交的 Core
 Navigation Snapshot 和协调器 generation 不回滚、不停止后续失效刷新。
+
+## Local Project display names
+
+`projectNames: Record<string, string>` 使用既有 canonical `directory:<projectPath>` key 保存本机显示名称。
+合法 schema 2/3 在内存升级时补空映射，不因升级产生损坏提示，也不在读取时重写旧文件。schema 1 继续沿用
+已有恢复规则。后续成功写入输出 schema 4；名称与置顶、移除、恢复、顺序共用 Main 串行队列和原子文件写入。
+写入失败保留旧快照；返回完整快照只发生在成功保存后。
+
+Main-owned `navigationPreferences.setProjectName(targetKey, name)` 接受字符串或 `null`；字符串去除首尾空白、
+合并连续空白，非空且最多 80 个 Unicode scalar；`null` 删除覆盖、恢复目录名。名称可重复，同名不同路径独立保存。
+移除项目、顺序同步中的暂时消失、无 Camp 的空目录均不删除名称；重新选择相同目录后恢复该名称。
+
+Renderer 在 Core 原始 Navigation Snapshot 之外建立名称展示投影，并在加入当前空目录后再次应用覆盖。
+侧栏/置顶、顶部、搜索、新建对话和定时任务项目选择共用该投影；Workspace inspection 返回的目录名称不会覆盖
+已保存的显示名称。重命名不调用 Core mutation、Workspace inspection 或 Runtime；不修改项目路径、Camp ID、
+消息、队员、记忆、Native Session、执行状态、活动时间或排序。渠道项目目录仍由既有 Core 投影拥有，本机别名不进入
+模型上下文或渠道配置。旧 Overview 名称读取通过改名 generation 隔离；顺序和置顶写入的返回不更新名称状态。
 
 ## Failure and lifecycle boundaries
 
@@ -110,6 +127,7 @@ preference 失败可以报告自己的错误，但不能停止 Navigation retry�
 - schema 2 第一次进入时冻结旧显示顺序，合法升级不产生偏好损坏提示；
 - 老 Project 的消息活动不改顺序，新 Project 追加，消失或本机移除的 Project 清理；
 - Sidecar Project 稳定顺序不改变 Project 内 Camp 最近活动、时间、marker 或未读更新。
+- 改名后刷新与重启保留，独立路径互不覆盖，保存失败可重试；目录和 Camp/Runtime 身份不变。
 
 ## References
 

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "01-collaboration",
+    "title": "Rovai AI 系统全景架构",
+    "subtitle": "长期队员 × 对等协作 × 原生 Agent Runtime：从用户目标、任务责任到协作成果与长期经验。"
+  },
+  {
+    "id": "02-identity-runtime",
+    "title": "咕咕：会话、Runtime 与记忆",
+    "description": "咕咕参与不同会话，可切换 Codex 或 Claude Code；共同记忆、队员记忆与队员间记忆分别用围炉、专属手册和双人经验交换表示。"
+  },
+  {
+    "id": "03-conversation-runs",
+    "title": "三位队员，协作完成 CSV 导出功能",
+    "description": "A 负责方案与编码，使用一条消息同时 mention B 和 C；B 返回原型附件，C 完成方案和代码评审，各次接收在成员自己的 Conversation 中形成后续 Run。"
+  },
+  {
+    "id": "04-a2a-handoff",
+    "title": "A2A：把工作交给同伴，把成果交回",
+    "description": "叮叮向芝士发送方案评审请求；Core 保存公共消息并定向投递。芝士继续委托咕咕复现，咕咕将记录返回芝士，芝士再将评审结论返回叮叮。所有 A2A 均经 Core 路由。"
+  },
+  {
+    "id": "05-gather",
+    "title": "协作组织与任务责任：同伴协作，分工有据",
+    "description": "叮叮担任本次轻量 Lead，与芝士、咕咕直接协作并共享成果。Task 保存跨 Run 的责任；Skill 提供讨论、评审与追问方法；Gather 将同一问题交给成员，在全部责任结束后形成一次汇总 Run。"
+  },
+  {
+    "id": "06-run-lifecycle",
+    "title": "一次 AgentRun 的加载与执行",
+    "description": "咕咕的 A2A 请求经收件人 FIFO 队列、Dispatch Pump 与 Scheduler 进入执行。Runtime Fleet 取得兼容的 Warm Host 或冷启动 Host，绑定本轮 Lease，再准备会话和动态输入。执行结束后，静默且可复用的常驻 Host 回到 IdleWarm，后续 Run 重新 acquire；Native Session 按自身兼容条件接续。"
+  },
+  {
+    "id": "07-toolkit",
+    "title": "Rovai CLI：平台内置 Toolkit",
+    "description": "Skill 提供协作方法，原生 Runtime 发现并读取；rovai CLI 经认证本地 IPC 调用 Core BuiltinToolRouter，领域服务执行业务操作并返回 Agent Result Projection。"
+  },
+  {
+    "id": "08-dynamic-context",
+    "title": "从 Session Bootstrap 到每次 Run 的动态上下文",
+    "description": "顶部三层稳定引导：Session Charter、MEMBER_IDENTITY、Memory Entrypoint。下方六层动态上下文：同伴、自身责任、公共历史、运行事实、协作指引与本次输入；按 Profile 选择并记录 ContextManifest。"
+  },
+  {
+    "id": "09-session-context",
+    "title": "长会话：稳定引导与持续的动态输入",
+    "description": "普通成员会话以 Bootstrap 和首次动态输入建立；后续 Run 获得新的动态上下文。支持的原生压缩信号触发后，在后续受控输入补送 Bootstrap，继续同一个 Native Session。"
+  },
+  {
+    "id": "10-memory-governance",
+    "title": "记忆：主动提报与持续演进",
+    "description": "队员经 memory.view 对照完整 Scope，通过 memory.write 提报新增或修订，分别归入共同记忆、队员记忆与队员间记忆。Hearth 保留手动晋升审核，Revision、Supersession、Retire 与 Forget 表达修订、替代、退役和显式遗忘。当前有效记忆经按需检索和读取用于下一次实践，实践反馈再回到经验提报，形成持续演进的闭环；成长课题提供实践方向。"
+  },
+  {
+    "id": "11-technology-stack",
+    "title": "Rovai AI 技术栈架构",
+    "description": "React Renderer、Electron Main、Rust Core、Native Agent Runtime 与本地存储分层协作；图中标注前端依赖、进程协议、原生 Runtime 适配、构建验证与发布工具。"
+  }
+]
