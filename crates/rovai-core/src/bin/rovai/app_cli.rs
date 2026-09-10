@@ -256,7 +256,7 @@ async fn execute(args: &[String]) -> Result<u8> {
         [command, action, rest @ ..]
             if matches!(
                 command.as_str(),
-                "runtime" | "member" | "camp" | "agent-run" | "trial" | "trace"
+                "runtime" | "member" | "camp" | "agent-run" | "trial" | "trace" | "eval"
             ) =>
         {
             (command.as_str(), Some(action.as_str()), rest)
@@ -409,6 +409,24 @@ async fn execute(args: &[String]) -> Result<u8> {
         }
     };
     Ok(exit_code)
+}
+
+// Regression owner: the public namespace parser must reach every evaluation
+// action before parsing flags; no App, database or Runtime is required.
+#[cfg(test)]
+#[tokio::test]
+async fn evaluation_actions_reach_their_public_help_without_owner_ipc() {
+    for action in [
+        "configure",
+        "gate",
+        "weekly",
+        "schedule",
+        "status",
+        "cancel",
+    ] {
+        let args = ["eval", action, "--help"].map(str::to_string);
+        assert_eq!(execute(&args).await.unwrap(), 0);
+    }
 }
 
 fn print_help() {
