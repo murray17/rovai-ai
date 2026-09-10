@@ -25,6 +25,12 @@ const runtime = {
     permissionMode: 'default',
     requireSilentHost: false,
     continuationName: 'ACP session/resume'
+  },
+  'zcode-app': {
+    label: 'ZCode',
+    permissionMode: 'build',
+    requireSilentHost: false,
+    continuationName: 'official session/resume'
   }
 }[adapterKind]
 if (!runtime) throw new Error(`Unsupported cold-continuation adapter: ${adapterKind}`)
@@ -401,7 +407,7 @@ async function sendExistingCampMessage(request, campId, body, purpose) {
   const saved = await request('camp.composerDraft.save', {
     campId,
     expectedRevision: draft.revision,
-    content: [{ kind: 'text', text: body }]
+    content: { version: 2, segments: [{ kind: 'text', text: body }] }
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),

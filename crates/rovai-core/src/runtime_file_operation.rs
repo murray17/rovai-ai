@@ -80,7 +80,10 @@ fn admit_candidate(
     };
     let protocol_family = candidate.get("protocolFamily").and_then(Value::as_str);
     let source_event_kind = candidate.get("sourceEventKind").and_then(Value::as_str);
-    let source_is_allowlisted = if adapter.uses_acp() {
+    let source_is_allowlisted = if adapter == AdapterKind::ZcodeApp {
+        protocol_family == Some(crate::zcode::PROTOCOL)
+            && source_event_kind == Some("tool.updated.result")
+    } else if adapter.uses_acp() {
         protocol_family == Some("acp-v1")
             && source_event_kind == Some("session/update.tool_call_update.completed")
     } else {

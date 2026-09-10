@@ -154,6 +154,11 @@ fn admit_candidate(
                 && source_event_kind == "item/completed.fileChange.completed"
                 && semantic_kind == "codex_file_change_snapshot"
         }
+        AdapterKind::ZcodeApp => {
+            protocol_family == crate::zcode::PROTOCOL
+                && source_event_kind == "tool.updated.result"
+                && semantic_kind == "zcode_edit_patch"
+        }
         adapter if adapter.uses_acp() => {
             protocol_family == "acp-v1"
                 && source_event_kind == "session/update.tool_call_update.completed"
@@ -224,7 +229,7 @@ fn admit_candidate(
             source_path.clone()
         };
         let (diff, evidence_entry) = match semantic_kind {
-            "codex_file_change_snapshot" | "pi_edit_patch" => {
+            "codex_file_change_snapshot" | "pi_edit_patch" | "zcode_edit_patch" => {
                 let content = raw
                     .get("diff")
                     .and_then(Value::as_str)
@@ -232,7 +237,7 @@ fn admit_candidate(
                 if content.len() > MAX_SINGLE_DIFF_BYTES {
                     return Err("runtime_diff_item_limit");
                 }
-                let content = if semantic_kind == "pi_edit_patch" {
+                let content = if matches!(semantic_kind, "pi_edit_patch" | "zcode_edit_patch") {
                     if change_kind != "update" {
                         return Err("runtime_diff_change_kind_invalid");
                     }
@@ -334,7 +339,7 @@ fn admit_candidate(
     Ok(AdmittedCommandDiff {
         semantic_kind: if matches!(
             semantic_kind,
-            "codex_file_change_snapshot" | "pi_edit_patch"
+            "codex_file_change_snapshot" | "pi_edit_patch" | "zcode_edit_patch"
         ) {
             "unified_diff_snapshot".to_string()
         } else {

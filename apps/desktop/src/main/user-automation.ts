@@ -69,6 +69,7 @@ const ADAPTER_KINDS: readonly AdapterKind[] = [
   'cursor-agent',
   'kimi-code-cli',
   'grok-build',
+  'zcode-app',
   'antigravity-app'
 ]
 

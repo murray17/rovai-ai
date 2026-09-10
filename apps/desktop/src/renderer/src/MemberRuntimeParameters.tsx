@@ -230,6 +230,8 @@ function runtimeParametersFor(
       return <KimiRuntimeParameters {...props} />
     case 'grok-build':
       return <GrokRuntimeParameters {...props} />
+    case 'zcode-app':
+      return <div className="runtime-parameter-form">{modelFieldsFor('zcode-app', props)}<PermissionSelect {...props} fieldKey="permission_mode" label="权限模式" /></div>
     case 'antigravity-app':
       return <AntigravityRuntimeParameters {...props} />
   }
@@ -388,6 +390,7 @@ function modelFieldsFor(
     case 'cursor-agent':
     case 'kimi-code-cli':
     case 'grok-build':
+    case 'zcode-app':
     case 'antigravity-app':
       return <ModelFields {...props} />
   }

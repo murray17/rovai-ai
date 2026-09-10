@@ -1,0 +1,733 @@
+{
+  "schemaVersion": 1,
+  "adapterKind": "zcode-app",
+  "platform": "macos-arm64",
+  "appVersion": "3.11.2",
+  "kernelVersion": "0.16.5",
+  "nodeVersion": "26.8.1",
+  "kernelSha256": "e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e1113266b8",
+  "transport": "zcode-native-node-transport-v3",
+  "status": "preview",
+  "productEvidence": {
+    "files": {
+      "logSha256": "15f59674fa93de7fadfd052f76bddda40f5bec41662bf9a4db21d3eb33e1bdcf",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "def37414-14f4-4d92-b1ee-75d8c0b01d52"
+        },
+        {
+          "nativeSessionId": "sess_b4211ac5-a600-42cd-b07f-7fa34c65a5c7"
+        },
+        {
+          "agentRunId": "b80ad3d9-b056-44f8-ac55-5d2b3db9493c"
+        },
+        {
+          "agentRunId": "ccf75b68-f93c-49ee-9544-b1a431447a00"
+        },
+        {
+          "agentRunId": "1c1a163f-0633-4f2a-82e2-9b26eb930169"
+        },
+        {
+          "agentRunId": "e8ecf3f1-02ae-426d-9f89-9660874a7b27"
+        }
+      ],
+      "smoke": "smoke-acp-runtime.mjs",
+      "stage": "zcode-native-node-transport-v3, after main integration",
+      "sourceCommit": "51fc6cc1",
+      "coreVersion": "0.2.2",
+      "dataContractVersion": "v1.57",
+      "zcodeGuiLaunchCount": 0
+    },
+    "commandOutput": {
+      "logSha256": "2565c688c75e93cf5fce0e698adc9e239b3a561219b5e4977c2466e683a68f35",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "391eadd6-066e-4ca7-adf5-3426610717b5"
+        },
+        {
+          "nativeSessionId": "sess_b5e950c4-ffd0-4820-b4e1-dd637f5b09a7"
+        },
+        {
+          "hostInstanceId": "391eadd6-066e-4ca7-adf5-3426610717b5"
+        }
+      ],
+      "smoke": "smoke-acp-runtime.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "manualCompaction": {
+      "logSha256": "195e08dcbefe256b47e5a52c85aa06dc51256aa9d63a55dfd4ed7632009e24de",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "715095f3-e7f1-4ae4-8c66-fbd89e62b8b9"
+        },
+        {
+          "nativeSessionId": "sess_6c063ec1-4b92-4d24-bde8-b1f3466fded7"
+        },
+        {
+          "hostInstanceId": "715095f3-e7f1-4ae4-8c66-fbd89e62b8b9"
+        },
+        {
+          "occurrenceIdentity": "zcode.session.compaction.completed.v1:runtime:compact_db464d9b-3e07-4eaa-b236-d1849d055fe7"
+        }
+      ],
+      "smoke": "smoke-acp-runtime.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "automaticCompaction": {
+      "logSha256": "54abda0a4cf5a88e8ed1757ef54bbf4e17d67e9de59ba3b9c8903f5229faad17",
+      "passed": true,
+      "identities": [
+        {
+          "nativeSessionId": "sess_c35adcf9-14ab-4f72-abab-c599df0fdece"
+        },
+        {
+          "hostInstanceId": "97ad67cb-844a-4ea3-9b45-30fd8c11c5de"
+        },
+        {
+          "agentRunId": "7d58e69b-9ced-449e-93d1-1b49cdc2d01c"
+        },
+        {
+          "source_observation_id": "zcode.session.compaction.completed.v1:runtime:compact_8be559d2-f72d-463e-91ef-e32a1e433950"
+        }
+      ],
+      "smoke": "smoke-zcode-context.py auto",
+      "stage": "before-stdio-owner"
+    },
+    "reactiveCompaction": {
+      "logSha256": "6c5c9a15298b6c6408baa2063aab5fb2e84faed25afd8177936ae6d1b5ffdedd",
+      "passed": true,
+      "identities": [
+        {
+          "nativeSessionId": "sess_1d8e721d-eab2-43e1-8fd6-8e390d121e06"
+        },
+        {
+          "hostInstanceId": "b5feb3ca-b393-4112-a767-400bfc606fb1"
+        },
+        {
+          "agentRunId": "3fedb617-f8f9-4513-b34e-102646661986"
+        },
+        {
+          "source_observation_id": "zcode.session.compaction.completed.v1:runtime:compact_b6ed1dc2-570e-4228-924b-0c44bc545f4b"
+        }
+      ],
+      "smoke": "smoke-zcode-context.py reactive",
+      "stage": "before-stdio-owner"
+    },
+    "coldResume": {
+      "logSha256": "435e88c6bc5c74dcca4e874c1f064e37fa3b2876b1981226b1039019ccfb05e5",
+      "passed": true,
+      "identities": [
+        {
+          "nativeSessionId": "sess_1c237759-cd50-452b-b2dc-17bab09b5ec2"
+        }
+      ],
+      "smoke": "smoke-trae-cold-resume.mjs",
+      "stage": "zcode-native-node-transport-v3",
+      "zcodeGuiLaunchCount": 0
+    },
+    "builtinCli": {
+      "logSha256": "f225da82cfbd1afeb262aa4b56cb7573898a335f36a5533dd35b133ecfa01f43",
+      "passed": true,
+      "identities": [],
+      "smoke": "smoke-builtin-cli.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "missingSend": {
+      "logSha256": "dbd95b4641f51b399bcaa21516fd38068220df8d3178aff90a2fc56534028b46",
+      "passed": true,
+      "identities": [],
+      "smoke": "smoke-missing-send-recovery.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "skills": {
+      "logSha256": "63d86b88dfdcf512ffc92e98a098eda5031dff10981e5693e01fe0d4df22ee6c",
+      "passed": true,
+      "identities": [
+        {
+          "agentRunId": "cd02b740-47fa-4665-8a45-7e44f11f7ff1"
+        }
+      ],
+      "smoke": "smoke-skills.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "mcp": {
+      "logSha256": "3a8acafa823f6d64152f7323d4cb6dc0beb11ae4f84e020507af85039aa5b968",
+      "passed": true,
+      "identities": [
+        {
+          "agentRunId": "01503925-7699-4139-9936-852d7981fa94"
+        }
+      ],
+      "smoke": "smoke-mcp-projection.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "permissions": {
+      "logSha256": "1ee265ffccd4aa8fa26f0d007d7ab06fd6b4576a165076d41043b282ba121e81",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "25b3dd76-b556-4864-ab6b-2886a77d0a3b"
+        },
+        {
+          "nativeSessionId": "sess_415e2d0a-a242-492c-b464-6461baa70c99"
+        },
+        {
+          "hostInstanceId": "25b3dd76-b556-4864-ab6b-2886a77d0a3b"
+        }
+      ],
+      "smoke": "smoke-acp-runtime.mjs",
+      "stage": "before-stdio-owner"
+    },
+    "fleet": {
+      "logSha256": "dd17be46c589abcfb050dd622b0581aa0436a8b0be0cd7372743ec92f46187f2",
+      "passed": true,
+      "identities": [
+        {
+          "hostInstanceId": "91617be8-ef77-4803-8cf1-283115bf1819"
+        },
+        {
+          "nativeSessionId": "sess_be2fb732-4ff4-4d1b-9ffa-7eaa6ee666a5"
+        },
+        {
+          "agentRunId": "6ff92c99-8b98-4663-9b72-19efc66786ab"
+        },
+        {
+          "nativeSessionId": "sess_1689574f-fe0c-4260-93bb-85acd36ee8f4"
+        },
+        {
+          "agentRunId": "d6ec25b4-ad3e-4a1e-9dce-a01c2ec53a60"
+        },
+        {
+          "agentRunId": "efbbe164-386e-4ae5-98e4-73bb3f4c8aaa"
+        },
+        {
+          "agentRunId": "f59673de-11eb-40fd-aabe-318bb876cd8d"
+        },
+        {
+          "hostInstanceId": "3a60ebba-13cc-4232-a83d-1291bf3c27db"
+        },
+        {
+          "agentRunId": "d723c5e2-b5b7-464b-b8a6-41020f73c15a"
+        },
+        {
+          "hostInstanceId": "b3b3fd28-86f6-4b54-8203-99bf414a0deb"
+        },
+        {
+          "nativeSessionId": "sess_954f909e-cfab-4197-aa1b-b50b7d517a1f"
+        },
+        {
+          "agentRunId": "daec447c-81d1-44d1-994f-25df7e8b4977"
+        }
+      ],
+      "smoke": "smoke-zcode-runtime.mjs",
+      "stage": "zcode-native-node-transport-v3, after main integration",
+      "sourceCommit": "51fc6cc1",
+      "coreVersion": "0.2.2",
+      "dataContractVersion": "v1.57",
+      "zcodeGuiLaunchCount": 0
+    },
+    "compactionColdResume": {
+      "logSha256": "567e1f83e899c4439d2d69fee929afbec7c9dc031a688556e3895f9cc84325b7",
+      "passed": true,
+      "identities": [
+        {
+          "nativeSessionId": "sess_1ba599a9-c6ce-44c3-9088-af07a518d2de"
+        },
+        {
+          "hostInstanceId": "00871aa8-5e61-4013-bfef-79912d4e9cea"
+        },
+        {
+          "agentRunId": "9cae5988-9d01-4526-8b9a-5f0f48a2fda0"
+        },
+        {
+          "source_observation_id": "zcode.session.compaction.completed.v1:runtime:compact_e15949ed-5a1b-4d89-8cda-23ceadaaf891"
+        }
+      ],
+      "smoke": "smoke-zcode-context.py auto, ROVAI_ZCODE_CONTEXT_COLD_RESUME=1",
+      "stage": "zcode-native-node-transport-v3",
+      "zcodeGuiLaunchCount": 0
+    },
+    "coreCrash": {
+      "logSha256": "638c925f1a1e23f7cbc83c5bbe2b7f35d0f5d31d5978b67d74f60883a3cfa1b7",
+      "passed": true,
+      "identities": [
+        {
+          "agentRunId": "72a9d1ba-30ae-4582-b154-bf888a857d14"
+        },
+        {
+          "hostInstanceId": "c8259d8a-283c-4907-8be8-10b3670090ff"
+        },
+        {
+          "nativeThreadId": "sess_73fb32a0-eb0e-4155-8f20-b848f6a38473"
+        }
+      ],
+      "smoke": "smoke-zcode-runtime.mjs, ROVAI_ZCODE_FLEET_CRASH=1",
+      "stage": "zcode-native-node-transport-v3",
+      "zcodeGuiLaunchCount": 0
+    },
+    "nativeCrash": {
+      "logSha256": "4a6191e5d9bb34f3aabe3e96111ac714c0b22da316ca86f750a39b1316bfb4e5",
+      "passed": true,
+      "identities": [
+        {
+          "agentRunId": "f112b44d-cc6a-41c2-bb31-b4b9faf3228f"
+        },
+        {
+          "hostInstanceId": "6c63e0c2-49c2-435c-b48c-a88113317991"
+        },
+        {
+          "nativeThreadId": "sess_63345c0f-1de5-4a23-a840-781750adbeab"
+        }
+      ],
+      "smoke": "smoke-zcode-runtime.mjs, ROVAI_ZCODE_FLEET_CRASH=native",
+      "stage": "zcode-native-node-transport-v3",
+      "zcodeGuiLaunchCount": 0
+    }
+  },
+  "launcherObservation": {
+    "tool": "smoke-zcode-launch.swift",
+    "permissionsGuiLaunchCount": 0,
+    "fleetGuiLaunchCount": 0,
+    "electronControlRegisteredAsApp": true,
+    "nodeControlRegisteredAsApp": false
+  },
+  "limits": [
+    "Same-turn compaction retry has no host injection seam; redelivery occurs on the next eligible input.",
+    "Images use authorized file paths and native Read, not structured prompt attachments; GUI callbacks are not implemented.",
+    "Official terminal account-login configuration and BYOK are in scope. App-only login state is not directly reused; real OAuth and subscription flows have not been accepted.",
+    "macOS x64 and Windows x64 have no qualification evidence.",
+    "Full Core compaction failure/cancellation combined with capability preservation, provider usage retry/resume accounting, and adapter-specific protocol-error/probe-timeout/upgrade drift flows are not yet all qualified."
+  ],
+  "evidenceScope": "Earlier functional flows plus final launcher v3 revalidation: files and Fleet after main integration, exact cold resume, compact then Core restart, native crash and Core crash. Each flow records its stage; no complete platform qualification is claimed.",
+  "localGates": {
+    "sourceCommit": "51fc6cc1",
+    "rustLibraryPassed": 550,
+    "rustCliPassed": 33,
+    "rustSlowPassed": 309,
+    "rustCorePassed": 234,
+    "rustCoreExistingIgnored": 5,
+    "vitestPassed": 1717,
+    "nodeFinalSuitePassed": 223,
+    "nodeExistingPlatformSkip": 1,
+    "clippyPassed": true,
+    "typecheckPassed": true,
+    "desktopBuildPassed": true,
+    "docsCiPassed": true
+  },
+  "v4Revision": {
+    "transport": "zcode-native-node-transport-v4",
+    "sourceBaseCommit": "903637834ed081c881b47c335e567fef2f02669a",
+    "sourceScope": "PR #323 worktree revision; existing productEvidence and localGates above retain their historical stages.",
+    "coreExecutableSha256": "cf77743cd63927dd502cc7b5e4364cf034dca213eafd3dcd6b3d62f27cea0811",
+    "files": {
+      "passed": true,
+      "logSha256": "0f50bba2dd8fcd3450adb09361fede07ef0ee42168b0b6bc56d7ba48e5ead0ab",
+      "hostInstanceId": "d79b2c0b-7f59-4f11-a869-217792380ada",
+      "nativeSessionId": "sess_8dd39669-4376-41f7-aa57-95725ca81f5a",
+      "cases": [
+        {
+          "name": "read",
+          "agentRunId": "d7591bf1-c5ce-4d92-a092-93a258ba346b",
+          "runStatus": "succeeded",
+          "fileEffect": "passed"
+        },
+        {
+          "name": "add",
+          "agentRunId": "67b883c5-4d65-4289-8e0e-3c2bbba58de4",
+          "runStatus": "succeeded",
+          "fileEffect": "passed"
+        },
+        {
+          "name": "edit",
+          "agentRunId": "ad7efbdf-f432-4469-a790-a57f0ccf440f",
+          "runStatus": "succeeded",
+          "fileEffect": "passed"
+        },
+        {
+          "name": "edit_empty",
+          "agentRunId": "0c291440-87e8-43e5-99d0-5ac950c47318",
+          "runStatus": "succeeded",
+          "fileEffect": "passed"
+        }
+      ],
+      "zcodeGuiLaunchCount": 0
+    },
+    "processOwner": {
+      "smoke": "node --test scripts/test-zcode-owner.mjs",
+      "passed": true,
+      "logSha256": "cec8813ff2befa005159c4185376baaeba82eaf6c2633e210588f6db976535fe",
+      "closedShellDescendantReaped": true,
+      "unrelatedProcessPreserved": true,
+      "requestScopedDelayedChildRetainsOriginalLease": true,
+      "unscopedChildHasNoLease": true,
+      "cliSnapshotMode": "0600"
+    },
+    "localGates": {
+      "rustLibraryPassed": 550,
+      "rustCliPassed": 33,
+      "rustSlowPassed": 309,
+      "rustCorePassed": 236,
+      "rustCoreExistingIgnored": 5,
+      "vitestPassed": 1717,
+      "nodeFinalSuitePassed": 224,
+      "nodeExistingPlatformSkip": 1,
+      "clippyPassed": true,
+      "typecheckPassed": true,
+      "docsCiPassed": true,
+      "desktopBuildRerun": false
+    },
+    "uncovered": [
+      "No real newer-kernel, macOS x64 or Windows x64 acceptance; minimum-version and fingerprint behavior has deterministic coverage.",
+      "Cold resume, compaction, permissions, Skills/MCP and bundled CLI full Golden Flows were not all repeated for v4; earlier stage-specific evidence remains above.",
+      "Core SIGKILL was not re-run with v4; the v4 closed-shell process-owner test kills the native Host and checks its exact owned groups.",
+      "Native automatic background-result model Turns have no Rovai Input and are stopped with a scoped native execution ID; no new Run authority is granted.",
+      "Native task events can omit exit codes. Host-close evidence identifies interruption and cleanup confirmation, not a successful native exit.",
+      "Self-detachment into an unobserved process group is not established by the registered-group cleanup tests.",
+      "The final async CLI boundary has delayed OS-child regression and real foreground/background Bash lease coverage, not a complete real native background-subagent model/permission matrix."
+    ],
+    "backgroundLifecycle": {
+      "smoke": "smoke-zcode-background.mjs",
+      "logSha256": "a672161cf4bd267326e4c1c3c4078cadcc3b2ae1036667dd514d41fd73bf09d6",
+      "zcodeGuiLaunchCount": 0,
+      "probe": {
+        "nativeEnvironmentPreserved": true,
+        "calls": [
+          "workspace/readState",
+          "session/create",
+          "session/subscribe",
+          "session/setMode"
+        ],
+        "temporaryResourcesRemoved": true,
+        "adapterSupport": [
+          "acp.initialize",
+          "builtin_cli.transport.v24",
+          "context.charter.first_payload",
+          "mcp.external_projection.additive_per_run",
+          "mcp.same_name_policy.rovai_wins",
+          "session.cancel",
+          "session.new",
+          "session.prompt",
+          "session.resume",
+          "session.set_config_option",
+          "session.update",
+          "structured_permission_request",
+          "zcode.native_byok"
+        ]
+      },
+      "ok": true,
+      "foregroundMs": 15453,
+      "retentionMs": 310000,
+      "retentionStartsAt": "foreground-completed",
+      "old300SecondBoundaryCovered": true,
+      "originalRunId": "7e50dd2c-14c8-4cc0-84c4-d20ecf6bfcb0",
+      "taskId": "exec_d36399b4-dfc4-4941-a071-2a67ffd4b44d",
+      "sameSessionRetained": true,
+      "crossMemberHostSeparated": true,
+      "cancelPreservedOlderTask": true,
+      "cancelStoppedCurrentTask": true,
+      "hostClosurePersisted": true,
+      "nativeNotificationTurnsStopped": 2,
+      "lateFailurePersistedOnOriginalRun": true,
+      "closeReapedManagedDescendants": true
+    },
+    "cliLeaseLifecycle": {
+      "smoke": "smoke-zcode-background.mjs with ROVAI_ZCODE_BACKGROUND_RETENTION_MS=10000",
+      "stage": "v4 with immutable request-scoped async CLI context",
+      "coreExecutableSha256": "2308644f92fb194a3d8a1c9486f8e1152a396aa0a386cdb0aabe1ec02191036c",
+      "logSha256": "89fcc6a9922564f195c41d7c0b801000fbacf64788d937ed90036f8e6a51ac6d",
+      "zcodeGuiLaunchCount": 0,
+      "successorRunCliLeaseAllowed": true,
+      "probe": {
+        "nativeEnvironmentPreserved": true,
+        "calls": [
+          "workspace/readState",
+          "session/create",
+          "session/subscribe",
+          "session/setMode"
+        ],
+        "temporaryResourcesRemoved": true,
+        "adapterSupport": [
+          "acp.initialize",
+          "builtin_cli.transport.v24",
+          "context.charter.first_payload",
+          "mcp.external_projection.additive_per_run",
+          "mcp.same_name_policy.rovai_wins",
+          "session.cancel",
+          "session.new",
+          "session.prompt",
+          "session.resume",
+          "session.set_config_option",
+          "session.update",
+          "structured_permission_request",
+          "zcode.native_byok"
+        ]
+      },
+      "ok": true,
+      "foregroundMs": 48324,
+      "retentionMs": 10000,
+      "retentionStartsAt": "foreground-completed",
+      "old300SecondBoundaryCovered": false,
+      "originalRunId": "a060514d-2d88-4259-aa04-c050b77931d3",
+      "taskId": "exec_12709a52-ddea-4d48-ac8e-221ce9acc133",
+      "sameSessionRetained": true,
+      "crossMemberHostSeparated": true,
+      "oldBackgroundCliLeaseRejectedDuringNextRun": true,
+      "cancelPreservedOlderTask": true,
+      "cancelStoppedCurrentTask": true,
+      "hostClosurePersisted": true,
+      "nativeNotificationTurnsStopped": 2,
+      "lateFailurePersistedOnOriginalRun": true,
+      "closeReapedManagedDescendants": true
+    },
+    "coreExecutableSha256Scope": "Files and 310-second lifecycle stage before the final request-scoped CLI context change; final CLI lifecycle binary is recorded separately.",
+    "cleanup": {
+      "isolatedCredentialCopiesRemoved": true,
+      "isolatedNativeHomeAndStorageRemoved": true,
+      "changedFilesCredentialScanCount": 25,
+      "taskLogsCredentialScanCount": 173,
+      "credentialMatches": 0
+    }
+  },
+  "v5Revision": {
+    "transport": "zcode-native-node-transport-v5",
+    "sourceBaseCommit": "3df3c7a7b161e27ab684625042af612d9dc0819a",
+    "sourceScope": "ZCode native config/auth guidance and model capability preservation; existing v3/v4 lifecycle evidence retains its recorded stage. No shared image pipeline or schema change.",
+    "coreExecutableSha256": "c2f566e6f768c6e4505f0af102ea46dfb02e758313148934b945753e12812984",
+    "pathImages": {
+      "smoke": "smoke-zcode-images.mjs via smoke-zcode-launch.swift",
+      "passed": true,
+      "model": "minimax/MiniMax-M3",
+      "logSha256": "7e0a420a5fbca2b8661e3da3fd14ec1747a94c571507884103d4acb44cefc13a",
+      "agentRunId": "ba28d212-a64e-4b39-a543-1ed7655fe652",
+      "nativeSessionId": "sess_45146798-a868-4d77-aead-66512e307e0e",
+      "imageCount": 2,
+      "nativeUploads": 0,
+      "exactColdResume": true,
+      "nativeReadOnly": true,
+      "probeDidNotGenerateOrUpload": true,
+      "noModificationDiff": true,
+      "zcodeGuiLaunchCount": 0
+    },
+    "accountConfiguration": {
+      "nativeLoginProviders": [
+        "zai",
+        "bigmodel"
+      ],
+      "officialConfigShapeRegressionPassed": true,
+      "missingCredentialGuidancePassed": true,
+      "publicCatalogExcludesSecrets": true,
+      "realOAuthOrSubscriptionAcceptance": false,
+      "appOnlyLoginReuse": false
+    },
+    "failedAttempt": {
+      "stage": "Path images with tiny bitmap glyphs",
+      "reason": "Native Read returned both images; model misread one digit. Exact-answer assertion failed. Replaced ambiguous fixture font, retaining the exact-answer assertion.",
+      "logSha256": "67ec6e948497cfb0aae7f8f10c6e579b5d8465d0dd889cdb511993c4ad9de58f"
+    },
+    "uncovered": [
+      "Real OAuth login, account subscription generation and App-only credential reuse.",
+      "All image formats, extreme dimensions/limits and models other than MiniMax-M3.",
+      "No repeated full background/compaction/Skills/MCP/permission Golden Flows for v5; lifecycle code is unchanged from v4.",
+      "No macOS x64, Windows x64 or newer-kernel qualification."
+    ],
+    "withdrawnApproach": "Temporary structured upload, shared Pi image refactor and schema 100/Migration 150 were withdrawn; their temporary tests are not evidence for this revision.",
+    "cleanup": {
+      "isolatedCredentialCopiesRemoved": true,
+      "isolatedNativeHomeAndStorageRemoved": true,
+      "changedFilesScanned": 14,
+      "taskLogsScanned": 17,
+      "credentialMatches": 0
+    },
+    "localGates": {
+      "zcodeLibraryTestsPassed": 5,
+      "zcodeProbeTestPassed": 1,
+      "platformAdmissionTestsPassed": 5,
+      "vitestPassed": 1717,
+      "vitestFilesPassed": 168,
+      "nodeFinalSuitePassed": 224,
+      "nodeExistingPlatformSkip": 1,
+      "clippyPassed": true,
+      "formatPassed": true,
+      "docsCiPassed": true,
+      "fullRustWorkspaceAndSlowSuiteRepeatedForFinalDiff": false
+    }
+  },
+  "v6Revision": {
+    "transport": "zcode-native-node-transport-v6",
+    "sourceBaseCommit": "8b09a32ef0bf39a3152e97974bc0c72994d1f246",
+    "mainIntegratedCommit": "7c6c72a0",
+    "coreVersion": "0.2.3",
+    "dataContractVersion": "v1.57",
+    "schemaVersion": 99,
+    "sourceScope": "App published configuration fallback, official family selection and memory-only catalog; safe failed-turn settlement and explicit unsupported Start Plan runtime verification. No shared Context or image pipeline changes.",
+    "appConfiguration": {
+      "terminalConfigAbsent": true,
+      "publishedAppConfigLoaded": true,
+      "nativeDataBaseDirSupported": true,
+      "ordinaryProbePromptCount": 0,
+      "realAppGenerationVerified": false,
+      "sourceCredentialStoreDecrypted": false,
+      "sourceConfigurationRewritten": false,
+      "cliConfigCreated": false
+    },
+    "accountGeneration": {
+      "passed": false,
+      "providerId": "builtin:zai-start-plan",
+      "modelId": "GLM-5.3",
+      "nativeSessionId": "sess_ccc597a1-fe30-44fb-84d2-748689ec7d45",
+      "nativeError": "captcha verify failed",
+      "providerErrorCode": "3007",
+      "attribution": "auth_failed",
+      "statusCode": 400,
+      "userReportedAppModelWorks": "GLM-5.3",
+      "temporaryConfigMatchedCurrentAppConfig": true,
+      "logSha256": "a5cd24962397ee9dc95f912b42b4d8e8f0d722e58b39c33a5d4b2f3455b51f58",
+      "zcodeGuiLaunchCount": 0
+    },
+    "failedTurnRegression": {
+      "reproducedFacadeClosureBeforeReply": true,
+      "redLogSha256": "689081f5389f571283733a5cb7a58a7d868e601a2c6c6b53707a1b27940668aa",
+      "nativeGenericPreparationErrorReproduced": true,
+      "initialRejectionLogSha256": "568fb24efa91637c7c7272fda4d91081255251e7ab2eed62e251a1b13022a1a2",
+      "smoke": "smoke-zcode-account.mjs --expect-auth-failure via smoke-zcode-launch.swift",
+      "rejectionPassed": true,
+      "actualAccountGeneration": false,
+      "code": "runtime_authentication_required",
+      "phase": "authentication",
+      "retryable": false,
+      "successFinalPublished": false,
+      "coreExitCode": 0,
+      "zcodeGuiLaunchCount": 0,
+      "logSha256": "3830ca4d9b27122f5e79177f3c49902fa6d7ab77a6354ceeb2dd5059729166d0",
+      "coreExecutableSha256": "4c72cc90dd942be20dbf419f083aa1955980a0202748cdf6acb2c1b3495c9833",
+      "binaryScope": "Final rejection-cause handling; the later stale Team Plan selection in explicit API-key mode is covered by the final configuration regression."
+    },
+    "uncovered": [
+      "Successful account generation, subscription balance and OAuth refresh.",
+      "Start Plan temporary Renderer verification and dynamic Team Plan credentials.",
+      "Account image generation and cold resume; prior BYOK path-image evidence remains scoped to v5.",
+      "No repeated full background/compaction/Skills/MCP/permission Golden Flows for v6.",
+      "macOS x64, Windows x64 or newer kernel qualification."
+    ],
+    "delivery": {
+      "merged": false,
+      "dailyAppReplaced": false,
+      "reason": "At the original v6 test stage, delivery was paused after Start Plan failure; the later ACP-aligned scope acceptance is recorded separately below."
+    },
+    "cleanup": {
+      "changedFiles": {
+        "scanned": 13,
+        "credentialMatches": 0
+      },
+      "taskLogs": {
+        "scanned": 21,
+        "credentialMatches": 0
+      },
+      "isolatedCoreFiles": {
+        "scanned": 223,
+        "credentialMatches": 0
+      },
+      "isolatedCredentialCopiesRemoved": true,
+      "isolatedNativeHomeAndStorageRemoved": true,
+      "sourceAppConfigNotRewritten": true
+    },
+    "localGates": {
+      "rustPrGate": {
+        "libraryPassed": 551,
+        "cliPassed": 33,
+        "slowPassed": 309,
+        "scope": "Full gate during v6 implementation; final callback-cause and API-mode refinements additionally covered by the final targeted ZCode tests and Clippy."
+      },
+      "finalZcodeLibraryPassed": 5,
+      "finalProbeAndFleetPassed": 2,
+      "platformAdmissionPassed": 5,
+      "vitestPassed": 1724,
+      "vitestFilesPassed": 169,
+      "nodeFinalSuitePassed": 224,
+      "nodePlatformSkip": 1,
+      "typecheckPassed": true,
+      "clippyAllTargetsPassed": true,
+      "formatPassed": true,
+      "docsCiPassed": true,
+      "logSha256": {
+        "rustPr": "0c6084ab7f8eda34b4ecefcdba5f11143d2b9b1b8e44ceafed22ab1ac7245b4f",
+        "zcode": "f45fab3c3d07e4b24e0e4a78fdfa53af7c2985b10529b58ea26b83a6019f571d",
+        "probeAndFleet": "0e8350d0cb25c8426c51f32d369ce2c9ffe5939c3f6db832dc9e57f028e2e841",
+        "platform": "6b7946bb46c8c031f4e17f974d0cd5909636999130f19b0a9fda2432da532fd0",
+        "javascript": "d1a4aaf4a2f8de62e29615b0d3307819a73b86dcc1d6e88084e82f46f45bb4b2",
+        "clippy": "1f0c9d82fc73914f1922d843b7be1f18533f53e0f70d19bd53d0f7f8fb31f974",
+        "docsCi": "fcd24bf5ec6cc2955d543a8c5c19507057c76a5f17a97173f0306d46581e40b6"
+      }
+    }
+  },
+  "acpAlignedFollowup": {
+    "sourceBaseCommit": "e4e1ca3791be2260ae0704139305c79b0a2ba0b4",
+    "mainIntegratedCommit": "3742fa042b6b2e72353dc0867af96b85fb05c41c",
+    "referenceCommit": "92e439c2eb7484d33343d9be88d35894f4bda13e",
+    "reference": "https://github.com/william0wang/zcode-acp/issues/123#issuecomment-5556410271",
+    "acceptedScope": "Use official native configuration and kernel signing for personal Coding Plan; explicitly decline Start Plan runtime-verification callbacks. No community dependency or GUI launch.",
+    "userConfirmedFreeAccount": true,
+    "userAcceptedDeliveryWithoutRealSubscriptionTest": true,
+    "realAccountGenerationRetested": false,
+    "realAccountGenerationPassed": false,
+    "personalCodingPlanSubscriptionTest": "not run; no authorized subscription credential available",
+    "configurationRegressionScope": [
+      "Z.ai and BigModel App personal Coding Plan signing credentials passed unchanged to the official kernel",
+      "No Start Plan Bearer injection for Coding Plan",
+      "Explicit native plan selection, automatic eligible selection, disabled entitlement and digest changes",
+      "Credentials absent from public catalog and digest; native configuration not rewritten"
+    ],
+    "platformAdmission": "macOS arm64 Preview; macOS x64 and Windows x64 remain NotQualified",
+    "localGates": {
+      "rustLibraryPassed": 551,
+      "rustCliPassed": 33,
+      "rustSlowPassed": 309,
+      "zcodeTargetedPassed": 5,
+      "vitestPassed": 1724,
+      "vitestFilesPassed": 169,
+      "nodeFinalSuitePassed": 224,
+      "nodePlatformSkip": 1,
+      "typecheckPassed": true,
+      "clippyAllTargetsPassed": true,
+      "formatPassed": true,
+      "docsCiPassed": true
+    },
+    "testRetry": {
+      "firstFullGate": "550 library passed; existing mcp_import local HTTP test failed with IncompleteMessage",
+      "failedTest": "mcp_import::tests::import_commit_rehydrates_credentials_and_fences_replacement_before_startup",
+      "isolatedRetryPassed": true,
+      "completePrGateRetryPassed": true,
+      "mcpCodeChanged": false,
+      "testDisabledOrSkipped": false,
+      "rootCause": "Not established; retained the first failure and subsequent successful retries.",
+      "failedSyntheticFixtureRemoved": true
+    },
+    "packagedApp": {
+      "dailyPackagePassed": true,
+      "architecture": "arm64",
+      "signature": "ad-hoc",
+      "isolatedStartupPassed": true,
+      "coreReady": true,
+      "zcodeInstallationPresent": true,
+      "isolatedDataSkillLibraryAndMcp": true,
+      "modelRequests": 0,
+      "fixtureRemoved": true,
+      "harnessRetry": "First cleanup refused a non-default temporary directory; corrected the explicit temporary-directory argument, cleaned the first owned fixture, and repeated startup and cleanup successfully.",
+      "coreSha256": "6d13877f015acc1b0b414afa6abe71d19e9a7ad555cebd8870b3fd56fefade56"
+    },
+    "logSha256": {
+      "zcode": "c2b4dc07f5773becbd7eec3f78379857d6998d4f5a5e524eb92582aa36b3fd3c",
+      "initialRustFailure": "527009816cc4bb11216d95c256fafe7a88af0dd66082c82421f2a0091934c997",
+      "isolatedMcpRetry": "7af6a5061999dc9414c822216be07f27a15411c3ae0a2c5d18bd821b1640f91a",
+      "completeRustRetry": "ad0acae89da6ea85ad249a847e8d23d4cdb2537b0e938d102e3b29c1b6131db4",
+      "javascript": "65b29c2dcbf8ebabbdf4bb1345dbde575f09d5849c071892a39354903c6ef40b",
+      "typecheck": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+      "clippy": "f05883f9251b96edee547e59df4c34479800ebb96fc8f0983ff89c83d16647c2",
+      "package": "a61645709975c2bac786d5dc364db1818d5f5463a003636679fa893c91f494e9",
+      "packagedStartup": "b4ff5b5a61b9a0f821e60b5d31987c866a02f40af9f013890102b2bf6e07b0fe"
+    }
+  }
+}

@@ -1508,7 +1508,11 @@ fn normalize_usage(usage: &ParsedRuntimeUsage) -> Result<UsageCounters> {
     {
         anyhow::bail!("Runtime Usage reasoning output exceeds output total");
     }
-    let cache_observable = (read.is_some() || write.is_some()).then_some(1);
+    // ZCode aggregates multiple provider calls into a terminal Turn. A cache
+    // total does not establish how many individual requests hit the cache.
+    let cache_observable = (usage.dialect_id != "zcode-native-turn-usage-v1"
+        && (read.is_some() || write.is_some()))
+    .then_some(1);
     let cache_hit = cache_observable.map(|_| i64::from(read.unwrap_or(0) > 0));
     Ok(UsageCounters {
         prompt_input_total_tokens: prompt_total,
@@ -1709,6 +1713,13 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
                     | ELIGIBLE_OUTPUT
                     | ELIGIBLE_REASONING_OUTPUT
                     | ELIGIBLE_REQUEST_CACHE_HIT
+            } else {
+                0
+            }
+        }
+        AdapterKind::ZcodeApp => {
+            if reported_version_at_least(runtime_version, [0, 16, 5]) {
+                ELIGIBLE_PROMPT_INPUT_TOTAL | ELIGIBLE_CACHE_READ | ELIGIBLE_OUTPUT
             } else {
                 0
             }
@@ -2710,6 +2721,50 @@ pub fn parse_acp_usage_message(
     method: &str,
     params: &Value,
 ) -> Vec<ParsedRuntimeUsage> {
+    if adapter_kind == AdapterKind::ZcodeApp && method == "session/update" {
+        let update = &params["update"];
+        let usage = &update["_meta"]["zcodeUsage"];
+        if update["sessionUpdate"] == "usage_update"
+            && usage["source"] == "provider"
+            && let (Some(turn), Some(event)) = (
+                update
+                    .pointer("/_meta/nativeTurnId")
+                    .and_then(Value::as_str),
+                update
+                    .pointer("/_meta/nativeEventId")
+                    .and_then(Value::as_str),
+            )
+        {
+            let input = integer_at_any(usage, &["/inputTokens"]);
+            let cached = integer_at_any(usage, &["/cacheReadTokens"]);
+            return vec![ParsedRuntimeUsage {
+                identity_suffix: format!("native_turn:{event}"),
+                dialect_id: "zcode-native-turn-usage-v1".to_string(),
+                source: "runtime_private_extension".to_string(),
+                scope: "turn".to_string(),
+                counter_mode: RuntimeUsageCounterMode::Delta,
+                input_semantics: RuntimeInputSemantics::CacheInclusiveTotal,
+                native_session_id: string_at_any(params, &["/sessionId"]),
+                native_turn_id: Some(turn.to_string()),
+                fields: RuntimeUsageFields {
+                    input_tokens: input,
+                    // Unknown cache-write usage prevents deriving uncached input.
+                    uncached_input_tokens: None,
+                    output_tokens: integer_at_any(usage, &["/outputTokens"]),
+                    cache_read_input_tokens: cached,
+                    // The native aggregator fills absent provider fields with 0.
+                    // Those zeros do not establish observed cache-write/reasoning usage.
+                    cache_write_input_tokens: None,
+                    reasoning_output_tokens: None,
+                    context_used_tokens: None,
+                    context_size_tokens: None,
+                },
+                cost: None,
+                occurred_at: None,
+            }];
+        }
+        return Vec::new();
+    }
     if method == "session/update" {
         let update = &params["update"];
         let update_kind = update.get("sessionUpdate").and_then(Value::as_str);
@@ -3542,6 +3597,48 @@ mod tests {
 
     #[test]
     fn runtime_parsers_emit_sparse_usage_without_antigravity_inference() {
+        let mut zcode = json!({
+            "sessionId": "native-session",
+            "update": {"sessionUpdate":"usage_update", "_meta":{
+                "nativeTurnId":"native-turn", "nativeEventId":"native-event",
+                "zcodeUsage":{"source":"provider", "inputTokens":120,
+                    "cacheReadTokens":100, "outputTokens":30,
+                    "cacheWriteTokens":0, "reasoningTokens":0}
+            }}
+        });
+        let parsed = parse_acp_usage_message(
+            AdapterKind::ZcodeApp,
+            Some("0.16.5"),
+            "session/update",
+            &zcode,
+        );
+        assert_eq!(parsed.len(), 1);
+        let normalized = normalize_usage(&parsed[0]).unwrap();
+        assert_eq!(normalized.prompt_input_total_tokens, Some(120));
+        assert_eq!(normalized.uncached_input_tokens, None);
+        assert_eq!(normalized.cache_read_tokens, Some(100));
+        assert_eq!(normalized.output_tokens, Some(30));
+        assert_eq!(normalized.cache_write_tokens, None);
+        assert_eq!(normalized.reasoning_output_tokens, None);
+        assert_eq!(normalized.cache_observable_request_count, None);
+        assert_eq!(normalized.cache_hit_request_count, None);
+        assert!(parsed[0].cost.is_none());
+        assert_eq!(
+            eligible_mask(AdapterKind::ZcodeApp, Some("0.16.5")),
+            ELIGIBLE_PROMPT_INPUT_TOTAL | ELIGIBLE_CACHE_READ | ELIGIBLE_OUTPUT
+        );
+        assert_eq!(eligible_mask(AdapterKind::ZcodeApp, None), 0);
+        zcode["update"]["_meta"]["zcodeUsage"]["source"] = json!("estimated");
+        assert!(
+            parse_acp_usage_message(
+                AdapterKind::ZcodeApp,
+                Some("0.16.5"),
+                "session/update",
+                &zcode,
+            )
+            .is_empty()
+        );
+
         let codex: Value =
             serde_json::from_str(include_str!("../tests/fixtures/runtime-usage/codex.json"))
                 .unwrap();

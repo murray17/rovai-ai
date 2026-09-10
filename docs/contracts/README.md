@@ -50,7 +50,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v36（当前）](runtime-launch-and-verification-v36.md) | v35 的 Fleet/epoch/abort/exact resume/图片边界不变；Pi 固定原生 project trust，删除 Rovai Tool Approval 与新 Managed Input Receipt，`agent_start` 原子接受 Delivery 并发布 started |
+| [Runtime Launch and Verification v37（当前）](runtime-launch-and-verification-v37.md) | 官方 ZCode Runtime 与原生证据边界；继承上一版合同 |
+| [Runtime Launch and Verification v36（历史）](runtime-launch-and-verification-v36.md) | v35 的 Fleet/epoch/abort/exact resume/图片边界不变；Pi 固定原生 project trust，删除 Rovai Tool Approval 与新 Managed Input Receipt，`agent_start` 原子接受 Delivery 并发布 started |
 | [Runtime Launch and Verification v35（历史）](runtime-launch-and-verification-v35.md) | v34 的 Pi 原生边界不变；abort 使用完整 RPC correlation，receipt 移到最终 pre-agent seam，epoch 双重 fencing，Fleet-owned Starting/Stopping operation 与第三方 Extension UI 安全取消；Approval/Receipt 已由 v36 退役 |
 | [Runtime Launch and Verification v34（历史）](runtime-launch-and-verification-v34.md) | v33 的 Pi 原生资源、External MCP Unsupported 与部分审批不变；删除资源二次发现、Slash/Prompt transform 和 extension fallback，精确限定 resume 降级并让 Fleet 在锁外并发启动；operation ownership 由 v35 替代 |
 | [Runtime Launch and Verification v33（历史）](runtime-launch-and-verification-v33.md) | v32 的 External MCP Unsupported 不变；正式 Pi 恢复原生资源，Rovai v5 薄扩展只做绑定、Bootstrap、最小 receipt 与 `bash/edit/write` 部分审批，并加入 Prompt transform、图片、诊断与 keyed singleflight；其资源追加、Slash transform 与启动 fallback 已由 v34 删除 |
@@ -132,7 +133,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Permanent Deletion v3（当前）](camp-permanent-deletion-v3.md) | 原删除权限/journal 不变；先定向业务终态，再有界 Runtime 清理和物理删除 |
 | [Camp Permanent Deletion v2（历史）](camp-permanent-deletion-v2.md) | v1 删除合同不变；增加 Camp Published Attachment View journal cleanup，并规定先 fence Runtime、再取得 View write gate |
 | [Camp Permanent Deletion v1（历史）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界；不含 Published View cleanup |
-| [Runtime File Change Observation v4（当前）](runtime-file-change-observation-v4.md) | v3 typed read/write 与文件汇总不变；准入 Pi 成功 edit 的 path-bound 原生 patch，activity-v4 隔离新映射且不回写历史 |
+| [Runtime File Change Observation v5（当前）](runtime-file-change-observation-v5.md) | 官方 ZCode Runtime 与原生证据边界；继承上一版合同 |
+| [Runtime File Change Observation v4（历史）](runtime-file-change-observation-v4.md) | v3 typed read/write 与文件汇总不变；准入 Pi 成功 edit 的 path-bound 原生 patch，activity-v4 隔离新映射且不回写历史 |
 | [Runtime File Change Observation v3（历史）](runtime-file-change-observation-v3.md) | v2 文件变化与临时区排除不变；schema 2 增加 typed read/write，activity-v3 准入可靠单文件阅读且排除 Files Changed |
 | [Runtime File Change Observation v2（历史）](runtime-file-change-observation-v2.md) | v1 Evidence/投影/呈现不变；精确排除当前 `ROVAI_RUN_TMP` 临时交付区，mixed evidence 保留普通文件且不迁移历史数据 |
 | [Runtime File Change Observation v1（历史）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation；不含 managed output exclusion |

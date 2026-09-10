@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.56
-last_updated: 2026-09-09
+current_version: v1.57
+last_updated: 2026-09-10
 ---
 
 # Rovai-ai 版本记录
@@ -208,4 +208,5 @@ last_updated: 2026-09-09
 | v1.54 | `historical` | 本机定时 Automation、原子派发、结果冻结与独立渠道通知 | [v1.54/README.md](v1.54/README.md) |
 | v1.55 | `historical` | 文件入口与项目归属解耦、成功路径如实呈现和同名 Tab 区分 | [v1.55/README.md](v1.55/README.md) |
 
-| v1.56 | `current` | Camp 与私聊多段消息选文引用、非模态悬浮与整行定位，已实现并完成隔离 Runtime 验收 | [v1.56/README.md](v1.56/README.md) |
+| v1.56 | `historical` | Camp 与私聊多段消息选文引用、非模态悬浮与整行定位，已实现并完成隔离 Runtime 验收 | [v1.56/README.md](v1.56/README.md) |
+| v1.57 | `current` | 官方 ZCode App 内核、原生认证与图片能力接入；实现与资格验收进行中 | [v1.57/README.md](v1.57/README.md) |

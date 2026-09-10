@@ -65,7 +65,8 @@ const allRuntimeSpecifications = [
   ['qwen-code', 'Qwen'],
   ['trae-cn-cli', 'TRAE'],
   ['kimi-code-cli', 'Kimi Code'],
-  ['grok-build', 'Grok Build']
+  ['grok-build', 'Grok Build'],
+  ['zcode-app', 'ZCode']
 ].map(([adapterKind, label]) => ({ adapterKind, label, slug: adapterKind.replaceAll('-', '_') }))
 const defaultRuntimeSpecifications = allRuntimeSpecifications
 const selectedAdapters = new Set((process.env.ROVAI_BUILTIN_CLI_ADAPTERS
@@ -556,14 +557,14 @@ async function sendCampMessage(request, input) {
   const draft = await request('camp.composerDraft.get', { campId: input.campId })
   const content = input.agentId
     ? [
-        { kind: 'member_mention', agentId: input.agentId },
+        { kind: 'atom', atom: { type: 'member', agentId: input.agentId } },
         { kind: 'text', text: ` ${input.body}` }
       ]
     : [{ kind: 'text', text: input.body }]
   const saved = await request('camp.composerDraft.save', {
     campId: input.campId,
     expectedRevision: draft.revision,
-    content
+    content: { version: 2, segments: content }
   })
   return request('camp.messages.send', {
     commandId: crypto.randomUUID(),
@@ -642,7 +643,7 @@ async function createHistoricalAttachmentMessage(request, input) {
   const saved = await request('camp.composerDraft.save', {
     campId: input.campId,
     expectedRevision: referenced.revision,
-    content: [{ kind: 'text', text: input.marker }]
+    content: { version: 2, segments: [{ kind: 'text', text: input.marker }] }
   })
   const sent = await request('camp.messages.send', {
     commandId: crypto.randomUUID(),
@@ -1003,6 +1004,13 @@ function projectEnvelopeForMeasurement(envelope) {
     case 'memory.search':
     case 'team.get_task':
     case 'team.list_tasks':
+    case 'automation.list':
+    case 'automation.get':
+    case 'automation.create':
+    case 'automation.run':
+    case 'automation.close':
+    case 'automation.update':
+    case 'automation.delete':
       return envelope.result
     default:
       throw new Error(`Missing Agent output measurement projection for ${envelope.operation}`)
@@ -1447,7 +1455,7 @@ printf '%s\n' "$camp_read_historical_attachment" | "$JQ" -e \
   and .items[0].attachments[0].name == "historical-attachment.txt"
   and .items[0].attachments[0].kind == "file"
   and .items[0].attachments[0].fileCount == 1
-  and (.items[0].attachments[0].mediaType | startswith("text/plain"))
+  and .items[0].attachments[0].mediaType == "application/octet-stream"
 ' >/dev/null
 
 cat > "$RUN_TMP/public-send.json" <<'ROVAI_JSON'
@@ -1730,7 +1738,7 @@ function startCore(dataDirectory) {
     if (!entry) return
     clearTimeout(entry.timer)
     pending.delete(message.id)
-    if (message.error) entry.reject(new Error(`${message.error.code}: ${message.error.message}`))
+    if (message.error) entry.reject(new Error(`${entry.method}: ${message.error.code}: ${message.error.message}`))
     else entry.resolve(message.result)
   })
   const request = (method, params = {}) => new Promise((resolveRequest, rejectRequest) => {
@@ -1739,7 +1747,7 @@ function startCore(dataDirectory) {
       pending.delete(id)
       rejectRequest(new Error(`Timed out waiting for Core method ${method}`))
     }, 180_000)
-    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
+    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer, method })
     child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
   const stop = async () => {

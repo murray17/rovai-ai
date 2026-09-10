@@ -108,6 +108,16 @@ pub fn executable_fingerprint(path: &Path) -> Result<String> {
     if command_shim_extension(path).is_some() {
         return Ok(capture_windows_command_shim(path)?.compatibility_fingerprint());
     }
+    if path.file_name().and_then(|v| v.to_str()) == Some("ZCode") {
+        let members = crate::zcode::bundle_members(path)?;
+        let fingerprints = members
+            .iter()
+            .map(|member| file_content_fingerprint(member))
+            .collect::<Result<Vec<_>>>()?;
+        return crate::command::canonical_json_digest(
+            &serde_json::json!({"officialZcodeBundle":fingerprints,"bridgeRevision":crate::zcode::BRIDGE_REVISION}),
+        );
+    }
     file_content_fingerprint(path)
 }
 
@@ -225,6 +235,21 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
     };
     #[cfg(not(any(unix, windows)))]
     let file_id = None;
+    let file_id = if path.file_name().and_then(|v| v.to_str()) == Some("ZCode") {
+        let mut stamps = Vec::new();
+        for member in crate::zcode::bundle_members(path)? {
+            let metadata = std::fs::metadata(&member)?;
+            stamps.push(format!(
+                "{}:{}:{}",
+                member.display(),
+                metadata.len(),
+                metadata.modified()?.duration_since(UNIX_EPOCH)?.as_nanos()
+            ));
+        }
+        Some(format!("{:?}:{}", file_id, stamps.join("|")))
+    } else {
+        file_id
+    };
     Ok(ExecutableFileIdentity {
         byte_size: metadata.len(),
         modified_at_unix_nanos,
@@ -361,10 +386,11 @@ pub enum SkillDeliveryGroupKey {
     Cursor,
     Kimi,
     Grok,
+    Zcode,
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
@@ -379,6 +405,7 @@ impl SkillDeliveryGroupKey {
         Self::Cursor,
         Self::Kimi,
         Self::Grok,
+        Self::Zcode,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -397,6 +424,7 @@ impl SkillDeliveryGroupKey {
             Self::Cursor => "cursor",
             Self::Kimi => "kimi",
             Self::Grok => "grok",
+            Self::Zcode => "zcode",
         }
     }
 
@@ -416,6 +444,7 @@ impl SkillDeliveryGroupKey {
             Self::Cursor => Path::new(".cursor/skills"),
             Self::Kimi => Path::new(".kimi-code/skills"),
             Self::Grok => Path::new(".grok/skills"),
+            Self::Zcode => Path::new(".zcode/skills"),
         }
     }
 }
@@ -439,6 +468,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "cursor" => Ok(Self::Cursor),
             "kimi" => Ok(Self::Kimi),
             "grok" => Ok(Self::Grok),
+            "zcode" => Ok(Self::Zcode),
             _ => anyhow::bail!("unsupported Skill delivery group: {value}"),
         }
     }
@@ -683,6 +713,21 @@ impl AgentRuntimeAdapterRegistry {
         kind: AdapterKind,
         platform: HostPlatformKey,
     ) -> RuntimePlatformAdmission {
+        if kind == AdapterKind::ZcodeApp {
+            return if platform == HostPlatformKey::MacosArm64 {
+                RuntimePlatformAdmission::preview(
+                    kind,
+                    platform,
+                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                )
+            } else {
+                RuntimePlatformAdmission::not_qualified(
+                    kind,
+                    platform,
+                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                )
+            };
+        }
         if kind == AdapterKind::CursorAgent {
             return RuntimePlatformAdmission::not_qualified(
                 kind,
@@ -768,6 +813,7 @@ impl AgentRuntimeAdapterRegistry {
                 "approval_policy": "never",
             }),
             AdapterKind::Pi => json!({}),
+            AdapterKind::ZcodeApp => json!({"permission_mode": "yolo"}),
             AdapterKind::OpencodeCli => json!({
                 "permission": "allow",
             }),
@@ -829,12 +875,17 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::TraeCnCli
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
-            | AdapterKind::GrokBuild => resolve_acp_runtime(kind, input),
+            | AdapterKind::GrokBuild
+            | AdapterKind::ZcodeApp => resolve_acp_runtime(kind, input),
         }
     }
 
     pub fn skill_discovery(&self, kind: AdapterKind) -> SkillDiscoveryCapability {
         match kind {
+            AdapterKind::ZcodeApp => native_skill_discovery(
+                [SkillDeliveryGroupKey::Zcode],
+                SkillDiscoveryVerification::Verified,
+            ),
             AdapterKind::CodexCli => self.codex_cli.skill_discovery(),
             AdapterKind::Pi => native_skill_discovery(
                 [SkillDeliveryGroupKey::Pi],
@@ -892,9 +943,8 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
-            | AdapterKind::KimiCodeCli => {
-                additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
-            }
+            | AdapterKind::KimiCodeCli
+            | AdapterKind::ZcodeApp => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
             AdapterKind::GrokBuild => {
                 additive_native_mcp_projection(McpSameNamePolicy::NativeWinsSkip)
             }
@@ -942,6 +992,9 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KimiCodeCli => {
                 acp_capability_snapshot(observation, kimi_permission_options())
             }
+            AdapterKind::ZcodeApp => {
+                acp_capability_snapshot(observation, zcode_permission_options())
+            }
             AdapterKind::GrokBuild => {
                 acp_capability_snapshot(observation, grok_permission_options())
             }
@@ -971,6 +1024,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CursorAgent => cursor_permission_options(),
             AdapterKind::KimiCodeCli => kimi_permission_options(),
             AdapterKind::GrokBuild => grok_permission_options(),
+            AdapterKind::ZcodeApp => zcode_permission_options(),
         };
         let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
         let grok_version_unsupported = kind == AdapterKind::GrokBuild
@@ -1996,7 +2050,19 @@ fn acp_capability_snapshot(
     }
     let mut capabilities = observation.capabilities;
     if ready {
-        let standard_capabilities: &[&str] = if adapter_kind == AdapterKind::CursorAgent {
+        let standard_capabilities: &[&str] = if adapter_kind == AdapterKind::ZcodeApp {
+            // Implemented adapter mappings, not observations from today's probe.
+            &[
+                "acp.initialize",
+                "session.new",
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "session.set_config_option",
+                "structured_permission_request",
+                "context.charter.first_payload",
+            ]
+        } else if adapter_kind == AdapterKind::CursorAgent {
             &[
                 "acp.initialize",
                 "session.new",
@@ -2082,7 +2148,15 @@ fn acp_capability_snapshot(
                     .context("ready TRAE snapshot has no executable fingerprint")?;
                 format!("{}:acp-v1:{fingerprint}", adapter_kind.as_str())
             } else {
-                format!("{}:acp-v1", adapter_kind.as_str())
+                format!(
+                    "{}:{}",
+                    adapter_kind.as_str(),
+                    if adapter_kind == AdapterKind::ZcodeApp {
+                        crate::zcode::PROTOCOL
+                    } else {
+                        "acp-v1"
+                    }
+                )
             },
         )
     } else {
@@ -2097,7 +2171,14 @@ fn acp_capability_snapshot(
         permission_schema_digest,
         capabilities,
         protocols: if ready {
-            vec!["acp-v1".to_string()]
+            vec![
+                if adapter_kind == AdapterKind::ZcodeApp {
+                    crate::zcode::PROTOCOL
+                } else {
+                    "acp-v1"
+                }
+                .to_string(),
+            ]
         } else {
             Vec::new()
         },
@@ -2526,6 +2607,25 @@ pub(crate) fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor
     }]
 }
 
+fn zcode_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".to_string(),
+        label: "Permission mode".to_string(),
+        description: "Official ZCode permission mode".to_string(),
+        scope: RuntimeOptionScope::Host,
+        value_type: "enum".to_string(),
+        choices: ["plan", "build", "edit", "yolo", "auto"]
+            .into_iter()
+            .map(|value| choice(value, value))
+            .collect(),
+        recommended_value: json!("build"),
+        risk: "dangerous".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
 fn pi_permission_options() -> Vec<PermissionOptionDescriptor> {
     Vec::new()
 }
@@ -2651,7 +2751,14 @@ fn resolve_acp_runtime(
     let protocol_version = input
         .protocols
         .iter()
-        .find(|protocol| protocol.as_str() == "acp-v1")
+        .find(|protocol| {
+            protocol.as_str()
+                == if expected_kind == AdapterKind::ZcodeApp {
+                    crate::zcode::PROTOCOL
+                } else {
+                    "acp-v1"
+                }
+        })
         .context("ACP installation does not advertise ACP v1")?
         .clone();
     let permission_values = input
@@ -4174,6 +4281,11 @@ mod tests {
             (
                 AdapterKind::GrokBuild,
                 &[SkillDeliveryGroupKey::Grok],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::ZcodeApp,
+                &[SkillDeliveryGroupKey::Zcode],
                 SkillDiscoveryVerification::Verified,
             ),
         ];

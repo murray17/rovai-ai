@@ -1208,6 +1208,7 @@ async fn acp_probe_at(
             | AdapterKind::GrokBuild
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
+            | AdapterKind::ZcodeApp
     ) {
         return AcpCapabilityProbe {
             result: agent_probe_result(
@@ -1262,6 +1263,29 @@ async fn acp_probe_at(
         };
     }
     let mut version_command = runtime_command(&canonical);
+    if kind == AdapterKind::ZcodeApp {
+        // Discovery already validated the bundle; do not execute its UI entrypoint.
+        match rovai_core::zcode::command(&canonical) {
+            Ok(command) => version_command = command,
+            Err(error) => {
+                return AcpCapabilityProbe {
+                    result: agent_probe_result(
+                        kind.as_str(),
+                        Some(path_text),
+                        None,
+                        fingerprint,
+                        AgentRuntimeProbeStatus::ProbeFailed,
+                        Vec::new(),
+                        required_capabilities,
+                        Some(error.to_string()),
+                        probed_at,
+                    ),
+                    initialize_result: None,
+                    session_result: None,
+                };
+            }
+        }
+    }
     version_command.arg("--version");
     let version_output = match bounded_output(&mut version_command, Duration::from_secs(15)).await {
         Ok(output) if output.status.success() => output,
@@ -1306,6 +1330,28 @@ async fn acp_probe_at(
     };
     let reported_version =
         first_nonempty_line(&version_output.stdout.bytes, &version_output.stderr.bytes);
+    if kind == AdapterKind::ZcodeApp
+        && !rovai_core::zcode::supported_version(reported_version.as_deref())
+    {
+        return AcpCapabilityProbe {
+            result: agent_probe_result(
+                kind.as_str(),
+                Some(path_text),
+                reported_version,
+                fingerprint,
+                AgentRuntimeProbeStatus::MissingCapabilities,
+                Vec::new(),
+                vec![format!(
+                    "runtime.version>={}",
+                    rovai_core::zcode::MINIMUM_VERSION
+                )],
+                Some("Official ZCode kernel 0.16.5 or later is required.".to_string()),
+                probed_at,
+            ),
+            initialize_result: None,
+            session_result: None,
+        };
+    }
     if kind == AdapterKind::CursorAgent
         && reported_version
             .as_deref()
@@ -1362,7 +1408,7 @@ async fn acp_probe_at(
                 grok_resume_verified,
             );
             let additive_mcp = additive_acp_mcp_verified(kind);
-            if additive_mcp {
+            if additive_mcp && kind != AdapterKind::ZcodeApp {
                 capabilities.push("mcp.additive_per_run".to_string());
             }
             capabilities.sort();
@@ -1378,12 +1424,16 @@ async fn acp_probe_at(
             } else {
                 AgentRuntimeProbeStatus::MissingCapabilities
             };
-            let detail = (!missing.is_empty()).then(|| {
-                format!(
-                    "ACP handshake succeeded, but required capabilities are missing: {}",
-                    missing.join(", ")
-                )
-            });
+            let detail = if kind == AdapterKind::ZcodeApp && missing.is_empty() {
+                Some("Native configuration and basic connection checked in a temporary workspace; no prompt sent. Model generation, balance and advanced capabilities were not tested. Native initialization may access the network and write state.".to_string())
+            } else {
+                (!missing.is_empty()).then(|| {
+                    format!(
+                        "ACP handshake succeeded, but required capabilities are missing: {}",
+                        missing.join(", ")
+                    )
+                })
+            };
             AcpCapabilityProbe {
                 result: agent_probe_result(
                     kind.as_str(),
@@ -1430,6 +1480,9 @@ async fn run_acp_probe(
 ) -> Result<(Value, Option<Value>, bool)> {
     if !runtime_launch_allowed(kind, purpose) {
         bail!(runtime_launch_disallowed_detail(purpose));
+    }
+    if kind == AdapterKind::ZcodeApp {
+        return rovai_core::zcode::transport::probe(path, include_session).await;
     }
     let probe_root = env::temp_dir().join(format!("rovai-acp-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&probe_root)?;
@@ -2152,7 +2205,8 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
-        | AdapterKind::AntigravityApp => {}
+        | AdapterKind::AntigravityApp
+        | AdapterKind::ZcodeApp => {}
     }
 }
 
@@ -2172,6 +2226,17 @@ fn acp_observed_capabilities(
     session: Option<&Value>,
     grok_resume_verified: bool,
 ) -> Vec<String> {
+    if kind == AdapterKind::ZcodeApp {
+        return if session.is_some() {
+            vec![
+                "acp.initialize".to_string(),
+                "zcode.native_configuration".to_string(),
+                "session.new".to_string(),
+            ]
+        } else {
+            vec!["acp.initialize".to_string()]
+        };
+    }
     let mut capabilities = if kind == AdapterKind::TraeCnCli {
         session.map_or_else(Vec::new, |session| {
             trae_machine_ready_capabilities(
@@ -2233,6 +2298,17 @@ fn acp_observed_capabilities(
 }
 
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
+    if kind == AdapterKind::ZcodeApp {
+        // Probe observations, distinct from AdapterCapabilitySnapshot support.
+        return [
+            "acp.initialize",
+            "zcode.native_configuration",
+            "session.new",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    }
     if kind == AdapterKind::TraeCnCli {
         return trae_machine_ready_requirements();
     }
@@ -3151,6 +3227,11 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
         AdapterKind::CursorAgent => (&["ROVAI_CURSOR_BIN"][..], "cursor-agent"),
         AdapterKind::KimiCodeCli => (&["ROVAI_KIMI_BIN"][..], "kimi"),
         AdapterKind::GrokBuild => (&["ROVAI_GROK_BIN"][..], "grok"),
+        AdapterKind::ZcodeApp => {
+            return rovai_core::zcode::default_executables()
+                .into_iter()
+                .find(|p| rovai_core::zcode::runtime_script(p).is_ok());
+        }
         AdapterKind::AntigravityApp => (
             &[
                 "ROVAI_ANTIGRAVITY_BIN",
@@ -3992,6 +4073,42 @@ printf '%s\n' "$resume" >> "$request_log"
         });
         let error = select_grok_noninteractive_auth_method(&interactive_only, false).unwrap_err();
         assert!(error.to_string().contains("grok login --device-auth"));
+    }
+
+    #[test]
+    fn zcode_probe_reports_only_basic_observations() {
+        // ZCode's no-generation Probe has its own evidence boundary; the
+        // advertised Adapter mappings cannot promote observations to tests.
+        let initialize = json!({"agentCapabilities":{"loadSession":true}});
+        let session = json!({"sessionId":"zcode-session"});
+        let observed = acp_observed_capabilities(
+            AdapterKind::ZcodeApp,
+            Some("0.17.0"),
+            Some("sha256:new-kernel"),
+            &initialize,
+            Some(&session),
+            false,
+        );
+        assert_eq!(observed, acp_required_capabilities(AdapterKind::ZcodeApp));
+        assert_eq!(
+            observed,
+            [
+                "acp.initialize",
+                "zcode.native_configuration",
+                "session.new"
+            ]
+        );
+        assert_eq!(
+            acp_observed_capabilities(
+                AdapterKind::ZcodeApp,
+                Some("0.16.5"),
+                None,
+                &initialize,
+                None,
+                false,
+            ),
+            ["acp.initialize"]
+        );
     }
 
     #[test]

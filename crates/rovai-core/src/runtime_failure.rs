@@ -315,6 +315,7 @@ fn runtime_display_name(runtime_kind: AdapterKind) -> &'static str {
         AdapterKind::KimiCodeCli => "Kimi Code",
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::AntigravityApp => "Antigravity",
+        AdapterKind::ZcodeApp => "ZCode",
     }
 }
 

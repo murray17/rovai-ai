@@ -8600,6 +8600,7 @@ function runtimeAdapterLabel(kind: string): string {
     'cursor-agent': 'Cursor Agent',
     'kimi-code-cli': 'Kimi Code',
     'grok-build': 'Grok Build',
+    'zcode-app': 'ZCode',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
 }

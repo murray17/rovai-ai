@@ -439,6 +439,34 @@ impl RuntimeSearchEnvironment {
     ) -> Vec<RuntimeExecutableCandidate> {
         let mut candidates = Vec::new();
         let manual_candidates = manual_candidates.into_iter().collect::<Vec<_>>();
+        if kind == AdapterKind::ZcodeApp {
+            for (path, source) in manual_candidates
+                .into_iter()
+                .map(|p| (p, InstallationSource::Manual))
+                .chain(
+                    override_path
+                        .into_iter()
+                        .map(|p| (p, InstallationSource::Env)),
+                )
+                .chain(
+                    crate::zcode::default_executables()
+                        .into_iter()
+                        .map(|p| (p, InstallationSource::KnownLocation)),
+                )
+            {
+                if crate::zcode::runtime_script(&path).is_ok() {
+                    push_candidates_for_kind(
+                        &mut candidates,
+                        path,
+                        source,
+                        None,
+                        kind,
+                        &self.executable_suffixes,
+                    );
+                }
+            }
+            return candidates;
+        }
         #[cfg(windows)]
         {
             if !manual_candidates.is_empty() {
@@ -789,7 +817,7 @@ fn version_timeout(kind: AdapterKind) -> Duration {
         // Pi's packaged JavaScript entrypoint may need a cold Node startup before it can
         // answer `--version`. Keep the bounded probe, but do not apply the native-binary
         // deadline to this runtime.
-        AdapterKind::Pi => PI_VERSION_TIMEOUT,
+        AdapterKind::Pi | AdapterKind::ZcodeApp => PI_VERSION_TIMEOUT,
         _ => VERSION_TIMEOUT,
     }
 }
@@ -804,7 +832,11 @@ async fn bounded_version_command(
     if !runtime_launch_allowed(kind, purpose) {
         anyhow::bail!("runtime_launch_disallowed_for_{purpose:?}");
     }
-    let mut command = TokioCommand::new(executable);
+    let mut command = if kind == AdapterKind::ZcodeApp {
+        crate::zcode::command(executable)?
+    } else {
+        TokioCommand::new(executable)
+    };
     command.args(arguments).stdin(Stdio::null());
     search.configure_tokio_command(&mut command);
     let output = run_bounded_command(
@@ -1683,7 +1715,10 @@ mod tests {
         ));
         fs::create_dir_all(&directory).unwrap();
         let marker = directory.join("invocations");
-        for kind in AdapterKind::ALL {
+        for kind in AdapterKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != AdapterKind::ZcodeApp)
+        {
             let version = if kind == AdapterKind::CursorAgent {
                 "2026.08.11-e8db854"
             } else {
@@ -1703,7 +1738,10 @@ mod tests {
             sources: vec![SearchPathSource::InheritedPath],
         }]);
 
-        for kind in AdapterKind::ALL {
+        for kind in AdapterKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != AdapterKind::ZcodeApp)
+        {
             let mut observation = discover_runtime_path(kind, &search);
             discover_runtime_version(&mut observation, &search).await;
             assert!(observation.reported_version.is_some());
@@ -1711,7 +1749,7 @@ mod tests {
 
         let invocations = fs::read_to_string(&marker).unwrap();
         let lines = invocations.lines().collect::<Vec<_>>();
-        assert_eq!(lines.len(), AdapterKind::ALL.len());
+        assert_eq!(lines.len(), AdapterKind::ALL.len() - 1);
         assert!(lines.iter().all(|line| line.ends_with(":--version")));
         assert!(!invocations.contains("acp"));
         assert!(!invocations.contains("session"));

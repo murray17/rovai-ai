@@ -34,9 +34,8 @@ use rovai_core::{
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
     managed_process::{
-        ManagedChildStderr, ManagedChildStdin, ManagedChildStdout, ManagedProcess,
-        ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
-        ManagedWindowsArgvDialect,
+        ManagedChildStderr, ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose,
+        ManagedStdinPolicy, ManagedWindowsArgvDialect,
     },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
@@ -52,7 +51,7 @@ use rovai_core::{
 };
 use serde_json::{Value, json};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     process::Command,
     sync::{Mutex, Notify, RwLock, mpsc, oneshot},
     time::timeout,
@@ -74,6 +73,12 @@ use crate::{
 
 #[derive(Debug)]
 pub enum AcpIncoming {
+    ZcodeBackground {
+        agent_run_id: String,
+        execution_epoch: i64,
+        registration: bool,
+        message: Value,
+    },
     InputAccepted {
         adapter_kind: AdapterKind,
         host_instance_id: String,
@@ -253,6 +258,7 @@ struct AcpActivePrompt {
     acceptance_emitted: bool,
     prompt_activity_observed: bool,
     kimi_compaction_lifecycle: KimiCompactionLifecycle,
+    zcode_input_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -352,6 +358,10 @@ fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Val
                     Some("_kiro.dev/mcp/server_initialized")
                 )
                 | (AdapterKind::CodebuddyCli, Some("_codebuddy.ai/command"))
+                | (
+                    AdapterKind::ZcodeApp,
+                    Some("_zcode/compaction" | "_zcode/inputAccepted")
+                )
         )
 }
 
@@ -1183,6 +1193,14 @@ impl AcpRpcError {
     }
 }
 
+#[derive(Clone)]
+struct ZcodeBackgroundRoute {
+    owner: AcpRuntimeOwner,
+    identity: Value,
+    tool_update: Value,
+    finished: bool,
+}
+
 pub(crate) struct AcpHost {
     adapter_kind: AdapterKind,
     reported_version: Option<String>,
@@ -1190,7 +1208,7 @@ pub(crate) struct AcpHost {
     client_terminal_bridge: Option<AcpClientTerminalBridge>,
     host_instance_id: String,
     child: Mutex<ManagedProcess>,
-    stdin: Mutex<ManagedChildStdin>,
+    stdin: Mutex<Box<dyn AsyncWrite + Unpin + Send>>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
     next_compaction_observation_sequence: AtomicU64,
@@ -1199,6 +1217,9 @@ pub(crate) struct AcpHost {
     ingress_fence: Mutex<()>,
     compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
+    zcode_background: std::sync::Mutex<HashMap<(String, String), ZcodeBackgroundRoute>>,
+    zcode_detached_prompts: RwLock<HashMap<String, AcpSessionRoute>>,
+    zcode_cleanup_confirmed: AtomicBool,
     session_results: RwLock<HashMap<String, Value>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
@@ -1254,7 +1275,11 @@ impl AcpHost {
         let host_instance_id = uuid::Uuid::new_v4().to_string();
         let grok_byok_configured =
             frozen_runtime.adapter_kind == AdapterKind::GrokBuild && grok_native_byok_configured()?;
-        let mut command = Command::new(&frozen_runtime.executable_path);
+        let mut command = if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
+            crate::zcode::command(Path::new(&frozen_runtime.executable_path))?
+        } else {
+            Command::new(&frozen_runtime.executable_path)
+        };
         configure_active_runtime_command(&mut command);
         if let Some(config) = &builtin_tools {
             config.configure_command(&mut command)?;
@@ -1333,6 +1358,34 @@ impl AcpHost {
         let stdin = child.take_stdin().context("ACP stdin was unavailable")?;
         let stdout = child.take_stdout().context("ACP stdout was unavailable")?;
         let stderr = child.take_stderr().context("ACP stderr was unavailable")?;
+        let (stdin, stdout): (
+            Box<dyn AsyncWrite + Unpin + Send>,
+            Box<dyn AsyncRead + Unpin + Send>,
+        ) = if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
+            let mode = if permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && workspace.access == "read_only"
+            {
+                "plan"
+            } else {
+                frozen_runtime
+                    .permissions
+                    .values
+                    .get("permission_mode")
+                    .and_then(Value::as_str)
+                    .context("ZCode permission mode missing")?
+            };
+            let bridge = crate::zcode::transport::start(
+                stdin,
+                stdout,
+                crate::zcode::NativeConfig::load(cwd)?,
+                cwd.to_path_buf(),
+                mode.to_string(),
+            );
+            let (read, write) = tokio::io::split(bridge);
+            (Box::new(write), Box::new(read))
+        } else {
+            (Box::new(stdin), Box::new(stdout))
+        };
         let host = Arc::new(Self {
             adapter_kind: frozen_runtime.adapter_kind,
             reported_version: frozen_runtime.reported_version.clone(),
@@ -1349,6 +1402,9 @@ impl AcpHost {
             ingress_fence: Mutex::new(()),
             compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
+            zcode_background: std::sync::Mutex::new(HashMap::new()),
+            zcode_detached_prompts: RwLock::new(HashMap::new()),
+            zcode_cleanup_confirmed: AtomicBool::new(false),
             session_results: RwLock::new(HashMap::new()),
             incoming,
             alive: AtomicBool::new(true),
@@ -1470,7 +1526,7 @@ impl AcpHost {
         }
     }
 
-    fn spawn_stdout_reader(host: Arc<Self>, stdout: ManagedChildStdout) {
+    fn spawn_stdout_reader<R: AsyncRead + Send + Unpin + 'static>(host: Arc<Self>, stdout: R) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             loop {
@@ -1537,6 +1593,55 @@ impl AcpHost {
                                     }
                                 }))
                                 .await;
+                            continue;
+                        }
+                        if host.adapter_kind == AdapterKind::ZcodeApp
+                            && method == Some("_zcode/inputAccepted")
+                            && let Some(session_id) =
+                                message.pointer("/params/sessionId").and_then(Value::as_str)
+                            && let Some(route) = host
+                                .zcode_detached_prompts
+                                .write()
+                                .await
+                                .get_mut(session_id)
+                            && let AcpSessionPhase::PromptActive(prompt) = &mut route.phase
+                        {
+                            prompt.zcode_input_id = message
+                                .pointer("/params/inputId")
+                                .and_then(Value::as_str)
+                                .map(str::to_string);
+                            continue;
+                        }
+                        if host.adapter_kind == AdapterKind::ZcodeApp
+                            && method == Some("_zcode/backgroundIdle")
+                        {
+                            if let Some(session_id) =
+                                message.pointer("/params/sessionId").and_then(Value::as_str)
+                            {
+                                host.zcode_background
+                                    .lock()
+                                    .expect("ZCode background mutex poisoned")
+                                    .retain(|(session, _), route| {
+                                        session != session_id || !route.finished
+                                    });
+                            }
+                            continue;
+                        }
+                        if host.adapter_kind == AdapterKind::ZcodeApp
+                            && method == Some("_zcode/backgroundNotificationStop")
+                        {
+                            host.send_host_diagnostic(format!("ZCode requested exact stop of a native background notification Turn without a Rovai Input; original task result preserved: {}", message["params"]));
+                            continue;
+                        }
+                        if host.adapter_kind == AdapterKind::ZcodeApp
+                            && method == Some("_zcode/background")
+                        {
+                            if let Err(error) = host.route_zcode_background(message).await {
+                                host.protocol_violated.store(true, Ordering::Release);
+                                host.send_host_diagnostic(format!(
+                                    "ZCode background ownership rejected: {error:#}"
+                                ));
+                            }
                             continue;
                         }
                         let declared_session_id = message
@@ -1699,6 +1804,12 @@ impl AcpHost {
                 session_id,
                 prompt_id,
             } => {
+                if self.adapter_kind == AdapterKind::ZcodeApp {
+                    self.zcode_detached_prompts
+                        .write()
+                        .await
+                        .remove(&session_id);
+                }
                 let active_prompt = {
                     let mut routes = self.routes.write().await;
                     let Some(route) = routes.get_mut(&session_id) else {
@@ -1802,6 +1913,12 @@ impl AcpHost {
 
     fn spawn_stderr_reader(host: Arc<Self>, stderr: ManagedChildStderr) {
         tokio::spawn(async move {
+            if host.adapter_kind == AdapterKind::ZcodeApp {
+                // Native diagnostics are not a public protocol and may echo
+                // runtimeModel credentials. Drain without retaining their body.
+                let _ = tokio::io::copy(&mut BufReader::new(stderr), &mut tokio::io::sink()).await;
+                return;
+            }
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if !line.trim().is_empty() {
@@ -2009,6 +2126,101 @@ impl AcpHost {
         }
     }
 
+    pub(crate) fn has_zcode_background_tasks(&self) -> bool {
+        !self
+            .zcode_background
+            .lock()
+            .expect("ZCode background mutex poisoned")
+            .is_empty()
+    }
+
+    async fn route_zcode_background(&self, mut message: Value) -> Result<()> {
+        let params = &message["params"];
+        let session = params["sessionId"].as_str().context("missing Session")?;
+        let background = &params["background"];
+        let task = background["taskId"].as_str().context("missing task ID")?;
+        let key = (session.to_string(), task.to_string());
+        let mut identity = background.clone();
+        identity
+            .as_object_mut()
+            .context("missing background identity")?
+            .remove("status");
+        identity["sessionId"] = json!(session);
+        identity["hostInstanceId"] = json!(self.host_instance_id);
+        let existing = self
+            .zcode_background
+            .lock()
+            .expect("ZCode background mutex poisoned")
+            .get(&key)
+            .cloned();
+        let registration = existing.is_none();
+        let mut route = if let Some(existing) = existing {
+            for field in [
+                "taskId",
+                "toolCallId",
+                "inputId",
+                "turnId",
+                "sessionId",
+                "hostInstanceId",
+            ] {
+                if existing.identity[field] != identity[field] {
+                    bail!("background identity changed");
+                }
+            }
+            existing
+        } else {
+            let active = self.routes.read().await.get(session).cloned();
+            let active = match active {
+                Some(active) => Some(active),
+                None => self
+                    .zcode_detached_prompts
+                    .read()
+                    .await
+                    .get(session)
+                    .cloned(),
+            };
+            let active = active.context("background started without Session owner")?;
+            let AcpSessionPhase::PromptActive(prompt) = &active.phase else {
+                bail!("background started outside an active prompt");
+            };
+            if prompt.zcode_input_id.as_deref() != background["inputId"].as_str() {
+                bail!("background Input does not belong to current prompt");
+            }
+            identity["nativePromptId"] = json!(prompt.prompt_id);
+            identity["deliveryId"] = json!(prompt.delivery_id);
+            ZcodeBackgroundRoute {
+                owner: active.owner.clone(),
+                identity,
+                tool_update: params["update"].clone(),
+                finished: false,
+            }
+        };
+        let status = background["status"].clone();
+        message["params"]["background"] = route.identity.clone();
+        message["params"]["background"]["status"] = status;
+        let finished = matches!(
+            message["params"]["background"]["status"].as_str(),
+            Some("completed" | "failed" | "cancelled")
+        );
+        self.incoming
+            .send(AcpIncoming::ZcodeBackground {
+                agent_run_id: route.owner.agent_run_id.clone(),
+                execution_epoch: route.owner.execution_epoch,
+                registration,
+                message,
+            })
+            .context("ZCode background evidence receiver closed")?;
+        let mut tasks = self
+            .zcode_background
+            .lock()
+            .expect("ZCode background mutex poisoned");
+        // Native task completion may immediately enqueue a model-only Turn.
+        // Keep the owner pinned until the bridge confirms native foreground idle.
+        route.finished = finished;
+        tasks.insert(key, route);
+        Ok(())
+    }
+
     async fn route_session_message(
         &self,
         session_id: &str,
@@ -2021,7 +2233,9 @@ impl AcpHost {
             if ((self.adapter_kind == AdapterKind::KimiCodeCli
                 && is_kimi_compaction_completed_frame(message))
                 || (self.adapter_kind == AdapterKind::GrokBuild
-                    && grok_compaction_completed_occurrence_id(message).is_some()))
+                    && grok_compaction_completed_occurrence_id(message).is_some())
+                || (self.adapter_kind == AdapterKind::ZcodeApp
+                    && message["method"] == "_zcode/compaction"))
                 && self
                     .compaction_observers
                     .read()
@@ -2038,6 +2252,25 @@ impl AcpHost {
         };
         match &mut route.phase {
             AcpSessionPhase::PromptActive(active_prompt) => {
+                if self.adapter_kind == AdapterKind::ZcodeApp
+                    && message["method"] == "_zcode/inputAccepted"
+                {
+                    active_prompt.zcode_input_id = message
+                        .pointer("/params/inputId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    if !active_prompt.acceptance_emitted {
+                        active_prompt.acceptance_emitted = true;
+                        active_prompt.prompt_activity_observed = true;
+                        let _ = self.incoming.send(route.owner.input_accepted(
+                            self.adapter_kind,
+                            &self.host_instance_id,
+                            session_id,
+                            active_prompt,
+                        ));
+                    }
+                    return AcpSessionMessageRoute::SessionMetadata;
+                }
                 if self.adapter_kind == AdapterKind::KimiCodeCli
                     && consume_kimi_prompt_compaction_lifecycle_frame(
                         &mut active_prompt.kimi_compaction_lifecycle,
@@ -2319,8 +2552,15 @@ impl AcpHost {
 
     async fn unbind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) {
         let mut routes = self.routes.write().await;
-        if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
-            routes.remove(session_id);
+        if routes.get(session_id).map(|route| &route.owner) == Some(owner)
+            && let Some(route) = routes.remove(session_id)
+            && self.adapter_kind == AdapterKind::ZcodeApp
+            && matches!(route.phase, AcpSessionPhase::PromptActive(_))
+        {
+            self.zcode_detached_prompts
+                .write()
+                .await
+                .insert(session_id.to_string(), route);
         }
         drop(routes);
         // Session terminal cleanup is idempotent and must still run when a
@@ -2339,8 +2579,15 @@ impl AcpHost {
             let _ingress_fence = self.ingress_fence.lock().await;
             if let Some(session_id) = session_id {
                 let mut routes = self.routes.write().await;
-                if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
-                    routes.remove(session_id);
+                if routes.get(session_id).map(|route| &route.owner) == Some(owner)
+                    && let Some(route) = routes.remove(session_id)
+                    && self.adapter_kind == AdapterKind::ZcodeApp
+                    && matches!(route.phase, AcpSessionPhase::PromptActive(_))
+                {
+                    self.zcode_detached_prompts
+                        .write()
+                        .await
+                        .insert(session_id.to_string(), route);
                 }
             }
             let (completion, flushed) = oneshot::channel();
@@ -2473,7 +2720,74 @@ impl AcpHost {
                     == Ok(true)
             }
         );
-        host_reaped && terminals_reaped
+        let native_groups_reaped = self.confirm_zcode_cleanup(deadline).await;
+        host_reaped && terminals_reaped && native_groups_reaped
+    }
+
+    async fn confirm_zcode_cleanup(&self, deadline: tokio::time::Instant) -> bool {
+        if self.adapter_kind != AdapterKind::ZcodeApp
+            || self.zcode_cleanup_confirmed.load(Ordering::Acquire)
+        {
+            return true;
+        }
+        let Some(root) = &self.private_config_root else {
+            return false;
+        };
+        let confirmed = crate::zcode::transport::confirm_owner_cleanup(root, deadline).await;
+        self.zcode_cleanup_confirmed
+            .store(confirmed, Ordering::Release);
+        self.record_zcode_host_closed(confirmed);
+        if !confirmed {
+            self.send_host_diagnostic(
+                "ZCode managed process-group cleanup remains unconfirmed; owner report retained"
+                    .to_string(),
+            );
+        }
+        confirmed
+    }
+
+    fn record_zcode_host_closed(&self, confirmed: bool) {
+        let mut tasks = self
+            .zcode_background
+            .lock()
+            .expect("ZCode background mutex poisoned");
+        for route in tasks.values() {
+            if route.finished {
+                continue;
+            }
+            let mut background = route.identity.clone();
+            background["status"] = json!(if confirmed {
+                "host_closed"
+            } else {
+                "cleanup_unconfirmed"
+            });
+            let mut update = route.tool_update.clone();
+            update["sessionUpdate"] = json!("tool_call_update");
+            update["status"] = json!(if confirmed { "failed" } else { "in_progress" });
+            update["rawOutput"] = json!({"exitCode":null,"commandStatus":"host_closed",
+                "cleanupConfirmed":confirmed,"nativeOutcomeUnknown":true,
+                "output":if confirmed {"Managed ZCode Host closed; native exit result unavailable"} else {"Managed ZCode Host closed; process-group cleanup remains unconfirmed"}});
+            update["content"] = json!([]);
+            let message = json!({"method":"_zcode/background","params":{
+                "sessionId":route.identity["sessionId"],"update":update,"background":background}});
+            if self
+                .incoming
+                .send(AcpIncoming::ZcodeBackground {
+                    agent_run_id: route.owner.agent_run_id.clone(),
+                    execution_epoch: route.owner.execution_epoch,
+                    registration: false,
+                    message,
+                })
+                .is_err()
+            {
+                self.send_host_diagnostic(
+                    "ZCode Host closure evidence receiver unavailable".to_string(),
+                );
+            }
+        }
+        if confirmed {
+            tasks.clear();
+        }
     }
 
     pub(crate) async fn shutdown_and_reap(&self) {
@@ -2486,7 +2800,11 @@ impl AcpHost {
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
         let _ = child.force_terminate_tree();
-        if self.remove_private_config_root_on_shutdown
+        let groups_reaped = self
+            .confirm_zcode_cleanup(tokio::time::Instant::now() + Duration::from_millis(2500))
+            .await;
+        if groups_reaped
+            && self.remove_private_config_root_on_shutdown
             && let Some(root) = self.private_config_root.as_ref()
         {
             let _ = std::fs::remove_dir_all(root);
@@ -2573,6 +2891,7 @@ impl AcpHost {
                 acceptance_emitted: false,
                 prompt_activity_observed: false,
                 kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
+                zcode_input_id: None,
             });
         }
         self.pending.lock().await.insert(
@@ -2690,6 +3009,15 @@ fn detect_acp_compaction_signal(
                 .or_else(|| value.as_i64().map(|value| value.to_string()))
         });
     match adapter_kind {
+        AdapterKind::ZcodeApp
+            if method == "_zcode/compaction" && message["params"]["status"] == "completed" =>
+        {
+            Some(DetectedAcpCompactionSignal {
+                source_signal: "zcode.session.compaction.completed.v1",
+                admission_point: "completed",
+                runtime_occurrence_id,
+            })
+        }
         AdapterKind::KiroCli if method == "_kiro.dev/compaction/status" => {
             let status = message
                 .pointer("/params/status/type")
@@ -3450,6 +3778,34 @@ impl AcpRuntime {
         cancellation
     }
 
+    pub async fn confirm_zcode_cancelled(&self) -> bool {
+        if self.host.adapter_kind != AdapterKind::ZcodeApp {
+            return false;
+        }
+        let Some(session_id) = self.session_id().await else {
+            return false;
+        };
+        let result = timeout(Duration::from_secs(3), async {
+            self.host
+                .rpc("_zcode/cancelFence", json!({"sessionId":session_id}))
+                .await?;
+            while !self.host.is_quiescent().await {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => true,
+            other => {
+                self.host.send_host_diagnostic(format!(
+                    "ZCode current-input cancellation remains unconfirmed: {other:?}"
+                ));
+                false
+            }
+        }
+    }
+
     pub async fn respond(&self, id: Value, result: Value) -> Result<()> {
         self.host
             .send(json!({"jsonrpc": "2.0", "id": id, "result": result}))
@@ -3853,11 +4209,21 @@ impl AcpCliRuntimeAdapter {
                     agent_run_id: agent_run_id.to_string(),
                     execution_epoch,
                     adapter_kind: self.kind,
-                    compatibility: RuntimeCompatibilityKey::member(
-                        camp_id,
-                        agent_id,
-                        runtime_compatibility_digest,
-                    ),
+                    compatibility: if self.kind == AdapterKind::ZcodeApp {
+                        // Official app-server switches exact member Sessions;
+                        // its attachment authorization is Camp-scoped.
+                        RuntimeCompatibilityKey::camp(
+                            camp_id,
+                            agent_id,
+                            runtime_compatibility_digest,
+                        )
+                    } else {
+                        RuntimeCompatibilityKey::member(
+                            camp_id,
+                            agent_id,
+                            runtime_compatibility_digest,
+                        )
+                    },
                 },
                 move || async move {
                     let host = AcpHost::spawn(
@@ -4039,11 +4405,19 @@ pub(crate) fn runtime_compatibility_digest(
     // Ready and therefore changes the full frozen config digest. Kimi and Grok MCP
     // projection digests are also Run-local because their evidence includes the
     // AgentRun identity. Those values are not Host launch inputs. The concrete
-    // resolved MCP server set below remains compatibility-authoritative.
-    let excludes_runtime_config_digest = frozen_runtime.adapter_kind == AdapterKind::TraeCnCli;
+    // resolved MCP server set below remains compatibility-authoritative. ZCode
+    // sets models on each exact Session; only its host projection (including mode) and
+    // official configuration, not member Session preferences, fence the process.
+    let excludes_runtime_config_digest = matches!(
+        frozen_runtime.adapter_kind,
+        AdapterKind::TraeCnCli | AdapterKind::ZcodeApp
+    );
     let excludes_mcp_projection_digest = matches!(
         frozen_runtime.adapter_kind,
-        AdapterKind::TraeCnCli | AdapterKind::KimiCodeCli | AdapterKind::GrokBuild
+        AdapterKind::TraeCnCli
+            | AdapterKind::KimiCodeCli
+            | AdapterKind::GrokBuild
+            | AdapterKind::ZcodeApp
     );
     let runtime_config_digest =
         (!excludes_runtime_config_digest).then_some(frozen_runtime.config_digest.as_str());
@@ -4082,6 +4456,10 @@ pub(crate) fn runtime_compatibility_digest(
             json!(GROK_NATIVE_RULES_REVISION),
         );
     }
+    if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
+        compatibility["zcodeNativeConfigurationDigest"] =
+            json!(crate::zcode::NativeConfig::load(&execution_root)?.digest);
+    }
     canonical_json_digest(&compatibility)
 }
 
@@ -4091,7 +4469,7 @@ pub(crate) fn freeze_native_session_compatibility(
 ) -> Result<FrozenAgentRuntimeConfig> {
     if !matches!(
         frozen_runtime.adapter_kind,
-        AdapterKind::TraeCnCli | AdapterKind::GrokBuild
+        AdapterKind::TraeCnCli | AdapterKind::GrokBuild | AdapterKind::ZcodeApp
     ) {
         return Ok(frozen_runtime);
     }
@@ -4134,8 +4512,16 @@ pub(crate) fn freeze_native_session_compatibility(
             json!(GROK_NATIVE_RULES_REVISION),
         );
     }
+    if adapter_kind == AdapterKind::ZcodeApp {
+        compatibility["zcodeNativeConfigurationDigest"] =
+            json!(crate::zcode::NativeConfig::load(&execution_root)?.digest);
+    }
     let compatibility_digest = canonical_json_digest(&compatibility)?;
-    let compatibility_flow = if is_grok { "resume" } else { "history-restore" };
+    let compatibility_flow = if is_grok || adapter_kind == AdapterKind::ZcodeApp {
+        "resume"
+    } else {
+        "history-restore"
+    };
     let compatibility_key = format!(
         "{}:{compatibility_flow}-v1:{compatibility_digest}",
         adapter_kind.as_str()
@@ -4166,6 +4552,10 @@ fn prepare_private_host_config(
             private_runtime_dir
                 .join("acp-host")
                 .join(uuid::Uuid::new_v4().to_string()),
+            true,
+        ),
+        AdapterKind::ZcodeApp => (
+            PathBuf::from("/tmp").join(format!("rvzc-{}", uuid::Uuid::new_v4().simple())),
             true,
         ),
         _ => return Ok(None),
@@ -4202,6 +4592,14 @@ fn configure_runtime_command(
         .as_object()
         .context("ACP permission configuration must be an object")?;
     match runtime.adapter_kind {
+        AdapterKind::ZcodeApp => {
+            let root = private_config_root.context("ZCode private socket directory missing")?;
+            command
+                .arg("app-server")
+                .env("TMPDIR", root)
+                .env("ROVAI_ZCODE_OWNER_REPORT", root.join("owner-cleanup.json"))
+                .env("ROVAI_ZCODE_CLI_CONTEXT_DIR", root.join("cli-contexts"));
+        }
         AdapterKind::OpencodeCli => {
             let configured = values
                 .get("permission")
@@ -5544,7 +5942,8 @@ pub fn automatically_allows_permission_requests(
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
-        | AdapterKind::AntigravityApp => false,
+        | AdapterKind::AntigravityApp
+        | AdapterKind::ZcodeApp => false,
     }
 }
 

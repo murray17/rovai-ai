@@ -8,6 +8,7 @@ mod health;
 mod pi;
 mod runtime_fleet;
 mod runtime_mcp;
+use rovai_core::zcode;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -1968,6 +1969,7 @@ struct Core {
     cursor_agent: AcpCliRuntimeAdapter,
     kimi_code_cli: AcpCliRuntimeAdapter,
     grok_build: AcpCliRuntimeAdapter,
+    zcode_app: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
@@ -2315,6 +2317,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::KimiCodeCli => "Kimi Code",
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::AntigravityApp => "Antigravity",
+        AdapterKind::ZcodeApp => "ZCode",
     }
 }
 
@@ -4185,6 +4188,13 @@ impl Core {
         {
             return Some(AgentRunRuntime::Acp(runtime));
         }
+        if let Some(runtime) = self
+            .zcode_app
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
         self.grok_build
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -4301,6 +4311,7 @@ impl Core {
             self.cursor_agent.shutdown_all(),
             self.kimi_code_cli.shutdown_all(),
             self.grok_build.shutdown_all(),
+            self.zcode_app.shutdown_all(),
             self.claude_code_cli.shutdown_all(),
             self.antigravity_app.shutdown_all(),
         );
@@ -4322,6 +4333,7 @@ impl Core {
                 self.cursor_agent.shutdown_all(),
                 self.kimi_code_cli.shutdown_all(),
                 self.grok_build.shutdown_all(),
+                self.zcode_app.shutdown_all(),
                 self.claude_code_cli.shutdown_all(),
                 self.antigravity_app.shutdown_all(),
             );
@@ -4347,6 +4359,7 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::CursorAgent => Some(&self.cursor_agent),
             rovai_core::agent_profile::AdapterKind::KimiCodeCli => Some(&self.kimi_code_cli),
             rovai_core::agent_profile::AdapterKind::GrokBuild => Some(&self.grok_build),
+            rovai_core::agent_profile::AdapterKind::ZcodeApp => Some(&self.zcode_app),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::Pi
             | rovai_core::agent_profile::AdapterKind::ClaudeCodeCli
@@ -9180,7 +9193,8 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::TraeCnCli
             | rovai_core::agent_profile::AdapterKind::CursorAgent
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
-            | rovai_core::agent_profile::AdapterKind::GrokBuild) => {
+            | rovai_core::agent_profile::AdapterKind::GrokBuild
+            | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 let probe =
                     health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
                         .await;
@@ -9196,7 +9210,13 @@ impl Core {
                         initialize_result: probe.initialize_result,
                         session_result: probe.session_result,
                         attempted_at,
-                        last_error: probe.result.detail,
+                        last_error: if kind == AdapterKind::ZcodeApp
+                            && probe.result.status == health::AgentRuntimeProbeStatus::Ready
+                        {
+                            None // Successful connection detail is not an error.
+                        } else {
+                            probe.result.detail
+                        },
                     })?,
                     None,
                 )
@@ -10554,6 +10574,21 @@ impl Core {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            if adapter_kind == "zcode-app"
+                && !self.planned_shutdown.launch_in_progress(&key).await
+                && let Some(adapter) = self.acp_adapter(AdapterKind::ZcodeApp)
+                && let Some(runtime) = adapter.get_agent_run(agent_run_id, execution_epoch).await
+            {
+                if !runtime.confirm_zcode_cancelled().await || !flushed {
+                    return RuntimeCancellationIngressFence::Unproven;
+                }
+                // The cancelled Run's lease is revoked normally. Older native
+                // tasks remain on their original Session's managed Host.
+                adapter
+                    .complete_agent_run(agent_run_id, execution_epoch)
+                    .await;
+                return RuntimeCancellationIngressFence::Flushed;
             }
             loop {
                 let launching_before_stop = self.planned_shutdown.launch_in_progress(&key).await;
@@ -14321,7 +14356,8 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::TraeCnCli
             | rovai_core::agent_profile::AdapterKind::CursorAgent
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
-            | rovai_core::agent_profile::AdapterKind::GrokBuild) => {
+            | rovai_core::agent_profile::AdapterKind::GrokBuild
+            | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
                     adapter
                         .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -15300,11 +15336,20 @@ async fn run_core(
         ),
         grok_build: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::GrokBuild,
-            acp_tx,
+            acp_tx.clone(),
             data_dir.join("runtime/grok-build"),
             runtime_fleet.clone(),
             compaction_detector_policies
                 .policy_for(AdapterKind::GrokBuild)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        ),
+        zcode_app: AcpCliRuntimeAdapter::deferred(
+            rovai_core::agent_profile::AdapterKind::ZcodeApp,
+            acp_tx,
+            data_dir.join("runtime/zcode-app"),
+            runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::ZcodeApp)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
         ),
         claude_code_cli,
@@ -17237,6 +17282,84 @@ async fn process_acp_events(
                 )
                 .await;
             }
+            AcpIncoming::ZcodeBackground {
+                agent_run_id,
+                execution_epoch,
+                registration,
+                message,
+            } => {
+                let params = &message["params"];
+                let (_, mut payload) =
+                    normalize_acp_event(AdapterKind::ZcodeApp, "session/update", params);
+                let mut identity = params["background"].clone();
+                let status = identity.as_object_mut().and_then(|v| v.remove("status"));
+                let result = async {
+                    let digest = canonical_json_digest(&identity)?;
+                    identity["identityDigest"] = json!(digest);
+                    identity["status"] = status.unwrap_or(Value::Null);
+                    payload["zcodeBackground"] = identity;
+                    // Preserve each distinct native update; ToolCallId remains
+                    // the canonical activity identity across these observations.
+                    payload["eventId"] = json!(canonical_json_digest(&payload)?);
+                    let mut database = core.database.lock().await;
+                    ExecutionEvidenceService.record_zcode_background_event(
+                        &mut database,
+                        &ManagedBlobStore::new(&core.data_dir),
+                        &agent_run_id,
+                        execution_epoch,
+                        registration,
+                        &payload,
+                    )
+                }
+                .await;
+                match result {
+                    Ok(Some(recorded)) => {
+                        if let Ok(Some(completion)) =
+                            acp::completed_action(AdapterKind::ZcodeApp, params)
+                        {
+                            let has_attempt = {
+                                let database = core.database.lock().await;
+                                ActionSafetyService::default()
+                                    .load_intercepted_action_attempts(
+                                        &database,
+                                        &agent_run_id,
+                                        execution_epoch,
+                                        &completion.native_item_id,
+                                    )
+                                    .is_ok_and(|attempts| !attempts.is_empty())
+                            };
+                            if has_attempt
+                                && let Err(error) = record_acp_action_completion(
+                                    &core,
+                                    &output,
+                                    AdapterKind::ZcodeApp,
+                                    &agent_run_id,
+                                    execution_epoch,
+                                    completion,
+                                )
+                                .await
+                            {
+                                eprintln!("ZCode background Action result audit failed: {error:#}");
+                            }
+                        }
+                        let evidence = recorded.into_evidence();
+                        emit(
+                            &output,
+                            "runtime.action",
+                            json!({"agentRunId":agent_run_id,
+                            "executionEpoch":execution_epoch,"adapterKind":AdapterKind::ZcodeApp,
+                            "nativeMethod":"_zcode/background","evidenceId":evidence.id,
+                            "payload":evidence.payload,"canonical":evidence.canonical}),
+                        );
+                    }
+                    Ok(None) => eprintln!(
+                        "ZCode background evidence rejected by its original Run/task fence"
+                    ),
+                    Err(error) => {
+                        eprintln!("ZCode background evidence persistence failed: {error:#}")
+                    }
+                }
+            }
             AcpIncoming::HostDiagnostic {
                 adapter_kind,
                 host_instance_id,
@@ -18050,8 +18173,8 @@ fn normalize_acp_event_with_completion(
             {
                 payload["runtimeFileOperation"] = json!({
                     "adapterKind": adapter_kind.as_str(),
-                    "protocolFamily": "acp-v1",
-                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "protocolFamily": if adapter_kind == AdapterKind::ZcodeApp { zcode::PROTOCOL } else { "acp-v1" },
+                    "sourceEventKind": if adapter_kind == AdapterKind::ZcodeApp { "tool.updated.result" } else { "session/update.tool_call_update.completed" },
                     "operationKind": operation_kind,
                     "path": path,
                 });
@@ -18073,6 +18196,13 @@ fn normalize_acp_event_with_completion(
                     "semanticKind": "complete_before_after",
                     "entries": changes,
                 });
+            }
+            if adapter_kind == AdapterKind::ZcodeApp
+                && public_status == "completed"
+                && let Some(entries) = update.pointer("/_meta/zcodeDiff")
+            {
+                payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":zcode::PROTOCOL,
+                    "sourceEventKind":"tool.updated.result","semanticKind":"zcode_edit_patch","entries":entries});
             }
             ("runtime.action", payload)
         }
@@ -18954,7 +19084,11 @@ async fn persist_acp_prompt_completion(
             .await
             .map(|body| {
                 MissingSendRecoveryCandidate::new(
-                    MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
+                    if adapter_kind == AdapterKind::ZcodeApp {
+                        MissingSendRecoveryBoundary::ZcodeCompletedTurn
+                    } else {
+                        MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix
+                    },
                     body,
                 )
             })
@@ -22467,11 +22601,20 @@ mod tests {
             )?,
             grok_build: AcpCliRuntimeAdapter::new(
                 AdapterKind::GrokBuild,
-                acp_tx,
+                acp_tx.clone(),
                 data_dir.join("runtime/grok-build"),
                 runtime_fleet.clone(),
                 compaction_detector_policies
                     .policy_for(AdapterKind::GrokBuild)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            zcode_app: AcpCliRuntimeAdapter::new(
+                AdapterKind::ZcodeApp,
+                acp_tx,
+                data_dir.join("runtime/zcode-app"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::ZcodeApp)
                     .unwrap_or(CompactionDetectorPolicy::Disabled),
             )?,
             claude_code_cli: ClaudeCodeCliRuntimeAdapter::new(&data_dir)?,
@@ -25162,7 +25305,7 @@ while IFS= read -r _ignored; do :; done
             .into_iter()
             .filter(|adapter_kind| adapter_kind.uses_acp())
             .collect::<Vec<_>>();
-        assert_eq!(acp_adapters.len(), 10);
+        assert_eq!(acp_adapters.len(), 11);
         for adapter_kind in acp_adapters {
             let expected_output = format!("{} terminal output", adapter_kind.as_str());
             let (event_type, payload) = normalize_acp_event(

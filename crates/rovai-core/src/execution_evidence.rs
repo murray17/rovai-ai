@@ -364,6 +364,88 @@ impl ExecutionEvidenceService {
         )
     }
 
+    /// ZCode's native background observer survives its Run, but grants no
+    /// execution authority. Late evidence must match a previously admitted
+    /// task identity in this exact epoch; ordinary Runtime fencing is unchanged.
+    pub fn record_zcode_background_event(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        registration: bool,
+        payload: &Value,
+    ) -> Result<Option<RecordedExecutionEvidence>> {
+        let identity = &payload["zcodeBackground"];
+        for field in [
+            "taskId",
+            "toolCallId",
+            "inputId",
+            "turnId",
+            "sessionId",
+            "hostInstanceId",
+            "nativePromptId",
+            "deliveryId",
+        ] {
+            if !identity[field].as_str().is_some_and(|s| !s.is_empty()) {
+                anyhow::bail!("ZCode background evidence identity missing");
+            }
+        }
+        let mut digest_input = identity.clone();
+        digest_input.as_object_mut().unwrap().remove("status");
+        digest_input
+            .as_object_mut()
+            .unwrap()
+            .remove("identityDigest");
+        if identity["identityDigest"].as_str()
+            != Some(crate::command::canonical_json_digest(&digest_input)?.as_str())
+        {
+            return Ok(None);
+        }
+        let adapter: Option<String> = database
+            .connection()
+            .query_row(
+                "SELECT runtime_adapter_kind FROM agent_run WHERE id = ?1 AND execution_epoch = ?2
+                 AND (?3 = 0 OR (status IN ('running', 'waiting') AND ended_at IS NULL)
+                      OR (status = 'cancelled' AND cancel_requested_at IS NOT NULL))",
+                params![agent_run_id, execution_epoch, registration],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        if adapter.as_deref() != Some("zcode-app") {
+            return Ok(None);
+        }
+        if !registration {
+            let registered: bool = database.connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_run_execution_evidence
+                 WHERE agent_run_id = ?1 AND execution_epoch = ?2 AND event_type = 'runtime.action'
+                 AND json_extract(payload_preview_json, '$.zcodeBackground.identityDigest') = ?3)",
+                params![
+                    agent_run_id,
+                    execution_epoch,
+                    identity["identityDigest"].as_str()
+                ],
+                |row| row.get(0),
+            )?;
+            if !registered {
+                return Ok(None);
+            }
+        }
+        self.record_runtime_event_with_fence_policy(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            "runtime.action",
+            payload,
+            // Cancellation revokes execution authority, but must not discard
+            // a task already accepted by the native input before stop settled.
+            true,
+            None,
+        )
+    }
+
     pub fn record_builtin_tool_result(
         &self,
         database: &mut Database,
@@ -952,6 +1034,9 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 "runtimeFileOperation": payload.get("runtimeFileOperation"),
                 "runtimeDiff": payload.get("runtimeDiff"),
             });
+            if let Some(background) = payload.get("zcodeBackground") {
+                normalized["zcodeBackground"] = background.clone();
+            }
             if let Some(core_envelope) = payload.get("coreEnvelope") {
                 normalized["coreEnvelope"] = core_envelope.clone();
             }
@@ -3399,6 +3484,143 @@ mod tests {
         assert!(replay_duplicate.inserted);
         assert_ne!(replay_duplicate.id, replay.id);
         assert_eq!(replay_duplicate.sequence, 15);
+
+        // Extend the existing durable fencing owner: only a registered ZCode
+        // background identity may update its original completed epoch.
+        database.connection().execute("UPDATE agent_run SET status = 'running', ended_at = NULL, cancel_requested_at = NULL, cancel_reason_code = NULL, runtime_adapter_kind = 'zcode-app' WHERE id = ?1", [&run_id]).unwrap();
+        let mut identity = json!({"taskId":"bg-task", "toolCallId":"bg-tool", "inputId":"input",
+            "turnId":"turn", "sessionId":"session", "hostInstanceId":"host", "nativePromptId":"prompt", "deliveryId":"delivery"});
+        identity["identityDigest"] =
+            json!(crate::command::canonical_json_digest(&identity).unwrap());
+        identity["status"] = json!("running");
+        let mut bg = json!({"eventId":"bg-start", "toolCallId":"bg-tool", "kind":"execute", "status":"in_progress", "zcodeBackground":identity});
+        assert!(
+            ExecutionEvidenceService
+                .record_zcode_background_event(
+                    &mut database,
+                    &blob_store,
+                    &run_id,
+                    execution_epoch,
+                    false,
+                    &bg
+                )
+                .unwrap()
+                .is_none()
+        );
+        // A stop request can race the native background registration. Evidence
+        // survives that revocation; it grants no new Tool or bundled CLI lease.
+        database.connection().execute("UPDATE agent_run SET cancel_requested_at = '2026-09-10T00:00:00Z', cancel_reason_code = 'test_cancel' WHERE id = ?1", [&run_id]).unwrap();
+        let started = ExecutionEvidenceService
+            .record_zcode_background_event(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                true,
+                &bg,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(started.payload["zcodeBackground"]["taskId"], "bg-task");
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'succeeded', ended_at = '2026-09-10T00:00:00Z', cancel_requested_at = NULL, cancel_reason_code = NULL WHERE id = ?1",
+                [&run_id],
+            )
+            .unwrap();
+        bg["eventId"] = json!("bg-end");
+        bg["status"] = json!("failed");
+        bg["zcodeBackground"]["status"] = json!("failed");
+        assert!(
+            ExecutionEvidenceService
+                .record_runtime_event(
+                    &mut database,
+                    &blob_store,
+                    &run_id,
+                    execution_epoch,
+                    "runtime.action",
+                    &bg
+                )
+                .unwrap()
+                .is_none()
+        );
+        let mut foreign = bg.clone();
+        foreign["zcodeBackground"]["turnId"] = json!("next-turn");
+        assert!(
+            ExecutionEvidenceService
+                .record_zcode_background_event(
+                    &mut database,
+                    &blob_store,
+                    &run_id,
+                    execution_epoch,
+                    false,
+                    &foreign
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            ExecutionEvidenceService
+                .record_zcode_background_event(
+                    &mut database,
+                    &blob_store,
+                    &run_id,
+                    execution_epoch + 1,
+                    false,
+                    &bg
+                )
+                .unwrap()
+                .is_none()
+        );
+        let ended = ExecutionEvidenceService
+            .record_zcode_background_event(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                false,
+                &bg,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(ended.agent_run_id, run_id);
+        assert_eq!(ended.payload["status"], "failed");
+        assert_eq!(ended.canonical.as_ref().unwrap().phase, "terminal");
+        assert!(
+            !ExecutionEvidenceService
+                .record_zcode_background_event(
+                    &mut database,
+                    &blob_store,
+                    &run_id,
+                    execution_epoch,
+                    false,
+                    &bg
+                )
+                .unwrap()
+                .unwrap()
+                .inserted
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET runtime_adapter_kind = 'grok-build' WHERE id = ?1",
+                [&run_id],
+            )
+            .unwrap();
+        assert!(
+            ExecutionEvidenceService
+                .record_zcode_background_event(
+                    &mut database,
+                    &blob_store,
+                    &run_id,
+                    execution_epoch,
+                    false,
+                    &bg
+                )
+                .unwrap()
+                .is_none()
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

@@ -53,6 +53,7 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'cursor-agent', label: 'Cursor Agent' },
   { value: 'kimi-code-cli', label: 'Kimi Code' },
   { value: 'grok-build', label: 'Grok Build' },
+  { value: 'zcode-app', label: 'ZCode' },
   { value: 'antigravity-app', label: 'Antigravity' }
 ]
 

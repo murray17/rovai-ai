@@ -43,7 +43,8 @@ const requestedAdapters = adapterSelection === 'all'
       'qwen-code',
       'trae-cn-cli',
       'kimi-code-cli',
-      'grok-build'
+      'grok-build',
+      'zcode-app'
     ]
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([
@@ -59,7 +60,8 @@ const supportedAdapters = new Set([
   'qwen-code',
   'trae-cn-cli',
   'kimi-code-cli',
-  'grok-build'
+  'grok-build',
+  'zcode-app'
 ])
 const allDeliveryGroups = [
   'antigravity',
@@ -75,12 +77,14 @@ const allDeliveryGroups = [
   'pi',
   'qoder',
   'qwen',
-  'trae'
+  'trae',
+  'zcode'
 ]
 let core = null
 let piAgentDir = null
 let immutableUpdateCount = 0
 let piSkillLifecycle = null
+let zcodeSkillLifecycle = null
 
 try {
   if (explicitModelId && requestedAdapters.length !== 1) {
@@ -270,34 +274,36 @@ try {
     })
   }
 
-  if (requestedAdapters.length === 1 && requestedAdapters[0] === 'pi') {
+  if (requestedAdapters.length === 1 && ['pi', 'zcode-app'].includes(requestedAdapters[0])) {
+    const lifecycleAdapter = requestedAdapters[0]
+    const lifecycleGroup = deliveryGroup(lifecycleAdapter)
     const originalMarker = marker
-    const updatedMarker = markerFor('pi-update')
+    const updatedMarker = markerFor(`${lifecycleAdapter}-update`)
     marker = updatedMarker
     await writeSmokeSkill(updatedMarker)
     const updateInspection = await core.request('skills.import.inspect', { path: sourceSkill })
     const updateCandidate = onlyCandidate(updateInspection)
-    assert(updateCandidate.importAction === 'update', `Pi changed Skill import was not an update: ${JSON.stringify(updateCandidate)}`)
+    assert(updateCandidate.importAction === 'update', `${lifecycleAdapter} changed Skill import was not an update: ${JSON.stringify(updateCandidate)}`)
     const updated = await commitCandidate(updateInspection, updateCandidate, true)
-    assert(updated.code === 'skill_updated', `Pi Skill update failed: ${JSON.stringify(updated)}`)
+    assert(updated.code === 'skill_updated', `${lifecycleAdapter} Skill update failed: ${JSON.stringify(updated)}`)
     immutableUpdateCount += 1
     importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
 
     const updatedResult = await runNativeDiscoveryWithRetry(
       core.request,
       selectedWorkspace,
-      'pi',
+      lifecycleAdapter,
       updatedMarker
     )
     const updatedExposure = updatedResult.exposure?.skills.find((skill) =>
       skill.name === 'rovai-skill-smoke'
-        && skill.groupKey === 'pi'
+        && skill.groupKey === lifecycleGroup
         && skill.status === 'ready'
     )
     assert(
       updatedExposure?.revisionId === importedSkill.currentRevision.id
         && !updatedResult.output.includes(originalMarker),
-      `Pi next eligible Session did not use only the updated immutable Skill Revision: ${JSON.stringify({ updatedExposure, updatedResult })}`
+      `${lifecycleAdapter} next eligible Session did not use only the updated immutable Skill Revision: ${JSON.stringify({ updatedExposure, updatedResult })}`
     )
 
     await applyCommand('skills.setEnabled', {
@@ -314,9 +320,11 @@ try {
     )
     assertSkillAbsent(disabledProbe, 'disabled')
     assert(
-      disabledProbe.hostInstanceId === updatedResult.hostInstanceId
+      (lifecycleAdapter === 'pi'
+        ? disabledProbe.hostInstanceId === updatedResult.hostInstanceId
+        : disabledProbe.hostInstanceId !== updatedResult.hostInstanceId)
         && disabledProbe.nativeThreadId !== updatedResult.nativeThreadId,
-      `Pi disabled-Skill probe did not reuse the Host with a fresh Session: ${JSON.stringify({ updatedResult, disabledProbe })}`
+      `${lifecycleAdapter} disabled-Skill probe violated Host scope or fresh Session isolation: ${JSON.stringify({ updatedResult, disabledProbe })}`
     )
 
     await applyCommand('skills.setEnabled', {
@@ -328,7 +336,7 @@ try {
     const reenabledResult = await runNativeDiscoveryWithRetry(
       core.request,
       selectedWorkspace,
-      'pi',
+      lifecycleAdapter,
       updatedMarker
     )
     assert(
@@ -337,14 +345,14 @@ try {
           && skill.revisionId === importedSkill.currentRevision.id
           && skill.status === 'ready'
       ),
-      `Pi re-enabled Skill was not callable in the next Session: ${JSON.stringify(reenabledResult)}`
+      `${lifecycleAdapter} re-enabled Skill was not callable in the next Session: ${JSON.stringify(reenabledResult)}`
     )
 
     const assignedGroups = importedSkill.groupAssignments.map((assignment) => assignment.groupKey)
     await applyCommand('skills.setGroupAssignments', {
       skillId: importedSkill.id,
       expectedVersion: importedSkill.version,
-      groupKeys: assignedGroups.filter((groupKey) => groupKey !== 'pi')
+      groupKeys: assignedGroups.filter((groupKey) => groupKey !== lifecycleGroup)
     })
     importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
     await applyCommand('skills.reconcile', {})
@@ -355,9 +363,11 @@ try {
     )
     assertSkillAbsent(unassignedProbe, 'unassigned')
     assert(
-      unassignedProbe.hostInstanceId === reenabledResult.hostInstanceId
+      (lifecycleAdapter === 'pi'
+        ? unassignedProbe.hostInstanceId === reenabledResult.hostInstanceId
+        : unassignedProbe.hostInstanceId !== reenabledResult.hostInstanceId)
         && unassignedProbe.nativeThreadId !== reenabledResult.nativeThreadId,
-      `Pi unassigned-Skill probe did not reuse the Host with a fresh Session: ${JSON.stringify({ reenabledResult, unassignedProbe })}`
+      `${lifecycleAdapter} unassigned-Skill probe violated Host scope or fresh Session isolation: ${JSON.stringify({ reenabledResult, unassignedProbe })}`
     )
 
     await applyCommand('skills.setGroupAssignments', {
@@ -367,14 +377,17 @@ try {
     })
     importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
     await applyCommand('skills.reconcile', {})
-    piSkillLifecycle = {
+    const lifecycle = {
       updatedRevisionObserved: true,
       disabledNextSessionHidden: true,
       reenabledNextSessionCallable: true,
       unassignedNextSessionHidden: true,
-      residentHostNoCrossSessionLeak: true,
+      residentHostNoCrossSessionLeak: lifecycleAdapter === 'pi',
+      campHostBoundaryRespected: lifecycleAdapter === 'zcode-app',
       hardDeleteNextSessionHidden: false
     }
+    if (lifecycleAdapter === 'pi') piSkillLifecycle = lifecycle
+    else zcodeSkillLifecycle = lifecycle
   }
 
   if (requestedAdapters.length > 0) {
@@ -439,14 +452,14 @@ try {
       'Imported Skill deletion removed the project-owned same-name directory'
     )
   }
-  if (piSkillLifecycle) {
+  if (piSkillLifecycle || zcodeSkillLifecycle) {
     const deletedProbe = await runSkillAbsenceProbe(
       core.request,
       selectedWorkspace,
       [marker]
     )
     assertSkillAbsent(deletedProbe, 'hard-deleted')
-    piSkillLifecycle.hardDeleteNextSessionHidden = true
+    ;(piSkillLifecycle ?? zcodeSkillLifecycle).hardDeleteNextSessionHidden = true
   }
 
   console.log(JSON.stringify({
@@ -462,6 +475,7 @@ try {
     restartRecovered: true,
     importedHardDeleted: true,
     piSkillLifecycle,
+    zcodeSkillLifecycle,
     runtimes: runtimeResults
   }, null, 2))
 } finally {
@@ -674,7 +688,7 @@ async function runSkillAbsenceProbe(request, workspace, forbiddenMarkers) {
       'Do not use facts from another conversation and do not modify the workspace.'
     ].join(' '),
     address: { mode: 'explicit', agentIds: ['agent_1'] },
-    purpose: 'Verify a disabled, unassigned, or deleted Pi Skill is absent from the next Native Session.'
+    purpose: 'Verify a disabled, unassigned, or deleted Runtime Skill is absent from the next Native Session.'
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
     throw new Error(`Pi Skill absence Camp was not accepted: ${JSON.stringify(created)}`)
@@ -838,6 +852,7 @@ function groupRoot(groupKey) {
   if (groupKey === 'trae') return '.trae/skills'
   if (groupKey === 'kimi') return '.kimi-code/skills'
   if (groupKey === 'grok') return '.grok/skills'
+  if (groupKey === 'zcode') return '.zcode/skills'
   throw new Error(`Unknown Skill delivery group: ${groupKey}`)
 }
 
@@ -855,6 +870,7 @@ function deliveryGroup(adapterKind) {
   if (adapterKind === 'trae-cn-cli') return 'trae'
   if (adapterKind === 'kimi-code-cli') return 'kimi'
   if (adapterKind === 'grok-build') return 'grok'
+  if (adapterKind === 'zcode-app') return 'zcode'
   throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
 }
 

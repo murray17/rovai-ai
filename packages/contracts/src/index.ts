@@ -37,6 +37,7 @@ export type AdapterKind =
   | 'cursor-agent'
   | 'kimi-code-cli'
   | 'grok-build'
+  | 'zcode-app'
   | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'
@@ -3050,6 +3051,7 @@ export type SkillDeliveryGroupKey =
   | 'cursor'
   | 'kimi'
   | 'grok'
+  | 'zcode'
 
 export interface SkillRiskSummary {
   executableFileCount: number

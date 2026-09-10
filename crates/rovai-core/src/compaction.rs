@@ -17,7 +17,7 @@ pub const BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_FORMATTER_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_POLICY_RELEASE: &str = "v1.28";
 
-const POLICY_ADAPTERS: [AdapterKind; 9] = [
+const POLICY_ADAPTERS: [AdapterKind; 10] = [
     AdapterKind::CopilotCli,
     AdapterKind::OpencodeCli,
     AdapterKind::KiroCli,
@@ -26,6 +26,7 @@ const POLICY_ADAPTERS: [AdapterKind; 9] = [
     AdapterKind::QwenCode,
     AdapterKind::KimiCodeCli,
     AdapterKind::GrokBuild,
+    AdapterKind::ZcodeApp,
     AdapterKind::AntigravityApp,
 ];
 
@@ -119,7 +120,8 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::CodebuddyCli
         | AdapterKind::QwenCode
         | AdapterKind::KimiCodeCli
-        | AdapterKind::GrokBuild => CompactionDetectorPolicy::BestEffort,
+        | AdapterKind::GrokBuild
+        | AdapterKind::ZcodeApp => CompactionDetectorPolicy::BestEffort,
         AdapterKind::AntigravityApp
         | AdapterKind::CodexCli
         | AdapterKind::Pi
@@ -139,6 +141,7 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         AdapterKind::QwenCode => "ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY",
         AdapterKind::KimiCodeCli => "ROVAI_INTERNAL_KIMI_COMPACTION_DETECTOR_POLICY",
         AdapterKind::GrokBuild => "ROVAI_INTERNAL_GROK_COMPACTION_DETECTOR_POLICY",
+        AdapterKind::ZcodeApp => "ROVAI_INTERNAL_ZCODE_COMPACTION_DETECTOR_POLICY",
         AdapterKind::AntigravityApp => "ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY",
         AdapterKind::CodexCli
         | AdapterKind::Pi
@@ -901,6 +904,10 @@ fn qualified_admission(
         }
         AdapterKind::GrokBuild => {
             source_signal == "grok.acp.auto_compact_completed.v1" && admission_point == "completed"
+        }
+        AdapterKind::ZcodeApp => {
+            source_signal == "zcode.session.compaction.completed.v1"
+                && admission_point == "completed"
         }
         AdapterKind::CodexCli
         | AdapterKind::Pi

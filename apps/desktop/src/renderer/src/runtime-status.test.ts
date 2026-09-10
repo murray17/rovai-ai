@@ -34,6 +34,12 @@ describe('Runtime user status projection', () => {
     'maps %s to the actionable status %s',
     (status, label) => {
       expect(runtimeAvailabilityPresentation(availability(status)).label).toBe(label)
+      if (status === 'ready') {
+        const zcode = runtimeAvailabilityPresentation(availability(status, 'zcode-app'))
+        expect(zcode.label).toBe('基础连接正常')
+        expect(zcode.detail).toContain('未发送测试提示词')
+        expect(zcode.detail).toContain('高级能力未经本次检查验证')
+      }
     }
   )
 

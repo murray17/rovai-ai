@@ -86,6 +86,13 @@ export function runtimeAvailabilityPresentation(
         '旧安装尚未形成轻度启动证据；请重新检测或检查可用性。'
       )
     case 'ready':
+      if (availability.runtimeKind === 'zcode-app') {
+        return {
+          status: 'available',
+          label: '基础连接正常',
+          detail: '已加载本机原生配置并连接成功，未发送测试提示词；模型生成、余额和高级能力未经本次检查验证。'
+        }
+      }
       return presentation(
         'available',
         availability.checking ? '正在后台刷新最近一次检查结果。' : null
