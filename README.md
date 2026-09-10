@@ -307,6 +307,8 @@ What matters is remembering why a choice was made, what remains unresolved, what
 
 - [**Installation Guide**](docs/guides/installation.md): downloads, first launch, and common issues
 - [**Operations Guide**](docs/guides/operations.md): configuring members, choosing a Runtime, and setting permissions
+- [**Product Showcase**](docs/product-showcase.md): collaboration workspace, members, automation, and connected capabilities
+- [**Illustrated System Architecture**](docs/architecture/system-views.md): identity, collaboration, context, memory, and execution
 - [**Architecture Decisions**](docs/decisions/CURRENT.md): current architectural choices and constraints
 - [**Development Environment and Dependencies**](docs/development/environment.md): tools and environment required for local development
 

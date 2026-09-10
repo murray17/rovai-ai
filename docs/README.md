@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-09-08
+last_updated: 2026-09-10
 ---
 
 # Rovai-ai 文档导航
@@ -13,6 +13,8 @@ last_updated: 2026-09-08
 | 你想做什么 | 入口 |
 |---|---|
 | 安装和使用 Rovai | [用户指南](guides/README.md) |
+| 查看产品界面与实际协作 | [产品展示](product-showcase.md) |
+| 浏览系统架构图解 | [系统架构图解](architecture/system-views.md) |
 | 参与开发 | [开发者指南](development/README.md) |
 | 理解当前架构 | [长期架构](architecture/README.md) |
 | 查看当前决策 | [当前决定](decisions/CURRENT.md) |
