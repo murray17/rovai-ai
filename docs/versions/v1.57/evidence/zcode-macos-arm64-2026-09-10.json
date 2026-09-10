@@ -615,7 +615,7 @@
     "delivery": {
       "merged": false,
       "dailyAppReplaced": false,
-      "reason": "User conditioned merge and install on successful verification; account generation remains blocked."
+      "reason": "At the original v6 test stage, delivery was paused after Start Plan failure; the later ACP-aligned scope acceptance is recorded separately below."
     },
     "cleanup": {
       "changedFiles": {
@@ -661,6 +661,73 @@
         "clippy": "1f0c9d82fc73914f1922d843b7be1f18533f53e0f70d19bd53d0f7f8fb31f974",
         "docsCi": "fcd24bf5ec6cc2955d543a8c5c19507057c76a5f17a97173f0306d46581e40b6"
       }
+    }
+  },
+  "acpAlignedFollowup": {
+    "sourceBaseCommit": "e4e1ca3791be2260ae0704139305c79b0a2ba0b4",
+    "mainIntegratedCommit": "3742fa042b6b2e72353dc0867af96b85fb05c41c",
+    "referenceCommit": "92e439c2eb7484d33343d9be88d35894f4bda13e",
+    "reference": "https://github.com/william0wang/zcode-acp/issues/123#issuecomment-5556410271",
+    "acceptedScope": "Use official native configuration and kernel signing for personal Coding Plan; explicitly decline Start Plan runtime-verification callbacks. No community dependency or GUI launch.",
+    "userConfirmedFreeAccount": true,
+    "userAcceptedDeliveryWithoutRealSubscriptionTest": true,
+    "realAccountGenerationRetested": false,
+    "realAccountGenerationPassed": false,
+    "personalCodingPlanSubscriptionTest": "not run; no authorized subscription credential available",
+    "configurationRegressionScope": [
+      "Z.ai and BigModel App personal Coding Plan signing credentials passed unchanged to the official kernel",
+      "No Start Plan Bearer injection for Coding Plan",
+      "Explicit native plan selection, automatic eligible selection, disabled entitlement and digest changes",
+      "Credentials absent from public catalog and digest; native configuration not rewritten"
+    ],
+    "platformAdmission": "macOS arm64 Preview; macOS x64 and Windows x64 remain NotQualified",
+    "localGates": {
+      "rustLibraryPassed": 551,
+      "rustCliPassed": 33,
+      "rustSlowPassed": 309,
+      "zcodeTargetedPassed": 5,
+      "vitestPassed": 1724,
+      "vitestFilesPassed": 169,
+      "nodeFinalSuitePassed": 224,
+      "nodePlatformSkip": 1,
+      "typecheckPassed": true,
+      "clippyAllTargetsPassed": true,
+      "formatPassed": true,
+      "docsCiPassed": true
+    },
+    "testRetry": {
+      "firstFullGate": "550 library passed; existing mcp_import local HTTP test failed with IncompleteMessage",
+      "failedTest": "mcp_import::tests::import_commit_rehydrates_credentials_and_fences_replacement_before_startup",
+      "isolatedRetryPassed": true,
+      "completePrGateRetryPassed": true,
+      "mcpCodeChanged": false,
+      "testDisabledOrSkipped": false,
+      "rootCause": "Not established; retained the first failure and subsequent successful retries.",
+      "failedSyntheticFixtureRemoved": true
+    },
+    "packagedApp": {
+      "dailyPackagePassed": true,
+      "architecture": "arm64",
+      "signature": "ad-hoc",
+      "isolatedStartupPassed": true,
+      "coreReady": true,
+      "zcodeInstallationPresent": true,
+      "isolatedDataSkillLibraryAndMcp": true,
+      "modelRequests": 0,
+      "fixtureRemoved": true,
+      "harnessRetry": "First cleanup refused a non-default temporary directory; corrected the explicit temporary-directory argument, cleaned the first owned fixture, and repeated startup and cleanup successfully.",
+      "coreSha256": "6d13877f015acc1b0b414afa6abe71d19e9a7ad555cebd8870b3fd56fefade56"
+    },
+    "logSha256": {
+      "zcode": "c2b4dc07f5773becbd7eec3f78379857d6998d4f5a5e524eb92582aa36b3fd3c",
+      "initialRustFailure": "527009816cc4bb11216d95c256fafe7a88af0dd66082c82421f2a0091934c997",
+      "isolatedMcpRetry": "7af6a5061999dc9414c822216be07f27a15411c3ae0a2c5d18bd821b1640f91a",
+      "completeRustRetry": "ad0acae89da6ea85ad249a847e8d23d4cdb2537b0e938d102e3b29c1b6131db4",
+      "javascript": "65b29c2dcbf8ebabbdf4bb1345dbde575f09d5849c071892a39354903c6ef40b",
+      "typecheck": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+      "clippy": "f05883f9251b96edee547e59df4c34479800ebb96fc8f0983ff89c83d16647c2",
+      "package": "a61645709975c2bac786d5dc364db1818d5f5463a003636679fa893c91f494e9",
+      "packagedStartup": "b4ff5b5a61b9a0f821e60b5d31987c866a02f40af9f013890102b2bf6e07b0fe"
     }
   }
 }

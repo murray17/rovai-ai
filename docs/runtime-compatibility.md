@@ -1157,4 +1157,7 @@ Read 活动可查询，不产生 Files Changed 或修改 Diff；重启 Core 后�
 
 `smoke-zcode-account.mjs` 默认要求真实随机 nonce 回复；`--expect-auth-failure` 只验证不可重试的鉴权拒绝
 及没有成功 Final，明确不计为账号生成通过。最终执行结果和未覆盖项见
-[v6 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。当前尚不满足用户要求的合并及安装前提。
+[v6 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。用户随后确认免费账号并接受按 zcode-acp
+当前边界先交付 Preview：个人 Coding Plan 原生凭据透传、Start Plan 验证回调明确拒绝。Z.ai/BigModel 的
+配置回归覆盖签名凭据不改写、显式套餐选择、禁用态与公开目录脱敏；个人 Coding Plan 仍无真实订阅验收，
+Start Plan 仍无成功模型回复，不因允许交付而提升能力证据或平台资格。

@@ -152,8 +152,10 @@ GUI/Computer Use 回调为 NotImplemented。账号登录与 BYOK 都在范围内
 
 ## v6：App 账号验收与失败修正
 
-用户授权验证已登录 App，且仅在无问题后合并 main、打包安装。App-only 配置加载已补齐，真实 Start Plan
-生成遇到上游 `captcha verify failed`（3007），因此该前提尚未满足，PR 保持待验收，不替换日常 App。
+App-only 配置加载已补齐，真实 Start Plan 生成遇到上游 `captcha verify failed`（3007），当时暂停了
+合并与安装。用户随后确认其为免费账号，并要求即使缺少真实订阅测试，也按 zcode-acp 的接法先交付。
+本次以个人 Coding Plan 原生凭据透传、Start Plan 回调明确拒绝的边界收口；保留未覆盖标记，继续此前
+授权的 PR 合并和 App 打包安装。该范围确认不把免费账号调用或缺少凭据的订阅验收记为通过。
 
 - 终端配置优先，缺失时只读 App config 和 family 模式/选择，完整目录经官方内存 registry RPC 加载。
   普通 Probe 沿用用户原生环境；真实模型验收单独使用隔离凭据副本、HOME、存储、Core 和 Skill Library。
@@ -169,3 +171,19 @@ GUI/Computer Use 回调为 NotImplemented。账号登录与 BYOK 都在范围内
   错误码、不可重试、无 Final 和关闭 Core，仅是失败路径证据。用 `smoke-zcode-launch.swift` 观察 GUI 注册数。
 - main 已同步至 0.2.3；Schema 99/Migration 149 与上下文合同不变。v3/v4/v5 实测仍保留各自版本阶段，
   不冒充本轮重新执行。实际门禁、账号失败与清理结果集中记录在 [v6 证据](evidence/zcode-macos-arm64-2026-09-10.json)。
+- zcode-acp 对照收口复用既有配置 owner，增加 Z.ai/BigModel App 个人 Coding Plan case：`id.secret`
+  原样交给内核签名、不擅加 Start Plan Bearer、目录脱敏、原生显式套餐选择和 entitlement 禁用均保留。
+  不新增测试函数或真实凭据夹具；现有 transport owner 继续验证验证头拒绝、失败终态与 Host 可复用。
+  错误提示明确限定为当前 Rovai Host 的验证能力，并指向官方 App 或原生 Coding Plan/API Key 配置。
+
+### ACP 边界收尾验证
+
+最终 Rust PR gate 为 Library 551 / CLI 33 / slow 309，通过 Clippy all-targets、格式、类型与文档门禁；
+Vitest 1724（169 files）、Node 224 通过，保留 1 项既有平台 skip。首次完整 Rust 运行有一个既有 MCP
+本机 HTTP 测试报 `IncompleteMessage`；该项单独复验及完整 PR gate 重跑均通过，没有修改或跳过测试，
+未确定偶发中断根因。首次失败和最终成功日志分别保留，失败测试的合成凭据夹具已清理。
+
+`package:mac:daily` 的 App/Core/CLI arm64 架构及 ad-hoc 签名通过。隔离 packaged App 启动、Core ready、
+ZCode Installation 存在及独立 data/Skill Library/MCP 检查通过，无模型请求。首次清理脚本未显式声明
+非默认临时根而被保护检查拒绝；修正调用参数后清理原夹具，并重跑启动与清理通过，不涉及产品代码改动。
+以上是 Preview 交付检查，不能替代未执行的个人 Coding Plan 真实订阅验收。

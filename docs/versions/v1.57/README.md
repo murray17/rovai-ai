@@ -20,8 +20,9 @@ last_updated: 2026-09-10
 - macOS arm64 在实现与资格验收期间为 Preview；其他平台保持 NotQualified。
 - 原生 NDJSON 在进程内转换为既有 Core Session transport；公开来源仍标明 ZCode 协议。
 - 官方用户/项目配置提供模型与 MCP，Rovai 不建立 provider 或密钥配置页。
-- App 账号配置 fallback 与目录加载已实现；Start Plan 真实调用被上游人机验证拒绝，账号生成验收未通过。
-  当前不满足用户要求的“验证无问题后合并并安装”条件；PR 保持待验收。
+- App 账号配置 fallback 与目录加载已实现。按用户确认的 zcode-acp 处理边界交付：个人 Coding Plan
+  凭据交给官方内核，Start Plan 的临时验证回调明确拒绝并给出认证错误；免费账号生成未打通。
+  个人 Coding Plan 具有配置与协议回归，缺少真实订阅验收；该项不再阻止本次 Preview 收口，不冒充实测通过。
 - Read/Write/Edit 路径事实与 Edit 结构化 patch 分别准入；不从参数或磁盘猜测 Diff。
 - Migration 149 增加 Runtime、Skill 和 Compaction 闭集，从 `v1.56/schema 98/activity-v4` 升级到
   `v1.57/schema 99/activity-v4`。既有分类规则与历史 Evidence 不变。

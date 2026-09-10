@@ -119,9 +119,12 @@ App 配置及选择纳入 digest，完整可用目录通过 `workspace/updatePro
 Rovai 不解密 `credentials.json`、复制配置到 CLI Home 或启动 GUI。普通 Probe 只证明配置与目录加载、协议初始化。
 
 Start Plan 除账号 Authorization 外，还依赖官方 App Renderer 完成的临时人机验证请求头。
-独立 app-server 暂不能完成该流程；`interaction/requestProviderRuntimeHeaders` 必须明确报告未应用，
+当前 Rovai Host 未实现该验证交互；`interaction/requestProviderRuntimeHeaders` 必须明确报告未应用，
 不能仅因已设置 Authorization 就宣称完成刷新，不提取或复用 App 的验证码结果。
 账号配置可加载不等于账号模型生成已验收，真实 OAuth、刷新、套餐额度与模型调用分别记录。
+个人 Coding Plan 的原生签名凭据原样交给官方内核；不按 Start Plan 的 Bearer 方式重写，不绕过官方
+enabled/entitlement 或用户显式套餐选择。Start Plan 拒绝提示应说明当前 Host 缺少验证能力，并指向
+官方 App 或原生 Coding Plan/API Key 配置，不能要求用户重复登录来假称该缺口已解决。
 原生 `turn.failed` 与 `projection.status=error` 是失败终态；无前台工具/审批/请求后应发布脱敏失败，
 不能等待 `idle` 后将鉴权失败误报为断线恢复。成功 Final 仍要求成功终态及原有完整校验。
 

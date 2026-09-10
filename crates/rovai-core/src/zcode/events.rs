@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
-pub(super) const RUNTIME_HEADERS_UNAVAILABLE: &str = "ZCode authentication failed: Start Plan requires official App captcha verification headers, unavailable in the independent app-server";
+pub(super) const RUNTIME_HEADERS_UNAVAILABLE: &str = "ZCode authentication failed: Start Plan requires per-request captcha verification from the official ZCode App, which the current Rovai host cannot provide; use Start Plan in the official App, or configure a Coding Plan/API-key provider in ZCode";
 
 #[derive(Debug)]
 pub(super) struct NativeTurnFailure(&'static str);

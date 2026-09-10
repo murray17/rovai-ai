@@ -102,6 +102,13 @@ Renderer 的 provider runtime headers handler 调用官方人机验证 SDK，产
 Adapter 明确拒绝未完成的运行时验证请求，不提取验证码结果、不启动 GUI；Start Plan、账号刷新、Team Plan
 动态凭据均保留未接入边界。终端账号配置解析测试不等于真实订阅生成通过。
 
+2026-09-10 对照 [zcode-acp issue #123 的维护者解释](https://github.com/william0wang/zcode-acp/issues/123#issuecomment-5556410271)
+及 [固定源码 92e439c 的回调处理](https://github.com/william0wang/zcode-acp/blob/92e439c2eb7484d33343d9be88d35894f4bda13e/src/handlers/server-requests.ts#L361)：
+该桥同样显式返回 `headersApplied: false`，未提供免费 Start Plan 验证能力；个人 Coding Plan 的签名由
+官方内核完成。用户已确认按这个边界先交付，即使本机没有订阅凭据可做真实验收。Rovai 继续使用官方内核，
+只参考协议行为，不引入该社区包。现有配置 owner 额外覆盖两个官方 family 的个人 Coding Plan 凭据透传、
+显式套餐选择及禁用态，不能用这些合成配置结果代替真实套餐调用。
+
 原生 Read 的声明明确支持文本和图片，`readImageFile` 经 `fileSystemPort.readBinaryFile` 和
 `imageProcessorPort.prepareForModel` 读取并处理图片，`formatModelContent` 输出原生 image 内容给模型。
 所以不能因为 Rovai `session/prompt` 只发送 text，就断言 ZCode 无法看图。图片继续使用现有授权路径；

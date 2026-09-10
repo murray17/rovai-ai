@@ -985,6 +985,80 @@ mod tests {
                 .to_string()
                 .contains("Team Plan")
         );
+        // App Coding Plan credentials must reach the official kernel unchanged:
+        // its signing path owns id.secret, while Start Plan uses Bearer + captcha.
+        for family in ["zai", "bigmodel"] {
+            let coding = format!("builtin:{family}-coding-plan");
+            let start = format!("builtin:{family}-start-plan");
+            let signing_key = format!("PRIVATE_{family}.SIGNING_SECRET");
+            let mut plans = json!({"provider":{
+                coding.clone():{"kind":"anthropic","enabled":true,
+                    "options":{"apiKey":signing_key},"models":{"glm-5.3":{}}},
+                start.clone():{"kind":"anthropic","enabled":true,
+                    "options":{"apiKey":"PRIVATE_START_TOKEN"},"models":{"glm-5.3":{}}}
+            }});
+            fs::write(&app_path, plans.to_string()).unwrap();
+            fs::write(
+                &setting_path,
+                json!({"modelProviderFamilyModes":{family:"oauth"},
+                "modelProviderFamilySelectedKeys":{family:format!("coding-plan:{coding}")}})
+                .to_string(),
+            )
+            .unwrap();
+            let paid = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+            let carrier = paid.runtime_model(None).unwrap();
+            assert_eq!(carrier["model"]["providerId"], coding);
+            assert_eq!(carrier["provider"]["apiKey"]["value"], signing_key);
+            assert!(carrier["provider"].get("headers").is_none());
+            let registry = paid.app_provider_registry().unwrap().unwrap();
+            assert_eq!(registry["providers"].as_array().unwrap().len(), 1);
+            assert_eq!(registry["providers"][0]["apiKey"]["value"], signing_key);
+            assert!(!registry.to_string().contains("PRIVATE_START_TOKEN"));
+            let catalog = paid
+                .session_catalog(
+                    "paid-session",
+                    &json!({"settings":{"model":{
+                "current":carrier["model"],"available":[{"ref":carrier["model"]}]}}}),
+                )
+                .unwrap();
+            assert!(!catalog.to_string().contains(&signing_key));
+            assert!(!paid.digest.contains(&signing_key));
+
+            // An explicit native Start Plan choice still wins over an available
+            // paid plan. A model name alone never identifies the chosen plan.
+            fs::write(
+                &setting_path,
+                json!({"modelProviderFamilySelectedKeys":{
+                family:format!("coding-plan:{start}")}})
+                .to_string(),
+            )
+            .unwrap();
+            let trial = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+            assert_eq!(
+                trial.runtime_model(None).unwrap()["model"]["providerId"],
+                start
+            );
+            assert_ne!(trial.digest, paid.digest);
+            fs::write(&setting_path, "{}").unwrap();
+            let automatic = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+            assert_eq!(
+                automatic.runtime_model(None).unwrap()["model"]["providerId"],
+                coding
+            );
+            plans["provider"][&coding]["systemDisabledReason"] = json!("coding_plan_not_entitled");
+            fs::write(&app_path, plans.to_string()).unwrap();
+            let unavailable = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+            assert_eq!(
+                unavailable.runtime_model(None).unwrap()["model"]["providerId"],
+                start
+            );
+            assert!(
+                unavailable
+                    .runtime_model(Some(&format!("{coding}/glm-5.3")))
+                    .is_err()
+            );
+            assert_eq!(fs::read_to_string(&app_path).unwrap(), plans.to_string());
+        }
         fs::write(home.join(".zcode/cli/config.json"), config.to_string()).unwrap();
         let terminal = NativeConfig::load_layers(&cwd, &home, &custom_env).unwrap();
         assert_eq!(

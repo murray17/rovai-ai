@@ -462,6 +462,8 @@ pipe-owned companion 补充回收原生 detached Bash 进程组，生命周期�
 并沿用 App 的 Provider family 选择。账号与 BYOK 共用只读 runtimeModel，App 完整目录经内存 registry RPC 加载。
 不建立 Rovai provider 配置，不解密登录文件。Start Plan 的 App 内临时人机验证、账号刷新和 Team Plan 动态凭据
 尚未接入；配置加载通过不能作为账号生成通过的证据。原生失败终态发布脱敏错误，不因 `error` 状态误触发断线恢复。
+个人 Coding Plan 的原生签名凭据由官方内核处理；Start Plan 的验证回调显式报告未应用并给出操作指引。
+该差异是当前 Host 的认证覆盖范围，不是取消账号配置接入或宣称 app-server 协议不支持账号认证。
 图片沿用授权附件路径，由原生 Read 转为模型图片内容；Read 保持读取活动，不形成 Files Changed 或修改 Diff。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；
 warm resume 不刷新 MCP，所以集合变化不能沿用旧 Host。协议、FirstPayload、权限、Usage 与保留能力见
 [Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)。平台资格与 Machine Ready 分开维护。
