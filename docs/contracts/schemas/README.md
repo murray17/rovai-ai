@@ -11,6 +11,7 @@ Schema version 与 raw-byte SHA-256；实现必须先验证 catalog，再按唯�
 
 当前包含：
 
+- `collaboration-ledger-v1.1.schema.json`：当前 Public A2A forward／return lineage；深度 0 仅用于已确认的 return。旧 1.0.0 schema 留在 v0.34 历史目录。规则由 [Execution Evaluation v3](../execution-evaluation-v3.md)拥有。
 - `gather-completion-input-v2.schema.json`：当前 Gather Barrier 冻结并交给原 initiator continuation 的
   self-contained mandatory Current Input；v1 仅用于已冻结 continuation 的恢复与审计。
 - `semantic-judge-view-suite-v1.schema.json`：Semantic Judge Views v1 的 Suite envelope 与逐项 Review projection。

@@ -7,10 +7,10 @@ import {
   sha256,
   writePrivateJsonExclusive
 } from './qualification-common.mjs'
-import { validateQualificationArtifactSchema } from './qualification-schema-validation.mjs'
+import { validateCatalogedQualificationArtifact } from './qualification-schema-validation.mjs'
 
 export const COLLABORATION_LEDGER_SCHEMA_ID = 'rovai.qualification.collaboration-ledger'
-export const COLLABORATION_LEDGER_SCHEMA_VERSION = '1.0.0'
+export const COLLABORATION_LEDGER_SCHEMA_VERSION = '1.1.0'
 
 const FORBIDDEN_FIELDS = new Set([
   'returnPolicy',
@@ -66,10 +66,11 @@ export function buildCollaborationLedger({
     const adaptedCall = currentSurface
       ? {
           ...call,
+          edgeKind: ['forward', 'return'].includes(call.edgeKind) ? call.edgeKind : 'unknown',
           conversationInputId: call.recipientInputEvidenceId ?? call.deliveryId,
           inputStatus: currentInputState(call.recipientInputStatus ?? call.deliveryStatus)
         }
-      : call
+      : { ...call, edgeKind: 'forward' }
     if (!isCanonicalCall(adaptedCall) || !contentReference || !inputReference || !eventReference) {
       incompleteCalls += 1
       continue
@@ -115,6 +116,7 @@ export function buildCollaborationLedger({
       taskId: adaptedCall.taskId ?? null,
       slot: adaptedCall.slot,
       depth: adaptedCall.depth,
+      edgeKind: adaptedCall.edgeKind,
       acceptedAt: adaptedCall.acceptedAt,
       input,
       recipientRun,
@@ -209,7 +211,7 @@ export async function retainCollaborationLedgerArtifact(evidenceDirectory, artif
 
 export function validateCollaborationLedger(artifact, evidenceIndex) {
   if (artifact?.schemaId !== COLLABORATION_LEDGER_SCHEMA_ID
-      || artifact.schemaVersion !== COLLABORATION_LEDGER_SCHEMA_VERSION
+      || !['1.0.0', COLLABORATION_LEDGER_SCHEMA_VERSION].includes(artifact.schemaVersion)
       || artifact.payloadDigest !== digest(artifact.payload)) {
     throw new Error('Collaboration Ledger envelope identity is invalid')
   }
@@ -250,7 +252,7 @@ export function validateCollaborationLedger(artifact, evidenceIndex) {
       throw new Error('Collaboration Ledger complete metrics disagree with Call records')
     }
   }
-  validateQualificationArtifactSchema('collaboration-ledger.schema.json', artifact)
+  validateCatalogedQualificationArtifact(artifact)
   return artifact
 }
 
@@ -278,7 +280,7 @@ function deriveRouteFacts(calls, evidenceIndexArtifactId) {
   )).values()) {
     if (selected.length > 1) addFact('exact_duplicate_acceptance', selected)
   }
-  for (const selected of groupedCalls(calls, (call) => (
+  for (const selected of groupedCalls(calls.filter(call => call.edgeKind === 'forward'), (call) => (
     [call.senderMemberId, call.recipientMemberId].sort().join('\u0000')
   )).values()) {
     const directions = new Set(selected.map((call) => (
@@ -359,7 +361,7 @@ function isCanonicalCall(call) {
     && Number.isSafeInteger(call.slot)
     && call.slot >= 1
     && Number.isSafeInteger(call.depth)
-    && call.depth >= 1
+    && (call.depth >= 1 || call.depth === 0 && call.edgeKind === 'return')
     && Number.isFinite(Date.parse(call.acceptedAt))
     && Number.isFinite(Date.parse(call.inputPersistedAt))
     && ['pending', 'materialized', 'failed', 'cancelled'].includes(call.inputStatus)

@@ -125,6 +125,19 @@ test('current Public A2A evidence binds one Message Delivery to its message, acc
     recipientInputStatus: 'accepted',
     settlement: 'settled'
   }])
+
+  // Core return edges restore the caller's lineage, including root depth zero.
+  for (const [edgeKind, depth, coverage] of [
+    ['return', 0, 'complete_with_message_delivery_receipts'],
+    ['forward', 0, 'partial_message_delivery_receipt_coverage']
+  ]) {
+    const snapshot = currentPublicA2aSnapshot()
+    snapshot.messageDeliveries[0].edgeKind = edgeKind
+    snapshot.timeline[0].payload.a2aDepth = depth
+    const returned = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-current' })
+    assert.equal(returned.a2a[0].depth, depth)
+    assert.equal(returned.metrics.coverage, coverage)
+  }
 })
 
 test('current Public A2A evidence fails closed when the accepted counter is not covered by Message Deliveries', () => {

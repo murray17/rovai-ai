@@ -107,6 +107,16 @@ test('Collaboration Ledger rejects unresolved Evidence References and metric inf
     () => validateCollaborationLedger(inflated, evidenceIndex),
     /complete metrics disagree/
   )
+
+  const historical = structuredClone(artifact)
+  historical.schemaVersion = '1.0.0'
+  for (const call of historical.payload.calls) delete call.edgeKind
+  historical.payloadDigest = `sha256:${digestJson(historical.payload)}`
+  assert.doesNotThrow(() => validateCollaborationLedger(historical, evidenceIndex))
+  const invalidForward = structuredClone(artifact)
+  invalidForward.payload.calls[0].depth = 0
+  invalidForward.payloadDigest = `sha256:${digestJson(invalidForward.payload)}`
+  assert.throws(() => validateCollaborationLedger(invalidForward, evidenceIndex), /violates/)
 })
 
 test('Collaboration Ledger adapts current Public Message Delivery evidence without inventing response semantics', () => {
@@ -191,6 +201,23 @@ test('Collaboration Ledger adapts current Public Message Delivery evidence witho
   assert.equal(artifact.payload.calls[0].input.state, 'materialized')
   assert.equal(artifact.payload.metrics.coverage.state, 'complete')
   assert.equal(JSON.stringify(artifact).includes('responseProduced'), false)
+
+  for (const [edgeKind, depth, count] of [['return', 0, 1], ['forward', 0, 0]]) {
+    const source = structuredClone(collaborationEvidence)
+    source.a2a[0].edgeKind = edgeKind
+    source.a2a[0].depth = depth
+    const returned = buildCollaborationLedger({
+      trialId: 'trial-current', plannedSlotId: 'slot-current', caseId: 'CASE-CURRENT',
+      caseSeal: 'b'.repeat(64), producerDigest: 'a'.repeat(64),
+      collaborationEvidence: source, evidenceIndex, evidenceReferences
+    })
+    assert.equal(returned.payload.calls.length, count)
+    if (count) {
+      assert.equal(returned.payload.calls[0].depth, 0)
+      assert.equal(returned.payload.calls[0].edgeKind, 'return')
+      assert.equal(returned.payload.metrics.coverage.state, 'complete')
+    }
+  }
 })
 
 function collaborationFixture() {

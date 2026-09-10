@@ -179,6 +179,7 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
       callId: delivery.id,
       deliveryId: delivery.id,
       deliveryStatus: delivery.status ?? null,
+      edgeKind: ['forward', 'return'].includes(delivery.edgeKind) ? delivery.edgeKind : 'unknown',
       messageId: delivery.messageId ?? null,
       acceptanceReceiptId: receipt?.eventId ?? null,
       acceptanceEventId: receipt?.eventId ?? null,
@@ -237,7 +238,7 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
       && Number.isSafeInteger(call.slot)
       && call.slot >= 1
       && Number.isSafeInteger(call.depth)
-      && call.depth >= 1
+      && (call.depth >= 1 || call.depth === 0 && call.edgeKind === 'return')
     ))
   const observedSettledMemberCalls = calls.filter(
     (call) => call.mechanicalSettlement.state === 'settled'

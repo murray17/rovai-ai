@@ -53,7 +53,7 @@ try {
   const due = new Date(Date.now() + 120_000)
   const localDate = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`
   const at = `${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}`
-  const prompt = '本次是隔离评测运行。宿主会独立运行固定回归，请勿自行启动 Runner。先从当前上下文取得本 Camp 的 ID，然后执行 node reports/wait-for-evaluation.mjs --camp-id <当前CampID>。命令最多等待55分钟；必要时继续等待同一进程，不能用旧报告或自己编写评测结果。完成后读取回执 directory 中的 report.json，总结真实版本、12个独立Case、计划重复数、硬性通过/失败/未知、Judge状态和HTML报告路径。completed是执行结束，不等于Gate通过。失败或中断则说明原因。最终用公开消息交付本次结论，不修改产品、Case或评分。'
+  const prompt = '本次是隔离评测运行。宿主会独立运行固定回归，请勿自行启动 Runner。先从当前上下文取得本 Camp 的 ID，然后执行 node reports/wait-for-evaluation.mjs --camp-id <当前CampID>。命令最多等待55分钟；必要时继续等待同一进程，不能用旧报告或自己编写评测结果。完成后读取回执 directory 中的 report.json，总结真实版本、12个独立Case、计划重复数、硬性与专项规则的联合通过/失败/未知、Judge状态和HTML报告路径。联合数量读取 reports/trend-data.json 中匹配本次 week/attempt 的 hardPass、hardFail、unknown，不能只数 hardOutcome 而遗漏专项 indeterminate。completed是执行结束，不等于Gate通过。失败或中断则说明原因。最终用公开消息交付本次结论，不修改产品、Case或评分。'
   const created = await core.request('automations.create', { commandId: randomUUID(), command: { name: '隔离每周回归验收', prompt, memberId: member.agentId, projectRef: { kind: 'directory', path: workspace }, schedule: { kind: 'once', date: localDate, at }, notifyChannels: [] } })
   const automationId = created.payload?.automationId
   if (!automationId) throw new Error('Automation creation returned no identity')

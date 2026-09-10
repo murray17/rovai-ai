@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.5.0",
+  "catalogVersion": "1.6.0",
   "hashAlgorithm": "sha256",
   "digestInput": "raw_file_bytes",
   "schemas": [
@@ -74,6 +74,12 @@
       "schemaUri": "https://schemas.rovai.invalid/contracts/paired-collaboration-experiment-v1.schema.json",
       "schemaVersion": "1.0.0",
       "digest": "sha256:3acf8b0bbad36ab74a06a9c8008552978a681357f7be48b7bc1714ab54019918"
+    },
+    {
+      "file": "collaboration-ledger-v1.1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/collaboration-ledger-v1.1.schema.json",
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:bd4dd664150c9f0a7f04509efb1a4582b0bf761b8cea1c11ce5d7307fc840d99"
     }
   ]
 }

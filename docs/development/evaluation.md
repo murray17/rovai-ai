@@ -6,7 +6,7 @@ last_updated: 2026-09-10
 
 # Gate、每周回归与每日分析
 
-本页拥有开发者操作流程。判断规则见 [Execution Evaluation v2](../contracts/execution-evaluation-v2.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+本页拥有开发者操作流程。判断规则见 [Execution Evaluation v3](../contracts/execution-evaluation-v3.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
 
 ## 上下文改动 Gate
 
@@ -92,6 +92,8 @@ rovai app eval status --job-id gate-change-01
 定时任务 Prompt 使用当前 Camp 身份等待结果，例如：
 
 > 宿主会为这次定时运行执行固定回归。在当前工作区执行 `node reports/wait-for-evaluation.mjs --camp-id <当前上下文中的 Camp ID>`，等待与当前 Camp 绑定的回执。completed 表示执行结束，不代表 Gate 通过；随后读取其 directory 中 report.json/report.html，总结结论、版本、独立 Case 数、计划重复数、失败、未知及证据链接。失败或超时如实报告，不使用上次报告，不执行评测 Runner，不修改实现、Case 或评分标准。
+
+周回归汇总使用根目录 `trend-data.json` 中与本次 week／attempt 对应的 `hardPass`、`hardFail`、`unknown`，它们包含硬性验收与专项规则。若另列原始 `hardOutcome` 数量，须注明它不包含专项规则；不能忽略 `rules[].status = indeterminate`，也不能让 LLM 重新猜测分母。
 
 宿主每次从绑定模板重新构建当前指定源码并冻结实际执行计划；任务集、评分、Judge 和预算仍须与原模板一致。执行器、Case 或标准变化后重新注册／绑定，不悄悄升级标准。定时模板总预算最多 2700 秒，为现有一小时 Automation 留出分析时间。日报通过 Automation ID 排除该分析任务；回归 Core 本身使用独立数据库。
 

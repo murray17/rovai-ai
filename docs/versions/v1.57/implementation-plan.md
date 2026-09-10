@@ -78,6 +78,10 @@ last_updated: 2026-09-10
 
 本环境未提供真实 Judge 配置及所需 API 凭据，本轮没有执行新标准的真实 Judge 或完整基线／候选对照。原先 12 Case 的结果继续属于旧标准与旧评测器；不能合并补跑、UI 夹具或测试结果宣称新标准 Gate 通过。
 
+### 宿主链路与后续失败复核
+
+后续增量见[宿主接入与失败复核](evaluation-host-integration.md)。已完成真实 Rovai 定时触发、宿主回归、报告和分析 Agent 交付，以及每日统计到真实分析登记的链路。周回归保留 degraded，缺 Judge 与预算未运行项不算通过；开发版 Electron 的 owner CLI 提交／取消也已实测。旧回归记录保持原样，新增 Case 111 v2 和 ledger 1.1 的版本、修正依据、定向补验与重放在该记录单列。当前权威合同为 [Execution Evaluation v3](../../contracts/execution-evaluation-v3.md) 与 [User Automation v4](../../contracts/user-automation-v4.md)。
+
 ## 明确限制
 
 精确 Memory 计数、全来源 provenance、历史 Run build 和完整 native Tool 错误不可用。共用主机上的隔离目录不等于独立主机 Formal qualification。小样本回归不证明统计上的非劣性；用户确认、测试通过与报告生成均不证明实际能力提升。首批独立验收保留集未运行；不会把公开回归 Case 改名冒充保留样本。
