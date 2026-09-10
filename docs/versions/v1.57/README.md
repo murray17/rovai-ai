@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # Rovai-ai v1.57：上下文 Gate 与双轨评测
@@ -44,3 +44,5 @@ last_updated: 2026-09-10
 | Root README | 确认无需更新 | 项目定位与支持平台不变；开发评测操作由 development 入口拥有 |
 
 评测证据采集、Judge 未知处理及报告结论修订见[证据与报告完整性修订](evaluation-evidence-completeness.md)。
+
+同一批十二项真实执行证据的新标准重评已完成：质量 94.27/100、覆盖 100%、硬验收 11/12、全条件验收 10/12；无基线比较。实际版本、未通过项合理性、发布故障修复与限制见[可观察指标实测记录](evaluation-observable-results.md)。
