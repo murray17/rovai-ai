@@ -1652,16 +1652,18 @@ async function buildToolInteractionEffectEvidence({
       return [result?.taskId, ...(result?.tasks ?? []).map((task) => task?.taskId)]
     })
     .filter((value) => typeof value === 'string'))
-  for (const task of (finalSnapshot?.tasks ?? []).filter((item) => measuredTaskIds.has(item.id))) {
-    const reference = evidenceReferences.taskStates?.[task.id]
+  for (const task of finalSnapshot?.tasks ?? []) {
+    const taskId = task.taskId ?? task.id
+    if (!measuredTaskIds.has(taskId)) continue
+    const reference = evidenceReferences.taskStates?.[taskId]
     if (!reference) continue
     const content = buildTaskStateContent(task)
     effects.push({
-      effectId: `task-state:${sha256(task.id).slice(0, 32)}`,
+      effectId: `task-state:${sha256(taskId).slice(0, 32)}`,
       kind: 'task_state',
       content,
       contentDigest: `sha256:${sha256(content)}`,
-      relatedResultIdentities: [task.id],
+      relatedResultIdentities: [taskId],
       evidenceReference: reference
     })
   }

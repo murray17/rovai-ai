@@ -333,7 +333,9 @@ export function buildEvidenceIndex({
     }
     for (const task of snapshot.tasks ?? []) {
       if (!trialRunIds.has(task.sourceAgentRunId)) continue
-      const taskEvidenceId = stableEvidenceId('core.task', task.id)
+      const taskId = task.taskId ?? task.id
+      if (typeof taskId !== 'string' || !taskId) throw new Error('Task evidence requires a current taskId or legacy id')
+      const taskEvidenceId = stableEvidenceId('core.task', taskId)
       addSourceRecord({
         evidenceId: taskEvidenceId,
         evidenceType: 'core_domain',
@@ -342,9 +344,9 @@ export function buildEvidenceIndex({
         observedAt: task.completedAt ?? task.updatedAt ?? task.createdAt,
         content: task
       })
-      references.tasks[task.id] = evidenceReference(artifactId, taskEvidenceId)
+      references.tasks[taskId] = evidenceReference(artifactId, taskEvidenceId)
       const taskState = buildTaskStateContent(task)
-      const taskStateEvidenceId = stableEvidenceId('core.task-state', task.id)
+      const taskStateEvidenceId = stableEvidenceId('core.task-state', taskId)
       addSourceRecord({
         evidenceId: taskStateEvidenceId,
         evidenceType: 'core_domain',
@@ -352,14 +354,14 @@ export function buildEvidenceIndex({
         sourceId: 'core.camp-snapshot',
         observedAt: task.completedAt ?? task.updatedAt ?? task.createdAt,
         content: {
-          taskId: task.id,
+          taskId,
           stateDigest: withSha256Prefix(sha256(taskState))
         },
         contentDigestOverride: sha256(taskState),
         safeForJudge: true,
         safeForPublic: false
       })
-      references.taskStates[task.id] = evidenceReference(artifactId, taskStateEvidenceId)
+      references.taskStates[taskId] = evidenceReference(artifactId, taskStateEvidenceId)
     }
     for (const action of snapshot.actions ?? []) {
       if (!trialRunIds.has(action.agentRunId)) continue
@@ -663,7 +665,7 @@ export function buildEvidenceIndex({
 
 export function buildTaskStateContent(task) {
   return canonicalJson(compactObject({
-    taskId: task?.id ?? task?.taskId ?? null,
+    taskId: task?.taskId ?? task?.id ?? null,
     status: task?.status ?? null,
     assigneeAgentId: task?.assigneeAgentId ?? null,
     version: task?.version ?? null,

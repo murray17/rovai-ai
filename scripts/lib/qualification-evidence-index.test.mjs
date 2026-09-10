@@ -410,3 +410,20 @@ function fixture() {
     finalResponses: [{ messageId: 'final-message', isFinal: true }]
   }
 }
+
+test('Current Task IDs bind distinct task and task-state evidence across two tasks', () => {
+  const input = fixture()
+  input.snapshot.tasks = [
+    { taskId: 'task-current-a', sourceAgentRunId: 'run-1', status: 'completed' },
+    { taskId: 'task-current-b', sourceAgentRunId: 'run-1', status: 'pending' }
+  ]
+  const { artifact, references } = buildEvidenceIndex(input)
+  assert.deepEqual(Object.keys(references.tasks).sort(), ['task-current-a', 'task-current-b'])
+  assert.deepEqual(Object.keys(references.taskStates).sort(), ['task-current-a', 'task-current-b'])
+  for (const id of ['task-current-a', 'task-current-b']) {
+    assert.equal(references.tasks[id].evidenceId, `core.task:${id}`)
+    assert.equal(references.taskStates[id].evidenceId, `core.task-state:${id}`)
+    assert.ok(artifact.payload.records.some(record => record.evidenceId === references.taskStates[id].evidenceId))
+  }
+  assert.equal(JSON.stringify(artifact).includes('core.task:undefined'), false)
+})
