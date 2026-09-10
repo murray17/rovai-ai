@@ -9,7 +9,7 @@ last_updated: 2026-09-07
 # User Automation Architecture
 
 本文说明普通用户终端自动化与 Runtime Diagnostic Trial 的长期组件边界。字段、命令、错误和 bundle 以
-[User Automation v3](../contracts/user-automation-v3.md)为准；决定理由见
+[User Automation v4](../contracts/user-automation-v4.md)为准；决定理由见
 [v1.21 决策](../versions/v1.21/decisions.md)。
 
 ## 进程结构
@@ -100,3 +100,7 @@ dispatcher、Contract、CLI help、错误/安全测试与版本影响记录；�
 ## 每日运行分析
 
 `trace.export` 只调用 Core 的有界元数据查询。Host 按用户配置的范围将规则报告准备到既有 Automation 工作区，分析 Agent 不获得用户 IPC；组件与失败边界见[双轨执行评测](execution-evaluation.md)。
+
+## 评测宿主
+
+`eval.*` 调用 Main 的封闭 EvaluationHostService，不透传 Core method 或 shell。服务只管理用户注册的开发者 Runner、活动进程和本地 job 文件；评测 Case、评分与尝试历史仍由既有 Qualification/Gate 模块拥有。定时任务仍由 Core 创建普通 AutomationRun/Camp，Host 观察其权威身份并执行，Agent 读取该 Camp 的报告回执。此能力与 Diagnostic Trial 保持独立，不能把 Trial bundle 直接提升为 Gate 结果。

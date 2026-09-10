@@ -351,6 +351,55 @@ async fn execute(args: &[String]) -> Result<u8> {
             print_json(&invoke("trace.schedules", json!({})).await?)?;
             0
         }
+        ("eval", Some("configure")) => {
+            flags.validate(&["source", "node"], &["json"])?;
+            print_json(
+                &invoke(
+                    "eval.configure",
+                    json!({
+                        "source": flags.required("source")?, "node": flags.required("node")?
+                    }),
+                )
+                .await?,
+            )?;
+            0
+        }
+        ("eval", Some(action @ ("gate" | "weekly"))) => {
+            flags.validate(&["plan", "output", "job-id"], &["json"])?;
+            let job_id = flags.required("job-id")?;
+            print_json(&invoke(&format!("eval.{action}"), json!({
+                "plan": flags.required("plan")?, "output": flags.required("output")?, "jobId": job_id
+            })).await?)?;
+            0
+        }
+        ("eval", Some("schedule")) => {
+            flags.validate(&["automation-id", "plan", "output"], &["json"])?;
+            print_json(
+                &invoke(
+                    "eval.schedule",
+                    json!({
+                        "automationId": flags.required("automation-id")?,
+                        "plan": flags.required("plan")?, "output": flags.required("output")?
+                    }),
+                )
+                .await?,
+            )?;
+            0
+        }
+        ("eval", Some("status")) => {
+            flags.validate(&["job-id"], &["json"])?;
+            let params = match flags.one("job-id")? {
+                Some(job_id) => json!({"jobId": job_id}),
+                None => json!({}),
+            };
+            print_json(&invoke("eval.status", params).await?)?;
+            0
+        }
+        ("eval", Some("cancel")) => {
+            flags.validate(&["job-id"], &["json"])?;
+            print_json(&invoke("eval.cancel", json!({"jobId": flags.required("job-id")?})).await?)?;
+            0
+        }
         _ => {
             return Err(CliError::new(
                 "automation_invalid_input",
@@ -364,7 +413,7 @@ async fn execute(args: &[String]) -> Result<u8> {
 
 fn print_help() {
     println!(
-        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app camp create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n  rovai app trace export|schedule|schedules\n\nThe Desktop App must already be running. V1 never launches it automatically."
+        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app camp create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n  rovai app trace export|schedule|schedules\n  rovai app eval configure|gate|weekly|schedule|status|cancel\n\nThe Desktop App must already be running. V1 never launches it automatically."
     );
 }
 
@@ -408,6 +457,20 @@ fn print_command_help(command: &str, action: Option<&str>) -> Result<()> {
             "rovai app trace schedule --automation-id <existing-id> --timezone <IANA-zone> --output <directory-in-automation-workspace> [--camp-id <id> ...] [--exclude-camp-id <id> ...] [--exclude-automation-id <id> ...] [--json]"
         }
         ("trace", Some("schedules")) => "rovai app trace schedules [--json]",
+        ("eval", Some("configure")) => {
+            "rovai app eval configure --source <absolute-developer-checkout> --node <absolute-node-binary> [--json]"
+        }
+        ("eval", Some("gate")) => {
+            "rovai app eval gate --plan <absolute-frozen-plan.json> --output <absolute-campaign-directory> --job-id <stable-id> [--json] (returns a job; inspect with eval status)"
+        }
+        ("eval", Some("weekly")) => {
+            "rovai app eval weekly --plan <absolute-frozen-weekly-plan.json> --output <absolute-history-directory> --job-id <stable-id> [--json]"
+        }
+        ("eval", Some("schedule")) => {
+            "rovai app eval schedule --automation-id <existing-id> --plan <absolute-frozen-weekly-plan.json> --output <directory-in-automation-workspace> [--json]"
+        }
+        ("eval", Some("status")) => "rovai app eval status [--job-id <id>] [--json]",
+        ("eval", Some("cancel")) => "rovai app eval cancel --job-id <id> [--json]",
         _ => {
             return Err(CliError::new(
                 "automation_invalid_input",

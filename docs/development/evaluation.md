@@ -76,11 +76,24 @@ API 凭据仅通过命名环境变量读取；不写进配置或报告。默认�
 
 ## 每周真实任务回归
 
-用户侧可直接运行每周 CLI。接入 Rovai 现有 Automation 前，先验证其受管 Runtime 能在目标平台启动隔离 Runner。**本次 macOS 验收发现 nested `sandbox-exec` 返回 exit 71 / `sandbox_apply: Operation not permitted`，因此第一版在该平台的每周 Agent 定时执行受阻。**不解除 Core 的用户 IPC 隔离来获得通过；CLI 的实际执行与定时调度分别记证据。
+用户终端可以运行仓库 CLI，也可以通过已运行的 Desktop 提交宿主 job。旧的“定时 Agent 直接启动 Runner”路径在 macOS 曾遇到 nested `sandbox-exec` exit 71；现在由 App 宿主启动同一 Runner，Agent 读取对应报告。安装与授权边界见 [User Automation v4](../contracts/user-automation-v4.md)。
 
-在通过嵌套执行准入的平台，可复用现有 Automation，绑定专门的评测目录。任务只针对指定源码 checkout，调用隔离 fixture；日报通过 Automation ID 排除该评测任务。任务提示应包括：
+先通过既有界面创建绑定评测目录的 Automation，然后从用户终端注册执行器并绑定已冻结的 weekly plan。需要 Node >=24、仓库依赖和 Rust/Git 工具链；这些命令不安装软件。
 
-> 为当前指定 checkout 创建新的 product 构建证据。基于固定配置生成 mode=weekly 的计划，运行 eval:gate weekly；输出报告、版本、样本数与趋势链接。保留全部结果，受阻写明原因，不修改实现、Case 或评分标准，不重跑用户工作区任务。
+```bash
+rovai app eval configure --source /absolute/rovai-checkout --node /absolute/node
+rovai app eval schedule --automation-id <id> --plan /absolute/weekly-plan.json --output /evaluation-workspace/reports
+rovai app eval status
+# 用户终端手动 Gate；同一 job-id 可查询或安全重放，不产生第二次尝试。
+rovai app eval gate --job-id gate-change-01 --plan /absolute/gate-plan.json --output /absolute/gate-campaign
+rovai app eval status --job-id gate-change-01
+```
+
+定时任务 Prompt 使用当前 Camp 身份等待结果，例如：
+
+> 宿主会为这次定时运行执行固定回归。在当前工作区执行 `node reports/wait-for-evaluation.mjs --camp-id <当前上下文中的 Camp ID>`，等待与当前 Camp 绑定的回执。completed 表示执行结束，不代表 Gate 通过；随后读取其 directory 中 report.json/report.html，总结结论、版本、独立 Case 数、计划重复数、失败、未知及证据链接。失败或超时如实报告，不使用上次报告，不执行评测 Runner，不修改实现、Case 或评分标准。
+
+宿主每次从绑定模板重新构建当前指定源码并冻结实际执行计划；任务集、评分、Judge 和预算仍须与原模板一致。执行器、Case 或标准变化后重新注册／绑定，不悄悄升级标准。定时模板总预算最多 2700 秒，为现有一小时 Automation 留出分析时间。日报通过 Automation ID 排除该分析任务；回归 Core 本身使用独立数据库。
 
 每周配置与 Gate 共用 schema，改为 `mode: weekly`，省略 `baseline`、`change`，保留 `candidate`、team、suite、Judge、重复数与预算。`eval:gate weekly --plan <frozen-plan.json> --output <weekly-history-root>` 按 UTC 周一分配 campaign；触发时间由 Automation 的设备本地时区决定，统计时区不改变触发时区。每周第一次尝试形成连续曲线，第二次尝试单列，不以最后一次成功替换失败点。JSON 保存每个版本、数量／分母和比较资格，缺周或环境变化断线。
 
@@ -105,7 +118,7 @@ Main 先把规则统计、HTML／SVG 和分析输入写入指定工作区；每�
 
 在后续部署时设置实际时间，建议当地时间 08:00 给 Host 留出准备时间。Host 在 App 内每分钟检查，失败退避一小时；如果当天尚无完整输入，分析应诚实失败，不能把旧报告当成昨天。关闭对应 Automation 即停止准备。当前版本未提供外部后台常驻保证。
 
-离线演示可以使用已实际导出的文件：`eval:daily --config <json> --date YYYY-MM-DD --trace <trace.json>`；在线用户调用省略 `--trace`，配置还需指定 bundled `rovai` 可执行文件。配置为 `{ "timezone": "Asia/Shanghai", "output": "/private/daily", "cli": "/app/bin/rovai", "scope": { "campIds": [], "excludeCampIds": [], "excludeAutomationIds": [] } }`。手工导出入口是 `rovai app trace export`；完整口径见 [User Automation v3](../contracts/user-automation-v3.md)。
+离线演示可以使用已实际导出的文件：`eval:daily --config <json> --date YYYY-MM-DD --trace <trace.json>`；在线用户调用省略 `--trace`，配置还需指定 bundled `rovai` 可执行文件。配置为 `{ "timezone": "Asia/Shanghai", "output": "/private/daily", "cli": "/app/bin/rovai", "scope": { "campIds": [], "excludeCampIds": [], "excludeAutomationIds": [] } }`。手工导出入口是 `rovai app trace export`；完整口径见 [User Automation v4](../contracts/user-automation-v4.md)。
 
 ## 报告解读与维护
 

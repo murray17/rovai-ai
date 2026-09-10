@@ -113,6 +113,22 @@ test('Tool evidence remains unavailable when the authoritative run boundary is a
   })
 })
 
+test('native command completion preserves failure and unknown outcomes independently of the event phase', () => {
+  // DEMO-111 retained activity.completed with nativeItemStatus=failed. A
+  // completed observation is not evidence that its command succeeded.
+  for (const [status, exitCode, expected] of [
+    ['failed', 42, 'failed'], ['completed', 42, 'failed'],
+    ['completed', 0, 'succeeded'], ['cancelled', null, 'indeterminate'],
+    ['unknown', null, 'indeterminate']
+  ]) {
+    const snapshot = { agentRuns: [{ id: 'run-1', campTurnId: 'turn-1' }], executionEvidence: [
+      activity('command-completed', 1, 'activity.completed', 'completed', { id: 'command-1', type: 'commandExecution', status, exitCode })
+    ] }
+    const result = deriveToolEvidence(snapshot, { campTurnId: 'turn-1' }, { coverage: { state: 'complete', reason: null }, declaredTotal: 1 })
+    assert.equal(result.ledger[0].lifecycle.state, expected, `${status}/${exitCode}`)
+  }
+})
+
 test('current Camp send keeps only digest-bound bounded operation projection', () => {
   const validProjection = operationProjection()
   const snapshot = {

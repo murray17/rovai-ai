@@ -109,7 +109,7 @@ last_updated: 2026-09-07
 
 ## User Automation 与 Diagnostic Trial
 
-- 当前规范：[User Automation 不变量](../architecture/foundational-invariants.md#user-automation-trial)、[Workspace 与动态 Git 不变量](../architecture/foundational-invariants.md#camp-workspace)、[User Automation Architecture](../architecture/user-automation.md)和[User Automation v2](../contracts/user-automation-v2.md)。
+- 当前规范：[User Automation 不变量](../architecture/foundational-invariants.md#user-automation-trial)、[Workspace 与动态 Git 不变量](../architecture/foundational-invariants.md#camp-workspace)、[User Automation Architecture](../architecture/user-automation.md)和[User Automation v4](../contracts/user-automation-v4.md)。
 - 理由来源：[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.21-D02](../versions/v1.21/decisions.md#v1-21-d02)、[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)、[V1.21-D04](../versions/v1.21/decisions.md#v1-21-d04)及[V1.53-D05](../versions/v1.53/decisions.md#v1-53-d05)。
 
 ## Scheduled Automation
@@ -158,5 +158,5 @@ last_updated: 2026-09-07
 
 ## 双轨执行评测
 
-- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v2](../contracts/execution-evaluation-v2.md)、[User Automation v3](../contracts/user-automation-v3.md)与[操作指南](../development/evaluation.md)。
+- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v2](../contracts/execution-evaluation-v2.md)、[User Automation v4](../contracts/user-automation-v4.md)与[操作指南](../development/evaluation.md)。
 - 理由来源：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)。

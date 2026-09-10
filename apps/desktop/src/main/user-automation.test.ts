@@ -13,6 +13,26 @@ import {
   WINDOWS_USER_AUTOMATION_QUALIFICATION_ENV
 } from './user-automation'
 
+it('routes only closed evaluation operations to Host without granting generic Core execution', async () => {
+  const calls: unknown[] = []
+  const invoke = async (name: string, params: unknown) => { calls.push([name, params]); return { state: 'running' } }
+  const dependencies = {
+    core: { async request<T>(): Promise<T> { throw new Error('Evaluation dispatch must not call generic Core') } },
+    openCamp: async (campId: string) => ({ campId, opened: true as const }), appVersion: 'test',
+    evaluation: {
+      configure: (params: unknown) => invoke('configure', params),
+      schedule: (params: unknown) => invoke('schedule', params),
+      start: (params: unknown, mode: 'gate' | 'weekly') => invoke(mode, params),
+      status: (params: unknown) => invoke('status', params),
+      cancel: (params: unknown) => invoke('cancel', params)
+    }
+  }
+  for (const operation of ['configure', 'gate', 'weekly', 'schedule', 'status', 'cancel']) await dispatchUserAutomation(`eval.${operation}`, {}, dependencies)
+  expect(calls).toHaveLength(6)
+  await expect(dispatchUserAutomation('eval.exec', {}, dependencies)).rejects.toThrow()
+  await expect(dispatchUserAutomation('eval.gate', {}, { ...dependencies, evaluation: undefined })).rejects.toThrow('unavailable')
+})
+
 async function socketRequest(path: string, request: unknown): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const socket = connect(path)

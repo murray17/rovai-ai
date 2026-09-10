@@ -82,6 +82,7 @@ import { DesktopSessionRegistry } from './desktop-session'
 import { parseClipboardWriteRequest } from './clipboard-write'
 import { OnboardingStore } from './onboarding-preferences'
 import { DailyAnalysisService } from './daily-analysis'
+import { EvaluationHostService } from './evaluation-host'
 import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
 import { applyWindowChromeAppearance, windowChromeOptions } from './window-chrome'
 import {
@@ -376,6 +377,7 @@ let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
 let automationSchedulerTimer: NodeJS.Timeout | null = null
 let dailyAnalysis: DailyAnalysisService | null = null
+let evaluationHost: EvaluationHostService | null = null
 let localStoresReady = false
 let resolveLocalStoresLoaded: () => void
 const localStoresLoaded = new Promise<void>((resolve) => { resolveLocalStoresLoaded = resolve })
@@ -870,6 +872,7 @@ if (primaryInstance) void app.whenReady().then(async () => {
   automationSchedulerTimer = setInterval(() => {
     void core.tickAutomationScheduler(new Date().toISOString()).catch(() => undefined)
     void dailyAnalysis?.tick().catch(() => undefined)
+    void evaluationHost?.tick().catch((error) => { console.warn('[rovai] Evaluation Host preparation failed:', error.message) })
   }, 500)
   automationSchedulerTimer.unref()
   const userDataPath = app.getPath('userData')
@@ -976,10 +979,13 @@ if (primaryInstance) void app.whenReady().then(async () => {
   dailyAnalysis = coreDataPath === null ? null : new DailyAnalysisService(
     userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory), core
   )
+  evaluationHost = coreDataPath === null || process.platform !== 'darwin' ? null : new EvaluationHostService(
+    userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory), core
+  )
   userAutomation = coreDataPath === null ? null : await startUserAutomationOptional(
     () => new UserAutomationServer(
       userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
-      { core, openCamp: openCampFromAutomation, appVersion: app.getVersion(), dailyAnalysis: dailyAnalysis ?? undefined }
+      { core, openCamp: openCampFromAutomation, appVersion: app.getVersion(), dailyAnalysis: dailyAnalysis ?? undefined, evaluation: evaluationHost ?? undefined }
     )
   )
   if (userAutomation) {
@@ -2238,6 +2244,7 @@ const appQuitCoordinator = new AppQuitCoordinator({
       await Promise.all([
         filePreview.closeAll(),
         stopAutomation,
+        evaluationHost?.stop() ?? Promise.resolve(),
         channelHostLifecycle.stop(),
         executionView.stop()
       ])

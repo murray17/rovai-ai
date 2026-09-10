@@ -211,15 +211,19 @@ export function compareResults(plan, slots, contracts) {
 }
 function semanticItem(slot, id) { return slot.semanticItems?.find(item => item.checklistItem === id) }
 
-export async function runPlan(planPath, outputRoot) {
-  const plan = await json(resolve(planPath)); validatePlanSeal(plan)
+export async function validatePlanInputs(plan, { products = true } = {}) {
+  validatePlanSeal(plan)
   if (!plan.scoring || digestJson(plan.scoring) !== plan.scoringDigest || digestJson(await json(plan.scoringPath)) !== plan.scoringDigest) throw new Error('Scoring changed or is missing; freeze a new plan')
   validateScoring(plan.scoring, plan.cases)
   if (plan.evaluatorDigest !== await evaluatorDigest()) throw new Error('Evaluator changed after the plan was frozen')
   if (digestJson(await readFile(plan.change.document, 'utf8')) !== plan.change.documentDigest || digestJson(await json(plan.suite.path)) !== plan.suite.digest) throw new Error('Change document or suite changed after confirmation/freezing')
   if (plan.judge && (await digestFile(plan.judge.adapter) !== plan.judge.adapterDigest || await digestFile(plan.judge.configuration) !== plan.judge.configurationDigest)) throw new Error('Judge configuration changed after freezing')
-  for (const product of Object.values(plan.products)) await validateProduct(product)
+  if (products) for (const product of Object.values(plan.products)) await validateProduct(product)
   for (const item of plan.cases) await verifyStoredCaseSeal(item.directory, item.seal)
+}
+
+export async function runPlan(planPath, outputRoot) {
+  const plan = await json(resolve(planPath)); await validatePlanInputs(plan)
   const output = resolve(outputRoot); await mkdir(output, { recursive: true, mode: 0o700 })
   const lock = await open(join(output, '.gate.lock'), 'wx', 0o600)
   try {

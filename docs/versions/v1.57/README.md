@@ -17,6 +17,8 @@ last_updated: 2026-09-10
 
 评测指标和离线报告的后续修订范围、旧检查项映射与验收边界见[指标修订计划](evaluation-metrics-revision.md)。
 
+宿主与定时执行接入、旧失败复核见[宿主接入计划](evaluation-host-integration.md)。该增量正在进行真实验收，不由流程单测推断全部 Case 通过。
+
 复用 Qualification Runner、Case admission、合同测试、双 View Judge、Core 持久证据、用户 CLI 和 Rovai Automation。新增受限只读 Trace 导出、日报与曲线、Host 报告准备、两级 Gate 及每周报告历史。通用集 12 个 Case；Memory 与 Review Duo 各有 3 个专属 Case。没有专属集的其他 Skill 先补样本，不能默认为已覆盖。
 
 本次没有新增数据库字段，Data Contract 98、Camp Snapshot 34、formatter/manifest 23 及 Built-in tool/context 语义保持。Memory 精确计数、文档体系重构和队员成长仍属后续项，日报中的两项 Memory 指标为未知。User Automation 新增 owner-only 元数据操作，不注入 Agent 上下文。
@@ -31,7 +33,7 @@ last_updated: 2026-09-10
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.56 冻结，本概览、实施计划及[版本索引](../README.md)建立唯一 current v1.57 |
 | Decisions | 已更新 | [V1.57-D01](decisions.md#v1-57-d01)记录元数据与分析 Agent 的权限分离 |
-| Contracts | 已更新 | [Execution Evaluation v2](../../contracts/execution-evaluation-v2.md)、[User Automation v3](../../contracts/user-automation-v3.md)及索引 |
+| Contracts | 已更新 | [Execution Evaluation v2](../../contracts/execution-evaluation-v2.md)、[User Automation v4](../../contracts/user-automation-v4.md)及索引 |
 | Architecture | 已更新 | [双轨执行评测](../../architecture/execution-evaluation.md)、User Automation 当前路由 |
 | UI | 已更新 | 复用 Camp 与文件入口，增加离线 HTML、质量和协作对照；保留 SVG/Markdown/JSON，无 Renderer 或 App 沙箱改动 |
 | Runtime Activity | 确认无需更新 | 只读取当前 classifier 既有证据，不修改分类、事件或 Activity 投影 |

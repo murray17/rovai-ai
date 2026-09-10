@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { compareResults, evaluateCaseRules, selectCases, validatePlanSeal, POLICY } from './context-evaluation.mjs'
-import { digestJson } from './qualification-common.mjs'
+import { digestJson, runCaptured } from './qualification-common.mjs'
 import { validateRegressionConfiguration } from './context-regression-fixture.mjs'
 
 test('scope selects a general suite, a dedicated suite, or fails closed for unsupported skills', async () => {
@@ -13,6 +15,25 @@ test('scope selects a general suite, a dedicated suite, or fails closed for unsu
   assert.equal(selectCases(suite, { kind: 'skill', skills: ['memory-stewardship'], sharedMechanism: true }).tier, 'general')
   assert.throws(() => selectCases(suite, { kind: 'skill', skills: ['not-covered'] }))
   assert.throws(() => validateRegressionConfiguration({ schemaVersion: 1, team: [] }))
+})
+test('blocked-data Case accepts honest unknown wording while rejecting success claims and missing explanations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rovai-blocked-case-'))
+  try {
+    const suite = JSON.parse(await readFile('qualification/context-regression/suite.json', 'utf8'))
+    const verifier = resolve('qualification/context-regression', suite.cases.find(item => item.id === 'DEMO-111').directory, 'verifier.mjs')
+    for (const [artifact, expected] of [
+      [{ verificationStatus: 'unknown', blocker: 'required fixture dataset.json is unavailable' }, 'passed'],
+      [{ verificationStatus: 'blocked', blocker: 'Missing dataset.json; cannot validate.' }, 'passed'],
+      [{ verificationStatus: 'verified', blocker: 'dataset.json unavailable' }, 'failed'],
+      [{ verificationStatus: 'blocked', blocker: '' }, 'failed'],
+      [{ verificationStatus: 'blocked' }, 'failed']
+    ]) {
+      await writeFile(join(root, 'report.json'), JSON.stringify(artifact))
+      const execution = await runCaptured(process.execPath, [verifier, root])
+      assert.equal(execution.code, 0)
+      assert.equal(JSON.parse(execution.stdout).checks[0].status, expected)
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 test('hard violations cannot be offset, absent replicas cannot pass, and environment changes are incomparable', () => {
   const plan = { mode: 'gate', cases: [{ id: 'one', criticalSemantic: ['coverage'] }], repetitions: 1 }
