@@ -30,10 +30,13 @@
 
 ## 评分与报告口径
 
-新执行使用 [scoring-v2.1.json](scoring-v2.1.json)：目标达成 50、证据一致性 25、边界遵守 25；协作保留五项状态与三组统计，不设总分。每个 Case 的权重、适用项、判定来源和具体依据均在运行前冻结。
+新执行使用 [scoring-v2.2.json](scoring-v2.2.json)：目标达成 50、证据一致性 25、边界遵守 25；协作保留五项状态与三组统计，不设总分。每个 Case 的权重、适用项、判定来源和具体依据均在运行前冻结。
 
-Suite 2.0.0 只升级评价和报告配置；Suite 2.1.0 将 DEMO-111 指向独立的 v2 目录，公开结构化状态取值并修正错误文案完全匹配造成的误判，保留原 v1 目录和 seal。评分权重及工具失败要求保持；通用集仍为 12 个 Case。无真实 Judge 的旧结果不可直接换算新分数。规则与限制见 [Execution Evaluation v5](../../docs/contracts/execution-evaluation-v5.md)。
+Suite 2.0.0 只升级评价和报告配置；Suite 2.1.0 将 DEMO-111 指向独立的 v2 目录，公开结构化状态取值并修正错误文案完全匹配造成的误判，保留原 v1 目录和 seal。评分权重及工具失败要求保持；通用集仍为 12 个 Case。无真实 Judge 的旧结果不可直接换算新分数。规则与限制见 [Execution Evaluation v6](../../docs/contracts/execution-evaluation-v6.md)。
 
 Suite 2.2.0 仅将十二个通用 Case 指向独立的 budget-v2 目录，时间上限由 240／300 秒提高到 480／600 秒。任务与验收规则字节保持，旧版本目录和报告不改写；配置并行度进入环境身份，不将预算或并行变化归为产品收益。
 
 Suite 2.3.0 使用 scoring 2.1.0 / generic-task-v3。题目、硬性验收及分数权重不变；受控文件和同 Turn 公开贡献补全、未知处理与本轮真实验证预算见[证据与报告完整性修订](../../docs/versions/v1.57/evaluation-evidence-completeness.md)。旧口径保留在既有冻结计划和 Git 历史中，不能直接混合评分。
+
+
+Suite 2.4.0 使用 scoring 2.2.0 / generic-task-v4，保留有界验证回执与 Lead 公开交付集合，并向 Process 补充 Task 正文。DEMO-106 1.2.0 明确审查后继续修复的阶段责任；原函数、验证器、范围和预算保持。新旧 Case 与报告独立保存。实际完整总分仍取决于必需判定是否齐全，不能从“Judge 已返回”推断评分完整；本轮结果及限制见[证据完整性记录](../../docs/versions/v1.57/evaluation-evidence-completeness.md)。
