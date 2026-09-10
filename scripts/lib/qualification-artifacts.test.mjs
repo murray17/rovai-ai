@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, rm, stat, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -131,6 +131,16 @@ test('normalized present-role artifacts are immutable and private', async () => 
         assert.equal((await stat(join(root, locator))).mode & 0o777, 0o600)
       }
     }
+    const republished = await buildAndRetainQualificationArtifacts({
+      evidenceDirectory: root, result: fixture.result, caseRecord, producerDigest: 'e'.repeat(64),
+      evidenceIndex: fixture.evidenceIndex, collaborationLedger: fixture.collaborationLedger,
+      toolCallLedger: fixture.toolCallLedger, workspaceMutationLedger: fixture.workspaceMutationLedger,
+      publicReport: fixture.publicReport, evaluationAttempts: fixture.evaluationAttempts
+    })
+    assert.notEqual(republished.artifacts.verification_catalog.artifactId, built.artifacts.verification_catalog.artifactId)
+    assert.equal(republished.artifacts.verification_catalog.payloadDigest, built.artifacts.verification_catalog.payloadDigest)
+    const retained = JSON.parse(await readFile(join(root, built.locators.verification_catalog), 'utf8'))
+    assert.equal(retained.producer.digest, `sha256:${fixture.producerDigest}`)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

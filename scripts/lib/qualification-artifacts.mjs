@@ -572,7 +572,7 @@ function envelope({
   payload
 }) {
   return {
-    artifactId,
+    artifactId: `${artifactId}:${digest({ schemaId, schemaVersion, producer, binding, sourceBoundaries, payload }).slice(-24)}`,
     schemaId,
     schemaVersion,
     producer,
