@@ -1,7 +1,8 @@
-import { buildEvaluationContext } from './lib/qualification-evaluation-context.mjs'
+import { buildEvaluationContext, buildEvaluationCommandSources } from './lib/qualification-evaluation-context.mjs'
+import { captureRuntimeUsage, deriveIsolatedRuntimeUsage } from './lib/qualification-resource-usage.mjs'
 import { appendFile, chmod, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { arch, platform, release, type as osType } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { captureRegressionMemoryState, materializeRegressionFixture, validateRegressionConfiguration } from './lib/context-regression-fixture.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
 import {
@@ -373,6 +374,8 @@ async function runTrial(options, registerCleanup) {
       throw new Error(`pre-dispatch workspace changed outside managed Runtime projections: ${JSON.stringify(unexpectedPredispatchChanges)}`)
     }
     const preDispatchSnapshot = await core.request('camps.snapshot', { campId })
+    const usageBefore = await captureRuntimeUsage(core.request)
+    await writePrivateJsonExclusive(join(evidenceDirectory, 'runtime-usage-before.json'), usageBefore)
     const commandId = crypto.randomUUID()
     const runnerClockAnchor = {
       wallTimeMs: Date.now(),
@@ -438,6 +441,7 @@ async function runTrial(options, registerCleanup) {
       budget: caseBudget,
       frozenBudget: frozenBudgetInspection.budget,
       runnerClockAnchor,
+      usageBefore,
       observationPath
     })
     finalSnapshot = observation.snapshot
@@ -1238,7 +1242,7 @@ async function collectEnvironmentManifest({
       }
     },
     toolchain,
-    usageObservation: { status: 'unavailable', reason: 'provider usage is not exposed consistently by all frozen Runtimes' }
+    usageObservation: { status: 'pending', reason: 'Collected after execution from isolated Core monitoring snapshots; each field requires complete Trial coverage' }
   }
   manifest.teamRuntimeCompatibilityDigest = digestJson(materializeJsonArtifact({
     runnerVersion: manifest.runnerVersion,
@@ -1263,6 +1267,7 @@ async function observeTrial({
   budget,
   frozenBudget,
   runnerClockAnchor,
+  usageBefore,
   observationPath
 }) {
   let budgetEvent = null
@@ -1449,6 +1454,9 @@ async function observeTrial({
     )
     snapshot.executionEvidence = executionEvidenceCoverage.evidence
     snapshot.evaluationContext = buildEvaluationContext(snapshot, { campTurnId, rootAgentRunId })
+    await writePrivateJsonExclusive(join(dirname(observationPath), 'private-command-evidence.json'), buildEvaluationCommandSources(snapshot, snapshot.evaluationContext))
+    const usageAfter = await captureRuntimeUsage(core.request)
+    await writePrivateJsonExclusive(join(dirname(observationPath), 'runtime-usage-after.json'), usageAfter)
     if (coverageOverride) executionEvidenceCoverage.coverage = coverageOverride
     const finalObservation = normalizeSnapshot(snapshot)
     const finalObservationDigest = digestJson(finalObservation)
@@ -1492,10 +1500,7 @@ async function observeTrial({
             ? null
             : { code: 'resource_measurement.delivery_dependency_unavailable' }
         },
-        providerUsage: {
-          state: 'unavailable',
-          reason: { code: 'resource_measurement.provider_receipt_unavailable' }
-        }
+        providerUsage: deriveIsolatedRuntimeUsage(usageBefore, usageAfter, runs.length)
       },
       observationDigest: sha256(observationHashInput)
     }

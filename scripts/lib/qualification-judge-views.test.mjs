@@ -849,10 +849,10 @@ test('v4 adds bounded receipts and public delivery, while Task descriptions stay
   }
 })
 
-test('v5 resolves only disputed items once, preserving both original verdicts and citations', async () => {
+for (const scoringVersion of ['2.3', '2.4']) test(`scoring ${scoringVersion} resolves only disputed items once, preserving both original verdicts and citations`, async () => {
   const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
   const { readFile } = await import('node:fs/promises')
-  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.3.json', import.meta.url)))
+  const scoring = JSON.parse(await readFile(new URL(`../../qualification/context-regression/scoring-v${scoringVersion}.json`, import.meta.url)))
   const configuration = buildJudgeViewConfiguration({ view:'outcome', provider:'fixture', snapshotId:'fixture', snapshotDigest:'a'.repeat(64), producerDigest:'a'.repeat(64), taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome') })
   const pack = buildJudgeViewPack({ view:'outcome', sourcePack:sourcePackFixture(), configuration, producerDigest:'a'.repeat(64) })
   const calls = []

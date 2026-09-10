@@ -37,3 +37,13 @@ test('CLI decoding metadata uses its own cataloged schema without fabricating AP
   assert.ok(schema.properties.items.items.required.includes('abstainReason'))
   assert.ok(schema.properties.items.items.properties.verdict.enum.includes('indeterminate'))
 })
+
+test('v6 Outcome requires a claim audit while legacy and Process output stay unchanged', () => {
+  const order = ['SER.response.claim_accuracy']
+  const schema = judgeOutputSchema(order, 'generic-task-v6')
+  assert.ok(schema.required.includes('claimsAudit'))
+  assert.ok(schema.properties.claimsAudit.required.includes('claimsComplete'))
+  assert.ok(schema.properties.claimsAudit.properties.claims.items.required.includes('sourceSegmentId'))
+  assert.equal(judgeOutputSchema(order).properties.claimsAudit, undefined)
+  assert.equal(judgeOutputSchema(['SER.collaboration.delegation'], 'generic-task-v6').properties.claimsAudit, undefined)
+})

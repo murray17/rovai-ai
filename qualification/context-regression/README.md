@@ -42,3 +42,5 @@ Suite 2.3.0 使用 scoring 2.1.0 / generic-task-v3。题目、硬性验收及分
 Suite 2.4.0 使用 scoring 2.2.0 / generic-task-v4，保留有界验证回执与 Lead 公开交付集合，并向 Process 补充 Task 正文。DEMO-106 1.2.0 明确审查后继续修复的阶段责任；原函数、验证器、范围和预算保持。新旧 Case 与报告独立保存。实际完整总分仍取决于必需判定是否齐全，不能从“Judge 已返回”推断评分完整；本轮结果及限制见[证据完整性记录](../../docs/versions/v1.57/evaluation-evidence-completeness.md)。
 
 Suite 2.5.0 使用 scoring 2.3.0 / generic-task-v5，冻结指标证据合同并支持同 View 一次分歧裁决。原任务、Case、硬验收及预算保持不变；不覆盖旧评分。范围与限制见 [Execution Evaluation v7](../../docs/contracts/execution-evaluation-v7.md)。
+
+Suite 2.6.0 使用 scoring 2.4.0 / generic-task-v6；DEMO-106 1.3.0 加强同一任务的 verifier。逐声明审计与隔离用量边界见 [Execution Evaluation v8](../../docs/contracts/execution-evaluation-v8.md)，预算与模型参数见[本轮计划](../../docs/versions/v1.57/evaluation-claim-calibration.md)。旧任务、评分与失败记录保留。

@@ -437,8 +437,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
       })
     }
   }
-  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5'].includes(caseEvaluation?.judgeProfile)) {
-    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], includeEvaluationContext: ['generic-task-v4', 'generic-task-v5'].includes(caseEvaluation.judgeProfile) })
+  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6'].includes(caseEvaluation?.judgeProfile)) {
+    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6'].includes(caseEvaluation.judgeProfile) })
     const seen = new Set(segments.map(segment => segment.evidenceReference.evidenceId))
     for (const segment of extra) if (!seen.has(segment.evidenceReference.evidenceId)) {
       segments.push(segment)

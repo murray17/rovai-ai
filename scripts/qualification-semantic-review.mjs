@@ -40,8 +40,9 @@ const configurationInput = JSON.parse(await readFile(options.configurationPath, 
 const adapter = await loadAdapter(options.adapterPath, result.mode, configurationInput)
 const producerDigest = await computeQualificationEvaluatorDigest()
 const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
+if (caseEvaluation?.judgeProfile === 'generic-task-v6' && adapter.claimAuditProfile !== 'claim-audit-v1') throw new Error('v6 requires a claim-audit-capable adapter')
 const sourceConfiguration = buildSemanticJudgeConfiguration({
-  evaluationContextPolicy: ['generic-task-v4', 'generic-task-v5'].includes(caseEvaluation?.judgeProfile) ? 'bounded-evaluation-context-v1' : null,
+  evaluationContextPolicy: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6'].includes(caseEvaluation?.judgeProfile) ? 'bounded-evaluation-context-v1' : null,
   provider: configurationInput.provider,
   snapshotId: configurationInput.snapshotId,
   snapshotDigest: configurationInput.snapshotDigest,
@@ -210,7 +211,7 @@ async function loadAdapter(path, mode, configuration) {
   if (!['tool_disabled_external_sandbox', 'tool_disabled_cli', 'fixture'].includes(assurance)) {
     throw new Error('Semantic Judge adapter assurance is unsupported')
   }
-  return { invokeReplica }
+  return { invokeReplica, claimAuditProfile: adapter.claimAuditProfile }
 }
 
 async function loadRetainedArtifacts(evidenceDirectory) {

@@ -4,7 +4,9 @@ import { validateMetricContract } from './context-metric-contract.mjs'
 export const TASK_JUDGE_PROFILE = 'generic-task-v2'
 export const RECEIPT_TASK_JUDGE_PROFILE = 'generic-task-v4'
 export const OBSERVABLE_TASK_JUDGE_PROFILE = 'generic-task-v5'
-export const usesReceipts = profile => [RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE].includes(profile)
+export const CLAIM_TASK_JUDGE_PROFILE = 'generic-task-v6'
+export const usesObservableMetrics = profile => [OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE].includes(profile)
+export const usesReceipts = profile => [RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE].includes(profile)
 export const usesTaskEvidence = profile => profile === EVIDENCE_TASK_JUDGE_PROFILE || usesReceipts(profile)
 export const EVIDENCE_TASK_JUDGE_PROFILE = 'generic-task-v3'
 export const TASK_OUTCOME_RUBRIC = Object.freeze({
@@ -55,19 +57,26 @@ export const OBSERVABLE_PROCESS_RUBRIC = Object.freeze({
   delegation: 'Assess the observable initial division of work against the assigned task. Explicitly required collaboration is necessary. Satisfied: suitable concrete role assignments; partial: an evidenced unnecessary handoff or duplicated assignment; not satisfied: no suitable assignment for the required collaborative task. Do not penalize necessary independent reviews merely for covering the same artifact. Failure to complete the Lead repair phase belongs to feedback_absorption/lead_integration and goal attainment, not automatically delegation.'
 })
 
+export const CLAIM_OUTCOME_RUBRIC = Object.freeze({
+  ...OBSERVABLE_OUTCOME_RUBRIC,
+  'SER.response.claim_accuracy': 'Audit each material in-scope delivery claim separately, quoting its source and supporting or contradicting evidence. Separate artifact facts from claims about agent-executed verification. Artifact correctness or evaluator acceptance does not establish that the agent performed a claimed successful check. Read command control flow and output; completed/exit 0 alone does not prove every subcheck succeeded. Missing or truncated necessary evidence is unknown; a directly evidenced false claim is contradicted. An earlier failed attempt followed by a supported correction does not make the corrected final claim false. The code derives this item from claimsAudit; do not infer global absence claims or process provenance outside the frozen scope.',
+  'SER.testing.strategy': 'Judge whether the supplied checks adequately verify the disclosed deliverable. For a one-off fixed-data report, a correct expected-value check is valid; do not require a second aggregation implementation or generalization beyond the supplied data. For reusable code, evaluate the disclosed behavioral cases and regressions. Attribute evaluator checks separately from agent checks. Do not deduct merely because an earlier attempt failed when later valid checks cover the goals. A check that masks unresolved errors is insufficient; unsupported verification claims belong to claim_accuracy, not automatically an additional testing penalty. No unique tool sequence or code test suite is required for non-code work.'
+})
+export const CLAIM_PROCESS_RUBRIC = OBSERVABLE_PROCESS_RUBRIC
+
 export function validateTaskJudgeProfile(profile, view) {
   if (profile === undefined || profile === null) return null
   const ids = view === 'process' ? TASK_PROCESS_IDS : TASK_OUTCOME_IDS
-  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE, RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
+  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE, RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
       || profile.items.length !== ids.length || new Set(profile.items.map(item => item.checklistItem)).size !== ids.length
       || profile.items.some(item => !ids.includes(item.checklistItem) || typeof item.applicable !== 'boolean'
         || typeof item.criterion !== 'string' || !item.criterion.trim() || item.criterion.length > 4000
-        || Object.keys(item).some(key => !['checklistItem', 'applicable', 'criterion', ...(profile.version === OBSERVABLE_TASK_JUDGE_PROFILE ? ['verification'] : [])].includes(key)))) throw new Error('Invalid frozen task Judge profile')
-  if (profile.version === OBSERVABLE_TASK_JUDGE_PROFILE) for (const item of profile.items) validateMetricContract({ ...item, source: view === 'outcome' ? 'outcome' : undefined })
+        || Object.keys(item).some(key => !['checklistItem', 'applicable', 'criterion', ...(usesObservableMetrics(profile.version) ? ['verification'] : [])].includes(key)))) throw new Error('Invalid frozen task Judge profile')
+  if (usesObservableMetrics(profile.version)) for (const item of profile.items) validateMetricContract({ ...item, source: view === 'outcome' ? 'outcome' : undefined })
   return profile
 }
 
 export function taskJudgeProfile(caseEvaluation, view) {
   const items = view === 'process' ? caseEvaluation.collaboration : caseEvaluation.quality.filter(item => item.source === 'outcome')
-  return validateTaskJudgeProfile({ version: caseEvaluation.judgeProfile ?? TASK_JUDGE_PROFILE, items: items.map(({ checklistItem, applicable, criterion, verification }) => ({ checklistItem, applicable, criterion, ...(caseEvaluation.judgeProfile === OBSERVABLE_TASK_JUDGE_PROFILE ? { verification } : {}) })) }, view)
+  return validateTaskJudgeProfile({ version: caseEvaluation.judgeProfile ?? TASK_JUDGE_PROFILE, items: items.map(({ checklistItem, applicable, criterion, verification }) => ({ checklistItem, applicable, criterion, ...(usesObservableMetrics(caseEvaluation.judgeProfile) ? { verification } : {}) })) }, view)
 }

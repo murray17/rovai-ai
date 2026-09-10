@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildEvaluationContext } from './qualification-evaluation-context.mjs'
+import { buildEvaluationContext, buildEvaluationCommandSources } from './qualification-evaluation-context.mjs'
 import { digestJson, sha256 } from './qualification-common.mjs'
 const boundary = {campTurnId:'turn', rootAgentRunId:'lead-run'}
 const event = (id, command, output, status='completed') => ({id,agentRunId:'lead-run',executionEpoch:1,payload:{item:{id,type:'commandExecution',command,aggregatedOutput:output,status,exitCode:status==='failed'?1:0}}})
@@ -44,4 +44,19 @@ test('verification in a rovai-prefixed temporary workspace and package remains e
   assert.deepEqual(c.receipts.map(r=>r.sourceEvidenceId),['python','npm'])
   assert.equal(c.omitted[0].sourceEvidenceId,'cli')
   assert.doesNotMatch(JSON.stringify(c.receipts),/private\/tmp/)
+})
+
+test('private command capture preserves selected source bytes and digest without broadening Judge evidence', () => {
+  const s = snapshot()
+  const command = event('ok', 'node check.mjs', 'first output\nlast output')
+  s.executionEvidence = [command, event('private', 'rovai task view', 'TASK CONTENT')]
+  const context = buildEvaluationContext(s, boundary)
+  const capture = buildEvaluationCommandSources(s, context)
+  assert.equal(capture.judgeVisible, false)
+  assert.equal(capture.capturedReceipts, 1)
+  assert.deepEqual(capture.records[0].payload, command.payload)
+  assert.equal(capture.records[0].payloadDigest, digestJson(command.payload))
+  assert.doesNotMatch(JSON.stringify(capture), /TASK CONTENT/)
+  command.payload.item.aggregatedOutput = 'changed later'
+  assert.throws(() => buildEvaluationCommandSources(s, context), /changed during capture/)
 })

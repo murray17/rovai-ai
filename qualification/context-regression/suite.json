@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "context-regression",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "partition": "regression",
   "coreSkills": [
     "cli-operations"
@@ -141,8 +141,8 @@
     },
     {
       "id": "DEMO-106",
-      "version": "1.2.0",
-      "directory": "cases/DEMO-106-phase-v3",
+      "version": "1.3.0",
+      "directory": "cases/DEMO-106-complete-v4",
       "fixture": {
         "campMessages": [],
         "memories": []
@@ -424,5 +424,5 @@
       "visibility": "demo"
     }
   ],
-  "scoring": "scoring-v2.3.json"
+  "scoring": "scoring-v2.4.json"
 }

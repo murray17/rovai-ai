@@ -45,3 +45,23 @@ export function buildEvaluationContext(snapshot, boundary) {
   return {policyId:EVALUATION_CONTEXT_POLICY,receipts,omitted,tasks,deliveryMessageIds,
     coverage:{paginationRequired:true,allRuntimeCommandsClaimed:false,limits:{maximumReceipts:MAX_RECEIPTS,maximumText:MAX_TEXT,maximumTotal:MAX_TOTAL}}}
 }
+
+// Private audit sidecar for selected, bounded evaluation commands only. Never
+// included in either Judge View. Ordinary user Runs do not invoke this exporter.
+export function buildEvaluationCommandSources(snapshot, context) {
+  const selected = new Map(context.receipts.map(receipt => [receipt.sourceEvidenceId, receipt]))
+  const records = [], omitted = []
+  let bytes = 0
+  for (const event of snapshot.executionEvidence ?? []) {
+    const receipt = selected.get(event.id)
+    if (!receipt) continue
+    if (digestJson(event.payload) !== receipt.sourcePayloadDigest) throw new Error('Command source payload changed during capture')
+    const length = Buffer.byteLength(JSON.stringify(event.payload))
+    if (length > 50_000 || bytes + length > 200_000) { omitted.push({ eventId: event.id, reason: 'raw_command_evidence_bound' }); continue }
+    bytes += length
+    records.push({ eventId: event.id, agentRunId: event.agentRunId, executionEpoch: event.executionEpoch,
+      payloadDigest: receipt.sourcePayloadDigest, payload: structuredClone(event.payload), isTruncated: event.isTruncated === true })
+  }
+  return { schemaVersion: 1, kind: 'private_selected_evaluation_command_sources', judgeVisible: false,
+    selectedReceipts: selected.size, capturedReceipts: records.length, rawPayloadBytes: bytes, records, omitted }
+}

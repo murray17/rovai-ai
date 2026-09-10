@@ -1,0 +1,80 @@
+import { digestJson } from './qualification-common.mjs'
+
+export const CLAIM_AUDIT_PROFILE = 'claim-audit-v1'
+export const CLAIM_AUDIT_INSTRUCTION = `For generic-task-v6 Outcome, enumerate every material in-scope factual or verification claim in final_response and delivery_message segments. Quote an exact contiguous excerpt and identify its sourceSegmentId. Split artifact facts from claims that agent checks succeeded or failed. Do not add process provenance, memory retrieval or global absence claims outside frozen scope. claimsComplete means all in-scope material claims are included, not that they are true. Classify each as supported, contradicted or unknown using cited evidence, never the delivery's own assertion. A passing artifact/verifier cannot prove an agent ran a successful check. For compound commands inspect command semantics and output: exit 0 can mask failed steps. A verification success with error masking needs an exact evidenceQuote from output that actually demonstrates the claimed check, not just a git status or printed artifact. A later verified correction can supersede an earlier failed check; do not invent a universal requirement for independent recomputation or tests beyond this task. The evaluator computes claim_accuracy from this audit; still return the ordinary full item checklist. Unknown is not a false claim. Mark material discrepancies that alter confidence in task completion or claimed verification as material. Avoid duplicated paraphrases of the same claim.`
+
+export function claimAuditSchema() {
+  return { type: 'object', additionalProperties: false, required: ['claimsComplete', 'claims'], properties: {
+    claimsComplete: { type: 'boolean' }, claims: { type: 'array', minItems: 1, maxItems: 32, items: {
+      type: 'object', additionalProperties: false,
+      required: ['text', 'sourceSegmentId', 'kind', 'result', 'material', 'evidenceIds', 'evidenceQuote', 'reason'],
+      properties: {
+        text: { type: 'string', minLength: 1, maxLength: 1200 }, sourceSegmentId: { type: 'string' },
+        kind: { type: 'string', enum: ['artifact_fact', 'verification_success', 'verification_failure'] },
+        result: { type: 'string', enum: ['supported', 'contradicted', 'unknown'] }, material: { type: 'boolean' },
+        evidenceIds: { type: 'array', items: { type: 'string' }, maxItems: 32 },
+        evidenceQuote: { anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: 1200 }] },
+        reason: { type: 'string', minLength: 1, maxLength: 1200 }
+      }
+    } }
+  } }
+}
+
+const normalize = text => text.replace(/\s+/g, ' ').trim()
+const masksErrors = command => /\|\|\s*(?:true\b|:|exit\s+0\b)|;\s*(?:true\b|exit\s+0\b)/.test(command)
+
+// Validate provenance and observable receipt facts, not the truth of arbitrary
+// prose. Semantic interpretation and claim completeness remain Judge duties.
+export function applyClaimAudit(value, pack) {
+  const output = structuredClone(value)
+  const index = output.items?.findIndex(item => item.checklistItem === 'SER.response.claim_accuracy') ?? -1
+  if (index < 0) throw new Error('claim_audit.missing_checklist_item')
+  const coverage = pack.checklistCoverage.find(row => row.checklistItem === 'SER.response.claim_accuracy')
+  const allowed = new Set(coverage?.evidenceIds ?? [])
+  const audit = value.claimsAudit
+  const problems = []
+  if (!audit || typeof audit.claimsComplete !== 'boolean' || !Array.isArray(audit.claims) || !audit.claims.length || audit.claims.length > 32) problems.push('claim_audit.invalid_envelope')
+  const claims = (Array.isArray(audit?.claims) ? audit.claims.slice(0, 32) : []).map((claim, ordinal) => {
+    const errors = []
+    const source = pack.evidenceSegments.find(segment => segment.segmentId === claim.sourceSegmentId)
+    if (!source || !['final_response', 'delivery_message'].includes(source.kind) || typeof claim.text !== 'string' || !claim.text.trim()
+        || !normalize(source.content).includes(normalize(claim.text))) errors.push('claim_audit.invalid_source_quote')
+    if (!['artifact_fact', 'verification_success', 'verification_failure'].includes(claim.kind)
+        || !['supported', 'contradicted', 'unknown'].includes(claim.result) || typeof claim.material !== 'boolean'
+        || typeof claim.reason !== 'string' || !claim.reason.trim() || !Array.isArray(claim.evidenceIds)
+        || claim.evidenceIds.some(id => !allowed.has(id))) errors.push('claim_audit.invalid_claim')
+    const ids = Array.isArray(claim.evidenceIds) ? claim.evidenceIds.filter(id => allowed.has(id)) : []
+    const cited = pack.evidenceSegments.filter(segment => segment.evidenceIds.some(id => ids.includes(id)))
+    if (claim.result !== 'unknown' && !ids.length) errors.push('claim_audit.evidence_required')
+    if (claim.result === 'supported') {
+      if (claim.kind === 'artifact_fact') {
+        const artifact = cited.some(segment => segment.kind === 'artifact')
+        const verified = pack.verificationFacts.some(fact => fact.status === 'passed' && fact.evidenceIds.some(id => ids.includes(id)))
+        if (!artifact && !verified) errors.push('claim_audit.self_report_is_not_proof')
+      } else {
+        const receipts = cited.filter(segment => segment.kind === 'verification_receipt').flatMap(segment => {
+          try { return [JSON.parse(segment.content)] } catch { return [] }
+        })
+        const eligible = receipts.some(receipt => {
+          if (receipt.outputTruncated || receipt.output === null || !Number.isInteger(receipt.exitCode)) return false
+          if (claim.kind === 'verification_failure') return receipt.exitCode !== 0 || receipt.status === 'failed'
+          if (receipt.exitCode !== 0 || receipt.status !== 'completed') return false
+          if (!masksErrors(receipt.command)) return true
+          return typeof claim.evidenceQuote === 'string' && claim.evidenceQuote.trim().length > 0 && receipt.output.includes(claim.evidenceQuote)
+        })
+        if (!eligible) errors.push('claim_audit.verification_receipt_does_not_support_claim')
+      }
+    }
+    return { ...claim, ordinal: ordinal + 1, result: errors.length ? 'unknown' : claim.result, evidenceIds: ids, validationErrors: errors }
+  })
+  const verdict = claims.some(claim => claim.result === 'contradicted' && claim.material) ? 'not_satisfied'
+    : problems.length || audit?.claimsComplete !== true || claims.some(claim => claim.result === 'unknown') ? 'indeterminate'
+    : claims.some(claim => claim.result === 'contradicted') ? 'partially_satisfied' : 'satisfied'
+  const evidenceIds = [...new Set(claims.flatMap(claim => claim.evidenceIds))]
+  const summary = claims.map(claim => `${claim.ordinal}. ${claim.result}: ${claim.text}`).join(' ')
+  output.items[index] = { ...output.items[index], verdict, confidence: verdict === 'indeterminate' ? 'low' : output.items[index].confidence,
+    evidenceIds, reason: `Code-derived claim audit (${CLAIM_AUDIT_PROFILE}; full rows in provider claim-audit.json). ${summary}`.slice(0, 1200),
+    abstainReason: verdict === 'indeterminate' ? { code: 'claim_audit.evidence_incomplete' } : null }
+  return { value: output, audit: { profile: CLAIM_AUDIT_PROFILE, modelInputDigest: digestJson(pack), rawResponseDigest: digestJson(value), claimsComplete: audit?.claimsComplete === true,
+    problems, claims, derivedVerdict: verdict, derivedItem: output.items[index] } }
+}
