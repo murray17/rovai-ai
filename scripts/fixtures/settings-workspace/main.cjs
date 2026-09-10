@@ -55,6 +55,28 @@ app.whenReady().then(async () => {
       return overflow
     })()`), false, label + ' must contain horizontal overflow')
   }
+  const selectMonitoringRange = async range => {
+    await run(`(() => {
+      const select = document.querySelector('.monitoring-filters select')
+      select.value = ${JSON.stringify(range)}
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })()`)
+    await settle()
+    await waitFor(`!document.querySelector('.monitoring-filters select').disabled && window.settingsTest.requests.some(r => r.method === 'monitoring.snapshot' && r.params.range === ${JSON.stringify(range)})`)
+  }
+  const costHistoryFits = async label => {
+    const bounds = await run(`(() => {
+      const page = document.querySelector('.runtime-monitoring')
+      const cost = document.querySelector('.monitoring-trend-cost')
+      return { pageWidth: page.clientWidth, pageScrollWidth: page.scrollWidth,
+        costWidth: cost.clientWidth, costScrollWidth: cost.scrollWidth,
+        dates: cost.querySelectorAll('time').length }
+    })()`)
+    assert.equal(bounds.dates, 30, label + ' retains every daily cost')
+    assert.ok(bounds.pageScrollWidth <= bounds.pageWidth + 1, label + ' page must fit: ' + JSON.stringify(bounds))
+    assert.ok(bounds.costScrollWidth <= bounds.costWidth + 1, label + ' costs must fit without horizontal scrolling: ' + JSON.stringify(bounds))
+    await noOverflow(label)
+  }
   try {
     await window.loadFile(renderer); await settle()
     assert.equal(await run("document.querySelectorAll('.general-save-row .dialog-glyph').length"), 1)
@@ -112,6 +134,11 @@ app.whenReady().then(async () => {
     await navigate('monitoring', 'empty')
     assert.equal(await run("document.querySelectorAll('.monitoring-chart-svg').length"), 0)
 
+    await navigate('monitoring')
+    await selectMonitoringRange('30d')
+    await costHistoryFits('monitoring/30d/1440')
+    await capture('monitoring-30d-day-1440')
+
     await navigate('diagnostics')
     await run("window.settingsTest.fail('mcp.config.repairPermissions')")
     await click('.diagnostics-issue-action button')
@@ -136,11 +163,16 @@ app.whenReady().then(async () => {
       window.setContentSize(1040, 700); window.webContents.setZoomFactor(1)
       for (const page of ['general','appearance','notifications','runtime','channels','monitoring','diagnostics','about']) {
         await navigate(page); await noOverflow(`${page}/${theme}/1040`); await capture(`${page}-${theme}-1040`)
+        if (page === 'monitoring') {
+          await selectMonitoringRange('30d'); await costHistoryFits(`${page}/30d/${theme}/1040`)
+          await capture(`${page}-30d-${theme}-1040`)
+        }
       }
       for (const page of ['general','monitoring','diagnostics','about']) {
         window.webContents.setZoomFactor(2); await navigate(page)
         await noOverflow(`${page}/${theme}/200%`)
         if(page === 'monitoring') {
+          await selectMonitoringRange('30d'); await costHistoryFits(`${page}/30d/${theme}/200%`)
           assert.equal(await run("getComputedStyle(document.querySelector('.monitoring-keyline')).gridTemplateColumns.split(' ').length"), 1)
           await run("document.querySelector('.monitoring-keyline').scrollIntoView()"); await settle()
         }

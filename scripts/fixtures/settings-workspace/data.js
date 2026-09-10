@@ -44,10 +44,16 @@ export function monitoringSnapshot(filter = {}, scenario = 'normal') {
     const sum = key => rows.length ? rows.reduce((n, r) => n + (r[key] ?? 0), 0) : null;
     const coverage = Object.fromEntries(metricKeys.map(k => [k, { eligibleRuns: eligible, observedRuns: scenario === 'partial' && ['cacheReadTokens', 'cacheWriteTokens', 'reasoningOutputTokens', 'cost'].includes(k) ? 0 : observed }]));
     const summary = { promptInputTotalTokens: sum('promptInputTotalTokens'), uncachedInputTokens: sum('uncachedInputTokens'), cacheReadTokens: sum('cacheReadTokens'), cacheWriteTokens: sum('cacheWriteTokens'), outputTokens: sum('outputTokens'), reasoningOutputTokens: sum('reasoningOutputTokens'), cacheReadShare: rows.length ? sum('cacheReadTokens') / sum('promptInputTotalTokens') : null, requestCacheHitRate: rows.length ? 0.62 : null, cost: { run: rows.length && (!filter.costKind || filter.costKind === 'run') ? [{ amount: rows.reduce((s, r) => s + Number(r.cost[0]?.amount ?? 0), 0).toFixed(2), currency: 'USD', kind: 'run', source: 'runtime_reported' }] : [], reconciliation: [], latestReconciledAt: null, difference: [] } };
-    const weights = [2, 1, 1, 1, 1, 2, 4, 8, 11, 7, 6, 9, 13, 11, 8, 6, 10, 9, 7, 5, 4, 3, 2, 1], total = weights.reduce((a, b) => a + b, 0);
+    const hourlyWeights = [2, 1, 1, 1, 1, 2, 4, 8, 11, 7, 6, 9, 13, 11, 8, 6, 10, 9, 7, 5, 4, 3, 2, 1];
+    const bucketCount = filter.range === '30d' ? 30 : filter.range === '7d' ? 7 : 24;
+    const weights = Array.from({ length: bucketCount }, (_, i) => hourlyWeights[i % hourlyWeights.length]);
+    const total = weights.reduce((a, b) => a + b, 0);
     const hours = filter.range === '30d' ? 30 * 24 : filter.range === '7d' ? 7 * 24 : 24;
     const start = Date.parse(now) - hours * 3600000;
-    const trend = rows.length ? weights.map((w, i) => ({ bucketStartAt: new Date(start + i * hours / 24 * 3600000).toISOString(), promptInputTotalTokens: Math.round(summary.promptInputTotalTokens * w / total), uncachedInputTokens: Math.round(summary.uncachedInputTokens * w / total), cacheReadTokens: Math.round(summary.cacheReadTokens * w / total), cacheWriteTokens: Math.round(summary.cacheWriteTokens * w / total), outputTokens: Math.round(summary.outputTokens * w / total), reasoningOutputTokens: Math.round(summary.reasoningOutputTokens * w / total), cacheReadShare: summary.cacheReadShare, requestCacheHitRate: summary.requestCacheHitRate, cost: null })) : [];
+    const trend = rows.length ? weights.map((w, i) => ({ bucketStartAt: new Date(start + i * hours / bucketCount * 3600000).toISOString(), promptInputTotalTokens: Math.round(summary.promptInputTotalTokens * w / total), uncachedInputTokens: Math.round(summary.uncachedInputTokens * w / total), cacheReadTokens: Math.round(summary.cacheReadTokens * w / total), cacheWriteTokens: Math.round(summary.cacheWriteTokens * w / total), outputTokens: Math.round(summary.outputTokens * w / total), reasoningOutputTokens: Math.round(summary.reasoningOutputTokens * w / total), cacheReadShare: summary.cacheReadShare, requestCacheHitRate: summary.requestCacheHitRate, cost: filter.range === '30d' ? [
+        { amount: '88.7653316', currency: 'USD', kind: 'run', source: 'price_catalog' },
+        { amount: '1.44650899999999996', currency: 'USD', kind: 'run', source: 'runtime_reported' }
+    ] : null })) : [];
     if (scenario === 'partial') {
         for (const k of ['cacheReadTokens', 'cacheWriteTokens', 'cacheReadShare', 'reasoningOutputTokens'])
             summary[k] = null;
