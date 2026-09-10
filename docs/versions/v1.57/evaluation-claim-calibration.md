@@ -42,3 +42,11 @@ last_updated: 2026-09-11
 本 revision 升级 Suite 2.7 / scoring 2.5 / generic-task-v7，只修正评测来源、声明核对与发布，保持相同题目、权重、关键条件、预算与产品代码。精确方案见 [Execution Evaluation v9](../../contracts/execution-evaluation-v9.md) 和 [Semantic Judge Views v7](../../contracts/semantic-judge-views-v7.md)。来源 supplement 与新 Index 只写入复制的重评目录；原始执行、资源、规则、Judge 输出及失败历史不可变。
 
 执行前验证包括原生命令摘要绑定、跨工作区／伪造输出拒绝、混合过程隔离、初始／交付文件分离、旧 profile 可重放与仲裁公开 Schema。再冻结 evaluator commit／摘要，用同一 12 Case 的真实执行证据重评一次，最多 2 Case 并行、每 Case Judge 600 秒、总计 3600 秒、最多 72 次调用（12 × 2 View × A/B/一次裁决；不适用不调用），不增加 Runtime 执行。修复已定位故障后才允许再次评价；不能只因分低重抽。完整报告须原始文件摘要不变、全部硬检查／关键项通过、必需质量和适用协作项完整，并逐项保留证据。尚未完成的实际结果在执行后追加。
+
+## revision 3：最终交付与可观察声明
+
+revision 2 对相同真实执行完成一次重评，8 Case 完整，105／106／107／112 的声明项仍有未知，质量覆盖 95.8333%。真实不足包括：107 的并行 Git 输出和 112 的独立初始哈希命令未被原生来源策略接纳；105 的冗余静默子命令无法由整体退出码单独认证。评价器还把否定式限制披露当作执行失败、要求输入文件证明未来部署建议，并把中间审查全文当作最终交付。105 的字数检查回执包含参与者草稿，也需加强 Outcome 隔离。全部原结果保留，未转写为成功。
+
+修正为 [Execution Evaluation v10](../../contracts/execution-evaluation-v10.md) / [Semantic Judge Views v8](../../contracts/semantic-judge-views-v8.md)：补取精确绑定的并行／哈希来源，最终交付与中间过程分开，结果事实、明确执行声明及限制披露分开。仍保留虚假完成与明确命令声明的硬边界。任务、权重和关键条件不改。
+
+先冻结 6 类合成 Judge 校准样本，A/B 共 12 次调用，验证正例、明确虚假成功、掩盖错误、正确修复、事实核对／限制披露和 Git 观察事实；不计入 Runtime。来源／范围正反例与现有测试通过后，再对同一 12 个真实 Case 重评一次，预算同 revision 2（2 Case 并行、600 秒每项、3600 秒总计、72 次逻辑 Judge 调用上限）。复用原始执行，保留前两轮标准及失败，不增加 Runtime 次数。若仍有问题须依据实际证据分析，不能把本计划当作已通过。

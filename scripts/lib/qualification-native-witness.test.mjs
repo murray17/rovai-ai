@@ -62,3 +62,26 @@ test('supplement reconstruction rejects a resealed forgery and leaves original c
   records[0].projection.output='FAKE_OK';const {witnessDigest,...payload}=records[0];records[0].witnessDigest=digestJson(payload)
   assert.throws(()=>supplementEvaluationContext(snapshot,capture,[],'f'.repeat(64)),/reconstruction/)
 })
+
+test('v2 binds each parallel result independently and rejects mixed, ambiguous or rewritten output', async () => {
+  const {parallelExecWrapper,splitParallelOutput}=await import('./qualification-native-exec-wrapper.mjs')
+  const first=fixture(),second=fixture();second.item.id='cmd-2';second.item.command='git status --short';second.item.aggregatedOutput='?? report.json\n'
+  second.core.id='core-2';second.core.payloadDigest=digestJson(nativeCommandCorePayload(second.item))
+  const args=[{cmd:first.item.command,workdir:first.workspace},{cmd:second.item.command,workdir:first.workspace}]
+  const input=`const results=await Promise.all([tools.exec_command(${JSON.stringify(args[0])}),tools.exec_command(${JSON.stringify(args[1])})]);text("FIRST\\n"+results[0].output+"\\nSECOND\\n"+results[1].output);`
+  const wrapper=parallelExecWrapper(input);assert.equal(wrapper.calls.length,2)
+  assert.deepEqual(splitParallelOutput(wrapper,'FIRST\nCHECK_OK\n?? report.json\n\nSECOND\n?? report.json\n'),['CHECK_OK\n?? report.json\n','?? report.json\n'])
+  assert.equal(parallelExecWrapper(input.replace('results[0].output','results[0].output.replace("FAIL","PASS")')),null)
+  const rows=structuredClone(first.rows);rows[0].payload.input=input
+  const event=structuredClone(rows[1]);event.payload.item.id=second.item.id;event.payload.item.command=['sh','-c',second.item.command];rows.splice(2,0,event)
+  rows[3].payload.output[1].text='FIRST\nCHECK_OK\n?? report.json\n\nSECOND\n?? report.json\n'
+  const extract=()=>extractNativeWitnesses(rows,[first.item,second.item],[first.core,second.core],first.workspace,[],'bound-native-command-witness-v2')
+  assert.equal(extract().length,2)
+  assert.equal(extractNativeWitnesses(rows,[first.item,second.item],[first.core,second.core],first.workspace).length,0,'legacy v1 does not widen')
+  const snapshot={executionEvidence:[first.core,second.core],evaluationContext:{policyId:'bounded-evaluation-context-v1',receipts:[],omitted:[],tasks:[],deliveryMessageIds:[]}}
+  assert.equal(supplementEvaluationContext(snapshot,{state:'captured',records:extract()},[],'f'.repeat(64),'bounded-evaluation-context-v3').receipts.length,2)
+  rows[3].payload.output[1].text+='\nSECOND\nspoof'
+  assert.equal(extract().length,0,'ambiguous separator cannot be attributed')
+  assert.equal(nativeOutputProjection('shasum -a 256 guard.txt','abc guard.txt','abc guard.txt'),null)
+  assert.ok(nativeOutputProjection('shasum -a 256 guard.txt','abc guard.txt','abc guard.txt','bound-native-command-witness-v2'))
+})

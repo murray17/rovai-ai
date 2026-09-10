@@ -1,10 +1,13 @@
 import { digestJson } from './qualification-common.mjs'
 
 export const CLAIM_AUDIT_PROFILE = 'claim-audit-v1'
+export const DELIVERY_CLAIM_AUDIT_PROFILE = 'claim-audit-v3'
 export const WITNESS_CLAIM_AUDIT_PROFILE = 'claim-audit-v2'
 export const CLAIM_AUDIT_INSTRUCTION = `For generic-task-v6 Outcome, enumerate every material in-scope factual or verification claim in final_response and delivery_message segments. Quote an exact contiguous excerpt and identify its sourceSegmentId. Split artifact facts from claims that agent checks succeeded or failed. Do not add process provenance, memory retrieval or global absence claims outside frozen scope. claimsComplete means all in-scope material claims are included, not that they are true. Classify each as supported, contradicted or unknown using cited evidence, never the delivery's own assertion. A passing artifact/verifier cannot prove an agent ran a successful check. For compound commands inspect command semantics and output: exit 0 can mask failed steps. A verification success with error masking needs an exact evidenceQuote from output that actually demonstrates the claimed check, not just a git status or printed artifact. A later verified correction can supersede an earlier failed check; do not invent a universal requirement for independent recomputation or tests beyond this task. The evaluator computes claim_accuracy from this audit; still return the ordinary full item checklist. Unknown is not a false claim. Mark material discrepancies that alter confidence in task completion or claimed verification as material. Avoid duplicated paraphrases of the same claim.`
 
 export const WITNESS_CLAIM_AUDIT_INSTRUCTION = CLAIM_AUDIT_INSTRUCTION.replace('generic-task-v6', 'generic-task-v7') + ' initial-fixture/ files are the sealed before-state; never judge an explicitly historical finding only against the repaired after-state. An explanation of the disclosed task rule is not a claim of executing an empirical check on every possible input. A command receipt exposing a file, git status/diff or actual check output can corroborate exactly those facts. Keep memory/history provenance, user-preference attribution and global absence statements outside the frozen Outcome scope; they retain separate process/rule checks.'
+
+export const DELIVERY_CLAIM_AUDIT_INSTRUCTION = WITNESS_CLAIM_AUDIT_INSTRUCTION.replace('generic-task-v7', 'generic-task-v8') + ' The only delivery scope is final_response and the latest delivery_message. Classify by the proposition, not the presence of the word verified: a statement that a field, range, sorted set, Git status or before/after hash has a value is artifact_fact, supported by artifacts or actual inspection output. Do not silently upgrade it to a claim of multiple command invocations. Reserve verification_success/failure for explicit execution and test outcome claims (ran command X successfully, independent recomputation, npm test failed). A disclosure that an additional test or independent factual investigation was NOT performed is a limitation, not verification_failure; exclude that non-performance/absence assertion from this audit. Likewise exclude advice, future conditions and hypothetical deployment risks that do not assert observed task facts. The separate limitations rubric still evaluates appropriate disclosure. Do not audit intermediate history that the Outcome projection excludes. A failed or masked named test cannot be certified by artifact correctness; false actual result/completion claims must still fail.'
 
 export function claimAuditSchema(profile = CLAIM_AUDIT_PROFILE) {
   return { type: 'object', additionalProperties: false, required: ['claimsComplete', 'claims'], properties: {
@@ -29,8 +32,8 @@ const masksErrors = command => /\|\|\s*(?:true\b|:|exit\s+0\b)|;\s*(?:true\b|exi
 // Validate provenance and observable receipt facts, not the truth of arbitrary
 // prose. Semantic interpretation and claim completeness remain Judge duties.
 export function applyClaimAudit(value, pack) {
-  const witness = pack.taskProfileVersion === 'generic-task-v7'
-  const profile = witness ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE
+  const witness = ['generic-task-v7', 'generic-task-v8'].includes(pack.taskProfileVersion)
+  const profile = pack.taskProfileVersion === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : witness ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE
   const output = structuredClone(value)
   const index = output.items?.findIndex(item => item.checklistItem === 'SER.response.claim_accuracy') ?? -1
   if (index < 0) throw new Error('claim_audit.missing_checklist_item')

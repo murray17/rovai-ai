@@ -4,10 +4,11 @@ import { validateMetricContract } from './context-metric-contract.mjs'
 export const TASK_JUDGE_PROFILE = 'generic-task-v2'
 export const RECEIPT_TASK_JUDGE_PROFILE = 'generic-task-v4'
 export const OBSERVABLE_TASK_JUDGE_PROFILE = 'generic-task-v5'
+export const DELIVERY_TASK_JUDGE_PROFILE = 'generic-task-v8'
 export const WITNESS_TASK_JUDGE_PROFILE = 'generic-task-v7'
 export const CLAIM_TASK_JUDGE_PROFILE = 'generic-task-v6'
-export const usesObservableMetrics = profile => [OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE].includes(profile)
-export const usesReceipts = profile => [RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE].includes(profile)
+export const usesObservableMetrics = profile => [OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE].includes(profile)
+export const usesReceipts = profile => [RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE].includes(profile)
 export const usesTaskEvidence = profile => profile === EVIDENCE_TASK_JUDGE_PROFILE || usesReceipts(profile)
 export const EVIDENCE_TASK_JUDGE_PROFILE = 'generic-task-v3'
 export const TASK_OUTCOME_RUBRIC = Object.freeze({
@@ -70,10 +71,16 @@ export const WITNESS_OUTCOME_RUBRIC = Object.freeze({
   'SER.testing.strategy': `${CLAIM_OUTCOME_RUBRIC['SER.testing.strategy']} Native-bound verification receipts are selected outputs of the original execution, not new runs. A receipt marked verification_prefix_before_readonly_cli_help preserves the verification prefix and removes only a separately identified final CLI help suffix.`
 })
 
+export const DELIVERY_OUTCOME_RUBRIC = Object.freeze({
+  ...WITNESS_OUTCOME_RUBRIC,
+  'SER.response.claim_accuracy': `${WITNESS_OUTCOME_RUBRIC['SER.response.claim_accuracy']} Evaluate the final delivery and latest public delivery only, not superseded progress/review messages. Distinguish propositions from execution claims: 'verified/confirmed that field X equals Y' describes a checkable artifact fact unless it explicitly asserts executing a named command, test run or independent recomputation. 'Git status showed X' is an observed inspection fact, not a claim that git diff exited zero. 'The before/after hashes equal H' is a checkable file/hash fact, not automatically a claim of two separately recorded command invocations. Explicit claims such as 'ran npm test successfully' or 'independently recomputed the totals' still require corresponding execution evidence. Honest disclosures of what was NOT independently checked are limitations, not verification_failure claims and not global-absence guarantees. Advice, conditional future recommendations and hypothetical deployment risks are assessed as limitations/fit, not asserted facts about this fixed task's observed execution. Do not manufacture a factual audit obligation for them.`,
+  'SER.testing.strategy': `${WITNESS_OUTCOME_RUBRIC['SER.testing.strategy']} This item measures coverage of the disclosed task behavior by all supplied checks, including the independent verifier; it does not measure observability of each shell subcommand. If independent checks cover the fixed deliverable's complete disclosed requirements, do not mark coverage partial only because an agent's redundant silent subcheck has no separate exit receipt. Explicit false or unsupported claims about executing a check remain separately evaluated under claim_accuracy.`
+})
+
 export function validateTaskJudgeProfile(profile, view) {
   if (profile === undefined || profile === null) return null
   const ids = view === 'process' ? TASK_PROCESS_IDS : TASK_OUTCOME_IDS
-  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE, RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
+  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE, RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE, DELIVERY_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
       || profile.items.length !== ids.length || new Set(profile.items.map(item => item.checklistItem)).size !== ids.length
       || profile.items.some(item => !ids.includes(item.checklistItem) || typeof item.applicable !== 'boolean'
         || typeof item.criterion !== 'string' || !item.criterion.trim() || item.criterion.length > 4000

@@ -20,10 +20,11 @@ export async function prepareJudgeSourceSupplement({ evidenceDirectory, result, 
   const configuration = JSON.parse(await readFile(join(evidenceDirectory, 'context-regression-configuration.json'), 'utf8'))
   const workspace = join(configuration.temporaryRoot, 'workspace')
   const installation = environment.runtimeInstallations.find(item => item.adapterKind === 'codex-cli')
+  const deliveryProfile = caseEvaluation.judgeProfile === 'generic-task-v8'
   const capturedAt = new Date().toISOString()
   const capture = installation ? await captureNativeCommandWitnesses({ snapshot, workspace,
     executable: installation.executablePath, executableDigest: installation.executableFingerprint,
-    startedAt: result.startedAt, completedAt: result.completedAt })
+    startedAt: result.startedAt, completedAt: result.completedAt, ...(deliveryProfile ? { policy: 'bound-native-command-witness-v2' } : {}) })
     : { state: 'unavailable', reason: 'native_read.adapter_not_supported', records: [], sources: [] }
   const initialFiles = []; let size = 0
   for (const path of caseEvaluation.evidenceFiles) {
@@ -38,13 +39,13 @@ export async function prepareJudgeSourceSupplement({ evidenceDirectory, result, 
     if (!content) continue
     initialFiles.push({ path, content, contentDigest: sha256(content), caseSeal: caseRecord.seal }); size += bytes.length
   }
-  const payload = { policyId: 'judge-source-supplement-v1', trialId: result.trialId, observationDigest: result.observationDigest,
+  const payload = { policyId: deliveryProfile ? 'judge-source-supplement-v2' : 'judge-source-supplement-v1', trialId: result.trialId, observationDigest: result.observationDigest,
     caseSeal: caseRecord.seal, producerDigest, capturedAt, capture, initialFiles,
     newRuntimeExecutions: 0, newVerifierExecutions: 0 }
   const supplementDigest = digestJson(payload)
   const locator = `judge-source-supplement-${supplementDigest}.json`
   await writePrivateJsonExclusive(join(evidenceDirectory, locator), { ...payload, supplementDigest })
-  snapshot.evaluationContext = supplementEvaluationContext(snapshot, capture, initialFiles, supplementDigest)
+  snapshot.evaluationContext = supplementEvaluationContext(snapshot, capture, initialFiles, supplementDigest, deliveryProfile ? 'bounded-evaluation-context-v3' : 'bounded-evaluation-context-v2')
   const manifest = JSON.parse(await readFile(join(evidenceDirectory, 'delivered-workspace-manifest.json'), 'utf8'))
   if (manifest.digest !== result.deliveredWorkspaceSnapshot.digest) throw new Error('Supplement delivered manifest mismatch')
   const next = await attachRecoveredEvidenceIndex({ evidenceDirectory, prior: result,

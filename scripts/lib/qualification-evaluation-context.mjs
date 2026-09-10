@@ -9,7 +9,7 @@ const redact = value => value.replace(/(?:\/Users|\/private|\/var\/folders|\/tmp
   .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, '[redacted]')
   .replace(/((?:api[_-]?key|access[_-]?token|password|credential|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
 
-export function supplementEvaluationContext(snapshot, capture, initialFiles, supplementDigest) {
+export function supplementEvaluationContext(snapshot, capture, initialFiles, supplementDigest, policyId = 'bounded-evaluation-context-v2') {
   const context = structuredClone(snapshot.evaluationContext)
   if (context?.policyId !== EVALUATION_CONTEXT_POLICY) throw new Error('Native supplement requires the original bounded context')
   const events = new Map(snapshot.executionEvidence.map(event => [event.id, event]))
@@ -18,7 +18,8 @@ export function supplementEvaluationContext(snapshot, capture, initialFiles, sup
     const { witnessDigest, ...payload } = witness
     if (digestJson(payload) !== witnessDigest || events.get(witness.sourceEvidenceId)?.payloadDigest !== witness.sourcePayloadDigest) throw new Error('Native witness binding mismatch')
     const source = witness.sourceRecords
-    const reconstructed = extractNativeWitnesses([source.call, source.command, source.response], [source.nativeItem], snapshot.executionEvidence, source.nativeItem.cwd)
+    const nativeItems = source.nativeItems ?? [source.nativeItem]
+    const reconstructed = extractNativeWitnesses([source.call, ...(source.commands ?? [source.command]), source.response], nativeItems, snapshot.executionEvidence, nativeItems[0].cwd, [], witness.policyId).filter(row => row.sourceEvidenceId === witness.sourceEvidenceId)
     if (reconstructed.length !== 1 || reconstructed[0].witnessDigest !== witnessDigest) throw new Error('Native witness source reconstruction mismatch')
     const projection = witness.projection
     if (projection.command.length > MAX_TEXT || projection.output.length > MAX_TEXT) {
@@ -38,7 +39,7 @@ export function supplementEvaluationContext(snapshot, capture, initialFiles, sup
     }
     context.receipts.push(receipt); characters += receipt.content.length
   }
-  return { ...context, policyId: 'bounded-evaluation-context-v2', initialFiles, supplementDigest,
+  return { ...context, policyId, initialFiles, supplementDigest,
     nativeCoverage: { state: capture.state, selectedWitnesses: capture.records.length, allNativeCommandsClaimed: false } }
 }
 

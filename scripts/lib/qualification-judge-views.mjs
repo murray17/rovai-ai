@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { WITNESS_TASK_JUDGE_PROFILE, WITNESS_OUTCOME_RUBRIC, CLAIM_TASK_JUDGE_PROFILE, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, usesObservableMetrics, OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
+import { DELIVERY_TASK_JUDGE_PROFILE, DELIVERY_OUTCOME_RUBRIC, WITNESS_TASK_JUDGE_PROFILE, WITNESS_OUTCOME_RUBRIC, CLAIM_TASK_JUDGE_PROFILE, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, usesObservableMetrics, OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -1113,6 +1113,21 @@ function projectRequirements(requirements) {
   })).sort((left, right) => left.requirementId.localeCompare(right.requirementId))
 }
 
+// A2A prose embedded in a command (for example measuring a draft's length)
+// remains Process evidence. This catches exact known prose without asking a
+// second LLM to select evidence; the private source and original receipt remain.
+export function containsParticipantProse(segment, segments) {
+  if (segment.kind !== 'test_output') return false
+  const normalize = text => text.replace(/\s+/g, ' ').trim()
+  let receipt; try { receipt = JSON.parse(segment.content) } catch { return true }
+  const content = normalize(`${receipt.command ?? ''}\n${receipt.output ?? ''}`)
+  for (const message of segments.filter(row => row.kind === 'participant_message')) {
+    const body = normalize(message.content)
+    for (let offset = 0; offset + 128 <= body.length; offset += 16) if (content.includes(body.slice(offset, offset + 128))) return true
+  }
+  return false
+}
+
 function projectEvidenceSegments(source, registry, view, taskProfile) {
   const allowedKinds = view === 'outcome'
     ? new Set(['code', 'final_response'])
@@ -1121,6 +1136,7 @@ function projectEvidenceSegments(source, registry, view, taskProfile) {
   const sourceSegments = (source.untrustedEvidence ?? [])
     .filter((segment) => allowedKinds.has(segment.kind) || receipts && (segment.kind === 'test_output'
       || segment.kind === 'comment' && (segment.segmentId.startsWith('delivery-message:') || view === 'process' && segment.segmentId.startsWith('task-description:'))))
+    .filter(segment => view !== 'outcome' || taskProfile?.version !== DELIVERY_TASK_JUDGE_PROFILE || !segment.segmentId.startsWith('delivery-message:historical:') && !containsParticipantProse(segment, source.untrustedEvidence))
     .sort(segmentProjectionOrder)
   const codePaths = new Map((source.workspaceChanges ?? [])
     .filter((change) => change.boundedContextSegmentId)
@@ -1676,6 +1692,7 @@ function collectLocalEvidenceIds(value) {
 }
 
 function viewPolicy(view, taskProfile) {
+  if (taskProfile?.version === DELIVERY_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-8`
   if (taskProfile?.version === WITNESS_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-7`
   if (taskProfile?.version === CLAIM_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-6`
   if (taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-5`
@@ -1685,6 +1702,7 @@ function viewPolicy(view, taskProfile) {
 }
 
 function viewRubric(view, taskProfile) {
+  if (taskProfile?.version === DELIVERY_TASK_JUDGE_PROFILE) return view === 'outcome' ? DELIVERY_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === WITNESS_TASK_JUDGE_PROFILE) return view === 'outcome' ? WITNESS_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === CLAIM_TASK_JUDGE_PROFILE) return view === 'outcome' ? CLAIM_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE) return view === 'outcome' ? OBSERVABLE_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(OBSERVABLE_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))

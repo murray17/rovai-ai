@@ -78,3 +78,62 @@ export function directExecWrapper(input) {
     : outputs.join(',') === 'text,exit' ? 'text_exit' : null
   return args && mode ? { args, mode } : null
 }
+
+// A second closed shape: Promise.all of literal exec calls, followed by a
+// delimiter-separated concatenation of their unmodified output properties.
+export function parallelExecWrapper(input) {
+  if (typeof input !== 'string' || input.length > 50_000) return null
+  const file=ts.createSourceFile('parallel-witness.js',input,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS)
+  const statements=file.statements.filter(s=>!ts.isEmptyStatement(s))
+  if (file.parseDiagnostics.length || statements.length!==2 || !ts.isVariableStatement(statements[0])) return null
+  const declarations=statements[0].declarationList.declarations
+  if (declarations.length!==1 || !ts.isIdentifier(declarations[0].name)) return null
+  const name=declarations[0].name.text,init=declarations[0].initializer
+  const property=(node,object,key)=>ts.isPropertyAccessExpression(node)&&ts.isIdentifier(node.expression)&&node.expression.text===object&&node.name.text===key
+  if (!init || !ts.isAwaitExpression(init) || !ts.isCallExpression(init.expression) || !property(init.expression.expression,'Promise','all') || init.expression.arguments.length!==1) return null
+  const array=init.expression.arguments[0]
+  if (!ts.isArrayLiteralExpression(array) || array.elements.length<2 || array.elements.length>4) return null
+  const calls=[]
+  for (const call of array.elements) {
+    if (!ts.isCallExpression(call) || !property(call.expression,'tools','exec_command') || call.arguments.length!==1 || !ts.isObjectLiteralExpression(call.arguments[0])) return null
+    const args={}
+    for(const field of call.arguments[0].properties){
+      if(!ts.isPropertyAssignment(field)||!(ts.isIdentifier(field.name)||ts.isStringLiteral(field.name))||Object.hasOwn(args,field.name.text))return null
+      const value=field.initializer
+      if(ts.isStringLiteral(value)||ts.isNoSubstitutionTemplateLiteral(value))args[field.name.text]=value.text
+      else if(ts.isNumericLiteral(value))args[field.name.text]=Number(value.text)
+      else if(value.kind===ts.SyntaxKind.TrueKeyword||value.kind===ts.SyntaxKind.FalseKeyword)args[field.name.text]=value.kind===ts.SyntaxKind.TrueKeyword
+      else return null
+    }
+    if(typeof args.cmd!=='string'||typeof args.workdir!=='string')return null
+    calls.push(args)
+  }
+  if(new Set(calls.map(c=>c.cmd)).size!==calls.length)return null
+  const expression=statements[1]
+  if(!ts.isExpressionStatement(expression)||!ts.isCallExpression(expression.expression)||!ts.isIdentifier(expression.expression.expression)||expression.expression.expression.text!=='text'||expression.expression.arguments.length!==1)return null
+  const parts=[]
+  function flatten(node){
+    if(ts.isBinaryExpression(node)&&node.operatorToken.kind===ts.SyntaxKind.PlusToken){flatten(node.left);flatten(node.right);return}
+    if(ts.isStringLiteral(node)||ts.isNoSubstitutionTemplateLiteral(node)){if(typeof parts.at(-1)==='string')parts[parts.length-1]+=node.text;else parts.push(node.text);return}
+    if(ts.isPropertyAccessExpression(node)&&node.name.text==='output'&&ts.isElementAccessExpression(node.expression)&&ts.isIdentifier(node.expression.expression)&&node.expression.expression.text===name&&ts.isNumericLiteral(node.expression.argumentExpression)){parts.push(Number(node.expression.argumentExpression.text));return}
+    throw new Error('modified output')
+  }
+  try{flatten(expression.expression.arguments[0])}catch{return null}
+  if(typeof parts[0]!=='string')parts.unshift('')
+  if(typeof parts.at(-1)!=='string')parts.push('')
+  const indices=parts.filter(p=>typeof p==='number')
+  if(parts.length!==calls.length*2+1||new Set(indices).size!==calls.length||indices.some(i=>!Number.isInteger(i)||i<0||i>=calls.length)||parts.some((p,i)=>i%2===0?typeof p!=='string'||i>0&&i<parts.length-1&&!p:typeof p!=='number'))return null
+  return {calls,parts,mode:'parallel_text'}
+}
+
+export function splitParallelOutput(wrapper, text) {
+  if(typeof text!=='string'||!text.startsWith(wrapper.parts[0]))return null
+  let cursor=wrapper.parts[0].length;const outputs=[]
+  for(let i=1;i<wrapper.parts.length;i+=2){
+    const delimiter=wrapper.parts[i+1],last=i+2>=wrapper.parts.length
+    let end=last?text.length-delimiter.length:text.indexOf(delimiter,cursor)
+    if(end<cursor||!text.slice(end).startsWith(delimiter)||!last&&text.indexOf(delimiter,end+delimiter.length)!==-1)return null
+    outputs[wrapper.parts[i]]=text.slice(cursor,end);cursor=end+delimiter.length
+  }
+  return cursor===text.length?outputs:null
+}

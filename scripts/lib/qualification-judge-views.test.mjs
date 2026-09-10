@@ -849,7 +849,7 @@ test('v4 adds bounded receipts and public delivery, while Task descriptions stay
   }
 })
 
-for (const scoringVersion of ['2.3', '2.4', '2.5']) test(`scoring ${scoringVersion} resolves only disputed items once, preserving both original verdicts and citations`, async () => {
+for (const scoringVersion of ['2.3', '2.4', '2.5', '2.6']) test(`scoring ${scoringVersion} resolves only disputed items once, preserving both original verdicts and citations`, async () => {
   const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
   const { readFile } = await import('node:fs/promises')
   const scoring = JSON.parse(await readFile(new URL(`../../qualification/context-regression/scoring-v${scoringVersion}.json`, import.meta.url)))
@@ -923,4 +923,12 @@ test('v5 configuration artifact revisions change identity without changing model
   assert.deepEqual(first.payload,second.payload)
   const pack=configuration=>buildJudgeViewPack({view:'outcome',sourcePack:sourcePackFixture(),configuration,producerDigest:'a'.repeat(64)})
   assert.deepEqual(pack(first).payload.modelInput,pack(second).payload.modelInput)
+})
+
+test('v8 quarantines known participant prose embedded in a tool receipt without hiding it from Process', async () => {
+  const {containsParticipantProse}=await import('./qualification-judge-views.mjs')
+  const prose='This participant explains the comparison, operational costs, risks, and the conditions under which their recommendation would change. '.repeat(3)
+  const segments=[{kind:'participant_message',content:prose}]
+  assert.equal(containsParticipantProse({kind:'test_output',content:JSON.stringify({command:`python -c ${JSON.stringify(prose)}`,output:'word count: 62'})},segments),true)
+  assert.equal(containsParticipantProse({kind:'test_output',content:JSON.stringify({command:'node --test tests/public.test.mjs',output:'12 checks passed'})},segments),false)
 })

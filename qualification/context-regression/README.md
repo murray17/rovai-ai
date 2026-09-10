@@ -46,3 +46,5 @@ Suite 2.5.0 使用 scoring 2.3.0 / generic-task-v5，冻结指标证据合同并
 Suite 2.6.0 使用 scoring 2.4.0 / generic-task-v6；DEMO-106 1.3.0 加强同一任务的 verifier。逐声明审计与隔离用量边界见 [Execution Evaluation v8](../../docs/contracts/execution-evaluation-v8.md)，预算与模型参数见[本轮计划](../../docs/versions/v1.57/evaluation-claim-calibration.md)。旧任务、评分与失败记录保留。
 
 Suite 2.7.0 / scoring 2.5.0 / generic-task-v7 保持同一题目、权重及关键条件，新增原生命令证据补取与初始文件证据，修复仲裁结果公开发布；见 [Execution Evaluation v9](../../docs/contracts/execution-evaluation-v9.md)。真实执行和证据重评分别记账，不增加重复样本数。
+
+Suite 2.8.0 / scoring 2.6.0 / generic-task-v8 补充严格并行／哈希检查来源，并按最终交付区分结果事实、执行声明和限制披露。中间审查与已知参与者正文留在 Process，旧评分报告保持；见 [Execution Evaluation v10](../../docs/contracts/execution-evaluation-v10.md)。
