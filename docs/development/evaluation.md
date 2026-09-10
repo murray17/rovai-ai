@@ -6,7 +6,7 @@ last_updated: 2026-09-10
 
 # Gate、每周回归与每日分析
 
-本页拥有开发者操作流程。判断规则见 [Execution Evaluation v11](../contracts/execution-evaluation-v11.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+本页拥有开发者操作流程。判断规则见 [Execution Evaluation v12](../contracts/execution-evaluation-v12.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
 
 ## 上下文改动 Gate
 
@@ -69,7 +69,7 @@ API 凭据仅通过命名环境变量读取；不写进配置或报告。默认�
 
 ### 质量、协作与有界修正
 
-评分配置随 suite 冻结为 `generic-task-quality@2.4.0`。任务质量按目标达成 50、证据一致性 25、边界遵守 25 汇总；Case 验收依据随任务定义，非代码任务不要求代码测试。三个维度中的未知会使该维度和总分未完成，页面保留已有分项与覆盖率。边界分只覆盖 Case 声明且能观察的检查，不能据此声称覆盖全部权限行为。
+评分配置随 suite 冻结为 `generic-task-quality@2.7.0`。任务质量按目标达成 50、证据一致性 25、边界遵守 25 汇总；Case 验收依据随任务定义，非代码任务不要求代码测试。三个维度中的未知会使该维度和总分未完成，页面保留已有分项与覆盖率。边界分只覆盖 Case 声明且能观察的检查，不能据此声称覆盖全部权限行为。
 
 协作三组保留五个细项的原始 Judge 判定、理由和证据，分母是适用的计划 Case × repetition，未知仍在分母。部分满足不算满足，零分母为 N/A；分组已有不满足时，其他细项的证据缺口也保留。Case 的关键协作项必须满足，不能用高质量分或其他 Case 的改善抵消。
 
@@ -157,3 +157,17 @@ node scripts/eval-judge-cli.mjs --executable /absolute/codex --model gpt-5.6-sol
 准备会使用本地假 HTTP 接口核验实际请求没有工具，随后所有真实评价只接收指定 evidence pack。CLI 的能力和参数依据[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)及实际命令探测；不依赖提示词单独限制工具。沿用 CLI 自己的登录，不把凭据导出到报告。其目录摘要是模型声明，不是提供者权重；固定 snapshot 未可观测时 Gate 保留证据不足，周回归仍可展示真实诊断结果。
 
 新评分的每项证据范围及一次分歧裁决见 [Semantic Judge Views v9](../contracts/semantic-judge-views-v9.md)。质量覆盖率表示有效判定的权重占比，不表示任务执行率。历史证据重评需独立目录与来源绑定，不能作为新的每周运行样本。
+
+## 每日数据与分析核验
+
+新分析输入遵循 `daily-health-analysis-v2`：根据已计算的指标与变化解释运行健康，明确分母、工具未判定终态、采集覆盖和模型未知数；不推断任务质量或不可见的错误原因。`prepared` 在交给模型前检查报告身份、日期窗口和输入摘要。登记器保留原始提交及代码派生的 `citedMetrics`，不改变原始统计。
+
+reportDefinitionVersion=3 区分当日交接群组未结束数与包含跨日的全部积压，旧口径不连线。样本按类别最多 18 条，eligible/selected/omitted 保存在 coverage.analysisSamples；Core 回放、回放身份未知和非 A2A 完成投递不混入对应失败样本。工具摘要完整展示其他终态，不将 `unsettled` 算作成功或失败。
+
+日常 App 已部署相应版本时使用 `rovai app trace export`。开发者核对旧安装版的既有记录，可以复用 feature-gated 测量入口：
+
+```bash
+cargo run -p rovai-core --features slow-tests --example export_execution_trace -- /absolute/confirmed/rovai.sqlite /private/params.json /private/new-trace.json
+```
+
+参数文件使用既有 `since`、`until`、`campIds`、`excludeCampIds`、`excludeAutomationIds`；数据库路径必须来自明确来源。此入口只读、无迁移或 Core/Runtime 启动，拒绝覆盖输出，执行原有行数／字节限制。它不证明安装版 CLI 或每日 Automation 已部署，不属于 Agent CLI help/context，也不新增产品权限入口。

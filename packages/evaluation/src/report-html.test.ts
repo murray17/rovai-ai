@@ -11,8 +11,18 @@ afterEach(async()=>{await Promise.all(roots.splice(0).map(root=>rm(root,{recursi
 const temp=async():Promise<string>=>{const path=await mkdtemp(join(tmpdir(),'rovai-report-test-'));roots.push(path);return path}
 
 describe('offline report contract — synthetic fixtures only',()=>{
+  it('separates the new handoff cohort from the complete retained open backlog',()=>{
+    const metrics=reportMetrics({a2a:{terminalCoverage:{numerator:3,denominator:4},openWaitReasonsAsOf:{target_running:5,unknown:1}}})
+    expect(metrics.a2a).toMatchObject({cohortOpenCountAsOf:1,openCountAsOf:6})
+    expect(reportMetrics({a2a:{terminalCoverage:{numerator:0,denominator:0}}}).a2a).toMatchObject({cohortOpenCountAsOf:0,openCountAsOf:null})
+  })
+  it('keeps unresolved terminal tool states visible without changing the failure denominator',()=>{
+    const html=renderDailyHtml({window:{date:'2026-09-09',timezone:'UTC'},metrics:{tools:{bySource:{runtime:{terminalOutcomesInWindow:{succeeded:10,failed:1,unsettled:22},failureRate:{numerator:1,denominator:11,value:1/11}}}}}},[],{})
+    const toolTable=html.slice(html.indexOf('>工具来源</th>')).split('</table>')[0]
+    expect(toolTable).toContain('unsettled');expect(toolTable).toContain('22')
+  })
   it('calculates terminal-window Run rate and preserves null, zero-denominator, and as-of A2A states',()=>{
-    expect(reportMetrics({runs:{terminalOutcomesInWindow:{failed:2,succeeded:8,cancelled:3},createdInWindow:100},a2a:{terminalCoverage:{numerator:3,denominator:10}}})).toMatchObject({runs:{failureRate:{value:0.2,numerator:2,denominator:10}},a2a:{openCountAsOf:7}})
+    expect(reportMetrics({runs:{terminalOutcomesInWindow:{failed:2,succeeded:8,cancelled:3},createdInWindow:100},a2a:{terminalCoverage:{numerator:3,denominator:10}}})).toMatchObject({runs:{failureRate:{value:0.2,numerator:2,denominator:10}},a2a:{cohortOpenCountAsOf:7,openCountAsOf:null}})
     expect(reportMetrics({runs:{terminalOutcomesInWindow:{}}})).toMatchObject({runs:{failureRate:{value:null,numerator:0,denominator:0}}})
     expect(reportMetrics({runs:{terminalOutcomesInWindow:{failed:null,succeeded:8}}})).toMatchObject({runs:{failureRate:{value:null,numerator:null,denominator:null}}})
     expect(reportMetrics({})).toMatchObject({runs:{failureRate:{value:null,numerator:null,denominator:null}}})
@@ -70,6 +80,7 @@ describe('offline report contract — synthetic fixtures only',()=>{
     const failed=await recordDailyAnalysis(result.directory,{...input,inputDigest:'wrong'})
     expect(failed.status).toBe('failed')
     const complete=await recordDailyAnalysis(result.directory,input);expect(complete.status).toBe('complete')
+    expect(complete.citedMetrics).toEqual({'yesterday.runs.failureRate.denominator':0})
     expect(await readFile(join(result.directory,'report.json'),'utf8')).toBe(stats)
     expect(await readFile(join(result.directory,String(failed.outputFile)),'utf8')).toContain('wrong')
     expect(await readFile(join(result.directory,'report.html'),'utf8')).toContain('Synthetic fixture, not real analysis.')

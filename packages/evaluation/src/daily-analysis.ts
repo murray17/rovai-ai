@@ -57,7 +57,12 @@ export async function recordDailyAnalysis(directory:string,submission:unknown):P
     const destination=join(root,relative);await mkdir(destination,{mode:0o700})
     const write=async(name:string,value:unknown):Promise<void>=>writeFile(join(destination,name),`${JSON.stringify(value,null,2)}\n`,{flag:'wx',mode:0o600})
     const record:Obj={schemaVersion:1,id,reportId:report.reportId,inputDigest,statisticsFileDigest:createHash('sha256').update(await readFile(reportPath)).digest('hex'),completedAt:new Date().toISOString(),status:'complete',model:obj(submission).model??null,modelIdentityAuthority:'submitted_not_independently_verified',outputFile:`${relative}/analysis.json`,validation:'identity_and_reference_existence_only'}
-    try{record.content=validateAnalysis(submission,pack,inputDigest)}catch(error){record.status='failed';record.failureCode=(error as Error).message;record.content=null}
+    try{
+      record.content=validateAnalysis(submission,pack,inputDigest)
+      const content=obj(record.content)
+      const paths=new Set(['facts','hypotheses','recommendations'].flatMap(kind=>(content[kind] as Obj[]).flatMap(item=>item.metricPaths as string[])))
+      record.citedMetrics=Object.fromEntries([...paths].sort().map(path=>[path,at(pack,path)]))
+    }catch(error){record.status='failed';record.failureCode=(error as Error).message;record.content=null}
     await write('analysis.json',submission);await write('record.json',record)
     const temporary=join(root,`.analysis-${id}.json`)
     await writeFile(temporary,`${JSON.stringify(record,null,2)}\n`,{flag:'wx',mode:0o600});await rename(temporary,join(root,'analysis-status.json'))

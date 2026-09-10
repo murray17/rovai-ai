@@ -186,7 +186,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Usage Monitoring v2（历史）](runtime-usage-monitoring-v2.md) | 五表 clean break、内存 Usage 合并、稀疏 Token/Cache/Cost、Coverage、单 Snapshot 与有界刷新 |
 | [Runtime Monitoring v1（历史）](runtime-monitoring-v1.md) | Clean-break collection/enrollment、稀疏 Usage Observation、Native Session fact、三类查询、Coverage、Tool Duration 与 Cost layer |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
-| [Execution Evaluation v11（当前）](execution-evaluation-v11.md) | 评分 2.7、执行声明分类与现有事件顺序投影 |
+| [Execution Evaluation v12（当前）](execution-evaluation-v12.md) | 每日跨日积压、全部工具终态与健康分析证据边界 |
+| [Execution Evaluation v11（历史）](execution-evaluation-v11.md) | 评分 2.7、执行声明分类与现有事件顺序投影 |
 | [Execution Evaluation v10（历史）](execution-evaluation-v10.md) | 并行验证凭据、最终交付范围及声明分类校准 |
 | [Execution Evaluation v9（历史）](execution-evaluation-v9.md) | 原生执行证据补取、同源重评及完整仲裁报告 |
 | [Execution Evaluation v8（历史）](execution-evaluation-v8.md) | 评分 2.4、Suite 2.6、声明审计与隔离用量采集 |

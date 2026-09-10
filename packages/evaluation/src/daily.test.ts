@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -9,6 +10,28 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 const scope: DailyScope = { campIds: [], excludeCampIds: [], excludeAutomationIds: ['analysis'] }
 const now = new Date('2026-09-10T02:00:00Z')
 describe('daily calendar and evidence contract', () => {
+  it('prepared CLI rejects modified analysis input before it reaches an analysis model', async () => {
+    const output=await mkdtemp(join(tmpdir(),'rovai-daily-test-'));roots.push(output)
+    const result=await runDaily({output,timezone:'UTC',scope,exportTrace:async params=>{
+      const facts={runs:[],deliveries:[],tools:[],deliveryEvents:[]}
+      return {schemaVersion:1,window:params,scope:params,asOf:new Date().toISOString(),facts,factsDigest:digest(facts),metrics:{definitionVersion:2,runs:{terminalOutcomesInWindow:{}}}}
+    }})
+    const args=['scripts/eval-daily.mjs','prepared','--output',output,'--timezone','UTC']
+    expect(JSON.parse(execFileSync(process.execPath,args,{encoding:'utf8'})).inputDigest).toBe(result.report.analysisInputDigest)
+    const path=join(result.directory,'analysis-input.json'),pack=JSON.parse(await readFile(path,'utf8'))
+    pack.yesterday.runs.createdInWindow=999
+    await writeFile(path,JSON.stringify(pack))
+    expect(()=>execFileSync(process.execPath,args,{stdio:'pipe'})).toThrow()
+  })
+  it('bounds metadata samples to their actual metric population and includes pending handoff evidence', async () => {
+    const output=await mkdtemp(join(tmpdir(),'rovai-daily-test-'));roots.push(output)
+    const facts={runs:[],deliveries:[{deliveryId:'old-open',deliveryKind:'public_a2a',dispatchDisposition:'dispatch',status:'pending',createdAt:'2026-09-08T01:00:00Z',waitCondition:'target_running'}],deliveryEvents:[{eventId:'completion-failure',deliveryKind:'completion',dispatchDisposition:'dispatch',eventType:'message_delivery.failed',occurredAt:'2026-09-09T01:00:00Z'}],tools:[{agentRunId:'r',operationId:'replayed',executionEpoch:1,sourceAuthority:'core',phase:'terminal',outcome:'failed',idempotentReplay:true,lastObservedAt:'2026-09-09T01:00:00Z'}]}
+    const result=await runDaily({output,timezone:'Asia/Shanghai',now,scope,exportTrace:async params=>({schemaVersion:1,window:params,scope:params,asOf:now.toISOString(),facts,factsDigest:digest(facts),metrics:{definitionVersion:2,runs:{terminalOutcomesInWindow:{}},a2a:{terminalCoverage:{numerator:0,denominator:0},openWaitReasonsAsOf:{target_running:1}}}})})
+    const pack=JSON.parse(await readFile(join(result.directory,'analysis-input.json'),'utf8'))
+    expect(pack.samples.map((sample:{evidenceId:string})=>sample.evidenceId)).toEqual(['delivery:old-open'])
+    expect(pack.samples[0]).toMatchObject({waitCondition:'target_running',cohort:'created_before_window'})
+    expect(pack.coverage.analysisSamples.groups.pendingHandoffs).toMatchObject({eligible:1,selected:1,omitted:0})
+  })
   it('uses complete local days including DST and rejects future, invalid dates and zones', () => {
     expect(dailyWindow('Asia/Shanghai', now)).toMatchObject({ date: '2026-09-09', since: '2026-09-08T16:00:00.000Z', until: '2026-09-09T16:00:00.000Z' })
     for (const [date, hours] of [['2026-03-08', 23], ['2026-11-01', 25]] as const) {

@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile, open, lstat } from 'node:fs/promise
 import { join, resolve } from 'node:path'
 import { DAILY_SERIES, reportMetrics, renderDailyHtml } from './daily-report.ts'
 import { renderReportIndex, sanitizeReportLinks } from './report-html.ts'
+import { dailyEvidence, DAILY_ANALYSIS_INSTRUCTIONS, DAILY_ANALYSIS_POLICY } from './daily-evidence.ts'
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 type ObjectValue = { [key: string]: Json }
@@ -172,33 +173,29 @@ export async function runDaily(options: DailyOptions): Promise<{ directory: stri
       if (!Number.isFinite(Date.parse(String(trace.asOf))) || Date.parse(String(trace.asOf)) < Date.parse(window.until)) throw new Error('Trace snapshot predates completed window')
       await privateJson(join(directory, 'trace.json'), trace)
     } catch (error) { trace = null; unavailable = (error as Error).message.slice(0, 300) }
-    const comparisonKey = digest({ reportDefinitionVersion: 2, scopeKey, exporter: trace?.exporter ?? null, coverage: trace?.coverage ?? null, definitionVersion: pathValue(trace, 'metrics.definitionVersion') ?? null })
+    const comparisonKey = digest({ reportDefinitionVersion: 3, scopeKey, exporter: trace?.exporter ?? null, coverage: trace?.coverage ?? null, definitionVersion: pathValue(trace, 'metrics.definitionVersion') ?? null })
     const facts = trace ? object(trace.facts) : {}
     const rows = (key: string): ObjectValue[] => Array.isArray(facts[key]) ? facts[key] as ObjectValue[] : []
     const point: Point = { date: window.date, reportId, status: trace ? 'available' : 'unavailable', comparisonKey, metrics: trace ? reportMetrics(trace.metrics) as ObjectValue : null, sourceDigest: trace ? String(trace.factsDigest) : null, runtimeVersions: trace ? runtimeVersions(rows('runs')) : null }
     const comparable = history.filter(item => item.comparisonKey === comparisonKey && item.date < window.date && item.metrics).sort((a, b) => a.date.localeCompare(b.date)).slice(-7)
-    const inWindow = (time: Json): boolean => typeof time === 'string' && Date.parse(time) >= Date.parse(window.since) && Date.parse(time) < Date.parse(window.until)
-    const failed = rows('runs').filter(run => run.status === 'failed' && inWindow(run.endedAt)).slice(0, 3)
-    const normal = rows('runs').filter(run => run.status === 'succeeded' && inWindow(run.endedAt)).slice(0, 2)
-    const samples = [...failed, ...normal].map(run => ({ evidenceId: `run:${run.agentRunId}`, agentRunId: run.agentRunId, status: run.status, failureCode: run.failureCode, runtimeKind: run.runtimeKind, startedAt: run.startedAt, endedAt: run.endedAt }))
+    const evidence = dailyEvidence(facts, point.metrics, window)
+    const coverage = trace ? { ...object(trace.coverage ?? {}), ...evidence.coverage, collectionAsOf: trace.asOf, window } as ObjectValue : null
     const report: ObjectValue = {
       schemaVersion: 2, kind: 'daily_trace_analysis', reportId, window, scope, scopeKey,
       status: point.status, unavailableReason: unavailable, comparisonKey,
       asOf: trace?.asOf ?? null, sourceDigest: point.sourceDigest, exporter: trace?.exporter ?? null,
       runtimeVersions: point.runtimeVersions ?? null,
-      coverage: trace?.coverage ?? null, metrics: point.metrics, semanticAnalysis: { status: trace ? 'pending' : 'unavailable', completionRecord: 'analysis-status.json' },
+      coverage, metrics: point.metrics, semanticAnalysis: { status: trace ? 'pending' : 'unavailable', completionRecord: 'analysis-status.json', policy: DAILY_ANALYSIS_POLICY },
       limits: ['Run/tool success is not task success.', 'Origin is unknown beyond explicit exclusions.', 'Historical Rovai build per Run is unavailable.', 'Current states are as of export, not reconstructed midnight.', 'Memory counters await memory governance; unknown is not zero.']
     }
     const changes = metricChanges(point, comparable)
-    const toolSamples = rows('tools').filter(tool => tool.outcome === 'failed' && inWindow(tool.originalTerminalObservedAt ?? tool.lastObservedAt)).slice(0, 3).map(tool => ({ evidenceId: `tool:${tool.agentRunId}:${tool.executionEpoch}:${tool.operationId}`, agentRunId: tool.agentRunId, sourceAuthority: tool.sourceAuthority, outcome: tool.outcome, errorCode: tool.errorCode }))
-    const deliverySamples = rows('deliveryEvents').filter(event => event.eventType === 'message_delivery.failed').slice(0, 3).map(event => ({ evidenceId: `event:${event.eventId}`, deliveryId: event.deliveryId, occurredAt: event.occurredAt, failureCode: event.failureCode }))
     const previousVersions = comparable.at(-1)?.runtimeVersions ?? null
-    const factPack = { schemaVersion: 1, reportId, window, yesterday: point.metrics, comparableHistory: comparable.map(item => ({ ...item, runtimeVersions: versionPreview(item.runtimeVersions) })), changes,
+    const factPack = { schemaVersion: 2, policy: DAILY_ANALYSIS_POLICY, reportId, window, asOf: trace?.asOf ?? null, yesterday: point.metrics, comparableHistory: comparable.map(item => ({ ...item, runtimeVersions: versionPreview(item.runtimeVersions) })), changes,
       versions: { exporter: trace?.exporter ?? null, runtime: versionPreview(point.runtimeVersions), previousRuntime: versionPreview(previousVersions),
         observedDistributionChanged: previousVersions && point.runtimeVersions ? digest(previousVersions) !== digest(point.runtimeVersions) : null,
         comparisonMeaning: 'Comparable metric definitions do not assert identical Runtime/model populations or a causal effect.' },
-      coverage: trace?.coverage ?? null, samples: [...samples, ...toolSamples, ...deliverySamples], unavailableReason: unavailable,
-      instructions: '只根据所给指标、分母、可比较历史与 evidenceId 解释变化、异常、可能原因和建议。样本不是总体；不得重新估算比例，不得把成功状态当作用户任务成功。区分事实与假设，缺数据明确说明；引用指标 JSON 路径或 evidenceId。不重跑原任务，不执行修复。输出 JSON：schemaVersion=1、reportId、prepared 提供的 inputDigest、model(provider/snapshotId)、facts/hypotheses/recommendations 数组；每项包含 text、metricPaths（点分路径）、evidenceIds，至少引用一处现有输入。通过 eval:daily analysis 登记完成；登记只验证引用，不证明解释正确。' }
+      coverage, samples: evidence.samples, unavailableReason: unavailable,
+      instructions: DAILY_ANALYSIS_INSTRUCTIONS }
     report.analysisInputDigest = digest(factPack)
     const selected = history.filter(item => item.date !== window.date).concat(point).sort((a, b) => a.date.localeCompare(b.date))
     const trendPoints = selected.slice(-90)
