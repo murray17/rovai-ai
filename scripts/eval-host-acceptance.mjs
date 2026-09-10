@@ -1,5 +1,5 @@
 // Explicit real-runtime acceptance. Not part of unit tests or daily App startup.
-import { build } from 'esbuild'
+import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, readFile, writeFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { buildProduct, freezePlan } from './lib/context-evaluation.mjs'
 import { startQualificationCore } from './lib/qualification-core.mjs'
 import { runCaptured, writePrivateJsonExclusive } from './lib/qualification-common.mjs'
+const { build } = createRequire(import.meta.resolve('vite'))('esbuild')
 
 const args = process.argv.slice(2)
 if (args.length !== 4 || args[0] !== '--root' || args[2] !== '--config') throw new Error('Usage: node scripts/eval-host-acceptance.mjs --root <empty-absolute-root> --config <weekly-config.json>')
