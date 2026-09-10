@@ -41,7 +41,7 @@ const adapter = await loadAdapter(options.adapterPath, result.mode, configuratio
 const producerDigest = await computeQualificationEvaluatorDigest()
 const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
 const sourceConfiguration = buildSemanticJudgeConfiguration({
-  evaluationContextPolicy: caseEvaluation?.judgeProfile === 'generic-task-v4' ? 'bounded-evaluation-context-v1' : null,
+  evaluationContextPolicy: ['generic-task-v4', 'generic-task-v5'].includes(caseEvaluation?.judgeProfile) ? 'bounded-evaluation-context-v1' : null,
   provider: configurationInput.provider,
   snapshotId: configurationInput.snapshotId,
   snapshotDigest: configurationInput.snapshotDigest,

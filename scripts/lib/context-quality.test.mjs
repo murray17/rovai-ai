@@ -16,6 +16,36 @@ function slot(p, arm, caseId = p.cases[0].id, repeat = 1) {
 }
 const contracts = { baseline: { status: 'passed' }, candidate: { status: 'passed' } }
 
+test('new scoring rejects applicable metrics without a declared evidence owner', () => {
+  const candidate = structuredClone(scoring)
+  candidate.version = '2.3.0'
+  assert.throws(() => validateScoring(candidate, suite.cases), /Metric evidence contract|task evidence scope/)
+})
+
+test('observable metric contracts and adjudication do not erase unknowns or hard failures', async () => {
+  const current = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.3.json', import.meta.url)))
+  validateScoring(current, suite.cases)
+  const p = plan(['DEMO-102']); p.scoring = current
+  const after = slot(p, 'candidate')
+  Object.assign(after.semanticItems[0], { state:'adjudicated', verdict:'not_satisfied', adjudication:{ verdict:'not_satisfied', reason:'Fixture evidence contradicts delivery.' } })
+  let result = compareResults(p, [slot(p, 'baseline'), after], contracts)
+  assert.equal(result.assessment.arms.candidate.quality.total, 87.5)
+  assert.equal(result.status, 'degraded')
+  after.semanticItems[0].verdict = 'indeterminate'
+  result = compareResults(p, [slot(p, 'baseline'), after], contracts)
+  assert.equal(result.assessment.arms.candidate.quality.total, null)
+  for (const mutate of [
+    item => { delete item.verification },
+    item => { item.verification.view = 'process' },
+    item => { item.verification.sources = [] },
+    item => { item.verification.scope = 'Prove no unobserved action occurred.' }
+  ]) {
+    const edited = structuredClone(current)
+    mutate(edited.cases['DEMO-102'].quality[0])
+    assert.throws(() => validateScoring(edited, suite.cases), /Metric evidence contract/)
+  }
+})
+
 test('every existing Case has frozen task-neutral acceptance and no collaboration score', () => {
   validateScoring(scoring, suite.cases)
   const p = plan(['DEMO-102']), report = evaluateQualityAndCollaboration(p, [slot(p, 'baseline'), slot(p, 'candidate')])

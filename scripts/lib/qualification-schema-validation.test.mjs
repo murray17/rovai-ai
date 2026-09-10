@@ -38,6 +38,7 @@ test('cross-version contract schema catalog is independent of frozen history', (
     'resource-measurement-v1.schema.json',
     'paired-collaboration-experiment-v1.schema.json',
     'collaboration-ledger-v1.1.schema.json',
-    'semantic-judge-configuration-v1.1.schema.json'
+    'semantic-judge-configuration-v1.1.schema.json',
+    'semantic-judge-view-suite-v2.schema.json'
   ])
 })

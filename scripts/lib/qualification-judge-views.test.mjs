@@ -848,3 +848,66 @@ test('v4 adds bounded receipts and public delivery, while Task descriptions stay
     assert.equal(serialized.includes('TASK_BODY_CANARY'),version==='generic-task-v4'&&view==='process')
   }
 })
+
+test('v5 resolves only disputed items once, preserving both original verdicts and citations', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.3.json', import.meta.url)))
+  const configuration = buildJudgeViewConfiguration({ view:'outcome', provider:'fixture', snapshotId:'fixture', snapshotDigest:'a'.repeat(64), producerDigest:'a'.repeat(64), taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome') })
+  const pack = buildJudgeViewPack({ view:'outcome', sourcePack:sourcePackFixture(), configuration, producerDigest:'a'.repeat(64) })
+  const calls = []
+  const execution = await executeJudgeView({ configuration, pack, producerDigest:'a'.repeat(64), invokeReplica: async request => {
+    calls.push(request)
+    const items = replicaItems(pack)
+    if (request.replica === 'B') items[0].verdict = 'partially_satisfied'
+    if (request.userPrompt.includes('evidence_adjudication_once_v1')) {
+      items[0].verdict = 'not_satisfied'
+      items[1].verdict = 'not_satisfied' // Non-disputed item must not change.
+    }
+    return { items }
+  } })
+  assert.equal(calls.length, 3)
+  assert.equal(execution.review.payload.items[0].state, 'adjudicated')
+  assert.equal(execution.review.payload.items[0].verdict, 'not_satisfied')
+  assert.equal(execution.review.payload.items[0].replicaA.verdict, 'satisfied')
+  assert.equal(execution.review.payload.items[0].replicaB.verdict, 'partially_satisfied')
+  assert.equal(execution.review.payload.items[1].verdict, 'satisfied')
+  assert.ok(execution.review.payload.adjudication)
+  validateJudgeViewReview(execution.review, { configuration, pack, replicas:execution.replicas })
+  const original = structuredClone(execution.review)
+  execution.review.payload.adjudication.payload.adjudicationContext.sourceDigests[0] = 'changed'
+  execution.review.payloadDigest = `sha256:${digestJson(execution.review.payload)}`
+  assert.throws(() => validateJudgeViewReview(execution.review, { configuration, pack, replicas:execution.replicas }), /identity|binding|bound/)
+  execution.review = original
+  const base = dualViewFixture()
+  const processExecution = await executeJudgeView({ ...base.process, producerDigest:'a'.repeat(64), judgeExecutionId:execution.replicas[0].payload.judgeExecutionId, invokeReplica: async () => ({items:replicaItems(base.process.pack)}) })
+  const suite = buildSemanticJudgeViewSuite({ process:{...base.process,...processExecution}, outcome:{configuration,pack,...execution}, producerDigest:'a'.repeat(64) })
+  assert.equal(suite.payload.protocolId, 'semantic-dual-view-judge-2')
+  validateSemanticJudgeViewSuite(suite)
+})
+
+test('v5 adjudication retains unknown, invalid citation and transport failure without a second try', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.3.json', import.meta.url)))
+  const configuration = buildJudgeViewConfiguration({ view:'outcome', provider:'fixture', snapshotId:'fixture', snapshotDigest:'a'.repeat(64), producerDigest:'a'.repeat(64), taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome') })
+  const pack = buildJudgeViewPack({ view:'outcome', sourcePack:sourcePackFixture(), configuration, producerDigest:'a'.repeat(64) })
+  for (const mode of ['unknown', 'invalid_citation', 'transport_failure', 'agreed_unknown']) {
+    let calls=0
+    const result=await executeJudgeView({configuration,pack,producerDigest:'a'.repeat(64),invokeReplica:async request=>{
+      calls++
+      const items=replicaItems(pack)
+      if (mode === 'agreed_unknown') Object.assign(items[0],{verdict:'indeterminate',abstainReason:{code:'fixture.missing'}})
+      else if (request.replica === 'B') items[0].verdict='not_satisfied'
+      if (request.userPrompt.includes('evidence_adjudication_once_v1')) {
+        if(mode==='transport_failure') throw new Error('Fixture provider unavailable')
+        if(mode==='unknown') Object.assign(items[0],{verdict:'indeterminate',abstainReason:{code:'fixture.missing'}})
+        if(mode==='invalid_citation') items[0].evidenceIds=['EV-9999']
+      }
+      return {items}
+    }})
+    assert.equal(calls,mode==='agreed_unknown'?2:3)
+    assert.ok([null,'indeterminate'].includes(result.review.payload.items[0].verdict))
+    validateJudgeViewReview(result.review,{configuration,pack,replicas:result.replicas})
+  }
+})

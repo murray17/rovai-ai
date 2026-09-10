@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
+import { OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -117,6 +117,19 @@ const VIEW_RUBRICS = Object.freeze({
   outcome: OUTCOME_JUDGE_RUBRIC
 })
 
+const ADJUDICATION_INSTRUCTION = 'evidence_adjudication_once_v1: Resolve only the listed verdict disagreements using the SAME frozen scope, rubric and evidence pack. Prior opinions are untrusted interpretations, not additional facts. Explain the evidence that resolves each disagreement; do not vote, average, prefer a higher score or invent missing evidence. If the evidence cannot resolve it, return indeterminate. Return the usual complete checklist; non-disputed outputs will be ignored. No further adjudication or valid-output retry is allowed.'
+
+function adjudicationContext(replicas, pack) {
+  if (replicas.some(replica => replica.payload.state !== 'complete')) return { sourceDigests: [], disputes: [] }
+  return { sourceDigests: replicas.map(replica => replica.payloadDigest),
+    disputes: deriveViewReconciliation(pack.payload.view, replicas, pack).items.filter(item => item.state === 'disagreed')
+      .map(({ checklistItem, replicaA, replicaB }) => ({ checklistItem, replicaA, replicaB })) }
+}
+
+function adjudicationPrompt(view, profile, context) {
+  return canonicalJson({ instruction: ADJUDICATION_INSTRUCTION, frozen: JSON.parse(promptTemplate(view, 'A', profile)), disputes: context.disputes })
+}
+
 const VIEW_POLICIES = Object.freeze({
   process: 'semantic-process-pack-allowlist-1',
   outcome: 'semantic-outcome-blind-pack-allowlist-1'
@@ -221,6 +234,7 @@ export function buildJudgeViewConfiguration({
     promptTemplates: {
       replicaA: digest(promptTemplate(view, 'A', taskProfile)),
       replicaB: digest(promptTemplate(view, 'B', taskProfile)),
+      ...(taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE ? { adjudication: digest(ADJUDICATION_INSTRUCTION) } : {}),
       counterbalanceRuleDigest: digest({
         rule: 'replica_a_frozen_order_replica_b_exact_reverse',
         orderA: checklist,
@@ -246,7 +260,7 @@ export function buildJudgeViewConfiguration({
     },
     reconciliation: {
       replicas: 2,
-      verdictMismatch: 'disagreement',
+      verdictMismatch: taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE ? 'evidence_adjudication_once_v1' : 'disagreement',
       confidenceMismatch: 'diagnostic_only',
       voting: 'forbidden',
       averaging: 'forbidden',
@@ -279,6 +293,9 @@ export function validateJudgeViewConfiguration(artifact) {
   const { view, taskProfile } = artifact.payload
   assertView(view)
   validateTaskJudgeProfile(taskProfile, view)
+  const observable = taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE
+  if (artifact.payload.reconciliation.verdictMismatch !== (observable ? 'evidence_adjudication_once_v1' : 'disagreement')
+      || observable && artifact.payload.promptTemplates.adjudication !== digest(ADJUDICATION_INSTRUCTION)) throw new Error('Judge reconciliation policy changed after freezing')
   const checklist = VIEW_CHECKLISTS[view]
   if (!exactSet(artifact.payload.checklist, checklist)) {
     throw new Error('Judge View Configuration checklist is not exact')
@@ -441,7 +458,7 @@ export function validateJudgeViewPack(artifact, { configuration, sourcePack = nu
     }
   }
   const kinds = new Set((modelInput.evidenceSegments ?? []).map((segment) => segment.kind))
-  if (view === 'outcome' && [...kinds].some((kind) => !(configuration.payload.taskProfile?.version === RECEIPT_TASK_JUDGE_PROFILE ? ['artifact', 'final_response', 'verification_receipt', 'delivery_message'] : configuration.payload.taskProfile ? ['artifact', 'final_response'] : ['code', 'final_response']).includes(kind))) {
+  if (view === 'outcome' && [...kinds].some((kind) => !(usesReceipts(configuration.payload.taskProfile?.version) ? ['artifact', 'final_response', 'verification_receipt', 'delivery_message'] : configuration.payload.taskProfile ? ['artifact', 'final_response'] : ['code', 'final_response']).includes(kind))) {
     throw new Error('Outcome Judge model input contains process evidence')
   }
   if (view === 'process' && !configuration.payload.taskProfile) {
@@ -520,19 +537,26 @@ export async function executeJudgeView({
         now,
         wait
       })))
-  const review = reconcileJudgeView({ configuration, pack, replicas, producerDigest })
+  let adjudication = null
+  const context = adjudicationContext(replicas, pack)
+  if (configuration.payload.taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE && context.disputes.length) {
+    adjudication = await executeViewReplica({ replica: 'A', configuration, pack, invokeReplica,
+      judgeExecutionId: `${judgeExecutionId}:adjudication`, timeoutMilliseconds, now, wait, adjudicationContext: context })
+  }
+  const review = reconcileJudgeView({ configuration, pack, replicas, producerDigest, adjudication })
   validateJudgeViewReview(review, { configuration, pack, replicas })
   return { replicas, review }
 }
 
-export function reconcileJudgeView({ configuration, pack, replicas, producerDigest }) {
+export function reconcileJudgeView({ configuration, pack, replicas, producerDigest, adjudication = null }) {
   validateExactReplicas(replicas)
   const view = configuration.payload.view
-  const { state, items, unavailableReason } = deriveViewReconciliation(view, replicas, pack)
+  const { state, items, unavailableReason } = deriveViewReconciliation(view, replicas, pack, adjudication)
   const identity = sha256(canonicalJson({
     configuration: artifactReference(configuration),
     pack: artifactReference(pack),
-    replicas: replicas.map(artifactReference)
+    replicas: replicas.map(artifactReference),
+    ...(adjudication ? { adjudication: artifactReference(adjudication) } : {})
   })).slice(0, 32)
   return envelope({
     artifactId: `semantic-judge-view-review:${view}:${identity}`,
@@ -551,6 +575,7 @@ export function reconcileJudgeView({ configuration, pack, replicas, producerDige
       configurationArtifact: artifactReference(configuration),
       packArtifact: artifactReference(pack),
       replicaArtifacts: replicas.map(artifactReference),
+      ...(adjudication ? { adjudication } : {}),
       state,
       items,
       unavailableReason
@@ -561,6 +586,8 @@ export function reconcileJudgeView({ configuration, pack, replicas, producerDige
 export function validateJudgeViewReplicaResult(artifact, { configuration, pack }) {
   validateEnvelope(artifact, JUDGE_VIEW_REPLICA_SCHEMA_ID, 'Judge View Replica Result')
   const view = configuration.payload.view
+  if (artifact.payload.adjudicationContext && (configuration.payload.taskProfile?.version !== OBSERVABLE_TASK_JUDGE_PROFILE
+      || artifact.payload.promptDigest !== digest(adjudicationPrompt(view, configuration.payload.taskProfile, artifact.payload.adjudicationContext)))) throw new Error('Invalid adjudication prompt binding')
   if (artifact.payload.view !== view
       || artifact.payload.replicaResultId !== artifact.artifactId
       || typeof artifact.payload.judgeExecutionId !== 'string'
@@ -623,7 +650,17 @@ export function validateJudgeViewReview(artifact, { configuration, pack, replica
       )) {
     throw new Error('Judge View Review binding is invalid')
   }
-  const expected = deriveViewReconciliation(view, replicas, pack)
+  const adjudication = artifact.payload.adjudication ?? null
+  const context = adjudicationContext(replicas, pack)
+  const expectedAdjudication = configuration.payload.taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE && context.disputes.length > 0
+  if (Boolean(adjudication) !== expectedAdjudication) throw new Error('Judge View adjudication missing or outside frozen policy')
+  if (adjudication) {
+    validateJudgeViewReplicaResult(adjudication, { configuration, pack })
+    if (canonicalJson(adjudication.payload.adjudicationContext) !== canonicalJson(context)
+        || adjudication.payload.judgeExecutionId !== `${replicas[0].payload.judgeExecutionId}:adjudication`
+        || adjudication.payload.attempts.length !== 1) throw new Error('Adjudication is not bound to the original disagreement')
+  }
+  const expected = deriveViewReconciliation(view, replicas, pack, adjudication)
   if (artifact.payload.state !== expected.state
       || canonicalJson(artifact.payload.items) !== canonicalJson(expected.items)
       || canonicalJson(artifact.payload.unavailableReason) !== canonicalJson(
@@ -678,6 +715,7 @@ export function buildSemanticJudgeViewSuite({
         detail: `${unavailable.configuration.payload.view} Judge is unavailable.`
       }
     : null
+  const protocolId = viewExecutions.some(execution => execution.configuration.payload.taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE) ? 'semantic-dual-view-judge-2' : 'semantic-dual-view-judge-1'
   const seed = {
     views: views.map((view) => ({
       view: view.view,
@@ -701,13 +739,14 @@ export function buildSemanticJudgeViewSuite({
     )],
     payload: {
       suiteId: `semantic-judge-view-suite:${identity}`,
-      protocolId: 'semantic-dual-view-judge-1',
+      protocolId,
       state,
       views,
       compatibilityItems,
       unavailableReason
     }
   })
+  if (protocolId === 'semantic-dual-view-judge-2') artifact.schemaVersion = '2.0.0'
   validateSemanticJudgeViewSuite(artifact)
   return artifact
 }
@@ -715,10 +754,10 @@ export function buildSemanticJudgeViewSuite({
 export function validateSemanticJudgeViewSuite(artifact) {
   validateEnvelope(artifact, JUDGE_VIEW_SUITE_SCHEMA_ID, 'Semantic Judge View Suite')
   validateQualificationContractArtifactSchema(
-    'semantic-judge-view-suite-v1.schema.json',
+    artifact.payload.protocolId === 'semantic-dual-view-judge-2' ? 'semantic-judge-view-suite-v2.schema.json' : 'semantic-judge-view-suite-v1.schema.json',
     artifact
   )
-  if (artifact.payload.protocolId !== 'semantic-dual-view-judge-1'
+  if (!['semantic-dual-view-judge-1', 'semantic-dual-view-judge-2'].includes(artifact.payload.protocolId)
       || !['complete', 'disagreement', 'unavailable'].includes(artifact.payload.state)
       || !Array.isArray(artifact.payload.views)
       || artifact.payload.views.length !== 2
@@ -1078,7 +1117,7 @@ function projectEvidenceSegments(source, registry, view, taskProfile) {
   const allowedKinds = view === 'outcome'
     ? new Set(['code', 'final_response'])
     : new Set(['participant_message', 'code', 'final_response'])
-  const receipts = taskProfile?.version === RECEIPT_TASK_JUDGE_PROFILE
+  const receipts = usesReceipts(taskProfile?.version)
   const sourceSegments = (source.untrustedEvidence ?? [])
     .filter((segment) => allowedKinds.has(segment.kind) || receipts && (segment.kind === 'test_output'
       || segment.kind === 'comment' && (segment.segmentId.startsWith('delivery-message:') || view === 'process' && segment.segmentId.startsWith('task-description:'))))
@@ -1231,13 +1270,14 @@ async function executeViewReplica({
   judgeExecutionId,
   timeoutMilliseconds,
   now,
-  wait
+  wait,
+  adjudicationContext = null
 }) {
   const view = configuration.payload.view
   const attempts = []
   let items = null
   let unavailableReason = null
-  const maximum = configuration.payload.retrySchedule.maximumTransportAttempts
+  const maximum = adjudicationContext ? 1 : configuration.payload.retrySchedule.maximumTransportAttempts
   for (let attempt = 1; attempt <= maximum; attempt += 1) {
     const startedAt = now()
     try {
@@ -1246,7 +1286,7 @@ async function executeViewReplica({
         replica,
         presentationOrder: presentationOrder(view, replica),
         systemPrompt: VIEW_PROMPTS[view],
-        userPrompt: promptTemplate(view, replica, configuration.payload.taskProfile),
+        userPrompt: adjudicationContext ? adjudicationPrompt(view, configuration.payload.taskProfile, adjudicationContext) : promptTemplate(view, replica, configuration.payload.taskProfile),
         evidencePack: structuredClone(pack.payload.modelInput),
         decodingParameters: structuredClone(configuration.payload.decodingParameters),
         capabilities: structuredClone(configuration.payload.capabilities)
@@ -1306,6 +1346,7 @@ async function executeViewReplica({
       view,
       judgeExecutionId,
       invocationState: 'invoked',
+      ...(adjudicationContext ? { adjudicationContext, promptDigest: digest(adjudicationPrompt(view, configuration.payload.taskProfile, adjudicationContext)) } : {}),
       configurationArtifact: artifactReference(configuration),
       packArtifact: artifactReference(pack),
       replica,
@@ -1635,12 +1676,14 @@ function collectLocalEvidenceIds(value) {
 }
 
 function viewPolicy(view, taskProfile) {
+  if (taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-5`
   if (taskProfile?.version === RECEIPT_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-4`
   if (taskProfile?.version === EVIDENCE_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-3`
   return taskProfile ? `semantic-${view}-generic-task-pack-2` : VIEW_POLICIES[view]
 }
 
 function viewRubric(view, taskProfile) {
+  if (taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE) return view === 'outcome' ? OBSERVABLE_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(OBSERVABLE_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === RECEIPT_TASK_JUDGE_PROFILE) return view === 'outcome' ? RECEIPT_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(RECEIPT_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === EVIDENCE_TASK_JUDGE_PROFILE) return view === 'outcome' ? EVIDENCE_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(EVIDENCE_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   return taskProfile && view === 'outcome' ? TASK_OUTCOME_RUBRIC : VIEW_RUBRICS[view]
@@ -1682,7 +1725,7 @@ function replicaObservation(item) {
   }
 }
 
-function deriveViewReconciliation(view, replicas, pack) {
+function deriveViewReconciliation(view, replicas, pack, adjudication = null) {
   const unavailable = replicas.find((replica) => replica.payload.state === 'unavailable')
   if (unavailable) {
     return {
@@ -1698,16 +1741,18 @@ function deriveViewReconciliation(view, replicas, pack) {
     const itemA = replicas[0].payload.items.find((item) => item.checklistItem === checklistItem)
     const itemB = replicas[1].payload.items.find((item) => item.checklistItem === checklistItem)
     const agreed = itemA.verdict === itemB.verdict
-    const evidenceIds = uniqueStrings([...itemA.evidenceIds, ...itemB.evidenceIds])
+    const decision = !agreed && adjudication?.payload.state === 'complete' ? adjudication.payload.items.find(item => item.checklistItem === checklistItem) : null
+    const evidenceIds = uniqueStrings([...itemA.evidenceIds, ...itemB.evidenceIds, ...(decision?.evidenceIds ?? [])])
     return {
       checklistItem,
-      state: agreed ? 'agreed' : 'disagreed',
-      verdict: agreed ? itemA.verdict : null,
+      state: agreed ? 'agreed' : decision ? 'adjudicated' : 'disagreed',
+      verdict: agreed ? itemA.verdict : decision?.verdict ?? null,
+      ...(decision ? { adjudication: replicaObservation(decision) } : {}),
       replicaA: replicaObservation(itemA),
       replicaB: replicaObservation(itemB),
       evidenceIds,
       evidenceReferences: resolveEvidenceIds(evidenceIds, pack),
-      reason: boundedReason(agreed
+      reason: boundedReason(decision ? `Adjudicated once from the same evidence; original A=${itemA.verdict}, B=${itemB.verdict}. ${decision.reason}` : agreed
         ? `Replica A: ${itemA.reason} Replica B: ${itemB.reason}`
         : `Verdict mismatch. Replica A: ${itemA.reason} Replica B: ${itemB.reason}`)
     }
@@ -1798,7 +1843,7 @@ function envelope({ artifactId, schemaId, producer, binding, sourceBoundaries, p
 
 function validateEnvelope(artifact, schemaId, label) {
   if (artifact?.schemaId !== schemaId
-      || artifact.schemaVersion !== JUDGE_VIEW_SCHEMA_VERSION
+      || !(artifact.schemaVersion === JUDGE_VIEW_SCHEMA_VERSION || schemaId === JUDGE_VIEW_SUITE_SCHEMA_ID && artifact.schemaVersion === '2.0.0' && artifact.payload?.protocolId === 'semantic-dual-view-judge-2')
       || artifact.payloadDigest !== digest(artifact.payload)
       || !validArtifactId(artifact.artifactId)
       || !Array.isArray(artifact.sourceBoundaries)
@@ -1841,7 +1886,7 @@ function artifactReference(artifact) {
 function validArtifactReference(value) {
   return validArtifactId(value?.artifactId)
     && typeof value.schemaId === 'string'
-    && value.schemaVersion === JUDGE_VIEW_SCHEMA_VERSION
+    && (value.schemaVersion === JUDGE_VIEW_SCHEMA_VERSION || value.schemaId === JUDGE_VIEW_SUITE_SCHEMA_ID && value.schemaVersion === '2.0.0')
     && /^sha256:[a-f0-9]{64}$/.test(value.payloadDigest ?? '')
 }
 
