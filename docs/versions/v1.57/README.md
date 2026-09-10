@@ -11,7 +11,7 @@ last_updated: 2026-09-10
 
 # Rovai-ai v1.57：上下文 Gate 与双轨评测
 
-前置：[v1.56](../v1.56/README.md)。本版本实现[四项治理愿景](../../research/agent-governance-vision.md)中的第二项：Gate／每周真实任务回归与每日 Trace 规则分析。长期规则见 [Execution Evaluation v4](../../contracts/execution-evaluation-v4.md)，操作见[开发指南](../../development/evaluation.md)。
+前置：[v1.56](../v1.56/README.md)。本版本实现[四项治理愿景](../../research/agent-governance-vision.md)中的第二项：Gate／每周真实任务回归与每日 Trace 规则分析。长期规则见 [Execution Evaluation v5](../../contracts/execution-evaluation-v5.md)，操作见[开发指南](../../development/evaluation.md)。
 
 ## 范围与状态
 
@@ -35,10 +35,12 @@ last_updated: 2026-09-10
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.56 冻结，本概览、实施计划及[版本索引](../README.md)建立唯一 current v1.57 |
 | Decisions | 已更新 | [V1.57-D01](decisions.md#v1-57-d01)记录元数据与分析 Agent 的权限分离 |
-| Contracts | 已更新 | [Execution Evaluation v4](../../contracts/execution-evaluation-v4.md)、[User Automation v4](../../contracts/user-automation-v4.md)及索引 |
+| Contracts | 已更新 | [Execution Evaluation v5](../../contracts/execution-evaluation-v5.md)、[User Automation v4](../../contracts/user-automation-v4.md)及索引 |
 | Architecture | 已更新 | [双轨执行评测](../../architecture/execution-evaluation.md)、User Automation 当前路由 |
 | UI | 已更新 | 复用 Camp 与文件入口，增加离线 HTML、质量和协作对照；保留 SVG/Markdown/JSON，无 Renderer 或 App 沙箱改动 |
 | Runtime Activity | 确认无需更新 | 只读取当前 classifier 既有证据，不修改分类、事件或 Activity 投影 |
 | Runtime compatibility | 确认无需更新 | 复用现有 Runtime Adapter；局部评测验证不提升平台或 Runtime 资格 |
 | Documentation routing | 已更新 | 文档导航、开发入口、上下文治理、Contracts、Architecture 与 CURRENT 纳入双轨评测 |
 | Root README | 确认无需更新 | 项目定位与支持平台不变；开发评测操作由 development 入口拥有 |
+
+评测证据采集、Judge 未知处理及报告结论修订见[证据与报告完整性修订](evaluation-evidence-completeness.md)。

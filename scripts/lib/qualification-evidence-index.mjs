@@ -31,6 +31,7 @@ export function buildEvidenceIndex({
   executionEvidenceCoverage,
   verifierObservation,
   deliveredWorkspaceSnapshot,
+  deliveredWorkspaceEntries = [],
   workspaceDiff,
   deliveryEvidence,
   convergence,
@@ -267,6 +268,9 @@ export function buildEvidenceIndex({
       const isFinalResponse = finalResponseIds.has(message.id)
       const isDeliveredA2aMessage = deliveriesByMessageId.has(message.id)
       const isToolRetrievedMessage = retrievedMessageIds.has(message.id)
+      const isPublicTrialMessage = message.authorType === 'agent'
+        && trialRunIds.has(message.sourceAgentRunId)
+        && message.campTurnId === dispatchBoundary?.campTurnId
       addSourceRecord({
         evidenceId,
         evidenceType: isFinalResponse ? 'final_response' : 'core_domain',
@@ -303,10 +307,10 @@ export function buildEvidenceIndex({
           observedAt: message.createdAt,
           content,
           contentDigestOverride: bodyDigest,
-          safeForJudge: isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage,
+          safeForJudge: isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage || isPublicTrialMessage,
           safeForPublic: false
         })
-        if (isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage) {
+        if (isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage || isPublicTrialMessage) {
           references.messageContents[message.id] = evidenceReference(
             artifactId,
             contentEvidenceId
@@ -525,6 +529,16 @@ export function buildEvidenceIndex({
         )
       }
     }
+  }
+
+  // Full captured files are distinct from mutations. A missing edit must not
+  // hide the unchanged artifact from an explicitly opted-in task Judge.
+  for (const entry of deliveredWorkspaceEntries) {
+    const contentEvidenceId = stableEvidenceId('runner.workspace-content', entry.path)
+    if (records.has(contentEvidenceId) || entry.type !== 'file' || !/^[a-f0-9]{64}$/.test(entry.digest ?? '')) continue
+    addSourceRecord({ evidenceId: contentEvidenceId, evidenceType: 'workspace_fact', authorityClass: 'runner', sourceId: 'runner.workspace',
+      content: { path: entry.path, type: entry.type, bytes: entry.bytes, digest: withSha256Prefix(entry.digest) }, contentDigestOverride: entry.digest, safeForJudge: true, safeForPublic: false })
+    references.workspaceContents[entry.path] = evidenceReference(artifactId, contentEvidenceId)
   }
 
   addSourceRecord({
@@ -966,7 +980,7 @@ function boundedContextManifestSummary(manifest) {
   }
 }
 
-function stableEvidenceId(prefix, nativeId) {
+export function stableEvidenceId(prefix, nativeId) {
   const candidate = `${prefix}:${nativeId}`
   return candidate.length <= 160 && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(candidate)
     ? candidate

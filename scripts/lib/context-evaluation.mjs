@@ -5,7 +5,7 @@ import { digestFile, digestJson, runCaptured, verifyStoredCaseSeal, writePrivate
 import { loadQualificationResultHistory, computeQualificationEvaluatorDigest } from './qualification-recovery.mjs'
 import { validateScoring, evaluateQualityAndCollaboration, semanticVerdict } from './context-quality.mjs'
 import { renderGateHtml, renderReportIndex, sanitizeReportLinks } from '../../packages/evaluation/src/report-html.ts'
-import { TASK_OUTCOME_RUBRIC } from './context-judge-profile.mjs'
+import { TASK_OUTCOME_RUBRIC, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC } from './context-judge-profile.mjs'
 import { PROCESS_JUDGE_RUBRIC, OUTCOME_JUDGE_RUBRIC } from './qualification-judge-views.mjs'
 import { validateRegressionConfiguration } from './context-regression-fixture.mjs'
 import { runCurrentContractConformance } from '../benchmark/execution/current-contract-runner.mjs'
@@ -114,7 +114,7 @@ export async function freezePlan(config, output) {
     if (sealed.contract.manifest.id !== item.id || sealed.contract.manifest.version !== item.version) throw new Error('Case manifest identity differs from the suite')
     const required = Math.max(item.rules.minAcceptedA2a ?? 0, 0)
     if (team.length < Math.max(required > 0 ? 2 : 1, (item.rules.minDistinctA2aRecipients ?? 0) + 1)) throw new Error(`${item.id} requires a team`)
-    cases.push({ ...item, directory, seal: sealed.seal, definitionDigest: digestJson(item), budget: sealed.contract.manifest.budget })
+    cases.push({ ...item, title: sealed.contract.manifest.title, directory, seal: sealed.seal, definitionDigest: digestJson(item), budget: sealed.contract.manifest.budget })
   }
   if (!config.change.document || !config.change.revision || !config.change.before || !config.change.after || !config.change.invariants || !config.change.confirmation) throw new Error('A reviewable change document, revision, before/after, invariants and confirmation record are required')
   if (config.mode === 'gate') {
@@ -131,7 +131,7 @@ export async function freezePlan(config, output) {
   }
   const plan = { schemaVersion: 1, createdAt: new Date().toISOString(), mode: config.mode, change: { ...config.change, document: resolve(config.change.document), documentDigest: digestJson(document) },
     scoring, scoringPath, scoringDigest: digestJson(scoring), tier: selected.tier, suite: { id: suite.id, version: suite.version, partition: suite.partition, digest: digestJson(suite), path: suitePath }, cases, products, team, repetitions: config.repetitions, budget: config.budget, execution, judge, policy: POLICY,
-    rubricDigest: digestJson({ process: PROCESS_JUDGE_RUBRIC, outcome: TASK_OUTCOME_RUBRIC, scoring }), evaluatorDigest: await evaluatorDigest(),
+    rubricDigest: digestJson({ process: scoring.version === '2.1.0' ? EVIDENCE_PROCESS_RUBRIC : PROCESS_JUDGE_RUBRIC, outcome: scoring.version === '2.1.0' ? EVIDENCE_OUTCOME_RUBRIC : TASK_OUTCOME_RUBRIC, scoring }), evaluatorDigest: await evaluatorDigest(),
     environment: { platform: process.platform, architecture: process.arch, node: process.version },
     holdout: { status: 'not_run', reason: 'Independent acceptance cases are separate from the regression suite.' } }
   const sealed = { ...plan, planDigest: digestJson(plan) }
@@ -230,7 +230,16 @@ export function compareResults(plan, slots, contracts) {
       if (change.kind !== 'unchanged') changes.push(change)
     }
   }
-  return { status: regressions.length ? 'degraded' : problems.length ? 'insufficient' : 'passed', regressions, evidenceGaps: problems, semanticChanges: changes, resourceChanges, ...(assessment ? { assessment } : {}) }
+  const trialCount = items => new Set(items.filter(item => item.caseId).map(item => `${item.caseId}/${item.repeat}`)).size
+  const detected = regressions.filter(item => item.newRegression === true || ['elapsed_time_regression', 'semantic_regression'].includes(item.code))
+  const conclusions = {
+    acceptance: regressions.length ? 'failed' : problems.length ? 'incomplete' : 'passed',
+    regression: plan.mode !== 'gate' ? 'not_compared' : detected.length ? 'detected' : problems.length ? 'inconclusive' : 'not_detected',
+    evaluation: problems.length ? 'incomplete' : 'complete',
+    failedTrials: trialCount(regressions), evidenceGapTrials: trialCount(problems), newRegressionTrials: trialCount(detected),
+    failureRecords: regressions.length, evidenceGapRecords: problems.length
+  }
+  return { status: regressions.length ? 'degraded' : problems.length ? 'insufficient' : 'passed', conclusions, regressions, evidenceGaps: problems, semanticChanges: changes, resourceChanges, ...(assessment ? { assessment } : {}) }
 }
 function semanticItem(slot, id) { return slot.semanticItems?.find(item => item.checklistItem === id) }
 
@@ -274,7 +283,7 @@ export async function runPlan(planPath, outputRoot) {
       const { item, repeat } = group
       const arms = plan.mode === 'weekly' ? ['candidate'] : (repeat + plan.cases.indexOf(item)) % 2 ? ['baseline', 'candidate'] : ['candidate', 'baseline']
       for (const arm of arms) {
-        const slot = { caseId: item.id, repeat, arm, state: 'not_run', reason: null }
+        const slot = { caseId: item.id, caseTitle: item.title ?? item.id, repeat, arm, state: 'not_run', reason: null }
         group.slots.push(slot)
         const id = `${item.id}-${repeat}-${arm}`, trialDirectory = join(directory, 'trials', id)
         if (contracts[arm]?.status !== 'passed') { slot.reason = 'Contract checks did not pass'; continue }
@@ -343,5 +352,5 @@ export function renderGateReport(report) {
   const assessment = report.assessment
   const quality = assessment ? `\n通用质量：基线 ${assessment.arms.baseline?.quality.total ?? '评价未完成'} → 候选 ${assessment.arms.candidate.quality.total ?? '评价未完成'}；评分版本 ${assessment.scoring.version}。协作只保留分项状态，不计综合分。\n\n| 协作组 | 满足/适用计划 | 未知/适用计划 | 独立适用 Case |\n|---|---|---|---|\n${Object.entries(assessment.arms.candidate.collaboration.groups).map(([id, d]) => `| ${id} | ${d.counts.satisfied}/${d.applicableTrials} | ${d.counts.indeterminate}/${d.applicableTrials} | ${d.applicableCases} |`).join('\n')}\n` : '\n此历史报告未使用当前评分标准，不换算新分数。\n'
   const rows = report.slots.map(slot => `| ${slot.caseId} | ${slot.repeat} | ${slot.arm} | ${slot.state} | ${slot.hardOutcome ?? 'unknown'} | ${slot.rules?.length ? slot.rules.filter(rule => rule.status !== 'passed').map(rule => `${rule.id}: ${rule.status}`).join(', ') || 'passed' : 'unknown'} | ${slot.judgeStatus ?? 'not_run'} |`).join('\n')
-  return `# ${report.kind === 'weekly_regression' ? '每周真实任务回归' : '上下文改动 Gate'}\n\n结论：**${report.status}**。仅对应计划 ${report.planDigest} 与报告中的实际版本。\n\n[交互报告](report.html) · [完整报告](report.json) · [冻结计划](plan.json)${quality}\n\n| Case | 重复 | 版本 | 执行证据 | HardOutcome | 专项规则 | 语义评价 |\n|---|---|---|---|---|---|---|\n${rows}\n\n退化或验收失败：${report.regressions.length}；证据缺口：${report.evidenceGaps.length}。硬性错误不可由语义得分抵消。Judge 的缺失、分歧或不足不算通过。历史失败保留，不使用 pass@k。\n\n独立验收保留集：${report.holdout.status}。本报告不声称用户任务成功率或实际能力提升。\n`
+  return `# ${report.kind === 'weekly_regression' ? '每周真实任务回归' : '上下文改动 Gate'}\n\n结论：**${report.status}**。仅对应计划 ${report.planDigest} 与报告中的实际版本。\n\n[交互报告](report.html) · [完整报告](report.json) · [冻结计划](plan.json)${quality}\n\n| Case | 重复 | 版本 | 执行证据 | HardOutcome | 专项规则 | 语义评价 |\n|---|---|---|---|---|---|---|\n${rows}\n\n验收：${report.conclusions?.acceptance ?? report.status}；新旧比较：${report.conclusions?.regression ?? "unknown"}；评价完整性：${report.conclusions?.evaluation ?? "unknown"}。失败涉及 ${report.conclusions?.failedTrials ?? "unknown"} 次 Trial，证据缺口涉及 ${report.conclusions?.evidenceGapTrials ?? "unknown"} 次 Trial；同一 Trial 可同时存在失败与未知。硬性错误不可由语义得分抵消。Judge 的缺失、分歧或不足不算通过。历史失败保留，不使用 pass@k。\n\n独立验收保留集：${report.holdout.status}。本报告不声称用户任务成功率或实际能力提升。\n`
 }

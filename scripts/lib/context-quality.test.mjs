@@ -106,3 +106,13 @@ test('freeze rejects critical exclusions, missing dimensions and duplicated scor
     const p=plan();mutate(p);assert.throws(()=>validateScoring(p.scoring,p.cases))
   }
 })
+
+test('weekly separates acceptance failure, missing evaluation and unmeasured regression', () => {
+  const p = { ...plan(['DEMO-106']), mode: 'weekly' }, after = slot(p, 'candidate')
+  after.hardOutcome = 'fail'
+  after.semanticItems[0].verdict = 'not_satisfied'
+  after.semanticItems[1].state = 'disagreed'
+  const report = compareResults(p, [after], { candidate: { status: 'passed' } })
+  assert.equal(report.status, 'degraded')
+  assert.deepEqual(report.conclusions, { acceptance: 'failed', regression: 'not_compared', evaluation: 'incomplete', failedTrials: 1, evidenceGapTrials: 1, newRegressionTrials: 0, failureRecords: 2, evidenceGapRecords: 1 })
+})

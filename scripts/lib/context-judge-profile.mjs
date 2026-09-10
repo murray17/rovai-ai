@@ -1,6 +1,7 @@
 // This opt-in profile changes evaluation evidence, never the product's context.
 // Legacy Judge Views keep their original prompt and projection when absent.
 export const TASK_JUDGE_PROFILE = 'generic-task-v2'
+export const EVIDENCE_TASK_JUDGE_PROFILE = 'generic-task-v3'
 export const TASK_OUTCOME_RUBRIC = Object.freeze({
   'SER.requirements.understanding': 'Assess the delivered goals and subgoals specified in case.acceptance. Method requirements such as delegation, history retrieval and tool use are checked separately; do not infer their execution from the final output. A prescribed escalation or honest blocked result can fulfill a task; refusing a normally achievable task cannot.',
   'SER.design.solution_fit': 'Assess whether the chosen approach and output structure fit this task and its constraints. Do not require a software design for a non-code task.',
@@ -13,10 +14,26 @@ export const TASK_OUTCOME_RUBRIC = Object.freeze({
 export const TASK_PROCESS_IDS = Object.freeze(['delegation', 'handoff_clarity', 'contribution_value', 'feedback_absorption', 'lead_integration'].map(id => `SER.collaboration.${id}`))
 export const TASK_OUTCOME_IDS = Object.freeze(Object.keys(TASK_OUTCOME_RUBRIC))
 
+// Frozen separately: old reports continue to replay with their original rubric.
+export const EVIDENCE_OUTCOME_RUBRIC = Object.freeze({
+  ...TASK_OUTCOME_RUBRIC,
+  'SER.requirements.understanding': `${TASK_OUTCOME_RUBRIC['SER.requirements.understanding']} Understanding or describing a required repair does not fulfill it. Judge achieved outcomes, not stated intentions.`,
+  'SER.testing.strategy': `${TASK_OUTCOME_RUBRIC['SER.testing.strategy']} Separate evaluator verification from agent-reported verification. A passing verifier proves the checked artifact behavior, not that the agent ran the claimed command.`,
+  'SER.response.claim_accuracy': 'Check each material completion, factual and verification claim against the supplied evidence. Satisfied: all material claims are supported. Partially satisfied: an evidenced, noncritical discrepancy exists. Not satisfied: an evidenced material false completion or verification claim exists. Indeterminate: a material claim cannot be checked because its source or execution record is missing. Missing corroboration alone is never a discrepancy and must not be converted into a half score. An explicitly completed review is not a claim that repairs are complete; missing repairs are assessed under goal attainment. Do not use final-response prose to corroborate itself.',
+  'SER.response.limitations': `${TASK_OUTCOME_RUBRIC['SER.response.limitations']} Do not require the agent to disclose gaps created only by the evaluator export. Do not demand generic caveats when the task is bounded and the supplied evidence shows no material limitation.`
+})
+export const EVIDENCE_PROCESS_RUBRIC = Object.freeze({
+  delegation: 'Assess necessity and suitable division of work for the disclosed task; more calls never imply quality.',
+  handoff_clarity: 'Assess whether goals, constraints, available evidence and expected result are sufficiently communicated, without requiring a fixed template.',
+  contribution_value: 'Assess actual task-relevant member contributions. Missing member content is indeterminate; an observed empty or irrelevant response is not satisfied.',
+  feedback_absorption: 'Compare concrete member feedback with later delivery: resolved findings or an explained, justified rejection support absorption. Unresolved required feedback supports failure. Use observable content and reply relations, not claims about internal causality. Do not require a ceremonial acknowledgement.',
+  lead_integration: 'Assess whether available contributions are selected and reconciled into a coherent final delivery. Compare their concrete substance and the delivered result; do not demand proof of the model internal causal process or a courtesy callback. Missing contributions or final delivery evidence is indeterminate.'
+})
+
 export function validateTaskJudgeProfile(profile, view) {
   if (profile === undefined || profile === null) return null
   const ids = view === 'process' ? TASK_PROCESS_IDS : TASK_OUTCOME_IDS
-  if (profile.version !== TASK_JUDGE_PROFILE || !Array.isArray(profile.items)
+  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
       || profile.items.length !== ids.length || new Set(profile.items.map(item => item.checklistItem)).size !== ids.length
       || profile.items.some(item => !ids.includes(item.checklistItem) || typeof item.applicable !== 'boolean'
         || typeof item.criterion !== 'string' || !item.criterion.trim() || item.criterion.length > 4000
@@ -26,5 +43,5 @@ export function validateTaskJudgeProfile(profile, view) {
 
 export function taskJudgeProfile(caseEvaluation, view) {
   const items = view === 'process' ? caseEvaluation.collaboration : caseEvaluation.quality.filter(item => item.source === 'outcome')
-  return validateTaskJudgeProfile({ version: TASK_JUDGE_PROFILE, items: items.map(({ checklistItem, applicable, criterion }) => ({ checklistItem, applicable, criterion })) }, view)
+  return validateTaskJudgeProfile({ version: caseEvaluation.judgeProfile ?? TASK_JUDGE_PROFILE, items: items.map(({ checklistItem, applicable, criterion }) => ({ checklistItem, applicable, criterion })) }, view)
 }

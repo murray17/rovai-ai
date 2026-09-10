@@ -722,6 +722,7 @@ async function runTrial(options, registerCleanup) {
     observationIntegrityIssues,
     executionEvidenceCoverage,
     verifierObservation,
+    deliveredWorkspaceEntries: finalManifest?.entries ?? [],
     deliveredWorkspaceSnapshot: deliveredSnapshot ? {
       digest: finalManifest.digest,
       directory: basename(deliveredSnapshot.path),

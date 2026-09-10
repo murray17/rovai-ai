@@ -42,6 +42,12 @@ describe('offline report contract — synthetic fixtures only',()=>{
     expect(html).not.toContain('<img src=x');expect(html).not.toContain('</script><script>alert(1)')
     expect(html).toContain("script-src 'sha256-")
   })
+  it('separates weekly acceptance, missing evaluation and absence of baseline without hiding trial evidence',()=>{
+    const html=renderGateHtml({kind:'weekly_regression',status:'degraded',conclusions:{acceptance:'failed',regression:'not_compared',evaluation:'incomplete',failedTrials:1,evidenceGapTrials:1},regressions:[{caseId:'DEMO-106',repeat:1,code:'candidate_hard_failure'}],evidenceGaps:[{caseId:'DEMO-109',repeat:1,code:'quality_evaluation_incomplete',items:['claim_accuracy']}],slots:[{caseId:'DEMO-106',caseTitle:'Review then repair <script>bad</script>',arm:'candidate',repeat:1,hardOutcome:'fail',state:'complete',judgeStatus:'disagreement',rules:[]}]})
+    for(const text of ['本轮验收','未进行基线对照','存在证据缺口','验收失败涉及 1 次 Trial','产物或专项规则验收失败','claim_accuracy','id="case-DEMO-106"'])expect(html).toContain(text)
+    expect(html).not.toContain('<script>bad</script>')
+    expect(html).toContain('不能判断是否由改动造成退化')
+  })
   it('disables absent or symlink evidence while preserving inert contained files',async()=>{
     const root=await temp(),outside=await temp()
     await writeFile(join(root,'report.json'),'{}');await writeFile(join(outside,'secret.json'),'{}')

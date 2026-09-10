@@ -137,7 +137,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime File Change Observation v2（历史）](runtime-file-change-observation-v2.md) | v1 Evidence/投影/呈现不变；精确排除当前 `ROVAI_RUN_TMP` 临时交付区，mixed evidence 保留普通文件且不迁移历史数据 |
 | [Runtime File Change Observation v1（历史）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation；不含 managed output exclusion |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
-| [Semantic Judge Views v2（当前）](semantic-judge-views-v2.md) | 通用任务 profile、冻结 Case 适用性、受控交付物证据与旧 profile 追溯 |
+| [Semantic Judge Views v3（当前）](semantic-judge-views-v3.md) | 受控输入和公开成员消息补全、View 内引用、逐项格式故障隔离与未知边界 |
+| [Semantic Judge Views v2（历史）](semantic-judge-views-v2.md) | 通用任务 profile、冻结 Case 适用性、受控交付物证据与旧 profile 追溯 |
 | [Semantic Judge Views v1（历史）](semantic-judge-views-v1.md) | Process/Blinded Outcome 双视图、模型可见 evidence allowlist、本地 Evidence ID、双 Replica、逐项 reconciliation 与 Hard Outcome non-interference |
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
@@ -179,7 +180,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Usage Monitoring v2（历史）](runtime-usage-monitoring-v2.md) | 五表 clean break、内存 Usage 合并、稀疏 Token/Cache/Cost、Coverage、单 Snapshot 与有界刷新 |
 | [Runtime Monitoring v1（历史）](runtime-monitoring-v1.md) | Clean-break collection/enrollment、稀疏 Usage Observation、Native Session fact、三类查询、Coverage、Tool Duration 与 Cost layer |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
-| [Execution Evaluation v4（当前）](execution-evaluation-v4.md) | 显式预算、至多两个 Case 并行、禁工具 CLI Judge 与模型身份限制；继承 v3 证据和评分 |
+| [Execution Evaluation v5（当前）](execution-evaluation-v5.md) | 验收、退化与完整性分开；评分 2.1 和可追溯逐项报告 |
+| [Execution Evaluation v4（历史）](execution-evaluation-v4.md) | 显式预算、至多两个 Case 并行、禁工具 CLI Judge 与模型身份限制；继承 v3 证据和评分 |
 | [Execution Evaluation v3（历史）](execution-evaluation-v3.md) | 继承通用质量与双轨报告，适配当前 return lineage 与历史账本 |
 | [Execution Evaluation v2（历史）](execution-evaluation-v2.md) | 通用质量三维度、协作分项统计、关键 Gate、离线报告与分析完成记录 |
 | [Execution Evaluation v1（历史）](execution-evaluation-v1.md) | Gate 分流、冻结版本、真实规则与 Judge、有限迭代、每日统计与可比较趋势 |

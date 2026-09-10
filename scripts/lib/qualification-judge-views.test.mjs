@@ -792,3 +792,25 @@ test('frozen required collaboration cannot become N/A when no interaction was ex
     assert.equal(result.review.payload.state,caseId==='DEMO-102'?'complete':'unavailable')
   }
 })
+
+test('v3 accepts relevant in-view boundary evidence and quarantines only a malformed item', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.json', import.meta.url)))
+  const source = dualViewFixture({ buildPacks: false }).sourcePack
+  const config = { ...scoring.cases['DEMO-102'], judgeProfile: 'generic-task-v3' }
+  const configuration = buildJudgeViewConfiguration({ view: 'outcome', provider: 'fixture', snapshotId: 'fixture-v3', snapshotDigest: 'b'.repeat(64), producerDigest: 'a'.repeat(64), taskProfile: taskJudgeProfile(config, 'outcome') })
+  const pack = buildJudgeViewPack({ view: 'outcome', sourcePack: source, configuration, producerDigest: 'a'.repeat(64) })
+  const verificationId = pack.payload.modelInput.verificationFacts.flatMap(fact => fact.evidenceIds)[0]
+  assert.ok(pack.payload.modelInput.checklistCoverage.find(item => item.checklistItem === 'SER.scope.discipline').evidenceIds.includes(verificationId))
+  const execution = await executeJudgeView({ configuration, pack, producerDigest: 'a'.repeat(64), invokeReplica: async () => {
+    const items = replicaItems(pack)
+    items.find(item => item.checklistItem === 'SER.scope.discipline').evidenceIds = [verificationId]
+    items.find(item => item.checklistItem === 'SER.response.claim_accuracy').evidenceIds = ['EV-9999']
+    return { items }
+  } })
+  assert.equal(execution.review.payload.items.length, 7)
+  assert.equal(execution.review.payload.items.find(item => item.checklistItem === 'SER.scope.discipline').verdict, 'satisfied')
+  assert.equal(execution.review.payload.items.find(item => item.checklistItem === 'SER.response.claim_accuracy').verdict, 'indeterminate')
+  assert.match(execution.review.payload.items.find(item => item.checklistItem === 'SER.response.claim_accuracy').reason, /evidence_out_of_pack/)
+})

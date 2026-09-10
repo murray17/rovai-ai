@@ -125,7 +125,7 @@ test('Collaboration message evidence projects only delivered Public A2A bodies w
 test('Semantic untrusted evidence includes participant messages and final response but never ContextManifest or private logs', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'rovai-semantic-evidence-'))
   try {
-    await mkdir(join(directory, 'delivered'))
+    await mkdir(join(directory, 'delivered', 'src'), { recursive: true })
     const finalBody = 'Implemented the fix and verified the public checks.'
     const participantBody = 'Please inspect the state transition and report defects.'
     await writeFile(join(directory, 'final-response-evidence.json'), JSON.stringify({
@@ -365,3 +365,33 @@ function digestRecord(evidenceId, value) {
 function ref(evidenceId) {
   return { artifactId: 'evidence-index:index-1', evidenceId }
 }
+
+test('task v3 includes unchanged captured files and Gather public returns with exact source digests', async () => {
+  const { buildTaskJudgeSegments } = await import('./qualification-semantic-evidence.mjs')
+  const directory = await mkdtemp(join(tmpdir(), 'rovai-task-evidence-'))
+  try {
+    await mkdir(join(directory, 'delivered', 'src'), { recursive: true })
+    const code = 'export const value = 0\n', body = 'Member return: retain the original tree on failure.'
+    await writeFile(join(directory, 'delivered', 'src/source.mjs'), code)
+    const snapshot = { agentRuns: [{ id: 'run-1', campTurnId: 'turn-1' }], messages: [
+      { id: 'return-1', authorType: 'agent', authorId: 'member-2', sourceAgentRunId: 'run-1', campTurnId: 'turn-1', content: [{ kind: 'text', text: body }] },
+      { id: 'foreign', authorType: 'agent', authorId: 'member-2', sourceAgentRunId: 'run-1', campTurnId: 'other', content: [{ kind: 'text', text: 'FOREIGN_CANARY' }] }
+    ] }
+    const raw = JSON.stringify({ snapshot, digest: digestJson(snapshot) }) + '\n'
+    await writeFile(join(directory, 'observations.ndjson'), raw)
+    const result = { observationDigest: sha256(raw), dispatchBoundary: { campTurnId: 'turn-1' }, deliveredWorkspaceSnapshot: { directory: 'delivered' } }
+    const evidenceIndex = { artifactId: 'index-1', payload: { records: [
+      { evidenceId: `runner.workspace-content:${sha256('src/source.mjs').slice(0, 40)}`, contentDigest: `sha256:${sha256(code)}`, safeForJudge: true },
+      { evidenceId: 'core.message-content:return-1', contentDigest: `sha256:${sha256(body)}`, safeForJudge: true }
+    ] } }
+    const args = { evidenceDirectory: directory, result, evidenceIndex, evidenceFiles: ['src/source.mjs'] }
+    const segments = await buildTaskJudgeSegments(args)
+    assert.equal(segments.length, 2)
+    assert.equal(segments[0].path, 'src/source.mjs')
+    assert.equal(segments[1].content, body)
+    assert.doesNotMatch(JSON.stringify(segments), /FOREIGN_CANARY/)
+    await writeFile(join(directory, 'delivered', 'src/source.mjs'), 'tampered')
+    await assert.rejects(buildTaskJudgeSegments(args), /digest mismatch/)
+    await assert.rejects(buildTaskJudgeSegments({ ...args, evidenceFiles: ['../outside'] }), /relative|locator|path|escapes/i)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})

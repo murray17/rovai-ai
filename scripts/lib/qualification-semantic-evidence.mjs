@@ -1,5 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { join, sep } from 'node:path'
+import { stableEvidenceId } from './qualification-evidence-index.mjs'
 import {
   QUALIFICATION_RUNNER_VERSION,
   artifactFileName,
@@ -327,7 +328,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
   result,
   evidenceIndex,
   workspaceMutationLedger,
-  collaborationLedger
+  collaborationLedger,
+  caseEvaluation = null
 }) {
   const indexRecords = new Map(
     evidenceIndex.payload.records.map((record) => [record.evidenceId, record])
@@ -434,11 +436,62 @@ export async function buildSemanticJudgeUntrustedEvidence({
       })
     }
   }
+  if (caseEvaluation?.judgeProfile === 'generic-task-v3') {
+    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [] })
+    const seen = new Set(segments.map(segment => segment.evidenceReference.evidenceId))
+    for (const segment of extra) if (!seen.has(segment.evidenceReference.evidenceId)) {
+      segments.push(segment)
+      seen.add(segment.evidenceReference.evidenceId)
+    }
+  }
   for (const segment of segments) {
     if (segment.evidenceReference.artifactId !== evidenceIndex.artifactId
         || !indexRecords.has(segment.evidenceReference.evidenceId)) {
       throw new Error('Semantic Review source segment has an unresolved Evidence Reference')
     }
+  }
+  return segments
+}
+
+// Sources are retained public messages and frozen workspace files, not live
+// workspaces, private Runtime logs or model reasoning. Every body is hash-bound.
+export async function buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles }) {
+  if (!Array.isArray(evidenceFiles) || evidenceFiles.length > 64 || new Set(evidenceFiles).size !== evidenceFiles.length) throw new Error('Invalid task evidence file allowlist')
+  const indexRecords = new Map(evidenceIndex.payload.records.map(record => [record.evidenceId, record]))
+  const segments = []
+  const root = await containedRealpath(evidenceDirectory, validateRelativeLocator(result.deliveredWorkspaceSnapshot?.directory, 'Task snapshot'))
+  let totalCharacters = 0
+  for (const path of [...evidenceFiles].sort()) {
+    validateRelativeLocator(path, 'Task evidence file')
+    const evidenceReference = { artifactId: evidenceIndex.artifactId, evidenceId: stableEvidenceId('runner.workspace-content', path) }
+    const record = indexRecords.get(evidenceReference.evidenceId)
+    if (record?.safeForJudge !== true) continue
+    const absolute = await containedRealpath(root, path)
+    if (absolute !== join(root, path)) throw new Error('Task evidence file must not traverse a symlink')
+    const bytes = await readFile(absolute)
+    if (record.contentDigest !== `sha256:${sha256(bytes)}`) throw new Error('Task evidence file digest mismatch')
+    let content
+    try { content = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { continue }
+    if (!content || content.length > 50_000 || totalCharacters + content.length > 150_000) continue
+    totalCharacters += content.length
+    segments.push({ segmentId: `task-file:${path}`, kind: 'code', path, authorAgentProfileId: null, visibility: 'workspace', content, evidenceReference })
+  }
+  const raw = await readFile(join(evidenceDirectory, 'observations.ndjson'), 'utf8')
+  if (sha256(raw) !== result.observationDigest) throw new Error('Task observation digest mismatch')
+  const observation = JSON.parse(raw.trim().split('\n').at(-1))
+  if (digestJson(observation.snapshot) !== observation.digest) throw new Error('Task snapshot digest mismatch')
+  const snapshot = observation.snapshot
+  const runs = new Set(snapshot.agentRuns.filter(run => run.campTurnId === result.dispatchBoundary.campTurnId).map(run => run.id))
+  for (const message of snapshot.messages) {
+    if (message.authorType !== 'agent' || !runs.has(message.sourceAgentRunId) || message.campTurnId !== result.dispatchBoundary.campTurnId) continue
+    const body = typeof message.body === 'string' ? message.body : (message.content ?? []).filter(part => part.kind === 'text').map(part => part.text).join('')
+    const evidenceReference = { artifactId: evidenceIndex.artifactId, evidenceId: stableEvidenceId('core.message-content', message.id) }
+    const record = indexRecords.get(evidenceReference.evidenceId)
+    if (record?.safeForJudge !== true || !body || body.length > 50_000 || totalCharacters + body.length > 150_000) continue
+    if (record.contentDigest !== `sha256:${sha256(body)}`) throw new Error('Task public message digest mismatch')
+    totalCharacters += body.length
+    segments.push({ segmentId: `participant-message:${message.id}`, kind: 'participant_message', messageId: message.id, sequence: message.sequence, replyToMessageId: message.replyToCampMessageId ?? null,
+      callIds: [], taskIds: [], createdAt: message.createdAt, authorAgentProfileId: message.authorId, visibility: 'public_to_camp', content: body, evidenceReference })
   }
   return segments
 }

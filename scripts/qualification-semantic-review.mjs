@@ -49,12 +49,14 @@ const sourceConfiguration = buildSemanticJudgeConfiguration({
   retrySchedule: configurationInput.retrySchedule
 })
 const artifacts = await loadRetainedArtifacts(evidenceDirectory)
+const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
 const untrustedEvidence = await buildSemanticJudgeUntrustedEvidence({
   evidenceDirectory,
   result,
   evidenceIndex: artifacts.evidenceIndex,
   workspaceMutationLedger: artifacts.workspaceMutationLedger,
-  collaborationLedger: artifacts.collaborationLedger
+  collaborationLedger: artifacts.collaborationLedger,
+  caseEvaluation
 })
 const sourcePack = buildJudgeEvidencePack({
   result,
@@ -65,7 +67,6 @@ const sourcePack = buildJudgeEvidencePack({
   untrustedEvidence,
   forbiddenCanaries: configurationInput.forbiddenCanaries ?? []
 })
-const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
 const viewCommon = {
   provider: configurationInput.provider,
   snapshotId: configurationInput.snapshotId,
