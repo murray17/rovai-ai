@@ -9210,7 +9210,13 @@ impl Core {
                         initialize_result: probe.initialize_result,
                         session_result: probe.session_result,
                         attempted_at,
-                        last_error: probe.result.detail,
+                        last_error: if kind == AdapterKind::ZcodeApp
+                            && probe.result.status == health::AgentRuntimeProbeStatus::Ready
+                        {
+                            None // Successful connection detail is not an error.
+                        } else {
+                            probe.result.detail
+                        },
                     })?,
                     None,
                 )
@@ -10568,6 +10574,21 @@ impl Core {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            if adapter_kind == "zcode-app"
+                && !self.planned_shutdown.launch_in_progress(&key).await
+                && let Some(adapter) = self.acp_adapter(AdapterKind::ZcodeApp)
+                && let Some(runtime) = adapter.get_agent_run(agent_run_id, execution_epoch).await
+            {
+                if !runtime.confirm_zcode_cancelled().await || !flushed {
+                    return RuntimeCancellationIngressFence::Unproven;
+                }
+                // The cancelled Run's lease is revoked normally. Older native
+                // tasks remain on their original Session's managed Host.
+                adapter
+                    .complete_agent_run(agent_run_id, execution_epoch)
+                    .await;
+                return RuntimeCancellationIngressFence::Flushed;
             }
             loop {
                 let launching_before_stop = self.planned_shutdown.launch_in_progress(&key).await;
@@ -17260,6 +17281,84 @@ async fn process_acp_events(
                     &mut runtime_route_permit,
                 )
                 .await;
+            }
+            AcpIncoming::ZcodeBackground {
+                agent_run_id,
+                execution_epoch,
+                registration,
+                message,
+            } => {
+                let params = &message["params"];
+                let (_, mut payload) =
+                    normalize_acp_event(AdapterKind::ZcodeApp, "session/update", params);
+                let mut identity = params["background"].clone();
+                let status = identity.as_object_mut().and_then(|v| v.remove("status"));
+                let result = async {
+                    let digest = canonical_json_digest(&identity)?;
+                    identity["identityDigest"] = json!(digest);
+                    identity["status"] = status.unwrap_or(Value::Null);
+                    payload["zcodeBackground"] = identity;
+                    // Preserve each distinct native update; ToolCallId remains
+                    // the canonical activity identity across these observations.
+                    payload["eventId"] = json!(canonical_json_digest(&payload)?);
+                    let mut database = core.database.lock().await;
+                    ExecutionEvidenceService.record_zcode_background_event(
+                        &mut database,
+                        &ManagedBlobStore::new(&core.data_dir),
+                        &agent_run_id,
+                        execution_epoch,
+                        registration,
+                        &payload,
+                    )
+                }
+                .await;
+                match result {
+                    Ok(Some(recorded)) => {
+                        if let Ok(Some(completion)) =
+                            acp::completed_action(AdapterKind::ZcodeApp, params)
+                        {
+                            let has_attempt = {
+                                let database = core.database.lock().await;
+                                ActionSafetyService::default()
+                                    .load_intercepted_action_attempts(
+                                        &database,
+                                        &agent_run_id,
+                                        execution_epoch,
+                                        &completion.native_item_id,
+                                    )
+                                    .is_ok_and(|attempts| !attempts.is_empty())
+                            };
+                            if has_attempt
+                                && let Err(error) = record_acp_action_completion(
+                                    &core,
+                                    &output,
+                                    AdapterKind::ZcodeApp,
+                                    &agent_run_id,
+                                    execution_epoch,
+                                    completion,
+                                )
+                                .await
+                            {
+                                eprintln!("ZCode background Action result audit failed: {error:#}");
+                            }
+                        }
+                        let evidence = recorded.into_evidence();
+                        emit(
+                            &output,
+                            "runtime.action",
+                            json!({"agentRunId":agent_run_id,
+                            "executionEpoch":execution_epoch,"adapterKind":AdapterKind::ZcodeApp,
+                            "nativeMethod":"_zcode/background","evidenceId":evidence.id,
+                            "payload":evidence.payload,"canonical":evidence.canonical}),
+                        );
+                    }
+                    Ok(None) => eprintln!(
+                        "ZCode background evidence rejected by its original Run/task fence"
+                    ),
+                    Err(error) => {
+                        eprintln!("ZCode background evidence persistence failed: {error:#}")
+                    }
+                }
             }
             AcpIncoming::HostDiagnostic {
                 adapter_kind,

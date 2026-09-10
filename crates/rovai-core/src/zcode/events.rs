@@ -8,9 +8,18 @@ pub(super) struct SessionEvents {
     turn: Option<String>,
     tools: HashMap<String, Value>,
     seen_tools: HashSet<String>,
+    background: HashMap<String, BackgroundTool>,
+    pending_background: HashSet<String>,
     final_suffix: String,
     final_message: Option<String>,
     terminal_seen: bool,
+}
+
+struct BackgroundTool {
+    tool: Value,
+    task_id: String,
+    input_id: String,
+    turn_id: String,
 }
 
 #[derive(Default)]
@@ -27,6 +36,8 @@ impl SessionEvents {
             turn: None,
             tools: HashMap::new(),
             seen_tools: HashSet::new(),
+            background: HashMap::new(),
+            pending_background: HashSet::new(),
             final_suffix: String::new(),
             final_message: None,
             terminal_seen: false,
@@ -58,34 +69,82 @@ impl SessionEvents {
                 messages.push(message);
             }
         }
-        if !self.tools.is_empty() {
+        if !self.tools.is_empty() || !self.pending_background.is_empty() {
             bail!("ZCode terminal left Tool results unresolved");
         }
         self.input = None;
         Ok(messages)
     }
 
+    pub fn input_id(&self) -> Option<&str> {
+        self.input.as_deref()
+    }
+
+    pub fn background_tasks_for_input(&self, input: Option<&str>) -> Vec<String> {
+        self.background
+            .values()
+            .filter(|tool| Some(tool.input_id.as_str()) == input)
+            .map(|tool| tool.task_id.clone())
+            .collect()
+    }
+
     fn background_result(&mut self, session: &str, job: &Value) -> Result<Option<Value>> {
-        if !matches!(
+        let (Some(id), Some(task_id), Some(status)) = (
+            job["toolCallId"].as_str(),
+            job["taskId"].as_str(),
             job["status"].as_str(),
-            Some("completed" | "failed" | "cancelled")
-        ) {
-            return Ok(None);
-        }
-        let Some(id) = job["toolCallId"].as_str() else {
+        ) else {
             return Ok(None);
         };
-        let Some(tool) = self.tools.get(id) else {
-            return Ok(None);
-        };
-        if tool["toolName"] != "Bash" || job["toolName"] != "Bash" || job["taskKind"] != "bash" {
+        if task_id.is_empty() || !matches!(job["taskKind"].as_str(), Some("bash" | "subagent")) {
             return Ok(None);
         }
-        let result = json!({"success":job["status"]=="completed","content":job.get("stdoutTail").and_then(Value::as_str).unwrap_or(""),
+        if !self.background.contains_key(id) {
+            let Some(tool) = self.tools.get(id) else {
+                return Ok(None);
+            };
+            if tool["toolName"] != job["toolName"] {
+                return Ok(None);
+            }
+            if self.background.len() >= 4096 {
+                bail!("ZCode background task limit exceeded");
+            }
+            self.background.insert(
+                id.to_string(),
+                BackgroundTool {
+                    tool: tool.clone(),
+                    task_id: task_id.to_string(),
+                    input_id: self
+                        .input
+                        .clone()
+                        .context("ZCode background Input missing")?,
+                    turn_id: self.turn.clone().context("ZCode background Turn missing")?,
+                },
+            );
+        }
+        let tool = &self.background[id];
+        if tool.task_id != task_id {
+            bail!("ZCode background task identity changed");
+        }
+        let terminal = matches!(status, "completed" | "failed" | "cancelled" | "lost");
+        if !terminal && status != "running" {
+            bail!("ZCode background state unsupported");
+        }
+        let result = json!({"success":status=="completed", "content":job.get("stdoutTail").and_then(Value::as_str).unwrap_or(""),
             "truncated":job["outputTruncated"],"budgetStrategy":"artifact","artifactPath":job["stdoutPersistedOutputPath"],
-            "perf":{"detail":{"command":{"status":job["status"],"exitCode":job["exitCode"],"outputBytes":job["outputBytes"]}}}});
-        let message = update(session, tool_update(tool, Some(&result))?);
-        self.tools.remove(id);
+            "perf":{"detail":{"command":{"status":if terminal && status != "lost" {status} else {"backgrounded"},"exitCode":job["exitCode"],"outputBytes":job["outputBytes"]}}}});
+        let mut message = update(session, tool_update(&tool.tool, Some(&result))?);
+        message["method"] = json!("_zcode/background");
+        message["params"]["background"] = json!({"taskId":task_id,"toolCallId":id,
+            "inputId":tool.input_id,"turnId":tool.turn_id,"status":status});
+        // 'lost' is an uncertain native task, not proof that its process exited.
+        // Keep its Host pinned until an explicit close or a confirmed exit.
+        if terminal && status != "lost" {
+            self.background.remove(id);
+        }
+        if self.pending_background.remove(id) {
+            self.tools.remove(id);
+        }
         Ok(Some(message))
     }
 
@@ -121,16 +180,20 @@ impl SessionEvents {
                 "trigger":payload["trigger"],"phase":payload["phase"]}}));
             return Ok(translated);
         }
-        if self.input.is_none() {
-            return Ok(translated);
-        }
         if kind == "session.updated"
+            && payload["taskId"].is_string()
+            && event["turnId"].as_str().is_some_and(|turn| {
+                payload["toolCallId"]
+                    .as_str()
+                    .and_then(|id| self.background.get(id))
+                    .map_or_else(|| self.owns_turn(Some(turn)), |tool| tool.turn_id == turn)
+            })
             && let Some(message) = self.background_result(session, payload)?
         {
             translated.messages.push(message);
             return Ok(translated);
         }
-        if self.terminal_seen {
+        if self.input.is_none() || self.terminal_seen {
             return Ok(translated);
         }
         if kind == "turn.started" {
@@ -180,7 +243,7 @@ impl SessionEvents {
                 if self.seen_tools.len() >= 4096 {
                     bail!("ZCode Tool count exceeds limit");
                 }
-                if !self.seen_tools.insert(id.to_string()) {
+                if self.background.contains_key(id) || !self.seen_tools.insert(id.to_string()) {
                     bail!("ZCode reused Tool identity");
                 }
                 self.tools.insert(id.to_string(), payload.clone());
@@ -197,18 +260,25 @@ impl SessionEvents {
                 let Some(tool) = self.tools.get(id) else {
                     return Ok(translated);
                 };
-                translated.messages.push(update(
-                    session,
-                    tool_update(tool, Some(&payload["result"]))?,
-                ));
-                if payload
+                let backgrounded = payload
                     .pointer("/result/perf/detail/command/status")
                     .and_then(Value::as_str)
-                    != Some("backgrounded")
-                {
+                    == Some("backgrounded");
+                if backgrounded || self.background.contains_key(id) {
+                    if self.background.contains_key(id) {
+                        self.tools.remove(id);
+                    } else {
+                        self.pending_background.insert(id.to_string());
+                    }
+                } else {
+                    translated.messages.push(update(
+                        session,
+                        tool_update(tool, Some(&payload["result"]))?,
+                    ));
                     self.tools.remove(id);
                 }
             }
+
             ("permission.resolved", _) if payload["decision"] == "deny" => {
                 // Official permission denial is terminal for this Tool and may
                 // be followed only by a batch event, with no ToolCallResult.
@@ -298,11 +368,10 @@ fn tool_update(tool: &Value, result: Option<&Value>) -> Result<Value> {
         let succeeded = result["success"] == true
             && !exit_code.is_some_and(|code| code != 0)
             && result.pointer("/perf/detail/command/timedOut") != Some(&json!(true));
-        update["status"] = json!(if name == "Bash"
-            && result
-                .pointer("/perf/detail/command/status")
-                .and_then(Value::as_str)
-                == Some("backgrounded")
+        update["status"] = json!(if result
+            .pointer("/perf/detail/command/status")
+            .and_then(Value::as_str)
+            == Some("backgrounded")
         {
             "in_progress"
         } else if succeeded {
@@ -484,10 +553,11 @@ mod tests {
             .unwrap();
         state.receive(&event(21,"t2","model.streaming",json!({"kind":"tool_call","toolCallId":"background","toolName":"Bash","input":{"command":"sleep 1"}}))).unwrap();
         let pending = state.receive(&event(22,"t2","tool.updated",json!({"kind":"result","toolCallId":"background","result":{"success":true,"perf":{"detail":{"command":{"status":"backgrounded"}}}}}))).unwrap();
-        assert_eq!(
-            pending.messages[0]["params"]["update"]["status"],
-            "in_progress"
+        assert!(
+            pending.messages.is_empty(),
+            "No task identity may be inferred from a Tool result alone"
         );
+        assert!(state.finish("s1", &[]).is_err());
         state
             .receive(&event(
                 23,
@@ -497,8 +567,11 @@ mod tests {
             ))
             .unwrap();
         assert!(state.begin("input-3").is_err());
-        let finished = state.finish("s1",&[json!({"toolCallId":"background","toolName":"Bash","taskKind":"bash","status":"failed","exitCode":7})]).unwrap();
-        assert_eq!(finished[0]["params"]["update"]["status"], "failed");
+        let job = json!({"taskId":"task-bg", "toolCallId":"background","toolName":"Bash","taskKind":"bash","status":"running"});
+        let finished = state.finish("s1", std::slice::from_ref(&job)).unwrap();
+        assert_eq!(finished[0]["params"]["update"]["status"], "in_progress");
+        assert!(finished[0]["params"]["update"]["rawOutput"]["exitCode"].is_null());
+        assert_eq!(state.background.len(), 1);
         state.begin("input-3").unwrap();
         state
             .receive(&event(
@@ -545,6 +618,28 @@ mod tests {
             ))
             .unwrap();
         state.finish("s1", &[]).unwrap();
+        let mut wrong = job.clone();
+        wrong["status"] = json!("failed");
+        assert!(
+            state
+                .receive(&event(32, "foreign-turn", "session.updated", wrong.clone()))
+                .unwrap()
+                .messages
+                .is_empty()
+        );
+        let failed = state
+            .receive(&event(33, "t2", "session.updated", wrong))
+            .unwrap();
+        assert_eq!(
+            failed.messages[0]["params"]["background"]["inputId"],
+            "input-2"
+        );
+        assert_eq!(
+            failed.messages[0]["params"]["background"]["taskId"],
+            "task-bg"
+        );
+        assert_eq!(failed.messages[0]["params"]["update"]["status"], "failed");
+        assert!(state.background.is_empty());
     }
 
     // This owner validates original hunk boundaries; the downstream shared

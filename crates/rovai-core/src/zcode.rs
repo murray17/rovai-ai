@@ -14,7 +14,7 @@ pub mod transport;
 
 pub const PROTOCOL: &str = "zcode-app-server-v1";
 pub const MINIMUM_VERSION: &str = "0.16.5";
-pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v3";
+pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v4";
 
 pub fn supported_version(version: Option<&str>) -> bool {
     version

@@ -29,7 +29,14 @@ last_updated: 2026-09-10
 
 原生 Bash 使用 detached 进程组，真实强杀测试证明只清理 Host 根组会留下延迟写入。Rovai Node prelude
 因此持有独立的组 ID 回收 companion，断开时清理已记录的原生子进程组；官方内核文件与工具调用参数保持原样。
-Core/原生 Host 强杀和后续 35 秒无副作用已分别通过。该 companion 属于 Host 进程所有权，不承担 Session 调度。
+Core/原生 Host 强杀和后续 35 秒无副作用在 v3 已分别通过。当前修订要求直接 shell close 后继续持有有后代的组，
+只在确认空组后注销，并以有界 owner report 区分清理确认与未知。该 companion 属于 Host 进程所有权，不承担 Session 调度。
+
+普通 Probe 检查用户实际原生环境，因此与正式执行共用 HOME/USERPROFILE/原生存储，不另造临时 Home 或复制凭据。
+保留私有 cwd/socket 和无生成请求边界；正常初始化允许联网/落盘，不能以删除原生数据库实现零残留。
+前台答案可以在原生后台任务仍运行时完成；任务保持 Session/Input/Turn/Tool 的原归属，晚到结果通过已有 Evidence
+模型的 ZCode 专用已登记身份校验入口持久化。Fleet 暂停该 Host 的跨成员复用及空闲/容量回收，原 Run 的 CLI 授权仍失效。
+取消只处理本次 input；明确关闭才清理关闭范围的组。移除每轮 300 秒后台收口门禁，不扩展其他 Runtime 的生命周期。
 
 ### 后果
 

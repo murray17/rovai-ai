@@ -316,5 +316,179 @@
     "typecheckPassed": true,
     "desktopBuildPassed": true,
     "docsCiPassed": true
+  },
+  "v4Revision": {
+    "transport": "zcode-native-node-transport-v4",
+    "sourceBaseCommit": "903637834ed081c881b47c335e567fef2f02669a",
+    "sourceScope": "PR #323 worktree revision; existing productEvidence and localGates above retain their historical stages.",
+    "coreExecutableSha256": "cf77743cd63927dd502cc7b5e4364cf034dca213eafd3dcd6b3d62f27cea0811",
+    "files": {
+      "passed": true,
+      "logSha256": "0f50bba2dd8fcd3450adb09361fede07ef0ee42168b0b6bc56d7ba48e5ead0ab",
+      "hostInstanceId": "d79b2c0b-7f59-4f11-a869-217792380ada",
+      "nativeSessionId": "sess_8dd39669-4376-41f7-aa57-95725ca81f5a",
+      "cases": [
+        {
+          "name": "read",
+          "agentRunId": "d7591bf1-c5ce-4d92-a092-93a258ba346b",
+          "runStatus": "succeeded",
+          "fileEffect": "passed"
+        },
+        {
+          "name": "add",
+          "agentRunId": "67b883c5-4d65-4289-8e0e-3c2bbba58de4",
+          "runStatus": "succeeded",
+          "fileEffect": "passed"
+        },
+        {
+          "name": "edit",
+          "agentRunId": "ad7efbdf-f432-4469-a790-a57f0ccf440f",
+          "runStatus": "succeeded",
+          "fileEffect": "passed"
+        },
+        {
+          "name": "edit_empty",
+          "agentRunId": "0c291440-87e8-43e5-99d0-5ac950c47318",
+          "runStatus": "succeeded",
+          "fileEffect": "passed"
+        }
+      ],
+      "zcodeGuiLaunchCount": 0
+    },
+    "processOwner": {
+      "smoke": "node --test scripts/test-zcode-owner.mjs",
+      "passed": true,
+      "logSha256": "cec8813ff2befa005159c4185376baaeba82eaf6c2633e210588f6db976535fe",
+      "closedShellDescendantReaped": true,
+      "unrelatedProcessPreserved": true,
+      "requestScopedDelayedChildRetainsOriginalLease": true,
+      "unscopedChildHasNoLease": true,
+      "cliSnapshotMode": "0600"
+    },
+    "localGates": {
+      "rustLibraryPassed": 550,
+      "rustCliPassed": 33,
+      "rustSlowPassed": 309,
+      "rustCorePassed": 236,
+      "rustCoreExistingIgnored": 5,
+      "vitestPassed": 1717,
+      "nodeFinalSuitePassed": 224,
+      "nodeExistingPlatformSkip": 1,
+      "clippyPassed": true,
+      "typecheckPassed": true,
+      "docsCiPassed": true,
+      "desktopBuildRerun": false
+    },
+    "uncovered": [
+      "No real newer-kernel, macOS x64 or Windows x64 acceptance; minimum-version and fingerprint behavior has deterministic coverage.",
+      "Cold resume, compaction, permissions, Skills/MCP and bundled CLI full Golden Flows were not all repeated for v4; earlier stage-specific evidence remains above.",
+      "Core SIGKILL was not re-run with v4; the v4 closed-shell process-owner test kills the native Host and checks its exact owned groups.",
+      "Native automatic background-result model Turns have no Rovai Input and are stopped with a scoped native execution ID; no new Run authority is granted.",
+      "Native task events can omit exit codes. Host-close evidence identifies interruption and cleanup confirmation, not a successful native exit.",
+      "Self-detachment into an unobserved process group is not established by the registered-group cleanup tests.",
+      "The final async CLI boundary has delayed OS-child regression and real foreground/background Bash lease coverage, not a complete real native background-subagent model/permission matrix."
+    ],
+    "backgroundLifecycle": {
+      "smoke": "smoke-zcode-background.mjs",
+      "logSha256": "a672161cf4bd267326e4c1c3c4078cadcc3b2ae1036667dd514d41fd73bf09d6",
+      "zcodeGuiLaunchCount": 0,
+      "probe": {
+        "nativeEnvironmentPreserved": true,
+        "calls": [
+          "workspace/readState",
+          "session/create",
+          "session/subscribe",
+          "session/setMode"
+        ],
+        "temporaryResourcesRemoved": true,
+        "adapterSupport": [
+          "acp.initialize",
+          "builtin_cli.transport.v24",
+          "context.charter.first_payload",
+          "mcp.external_projection.additive_per_run",
+          "mcp.same_name_policy.rovai_wins",
+          "session.cancel",
+          "session.new",
+          "session.prompt",
+          "session.resume",
+          "session.set_config_option",
+          "session.update",
+          "structured_permission_request",
+          "zcode.native_byok"
+        ]
+      },
+      "ok": true,
+      "foregroundMs": 15453,
+      "retentionMs": 310000,
+      "retentionStartsAt": "foreground-completed",
+      "old300SecondBoundaryCovered": true,
+      "originalRunId": "7e50dd2c-14c8-4cc0-84c4-d20ecf6bfcb0",
+      "taskId": "exec_d36399b4-dfc4-4941-a071-2a67ffd4b44d",
+      "sameSessionRetained": true,
+      "crossMemberHostSeparated": true,
+      "cancelPreservedOlderTask": true,
+      "cancelStoppedCurrentTask": true,
+      "hostClosurePersisted": true,
+      "nativeNotificationTurnsStopped": 2,
+      "lateFailurePersistedOnOriginalRun": true,
+      "closeReapedManagedDescendants": true
+    },
+    "cliLeaseLifecycle": {
+      "smoke": "smoke-zcode-background.mjs with ROVAI_ZCODE_BACKGROUND_RETENTION_MS=10000",
+      "stage": "v4 with immutable request-scoped async CLI context",
+      "coreExecutableSha256": "2308644f92fb194a3d8a1c9486f8e1152a396aa0a386cdb0aabe1ec02191036c",
+      "logSha256": "89fcc6a9922564f195c41d7c0b801000fbacf64788d937ed90036f8e6a51ac6d",
+      "zcodeGuiLaunchCount": 0,
+      "successorRunCliLeaseAllowed": true,
+      "probe": {
+        "nativeEnvironmentPreserved": true,
+        "calls": [
+          "workspace/readState",
+          "session/create",
+          "session/subscribe",
+          "session/setMode"
+        ],
+        "temporaryResourcesRemoved": true,
+        "adapterSupport": [
+          "acp.initialize",
+          "builtin_cli.transport.v24",
+          "context.charter.first_payload",
+          "mcp.external_projection.additive_per_run",
+          "mcp.same_name_policy.rovai_wins",
+          "session.cancel",
+          "session.new",
+          "session.prompt",
+          "session.resume",
+          "session.set_config_option",
+          "session.update",
+          "structured_permission_request",
+          "zcode.native_byok"
+        ]
+      },
+      "ok": true,
+      "foregroundMs": 48324,
+      "retentionMs": 10000,
+      "retentionStartsAt": "foreground-completed",
+      "old300SecondBoundaryCovered": false,
+      "originalRunId": "a060514d-2d88-4259-aa04-c050b77931d3",
+      "taskId": "exec_12709a52-ddea-4d48-ac8e-221ce9acc133",
+      "sameSessionRetained": true,
+      "crossMemberHostSeparated": true,
+      "oldBackgroundCliLeaseRejectedDuringNextRun": true,
+      "cancelPreservedOlderTask": true,
+      "cancelStoppedCurrentTask": true,
+      "hostClosurePersisted": true,
+      "nativeNotificationTurnsStopped": 2,
+      "lateFailurePersistedOnOriginalRun": true,
+      "closeReapedManagedDescendants": true
+    },
+    "coreExecutableSha256Scope": "Files and 310-second lifecycle stage before the final request-scoped CLI context change; final CLI lifecycle binary is recorded separately.",
+    "cleanup": {
+      "isolatedCredentialCopiesRemoved": true,
+      "isolatedNativeHomeAndStorageRemoved": true,
+      "changedFilesCredentialScanCount": 25,
+      "taskLogsCredentialScanCount": 173,
+      "credentialMatches": 0
+    }
   }
 }

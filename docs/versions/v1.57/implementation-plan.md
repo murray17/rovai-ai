@@ -17,14 +17,14 @@ last_updated: 2026-09-10
 - Branch：`codex/zcode-runtime`
 - 原始 Base：`23c002585f9a6840e82294b6d9e93667f7386118`；提交前已合并主线 `2ec2adff`（v0.2.2、v1.56 引用合同）。
 - Governance：无先行主线治理提交；版本、合同和实现同一 PR 评审。
-- Status：ready（[PR #323](https://github.com/murray17/rovai-ai/pull/323) 为 Draft，未合入；First-Class 资格尚未闭合）
+- Status：in-progress（[PR #323](https://github.com/murray17/rovai-ai/pull/323) 为 Draft，未合入；First-Class 资格尚未闭合）
 - 主 checkout 的并行文档改动不属于本任务；worktree 在 review/CI 期间保留。
 
 ## 已实现
 
 - 官方 bundle 发现与 App/cjs/独立 Node composite fingerprint；统一无 GUI 启动；私有短 socket root。
 - 复用 AcpHost/Fleet，Camp 内多成员 exact Session 切换、并发独立 Host；原生配置、mode、MCP 变化 fence。
-- 原生 NDJSON 的 Session/Input/Turn/Tool correlation、accepted-input、终态与后台收口；未知回调拒绝。
+- 原生 NDJSON 的 Session/Input/Turn/Tool correlation、accepted-input、前台终态与独立后台归属；未知回调拒绝。
 - user FirstPayload、completed Compaction observer、标准审批、原生 Skills 与 additive MCP。
 - narration/reasoning 隔离、Missing-Send、bundled CLI lease、稀疏 Usage、Read/Write/Edit 与 path-bound patch。
 - 原生 detached Bash 的 pipe-owned cleanup companion；官方内核原样加载，Core/原生强杀后回收已记录的进程组。
@@ -49,7 +49,7 @@ last_updated: 2026-09-10
 | Permission / Cancel | Verified / Implemented | build allow/deny、plan 无写入、cancelled；等待 35 秒无延迟文件 |
 | Built-in rovai CLI | Verified / Implemented | 当前完整 operation 集、Gather 返回、后续 Run、旧 lease 失效 |
 | Usage / Cache / Cost | Verified / Implemented，组合资格未全闭合 | provider Turn input/output/cacheRead；其他字段 NULL；稀疏字段 parser 与实际持久化 |
-| Retry / Queue / Cleanup | Verified / Implemented，组合资格未全闭合 | V4 accepted 输入、单终态、正常后台等待、取消、Core/原生强杀；共享队列/epoch 回归 |
+| Retry / Queue / Cleanup | Verified / Implemented，组合资格未全闭合 | V4 accepted 输入、单终态、后台存活与前台完成分离、取消、Core/原生强杀；共享队列/epoch 回归 |
 | Ready / Version / Platform | Verified / Implemented，平台资格未全闭合 | 官方 identity、独立 Node、无模型调用 Probe；arm64 Preview，其他平台 NotQualified |
 
 ## 真实 Golden Flows
@@ -75,7 +75,41 @@ last_updated: 2026-09-10
 功能流早于最终进程回收 prelude 的证据与 v3 复验分开标记；不能声称每条历史功能流都运行在最终启动器上。
 原始协议研究只用于说明上游字段和行为，不能替代上述 Core 产品路径。
 
-## 本地回归
+## PR #323 原生环境与后台生命周期修订
+
+基于 `9036378`，只调整 ZCode；不改变 Kimi/Kiro/Grok 的 HOME 或运行规则，不做全局 HOME 隔离重构。
+bridge revision 为 v4。普通 Probe 沿用用户原生 HOME/存储，不发送生成请求；临时 cwd/socket 可清理。
+前台完成后后台任务通过原始 task/Session/Turn/Tool 归属继续受管。Fleet 的空闲/容量回收和跨成员复用排除有后台任务的 Host，
+原 Session 可续接，CLI lease 正常失效。取消与关闭分开，companion 对 closed-shell 后代保留回收责任。
+ZCode 请求入口固定内部 CLI context，并沿 Node 异步链传递；子进程不会读取后来重绑给其他 Run 的 Host lease。
+无请求归属的命令获得空 lease。这些私有快照随 Host 清理，不属于原生 BYOK/Home 复制，普通 Probe 不启用。
+
+本次 v4 已完成完整 Rust 回归（Library 550 / CLI 33 / slow 309；Core 236 passed、5 个既有 ignored）、
+Clippy warnings-as-errors、TypeScript、完整 `pnpm test`（1717 Vitest；末段 Node 224 passed、1 个平台 skip）与通用文档 CI。
+最终代码还通过定向 Evidence fencing、ZCode parser、Fleet pin/优先续接、Probe 能力声明和 compatibility digest 复核。
+Desktop 构建与其余历史 Golden Flows 本次未全量重跑，不能把下方 v3 基线改称 v4 实测。
+
+- 真实文件矩阵：Read、Write、Edit、空文件、实时/历史投影均通过；真实 Edit +1/-1，Read 无 Files Changed。
+- 真实后台模型验收由 `smoke-zcode-background.mjs` 单独拥有：原生环境一致、无生成 Probe、前台完成、跨成员隔离、
+  原 Host/Session 优先续接、当前后台任务取消且旧服务继续、晚到失败原 Run 持久化、关闭记录与组清理。
+  长时验收已通过：前台 15.453 秒完成，之后继续保留服务 310 秒；结果与日志摘要保存在版本 Evidence 的 `v4Revision`。
+  最终 CLI 修订另以 10 秒保留参数重跑同一流程：旧后台 CLI 在新 Run 活跃时被拒绝，新 Run CLI 可用；
+  两个原生自动通知轮次均观察到精确取消终态，无新增工具执行。该补测不替代此前 310 秒长时证据。
+- 官方会启动没有 Rovai Input 的自动结果通知轮次。当前框架没有为其创建新 Run 的授权来源；按结构化
+  `inputSource=background_task` 与 `foregroundExecutionId` 请求停止并保留诊断，未把它作为自动新 Run 能力接入。
+  原任务退出结果仍按原身份落盘；未确认原生前台空闲前保留 Host 归属。
+- 新增测试 owner：Fleet 的后台 pin/容量/TTL/原成员优先续接，没有等价旧 owner，Fake 状态足以验证其生命周期；
+  `cargo test -p rovai-core --bin rovai-core zcode_` 同时验证 ZCode 专属“基础检查不冒充高级实测”的 Probe 语义。
+  原生事件关联与跨轮迟到结果扩展既有 parser；取消 fencing/已结束 epoch 归属和 Action 终态门禁扩展既有数据库测试，
+  不新增另一份完整数据库 fixture。取消后的观察不授予业务操作权限。
+- `pnpm test:zcode-owner` 拥有真实进程组边界：shell close 后后代存活，Host 关闭后回收，独立进程不受影响。
+  该边界不能由 PID/mock 或 parser 测试替代，已经接入默认 Node 回归。删除已退出组记录避免永久持有 PID。
+  同一 owner 还验证请求异步链中的迟启动子进程保留原 lease、快照权限为 0600，以及无请求归属的命令不获取 Host 当前授权。
+- 未覆盖：未安装更高 kernel 做真实升级验收；未重跑 v4 Core SIGKILL 与所有压缩/能力组合；未验证 x64/Windows。
+  原生后台子代理完整模型/权限组合尚未做真实验收；延迟命令的异步授权边界由 OS 子进程回归覆盖。
+  原生缺失的后台 exitCode 仍未知；不声称可回收自行逃逸到未登记组的任意后代。实际模型测试继续使用隔离目录与授权凭据。
+
+## 本地回归（9036378 基线）
 
 - `pnpm test:rust:pr`：合并主线后完整通过；library 550 passed，CLI 33 passed，slow 309 passed。
 - Rust Core binary：合并主线后 234 passed，5 个既有 ignored。

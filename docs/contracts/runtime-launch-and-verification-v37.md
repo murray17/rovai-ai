@@ -17,7 +17,7 @@ last_updated: 2026-09-10
 `ZCode.app/Contents/MacOS/ZCode` 定位 bundle，实际启动独立 Node.js 执行同 bundle 的
 `Resources/glm/zcode.cjs app-server`。不执行 App 主程序；`ELECTRON_RUN_AS_NODE=1` 不能阻止 macOS 注册 App。
 Node 从 Runtime PATH 或 `ROVAI_ZCODE_NODE_BIN` 解析，拒绝 `.app` 内程序。验证 bundle identifier `dev.zcode.app`，
-fingerprint 包含官方定位文件、内核与独立 Node，bridge revision 为 `zcode-native-node-transport-v3`。
+fingerprint 包含官方定位文件、内核与独立 Node，bridge revision 为 `zcode-native-node-transport-v4`。
 默认发现 `/Applications` 与用户 Applications；不通过 PATH 选择社区 `zcode`、`zcode-app-cli` 或 `zcode-acp`。
 
 BYOK 由官方 `~/.zcode/cli/config.json` 和项目 `zcode.json`、`.zcode/config.json` 提供。
@@ -26,7 +26,16 @@ BYOK 由官方 `~/.zcode/cli/config.json` 和项目 `zcode.json`、`.zcode/confi
 Rovai 不修改用户 provider 配置，不建立额外密钥配置入口。原生模型目录仍须通过无 Prompt 的官方 workspace/session 交换。
 
 每个 Host 使用权限收紧的短临时目录容纳原生 Unix socket；退出后清理。正式执行保留用户 Home。
-Probe 使用独立 Home、workspace 与 socket root，不持久化 Probe Session 到用户 Home，也不提交模型输入。
+普通 Probe 同样沿用用户 HOME / USERPROFILE 和 ZCODE_STORAGE_DIR、ZCODE_SESSION_DB、ZCODE_SESSION_DB_PATH 等
+原生存储环境，不复制 Home、凭据或迁移配置。只把 cwd 与 TMPDIR/socket 放在可清理的私有临时目录。
+配置读取和内存 runtimeModel 与正式执行共用；临时 cwd 的基础连接不能证明任意项目配置都已验证。
+Probe 只做版本、workspace/readState、无消息 deferred Session 创建、订阅与模式初始化；关闭自动标题生成，
+不发 session/prompt、V4 sendText、workspace/generateText、compact 或测试工具调用。初始化可以正常联网/落盘，
+不承诺零写入；结束只删除本次临时资源，不扫描或删除用户原生 Session 数据库。
+
+Probe 实测结果只包含 initialize、native BYOK 配置加载、session.new；AdapterCapabilitySnapshot 另存代码已实现
+的映射能力，发布 Smoke 证据按版本/平台独立记录。用户“基础连接正常”不保证余额、模型生成或高级能力已实测。
+保留最低 kernel 0.16.5、程序指纹变化复查和关键返回值校验；不因版本新于已测试版本而无条件禁止使用。
 
 ## Session、输入与生命周期
 
@@ -39,15 +48,37 @@ commandId 与 inputId 精确匹配；匹配的 accepted reply 或 turn.started �
 只发布原生 text_delta，reasoning_delta 不成为公开正文。只有匹配输入的 `turn.completed.resultType=success`
 形成成功 Final；failed/cancelled 不伪造成功。Missing-Send 使用 `zcode_completed_turn` 边界，仍受已接受业务 send 抑制。
 
-取消使用 V4 `stop` 并取消未收口的 backgroundJobs。正常 foreground terminal 后继续等待已有后台工作收口，
-同一 Run 保持租约；后台 Bash 的启动回执不是命令成功终态。仅当 jobs、activeToolCalls、pendingPermissions、
-pendingRequestIds 全部收口且原生状态 idle 才释放 owner。等待超过 300 秒或无法证明空闲则关闭 Host。
-ManagedProcess 继续拥有 Host 根进程组的有界终止与 reap。ZCode 原生 Bash 使用独立进程组，
-仅终止 Host 根组无法回收它们；启动前由 Rovai 的 Node prelude 建立一个独立清理 companion，
-记录原生 `child_process.spawn(detached=true)` 返回的确切进程组 ID，stdio close 后解除记录。
-官方内核以 `require` 原样加载，spawn 的参数和返回对象保持原生语义；不复制或修改内核文件。
-companion 通过私有 pipe 观察 Host 死亡/EOF，回收记录的组与 Host 根组后退出；companion 自身失败使
-Host fail closed。该机制不依赖沙箱内的 `ps`，不扫描或终止其他 App 的进程。
+前台完成只要求本轮 Input/Turn 成功终态、最终文本一致、前台 Tool/审批/请求收口与 native idle。
+原生结构化 background task 的 taskId、ToolCallId、inputId、turnId 和 Session 固定归属；backgrounded/running
+保持尚未退出，不伪造 completed 或 exitCode=0。前台完成不等待这些任务退出，不设 300 秒后台门禁。
+任务晚到结果经存活的 Host 路由写回原 Run/epoch 的 runtime.action Evidence；必须匹配已登记的完整 identity，
+不进入后续输入或其他成员。原生 lost 只表示跟踪状态未知，保留受管责任；原生未提供 exitCode 时保持未知。
+已有 intercepted Action 继续记录真实结果，已解决审批且已有原生后台归属的 Action 不阻挡前台终态；新业务操作仍受 Run 授权约束。
+
+有后台任务的 Host 暂不跨成员复用，不参与空闲 TTL 或容量 LRU 回收；同一成员的原 Session 可继续交互。
+同一成员续接优先选择仍承载其后台任务的兼容 Host，避免仅因另一个 Host 更早空闲而跨 Host 恢复同一 Native Session。
+最后一个任务退出后恢复普通复用/回收。原 Run 的 bundled rovai CLI lease 仍正常失效，不因后台服务延长。
+ZCode prelude 在原生请求进入时固定 Rovai CLI context，并沿 Node 异步执行链传递给后续子进程；
+长期 shell 与后台子代理迟启动的命令不读取已被下一 Run 重绑的 Host context。没有请求归属的启动只获得空 lease。
+快照仅包含 Rovai 内部 CLI context，存放于 Host 私有目录并随 Host 清理；普通 Probe 不启用此机制，
+不复制原生 BYOK 凭据或用户 Home。CLI 仍由 Core 按原 Run/epoch/lease 校验，固定快照不延长授权。
+取消使用 V4 stop 并只取消本次 input 所属后台任务，确认前台收口后释放 Run；不顺手停止原 Session 的旧任务或其他 Host。
+取消 ingress 已关闭时，只保留当前原生 Prompt 的后台归属观察，直到其终态；不恢复正文投递或业务授权。
+无法确认本次取消时报告 cleanup unproven，不伪报成功。明确关闭/失效 Host、Core 退出或异常死亡仍执行有界清理。
+
+ManagedProcess 管理 Host 根进程组；Rovai Node prelude 的独立 companion 管理 native spawn(detached=true)
+返回的确切组 ID。直接子进程 close 只触发该组存活检查，确认组为空才注销；保留仍有后代的组，不永久保存已退出组的 PID。
+不扫描进程名或全系统子进程。官方内核原样 require；仅替换子进程的 Rovai CLI context 环境路径，原生命令和返回对象不变。
+Host pipe EOF 后 companion 清理已登记组和根组，在 2 秒内观察结果并写入私有 owner report；Fleet 只在报告确认后
+承认清理完成。未确认时保留诊断/报告，不把发送 kill 等同于已退出。回答结束、Session 关闭与 Host 回收是不同边界。
+受管 Host 明确关闭时，仍存活任务的原 Run Evidence 记录 `host_closed`；工具表现为中断失败，原生退出码仍为未知。
+清理未确认则记录 `cleanup_unconfirmed`，保持未确认退出的语义。这是 Host 生命周期事实，不冒充原生任务成功或实际 exitCode。
+
+官方 0.16.5 会在后台任务结果后自行启动 `inputSource=background_task` 的模型通知轮次；它没有 Rovai Input/Run，
+现有业务授权模型不能把它当成新 Run。Adapter 保留真实任务结果，记录明确诊断，并用原生 `foregroundExecutionId`
+限定 V4 stop 请求来停止该额外轮次；不停止其他 Session 或后台服务，不把通知正文当作本轮 Final。
+后台结果观察与原生前台空闲确认独立运行，未确认前仍保留 Host 归属，不能提前跨成员复用。
+这项原生自动模型通知不作为已接入能力；原 Session 的下一次 Rovai 输入仍正常精确续接。
 
 ## Bootstrap、权限、Skills 与 MCP
 

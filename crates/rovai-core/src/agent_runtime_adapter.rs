@@ -2050,7 +2050,19 @@ fn acp_capability_snapshot(
     }
     let mut capabilities = observation.capabilities;
     if ready {
-        let standard_capabilities: &[&str] = if adapter_kind == AdapterKind::CursorAgent {
+        let standard_capabilities: &[&str] = if adapter_kind == AdapterKind::ZcodeApp {
+            // Implemented adapter mappings, not observations from today's probe.
+            &[
+                "acp.initialize",
+                "session.new",
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "session.set_config_option",
+                "structured_permission_request",
+                "context.charter.first_payload",
+            ]
+        } else if adapter_kind == AdapterKind::CursorAgent {
             &[
                 "acp.initialize",
                 "session.new",

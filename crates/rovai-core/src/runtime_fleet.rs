@@ -186,6 +186,7 @@ pub(crate) struct FakeRuntimeProcessHost {
     shutdown_delay: Duration,
     reaped: std::sync::atomic::AtomicBool,
     shutdown_calls: std::sync::atomic::AtomicUsize,
+    zcode_background: AtomicBool,
 }
 
 impl RuntimeProcessHost {
@@ -206,6 +207,15 @@ impl RuntimeProcessHost {
             Self::Pi(host) => host.is_alive(),
             #[cfg(test)]
             Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
+        }
+    }
+
+    fn has_zcode_background_tasks(&self) -> bool {
+        match self {
+            Self::Acp(host) => host.has_zcode_background_tasks(),
+            #[cfg(test)]
+            Self::Fake(host) => host.zcode_background.load(Ordering::Acquire),
+            _ => false,
         }
     }
 
@@ -586,7 +596,12 @@ impl FleetState {
 
     fn reserve_idle_eviction(&mut self, process_id: &str) -> Option<FleetStopLaunch> {
         let entry = self.processes.get_mut(process_id)?;
-        if entry.state != FleetProcessState::IdleWarm {
+        if entry.state != FleetProcessState::IdleWarm
+            || entry
+                .host
+                .as_ref()
+                .is_some_and(RuntimeProcessHost::has_zcode_background_tasks)
+        {
             return None;
         }
         self.idle_lru
@@ -641,6 +656,10 @@ impl FleetState {
                 .filter(|entry| {
                     entry.state == FleetProcessState::IdleWarm
                         && entry.compatibility.residency_bucket == residency_bucket
+                        && !entry
+                            .host
+                            .as_ref()
+                            .is_some_and(RuntimeProcessHost::has_zcode_background_tasks)
                 })
                 .map(|_| process_id.clone())
         })
@@ -650,7 +669,13 @@ impl FleetState {
         self.idle_lru.iter().find_map(|(_, process_id)| {
             self.processes
                 .get(process_id)
-                .filter(|entry| entry.state == FleetProcessState::IdleWarm)
+                .filter(|entry| {
+                    entry.state == FleetProcessState::IdleWarm
+                        && !entry
+                            .host
+                            .as_ref()
+                            .is_some_and(RuntimeProcessHost::has_zcode_background_tasks)
+                })
                 .map(|_| process_id.clone())
         })
     }
@@ -688,30 +713,47 @@ impl FleetState {
             );
         }
 
-        let compatible_idle = self.idle_lru.iter().find_map(|(_, process_id)| {
-            self.processes
-                .get(process_id)
-                .filter(|entry| {
-                    entry.state == FleetProcessState::IdleWarm
-                        && entry.adapter_kind == request.adapter_kind
-                        && entry
-                            .compatibility
-                            .is_process_compatible_with(&request.compatibility)
-                        && entry
-                            .host
-                            .as_ref()
-                            .is_some_and(RuntimeProcessHost::is_healthy)
-                })
-                .map(|_| process_id.clone())
+        let compatible_idle = [true, false].into_iter().find_map(|background_first| {
+            self.idle_lru.iter().find_map(|(_, process_id)| {
+                self.processes
+                    .get(process_id)
+                    .filter(|entry| {
+                        entry.state == FleetProcessState::IdleWarm
+                            && (!background_first
+                                || entry
+                                    .host
+                                    .as_ref()
+                                    .is_some_and(RuntimeProcessHost::has_zcode_background_tasks))
+                            && entry.adapter_kind == request.adapter_kind
+                            && (!entry
+                                .host
+                                .as_ref()
+                                .is_some_and(RuntimeProcessHost::has_zcode_background_tasks)
+                                || entry.compatibility.invalidation_agent_id
+                                    == request.compatibility.invalidation_agent_id)
+                            && entry
+                                .compatibility
+                                .is_process_compatible_with(&request.compatibility)
+                            && entry
+                                .host
+                                .as_ref()
+                                .is_some_and(RuntimeProcessHost::is_healthy)
+                    })
+                    .map(|_| process_id.clone())
+            })
         });
         if let Some(process_id) = compatible_idle {
-            let (last_used_sequence, host) = {
+            let (last_used_sequence, host, residency) = {
                 let entry = self
                     .processes
                     .get_mut(&process_id)
                     .expect("Fleet compatible idle process disappeared");
                 let last_used_sequence = entry.last_used_sequence;
-                entry.state = FleetProcessState::BusyResident;
+                entry.state = if entry.residency == FleetResidency::Burst {
+                    FleetProcessState::BusyBurst
+                } else {
+                    FleetProcessState::BusyResident
+                };
                 entry.run_lease = Some(run_lease.clone());
                 entry.idle_since = None;
                 entry.compatibility = request.compatibility.clone();
@@ -721,6 +763,7 @@ impl FleetState {
                         .host
                         .clone()
                         .expect("Fleet compatible idle Host disappeared"),
+                    entry.residency,
                 )
             };
             self.idle_lru
@@ -729,7 +772,7 @@ impl FleetState {
             return FleetAcquirePlan::Ready(FleetLease {
                 process_id,
                 host,
-                residency: FleetResidency::Resident,
+                residency,
             });
         }
 
@@ -1464,7 +1507,12 @@ impl AgentRuntimeFleetManager {
                 return true;
             };
             let should_stop = disposition == FleetReleaseDisposition::Stop
-                || entry.state != FleetProcessState::BusyResident
+                || (entry.state != FleetProcessState::BusyResident
+                    && !(entry.state == FleetProcessState::BusyBurst
+                        && entry
+                            .host
+                            .as_ref()
+                            .is_some_and(RuntimeProcessHost::has_zcode_background_tasks)))
                 || entry.retire_after_run
                 || entry.host.is_none();
             if should_stop {
@@ -1494,8 +1542,10 @@ impl AgentRuntimeFleetManager {
             let reusable = quiescent
                 && state.process_by_run.get(&run_lease) == Some(&process_id)
                 && state.processes.get(&process_id).is_some_and(|entry| {
-                    entry.state == FleetProcessState::BusyResident
-                        && !entry.retire_after_run
+                    matches!(
+                        entry.state,
+                        FleetProcessState::BusyResident | FleetProcessState::BusyBurst
+                    ) && !entry.retire_after_run
                         && entry.run_lease.as_ref() == Some(&run_lease)
                         && entry.host.as_ref().is_some_and(|current| {
                             current.process_id() == host.process_id() && current.is_healthy()
@@ -1700,6 +1750,10 @@ impl AgentRuntimeFleetManager {
                     ((entry.state == FleetProcessState::IdleWarm
                         && (entry.idle_since.is_some_and(|idle_since| {
                             now.duration_since(idle_since) >= self.config.idle_ttl
+                                && !entry
+                                    .host
+                                    .as_ref()
+                                    .is_some_and(RuntimeProcessHost::has_zcode_background_tasks)
                         }) || entry.host.as_ref().is_none_or(|host| !host.is_healthy())
                             || entry.retire_after_run))
                         || entry.state == FleetProcessState::Stopping)
@@ -1865,6 +1919,7 @@ mod tests {
             shutdown_delay: Duration::ZERO,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+            zcode_background: AtomicBool::new(false),
         }))
     }
 
@@ -1891,6 +1946,7 @@ mod tests {
             shutdown_delay,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+            zcode_background: AtomicBool::new(false),
         });
         let mut state = fleet.state.lock().await;
         state
@@ -2317,6 +2373,7 @@ mod tests {
             shutdown_delay: Duration::ZERO,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+            zcode_background: AtomicBool::new(false),
         });
         let acquire = {
             let fleet = fleet.clone();
@@ -2386,6 +2443,7 @@ mod tests {
             shutdown_delay: Duration::ZERO,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+            zcode_background: AtomicBool::new(false),
         });
         let acquire = {
             let fleet = fleet.clone();
@@ -2455,6 +2513,7 @@ mod tests {
             shutdown_delay: Duration::ZERO,
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+            zcode_background: AtomicBool::new(false),
         });
         let acquire = {
             let fleet = fleet.clone();
@@ -2545,6 +2604,95 @@ mod tests {
                 .unwrap();
             assert_eq!(camp_a_again.host.process_id(), "host-a");
             fleet.shutdown_all().await;
+        }
+    }
+
+    // Unique Fleet boundary: a foreground-free Host can retain native work.
+    // Fake lifetime state is sufficient; real descendant cleanup has a Node owner.
+    #[tokio::test]
+    async fn zcode_background_pins_member_and_prevents_idle_and_capacity_eviction() {
+        for capacity in [1, 2] {
+            let mut config = test_config(Duration::from_secs(1));
+            config.idle_ttl = Duration::ZERO;
+            config.max_resident_processes_global = capacity;
+            config.max_resident_processes_per_member = capacity;
+            let fleet = AgentRuntimeFleetManager::new(config);
+            let request = |run: &str, member: &str| FleetAcquireRequest {
+                agent_run_id: run.to_string(),
+                execution_epoch: 1,
+                adapter_kind: AdapterKind::ZcodeApp,
+                compatibility: RuntimeCompatibilityKey::camp("camp", member, "digest"),
+            };
+            let host = fake_host("background-host");
+            let RuntimeProcessHost::Fake(fake) = &host else {
+                unreachable!()
+            };
+            let fake = fake.clone();
+            fake.zcode_background.store(true, Ordering::Release);
+            fleet
+                .acquire(request("a1", "a"), move || async move { Ok(host) })
+                .await
+                .unwrap();
+            assert!(
+                fleet
+                    .release("a1", 1, FleetReleaseDisposition::Reusable)
+                    .await
+            );
+            fleet.sweep_idle().await;
+            assert!(!fake.reaped.load(Ordering::Acquire));
+            let other = fleet
+                .acquire(request("b1", "b"), || async {
+                    Ok(fake_host("other-member"))
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                other.residency,
+                if capacity == 1 {
+                    FleetResidency::Burst
+                } else {
+                    FleetResidency::Resident
+                }
+            );
+            assert_eq!(other.host.process_id(), "other-member");
+            let original = fleet
+                .acquire(request("a2", "a"), || async {
+                    panic!("original Host must remain available")
+                })
+                .await
+                .unwrap();
+            assert_eq!(original.host.process_id(), "background-host");
+            fleet
+                .release("b1", 1, FleetReleaseDisposition::Reusable)
+                .await;
+            fleet
+                .release("a2", 1, FleetReleaseDisposition::Reusable)
+                .await;
+            let again = fleet
+                .acquire(request("a3", "a"), || async {
+                    panic!("background owner must take precedence over an older free Host")
+                })
+                .await
+                .unwrap();
+            assert_eq!(again.host.process_id(), "background-host");
+            fleet
+                .release("a3", 1, FleetReleaseDisposition::Reusable)
+                .await;
+            fleet.sweep_idle().await;
+            assert!(!fake.reaped.load(Ordering::Acquire));
+            fake.zcode_background.store(false, Ordering::Release);
+            let shared = fleet
+                .acquire(request("b2", "b"), || async {
+                    panic!("completed jobs restore Camp reuse")
+                })
+                .await
+                .unwrap();
+            assert_eq!(shared.host.process_id(), "background-host");
+            fleet
+                .release("b2", 1, FleetReleaseDisposition::Reusable)
+                .await;
+            fleet.sweep_idle().await;
+            assert!(fake.reaped.load(Ordering::Acquire));
         }
     }
 

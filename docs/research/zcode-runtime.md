@@ -32,9 +32,9 @@ App 内核 SHA-256：`e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e111
 | Permission / Cancel | 原生 plan/build/edit/yolo/auto，默认 yolo；回调 optionId 精确映射；真实审批允许/拒绝、plan 无写入、取消后等待 35 秒无延迟副作用 | 未实现 GUI/Computer Use、结构化图片输入和其他桌面交互回调；未知回调安全拒绝，不自动批准 |
 | Narration / Final | text_delta 作为公开执行叙述，reasoning_delta 隔离；匹配 input 的成功 terminal 才形成 Final | Narration 是执行中说明；Final 是最终回答。`Missing-Send` 是没有业务 send 时由 Core 补发最终回答，已有 accepted send 则抑制补发；三种真实场景已通过 |
 | 内置 rovai CLI | 复用当前 bundled CLI 与 active Run lease；共享完整 operation、Gather、后续 Run 和过期租约验收 | 不安装第二套 CLI 或借用历史上下文。完整操作集、Gather 返回、续接与过期 lease 验收通过 |
-| 后台执行 | foreground terminal 后继续等 jobs、tools、permissions、requests 清空且 native idle，再释放 Run/lease | 原生 Bash 的 backgrounded 是启动回执；正常等待，不当作完成或主动取消。300 秒仍未收口则关闭 Host，取消继续由共享进程树期限兜底 |
+| 后台执行 | 前台终态与前台 Tool/审批收口后完成 Run；原生 taskId 固定关联原 Session/Input/Turn/Tool，晚到结果写回原 Run Evidence | 有任务的 Host 保留并优先匹配原成员，禁止空闲/容量回收和跨成员复用；取消只作用当前 input，关闭 Host 才全面清理其受管组。缺失 exitCode 保持未知，lost 不证明退出；无 Rovai Input 的原生自动模型通知轮次按精确执行 ID 停止并诊断，未当作新 Run 接入 |
 | Usage / Cache / Cost | 唯一原生 terminal 的 provider input/output/cacheRead；真实持久化与稀疏字段 parser 校验 | 原生汇总会为缺值填零，因此 cacheWrite、reasoning、uncached 和成本保持未知；Turn 聚合不用于推导单次请求缓存命中率 |
-| 平台 / Ready | 官方身份、最低 kernel 0.16.5、无 Prompt capability Probe、平台资格独立 | Probe 不验证账户余额或真实模型可调用性；macOS arm64 Preview，macOS x64 / Windows x64 NotQualified |
+| 平台 / Ready | 官方身份、最低 kernel 0.16.5、原生 HOME/存储下的无 Prompt 基础连接 Probe、平台资格独立 | 实测连接/初始化与 Adapter 实现能力、发布测试证据分开；不验证余额/生成/全部高级能力。不保证零联网/零落盘，不删除原生历史；新版本不自动封禁。arm64 Preview，其他平台 NotQualified |
 
 ## 文件、命令输出与 Diff
 
@@ -59,6 +59,7 @@ Rovai 的 Node 启动 prelude 另带进程回收 companion。真实强杀测试�
 只杀 Host 会留下延迟命令。companion 记录这些原生 spawn 的组 ID，在 Host pipe 关闭时回收；官方内核文件
 保持原样，既有 Fleet 仍拥有 Host/Run 生命周期。Core 和原生 Host 分别 SIGKILL 后，已观察到的子进程均退出，
 等待 35 秒没有延迟文件。这是 ZCode 相对其他 Runtime 增加的启动适配，不是额外进程池。
+当前 v4 companion 在直接 shell close 后继续监测已登记的进程组，确认空组才注销；显式关闭时通过有界清理报告确认结果。
 本机便捷 `zcode` shim 直接调用官方内核；Rovai Host/Probe 使用含上述回收机制的统一启动器。
 
 因此额外依赖 PATH 中的独立 Node.js（本机实测 26.8.1）；可用 `ROVAI_ZCODE_NODE_BIN` 指定绝对路径。

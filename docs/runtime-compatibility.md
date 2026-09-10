@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-08
+last_updated: 2026-09-10
 ---
 
 # Agent Runtime 兼容性清单
@@ -1095,3 +1095,26 @@ ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview�
 
 逐项证据与剩余资格项见 [v1.57 验收](versions/v1.57/implementation-plan.md)、
 [脱敏证据清单](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)和[接入矩阵](research/zcode-runtime.md)。
+
+
+### PR #323 v4：原生环境 Probe 与后台任务生命周期
+
+在相同官方版本、平台和 MiniMax BYOK 下，普通 Probe 沿用实际 HOME/USERPROFILE 及 ZCode 原生存储配置，
+仅 cwd/socket 使用私有临时目录。原生方法观察只有 `workspace/readState`、deferred `session/create`、
+`session/subscribe`、`session/setMode`，关闭自动标题，没有测试 Prompt、生成、压缩或工具调用；临时资源已清理。
+检查只证明基础连接和配置加载，不把 Adapter 已实现映射列为当次逐项实测，不保证零联网/零落盘。
+最低版本与复合指纹门禁保留；代码输入矩阵允许 0.17.0，不要求所有新版本先重新资格化。
+
+后台任务以原生 taskId/ToolCallId/Session/Input/Turn 保持原始 Run/epoch 归属，`backgrounded` 保持运行且退出码未知。
+前台可完成并撤销原 Run 的 bundled CLI lease；Host 有后台工作时不被 TTL/容量回收或跨成员复用，原成员优先续接原 Host。
+请求进入时固定 Rovai CLI context，并沿 Node 异步执行链传给命令；下一 Run 重绑 Host 不续期旧后台命令的 lease。
+无请求归属的启动使用空 lease。真实 OS 子进程回归覆盖延迟启动和 context 重绑，普通 Probe 不创建这类内部快照。
+取消仅处理当前 input 的任务，取消收口保留后台观察；明确关闭 Host 才清理其受管组，并写回中断或清理未确认的事实。
+原生无 Rovai Input 的自动模型结果通知轮次不能获得新业务授权，按结构化来源和精确执行 ID 请求停止并留下诊断；
+它不作为已接入的自动新 Run 能力。任务实际结果仍保留在原 Run。
+
+v4 的文件矩阵已重新通过：Read、Write、Edit、空文件与历史投影；Edit 的原生 Diff 为真实 +1/-1，
+Read 不进入 Files Changed，缺少原生 patch 的 Write 不编造行数。独立 Node 进程回归验证 shell close 后的后代仍被管理，
+关闭 Host 回收这些确切组且不触及夹具外独立进程；该测试不等同于任意自行脱离已登记进程组的后代都可回收。
+实际执行记录与长后台服务验收见 [v4 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。
+本次没有重跑全部历史 Golden Flows，也未验证 x64/Windows 或授予新的平台资格。

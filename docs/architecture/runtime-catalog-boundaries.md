@@ -454,7 +454,9 @@ fingerprint 同时包含内核与独立 Node；PATH 中的社区
 CLI 不属于这个 Product Runtime。Core 内的协议翻译负责原生 NDJSON、Session/Input/Turn/Tool identity 与 callback，
 已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU；Host 复用以 Camp 为授权边界。Node prelude 的
 pipe-owned companion 补充回收原生 detached Bash 进程组，生命周期细节由 Runtime Launch v37 拥有。
-内部 ACP shape 不改变公开协议来源。
+内部 ACP shape 不改变公开协议来源。有原生后台任务的 Host 保留 Session/成员关联，禁止跨成员复用和空闲/容量回收；
+后台结果走原 Run 的已登记 Evidence 归属，前台 Run 与 CLI 授权正常结束。普通 Probe 沿用原生 HOME/存储，
+只隔离临时 cwd/socket，且不发送生成请求；Probe 实测与 Adapter 能力及发布资格分开。
 
 模型与凭据由官方 `.zcode/cli/config.json` 和项目配置拥有；只读生成原生 runtimeModel carrier，不建立 Rovai provider
 配置。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；

@@ -26,9 +26,9 @@ type Writer = Box<dyn AsyncWrite + Unpin + Send>;
 type Reply = oneshot::Sender<Result<Value>>;
 const FRAME_LIMIT: usize = 4 * 1024 * 1024;
 
-/// Read-only capability exchange with an isolated native Home and socket root.
-/// Credentials stay in memory in the official runtimeModel carrier. No prompt
-/// is submitted and no probe Session is stored in the user's native Home.
+/// Basic native-environment connection check, without model generation.
+/// Only cwd and socket/TMPDIR are private; native initialization may write normal
+/// state under the user's existing HOME/storage. Credentials remain in memory.
 pub async fn probe(
     executable: &std::path::Path,
     include_session: bool,
@@ -57,9 +57,12 @@ pub async fn probe(
     command
         .arg("app-server")
         .current_dir(&root.0)
-        .env("HOME", &root.0)
-        .env("USERPROFILE", &root.0)
-        .env("TMPDIR", &root.0);
+        .env("TMPDIR", &root.0)
+        .env_remove("ROVAI_ZCODE_CLI_CONTEXT_DIR")
+        .env(
+            "ROVAI_ZCODE_OWNER_REPORT",
+            root.0.join("owner-cleanup.json"),
+        );
     let spec = ManagedProcessLaunchSpec::capture(
         &command,
         ManagedProcessPurpose::RuntimeProbe,
@@ -120,14 +123,38 @@ pub async fn probe(
     drop(writer);
     let _ = child.force_terminate_tree();
     let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
+    let cleanup = confirm_owner_cleanup(
+        &root.0,
+        tokio::time::Instant::now() + Duration::from_millis(2500),
+    )
+    .await;
     drain.abort();
+    if !cleanup {
+        bail!("ZCode probe process-group cleanup unconfirmed");
+    }
     result
+}
+
+pub async fn confirm_owner_cleanup(root: &std::path::Path, deadline: tokio::time::Instant) -> bool {
+    loop {
+        if let Ok(bytes) = tokio::fs::read(root.join("owner-cleanup.json")).await
+            && let Ok(report) = serde_json::from_slice::<Value>(&bytes)
+        {
+            return report["confirmed"] == true && report["pendingGroups"] == 0;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 struct Session {
     events: SessionEvents,
     terminal: Option<Reply>,
     cancelled: bool,
+    cancel_input: Option<String>,
+    cancel_requests: std::collections::HashSet<String>,
     acceptance_compaction: Option<oneshot::Sender<()>>,
 }
 
@@ -145,6 +172,7 @@ struct Bridge {
     permissions: Mutex<HashMap<String, PendingPermission>>,
     sessions: Mutex<HashMap<String, Session>>,
     finished: mpsc::Sender<(String, Result<Value>)>,
+    background_settle: mpsc::Sender<String>,
     config: NativeConfig,
     cwd: PathBuf,
     mode: String,
@@ -167,6 +195,7 @@ where
     let (core, bridge) = tokio::io::duplex(256 * 1024);
     let (core_read, core_write) = tokio::io::split(bridge);
     let (finished, mut finished_rx) = mpsc::channel::<(String, Result<Value>)>(8);
+    let (background_settle, mut background_rx) = mpsc::channel::<String>(256);
     let bridge = Arc::new(Bridge {
         native: Mutex::new(Box::new(stdin)),
         core: Mutex::new(Box::new(core_write)),
@@ -178,6 +207,7 @@ where
         cwd,
         mode,
         finished,
+        background_settle,
         acceptance_compacted: AtomicBool::new(false),
     });
     tokio::spawn(async move {
@@ -219,17 +249,37 @@ where
             Ok(())
         });
         let finish_bridge = bridge.clone();
+        let background_bridge = bridge.clone();
+        workers.spawn(async move {
+            while let Some(session_id) = background_rx.recv().await {
+                if background_bridge.settle_foreground(&session_id).await.is_ok() {
+                    write_frame(&background_bridge.core, &json!({"method":"_zcode/backgroundIdle","params":{"sessionId":session_id}})).await?;
+                }
+                // If still busy, retain the Host pin. The next native terminal
+                // retries this bounded observation; no foreground Run waits here.
+            }
+            Ok(())
+        });
         workers.spawn(async move {
             while let Some((session_id,terminal)) = finished_rx.recv().await {
-                let jobs = finish_bridge.settle_background(&session_id,false).await?;
-                let (messages,reply) = {
+                let jobs = finish_bridge.settle_foreground(&session_id).await?;
+                let (messages,reply,cancel_tasks) = {
                     let mut sessions = finish_bridge.sessions.lock().await;
                     let session = sessions.get_mut(&session_id).context("ZCode finishing Session missing")?;
-                    (session.events.finish(&session_id,&jobs)?,session.terminal.take())
+                    let messages = session.events.finish(&session_id,&jobs)?;
+                    let cancel_tasks = if session.cancelled {
+                        session.events.background_tasks_for_input(session.cancel_input.as_deref())
+                    } else { Vec::new() };
+                    (messages,session.terminal.take(),cancel_tasks)
                 };
                 for mut message in messages {
                     recover_command_output(&mut message,&finish_bridge.config.output_root()?).await;
                     write_frame(&finish_bridge.core,&message).await?;
+                }
+                // A task can be backgrounded while stop is in flight. The final
+                // snapshot must join that task to the cancelled input as well.
+                for task_id in cancel_tasks {
+                    finish_bridge.cancel_background_task(&session_id,&task_id).await?;
                 }
                 if terminal.is_ok() && std::env::var("ROVAI_INTERNAL_ZCODE_COMPACTION_ACCEPTANCE").as_deref()==Ok("1")
                     && !finish_bridge.acceptance_compacted.swap(true,Ordering::AcqRel) {
@@ -469,6 +519,8 @@ impl Bridge {
                         ),
                         terminal: None,
                         cancelled: false,
+                        cancel_input: None,
+                        cancel_requests: Default::default(),
                         acceptance_compaction: None,
                     },
                 );
@@ -532,6 +584,8 @@ impl Bridge {
                     }
                     session.events.begin(&input_id)?;
                     session.cancelled = false;
+                    session.cancel_input = None;
+                    session.cancel_requests.clear();
                     session.terminal = Some(tx);
                 }
                 let ack = self
@@ -557,13 +611,17 @@ impl Bridge {
                 }
                 rx.await.context("ZCode turn closed without terminal")?
             }
-            "session/cancel" => {
+            "session/cancel" | "_zcode/cancelFence" => {
                 self.stop(
                     params["sessionId"]
                         .as_str()
                         .context("ZCode Session ID missing")?,
                 )
                 .await?;
+                if method == "_zcode/cancelFence" {
+                    self.settle_foreground(params["sessionId"].as_str().unwrap())
+                        .await?;
+                }
                 Ok(json!({}))
             }
             _ => bail!("Unsupported internal ZCode operation"),
@@ -572,6 +630,9 @@ impl Bridge {
 
     async fn stop(&self, session_id: &str) -> Result<()> {
         if let Some(session) = self.sessions.lock().await.get_mut(session_id) {
+            if !session.cancelled {
+                session.cancel_input = session.events.input_id().map(str::to_string);
+            }
             session.cancelled = true;
         }
         self.command(
@@ -581,13 +642,45 @@ impl Bridge {
             json!({}),
         )
         .await?;
-        self.settle_background(session_id, true).await?;
+        // Cancel only background work launched by this input. Older Session
+        // services do not acquire the successor Run's cancellation scope.
+        let tasks = self
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .map(|s| {
+                s.events
+                    .background_tasks_for_input(s.cancel_input.as_deref())
+            })
+            .unwrap_or_default();
+        for task_id in tasks {
+            self.cancel_background_task(session_id, &task_id).await?;
+        }
         Ok(())
     }
 
-    async fn settle_background(&self, session_id: &str, cancel: bool) -> Result<Vec<Value>> {
-        let deadline =
-            tokio::time::Instant::now() + Duration::from_secs(if cancel { 3 } else { 300 });
+    async fn cancel_background_task(&self, session_id: &str, task_id: &str) -> Result<()> {
+        let first = self
+            .sessions
+            .lock()
+            .await
+            .get_mut(session_id)
+            .context("ZCode cancelled Session missing")?
+            .cancel_requests
+            .insert(task_id.to_string());
+        if first {
+            self.call(
+                "session/cancelBackgroundTask",
+                json!({"sessionId":session_id,"taskId":task_id}),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn settle_foreground(&self, session_id: &str) -> Result<Vec<Value>> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
         loop {
             let snapshot = self
                 .call("session/read", json!({"sessionId":session_id}))
@@ -596,15 +689,6 @@ impl Bridge {
                 .pointer("/projection/backgroundJobs")
                 .and_then(Value::as_array)
                 .context("ZCode background state unavailable")?;
-            let active = jobs
-                .iter()
-                .filter(|job| {
-                    !matches!(
-                        job.get("status").and_then(Value::as_str),
-                        Some("completed" | "failed" | "cancelled")
-                    )
-                })
-                .collect::<Vec<_>>();
             let quiescent = snapshot
                 .pointer("/projection/status")
                 .and_then(Value::as_str)
@@ -621,33 +705,13 @@ impl Bridge {
                         .and_then(Value::as_array)
                         .is_some_and(Vec::is_empty)
                 });
-            if active.is_empty() && quiescent {
+            if quiescent {
                 return Ok(jobs.clone());
             }
-            if cancel
-                || self
-                    .sessions
-                    .lock()
-                    .await
-                    .get(session_id)
-                    .is_some_and(|session| session.cancelled)
-            {
-                for job in active {
-                    let task_id = job
-                        .get("taskId")
-                        .and_then(Value::as_str)
-                        .context("ZCode background identity missing")?;
-                    self.call(
-                        "session/cancelBackgroundTask",
-                        json!({"sessionId":session_id,"taskId":task_id}),
-                    )
-                    .await?;
-                }
-            }
             if tokio::time::Instant::now() >= deadline {
-                bail!("ZCode background execution did not settle");
+                bail!("ZCode foreground Tool or permission did not settle");
             }
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
 
@@ -715,9 +779,36 @@ impl Bridge {
             };
             session.events.receive(params)?
         };
+        if params["type"] == "turn.started"
+            && params
+                .pointer("/payload/inputSource")
+                .and_then(Value::as_str)
+                == Some("background_task")
+        {
+            // Native completion notifications start an extra model Turn without
+            // a Rovai Input. Stop only that exact native foreground execution;
+            // the background service and its real result keep their own scope.
+            let foreground = params
+                .pointer("/payload/foregroundExecutionId")
+                .and_then(Value::as_str)
+                .context("ZCode background notification execution ID missing")?;
+            let result = self.call("v4/command", json!({"commandId":format!("rovai-notification-stop-{}",uuid::Uuid::new_v4()),
+                "clientId":"rovai","sessionId":session_id,"type":"stop", "payload":{"expectedForegroundExecutionId":foreground},
+                "issuedAt":chrono::Utc::now().timestamp_millis()})).await?;
+            write_frame(&self.core, &json!({"method":"_zcode/backgroundNotificationStop","params":{
+                "sessionId":session_id,"nativeTurnId":params["turnId"],"foregroundExecutionId":foreground,"commandStatus":result["status"]}})).await?;
+        }
+        let mut background_finished = false;
         for mut event in translated.messages {
             recover_command_output(&mut event, &self.config.output_root()?).await;
             write_frame(&self.core, &event).await?;
+            background_finished |= event["method"] == "_zcode/background"
+                && matches!(
+                    event
+                        .pointer("/params/background/status")
+                        .and_then(Value::as_str),
+                    Some("completed" | "failed" | "cancelled")
+                );
             if event["method"] == "_zcode/compaction"
                 && let Some(session) = self.sessions.lock().await.get_mut(session_id)
                 && let Some(reply) = session.acceptance_compaction.take()
@@ -725,9 +816,18 @@ impl Bridge {
                 let _ = reply.send(());
             }
         }
+        if background_finished
+            || matches!(
+                params["type"].as_str(),
+                Some("turn.completed" | "turn.failed")
+            )
+        {
+            self.background_settle
+                .try_send(session_id.to_string())
+                .context("ZCode background observer queue unavailable")?;
+        }
         if let Some(terminal) = translated.terminal {
-            // A foreground terminal does not prove that background children are
-            // idle. Keep the old owner until the native execution set settles.
+            // Foreground closure is independent of managed background jobs.
             self.finished
                 .send((session_id.to_string(), terminal))
                 .await
