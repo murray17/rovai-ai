@@ -2,6 +2,41 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
+pub(super) const RUNTIME_HEADERS_UNAVAILABLE: &str = "ZCode authentication failed: Start Plan requires official App captcha verification headers, unavailable in the independent app-server";
+
+#[derive(Debug)]
+pub(super) struct NativeTurnFailure(&'static str);
+
+impl std::fmt::Display for NativeTurnFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for NativeTurnFailure {}
+
+impl NativeTurnFailure {
+    fn from_payload(payload: &Value) -> Self {
+        let error = &payload["error"];
+        // Never forward arbitrary provider messages, stack traces or request
+        // data: they can contain credentials. Map only bounded known semantics.
+        let auth =
+            error.pointer("/attribution/reason").and_then(Value::as_str) == Some("auth_failed");
+        let captcha = error
+            .pointer("/attribution/providerErrorCode")
+            .is_some_and(|code| code == "3007" || code == 3007);
+        Self(
+            if error["message"] == RUNTIME_HEADERS_UNAVAILABLE || (auth && captcha) {
+                RUNTIME_HEADERS_UNAVAILABLE
+            } else if auth {
+                "ZCode authentication failed; check the official native account or provider configuration"
+            } else {
+                "Official ZCode Turn failed"
+            },
+        )
+    }
+}
+
 pub(super) struct SessionEvents {
     sequence: u64,
     input: Option<String>,
@@ -13,6 +48,7 @@ pub(super) struct SessionEvents {
     final_suffix: String,
     final_message: Option<String>,
     terminal_seen: bool,
+    runtime_headers_rejected: bool,
 }
 
 struct BackgroundTool {
@@ -41,6 +77,7 @@ impl SessionEvents {
             final_suffix: String::new(),
             final_message: None,
             terminal_seen: false,
+            runtime_headers_rejected: false,
         }
     }
 
@@ -55,7 +92,14 @@ impl SessionEvents {
         self.final_suffix.clear();
         self.final_message = None;
         self.terminal_seen = false;
+        self.runtime_headers_rejected = false;
         Ok(())
+    }
+
+    pub fn reject_runtime_headers(&mut self, turn: Option<&str>) {
+        if self.owns_turn(turn) {
+            self.runtime_headers_rejected = true;
+        }
     }
 
     pub fn owns_turn(&self, turn: Option<&str>) -> bool {
@@ -328,7 +372,10 @@ impl SessionEvents {
                         Ok(json!({"stopReason":"end_turn"}))
                     }
                     Some("cancelled") => Ok(json!({"stopReason":"cancelled"})),
-                    _ => Err(anyhow::anyhow!("Official ZCode Turn failed")),
+                    _ if self.runtime_headers_rejected => {
+                        Err(NativeTurnFailure(RUNTIME_HEADERS_UNAVAILABLE).into())
+                    }
+                    _ => Err(NativeTurnFailure::from_payload(payload).into()),
                 });
                 self.terminal_seen = true;
             }
@@ -472,6 +519,29 @@ mod tests {
     // the active input, and only a correlated success terminal permits Final.
     #[test]
     fn native_input_fences_replay_tools_compaction_and_terminal() {
+        for (error, expected) in [
+            (
+                json!({"message":RUNTIME_HEADERS_UNAVAILABLE}),
+                RUNTIME_HEADERS_UNAVAILABLE,
+            ),
+            (
+                json!({"message":"PRIVATE_KEY","attribution":{"reason":"auth_failed","providerErrorCode":3007}}),
+                RUNTIME_HEADERS_UNAVAILABLE,
+            ),
+            (
+                json!({"message":"PRIVATE_KEY","attribution":{"reason":"auth_failed"}}),
+                "ZCode authentication failed; check the official native account or provider configuration",
+            ),
+            (
+                json!({"message":"PRIVATE_KEY","stack":"PRIVATE_KEY","data":{"Authorization":"PRIVATE_KEY"}}),
+                "Official ZCode Turn failed",
+            ),
+        ] {
+            assert_eq!(
+                NativeTurnFailure::from_payload(&json!({"error":error})).to_string(),
+                expected
+            );
+        }
         let mut state = SessionEvents::new(10);
         state.begin("input-1").unwrap();
         let event = |seq, turn, kind, payload| json!({"sessionId":"s1","seq":seq,"eventId":format!("e{seq}"),"turnId":turn,"type":kind,"payload":payload});

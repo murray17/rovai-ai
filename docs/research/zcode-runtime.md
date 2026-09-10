@@ -22,7 +22,7 @@ App 内核 SHA-256：`e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e111
 
 | 能力轴 | 实现与证据 | 一致性与差异 |
 | --- | --- | --- |
-| 官方入口 / 认证 | 官方 bundle identity、官方 bundle/cjs/Node composite fingerprint；用户和项目原生配置只读；真实 MiniMax BYOK AgentRun | 原生终端账号登录与 BYOK 均可提供配置；App-only 登录态不能直接替代终端配置，不增加 Rovai provider/密钥配置 |
+| 官方入口 / 认证 | 官方 bundle/cjs/Node 指纹；原生终端配置优先，缺失时只读 App 发布配置与 family 选择；真实 MiniMax BYOK AgentRun | App 账号目录可加载；Start Plan 真实调用被上游人机验证拒绝，账号生成尚未通过；不增加 Rovai provider/密钥配置 |
 | 图片输入 | 现有附件路径经原生 Read 读取并生成 image tool content | 与 Codex、Claude 和普通 ACP 的路径投递方式一致；不新增上传或图片证据表。真实看图与冷恢复证据另记 |
 | Host / Fleet / owner | 复用 AcpHost/Fleet、独占 lease、兼容性 digest 和 ManagedProcess；Camp 范围内按进程配置复用、精确切换成员 Session | Core 内部转换成现有 Session transport；上游协议仍标为 `zcode-app-server-v1`，不声称原生支持 ACP |
 | Session / continuation | exact ID；真实 Core 重启后恢复同一 Session；无历史动作/审批重放；无效 ID 仅一次显式 continuity loss 后重建 | 不使用 latest Session，不猜私有历史；已 accepted 的输入不自动重发 |
@@ -89,8 +89,18 @@ bundle 身份定位，不能把对它的发现误解为启动 GUI。与 Pi 的 w
 配置中存在 `apiKey` 不等于只支持用户手动 BYOK。账号流程生成的两类配置、公开模型目录不含秘密和配置变化
 已纳入既有配置 owner 回归；真实 OAuth 和订阅余额不由该 fixture 证明。
 
-官方 App 的 `.zcode/v2` 与终端 `.zcode/cli` 是不同配置载体。只存在 App 登录态时，当前仍需在官方终端
-执行 `/login`；未实现 App-only 登录态直接复用。终端依然由独立 Node 加载官方内核，不启动 GUI。
+官方 App 的 `.zcode/v2` 与终端 `.zcode/cli` 是不同配置载体。v6 在终端配置缺失时读取 App 发布的
+config 和 setting 中的 family 模式/选择。官方 `pickResolvedFamilyProvider` 决定 OAuth 与 API Key 的 preset；
+`convertModelProviderConfigToZCodeProviderInput` 将 App 的输入 modalities 转为模型能力。
+`workspace/updateProviderRegistry` 注册完整目录，session runtimeModel 只选择对应 Provider/模型。
+
+App 3.11.2 `out/host/index.js` 的 `buildStartPlanRuntimeAuthorizationHeaders` 还设置 Bearer Authorization；
+Renderer 的 provider runtime headers handler 调用官方人机验证 SDK，产生临时验证头后回复内核请求。
+这些临时头不保存在 config。2026-09-10 隔离模型验收中，账号配置与用户当前 App 文件一致、GLM-5.3 请求已发出，
+上游返回 `captcha verify failed`、Provider code 3007、`auth_failed`。用户确认 App 内 GLM-5.3 能正常对话；
+这不能替代独立 app-server 验收，也不能靠复制账号配置解决该临时交互缺口。
+Adapter 明确拒绝未完成的运行时验证请求，不提取验证码结果、不启动 GUI；Start Plan、账号刷新、Team Plan
+动态凭据均保留未接入边界。终端账号配置解析测试不等于真实订阅生成通过。
 
 原生 Read 的声明明确支持文本和图片，`readImageFile` 经 `fileSystemPort.readBinaryFile` 和
 `imageProcessorPort.prepareForModel` 读取并处理图片，`formatModelContent` 输出原生 image 内容给模型。

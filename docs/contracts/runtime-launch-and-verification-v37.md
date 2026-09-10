@@ -17,10 +17,11 @@ last_updated: 2026-09-10
 `ZCode.app/Contents/MacOS/ZCode` 定位 bundle，实际启动独立 Node.js 执行同 bundle 的
 `Resources/glm/zcode.cjs app-server`。不执行 App 主程序；`ELECTRON_RUN_AS_NODE=1` 不能阻止 macOS 注册 App。
 Node 从 Runtime PATH 或 `ROVAI_ZCODE_NODE_BIN` 解析，拒绝 `.app` 内程序。验证 bundle identifier `dev.zcode.app`，
-fingerprint 包含官方定位文件、内核与独立 Node，bridge revision 为 `zcode-native-node-transport-v5`。
+fingerprint 包含官方定位文件、内核与独立 Node，bridge revision 为 `zcode-native-node-transport-v6`。
 默认发现 `/Applications` 与用户 Applications；不通过 PATH 选择社区 `zcode`、`zcode-app-cli` 或 `zcode-acp`。
 
-账号登录与 BYOK 均使用官方 `~/.zcode/cli/config.json` 和项目 `zcode.json`、`.zcode/config.json` 提供。
+账号登录与 BYOK 优先使用官方 `~/.zcode/cli/config.json`；不存在时读取 App 发布的 `.zcode/v2/config.json`。
+项目 `zcode.json`、`.zcode/config.json` 继续按既有原生层次合并。
 项目搜索从最近 Git root 到 cwd；无 Git root 时只读取 cwd。配置变化进入 Host 与 Native Binding compatibility digest。
 秘密只在内存与原生 `runtimeModel` RPC 中传递，不进入 argv、Prompt、数据库、诊断或公开 Evidence。
 Rovai 不修改用户 provider 配置，不建立额外密钥配置入口。原生模型目录仍须通过无 Prompt 的官方 workspace/session 交换。
@@ -111,9 +112,18 @@ macOS arm64 在完整资格证据冻结前为 Preview；其他平台 NotQualifie
 不要求用户再向 Rovai 手工填写 key。普通 Probe 不发起交互登录；缺少原生配置或凭据时给出官方登录指引。
 登录或配置变化后重新检查，旧配置 digest 对应的 Host 不复用。
 
-App `.zcode/v2` 登录态和终端配置不是同一个载体。仅在 App 中登录、尚无终端配置时，当前 Adapter
-不能据此宣称可用，仍需在官方终端完成 `/login`。Rovai 不自行解密或复制 App 凭据，也不启动 GUI 补做登录。
-该边界与真实 OAuth 登录、订阅额度验证分别报告，配置 fixture 不等于真实账号验收。
+终端配置不存在时，App 配置从 `ZCODE_DATA_BASE_DIR`（缺省为原生 HOME）下的 `.zcode/v2/config.json`
+读取；只额外读取 sibling `setting.json` 的 Provider family 模式与选择，沿用官方 OAuth/API Key 选择规则。
+禁用、无凭据的 Provider 和禁用模型不进入目录；Team Plan 动态组织/项目凭据尚未接入，不能回退成个人凭据。
+App 配置及选择纳入 digest，完整可用目录通过 `workspace/updateProviderRegistry` 内存 RPC 注册并校验回执。
+Rovai 不解密 `credentials.json`、复制配置到 CLI Home 或启动 GUI。普通 Probe 只证明配置与目录加载、协议初始化。
+
+Start Plan 除账号 Authorization 外，还依赖官方 App Renderer 完成的临时人机验证请求头。
+独立 app-server 暂不能完成该流程；`interaction/requestProviderRuntimeHeaders` 必须明确报告未应用，
+不能仅因已设置 Authorization 就宣称完成刷新，不提取或复用 App 的验证码结果。
+账号配置可加载不等于账号模型生成已验收，真实 OAuth、刷新、套餐额度与模型调用分别记录。
+原生 `turn.failed` 与 `projection.status=error` 是失败终态；无前台工具/审批/请求后应发布脱敏失败，
+不能等待 `idle` 后将鉴权失败误报为断线恢复。成功 Final 仍要求成功终态及原有完整校验。
 
 图片与 Codex、Claude Code 及现有 ACP Runtime 一样，从现有 Attachment 授权/解析进入
 `CURRENT_INPUT.attachments` 路径数组。ZCode 原生 Read 自行读取图片，按原生格式、压缩与大小规则处理，

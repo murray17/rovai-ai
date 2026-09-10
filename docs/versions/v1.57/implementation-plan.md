@@ -149,3 +149,23 @@ GUI/Computer Use 回调为 NotImplemented。账号登录与 BYOK 都在范围内
 - 最终路径实现验证：ZCode Library 5 项、普通 Probe 1 项、平台准入 5 项通过；Vitest 1717 项、
   末段 Node 224 项通过（保留 1 项平台 skip）；Clippy、格式与通用文档 CI 通过。最终差异未重跑全部 Rust slow 套件，
   不沿用已撤回方案的测试数量。隔离凭据、原生 Home/历史已清理，14 个改动文件和 17 份本轮日志的密钥匹配为 0。
+
+## v6：App 账号验收与失败修正
+
+用户授权验证已登录 App，且仅在无问题后合并 main、打包安装。App-only 配置加载已补齐，真实 Start Plan
+生成遇到上游 `captcha verify failed`（3007），因此该前提尚未满足，PR 保持待验收，不替换日常 App。
+
+- 终端配置优先，缺失时只读 App config 和 family 模式/选择，完整目录经官方内存 registry RPC 加载。
+  普通 Probe 沿用用户原生环境；真实模型验收单独使用隔离凭据副本、HOME、存储、Core 和 Skill Library。
+- App 的 Start Plan 请求另需 Renderer 临时人机验证头；不解密凭据，不提取验证码结果，不启动 GUI。
+  Coding Plan/Team Plan、账号刷新及账号图片生成仍未完成真实验收，不能把 Basic Ready 当作生成成功。
+- 修复 `turn.failed` 后 `projection.status=error` 被误判未收敛的问题，保留前台工具/审批/请求门禁。
+  失败仅映射固定脱敏提示；业务失败不污染 Host，不触碰原后台任务归属及 Run CLI lease。
+- 扩展已有配置 owner，覆盖 App/CLI 优先级、原生自定义目录、OAuth/API Key family、禁用模型、轮换和目录脱敏。
+  独立 transport 回归拥有 reader/settler/request 并发 seam：修复前 Core 在约 3 秒后只见断线；修复后收到鉴权失败，
+  Host 可继续处理请求。它无真实进程、文件或 DB，纯 event owner 无法覆盖此跨 worker 终态丢失。
+  最小命令：`cargo test -p rovai-core --lib zcode::`。
+- 新增显式 `scripts/smoke-zcode-account.mjs`。默认模式要求真实随机 nonce；`--expect-auth-failure` 单独验证
+  错误码、不可重试、无 Final 和关闭 Core，仅是失败路径证据。用 `smoke-zcode-launch.swift` 观察 GUI 注册数。
+- main 已同步至 0.2.3；Schema 99/Migration 149 与上下文合同不变。v3/v4/v5 实测仍保留各自版本阶段，
+  不冒充本轮重新执行。实际门禁、账号失败与清理结果集中记录在 [v6 证据](evidence/zcode-macos-arm64-2026-09-10.json)。

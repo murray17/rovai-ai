@@ -458,8 +458,10 @@ pipe-owned companion 补充回收原生 detached Bash 进程组，生命周期�
 后台结果走原 Run 的已登记 Evidence 归属，前台 Run 与 CLI 授权正常结束。普通 Probe 沿用原生 HOME/存储，
 只隔离临时 cwd/socket，且不发送生成请求；Probe 实测与 Adapter 能力及发布资格分开。
 
-模型与凭据由官方 `.zcode/cli/config.json` 和项目配置拥有；官方终端 `/login` 生成的账号配置与 BYOK
-共用只读的原生 runtimeModel carrier，不建立 Rovai provider 配置。App-only `.zcode/v2` 登录态尚不直接复用。
+模型与凭据由官方配置拥有；终端 `.zcode/cli/config.json` 不存在时读取 App `.zcode/v2/config.json`，
+并沿用 App 的 Provider family 选择。账号与 BYOK 共用只读 runtimeModel，App 完整目录经内存 registry RPC 加载。
+不建立 Rovai provider 配置，不解密登录文件。Start Plan 的 App 内临时人机验证、账号刷新和 Team Plan 动态凭据
+尚未接入；配置加载通过不能作为账号生成通过的证据。原生失败终态发布脱敏错误，不因 `error` 状态误触发断线恢复。
 图片沿用授权附件路径，由原生 Read 转为模型图片内容；Read 保持读取活动，不形成 Files Changed 或修改 Diff。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；
 warm resume 不刷新 MCP，所以集合变化不能沿用旧 Host。协议、FirstPayload、权限、Usage 与保留能力见
 [Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)。平台资格与 Machine Ready 分开维护。

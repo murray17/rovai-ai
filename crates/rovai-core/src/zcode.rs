@@ -14,7 +14,7 @@ pub mod transport;
 
 pub const PROTOCOL: &str = "zcode-app-server-v1";
 pub const MINIMUM_VERSION: &str = "0.16.5";
-pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v5";
+pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v6";
 
 pub fn supported_version(version: Option<&str>) -> bool {
     version
@@ -146,6 +146,7 @@ pub fn default_executables() -> Vec<PathBuf> {
 pub struct NativeConfig {
     value: Value,
     pub digest: String,
+    app_config: bool,
 }
 
 impl NativeConfig {
@@ -169,6 +170,7 @@ impl NativeConfig {
                 matches!(
                     key.as_str(),
                     "ZCODE_MODEL"
+                        | "ZCODE_DATA_BASE_DIR"
                         | "ZCODE_BASE_URL"
                         | "ZCODE_STORAGE_DIR"
                         | "ZCODE_SESSION_DB"
@@ -202,33 +204,48 @@ impl NativeConfig {
             directories = vec![cwd.to_path_buf()];
         }
         directories.reverse();
-        let user_path = home.join(".zcode/cli/config.json");
+        // An explicit terminal configuration keeps its existing authority. App-only
+        // login publishes usable provider credentials in the official v2 config;
+        // do not decrypt credentials.json or copy either file into a new Home.
+        let terminal_path = home.join(".zcode/cli/config.json");
+        let use_app_config = match fs::metadata(&terminal_path) {
+            Ok(_) => false,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => bail!("ZCode official configuration is unreadable"),
+        };
+        let app_base = native_environment
+            .get("ZCODE_DATA_BASE_DIR")
+            .map(|path| path.trim())
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.to_path_buf());
+        let user_path = if use_app_config {
+            app_base.join(".zcode/v2/config.json")
+        } else {
+            terminal_path
+        };
         let paths = std::iter::once(user_path.clone()).chain(
             directories
                 .iter()
                 .flat_map(|p| [p.join("zcode.json"), p.join(".zcode/config.json")]),
         );
         let mut user_servers = json!({});
+        let mut app_config_loaded = false;
         for path in paths {
-            if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > 4 * 1024 * 1024) {
-                bail!("ZCode official configuration exceeds limit");
-            }
-            let bytes = match fs::read(&path) {
-                Ok(bytes) => bytes,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(_) => bail!("ZCode official configuration is unreadable"),
+            let Some(mut layer) = read_native_configuration(&path)? else {
+                continue;
             };
-            if bytes.len() > 4 * 1024 * 1024 {
-                bail!("ZCode official configuration exceeds limit");
-            }
-            let text = std::str::from_utf8(&bytes).context("ZCode configuration must be UTF-8")?;
-            let mut layer: Value = serde_json::from_str(text)
-                .map_err(|_| anyhow::anyhow!("ZCode official configuration is invalid"))?;
-            if !layer.is_object() {
-                bail!("ZCode configuration must be an object");
-            }
             identities.push(crate::command::canonical_json_digest(&layer)?);
             if path == user_path {
+                if use_app_config {
+                    let settings =
+                        read_native_configuration(&user_path.with_file_name("setting.json"))?
+                            .unwrap_or_else(|| json!({}));
+                    let selection = json!({"modelProviderFamilyModes":settings["modelProviderFamilyModes"],"modelProviderFamilySelectedKeys":settings["modelProviderFamilySelectedKeys"]});
+                    identities.push(crate::command::canonical_json_digest(&selection)?);
+                    layer = app_provider_configuration(layer, &selection)?;
+                    app_config_loaded = true;
+                }
                 user_servers = layer
                     .pointer("/mcp/servers")
                     .cloned()
@@ -284,6 +301,7 @@ impl NativeConfig {
         Ok(Self {
             value: config,
             digest,
+            app_config: app_config_loaded,
         })
     }
 
@@ -307,8 +325,16 @@ impl NativeConfig {
         let target = selected.unwrap_or(&default);
         let (provider_id, model_id) = target
             .split_once('/')
-            .context("Sign in through official ZCode terminal /login (Z.ai or BigModel), or configure a provider and model in ~/.zcode/cli/config.json")?;
+            .context("Sign in to official ZCode App or terminal /login, or configure a provider and model in ~/.zcode/cli/config.json")?;
         let provider = &self.value["provider"][provider_id];
+        if provider.get("enabled") == Some(&Value::Bool(false))
+            || provider
+                .get("systemDisabledReason")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+        {
+            bail!("ZCode selected provider is disabled in native configuration");
+        }
         let models = provider["models"].as_object();
         let model = models
             .and_then(|models| {
@@ -322,7 +348,7 @@ impl NativeConfig {
         } else {
             &Value::Null
         };
-        if model.is_none() && main.is_null() {
+        if model.is_none() && (main.is_null() || (self.app_config && main.is_string())) {
             bail!("ZCode selected model not present in official configuration");
         }
         let kind = main
@@ -375,16 +401,64 @@ impl NativeConfig {
             .and_then(Value::as_str)
             .filter(|v| !v.is_empty())
         {
+            if matches!(
+                provider_id,
+                "builtin:zai-start-plan" | "builtin:bigmodel-start-plan"
+            ) {
+                // Official App buildStartPlanRuntimeAuthorizationHeaders: these
+                // account endpoints require Bearer authorization as well as apiKey.
+                let key = key.trim();
+                let bearer = key
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|part| part.eq_ignore_ascii_case("bearer"));
+                native["headers"]["Authorization"] = json!(if bearer {
+                    key.to_string()
+                } else {
+                    format!("Bearer {key}")
+                });
+            }
             native["apiKey"] = json!({"source":"inline","value":key});
             native["apiKeyRequired"] = json!(true);
         } else {
             bail!(
-                "ZCode native provider credentials are missing; sign in through official ZCode terminal /login or configure the provider API key"
+                "ZCode native provider credentials are missing; sign in to official ZCode App or terminal /login, or configure the provider API key"
             );
         }
         Ok(
             json!({"revision":self.digest,"generatedAt":chrono::Utc::now().timestamp_millis(),"model":{"providerId":provider_id,"modelId":model_id},"provider":native}),
         )
+    }
+
+    /// App-only providers are absent from the CLI's disk configuration. Register
+    /// their complete catalog through the official memory-only registry RPC.
+    pub fn app_provider_registry(&self) -> Result<Option<Value>> {
+        if !self.app_config {
+            return Ok(None);
+        }
+        let mut providers = Vec::new();
+        for (id, provider) in self.value["provider"].as_object().into_iter().flatten() {
+            let mut native = None;
+            let mut models = Vec::new();
+            for (alias, model) in provider["models"].as_object().into_iter().flatten() {
+                let id = format!(
+                    "{id}/{}",
+                    model.get("id").and_then(Value::as_str).unwrap_or(alias)
+                );
+                let Ok(runtime) = self.runtime_model(Some(&id)) else {
+                    continue;
+                };
+                models.push(runtime["provider"]["models"][0].clone());
+                native.get_or_insert_with(|| runtime["provider"].clone());
+            }
+            if let Some(mut native) = native {
+                native["models"] = json!(models);
+                providers.push(native);
+            }
+        }
+        Ok(Some(
+            json!({"revision":self.digest,"generatedAt":chrono::Utc::now().timestamp_millis(),"providers":providers}),
+        ))
     }
 
     pub fn mcp_servers(&self, assigned: Option<&Value>) -> Result<Vec<Value>> {
@@ -518,6 +592,143 @@ impl NativeConfig {
             "modelContextBudgetStrategy":"preflight-v1"
         })
     }
+}
+
+fn read_native_configuration(path: &Path) -> Result<Option<Value>> {
+    if fs::metadata(path).is_ok_and(|metadata| metadata.len() > 4 * 1024 * 1024) {
+        bail!("ZCode official configuration exceeds limit");
+    }
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => bail!("ZCode official configuration is unreadable"),
+    };
+    if bytes.len() > 4 * 1024 * 1024 {
+        bail!("ZCode official configuration exceeds limit");
+    }
+    let text = std::str::from_utf8(&bytes).context("ZCode configuration must be UTF-8")?;
+    let layer: Value = serde_json::from_str(text)
+        .map_err(|_| anyhow::anyhow!("ZCode official configuration is invalid"))?;
+    if !layer.is_object() {
+        bail!("ZCode configuration must be an object");
+    }
+    Ok(Some(layer))
+}
+
+/// Project the App's published provider config, without loading App sessions or
+/// its encrypted credential store. The App owns login, entitlement and refresh.
+fn app_provider_configuration(mut app: Value, selection: &Value) -> Result<Value> {
+    let providers = app.get_mut("provider").and_then(Value::as_object_mut)
+        .context("ZCode App provider configuration is missing; sign in to the official App or terminal /login")?;
+    // Match the App's resolved family choice. A cached API key must not silently
+    // replace its OAuth plan (or a dynamically resolved Team Plan identity).
+    for family in ["zai", "bigmodel"] {
+        let api = format!("builtin:{family}");
+        let coding = format!("{api}-coding-plan");
+        let start = format!("{api}-start-plan");
+        let available = |id: &str| {
+            providers.get(id).is_some_and(|provider| {
+                provider.get("enabled") != Some(&Value::Bool(false))
+                    && provider
+                        .get("systemDisabledReason")
+                        .and_then(Value::as_str)
+                        .is_none_or(str::is_empty)
+            })
+        };
+        let selected_key = selection["modelProviderFamilySelectedKeys"][family]
+            .as_str()
+            .unwrap_or("")
+            .trim();
+        if selection["modelProviderFamilyModes"][family] != "apiKey"
+            && selected_key.starts_with("team-plan:")
+            && [&api, &coding, &start].iter().any(|id| available(id))
+        {
+            bail!(
+                "ZCode App Team Plan requires native dynamic credential projection; cached personal credentials cannot be substituted"
+            );
+        }
+        let selected = if selection["modelProviderFamilyModes"][family] == "apiKey" {
+            available(&api).then(|| api.clone())
+        } else {
+            [&start, &coding]
+                .into_iter()
+                .find(|id| selected_key == format!("coding-plan:{id}") && available(id))
+                .cloned()
+                .or_else(|| {
+                    (available(&coding)
+                        && providers[&coding]
+                            .pointer("/options/apiKey")
+                            .and_then(Value::as_str)
+                            .is_some_and(|key| !key.trim().is_empty()))
+                    .then(|| coding.clone())
+                })
+                .or_else(|| {
+                    [&start, &coding, &api]
+                        .into_iter()
+                        .find(|id| available(id))
+                        .cloned()
+                })
+        };
+        for id in [&api, &coding, &start] {
+            if selected.as_ref() != Some(id) {
+                providers.remove(id);
+            }
+        }
+    }
+    let mut default = None;
+    for (provider_id, provider) in providers.iter_mut() {
+        if provider.get("enabled") == Some(&Value::Bool(false))
+            || provider
+                .get("systemDisabledReason")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+            || provider
+                .pointer("/options/apiKey")
+                .and_then(Value::as_str)
+                .is_none_or(|key| key.trim().is_empty())
+        {
+            continue;
+        }
+        let Some(models) = provider.get_mut("models").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        models.retain(|_, model| {
+            model.pointer("/zcode/deleted") != Some(&Value::Bool(true))
+                && model.get("enabled") != Some(&Value::Bool(false))
+                && model
+                    .get("disabledReason")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+        });
+        for model in models.values_mut() {
+            if let Some(input) = model.pointer("/modalities/input").and_then(Value::as_array) {
+                model["supportsImages"] = json!(input.iter().any(|value| value == "image"));
+            }
+        }
+        // Official App sorts provider IDs and model priorities ascending. For
+        // equal priorities the canonical model ID gives a stable default; users
+        // may select any native catalog model explicitly in Rovai.
+        if default.is_none() {
+            default = models
+                .iter()
+                .min_by_key(|(id, model)| {
+                    (
+                        model
+                            .pointer("/zcode/priority")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(i64::MAX),
+                        id.to_string(),
+                    )
+                })
+                .map(|(id, model)| {
+                    format!(
+                        "{provider_id}/{}",
+                        model.get("id").and_then(Value::as_str).unwrap_or(id)
+                    )
+                });
+        }
+    }
+    Ok(json!({"provider":providers,"model":{"main":default}}))
 }
 
 fn merge(target: &mut Value, layer: Value) {
@@ -675,6 +886,112 @@ mod tests {
                     .contains("/login")
             );
         }
+        fs::remove_file(home.join(".zcode/cli/config.json")).unwrap();
+        fs::create_dir_all(home.join(".zcode/v2")).unwrap();
+        let app_path = home.join(".zcode/v2/config.json");
+        let mut app = json!({"provider":{
+            "builtin:zai-start-plan":{"kind":"anthropic","enabled":true,
+                "options":{"apiKey":"PRIVATE_APP_TOKEN","baseURL":"https://zcode.z.ai/api/v1/zcode-plan/anthropic"},
+                "models":{"vision":{"modalities":{"input":["text","image"]},"zcode":{"priority":1}},
+                    "text":{"modalities":{"input":["text"]},"zcode":{"priority":2}},
+                    "deleted":{"zcode":{"deleted":true,"priority":0}}}},
+            "builtin:zai-coding-plan":{"kind":"anthropic","enabled":false,"systemDisabledReason":"coding_plan_not_entitled",
+                "options":{"apiKey":"PRIVATE_DISABLED_TOKEN"},"models":{"blocked":{}}}
+        }});
+        let bytes = app.to_string();
+        fs::write(&app_path, &bytes).unwrap();
+        let signed_in = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+        let carrier = signed_in.runtime_model(None).unwrap();
+        assert_eq!(carrier["model"]["modelId"], "vision");
+        assert_eq!(
+            carrier["provider"]["headers"]["Authorization"],
+            "Bearer PRIVATE_APP_TOKEN"
+        );
+        assert_eq!(carrier["provider"]["models"][0]["supportsImages"], true);
+        assert_eq!(
+            signed_in
+                .runtime_model(Some("builtin:zai-start-plan/text"))
+                .unwrap()["provider"]["models"][0]["supportsImages"],
+            false
+        );
+        assert!(
+            signed_in
+                .runtime_model(Some("builtin:zai-coding-plan/blocked"))
+                .is_err()
+        );
+        assert!(
+            signed_in
+                .runtime_model(Some("builtin:zai-start-plan/deleted"))
+                .is_err()
+        );
+        let registry = signed_in.app_provider_registry().unwrap().unwrap();
+        assert_eq!(registry["providers"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            registry["providers"][0]["models"].as_array().unwrap().len(),
+            2
+        );
+        assert!(!registry.to_string().contains("PRIVATE_DISABLED_TOKEN"));
+        assert_eq!(fs::read_to_string(&app_path).unwrap(), bytes);
+        assert!(!home.join(".zcode/cli/config.json").exists());
+        app["provider"]["builtin:zai-start-plan"]["options"]["apiKey"] =
+            json!("PRIVATE_ROTATED_APP_TOKEN");
+        fs::write(&app_path, app.to_string()).unwrap();
+        let rotated = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+        assert_ne!(signed_in.digest, rotated.digest);
+        assert!(!rotated.digest.contains("PRIVATE_ROTATED_APP_TOKEN"));
+        let custom = root.join("custom-app-data");
+        fs::create_dir_all(custom.join(".zcode/v2")).unwrap();
+        fs::write(custom.join(".zcode/v2/config.json"), &bytes).unwrap();
+        let custom_env = std::collections::BTreeMap::from([(
+            "ZCODE_DATA_BASE_DIR".to_string(),
+            custom.to_str().unwrap().to_string(),
+        )]);
+        let custom_config = NativeConfig::load_layers(&cwd, &home, &custom_env).unwrap();
+        assert_eq!(
+            custom_config.runtime_model(None).unwrap()["provider"]["apiKey"]["value"],
+            "PRIVATE_APP_TOKEN"
+        );
+        let mut dual = app.clone();
+        dual["provider"]["builtin:zai"] = json!({"kind":"anthropic","options":{"apiKey":"PRIVATE_APP_BYOK"},"models":{"api-model":{}}});
+        fs::write(&app_path, dual.to_string()).unwrap();
+        let setting_path = app_path.with_file_name("setting.json");
+        fs::write(
+            &setting_path,
+            json!({"modelProviderFamilyModes":{"zai":"apiKey"},
+                "modelProviderFamilySelectedKeys":{"zai":"team-plan:builtin:zai-coding-plan:fixture"}}).to_string(),
+        )
+        .unwrap();
+        let api_mode = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+        assert_eq!(
+            api_mode.runtime_model(None).unwrap()["model"]["providerId"],
+            "builtin:zai"
+        );
+        fs::write(
+            &setting_path,
+            json!({"modelProviderFamilyModes":{"zai":"oauth"}}).to_string(),
+        )
+        .unwrap();
+        let oauth_mode = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
+        assert_eq!(
+            oauth_mode.runtime_model(None).unwrap()["model"]["providerId"],
+            "builtin:zai-start-plan"
+        );
+        assert_ne!(api_mode.digest, oauth_mode.digest);
+        fs::write(&setting_path, json!({"modelProviderFamilySelectedKeys":{"zai":"team-plan:builtin:zai-coding-plan:fixture"}}).to_string()).unwrap();
+        assert!(
+            NativeConfig::load_layers(&cwd, &home, &Default::default())
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("Team Plan")
+        );
+        fs::write(home.join(".zcode/cli/config.json"), config.to_string()).unwrap();
+        let terminal = NativeConfig::load_layers(&cwd, &home, &custom_env).unwrap();
+        assert_eq!(
+            terminal.runtime_model(None).unwrap()["model"]["providerId"],
+            "byok"
+        );
+        assert!(terminal.app_provider_registry().unwrap().is_none());
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -554,5 +554,113 @@
       "docsCiPassed": true,
       "fullRustWorkspaceAndSlowSuiteRepeatedForFinalDiff": false
     }
+  },
+  "v6Revision": {
+    "transport": "zcode-native-node-transport-v6",
+    "sourceBaseCommit": "8b09a32ef0bf39a3152e97974bc0c72994d1f246",
+    "mainIntegratedCommit": "7c6c72a0",
+    "coreVersion": "0.2.3",
+    "dataContractVersion": "v1.57",
+    "schemaVersion": 99,
+    "sourceScope": "App published configuration fallback, official family selection and memory-only catalog; safe failed-turn settlement and explicit unsupported Start Plan runtime verification. No shared Context or image pipeline changes.",
+    "appConfiguration": {
+      "terminalConfigAbsent": true,
+      "publishedAppConfigLoaded": true,
+      "nativeDataBaseDirSupported": true,
+      "ordinaryProbePromptCount": 0,
+      "realAppGenerationVerified": false,
+      "sourceCredentialStoreDecrypted": false,
+      "sourceConfigurationRewritten": false,
+      "cliConfigCreated": false
+    },
+    "accountGeneration": {
+      "passed": false,
+      "providerId": "builtin:zai-start-plan",
+      "modelId": "GLM-5.3",
+      "nativeSessionId": "sess_ccc597a1-fe30-44fb-84d2-748689ec7d45",
+      "nativeError": "captcha verify failed",
+      "providerErrorCode": "3007",
+      "attribution": "auth_failed",
+      "statusCode": 400,
+      "userReportedAppModelWorks": "GLM-5.3",
+      "temporaryConfigMatchedCurrentAppConfig": true,
+      "logSha256": "a5cd24962397ee9dc95f912b42b4d8e8f0d722e58b39c33a5d4b2f3455b51f58",
+      "zcodeGuiLaunchCount": 0
+    },
+    "failedTurnRegression": {
+      "reproducedFacadeClosureBeforeReply": true,
+      "redLogSha256": "689081f5389f571283733a5cb7a58a7d868e601a2c6c6b53707a1b27940668aa",
+      "nativeGenericPreparationErrorReproduced": true,
+      "initialRejectionLogSha256": "568fb24efa91637c7c7272fda4d91081255251e7ab2eed62e251a1b13022a1a2",
+      "smoke": "smoke-zcode-account.mjs --expect-auth-failure via smoke-zcode-launch.swift",
+      "rejectionPassed": true,
+      "actualAccountGeneration": false,
+      "code": "runtime_authentication_required",
+      "phase": "authentication",
+      "retryable": false,
+      "successFinalPublished": false,
+      "coreExitCode": 0,
+      "zcodeGuiLaunchCount": 0,
+      "logSha256": "3830ca4d9b27122f5e79177f3c49902fa6d7ab77a6354ceeb2dd5059729166d0",
+      "coreExecutableSha256": "4c72cc90dd942be20dbf419f083aa1955980a0202748cdf6acb2c1b3495c9833",
+      "binaryScope": "Final rejection-cause handling; the later stale Team Plan selection in explicit API-key mode is covered by the final configuration regression."
+    },
+    "uncovered": [
+      "Successful account generation, subscription balance and OAuth refresh.",
+      "Start Plan temporary Renderer verification and dynamic Team Plan credentials.",
+      "Account image generation and cold resume; prior BYOK path-image evidence remains scoped to v5.",
+      "No repeated full background/compaction/Skills/MCP/permission Golden Flows for v6.",
+      "macOS x64, Windows x64 or newer kernel qualification."
+    ],
+    "delivery": {
+      "merged": false,
+      "dailyAppReplaced": false,
+      "reason": "User conditioned merge and install on successful verification; account generation remains blocked."
+    },
+    "cleanup": {
+      "changedFiles": {
+        "scanned": 13,
+        "credentialMatches": 0
+      },
+      "taskLogs": {
+        "scanned": 21,
+        "credentialMatches": 0
+      },
+      "isolatedCoreFiles": {
+        "scanned": 223,
+        "credentialMatches": 0
+      },
+      "isolatedCredentialCopiesRemoved": true,
+      "isolatedNativeHomeAndStorageRemoved": true,
+      "sourceAppConfigNotRewritten": true
+    },
+    "localGates": {
+      "rustPrGate": {
+        "libraryPassed": 551,
+        "cliPassed": 33,
+        "slowPassed": 309,
+        "scope": "Full gate during v6 implementation; final callback-cause and API-mode refinements additionally covered by the final targeted ZCode tests and Clippy."
+      },
+      "finalZcodeLibraryPassed": 5,
+      "finalProbeAndFleetPassed": 2,
+      "platformAdmissionPassed": 5,
+      "vitestPassed": 1724,
+      "vitestFilesPassed": 169,
+      "nodeFinalSuitePassed": 224,
+      "nodePlatformSkip": 1,
+      "typecheckPassed": true,
+      "clippyAllTargetsPassed": true,
+      "formatPassed": true,
+      "docsCiPassed": true,
+      "logSha256": {
+        "rustPr": "0c6084ab7f8eda34b4ecefcdba5f11143d2b9b1b8e44ceafed22ab1ac7245b4f",
+        "zcode": "f45fab3c3d07e4b24e0e4a78fdfa53af7c2985b10529b58ea26b83a6019f571d",
+        "probeAndFleet": "0e8350d0cb25c8426c51f32d369ce2c9ffe5939c3f6db832dc9e57f028e2e841",
+        "platform": "6b7946bb46c8c031f4e17f974d0cd5909636999130f19b0a9fda2432da532fd0",
+        "javascript": "d1a4aaf4a2f8de62e29615b0d3307819a73b86dcc1d6e88084e82f46f45bb4b2",
+        "clippy": "1f0c9d82fc73914f1922d843b7be1f18533f53e0f70d19bd53d0f7f8fb31f974",
+        "docsCi": "fcd24bf5ec6cc2955d543a8c5c19507057c76a5f17a97173f0306d46581e40b6"
+      }
+    }
   }
 }

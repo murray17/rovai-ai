@@ -1138,3 +1138,23 @@ Read 活动可查询，不产生 Files Changed 或修改 Diff；重启 Core 后�
 改用清晰系统字体后保留相同准确识别断言并通过。此前撤回的上传方案测试也不计入路径方案证据。
 这只证明当前模型/图片夹具和恢复流程，不代表全部图片格式、上限尺寸或所有模型均完成视觉资格化。
 最终路径实现的本地门禁与脱敏运行摘要见 [v5 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。
+
+### PR #323 v6：App 账号配置与失败终态
+
+官方 App 3.11.2 / 内核 0.16.5 / Node 26.8.1 未改变，Core 随 main 更新为 0.2.3。终端配置缺失时，
+只读 App 发布的 `.zcode/v2/config.json` 与 family 选择，保留 `ZCODE_DATA_BASE_DIR` 原生解析与 digest。
+模型目录通过官方内存 provider registry 初始化；不复制用户 Home、写 CLI 配置或解密 credentials 文件。
+普通原生环境 Probe 观察到账号配置加载、GLM-5.3/Flash 目录及无消息初始化通过，没有生成请求。
+
+真实账号生成**未通过**。隔离 Home/存储/Core/Skill Library 使用用户授权的账号配置副本，独立 app-server
+请求 GLM-5.3 时返回 `captcha verify failed`（3007，`auth_failed`，不可重试）；用户确认 App 内 GLM-5.3 可正常对话。
+官方 Renderer 负责的临时人机验证头不在持久配置中。Adapter 不再把已有 Authorization 当作运行时验证已完成，
+而是明确拒绝该回调；Start Plan、账号刷新及 Team Plan 动态凭据不能宣称已接入。
+
+另修复原生 `error` 终态被等待 `idle`、进而断开 transport 的缺陷。回归复现了 Core 收不到 provider 失败；
+修复后失败通过原 Session/Turn 输出固定脱敏消息，前台工具/审批/请求仍须收敛，成功 Final 继续要求 idle。
+失败本身不注销 Host 或后台任务。独立 Node/no-GUI、原生 HOME Probe 和路径图片等既有边界不变。
+
+`smoke-zcode-account.mjs` 默认要求真实随机 nonce 回复；`--expect-auth-failure` 只验证不可重试的鉴权拒绝
+及没有成功 Final，明确不计为账号生成通过。最终执行结果和未覆盖项见
+[v6 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。当前尚不满足用户要求的合并及安装前提。

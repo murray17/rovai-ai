@@ -1,7 +1,10 @@
 //! In-process translation of the official NDJSON protocol into Core's existing
 //! session transport. The child is the official App kernel, never an ACP package.
 
-use super::{NativeConfig, events::SessionEvents};
+use super::{
+    NativeConfig,
+    events::{NativeTurnFailure, RUNTIME_HEADERS_UNAVAILABLE, SessionEvents},
+};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::{
@@ -254,7 +257,7 @@ where
         let background_bridge = bridge.clone();
         workers.spawn(async move {
             while let Some(session_id) = background_rx.recv().await {
-                if background_bridge.settle_foreground(&session_id).await.is_ok() {
+                if background_bridge.settle_foreground(&session_id, true).await.is_ok() {
                     write_frame(&background_bridge.core, &json!({"method":"_zcode/backgroundIdle","params":{"sessionId":session_id}})).await?;
                 }
                 // If still busy, retain the Host pin. The next native terminal
@@ -264,7 +267,7 @@ where
         });
         workers.spawn(async move {
             while let Some((session_id,terminal)) = finished_rx.recv().await {
-                let jobs = finish_bridge.settle_foreground(&session_id).await?;
+                let jobs = finish_bridge.settle_foreground(&session_id, terminal.is_err()).await?;
                 let (messages,reply,cancel_tasks) = {
                     let mut sessions = finish_bridge.sessions.lock().await;
                     let session = sessions.get_mut(&session_id).context("ZCode finishing Session missing")?;
@@ -457,7 +460,10 @@ impl Bridge {
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         let params = &message["params"];
         let result = self.dispatch(method, params).await;
-        let failed = result.is_err();
+        let failed = result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.downcast_ref::<NativeTurnFailure>().is_none());
         if let Some(id) = id {
             let response = match result {
                 Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
@@ -478,6 +484,18 @@ impl Bridge {
     async fn dispatch(&self, method: &str, params: &Value) -> Result<Value> {
         match method {
             "initialize" => {
+                if let Some(registry) = self.config.app_provider_registry()? {
+                    let applied = self.call("workspace/updateProviderRegistry", json!({"workspace":self.workspace(),"registry":registry,"includeWorkspaceState":false})).await?;
+                    if applied["appliedProviderRevision"] != self.config.digest
+                        || !matches!(applied["status"].as_str(), Some("applied" | "unchanged"))
+                        || applied["providerCount"].as_u64()
+                            != registry["providers"]
+                                .as_array()
+                                .map(|providers| providers.len() as u64)
+                    {
+                        bail!("ZCode App provider registry was not confirmed");
+                    }
+                }
                 self.call("workspace/readState", json!({"workspace":self.workspace(),"runtimeModel":self.config.runtime_model(None)?})).await?;
                 Ok(json!({"protocolVersion":1,"agentInfo":{"name":"ZCode"},
                     "agentCapabilities":{"loadSession":false,"sessionCapabilities":{"resume":{}},"mcpCapabilities":{"http":true,"sse":true}},"authMethods":[]}))
@@ -621,7 +639,7 @@ impl Bridge {
                 )
                 .await?;
                 if method == "_zcode/cancelFence" {
-                    self.settle_foreground(params["sessionId"].as_str().unwrap())
+                    self.settle_foreground(params["sessionId"].as_str().unwrap(), true)
                         .await?;
                 }
                 Ok(json!({}))
@@ -681,7 +699,7 @@ impl Bridge {
         Ok(())
     }
 
-    async fn settle_foreground(&self, session_id: &str) -> Result<Vec<Value>> {
+    async fn settle_foreground(&self, session_id: &str, allow_failed: bool) -> Result<Vec<Value>> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
         loop {
             let snapshot = self
@@ -691,22 +709,7 @@ impl Bridge {
                 .pointer("/projection/backgroundJobs")
                 .and_then(Value::as_array)
                 .context("ZCode background state unavailable")?;
-            let quiescent = snapshot
-                .pointer("/projection/status")
-                .and_then(Value::as_str)
-                == Some("idle")
-                && [
-                    "/projection/activeToolCalls",
-                    "/projection/pendingPermissions",
-                    "/runtime/pendingRequestIds",
-                ]
-                .iter()
-                .all(|path| {
-                    snapshot
-                        .pointer(path)
-                        .and_then(Value::as_array)
-                        .is_some_and(Vec::is_empty)
-                });
+            let quiescent = foreground_quiescent(&snapshot, allow_failed);
             if quiescent {
                 return Ok(jobs.clone());
             }
@@ -725,6 +728,29 @@ impl Bridge {
                 return write_frame(
                     &self.native,
                     &json!({"id":id,"result":self.config.preferences()}),
+                )
+                .await;
+            }
+            if method == "interaction/requestProviderRuntimeHeaders" {
+                // The official App obtains fresh verification headers in its
+                // Renderer. Config Authorization alone cannot confirm that step.
+                // Native preparation replaces this cause with a generic error.
+                if params["workspace"] == self.workspace()
+                    && let Some(session) = self
+                        .sessions
+                        .lock()
+                        .await
+                        .get_mut(params["sessionId"].as_str().unwrap_or(""))
+                {
+                    session
+                        .events
+                        .reject_runtime_headers(params["turnId"].as_str());
+                }
+                return write_frame(
+                    &self.native,
+                    &json!({"id":id,"result":{
+                        "headersApplied":false,"errorMessage":RUNTIME_HEADERS_UNAVAILABLE
+                    }}),
                 )
                 .await;
             }
@@ -839,6 +865,30 @@ impl Bridge {
     }
 }
 
+// A provider failure leaves the native projection in error, not idle. It can
+// settle only a failed/cancelled path; successful Final retains the idle gate.
+fn foreground_quiescent(snapshot: &Value, allow_failed: bool) -> bool {
+    let status = snapshot
+        .pointer("/projection/status")
+        .and_then(Value::as_str);
+    (status == Some("idle") || (allow_failed && status == Some("error")))
+        && snapshot
+            .pointer("/runtime/activeTurnId")
+            .is_none_or(Value::is_null)
+        && [
+            "/projection/activeToolCalls",
+            "/projection/pendingPermissions",
+            "/runtime/pendingRequestIds",
+        ]
+        .iter()
+        .all(|path| {
+            snapshot
+                .pointer(path)
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+        })
+}
+
 /// Only a correlated native Bash result may identify an output artifact. Never
 /// follow a path scraped from text, another Session, a symlink, or a device.
 async fn recover_command_output(event: &mut Value, output_root: &std::path::Path) {
@@ -933,6 +983,138 @@ async fn recover_command_output(event: &mut Value, output_root: &std::path::Path
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Owns terminal delivery across the facade's concurrent reader/settler/request
+    // workers. Pure event mapping cannot catch a failed projection closing the
+    // facade before Core receives the provider failure. No process, disk or DB.
+    #[tokio::test]
+    async fn provider_failure_reaches_core_without_poisoning_the_host() {
+        let snapshot = json!({"projection":{"status":"error","activeToolCalls":[],"pendingPermissions":[]},
+            "runtime":{"pendingRequestIds":[]}});
+        assert!(foreground_quiescent(&snapshot, true));
+        assert!(!foreground_quiescent(&snapshot, false));
+        for path in [
+            "/projection/activeToolCalls",
+            "/projection/pendingPermissions",
+            "/runtime/pendingRequestIds",
+        ] {
+            let mut busy = snapshot.clone();
+            *busy.pointer_mut(path).unwrap() = json!([{"id":"pending"}]);
+            assert!(!foreground_quiescent(&busy, true));
+        }
+        let mut active = snapshot;
+        active["runtime"]["activeTurnId"] = json!("t1");
+        assert!(!foreground_quiescent(&active, true));
+        let config = NativeConfig {
+            value: json!({"model":{"main":"fixture/model"},"provider":{"fixture":{"kind":"anthropic",
+                "options":{"apiKey":"PRIVATE_TEST_KEY","baseURL":"https://example.invalid"},
+                "models":{"model":{}}}}}),
+            digest: "fixture".into(),
+            app_config: false,
+        };
+        let (native, adapter) = tokio::io::duplex(64 * 1024);
+        let (native_read, native_write) = tokio::io::split(native);
+        let (adapter_read, adapter_write) = tokio::io::split(adapter);
+        let peer = tokio::spawn(async move {
+            let mut reader = BufReader::new(native_read);
+            let writer: Mutex<Writer> = Mutex::new(Box::new(native_write));
+            let mut frame = Vec::new();
+            while let Some(request) = read_frame(&mut reader, &mut frame).await.unwrap() {
+                let result = match request["method"].as_str().unwrap() {
+                    "session/create" => json!({"session":{"sessionId":"s1"},"settings":{"model":{
+                        "current":{"providerId":"fixture","modelId":"model"},
+                        "available":[{"ref":{"providerId":"fixture","modelId":"model"}}]}}}),
+                    "session/subscribe" => json!({"eventSeq":0}),
+                    "v4/command" => {
+                        let input = request["params"]["commandId"].clone();
+                        write_frame(
+                            &writer,
+                            &json!({"method":"session/event","params":{"sessionId":"s1","seq":1,
+                            "turnId":"t1","type":"turn.started","payload":{"inputId":input}}}),
+                        )
+                        .await
+                        .unwrap();
+                        write_frame(&writer,&json!({"id":"headers","method":"interaction/requestProviderRuntimeHeaders",
+                            "params":{"sessionId":"s1","turnId":"t1","reason":"model-request",
+                                "workspace":{"workspacePath":"/fixture","workspaceKey":"/fixture"}}})).await.unwrap();
+                        let callback = read_frame(&mut reader, &mut frame).await.unwrap().unwrap();
+                        assert_eq!(callback["id"], "headers");
+                        assert_eq!(callback["result"]["headersApplied"], false);
+                        write_frame(&writer,&json!({"method":"session/event","params":{
+                            "sessionId":"s1","seq":2,"turnId":"t1","type":"turn.failed",
+                            "payload":{"inputId":input,"turnPhase":"model","error":{
+                                "type":"model_request_failed","code":"model_request_failed",
+                                "message":"Model request failed.","stack":"PRIVATE_TEST_KEY",
+                                "attribution":{"source":"runtime","reason":"unknown"},"retryable":false}}
+                        }})).await.unwrap();
+                        json!({"status":"accepted","result":{"inputId":input}})
+                    }
+                    "session/read" => json!({"projection":{"status":"error","backgroundJobs":[],
+                        "activeToolCalls":[],"pendingPermissions":[]},"runtime":{"pendingRequestIds":[]}}),
+                    "workspace/readState" | "session/setMode" => json!({}),
+                    method => panic!("unexpected native method {method}"),
+                };
+                write_frame(&writer, &json!({"id":request["id"],"result":result}))
+                    .await
+                    .unwrap();
+            }
+        });
+        let stream = start(
+            adapter_write,
+            adapter_read,
+            config,
+            PathBuf::from("/fixture"),
+            "build".into(),
+        );
+        let (read, write) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read);
+        let writer: Mutex<Writer> = Mutex::new(Box::new(write));
+        let mut frame = Vec::new();
+        for (id, method, params) in [
+            (1, "session/new", json!({"cwd":"/fixture"})),
+            (
+                2,
+                "session/prompt",
+                json!({"sessionId":"s1","prompt":[{"type":"text","text":"fixture"}]}),
+            ),
+            (3, "initialize", json!({})),
+        ] {
+            write_frame(&writer, &json!({"id":id,"method":method,"params":params}))
+                .await
+                .unwrap();
+            let response = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let message = read_frame(&mut reader, &mut frame)
+                        .await
+                        .unwrap()
+                        .expect("provider failure must reach Core before any transport close");
+                    assert!(!message.to_string().contains("PRIVATE_TEST_KEY"));
+                    if message["id"] == id {
+                        break message;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            if id == 2 {
+                assert!(
+                    response["error"]["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("authentication failed")
+                );
+                assert!(
+                    response["error"]["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("captcha")
+                );
+            } else {
+                assert!(response.get("error").is_none(), "{response}");
+            }
+        }
+        peer.abort();
+    }
 
     // Owns the artifact filesystem boundary, which existing ACP output tests
     // cannot cover because they never read native ZCode artifact paths.
