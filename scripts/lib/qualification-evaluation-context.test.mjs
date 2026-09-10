@@ -35,3 +35,13 @@ test('delivery includes earlier public Lead result before late acknowledgement, 
   ]
   assert.deepEqual(buildEvaluationContext(s,boundary).deliveryMessageIds,['delivery'])
 })
+
+
+test('verification in a rovai-prefixed temporary workspace and package remains eligible, actual CLI stays excluded', () => {
+  const s=snapshot()
+  s.executionEvidence=[event('python',"/bin/zsh -lc 'cd /private/tmp/rovai-qualification-123/workspace && python3 verify.py'",'verified'),event('npm','npm test','> rovai-context-demo-106@1.0.0 test\npass 5'),event('cli',"node check.mjs && /private/tmp/bin/rovai task view --task-id x",'task details')]
+  const c=buildEvaluationContext(s,boundary)
+  assert.deepEqual(c.receipts.map(r=>r.sourceEvidenceId),['python','npm'])
+  assert.equal(c.omitted[0].sourceEvidenceId,'cli')
+  assert.doesNotMatch(JSON.stringify(c.receipts),/private\/tmp/)
+})
