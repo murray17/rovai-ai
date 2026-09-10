@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  collectFinalResponseEvidence,
   deriveCollaborationEvidence,
   evaluateCollaborationContract,
   extractEvidenceIdentity
@@ -380,3 +381,27 @@ function receipt(id, inboxMessageId, slot, depth) {
     }
   }
 }
+
+
+test('Current Task identity survives JSON persistence in collaboration facts', () => {
+  const snapshot = currentPublicA2aSnapshot()
+  snapshot.tasks = [{ taskId: 'task-current', status: 'completed', assigneeAgentId: 'agent-reviewer', sourceAgentRunId: 'run-lead' }]
+  const evidence = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-current' })
+  assert.equal(evidence.taskFacts[0].id, 'task-current')
+  assert.deepEqual(JSON.parse(JSON.stringify(evidence.taskFacts)), evidence.taskFacts)
+})
+
+test('Final delivery follows the original Lead across return Runs and excludes peers and later turns', () => {
+  const run = (id, agentId, campTurnId = 'turn') => ({ id, agentId, campTurnId })
+  const message = (id, sourceAgentRunId, authorId, sequence) => ({ id, sourceAgentRunId, authorId, authorType: 'agent', sequence, body: id, createdAt: '2026-09-10T00:00:00Z' })
+  const snapshot = {
+    agentRuns: [run('root', 'lead'), run('peer', 'reviewer'), run('return', 'lead'), run('later', 'lead', 'other-turn')],
+    messages: [message('handoff', 'root', 'lead', 1), message('integrated-delivery', 'return', 'lead', 3), message('late-peer', 'peer', 'reviewer', 4), message('other-task', 'later', 'lead', 5)]
+  }
+  const result = collectFinalResponseEvidence(snapshot, { campTurnId: 'turn', rootAgentRunId: 'root' })
+  assert.deepEqual(result.privateMessages.map(item => [item.messageId, item.isFinal]), [['handoff', false], ['integrated-delivery', true]])
+  assert.equal(result.references.some(item => 'body' in item), false)
+  assert.deepEqual(collectFinalResponseEvidence(snapshot, { campTurnId: 'turn', rootAgentRunId: 'missing' }).privateMessages, [])
+  snapshot.messages = snapshot.messages.filter(message => message.authorId !== 'lead')
+  assert.deepEqual(collectFinalResponseEvidence(snapshot, { campTurnId: 'turn', rootAgentRunId: 'root' }).privateMessages, [])
+})

@@ -11,6 +11,7 @@ import {
   digestJson,
   evaluateChangeBoundary,
   makeTemporaryDirectory,
+  materializeJsonArtifact,
   removeTemporaryDirectory,
   runCaseVerifier,
   sha256,
@@ -211,7 +212,9 @@ export async function appendResultRevision(evidenceDirectory, result, {
     evaluationAttemptId,
     recordedAt: new Date().toISOString()
   }
-  const resultBundle = { ...result, resultRevision: revision }
+  // Hash exactly the JSON representation retained on disk. Optional undefined
+  // properties must not make a freshly written revision unreadable.
+  const resultBundle = materializeJsonArtifact({ ...result, resultRevision: revision })
   const record = {
     schemaVersion: QUALIFICATION_TRIAL_SCHEMA_VERSION,
     ...revision,

@@ -162,7 +162,7 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
     return String(left?.createdAt ?? a.createdAt).localeCompare(String(right?.createdAt ?? b.createdAt)) || a.id.localeCompare(b.id)
   })
   const taskFacts = (Array.isArray(snapshot.tasks) ? snapshot.tasks : []).map((task) => ({
-    id: task.id,
+    id: task.taskId ?? task.id ?? null,
     status: task.status,
     assigneeAgentId: task.assigneeAgentId,
     sourceAgentRunId: task.sourceAgentRunId
@@ -316,7 +316,7 @@ function deriveLegacyCollaborationEvidence(snapshot, dispatchBoundary) {
     snapshot.executionEvidence.filter((evidence) => runIds.has(evidence.agentRunId))
   )
   const taskFacts = snapshot.tasks.map((task) => ({
-    id: task.id,
+    id: task.taskId ?? task.id ?? null,
     status: task.status,
     assigneeAgentId: task.assigneeAgentId,
     sourceAgentRunId: task.sourceAgentRunId
@@ -538,4 +538,35 @@ function compareNullableNumber(left, right) {
   if (Number.isFinite(left)) return -1
   if (Number.isFinite(right)) return 1
   return 0
+}
+
+export function collectFinalResponseEvidence(snapshot, dispatchBoundary) {
+  if (!snapshot || !dispatchBoundary) return { privateMessages: [], references: [] }
+  const turnRuns = snapshot.agentRuns.filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
+  const leadAgentId = turnRuns.find((run) => run.id === dispatchBoundary.rootAgentRunId)?.agentId
+  if (!leadAgentId) return { privateMessages: [], references: [] }
+  const runIds = new Set(turnRuns.filter((run) => run.agentId === leadAgentId).map((run) => run.id))
+  const candidates = snapshot.messages
+    .filter((message) => (
+      message.authorType === 'agent'
+      && message.authorId === leadAgentId
+      && runIds.has(message.sourceAgentRunId)
+    ))
+    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id))
+  // The initial Lead Run can end with a handoff. A return creates another Run
+  // for the same Lead; its delivery must remain eligible as the final response.
+  const privateMessages = candidates.map((message, index) => ({
+    messageId: message.id,
+    agentId: message.authorId,
+    sourceAgentRunId: message.sourceAgentRunId,
+    createdAt: message.createdAt,
+    body: message.body,
+    bodyDigest: sha256(message.body),
+    bodyBytes: Buffer.byteLength(message.body),
+    isFinal: index === candidates.length - 1
+  }))
+  return {
+    privateMessages,
+    references: privateMessages.map(({ body, ...message }) => message)
+  }
 }

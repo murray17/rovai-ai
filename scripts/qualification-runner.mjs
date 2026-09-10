@@ -64,6 +64,7 @@ import {
   deriveUnattendedRetryBoundary
 } from './lib/qualification-observation.mjs'
 import {
+  collectFinalResponseEvidence,
   deriveCollaborationEvidence,
   evaluateCollaborationContract,
   extractEvidenceIdentity
@@ -1551,36 +1552,6 @@ function normalizeSnapshot(snapshot) {
   }
 }
 
-function collectFinalResponseEvidence(snapshot, dispatchBoundary) {
-  if (!snapshot || !dispatchBoundary) return { privateMessages: [], references: [] }
-  const runIds = new Set(snapshot.agentRuns
-    .filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
-    .map((run) => run.id))
-  const candidates = snapshot.messages
-    .filter((message) => (
-      message.authorType === 'agent'
-      && runIds.has(message.sourceAgentRunId)
-    ))
-    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id))
-  const leadMessages = candidates.filter((message) => (
-    message.sourceAgentRunId === dispatchBoundary.rootAgentRunId
-  ))
-  const selected = leadMessages.length > 0 ? leadMessages : candidates
-  const privateMessages = selected.map((message, index) => ({
-    messageId: message.id,
-    agentId: message.authorId,
-    sourceAgentRunId: message.sourceAgentRunId,
-    createdAt: message.createdAt,
-    body: message.body,
-    bodyDigest: sha256(message.body),
-    bodyBytes: Buffer.byteLength(message.body),
-    isFinal: index === selected.length - 1
-  }))
-  return {
-    privateMessages,
-    references: privateMessages.map(({ body, ...message }) => message)
-  }
-}
 
 function collectToolRetrievedFixtureMessageIds(toolEvidence, preparedManifest) {
   const fixtureMessageIds = new Set((preparedManifest.entities ?? [])
