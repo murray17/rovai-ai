@@ -34,7 +34,7 @@ export async function runPlan(planFile, directory) {
   return {directory, report:{status:'insufficient', planDigest:plan.planDigest}};
 }
 `)
-  let automation = { automationId: 'automation-1', enabled: true, projectRef: { kind: 'directory', path: workspace } } as AutomationView
+  let automation = { automationId: 'automation-1', version: 1, enabled: true, schedule: { kind: 'once' }, projectRef: { kind: 'directory', path: workspace } } as AutomationView
   let runs: unknown[] = []
   const calls: string[] = []
   const service = new EvaluationHostService(join(root, 'owner'), { async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
@@ -54,7 +54,8 @@ export async function runPlan(planFile, directory) {
     return path
   }
   return { root, source, workspace, service, calls, plan,
-    setRuns(value: unknown[]) { runs = value }, disable() { automation = { ...automation, enabled: false } },
+    setRuns(value: unknown[]) { runs = value }, disable() { automation = { ...automation, enabled: false, version: automation.version + 1 } },
+    consumeOnce() { automation = { ...automation, enabled: false } },
     async close() { await service.stop(); await rm(root, { recursive: true, force: true }) } }
 }
 
@@ -87,6 +88,7 @@ it('binds an existing Automation and consumes each accepted run once, exposing o
     await f.service.schedule({ automationId: 'automation-1', plan, output })
     const now = new Date(Date.now() + 1000)
     f.setRuns([{ runId: 'auto-run-1', campId: 'camp-1', status: 'running', createdAt: now.toISOString() }])
+    f.consumeOnce() // Core consumes once schedules without an owner version change.
     await f.service.tick(now)
     await expect.poll(async () => (await f.service.status({ jobId: 'auto-run-1' }) as { state: string }).state).toBe('completed')
     await f.service.tick(new Date(now.getTime() + 6000))

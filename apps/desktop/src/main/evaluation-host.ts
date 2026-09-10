@@ -9,7 +9,7 @@ import { digest } from '../../../../packages/evaluation/src/daily'
 
 type Core = { request<T>(method: CoreMethod, params?: unknown): Promise<T> }
 type Engine = { source: string; node: string; nodeDigest: string; sourceDigest: string }
-type Binding = { automationId: string; workspace: string; output: string; plan: string; planDigest: string; registeredAt: string }
+type Binding = { automationId: string; automationVersion: number; workspace: string; output: string; plan: string; planDigest: string; registeredAt: string }
 type Job = {
   schemaVersion: 1; jobId: string; mode: 'gate' | 'weekly'; plan: string; planDigest: string; output: string
   automationId: string | null; campId: string | null; createdAt: string; endedAt: string | null
@@ -119,7 +119,7 @@ export class EvaluationHostService {
       const engine = await this.#engine()
       const existing = await optionalJson<Binding[]>(join(this.root, 'schedules.json'), [])
       if (existing.some(binding => binding.automationId !== automationId && binding.output === output)) throw new Error('Evaluation output is already bound to another Automation')
-      const binding = { automationId, workspace, output, plan, planDigest: frozen.planDigest, registeredAt: new Date().toISOString() }
+      const binding = { automationId, automationVersion: automation.version, workspace, output, plan, planDigest: frozen.planDigest, registeredAt: new Date().toISOString() }
       const bindings = existing.filter(item => item.automationId !== automationId).concat(binding)
       if (bindings.length > 8) throw new Error('At most eight evaluation schedules are supported')
       // The helper only waits for a receipt belonging to the current Camp. It
@@ -167,7 +167,10 @@ export class EvaluationHostService {
         for (const binding of bindings) {
           const automation = await this.core.request<AutomationView | null>('automations.get', { automationId: binding.automationId })
           const live = [...this.#live.values()].find(item => item.job.automationId === binding.automationId)
-          const eligible = automation?.enabled && automation.projectRef.kind === 'directory' && await realpath(automation.projectRef.path) === binding.workspace
+          // Consuming a once schedule disables future dispatch without changing
+          // its owner version. An explicit close/update increments that version.
+          const enabledOrConsumedOnce = automation?.enabled || automation?.schedule.kind === 'once' && automation.version === binding.automationVersion
+          const eligible = enabledOrConsumedOnce && automation?.projectRef.kind === 'directory' && await realpath(automation.projectRef.path) === binding.workspace
           const page = eligible ? await this.core.request<AutomationRunListPage>('automations.runs.list', { automationId: binding.automationId, limit: 50 }) : null
           if (live && !page?.runs.some(run => run.runId === live.job.jobId && run.status === 'running')) {
             live.job.reason = 'automation_stopped_or_finished'; live.child.kill('SIGTERM')
