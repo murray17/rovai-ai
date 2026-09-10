@@ -117,7 +117,7 @@ Main 先把规则统计、HTML／SVG 和分析输入写入指定工作区；每�
 
 > 在指定仓库执行 `node scripts/eval-daily.mjs prepared --output /analysis-workspace/reports --timezone Asia/Shanghai`。输入必须是前一自然日的完整报告。根据 yesterday、comparableHistory、changes、versions、coverage 和样本解释变化、证据、可能原因及建议，区分事实与假设。将结构化 JSON 保存到命令给出的 analysisOutput，再执行 `node scripts/eval-daily.mjs analysis --report <directory> --input <analysisOutput>` 登记结果。引用指标路径或 evidenceId，在 Camp 提供本地报告入口。缺失或陈旧时报受阻，不从全部日志估算比例，不执行原任务或修复。
 
-结构化分析包含 `schemaVersion: 1`、`reportId`、`inputDigest`、`model: { provider, snapshotId }` 和 `facts`／`hypotheses`／`recommendations` 数组。每项为 `{ text, metricPaths, evidenceIds }`，至少引用一个存在的路径或样本 ID；路径示例为 `yesterday.runs.failureRate`、`changes.0.deltaPercentagePoints`。模型身份是提交者声明，不能伪造缺失的版本证据。登记器保留每次原始提交和成功／失败记录，只更新分析状态指针与 HTML，不改写统计 JSON，也不证明解释正确。
+结构化分析包含 `schemaVersion: 1`、`reportId`、`inputDigest`、`model: { provider, snapshotId }` 和 `facts`／`hypotheses`／`recommendations` 数组。将 prepared 返回的 `analysisSchema` 用作模型结构化输出约束，并遵循 `analysisInput.instructions`；每项为 `{ text, metricPaths, evidenceIds }`，至少引用一个存在的路径或样本 ID。指标路径和样本 ID 从 schema 枚举中原样选择；报告 ID 不是样本 ID，日期引用 `coverage.window.date`。模型身份是提交者声明，不能伪造缺失的版本证据。登记器保留每次原始提交和成功／失败记录，只更新分析状态指针与 HTML，不改写统计 JSON，也不证明解释正确。
 
 在后续部署时设置实际时间，建议当地时间 08:00 给 Host 留出准备时间。Host 在 App 内每分钟检查，失败退避一小时；如果当天尚无完整输入，分析应诚实失败，不能把旧报告当成昨天。关闭对应 Automation 即停止准备。当前版本未提供外部后台常驻保证。
 
@@ -160,7 +160,7 @@ node scripts/eval-judge-cli.mjs --executable /absolute/codex --model gpt-5.6-sol
 
 ## 每日数据与分析核验
 
-新分析输入遵循 `daily-health-analysis-v2`：根据已计算的指标与变化解释运行健康，明确分母、工具未判定终态、采集覆盖和模型未知数；不推断任务质量或不可见的错误原因。`prepared` 在交给模型前检查报告身份、日期窗口和输入摘要。登记器保留原始提交及代码派生的 `citedMetrics`，不改变原始统计。
+新分析输入遵循 `daily-health-analysis-v3`：根据已计算的指标与变化解释运行健康，明确分母、工具未判定终态、采集覆盖和模型未知数；不推断任务质量或不可见的错误原因。可信稀疏终态分布中的标准零值显式提供，不可用总体仍保持未知。`prepared` 在交给模型前检查报告身份、日期窗口和输入摘要，并从输入生成有限引用 schema。登记器保留原始提交及代码派生的 `citedMetrics`，不改变原始统计。
 
 reportDefinitionVersion=3 区分当日交接群组未结束数与包含跨日的全部积压，旧口径不连线。样本按类别最多 18 条，eligible/selected/omitted 保存在 coverage.analysisSamples；Core 回放、回放身份未知和非 A2A 完成投递不混入对应失败样本。工具摘要完整展示其他终态，不将 `unsettled` 算作成功或失败。
 

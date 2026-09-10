@@ -15,7 +15,7 @@ last_updated: 2026-09-11
 
 ## 范围与状态
 
-每日非空真实记录核验、分析输入修正和未采集数据成本见[每日 Trace 核验计划](daily-trace-verification.md)。
+每日已完成 7 天非空真实记录复算和最新一天的真实 LLM 分析；实际采集覆盖、两次分析尝试及部署限制见[每日 Trace 实测结果](daily-trace-results.md)，冻结范围见[核验计划](daily-trace-verification.md)。
 
 最新十二项回归已完成完整评价：12/12 硬性及关键语义验收通过，质量 100/100、覆盖 100%，112 个质量项与 17 个适用协作项均有有效判定，Runtime 用量可复算。版本、原始失败保留、完整性核验及未覆盖范围见[完整实测结果](evaluation-complete-results.md)。基线对照、保留集及重复可靠性仍未验收。
 
