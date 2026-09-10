@@ -4,9 +4,10 @@ import { validateMetricContract } from './context-metric-contract.mjs'
 export const TASK_JUDGE_PROFILE = 'generic-task-v2'
 export const RECEIPT_TASK_JUDGE_PROFILE = 'generic-task-v4'
 export const OBSERVABLE_TASK_JUDGE_PROFILE = 'generic-task-v5'
+export const WITNESS_TASK_JUDGE_PROFILE = 'generic-task-v7'
 export const CLAIM_TASK_JUDGE_PROFILE = 'generic-task-v6'
-export const usesObservableMetrics = profile => [OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE].includes(profile)
-export const usesReceipts = profile => [RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE].includes(profile)
+export const usesObservableMetrics = profile => [OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE].includes(profile)
+export const usesReceipts = profile => [RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE].includes(profile)
 export const usesTaskEvidence = profile => profile === EVIDENCE_TASK_JUDGE_PROFILE || usesReceipts(profile)
 export const EVIDENCE_TASK_JUDGE_PROFILE = 'generic-task-v3'
 export const TASK_OUTCOME_RUBRIC = Object.freeze({
@@ -63,11 +64,16 @@ export const CLAIM_OUTCOME_RUBRIC = Object.freeze({
   'SER.testing.strategy': 'Judge whether the supplied checks adequately verify the disclosed deliverable. For a one-off fixed-data report, a correct expected-value check is valid; do not require a second aggregation implementation or generalization beyond the supplied data. For reusable code, evaluate the disclosed behavioral cases and regressions. Attribute evaluator checks separately from agent checks. Do not deduct merely because an earlier attempt failed when later valid checks cover the goals. A check that masks unresolved errors is insufficient; unsupported verification claims belong to claim_accuracy, not automatically an additional testing penalty. No unique tool sequence or code test suite is required for non-code work.'
 })
 export const CLAIM_PROCESS_RUBRIC = OBSERVABLE_PROCESS_RUBRIC
+export const WITNESS_OUTCOME_RUBRIC = Object.freeze({
+  ...CLAIM_OUTCOME_RUBRIC,
+  'SER.response.claim_accuracy': `${CLAIM_OUTCOME_RUBRIC['SER.response.claim_accuracy']} Files under initial-fixture/ are the sealed starting state, not delivered files. Use them for historical findings explicitly reported before a repair; use delivered files for the final state. A task-rule explanation is not a claim of empirically testing all possible future inputs. Direct file reads, git diff/status and printed verification results can corroborate the facts they actually expose. Memory provenance or preferences attributed to past interactions remain excluded here: assess the factual output against the task data, and leave retrieval/applicability to the Process/rule checks.`,
+  'SER.testing.strategy': `${CLAIM_OUTCOME_RUBRIC['SER.testing.strategy']} Native-bound verification receipts are selected outputs of the original execution, not new runs. A receipt marked verification_prefix_before_readonly_cli_help preserves the verification prefix and removes only a separately identified final CLI help suffix.`
+})
 
 export function validateTaskJudgeProfile(profile, view) {
   if (profile === undefined || profile === null) return null
   const ids = view === 'process' ? TASK_PROCESS_IDS : TASK_OUTCOME_IDS
-  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE, RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
+  if (![TASK_JUDGE_PROFILE, EVIDENCE_TASK_JUDGE_PROFILE, RECEIPT_TASK_JUDGE_PROFILE, OBSERVABLE_TASK_JUDGE_PROFILE, CLAIM_TASK_JUDGE_PROFILE, WITNESS_TASK_JUDGE_PROFILE].includes(profile.version) || !Array.isArray(profile.items)
       || profile.items.length !== ids.length || new Set(profile.items.map(item => item.checklistItem)).size !== ids.length
       || profile.items.some(item => !ids.includes(item.checklistItem) || typeof item.applicable !== 'boolean'
         || typeof item.criterion !== 'string' || !item.criterion.trim() || item.criterion.length > 4000

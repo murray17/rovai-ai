@@ -9,7 +9,7 @@ import {
   sha256,
   writePrivateJsonExclusive
 } from './qualification-common.mjs'
-import { validateQualificationArtifactSchema } from './qualification-schema-validation.mjs'
+import { validateQualificationArtifactSchema, validateQualificationContractArtifactSchema } from './qualification-schema-validation.mjs'
 
 export const PUBLIC_BENCHMARK_REPORT_SCHEMA_ID = 'rovai.qualification.public-benchmark-report'
 export const PUBLIC_BENCHMARK_REPORT_SCHEMA_VERSION = '1.0.0'
@@ -88,7 +88,7 @@ export function buildPublicBenchmarkReport({
   const artifact = {
     artifactId: `public-benchmark-report:${identity}`,
     schemaId: PUBLIC_BENCHMARK_REPORT_SCHEMA_ID,
-    schemaVersion: PUBLIC_BENCHMARK_REPORT_SCHEMA_VERSION,
+    schemaVersion: layer5SemanticReview.items.some(item => item.state === 'adjudicated') ? '2.0.0' : PUBLIC_BENCHMARK_REPORT_SCHEMA_VERSION,
     producer: {
       id: 'rovai-qualification-runner',
       version: QUALIFICATION_RUNNER_VERSION,
@@ -135,7 +135,7 @@ export async function retainPublicBenchmarkReportArtifact(evidenceDirectory, art
 
 export function validatePublicBenchmarkReport(artifact, evidenceIndex = null) {
   if (artifact?.schemaId !== PUBLIC_BENCHMARK_REPORT_SCHEMA_ID
-      || artifact.schemaVersion !== PUBLIC_BENCHMARK_REPORT_SCHEMA_VERSION
+      || ![PUBLIC_BENCHMARK_REPORT_SCHEMA_VERSION, '2.0.0'].includes(artifact.schemaVersion)
       || artifact.payloadDigest !== digest(artifact.payload)) {
     throw new Error('Public Benchmark Report envelope identity is invalid')
   }
@@ -162,7 +162,8 @@ export function validatePublicBenchmarkReport(artifact, evidenceIndex = null) {
       && artifact.payload.layer5SemanticReview.items.length !== 0) {
     throw new Error('Public Benchmark Report unavailable Semantic Review contains items')
   }
-  validateQualificationArtifactSchema('public-benchmark-report.schema.json', artifact)
+  if (artifact.schemaVersion === '2.0.0') validateQualificationContractArtifactSchema('public-benchmark-report-v2.schema.json', artifact)
+  else validateQualificationArtifactSchema('public-benchmark-report.schema.json', artifact)
   return artifact
 }
 

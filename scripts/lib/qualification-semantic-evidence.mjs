@@ -58,6 +58,7 @@ export function semanticJudgeContentKindAllowed(kind) {
 
 export function buildCollaborationMessageEvidence({
   trialId,
+  evaluationAttemptId = null,
   snapshot,
   dispatchBoundary,
   collaborationEvidence,
@@ -136,6 +137,7 @@ export function buildCollaborationMessageEvidence({
   const noCallsObserved = acceptedCalls === 0 && calls.length === 0
   const payload = {
     policyId: SEMANTIC_JUDGE_CONTENT_POLICY_ID,
+    ...(evaluationAttemptId ? { evaluationRevision: { evaluationAttemptId, evidenceIndexArtifactId: evidenceIndex.artifactId, producerDigest } } : {}),
     trialId,
     campTurnId: dispatchBoundary?.campTurnId ?? null,
     sourceSurface: collaborationEvidence?.sourceSurface ?? null,
@@ -224,6 +226,9 @@ export function validateCollaborationMessageEvidence(artifact, {
       || artifact.binding?.trialId !== artifact.payload?.trialId) {
     throw new Error('Collaboration Message Evidence envelope identity is invalid')
   }
+  if (artifact.payload.evaluationRevision && (artifact.payload.evaluationRevision.evidenceIndexArtifactId !== artifact.binding.evidenceIndexArtifactId
+      || withSha256Prefix(artifact.payload.evaluationRevision.producerDigest) !== artifact.producer.digest
+      || typeof artifact.payload.evaluationRevision.evaluationAttemptId !== 'string')) throw new Error('Collaboration Message Evidence revision binding is invalid')
   if (result && artifact.binding.trialId !== result.trialId) {
     throw new Error('Collaboration Message Evidence is bound to another Trial')
   }
@@ -329,7 +334,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
   evidenceIndex,
   workspaceMutationLedger,
   collaborationLedger,
-  caseEvaluation = null
+  caseEvaluation = null,
+  evaluationSnapshot = null
 }) {
   const indexRecords = new Map(
     evidenceIndex.payload.records.map((record) => [record.evidenceId, record])
@@ -437,8 +443,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
       })
     }
   }
-  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6'].includes(caseEvaluation?.judgeProfile)) {
-    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6'].includes(caseEvaluation.judgeProfile) })
+  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7'].includes(caseEvaluation?.judgeProfile)) {
+    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], evaluationSnapshot, includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7'].includes(caseEvaluation.judgeProfile) })
     const seen = new Set(segments.map(segment => segment.evidenceReference.evidenceId))
     for (const segment of extra) if (!seen.has(segment.evidenceReference.evidenceId)) {
       segments.push(segment)
@@ -456,7 +462,7 @@ export async function buildSemanticJudgeUntrustedEvidence({
 
 // Sources are retained public messages and frozen workspace files, not live
 // workspaces, private Runtime logs or model reasoning. Every body is hash-bound.
-export async function buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles, includeEvaluationContext = false }) {
+export async function buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles, includeEvaluationContext = false, evaluationSnapshot = null }) {
   if (!Array.isArray(evidenceFiles) || evidenceFiles.length > 64 || new Set(evidenceFiles).size !== evidenceFiles.length) throw new Error('Invalid task evidence file allowlist')
   const indexRecords = new Map(evidenceIndex.payload.records.map(record => [record.evidenceId, record]))
   const segments = []
@@ -481,15 +487,24 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
   if (sha256(raw) !== result.observationDigest) throw new Error('Task observation digest mismatch')
   const observation = JSON.parse(raw.trim().split('\n').at(-1))
   if (digestJson(observation.snapshot) !== observation.digest) throw new Error('Task snapshot digest mismatch')
-  const snapshot = observation.snapshot
+  const snapshot = evaluationSnapshot ?? observation.snapshot
   const runs = new Set(snapshot.agentRuns.filter(run => run.campTurnId === result.dispatchBoundary.campTurnId).map(run => run.id))
-  const context = includeEvaluationContext && snapshot.evaluationContext?.policyId === 'bounded-evaluation-context-v1' ? snapshot.evaluationContext : null
+  const context = includeEvaluationContext && ['bounded-evaluation-context-v1', 'bounded-evaluation-context-v2'].includes(snapshot.evaluationContext?.policyId) ? snapshot.evaluationContext : null
   if (context) {
     const events = new Map((snapshot.executionEvidence ?? []).filter(event => runs.has(event.agentRunId)).map(event => [event.id, event]))
     const tasks = new Map((snapshot.tasks ?? []).filter(task => runs.has(task.sourceAgentRunId)).map(task => [task.taskId ?? task.id, task]))
     for (const receipt of context.receipts) {
       if (events.get(receipt.sourceEvidenceId)?.payloadDigest !== receipt.sourcePayloadDigest || sha256(receipt.content) !== receipt.contentDigest) throw new Error('Evaluation receipt source digest mismatch')
       addContextSegment('runtime.command-receipt', receipt.sourceEvidenceId, 'test_output', 'verification-receipt', receipt.content)
+    }
+    for (const file of context.initialFiles ?? []) {
+      const evidenceReference = { artifactId: evidenceIndex.artifactId, evidenceId: stableEvidenceId('runner.initial-workspace-content', file.path) }
+      const record = indexRecords.get(evidenceReference.evidenceId)
+      if (record?.contentDigest !== `sha256:${sha256(file.content)}` || sha256(file.content) !== file.contentDigest) throw new Error('Initial fixture content digest mismatch')
+      if (!file.content || file.content.length > 50_000 || totalCharacters + file.content.length > 310_000) continue
+      totalCharacters += file.content.length
+      const path = `initial-fixture/${file.path}`
+      segments.push({ segmentId: `task-file-base64:${Buffer.from(path).toString('base64url')}`, kind: 'code', path, authorAgentProfileId: null, visibility: 'workspace', content: file.content, evidenceReference })
     }
     for (const task of context.tasks) {
       const source = tasks.get(task.taskId), body = JSON.parse(task.content)

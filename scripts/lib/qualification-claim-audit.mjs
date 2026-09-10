@@ -1,9 +1,12 @@
 import { digestJson } from './qualification-common.mjs'
 
 export const CLAIM_AUDIT_PROFILE = 'claim-audit-v1'
+export const WITNESS_CLAIM_AUDIT_PROFILE = 'claim-audit-v2'
 export const CLAIM_AUDIT_INSTRUCTION = `For generic-task-v6 Outcome, enumerate every material in-scope factual or verification claim in final_response and delivery_message segments. Quote an exact contiguous excerpt and identify its sourceSegmentId. Split artifact facts from claims that agent checks succeeded or failed. Do not add process provenance, memory retrieval or global absence claims outside frozen scope. claimsComplete means all in-scope material claims are included, not that they are true. Classify each as supported, contradicted or unknown using cited evidence, never the delivery's own assertion. A passing artifact/verifier cannot prove an agent ran a successful check. For compound commands inspect command semantics and output: exit 0 can mask failed steps. A verification success with error masking needs an exact evidenceQuote from output that actually demonstrates the claimed check, not just a git status or printed artifact. A later verified correction can supersede an earlier failed check; do not invent a universal requirement for independent recomputation or tests beyond this task. The evaluator computes claim_accuracy from this audit; still return the ordinary full item checklist. Unknown is not a false claim. Mark material discrepancies that alter confidence in task completion or claimed verification as material. Avoid duplicated paraphrases of the same claim.`
 
-export function claimAuditSchema() {
+export const WITNESS_CLAIM_AUDIT_INSTRUCTION = CLAIM_AUDIT_INSTRUCTION.replace('generic-task-v6', 'generic-task-v7') + ' initial-fixture/ files are the sealed before-state; never judge an explicitly historical finding only against the repaired after-state. An explanation of the disclosed task rule is not a claim of executing an empirical check on every possible input. A command receipt exposing a file, git status/diff or actual check output can corroborate exactly those facts. Keep memory/history provenance, user-preference attribution and global absence statements outside the frozen Outcome scope; they retain separate process/rule checks.'
+
+export function claimAuditSchema(profile = CLAIM_AUDIT_PROFILE) {
   return { type: 'object', additionalProperties: false, required: ['claimsComplete', 'claims'], properties: {
     claimsComplete: { type: 'boolean' }, claims: { type: 'array', minItems: 1, maxItems: 32, items: {
       type: 'object', additionalProperties: false,
@@ -26,6 +29,8 @@ const masksErrors = command => /\|\|\s*(?:true\b|:|exit\s+0\b)|;\s*(?:true\b|exi
 // Validate provenance and observable receipt facts, not the truth of arbitrary
 // prose. Semantic interpretation and claim completeness remain Judge duties.
 export function applyClaimAudit(value, pack) {
+  const witness = pack.taskProfileVersion === 'generic-task-v7'
+  const profile = witness ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE
   const output = structuredClone(value)
   const index = output.items?.findIndex(item => item.checklistItem === 'SER.response.claim_accuracy') ?? -1
   if (index < 0) throw new Error('claim_audit.missing_checklist_item')
@@ -50,7 +55,8 @@ export function applyClaimAudit(value, pack) {
       if (claim.kind === 'artifact_fact') {
         const artifact = cited.some(segment => segment.kind === 'artifact')
         const verified = pack.verificationFacts.some(fact => fact.status === 'passed' && fact.evidenceIds.some(id => ids.includes(id)))
-        if (!artifact && !verified) errors.push('claim_audit.self_report_is_not_proof')
+        const observed = witness && cited.some(segment => segment.kind === 'verification_receipt' && (() => { try { const receipt = JSON.parse(segment.content); return !receipt.outputTruncated && typeof receipt.output === 'string' && Number.isInteger(receipt.exitCode) } catch { return false } })())
+        if (!artifact && !verified && !observed) errors.push('claim_audit.self_report_is_not_proof')
       } else {
         const receipts = cited.filter(segment => segment.kind === 'verification_receipt').flatMap(segment => {
           try { return [JSON.parse(segment.content)] } catch { return [] }
@@ -73,8 +79,8 @@ export function applyClaimAudit(value, pack) {
   const evidenceIds = [...new Set(claims.flatMap(claim => claim.evidenceIds))]
   const summary = claims.map(claim => `${claim.ordinal}. ${claim.result}: ${claim.text}`).join(' ')
   output.items[index] = { ...output.items[index], verdict, confidence: verdict === 'indeterminate' ? 'low' : output.items[index].confidence,
-    evidenceIds, reason: `Code-derived claim audit (${CLAIM_AUDIT_PROFILE}; full rows in provider claim-audit.json). ${summary}`.slice(0, 1200),
+    evidenceIds, reason: `Code-derived claim audit (${profile}; full rows in provider claim-audit.json). ${summary}`.slice(0, 1200),
     abstainReason: verdict === 'indeterminate' ? { code: 'claim_audit.evidence_incomplete' } : null }
-  return { value: output, audit: { profile: CLAIM_AUDIT_PROFILE, modelInputDigest: digestJson(pack), rawResponseDigest: digestJson(value), claimsComplete: audit?.claimsComplete === true,
+  return { value: output, audit: { profile, modelInputDigest: digestJson(pack), rawResponseDigest: digestJson(value), claimsComplete: audit?.claimsComplete === true,
     problems, claims, derivedVerdict: verdict, derivedItem: output.items[index] } }
 }

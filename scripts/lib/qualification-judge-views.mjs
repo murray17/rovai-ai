@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { CLAIM_TASK_JUDGE_PROFILE, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, usesObservableMetrics, OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
+import { WITNESS_TASK_JUDGE_PROFILE, WITNESS_OUTCOME_RUBRIC, CLAIM_TASK_JUDGE_PROFILE, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, usesObservableMetrics, OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -1676,6 +1676,7 @@ function collectLocalEvidenceIds(value) {
 }
 
 function viewPolicy(view, taskProfile) {
+  if (taskProfile?.version === WITNESS_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-7`
   if (taskProfile?.version === CLAIM_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-6`
   if (taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-5`
   if (taskProfile?.version === RECEIPT_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-4`
@@ -1684,6 +1685,7 @@ function viewPolicy(view, taskProfile) {
 }
 
 function viewRubric(view, taskProfile) {
+  if (taskProfile?.version === WITNESS_TASK_JUDGE_PROFILE) return view === 'outcome' ? WITNESS_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === CLAIM_TASK_JUDGE_PROFILE) return view === 'outcome' ? CLAIM_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === OBSERVABLE_TASK_JUDGE_PROFILE) return view === 'outcome' ? OBSERVABLE_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(OBSERVABLE_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === RECEIPT_TASK_JUDGE_PROFILE) return view === 'outcome' ? RECEIPT_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(RECEIPT_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))

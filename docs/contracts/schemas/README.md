@@ -1,7 +1,7 @@
 ---
 document_type: schema-index
 authority: cross-version-contract-schema-catalog
-last_updated: 2026-08-15
+last_updated: 2026-09-11
 ---
 
 # Cross-version contract schemas
@@ -10,6 +10,8 @@ last_updated: 2026-08-15
 Schema version 与 raw-byte SHA-256；实现必须先验证 catalog，再按唯一 `schemaId@schemaVersion` 解析 artifact。
 
 当前包含：
+
+- `public-benchmark-report-v2.schema.json`：保留真实 `adjudicated` 判定；旧 1.0 report 不改写。规则见 [Execution Evaluation v9](../execution-evaluation-v9.md)。
 
 - `collaboration-ledger-v1.1.schema.json`：当前 Public A2A forward／return lineage；深度 0 仅用于已确认的 return。旧 1.0.0 schema 留在 v0.34 历史目录。规则由 [Execution Evaluation v3](../execution-evaluation-v3.md)拥有。
 - `gather-completion-input-v2.schema.json`：当前 Gather Barrier 冻结并交给原 initiator continuation 的

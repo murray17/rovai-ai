@@ -429,3 +429,16 @@ test('v4 receipt and Task bodies require matching frozen observation and Evidenc
     await assert.rejects(buildTaskJudgeSegments(args),/source digest mismatch/)
   } finally {await rm(directory,{recursive:true,force:true})}
 })
+
+test('empty collaboration reevaluation preserves old evidence and gets a new bound identity', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'empty-collaboration-revision-'))
+  try {
+    const base={trialId:'empty-trial',snapshot:{messages:[]},dispatchBoundary:{campTurnId:'turn'},collaborationEvidence:{sourceSurface:'public_message_delivery_v1',a2a:[],metrics:{acceptedMemberCalls:0,coverage:'complete_with_message_delivery_receipts'}},evidenceReferences:{},producerDigest:'a'.repeat(64),evidenceIndex:{artifactId:'evidence-index:original'}}
+    const first=buildCollaborationMessageEvidence(base),retained=await retainCollaborationMessageEvidence(dir,first)
+    const revised=buildCollaborationMessageEvidence({...base,evaluationAttemptId:'evaluation-2',producerDigest:'b'.repeat(64),evidenceIndex:{artifactId:'evidence-index:revised'}})
+    assert.notEqual(first.artifactId,revised.artifactId)
+    await retainCollaborationMessageEvidence(dir,revised)
+    assert.deepEqual(JSON.parse(await readFile(join(dir,retained.locator),'utf8')),first)
+    assert.equal(revised.payload.messages.length,0)
+  } finally { await rm(dir,{recursive:true,force:true}) }
+})

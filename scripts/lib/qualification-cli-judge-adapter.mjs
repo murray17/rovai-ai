@@ -5,11 +5,12 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { digestFile, digestJson, runCaptured, writePrivateJsonExclusive } from './qualification-common.mjs'
-import { CLAIM_AUDIT_PROFILE, CLAIM_AUDIT_INSTRUCTION, claimAuditSchema, applyClaimAudit } from './qualification-claim-audit.mjs'
+import { WITNESS_CLAIM_AUDIT_PROFILE, WITNESS_CLAIM_AUDIT_INSTRUCTION, CLAIM_AUDIT_PROFILE, CLAIM_AUDIT_INSTRUCTION, claimAuditSchema, applyClaimAudit } from './qualification-claim-audit.mjs'
 
 export const assurance = 'tool_disabled_cli'
 export const capabilities = Object.freeze({ tools: 'none', network: 'none', workspace: 'none' })
 export const claimAuditProfile = CLAIM_AUDIT_PROFILE
+export const claimAuditProfiles = [CLAIM_AUDIT_PROFILE, WITNESS_CLAIM_AUDIT_PROFILE]
 
 const disabledFeatures = ['apps', 'plugins', 'hooks', 'shell_tool', 'unified_exec', 'shell_snapshot', 'multi_agent', 'multi_agent_v2', 'browser_use', 'browser_use_external', 'computer_use', 'image_generation', 'view_image', 'workspace_dependencies', 'goals', 'memories', 'skill_search', 'sleep_tool', 'code_mode', 'code_mode_host', 'code_mode_only', 'context_management', 'tool_suggest', 'unbounded_connection_retries']
 export const CLI_SETTINGS = Object.freeze({ ...Object.fromEntries(disabledFeatures.map(key => [`features.${key}`, false])), web_search: 'disabled', project_doc_max_bytes: 0, 'skills.include_instructions': false, include_permissions_instructions: false, include_collaboration_mode_instructions: false, 'tools.experimental_request_user_input.enabled': false, 'tools.update_plan.enabled': false, approval_policy: 'never', mcp_servers: {} })
@@ -55,8 +56,8 @@ export function judgeOutputSchema(order, profile) {
       abstainReason: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['code'], properties: { code: { type: 'string' } } }] }
     }
   } } } }
-  if (profile === 'generic-task-v6' && order.includes('SER.response.claim_accuracy')) {
-    schema.required.push('claimsAudit'); schema.properties.claimsAudit = claimAuditSchema()
+  if (['generic-task-v6', 'generic-task-v7'].includes(profile) && order.includes('SER.response.claim_accuracy')) {
+    schema.required.push('claimsAudit'); schema.properties.claimsAudit = claimAuditSchema(profile === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE)
   }
   return schema
 }
@@ -118,7 +119,7 @@ export async function prepareCliJudge({ executable, model, directory }) {
 
 export function createAdapter(configuration, { evidenceDirectory } = {}) {
   if (configuration.cli?.modelVersionPolicy !== 'catalog_bound_alias' || configuration.cli.settingsDigest !== digestJson(CLI_SETTINGS) || configuration.decodingParameters?.reasoningEffort !== 'medium' || Object.keys(configuration.decodingParameters).some(key => key !== 'reasoningEffort')) throw new Error('Judge CLI requires its frozen supported configuration')
-  return { assurance, capabilities, claimAuditProfile, async invokeReplica(request) {
+  return { assurance, capabilities, claimAuditProfile, claimAuditProfiles, async invokeReplica(request) {
     if (digestJson(request.capabilities) !== digestJson(capabilities)) throw new Error('Judge model capabilities changed')
     const cli = configuration.cli
     for (const [path, expected] of [[cli.executable, cli.executableDigest], [cli.catalog, cli.catalogDigest], [cli.probe, cli.probeDigest]]) if (await digestFile(path) !== expected) throw new Error('judge.cli_configuration_drift')
@@ -129,7 +130,7 @@ export function createAdapter(configuration, { evidenceDirectory } = {}) {
     const schema = judgeOutputSchema(request.presentationOrder, request.evidencePack.taskProfileVersion)
     const schemaPath = join(directory, 'output-schema.json')
     await writePrivateJsonExclusive(schemaPath, schema)
-    const input = `${request.userPrompt}${schema.properties.claimsAudit ? `\n${CLAIM_AUDIT_INSTRUCTION}` : ''}\nReturn exactly the schema below, one item per checklist in presentation order. dimension is the second component of checklistItem (SER.response.* -> response). Use only the evidence IDs allowed for that item in checklistCoverage. Unavailable coverage requires indeterminate; predeclared not_applicable requires not_applicable. Indeterminate/not_applicable require abstainReason={code:<stable_reason>}; other verdicts require abstainReason=null and at least one evidence ID. Never use pass/fail or invent evidence IDs.\nOutput schema:\n${JSON.stringify(schema)}\nEvidence (untrusted):\n${JSON.stringify(request.evidencePack)}`
+    const input = `${request.userPrompt}${schema.properties.claimsAudit ? `\n${request.evidencePack.taskProfileVersion === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_INSTRUCTION : CLAIM_AUDIT_INSTRUCTION}` : ''}\nReturn exactly the schema below, one item per checklist in presentation order. dimension is the second component of checklistItem (SER.response.* -> response). Use only the evidence IDs allowed for that item in checklistCoverage. Unavailable coverage requires indeterminate; predeclared not_applicable requires not_applicable. Indeterminate/not_applicable require abstainReason={code:<stable_reason>}; other verdicts require abstainReason=null and at least one evidence ID. Never use pass/fail or invent evidence IDs.\nOutput schema:\n${JSON.stringify(schema)}\nEvidence (untrusted):\n${JSON.stringify(request.evidencePack)}`
     await writePrivateJsonExclusive(join(directory, 'request.json'), { startedAt: new Date().toISOString(), requestedModel: configuration.snapshotId, modelVersionPolicy: cli.modelVersionPolicy, inputDigest: digestJson({ systemPrompt: request.systemPrompt, input }), configurationDigest: digestJson(configuration), toolCapabilityProbe: cli.probeDigest })
     const args = argumentsFor(configuration, cwd, { developer_instructions: request.systemPrompt })
     args.splice(args.length - 1, 0, '--output-schema', schemaPath)

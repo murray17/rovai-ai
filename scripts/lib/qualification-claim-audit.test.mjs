@@ -62,3 +62,13 @@ test('honest failed-check statement uses the actual failed receipt', () => {
   Object.assign(f.claim, { text: '检查失败', kind: 'verification_failure', evidenceIds: ['EV-0003'] })
   assert.equal(applyClaimAudit(f.value, f.pack).audit.derivedVerdict, 'satisfied')
 })
+
+test('v7 permits actual read or status receipts for artifact facts without certifying unobserved agent checks', () => {
+  const f = fixture('node print.mjs', '{"durationMinutes":12}')
+  f.claim.evidenceIds=['EV-0003']
+  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate','v6 replay stays frozen')
+  f.pack.taskProfileVersion='generic-task-v7'
+  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'satisfied')
+  Object.assign(f.claim,{text:'已运行检查且通过',kind:'verification_success',evidenceIds:['EV-0002']})
+  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+})

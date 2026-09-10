@@ -849,7 +849,7 @@ test('v4 adds bounded receipts and public delivery, while Task descriptions stay
   }
 })
 
-for (const scoringVersion of ['2.3', '2.4']) test(`scoring ${scoringVersion} resolves only disputed items once, preserving both original verdicts and citations`, async () => {
+for (const scoringVersion of ['2.3', '2.4', '2.5']) test(`scoring ${scoringVersion} resolves only disputed items once, preserving both original verdicts and citations`, async () => {
   const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
   const { readFile } = await import('node:fs/promises')
   const scoring = JSON.parse(await readFile(new URL(`../../qualification/context-regression/scoring-v${scoringVersion}.json`, import.meta.url)))

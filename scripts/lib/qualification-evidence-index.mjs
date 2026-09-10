@@ -337,7 +337,11 @@ export function buildEvidenceIndex({
     }
     for (const receipt of snapshot.evaluationContext?.receipts ?? []) {
       addSourceRecord({ evidenceId: stableEvidenceId('runtime.command-receipt', receipt.sourceEvidenceId), evidenceType: 'runtime_activity', authorityClass: 'runtime',
-        sourceId: 'core.agent-run-execution-evidence', content: receipt.content, contentDigestOverride: sha256(receipt.content), safeForJudge: true })
+        sourceId: receipt.nativeWitnessDigest ? 'runtime.bound-native-command-supplement' : 'core.agent-run-execution-evidence', content: receipt.content, contentDigestOverride: sha256(receipt.content), safeForJudge: true })
+    }
+    for (const file of snapshot.evaluationContext?.initialFiles ?? []) {
+      addSourceRecord({ evidenceId: stableEvidenceId('runner.initial-workspace-content', file.path), evidenceType: 'workspace_fact', authorityClass: 'runner',
+        sourceId: 'runner.sealed-case-fixture', content: { path: file.path, caseSeal: file.caseSeal }, contentDigestOverride: file.contentDigest, safeForJudge: true, safeForPublic: false })
     }
     for (const task of snapshot.evaluationContext?.tasks ?? []) {
       addSourceRecord({ evidenceId: stableEvidenceId('core.task-description', task.taskId), evidenceType: 'core_domain', authorityClass: 'core',
@@ -878,6 +882,13 @@ function buildSourceBoundaries(input) {
         : unavailable('evidence_index.derived_facts_unavailable')
     })
   ]
+  if (input.snapshot?.evaluationContext?.policyId === 'bounded-evaluation-context-v2') {
+    const context = input.snapshot.evaluationContext
+    boundaries.push(sourceBoundary('runtime', 'runtime.bound-native-command-supplement', {
+      supplementDigest: context.supplementDigest, witnesses: context.receipts.filter(row => row.nativeWitnessDigest).map(row => ({ sourceEvidenceId: row.sourceEvidenceId, sourcePayloadDigest: row.sourcePayloadDigest, witnessDigest: row.nativeWitnessDigest }))
+    }, { coverage: COMPLETE }))
+    boundaries.push(sourceBoundary('runner', 'runner.sealed-case-fixture', context.initialFiles.map(({ path, contentDigest, caseSeal }) => ({ path, contentDigest, caseSeal })), { coverage: COMPLETE }))
+  }
   return boundaries.sort((left, right) => left.sourceId.localeCompare(right.sourceId))
 }
 

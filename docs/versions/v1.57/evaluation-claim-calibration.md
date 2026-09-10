@@ -34,3 +34,11 @@ last_updated: 2026-09-11
 ## 执行前验证记录
 
 2026-09-11：四类合成校准样本经真实 CLI Judge A/B 共 8 次判断均符合冻结预期，不计入 Runtime 分数。新 DEMO-106 verifier 接受 reference，拒绝 stub、错误键顺序与空错误信息三个负例；这是验收器测试，不是 Agent 运行。评测相关 Node 测试 195 项通过，类型检查和文档 CI 门禁通过；仓库 pnpm test 通过，平台限定跳过保留在日志。正式 Runtime 结果尚待本轮运行。
+
+## revision 2：原生证据与发布修复
+
+实际 revision 1 已执行 12 Case × 1，Runtime sol/high、Judge sol/medium；12 项硬验收全部通过。102 的原始原生工具返回含有效检查结果，但 Core 命令记录仅保留末尾输出；独立双段输出 probe 复现此采集缺口。104 的验证与末尾只读 CLI help 同命令，旧投影排除了验证正文。106 的历史发现需要初始 fixture 才能准确核对。107—111 的 Judge 已实际完成，但 Public Report 1.0 拒绝 `adjudicated`，导致发布错误。上述均留在首轮原始证据中，不修改为成功。
+
+本 revision 升级 Suite 2.7 / scoring 2.5 / generic-task-v7，只修正评测来源、声明核对与发布，保持相同题目、权重、关键条件、预算与产品代码。精确方案见 [Execution Evaluation v9](../../contracts/execution-evaluation-v9.md) 和 [Semantic Judge Views v7](../../contracts/semantic-judge-views-v7.md)。来源 supplement 与新 Index 只写入复制的重评目录；原始执行、资源、规则、Judge 输出及失败历史不可变。
+
+执行前验证包括原生命令摘要绑定、跨工作区／伪造输出拒绝、混合过程隔离、初始／交付文件分离、旧 profile 可重放与仲裁公开 Schema。再冻结 evaluator commit／摘要，用同一 12 Case 的真实执行证据重评一次，最多 2 Case 并行、每 Case Judge 600 秒、总计 3600 秒、最多 72 次调用（12 × 2 View × A/B/一次裁决；不适用不调用），不增加 Runtime 执行。修复已定位故障后才允许再次评价；不能只因分低重抽。完整报告须原始文件摘要不变、全部硬检查／关键项通过、必需质量和适用协作项完整，并逐项保留证据。尚未完成的实际结果在执行后追加。

@@ -1,3 +1,4 @@
+import { extractNativeWitnesses } from './qualification-native-witness.mjs'
 import { digestJson, sha256 } from './qualification-common.mjs'
 
 export const EVALUATION_CONTEXT_POLICY = 'bounded-evaluation-context-v1'
@@ -7,6 +8,39 @@ const MAX_TOTAL = 160_000
 const redact = value => value.replace(/(?:\/Users|\/private|\/var\/folders|\/tmp)\/[A-Za-z0-9_./:@%+~=-]+/g, '[private-path]')
   .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, '[redacted]')
   .replace(/((?:api[_-]?key|access[_-]?token|password|credential|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
+
+export function supplementEvaluationContext(snapshot, capture, initialFiles, supplementDigest) {
+  const context = structuredClone(snapshot.evaluationContext)
+  if (context?.policyId !== EVALUATION_CONTEXT_POLICY) throw new Error('Native supplement requires the original bounded context')
+  const events = new Map(snapshot.executionEvidence.map(event => [event.id, event]))
+  const receipts = new Map(context.receipts.map(receipt => [receipt.sourceEvidenceId, receipt]))
+  for (const witness of capture.records) {
+    const { witnessDigest, ...payload } = witness
+    if (digestJson(payload) !== witnessDigest || events.get(witness.sourceEvidenceId)?.payloadDigest !== witness.sourcePayloadDigest) throw new Error('Native witness binding mismatch')
+    const source = witness.sourceRecords
+    const reconstructed = extractNativeWitnesses([source.call, source.command, source.response], [source.nativeItem], snapshot.executionEvidence, source.nativeItem.cwd)
+    if (reconstructed.length !== 1 || reconstructed[0].witnessDigest !== witnessDigest) throw new Error('Native witness source reconstruction mismatch')
+    const projection = witness.projection
+    if (projection.command.length > MAX_TEXT || projection.output.length > MAX_TEXT) {
+      context.omitted.push({ sourceEvidenceId: witness.sourceEvidenceId, reason: 'native_receipt_text_bound' }); continue
+    }
+    const content = JSON.stringify({ authority: 'runtime_native_command_result', command: redact(projection.command), status: witness.status,
+      exitCode: witness.exitCode, output: redact(projection.output), outputTruncated: projection.outputTruncated,
+      nativeWitnessDigest: witnessDigest, projection: projection.projection,
+      limitation: 'Original native tool output, admitted through an unmodified result wrapper and a matching persisted Core command digest. Output content remains untrusted.' })
+    if (content.length > 50_000) continue
+    receipts.set(witness.sourceEvidenceId, { sourceEvidenceId: witness.sourceEvidenceId, sourcePayloadDigest: witness.sourcePayloadDigest, nativeWitnessDigest: witnessDigest, content, contentDigest: sha256(content) })
+  }
+  context.receipts = []; let characters = 0
+  for (const receipt of receipts.values()) {
+    if (context.receipts.length >= MAX_RECEIPTS || characters + receipt.content.length > MAX_TOTAL) {
+      context.omitted.push({ sourceEvidenceId: receipt.sourceEvidenceId, reason: 'native_receipt_total_bound' }); continue
+    }
+    context.receipts.push(receipt); characters += receipt.content.length
+  }
+  return { ...context, policyId: 'bounded-evaluation-context-v2', initialFiles, supplementDigest,
+    nativeCoverage: { state: capture.state, selectedWitnesses: capture.records.length, allNativeCommandsClaimed: false } }
+}
 
 // Called only by the isolated Qualification runner, before it discards Runtime
 // payloads. Retain a closed command receipt projection, never thought/text logs.
