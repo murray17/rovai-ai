@@ -10,12 +10,13 @@ export function ProjectRenameDialog({ project, onClose, onSave }: {
   onSave(project: ProjectNavigationGroup, name: string | null): Promise<void>
 }): React.JSX.Element {
   const [name, setName] = useState(project.name)
+  const [restoreDirectoryName, setRestoreDirectoryName] = useState(false)
   const [busy, setBusy] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null)
   const submitting = useRef(false)
   const normalized = normalizeProjectDisplayName(name)
-  const validationError = projectDisplayNameError(name)
+  const validationError = restoreDirectoryName ? null : projectDisplayNameError(name)
   const directoryName = projectDirectoryName(project.projectPath)
   const error = normalized ? validationError ?? saveError : saveError
 
@@ -27,7 +28,7 @@ export function ProjectRenameDialog({ project, onClose, onSave }: {
     setBusy(true)
     setSaveError(null)
     try {
-      await onSave(project, normalized === directoryName ? null : normalized)
+      await onSave(project, restoreDirectoryName || normalized === directoryName ? null : normalized)
       onClose()
     } catch {
       setSaveError('名称未能保存，请重试。')
@@ -52,7 +53,7 @@ export function ProjectRenameDialog({ project, onClose, onSave }: {
             <label className="field-label" htmlFor="rename-project-name">项目名称
               <input id="rename-project-name" ref={input} data-dialog-autofocus value={name} disabled={busy}
                 autoComplete="off" aria-invalid={Boolean(error)} aria-describedby="rename-project-context rename-project-error"
-                onChange={(event) => { setName(event.target.value); setSaveError(null) }}
+                onChange={(event) => { setName(event.target.value); setRestoreDirectoryName(false); setSaveError(null) }}
                 onKeyDown={(event) => { if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault() }} />
             </label>
             <div className="rename-project-context" id="rename-project-context"><span>工作目录</span><code>{project.projectPath}</code></div>
@@ -61,6 +62,7 @@ export function ProjectRenameDialog({ project, onClose, onSave }: {
           <AppDialogFooter leading={project.name !== directoryName
             ? <button className="quiet-button" type="button" disabled={busy} onClick={() => {
                 setName(directoryName)
+                setRestoreDirectoryName(true)
                 setSaveError(null)
                 input.current?.focus()
               }}>使用目录名</button>
