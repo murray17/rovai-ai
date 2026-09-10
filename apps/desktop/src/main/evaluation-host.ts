@@ -168,7 +168,7 @@ export class EvaluationHostService {
           const automation = await this.core.request<AutomationView | null>('automations.get', { automationId: binding.automationId })
           const live = [...this.#live.values()].find(item => item.job.automationId === binding.automationId)
           const eligible = automation?.enabled && automation.projectRef.kind === 'directory' && await realpath(automation.projectRef.path) === binding.workspace
-          const page = eligible ? await this.core.request<AutomationRunListPage>('automations.runs.list', { automationId: binding.automationId, limit: 100 }) : null
+          const page = eligible ? await this.core.request<AutomationRunListPage>('automations.runs.list', { automationId: binding.automationId, limit: 50 }) : null
           if (live && !page?.runs.some(run => run.runId === live.job.jobId && run.status === 'running')) {
             live.job.reason = 'automation_stopped_or_finished'; live.child.kill('SIGTERM')
           }

@@ -37,10 +37,14 @@ export async function runPlan(planFile, directory) {
   let automation = { automationId: 'automation-1', enabled: true, projectRef: { kind: 'directory', path: workspace } } as AutomationView
   let runs: unknown[] = []
   const calls: string[] = []
-  const service = new EvaluationHostService(join(root, 'owner'), { async request<T>(method: CoreMethod): Promise<T> {
+  const service = new EvaluationHostService(join(root, 'owner'), { async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
     calls.push(method)
     if (method === 'automations.get') return automation as T
-    if (method === 'automations.runs.list') return { runs, truncated: false, nextCursor: null } as T
+    if (method === 'automations.runs.list') {
+      const limit = (params as { limit: number }).limit
+      if (limit < 1 || limit > 50) throw new Error('Automation history limit must be between 1 and 50')
+      return { runs, truncated: false, nextCursor: null } as T
+    }
     throw new Error('Unexpected Core request')
   } })
   async function plan(mode = 'weekly', extra = {}) {
