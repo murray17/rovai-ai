@@ -5,7 +5,7 @@ lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
-model_context_change: false
+model_context_change: true
 last_updated: 2026-09-11
 ---
 
@@ -31,7 +31,12 @@ last_updated: 2026-09-11
 
 本次没有新增数据库字段，沿用 main 的 Data Contract 99、Camp Snapshot 34、formatter/manifest 23 及 Built-in tool/context 语义。旧评测构建使用 Data Contract 98，不能冒充本次合并构建的执行证据。Memory 精确计数、文档体系重构和队员成长仍属后续项，日报中的两项 Memory 指标为未知。User Automation 新增 owner-only 元数据操作，不注入 Agent 上下文。
 
-2026-09-10 开发者明确授权继续实现两条评测线，并授权实现者自行选择必要实现细节、最后汇总。本版本不修改核心模型可见机制或内置 Skill 内容，因此不触发产品模型上下文 revision；后续实际上下文／Skill 机制改动仍按 Gate 流程确认和验证。
+2026-09-10 开发者明确授权继续实现两条评测线，并授权实现者自行选择必要实现细节、最后汇总。该评测增量不修改核心模型可见机制或内置 Skill 内容，因此自身不触发产品模型上下文 revision；后续实际上下文／Skill 机制改动仍按 Gate 流程确认和验证。
+
+2026-09-11 开发者另行确认 Source Attachment 的模型可见路径语义收敛：Run 前保留宿主重检，随后把 exact stored
+source path 原样写入 `CURRENT_INPUT.attachments`，彻底删除 execution-root 分流和 Run Temp 复制。该独立 revision
+见[完整前后对照与确认记录](model-context-change-source-attachment-live-reference.md)；它不改变 Context shape、选择预算、
+formatter/profile/manifest 版本或其他附件类型。
 
 代码及本地验证、隔离定时链路和首次真实 Judge 校准已运行；完整对照、独立保留集、固定模型 snapshot 与部分取证覆盖仍有缺口，版本状态保持 `in_progress`，详见[实施计划](implementation-plan.md)和[预算校准记录](evaluation-budget-calibration.md)。设计、Case 准入与合同测试不能证明任务质量提升；各类运行证据分别记录，不相互替代。
 
@@ -46,13 +51,13 @@ last_updated: 2026-09-11
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | main 的 v1.57 冻结，本概览、实施计划及[版本索引](../README.md)建立唯一 current v1.58；旧分支报告身份不重写 |
-| Decisions | 已更新 | [V1.58-D01](decisions.md#v1-58-d01)记录元数据与分析 Agent 的权限分离；[V1.58-D05](decisions.md#v1-58-d05)明确 CLI 防误调用边界并移除 Runtime 外层沙箱 |
-| Contracts | 已更新 | [Execution Evaluation v14](../../contracts/execution-evaluation-v14.md)、[User Automation v5](../../contracts/user-automation-v5.md)、[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md)、[ACP Client Terminal v3](../../contracts/acp-client-terminal-v3.md)及索引 |
-| Architecture | 已更新 | [双轨执行评测](../../architecture/execution-evaluation.md)、User Automation 当前路由 |
-| UI | 已更新 | 复用 Camp 与文件入口，增加离线 HTML、质量和协作对照；保留 SVG/Markdown/JSON，Runtime 外层沙箱清理不涉及 Renderer 或 Electron 沙箱 |
+| Decisions | 已更新 | [V1.58-D01](decisions.md#v1-58-d01)记录元数据与分析 Agent 的权限分离；[V1.58-D05](decisions.md#v1-58-d05)明确 CLI 防误调用边界并移除 Runtime 外层沙箱；[V1.58-D06](decisions.md#v1-58-d06)记录 Source Attachment 原路径投影 clean cutover |
+| Contracts | 已更新 | [Execution Evaluation v14](../../contracts/execution-evaluation-v14.md)、[User Automation v5](../../contracts/user-automation-v5.md)、[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md)、[ACP Client Terminal v3](../../contracts/acp-client-terminal-v3.md)、[Camp Attachment v9](../../contracts/camp-attachment-v9.md)、[Single Chat v4](../../contracts/single-chat-v4.md)及索引 |
+| Architecture | 已更新 | [双轨执行评测](../../architecture/execution-evaluation.md)、User Automation 当前路由、[Camp Attachments](../../architecture/camp-published-attachment-view.md)、[Single Chat](../../architecture/single-chat.md)与基础不变量 |
+| UI | 已更新 | 复用 Camp 与文件入口，增加离线 HTML、质量和协作对照；保留 SVG/Markdown/JSON，Runtime 外层沙箱清理与 Source Attachment 投影均不改变 Renderer 或 Electron 沙箱 |
 | Runtime Activity | 确认无需更新 | 只读取当前 classifier 既有证据，不修改分类、事件或 Activity 投影 |
-| Runtime compatibility | 确认无需更新 | 复用现有 Runtime Adapter；局部评测验证不提升平台或 Runtime 资格 |
-| Documentation routing | 已更新 | 文档导航、开发入口、上下文治理、Contracts、Architecture 与 CURRENT 纳入双轨评测 |
+| Runtime compatibility | 确认无需更新 | 复用现有 Runtime Adapter；Source Attachment 不新增 read root/capability 或可读保证，局部评测验证也不提升平台或 Runtime 资格 |
+| Documentation routing | 已更新 | 文档导航、开发入口、上下文治理、Contracts、Architecture 与 CURRENT 纳入双轨评测及 Source Attachment v9/v4 |
 | Root README | 确认无需更新 | 项目定位与支持平台不变；开发评测操作由 development 入口拥有 |
 
 评测证据采集、Judge 未知处理及报告结论修订见[证据与报告完整性修订](evaluation-evidence-completeness.md)。

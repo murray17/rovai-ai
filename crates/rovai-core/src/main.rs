@@ -2017,7 +2017,6 @@ struct CampAttachmentRunAccess<'a> {
 struct RuntimeInputPreparationRequest<'a> {
     charter_delivery_mode: CharterDeliveryMode,
     proposed_delivery_id: Option<&'a str>,
-    run_tmp: &'a Path,
 }
 
 impl CampAttachmentRunAccess<'_> {
@@ -11070,7 +11069,7 @@ impl Core {
     ) -> Result<Option<PreparedContext>> {
         attachment_access.prove(execution)?;
         let source_attachment_paths = self
-            .resolve_agent_run_source_attachment_paths(execution, request.run_tmp)
+            .resolve_agent_run_source_attachment_paths(execution)
             .await?;
         let materialization = {
             let mut database = self.database.lock().await;
@@ -11118,7 +11117,7 @@ impl Core {
     ) -> Result<Option<(PreparedContext, RuntimeInputDelivery)>> {
         attachment_access.prove(execution)?;
         let source_attachment_paths = self
-            .resolve_agent_run_source_attachment_paths(execution, request.run_tmp)
+            .resolve_agent_run_source_attachment_paths(execution)
             .await?;
         let preparation = {
             // The Core database mutex is the logical Runtime Input preparation
@@ -11195,7 +11194,6 @@ impl Core {
     async fn resolve_agent_run_source_attachment_paths(
         &self,
         execution: &AgentRunExecution,
-        run_tmp: &Path,
     ) -> Result<Vec<String>> {
         let source_refs = {
             let database = self.database.lock().await;
@@ -11208,13 +11206,9 @@ impl Core {
         if source_refs.is_empty() {
             return Ok(Vec::new());
         }
-        let execution_root = PathBuf::from(&execution.workspace.execution_root);
-        let run_tmp = run_tmp.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            resolve_source_attachments_for_run(&source_refs, &execution_root, &run_tmp)
-        })
-        .await
-        .context("Source Attachment Run resolver task failed")?
+        tokio::task::spawn_blocking(move || resolve_source_attachments_for_run(&source_refs))
+            .await
+            .context("Source Attachment Run resolver task failed")?
     }
 
     async fn prepare_agent_run_skill_exposure(
@@ -12449,10 +12443,6 @@ impl Core {
         };
         self.bind_prepared_native_session(execution, &binding_credential, &thread_id)
             .await?;
-        let active_builtin_tools = runtime
-            .builtin_tool_process_config()
-            .context("Codex Runtime has no Built-in Tool process context")?
-            .clone();
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
@@ -12462,7 +12452,6 @@ impl Core {
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode: CharterDeliveryMode::NativeAppend,
                     proposed_delivery_id: None,
-                    run_tmp: active_builtin_tools.run_tmp(),
                 },
                 output,
             )
@@ -12775,7 +12764,6 @@ impl Core {
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
                     proposed_delivery_id: Some(&delivery_id),
-                    run_tmp: active_builtin_tools.run_tmp(),
                 },
                 output,
             )
@@ -12925,7 +12913,6 @@ impl Core {
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode: CharterDeliveryMode::NativeAppend,
                     proposed_delivery_id: None,
-                    run_tmp: builtin_tools.run_tmp(),
                 },
                 output,
             )
@@ -13506,7 +13493,6 @@ impl Core {
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode: CharterDeliveryMode::FirstPayload,
                     proposed_delivery_id: None,
-                    run_tmp: builtin_tools.run_tmp(),
                 },
                 output,
             )
@@ -14110,10 +14096,6 @@ impl Core {
             .context("failed to bind ACP Native Session")?;
         self.establish_acp_compaction_observer_best_effort(execution, &runtime, &session_id)
             .await;
-        let active_builtin_tools = runtime
-            .builtin_tool_process_config()
-            .context("ACP Runtime has no Built-in Tool process context")?
-            .clone();
         let Some((prepared_context, delivery)) = self
             .materialize_and_prepare_agent_run_input(
                 execution,
@@ -14123,7 +14105,6 @@ impl Core {
                 RuntimeInputPreparationRequest {
                     charter_delivery_mode,
                     proposed_delivery_id: None,
-                    run_tmp: active_builtin_tools.run_tmp(),
                 },
                 output,
             )
