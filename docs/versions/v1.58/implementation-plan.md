@@ -94,5 +94,5 @@ last_updated: 2026-09-11
 - 回归 owner：`core-startup-availability.test.mjs` 新增真实 Core 启动 → Runtime Probe → 子沙箱的集成断言。仅测试 Managed Process 无法捕获旧 Core 启动时注册的全局沙箱，因此使用独立数据和 Skill Library fixture；不提交模型请求。
 - 旧构建实测：同一新回归在已安装旧 Core 上失败，子沙箱退出 `71`；候选 Core 返回 `0`。最小独立命令在当前 Codex 环境成功。
 - 本地门禁：`pnpm typecheck`、完整 `pnpm test`（Vitest 174 文件、1755 测试及 Node 套件）、Rust PR 范围（553 lib、35 CLI、309 slow）、Core binary 测试（236 通过、5 个既有 ignored）、Clippy、格式与通用文档治理通过。
-- 启动集成：完整 Core startup suite 10 通过、1 个既有 Windows-only Pi 检查跳过；同时将该文件两处已失效的 Composer RPC 夹具改为当前 v2 document，保留旧队列恢复的历史存储夹具。真实 CLI 的单标记、双标记及空标记场景均在 User Automation dispatch 前退出 `2`。
+- 启动集成：完整 Core startup suite 10 通过、1 个 Pi 缺失检查按既有 macOS 规则跳过；同时将该文件两处已失效的 Composer RPC 夹具改为当前 v2 document，保留旧队列恢复的历史存储夹具。真实 CLI 的单标记、双标记及空标记场景均在 User Automation dispatch 前退出 `2`。
 - 最小回归命令：`node --test --test-name-pattern='Core-managed macOS probes' scripts/lib/core-startup-availability.test.mjs`。本条 supersedes 本文较早批次的沙箱准入约束，旧失败记录不改写。
