@@ -263,6 +263,7 @@ export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'automations' | 'memory' | 'settings'
 type ActivateCampOptions = {
   reconcileDefaultLead?: boolean
+  initializeComposerDraft?: boolean
   preserveNotificationFocus?: boolean
   suppressErrors?: boolean
   anchoredMessages?: readonly CampMessageView[]
@@ -1134,7 +1135,8 @@ function AuthoritativeApp({
   const [campSnapshotState, setCampSnapshotState] = useState<{
     snapshot: CampSurfaceSnapshot | null
     entryPreview: boolean
-  }>({ snapshot: null, entryPreview: false })
+    initialComposerDraft: CampComposerDraftView | null
+  }>({ snapshot: null, entryPreview: false, initialComposerDraft: null })
   const campSnapshot = campSnapshotState.snapshot
   const [campInspectorCampId, setCampInspectorCampId] = useState<string | null>(null)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
@@ -1242,11 +1244,18 @@ function AuthoritativeApp({
 
   const setCampSnapshot = useCallback((
     snapshot: CampSurfaceSnapshot | null,
-    entryPreview = false
+    entryPreview = false,
+    initialComposerDraft: CampComposerDraftView | null = null
   ): void => {
     campSnapshotRef.current = snapshot
     if (snapshot) rememberCampSnapshot(campSnapshotCache.current, snapshot)
-    setCampSnapshotState({ snapshot, entryPreview })
+    setCampSnapshotState({ snapshot, entryPreview, initialComposerDraft })
+  }, [])
+
+  const consumeInitialComposerDraft = useCallback((draft: CampComposerDraftView): void => {
+    setCampSnapshotState((current) => current.initialComposerDraft === draft
+      ? { ...current, initialComposerDraft: null }
+      : current)
   }, [])
 
   const clearCampOpenFeedback = useCallback((): void => {
@@ -1771,7 +1780,8 @@ function AuthoritativeApp({
     )
     const commitCampSurface = (
       snapshot: CampSurfaceSnapshot,
-      entryPreview = false
+      entryPreview = false,
+      initialComposerDraft: CampComposerDraftView | null = null
     ): void => {
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
@@ -1788,7 +1798,7 @@ function AuthoritativeApp({
         })
       }
       setActiveCampId(campId)
-      setCampSnapshot(snapshot, entryPreview)
+      setCampSnapshot(snapshot, entryPreview, initialComposerDraft)
       lastMainView.current = 'camp'
       setView('camp')
     }
@@ -1803,15 +1813,18 @@ function AuthoritativeApp({
       }, CAMP_OPEN_FEEDBACK_DELAY_MS)
     }
     try {
-      const { snapshot, traceId, startedAt } = await requestCampProjection(
-        campId,
-        options.reconcileDefaultLead === false ? 'open' : 'enter'
-      )
+      const [{ snapshot, traceId, startedAt }, initialComposerDraft] = await Promise.all([
+        requestCampProjection(campId, options.reconcileDefaultLead === false ? 'open' : 'enter'),
+        options.initializeComposerDraft
+          ? window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+            .catch(() => null)
+          : Promise.resolve(null)
+      ])
       if (selectionGeneration !== campSelectionGeneration.current) {
         return false
       }
       clearCampOpenFeedback()
-      commitCampSurface(snapshot)
+      commitCampSurface(snapshot, false, initialComposerDraft)
       await afterNextPaint()
       if (selectionGeneration !== campSelectionGeneration.current) return false
       console.info(
@@ -3510,7 +3523,7 @@ function AuthoritativeApp({
         }
       }
       try {
-        await activateCamp(campId, { reconcileDefaultLead: false })
+        await activateCamp(campId, { reconcileDefaultLead: false, initializeComposerDraft: true })
       } finally {
         if (preferencesSaveFailed) {
           notifyError('对话已创建，但默认队伍与一键新建设置未保存。可在「设置 → 通用」重试。')
@@ -3986,6 +3999,8 @@ function AuthoritativeApp({
           <CampWorkspace
             key={activeCampId}
             snapshot={visibleCampSnapshot}
+            initialComposerDraft={campSnapshotState.initialComposerDraft}
+            onInitialComposerDraftConsumed={consumeInitialComposerDraft}
             openCoverage={campSnapshot?.camp.id === activeCampId
               ? campSnapshot.openCoverage ?? null
               : null}

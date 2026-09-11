@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import { lstat, mkdtemp, mkdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
+import { composerDocumentForAddress } from './create-configured-camp.mjs'
 import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
@@ -15,6 +16,50 @@ import {
 const repository = resolve(import.meta.dirname, '../..')
 const binary = process.env.ROVAI_CORE_BIN
   ?? join(repository, 'target', 'debug', process.platform === 'win32' ? 'rovai-core.exe' : 'rovai-core')
+
+// Core startup used to install a process-global wrapper. A ManagedProcess unit
+// test without run_core would miss that policy and pass on the broken build.
+test('Core-managed macOS probes can start their own native sandbox', { skip: process.platform !== 'darwin' }, async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-native-sandbox-')))
+  const dataDir = join(fixture, 'data')
+  const resultPath = join(fixture, 'sandbox-exit.txt')
+  const fakeCodex = join(fixture, 'codex')
+  const quotedResultPath = `'${resultPath.replaceAll("'", "'\\''")}'`
+  await writeFile(fakeCodex, `#!/bin/sh
+/usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/true
+probe_exit=$?
+printf '%s\\n' "$probe_exit" > ${quotedResultPath}
+# Keep discovery on this fixture, then reject protocol startup without a model.
+if [ "$1" = '--version' ]; then
+  printf 'codex-cli 0.153.4\\n'
+  exit 0
+fi
+exit 1
+`, { mode: 0o700 })
+  const core = startCore(dataDir, join(dataDir, 'managed-skill-library'), join(dataDir, 'mcp.json'), [], {
+    ROVAI_CODEX_BIN: fakeCodex
+  })
+  try {
+    await core.ready
+    await core.settled()
+    await core.request('runtime.product.ensure', { runtimeKind: 'codex-cli' })
+    let sandboxExit = null
+    const deadline = Date.now() + 10000
+    while (Date.now() < deadline) {
+      sandboxExit = await readFile(resultPath, 'utf8').catch((error) => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+      if (sandboxExit?.trim()) break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    assert.equal(sandboxExit?.trim(), '0', 'Rovai must not prevent a Runtime from creating its own sandbox')
+  } finally {
+    await core.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
 
 // This owns the real run_core -> ready -> RPC seam: an initializer-only unit test
 // cannot prove that a healthy authority remains reachable after a filesystem error.
@@ -160,7 +205,7 @@ test('queued input commits notify Desktop without exposing private bodies in pub
     core = startCore(dataDir, skillRoot, mcpPath)
     await core.ready
     const draft = await core.request('camp.composerDraft.save', {
-      campId, expectedRevision: 0, content: { version: 2, segments: [{ kind: 'text', text: 'Private queued body' }] }
+      campId, expectedRevision: 0, content: composerDocumentForAddress({ mode: 'default' }, 'Private queued body')
     })
     const result = await core.request('camp.messages.send', {
       commandId: randomUUID(), campId, draftRevision: draft.revision,
@@ -217,7 +262,7 @@ test('idle camps accept new input and drain backlog after legacy failed-turn rec
   const sendText = async (campId, body) => {
     const current = await core.request('camp.composerDraft.get', { campId })
     const draft = await core.request('camp.composerDraft.save', {
-      campId, expectedRevision: current.revision, content: { version: 2, segments: [{ kind: 'text', text: body }] }
+      campId, expectedRevision: current.revision, content: composerDocumentForAddress({ mode: 'default' }, body)
     })
     // No new Run or model is allowed in this transport/scheduler fixture.
     return core.request('camp.messages.send', {

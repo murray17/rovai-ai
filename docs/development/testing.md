@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-09-04
+last_updated: 2026-09-12
 ---
 
 # 测试与 Smoke Test
@@ -95,6 +95,19 @@ Electron 回归使用生产 adapter、CampWorkspace 与 CSS，验证空事件下
 夹具创建临时绝对 `userData`，不启动 Core/SQLite/Skill Library/Runtime；`ROVAI_KEEP_CAMP_OPEN_FIXTURE=1`
 保留测量和双主题截图。手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:camp-open-projection`。这些分别是数据库边界
 和生产组件组合测试，不冒充已安装 App 的真实会话端到端耗时。
+
+### Claude Code 无 Prompt 目录验证
+
+目录协议与进程生命周期由共享 Core library 的 `health::claude_catalog_tests` owner 验证，正常门禁使用临时
+可执行夹具，不启动真实模型。安装版手工验证使用显式 ignored 测试：
+
+```bash
+cargo test -p rovai-core --lib health::claude_catalog_tests::claude_catalog_real_runtime_smoke -- --ignored --nocapture
+```
+
+执行前遵守 [本地隔离流程](local-workflow.md)，确认实际 Claude 可执行入口与继承的配置；该命令只发送
+初始化控制请求，不发送用户消息。原生初始化 hook 可按 Runtime 配置执行，认证与 Provider 配置不改写。
+测试输出仅含 Runtime 版本和模型条目，不输出完整初始化账户响应。此目录证据不替代生成类 smoke。
 
 ### 日常 commit 验证
 

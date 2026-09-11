@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-09-08
+last_updated: 2026-09-11
 ---
 
 # Windows Desktop Platform
@@ -39,7 +39,7 @@ use remains inside the corresponding adapter.
 
 ## 3. Managed processes and shutdown
 
-[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md) is the only Runtime/Probe launch interface.
+[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md) is the only Runtime/Probe launch interface.
 Windows creates the child with its Job and explicit inheritable handles in one `CreateProcessW` operation. Runtime entrypoint
 is a closed `native_executable | windows_command_shim` union: native `.exe` remains direct; `.cmd/.bat` uses canonical
 System32 `cmd.exe` with a Core-owned batch serializer, disabled AutoRun/delayed expansion and a composite shim/interpreter

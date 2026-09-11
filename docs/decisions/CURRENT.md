@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-09-07
+last_updated: 2026-09-12
 ---
 
 # 当前规范与决定理由导航
@@ -71,7 +71,7 @@ last_updated: 2026-09-07
 
 ## Runtime execution 与 Security
 
-- 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Network Interruption Recovery v1](../contracts/network-interruption-recovery-v1.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Planned Shutdown v6](../contracts/planned-shutdown-v6.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[ACP Client Terminal v2](../contracts/acp-client-terminal-v2.md)、[Runtime Launch and Verification v38](../contracts/runtime-launch-and-verification-v38.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)和[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)。
+- 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Network Interruption Recovery v1](../contracts/network-interruption-recovery-v1.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Planned Shutdown v6](../contracts/planned-shutdown-v6.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[ACP Client Terminal v3](../contracts/acp-client-terminal-v3.md)、[Runtime Launch and Verification v39](../contracts/runtime-launch-and-verification-v39.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)和[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md)。
 - 同一 Core generation 内采用固定退避、只有明确未接收的 ACP 输入才由 Rovai 接管，并让 native retry 与 Rovai 保持单一 owner 的理由：[V1.53-D04](../versions/v1.53/decisions.md#v1-53-d04)。
 - Runtime 安装缺失只进入 Availability、optional subsystem 只覆盖 Adapter 自有初始化的当前边界与理由：
   [V1.53-D07](../versions/v1.53/decisions.md#v1-53-d07)。
@@ -111,7 +111,8 @@ last_updated: 2026-09-07
 
 ## User Automation 与 Diagnostic Trial
 
-- 当前规范：[User Automation 不变量](../architecture/foundational-invariants.md#user-automation-trial)、[Workspace 与动态 Git 不变量](../architecture/foundational-invariants.md#camp-workspace)、[User Automation Architecture](../architecture/user-automation.md)和[User Automation v2](../contracts/user-automation-v2.md)。
+- 当前 CLI 防误调用与移除 macOS Runtime 外层沙箱理由：[V1.58-D05](../versions/v1.58/decisions.md#v1-58-d05)，替代 V1.21-D03 的 OS denial 选择；进程合同见 [Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md)。
+- 当前规范：[User Automation 不变量](../architecture/foundational-invariants.md#user-automation-trial)、[Workspace 与动态 Git 不变量](../architecture/foundational-invariants.md#camp-workspace)、[User Automation Architecture](../architecture/user-automation.md)和[User Automation v5](../contracts/user-automation-v5.md)。
 - 理由来源：[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.21-D02](../versions/v1.21/decisions.md#v1-21-d02)、[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)、[V1.21-D04](../versions/v1.21/decisions.md#v1-21-d04)及[V1.53-D05](../versions/v1.53/decisions.md#v1-53-d05)。
 
 ## Scheduled Automation
@@ -124,7 +125,7 @@ last_updated: 2026-09-07
 - 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v5](../contracts/runtime-file-change-observation-v5.md)、[Run Process Detail Surface v31](../contracts/run-process-detail-surface-v31.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v4](../contracts/runtime-usage-monitoring-v4.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。
 - Pi 成功 edit 的 path-bound 原生 patch、activity-v4 cutover、Migration 147 与历史 classifier 冻结理由：[V1.55-D02](../versions/v1.55/decisions.md#v1-55-d02)。
 - 理由来源：[v0.17](../versions/v0.17/decisions.md)、[v0.41](../versions/v0.41/decisions.md)、[v0.96](../versions/v0.96/decisions.md)、[v0.99](../versions/v0.99/decisions.md)、[V1.28-D12](../versions/v1.28/decisions.md#v1-28-d12)、[V1.29-D08](../versions/v1.29/decisions.md#v1-29-d08)、[V1.29-D09](../versions/v1.29/decisions.md#v1-29-d09)、[V1.29-D14](../versions/v1.29/decisions.md#v1-29-d14)。
-- Pi terminal assistant model-call Usage、原生 Action lifecycle 与 `agent_start` admission 的当前字段边界由 [Runtime Launch v38](../contracts/runtime-launch-and-verification-v38.md)继承并收敛，接入理由见 [V1.39-D01](../versions/v1.39/decisions.md#v1-39-d01)和[V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01)。
+- Pi terminal assistant model-call Usage、原生 Action lifecycle 与 `agent_start` admission 的当前字段边界由 [Runtime Launch v39](../contracts/runtime-launch-and-verification-v39.md)继承并收敛，接入理由见 [V1.39-D01](../versions/v1.39/decisions.md#v1-39-d01)和[V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01)。
 
 ## Qualification 与 Benchmark
 
@@ -161,12 +162,12 @@ last_updated: 2026-09-07
 
 ## 官方 ZCode 接入
 
-- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v38](../contracts/runtime-launch-and-verification-v38.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v5](../contracts/runtime-file-change-observation-v5.md)。
+- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v39](../contracts/runtime-launch-and-verification-v39.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v5](../contracts/runtime-file-change-observation-v5.md)。
 - 理由：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)、[V1.57-D02](../versions/v1.57/decisions.md#v1-57-d02)。
 
 ## 双轨执行评测
 
-- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v14](../contracts/execution-evaluation-v14.md)、[User Automation v4](../contracts/user-automation-v4.md)与[操作指南](../development/evaluation.md)。
+- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v14](../contracts/execution-evaluation-v14.md)、[User Automation v5](../contracts/user-automation-v5.md)与[操作指南](../development/evaluation.md)。
 - 理由来源：[V1.58-D01](../versions/v1.58/decisions.md#v1-58-d01)。
 
 ## 统一 Host 与 Web

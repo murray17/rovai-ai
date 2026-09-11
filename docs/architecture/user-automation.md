@@ -3,13 +3,13 @@ document_type: architecture
 architecture: user-automation
 authority: desktop-user-automation-component-boundaries
 status: accepted
-last_updated: 2026-09-07
+last_updated: 2026-09-11
 ---
 
 # User Automation Architecture
 
 本文说明普通用户终端自动化与 Runtime Diagnostic Trial 的长期组件边界。字段、命令、错误和 bundle 以
-[User Automation v4](../contracts/user-automation-v4.md)为准；决定理由见
+[User Automation v5](../contracts/user-automation-v5.md)为准；决定理由见
 [v1.21 决策](../versions/v1.21/decisions.md)。
 
 ## 进程结构
@@ -26,8 +26,8 @@ rovai app ...                       每次命令一个短进程
     └── User Automation IPC ──────> Electron Main
 
 Agent Runtime
-    └── OS-denied automation-v1 tree
-        └── rovai send/... ───────> process-private Agent CLI IPC ──> Core Built-in Router
+    ├── rovai app ... ──────────> CLI detects Run markers and rejects
+    └── rovai send/... ─────────> process-private Agent CLI IPC ──> Core Built-in Router
 ```
 
 一个 binary 降低安装和命令认知成本；namespace 之后的调用身份和能力完全分离。Electron Main 是 User
@@ -86,10 +86,13 @@ User Automation 是 Desktop 的可选控制面，不是 Desktop/Core 启动前�
 Server 初始化失败时，Main 清理本次半初始化资源、记录本机诊断并让 Desktop/Core 继续可用；此时 Automation
 命令不可连接，但不得触发全局 `app.quit()`。受控关闭只停止已经成功启动的 Server。
 
-同 UID 文件 mode 不是 Runtime 隔离。Core 在 macOS 初始化 Managed Process policy 后，所有 Probe、Host 与
-one-shot Runtime 都通过同一启动边界继承对当前 `automation-v1` 树的 OS 级 read/write deny；缺少该保护时
-Runtime launch fail closed。CLI 根据受管 Run 环境隐藏并拒绝 `app` namespace，只作为纵深防御。绝对 binary
-路径、环境清除或后代进程都不得绕过 OS policy。
+Agent CLI 根据 `ROVAI_CLI_CONTEXT` 或 `ROVAI_RUN_TMP` 标记隐藏并拒绝 `app` namespace，在读取用户
+connection context 与连接 IPC 前结束误调用。该约定覆盖正常继承环境的后代；同 UID 进程主动清除标记
+或伪装普通终端不在保证范围内。用户与 Agent 的 endpoint、凭据和服务端授权仍分离。
+
+Core 不再配置 protected tree 或通过 `sandbox-exec` 包装 Runtime；Managed Process 只拥有既有进程启动、
+stdio 和回收语义，Runtime 原生权限保持由 Runtime 控制。本机私有文件 mode 不被描述成同 UID Agent
+隔离。变更理由见 [V1.58-D05](../versions/v1.58/decisions.md#v1-58-d05)。
 
 ## 平台与演进
 

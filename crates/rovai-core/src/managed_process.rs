@@ -19,9 +19,6 @@ use crate::windows_runtime_entrypoint::{
     capture_windows_command_shim, command_shim_extension,
 };
 
-#[cfg(target_os = "macos")]
-use std::sync::OnceLock;
-
 #[cfg(unix)]
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
@@ -94,53 +91,7 @@ pub struct ManagedProcessLaunchSpec {
     application_identity: windows::WindowsApplicationIdentity,
     #[cfg(windows)]
     windows_entrypoint: WindowsRuntimeEntrypoint,
-    #[cfg(target_os = "macos")]
-    user_automation_denial_root: Option<PathBuf>,
     ownership: String,
-}
-
-#[cfg(target_os = "macos")]
-static USER_AUTOMATION_DENIAL_ROOT: OnceLock<PathBuf> = OnceLock::new();
-
-/// Configures the Desktop User Automation credential tree that every
-/// Core-managed Runtime process must be unable to read or mutate. This is a
-/// process-global launch invariant because every Runtime entry point funnels
-/// through `ManagedProcessLaunchSpec`.
-#[cfg(target_os = "macos")]
-pub fn configure_user_automation_denial_root(root: &Path) -> Result<()> {
-    if !root.is_absolute()
-        || root
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        bail!(
-            "managed_process.invalid_user_automation_denial_root: {}",
-            root.display()
-        );
-    }
-    let root = if root.exists() {
-        std::fs::canonicalize(root)?
-    } else {
-        let parent = root.parent().context(
-            "managed_process.invalid_user_automation_denial_root: missing parent directory",
-        )?;
-        let file_name = root.file_name().context(
-            "managed_process.invalid_user_automation_denial_root: missing final component",
-        )?;
-        std::fs::canonicalize(parent)?.join(file_name)
-    };
-    if let Some(existing) = USER_AUTOMATION_DENIAL_ROOT.get() {
-        if existing != &root {
-            bail!(
-                "managed_process.user_automation_denial_root_already_configured: {}",
-                existing.display()
-            );
-        }
-        return Ok(());
-    }
-    USER_AUTOMATION_DENIAL_ROOT
-        .set(root)
-        .map_err(|_| anyhow::anyhow!("managed_process.user_automation_denial_root_race"))
 }
 
 impl ManagedProcessLaunchSpec {
@@ -235,8 +186,6 @@ impl ManagedProcessLaunchSpec {
             application_identity,
             #[cfg(windows)]
             windows_entrypoint,
-            #[cfg(target_os = "macos")]
-            user_automation_denial_root: USER_AUTOMATION_DENIAL_ROOT.get().cloned(),
             ownership,
         })
     }
@@ -317,8 +266,6 @@ impl ManagedProcessLaunchSpec {
             application_identity,
             #[cfg(windows)]
             windows_entrypoint,
-            #[cfg(target_os = "macos")]
-            user_automation_denial_root: self.user_automation_denial_root.clone(),
             ownership,
         })
     }
@@ -578,7 +525,7 @@ impl ManagedProcess {
     pub fn spawn(spec: ManagedProcessLaunchSpec) -> Result<Self> {
         #[cfg(unix)]
         {
-            let mut command = command_from_spec(&spec)?;
+            let mut command = command_from_spec(&spec);
             command.as_std_mut().process_group(0);
             let child = command.spawn().with_context(|| {
                 format!(
@@ -771,40 +718,10 @@ impl Drop for ManagedProcess {
 }
 
 #[cfg(unix)]
-fn command_from_spec(spec: &ManagedProcessLaunchSpec) -> Result<Command> {
-    #[cfg(target_os = "macos")]
-    let (application, arguments) = if let Some(root) = &spec.user_automation_denial_root {
-        let sandbox_executable = Path::new("/usr/bin/sandbox-exec");
-        if !sandbox_executable.is_file() {
-            bail!("managed_process.runtime_sandbox_unavailable");
-        }
-        let root = root.to_str().with_context(|| {
-            format!(
-                "managed_process.invalid_user_automation_denial_root: {}",
-                root.display()
-            )
-        })?;
-        let root_literal = serde_json::to_string(root)?;
-        let profile = format!(
-            "(version 1) (allow default) (deny file-read* (subpath {root_literal})) (deny file-write* (subpath {root_literal}))"
-        );
-        let mut arguments = vec![
-            OsString::from("-p"),
-            OsString::from(profile),
-            OsString::from("--"),
-            spec.application.as_os_str().to_os_string(),
-        ];
-        arguments.extend(spec.arguments.iter().cloned());
-        (sandbox_executable, arguments)
-    } else {
-        (spec.application.as_path(), spec.arguments.clone())
-    };
-    #[cfg(not(target_os = "macos"))]
-    let (application, arguments) = (spec.application.as_path(), spec.arguments.clone());
-
-    let mut command = Command::new(application);
+fn command_from_spec(spec: &ManagedProcessLaunchSpec) -> Command {
+    let mut command = Command::new(&spec.application);
     command
-        .args(arguments)
+        .args(&spec.arguments)
         .current_dir(&spec.working_directory)
         .env_clear()
         .envs(&spec.environment)
@@ -815,7 +732,7 @@ fn command_from_spec(spec: &ManagedProcessLaunchSpec) -> Result<Command> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    Ok(command)
+    command
 }
 
 #[cfg(test)]
@@ -1075,44 +992,6 @@ mod tests {
         assert!(process.wait().await.unwrap().success());
         process.force_terminate_tree().unwrap();
         assert_eq!(bytes, b"managed");
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn macos_runtime_sandbox_denies_user_automation_root_but_keeps_other_files_visible() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-managed-automation-deny-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let protected = root.join("automation-v1");
-        let allowed = root.join("allowed.txt");
-        std::fs::create_dir_all(&protected).unwrap();
-        std::fs::write(protected.join("connection-v1.json"), b"credential").unwrap();
-        std::fs::write(&allowed, b"allowed").unwrap();
-        let protected = std::fs::canonicalize(protected).unwrap();
-        let mut command = Command::new("/bin/sh");
-        command
-            .args([
-                "-c",
-                "if cat \"$PROTECTED\" >/dev/null 2>&1; then exit 41; fi; test \"$(cat \"$ALLOWED\")\" = allowed || exit 42",
-            ])
-            .env("PROTECTED", protected.join("connection-v1.json"))
-            .env("ALLOWED", &allowed);
-        let mut spec = ManagedProcessLaunchSpec::capture(
-            &command,
-            ManagedProcessPurpose::RuntimeProbe,
-            ManagedStdinPolicy::Null,
-            ManagedWindowsArgvDialect::MicrosoftCrt,
-            "probe:automation-denial",
-        )
-        .unwrap();
-        spec.user_automation_denial_root = Some(protected);
-
-        let mut process = ManagedProcess::spawn(spec).unwrap();
-        let status = process.wait().await.unwrap();
-        assert!(status.success(), "sandbox probe exited with {status}");
-        process.force_terminate_tree().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]

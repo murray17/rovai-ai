@@ -59,6 +59,8 @@ export interface ModelOptionDescriptor {
 export interface ModelDescriptor {
   id: string
   displayName: string
+  description?: string | null
+  runtimeMetadata?: Record<string, unknown> | null
   isDefault: boolean
   hidden: boolean
   deprecated: boolean

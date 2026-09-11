@@ -46,6 +46,11 @@ OS socket/文件权限不单独证明同 UID Runtime 隔离。Windows/Linux 阶�
 访问边界。复用系统已有隔离，不承诺抵御宿主管理员/root。失败先交用户确认最小修正、替代与影响，
 未通过组合不声明安全发布；不自动扩大为通用沙箱或容器平台。
 
+当前 [Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md) 与
+[User Automation v5](../contracts/user-automation-v5.md) 已移除 Rovai 外层 macOS 沙箱及同 UID 防冒用承诺。
+本轮同步该实现，不重新引入旧沙箱；上述 Host 控制面保护仍是待验证的目标，不能从现有目录权限或 CLI
+误用防护推导成立。接入管理凭据、用户 IPC 与恢复入口前，需要明确该目标与当前 Runtime 合同的差距和最小修正。
+
 ## 草稿与用户文件
 
 每个客户端草稿有独立身份与后端验证的归属，贯穿读取、保存、附件、队列与发送消费。

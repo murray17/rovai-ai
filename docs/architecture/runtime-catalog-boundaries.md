@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-09-11
+last_updated: 2026-09-12
 ---
 
 # Runtime Catalog Boundaries
@@ -14,7 +14,7 @@ last_updated: 2026-09-11
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v38](../contracts/runtime-launch-and-verification-v38.md)。实测版本和能力只由
+[Runtime Launch and Verification v39](../contracts/runtime-launch-and-verification-v39.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -157,6 +157,24 @@ Thread/Session 的 Runtime-native 结构化字段记录首个实际模型，并�
 write-once 持久化；catalog default、请求模型、冻结 sentinel、Usage 或自由文本都不能补推。无观测时 Read
 Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime failure；该事实也不反向改写配置或 catalog。
 
+### Claude Code 原生模型目录
+
+Claude Code 通过选中的原生 CLI，以 stream-json 双向控制协议发送一次无 Prompt `initialize`。
+精确关联的成功响应 `models` 是唯一候选目录来源，`--help` 只检查命令参数。Probe 继承原生环境与
+active PATH，使用 `--no-session-persistence`，不追加 model、settings、权限或 Provider 覆盖。
+整个握手沿用 `RuntimeProbeProcess` 的 30 秒 deadline、有界输出和进程树回收。
+
+`value` 保留为选择 ID，显示名称与描述独立；原生单条模型元数据进入统一 descriptor 的
+`runtimeMetadata`，包括 Runtime 明确给出的别名、resolved ID 和能力。整份 account/初始化响应不进入
+模型目录。只有 Runtime 报告的 effort levels 才能生成选项；不按家族筛选或推断版本。
+`system.init` 的当前模型继续作为 Run 观察，不能用它代替目录。
+
+新目录复用统一快照、Picker、缓存和刷新；help 时代旧目录缺少原生 entry 证据，不能再服务选择或作为 LKG，
+但保存的队员配置保留。原生成功目录在刷新失败时继续按已有 stale/expired 边界读取，失败不能更新成功时间。
+`model.catalog.initialize` 是当前 Claude Ready 必需证据，旧配置在执行前重新验证。显式模型 ID 继续
+原样传给 `--model`；运行时默认省略该参数。字段与错误边界见
+[Runtime Launch v39](../contracts/runtime-launch-and-verification-v39.md)。
+
 ## 内部诊断与公开 Runtime failure
 
 任一 Product Runtime 的真实执行失败，以及支持该边界的显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
@@ -175,7 +193,7 @@ response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 f
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v38](../contracts/runtime-launch-and-verification-v38.md)。
+[Runtime Launch and Verification v39](../contracts/runtime-launch-and-verification-v39.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -240,7 +258,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v38](../contracts/runtime-launch-and-verification-v38.md)，
+字段级行为见 [Runtime Launch and Verification v39](../contracts/runtime-launch-and-verification-v39.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## ACP Client Terminal 边界
@@ -251,15 +269,16 @@ Runtime 返回 `disabled` 或 `local_bridged`：只有后者才同时在 initial
 保留各自已资格验证的内部 Shell 路径。
 
 Bridge 只在当前 AgentRun owner、execution epoch、Session 与 Active Prompt fence 内创建本地进程。进程从已
-admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境、
-macOS protected-tree deny 和平台进程树所有权。省略 cwd 时使用 execution root；显式 cwd 只要求为已存在的绝对
+admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境和
+平台进程树所有权。当前 [Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md) 不再附加 macOS
+protected-tree deny。省略 cwd 时使用 execution root；显式 cwd 只要求为已存在的绝对
 目录，不做 execution-root containment。原始 application 与结构化 argv 会和请求 cwd/env 一次性交给 Managed Process：
 先应用最终上下文，再解析 bare/relative command；Windows `.cmd/.bat` 重新进入 CommandShim identity，而不是 EXE-only
 派生路径。Runtime 的 sandbox/permission mode 与操作系统拥有 Shell/文件权限，Core
 不再通过 `scoped_path()` 建立第二层 Terminal cwd allowlist。Run cancel、detach、Host EOF/shutdown 与 fleet reap
 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr 使用有界私有 buffer，Terminal wire、
 output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
-[ACP Client Terminal v2](../contracts/acp-client-terminal-v2.md)。
+[ACP Client Terminal v3](../contracts/acp-client-terminal-v3.md)。
 
 <a id="native-home-probes"></a>
 
@@ -268,7 +287,7 @@ output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等�
 三者的普通检查沿用正式运行的原生 Home 选择，包括未设置的 Home override；Grok BYOK 不再复制配置。
 临时 cwd、Kiro additive agent、既有非交互认证、无消息 Session 检查和有界进程清理保留，不发送 Prompt。
 只清理 Probe 自有资源；原生初始化可能联网或落盘，检查不保证模型生成、余额或任意项目配置。
-自动化回归与真实模型 smoke 继续由调用方提供隔离环境，详见 [Runtime Launch v38](../contracts/runtime-launch-and-verification-v38.md)。
+自动化回归与真实模型 smoke 继续由调用方提供隔离环境，详见 [Runtime Launch v39](../contracts/runtime-launch-and-verification-v39.md)。
 
 仍保留两项独立差异：Kiro 通过临时 `.kiro/agents/rovai.json` 与 `--agent rovai` 追加 MCP；Kimi 通过
 Rovai 专属 env 文件提供进程级模型配置。两者分别评估，本次不改变默认 Agent、MCP 或 Provider 投递机制。
@@ -320,7 +339,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v38](../contracts/runtime-launch-and-verification-v38.md)，证据状态见
+[Runtime Launch and Verification v39](../contracts/runtime-launch-and-verification-v39.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -413,7 +432,7 @@ Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Camp F
 macOS x64 和 Windows x64 各自绑定 Pi 专属 immutable evidence revision，均为 `qualified / reasonCode=null`；普通
 discovery、检查、成员选择、Diagnostics 与 AgentRun 对三平台开放，UI 走正式 Runtime 展示且不再标记实验性。
 平台晋升不新增 Pi 已明确 unsupported/hidden 的能力。字段级行为见
-[Runtime Launch and Verification v38](../contracts/runtime-launch-and-verification-v38.md)，
+[Runtime Launch and Verification v39](../contracts/runtime-launch-and-verification-v39.md)，
 证据状态见[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -440,7 +459,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `CoreEnforcedV1 + read_only Workspace` 恢复路径仍强制 `plan`。descriptor 的 `recommendedValue=default` 只是
 保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v38](../contracts/runtime-launch-and-verification-v38.md)。
+[Runtime Launch and Verification v39](../contracts/runtime-launch-and-verification-v39.md)。
 
 ACP Client FS 不把这些权限 descriptor 复制成 Core allowlist。`fs/read_text_file` / `fs/write_text_file` 对当前
 fenced Run 只作协议与参数校验，绝对路径按 Runtime 请求执行，相对路径以 execution root 解析；是否能读写、是否
@@ -466,7 +485,7 @@ fingerprint 同时包含内核与独立 Node；PATH 中的社区
 CLI 不属于这个 Product Runtime。Core 内的协议翻译负责原生 NDJSON、Session/Input/Turn/Tool identity 与 callback，
 已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU；Host 复用以 Camp 为授权边界。Node prelude 的
 pipe-owned companion 在 Unix 补充回收原生 detached Bash 进程组；Windows 由原子 Job 拥有全部后代，
-以 Job 空集确认退出，不使用 Unix companion。生命周期细节由 Runtime Launch v38 拥有。
+以 Job 空集确认退出，不使用 Unix companion。生命周期细节由 Runtime Launch v39 拥有。
 内部 ACP shape 不改变公开协议来源。有原生后台任务的 Host 保留 Session/成员关联，禁止跨成员复用和空闲/容量回收；
 后台结果走原 Run 的已登记 Evidence 归属，前台 Run 与 CLI 授权正常结束。普通 Probe 沿用原生 HOME/存储，
 只隔离临时 cwd/socket，且不发送生成请求；Probe 实测与 Adapter 能力及发布资格分开。
@@ -479,7 +498,7 @@ pipe-owned companion 在 Unix 补充回收原生 detached Bash 进程组；Windo
 该差异是当前 Host 的认证覆盖范围，不是取消账号配置接入或宣称 app-server 协议不支持账号认证。
 图片沿用授权附件路径，由原生 Read 转为模型图片内容；Read 保持读取活动，不形成 Files Changed 或修改 Diff。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；
 warm resume 不刷新 MCP，所以集合变化不能沿用旧 Host。协议、FirstPayload、权限、Usage 与保留能力见
-[Runtime Launch v38](../contracts/runtime-launch-and-verification-v38.md)。平台资格与 Machine Ready 分开维护。
+[Runtime Launch v39](../contracts/runtime-launch-and-verification-v39.md)。平台资格与 Machine Ready 分开维护。
 
 Windows x64 与 macOS arm64 分别以平台专属冻结证据标记 Qualified；macOS x64 同时开放为可执行 Preview，
 没有 Intel Mac 真机资格。管理页不显示测试、试运行或实验性标签，保留机器检查、错误和具体能力限制；

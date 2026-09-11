@@ -2182,11 +2182,19 @@ mod tests {
     fn managed_runtime_cli_surface_does_not_advertise_or_admit_user_automation() {
         assert!(!root_help_text(true).contains("rovai app"));
         assert!(root_help_text(false).contains("rovai app --help"));
-        assert!(!user_automation_available_in_process(
-            Some("context"),
-            Some("run-tmp")
-        ));
-        assert!(user_automation_available_in_process(None, None));
+        for (context, run_tmp, available) in [
+            (None, None, true),
+            (Some("context"), None, false),
+            (None, Some("run-tmp"), false),
+            (Some("context"), Some("run-tmp"), false),
+            (Some(""), None, false),
+            (None, Some(""), false),
+        ] {
+            assert_eq!(
+                user_automation_available_in_process(context, run_tmp),
+                available
+            );
+        }
     }
 
     #[test]

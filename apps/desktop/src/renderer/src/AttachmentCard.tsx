@@ -82,7 +82,8 @@ export function AttachmentCard({
   const locatorRef = useRef(locator)
   locatorRef.current = locator
   const timeline = presentation !== 'composer'
-  const interactive = timeline || Boolean(menuItems)
+  const contextMenuAvailable = timeline || Boolean(menuItems)
+  const primaryActionAvailable = contextMenuAvailable || attachment.previewKind !== 'image'
   const agentPresentation = presentation === 'agent-timeline'
   const composerImage = presentation === 'composer' && attachment.previewKind === 'image'
   const displayClassification = classifyAttachmentDisplay(attachment)
@@ -122,7 +123,7 @@ export function AttachmentCard({
     action: 'open' | 'reveal',
     forceSystem = false
   ): Promise<void> => {
-    if (!interactive || disabled || attachmentAction) return
+    if (!primaryActionAvailable || disabled || attachmentAction) return
     setAttachmentAction(action)
     try {
       if (action === 'open') {
@@ -236,7 +237,7 @@ export function AttachmentCard({
       className={`attachment-card ${presentation === 'composer' ? 'composer-attachment-card' : presentation} ${composerImage ? 'composer-image-attachment' : ''} type-${displayClassification.agentDisplayType} ${availabilityLabel ? `attachment-availability-${availability}` : ''}`}
       aria-label={availabilityLabel ? `${attachment.displayName}：${availabilityLabel}` : undefined}
       data-context-open={contextMenuOpen ? 'true' : undefined}
-      onContextMenu={interactive && !disabled
+      onContextMenu={contextMenuAvailable && !disabled
         ? (event) => {
             event.preventDefault()
             if (event.clientX === 0 && event.clientY === 0) showAttachmentKeyboardMenu()
@@ -244,7 +245,7 @@ export function AttachmentCard({
           }
         : undefined}
     >
-      {interactive
+      {primaryActionAvailable
         ? (
             <>
               <button
@@ -263,64 +264,68 @@ export function AttachmentCard({
                   else if (hasImagePreview) setPreviewOpen(true)
                   else void runAttachmentAction('open')
                 }}
-                onKeyDown={(event) => {
-                  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
-                  event.preventDefault()
-                  showAttachmentKeyboardMenu()
-                }}
+                onKeyDown={contextMenuAvailable
+                  ? (event) => {
+                      if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+                      event.preventDefault()
+                      showAttachmentKeyboardMenu()
+                    }
+                  : undefined}
                 ref={attachmentButtonRef}
               >
                 {content}
                 {attachmentAction && <i className="attachment-action-loading" aria-hidden="true" />}
               </button>
-              <DropdownMenu.Root open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
-                <DropdownMenu.Trigger asChild>
-                  <span
-                    className="attachment-context-anchor"
-                    style={{ left: contextAnchor.x, top: contextAnchor.y }}
-                  />
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content
-                    className="attachment-context-menu"
-                    aria-label={`附件操作：${attachment.displayName}`}
-                    align="start"
-                    side="right"
-                    sideOffset={4}
-                    collisionPadding={8}
-                    loop
-                    onCloseAutoFocus={(event) => {
-                      event.preventDefault()
-                    }}
-                  >
-                    <DropdownMenu.Label className="attachment-context-menu-label">
-                      <strong>{attachment.displayName}</strong>
-                      <small>{attachment.kind === 'directory' ? '文件夹' : attachmentTypeLabel(attachment.mediaType)}</small>
-                    </DropdownMenu.Label>
-                    <DropdownMenu.Item
-                      className="attachment-context-menu-item"
-                      disabled={disabled || attachmentAction !== null}
-                      onSelect={() => void runAttachmentAction('open', true)}
+              {contextMenuAvailable && (
+                <DropdownMenu.Root open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
+                  <DropdownMenu.Trigger asChild>
+                    <span
+                      className="attachment-context-anchor"
+                      style={{ left: contextAnchor.x, top: contextAnchor.y }}
+                    />
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content
+                      className="attachment-context-menu"
+                      aria-label={`附件操作：${attachment.displayName}`}
+                      align="start"
+                      side="right"
+                      sideOffset={4}
+                      collisionPadding={8}
+                      loop
+                      onCloseAutoFocus={(event) => {
+                        event.preventDefault()
+                      }}
                     >
-                      <AttachmentOpenGlyph kind={attachment.kind} />
-                      <span>{systemOpenLabel}</span>
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator className="attachment-context-menu-separator" />
-                    <DropdownMenu.Item
-                      className="attachment-context-menu-item"
-                      disabled={disabled || attachmentAction !== null}
-                      onSelect={() => void runAttachmentAction('reveal')}
-                    >
-                      <AttachmentRevealGlyph />
-                      <span>{revealLabel}</span>
-                    </DropdownMenu.Item>
-                    {menuItems && <>
+                      <DropdownMenu.Label className="attachment-context-menu-label">
+                        <strong>{attachment.displayName}</strong>
+                        <small>{attachment.kind === 'directory' ? '文件夹' : attachmentTypeLabel(attachment.mediaType)}</small>
+                      </DropdownMenu.Label>
+                      <DropdownMenu.Item
+                        className="attachment-context-menu-item"
+                        disabled={disabled || attachmentAction !== null}
+                        onSelect={() => void runAttachmentAction('open', true)}
+                      >
+                        <AttachmentOpenGlyph kind={attachment.kind} />
+                        <span>{systemOpenLabel}</span>
+                      </DropdownMenu.Item>
                       <DropdownMenu.Separator className="attachment-context-menu-separator" />
-                      {menuItems}
-                    </>}
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Root>
+                      <DropdownMenu.Item
+                        className="attachment-context-menu-item"
+                        disabled={disabled || attachmentAction !== null}
+                        onSelect={() => void runAttachmentAction('reveal')}
+                      >
+                        <AttachmentRevealGlyph />
+                        <span>{revealLabel}</span>
+                      </DropdownMenu.Item>
+                      {menuItems && <>
+                        <DropdownMenu.Separator className="attachment-context-menu-separator" />
+                        {menuItems}
+                      </>}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+              )}
             </>
           )
         : hasImagePreview

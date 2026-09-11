@@ -87,3 +87,26 @@ last_updated: 2026-09-12
 
 2026-09-12 用户追加要求先推送当前阶段进展，再把最新 `origin/main` 合入任务分支。
 本次阶段性推送不代表五阶段交付完成；主工作目录中的其他未提交改动不纳入本分支。
+
+## 同步 main 的边界
+
+阶段性提交 `3a5789ed` 已先推送至同名远端分支；随后同步 `main` 的
+`8203c6d33223c361f41fe8a53571ca4000c85499`。保留上游附件预览、Composer 接收者初始化、
+Claude 原生初始化模型目录和移除 Rovai 外层 macOS 沙箱的变更；原 `main.rs` 的运行层变更同步到
+`application.rs`，旧入口继续保持薄适配。
+
+上述旧 macOS sandbox 测试结果仅证明合入 main 前的基线。上游随生产边界退役该测试，改为证明
+Core 管理的 Probe 可使用 Runtime 自带的原生沙箱；这不构成 Host 控制凭据、IPC 或管理恢复的隔离证明。
+当前 [User Automation v5](../../contracts/user-automation-v5.md) 明确不承诺防御同 UID 冒用，
+与 Host 目标之间的差距仍需前置验证和最小方案说明，未通过前不放行控制面安全验收。
+
+合并验证：`pnpm test:rust:staged` 选择完整 workspace 默认回归，Core 792 通过、0 失败、6 忽略，
+CLI 35 通过、0 失败；新增 Claude 无 Prompt 目录 fixture 通过，真实安装版 smoke 保持显式人工忽略。
+重新构建 workspace 二进制后的 stdio/Host 进程联合测试为 11 通过、0 失败、1 既有平台跳过，包含
+Core 管理的 Probe 启动原生沙箱。格式、Clippy `-D warnings`、类型检查、Desktop build 和以本次
+main SHA 为 base 的文档门禁通过。
+
+首次 `pnpm test` 与 Rust 构建/回归并行时，既有评测 Host 的 `auto-run-1` 完成状态轮询超时；
+该生产文件与测试均未在本次合并中改变。原测试单独复验 4 项通过，待 Rust 检查结束后完整重跑
+`pnpm test` 通过：Vitest 174 文件 / 1757 测试，末尾 Node 317 通过、0 失败、2 既有平台跳过。
+未修改断言、超时或跳过配置；首次失败保留记录，不将并行负载推断成已证实的根因。

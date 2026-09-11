@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.58
 status: in_progress
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # 评测宿主接入与失败复核
@@ -15,7 +15,7 @@ last_updated: 2026-09-10
 
 Main 观察已由现有 Scheduler 正式接纳的 AutomationRun，以该 runId 去重并启动宿主子进程。Agent 不调用 owner IPC、不启动嵌套 Core，只读取当前 Camp 对应的报告回执并解释。辅助等待命令只读文件且有截止时间，不新增 Agent Built-in 或全局上下文注入。手动关闭、取消、超时或 App 退出终止本次子进程；重启保留 interrupted，不自动重派发。Automation 的一小时合同不变，定时评测预算须留下分析时间。
 
-配置和执行回执使用受 User Automation OS denial 保护的本机文件；报告仍在显式输出目录，普通用户未配置时不启动评测、不创建记录。无需数据库新列、独立服务或新工作台。评测执行完成与 Gate 通过是两个字段；Judge 未配置时仍可验证调度链路，但不能宣称质量验收通过。
+配置和执行回执使用 User Automation 本机私有文件；当前按 [User Automation v5](../../contracts/user-automation-v5.md) 采用 CLI 防误调用，不再施加 Runtime OS denial；报告仍在显式输出目录，普通用户未配置时不启动评测、不创建记录。无需数据库新列、独立服务或新工作台。评测执行完成与 Gate 通过是两个字段；Judge 未配置时仍可验证调度链路，但不能宣称质量验收通过。
 
 ## 失败复核
 

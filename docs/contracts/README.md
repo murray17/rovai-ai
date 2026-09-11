@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-09-07
+last_updated: 2026-09-11
 ---
 
 # 长期接口合同
@@ -51,7 +51,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v38（当前）](runtime-launch-and-verification-v38.md) | Grok BYOK、Kimi、Kiro 普通 Probe 继承原生 Home；保留临时 cwd、非生成请求、认证与有界清理 |
+| [Runtime Launch and Verification v39（当前）](runtime-launch-and-verification-v39.md) | Claude Code 无 Prompt 控制初始化动态模型目录；原生模型元数据、统一缓存与旧别名目录退役 |
+| [Runtime Launch and Verification v38（历史）](runtime-launch-and-verification-v38.md) | Grok BYOK、Kimi、Kiro 普通 Probe 继承原生 Home；保留临时 cwd、非生成请求、认证与有界清理 |
 | [Runtime Launch and Verification v37（历史）](runtime-launch-and-verification-v37.md) | 官方 ZCode Runtime 与原生证据边界；继承上一版合同 |
 | [Runtime Launch and Verification v36（历史）](runtime-launch-and-verification-v36.md) | v35 的 Fleet/epoch/abort/exact resume/图片边界不变；Pi 固定原生 project trust，删除 Rovai Tool Approval 与新 Managed Input Receipt，`agent_start` 原子接受 Delivery 并发布 started |
 | [Runtime Launch and Verification v35（历史）](runtime-launch-and-verification-v35.md) | v34 的 Pi 原生边界不变；abort 使用完整 RPC correlation，receipt 移到最终 pre-agent seam，epoch 双重 fencing，Fleet-owned Starting/Stopping operation 与第三方 Extension UI 安全取消；Approval/Receipt 已由 v36 退役 |
@@ -156,7 +157,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [ACP Client Terminal v2（当前）](acp-client-terminal-v2.md) | v1 capability/wire/lifecycle 不变；显式绝对 cwd 只校验存在目录，不做 execution-root containment，权限由 Runtime/OS 拥有 |
+| [ACP Client Terminal v3（当前）](acp-client-terminal-v3.md) | 继承 v2 capability/wire/cwd/lifecycle；派生进程跟随 Managed Process v2 移除 macOS User Automation protected-tree deny |
+| [ACP Client Terminal v2（历史）](acp-client-terminal-v2.md) | v1 capability/wire/lifecycle 不变；显式绝对 cwd 只校验存在目录，不做 execution-root containment，权限由 Runtime/OS 拥有 |
 | [ACP Client Terminal v1（历史）](acp-client-terminal-v1.md) | Runtime-specific `disabled/local_bridged` policy、标准 ACP Terminal wire、本地 ManagedProcess 派生、旧 workspace-contained cwd、Run fencing、有界输出与 cancellation/release cleanup |
 | [Runtime Launch and Verification v28（历史）](runtime-launch-and-verification-v28.md) | v27 边界不变；ACP Client FS 成为无 execution-root containment、无一次性 token 的 Runtime-owned 文件执行代理；自动/绕过模式的合格 permission request 只作协议兼容 allow |
 | [Runtime Launch and Verification v27（历史）](runtime-launch-and-verification-v27.md) | v26 边界不变；Grok Build 三端最低版本统一为 `>= 1.0.0`，Ready 要求标准 ACP resume，cold continuation 从 load-only HistoryRestore 切到 `session/resume`，creation-only rules 不在恢复时重注入 |
@@ -182,7 +184,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v7（历史）](runtime-launch-and-verification-v7.md) | v6 加恢复 response exact-ID 校验；不同 ID 使 Host protocol-violated 并进入 continuity-lost fallback，禁止换绑返回 ID；不含公开 Runtime failure |
 | [Runtime Platform Admission v2（当前）](runtime-platform-admission-v2.md) | v1 不变；保留可 discovery/选择/执行但不伪造 qualification evidence 的 `preview` 状态；Pi 三个平台已分别以 immutable evidence 晋升为 qualified |
 | [Runtime Platform Admission v1（历史）](runtime-platform-admission-v1.md) | `AdapterKind × HostPlatformKey` 三态准入、closed reason/evidence、现有配置保留与 execution blocker |
-| [Managed Runtime Process v1（当前）](managed-runtime-process-v1.md) | 统一进程启动 interface、Windows 创建时 Job/handle list、native EXE/受控 `.cmd/.bat` identity、macOS User Automation protected-tree deny 与 descendant cleanup |
+| [Managed Runtime Process v2（当前）](managed-runtime-process-v2.md) | 直接启动 Runtime，移除 macOS User Automation 外层沙箱；保留 process group、Windows Job/handle 与后代回收 |
+| [Managed Runtime Process v1（历史）](managed-runtime-process-v1.md) | 统一进程启动 interface、Windows 创建时 Job/handle list、native EXE/受控 `.cmd/.bat` identity、macOS User Automation protected-tree deny 与 descendant cleanup |
 | [Runtime Launch and Verification v6（历史）](runtime-launch-and-verification-v6.md) | v5 加 TRAE exact-ID Provider Resume Probe、受控 ACP HistoryRestore、replay quarantine、兼容性 fence 与 continuity-lost fallback；其接受不同 response ID 的语义已由 v7 替代 |
 | [Runtime Launch and Verification v5（历史）](runtime-launch-and-verification-v5.md) | v4 加 TRAE 有界启动轻检、用户授权快速 ACP Session Probe 与 Ready commit fence |
 | [Runtime Launch and Verification v4（历史）](runtime-launch-and-verification-v4.md) | v3 加 TRAE/Kiro 最高权限队员默认、Kiro trust-all Host 映射与 permission schema digest preserve fence |
@@ -207,7 +210,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Execution Evaluation v3（历史）](execution-evaluation-v3.md) | 继承通用质量与双轨报告，适配当前 return lineage 与历史账本 |
 | [Execution Evaluation v2（历史）](execution-evaluation-v2.md) | 通用质量三维度、协作分项统计、关键 Gate、离线报告与分析完成记录 |
 | [Execution Evaluation v1（历史）](execution-evaluation-v1.md) | Gate 分流、冻结版本、真实规则与 Judge、有限迭代、每日统计与可比较趋势 |
-| [User Automation v4（当前）](user-automation-v4.md) | 继承 v3；开发者评测 CLI、宿主执行与按 AutomationRun 去重的定时绑定 |
+| [User Automation v5（当前）](user-automation-v5.md) | Agent CLI 防误调用、删除 Runtime OS denial；继承用户运输、Trace、评测宿主和平台准入 |
+| [User Automation v4（历史）](user-automation-v4.md) | 继承 v3；开发者评测 CLI、宿主执行与按 AutomationRun 去重的定时绑定 |
 | [User Automation v3（历史）](user-automation-v3.md) | 继承 v2；受限只读 Trace 导出与 Host 日报准备配置，不授予 Agent 用户级 IPC |
 | [User Automation v2（历史）](user-automation-v2.md) | v1 transport、Trial 与安全投影不变；Camp 创建只做目录准入，Git observation 不扫描工作树且新 dirty 为 null |
 | [User Automation v1（历史）](user-automation-v1.md) | 普通用户 `rovai app` 的独立本机 IPC、Runtime OS 隔离、原子 Camp/Run 自动化、真实 shell exit、双 cursor Diagnostic Trial、安全投影与私有 bundle |
