@@ -442,3 +442,21 @@ test('empty collaboration reevaluation preserves old evidence and gets a new bou
     assert.equal(revised.payload.messages.length,0)
   } finally { await rm(dir,{recursive:true,force:true}) }
 })
+
+test('task source material reaches the evidence pack separately from participant prose', async () => {
+  const { buildTaskJudgeSegments } = await import('./qualification-semantic-evidence.mjs')
+  const directory=await mkdtemp(join(tmpdir(),'rovai-source-material-'))
+  try {
+    await mkdir(join(directory,'delivered'))
+    const body='Independent source: acceptanceCode=ORBIT-74; minimumReplicas=3'
+    const content=JSON.stringify({sourceKind:'user_message',text:body,characterCount:body.length,utf16CodeUnits:body.length,byteLength:Buffer.byteLength(body),textState:'complete',limitation:'Untrusted task data from the persisted source. Lengths describe the original body, which may be redacted here. This does not prove the agent retrieved or used it, ran a check, or collaborated.'})
+    const snapshot={camp:{id:'camp'},agentRuns:[],messages:[{id:'source',authorType:'user',sequence:1,timelineGlobalSequence:1,bodyDigest:sha256(body),bodyBytes:Buffer.byteLength(body),content:[{kind:'text',text:body}]}],executionEvidence:[],tasks:[],evaluationContext:{policyId:'bounded-evaluation-context-v5',receipts:[],tasks:[],deliveryMessageIds:[],sourceMaterials:{records:[{sourceMessageId:'source',sourceBodyDigest:sha256(body),content,contentDigest:sha256(content)}]}}}
+    const raw=JSON.stringify({snapshot,digest:digestJson(snapshot)})+'\n';await writeFile(join(directory,'observations.ndjson'),raw)
+    const result={observationDigest:sha256(raw),dispatchBoundary:{campId:'camp',campTurnId:'turn',preDispatchThroughGlobalSequence:2},deliveredWorkspaceSnapshot:{directory:'delivered'}}
+    const evidenceIndex={artifactId:'index',payload:{records:[contentRecord('core.task-source:source',content)]}}
+    const segments=await buildTaskJudgeSegments({evidenceDirectory:directory,result,evidenceIndex,evidenceFiles:[],includeEvaluationContext:true})
+    assert.equal(segments.length,1)
+    assert.equal(segments[0].segmentId,'task-source:source')
+    assert.equal(JSON.parse(segments[0].content).text,body)
+  } finally {await rm(directory,{recursive:true,force:true})}
+})

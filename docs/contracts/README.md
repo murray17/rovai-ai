@@ -140,7 +140,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime File Change Observation v2（历史）](runtime-file-change-observation-v2.md) | v1 Evidence/投影/呈现不变；精确排除当前 `ROVAI_RUN_TMP` 临时交付区，mixed evidence 保留普通文件且不迁移历史数据 |
 | [Runtime File Change Observation v1（历史）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation；不含 managed output exclusion |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
-| [Semantic Judge Views v9（当前）](semantic-judge-views-v9.md) | 执行事实、严格输出引用与同流有限顺序证据 |
+| [Semantic Judge Views v10（当前）](semantic-judge-views-v10.md) | 派发前用户来源正文、完整性预检查与事实引用 |
+| [Semantic Judge Views v9（历史）](semantic-judge-views-v9.md) | 执行事实、严格输出引用与同流有限顺序证据 |
 | [Semantic Judge Views v8（历史）](semantic-judge-views-v8.md) | 结果事实／执行声明／限制披露分离与过程正文隔离 |
 | [Semantic Judge Views v7（历史）](semantic-judge-views-v7.md) | 原生验证凭据、初始文件与逐声明来源核对 |
 | [Semantic Judge Views v6（历史）](semantic-judge-views-v6.md) | 逐声明证据审计、固定报告验证与原始／派生结果保留 |

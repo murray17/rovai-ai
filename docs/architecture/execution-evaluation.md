@@ -8,6 +8,8 @@ last_updated: 2026-09-10
 
 # 双轨执行评测
 
+结果 Judge 的来源材料由 [Semantic Judge Views v10](../contracts/semantic-judge-views-v10.md)约束：从隔离评测的持久化快照投影派发前用户材料，保留摘要和字符/字节长度，缺失或超限提前报告。来源数据与实际协作轨迹保持独立，材料正确不证明 Agent 使用过它。
+
 当前字段与判断规则由 [Execution Evaluation v13](../contracts/execution-evaluation-v13.md)拥有；操作见[开发指南](../development/evaluation.md)。
 
 ```mermaid

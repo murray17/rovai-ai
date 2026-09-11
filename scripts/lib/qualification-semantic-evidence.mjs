@@ -1,3 +1,4 @@
+import { validateTaskSourceMaterial } from './qualification-task-source-materials.mjs'
 import { readFile, realpath } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import { stableEvidenceId } from './qualification-evidence-index.mjs'
@@ -443,8 +444,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
       })
     }
   }
-  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9'].includes(caseEvaluation?.judgeProfile)) {
-    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], evaluationSnapshot, includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9'].includes(caseEvaluation.judgeProfile) })
+  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(caseEvaluation?.judgeProfile)) {
+    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], evaluationSnapshot, includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(caseEvaluation.judgeProfile) })
     const seen = new Set(segments.map(segment => segment.evidenceReference.evidenceId))
     for (const segment of extra) if (!seen.has(segment.evidenceReference.evidenceId)) {
       segments.push(segment)
@@ -489,7 +490,7 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
   if (digestJson(observation.snapshot) !== observation.digest) throw new Error('Task snapshot digest mismatch')
   const snapshot = evaluationSnapshot ?? observation.snapshot
   const runs = new Set(snapshot.agentRuns.filter(run => run.campTurnId === result.dispatchBoundary.campTurnId).map(run => run.id))
-  const context = includeEvaluationContext && ['bounded-evaluation-context-v1', 'bounded-evaluation-context-v2', 'bounded-evaluation-context-v3', 'bounded-evaluation-context-v4'].includes(snapshot.evaluationContext?.policyId) ? snapshot.evaluationContext : null
+  const context = includeEvaluationContext && ['bounded-evaluation-context-v1', 'bounded-evaluation-context-v2', 'bounded-evaluation-context-v3', 'bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(snapshot.evaluationContext?.policyId) ? snapshot.evaluationContext : null
   if (context) {
     const events = new Map((snapshot.executionEvidence ?? []).filter(event => runs.has(event.agentRunId)).map(event => [event.id, event]))
     const tasks = new Map((snapshot.tasks ?? []).filter(task => runs.has(task.sourceAgentRunId)).map(task => [task.taskId ?? task.id, task]))
@@ -506,6 +507,14 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
       const path = `initial-fixture/${file.path}`
       segments.push({ segmentId: `task-file-base64:${Buffer.from(path).toString('base64url')}`, kind: 'code', path, authorAgentProfileId: null, visibility: 'workspace', content: file.content, evidenceReference })
     }
+    if (context.policyId === 'bounded-evaluation-context-v5') {
+      if (!context.sourceMaterials) throw new Error('task_source.inventory_missing')
+      for (const source of context.sourceMaterials.records) {
+        validateTaskSourceMaterial(source, snapshot, result.dispatchBoundary)
+        if (totalCharacters + source.content.length > 310_000) throw new Error('task_source.pack_budget_exceeded')
+        addContextSegment('core.task-source', source.sourceMessageId, 'comment', 'task-source', source.content)
+      }
+    }
     for (const task of context.tasks) {
       const source = tasks.get(task.taskId), body = JSON.parse(task.content)
       if (!source || source.titleDigest !== sha256(body.title) || source.descriptionDigest !== sha256(body.description)) throw new Error('Evaluation Task source digest mismatch')
@@ -520,7 +529,7 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
     totalCharacters += content.length
     segments.push({ segmentId: `${segmentPrefix}:${sourceId}`, kind, authorAgentProfileId: null, visibility: 'public_to_camp', content, evidenceReference })
   }
-  const currentDeliveryId = ['bounded-evaluation-context-v3', 'bounded-evaluation-context-v4'].includes(context?.policyId) ? snapshot.messages.filter(message => context.deliveryMessageIds.includes(message.id)).sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)).at(-1)?.id : null
+  const currentDeliveryId = ['bounded-evaluation-context-v3', 'bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(context?.policyId) ? snapshot.messages.filter(message => context.deliveryMessageIds.includes(message.id)).sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)).at(-1)?.id : null
   for (const message of snapshot.messages) {
     if (message.authorType !== 'agent' || !runs.has(message.sourceAgentRunId) || message.campTurnId !== result.dispatchBoundary.campTurnId) continue
     const body = typeof message.body === 'string' ? message.body : (message.content ?? []).filter(part => part.kind === 'text').map(part => part.text).join('')
@@ -530,7 +539,7 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
     if (record.contentDigest !== `sha256:${sha256(body)}`) throw new Error('Task public message digest mismatch')
     totalCharacters += body.length
     const delivery = context?.deliveryMessageIds.includes(message.id) && !(message.addressedAgentIds?.length)
-    segments.push({ segmentId: `${delivery ? `delivery-message:${['bounded-evaluation-context-v3', 'bounded-evaluation-context-v4'].includes(context.policyId) ? currentDeliveryId === message.id ? 'current:' : 'historical:' : ''}` : 'participant-message:'}${message.id}`, kind: delivery ? 'comment' : 'participant_message', messageId: message.id, sequence: message.sequence, replyToMessageId: message.replyToCampMessageId ?? null,
+    segments.push({ segmentId: `${delivery ? `delivery-message:${['bounded-evaluation-context-v3', 'bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(context.policyId) ? currentDeliveryId === message.id ? 'current:' : 'historical:' : ''}` : 'participant-message:'}${message.id}`, kind: delivery ? 'comment' : 'participant_message', messageId: message.id, sequence: message.sequence, replyToMessageId: message.replyToCampMessageId ?? null,
       callIds: [], taskIds: [], createdAt: message.createdAt, authorAgentProfileId: message.authorId, visibility: 'public_to_camp', content: body, evidenceReference })
   }
   return segments

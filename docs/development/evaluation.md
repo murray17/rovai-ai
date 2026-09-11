@@ -6,6 +6,8 @@ last_updated: 2026-09-10
 
 # Gate、每周回归与每日分析
 
+**来源材料预检查：** Judge v10 将持久化用户材料作为独立来源段，调用前生成 `task-source-preflight-*.json`。`unavailable` 时检查缺失、摘要、范围或预算原因，不能以 Fixture 内容替代运行证据。评分 2.8 需以同一新标准重评整个比较集合，不能拼接旧版已通过项和新版单项分数。字段与边界见 [Semantic Judge Views v10](../contracts/semantic-judge-views-v10.md)。
+
 本页拥有开发者操作流程。判断规则见 [Execution Evaluation v13](../contracts/execution-evaluation-v13.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
 
 ## 上下文改动 Gate
