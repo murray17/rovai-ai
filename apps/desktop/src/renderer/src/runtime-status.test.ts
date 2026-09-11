@@ -37,8 +37,8 @@ describe('Runtime user status projection', () => {
       if (status === 'ready') {
         const zcode = runtimeAvailabilityPresentation(availability(status, 'zcode-app'))
         expect(zcode.label).toBe('基础连接正常')
-        expect(zcode.detail).toContain('未发送测试提示词')
-        expect(zcode.detail).toContain('高级能力未经本次检查验证')
+        expect(zcode.detail).toContain('本次检查未调用模型')
+        expect(zcode.detail).toContain('高级能力将在实际任务中确认')
       }
     }
   )
@@ -204,8 +204,19 @@ describe('Runtime user status projection', () => {
     expect(runtimeProductPresentation(admission, availability('ready', 'pi'))).toEqual({
       status: 'available',
       label: '可用',
-      detail: '实验性开放；当前平台尚未完成正式资格验证，请自行验证后使用。'
+      detail: '当前平台已开放使用，完整的平台资格验证记录尚未齐备。'
     })
+    for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64'] as const) {
+      for (const status of ['preview', 'qualified'] as const) {
+        for (const state of ['ready', 'missing', 'authentication_required'] as const) {
+          const result = runtimeProductPresentation(
+            { ...admission, runtimeKind: 'zcode-app', platform, status },
+            availability(state, 'zcode-app')
+          )
+          expect(`${result.label} ${result.detail}`).not.toMatch(/测试|试运行|实验性/)
+        }
+      }
+    }
   })
 })
 

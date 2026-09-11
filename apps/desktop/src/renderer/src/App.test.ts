@@ -7412,7 +7412,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('高级诊断与自定义启动入口')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
 
-    // Missing versions remove the subtitle; a future preview still discloses admission.
+    // Admitted rows show versions and machine status, without release-stage labels.
     for (const status of ['qualified', 'preview'] as const) {
       for (const reportedVersion of [null, '   ', 'codex-cli 1.0.0']) {
         const versionMarkup = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
@@ -7425,13 +7425,15 @@ describe('task event projections', () => {
           onReload: async () => undefined
         }))
         const version = reportedVersion?.trim()
-        const subtitle = status === 'preview' ? `实验性开放${version ? ` · ${version}` : ''}` : version
+        const subtitle = version
         expect(versionMarkup).toContain(subtitle
           ? `<strong>Codex CLI</strong><small title="${subtitle}">${subtitle}</small>`
           : '<strong>Codex CLI</strong></div>')
         expect(versionMarkup).toContain('status-available">可用</span>')
         expect(versionMarkup.match(/检查可用性/g)).toHaveLength(14)
         expect(versionMarkup).not.toContain('DeepSeek Harness')
+        expect(versionMarkup).not.toMatch(/测试|试运行|实验性/)
+        expect(versionMarkup).toContain('<strong>ZCode</strong></div>')
       }
     }
   })

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "windows-x64-zcode-v1",
+  "capturedAt": "2026-09-11",
+  "platform": "windows-x64",
+  "baseRevision": "1bf382a507351227bee13d1894df126275c169c8",
+  "qualifiedRuntimeKinds": ["zcode-app"],
+  "qualificationBasis": {
+    "type": "real-app-cli-camp-acceptance-and-maintainer-release-approval",
+    "decision": "The maintainer requested Windows qualification after acceptance and release without testing, trial or experimental labels.",
+    "channel": "isolated development Desktop launched with pnpm dev; native protected data root, separate database, Skill Library and MCP configuration",
+    "desktopVersion": "0.2.3",
+    "bridgeRevision": "zcode-native-node-transport-v7",
+    "dailyDataUsed": false,
+    "userAutomation": "explicit per-process Windows qualification mode; no change to User Automation global platform admission"
+  },
+  "runtimeEvidence": {
+    "appVersion": "3.11.2",
+    "installerSignature": "Authenticode valid; official ZCode publisher",
+    "installerSha256": "4db76b6785c10fbc852dd9c9d257f574ea46f2a889d0beb9398ae0885d716717",
+    "kernelVersion": "0.16.5",
+    "kernelSha256": "e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e1113266b8",
+    "nodeVersion": "24.19.0",
+    "protocol": "zcode-app-server-v1",
+    "provider": "minimax",
+    "model": "MiniMax-M2.5",
+    "credentialSource": "authorized official ZCode cli/config.json; no key in command arguments or repository",
+    "flows": {
+      "discoveryAndExplicitCheck": "official extracted Windows bundle discovered; native configuration and Session check ready without a model prompt",
+      "memberAndCamp": "real App CLI member creation, runtime configuration, Camp create/open/send and persisted runtime evidence",
+      "files": "Read, Write, Edit +1/-1 runtime-reported unified diff, zero-byte file, missing-file error",
+      "commands": "stdout, stderr, mixed, empty, exact nonzero exit 7, exact unpiped large output; full 131129-byte output and managed blob hash verified",
+      "continuation": "warm continuation and exact same native Session after Desktop/Core restart; old host fenced and new host active",
+      "builtinCli": "bound CLI help/read and public CampMessage publication; receipts persisted; accepted sends suppress duplicate Final publication",
+      "background": "native 1-second command deadline entered background; delayed completion and TaskOutput observed, not reported as timeout termination",
+      "cancel": "running 35-second delayed-write command cancelled through App CLI; Run cancelled and no delayed file after 40 seconds",
+      "shutdown": "controlled shutdown completed without forced signal; observed native host and child PIDs exited",
+      "usage": "provider input/output/cacheRead persisted; absent fields remain unknown",
+      "database": "quick_check ok; zero foreign-key violations"
+    },
+    "regressionOwners": [
+      "zcode::tests::official_bundle_layouts_reject_launchers_and_missing_resources",
+      "zcode::tests::native_layers_preserve_byok_precedence_mcp_cwd_and_catalog_authority",
+      "managed_process::tests (14 passed; 7 existing subprocess helpers ignored)",
+      "scripts/test-zcode-owner.mjs Windows real-process lease/cwd/argv test",
+      "runtime status, settings panel and onboarding presentation tests across platform projections"
+    ],
+    "evidenceSha256": {
+      "filesAndOutputs": "436a40b96cc7f4024e53cbe167f7d06b989fb56d5427efad2c1f9070f031d19c",
+      "warmContinuationAndBackground": "b8893b41b0fc85d47ab9f41c1e122900e7d45a6222f5d2ed7599ca79b2fa764a",
+      "strictExitAndLargeOutput": "3a960cad9db42d5f7c06e3e4528179188dcbaef500abccd5a9b694227b0fa030",
+      "cancellation": "9006cb9c73d02b170433fddf30b90da22ca527e1deea4ceffa46fa2d01e09b9e",
+      "coldSessionAndBlobVerification": "4fede4354b4c39f635ebb5d8fec6e8e26193a0871bb6516545028dc65d794025"
+    }
+  },
+  "acceptance": {
+    "status": "qualified",
+    "platformScope": "windows-x64 only",
+    "machineAndExecutionBoundary": "Ordinary installation, configuration, model, permission, Session and capability checks remain mandatory."
+  },
+  "limitations": [
+    "First attempted discovery failed because Node rejected a Win32 verbatim module path; first Camp failed due to protocol/canonical cwd mismatch. Both were fixed and the original App CLI path repeated successfully.",
+    "The model initially wrapped exit 7 and piped the large output. Those attempts are not strict command evidence; exact unwrapped commands were rerun separately.",
+    "Windows full external-MCP assignment, Skills, compaction and permission combinations were not rerun; native cwd/argv, configuration and process ownership have targeted coverage. Full integration-checklist First-Class completion is not claimed.",
+    "Start Plan runtime verification, account refresh, Team Plan dynamic credentials and GUI callbacks remain outside implemented coverage; no successful account subscription generation is claimed.",
+    "Full repository Windows regression is not green: unchanged main reproduces file-preview failures and a Rust path-projection failure; additional authority/ACL fixture failures appeared in the interrupted full Rust suite. No tests were disabled or removed.",
+    "No macOS native execution or release-installer acceptance was performed by this Windows evidence capture."
+  ]
+}

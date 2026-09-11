@@ -4,7 +4,7 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-09-05
+last_updated: 2026-09-11
 ---
 
 # Runtime Platform Admission v2
@@ -51,13 +51,17 @@ Admission，不是 Renderer-only Settings Preview；后者仍没有 Adapter、In
 | --- | --- | --- | --- | --- |
 | discovery / availability check | allowed | allowed | omitted | omitted |
 | managed Installation create/relocate | allowed | allowed | denied | denied |
-| Onboarding / Member selection | enabled | enabled with experimental disclosure | disabled: platform unverified | disabled: platform unsupported |
+| Onboarding / Member selection | enabled | enabled; qualification detail remains available | disabled: platform unverified | disabled: platform unsupported |
 | diagnostics | platform row + machine facts | platform row + machine facts | platform row only | platform row only |
 | AgentRun preflight | continue | continue with all ordinary runtime/capability blockers | `runtime_platform_not_qualified` | `runtime_platform_unsupported` |
 | migration/default materialization | allowed | allowed | forbidden | forbidden |
 
 Machine facts remain independent. `preview` does not manufacture installation, authentication, model, capability, Session or Ready
 evidence; all ordinary checks and fail-closed Runtime blockers still apply.
+
+Runtime management presents admitted rows with the reported version and actual machine-state badge. It does not
+add testing, trial or experimental labels. For `preview`, detailed check feedback may explain that the platform
+is available while its complete qualification record remains pending; this presentation never promotes Core admission.
 
 ## 4. Current Pi qualification
 

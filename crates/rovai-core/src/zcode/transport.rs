@@ -46,13 +46,7 @@ pub async fn probe(
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
-    let root = Root(PathBuf::from("/tmp").join(format!("rvzp-{}", uuid::Uuid::new_v4().simple())));
-    std::fs::create_dir(&root.0)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&root.0, std::fs::Permissions::from_mode(0o700))?;
-    }
+    let root = Root(super::private_runtime_root("rvzp")?);
     let mut config = NativeConfig::load(&std::env::current_dir()?)?;
     // Native login and BYOK both resolve here. Report setup guidance before spawning.
     config.runtime_model(None)?;
@@ -129,6 +123,7 @@ pub async fn probe(
     let _ = child.force_terminate_tree();
     let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
     let cleanup = confirm_owner_cleanup(
+        &child,
         &root.0,
         tokio::time::Instant::now() + Duration::from_millis(2500),
     )
@@ -140,9 +135,20 @@ pub async fn probe(
     result
 }
 
-pub async fn confirm_owner_cleanup(root: &std::path::Path, deadline: tokio::time::Instant) -> bool {
+pub async fn confirm_owner_cleanup(
+    _child: &crate::managed_process::ManagedProcess,
+    _root: &std::path::Path,
+    deadline: tokio::time::Instant,
+) -> bool {
     loop {
-        if let Ok(bytes) = tokio::fs::read(root.join("owner-cleanup.json")).await
+        #[cfg(windows)]
+        match _child.tree_is_empty() {
+            Ok(true) => return true,
+            Err(_) => return false,
+            Ok(false) => {}
+        }
+        #[cfg(not(windows))]
+        if let Ok(bytes) = tokio::fs::read(_root.join("owner-cleanup.json")).await
             && let Ok(report) = serde_json::from_slice::<Value>(&bytes)
         {
             return report["confirmed"] == true && report["pendingGroups"] == 0;

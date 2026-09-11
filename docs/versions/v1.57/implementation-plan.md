@@ -3,21 +3,22 @@ document_type: implementation-plan
 version: v1.57
 lifecycle: current
 status: in-progress
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # 官方 ZCode 实施与验收
 
-官方 Runtime Adapter 已实现并经过真实 Core 验证；当前为 macOS arm64 Preview，完整 First-Class 资格仍未完成。
-[接入矩阵](../../research/zcode-runtime.md)逐项描述用户可观察差异；[D02](decisions.md#v1-57-d02)明确 Preview 的可见性边界。
+官方 Runtime Adapter 已实现并经过真实 Core 验证；当前 Windows x64 / macOS arm64 Qualified、macOS x64 可执行 Preview，
+完整 First-Class 资格仍未完成。[接入矩阵](../../research/zcode-runtime.md)逐项描述用户可观察差异；
+[D02](decisions.md#v1-57-d02)明确逐平台发布资格与完整能力边界。
 
-## Worktree 交接
+## 原 macOS 接入 Worktree 记录
 
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-zcode-runtime`
 - Branch：`codex/zcode-runtime`
 - 原始 Base：`23c002585f9a6840e82294b6d9e93667f7386118`；提交前已合并主线 `2ec2adff`（v0.2.2、v1.56 引用合同）。
 - Governance：无先行主线治理提交；版本、合同和实现同一 PR 评审。
-- Status：in-progress（[PR #323](https://github.com/murray17/rovai-ai/pull/323) 为 Draft，未合入；First-Class 资格尚未闭合）
+- Status：原接入已由 [PR #323](https://github.com/murray17/rovai-ai/pull/323) 合入，后续 v7 独立记录；First-Class 组合资格尚未闭合。
 - 主 checkout 的并行文档改动不属于本任务；worktree 在 review/CI 期间保留。
 
 ## 已实现
@@ -50,7 +51,7 @@ last_updated: 2026-09-10
 | Built-in rovai CLI | Verified / Implemented | 当前完整 operation 集、Gather 返回、后续 Run、旧 lease 失效 |
 | Usage / Cache / Cost | Verified / Implemented，组合资格未全闭合 | provider Turn input/output/cacheRead；其他字段 NULL；稀疏字段 parser 与实际持久化 |
 | Retry / Queue / Cleanup | Verified / Implemented，组合资格未全闭合 | V4 accepted 输入、单终态、后台存活与前台完成分离、取消、Core/原生强杀；共享队列/epoch 回归 |
-| Ready / Version / Platform | Verified / Implemented，平台资格未全闭合 | 官方 identity、独立 Node、无模型调用 Probe；arm64 Preview，其他平台 NotQualified |
+| Ready / Version / Platform | Verified / Implemented，完整组合资格未闭合 | 官方 identity、独立 Node、无模型调用 Probe；v3–v6 阶段为 arm64 Preview，v7 平台晋升另见下文 |
 
 ## 真实 Golden Flows
 
@@ -123,12 +124,60 @@ Desktop 构建与其余历史 Golden Flows 本次未全量重跑，不能把下�
 有界且绑定 Session/Tool 的输出 artifact；Migration 使用独立升级 owner。Shared Fleet、Usage、closed catalog 等扩展已有测试。
 原生强杀遗漏 detached 组先实际复现（延迟文件出现），再由真实 Core/原生强杀复验修复；没有用 parser 成功替代进程回收。
 
+## v7：Windows x64 / macOS x64 接入计划
+
+用户要求两端同时可选择、配置并执行 ZCode。基线为 `1bf382a5`；最近的生产实现是本版本的
+macOS arm64 ZCode Preview，不借用其他 Runtime 的平台资格。用户追加要求：Windows 验收通过后与
+macOS arm64 一同标记 Qualified，各自绑定平台证据；macOS x64 同时开放，不把 Windows 结果记成 Intel Mac
+真机验证。管理页仅显示版本与真实机器状态，去掉测试、试运行和实验性标签。当前实施阶段仍先用 Preview
+完成 Windows 真实验证，尚未通过的流程不能作为资格证据。
+
+| 能力轴 | 接入策略与本次验证范围 | 当前证据状态 |
+| --- | --- | --- |
+| Auth / Provider / Model | 复用官方终端/App 配置与原生模型目录，不新增凭据入口 | Windows 原生 BYOK 已验证，Core 待验；Intel Mac 待验 |
+| Host / Fleet / LRU | 复用既有 ZCode Fleet；Windows 以原子 Job 管理全部后代，macOS 保留组 companion | Windows 实现/回收待验；Intel Mac 复用 Unix 路径，待真机 |
+| Native Session / Continuation | 同一 exact Session 与原生 transport；暖续接和冷恢复分别验证 | Windows 原生 exact resume 已验证，Core 待验 |
+| Bootstrap / Context | 不改变已确认 FirstPayload 或 Context 合同 | 复用当前实现，跨平台 Core 待验 |
+| Compaction continuity | 复用现有 completed observation 与下一 eligible input 补发 | 不新增能力声明，组合验收仍未冻结 |
+| Skills | 保留 zcode delivery group 与原生项目发现 | Core 跨平台投影待验 |
+| External MCP | 复用 assigned/native union；Windows 原生 cwd launcher 不使用 /bin/sh | 适配及参数、路径、生命周期待验 |
+| Tool / Action / Command Output | 原生事件映射不变；修正 Windows 路径 fixture，核验真实文件与命令 Evidence | Windows 原生读写/输出/退出码/超时已验证，Core 待验 |
+| Narration / Final / Missing-Send | 保留唯一原生成功边界和公开 send 抑制 | Core 跨平台待验 |
+| Permission / Approval / Workspace | 原生模式、审批与普通阻断不变 | 原生 Plan 仅模型遵守，不能代替强制权限验证 |
+| Built-in rovai CLI | 复用 Run/epoch lease；Windows prelude 保留异步 context 冻结 | Windows Core 真实 CLI 待验 |
+| Usage / Cache / Cost | 沿用已有 provider Turn 稀疏字段，不推导未知值 | Windows 原生 usage 可见，Core 待验 |
+| Retry / Queue / Cancel / Cleanup | Windows 不发送 Unix 负 PID；通过 Job 空集证明清理，不把 kill 或根进程退出当证明 | 实现及真实后代/取消/关闭待验 |
+| Ready / Version / Platform | 官方 Windows EXE/资源与两种 Mac bundle；独立 Node 纳入复合身份；私有临时目录 | 布局/完整性/准入回归与 Windows 真机待验，Intel Mac 未实测 |
+
+本段是实施前 Parity Matrix。完成后在同段追加实际结果，不用先前原生独立测试冒充 Rovai Camp 通过。
+不升级 First-Class、不改变 Schema/Context，不静默降低其他 Runtime 的安全边界。
+
+### v7 实际结果（2026-09-11）
+
+- Windows x64 与 macOS arm64 已分别冻结 [Windows 证据](../../../qualification/runtime-platform/windows-x64-zcode-v1.json)
+  和 [arm64 证据](../../../qualification/runtime-platform/macos-arm64-zcode-v1.json)，Core 两行标记 Qualified。
+  arm64 使用目标主机已有 v3–v6 记录和维护者发布批准，本轮未重跑 Mac；macOS x64 为可执行 Preview，未宣称真机通过。
+- Windows 官方 App 3.11.2 / kernel 0.16.5 / Node 24.19.0 / MiniMax-M2.5 经真实 App CLI 完成配置、Camp 投递、
+  Read/Write/Edit/空文件、六类命令输出、原样 exit 7、未截断大输出、warm/cold exact Session、CLI 公开消息、Usage、
+  原生后台任务观察、取消与受控退出。131129 字节完整输出及 blob hash 独立核对；取消后等待 40 秒无延迟文件。
+- 修复两项真实失败并重跑原路径：Node CommonJS 无法加载 Win32 verbatim module path；Session 协议 cwd 与
+  canonical cwd 比较不一致。Windows Job 回收使用 ActiveProcesses=0，非根 PID/kill 请求推断。
+- 管理页和 Onboarding 保留版本、真实机器状态与错误，不显示测试、试运行、实验性标签；不改变 Core 准入与普通阻断。
+- 本机日常安装版另经显式备份、Release 构建和安装验证；真实 Camp 约 35 秒完成小狗年龄 3→4、原生 Read/Edit/Write、
+  stdout/stderr/empty/delay/独立 exit 7，32 条 Evidence，业务 `rovai send` 消息已持久化。该记录不替代隔离全矩阵。
+- Windows MCP cwd/argv 和异步 CLI lease 真实进程回归、ZCode 6 项 Library、平台准入 5 项、ManagedProcess 14 项
+  （7 个既有 helper ignored）、3 个 Renderer 测试文件 202 项通过；类型检查、Windows Release 打包验证及设置页布局检查通过。
+- 完整 Windows 回归并非全绿：10 项 file-preview 失败已在未修改 main 重现；Rust path-projection 失败也有 main 对照，
+  完整 Rust suite 中另有 authority/ACL fixture 失败且长任务被中断，不声称全部为已证明的基线问题，也未禁用或删除测试。
+- Compaction/Skills/完整 MCP assignment/权限及升级漂移的 Windows 组合未全量重跑，账号/GUI 缺口保持前述边界。
+  工作分支 `codex/zcode-windows-macos-x64` 基于 `1bf382a5`，合并前同步新的 origin/main 并重新运行提交门禁。
+
 ## First-Class 前仍需冻结的资格
 
 - 在完整 Core 流程中联合验证 compact fail/cancel 与 Skills/MCP/权限保留；当前失败/取消证据来自原始协议与 parser，成功及 cold-after-compact 已有 Core 证据。
 - provider Usage 在多次 retry、compaction、resume 组合中的无重复归属，以及 MCP mutation 的审批/取消网络副作用，补充逐流真实证据。
 - Adapter 专属协议损坏、Probe timeout、idle eviction 和版本/Node 升级 drift 组合；现有共享安全回归不能替代该官方版本的全部真实流程。
-- macOS x64、Windows x64 没有目标平台证据；不得因 arm64 功能通过而开放。
+- macOS x64 尚无目标主机资格；Windows 已有 v7 平台证据，但未运行的高级组合不得借用 arm64 功能流补记为通过。
 
 GUI/Computer Use 回调为 NotImplemented。账号登录与 BYOK 都在范围内；图片沿用现有附件路径，经原生 Read 看图，不能因没有结构化 Prompt 图片而标为不支持。
 不把这些限制声明为上游 Unsupported，不把 Preview 或代码可评审等同于正式第一版接入完成。

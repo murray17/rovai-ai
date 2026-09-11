@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in-progress
 model_context_change: false
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # Rovai-ai v1.57：官方 ZCode Runtime
@@ -17,7 +17,7 @@ last_updated: 2026-09-10
 ## 范围与当前状态
 
 - Product identity 为 `zcode-app`；只接受官方 App bundle，不接受社区 npm CLI/ACP 包。
-- macOS arm64 在实现与资格验收期间为 Preview；其他平台保持 NotQualified。
+- Windows x64 与 macOS arm64 分别绑定自身冻结证据并标记 Qualified；macOS x64 开放为可执行 Preview，尚无 Intel Mac 真机证据。运行时管理页不显示测试、试运行或实验性标签，机器检查与能力边界保持不变。
 - 原生 NDJSON 在进程内转换为既有 Core Session transport；公开来源仍标明 ZCode 协议。
 - 官方用户/项目配置提供模型与 MCP，Rovai 不建立 provider 或密钥配置页。
 - App 账号配置 fallback 与目录加载已实现。按用户确认的 zcode-acp 处理边界交付：个人 Coding Plan
@@ -33,10 +33,10 @@ last_updated: 2026-09-10
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.56 冻结为 historical；本概览、实施计划和版本索引建立 current v1.57 |
-| Decisions | 已更新 | [V1.57-D01](decisions.md#v1-57-d01)解释官方内核与共享生命周期，[D02](decisions.md#v1-57-d02)明确 Preview 资格边界 |
+| Decisions | 已更新 | [V1.57-D01](decisions.md#v1-57-d01)解释官方内核与共享生命周期，[D02](decisions.md#v1-57-d02)明确逐平台资格与完整接入能力的边界 |
 | Contracts | 已更新 | [Runtime Launch v37](../../contracts/runtime-launch-and-verification-v37.md)、[File Change v5](../../contracts/runtime-file-change-observation-v5.md)定义新增 Runtime 的 wire 与证据边界 |
 | Architecture | 已更新 | [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md)、[Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)、[File Change](../../architecture/runtime-file-change-observation.md)增加 ZCode |
-| UI | 确认无需更新 | 新 Runtime 使用既有产品选项、Preview、参数表单与文件 Evidence 呈现；无新交互合同 |
+| UI | 已更新 | [Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)与[Windows Interaction Delta](../../ui/windows-interaction-delta.md)规定管理页显示版本及机器状态，不展示发布阶段标签 |
 | Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)新增原生工具映射；现有分类语义不变，无历史重分类 |
 | Runtime compatibility | 已更新 | [Compatibility](../../runtime-compatibility.md)分开记录官方实验、产品验证与未资格化平台 |
 | Documentation routing | 已更新 | Contracts 索引、当前决定导航和任务入口指向新合同 |

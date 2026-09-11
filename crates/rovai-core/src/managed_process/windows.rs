@@ -31,8 +31,9 @@ use windows_sys::Win32::{
     System::{
         JobObjects::{
             CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, TerminateJobObject,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+            QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
         },
         Pipes::CreatePipe,
         Threading::{
@@ -266,6 +267,25 @@ impl WindowsManagedProcess {
                 _ => return Err(io::Error::last_os_error()),
             }
         }
+    }
+
+    pub(super) fn tree_is_empty(&self) -> io::Result<bool> {
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: this non-inheritable handle owns this launch's Job. The buffer
+        // has exactly the type and size required by the selected query class.
+        let queried = unsafe {
+            QueryInformationJobObject(
+                raw_handle(&self.job),
+                JobObjectBasicAccountingInformation,
+                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                null_mut(),
+            )
+        };
+        if queried == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(accounting.ActiveProcesses == 0)
     }
 
     pub(super) fn terminate_job(&mut self) -> io::Result<()> {

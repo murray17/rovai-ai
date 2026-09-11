@@ -14,7 +14,13 @@ pub mod transport;
 
 pub const PROTOCOL: &str = "zcode-app-server-v1";
 pub const MINIMUM_VERSION: &str = "0.16.5";
-pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v6";
+pub const BRIDGE_REVISION: &str = "zcode-native-node-transport-v7";
+
+pub fn is_bundle_executable(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "ZCode" || name.eq_ignore_ascii_case("ZCode.exe"))
+}
 
 pub fn supported_version(version: Option<&str>) -> bool {
     version
@@ -38,6 +44,24 @@ pub fn runtime_script(executable: &Path) -> Result<PathBuf> {
     let executable = executable
         .canonicalize()
         .context("ZCode executable unavailable")?;
+    let file_name = executable.file_name().and_then(|name| name.to_str());
+    if file_name.is_some_and(|name| name.eq_ignore_ascii_case("ZCode.exe")) {
+        let root = executable
+            .parent()
+            .context("ZCode installation root missing")?;
+        let resources = root.join("resources").canonicalize()?;
+        let app = resources.join("app.asar").canonicalize()?;
+        let script = resources.join("glm/zcode.cjs").canonicalize()?;
+        if !resources.starts_with(root)
+            || !app.starts_with(&resources)
+            || !script.starts_with(&resources)
+            || !app.is_file()
+            || !script.is_file()
+        {
+            bail!("ZCode requires the official Windows App resources");
+        }
+        return Ok(script);
+    }
     let contents = executable
         .parent()
         .and_then(Path::parent)
@@ -80,7 +104,7 @@ pub fn node_executable() -> Result<PathBuf> {
         Some(path) => vec![PathBuf::from(path)],
         None => std::env::split_paths(&search_path)
             .filter(|path| path.is_absolute())
-            .map(|path| path.join("node"))
+            .map(|path| path.join(if cfg!(windows) { "node.exe" } else { "node" }))
             .collect(),
     };
     for candidate in candidates {
@@ -92,6 +116,14 @@ pub fn node_executable() -> Result<PathBuf> {
         if candidate
             .components()
             .any(|part| part.as_os_str().to_string_lossy().ends_with(".app"))
+        {
+            continue;
+        }
+        #[cfg(windows)]
+        if !candidate
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("node.exe"))
         {
             continue;
         }
@@ -132,13 +164,55 @@ pub fn bundle_members(executable: &Path) -> Result<Vec<PathBuf>> {
 }
 
 pub fn default_executables() -> Vec<PathBuf> {
-    let mut paths = vec![PathBuf::from(
-        "/Applications/ZCode.app/Contents/MacOS/ZCode",
-    )];
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join("Applications/ZCode.app/Contents/MacOS/ZCode"));
+    #[cfg(windows)]
+    {
+        return windows_default_executables(
+            std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new),
+            std::env::var_os("ProgramFiles").as_deref().map(Path::new),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let mut paths = vec![PathBuf::from(
+            "/Applications/ZCode.app/Contents/MacOS/ZCode",
+        )];
+        if let Some(home) = dirs::home_dir() {
+            paths.push(home.join("Applications/ZCode.app/Contents/MacOS/ZCode"));
+        }
+        paths
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_default_executables(local: Option<&Path>, program_files: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(local) = local.filter(|path| path.is_absolute()) {
+        paths.push(local.join("Programs/ZCode/ZCode.exe"));
+        paths.push(local.join("ZCode/ZCode.exe"));
+    }
+    if let Some(program_files) = program_files.filter(|path| path.is_absolute()) {
+        paths.push(program_files.join("ZCode/ZCode.exe"));
     }
     paths
+}
+
+/// Short Unix socket paths; native protected DACL on Windows. Never a Runtime Home.
+pub fn private_runtime_root(prefix: &str) -> Result<PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::temp_dir()
+    } else {
+        PathBuf::from("/tmp")
+    };
+    let root = base.join(format!("{prefix}-{}", uuid::Uuid::new_v4().simple()));
+    #[cfg(windows)]
+    {
+        crate::platform::private_storage::create_private_directory(&root)
+    }
+    #[cfg(not(windows))]
+    {
+        fs::create_dir(&root)?;
+        crate::platform::private_storage::prepare_private_directory(&root)
+    }
 }
 
 /// Official JSON config layers. Keep the bytes and credentials private;
@@ -462,6 +536,14 @@ impl NativeConfig {
     }
 
     pub fn mcp_servers(&self, assigned: Option<&Value>) -> Result<Vec<Value>> {
+        self.mcp_servers_with_node(assigned, node_executable)
+    }
+
+    fn mcp_servers_with_node(
+        &self,
+        assigned: Option<&Value>,
+        _node: impl Fn() -> Result<PathBuf>,
+    ) -> Result<Vec<Value>> {
         let mut servers = std::collections::BTreeMap::new();
         if self.value.pointer("/mcp/enabled") != Some(&json!(false))
             && let Some(native) = self
@@ -497,13 +579,28 @@ impl NativeConfig {
                         let command = definition["command"]
                             .as_str()
                             .context("ZCode MCP command invalid")?;
-                        let mut args = vec![
-                            json!("-c"),
-                            json!("cd -- \"$1\" && shift && exec \"$@\""),
-                            json!("rovai-zcode-mcp"),
-                            json!(cwd),
-                            json!(command),
-                        ];
+                        #[cfg(not(windows))]
+                        let (launcher, mut args) = (
+                            PathBuf::from("/bin/sh"),
+                            vec![
+                                json!("-c"),
+                                json!("cd -- \"$1\" && shift && exec \"$@\""),
+                                json!("rovai-zcode-mcp"),
+                                json!(cwd),
+                                json!(command),
+                            ],
+                        );
+                        #[cfg(windows)]
+                        let (launcher, mut args) = (
+                            _node()?,
+                            vec![
+                                json!("--eval"),
+                                json!(include_str!("zcode/mcp-cwd.cjs")),
+                                json!("--"),
+                                json!(cwd),
+                                json!(command),
+                            ],
+                        );
                         args.extend(
                             server["args"]
                                 .as_array()
@@ -511,7 +608,7 @@ impl NativeConfig {
                                 .iter()
                                 .cloned(),
                         );
-                        server["command"] = json!("/bin/sh");
+                        server["command"] = json!(launcher);
                         server["args"] = json!(args);
                     }
                     server["env"] = json!(
@@ -745,6 +842,59 @@ fn merge(target: &mut Value, layer: Value) {
 mod tests {
     use super::*;
 
+    // Owns bundle-layout admission, independent of native execution and config.
+    // A filesystem fixture is sufficient; no installed App/Node/network needed.
+    #[test]
+    fn official_bundle_layouts_reject_launchers_and_missing_resources() {
+        let root = std::env::temp_dir().join(format!("zcode-layout-{}", uuid::Uuid::new_v4()));
+        let mac = root.join("ZCode.app/Contents");
+        let win = root.join("Windows ZCode");
+        fs::create_dir_all(mac.join("MacOS")).unwrap();
+        fs::create_dir_all(mac.join("Resources/glm")).unwrap();
+        fs::create_dir_all(win.join("resources/glm")).unwrap();
+        fs::write(mac.join("Info.plist"), "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>dev.zcode.app</string></dict></plist>").unwrap();
+        fs::write(mac.join("MacOS/ZCode"), "fixture").unwrap();
+        fs::write(mac.join("Resources/glm/zcode.cjs"), "fixture").unwrap();
+        fs::write(win.join("ZCode.exe"), "fixture").unwrap();
+        fs::write(win.join("resources/glm/zcode.cjs"), "fixture").unwrap();
+        assert!(
+            runtime_script(&win.join("ZCode.exe")).is_err(),
+            "The kernel alone is not an official App layout"
+        );
+        fs::write(win.join("resources/app.asar"), "fixture").unwrap();
+        for (exe, kernel) in [
+            (mac.join("MacOS/ZCode"), mac.join("Resources/glm/zcode.cjs")),
+            (win.join("ZCode.exe"), win.join("resources/glm/zcode.cjs")),
+        ] {
+            assert!(is_bundle_executable(&exe));
+            assert_eq!(
+                runtime_script(&exe).unwrap(),
+                kernel.canonicalize().unwrap()
+            );
+            fs::remove_file(&kernel).unwrap();
+            assert!(runtime_script(&exe).is_err());
+        }
+        fs::write(win.join("zcode.cmd"), "fixture").unwrap();
+        assert!(!is_bundle_executable(&win.join("zcode.cmd")));
+        assert!(runtime_script(&win.join("zcode.cmd")).is_err());
+        assert_eq!(
+            windows_default_executables(Some(&root), None),
+            vec![
+                root.join("Programs/ZCode/ZCode.exe"),
+                root.join("ZCode/ZCode.exe")
+            ]
+        );
+        assert!(windows_default_executables(Some(Path::new("relative")), None).is_empty());
+        #[cfg(unix)]
+        {
+            let outside = root.join("outside.cjs");
+            fs::write(&outside, "fixture").unwrap();
+            std::os::unix::fs::symlink(&outside, win.join("resources/glm/zcode.cjs")).unwrap();
+            assert!(runtime_script(&win.join("ZCode.exe")).is_err());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
     // Owns native file precedence and the private BYOK/public catalog boundary.
     // No environment mutation or real credentials are used by this fixture.
     #[test]
@@ -777,7 +927,9 @@ mod tests {
         assert_eq!(model["provider"]["baseURL"], "https://project.invalid");
         assert_eq!(model["model"]["modelId"], "alias");
         assert_eq!(model["provider"]["models"][0]["supportsImages"], true);
-        let servers = native.mcp_servers(None).unwrap();
+        let servers = native
+            .mcp_servers_with_node(None, || Ok(root.join("node.exe")))
+            .unwrap();
         assert_eq!(
             servers.iter().find(|s| s["name"] == "same").unwrap()["command"],
             "user-server"
@@ -796,9 +948,10 @@ mod tests {
             json!([{"name":"X-Probe","value":"native"}])
         );
         let assigned = native
-            .mcp_servers(Some(
-                &json!([{"name":"same","command":"rovai-server","args":[],"env":[]}]),
-            ))
+            .mcp_servers_with_node(
+                Some(&json!([{"name":"same","command":"rovai-server","args":[],"env":[]}])),
+                || Ok(root.join("node.exe")),
+            )
             .unwrap();
         assert_eq!(
             assigned.iter().find(|s| s["name"] == "same").unwrap()["command"],
