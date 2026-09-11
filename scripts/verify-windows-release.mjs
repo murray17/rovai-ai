@@ -34,6 +34,7 @@ const unpackedOnly = process.argv.includes('--unpacked-only')
 const appDirectory = join(dist, 'win-unpacked')
 const executableName = packageMetadata.build.win.executableName ?? packageMetadata.build.productName
 const appExecutable = join(appDirectory, `${executableName}.exe`)
+const hostExecutable = join(appDirectory, 'resources', 'bin', 'rovai-host.exe')
 const coreExecutable = join(appDirectory, 'resources', 'bin', 'rovai-core.exe')
 const cliExecutable = join(appDirectory, 'resources', 'bin', 'rovai.exe')
 const installer = join(
@@ -377,6 +378,7 @@ try {
   const updaterArtifacts = await verifyUpdateArtifacts()
   const binaries = {
     app: await verifyBinary('App', appExecutable),
+    host: await verifyBinary('rovai-host', hostExecutable),
     core: await verifyBinary('rovai-core', coreExecutable),
     cli: await verifyBinary('rovai', cliExecutable)
   }
@@ -388,9 +390,9 @@ try {
 
   isolatedParent = await mkdtemp(join(tmpdir(), 'rovai-windows-verifier-'))
   const dataRoot = join(isolatedParent, 'data-root')
-  const prepared = JSON.parse(run(coreExecutable, ['--prepare-windows-data-root', dataRoot]))
+  const prepared = JSON.parse(run(hostExecutable, ['--prepare-windows-data-root', dataRoot]))
   if (resolve(prepared.root) !== resolve(dataRoot)) throw new Error('Core prepared the wrong isolated data root')
-  core = startCore(coreExecutable, join(dataRoot, 'Core'))
+  core = startCore(hostExecutable, join(dataRoot, 'Core'))
   const health = await core.request('health.check')
   if (health?.core?.ok !== true
       || health.core.version !== packageMetadata.version

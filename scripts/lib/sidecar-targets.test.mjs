@@ -6,6 +6,8 @@ import {
   hostSidecarTargetKey,
   sidecarExecutableName,
   sidecarTarget,
+  serverTarget,
+  hostServerTargetKey,
   stagedSidecarPath
 } from './sidecar-targets.mjs'
 
@@ -31,6 +33,12 @@ test('maps only the three shipped sidecar targets', () => {
   assert.equal(hostSidecarTargetKey('darwin', 'arm64'), 'macos-arm64')
   assert.equal(hostSidecarTargetKey('darwin', 'x64'), 'macos-x64')
   assert.equal(hostSidecarTargetKey('win32', 'x64'), 'windows-x64')
+  assert.throws(() => hostSidecarTargetKey('linux', 'x64'), /Unsupported Rovai sidecar host/)
+  assert.throws(() => sidecarTarget('linux-x64'), /Unsupported Rovai sidecar target/)
+  assert.equal(hostServerTargetKey('linux', 'x64'), 'linux-x64')
+  assert.equal(serverTarget('linux-x64').rustTarget, 'x86_64-unknown-linux-gnu')
+  assert.equal(serverTarget('macos-arm64'), sidecarTarget('macos-arm64'))
+  assert.throws(() => serverTarget('linux-arm64'), /Unsupported Rovai Server target/)
   assert.throws(
     () => hostSidecarTargetKey('win32', 'arm64'),
     /Unsupported Rovai sidecar host/

@@ -35,7 +35,7 @@
     "test:rust:full": "pnpm test:rust:workspace-default",
     "test:rust:staged": "node scripts/check-rust-staged.mjs",
     "dev": "pnpm core:build:debug && node scripts/dev-desktop.mjs",
-    "build:desktop": "electron-vite build",
+    "build:desktop": "pnpm build:web && electron-vite build",
     "build": "pnpm core:build && pnpm build:desktop",
     "build:macos:arm64": "pnpm core:build:macos:arm64 && pnpm build:desktop",
     "build:macos:x64": "pnpm core:build:macos:x64 && pnpm build:desktop",
@@ -146,7 +146,10 @@
     "dist:windows:release:x64": "pnpm build:windows:x64 && node scripts/package-windows.mjs nsis && node scripts/verify-windows-release.mjs --require-signed",
     "verify:windows": "node scripts/verify-windows-release.mjs",
     "eval:daily": "node scripts/eval-daily.mjs",
-    "eval:gate": "node scripts/eval-gate.mjs"
+    "eval:gate": "node scripts/eval-gate.mjs",
+    "build:web": "vite build --config web.vite.config.ts",
+    "build:server": "node scripts/build-server.mjs",
+    "test:host-web": "node --test scripts/lib/host-web.test.mjs"
   },
   "dependencies": {
     "@codemirror/language": "6.12.4",
@@ -224,12 +227,21 @@
           "to": "bin/rovai-core"
         },
         {
+          "from": "resources/bin/macos-${arch}/rovai-host",
+          "to": "bin/rovai-host"
+        },
+        {
           "from": "resources/bin/macos-${arch}/rovai",
           "to": "bin/rovai"
+        },
+        {
+          "from": "out/web",
+          "to": "web-ui"
         }
       ],
       "binaries": [
         "Contents/Resources/bin/rovai-core",
+        "Contents/Resources/bin/rovai-host",
         "Contents/Resources/bin/rovai"
       ],
       "hardenedRuntime": true,
@@ -272,8 +284,16 @@
           "to": "bin/rovai-core.exe"
         },
         {
+          "from": "resources/bin/windows-x64/rovai-host.exe",
+          "to": "bin/rovai-host.exe"
+        },
+        {
           "from": "resources/bin/windows-x64/rovai.exe",
           "to": "bin/rovai.exe"
+        },
+        {
+          "from": "out/web",
+          "to": "web-ui"
         }
       ],
       "artifactName": "Rovai-AI-${version}-${arch}.${ext}"

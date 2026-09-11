@@ -1037,7 +1037,8 @@ function MemberDetailHeader({
 const HOST_PLATFORM_LABELS: Record<HostPlatformKey, string> = {
   'macos-arm64': 'macOS Apple Silicon',
   'macos-x64': 'macOS Intel',
-  'windows-x64': 'Windows x64'
+  'windows-x64': 'Windows x64',
+  'linux-x64': 'Linux x64 Server'
 }
 
 export type MemberRuntimeFormHandle = {

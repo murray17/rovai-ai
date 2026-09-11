@@ -44,8 +44,11 @@ runner 真实结束。十秒总期限包含启动期间收到停止信号后的�
 Windows console 关闭、系统服务停止、父进程异常与三平台真实 Runtime 回收另行验收，不继承这两个 console
 事件的资格。
 
-当前初始 CLI 尚不提供 Web、受保护用户 IPC、管理凭据操作、Automation 时钟、日报、评测或渠道驱动。
-这些接口在后续检查点接入并验收；Core 可启动不表示完整 Headless 产品已完成。
+`prepare --data-dir` 只为显式新路径创建私有目录并输出四个运行路径；不创建数据库或迁移已有数据。
+`token` 为本机管理者生成随机令牌。可选 `--web-listen`、`--web-ui`、`--web-token-stdin` 接入
+[共享 Web](host-web-v1.md)；LAN 参数与安全边界见该合同。Desktop 原父管道由同一个 Host 适配，
+旧 `rovai-core` 兼容程序保留。受保护用户 IPC、Automation 时钟、日报、评测与渠道 Headless 驱动尚未交付；
+Core 可启动不表示完整 Server 产品已完成。
 
 ## 验证 owner
 

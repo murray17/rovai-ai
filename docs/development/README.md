@@ -32,7 +32,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm dev` 会构建 Debug 版 `rovai-core` 与 bundled `rovai` Agent CLI、复制到
+`pnpm dev` 会构建 Debug 版 `rovai-host`、兼容 `rovai-core` 与 bundled `rovai` Agent CLI、复制到
 `resources/bin/`，然后启动 Electron Vite 开发环境。该入口通过 `scripts/dev-desktop.mjs`
 自动传入隔离 `userData`、拒绝日常
 数据目录和独立 Skill Library，并锁定单一开发实例；Core 还会独占同一数据目录。不要直接运行
@@ -43,6 +43,8 @@ pnpm dev
 ```bash
 pnpm core:build:debug
 ```
+
+独立 Host/Web 的运行与当前能力边界见 [Server 开发预览](server-preview.md)。
 
 ## 执行评测
 

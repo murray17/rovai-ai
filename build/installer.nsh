@@ -60,6 +60,9 @@ Var rovaiShutdownFailure
       StrCpy $IsPowerShellAvailable 1
       !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" ${RESULT}
       ${if} ${RESULT} != 0
+        !insertmacro FIND_PROCESS "rovai-host.exe" ${RESULT}
+      ${endif}
+      ${if} ${RESULT} != 0
         !insertmacro FIND_PROCESS "rovai-core.exe" ${RESULT}
       ${endif}
       ${if} ${RESULT} != 0
@@ -68,6 +71,9 @@ Var rovaiShutdownFailure
     ${endif}
   ${else}
     !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" ${RESULT}
+    ${if} ${RESULT} != 0
+      !insertmacro FIND_PROCESS "rovai-host.exe" ${RESULT}
+    ${endif}
     ${if} ${RESULT} != 0
       !insertmacro FIND_PROCESS "rovai-core.exe" ${RESULT}
     ${endif}
@@ -98,13 +104,13 @@ Var rovaiShutdownFailure
 !macro ROVAI_SET_SHUTDOWN_MESSAGES
   ${if} $IsPowerShellAvailable != 0
     ${if} $LANGUAGE == 2052
-      StrCpy $rovaiShutdownPrompt "安装器无法验证 Rovai 进程的安装路径，因此不会自动结束任何进程。请在任务管理器中关闭 Rovai AI、rovai-core 和 rovai，然后点击“重试”再等待 20 秒；点击“取消”停止安装。"
+      StrCpy $rovaiShutdownPrompt "安装器无法验证 Rovai 进程的安装路径，因此不会自动结束任何进程。请在任务管理器中关闭 Rovai AI、rovai-host、rovai-core 和 rovai，然后点击“重试”再等待 20 秒；点击“取消”停止安装。"
       StrCpy $rovaiShutdownFailure "仍检测到 Rovai 进程，或无法验证其安装路径，安装已安全停止。请关闭对应进程，并确认 Windows PowerShell 未被策略禁用，然后重新运行安装程序。"
     ${elseif} $LANGUAGE == 1028
-      StrCpy $rovaiShutdownPrompt "安裝程式無法驗證 Rovai 程序的安裝路徑，因此不會自動結束任何程序。請在工作管理員中關閉 Rovai AI、rovai-core 和 rovai，然後點擊「重試」再等待 20 秒；點擊「取消」停止安裝。"
+      StrCpy $rovaiShutdownPrompt "安裝程式無法驗證 Rovai 程序的安裝路徑，因此不會自動結束任何程序。請在工作管理員中關閉 Rovai AI、rovai-host、rovai-core 和 rovai，然後點擊「重試」再等待 20 秒；點擊「取消」停止安裝。"
       StrCpy $rovaiShutdownFailure "仍偵測到 Rovai 程序，或無法驗證其安裝路徑，安裝已安全停止。請關閉對應程序，並確認 Windows PowerShell 未被原則停用，然後重新執行安裝程式。"
     ${else}
-      StrCpy $rovaiShutdownPrompt "Setup could not verify the installation path of the Rovai processes, so it will not end any process automatically. Close Rovai AI, rovai-core, and rovai in Task Manager, then click Retry to wait another 20 seconds, or Cancel to stop setup."
+      StrCpy $rovaiShutdownPrompt "Setup could not verify the installation path of the Rovai processes, so it will not end any process automatically. Close Rovai AI, rovai-host, rovai-core, and rovai in Task Manager, then click Retry to wait another 20 seconds, or Cancel to stop setup."
       StrCpy $rovaiShutdownFailure "Rovai processes are still detected, or their installation paths could not be verified, so setup stopped safely. Close them and confirm that Windows PowerShell is not disabled by policy, then run setup again."
     ${endif}
   ${elseif} $LANGUAGE == 2052
@@ -134,7 +140,7 @@ Var rovaiShutdownFailure
     ${endif}
   ${endif}
 
-  ; Path verification is unavailable. Poll only the three exact image names and
+  ; Path verification is unavailable. Poll only the four exact image names and
   ; never force them; the elapsed time can include native task-list overhead.
   StrCpy $rovaiShutdownTicks 0
   rovai_wait_${LOOP_ID}:

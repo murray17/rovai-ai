@@ -42,6 +42,8 @@ test('Windows installer grants Planned Shutdown its full budget before bounded f
   assert.doesNotMatch(installerInclude, /!insertmacro KILL_PROCESS/u)
 
   assert.match(coordinator, /\[ValidateSet\('Status', 'RequestClose', 'WaitForExit', 'ForceClose'\)\]/u)
+  assert.match(installerInclude, /FIND_PROCESS "rovai-host\.exe"/u)
+  assert.match(coordinator, /'rovai-host\.exe'/u)
   assert.match(coordinator, /System\.Diagnostics\.Stopwatch/u)
   assert.match(coordinator, /\.CloseMainWindow\(\)/u)
   assert.match(coordinator, /Stop-Process -Id \$processId -Force/u)

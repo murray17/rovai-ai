@@ -279,6 +279,15 @@ mod tests {
         );
         for runtime_kind in AdapterKind::ALL {
             for platform in HostPlatformKey::ALL {
+                if platform == HostPlatformKey::LinuxX64 {
+                    let admission = registry.platform_admission(runtime_kind, platform);
+                    assert_eq!(
+                        admission.status(),
+                        RuntimePlatformAdmissionStatus::NotQualified
+                    );
+                    assert!(!admission.allows_runtime_use());
+                    assert!(admission.evidence_revision().is_none());
+                }
                 assert_eq!(
                     matrix
                         .iter()
@@ -424,7 +433,7 @@ mod tests {
                 Some(match platform {
                     HostPlatformKey::MacosArm64 => PI_MACOS_ARM64_EVIDENCE_REVISION,
                     HostPlatformKey::MacosX64 => PI_MACOS_X64_EVIDENCE_REVISION,
-                    HostPlatformKey::WindowsX64 => unreachable!(),
+                    HostPlatformKey::WindowsX64 | HostPlatformKey::LinuxX64 => unreachable!(),
                 })
             );
         }

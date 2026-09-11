@@ -24,6 +24,8 @@ ipcMain.handle('rovai:request', (_event, _method, params) => params?.kind === 'v
   ? { kind: 'value', value: { unchanged: true, values: [1, null, 'ok'] } }
   : { kind: 'failure', failure: failures[params.index] })
 
+ipcMain.handle('rovai:host-web', (_event, operation, params) => ({ operation, params }))
+
 ipcMain.handle('rovai:general-preferences-set-new-conversation-defaults', (_event, defaults, enableOneClick) => ({ defaults, enableOneClick }))
 ipcMain.handle('rovai:navigation-preferences-set-project-name', (_event, targetKey, name) => ({ targetKey, name }))
 
@@ -36,6 +38,7 @@ app.whenReady().then(async () => {
     await window.loadURL('data:text/html,<html><body>Isolated contextBridge regression</body></html>')
     const observations = await window.webContents.executeJavaScript(`(async () => {
       const value = await window.rovai.request('navigation.snapshot', { kind: 'value' })
+      const hostWeb = [await window.rovai.hostWeb.status(), await window.rovai.hostWeb.start({ listen: '127.0.0.1:4317' }), await window.rovai.hostWeb.rotate(), await window.rovai.hostWeb.stop()]
       const defaults = { memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }
       const savedOnly = await window.rovai.generalPreferences.setNewConversationDefaults(defaults)
       const enabled = await window.rovai.generalPreferences.setNewConversationDefaults(defaults, true)
@@ -55,8 +58,14 @@ app.whenReady().then(async () => {
           ))
         }
       }
-      return { value, failures, savedOnly, enabled, projectName, restoredName }
+      return { value, failures, savedOnly, enabled, projectName, restoredName, hostWeb }
     })()`)
+    assert.deepEqual(observations.hostWeb, [
+      { operation: 'status', params: undefined },
+      { operation: 'start', params: { listen: '127.0.0.1:4317' } },
+      { operation: 'rotate', params: undefined },
+      { operation: 'stop', params: undefined }
+    ])
     assert.deepEqual(observations.value, { unchanged: true, values: [1, null, 'ok'] })
     assert.deepEqual(observations.failures, failures, 'Renderer must receive every structured failure field')
     const defaults = { memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }

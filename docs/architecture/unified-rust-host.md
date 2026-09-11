@@ -9,7 +9,11 @@ last_updated: 2026-09-12
 本文拥有已确认的 Host 目标结构。实施与平台资格见[当前版本](../versions/README.md)及
 [Runtime 兼容性](../runtime-compatibility.md)，不能由目标结构推断完成。
 现有准入、事务、Runtime 与关闭合同继续有效；新增 wire 合同随对应实现明确发布。
-初始 CLI 的精确路径、初始化准入和停止适配由[Host Lifecycle v1](../contracts/host-lifecycle-v1.md)拥有。
+初始 CLI 的精确路径、初始化准入和停止适配由[Host Lifecycle v1](../contracts/host-lifecycle-v1.md)拥有；
+当前只读网络入口由[Host Web v1](../contracts/host-web-v1.md)拥有。
+
+当前已实现父进程匿名管道与进程内请求共用一个 Host/Core，以及只读 Axum 入口。以下 UDS/Named Pipe 身份握手、
+完整公共 DTO 生成、客户端草稿/上传与控制面隔离均是后续目标，不由现有管道推断完成。
 
 ## 组件和唯一权威
 

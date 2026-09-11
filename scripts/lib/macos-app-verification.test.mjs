@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { verifyAdhocMacosApp } from './macos-app-verification.mjs'
 
-test('verifies an ad-hoc App, Core, and CLI with the expected architecture and bundle ID', (context) => {
+test('verifies an ad-hoc App, Host, Core, and CLI with the expected architecture and bundle ID', (context) => {
   const root = mkdtempSync(join(tmpdir(), 'rovai-adhoc-verification-'))
   context.after(() => rmSync(root, { recursive: true, force: true }))
   const appPath = join(root, 'Rovai AI.app')
@@ -25,7 +25,7 @@ test('verifies an ad-hoc App, Core, and CLI with the expected architecture and b
       mac: {}
     }
   }))
-  for (const binary of [appBinary, join(resources, 'rovai-core'), join(resources, 'rovai')]) {
+  for (const binary of [appBinary, join(resources, 'rovai-host'), join(resources, 'rovai-core'), join(resources, 'rovai')]) {
     writeFileSync(binary, 'binary')
   }
   const result = verifyAdhocMacosApp(appPath, 'arm64', {
@@ -68,7 +68,7 @@ test('rejects any packaged DingTalk DWS artifact', (context) => {
   }))
   for (const binary of [
     appBinary,
-    join(resources, 'rovai-core'),
+    join(resources, 'rovai-host'), join(resources, 'rovai-core'),
     join(resources, 'rovai')
   ]) {
     writeFileSync(binary, 'tampered-binary')

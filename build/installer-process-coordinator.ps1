@@ -102,6 +102,7 @@ try {
     [System.IO.Path]::DirectorySeparatorChar
   $managedNames = @(
     $ExecutableName,
+    'rovai-host.exe',
     'rovai-core.exe',
     'rovai.exe'
   ) | Sort-Object -Unique

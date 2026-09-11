@@ -2,7 +2,10 @@ mod config;
 mod transport;
 pub use config::{CoreConfig, RemovedSkillProjectRoots};
 use transport::{CoreInput, OutputTarget};
-pub use transport::{CoreReply, CoreRunner, CoreService, embedded};
+pub use transport::{
+    CoreReply, CoreRunner, CoreService, HostControl, HostControlError, HostControlFuture,
+    HostWebOperation, embedded,
+};
 #[path = "core_subsystems.rs"]
 mod core_subsystems;
 use crate::{acp, antigravity, builtin_tool_runtime, claude, codex, health, pi, runtime_fleet};
@@ -14840,6 +14843,7 @@ pub fn run_stdio() -> Result<()> {
         startup_started_at,
         input,
         OutputTarget::Stdio,
+        None,
     ));
     runtime.shutdown_timeout(Duration::from_millis(250));
     result
@@ -14915,6 +14919,7 @@ async fn run_core(
     startup_started_at: Instant,
     mut input: CoreInput,
     output_target: OutputTarget,
+    host_control: Option<Arc<dyn HostControl>>,
 ) -> Result<()> {
     config.validate()?;
     let CoreConfig {
@@ -15494,6 +15499,43 @@ async fn run_core(
             if let Err(error) = result {
                 eprintln!("background Core request failed: {error}");
             }
+        }
+        let host_operation = match request.method.as_str() {
+            "host.web.status" => Some(HostWebOperation::Status),
+            "host.web.start" => Some(HostWebOperation::Start),
+            "host.web.stop" => Some(HostWebOperation::Stop),
+            "host.web.rotate" => Some(HostWebOperation::Rotate),
+            _ => None,
+        };
+        if let Some(operation) = host_operation {
+            let reply = if let Some(control) = &host_control {
+                control.web(operation, request.params).await
+            } else {
+                Err(HostControlError {
+                    code: "HOST_CONTROL_UNAVAILABLE",
+                    message: "This process does not provide Host Web control".into(),
+                })
+            };
+            let response = match reply {
+                Ok(value) => Response {
+                    id: request.id,
+                    result: Some(value),
+                    error: None,
+                },
+                Err(error) => Response {
+                    id: request.id,
+                    result: None,
+                    error: Some(ErrorBody {
+                        kind: "domain_rejection",
+                        code: error.code.into(),
+                        message: error.message,
+                        retryable: false,
+                        details: json!({}),
+                    }),
+                },
+            };
+            enqueue_response(&output_tx, &response)?;
+            continue;
         }
         if request.method == "core.shutdown" {
             let parsed = parse_planned_shutdown_params(request.params.clone());

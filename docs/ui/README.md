@@ -49,6 +49,10 @@ Runtime 终态文件行与会话中的每 Run 文件变化卡片由
 
 MCP 与 Skills 的列表/详情、导入、启停和拖拽合同见 [Capability settings](components/capability-settings.md)。
 
+## Web 与 Mobile
+
+- [Host Web 与 Mobile 交互提案](host-web-mobile.md)：沿用现有视觉系统，第五阶段先供交互评审；不是生产 Mobile 能力。
+
 ## 平台差异
 
 - [Windows Interaction Delta](windows-interaction-delta.md)

@@ -51,6 +51,12 @@ ipcRenderer.on(APP_PREPARE_QUIT_CHANNEL, (event) => {
 })
 
 const api: RovaiApi = {
+  hostWeb: {
+    status: () => ipcRenderer.invoke('rovai:host-web', 'status'),
+    start: (input) => ipcRenderer.invoke('rovai:host-web', 'start', input),
+    stop: () => ipcRenderer.invoke('rovai:host-web', 'stop'),
+    rotate: () => ipcRenderer.invoke('rovai:host-web', 'rotate')
+  },
   async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
     const transport = await ipcRenderer.invoke(
       'rovai:request',

@@ -1580,3 +1580,13 @@
 @media (max-width: 600px) {
   :root .settings-panel.settings-panel-monitoring .monitoring-filters { display: grid; grid-template-columns: minmax(0, 1fr); }
 }
+
+.host-web-settings { display: grid; gap: 12px; }
+.host-web-settings p { margin: 0; overflow-wrap: anywhere; }
+.host-web-fields { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.host-web-fields legend { margin-bottom: 12px; font-weight: 600; }
+.host-web-fields label { display: grid; gap: 6px; }
+.host-web-fields input:not([type='checkbox']) { width: min(100%, 520px); min-height: 38px; padding: 8px 10px; border: 1px solid var(--settings-field-line); border-radius: 7px; color: var(--ink); background: var(--input); font: inherit; }
+.host-web-fields .host-web-lan { display: flex; align-items: center; gap: 8px; }
+.host-web-fields p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.host-web-actions { display: flex; flex-wrap: wrap; gap: 8px; }

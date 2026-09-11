@@ -390,7 +390,7 @@ export interface ProductRuntimeCatalogEntry {
   commandName: string
 }
 
-export type HostPlatformKey = 'macos-arm64' | 'macos-x64' | 'windows-x64'
+export type HostPlatformKey = 'macos-arm64' | 'macos-x64' | 'windows-x64' | 'linux-x64'
 
 export type RuntimePlatformAdmissionStatus = 'qualified' | 'preview' | 'not_qualified' | 'unsupported'
 
@@ -3757,7 +3757,29 @@ export type CoreMethod =
   | 'events.subscribe'
   | 'diagnostics.export'
 
+export type HostWebStatus = {
+  enabled: boolean
+  origin?: string
+  sessions?: number
+  sessionLifetimeSeconds?: number
+}
+
+export type HostWebStartInput = {
+  listen: string
+  publicOrigin?: string
+  allowInsecureLan: boolean
+}
+
+export interface HostWebApi {
+  status(): Promise<HostWebStatus>
+  start(input: HostWebStartInput): Promise<HostWebStatus & { administratorToken: string }>
+  stop(): Promise<HostWebStatus>
+  rotate(): Promise<HostWebStatus & { administratorToken: string }>
+}
+
 export interface RovaiApi {
+  /** Local Desktop owner only; absent on the public Web capability. */
+  hostWeb?: HostWebApi
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   appLifecycle: {

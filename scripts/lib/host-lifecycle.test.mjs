@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { access, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { spawn, execFileSync } from 'node:child_process'
+import { access, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -10,7 +10,26 @@ import {
 } from './runtime-camp-files-root.mjs'
 
 const repository = resolve(import.meta.dirname, '../..')
-const binary = join(repository, 'target/debug/rovai-host')
+const binary = process.env.ROVAI_HOST_BIN ?? join(repository, 'target/debug', process.platform === 'win32' ? 'rovai-host.exe' : 'rovai-host')
+
+test('Host prepare creates only a new private authority directory and preserves existing contents', async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-host-prepare-')))
+  try {
+    const dataDir = join(fixture, 'data')
+    const prepared = JSON.parse(execFileSync(binary, ['prepare', '--data-dir', dataDir], { encoding: 'utf8' }))
+    assert.equal(prepared.dataDir, dataDir)
+    assert.ok(prepared.runArguments.includes(prepared.runtimeCampFilesRoot))
+    if (process.platform !== 'win32') assert.equal((await stat(dataDir)).mode & 0o777, 0o700)
+    await assert.rejects(access(join(dataDir, 'rovai.sqlite')), { code: 'ENOENT' })
+    const marker = join(dataDir, 'existing-work')
+    await writeFile(marker, 'preserve me')
+    assert.throws(() => execFileSync(binary, ['prepare', '--data-dir', dataDir], { stdio: 'pipe' }))
+    assert.equal(await readFile(marker, 'utf8'), 'preserve me')
+    assert.throws(() => execFileSync(binary, ['prepare', '--data-dir', 'relative-path'], { stdio: 'pipe' }))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
 
 // Owns the new CLI -> embedded Core -> process signal seam. The existing stdio
 // suite cannot prove that Host signals reach the in-process shutdown protocol.

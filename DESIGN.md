@@ -90,7 +90,7 @@ states. `system` is a preference resolver, not a third theme.
 
 ## Typography
 
-The body stack is the platform-native sans-serif stack declared in `styles.css`; no downloadable
+The body stack is the platform-native sans-serif stack declared in `packages/ui/src/theme.css`; no downloadable
 font is required. Monospace is reserved for commands, paths, timestamps, stable IDs, short status
 values and evidence.
 

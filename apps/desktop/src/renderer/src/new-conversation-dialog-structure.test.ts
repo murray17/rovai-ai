@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const component = readFileSync(new URL('./NewConversationDialog.tsx', import.meta.url), 'utf8')
-const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+const styles = ['../../../../../packages/ui/src/theme.css', './styles.css']
+  .map(path => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n')
 
 describe('New Conversation dialog presentation contract', () => {
   it('keeps a single title and a collapsed, focusable optional name editor', () => {

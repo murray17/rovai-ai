@@ -61,7 +61,9 @@ describe('desktop package metadata', () => {
     expect(packageMetadata.scripts['build:desktop']).not.toContain('native:build:macos')
     expect(packageMetadata.build.mac.extraResources.map(({ to }: { to: string }) => to)).toEqual([
       'bin/rovai-core',
-      'bin/rovai'
+      'bin/rovai-host',
+      'bin/rovai',
+      'web-ui'
     ])
   })
 
@@ -71,24 +73,29 @@ describe('desktop package metadata', () => {
         from: 'resources/bin/macos-${arch}/rovai-core',
         to: 'bin/rovai-core'
       },
+      { from: 'resources/bin/macos-${arch}/rovai-host', to: 'bin/rovai-host' },
       {
         from: 'resources/bin/macos-${arch}/rovai',
         to: 'bin/rovai'
-      }
+      },
+      { from: 'out/web', to: 'web-ui' }
     ])
     expect(packageMetadata.build.win.extraResources).toEqual([
       {
         from: 'resources/bin/windows-x64/rovai-core.exe',
         to: 'bin/rovai-core.exe'
       },
+      { from: 'resources/bin/windows-x64/rovai-host.exe', to: 'bin/rovai-host.exe' },
       {
         from: 'resources/bin/windows-x64/rovai.exe',
         to: 'bin/rovai.exe'
-      }
+      },
+      { from: 'out/web', to: 'web-ui' }
     ])
     expect(packageMetadata.build).not.toHaveProperty('extraResources')
     expect(packageMetadata.build.mac.binaries).toEqual([
       'Contents/Resources/bin/rovai-core',
+      'Contents/Resources/bin/rovai-host',
       'Contents/Resources/bin/rovai'
     ])
     expect(JSON.stringify(packageMetadata.build)).not.toMatch(/dws/iu)

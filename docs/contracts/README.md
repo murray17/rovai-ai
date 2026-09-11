@@ -28,6 +28,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | 合同 | 权威范围 |
 | --- | --- |
 | [Host Lifecycle v1（当前）](host-lifecycle-v1.md) | 初始独立 Host CLI 的显式路径、受控初始化、唯一 Core、停止信号与既有 protocol 3 关闭适配；不代表完整 Server 或平台资格 |
+| [Host Web v1（当前）](host-web-v1.md) | 同一 Core 的 Desktop/Web 管理、内存 Bearer、只读封闭 API、失效 SSE 与当前能力边界；不是安全发布资格 |
 | [Current User Profile v1（当前）](current-user-profile-v1.md) | Desktop 本地名称/头像、原子保存、历史作者与结构化提及投影；不改变 Core identity、正文或模型上下文 |
 | [Domain Command Result v1（当前）](domain-command-result-v1.md) | Domain Command 结果的事务、幂等回放、专用列唯一正文、内部 marker、新旧事件双读与 schema 95 回退边界 |
 | [Scheduled Automation v1（当前）](scheduled-automation-v1.md) | Desktop/Core 本机计划、冻结快照、原子 Camp 派发、恢复收口、唯一公共结果与独立 Owner 通知 |

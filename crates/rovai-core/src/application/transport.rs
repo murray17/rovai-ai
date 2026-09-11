@@ -14,6 +14,29 @@ pub struct CoreReply {
     pub error: Option<Value>,
 }
 
+/// Only the process owner installs this local control capability. Public Web
+/// requests never enter this seam; its operations are deliberately closed.
+#[derive(Clone, Copy)]
+pub enum HostWebOperation {
+    Status,
+    Start,
+    Stop,
+    Rotate,
+}
+
+pub struct HostControlError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+pub type HostControlFuture<'a> = std::pin::Pin<
+    Box<dyn Future<Output = std::result::Result<Value, HostControlError>> + Send + 'a>,
+>;
+
+pub trait HostControl: Send + Sync {
+    fn web(&self, operation: HostWebOperation, params: Value) -> HostControlFuture<'_>;
+}
+
 /// Trusted Rust host capability, not a network RPC surface. The Host must apply
 /// its closed operation mapping and verified caller policy before invoking it.
 /// Dropping a request future or an event receiver never cancels admitted work.
@@ -141,7 +164,7 @@ pub(super) struct EmbeddedOutput {
 }
 
 impl EmbeddedOutput {
-    fn publish(&self, mut frame: Value) {
+    fn publish(&self, mut frame: Value) -> bool {
         if frame.get("kind").and_then(Value::as_str) == Some("core_startup") {
             self.startup.send_replace(frame);
         } else if let Some(id) = frame.get("id").and_then(Value::as_str) {
@@ -155,12 +178,14 @@ impl EmbeddedOutput {
                     result: frame.get_mut("result").map(Value::take),
                     error: frame.get_mut("error").map(Value::take),
                 });
+                return true;
             }
-        } else {
+        } else if frame.get("id").is_none() {
             // No subscriber is normal (e.g. a disconnected browser). Core work
             // proceeds independently of observation.
             let _ = self.events.send(frame);
         }
+        false
     }
 
     fn finish(&self) {
@@ -191,6 +216,8 @@ pub struct CoreRunner {
     control: mpsc::Receiver<Request>,
     output: Arc<EmbeddedOutput>,
     completion: RunnerCompletion,
+    desktop_stdio: bool,
+    host_control: Option<Arc<dyn HostControl>>,
 }
 
 struct RunnerCompletion(Arc<EmbeddedOutput>);
@@ -202,19 +229,42 @@ impl Drop for RunnerCompletion {
 }
 
 impl CoreRunner {
+    /// Adds the original Desktop pipe to this same Core owner. EOF retains the
+    /// legacy parent-loss semantics; Web cannot keep a dead Desktop alive.
+    pub fn with_desktop_stdio(mut self, control: Arc<dyn HostControl>) -> Self {
+        self.desktop_stdio = true;
+        self.host_control = Some(control);
+        self
+    }
+
     pub async fn run(self) -> Result<()> {
         // The completion guard is also owned by an unpolled runner, so callers
         // never wait forever when a host abandons startup before spawning it.
         let _completion = self.completion;
+        let input = if self.desktop_stdio {
+            CoreInput::Desktop {
+                lines: BufReader::new(tokio::io::stdin()).lines(),
+                requests: self.requests,
+                control: self.control,
+            }
+        } else {
+            CoreInput::Embedded {
+                requests: self.requests,
+                control: self.control,
+            }
+        };
+        let output = if self.desktop_stdio {
+            OutputTarget::Desktop(self.output)
+        } else {
+            OutputTarget::Embedded(self.output)
+        };
         run_core(
             self.config,
             self.environment,
             Instant::now(),
-            CoreInput::Embedded {
-                requests: self.requests,
-                control: self.control,
-            },
-            OutputTarget::Embedded(self.output),
+            input,
+            output,
+            self.host_control,
         )
         .await
     }
@@ -253,6 +303,8 @@ pub fn embedded(
             control: control_receiver,
             completion: RunnerCompletion(output.clone()),
             output,
+            desktop_stdio: false,
+            host_control: None,
         },
     ))
 }
@@ -273,6 +325,11 @@ fn is_control_request(method: &str) -> bool {
 
 pub(super) enum CoreInput {
     Stdio(tokio::io::Lines<BufReader<tokio::io::Stdin>>),
+    Desktop {
+        lines: tokio::io::Lines<BufReader<tokio::io::Stdin>>,
+        requests: mpsc::Receiver<Request>,
+        control: mpsc::Receiver<Request>,
+    },
     Embedded {
         requests: mpsc::Receiver<Request>,
         control: mpsc::Receiver<Request>,
@@ -282,6 +339,19 @@ pub(super) enum CoreInput {
 impl CoreInput {
     pub(super) async fn next_request(&mut self) -> Result<Option<Request>> {
         match self {
+            Self::Desktop {
+                lines,
+                requests,
+                control,
+            } => {
+                tokio::select! {
+                    biased;
+                    // Parent EOF must win even if a remote caller keeps sending.
+                    request = read_stdio_request(lines) => request,
+                    request = control.recv(), if !control.is_closed() || !control.is_empty() => Ok(request),
+                    request = requests.recv(), if !requests.is_closed() || !requests.is_empty() => Ok(request),
+                }
+            }
             Self::Embedded { requests, control } => {
                 tokio::select! {
                     biased;
@@ -295,24 +365,30 @@ impl CoreInput {
                     },
                 }
             }
-            Self::Stdio(lines) => loop {
-                let line = match lines.next_line().await {
-                    Ok(Some(line)) => line,
-                    Ok(None) => return Ok(None),
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        tokio::time::sleep(Duration::from_millis(5)).await;
-                        continue;
-                    }
-                    Err(error) => return Err(error).context("failed reading Core stdin"),
-                };
-                if line.trim().is_empty() {
-                    continue;
-                }
-                match serde_json::from_str::<Request>(&line) {
-                    Ok(request) => return Ok(Some(request)),
-                    Err(error) => eprintln!("invalid request: {error}"),
-                }
-            },
+            Self::Stdio(lines) => read_stdio_request(lines).await,
+        }
+    }
+}
+
+async fn read_stdio_request(
+    lines: &mut tokio::io::Lines<BufReader<tokio::io::Stdin>>,
+) -> Result<Option<Request>> {
+    loop {
+        let line = match lines.next_line().await {
+            Ok(Some(line)) => line,
+            Ok(None) => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                continue;
+            }
+            Err(error) => return Err(error).context("failed reading Core stdin"),
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Request>(&line) {
+            Ok(request) => return Ok(Some(request)),
+            Err(error) => eprintln!("invalid request: {error}"),
         }
     }
 }
@@ -320,13 +396,17 @@ impl CoreInput {
 #[derive(Clone)]
 pub(super) enum OutputTarget {
     Stdio,
+    Desktop(Arc<EmbeddedOutput>),
     Embedded(Arc<EmbeddedOutput>),
 }
 
 impl OutputTarget {
     pub(super) fn startup(&self, frame: Value) -> Result<()> {
         match self {
-            Self::Stdio => {
+            Self::Stdio | Self::Desktop(_) => {
+                if let Self::Desktop(output) = self {
+                    output.publish(frame.clone());
+                }
                 use std::io::Write as _;
                 let stdout = std::io::stdout();
                 let mut output = stdout.lock();
@@ -334,7 +414,9 @@ impl OutputTarget {
                 output.write_all(b"\n")?;
                 output.flush()?;
             }
-            Self::Embedded(output) => output.publish(frame),
+            Self::Embedded(output) => {
+                output.publish(frame);
+            }
         }
         Ok(())
     }
@@ -345,20 +427,29 @@ impl OutputTarget {
         line: &str,
     ) -> Result<()> {
         match self {
-            Self::Stdio => {
+            Self::Stdio | Self::Desktop(_) => {
+                if let Self::Desktop(output) = self {
+                    // A Web reply is delivered only to its registered waiter.
+                    // Forwarding it to Desktop would leak another client's draft.
+                    if output
+                        .publish(serde_json::from_str(line).context("invalid Core output frame")?)
+                    {
+                        return Ok(());
+                    }
+                }
                 stdout.write_all(line.as_bytes()).await?;
                 stdout.write_all(b"\n").await?;
                 stdout.flush().await?;
             }
             Self::Embedded(output) => {
-                output.publish(serde_json::from_str(line).context("invalid Core output frame")?)
+                output.publish(serde_json::from_str(line).context("invalid Core output frame")?);
             }
         }
         Ok(())
     }
 
     pub(super) async fn flush(&self, stdout: &mut BufWriter<tokio::io::Stdout>) -> Result<()> {
-        if matches!(self, Self::Stdio) {
+        if matches!(self, Self::Stdio | Self::Desktop(_)) {
             stdout
                 .flush()
                 .await
