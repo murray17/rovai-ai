@@ -4,7 +4,7 @@ version: v1.58
 lifecycle: current
 authority: implementation-status
 status: in_progress
-last_updated: 2026-09-11
+last_updated: 2026-09-12
 ---
 
 # v1.58 实施与验证
@@ -96,3 +96,39 @@ last_updated: 2026-09-11
 - 本地门禁：`pnpm typecheck`、完整 `pnpm test`（Vitest 174 文件、1755 测试及 Node 套件）、Rust PR 范围（553 lib、35 CLI、309 slow）、Core binary 测试（236 通过、5 个既有 ignored）、Clippy、格式与通用文档治理通过。
 - 启动集成：完整 Core startup suite 10 通过、1 个 Pi 缺失检查按既有 macOS 规则跳过；同时将该文件两处已失效的 Composer RPC 夹具改为当前 v2 document，保留旧队列恢复的历史存储夹具。真实 CLI 的单标记、双标记及空标记场景均在 User Automation dispatch 前退出 `2`。
 - 最小回归命令：`node --test --test-name-pattern='Core-managed macOS probes' scripts/lib/core-startup-availability.test.mjs`。本条 supersedes 本文较早批次的沙箱准入约束，旧失败记录不改写。
+
+## Claude Code 动态模型目录
+
+删除固定家族候选与 help 模型名称筛选；通过当前原生 CLI 的无 Prompt `initialize` 控制交换获取结构化
+`models`，保持原生环境、权限、认证和 Provider。映射到统一 `ModelDescriptor`，保存显示名称、描述和单条
+`runtimeMetadata`，effort 仅来自明确报告值。现有目录刷新、LKG、过期、已保存选择和 Run 实际模型观察保持分离。
+旧 help 目录不能再服务选择或证明当前 Ready；失败不创建 fallback。
+
+当前规范同步至 [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#claude-code-原生模型目录)、
+[Runtime Launch v39](../../contracts/runtime-launch-and-verification-v39.md)、Contracts/CURRENT/文档入口及成员局部 brief。
+不新增 Version Decision：此项是按已确认 Runtime 原生权威原则修正局部发现实现，无独立高成本架构取舍。
+不更改 Schema/Migration、Native Session Bootstrap、ContextManifest、Activity、其他 Runtime 协议或权限。
+
+测试所有权：扩展既有 Claude Adapter 映射测试与统一缓存边界测试；新增唯一 Claude NDJSON 进程测试，
+覆盖真实 managed-process seam 的无用户输入、关联 ID、失败与回收，纯 parser 测试不能证明该进程边界。
+原先没有 Claude 初始化进程 owner；只有 `system.init.model`、无相关 `models` 的响应必须失败，不能被旧别名
+fallback 接纳。最小命令为 `cargo test -p rovai-core --bin rovai-core health::claude_catalog_tests`。
+既有 Claude 错误终态进程测试增加默认/显式模型两行，验证默认省略参数、opaque ID 与原生 effort 值透传，
+同时保留原终态错误与脱敏断言。新增 ignored 原生无 Prompt smoke，不调用生成式 Claude Runtime smoke。
+
+验证记录（2026-09-12，macOS arm64）：
+
+- `pnpm typecheck`、`pnpm test`、`pnpm build:desktop`、`pnpm docs:check` 与绑定 base 的
+  `pnpm docs:check:ci` 通过。Vitest 174 个文件、1757 项通过；Node 脚本 317 项通过、2 项平台限定跳过。
+- `pnpm test:rust:pr` 通过：Library 553、CLI 35、slow integration 309 项；新版 Claude cache admission、
+  LKG、旧目录拒绝和保存默认策略均包含其中。
+- 最终 `pnpm test:rust:staged` 的 workspace-default 门禁通过：553 Library、35 CLI、237 Main，6 项显式
+  ignored；`cargo fmt --all --check` 和 `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- 原生 `claude_catalog_real_runtime_smoke` 通过，Claude Code 2.1.236 的无 Prompt 控制初始化返回五项
+  `default`、`opus[1m]`、`sonnet`、`sonnet[1m]`、`haiku`；这些仅是本机当次观察，不能成为白名单或版本映射。
+- 一次性生产组件 Electron 夹具验证日/夜主题 1040×700、模型名称/ID/描述、键盘打开、opaque ID 选择、
+  目录替换、刷新失败保留选择和默认策略。此证据不冒充真实模型生成。
+- `pnpm package:mac:daily` 通过 App/Core/CLI 的 arm64 ad-hoc 签名门；隔离 packaged App 经生产
+  `runtime.modelCatalog.open` 返回 fresh 原生目录及完整模型 metadata，未提交用户消息。
+- 首次 workspace 门禁发现兼容性登记文件属于既有平台资格摘要；撤回对该文件的编辑，把此次观测留在本文，
+  原摘要绑定测试复核通过。浅发现版本测试该次失败后单独复跑和最终 workspace 复跑均通过。

@@ -596,7 +596,7 @@ pub struct ClaudeCodeProbeObservation {
     pub authentication_status: String,
     pub probe_status: String,
     pub capabilities: Vec<String>,
-    pub model_aliases: Vec<String>,
+    pub models: Vec<ModelDescriptor>,
     pub attempted_at: String,
     pub last_error: Option<String>,
 }
@@ -1184,6 +1184,8 @@ impl AgentRuntimeAdapterRegistry {
 
 fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
     let mut models = vec![ModelDescriptor {
+        description: None,
+        runtime_metadata: None,
         id: PI_RUNTIME_DEFAULT_MODEL_ID.to_string(),
         display_name: "Pi native default".to_string(),
         is_default: true,
@@ -1214,6 +1216,8 @@ fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
             .finish();
         let id = format!("pi://model?{query}");
         models.push(ModelDescriptor {
+            description: None,
+            runtime_metadata: None,
             id,
             display_name: value
                 .get("name")
@@ -1350,6 +1354,8 @@ fn codex_models(catalog: &Value) -> Result<Vec<ModelDescriptor>> {
                 }]
             };
             Ok(ModelDescriptor {
+                description: None,
+                runtime_metadata: None,
                 id: id.to_string(),
                 display_name: display_name.to_string(),
                 is_default: value
@@ -1536,6 +1542,109 @@ impl CopilotCliAdapterPolicy {
     }
 }
 
+pub const CLAUDE_MODEL_CATALOG_CAPABILITY: &str = "model.catalog.initialize";
+
+/// Normalize the model list from the matching SDK initialize control response.
+/// Native selection values remain opaque: aliases and resolved IDs are not interchangeable.
+pub fn claude_code_models(response: &Value) -> Result<Vec<ModelDescriptor>> {
+    let rows = response
+        .get("models")
+        .and_then(Value::as_array)
+        .filter(|rows| !rows.is_empty())
+        .context(
+            "claude_model_catalog_incompatible: initialize did not return a non-empty models array",
+        )?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut models = vec![ModelDescriptor {
+        id: CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+        display_name: "Claude Code runtime default".to_string(),
+        description: None,
+        runtime_metadata: None,
+        is_default: true,
+        hidden: false,
+        deprecated: false,
+        options: Vec::new(),
+    }];
+    for row in rows {
+        let id = row
+            .get("value")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty() && !value.chars().any(char::is_control))
+            .context(
+                "claude_model_catalog_incompatible: model entry has no valid selection value",
+            )?;
+        if id == CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID || !seen.insert(id) {
+            anyhow::bail!(
+                "claude_model_catalog_incompatible: duplicate or reserved selection value"
+            );
+        }
+        let mut options = Vec::new();
+        if row.get("supportsEffort").and_then(Value::as_bool) != Some(false)
+            && let Some(levels) = row.get("supportedEffortLevels").and_then(Value::as_array)
+            && !levels.is_empty()
+        {
+            let values = levels
+                .iter()
+                .map(|level| {
+                    let value = level
+                        .as_str()
+                        .filter(|value| !value.trim().is_empty())
+                        .context("claude_model_catalog_incompatible: invalid effort level")?;
+                    Ok(choice(value, value))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            options.push(ModelOptionDescriptor {
+                key: "effort".to_string(),
+                label: "effort".to_string(),
+                value_type: "enum".to_string(),
+                values,
+                default_value: None,
+                scope: RuntimeOptionScope::Run,
+            });
+        }
+        models.push(ModelDescriptor {
+            id: id.to_string(),
+            display_name: row
+                .get("displayName")
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or(id)
+                .to_string(),
+            description: row
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            runtime_metadata: Some(row.clone()),
+            is_default: false,
+            hidden: row.get("hidden").and_then(Value::as_bool).unwrap_or(false),
+            deprecated: row
+                .get("deprecated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            options,
+        });
+    }
+    Ok(models)
+}
+
+/// Survives retained-LKG projection, which deliberately drops current capability evidence.
+/// Pre-initialize help-derived catalogs have no native entries and cannot be served as LKG.
+pub fn claude_code_catalog_has_native_evidence(models: &[ModelDescriptor]) -> bool {
+    let mut native = models
+        .iter()
+        .filter(|model| model.id != CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID)
+        .peekable();
+    native.peek().is_some()
+        && native.all(|model| {
+            model
+                .runtime_metadata
+                .as_ref()
+                .and_then(|row| row.get("value"))
+                .and_then(Value::as_str)
+                == Some(model.id.as_str())
+        })
+}
+
 impl ClaudeCodeCliAdapterPolicy {
     fn capability_snapshot(
         &self,
@@ -1560,49 +1669,16 @@ impl ClaudeCodeCliAdapterPolicy {
         capabilities.sort();
         capabilities.dedup();
         let models = if ready {
-            let mut models = vec![ModelDescriptor {
-                id: CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
-                display_name: "Claude Code runtime default".to_string(),
-                is_default: true,
-                hidden: false,
-                deprecated: false,
-                options: vec![ModelOptionDescriptor {
-                    key: "effort".to_string(),
-                    label: "effort".to_string(),
-                    value_type: "enum".to_string(),
-                    values: ["low", "medium", "high", "xhigh", "max"]
-                        .into_iter()
-                        .map(|value| choice(value, value))
-                        .collect(),
-                    default_value: None,
-                    scope: RuntimeOptionScope::Run,
-                }],
-            }];
-            models.extend(
-                observation
-                    .model_aliases
-                    .into_iter()
-                    .filter(|model| !model.trim().is_empty())
-                    .map(|model| ModelDescriptor {
-                        id: model.clone(),
-                        display_name: model,
-                        is_default: false,
-                        hidden: false,
-                        deprecated: false,
-                        options: vec![ModelOptionDescriptor {
-                            key: "effort".to_string(),
-                            label: "effort".to_string(),
-                            value_type: "enum".to_string(),
-                            values: ["low", "medium", "high", "xhigh", "max"]
-                                .into_iter()
-                                .map(|value| choice(value, value))
-                                .collect(),
-                            default_value: None,
-                            scope: RuntimeOptionScope::Run,
-                        }],
-                    }),
-            );
-            models
+            if !claude_code_catalog_has_native_evidence(&observation.models)
+                || !capabilities
+                    .iter()
+                    .any(|value| value == CLAUDE_MODEL_CATALOG_CAPABILITY)
+            {
+                anyhow::bail!(
+                    "Claude Code ready snapshot requires an initialization model catalog"
+                );
+            }
+            observation.models
         } else {
             Vec::new()
         };
@@ -1668,6 +1744,8 @@ impl AntigravityAppAdapterPolicy {
         let mut models = Vec::new();
         if ready {
             models.push(ModelDescriptor {
+                description: None,
+                runtime_metadata: None,
                 id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                 display_name: "Antigravity App runtime default".to_string(),
                 is_default: true,
@@ -1680,6 +1758,8 @@ impl AntigravityAppAdapterPolicy {
                     continue;
                 }
                 models.push(ModelDescriptor {
+                    description: None,
+                    runtime_metadata: None,
                     display_name: model_id.clone(),
                     id: model_id,
                     is_default: false,
@@ -1850,6 +1930,17 @@ pub fn validate_machine_ready_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
 ) -> Result<()> {
+    if adapter_kind == AdapterKind::ClaudeCodeCli && snapshot.probe_status == "ready" {
+        if !snapshot
+            .capabilities
+            .iter()
+            .any(|value| value == CLAUDE_MODEL_CATALOG_CAPABILITY)
+            || !claude_code_catalog_has_native_evidence(&snapshot.models)
+        {
+            anyhow::bail!("Claude Code ready snapshot requires an initialization model catalog");
+        }
+        return Ok(());
+    }
     if adapter_kind == AdapterKind::Pi && snapshot.probe_status == "ready" {
         validate_pi_machine_ready_evidence(
             snapshot.reported_version.as_deref(),
@@ -2035,6 +2126,8 @@ fn acp_capability_snapshot(
                 ) =>
             {
                 vec![ModelDescriptor {
+                    description: None,
+                    runtime_metadata: None,
                     id: format!("{}://runtime-default", adapter_kind.as_str()),
                     display_name: format!("{} runtime default", adapter_kind.as_str()),
                     is_default: true,
@@ -2292,6 +2385,8 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
             .and_then(Value::as_str)
             .unwrap_or(id);
         models.push(ModelDescriptor {
+            description: None,
+            runtime_metadata: None,
             id: id.to_string(),
             display_name: display_name.to_string(),
             is_default: current_model.as_deref() == Some(id),
@@ -4140,7 +4235,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_uses_installed_aliases_and_builtin_cli_support() {
+    fn claude_code_preserves_native_catalog_and_builtin_cli_support() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let snapshot = registry
             .claude_code_capability_snapshot(ClaudeCodeProbeObservation {
@@ -4148,8 +4243,12 @@ mod tests {
                 executable_fingerprint: Some("sha256:claude".to_string()),
                 authentication_status: "authenticated".to_string(),
                 probe_status: "ready".to_string(),
-                capabilities: vec!["output.json".to_string()],
-                model_aliases: vec!["sonnet".to_string(), "opus".to_string()],
+                capabilities: vec!["output.json".to_string(), CLAUDE_MODEL_CATALOG_CAPABILITY.to_string()],
+                models: claude_code_models(&json!({"models": [
+                    {"value":"custom-provider/model-vNext", "displayName":"My custom model", "description":"Provider description", "resolvedModel":"provider-exact-id", "aliases":["native-alias"], "supportsEffort":true, "supportedEffortLevels":["low","future-level"], "supportsAdaptiveThinking":true},
+                    {"value":"opus[1m]", "displayName":"Native extended context", "supportsEffort":false},
+                    {"value":"default", "displayName":"Native default", "supportsFastMode":false}
+                ]})).unwrap(),
                 attempted_at: "2026-07-23T00:00:00Z".to_string(),
                 last_error: None,
             })
@@ -4157,7 +4256,45 @@ mod tests {
 
         assert_eq!(snapshot.models[0].id, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID);
         assert!(snapshot.models[0].is_default);
-        assert_eq!(snapshot.models[1].id, "sonnet");
+        assert_eq!(snapshot.models[1].id, "custom-provider/model-vNext");
+        assert_eq!(snapshot.models[1].display_name, "My custom model");
+        assert_eq!(
+            snapshot.models[1].description.as_deref(),
+            Some("Provider description")
+        );
+        let metadata = snapshot.models[1].runtime_metadata.as_ref().unwrap();
+        assert_eq!(metadata["resolvedModel"], "provider-exact-id");
+        assert_eq!(metadata["aliases"], json!(["native-alias"]));
+        assert_eq!(metadata["supportsAdaptiveThinking"], true);
+        assert_eq!(
+            snapshot.models[1].options[0].values[1].value,
+            "future-level"
+        );
+        assert!(snapshot.models[0].options.is_empty());
+        assert!(snapshot.models[2].options.is_empty());
+        assert_eq!(snapshot.models[3].id, "default");
+        assert!(!snapshot.models[3].is_default);
+        validate_machine_ready_snapshot(AdapterKind::ClaudeCodeCli, &snapshot).unwrap();
+        let mut legacy = snapshot.clone();
+        legacy
+            .capabilities
+            .retain(|value| value != CLAUDE_MODEL_CATALOG_CAPABILITY);
+        assert!(validate_machine_ready_snapshot(AdapterKind::ClaudeCodeCli, &legacy).is_err());
+        for invalid in [
+            json!({"model":"current-model"}),
+            json!({}),
+            json!({"models":[]}),
+            json!({"models":[{"value":""}]}),
+            json!({"models":[{"id":"not-a-selection-value"}]}),
+            json!({"models":[{"value":"same"},{"value":"same"}]}),
+            json!({"models":[{"value":CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID}]}),
+            json!({"models":[{"value":"valid","supportedEffortLevels":[1]}]}),
+        ] {
+            assert!(claude_code_models(&invalid).is_err(), "{invalid}");
+        }
+        let encoded = serde_json::to_value(&snapshot.models).unwrap();
+        let decoded: Vec<ModelDescriptor> = serde_json::from_value(encoded).unwrap();
+        assert_eq!(snapshot.models, decoded);
         assert!(
             snapshot
                 .capabilities

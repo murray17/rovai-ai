@@ -91,6 +91,10 @@ catalog cache and Picker behavior as every other Runtime; its permission draft s
 admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the existing compact switch pattern for
 `trust_all_tools`; label it “自动允许全部工具” and default it on from Core without adding a separate warning card.
 
+Model rows keep Runtime display names separate from opaque selection IDs and show the Runtime description when
+provided, with the full text available on hover. Claude's initialize catalog uses this same Picker; no family-specific
+rows or inferred version labels are supplied by Renderer.
+
 Opening the model Picker uses Core-owned stale-while-revalidate state. Fresh catalogs display immediately;
 serviceable stale catalogs remain interactive while a single background refresh runs; expired, unavailable or
 invalidated catalogs show a bounded loading state until discovery settles. A failed refresh keeps and labels the
