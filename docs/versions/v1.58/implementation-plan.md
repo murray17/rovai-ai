@@ -20,18 +20,23 @@ last_updated: 2026-09-12
 | 分析 Agent 不能调用用户级导出 | Main 配置、现有 Scheduler tick、工作区报告 | Agent 只解释文件；App 不在线没有常驻保证 |
 | 原评价项容易把非代码任务套入实现／测试要求 | 冻结 generic-task-v2 profile、复用原七个 Outcome ID 与五个 Process ID | 通用质量按 50/25/25 汇总；协作只做三组五项状态统计，未知保留分母 |
 | 读者难以从计数找到变化和证据 | 共享离线 HTML、原 JSON／SVG、轻量分析完成记录 | 质量与硬门槛分开；每日比例直接展示数量与分母，日期断点保留，证据限定报告范围 |
+| Source Attachment 外部路径仍被复制并预扫目录 | 共享 resolver 保留宿主重检后直接返回 exact stored source path；Camp 与 Single Chat 共用 | 删除 execution-root/Run Temp 参数、复制函数和 `source-attachments` 创建；不新增权限、preflight 或 fallback |
 
 入口：[操作指南](../../development/evaluation.md)、[回归集](../../../qualification/context-regression/README.md)、[架构](../../architecture/execution-evaluation.md)。
 
 ## 验证证据
 
-代码实现及本地验证已完成，版本状态因下述运行验收缺口保持 `in_progress`。以下均来自 2026-09-10 的实际命令输出，未列出的执行不得推断为通过。私有原始报告留在运行目录，仓库保留脱敏索引和摘要。
+代码实现及本地验证已完成，版本状态因下述运行验收缺口保持 `in_progress`。以下来自 2026-09-10 至 2026-09-12 的实际命令输出，未列出的执行不得推断为通过。私有原始报告留在运行目录，仓库保留脱敏索引和摘要。
 
 | 验证 | 实际结果 | 能说明什么 |
 | --- | --- | --- |
 | `pnpm test` | 170 个 Vitest 文件、1722 个测试通过；最后一组 Node 测试 232 通过、1 个既有平台测试跳过 | 代码及现有合同回归；不代表模型任务质量 |
 | `pnpm test:rust:staged` | 547 个 lib、34 个 CLI、234 个 Main 测试通过；5 个既有 ignored 保持 | 实际工作区编译与默认测试 |
 | `pnpm test:rust:pr` | 547 个 lib、34 个 CLI、309 个 slow integration 测试通过 | 仓库要求的 PR 前完整 Rust 范围；与上一行重叠的测试不重复计入样本量 |
+| Source Attachment 定向 Rust | resolver 5 项、Single Chat source-path 1 项、Camp source-path publication slow test 1 项通过 | exact stored path、顶层 symlink、目录不预扫、missing/kind-changed、Single Chat owner/run 与 Camp 既有 publication 均有实际覆盖 |
+| `rovai-core` all-targets / Clippy | `--all-targets --features slow-tests` check 与 `-D warnings` Clippy 通过 | 新 resolver 签名与五类 Runtime input call site 均编译，无警告 |
+| `rovai-core` 全量回归 | Main 237 通过、6 个既有 manual smoke ignored；lib 553 通过 | 合入最新 main 的 Claude 模型目录后，两组全量 Core 回归均无失败；Source Attachment 与保留业务能力一起通过 |
+| 文档治理 | `pnpm docs:test`、`pnpm docs:check`、固定 base 的 `pnpm docs:check:ci` 通过 | v9/v4、D06、模型上下文确认记录与 current 路由满足通用门禁 |
 | Trace slow-test | 3 个定向测试通过，含当前 SQLite schema 的读写 authorizer 断言 | 不读取正文、不修改状态，排除与跨日回放口径 |
 | Case admission | 15 个 Case 的初始 fixture 不通过、reference 两次通过 | 样本／验收器可以区分预设缺陷；不证明 Runtime 会完成任务 |
 | 当前合同 Runner | 16 条标准通过，每条引用实际匹配的测试 harness 结果 | 逐项执行证据；先前编译失败记录保留 |

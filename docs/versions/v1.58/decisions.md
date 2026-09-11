@@ -72,3 +72,26 @@ last_updated: 2026-09-11
 继续保留外层沙箱会保持较强文件隔离但延续已复现的兼容阻塞；新增进程身份隔离或专用执行代理超出
 本次防误调用目标，因此不采用。本决定替代 V1.21-D03 的 OS denial 选择，不把协议身份分离宣称为
 本机恶意进程安全边界，也不改变 Windows 平台准入或进程回收。
+
+<a id="v1-58-d06"></a>
+## V1.58-D06：Source Attachment 运行前重检后原样投影源路径
+
+- 状态：accepted
+- 日期：2026-09-11
+- 当前权威：[Camp Attachment v9](../../contracts/camp-attachment-v9.md)、[Single Chat v4](../../contracts/single-chat-v4.md)、[Camp Attachments](../../architecture/camp-published-attachment-view.md)
+
+Source Ref 已经把用户附件定义为弱持久 live reference，但 v8 又按 execution root 分流，把外部来源递归复制到
+Run Temp。这使路径语义随位置改变、读取内容在 dispatch 时冻结，并让目录内部 symlink 或特殊节点在 Agent 尚未访问
+前阻断整个附件，偏离“只引用源路径”的产品边界。
+
+选择保留既有宿主侧 exists/readable/kind 重检及 `spawn_blocking`，成功后无条件把完全相同的 stored source path
+交给 Context。`fs::metadata` 继续跟随顶层 symlink；目录只打开 `read_dir` 而不枚举子项。Core 不 canonicalize、
+不比较 workspace、不复制、不创建 symlink，也不建立 Runtime preflight。宿主可读不保证 Runtime 可读；Agent 只有
+在实际访问时才从原生文件工具获得 Runtime/OS 错误。
+
+代价是外部绝对路径会对目标 Runtime、Agent 及潜在模型 Provider 可见，且既没有快照或只读保证，也可能受现有
+Runtime 权限限制。该路径仍不进入 Renderer、公共消息或历史 View。既有 Source Refs 在后续 Run 直接采用新语义，
+不迁移数据库或历史 ContextManifest；Prepared、Managed、Agent/CLI 与 legacy attachment 不变。
+
+拒绝保留旧复制兼容、delivery mode、Runtime capability 分流、external read-root 授权、snapshot/config 开关及
+materialize/upload fallback，因为它们会用新的策略系统替代本次删除，扩大 Source Attachment 的职责。

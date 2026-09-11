@@ -2,15 +2,16 @@
 document_type: architecture
 architecture: single-chat
 authority: single-chat-component-boundaries-and-data-flow
-last_updated: 2026-09-06
+last_updated: 2026-09-11
 ---
 
 # Single Chat Architecture
 
 Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。字段级合同见
-[Single Chat v3](../contracts/single-chat-v3.md)，当前选择理由见
+[Single Chat v4](../contracts/single-chat-v4.md)，当前选择理由见
 [V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)至
-[V1.50-D04](../versions/v1.50/decisions.md#v1-50-d04)。
+[V1.50-D04](../versions/v1.50/decisions.md#v1-50-d04)及
+[V1.58-D06](../versions/v1.58/decisions.md#v1-58-d06)。
 
 ## 组件职责
 
@@ -19,7 +20,7 @@ Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。
 | Desktop Renderer | active 会话选择、私有 transcript、Composer Draft 交互、Conversation-local 排队编辑、执行折叠、停止与结束意图 | 权限、原始附件路径、路由、恢复推断、公共水位 |
 | Desktop Main / Preload | Single Chat Core method allowlist、公共附件选择/预览/打开/Reveal bridge 和事件转发 | 业务状态、附件内容仓库、目标选择、私有输出生成 |
 | `SingleChatService` | Conversation 生命周期、原子 open/send/end、附件 Draft revision、Pending FIFO、Snapshot/History | Runtime process、Prompt 执行、公共投影 |
-| Source Attachment 基础设施 | `LocalAttachmentSourceRef` 观察/清洗/重检、owner 精确读取、Run-local 解析与公共 AttachmentCard 能力 | Source 永久可用性、Single Chat transcript、队列顺序 |
+| Source Attachment 基础设施 | `LocalAttachmentSourceRef` 观察/清洗/重检、owner 精确读取、原路径投影与公共 AttachmentCard 能力 | Source 永久可用性、Single Chat transcript、队列顺序 |
 | Context builder | 无 Memory 的专用 Bootstrap、专用 Charter/Guidance、过滤后 Skill exposure、私有水位上的公共增量和公共 resolved attachment paths | transcript 自动重放、连续性解释、异步唤醒、授权替代 |
 | Built-in Router | `single_chat_v1` 固定三项 allowlist、当前 Camp scope 与当前单聊历史反向解析 | Runtime 原生 delegation、通用 Capability DSL |
 | Runtime terminal service | 冻结 route 复核、恰好一条私有 final、迟到事件 fence | Renderer 展示、队列编辑 |
@@ -68,16 +69,17 @@ AgentRun.trigger_conversation_message_id
   → conversation_message.source_attachments_json
   → Vec<LocalAttachmentSourceRef>
   → resolve_source_attachments_for_run
-      ├── executionRoot 内：使用原路径
-      └── executionRoot 外：复制到 ROVAI_RUN_TMP/source-attachments
+      → spawn_blocking 中重检 exists / host-readable / kind
+      → 返回完全相同的 stored source_path
   → materialize_with_exposures_and_source_attachments
   → CURRENT_INPUT.attachments
-  → 所有 Runtime Adapter 接收同一份 resolved paths
+  → 所有 Runtime Adapter 接收同一份 source paths
 ```
 
 Single Chat 不拥有附件内容根、copy receipt、retention worker 或专用 Runtime projection。Source Ref 是 weakly durable：
 选择、发送和 dispatch 分别按公共规则观察或重检；原文件移动、删除、失去权限或改变类型时诚实失败，内容后来变化则读取
-执行时实际内容。只有 execution root 外的来源在本轮 dispatch 时复制到通用 Run Temp，并由通用 cleanup 回收。
+执行时实际内容。dispatch 不 canonicalize、不按 execution root 分流、不预扫目录子项，也不复制到通用 Run Temp。
+宿主重检不保证 Runtime 可读；Agent 按现有权限访问，原生工具按实际访问结果报告错误，不增加 preflight 或 fallback。
 
 `LocalAttachmentOwnerLocator` 用四类 Single Chat owner 精确恢复 Source Ref：Composer、Pending canonical、Pending edit
 working copy 和已发送 Message。每次读取都校验 Camp、Conversation kind、Message/Pending 所属关系和 attachment ref id；

@@ -362,13 +362,13 @@ Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即�
 “结束”在默认情况下打开危险确认 Dialog。说明必须为“这段对话将被删除且无法回复。”，按钮为“取消 / 结束”，
 并提供“不再询问”复选框；选择后只把该确认偏好保存在本机。结束成功立即从产品 surface 移除该 transcript，之后与
 同一队员发起单聊显示新的空白 Conversation。具体 ended/审计保留、取消和迟到事件行为由
-[Single Chat v3](../../contracts/single-chat-v3.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
+[Single Chat v4](../../contracts/single-chat-v4.md)拥有，Renderer 不从旧 Runtime 事件恢复正文。
 
 panel 保留明确的收起按钮与 `Esc`，对象菜单和确认 Dialog 打开时 `Esc` 先关闭最上层浮层。选择器、Disclosure、停止、
 结束和发送均需可键盘到达，不添加额外焦点框；spinner 有文本或可访问名称。窄窗口中 panel 以会话区宽度为上限，
 不能遮住全局侧栏或溢出可视区；reduced motion 关闭非必要位移和旋转动画但保留状态变化。
 
-领域、权限与输出路由见 [Single Chat v3](../../contracts/single-chat-v3.md)，组件数据流见
+领域、权限与输出路由见 [Single Chat v4](../../contracts/single-chat-v4.md)，组件数据流见
 [Single Chat Architecture](../../architecture/single-chat.md)。
 
 ## Camp 执行过程
@@ -827,7 +827,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 修改会影响后续读取，移动、删除或失去权限可以使引用不可用。非图片文件卡按内容自然收窄但不超过 220px，
 长名称必须省略且可取得完整名称。拖放命中、反馈和卡片合同见
 [会话区文件与文件夹拖放](conversation-drop-zone.md)，领域边界见
-[Camp Attachment v8](../../contracts/camp-attachment-v8.md)，发送边界见
+[Camp Attachment v9](../../contracts/camp-attachment-v9.md)，发送边界见
 [Camp Composer Draft v12](../../contracts/camp-composer-draft-v12.md)。
 
 准备区固定使用 D 档：普通文件项高 48px、约 11px 圆角并始终显示浅边框，采用用户侧中性图形、文件名和
@@ -849,7 +849,7 @@ unreadable 或 kind_changed；重新读取历史仍从 unknown 开始。状态�
 确认，不在 Renderer 判断。Composer 附件保持既有预览/移除交互；所有动作都提交 composer、pending、
 pending_edit 或 message 的精确 owner locator，不提交路径。
 精确动作与结果合同见 [File Preview v5](../../contracts/file-preview-v5.md)和
-[Camp Attachment v8](../../contracts/camp-attachment-v8.md)。
+[Camp Attachment v9](../../contracts/camp-attachment-v9.md)。
 
 ## 空 Camp 欢迎状态
 

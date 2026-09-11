@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-composer-draft
 authority: camp-composer-editing-draft-pending-and-user-send-boundaries
 status: accepted
-last_updated: 2026-09-05
+last_updated: 2026-09-11
 ---
 
 # Camp Composer Draft 架构
@@ -12,7 +12,7 @@ Camp Composer 有三个互不替代的权威层：输入期间的 Lexical `Edito
 `ComposerDocument` V2，以及持久化与 exact revision 的 Core Draft。已提交但尚未公开的下一轮输入由私有
 Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v12](../contracts/camp-composer-draft-v12.md)、
 [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)，附件生命周期见
-[Camp Attachment v8](../contracts/camp-attachment-v8.md)。
+[Camp Attachment v9](../contracts/camp-attachment-v9.md)。
 
 ## Component authority
 
@@ -27,7 +27,7 @@ Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v12](../cont
 | Pending module | 原子保存已提交的完整 V2 下一轮意图、FIFO、edit token/revision、working source refs 与 needs-repair 状态 |
 | Collaboration send | 从 exact Draft/Pending 读取 V2，物化 continuation，最终校验 Reply/Atom/source availability，转换成公共 Structured Content，并只在 accepted transaction 消费 owner |
 | Camp Read Model | 投影公开 Message、Reply/Continuation 和统一无路径附件 View；不暴露 Lexical 状态 |
-| Runtime source resolver | 对触发 Message 的 source refs 返回 executionRoot 内原路径或当前 Run Temp 路径；Adapter 不理解 Composer 或存储差异 |
+| Runtime source resolver | 对触发 Message 的 source refs 做宿主重检并返回完全相同的 stored source path；Adapter 不理解 Composer 或存储差异 |
 
 ## 两层 Schema
 
@@ -218,7 +218,7 @@ initial snapshot 与原 edit token/revision；不在普通按键或组件 cleanu
 
 - [Camp Composer Draft v12](../contracts/camp-composer-draft-v12.md)
 - [Pending Camp Input v3](../contracts/pending-camp-input-v3.md)
-- [Camp Attachment v8](../contracts/camp-attachment-v8.md)
+- [Camp Attachment v9](../contracts/camp-attachment-v9.md)
 - [结构化 Mention 与 Atom](../ui/components/structured-mentions.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [V1.43-D01](../versions/v1.43/decisions.md#v1-43-d01)
