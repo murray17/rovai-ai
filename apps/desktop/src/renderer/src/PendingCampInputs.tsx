@@ -78,7 +78,8 @@ function pendingError(code: string): string {
 
 export const PendingCampInputs = forwardRef(function PendingCampInputs({
   campId, refreshKey, executionActive, members, skills, skillCatalogStatus, quoteMessages = [], onRevealQuote = async () => { throw new Error('quote.source_unavailable') },
-  onQueueChange, onEditingChange, onAttachmentDropTargetChange, attachmentDragActive
+  onQueueChange, onEditingChange, onAttachmentDropTargetChange, attachmentDragActive,
+  submittedInputIds = []
 }: {
   quoteMessages?: CampMessageView[]
   onRevealQuote?(quote: MessageQuoteSnapshot): void | Promise<void>
@@ -92,6 +93,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
   onEditingChange(editing: boolean): void
   onAttachmentDropTargetChange(target: PendingAttachmentDropTarget): void
   attachmentDragActive: boolean
+  submittedInputIds?: readonly string[]
 }, ref: ForwardedRef<PendingCampInputsHandle>): JSX.Element {
   const [queue, setQueue] = useState<CampPendingInputsView | null>(null)
   const [edit, setEditState] = useState<LocalEdit | null>(null)
@@ -121,13 +123,19 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
   const refreshReader = useRef<ReturnType<typeof createPendingInputsRefresh> | null>(null)
   const callbacks = useRef({ onQueueChange, onEditingChange, members, skills })
   callbacks.current = { onQueueChange, onEditingChange, members, skills }
+  const submittedInputIdsRef = useRef(submittedInputIds)
+  submittedInputIdsRef.current = submittedInputIds
+  const submittedInputIdsKey = JSON.stringify(submittedInputIds)
 
   const refresh = useCallback((): Promise<void> => refreshReader.current?.refresh() ?? Promise.resolve(), [])
 
   useEffect(() => {
     mounted.current = true
     const reader = createPendingInputsRefresh(
-      () => window.rovai.request<CampPendingInputsView>('camp.pendingInputs.get', { campId }),
+      () => window.rovai.request<CampPendingInputsView>('camp.pendingInputs.get', {
+        campId,
+        ...(submittedInputIdsRef.current.length ? { submittedInputIds: submittedInputIdsRef.current } : {})
+      }),
       (next) => {
         if (next.campId !== campId) return
         setQueue(next)
@@ -162,7 +170,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
     }
   }, [campId, setEdit])
 
-  useEffect(() => { void refresh().catch(() => undefined) }, [refreshKey, executionActive, refresh])
+  useEffect(() => { void refresh().catch(() => undefined) }, [refreshKey, executionActive, submittedInputIdsKey, refresh])
   useEffect(() => { callbacks.current.onEditingChange(edit !== null) }, [edit !== null])
 
   useEffect(() => {

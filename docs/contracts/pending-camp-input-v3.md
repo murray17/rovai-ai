@@ -4,7 +4,7 @@ contract: pending-camp-input
 version: 3
 status: accepted
 authority: camp-next-turn-composer-document-attachments-and-editing
-last_updated: 2026-09-04
+last_updated: 2026-09-11
 ---
 
 # Pending Camp Input v3
@@ -66,6 +66,30 @@ there is no name-based rebinding, Atom deletion, plain-text downgrade or fallbac
 
 Source failures continue to produce exact `attachment_missing`, `attachment_unreadable` or
 `attachment_kind_changed` repair states and block later items. Legacy Prepared Drafts still cannot enter the queue.
+
+## Desktop submission outcomes
+
+`camp.pendingInputs.get({ campId, submittedInputIds?: string[] })` optionally reads the durable outcomes of
+inputs submitted by the current Renderer workspace. The response's optional `submissionOutcomes` contains
+one `{ pendingInputId, state, campTurnId, addressedAgentIds }` per requested ID, in request order. `state` is
+`queued | needs_repair | published | cancelled | missing`; `campTurnId` is the persisted publication Turn ID
+or null. `addressedAgentIds` is the published message's canonical recipient order, otherwise empty; it does
+not reuse the possibly changed Default Lead or member order from queue admission. An unknown ID or an ID
+belonging to another Camp returns `missing` with a null Turn ID and empty recipients. Omitted
+IDs do not enumerate historical outcomes. This is a read-only Desktop projection; it exposes no private
+body, edit token, Runtime context or new public event, and does not publish or retry an input.
+
+The workspace keeps only its own successful submission receipts, including queued receipts, until their
+presentation intent is consumed. Existing queue invalidations, foreground/reconnect reads and submission
+changes refresh the outcomes through the same single-flight reader. A published outcome resolves the
+exact Turn using the ordinary public Run projection; if that projection arrives later, the workspace
+waits for it. It never infers a publication from queue disappearance, message text or the newest Run.
+Cancelled/missing inputs and publications without execution retire the intent. Publication may already
+have happened when the initial send receipt arrives; the durable lookup still resolves it.
+
+Publication of a locally submitted queued input uses the same execution auto-focus rules as direct send,
+including visible non-terminal Run and task-creation protection. Other windows' inputs, background A2A
+and old publications create no auto-focus intent. Leaving the Camp discards these presentation receipts.
 
 ## References
 
