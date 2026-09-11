@@ -129,9 +129,9 @@ Agent 未访问路径时，不产生虚构的 Runtime-read failure。
 已经持久化的 ContextManifest、prepared Runtime input 与历史投递证据保持原值。无需使 Native Session Binding 失效，
 因为变化位于每轮 Dynamic Context 的 attachment string，既有 formatter/profile/manifest 仍能如实冻结新 payload。
 
-已确认的比较基线保持为 `aa8a56c27c71e2f077c97714071fa6420dff05e6`。最终集成与验证前，main 快进到
-`cde7c12f405c11b197e1bbf7bad1d9f1aec032fe`；其中另行批准的 V1.58-D05 Runtime sandbox 变更不属于本次权限
-工作。本 revision 没有新增或扩大 Runtime 权限，也没有因同步而恢复 Source Attachment 的复制或分流。
+已确认的比较基线保持为 `aa8a56c27c71e2f077c97714071fa6420dff05e6`。实现随后与当时最新 main 集成；
+其中另行批准的 Runtime sandbox、模型目录等变更各自由自身决定和合同拥有，不属于本次权限或附件工作。
+本 revision 没有新增或扩大 Runtime 权限，也没有因主线同步而恢复 Source Attachment 的复制或分流。
 
 ## 验证
 
@@ -143,5 +143,5 @@ Agent 未访问路径时，不产生虚构的 Runtime-read failure。
 - Rust 定向测试、Core all-target check、格式化及文档治理门禁通过。
 
 2026-09-12 的最终工作区验证结果：resolver 定向测试 5 项、Single Chat 定向测试 1 项、Camp slow test 1 项通过；
-`rovai-core` lib 553 项全部通过，Main 236 项通过且 5 项既有 manual smoke ignored；all-targets check、零警告
+`rovai-core` lib 553 项全部通过，Main 237 项通过且 6 项既有 manual smoke ignored；all-targets check、零警告
 Clippy、格式化、diff 检查及三道文档治理命令均通过。

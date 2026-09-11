@@ -9250,7 +9250,7 @@ impl Core {
                             .to_string(),
                         probe_status: probe_status_name(probe.result.status).to_string(),
                         capabilities: probe.result.capabilities,
-                        model_aliases: probe.model_aliases,
+                        models: probe.models,
                         attempted_at,
                         last_error: probe.result.detail,
                     })?;

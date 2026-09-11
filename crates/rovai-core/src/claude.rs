@@ -407,9 +407,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             .get("effort")
             .and_then(serde_json::Value::as_str)
         {
-            if !["low", "medium", "high", "xhigh", "max"].contains(&effort) {
-                anyhow::bail!("Claude Code effort has an unsupported value");
-            }
+            // Core already validated this value against the Runtime's model catalog.
             command.args(["--effort", effort]);
         }
         command.args(launch_session_arguments(
@@ -2345,62 +2343,82 @@ mod tests {
 
         // This process-boundary fixture owns the exit-status ordering regression;
         // the pure terminal validator cannot prove that run_process reaches it.
-        let root = std::env::temp_dir().join(format!(
-            "rovai-claude-nonzero-structured-failure-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let workspace = root.join("workspace");
-        std::fs::create_dir_all(&workspace).expect("workspace should be created");
-        let executable = root.join("fake-claude");
-        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
-        std::fs::write(
-            &executable,
-            format!(
-                r#"#!/bin/sh
-cat >/dev/null
-printf '%s\n' '{{"type":"stream_event","session_id":"{session_id}","event":{{"type":"message_start"}}}}'
-printf '%s\n' '{{"type":"result","subtype":"error","is_error":true,"result":"API Error: 529 overloaded; api_key=private-key","session_id":"{session_id}"}}'
-exit 1
-"#,
-            ),
-        )
-        .expect("fake Claude executable should be written");
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
-            .expect("fake Claude executable should be executable");
-        let adapter = ClaudeCodeCliRuntimeAdapter::new(&root).expect("Adapter should initialize");
-        let mut request = fake_claude_request(
-            &workspace,
-            &executable,
-            uuid::Uuid::new_v4().to_string(),
-            session_id,
-        );
-        let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
-        request.input_accepted = Some(accepted_sender);
+        for explicit in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "rovai-claude-nonzero-structured-failure-test-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let workspace = root.join("workspace");
+            std::fs::create_dir_all(&workspace).expect("workspace should be created");
+            let executable = root.join("fake-claude");
+            let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+            std::fs::write(
+                &executable,
+                format!(
+                    r#"#!/bin/sh
+    printf '%s\n' "$@" > "$0.argv"
+    cat >/dev/null
+    printf '%s\n' '{{"type":"stream_event","session_id":"{session_id}","event":{{"type":"message_start"}}}}'
+    printf '%s\n' '{{"type":"result","subtype":"error","is_error":true,"result":"API Error: 529 overloaded; api_key=private-key","session_id":"{session_id}"}}'
+    exit 1
+    "#,
+                ),
+            )
+            .expect("fake Claude executable should be written");
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+                .expect("fake Claude executable should be executable");
+            let adapter =
+                ClaudeCodeCliRuntimeAdapter::new(&root).expect("Adapter should initialize");
+            let mut request = fake_claude_request(
+                &workspace,
+                &executable,
+                uuid::Uuid::new_v4().to_string(),
+                session_id,
+            );
+            if explicit {
+                request.runtime.model.source = "explicit".to_string();
+                request.runtime.model.model_id = "provider/custom[extended]".to_string();
+                request.runtime.model.options = json!({"effort":"future-level"});
+            }
+            let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+            request.input_accepted = Some(accepted_sender);
 
-        let error = adapter
-            .run(request)
-            .await
-            .expect_err("structured Provider failure must remain visible on exit 1");
-        let diagnostic = format!("{error:#}");
-        let delivered = error
-            .downcast_ref::<ClaudeCodeDeliveredFailure>()
-            .expect("structured final should prove the delivered turn ended")
-            .clone();
-        let accepted = accepted_receiver
-            .try_recv()
-            .expect("message_start should preserve accepted-input proof");
-        std::fs::remove_dir_all(&root).expect("temporary root should be removed");
+            let error = adapter
+                .run(request)
+                .await
+                .expect_err("structured Provider failure must remain visible on exit 1");
+            let diagnostic = format!("{error:#}");
+            let delivered = error
+                .downcast_ref::<ClaudeCodeDeliveredFailure>()
+                .expect("structured final should prove the delivered turn ended")
+                .clone();
+            let accepted = accepted_receiver
+                .try_recv()
+                .expect("message_start should preserve accepted-input proof");
+            let argv = std::fs::read_to_string(root.join("fake-claude.argv")).unwrap();
+            if explicit {
+                assert!(argv.contains("--model\nprovider/custom[extended]\n"));
+                assert!(argv.contains("--effort\nfuture-level\n"));
+            } else {
+                assert!(
+                    !argv
+                        .lines()
+                        .any(|arg| matches!(arg, "--model" | "--effort"))
+                );
+            }
+            std::fs::remove_dir_all(&root).expect("temporary root should be removed");
 
-        assert_eq!(accepted.native_session_id, session_id);
-        assert_eq!(delivered.error_code, "runtime_terminal_failure");
-        assert_eq!(delivered.failure.origin, RuntimeFailureOrigin::Runtime);
-        assert_eq!(delivered.failure.phase, RuntimeFailurePhase::Terminal);
-        let detail = delivered.failure.detail.as_deref().expect("safe detail");
-        assert!(detail.contains("API Error: 529 overloaded"));
-        assert!(detail.contains("api_key=[redacted]"));
-        assert!(!detail.contains("private-key"));
-        assert!(diagnostic.contains("exit status: 1"));
-        assert!(diagnostic.contains("stderrBytes=0"));
+            assert_eq!(accepted.native_session_id, session_id);
+            assert_eq!(delivered.error_code, "runtime_terminal_failure");
+            assert_eq!(delivered.failure.origin, RuntimeFailureOrigin::Runtime);
+            assert_eq!(delivered.failure.phase, RuntimeFailurePhase::Terminal);
+            let detail = delivered.failure.detail.as_deref().expect("safe detail");
+            assert!(detail.contains("API Error: 529 overloaded"));
+            assert!(detail.contains("api_key=[redacted]"));
+            assert!(!detail.contains("private-key"));
+            assert!(diagnostic.contains("exit status: 1"));
+            assert!(diagnostic.contains("stderrBytes=0"));
+        }
     }
 
     #[test]

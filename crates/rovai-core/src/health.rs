@@ -9,9 +9,10 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use rovai_core::{
-    agent_profile::AdapterKind,
+    agent_profile::{AdapterKind, ModelDescriptor},
     agent_runtime_adapter::{
-        GROK_BUILD_MINIMUM_VERSION_LABEL, KIRO_ADDITIVE_AGENT_NAME, PI_MINIMUM_VERSION_LABEL,
+        CLAUDE_MODEL_CATALOG_CAPABILITY, GROK_BUILD_MINIMUM_VERSION_LABEL,
+        KIRO_ADDITIVE_AGENT_NAME, PI_MINIMUM_VERSION_LABEL, claude_code_models,
         executable_fingerprint, grok_build_minimum_version_satisfied,
         pi_machine_ready_requirements, pi_minimum_version_satisfied,
         trae_machine_ready_capabilities, trae_machine_ready_requirements,
@@ -150,7 +151,7 @@ struct TraeBehavioralProbeEvidence {
 #[derive(Debug, Clone)]
 pub struct ClaudeCodeCapabilityProbe {
     pub result: AgentRuntimeProbeResult,
-    pub model_aliases: Vec<String>,
+    pub models: Vec<ModelDescriptor>,
 }
 
 #[derive(Debug, Clone)]
@@ -498,6 +499,8 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     let required = [
         ("cli.print", "--print"),
         ("output.json", "--output-format"),
+        ("input.stream_json", "--input-format"),
+        ("session.no_persistence", "--no-session-persistence"),
         ("conversation.resume", "--resume"),
         ("conversation.create", "--session-id"),
         ("context.charter.native_append", "--append-system-prompt"),
@@ -545,7 +548,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         result.failure = Some(failure);
         return ClaudeCodeCapabilityProbe {
             result,
-            model_aliases: Vec::new(),
+            models: Vec::new(),
         };
     }
 
@@ -633,10 +636,41 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         );
     }
     capabilities.push("process.interrupt".to_string());
-    let model_aliases = claude_code_model_aliases(&help);
-    if !model_aliases.is_empty() {
-        capabilities.push("model.aliases".to_string());
-    }
+    let models = match claude_code_model_catalog(&canonical, Duration::from_secs(30)).await {
+        Ok(models) => models,
+        Err(error) => {
+            let detail = format!("{error:#}");
+            let incompatible = detail.contains("claude_model_catalog_incompatible");
+            let failure = public_probe_failure(
+                AdapterKind::ClaudeCodeCli,
+                if incompatible {
+                    RuntimeFailureOrigin::Compatibility
+                } else {
+                    RuntimeFailureOrigin::Runtime
+                },
+                RuntimeFailurePhase::ModelCatalog,
+                if incompatible {
+                    "runtime_model_catalog_incompatible"
+                } else {
+                    "runtime_model_catalog_unavailable"
+                },
+                "无法获取 Claude Code 模型目录",
+                &detail,
+                &canonical,
+                !incompatible,
+            );
+            return claude_code_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                detail,
+                failure,
+                probed_at,
+            );
+        }
+    };
+    capabilities.push(CLAUDE_MODEL_CATALOG_CAPABILITY.to_string());
     ClaudeCodeCapabilityProbe {
         result: agent_probe_result(
             AdapterKind::ClaudeCodeCli.as_str(),
@@ -649,7 +683,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
             None,
             probed_at,
         ),
-        model_aliases,
+        models,
     }
 }
 
@@ -1109,7 +1143,7 @@ fn claude_code_probe_failure(
     result.failure = Some(failure);
     ClaudeCodeCapabilityProbe {
         result,
-        model_aliases: Vec::new(),
+        models: Vec::new(),
     }
 }
 
@@ -1128,23 +1162,98 @@ fn public_probe_status(
     }
 }
 
-fn claude_code_model_aliases(help: &str) -> Vec<String> {
-    // Claude Code currently exposes model selection but not a machine-readable
-    // model catalog. Only advertise aliases explicitly named by the installed
-    // binary instead of freezing a version-specific model list in Rovai-ai.
-    ["sonnet", "opus", "haiku", "fable"]
-        .into_iter()
-        .filter(|alias| {
-            help.contains(&format!("'{alias}'")) || help.contains(&format!("\"{alias}\""))
-        })
-        .map(str::to_string)
-        .collect()
+/// Uses the same inherited environment and active PATH overlay as an AgentRun.
+/// No model, permission, settings or provider override is installed by discovery.
+async fn claude_code_model_catalog(
+    path: &Path,
+    deadline: Duration,
+) -> Result<Vec<ModelDescriptor>> {
+    let mut command = runtime_command(path);
+    command.args([
+        "--print",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--no-session-persistence",
+    ]);
+    let mut process = RuntimeProbeProcess::spawn(
+        &mut command,
+        ACP_STDOUT_LIMIT,
+        DEFAULT_CAPTURE_LIMIT,
+        DEFAULT_LINE_LIMIT,
+        DEFAULT_CLEANUP_TIMEOUT,
+    )
+    .context("failed to start Claude Code model initialization")?;
+    let result = {
+        let (stdin, lines) = process.split_io()?;
+        let query = async {
+            let request_id = uuid::Uuid::new_v4().to_string();
+            write_json_line(
+                stdin,
+                &json!({
+                    "type": "control_request", "request_id": request_id,
+                    "request": { "subtype": "initialize" },
+                }),
+            )
+            .await?;
+            while let Some(line) = lines.next_line().await? {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let message: Value = serde_json::from_str(&line)
+                    .context("claude_model_catalog_incompatible: invalid initialization frame")?;
+                if message.get("type").and_then(Value::as_str) == Some("control_request") {
+                    anyhow::bail!(
+                        "claude_model_catalog_incompatible: initialization requires interactive control"
+                    );
+                }
+                if message.get("type").and_then(Value::as_str) != Some("control_response") {
+                    // system.init describes a current model, not the selectable catalog.
+                    continue;
+                }
+                let response = &message["response"];
+                if response.get("request_id").and_then(Value::as_str) != Some(request_id.as_str()) {
+                    continue;
+                }
+                if response.get("subtype").and_then(Value::as_str) != Some("success") {
+                    anyhow::bail!(
+                        "Claude Code initialize rejected: {}",
+                        response
+                            .get("error")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown control error")
+                    );
+                }
+                return claude_code_models(&response["response"]);
+            }
+            anyhow::bail!("Claude Code exited before returning the initialization model catalog")
+        };
+        timeout(deadline, query)
+            .await
+            .context("Claude Code model initialization timed out")
+            .and_then(std::convert::identity)
+    };
+    // Reap on success, protocol failure and deadline expiry before publishing a result.
+    let stderr = process.finish().await?;
+    match result {
+        Ok(models) => Ok(models),
+        Err(error) if !stderr.bytes.is_empty() => Err(error.context(format!(
+            "Claude Code initialization stderr: {}",
+            String::from_utf8_lossy(&stderr.bytes)
+        ))),
+        Err(error) => Err(error),
+    }
 }
 
 fn claude_code_required_capabilities() -> Vec<String> {
     [
         "cli.print",
         "output.json",
+        "input.stream_json",
+        "session.no_persistence",
+        CLAUDE_MODEL_CATALOG_CAPABILITY,
         "conversation.resume",
         "conversation.create",
         "context.charter.native_append",
@@ -3261,6 +3370,9 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
 
 #[cfg(all(test, unix))]
 mod native_home_probe_tests;
+
+#[cfg(all(test, unix))]
+mod claude_catalog_tests;
 
 #[cfg(all(test, unix))]
 mod tests {
