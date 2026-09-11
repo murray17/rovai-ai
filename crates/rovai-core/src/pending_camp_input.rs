@@ -64,6 +64,17 @@ pub struct CampPendingInputsView {
     pub execution_active: bool,
     pub items: Vec<PendingCampInputView>,
     pub edit_session: Option<PendingInputEditSession>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub submission_outcomes: Vec<PendingCampInputSubmissionOutcome>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingCampInputSubmissionOutcome {
+    pub pending_input_id: String,
+    pub state: String,
+    pub camp_turn_id: Option<String>,
+    pub addressed_agent_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,7 +253,48 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
         execution_active: has_nonterminal_execution(connection, camp_id)?,
         items,
         edit_session: load_edit_session(connection, camp_id)?,
+        submission_outcomes: Vec::new(),
     })
+}
+
+/// Exact, Camp-scoped publication receipts for this workspace's submitted inputs.
+/// Missing and cancelled inputs retire UI intent without selecting another Run.
+pub fn read_submission_outcomes(
+    database: &Database,
+    camp_id: &str,
+    pending_input_ids: &[String],
+) -> Result<Vec<PendingCampInputSubmissionOutcome>> {
+    let mut statement = database.connection().prepare(
+        "SELECT input.state, input.published_camp_turn_id, message.addressed_agent_ids_json
+         FROM pending_camp_input AS input LEFT JOIN camp_message AS message
+           ON message.id = input.published_camp_message_id AND message.camp_id = input.camp_id
+         WHERE input.camp_id = ?1 AND input.id = ?2",
+    )?;
+    pending_input_ids
+        .iter()
+        .map(|id| {
+            let record = statement
+                .query_row(params![camp_id, id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .optional()?;
+            let (state, camp_turn_id, recipients) =
+                record.unwrap_or_else(|| ("missing".into(), None, None));
+            Ok(PendingCampInputSubmissionOutcome {
+                pending_input_id: id.clone(),
+                state,
+                camp_turn_id,
+                addressed_agent_ids: recipients
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()?
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 fn render_input_body(connection: &Connection, content: &ComposerDocument) -> Result<String> {
@@ -914,6 +966,31 @@ mod tests {
             .unwrap();
         let published = publish(&mut database, &camp_id, &b.id, b.revision);
         assert_eq!(published.result.code, "camp_turn.queued");
+        let outcomes = read_submission_outcomes(
+            &database,
+            &camp_id,
+            &[b.id.clone(), c.id.clone(), "missing".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|item| item.state.as_str())
+                .collect::<Vec<_>>(),
+            ["published", "queued", "missing"]
+        );
+        assert_eq!(outcomes[0].pending_input_id, b.id);
+        assert_eq!(
+            outcomes[0].camp_turn_id.as_deref(),
+            published.result.payload["campTurnId"].as_str()
+        );
+        assert!(outcomes[1].camp_turn_id.is_none());
+        assert!(outcomes[2].camp_turn_id.is_none());
+        let foreign =
+            read_submission_outcomes(&database, "another-camp", std::slice::from_ref(&b.id))
+                .unwrap();
+        assert_eq!(foreign[0].state, "missing");
+        assert!(foreign[0].camp_turn_id.is_none());
         let saved = crate::message_quote::load_quotes(
             database.connection(),
             crate::message_quote::QuoteStorage::CampMessage,
@@ -1409,6 +1486,11 @@ mod tests {
             None,
             PendingInputEditAction::Delete,
         );
+        let removed =
+            read_submission_outcomes(&database, &camp_id, std::slice::from_ref(&continued.id))
+                .unwrap();
+        assert_eq!(removed[0].state, "cancelled");
+        assert!(removed[0].camp_turn_id.is_none());
         send(&mut database, &camp_id, text("new default route"));
         database
             .connection()
@@ -1429,6 +1511,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(route, "[\"agent_2\"]");
+        let outcome =
+            read_submission_outcomes(&database, &camp_id, std::slice::from_ref(&item.id)).unwrap();
+        assert_eq!(
+            outcome[0].addressed_agent_ids,
+            ["agent_2"],
+            "UI focus follows the published recipients, not the former default lead"
+        );
     }
 
     #[test]
