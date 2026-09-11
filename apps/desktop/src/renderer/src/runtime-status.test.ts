@@ -218,6 +218,10 @@ describe('Runtime user status projection', () => {
             availability(state, 'zcode-app')
           )
           expect(`${result.label} ${result.detail}`).not.toMatch(/测试|试运行|实验性/)
+          if (state === 'ready') {
+            expect(result.status).toBe('available')
+            expect(result.label).toBe('可用')
+          }
         }
       }
     }

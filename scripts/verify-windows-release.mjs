@@ -321,6 +321,7 @@ async function verifyBinary(label, path) {
 function startCore(executable, dataDirectory) {
   const child = spawn(executable, [
     ...coreDataDirectoryArguments(dataDirectory),
+    '--mcp-config-path', join(dataDirectory, 'mcp.json'),
     '--skill-library-root', join(dataDirectory, 'managed-skill-library')
   ], {
     cwd: appDirectory,
