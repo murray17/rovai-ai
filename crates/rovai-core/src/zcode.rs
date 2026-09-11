@@ -166,10 +166,10 @@ pub fn bundle_members(executable: &Path) -> Result<Vec<PathBuf>> {
 pub fn default_executables() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
-        return windows_default_executables(
+        windows_default_executables(
             std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new),
             std::env::var_os("ProgramFiles").as_deref().map(Path::new),
-        );
+        )
     }
     #[cfg(not(windows))]
     {
