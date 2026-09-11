@@ -1,7 +1,7 @@
 ---
 document_type: implementation-plan
 authority: evaluation-source-materials-change
-status: in_progress
+status: implemented
 last_updated: 2026-09-11
 ---
 
@@ -34,4 +34,13 @@ last_updated: 2026-09-11
 
 ## 实际结果
 
-待实施与验证，不预填通过。
+2026-09-11 按上述预算完成一次 12 Case 保留证据重评，Judge 为 sol/medium，评分为 2.8.0。评测器提交 `063c612f6da1adb152b701c8217faeb243d6a9ad`；原任务执行仍属于产品提交 `f32874d596eeed638b446da7258dc156f1b8df1c` 和任务集 2.9.0。本次没有新的 Runtime 或验收命令执行，不能将重评差异解释为队伍能力提升。
+
+- DEMO-110：同一复现脚本对旧输入失败、对 v10 输入通过。两份真实 Outcome Judge 均引用独立来源，确认 19,975 字符和末段签收条件；声明一致性满足，Case 质量 100，覆盖率 100%。
+- 12/12 来源预检完整，逐条比较预检材料与最终 Outcome 输入，正文投影完全一致。原 observations、规则和硬性检查结果及旧报告摘要保持不变。
+- 106 项实现测试及文档治理通过。报告分数独立复算一致，62 个 HTML 本地链接通过检查。
+- 全套结果仍不可发布完整总分：DEMO-106 保留功能验收失败，质量 39.58；DEMO-104 的 Judge 将 Camp 报告／已发布结论声明纳入核验后得到未知，暴露判定范围不稳定；DEMO-105 的一份 Outcome Judge 超时。34 次 Judge 请求中 33 次取得响应、1 次超时，全部保留。全套加权质量评价覆盖率 92.01%，硬性通过 11/12；不是全套通过。
+
+证据目录标识为 `evaluation-source-evidence-20260911-i4y29ejb`，包含 `reports/attempt-01/report.json`、离线 HTML、`reproduction-verification.json`、`source-projection-verification.json` 和 `run-verification.json`。演示时先查看 DEMO-110 的逐声明审计及来源引用，再查看原始重现失败和新输入通过，最后查看保留的 DEMO-106 失败以及 104/105 缺口。
+
+保证范围仅为本协议声明且已持久化的 Camp 用户来源；外部网页、附件等没有因此获得完整证据。超限、缺失和摘要不符仍在 Judge 前失败。104 的范围判定与 Judge 超时稳定性是另外的待治理问题，本次未修改评分范围或反复调用直至通过。
