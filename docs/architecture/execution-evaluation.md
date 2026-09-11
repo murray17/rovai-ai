@@ -3,7 +3,7 @@ document_type: architecture
 architecture: execution-evaluation
 authority: dual-track-evaluation-component-boundaries
 status: accepted
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # 双轨执行评测
@@ -31,7 +31,7 @@ flowchart LR
   Files --> Automation[既有 Automation 分析 Agent]
 ```
 
-Core 是执行状态与元数据查询的权威，Rust 导出器只读取既有投影和去重事件。普通用户 CLI 经既有 Main IPC 获取受限快照；DailyAnalysisService 在用户显式配置后，用同一读取能力把日报准备到分析工作区。配置保存在 User Automation 受保护目录，不向受管 Runtime 暴露用户 socket 或全局查询工具。
+Core 是执行状态与元数据查询的权威，Rust 导出器只读取既有投影和去重事件。普通用户 CLI 经既有 Main IPC 获取受限快照；DailyAnalysisService 在用户显式配置后，用同一读取能力把日报准备到分析工作区。配置保存在 User Automation 本机私有目录，不向受管 Runtime 暴露用户 socket 或全局查询工具。
 
 日报逻辑位于共享 TypeScript 模块，供 Node CLI 与 Electron Main 复用；它负责日历边界、冻结、趋势、可比较性和分析输入。Main 准备器与原有 Automation 派发相互独立，准备受阻不能使普通定时任务停摆。分析 Agent 必须验证昨日报告身份再解释，不能把旧文件当成功。
 
@@ -41,6 +41,6 @@ Gate CLI 只编排既有测试与 Qualification 能力。用户终端的 `rovai 
 
 共享 HTML 生成器只投影已保存 JSON，不拥有第二套统计事实。固定交互脚本受 CSP hash 限制，文本转义，证据链接限定报告目录且拒绝 symlink。每日分析完成记录是轻量文件记录：校验报告／输入摘要和引用存在性，保留全部提交，替换最新分析指针与 HTML；分析 Agent 不修改统计。生成、分析与页面分别失败时，已有证据保持可读取。
 
-每周 CLI 与自动触发分开验收。macOS 受管 Agent 内启动子 Runner 的旧路径存在嵌套沙箱限制；Main 现在观察已有 AutomationRun，以 runId 去重并在宿主启动受限 worker。Agent 等待当前 Camp 专属回执再解释报告，不获得用户 IPC。取消与 App 关闭收口本次 worker 及后代；重启不重派发。具体边界见 [User Automation v4](../contracts/user-automation-v4.md)。每日 Host 准备统计文件、Automation 读取解释的路径保持。
+每周 CLI 与自动触发分开验收。旧构建曾因 Rovai 外层沙箱阻止嵌套 Runner；该包装已由 [Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md) 退役。Main 继续观察已有 AutomationRun，以 runId 去重并在宿主启动受限 worker。Agent 等待当前 Camp 专属回执再解释报告，不获得用户 IPC。取消与 App 关闭收口本次 worker 及后代；重启不重派发。具体边界见 [User Automation v5](../contracts/user-automation-v5.md)。每日 Host 准备统计文件、Automation 读取解释的路径保持。
 
 第一版不增加执行来源／历史 build 数据列。代价是日报覆盖必须显式声明未知；后续若补 provenance，应独立设计所有入口及 A2A 继承，不能只补一列后回填推测。精确记忆计数也不在此阶段提前近似实现。

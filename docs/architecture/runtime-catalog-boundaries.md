@@ -251,15 +251,16 @@ Runtime 返回 `disabled` 或 `local_bridged`：只有后者才同时在 initial
 保留各自已资格验证的内部 Shell 路径。
 
 Bridge 只在当前 AgentRun owner、execution epoch、Session 与 Active Prompt fence 内创建本地进程。进程从已
-admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境、
-macOS protected-tree deny 和平台进程树所有权。省略 cwd 时使用 execution root；显式 cwd 只要求为已存在的绝对
+admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境和
+平台进程树所有权。当前 [Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md) 不再附加 macOS
+protected-tree deny。省略 cwd 时使用 execution root；显式 cwd 只要求为已存在的绝对
 目录，不做 execution-root containment。原始 application 与结构化 argv 会和请求 cwd/env 一次性交给 Managed Process：
 先应用最终上下文，再解析 bare/relative command；Windows `.cmd/.bat` 重新进入 CommandShim identity，而不是 EXE-only
 派生路径。Runtime 的 sandbox/permission mode 与操作系统拥有 Shell/文件权限，Core
 不再通过 `scoped_path()` 建立第二层 Terminal cwd allowlist。Run cancel、detach、Host EOF/shutdown 与 fleet reap
 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr 使用有界私有 buffer，Terminal wire、
 output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
-[ACP Client Terminal v2](../contracts/acp-client-terminal-v2.md)。
+[ACP Client Terminal v3](../contracts/acp-client-terminal-v3.md)。
 
 <a id="native-home-probes"></a>
 

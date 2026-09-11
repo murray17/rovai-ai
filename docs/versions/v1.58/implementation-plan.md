@@ -4,7 +4,7 @@ version: v1.58
 lifecycle: current
 authority: implementation-status
 status: in_progress
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # v1.58 实施与验证
@@ -80,8 +80,19 @@ last_updated: 2026-09-10
 
 ### 宿主链路与后续失败复核
 
-后续增量见[宿主接入与失败复核](evaluation-host-integration.md)。已完成真实 Rovai 定时触发、宿主回归、报告和分析 Agent 交付，以及每日统计到真实分析登记的链路。周回归保留 degraded，缺 Judge 与预算未运行项不算通过；开发版 Electron 的 owner CLI 提交／取消也已实测。旧回归记录保持原样，新增 Case 111 v2 和 ledger 1.1 的版本、修正依据、定向补验与重放在该记录单列。当前权威合同为 [Execution Evaluation v3](../../contracts/execution-evaluation-v3.md) 与 [User Automation v4](../../contracts/user-automation-v4.md)。
+后续增量见[宿主接入与失败复核](evaluation-host-integration.md)。已完成真实 Rovai 定时触发、宿主回归、报告和分析 Agent 交付，以及每日统计到真实分析登记的链路。周回归保留 degraded，缺 Judge 与预算未运行项不算通过；开发版 Electron 的 owner CLI 提交／取消也已实测。旧回归记录保持原样，新增 Case 111 v2 和 ledger 1.1 的版本、修正依据、定向补验与重放在该记录单列。当前权威合同为 [Execution Evaluation v14](../../contracts/execution-evaluation-v14.md) 与 [User Automation v5](../../contracts/user-automation-v5.md)。
 
 ## 明确限制
 
 精确 Memory 计数、全来源 provenance、历史 Run build 和完整 native Tool 错误不可用。共用主机上的隔离目录不等于独立主机 Formal qualification。小样本回归不证明统计上的非劣性；用户确认、测试通过与报告生成均不证明实际能力提升。首批独立验收保留集未运行；不会把公开回归 Case 改名冒充保留样本。
+
+
+## Runtime 外层沙箱清理
+
+- 实现：删除 Managed Process 的 denial-root 全局配置、捕获/派生字段、`sandbox-exec` 包装及 Core 初始化调用；Agent CLI 防误调用继续生效。
+- Rust 测试退役：删除 `macos_runtime_sandbox_denies_user_automation_root_but_keeps_other_files_visible`，其生产路径及 OS denial 合同同时退出。现有 Unix stdio/PID/reap 与 Windows Job 测试继续拥有进程合同；现有 CLI 测试扩充单标记、双标记和空值 case，不增加平行 Rust 测试。
+- 回归 owner：`core-startup-availability.test.mjs` 新增真实 Core 启动 → Runtime Probe → 子沙箱的集成断言。仅测试 Managed Process 无法捕获旧 Core 启动时注册的全局沙箱，因此使用独立数据和 Skill Library fixture；不提交模型请求。
+- 旧构建实测：同一新回归在已安装旧 Core 上失败，子沙箱退出 `71`；候选 Core 返回 `0`。最小独立命令在当前 Codex 环境成功。
+- 本地门禁：`pnpm typecheck`、完整 `pnpm test`（Vitest 174 文件、1755 测试及 Node 套件）、Rust PR 范围（553 lib、35 CLI、309 slow）、Core binary 测试（236 通过、5 个既有 ignored）、Clippy、格式与通用文档治理通过。
+- 启动集成：完整 Core startup suite 10 通过、1 个既有 Windows-only Pi 检查跳过；同时将该文件两处已失效的 Composer RPC 夹具改为当前 v2 document，保留旧队列恢复的历史存储夹具。真实 CLI 的单标记、双标记及空标记场景均在 User Automation dispatch 前退出 `2`。
+- 最小回归命令：`node --test --test-name-pattern='Core-managed macOS probes' scripts/lib/core-startup-availability.test.mjs`。本条 supersedes 本文较早批次的沙箱准入约束，旧失败记录不改写。

@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.58
 lifecycle: current
 authority: decision-rationale
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # v1.58 版本决定
@@ -53,3 +53,22 @@ last_updated: 2026-09-10
 将所有未获得执行证明的声明视为未知，会让可观察的交付依据缺陷无法扣分；将其全部视为虚假则错误推断了历史事实。选择评价声明与交付依据的匹配程度，新增未充分佐证状态，保留评测器采集不足的未知。分数下降表示交付依据不足，不证明事件未发生。
 
 代价是 Judge 必须区分交付问题与评测来源问题，仍可能产生真正未知；不能承诺任意输入一定得到完整总分。评分语义升级后统一重评，历史分数不直接连接。
+
+<a id="v1-58-d05"></a>
+## V1.58-D05：User Automation 采用 CLI 防误调用，移除 Runtime 外层沙箱
+
+- 状态：accepted
+- 日期：2026-09-11
+- 当前权威：[User Automation v5](../../contracts/user-automation-v5.md)、[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md)、[ACP Client Terminal v3](../../contracts/acp-client-terminal-v3.md)、[User Automation 架构](../../architecture/user-automation.md)
+
+本机用户明确要求 Agent 不使用用户命令，但仅需防止正常执行中的误调用。V1.21-D03 为抵御同 UID
+进程主动伪装而给所有 Runtime 添加文件沙箱，导致 macOS Runtime 内再次创建沙箱时出现
+`sandbox_apply: Operation not permitted`，阻断正常开发与验收。
+
+选择删除 protected-tree 配置、全局状态、启动包装与旧 deny 测试，保留 CLI 对 Run 标记的隐藏与拒绝。
+用户 IPC 的实例认证、封闭命令及业务授权保持；Runtime 原生权限由 Runtime 实施。正常环境下的误调用
+仍被拒绝，同 UID 进程主动清除标记或构造用户 IPC 不属于保证范围。旧版本的执行证据保留原样。
+
+继续保留外层沙箱会保持较强文件隔离但延续已复现的兼容阻塞；新增进程身份隔离或专用执行代理超出
+本次防误调用目标，因此不采用。本决定替代 V1.21-D03 的 OS denial 选择，不把协议身份分离宣称为
+本机恶意进程安全边界，也不改变 Windows 平台准入或进程回收。

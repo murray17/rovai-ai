@@ -43,8 +43,6 @@ use pi::{
     PiAgentRunRuntimeRequest, PiIncoming, PiPromptImage, PiRpcRuntimeAdapter, PiRuntime,
     PreparedPiPromptImage, prepare_prompt_images,
 };
-#[cfg(target_os = "macos")]
-use rovai_core::managed_process::configure_user_automation_denial_root;
 use rovai_core::{
     action::{
         AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
@@ -15030,8 +15028,6 @@ async fn run_core(
         None,
         None,
     )?;
-    #[cfg(target_os = "macos")]
-    configure_user_automation_denial_root(&data_dir.join("automation-v1"))?;
     let runtime_camp_files_root = parse_runtime_camp_files_root()?;
     let attachment_views = match CampAttachmentViewStore::admit(
         &runtime_camp_files_root,

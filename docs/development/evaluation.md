@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: dual-track-evaluation-workflow
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # Gate、每周回归与每日分析
@@ -83,7 +83,7 @@ API 凭据仅通过命名环境变量读取；不写进配置或报告。默认�
 
 ## 每周真实任务回归
 
-用户终端可以运行仓库 CLI，也可以通过已运行的 Desktop 提交宿主 job。旧的“定时 Agent 直接启动 Runner”路径在 macOS 曾遇到 nested `sandbox-exec` exit 71；现在由 App 宿主启动同一 Runner，Agent 读取对应报告。安装与授权边界见 [User Automation v4](../contracts/user-automation-v4.md)。
+用户终端可以运行仓库 CLI，也可以通过已运行的 Desktop 提交宿主 job。旧的“定时 Agent 直接启动 Runner”路径在 macOS 曾遇到 nested `sandbox-exec` exit 71；现在由 App 宿主启动同一 Runner，Agent 读取对应报告。安装与授权边界见 [User Automation v5](../contracts/user-automation-v5.md)。
 
 先通过既有界面创建绑定评测目录的 Automation，然后从用户终端注册执行器并绑定已冻结的 weekly plan。需要 Node >=24、仓库依赖和 Rust/Git 工具链；这些命令不安装软件。
 
@@ -127,7 +127,7 @@ Main 先把规则统计、HTML／SVG 和分析输入写入指定工作区；每�
 
 在后续部署时设置实际时间，建议当地时间 08:00 给 Host 留出准备时间。Host 在 App 内每分钟检查，失败退避一小时；如果当天尚无完整输入，分析应诚实失败，不能把旧报告当成昨天。关闭对应 Automation 即停止准备。当前版本未提供外部后台常驻保证。
 
-离线演示可以使用已实际导出的文件：`eval:daily --config <json> --date YYYY-MM-DD --trace <trace.json>`；在线用户调用省略 `--trace`，配置还需指定 bundled `rovai` 可执行文件。配置为 `{ "timezone": "Asia/Shanghai", "output": "/private/daily", "cli": "/app/bin/rovai", "scope": { "campIds": [], "excludeCampIds": [], "excludeAutomationIds": [] } }`。手工导出入口是 `rovai app trace export`；完整口径见 [User Automation v4](../contracts/user-automation-v4.md)。
+离线演示可以使用已实际导出的文件：`eval:daily --config <json> --date YYYY-MM-DD --trace <trace.json>`；在线用户调用省略 `--trace`，配置还需指定 bundled `rovai` 可执行文件。配置为 `{ "timezone": "Asia/Shanghai", "output": "/private/daily", "cli": "/app/bin/rovai", "scope": { "campIds": [], "excludeCampIds": [], "excludeAutomationIds": [] } }`。手工导出入口是 `rovai app trace export`；完整口径见 [User Automation v5](../contracts/user-automation-v5.md)。
 
 ## 报告解读与维护
 

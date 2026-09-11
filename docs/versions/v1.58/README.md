@@ -35,15 +35,21 @@ last_updated: 2026-09-11
 
 代码及本地验证、隔离定时链路和首次真实 Judge 校准已运行；完整对照、独立保留集、固定模型 snapshot 与部分取证覆盖仍有缺口，版本状态保持 `in_progress`，详见[实施计划](implementation-plan.md)和[预算校准记录](evaluation-budget-calibration.md)。设计、Case 准入与合同测试不能证明任务质量提升；各类运行证据分别记录，不相互替代。
 
+## Runtime 外层沙箱清理
+
+按用户确认的防误调用边界，移除 Rovai 的 macOS Runtime 外层沙箱，保留 Agent CLI 对 `rovai app` 的拒绝。
+取舍见 [V1.58-D05](decisions.md#v1-58-d05)，当前合同为 [User Automation v5](../../contracts/user-automation-v5.md)
+与 [Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md)。实现与定向验证记录见[实施计划](implementation-plan.md#runtime-外层沙箱清理)。原评测与平台验收缺口保持独立。
+
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | main 的 v1.57 冻结，本概览、实施计划及[版本索引](../README.md)建立唯一 current v1.58；旧分支报告身份不重写 |
-| Decisions | 已更新 | [V1.58-D01](decisions.md#v1-58-d01)记录元数据与分析 Agent 的权限分离 |
-| Contracts | 已更新 | [Execution Evaluation v14](../../contracts/execution-evaluation-v14.md)、[User Automation v4](../../contracts/user-automation-v4.md)及索引 |
+| Decisions | 已更新 | [V1.58-D01](decisions.md#v1-58-d01)记录元数据与分析 Agent 的权限分离；[V1.58-D05](decisions.md#v1-58-d05)明确 CLI 防误调用边界并移除 Runtime 外层沙箱 |
+| Contracts | 已更新 | [Execution Evaluation v14](../../contracts/execution-evaluation-v14.md)、[User Automation v5](../../contracts/user-automation-v5.md)、[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md)、[ACP Client Terminal v3](../../contracts/acp-client-terminal-v3.md)及索引 |
 | Architecture | 已更新 | [双轨执行评测](../../architecture/execution-evaluation.md)、User Automation 当前路由 |
-| UI | 已更新 | 复用 Camp 与文件入口，增加离线 HTML、质量和协作对照；保留 SVG/Markdown/JSON，无 Renderer 或 App 沙箱改动 |
+| UI | 已更新 | 复用 Camp 与文件入口，增加离线 HTML、质量和协作对照；保留 SVG/Markdown/JSON，Runtime 外层沙箱清理不涉及 Renderer 或 Electron 沙箱 |
 | Runtime Activity | 确认无需更新 | 只读取当前 classifier 既有证据，不修改分类、事件或 Activity 投影 |
 | Runtime compatibility | 确认无需更新 | 复用现有 Runtime Adapter；局部评测验证不提升平台或 Runtime 资格 |
 | Documentation routing | 已更新 | 文档导航、开发入口、上下文治理、Contracts、Architecture 与 CURRENT 纳入双轨评测 |
