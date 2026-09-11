@@ -604,7 +604,7 @@ try {
       const rail = document.querySelector('.composer:has(#camp-message) .composer-route-rail')
       const summary = rail?.querySelector('.mention-target-summary')
       return rail?.getAttribute('aria-label') === '接收者路由'
-        && summary?.textContent?.trim() === ${JSON.stringify(`默认由 Lead · ${targetMembers[0].displayName}接收`)}
+        && summary?.textContent?.trim() === ${JSON.stringify(`默认由队长 @${targetMembers[0].displayName} 接收`)}
     })()`)
     const defaultRouteInspection = await evaluate(running.cdp, `(() => {
       const rail = document.querySelector('.composer:has(#camp-message) .composer-route-rail')

@@ -921,7 +921,7 @@ describe('task event projections', () => {
       }
     ]
     expect(composerRecipientSummary({ version: 2, segments: [] }, members))
-      .toBe('默认由 Lead · 叮叮接收')
+      .toBe('默认由队长 @叮叮 接收')
     expect(composerRecipientSummary({ version: 2, segments: [
       { kind: 'atom', atom: { type: 'member', agentId: 'agent_2' } },
       { kind: 'atom', atom: { type: 'member', agentId: 'agent_1' } }
@@ -3375,7 +3375,7 @@ describe('task event projections', () => {
     expect(markup).toContain('给 洛可 发消息')
     expect(markup).toContain('集结队伍，写下这次冒险的目标…')
     expect(markup).not.toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
-    expect(markup).not.toContain('默认由 Lead · 洛可接收')
+    expect(markup).not.toContain('默认由队长 @洛可 接收')
     expect(markup).toContain('开始这段协作')
     expect(markup).toContain('class="empty-camp-mark" data-brand-mark="horizon" data-brand-layout="separated"')
     expect(markup).not.toContain('data-brand-point="rendezvous"')

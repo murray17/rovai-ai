@@ -258,7 +258,7 @@ Agent 公共消息继续左对齐，仅正文使用与用户消息相同的雾�
 回复当前可寻址 Agent 是一次明确的用户双意图：同一 Draft revision 设置 reply target，并插入或复用
 可见 Member Mention。已有其他 Mention 时全部保留，
 `@所有队员` 已覆盖作者时不重复插入。回复当前用户自己的消息只建立引用，不从原消息的历史 recipient、
-作者或 reply relation 猜 Agent；无 Mention 时必须明确显示“默认由 Lead · {name}接收”。显式 Mention、
+作者或 reply relation 猜 Agent；无 Mention 时必须明确显示“默认由队长 @{name} 接收”。显式 Mention、
 `@所有队员`、reply 或接收者修复已经足以表达路由，不再重复显示“实际接收者”汇总。
 
 原作者已退出 Camp、变为 `away`、被移除或不可解析时，reply dock 保留引用，但不插入失效 Mention，
@@ -294,7 +294,10 @@ Mention、修复或手动接收者修改时，Composer 输入面上方的独立�
 
 标签与默认 Lead 文案占用同一行。标签出现时不显示默认文案；显式 Member Mention、多人 Mention、
 `@所有队员` 和 reply 出现时两者都隐藏。点击标签的关闭按钮只取消当前来源延续并恢复
-“默认由 Lead · {name}接收”；同一 source 在导航、重载或重新进入 Camp 后不得复现。
+“默认由队长 @{name} 接收”；同一 source 在导航、重载或重新进入 Camp 后不得复现。
+
+默认接收人与 continuation 均将 `@姓名` 用同一 `--mention-ink` 与字重突出；界面角色名称使用“队长”。
+默认接收人提示只表达当前路由，不向正文插入 Mention。
 
 reply 比 continuation 优先。回复 Agent 后取消引用，自动加入的 Mention 保留，因此延续不恢复；回复用户
 消息未产生 Mention 且用户未改址时，取消可恢复此前只被隐藏的标签。用户主动改变过接收者后，即使再删光
@@ -763,6 +766,10 @@ Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` �
 接收者提示始终预留一行 34px 高度及 5px 底部间距。草稿首次 loading 时显示无接收者文案、无循环动画的模糊占位；
 ready 后原位显示默认 Lead 或 continuation。显式 Mention、reply 或错误状态不显示路由时保留空白行，
 避免路由加载或显隐挤动会话内容。占位不提前声明接收者，也不提前启用编辑或发送。
+
+新建会话成功后的首次打开，将同一 Camp 的 Core Draft 读取与 Open 投影并行准备，在首次绘制前一次性交给
+Draft Coordinator，因此直接呈现已就绪的默认接收人，不重复读取或闪现模糊占位。该交接不缓存供后续导航复用；
+普通重新进入仍读取当前草稿。读取失败继续走 loading/error 与重试流程，不能用空时间线推定 revision-zero Draft。
 
 Draft 首次读取只有 loading、ready 和 error。loading 与 error 时正文、附件、Reply/Continuation 和发送不可操作；
 error 在 Composer 上方原位显示“草稿无法加载”、具体错误与“重新加载草稿”，不能渲染可编辑的 revision-zero 空
