@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-09-09
+last_updated: 2026-09-11
 ---
 
 # 长期系统架构
@@ -39,7 +39,7 @@ last_updated: 2026-09-09
 | [Camp Activation Lifecycle](camp-activation-lifecycle.md) | 一键 Pending、Composer Draft、统一离开 guard、Navigation、Restorable Location、首消息原子激活与启动清理的组件权威 |
 | [Camp Composer Draft](camp-composer-draft.md) | Lexical 本地 EditorState、唯一 Renderer Draft Mutation Coordinator、Text + inline Decorator Atom、同步 Typeahead、低频 Snapshot、显式 Core content 回写、交互锁、统一 Camp Surface 离开与 App 退出前保护、加载错误、source refs、Pending 与 exact-revision send 的组件权威 |
 | [Camp Open Read Path](camp-open-read-path.md) | Desktop 两阶段冷启动壳层、enter/reconcile、不读 event_log 的业务 open projection、渐进消息、当前会话精确查找/anchored 定位、Run detail、high-water/cache 与 meaningful-paint 后台维护边界 |
-| [Camp Attachments：Source Refs、Agent Managed Artifacts 与 Legacy View](camp-published-attachment-view.md) | Desktop 用户 source refs、Pending 原生携带、Run-local resolver、Agent Managed v2 及 legacy Authority/View 兼容边界 |
+| [Camp Attachments：Source Refs、Agent Managed Artifacts 与 Legacy View](camp-published-attachment-view.md) | Desktop 用户 source refs、Pending 原生携带、宿主重检后原路径投影、Agent Managed v2 及 legacy Authority/View 兼容边界 |
 | [First-run Onboarding](first-run-onboarding.md) | Full Core authority-origin 首次安装 admission、schema 2 三页状态、无 Runtime 延后完成、幂等 provisioning 与 Draft-only 第四页边界 |
 | [File Preview](file-preview.md) | 显式 Markdown 消息资源入口、来源上下文解析、Main canonical 路径投影、窗口内 Camp Tab shell、项目内子文件独立恢复来源、无副作用恢复、binding generation、具体文件能力/重开、分页、Root Grant、watcher、HTML 协议与资源生命周期 |
 | [当前基础架构不变量](foundational-invariants.md) | Core、Camp、身份、协作、Runtime、Context、Memory、Skill、Evidence、Qualification 与 Renderer 的跨主题当前规范内核 |

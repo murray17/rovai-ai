@@ -7,9 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     db::Database,
-    local_attachment_snapshot::{
-        DIRECTORY_MEDIA_TYPE, normalize_display_name, validate_runtime_safe_leaf,
-    },
+    local_attachment_snapshot::{DIRECTORY_MEDIA_TYPE, normalize_display_name},
 };
 
 pub const EMPTY_SOURCE_ATTACHMENTS_JSON: &str = "[]";
@@ -623,90 +621,13 @@ pub fn load_agent_run_source_attachments(
 
 pub fn resolve_source_attachments_for_run(
     source_refs: &[LocalAttachmentSourceRef],
-    execution_root: &Path,
-    run_tmp: &Path,
 ) -> Result<Vec<String>> {
-    let canonical_execution_root = fs::canonicalize(execution_root)
-        .context("Execution root is unavailable while resolving Source Attachments")?;
-    let destination_root = run_tmp.join("source-attachments");
     let mut resolved = Vec::with_capacity(source_refs.len());
     for source_ref in source_refs {
         validate_source_attachment(source_ref).map_err(anyhow::Error::new)?;
-        let canonical_source = fs::canonicalize(&source_ref.source_path).with_context(|| {
-            format!("{}: Source Attachment could not be resolved", source_ref.id)
-        })?;
-        if canonical_source.starts_with(&canonical_execution_root) {
-            resolved.push(source_ref.source_path.clone());
-            continue;
-        }
-        fs::create_dir_all(&destination_root)
-            .context("Run Temp Source Attachment directory could not be created")?;
-        let display_name = normalize_display_name(&source_ref.display_name)?;
-        validate_runtime_safe_leaf(&display_name)?;
-        let destination = destination_root.join(format!("{}-{display_name}", source_ref.id));
-        if let Ok(metadata) = fs::symlink_metadata(&destination) {
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                fs::remove_dir_all(&destination)?;
-            } else {
-                fs::remove_file(&destination)?;
-            }
-        }
-        match source_ref.kind {
-            LocalAttachmentKind::File => {
-                fs::copy(&canonical_source, &destination).with_context(|| {
-                    format!(
-                        "Source Attachment {} could not be copied into Run Temp",
-                        source_ref.id
-                    )
-                })?;
-            }
-            LocalAttachmentKind::Directory => {
-                copy_directory_without_links(&canonical_source, &destination).with_context(
-                    || {
-                        format!(
-                            "Source Attachment {} could not be copied into Run Temp",
-                            source_ref.id
-                        )
-                    },
-                )?;
-            }
-        }
-        resolved.push(
-            destination
-                .to_str()
-                .context("Run Temp Source Attachment path must be valid UTF-8")?
-                .to_string(),
-        );
+        resolved.push(source_ref.source_path.clone());
     }
     Ok(resolved)
-}
-
-fn copy_directory_without_links(source: &Path, destination: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(source)?;
-    anyhow::ensure!(
-        metadata.is_dir() && !metadata.file_type().is_symlink(),
-        "Source Attachment directory is not a regular directory"
-    );
-    fs::create_dir(destination)?;
-    let mut entries = fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let source_child = entry.path();
-        let destination_child = destination.join(entry.file_name());
-        let child_metadata = fs::symlink_metadata(&source_child)?;
-        anyhow::ensure!(
-            !child_metadata.file_type().is_symlink(),
-            "Source Attachment directory contains a symbolic link"
-        );
-        if child_metadata.is_dir() {
-            copy_directory_without_links(&source_child, &destination_child)?;
-        } else if child_metadata.is_file() {
-            fs::copy(&source_child, &destination_child)?;
-        } else {
-            anyhow::bail!("Source Attachment directory contains an unsupported item");
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -739,86 +660,72 @@ mod tests {
     }
 
     #[test]
-    fn resolver_keeps_canonical_workspace_paths_and_copies_external_files() {
+    fn resolver_returns_exact_stored_paths_for_files_and_directories() {
         let root = std::env::temp_dir().join(format!("rovai-source-resolver-{}", Uuid::new_v4()));
-        let workspace = root.join("workspace");
-        let external = root.join("external");
-        let run_tmp = root.join("run-tmp");
-        fs::create_dir_all(&workspace).unwrap();
-        fs::create_dir_all(&external).unwrap();
-        fs::create_dir_all(&run_tmp).unwrap();
-        let workspace_file = workspace.join("inside.txt");
-        let external_file = external.join("outside.txt");
-        fs::write(&workspace_file, b"inside").unwrap();
-        fs::write(&external_file, b"outside").unwrap();
+        let directory = root.join("directory");
+        fs::create_dir_all(&directory).unwrap();
+        let file = root.join("file.txt");
+        fs::write(&file, b"content").unwrap();
         let refs = [
-            observe_source_attachment(&workspace_file, "inside.txt", Some("text/plain")).unwrap(),
-            observe_source_attachment(&external_file, "outside.txt", Some("text/plain")).unwrap(),
+            observe_source_attachment(&file, "file.txt", Some("text/plain")).unwrap(),
+            observe_source_attachment(&directory, "directory", None).unwrap(),
         ];
 
-        let resolved = resolve_source_attachments_for_run(&refs, &workspace, &run_tmp).unwrap();
-        assert_eq!(Path::new(&resolved[0]), workspace_file);
-        assert!(Path::new(&resolved[1]).starts_with(run_tmp.join("source-attachments")));
-        assert_eq!(fs::read(&resolved[1]).unwrap(), b"outside");
+        let resolved = resolve_source_attachments_for_run(&refs).unwrap();
+        assert_eq!(
+            resolved,
+            refs.iter()
+                .map(|source_ref| source_ref.source_path.clone())
+                .collect::<Vec<_>>()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
     #[test]
-    fn resolver_does_not_treat_workspace_symlink_escape_as_contained() {
+    fn resolver_preserves_a_top_level_symlink_path_after_following_its_kind() {
         use std::os::unix::fs::symlink;
 
         let root = std::env::temp_dir().join(format!("rovai-source-symlink-{}", Uuid::new_v4()));
-        let workspace = root.join("workspace");
-        let external = root.join("external.txt");
-        let run_tmp = root.join("run-tmp");
-        fs::create_dir_all(&workspace).unwrap();
-        fs::create_dir_all(&run_tmp).unwrap();
-        fs::write(&external, b"outside").unwrap();
-        let link = workspace.join("escape.txt");
-        symlink(&external, &link).unwrap();
-        let source_ref = observe_source_attachment(&link, "escape.txt", None).unwrap();
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.txt");
+        fs::write(&target, b"target").unwrap();
+        let link = root.join("link.txt");
+        symlink(&target, &link).unwrap();
+        let source_ref = observe_source_attachment(&link, "link.txt", None).unwrap();
 
-        let resolved =
-            resolve_source_attachments_for_run(&[source_ref], &workspace, &run_tmp).unwrap();
-        assert!(Path::new(&resolved[0]).starts_with(run_tmp.join("source-attachments")));
+        let resolved = resolve_source_attachments_for_run(&[source_ref]).unwrap();
+        assert_eq!(resolved, [link.to_string_lossy().into_owned()]);
         fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
     #[test]
-    fn resolver_rejects_links_and_special_nodes_inside_external_directories() {
+    fn resolver_does_not_scan_links_or_special_nodes_inside_directories() {
         use std::os::unix::{fs::symlink, net::UnixListener};
 
         // Unix-domain socket paths are very short on some platforms, so keep this fixture under
         // the canonical short temporary root rather than the per-user macOS temporary directory.
         let root = std::path::PathBuf::from("/tmp").join(format!("rvs-{}", Uuid::new_v4()));
-        let workspace = root.join("workspace");
-        let external = root.join("external");
-        let run_tmp = root.join("run-tmp");
-        fs::create_dir_all(&workspace).unwrap();
-        fs::create_dir_all(&external).unwrap();
-        fs::create_dir_all(&run_tmp).unwrap();
-        fs::write(external.join("regular.txt"), b"regular").unwrap();
-        symlink(external.join("regular.txt"), external.join("link.txt")).unwrap();
-        let linked = observe_source_attachment(&external, "external", None).unwrap();
-        let link_error =
-            resolve_source_attachments_for_run(&[linked], &workspace, &run_tmp).unwrap_err();
-        assert!(format!("{link_error:#}").contains("symbolic link"));
-
-        fs::remove_file(external.join("link.txt")).unwrap();
-        let socket_path = external.join("socket");
+        let directory = root.join("directory");
+        fs::create_dir_all(&directory).unwrap();
+        symlink(
+            directory.join("missing.txt"),
+            directory.join("dangling-link.txt"),
+        )
+        .unwrap();
+        let socket_path = directory.join("socket");
         let socket = UnixListener::bind(&socket_path).unwrap();
-        let special = observe_source_attachment(&external, "external", None).unwrap();
-        let special_error =
-            resolve_source_attachments_for_run(&[special], &workspace, &run_tmp).unwrap_err();
-        assert!(format!("{special_error:#}").contains("unsupported item"));
+        let source_ref = observe_source_attachment(&directory, "directory", None).unwrap();
+
+        let resolved = resolve_source_attachments_for_run(&[source_ref]).unwrap();
+        assert_eq!(resolved, [directory.to_string_lossy().into_owned()]);
         drop(socket);
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn validation_reports_missing_and_kind_changed_without_hashing_content() {
+    fn resolver_rechecks_missing_and_kind_changed_without_hashing_content() {
         let root =
             std::env::temp_dir().join(format!("rovai-source-validation-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
@@ -828,15 +735,23 @@ mod tests {
             observe_source_attachment(&path, "mutable.txt", Some("text/plain")).unwrap();
 
         fs::write(&path, b"after with different bytes").unwrap();
-        validate_source_attachment(&source_ref).unwrap();
+        resolve_source_attachments_for_run(std::slice::from_ref(&source_ref)).unwrap();
         fs::remove_file(&path).unwrap();
         assert_eq!(
-            validate_source_attachment(&source_ref).unwrap_err().code(),
+            resolve_source_attachments_for_run(std::slice::from_ref(&source_ref))
+                .unwrap_err()
+                .downcast_ref::<LocalAttachmentFailure>()
+                .unwrap()
+                .code(),
             LocalAttachmentFailureCode::Missing
         );
         fs::create_dir(&path).unwrap();
         assert_eq!(
-            validate_source_attachment(&source_ref).unwrap_err().code(),
+            resolve_source_attachments_for_run(std::slice::from_ref(&source_ref))
+                .unwrap_err()
+                .downcast_ref::<LocalAttachmentFailure>()
+                .unwrap()
+                .code(),
             LocalAttachmentFailureCode::KindChanged
         );
         fs::remove_dir_all(root).unwrap();

@@ -3356,7 +3356,7 @@ mod tests {
     }
 
     #[test]
-    fn source_attachments_are_consumed_by_one_message_and_resolved_for_its_run() {
+    fn source_attachments_are_consumed_by_one_message_and_keep_their_path_for_its_run() {
         let (mut database, camp_id) = fixture();
         let service = SingleChatService::default();
         let (conversation_id, _) = open(
@@ -3416,15 +3416,12 @@ mod tests {
             "a sent message must retain its frozen Source Refs"
         );
 
-        let run_tmp = database.directory().join("run-tmp-attachment-test");
-        std::fs::create_dir_all(&run_tmp).unwrap();
         let refs = load_agent_run_source_attachments(&database, run_id, 0).unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].source_path, source.to_string_lossy());
-        let execution_root = database.directory().join("workspace");
-        let resolved =
-            resolve_source_attachments_for_run(&refs, &execution_root, &run_tmp).unwrap();
+        let resolved = resolve_source_attachments_for_run(&refs).unwrap();
         assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0], source.to_string_lossy());
         assert_eq!(
             std::fs::read(&resolved[0]).unwrap(),
             b"private single chat attachment"
