@@ -87,11 +87,10 @@ export function runtimeAvailabilityPresentation(
       )
     case 'ready':
       if (availability.runtimeKind === 'zcode-app') {
-        return {
-          status: 'available',
-          label: '基础连接正常',
-          detail: '已加载本机原生配置并连接成功，未发送测试提示词；模型生成、余额和高级能力未经本次检查验证。'
-        }
+        return presentation(
+          'available',
+          '已加载本机原生配置并连接成功；本次检查未调用模型，生成能力、余额和高级能力将在实际任务中确认。'
+        )
       }
       return presentation(
         'available',
@@ -179,7 +178,7 @@ export function runtimeProductPresentation(
   }
   const availabilityPresentation = runtimeAvailabilityPresentation(availability, pending)
   if (admission.status !== 'preview') return availabilityPresentation
-  const previewDetail = '实验性开放；当前平台尚未完成正式资格验证，请自行验证后使用。'
+  const previewDetail = '当前平台已开放使用，完整的平台资格验证记录尚未齐备。'
   return {
     ...availabilityPresentation,
     detail: availabilityPresentation.detail

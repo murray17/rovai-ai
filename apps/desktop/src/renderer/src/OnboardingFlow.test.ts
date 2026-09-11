@@ -86,11 +86,12 @@ describe('first-run onboarding flow', () => {
     expect(onboardingHasUsableRuntime('ready', emptyHealth(), [])).toBe(false)
   })
 
-  it.each(['ready', 'light_ready'] as const)('keeps experimental admission visible for a %s Runtime', (status) => {
+  it.each(['ready', 'light_ready'] as const)('keeps incomplete qualification detail visible for a %s Runtime', (status) => {
     const health = healthWithRuntime({ ...readyAvailability(), status }, previewAdmission())
     const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [codexInstallation()])
     expect(onboardingHasUsableRuntime('ready', health, [codexInstallation()])).toBe(true)
-    expect(markup).toContain('<small>实验性开放；当前平台尚未完成正式资格验证')
+    expect(markup).toContain('<small>当前平台已开放使用，完整的平台资格验证记录尚未齐备。')
+    expect(markup).not.toMatch(/测试|试运行|实验性/)
   })
 
   it('keeps selectable and experimental alternatives outside the collapsed runtime list', () => {

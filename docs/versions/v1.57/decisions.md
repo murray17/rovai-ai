@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.57
 lifecycle: historical
 authority: decision-rationale
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # v1.57 版本决定
@@ -32,6 +32,9 @@ last_updated: 2026-09-10
 Core/原生 Host 强杀和后续 35 秒无副作用在 v3 已分别通过。当前修订要求直接 shell close 后继续持有有后代的组，
 只在确认空组后注销，并以有界 owner report 区分清理确认与未知。该 companion 属于 Host 进程所有权，不承担 Session 调度。
 
+v7 在 Windows 复用原子创建、禁止 breakaway 的 ManagedProcess Job，不运行 Unix companion 或负 PID 清理。
+Job 的 ActiveProcesses 为零才确认整树退出；两种平台保留相同的请求级 CLI lease 冻结，避免后发命令继承新 Run 授权。
+
 普通 Probe 检查用户实际原生环境，因此与正式执行共用 HOME/USERPROFILE/原生存储，不另造临时 Home 或复制凭据。
 保留私有 cwd/socket 和无生成请求边界；正常初始化允许联网/落盘，不能以删除原生数据库实现零残留。
 前台答案可以在原生后台任务仍运行时完成；任务保持 Session/Input/Turn/Tool 的原归属，晚到结果通过已有 Evidence
@@ -52,7 +55,7 @@ provider broker。原生能力缺口和平台资格独立记录，不用共享 t
 
 <a id="v1-57-d02"></a>
 
-## V1.57-D02：macOS arm64 以明确披露的 Preview 供主动验证
+## V1.57-D02：逐平台发布资格与完整接入能力分离
 
 ### 背景
 
@@ -61,9 +64,14 @@ provider broker。原生能力缺口和平台资格独立记录，不用共享 t
 
 ### 决定
 
-当前接受 macOS arm64 Runtime Platform `preview`：使用已有实验性呈现，reason 为
-`runtime_platform.qualification_evidence_missing`，evidence revision 保持空。macOS x64 和 Windows x64
-继续 NotQualified。该决定允许主动测试，不授予 First-Class，也不把未验证能力标成 Unsupported。
+初始交付仅允许 macOS arm64 Preview。v7 在 Windows 真实 Camp 验收后，维护者要求 Windows x64 与
+macOS arm64 同时标记 Qualified，并移除运行时管理页的测试、试运行和实验性标签。两行分别绑定自身
+冻结证据：Windows 使用本次真实 App CLI 证据，arm64 使用既有目标主机 v3–v6 证据及明确发布批准；
+不声称本次在 Mac 重跑，也不把 Windows 成功当作 Mac 实测。
+
+macOS x64 同时开放为可执行 Preview，保留 `runtime_platform.qualification_evidence_missing` 与空 evidence revision，
+不谎报 Intel Mac 资格。管理页使用版本和机器状态，检查详情仍可解释资格记录待完善。平台发布资格不代表
+完整 First-Class 接入 Checklist 完成，安装、模型、原生配置、权限和 Session 门禁不因呈现调整而放宽。
 剩余资格项和逐项产品证据由[实施与验收](implementation-plan.md)与[兼容性清单](../../runtime-compatibility.md)记录。
 
 ### 后果

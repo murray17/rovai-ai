@@ -716,7 +716,9 @@ mod tests {
     // Diff admission test owns workspace paths and frozen adapter identity.
     #[test]
     fn edit_diff_requires_complete_native_patch_and_matching_tool_path() {
-        let path = "/workspace/file.txt";
+        let workspace = std::env::temp_dir().join("zcode-diff-fixture");
+        let file = workspace.join("file.txt");
+        let path = file.to_str().unwrap();
         let patch = json!({"kind":"file_diff","filePath":path,"truncated":false,"additions":1,"deletions":1,
             "structuredPatch":[{"oldStart":1,"oldLines":2,"newStart":1,"newLines":2,"lines":[" alpha","-beta","+gamma"]}]});
         assert!(
@@ -732,12 +734,8 @@ mod tests {
         let payload = json!({"runtimeDiff":{"adapterKind":"zcode-app","protocolFamily":crate::zcode::PROTOCOL,
             "sourceEventKind":"tool.updated.result","semanticKind":"zcode_edit_patch","entries":update["_meta"]["zcodeDiff"]}});
         assert!(
-            crate::runtime_diff::admit_runtime_diff(
-                &payload,
-                std::path::Path::new("/workspace"),
-                Some("zcode-app")
-            )
-            .is_some_and(|result| result.is_ok())
+            crate::runtime_diff::admit_runtime_diff(&payload, &workspace, Some("zcode-app"))
+                .is_some_and(|result| result.is_ok())
         );
         let mut cases = Vec::new();
         let mut truncated = patch.clone();

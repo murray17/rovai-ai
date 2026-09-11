@@ -1,7 +1,7 @@
 ---
 document_type: research
 status: verified-with-limitations
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # 官方 ZCode 接入与一致性矩阵
@@ -18,7 +18,9 @@ App 内核 SHA-256：`e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e111
 ## 与现有 Runtime 的一致性
 
 “产品验证”仅指经过 Rovai Core 的真实 AgentRun；原始协议实验与单元测试分别标注，不相互替代。
-当前交付等级为 macOS arm64 Preview；其他平台未资格化，不能由共享代码推导通过。
+v7 当前交付为 Windows x64 / macOS arm64 Qualified 与 macOS x64 可执行 Preview；两份 Qualified 记录各有自身平台证据。
+下表原有功能流主要来自 macOS arm64 v3–v6；Windows v7 的真实 App CLI 范围与未覆盖组合见
+[当前实施记录](../versions/v1.57/implementation-plan.md)，不将既有 Mac 功能流当作 Windows 或 Intel Mac 的实测。
 
 | 能力轴 | 实现与证据 | 一致性与差异 |
 | --- | --- | --- |
@@ -35,7 +37,7 @@ App 内核 SHA-256：`e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e111
 | 内置 rovai CLI | 复用当前 bundled CLI 与 active Run lease；共享完整 operation、Gather、后续 Run 和过期租约验收 | 不安装第二套 CLI 或借用历史上下文。完整操作集、Gather 返回、续接与过期 lease 验收通过 |
 | 后台执行 | 前台终态与前台 Tool/审批收口后完成 Run；原生 taskId 固定关联原 Session/Input/Turn/Tool，晚到结果写回原 Run Evidence | 有任务的 Host 保留并优先匹配原成员，禁止空闲/容量回收和跨成员复用；取消只作用当前 input，关闭 Host 才全面清理其受管组。缺失 exitCode 保持未知，lost 不证明退出；无 Rovai Input 的原生自动模型通知轮次按精确执行 ID 停止并诊断，未当作新 Run 接入 |
 | Usage / Cache / Cost | 唯一原生 terminal 的 provider input/output/cacheRead；真实持久化与稀疏字段 parser 校验 | 原生汇总会为缺值填零，因此 cacheWrite、reasoning、uncached 和成本保持未知；Turn 聚合不用于推导单次请求缓存命中率 |
-| 平台 / Ready | 官方身份、最低 kernel 0.16.5、原生 HOME/存储下的无 Prompt 基础连接 Probe、平台资格独立 | 实测连接/初始化与 Adapter 实现能力、发布测试证据分开；不验证余额/生成/全部高级能力。不保证零联网/零落盘，不删除原生历史；新版本不自动封禁。arm64 Preview，其他平台 NotQualified |
+| 平台 / Ready | 官方身份、最低 kernel 0.16.5、原生 HOME/存储下的无 Prompt 基础连接 Probe、平台资格独立 | 实测连接/初始化与 Adapter 实现能力、发布测试证据分开；不验证余额/生成/全部高级能力。不保证零联网/零落盘，不删除原生历史；新版本不自动封禁。Windows x64 / macOS arm64 Qualified，macOS x64 可执行 Preview |
 
 ## 文件、命令输出与 Diff
 

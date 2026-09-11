@@ -4,7 +4,64 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, toNamespacedPath } from 'node:path'
+
+// Windows Job membership is owned by the Rust OS-boundary test. This separate
+// seam checks the real Node prelude's request lease and argv/cwd projection.
+test('Windows ZCode freezes async CLI leases and preserves MCP cwd and arguments', { skip: process.platform !== 'win32' }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rovai-zcode-windows-'))
+  const companion = await readFile(new URL('../crates/rovai-core/src/zcode/stdio-owner.cjs', import.meta.url), 'utf8')
+  const launcher = await readFile(new URL('../crates/rovai-core/src/zcode/mcp-cwd.cjs', import.meta.url), 'utf8')
+  const context = join(root, 'context.json')
+  const kernel = join(root, 'kernel.cjs')
+  const late = join(root, 'late.json')
+  const unscoped = join(root, 'unscoped.json')
+  const release = join(root, 'release')
+  const writeContext = `require('node:fs').copyFileSync(process.env.ROVAI_CLI_CONTEXT, process.argv[1])`
+  await writeFile(context, JSON.stringify({ lease: { leaseId: 'original' } }))
+  await writeFile(kernel, `const {spawn}=require('node:child_process');
+    const fs=require('node:fs');
+    spawn(process.execPath,['--eval',${JSON.stringify(writeContext)},${JSON.stringify(unscoped)}],{stdio:'ignore'});
+    process.stdin.once('data',()=>{
+      process.stdout.write('accepted\\n');
+      const timer=setInterval(()=>{
+        if(!fs.existsSync(${JSON.stringify(release)}))return;
+        clearInterval(timer);
+        const child=spawn(process.execPath,['--eval',${JSON.stringify(writeContext)},${JSON.stringify(late)}],{stdio:'ignore',detached:true});
+        child.once('exit',()=>process.stdin.destroy());
+      },25);
+    });`)
+  const host = spawn(process.execPath, ['--eval', companion, toNamespacedPath(kernel)], {
+    windowsHide: true,
+    env: { ...process.env, ROVAI_CLI_CONTEXT: context, ROVAI_ZCODE_CLI_CONTEXT_DIR: join(root, 'contexts') },
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
+  const closed = once(host, 'close')
+  const deadline = setTimeout(() => host.kill(), 10_000)
+  try {
+    const accepted = Promise.race([
+      once(host.stdout, 'data'),
+      closed.then(([code]) => { throw new Error(`Host exited before accepting the request: ${code}`) })
+    ])
+    host.stdin.write('request\n')
+    assert.match(String((await accepted)[0]), /accepted/)
+    await writeFile(context, JSON.stringify({ lease: { leaseId: 'successor' } }))
+    await writeFile(release, '')
+    assert.equal((await closed)[0], 0)
+    assert.equal(JSON.parse(await readFile(late, 'utf8')).lease.leaseId, 'original')
+    assert.equal(JSON.parse(await readFile(unscoped, 'utf8')).lease, null)
+    const args = ['space argument', '小狗', '&echo unsafe', 'a"b', '']
+    const mcp = spawn(process.execPath, ['--eval', launcher, '--', root, process.execPath, '--eval', 'console.log(JSON.stringify({cwd:process.cwd(),args:process.argv.slice(1)}))', '--', ...args], {windowsHide: true})
+    let output = ''
+    mcp.stdout.on('data', chunk => output += chunk)
+    assert.equal((await once(mcp, 'close'))[0], 0)
+    assert.deepEqual(JSON.parse(output), {cwd: root, args})
+  } finally {
+    clearTimeout(deadline)
+    if (host.exitCode === null) {host.kill(); await closed}
+    await rm(root, {recursive: true, force: true})
+  }
+})
 
 // Process-boundary regression: the shell closes all stdio and exits before its
 // descendant. A direct-child unit mock cannot establish process-group ownership.

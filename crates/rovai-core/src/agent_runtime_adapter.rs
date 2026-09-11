@@ -35,6 +35,7 @@ use crate::{
         PI_MACOS_ARM64_EVIDENCE_REVISION, PI_MACOS_X64_EVIDENCE_REVISION,
         PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
         RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+        ZCODE_MACOS_ARM64_EVIDENCE_REVISION, ZCODE_WINDOWS_X64_EVIDENCE_REVISION,
     },
 };
 
@@ -108,7 +109,7 @@ pub fn executable_fingerprint(path: &Path) -> Result<String> {
     if command_shim_extension(path).is_some() {
         return Ok(capture_windows_command_shim(path)?.compatibility_fingerprint());
     }
-    if path.file_name().and_then(|v| v.to_str()) == Some("ZCode") {
+    if crate::zcode::is_bundle_executable(path) {
         let members = crate::zcode::bundle_members(path)?;
         let fingerprints = members
             .iter()
@@ -235,7 +236,7 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
     };
     #[cfg(not(any(unix, windows)))]
     let file_id = None;
-    let file_id = if path.file_name().and_then(|v| v.to_str()) == Some("ZCode") {
+    let file_id = if crate::zcode::is_bundle_executable(path) {
         let mut stamps = Vec::new();
         for member in crate::zcode::bundle_members(path)? {
             let metadata = std::fs::metadata(&member)?;
@@ -714,18 +715,22 @@ impl AgentRuntimeAdapterRegistry {
         platform: HostPlatformKey,
     ) -> RuntimePlatformAdmission {
         if kind == AdapterKind::ZcodeApp {
-            return if platform == HostPlatformKey::MacosArm64 {
-                RuntimePlatformAdmission::preview(
+            return match platform {
+                HostPlatformKey::MacosArm64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    ZCODE_MACOS_ARM64_EVIDENCE_REVISION,
+                ),
+                HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    ZCODE_WINDOWS_X64_EVIDENCE_REVISION,
+                ),
+                HostPlatformKey::MacosX64 => RuntimePlatformAdmission::preview(
                     kind,
                     platform,
                     RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
-                )
-            } else {
-                RuntimePlatformAdmission::not_qualified(
-                    kind,
-                    platform,
-                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
-                )
+                ),
             };
         }
         if kind == AdapterKind::CursorAgent {

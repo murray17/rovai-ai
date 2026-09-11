@@ -159,7 +159,7 @@ last_updated: 2026-09-07
 
 ## 官方 ZCode 接入
 
-- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)、[File Change v5](../contracts/runtime-file-change-observation-v5.md)。
+- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v5](../contracts/runtime-file-change-observation-v5.md)。
 - 理由：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)、[V1.57-D02](../versions/v1.57/decisions.md#v1-57-d02)。
 
 ## 双轨执行评测

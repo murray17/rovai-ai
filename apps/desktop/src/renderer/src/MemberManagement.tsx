@@ -1511,10 +1511,8 @@ export function RuntimeInstallationsPanel({
               health === null
             )
             const version = item?.reportedVersion?.trim() || null
-            const subtitle = admission?.status === 'preview'
-              ? `实验性开放${version ? ` · ${version}` : ''}`
-              : admission?.status === 'qualified' ? version : presentation.detail
             const allowed = runtimePlatformAdmissionAllowsUse(admission)
+            const subtitle = allowed ? version : presentation.detail
             const guide = allowed ? runtimeInstallGuide(runtimeKind, health?.hostPlatform ?? null) : null
             const mode = presentation.status === 'not_installed' ? 'install'
               : presentation.status === 'authentication_required' ? 'login' : null

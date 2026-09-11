@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "macos-arm64-zcode-v1",
+  "capturedAt": "2026-09-11",
+  "platform": "macos-arm64",
+  "baseRevision": "1bf382a507351227bee13d1894df126275c169c8",
+  "qualifiedRuntimeKinds": ["zcode-app"],
+  "qualificationBasis": {
+    "type": "recorded-target-host-evidence-and-maintainer-release-approval",
+    "decision": "The maintainer requested macOS arm64 qualification alongside Windows acceptance, without testing, trial or experimental labels. This row uses its own existing macOS arm64 evidence, not Windows results.",
+    "source": "docs/versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json",
+    "sourceSha256": "534d2dc9e5656a473130c2d2f27031877e87ddbb1743737d9445c0c632a9258e"
+  },
+  "runtimeEvidence": {
+    "appVersion": "3.11.2",
+    "kernelVersion": "0.16.5",
+    "kernelSha256": "e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e1113266b8",
+    "nodeVersion": "26.8.1",
+    "protocol": "zcode-app-server-v1",
+    "recordedFlows": ["BYOK generation", "Read/Write/Edit and empty files", "command output", "warm and cold exact Session continuation", "Skills", "external MCP", "built-in CLI", "permissions and cancellation", "compaction and bootstrap redelivery", "background ownership", "Core and native-host crash cleanup", "isolated packaged startup"]
+  },
+  "acceptance": {
+    "status": "qualified",
+    "releaseApproval": "maintainer-approved",
+    "platformScope": "macos-arm64 only",
+    "machineAndExecutionBoundary": "Installation, native configuration, model, permission, capability and Session checks remain mandatory."
+  },
+  "limitations": [
+    "This promotion did not rerun a macOS host; the source records separate v3-v6 revisions and the exact tests repeated for each. It does not claim every historical flow ran on the v7 prelude.",
+    "Start Plan runtime verification, account refresh, Team Plan dynamic credentials and GUI callbacks remain unimplemented; successful account generation is not claimed.",
+    "Full compaction/permission/MCP/usage retry combinations and newer-kernel upgrade qualification remain incomplete. Platform qualification does not declare the entire integration checklist First-Class complete.",
+    "Windows x64 and macOS x64 never inherit this result."
+  ]
+}

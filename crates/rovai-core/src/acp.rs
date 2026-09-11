@@ -1378,7 +1378,9 @@ impl AcpHost {
                 stdin,
                 stdout,
                 crate::zcode::NativeConfig::load(cwd)?,
-                cwd.to_path_buf(),
+                // Session RPCs use the protocol spelling, not Rust's Win32
+                // verbatim spelling. The bridge must compare that same key.
+                PathBuf::from(acp_protocol_path(cwd)),
                 mode.to_string(),
             );
             let (read, write) = tokio::io::split(bridge);
@@ -2720,11 +2722,19 @@ impl AcpHost {
                     == Ok(true)
             }
         );
-        let native_groups_reaped = self.confirm_zcode_cleanup(deadline).await;
+        let native_groups_reaped = match tokio::time::timeout_at(deadline, self.child.lock()).await
+        {
+            Ok(child) => self.confirm_zcode_cleanup(&child, deadline).await,
+            Err(_) => false,
+        };
         host_reaped && terminals_reaped && native_groups_reaped
     }
 
-    async fn confirm_zcode_cleanup(&self, deadline: tokio::time::Instant) -> bool {
+    async fn confirm_zcode_cleanup(
+        &self,
+        child: &ManagedProcess,
+        deadline: tokio::time::Instant,
+    ) -> bool {
         if self.adapter_kind != AdapterKind::ZcodeApp
             || self.zcode_cleanup_confirmed.load(Ordering::Acquire)
         {
@@ -2733,13 +2743,13 @@ impl AcpHost {
         let Some(root) = &self.private_config_root else {
             return false;
         };
-        let confirmed = crate::zcode::transport::confirm_owner_cleanup(root, deadline).await;
+        let confirmed = crate::zcode::transport::confirm_owner_cleanup(child, root, deadline).await;
         self.zcode_cleanup_confirmed
             .store(confirmed, Ordering::Release);
         self.record_zcode_host_closed(confirmed);
         if !confirmed {
             self.send_host_diagnostic(
-                "ZCode managed process-group cleanup remains unconfirmed; owner report retained"
+                "ZCode managed process-tree cleanup remains unconfirmed; private evidence retained"
                     .to_string(),
             );
         }
@@ -2801,7 +2811,10 @@ impl AcpHost {
         }
         let _ = child.force_terminate_tree();
         let groups_reaped = self
-            .confirm_zcode_cleanup(tokio::time::Instant::now() + Duration::from_millis(2500))
+            .confirm_zcode_cleanup(
+                &child,
+                tokio::time::Instant::now() + Duration::from_millis(2500),
+            )
             .await;
         if groups_reaped
             && self.remove_private_config_root_on_shutdown
@@ -4554,10 +4567,12 @@ fn prepare_private_host_config(
                 .join(uuid::Uuid::new_v4().to_string()),
             true,
         ),
-        AdapterKind::ZcodeApp => (
-            PathBuf::from("/tmp").join(format!("rvzc-{}", uuid::Uuid::new_v4().simple())),
-            true,
-        ),
+        AdapterKind::ZcodeApp => {
+            return Ok(Some(PreparedPrivateHostConfig {
+                root: crate::zcode::private_runtime_root("rvzc")?,
+                remove_on_shutdown: true,
+            }));
+        }
         _ => return Ok(None),
     };
     std::fs::create_dir_all(&root).with_context(|| {

@@ -31,6 +31,11 @@ pub const PI_MACOS_X64_EVIDENCE_REVISION: &str =
 pub const PI_WINDOWS_X64_EVIDENCE_REVISION: &str =
     "sha256:2dec32c61673793e06c80e9c55fb9631473a418cb773b309f9e075216b3362b8";
 
+pub const ZCODE_MACOS_ARM64_EVIDENCE_REVISION: &str =
+    "sha256:4c4134d5f68f0633e02d3ade061725d5ff5cfc372d85c345fae10b71ad2badc2";
+pub const ZCODE_WINDOWS_X64_EVIDENCE_REVISION: &str =
+    "sha256:9c40aa1c943bc3b2e823ea2a9a48ac41441a3924190ec46d493135a46b0b00b0";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimePlatformAdmissionStatus {
@@ -180,6 +185,33 @@ mod tests {
 
     #[test]
     fn platform_evidence_revisions_bind_their_frozen_source_bytes() {
+        for (revision, bytes) in [
+            (
+                ZCODE_MACOS_ARM64_EVIDENCE_REVISION,
+                include_bytes!("../../../qualification/runtime-platform/macos-arm64-zcode-v1.json")
+                    .as_slice(),
+            ),
+            (
+                ZCODE_WINDOWS_X64_EVIDENCE_REVISION,
+                include_bytes!("../../../qualification/runtime-platform/windows-x64-zcode-v1.json")
+                    .as_slice(),
+            ),
+        ] {
+            assert_eq!(revision, format!("sha256:{:x}", Sha256::digest(bytes)));
+        }
+        let zcode_macos: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../../qualification/runtime-platform/macos-arm64-zcode-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            zcode_macos["qualificationBasis"]["sourceSha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!(
+                    "../../../docs/versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json"
+                ))
+            )
+        );
         let macos_digest = Sha256::digest(include_bytes!("../../../docs/runtime-compatibility.md"));
         assert_eq!(
             MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
@@ -279,6 +311,19 @@ mod tests {
                     Some(PI_WINDOWS_X64_EVIDENCE_REVISION)
                 );
                 assert_eq!(admission.blocker_code(), None);
+            } else if runtime_kind == AdapterKind::ZcodeApp {
+                assert_eq!(
+                    admission.status(),
+                    RuntimePlatformAdmissionStatus::Qualified
+                );
+                assert!(admission.allows_runtime_use());
+                assert!(admission.is_qualified());
+                assert_eq!(admission.reason_code(), None);
+                assert_eq!(
+                    admission.evidence_revision(),
+                    Some(ZCODE_WINDOWS_X64_EVIDENCE_REVISION)
+                );
+                assert_eq!(admission.blocker_code(), None);
             } else if !matches!(
                 runtime_kind,
                 AdapterKind::CursorAgent | AdapterKind::ZcodeApp
@@ -322,13 +367,19 @@ mod tests {
             registry
                 .platform_admission(AdapterKind::ZcodeApp, HostPlatformKey::MacosArm64)
                 .status(),
-            RuntimePlatformAdmissionStatus::Preview
+            RuntimePlatformAdmissionStatus::Qualified
+        );
+        assert_eq!(
+            registry
+                .platform_admission(AdapterKind::ZcodeApp, HostPlatformKey::MacosArm64)
+                .evidence_revision(),
+            Some(ZCODE_MACOS_ARM64_EVIDENCE_REVISION)
         );
         assert_eq!(
             registry
                 .platform_admission(AdapterKind::ZcodeApp, HostPlatformKey::MacosX64)
                 .status(),
-            RuntimePlatformAdmissionStatus::NotQualified
+            RuntimePlatformAdmissionStatus::Preview
         );
         for runtime_kind in AdapterKind::ALL.into_iter().filter(|kind| {
             !matches!(

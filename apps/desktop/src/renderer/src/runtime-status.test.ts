@@ -34,14 +34,18 @@ describe('Runtime user status projection', () => {
     'maps %s to the actionable status %s',
     (status, label) => {
       expect(runtimeAvailabilityPresentation(availability(status)).label).toBe(label)
-      if (status === 'ready') {
-        const zcode = runtimeAvailabilityPresentation(availability(status, 'zcode-app'))
-        expect(zcode.label).toBe('基础连接正常')
-        expect(zcode.detail).toContain('未发送测试提示词')
-        expect(zcode.detail).toContain('高级能力未经本次检查验证')
-      }
+      expect(runtimeAvailabilityPresentation(availability(status, 'zcode-app')).label).toBe(label)
     }
   )
+
+  it('uses the shared available label for ZCode and keeps probe scope in the detail', () => {
+    const zcode = runtimeAvailabilityPresentation(availability('ready', 'zcode-app'))
+
+    expect(zcode.status).toBe('available')
+    expect(zcode.label).toBe('可用')
+    expect(zcode.detail).toContain('本次检查未调用模型')
+    expect(zcode.detail).toContain('高级能力将在实际任务中确认')
+  })
 
   it('keeps a cached ready result usable while Core refreshes it', () => {
     const result = runtimeAvailabilityPresentation({
@@ -204,8 +208,23 @@ describe('Runtime user status projection', () => {
     expect(runtimeProductPresentation(admission, availability('ready', 'pi'))).toEqual({
       status: 'available',
       label: '可用',
-      detail: '实验性开放；当前平台尚未完成正式资格验证，请自行验证后使用。'
+      detail: '当前平台已开放使用，完整的平台资格验证记录尚未齐备。'
     })
+    for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64'] as const) {
+      for (const status of ['preview', 'qualified'] as const) {
+        for (const state of ['ready', 'missing', 'authentication_required'] as const) {
+          const result = runtimeProductPresentation(
+            { ...admission, runtimeKind: 'zcode-app', platform, status },
+            availability(state, 'zcode-app')
+          )
+          expect(`${result.label} ${result.detail}`).not.toMatch(/测试|试运行|实验性/)
+          if (state === 'ready') {
+            expect(result.status).toBe('available')
+            expect(result.label).toBe('可用')
+          }
+        }
+      }
+    }
   })
 })
 

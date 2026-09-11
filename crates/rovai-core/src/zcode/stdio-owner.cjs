@@ -44,6 +44,25 @@ function freezeCliContext(args) {
   next[index] = { ...options, env: { ...env, ROVAI_CLI_CONTEXT: snapshot } }
   return next
 }
+if (process.platform === 'win32') {
+  // ManagedProcess atomically owns the native Host and every descendant in a
+  // non-breakaway, kill-on-close Windows Job. Unix negative-PID groups do not
+  // exist here; keep lease freezing but let the Core-owned Job prove cleanup.
+  cp.spawn = function (...args) {
+    args = freezeCliContext(args)
+    const index = Array.isArray(args[1]) ? 2 : 1
+    args[index] = { ...args[index], windowsHide: true }
+    return Reflect.apply(spawn, this, args)
+  }
+  // Rust canonical paths carry a Win32 verbatim prefix. Node's CommonJS
+  // realpath resolver rejects that prefix even though fs and CreateProcess
+  // accept it. Preserve the resolved target while using its ordinary spelling.
+  const kernel = process.argv[1]
+  const loadPath = kernel.startsWith('\\\\?\\UNC\\')
+    ? `\\\\${kernel.slice(8)}`
+    : kernel.startsWith('\\\\?\\') ? kernel.slice(4) : kernel
+  require(loadPath)
+} else {
 const owner = process.pid
 const groups = new Set()
 let exiting = false
@@ -164,3 +183,4 @@ watcher.stdout.on('data', (chunk) => {
     } else failClosed()
   }
 })
+}

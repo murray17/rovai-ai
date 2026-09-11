@@ -33,7 +33,7 @@ Renderer 当前不展示 Settings Preview row；DeepSeek Harness 在三个目标
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
 selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
 
-`qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 必须标明实验性并保留缺失资格证据。
+`qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 保留缺失资格证据，检查详情说明记录未齐备。
 `qualified` 行只在有实际 reported version 时显示版本副文案，否则仅显示居中的产品名，不再回退到静态
 “稳定 / 测试 / 实验性”标签。当前主机平台在目录标题旁统一显示，机器状态徽标继续来自 Availability。
 `not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，`unsupported` 显示平台不支持。
@@ -453,7 +453,8 @@ ZCode 使用独立 Node.js 执行官方 App 自带的未修改内核，不执行
 fingerprint 同时包含内核与独立 Node；PATH 中的社区
 CLI 不属于这个 Product Runtime。Core 内的协议翻译负责原生 NDJSON、Session/Input/Turn/Tool identity 与 callback，
 已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU；Host 复用以 Camp 为授权边界。Node prelude 的
-pipe-owned companion 补充回收原生 detached Bash 进程组，生命周期细节由 Runtime Launch v37 拥有。
+pipe-owned companion 在 Unix 补充回收原生 detached Bash 进程组；Windows 由原子 Job 拥有全部后代，
+以 Job 空集确认退出，不使用 Unix companion。生命周期细节由 Runtime Launch v37 拥有。
 内部 ACP shape 不改变公开协议来源。有原生后台任务的 Host 保留 Session/成员关联，禁止跨成员复用和空闲/容量回收；
 后台结果走原 Run 的已登记 Evidence 归属，前台 Run 与 CLI 授权正常结束。普通 Probe 沿用原生 HOME/存储，
 只隔离临时 cwd/socket，且不发送生成请求；Probe 实测与 Adapter 能力及发布资格分开。
@@ -467,3 +468,7 @@ pipe-owned companion 补充回收原生 detached Bash 进程组，生命周期�
 图片沿用授权附件路径，由原生 Read 转为模型图片内容；Read 保持读取活动，不形成 Files Changed 或修改 Diff。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；
 warm resume 不刷新 MCP，所以集合变化不能沿用旧 Host。协议、FirstPayload、权限、Usage 与保留能力见
 [Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)。平台资格与 Machine Ready 分开维护。
+
+Windows x64 与 macOS arm64 分别以平台专属冻结证据标记 Qualified；macOS x64 同时开放为可执行 Preview，
+没有 Intel Mac 真机资格。管理页不显示测试、试运行或实验性标签，保留机器检查、错误和具体能力限制；
+平台晋升不等于完整 First-Class Checklist 已完成，证据与尚未覆盖范围见[当前实施记录](../versions/v1.57/implementation-plan.md)。

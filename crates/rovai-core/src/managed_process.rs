@@ -706,6 +706,13 @@ impl ManagedProcess {
         ))
     }
 
+    /// The Job, not the root PID or a sent termination request, proves that
+    /// every owned Windows descendant has exited. Query failure stays unknown.
+    #[cfg(windows)]
+    pub(crate) fn tree_is_empty(&self) -> io::Result<bool> {
+        self.child.tree_is_empty()
+    }
+
     pub fn force_terminate_tree(&mut self) -> io::Result<()> {
         if self.tree_termination_requested {
             return Ok(());
@@ -1353,6 +1360,10 @@ mod tests {
             .expect("command shim leader did not exit")
             .expect("command shim leader wait failed");
         assert!(leader_status.success());
+        assert!(
+            !process.tree_is_empty().unwrap(),
+            "A reaped root does not prove its Job is empty"
+        );
         let grandchild_pid = std::fs::read_to_string(&handshake)
             .expect("grandchild handshake was not written")
             .trim()
@@ -1464,6 +1475,10 @@ mod tests {
             .await
             .expect("stdout handle remained inherited after Job termination")
             .unwrap();
+        assert!(
+            process.tree_is_empty().unwrap(),
+            "Cleanup confirmation must observe the owned Job, not a kill request"
+        );
         tokio::time::timeout(Duration::from_secs(2), stderr_reader)
             .await
             .expect("stderr handle remained inherited after Job termination")
