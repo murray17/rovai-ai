@@ -17,7 +17,9 @@ test('Host prepare creates only a new private authority directory and preserves 
   try {
     const dataDir = join(fixture, 'data')
     const prepared = JSON.parse(execFileSync(binary, ['prepare', '--data-dir', dataDir], { encoding: 'utf8' }))
-    assert.equal(prepared.dataDir, dataDir)
+    // Windows canonical paths can carry the extended-length prefix. Compare
+    // the actual directory identity without weakening the new-directory fence.
+    assert.equal(await realpath(prepared.dataDir), dataDir)
     assert.ok(prepared.runArguments.includes(prepared.runtimeCampFilesRoot))
     if (process.platform !== 'win32') assert.equal((await stat(dataDir)).mode & 0o777, 0o700)
     await assert.rejects(access(join(dataDir, 'rovai.sqlite')), { code: 'ENOENT' })

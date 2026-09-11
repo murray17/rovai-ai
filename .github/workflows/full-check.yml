@@ -10,12 +10,22 @@ on:
         options:
           - full
           - server
+      server_target:
+        description: Native Server target (only for server scope)
+        type: choice
+        default: all
+        options:
+          - all
+          - macos-arm64
+          - macos-x64
+          - windows-x64
+          - linux-x64
 
 permissions:
   contents: read
 
 concurrency:
-  group: full-check-${{ github.ref }}
+  group: full-check-${{ github.ref }}-${{ inputs.scope }}-${{ inputs.server_target || 'all' }}
   cancel-in-progress: true
 
 jobs:
@@ -183,20 +193,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: macos-arm64
-            runner: macos-15
-            suffix: ''
-          - target: macos-x64
-            runner: macos-15-intel
-            suffix: ''
-          - target: windows-x64
-            runner: windows-2022
-            suffix: .exe
-          - target: linux-x64
-            runner: ubuntu-24.04
-            suffix: ''
-    runs-on: ${{ matrix.runner }}
+        target: ${{ fromJSON('{"all":["macos-arm64","macos-x64","windows-x64","linux-x64"],"macos-arm64":["macos-arm64"],"macos-x64":["macos-x64"],"windows-x64":["windows-x64"],"linux-x64":["linux-x64"]}')[inputs.server_target || 'all'] }}
+    runs-on: ${{ fromJSON('{"macos-arm64":"macos-15","macos-x64":"macos-15-intel","windows-x64":"windows-2022","linux-x64":"ubuntu-24.04"}')[matrix.target] }}
     timeout-minutes: 60
     env:
       CARGO_BUILD_JOBS: 3
@@ -232,7 +230,7 @@ jobs:
           cargo test -p rovai-core --lib core_data_dir_lock
       - name: Verify packaged Host and shared Web lifecycle
         env:
-          ROVAI_HOST_BIN: ${{ github.workspace }}/out/server/${{ matrix.target }}/rovai-host${{ matrix.suffix }}
+          ROVAI_HOST_BIN: ${{ github.workspace }}/out/server/${{ matrix.target }}/rovai-host${{ matrix.target == 'windows-x64' && '.exe' || '' }}
           ROVAI_WEB_UI: ${{ github.workspace }}/out/server/${{ matrix.target }}/web-ui
         run: node --test scripts/lib/host-lifecycle.test.mjs scripts/lib/host-web.test.mjs
       - name: Observe native managed Runtime file boundary

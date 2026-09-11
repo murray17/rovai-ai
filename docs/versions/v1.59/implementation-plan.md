@@ -149,10 +149,22 @@ macOS/Windows 兼容性证据。
 
 后续 Core library 限制 4 并发仍为 791 通过/1 失败/6 既有忽略，唯一失败仍是该 Claude 初始化期限。
 精确用例、health 分组（22 通过/3 既有忽略）以及与相邻 v99 migration 的组合均通过；尚未得到稳定的
-最小失败复现，未改动该生产路径或测试。完整串行复核待完成，不能用定向通过替代完整门禁。
+最小失败复现，未改动该生产路径或测试。完整串行复核结果见下文；该间歇超时没有被宣称为已修复。
 新增 Web 纯状态/公开投影测试 3 项通过，Clippy 全目标通过；本机原生 debug Server 预览包已构建。
 Desktop 真实 contextBridge 与设置工作区检查通过，覆盖迟到 status、未知 start 回执只查询不重试、
 令牌轮换与页面卸载清空。Windows 安装器的 Host 进程识别和 macOS/Windows 包验证已随入口切换更新。
+
+本轮实现已提交并推送 `670dae367c6a00d45d0a9ec96eca57c575645249`。完整串行
+`RUST_TEST_THREADS=1 pnpm test:rust:pr` 通过：Core library 792 通过/6 既有忽略，CLI 35 通过，
+slow integration 309 通过/0 忽略。没有永久禁用测试、修改超时或放宽断言。
+
+`pnpm test` 最终通过：175 个 Vitest 文件/1759 项，Node 聚合 317 通过/2 既有平台跳过。
+此前两项读取主题文件的测试仍指向旧文件，已改为读取共享生产主题，原颜色与对比度断言保留。
+Typecheck、workspace 全目标 Clippy、Desktop/Web build、真实 bridge/设置与固定 main base 的文档门禁通过。
+本机原生 debug Server 包的真实进程测试 3 项通过；真实浏览器截图使用界面主题按钮，避免只改 DOM 造成状态失配。
+
+[三平台原生工作流](https://github.com/murray17/rovai-ai/actions/runs/34637391844)对应上述实现 SHA；
+运行状态与具体失败继续补记，不能将 pending 或 preview artifacts 当正式发布证据。
 
 ## 原型缺口的最小修正提案（待用户决定）
 

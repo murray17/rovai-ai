@@ -92,12 +92,26 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(stream.status, 200)
     const reader = stream.body.getReader()
     assert.match(new TextDecoder().decode((await within(reader.read())).value), /event: resync/)
+    const otherReaders = []
+    for (const session of [first, second]) {
+      const controller = new AbortController(); controllers.push(controller)
+      const response = await fetch(`${origin}/api/v1/events`, { headers: { Authorization: `Bearer ${session.token}` }, signal: controller.signal })
+      assert.equal(response.status, 200, 'one client filling its quota must not deny another client')
+      const reader = response.body.getReader()
+      assert.match(new TextDecoder().decode((await within(reader.read())).value), /event: resync/)
+      otherReaders.push(reader)
+    }
+    assert.equal((await authorized(first, 'events')).status, 429, 'a third stream must exceed only this session quota')
     const rotated = await host.request('host.web.rotate')
     assert.notEqual(rotated.administratorToken, administrator)
     assert.equal((await authorized(first, 'capabilities')).status, 401)
     assert.equal((await authorized(second, 'capabilities')).status, 401)
     assert.equal((await within(reader.read())).done, true, 'rotation must close active SSE')
     reader.releaseLock()
+    for (const reader of otherReaders) {
+      assert.equal((await within(reader.read())).done, true, 'rotation must close every client stream')
+      reader.releaseLock()
+    }
     assert.equal((await host.request('host.web.stop')).enabled, false)
     assert.equal(host.child.exitCode, null, 'stopping Web must leave Core alive')
     assert.equal((await host.request('app.info')).name, info.name)
