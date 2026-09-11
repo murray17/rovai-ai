@@ -1,7 +1,7 @@
 ---
 document_type: implementation-plan
 version: v1.58
-lifecycle: current
+lifecycle: historical
 authority: implementation-status
 status: completed
 last_updated: 2026-09-11

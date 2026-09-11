@@ -160,7 +160,7 @@ test('queued input commits notify Desktop without exposing private bodies in pub
     core = startCore(dataDir, skillRoot, mcpPath)
     await core.ready
     const draft = await core.request('camp.composerDraft.save', {
-      campId, expectedRevision: 0, content: [{ kind: 'text', text: 'Private queued body' }]
+      campId, expectedRevision: 0, content: { version: 2, segments: [{ kind: 'text', text: 'Private queued body' }] }
     })
     const result = await core.request('camp.messages.send', {
       commandId: randomUUID(), campId, draftRevision: draft.revision,
@@ -217,7 +217,7 @@ test('idle camps accept new input and drain backlog after legacy failed-turn rec
   const sendText = async (campId, body) => {
     const current = await core.request('camp.composerDraft.get', { campId })
     const draft = await core.request('camp.composerDraft.save', {
-      campId, expectedRevision: current.revision, content: [{ kind: 'text', text: body }]
+      campId, expectedRevision: current.revision, content: { version: 2, segments: [{ kind: 'text', text: body }] }
     })
     // No new Run or model is allowed in this transport/scheduler fixture.
     return core.request('camp.messages.send', {

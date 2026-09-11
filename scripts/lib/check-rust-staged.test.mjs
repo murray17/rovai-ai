@@ -108,7 +108,7 @@ test("current main.rs and lib.rs declarations classify real modules", async () =
       mainSource: currentMain,
       libSource: currentLib,
     }).scripts,
-    ["check:rust", "test:rust:core"]
+    ["check:rust", "test:rust:lib"]
   );
   assert.deepEqual(
     classifyStagedRustChanges({

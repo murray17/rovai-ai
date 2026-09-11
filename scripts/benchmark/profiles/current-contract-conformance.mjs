@@ -71,7 +71,7 @@ const criteria = [
     test('crates/rovai-core/src/team_tool.rs', 'running_source_sends_fourteen_mib_without_waiting_for_camp_publication'),
     test('crates/rovai-core/src/camp_attachment_view.rs', 'legacy_rebuild_target_preserves_managed_v2_resources'),
     test('crates/rovai-core/src/context.rs', 'unavailable_legacy_locator_is_omitted_without_filesystem_fallback'),
-    test('crates/rovai-core/src/main.rs', 'v2_dispatch_admission_ignores_broken_legacy_view_and_managed_payload')
+    test('crates/rovai-core/src/application.rs', 'v2_dispatch_admission_ignores_broken_legacy_view_and_managed_payload')
   ])
 ]
 

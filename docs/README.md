@@ -24,6 +24,7 @@ last_updated: 2026-09-10
 
 | 任务 | 必读资料 |
 |---|---|
+| 修改共享 Core 运行层、Host、Desktop Web 或独立 Server | [统一 Rust Host](architecture/unified-rust-host.md)、[当前版本](versions/README.md)、[Availability-first Runtime](architecture/availability-first-runtime.md)与[本地隔离流程](development/local-workflow.md) |
 | 修改 Runtime 结构化图片、原生生图自动展示准入、混合临时文件生命周期、Run 图片读取、图片附件 Gallery、消息附件分区/几何或本地图片与飞书显式文件交付边界 | [Runtime 图片架构](architecture/runtime-images.md)、[Runtime Images v5](contracts/runtime-images-v5.md)、[Camp Open Projection v17](contracts/camp-open-projection-v17.md)、[v1.53 交付范围](versions/v1.53/README.md)及[统一图片与文件展示](ui/components/conversation-workspace.md#runtime-图片与消息图片) |
 | 修改 Camp 成员 Fast、原生订阅资格、三态偏好、绑定代次或单次执行档位 | [Camp Member Fast v1](contracts/camp-member-fast-v1.md)、[Runtime Launch v38](contracts/runtime-launch-and-verification-v38.md)、[Usage v4](contracts/runtime-usage-monitoring-v4.md)、[Camp 会话工作区](ui/components/conversation-workspace.md) |
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | 先读[当前 Architecture 索引](architecture/README.md)和相关当前 Contract；需要理解取舍时再从[当前决定导航](decisions/CURRENT.md)进入版本理由 |

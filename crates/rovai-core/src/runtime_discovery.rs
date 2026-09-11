@@ -275,7 +275,7 @@ impl RuntimeDiscoveryObservation {
 }
 
 impl RuntimeSearchEnvironment {
-    #[cfg(feature = "slow-tests")]
+    #[cfg(any(test, feature = "slow-tests"))]
     pub fn for_test_paths(generation: u64, paths: Vec<PathBuf>) -> Self {
         let path_entries = paths
             .into_iter()

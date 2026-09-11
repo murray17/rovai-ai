@@ -133,6 +133,9 @@ DOCS_BASE_REF=<目标分支 base SHA> pnpm docs:check:ci
 | 仅 `rovai-core` Main 或其专属模块 | `pnpm check:rust`、`pnpm test:rust:core` |
 | Cargo/Rust 配置、`src/lib.rs`、多 target、删除/重命名、未知 Rust 路径或分类失败 | `pnpm test:rust:workspace-default` |
 
+`test:rust:core` 保留为共享 library 回归的兼容入口：应用运行层与 Runtime Adapter 单测已随库化迁入
+library，薄 stdio main 不再重复编译这些测试。
+
 Main 专属模块由 staged `src/main.rs` 声明、但未由 staged `src/lib.rs` 导出的模块动态确定。
 脚本使用 NUL 分隔读取路径以支持空格等合法文件名；Git 读取、模块解析或分类失败都会 fail closed
 到全量测试，不会静默跳过。
@@ -276,6 +279,10 @@ Composer 续发目标的发布时点与草稿保护运行 `pnpm test:composer-co
 计算与队列调度验收；手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:composer-continuation`。
 
 ### Core 可选功能启动回归
+
+Headless Host 的进程准入与 Unix 受控停止使用 `pnpm test:host-startup`；精确边界见
+[Host Lifecycle v1](../contracts/host-lifecycle-v1.md)。Windows console 停止另做原生验收；该测试不调用模型，
+不代替完整 Headless 执行、审批或平台安全验证。
 
 涉及 `run_core()` ready 边界、可选初始化或功能重试时，运行：
 

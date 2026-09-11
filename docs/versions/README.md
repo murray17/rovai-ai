@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.58
+current_version: v1.59
 last_updated: 2026-09-11
 ---
 
@@ -210,4 +210,5 @@ last_updated: 2026-09-11
 
 | v1.56 | `historical` | Camp 与私聊多段消息选文引用、非模态悬浮与整行定位，已实现并完成隔离 Runtime 验收 | [v1.56/README.md](v1.56/README.md) |
 | v1.57 | `historical` | 官方 ZCode App 内核、原生认证与图片能力接入；实现与资格验收进行中 | [v1.57/README.md](v1.57/README.md) |
-| v1.58 | `current` | 上下文 Gate、分层真实回归与每日 Trace 规则分析 | [v1.58/README.md](v1.58/README.md) |
+| v1.58 | `historical` | 上下文 Gate、分层真实回归与每日 Trace 规则分析 | [v1.58/README.md](v1.58/README.md) |
+| v1.59 | `current` | 统一 Rust Host、共享 Web 服务与三平台 Server；实施中 | [v1.59/README.md](v1.59/README.md) |
