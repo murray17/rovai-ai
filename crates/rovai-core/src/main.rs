@@ -939,6 +939,14 @@ struct CampIdParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PendingCampInputsParams {
+    camp_id: CampId,
+    #[serde(default)]
+    submitted_input_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SingleChatSnapshotParams {
     conversation_id: String,
 }
@@ -8094,11 +8102,18 @@ impl Core {
                 )?)
             }
             "camp.pendingInputs.get" => {
-                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let params: PendingCampInputsParams =
+                    serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    rovai_core::pending_camp_input::read_queue(&database, params.camp_id.as_str())?,
-                )?)
+                let mut queue =
+                    rovai_core::pending_camp_input::read_queue(&database, params.camp_id.as_str())?;
+                queue.submission_outcomes =
+                    rovai_core::pending_camp_input::read_submission_outcomes(
+                        &database,
+                        params.camp_id.as_str(),
+                        &params.submitted_input_ids,
+                    )?;
+                Ok(serde_json::to_value(queue)?)
             }
             "camp.pendingInputs.edit" => {
                 let params: UserCommandParams<

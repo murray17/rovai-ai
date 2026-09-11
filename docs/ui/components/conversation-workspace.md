@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-09
+last_updated: 2026-09-11
 ---
 
 # Camp 会话工作区
@@ -437,6 +437,11 @@ selection 不算“正在查看 non-terminal Run”。从其他 Camp、一级页
 聚焦 live Run 且用户停留详情底部时可跟随最新输出；手动上滚后暂停，回到底部恢复。该跟随
 不能滚动公共消息时间线。Drawer 空间不足时收缩、滚动或变为摘要，不能遮住 Approval Dock、
 Composer 或唯一 Stop。
+
+本工作区显式提交后入队的消息，在真正发布时沿用发送后的精确定位规则；上一轮被取消同样适用。
+Renderer 保留本次 `pendingInputId`，通过 [Pending Camp Input v3](../../contracts/pending-camp-input-v3.md#desktop-submission-outcomes)
+的持久结果找到对应 Turn，等待其 Run 投影到达后展开并恢复详情底部跟随，不夺走 Composer 焦点。
+删除待发送消息、无执行发布或离开 Camp 会消费或丢弃意图；其他窗口的发送和后台新 Run 不触发该行为。
 
 单聊与执行台的发送确认前和排队显示“连接中”，开始处理但尚未输出时显示“思考中”；正文、计划、工具或 final 到达即移除普通等待提示，
 后续正文不追加提示。需要审批、网络恢复、重试或停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要在已有输出时显示“执行中”。成功后才显示“工作了 {时长}”

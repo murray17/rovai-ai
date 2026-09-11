@@ -1339,6 +1339,14 @@ export interface CampPendingInputsView {
   executionActive: boolean
   items: PendingCampInputView[]
   editSession: PendingInputEditSession | null
+  submissionOutcomes?: PendingCampInputSubmissionOutcome[]
+}
+
+export interface PendingCampInputSubmissionOutcome {
+  pendingInputId: string
+  state: 'queued' | 'needs_repair' | 'published' | 'cancelled' | 'missing'
+  campTurnId: string | null
+  addressedAgentIds: string[]
 }
 
 export type PendingInputEditAction =
