@@ -159,3 +159,14 @@ test('evaluator failure cannot hide an independent arm or View evidence gap',()=
   assert.ok(report.evidenceGaps.some(item=>item.checklistItem?.startsWith('SER.collaboration.')))
   assert.equal(report.assessment.arms.candidate.quality.total,null)
 })
+
+test('current scoring freezes v12 substantiation semantics without changing case weights',async()=>{
+ const next=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.10.json',import.meta.url)))
+ validateScoring(next,suite.cases)
+ const previous=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.9.json',import.meta.url)))
+ assert.deepEqual(next.dimensions,previous.dimensions)
+ for(const [id,c] of Object.entries(next.cases)){
+  assert.equal(c.weight,previous.cases[id].weight)
+  assert.deepEqual(c.quality.map(({criterion,...item})=>item),previous.cases[id].quality.map(({criterion,...item})=>item))
+ }
+})

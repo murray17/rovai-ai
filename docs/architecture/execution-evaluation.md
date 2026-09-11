@@ -8,7 +8,7 @@ last_updated: 2026-09-10
 
 # 双轨执行评测
 
-结果 Judge 的来源材料由 [Semantic Judge Views v11](../contracts/semantic-judge-views-v11.md)约束：从隔离评测的持久化快照投影派发前用户材料，保留摘要和字符/字节长度，缺失或超限提前报告。来源数据与实际协作轨迹保持独立，材料正确不证明 Agent 使用过它。
+结果 Judge 的来源材料由 [Semantic Judge Views v12](../contracts/semantic-judge-views-v12.md)约束：从隔离评测的持久化快照投影派发前用户材料，保留摘要和字符/字节长度，缺失或超限提前报告。来源数据与实际协作轨迹保持独立，材料正确不证明 Agent 使用过它。
 
 Outcome 另保留同轮有序公开 Lead 交付来理解最后确认，仍不读取完整成员轨迹。评分进程或副本失败由报告单列为评测器故障；实际产物失败和证据问题分别保留。
 

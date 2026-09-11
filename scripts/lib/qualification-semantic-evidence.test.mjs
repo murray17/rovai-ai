@@ -480,6 +480,10 @@ test('v11 validates all Lead deliveries, encodes sequence order and fails closed
     await assert.rejects(buildTaskJudgeSegments({...args,evaluationSnapshot:changed}),/inventory_incomplete/)
     changed.messages[0].sequence=3;changed.messages[1].authorId='peer'
     await assert.rejects(buildTaskJudgeSegments({...args,evaluationSnapshot:changed}),/inventory_incomplete/)
+    const empty=structuredClone(snapshot);empty.messages[1].body=''
+    const emptyIndex=structuredClone(index);emptyIndex.payload.records[1]=contentRecord('core.message-content:report','')
+    const emptySegments=await buildTaskJudgeSegments({...args,evaluationSnapshot:empty,evidenceIndex:emptyIndex})
+    assert.equal(emptySegments.length,1);assert.equal(emptySegments[0].segmentId,'delivery-message:current:ack')
     index.payload.records.pop()
     await assert.rejects(buildTaskJudgeSegments(args),/content_unavailable/)
   } finally {await rm(directory,{recursive:true,force:true})}

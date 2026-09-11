@@ -953,11 +953,11 @@ test('v11 keeps ordered prior Lead delivery for an acknowledgement without scori
  const source=dualViewFixture({buildPacks:false}).sourcePack
  const message=(id,sequence,content)=>({segmentId:id,kind:'comment',sequence,authorPseudonym:null,visibility:'public_to_camp',content,evidenceReference:{artifactId:'evidence-index:fixture',evidenceId:`core.message:${id}`}})
  source.payload.untrustedEvidence.push(message('delivery-message:historical:ordered-0001:z',4,'Initial delivery: the migration implementation and report are complete.'),message('delivery-message:historical:ordered-0002:a',5,'Correction: the final file supersedes the earlier draft.'),message('delivery-message:current:c',6,'The published report stands; no duplicate publication is needed.'))
- for(const version of ['generic-task-v10','generic-task-v11']){
+ for(const version of ['generic-task-v10','generic-task-v11','generic-task-v12']){
   const config=buildJudgeViewConfiguration({view:'outcome',provider:'fixture',snapshotId:'fixture',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile({...scoring.cases['DEMO-104'],judgeProfile:version},'outcome')})
   const pack=buildJudgeViewPack({view:'outcome',sourcePack:source,configuration:config,producerDigest:'a'.repeat(64)})
   const history=pack.payload.modelInput.evidenceSegments.filter(s=>s.kind==='prior_delivery').map(s=>JSON.parse(s.content))
-  assert.equal(history.length,version==='generic-task-v11'?2:0)
+  assert.equal(history.length,version!=='generic-task-v10'?2:0)
   if(history.length){assert.deepEqual(history.map(x=>x.order),[1,2]);assert.match(history[0].text,/Initial delivery/);assert.match(history[1].text,/Correction/)}
   assert.equal(pack.payload.modelInput.evidenceSegments.filter(s=>s.kind==='delivery_message').length,1)
   assert.ok(!pack.payload.modelInput.evidenceSegments.some(s=>s.kind==='participant_message'))

@@ -6,7 +6,7 @@ last_updated: 2026-09-07
 
 # 当前规范与决定理由导航
 
-结果 Judge 来源材料当前规范：[Semantic Judge Views v11](../contracts/semantic-judge-views-v11.md)；理由：[V1.58-D02](../versions/v1.58/decisions.md#v1-58-d02)、[V1.58-D03](../versions/v1.58/decisions.md#v1-58-d03)。
+结果 Judge 来源材料当前规范：[Semantic Judge Views v12](../contracts/semantic-judge-views-v12.md)；理由：[V1.58-D02](../versions/v1.58/decisions.md#v1-58-d02)、[V1.58-D03](../versions/v1.58/decisions.md#v1-58-d03)、[V1.58-D04](../versions/v1.58/decisions.md#v1-58-d04)。
 
 本页先连接当前规范，再连接形成这些边界的重要理由。历史版本决定不证明代码已经实现；实现状态仍需检查代码、Migration、测试和当前版本验收。
 

@@ -122,3 +122,20 @@ test('v11 prior delivery proves publication text but never implementation or suc
  Object.assign(f.claim,{text:'The implementation works',kind:'artifact_fact'});assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
  f.claim.result='contradicted';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'not_satisfied')
 })
+
+test('v12 substantiation deficits deduct without claiming falsity; missing evaluation stays unknown',()=>{
+ const f=fixture('node check.mjs || true','?? report.json');f.pack.taskProfileVersion='generic-task-v12'
+ const unsupported={...f.claim,text:'已运行检查且通过',kind:'verification_success',result:'unsubstantiated',evidenceIds:['EV-0003'],reason:'The captured masked check has no success witness; the delivery supplies no further substantiation. This does not prove it failed.'}
+ f.value.claimsAudit.claims.push(unsupported)
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'partially_satisfied')
+ f.value.claimsAudit.claims=[unsupported]
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'not_satisfied')
+ unsupported.result='unknown'
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ unsupported.result='unsubstantiated';f.value.claimsAudit.claimsComplete=false
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ f.value.claimsAudit.claimsComplete=true;unsupported.sourceSegmentId='missing'
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ f.pack.taskProfileVersion='generic-task-v11';unsupported.sourceSegmentId='delivery'
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate','old standards cannot silently adopt new scoring')
+})

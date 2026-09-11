@@ -6,9 +6,11 @@ last_updated: 2026-09-10
 
 # Gate、每周回归与每日分析
 
-**来源材料预检查：** Judge v11 将持久化用户材料作为独立来源段，调用前生成 `task-source-preflight-*.json`。`unavailable` 时检查缺失、摘要、范围或预算原因，不能以 Fixture 内容替代运行证据。评分 2.9 需以同一新标准重评整个比较集合，不能拼接旧版已通过项和新版单项分数。字段与边界见 [Semantic Judge Views v11](../contracts/semantic-judge-views-v11.md)。
+**来源材料预检查：** Judge v12 将持久化用户材料作为独立来源段，调用前生成 `task-source-preflight-*.json`。`unavailable` 时检查缺失、摘要、范围或预算原因，不能以 Fixture 内容替代运行证据。评分 2.10 需以同一新标准重评整个比较集合，不能拼接旧版已通过项和新版单项分数。字段与边界见 [Semantic Judge Views v12](../contracts/semantic-judge-views-v12.md)。
 
 本页拥有开发者操作流程。判断规则见 [Execution Evaluation v14](../contracts/execution-evaluation-v14.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+
+声明审计区分已支持、已证伪、未充分佐证与真正未知。未充分佐证是交付质量扣分，不是事实已被证明错误；评测器缺数据仍不能算队员失败。
 
 先前 Lead 报告随 `prior_delivery` 保留，用于核对最后确认的引用；不能用于自证实现或测试成功。评分请求超时在 `evaluationFailures` 单列并保留每次尝试，任务缺陷仍按实际验收扣分。
 
@@ -73,7 +75,7 @@ API 凭据仅通过命名环境变量读取；不写进配置或报告。默认�
 
 ### 质量、协作与有界修正
 
-评分配置随 suite 冻结为 `generic-task-quality@2.9.0`。任务质量按目标达成 50、证据一致性 25、边界遵守 25 汇总；Case 验收依据随任务定义，非代码任务不要求代码测试。三个维度中的未知会使该维度和总分未完成，页面保留已有分项与覆盖率。边界分只覆盖 Case 声明且能观察的检查，不能据此声称覆盖全部权限行为。
+评分配置随 suite 冻结为 `generic-task-quality@2.10.0`。任务质量按目标达成 50、证据一致性 25、边界遵守 25 汇总；Case 验收依据随任务定义，非代码任务不要求代码测试。三个维度中的未知会使该维度和总分未完成，页面保留已有分项与覆盖率。边界分只覆盖 Case 声明且能观察的检查，不能据此声称覆盖全部权限行为。
 
 协作三组保留五个细项的原始 Judge 判定、理由和证据，分母是适用的计划 Case × repetition，未知仍在分母。部分满足不算满足，零分母为 N/A；分组已有不满足时，其他细项的证据缺口也保留。Case 的关键协作项必须满足，不能用高质量分或其他 Case 的改善抵消。
 

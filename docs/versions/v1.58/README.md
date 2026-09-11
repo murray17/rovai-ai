@@ -57,4 +57,4 @@ last_updated: 2026-09-11
 
 混合队伍实测暴露的 Outcome 来源正文遗漏，按[来源材料闭合](evaluation-source-materials.md)修订为 Judge v10 / 评分 2.8；原始执行失败与旧分数保留，实际重评状态见该记录。
 
-正式交付被后续确认遮蔽、Judge 超时分类和恢复按[正式交付与有限恢复](evaluation-delivery-recovery.md)推进，当前评分 2.9 / Judge v11；既有 Case 和历史结果保留。
+正式交付被后续确认遮蔽、Judge 超时分类和恢复按[正式交付与有限恢复](evaluation-delivery-recovery.md)推进，当前评分 2.10 / Judge v12；既有 Case 和历史结果保留。

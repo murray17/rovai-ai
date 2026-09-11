@@ -21,9 +21,9 @@ export async function prepareJudgeSourceSupplement({ evidenceDirectory, result, 
   const configuration = JSON.parse(await readFile(join(evidenceDirectory, 'context-regression-configuration.json'), 'utf8'))
   const workspace = join(configuration.temporaryRoot, 'workspace')
   const installation = environment.runtimeInstallations.find(item => item.adapterKind === 'codex-cli')
-  const sourceProfile = ['generic-task-v10', 'generic-task-v11'].includes(caseEvaluation.judgeProfile)
-  const executionProfile = ['generic-task-v9', 'generic-task-v10', 'generic-task-v11'].includes(caseEvaluation.judgeProfile)
-  const deliveryProfile = ['generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11'].includes(caseEvaluation.judgeProfile)
+  const sourceProfile = ['generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(caseEvaluation.judgeProfile)
+  const executionProfile = ['generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(caseEvaluation.judgeProfile)
+  const deliveryProfile = ['generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(caseEvaluation.judgeProfile)
   const capturedAt = new Date().toISOString()
   let sourceMaterials = null
   if (sourceProfile) {

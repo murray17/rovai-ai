@@ -444,8 +444,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
       })
     }
   }
-  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11'].includes(caseEvaluation?.judgeProfile)) {
-    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], requireDeliveryClosure: caseEvaluation.judgeProfile === 'generic-task-v11', evaluationSnapshot, includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11'].includes(caseEvaluation.judgeProfile) })
+  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(caseEvaluation?.judgeProfile)) {
+    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], requireDeliveryClosure: ['generic-task-v11', 'generic-task-v12'].includes(caseEvaluation.judgeProfile), evaluationSnapshot, includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(caseEvaluation.judgeProfile) })
     const seen = new Set(segments.map(segment => segment.evidenceReference.evidenceId))
     for (const segment of extra) if (!seen.has(segment.evidenceReference.evidenceId)) {
       segments.push(segment)
@@ -552,6 +552,7 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
       deliveryCharacters += body.length
       if (deliveries.length > 64 || deliveryCharacters > 160_000) throw new Error('delivery_history.budget_exceeded')
     }
+    if (requiredDelivery && body === '' && record?.safeForJudge === true && record.contentDigest === `sha256:${sha256('')}`) { retainedDeliveries.add(message.id); continue }
     if (record?.safeForJudge !== true || !body || body.length > 50_000 || totalCharacters + body.length > (includeEvaluationContext ? 310_000 : 150_000)) {
       if (requiredDelivery) throw new Error('delivery_history.content_unavailable_or_over_budget')
       continue
