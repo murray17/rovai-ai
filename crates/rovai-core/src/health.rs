@@ -1501,31 +1501,19 @@ async fn run_acp_probe(
         }
     }
     if kind == AdapterKind::KimiCodeCli {
-        command.env("KIMI_CODE_HOME", probe_root.join("kimi-code-home"));
         crate::acp::configure_kimi_model_environment(&mut command)?;
     }
     let grok_byok_configured =
         kind == AdapterKind::GrokBuild && crate::acp::grok_native_byok_configured()?;
     if kind == AdapterKind::GrokBuild {
-        // A BYOK Probe copies the official Grok configuration layers into a
-        // disposable Home so the native parser and model catalog remain exact
-        // without writing Probe Sessions into the user's Home. Account auth
-        // retains the native Home so an existing cached token remains reachable.
-        if grok_byok_configured {
-            let grok_probe_home = probe_root.join("grok-home");
-            crate::acp::prepare_grok_probe_home(&grok_probe_home)?;
-            command.env("GROK_HOME", grok_probe_home);
-        }
         crate::acp::configure_grok_native_environment(&mut command)?;
     }
     if kind == AdapterKind::TraeCnCli {
         command.args(["--permission-mode", "default"]);
     }
-    if kind == AdapterKind::KiroCli {
-        // Authentication remains in the user's native secure store, while
-        // disposable probe Sessions stay out of the persistent Kiro home.
-        command.env("KIRO_HOME", probe_root.join("kiro-home"));
-    }
+    // Probe the same native Home/configuration as a formal AgentRun. Only the
+    // working directory and its additive configuration belong to this probe;
+    // native initialization may persist state, which is not ours to remove.
     command.current_dir(&probe_root).stdin(Stdio::piped());
     let mut process = RuntimeProbeProcess::spawn(
         &mut command,
@@ -3270,6 +3258,9 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
     }
     candidates.into_iter().find(|path| path.is_file())
 }
+
+#[cfg(all(test, unix))]
+mod native_home_probe_tests;
 
 #[cfg(all(test, unix))]
 mod tests {

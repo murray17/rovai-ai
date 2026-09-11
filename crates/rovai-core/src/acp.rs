@@ -5275,41 +5275,6 @@ fn grok_native_configuration_compatibility_digest() -> Result<String> {
     Ok(load_grok_native_configuration()?.compatibility_digest)
 }
 
-fn prepare_grok_probe_home_from(source_home: &Path, probe_home: &Path) -> Result<()> {
-    std::fs::create_dir_all(probe_home)
-        .with_context(|| format!("failed to create {}", probe_home.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        std::fs::set_permissions(probe_home, std::fs::Permissions::from_mode(0o700))?;
-    }
-    for file_name in ["config.toml", "managed_config.toml", "requirements.toml"] {
-        let source = source_home.join(file_name);
-        if !source.is_file() {
-            continue;
-        }
-        let target = probe_home.join(file_name);
-        std::fs::copy(&source, &target).with_context(|| {
-            format!(
-                "failed to copy official Grok Build configuration {} into the isolated Probe Home",
-                source.display()
-            )
-        })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600))?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn prepare_grok_probe_home(probe_home: &Path) -> Result<()> {
-    prepare_grok_probe_home_from(&grok_home_path()?, probe_home)
-}
-
 fn configure_compaction_detector_command(
     command: &mut Command,
     adapter_kind: AdapterKind,
@@ -8245,38 +8210,6 @@ done
         )
         .expect_err("group-readable Grok environment secrets must fail closed");
         assert!(error.to_string().contains("group or others"));
-
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn grok_byok_probe_copies_official_config_without_copying_the_env_file() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-grok-provider-probe-home-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let source_home = root.join("source");
-        let probe_home = root.join("probe");
-        std::fs::create_dir_all(&source_home).unwrap();
-        std::fs::write(
-            source_home.join("config.toml"),
-            "[model.minimax-m3]\nenv_key = \"MINIMAX_API_KEY\"\n",
-        )
-        .unwrap();
-        std::fs::write(
-            source_home.join("managed_config.toml"),
-            "[features]\ntelemetry = false\n",
-        )
-        .unwrap();
-        std::fs::write(source_home.join(".env"), "MINIMAX_API_KEY=test-plan-key\n").unwrap();
-
-        prepare_grok_probe_home_from(&source_home, &probe_home).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(probe_home.join("config.toml")).unwrap(),
-            "[model.minimax-m3]\nenv_key = \"MINIMAX_API_KEY\"\n"
-        );
-        assert!(probe_home.join("managed_config.toml").is_file());
-        assert!(!probe_home.join(".env").exists());
 
         std::fs::remove_dir_all(root).unwrap();
     }

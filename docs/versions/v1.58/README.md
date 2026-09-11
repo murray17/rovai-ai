@@ -55,4 +55,6 @@ last_updated: 2026-09-11
 
 102／106／107 的后续诊断、校准与新一轮实测见[声明评价校准计划](evaluation-claim-calibration.md)。前述 94.27 分保留为旧标准记录，不等于校准后结论。
 
+普通 Runtime Probe 的原生 Home 收敛与两项保留差异见[实施记录](runtime-probe-native-home.md)；本增量不涉及 Renderer、正式 AgentRun 或 Pi 图片。
+
 混合队伍实测暴露的 Outcome 来源正文遗漏，按[来源材料闭合](evaluation-source-materials.md)修订为 Judge v10 / 评分 2.8；原始执行失败与旧分数保留，实际重评状态见该记录。
