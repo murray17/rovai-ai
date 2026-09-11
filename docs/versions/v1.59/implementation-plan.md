@@ -18,12 +18,12 @@ last_updated: 2026-09-12
 | 阶段 | 工作与放行条件 | 状态 |
 | --- | --- | --- |
 | 1A 共享 Core | 抽取应用运行层，普通串行入口与必要独立通道不变；旧 Desktop 准入、重复实例、执行、关闭回归；补齐 Main 迁移表及窄接口 | 实施中 |
-| 1A 平台原型 | Windows/Linux 实测文件、环境/句柄、必要进程访问、IPC 冒用、管理恢复、授权工作区与后代回收；失败先由用户确认最小修正 | 待环境与执行 |
+| 1A 平台原型 | Windows/Linux 实测文件、环境/句柄、必要进程访问、IPC 冒用、管理恢复、授权工作区与后代回收；失败先由用户确认最小修正 | 四个目标的文件边界均未通过；其余边界未验收 |
 | 1B Headless | 空目录初始化与原生 Runtime 认证；真实发送、产物、审批、取消、受控关闭、强杀恢复；无 Electron/基础 Node 依赖 | 初始 CLI 在 macOS 验证；真实执行未验收 |
 | 1C Web 闭环 | 同一 Axum 模块、内存 Bearer、受限 Fetch、上传 source ref、草稿归属、SSE 与宽屏闭环；第二台 LAN 电脑使用 | 只读入口与浏览器验证已接入；草稿、上传与发送未开放 |
 | 2 Desktop 共用 | 受保护本机 IPC、同 Host Web 开关与会话管理；关闭 Web 不停 Core，bind 失败不毁 Desktop；保留退出与父进程异常语义 | 同 Host/匿名父管道/Web 开关已接入并做进程验证；完整隔离与 Desktop 交互验收待补 |
 | 3 宽屏完整性 | Camp/成员/Task/Runtime/Memory/Automation/Skills/MCP 与必要设置；声明能力矩阵；多端、私聊归属、审批竞争和迟到响应回归 | 只读资源与现状双主题已接入；完整写入与多端回归未完成 |
-| 4 三平台发布 | macOS arm64/x64、Windows x64、Linux x64 实际 CLI Server 闭环与匹配 Host/Web 包；平台/Runtime/部署方式分别留证 | 原生预览构建/验证工作流已准备，未正式验收或发布 |
+| 4 三平台发布 | macOS arm64/x64、Windows x64、Linux x64 实际 CLI Server 闭环与匹配 Host/Web 包；平台/Runtime/部署方式分别留证 | 四个原生预览包与有限链路已验证；隔离未通过，未正式发布 |
 | 5 Mobile | 按 2026-09-12 用户追加要求先出沿用现有风格的交互稿；真实 Mobile 生产实现与设备验收留待后续 | 已有可交互 HTML 和状态检查，待用户评审 |
 
 1C 的基础门禁不能后移：两标签页互不覆盖，伪造归属不能读/写/绑定/消费；陈旧 revision 不消费新内容；
@@ -140,12 +140,12 @@ macOS/Windows 兼容性证据。
 原生文件边界探针只访问本次临时目录中的无敏感哨兵文件。macOS arm64 的
 [观测结果](evidence/host-file-boundary-macos-arm64.json)显示 ManagedProcess 及后代均能读取私有目录里的哨兵，
 同时能写授权工作区；因此现有进程回收/私有目录权限不能单独证明目标隔离。该探针不读取真实控制凭据，
-也未覆盖环境/句柄、IPC 或内存；不能把它扩称为完整隔离攻防结论。Windows/Linux 同入口待原生 CI 实测。
-若其隔离失败，按用户已确认规则先提交最小修正、替代与影响，由用户决定再实施。
+也未覆盖环境/句柄、IPC 或内存；不能把它扩称为完整隔离攻防结论。随后四个目标的原生 CI 结果见下文。
+按用户已确认规则，隔离失败后先提交最小修正、替代与影响，由用户决定再实施。
 
 第一轮全量 Rust library 为 790 通过/2 失败/6 既有忽略：一项是未验收 Linux 说明误加入被 SHA-256 绑定
 的兼容性清单，已移回平台合同，原 evidence 字节保持不变；另一项是既有 Claude 原生初始化夹具 1 秒期限
-超时，正在单独复验并限制测试并发重跑，未修改生产期限、断言或忽略配置。后续门禁结果继续补记。
+超时，随后单独复验并限制测试并发重跑，未修改生产期限、断言或忽略配置。最终门禁结果见下文。
 
 后续 Core library 限制 4 并发仍为 791 通过/1 失败/6 既有忽略，唯一失败仍是该 Claude 初始化期限。
 精确用例、health 分组（22 通过/3 既有忽略）以及与相邻 v99 migration 的组合均通过；尚未得到稳定的
@@ -164,12 +164,41 @@ Typecheck、workspace 全目标 Clippy、Desktop/Web build、真实 bridge/设�
 本机原生 debug Server 包的真实进程测试 3 项通过；真实浏览器截图使用界面主题按钮，避免只改 DOM 造成状态失配。
 
 [三平台原生工作流](https://github.com/murray17/rovai-ai/actions/runs/34637391844)对应上述实现 SHA；
-运行状态与具体失败继续补记，不能将 pending 或 preview artifacts 当正式发布证据。
+最终结果及失败边界见下文，不能将 preview artifacts 当正式发布证据。
+
+## 原生预览检查与依赖证据
+
+第一轮 [Run 34637391844](https://github.com/murray17/rovai-ai/actions/runs/34637391844) 对应实现
+`670dae36`，四个原生 release 包均构建并上传；这次 Run 的最终结果是 failure。
+
+| 原生目标 | 凭据状态与 Core 进程/目录检查 | 包内 Host 生命周期 | 文件边界原型 |
+| --- | --- | --- | --- |
+| macOS 15 arm64 | 通过 | 3 通过 | [未通过](evidence/host-file-boundary-macos-arm64-ci.json) |
+| macOS 15 x64 | 通过 | 3 通过 | [未通过](evidence/host-file-boundary-macos-x64-ci.json) |
+| Ubuntu 24.04 x64 | 通过 | 3 通过 | [未通过](evidence/host-file-boundary-linux-x64-ci.json) |
+| Windows Server 2022 x64 | 通过 | 复核 2 通过/1 console 平台跳过 | [未通过](evidence/host-file-boundary-windows-x64-ci.json) |
+
+四个目标均观测到自身及后代能读取本次私有哨兵文件；授权工作区写入与回收请求成功。
+该结果不等同于真实 Token、IPC、环境/句柄或进程内存攻防。CI 的 OS/权限上下文不替代最低支持 OS、
+普通非提升权限用户、实际 Runtime、干净机器、系统服务与容器验收。
+
+Windows 初轮失败是测试将带 extended-length 前缀的规范路径与普通拼写作字面比较，Host/Web 场景本身通过。
+`fbadd0e9` 改为验证真实目录身份，原“只创建新目录、不改变已有内容”断言保留；同提交扩展了跨会话 SSE 配额/
+撤销检查。本机复验 3 项通过，工作流新增封闭的单目标选择，
+[Windows 复核 Run 34639404464](https://github.com/murray17/rovai-ai/actions/runs/34639404464) 对应此提交。
+该次原生构建、凭据状态、Core 进程/目录、Host prepare 和同 Core Web 生命周期均通过；随后文件边界原型失败，
+Run 保持 failure。Windows console 事件的原生受控关闭仍未验收，没有将平台跳过计为通过。
+
+对下载的原生产物先校验 manifest SHA-256，再离线读取二进制依赖：
+[Windows Host/CLI](evidence/windows-server-imports.json) 动态依赖 VCRUNTIME140.dll；
+[Linux Host/CLI](evidence/linux-server-imports.json) 分别包含 GLIBC_2.39 / GLIBC_2.34 符号需求。
+运行说明据此列出当前预览包的 Windows v14 Runtime 与 Linux glibc 基线；未把开发工具齐全的 CI 镜像
+等同于干净用户环境，不扩大成系统组件安装器。
 
 ## 原型缺口的最小修正提案（待用户决定）
 
-本节是待确认提案，不是新授权或已实现隔离。macOS 当前哨兵读取失败事实见上文；Windows/Linux 仍以
-原生工作流结果为准。哨兵证明“目录私有权限不足以隔离同一用户的 Runtime”，不证明本次新 Token
+本节是待确认提案，不是新授权或已实现隔离。macOS、Windows、Linux 当前文件隔离检查的失败事实见上文。
+哨兵证明“目录私有权限不足以隔离同一用户的 Runtime”，不证明本次新 Token
 已经泄漏：新令牌只经本机管道或显式 stdin 输入，服务端只留摘要。进程访问、IPC、句柄和环境仍须独立验证。
 
 | 选项 | 最小范围 | 影响与门禁 |

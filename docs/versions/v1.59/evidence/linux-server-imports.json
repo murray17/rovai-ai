@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "670dae367c6a00d45d0a9ec96eca57c575645249",
+  "workflowRun": 34637391844,
+  "artifactId": 10279240314,
+  "inspection": "llvm-objdump -p on native CI release artifacts; SHA-256 verified against their manifest",
+  "files": {
+    "rovai-host": {
+      "sha256": "75b0ba33afbff50f136ebadf2f83d48698728c4783d0a84bd50638f2f9da3e9b",
+      "neededLibraries": [
+        "libgcc_s.so.1",
+        "libm.so.6",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "glibcVersions": [
+        "2.2.5",
+        "2.3",
+        "2.3.2",
+        "2.3.4",
+        "2.4",
+        "2.5",
+        "2.7",
+        "2.9",
+        "2.10",
+        "2.14",
+        "2.15",
+        "2.16",
+        "2.17",
+        "2.18",
+        "2.25",
+        "2.27",
+        "2.28",
+        "2.29",
+        "2.30",
+        "2.32",
+        "2.33",
+        "2.34",
+        "2.39"
+      ],
+      "highestGlibcSymbolVersion": "2.39"
+    },
+    "rovai": {
+      "sha256": "11d4aabbb53d646c4acdedef8365acaef9158abf61d46333ef327affe2c36e35",
+      "neededLibraries": [
+        "libgcc_s.so.1",
+        "libm.so.6",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "glibcVersions": [
+        "2.2.5",
+        "2.3",
+        "2.3.2",
+        "2.3.4",
+        "2.4",
+        "2.7",
+        "2.9",
+        "2.14",
+        "2.16",
+        "2.17",
+        "2.18",
+        "2.25",
+        "2.28",
+        "2.29",
+        "2.30",
+        "2.32",
+        "2.33",
+        "2.34"
+      ],
+      "highestGlibcSymbolVersion": "2.34"
+    }
+  },
+  "qualification": "offline ABI observation; not another distribution, musl, container or Runtime qualification"
+}

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "670dae367c6a00d45d0a9ec96eca57c575645249",
+  "workflowRun": 34637391844,
+  "artifactId": 10279286349,
+  "inspection": "llvm-objdump -p on native CI release artifacts; SHA-256 verified against their manifest",
+  "files": {
+    "rovai-host.exe": {
+      "sha256": "a77a5d368bb84847c8e0588bd08671474e913af9459081b08ad119f4586cc1a8",
+      "dllImports": [
+        "bcryptprimitives.dll",
+        "kernel32.dll",
+        "ws2_32.dll",
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "advapi32.dll",
+        "ntdll.dll",
+        "shell32.dll",
+        "combase.dll",
+        "KERNEL32.dll",
+        "WS2_32.dll",
+        "VCRUNTIME140.dll",
+        "api-ms-win-crt-math-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-utility-l1-1-0.dll",
+        "api-ms-win-crt-time-l1-1-0.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-locale-l1-1-0.dll"
+      ]
+    },
+    "rovai.exe": {
+      "sha256": "f556a1267a6ec150b57d6438c21b029fad7fd7541c32708e2f1cec76bc8144e9",
+      "dllImports": [
+        "kernel32.dll",
+        "bcryptprimitives.dll",
+        "advapi32.dll",
+        "ntdll.dll",
+        "shell32.dll",
+        "combase.dll",
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "KERNEL32.dll",
+        "VCRUNTIME140.dll",
+        "api-ms-win-crt-math-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-utility-l1-1-0.dll",
+        "api-ms-win-crt-time-l1-1-0.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-locale-l1-1-0.dll"
+      ]
+    }
+  },
+  "qualification": "offline dependency observation only; not clean-machine or Runtime qualification"
+}
