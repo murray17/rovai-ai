@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hello 👋</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fafafa;
+      --fg: #1a1a1a;
+      --muted: #666;
+      --card: #ffffff;
+      --border: #e5e5e5;
+      --accent: #2563eb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1115;
+        --fg: #f0f0f0;
+        --muted: #9aa0a6;
+        --card: #181b22;
+        --border: #2a2f3a;
+        --accent: #60a5fa;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      transition: background 200ms ease, color 200ms ease;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 480px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 28px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04),
+                  0 8px 24px rgba(0, 0, 0, 0.04);
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 32px;
+      letter-spacing: -0.02em;
+    }
+
+    p.lede {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .clock {
+      font-variant-numeric: tabular-nums;
+      font-size: 40px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 8px 0 4px;
+    }
+
+    .date {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--fg);
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 15px;
+      cursor: pointer;
+      transition: transform 80ms ease, background 120ms ease, border-color 120ms ease;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .greeting {
+      margin-top: 20px;
+      min-height: 24px;
+      font-size: 16px;
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Hello <span aria-hidden="true">👋</span></h1>
+    <p class="lede">一个会跟着系统主题走的最小页面。</p>
+
+    <div class="clock" id="clock" aria-live="off">--:--:--</div>
+    <div class="date" id="date">—</div>
+
+    <button id="greet" type="button">打个招呼</button>
+    <div class="greeting" id="greeting" aria-live="polite"></div>
+  </main>
+
+  <script>
+    const greetings = [
+      "你好，世界！",
+      "Hello, world!",
+      "嘿，今天过得怎么样？",
+      "Hi there 👋",
+      "祝你心情好 ☀️",
+      "Welcome!",
+      "很高兴见到你 :)",
+      "Salutations!",
+    ];
+
+    const clockEl = document.getElementById("clock");
+    const dateEl = document.getElementById("date");
+    const greetEl = document.getElementById("greeting");
+    const btn = document.getElementById("greet");
+
+    function pad(n) {
+      return String(n).padStart(2, "0");
+    }
+
+    function render() {
+      const d = new Date();
+      clockEl.textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      const weekday = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
+      dateEl.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} 周${weekday}`;
+    }
+
+    render();
+    setInterval(render, 1000);
+
+    btn.addEventListener("click", () => {
+      const g = greetings[Math.floor(Math.random() * greetings.length)];
+      greetEl.textContent = g;
+    });
+  </script>
+</body>
+</html>
