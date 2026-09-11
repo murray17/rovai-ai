@@ -50,7 +50,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v37（当前）](runtime-launch-and-verification-v37.md) | 官方 ZCode Runtime 与原生证据边界；继承上一版合同 |
+| [Runtime Launch and Verification v38（当前）](runtime-launch-and-verification-v38.md) | Grok BYOK、Kimi、Kiro 普通 Probe 继承原生 Home；保留临时 cwd、非生成请求、认证与有界清理 |
+| [Runtime Launch and Verification v37（历史）](runtime-launch-and-verification-v37.md) | 官方 ZCode Runtime 与原生证据边界；继承上一版合同 |
 | [Runtime Launch and Verification v36（历史）](runtime-launch-and-verification-v36.md) | v35 的 Fleet/epoch/abort/exact resume/图片边界不变；Pi 固定原生 project trust，删除 Rovai Tool Approval 与新 Managed Input Receipt，`agent_start` 原子接受 Delivery 并发布 started |
 | [Runtime Launch and Verification v35（历史）](runtime-launch-and-verification-v35.md) | v34 的 Pi 原生边界不变；abort 使用完整 RPC correlation，receipt 移到最终 pre-agent seam，epoch 双重 fencing，Fleet-owned Starting/Stopping operation 与第三方 Extension UI 安全取消；Approval/Receipt 已由 v36 退役 |
 | [Runtime Launch and Verification v34（历史）](runtime-launch-and-verification-v34.md) | v33 的 Pi 原生资源、External MCP Unsupported 与部分审批不变；删除资源二次发现、Slash/Prompt transform 和 extension fallback，精确限定 resume 降级并让 Fleet 在锁外并发启动；operation ownership 由 v35 替代 |

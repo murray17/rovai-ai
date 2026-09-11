@@ -54,3 +54,5 @@ last_updated: 2026-09-11
 较早批次的十二项真实执行证据曾完成重评：质量 94.27/100、覆盖 100%、硬验收 11/12、全条件验收 10/12；无基线比较。实际版本、未通过项合理性、发布故障修复与限制见[可观察指标实测记录](evaluation-observable-results.md)，保留为历史结果。
 
 102／106／107 的后续诊断、校准与新一轮实测见[声明评价校准计划](evaluation-claim-calibration.md)。前述 94.27 分保留为旧标准记录，不等于校准后结论。
+
+普通 Runtime Probe 的原生 Home 收敛与两项保留差异见[实施记录](runtime-probe-native-home.md)；本增量不涉及 Renderer、正式 AgentRun 或 Pi 图片。

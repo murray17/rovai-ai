@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-10
+last_updated: 2026-09-11
 ---
 
 # Agent Runtime 兼容性清单
@@ -32,6 +32,17 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 目录不展示该项。DeepSeek Harness 在 macOS arm64、macOS x64 与 Windows x64 的设置页均隐藏，
 不保留“待支持”占位行；它仍是未实现候选，不在这个目录中，也没有 Installation、Probe、成员选择、
 诊断或 AgentRun 语义。本次显示范围调整不改变任何 Runtime 的平台资格或实测证据。
+
+### 2026-09-11 Grok、Kimi、Kiro 普通 Probe 原生环境
+
+普通 Probe 现沿用用户原生 Home，不再额外覆盖 `GROK_HOME`、`KIMI_CODE_HOME` 或 `KIRO_HOME`；
+Grok BYOK 不再复制原生配置到临时 Home。临时 cwd、Kiro additive agent、Kimi 配置 overlay、非交互认证
+和进程清理继续保留，主动请求不包含 Prompt 或其他生成请求。当前边界见
+[Runtime Launch and Verification v38](contracts/runtime-launch-and-verification-v38.md)，实际回归及未覆盖项见
+[实现记录](versions/v1.58/runtime-probe-native-home.md)。
+
+本次证据来自隔离假 Runtime 的跨进程回归，不新增真实认证、模型或平台资格结论。以下按日期记录的旧验收
+保留当时事实；其中临时 Probe Home 的描述不再代表当前普通检测行为。
 
 ### 2026-09-07 Pi 0.84.4 edit patch 文件变化证据
 

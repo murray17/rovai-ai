@@ -80,7 +80,9 @@ last_updated: 2026-08-24
 ### 3.1 Auth、Provider 与 Model
 
 - [ ] 正式 AgentRun 使用该 Runtime 自身的官方认证、Subscription、OAuth、BYOK 和原生配置来源。
-- [ ] 不借用另一个 Runtime 的 Home、凭据、Provider 或模型配置；Probe 的临时 Home 不进入生产启动。
+- [ ] 不借用另一个 Runtime 的 Home、凭据、Provider 或模型配置；自动化验收的临时 Home 不进入生产启动。
+- [ ] Grok Build、Kimi Code、Kiro CLI 的普通 Probe 继承正式运行的原生 Home，保留临时 cwd 和非生成检查；
+  自动化回归与模型 smoke 的隔离由调用方提供，不把普通检测宣称为零联网、零落盘或模型生成验证。
 - [ ] 支持 Runtime native default；显式模型从真实 catalog/state 选择并在启动后核对。
 - [ ] 凭据、模型或 Provider 改变后，已驻留 Host/Session 会 live refresh 或被精确 fence，不继续使用旧状态。
 - [ ] Secret 不进入数据库、argv、Prompt、日志、Evidence、diagnostics 或公开 Runtime 事件。
