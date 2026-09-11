@@ -40,7 +40,7 @@ Probe 只做版本、workspace/readState、无消息 deferred Session 创建、�
 不承诺零写入；结束只删除本次临时资源，不扫描或删除用户原生 Session 数据库。
 
 Probe 实测结果只包含 initialize、native 配置加载、session.new；AdapterCapabilitySnapshot 另存代码已实现
-的映射能力，发布 Smoke 证据按版本/平台独立记录。用户“基础连接正常”不保证余额、模型生成或高级能力已实测。
+的映射能力，发布 Smoke 证据按版本/平台独立记录。Ready 与其他 Runtime 统一显示“可用”，检查范围保留在详情中；该状态不保证余额、模型生成或高级能力已实测。
 保留最低 kernel 0.16.5、程序指纹变化复查和关键返回值校验；不因版本新于已测试版本而无条件禁止使用。
 
 ## Session、输入与生命周期

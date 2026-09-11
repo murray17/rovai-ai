@@ -87,11 +87,10 @@ export function runtimeAvailabilityPresentation(
       )
     case 'ready':
       if (availability.runtimeKind === 'zcode-app') {
-        return {
-          status: 'available',
-          label: '基础连接正常',
-          detail: '已加载本机原生配置并连接成功；本次检查未调用模型，生成能力、余额和高级能力将在实际任务中确认。'
-        }
+        return presentation(
+          'available',
+          '已加载本机原生配置并连接成功；本次检查未调用模型，生成能力、余额和高级能力将在实际任务中确认。'
+        )
       }
       return presentation(
         'available',

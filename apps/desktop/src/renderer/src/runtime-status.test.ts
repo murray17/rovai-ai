@@ -34,14 +34,18 @@ describe('Runtime user status projection', () => {
     'maps %s to the actionable status %s',
     (status, label) => {
       expect(runtimeAvailabilityPresentation(availability(status)).label).toBe(label)
-      if (status === 'ready') {
-        const zcode = runtimeAvailabilityPresentation(availability(status, 'zcode-app'))
-        expect(zcode.label).toBe('基础连接正常')
-        expect(zcode.detail).toContain('本次检查未调用模型')
-        expect(zcode.detail).toContain('高级能力将在实际任务中确认')
-      }
+      expect(runtimeAvailabilityPresentation(availability(status, 'zcode-app')).label).toBe(label)
     }
   )
+
+  it('uses the shared available label for ZCode and keeps probe scope in the detail', () => {
+    const zcode = runtimeAvailabilityPresentation(availability('ready', 'zcode-app'))
+
+    expect(zcode.status).toBe('available')
+    expect(zcode.label).toBe('可用')
+    expect(zcode.detail).toContain('本次检查未调用模型')
+    expect(zcode.detail).toContain('高级能力将在实际任务中确认')
+  })
 
   it('keeps a cached ready result usable while Core refreshes it', () => {
     const result = runtimeAvailabilityPresentation({
