@@ -148,8 +148,8 @@ describe('member runtime parameters', () => {
     expect(markup).toContain('value="high" selected')
   })
 
-  it('marks a saved unknown model as unverified when no serviceable catalog exists', () => {
-    const installation = runtimeInstallation('copilot-cli')
+  it.each(['copilot-cli', 'claude-code-cli'] as const)('marks a saved unknown model as unverified when no serviceable catalog exists (%s)', (adapterKind) => {
+    const installation = runtimeInstallation(adapterKind)
     installation.modelCatalog = {
       status: 'unavailable',
       observedAt: null,
@@ -157,7 +157,7 @@ describe('member runtime parameters', () => {
       expiresAt: null
     }
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
-      adapterKind: 'copilot-cli',
+      adapterKind,
       installation,
       draft: {
         model: {
@@ -175,8 +175,8 @@ describe('member runtime parameters', () => {
     expect(markup).not.toContain('已失效')
   })
 
-  it('keeps a stale last-known-good catalog visible after a newer refresh failure', () => {
-    const installation = runtimeInstallation('copilot-cli')
+  it.each(['copilot-cli', 'claude-code-cli'] as const)('keeps a stale last-known-good catalog visible after a newer refresh failure (%s)', (adapterKind) => {
+    const installation = runtimeInstallation(adapterKind)
     installation.modelCatalog.status = 'stale'
     installation.lastProbeAttempt = {
       id: 'attempt-refresh-failed',
@@ -191,7 +191,7 @@ describe('member runtime parameters', () => {
       failure: null
     }
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
-      adapterKind: 'copilot-cli',
+      adapterKind,
       installation,
       draft: {
         model: { mode: 'explicit', modelId: 'runtime/model', options: {} },

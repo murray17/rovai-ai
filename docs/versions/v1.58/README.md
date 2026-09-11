@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-09-11
+last_updated: 2026-09-12
 ---
 
 # Rovai-ai v1.58：上下文 Gate 与双轨评测
@@ -66,3 +66,7 @@ last_updated: 2026-09-11
 混合队伍实测暴露的 Outcome 来源正文遗漏，按[来源材料闭合](evaluation-source-materials.md)修订为 Judge v10 / 评分 2.8；原始执行失败与旧分数保留，实际重评状态见该记录。
 
 正式交付被后续确认遮蔽、Judge 超时分类和恢复按[正式交付与有限恢复](evaluation-delivery-recovery.md)推进，当前评分 2.10 / Judge v12；既有 Case 和历史结果保留。
+
+Claude Code 模型目录从 help 别名改为无 Prompt 控制初始化，原生元数据、统一缓存、失败保留和验证状态见
+[实施计划](implementation-plan.md#claude-code-动态模型目录)；当前合同为
+[Runtime Launch v39](../../contracts/runtime-launch-and-verification-v39.md)。此项不改变当前版本状态或 Runtime 平台资格。

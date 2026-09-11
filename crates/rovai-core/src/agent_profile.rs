@@ -17,12 +17,13 @@ use crate::{
     agent_identity::allocate_agent_id,
     agent_runtime_adapter::{
         ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, AdapterRuntimeResolutionInput,
-        AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
-        PI_MACHINE_PROTOCOL, PI_NATIVE_SESSION_COMPATIBILITY_KEY, PI_RUNTIME_DEFAULT_MODEL_ID,
-        TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
-        trae_static_permission_options, validate_grok_machine_ready_evidence,
-        validate_machine_ready_snapshot, validate_pi_machine_ready_evidence,
-        validate_trae_machine_ready_evidence,
+        AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID,
+        CLAUDE_MODEL_CATALOG_CAPABILITY, ExecutableFileIdentity, PI_MACHINE_PROTOCOL,
+        PI_NATIVE_SESSION_COMPATIBILITY_KEY, PI_RUNTIME_DEFAULT_MODEL_ID,
+        TRAE_RUNTIME_DEFAULT_MODEL_ID, claude_code_catalog_has_native_evidence,
+        observe_executable_file_identity, trae_static_permission_options,
+        validate_grok_machine_ready_evidence, validate_machine_ready_snapshot,
+        validate_pi_machine_ready_evidence, validate_trae_machine_ready_evidence,
     },
     collaboration::end_camp_membership,
     command::{
@@ -484,6 +485,11 @@ pub enum RuntimeOptionScope {
 pub struct ModelDescriptor {
     pub id: String,
     pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The Runtime's model entry only; never the surrounding initialization/account response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_metadata: Option<Value>,
     pub is_default: bool,
     pub hidden: bool,
     pub deprecated: bool,
@@ -525,7 +531,15 @@ impl RuntimeModelCatalogCacheView {
     }
 }
 
+fn model_catalog_has_native_evidence(
+    adapter_kind: AdapterKind,
+    models: &[ModelDescriptor],
+) -> bool {
+    adapter_kind != AdapterKind::ClaudeCodeCli || claude_code_catalog_has_native_evidence(models)
+}
+
 pub fn runtime_model_catalog_cache_view(
+    adapter_kind: AdapterKind,
     snapshot: Option<&AdapterCapabilitySnapshot>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> RuntimeModelCatalogCacheView {
@@ -550,7 +564,9 @@ pub fn runtime_model_catalog_cache_view(
     let retained_lkg = snapshot.probe_status != "ready"
         && snapshot.last_successful_probe_at.is_some()
         && !snapshot.models.is_empty();
-    if snapshot.probe_status != "ready" && !retained_lkg {
+    if (snapshot.probe_status != "ready" && !retained_lkg)
+        || !model_catalog_has_native_evidence(adapter_kind, &snapshot.models)
+    {
         return RuntimeModelCatalogCacheView {
             status: RuntimeModelCatalogCacheStatus::Unavailable,
             observed_at: None,
@@ -1464,6 +1480,20 @@ impl AgentProfileService {
                 json!({
                     "installationId": runtime.installation_id,
                     "probeStatus": probe_status,
+                }),
+            )));
+        }
+        if runtime.adapter_kind == AdapterKind::ClaudeCodeCli
+            && !runtime
+                .capabilities
+                .iter()
+                .any(|value| value == CLAUDE_MODEL_CATALOG_CAPABILITY)
+        {
+            return Ok(Some(runtime_blocker(
+                "runtime_probe_required",
+                json!({
+                    "installationId": runtime.installation_id,
+                    "detail": "Claude Code initialization model catalog must be verified",
                 }),
             )));
         }
@@ -3476,7 +3506,8 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
     } else {
         None
     };
-    let model_catalog = runtime_model_catalog_cache_view(snapshot.as_ref(), chrono::Utc::now());
+    let model_catalog =
+        runtime_model_catalog_cache_view(adapter_kind, snapshot.as_ref(), chrono::Utc::now());
     Ok(AdapterInstallationView {
         id: row.get(0)?,
         adapter_kind,
@@ -4329,6 +4360,8 @@ pub fn configure_test_runtime(database: &Database, agent_ids: &[&str]) {
         )
         .expect("test Adapter installation should be inserted");
     let models = vec![ModelDescriptor {
+        description: None,
+        runtime_metadata: None,
         id: "gpt-test".to_string(),
         display_name: "GPT Test".to_string(),
         is_default: true,
@@ -4608,7 +4641,17 @@ fn configurable_managed_runtime_snapshot(
                 let probe_status = row.get::<_, String>(4)?;
                 let preflight_required = is_preflight_required_status(Some(probe_status.as_str()));
                 let last_successful_probe_at = row.get::<_, Option<String>>(5)?;
+                let stored_models_json = row.get::<_, String>(2)?;
+                let stored_models: Vec<ModelDescriptor> = serde_json::from_str(&stored_models_json)
+                    .map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
                 let model_catalog_serviceable = probe_status == "ready"
+                    && model_catalog_has_native_evidence(adapter_kind, &stored_models)
                     && last_successful_probe_at
                         .as_deref()
                         .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
@@ -4622,26 +4665,12 @@ fn configurable_managed_runtime_snapshot(
                 Ok(ConfigurableManagedRuntimeSnapshot {
                     installation_id: row.get(0)?,
                     permission_schema_version: row.get(1)?,
-                    models_json: if preflight_required {
-                        let stored = row.get::<_, String>(2)?;
-                        let models: Vec<ModelDescriptor> =
-                            serde_json::from_str(&stored).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    2,
-                                    rusqlite::types::Type::Text,
-                                    Box::new(error),
-                                )
-                            })?;
-                        if preflight_required && models.is_empty() {
-                            serde_json::to_string(&provisional_runtime_models(adapter_kind))
-                                .map_err(|error| {
-                                    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
-                                })?
-                        } else {
-                            stored
-                        }
+                    models_json: if preflight_required && stored_models.is_empty() {
+                        serde_json::to_string(&provisional_runtime_models(adapter_kind)).map_err(
+                            |error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)),
+                        )?
                     } else {
-                        row.get(2)?
+                        stored_models_json
                     },
                     permissions_json: row.get(3)?,
                     preflight_required,
@@ -4975,6 +5004,8 @@ fn member_runtime_defaults_for_snapshot(
 
 fn provisional_runtime_models(adapter_kind: AdapterKind) -> Vec<ModelDescriptor> {
     vec![ModelDescriptor {
+        description: None,
+        runtime_metadata: None,
         id: runtime_default_model_id(adapter_kind),
         display_name: format!("{} runtime default", adapter_kind.as_str()),
         is_default: true,
@@ -5539,6 +5570,8 @@ mod slow_tests {
             capabilities: vec!["structured_permission_request".to_string()],
             protocols: vec!["codex-app-server".to_string()],
             models: vec![ModelDescriptor {
+                description: None,
+                runtime_metadata: None,
                 id: "gpt-test".to_string(),
                 display_name: "GPT Test".to_string(),
                 is_default: true,
@@ -5601,6 +5634,28 @@ mod slow_tests {
         }
     }
 
+    fn ready_claude_snapshot() -> AdapterCapabilitySnapshot {
+        AgentRuntimeAdapterRegistry::default()
+            .claude_code_capability_snapshot(
+                crate::agent_runtime_adapter::ClaudeCodeProbeObservation {
+                    reported_version: Some("2.1.236".to_string()),
+                    executable_fingerprint: Some("sha256:test".to_string()),
+                    authentication_status: "authenticated".to_string(),
+                    probe_status: "ready".to_string(),
+                    capabilities: vec![CLAUDE_MODEL_CATALOG_CAPABILITY.to_string()],
+                    models: crate::agent_runtime_adapter::claude_code_models(&json!({"models":[{
+                        "value":"provider/custom[extended]", "displayName":"Custom model",
+                        "description":"Runtime description", "resolvedModel":"resolved-vNext",
+                        "supportsEffort": true, "supportedEffortLevels":["high"]
+                    }]}))
+                    .unwrap(),
+                    attempted_at: chrono::Utc::now().to_rfc3339(),
+                    last_error: None,
+                },
+            )
+            .unwrap()
+    }
+
     #[test]
     fn model_catalog_cache_has_distinct_revalidate_expiry_and_invalidation_states() {
         let observed_at = chrono::DateTime::parse_from_rfc3339("2026-08-18T12:00:00Z")
@@ -5611,6 +5666,7 @@ mod slow_tests {
 
         assert_eq!(
             runtime_model_catalog_cache_view(
+                AdapterKind::CodexCli,
                 Some(&snapshot),
                 observed_at + chrono::Duration::seconds(59),
             )
@@ -5619,6 +5675,7 @@ mod slow_tests {
         );
         assert_eq!(
             runtime_model_catalog_cache_view(
+                AdapterKind::CodexCli,
                 Some(&snapshot),
                 observed_at + chrono::Duration::seconds(60),
             )
@@ -5627,6 +5684,7 @@ mod slow_tests {
         );
         assert_eq!(
             runtime_model_catalog_cache_view(
+                AdapterKind::CodexCli,
                 Some(&snapshot),
                 observed_at + chrono::Duration::hours(24),
             )
@@ -5636,23 +5694,71 @@ mod slow_tests {
 
         snapshot.stale_at = Some("2026-08-18T12:00:30Z".to_string());
         assert_eq!(
-            runtime_model_catalog_cache_view(Some(&snapshot), observed_at).status,
+            runtime_model_catalog_cache_view(AdapterKind::CodexCli, Some(&snapshot), observed_at)
+                .status,
             RuntimeModelCatalogCacheStatus::Invalidated
         );
 
         snapshot.stale_at = None;
         snapshot.probe_status = "light_ready".to_string();
-        let light_cache = runtime_model_catalog_cache_view(Some(&snapshot), observed_at);
+        let light_cache =
+            runtime_model_catalog_cache_view(AdapterKind::CodexCli, Some(&snapshot), observed_at);
         assert_eq!(light_cache.status, RuntimeModelCatalogCacheStatus::Stale);
         assert_eq!(light_cache.observed_at, snapshot.last_successful_probe_at);
         assert_eq!(
             runtime_model_catalog_cache_view(
+                AdapterKind::CodexCli,
                 Some(&snapshot),
                 observed_at + chrono::Duration::hours(24),
             )
             .status,
             RuntimeModelCatalogCacheStatus::Expired
         );
+        let native_models = crate::agent_runtime_adapter::claude_code_models(&json!({"models":[
+            {"value":"custom-model","displayName":"Custom model"}
+        ]}))
+        .unwrap();
+        snapshot.models = native_models.clone();
+        snapshot.probe_status = "ready".to_string();
+        assert_eq!(
+            runtime_model_catalog_cache_view(
+                AdapterKind::ClaudeCodeCli,
+                Some(&snapshot),
+                observed_at
+            )
+            .status,
+            RuntimeModelCatalogCacheStatus::Fresh
+        );
+        snapshot.probe_status = "light_ready".to_string();
+        assert_eq!(
+            runtime_model_catalog_cache_view(
+                AdapterKind::ClaudeCodeCli,
+                Some(&snapshot),
+                observed_at
+            )
+            .status,
+            RuntimeModelCatalogCacheStatus::Stale
+        );
+        assert_eq!(
+            runtime_model_catalog_cache_view(
+                AdapterKind::ClaudeCodeCli,
+                Some(&snapshot),
+                observed_at + chrono::Duration::hours(24)
+            )
+            .status,
+            RuntimeModelCatalogCacheStatus::Expired
+        );
+        snapshot.models[1].runtime_metadata = None;
+        for status in ["ready", "light_ready"] {
+            snapshot.probe_status = status.to_string();
+            let legacy = runtime_model_catalog_cache_view(
+                AdapterKind::ClaudeCodeCli,
+                Some(&snapshot),
+                observed_at,
+            );
+            assert_eq!(legacy.status, RuntimeModelCatalogCacheStatus::Unavailable);
+            assert!(legacy.observed_at.is_none());
+        }
     }
 
     #[test]
@@ -5752,6 +5858,7 @@ mod slow_tests {
         assert!(installation.last_probe_attempt.is_none());
         assert_eq!(
             runtime_model_catalog_cache_view(
+                AdapterKind::CodexCli,
                 Some(snapshot),
                 last_successful + chrono::Duration::hours(24),
             )
@@ -5826,86 +5933,104 @@ mod slow_tests {
 
     #[test]
     fn expired_catalog_allows_runtime_default_but_rejects_new_explicit_selection() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let executable_path = test_executable_path(&directory, "expired-catalog-codex");
-        let mut snapshot = ready_codex_snapshot();
-        let expired_at = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
-        snapshot.observed_at = Some(expired_at.clone());
-        snapshot.last_attempted_at = expired_at.clone();
-        snapshot.last_successful_probe_at = Some(expired_at);
-        service
-            .commit_verified_managed_installation(
-                &mut database,
-                VerifiedManagedInstallation {
-                    adapter_kind: AdapterKind::CodexCli,
-                    executable_path: executable_path.to_string_lossy().into_owned(),
-                    command_name: "codex".to_string(),
-                    source: InstallationSource::InheritedPath,
-                    auth_scope: "default".to_string(),
-                    snapshot,
-                    entrypoint_locator_identity: None,
+        for (kind, mut snapshot, model_id) in [
+            (AdapterKind::CodexCli, ready_codex_snapshot(), "gpt-test"),
+            (
+                AdapterKind::ClaudeCodeCli,
+                ready_claude_snapshot(),
+                "provider/custom[extended]",
+            ),
+        ] {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let executable_path = test_executable_path(&directory, "expired-catalog-codex");
+            let expired_at = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+            snapshot.observed_at = Some(expired_at.clone());
+            snapshot.last_attempted_at = expired_at.clone();
+            snapshot.last_successful_probe_at = Some(expired_at);
+            service
+                .commit_verified_managed_installation(
+                    &mut database,
+                    VerifiedManagedInstallation {
+                        adapter_kind: kind,
+                        executable_path: executable_path.to_string_lossy().into_owned(),
+                        command_name: "codex".to_string(),
+                        source: InstallationSource::InheritedPath,
+                        auth_scope: "default".to_string(),
+                        snapshot: snapshot.clone(),
+                        entrypoint_locator_identity: None,
+                    },
+                )
+                .unwrap();
+            if kind == AdapterKind::ClaudeCodeCli {
+                for model in &mut snapshot.models {
+                    model.runtime_metadata = None;
+                }
+                database.connection().execute(
+                "UPDATE adapter_capability_snapshot SET model_catalog_json = ?1, last_successful_probe_at = ?2 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind = 'claude-code-cli')",
+                params![serde_json::to_string(&snapshot.models).unwrap(), chrono::Utc::now().to_rfc3339()],
+            ).unwrap();
+            }
+            let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
+            let permissions = AdapterPermissionConfig {
+                adapter_kind: kind,
+                schema_version: 1,
+                values: if kind == AdapterKind::ClaudeCodeCli {
+                    json!({"permission_mode":"bypassPermissions"})
+                } else {
+                    json!({"sandbox_mode":"workspace-write", "approval_policy":"on-request"})
                 },
-            )
-            .unwrap();
-        let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
-        let permissions = AdapterPermissionConfig {
-            adapter_kind: AdapterKind::CodexCli,
-            schema_version: 1,
-            values: json!({
-                "sandbox_mode": "workspace-write",
-                "approval_policy": "on-request",
-            }),
-        };
-        let default_result = service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "expired-catalog-runtime-default",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: profile.agent_id.clone(),
-                        expected_version: profile.version,
-                        adapter_kind: AdapterKind::CodexCli,
-                        model: ModelSelection::RuntimeDefault,
-                        permissions: permissions.clone(),
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(
-            default_result.result.code,
-            "agent_profile.runtime_configured"
-        );
-
-        let configured = service
-            .get_profile(&database, &profile.agent_id)
-            .unwrap()
-            .unwrap();
-        let explicit_result = service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "expired-catalog-explicit-model",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: configured.agent_id,
-                        expected_version: configured.version,
-                        adapter_kind: AdapterKind::CodexCli,
-                        model: ModelSelection::Explicit {
-                            model_id: "gpt-test".to_string(),
-                            options: json!({}),
+            };
+            let default_result = service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "expired-catalog-runtime-default",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: profile.version,
+                            adapter_kind: kind,
+                            model: ModelSelection::RuntimeDefault,
+                            permissions: permissions.clone(),
                         },
-                        permissions,
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(
-            explicit_result.result.code,
-            "runtime_model_catalog_refresh_required"
-        );
+                    ),
+                )
+                .unwrap();
+            assert_eq!(
+                default_result.result.code,
+                "agent_profile.runtime_configured"
+            );
 
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
+            let configured = service
+                .get_profile(&database, &profile.agent_id)
+                .unwrap()
+                .unwrap();
+            let explicit_result = service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "expired-catalog-explicit-model",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: configured.agent_id,
+                            expected_version: configured.version,
+                            adapter_kind: kind,
+                            model: ModelSelection::Explicit {
+                                model_id: model_id.to_string(),
+                                options: json!({}),
+                            },
+                            permissions,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(
+                explicit_result.result.code,
+                "runtime_model_catalog_refresh_required"
+            );
+
+            drop(database);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     #[test]
@@ -6681,95 +6806,104 @@ mod slow_tests {
 
     #[test]
     fn failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let executable_path = test_executable_path(&directory, "failed-probe-codex");
-        let installation = service
-            .create_installation(
-                &mut database,
-                &user_command(
-                    "create-installation",
-                    CreateAdapterInstallationCommand {
-                        adapter_kind: AdapterKind::CodexCli,
-                        executable_path: executable_path.to_string_lossy().into_owned(),
-                        command_name: "codex".to_string(),
-                        source: InstallationSource::Custom,
-                        auth_scope: "default".to_string(),
-                    },
-                ),
-            )
-            .expect("installation should be created");
-        let installation_id = installation.result.payload["installationId"]
-            .as_str()
-            .expect("installation id")
-            .to_string();
-        service
-            .record_snapshot(
-                &mut database,
-                &user_command(
-                    "record-ready-snapshot",
-                    RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: installation_id.clone(),
-                        expected_installation_version: 1,
-                        snapshot: ready_codex_snapshot(),
-                        failure: None,
-                    },
-                ),
-            )
-            .expect("ready snapshot should be recorded");
-        let failed_at = chrono::Utc::now().to_rfc3339();
-        service
-            .record_snapshot(
-                &mut database,
-                &user_command(
-                    "record-failed-snapshot",
-                    RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: installation_id.clone(),
-                        expected_installation_version: 1,
-                        snapshot: AdapterCapabilitySnapshot {
-                            reported_version: Some("must-not-replace".to_string()),
-                            executable_fingerprint: Some("sha256:test".to_string()),
-                            authentication_status: "unknown".to_string(),
-                            probe_status: "probe_failed".to_string(),
-                            permission_schema_version: 99,
-                            permission_schema_digest: "sha256:failed".to_string(),
-                            capabilities: vec!["must-not-replace".to_string()],
-                            protocols: vec!["must-not-replace".to_string()],
-                            models: Vec::new(),
-                            permission_options: Vec::new(),
-                            observed_at: None,
-                            last_attempted_at: failed_at.clone(),
-                            last_successful_probe_at: None,
-                            stale_at: None,
-                            last_error: Some("probe failed".to_string()),
-                            native_session_compatibility_key: None,
+        for (kind, ready) in [
+            (AdapterKind::CodexCli, ready_codex_snapshot()),
+            (AdapterKind::ClaudeCodeCli, ready_claude_snapshot()),
+        ] {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let executable_path = test_executable_path(&directory, "failed-probe-codex");
+            let installation = service
+                .create_installation(
+                    &mut database,
+                    &user_command(
+                        "create-installation",
+                        CreateAdapterInstallationCommand {
+                            adapter_kind: kind,
+                            executable_path: executable_path.to_string_lossy().into_owned(),
+                            command_name: "codex".to_string(),
+                            source: InstallationSource::Custom,
+                            auth_scope: "default".to_string(),
                         },
-                        failure: None,
-                    },
-                ),
-            )
-            .expect("failed attempt should be recorded");
-        let installation = service
-            .list_installations(&database)
-            .expect("installations should load")
-            .into_iter()
-            .find(|candidate| candidate.id == installation_id)
-            .expect("installation should remain");
-        let snapshot = installation.snapshot.expect("snapshot should remain");
-        assert_eq!(snapshot.reported_version.as_deref(), Some("0.144.6"));
-        assert_eq!(snapshot.models[0].id, "gpt-test");
-        assert_eq!(snapshot.permission_schema_version, 1);
-        assert_eq!(snapshot.probe_status, "ready");
-        assert_eq!(snapshot.stale_at, None);
-        assert_eq!(
-            installation
-                .last_probe_attempt
-                .as_ref()
-                .map(|attempt| attempt.failure_class.as_str()),
-            Some("transient")
-        );
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+                    ),
+                )
+                .expect("installation should be created");
+            let installation_id = installation.result.payload["installationId"]
+                .as_str()
+                .expect("installation id")
+                .to_string();
+            service
+                .record_snapshot(
+                    &mut database,
+                    &user_command(
+                        "record-ready-snapshot",
+                        RecordAdapterCapabilitySnapshotCommand {
+                            installation_id: installation_id.clone(),
+                            expected_installation_version: 1,
+                            snapshot: ready.clone(),
+                            failure: None,
+                        },
+                    ),
+                )
+                .expect("ready snapshot should be recorded");
+            let failed_at = chrono::Utc::now().to_rfc3339();
+            service
+                .record_snapshot(
+                    &mut database,
+                    &user_command(
+                        "record-failed-snapshot",
+                        RecordAdapterCapabilitySnapshotCommand {
+                            installation_id: installation_id.clone(),
+                            expected_installation_version: 1,
+                            snapshot: AdapterCapabilitySnapshot {
+                                reported_version: Some("must-not-replace".to_string()),
+                                executable_fingerprint: Some("sha256:test".to_string()),
+                                authentication_status: "unknown".to_string(),
+                                probe_status: "probe_failed".to_string(),
+                                permission_schema_version: 99,
+                                permission_schema_digest: "sha256:failed".to_string(),
+                                capabilities: vec!["must-not-replace".to_string()],
+                                protocols: vec!["must-not-replace".to_string()],
+                                models: Vec::new(),
+                                permission_options: Vec::new(),
+                                observed_at: None,
+                                last_attempted_at: failed_at.clone(),
+                                last_successful_probe_at: None,
+                                stale_at: None,
+                                last_error: Some("probe failed".to_string()),
+                                native_session_compatibility_key: None,
+                            },
+                            failure: None,
+                        },
+                    ),
+                )
+                .expect("failed attempt should be recorded");
+            let installation = service
+                .list_installations(&database)
+                .expect("installations should load")
+                .into_iter()
+                .find(|candidate| candidate.id == installation_id)
+                .expect("installation should remain");
+            let snapshot = installation.snapshot.expect("snapshot should remain");
+            assert_eq!(snapshot.reported_version, ready.reported_version);
+            assert_eq!(snapshot.models, ready.models);
+            assert_eq!(
+                snapshot.last_successful_probe_at,
+                ready.last_successful_probe_at
+            );
+            assert_eq!(snapshot.permission_schema_version, 1);
+            assert_eq!(snapshot.probe_status, "ready");
+            assert_eq!(snapshot.stale_at, None);
+            assert_eq!(
+                installation
+                    .last_probe_attempt
+                    .as_ref()
+                    .map(|attempt| attempt.failure_class.as_str()),
+                Some("transient")
+            );
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
     }
 
     #[test]

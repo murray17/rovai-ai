@@ -7607,6 +7607,8 @@ mod slow_tests {
                         protocols: vec!["codex-app-server-v2".to_string()],
                         models: vec![
                             crate::agent_profile::ModelDescriptor {
+                                description: None,
+                                runtime_metadata: None,
                                 id: "test-model".to_string(),
                                 display_name: "Test Model".to_string(),
                                 is_default: true,
@@ -7615,6 +7617,8 @@ mod slow_tests {
                                 options: Vec::new(),
                             },
                             crate::agent_profile::ModelDescriptor {
+                                description: None,
+                                runtime_metadata: None,
                                 id: "alternate-model".to_string(),
                                 display_name: "Alternate Model".to_string(),
                                 is_default: false,

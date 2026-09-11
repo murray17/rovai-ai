@@ -612,6 +612,7 @@ function RuntimeModelPicker({
                   value={model.id}
                   label={model.displayName}
                   detail={model.id === model.displayName ? undefined : model.id}
+                  description={model.description ?? undefined}
                   code
                 />
               ))}
@@ -639,12 +640,14 @@ function RuntimeModelPickerItem({
   value,
   label,
   detail,
+  description,
   disabled = false,
   code = false
 }: {
   value: string
   label: string
   detail?: string
+  description?: string
   disabled?: boolean
   code?: boolean
 }): React.JSX.Element {
@@ -653,10 +656,12 @@ function RuntimeModelPickerItem({
       className="runtime-model-picker-item"
       value={value}
       disabled={disabled}
+      title={[label, detail, description].filter(Boolean).join('\n')}
     >
       <span className="runtime-model-picker-copy">
         <strong>{label}</strong>
         {detail && <small className={code ? 'is-code' : ''}>{detail}</small>}
+        {description && <small>{description}</small>}
       </span>
       <DropdownMenu.ItemIndicator className="runtime-model-picker-check">
         <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m3.5 8.2 2.8 2.8 6.2-6.2" /></svg>
