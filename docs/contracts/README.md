@@ -140,7 +140,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime File Change Observation v2（历史）](runtime-file-change-observation-v2.md) | v1 Evidence/投影/呈现不变；精确排除当前 `ROVAI_RUN_TMP` 临时交付区，mixed evidence 保留普通文件且不迁移历史数据 |
 | [Runtime File Change Observation v1（历史）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation；不含 managed output exclusion |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
-| [Semantic Judge Views v10（当前）](semantic-judge-views-v10.md) | 派发前用户来源正文、完整性预检查与事实引用 |
+| [Semantic Judge Views v12（当前）](semantic-judge-views-v12.md) | 声明佐证不足扣分、真正不可观察仍未知 |
+| [Semantic Judge Views v11](semantic-judge-views-v11.md) | 有序先前 Lead 交付、发布声明核验与有限运输恢复 |
+| [Semantic Judge Views v10](semantic-judge-views-v10.md) | 派发前用户来源正文、完整性预检查与事实引用 |
 | [Semantic Judge Views v9（历史）](semantic-judge-views-v9.md) | 执行事实、严格输出引用与同流有限顺序证据 |
 | [Semantic Judge Views v8（历史）](semantic-judge-views-v8.md) | 结果事实／执行声明／限制披露分离与过程正文隔离 |
 | [Semantic Judge Views v7（历史）](semantic-judge-views-v7.md) | 原生验证凭据、初始文件与逐声明来源核对 |
@@ -190,7 +192,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Usage Monitoring v2（历史）](runtime-usage-monitoring-v2.md) | 五表 clean break、内存 Usage 合并、稀疏 Token/Cache/Cost、Coverage、单 Snapshot 与有界刷新 |
 | [Runtime Monitoring v1（历史）](runtime-monitoring-v1.md) | Clean-break collection/enrollment、稀疏 Usage Observation、Native Session fact、三类查询、Coverage、Tool Duration 与 Cost layer |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
-| [Execution Evaluation v13（当前）](execution-evaluation-v13.md) | 每日分析有限引用 schema、已知零值与真实失败尝试保留 |
+| [Execution Evaluation v14（当前）](execution-evaluation-v14.md) | 评分执行故障与任务失败、证据问题分开 |
+| [Execution Evaluation v13](execution-evaluation-v13.md) | 每日分析有限引用 schema、已知零值与真实失败尝试保留 |
 | [Execution Evaluation v12（历史）](execution-evaluation-v12.md) | 每日跨日积压、全部工具终态与健康分析证据边界 |
 | [Execution Evaluation v11（历史）](execution-evaluation-v11.md) | 评分 2.7、执行声明分类与现有事件顺序投影 |
 | [Execution Evaluation v10（历史）](execution-evaluation-v10.md) | 并行验证凭据、最终交付范围及声明分类校准 |

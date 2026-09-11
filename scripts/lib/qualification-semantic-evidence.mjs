@@ -444,8 +444,8 @@ export async function buildSemanticJudgeUntrustedEvidence({
       })
     }
   }
-  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(caseEvaluation?.judgeProfile)) {
-    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], evaluationSnapshot, includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(caseEvaluation.judgeProfile) })
+  if (['generic-task-v3', 'generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(caseEvaluation?.judgeProfile)) {
+    const extra = await buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles: caseEvaluation.evidenceFiles ?? [], requireDeliveryClosure: ['generic-task-v11', 'generic-task-v12'].includes(caseEvaluation.judgeProfile), evaluationSnapshot, includeEvaluationContext: ['generic-task-v4', 'generic-task-v5', 'generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(caseEvaluation.judgeProfile) })
     const seen = new Set(segments.map(segment => segment.evidenceReference.evidenceId))
     for (const segment of extra) if (!seen.has(segment.evidenceReference.evidenceId)) {
       segments.push(segment)
@@ -463,7 +463,7 @@ export async function buildSemanticJudgeUntrustedEvidence({
 
 // Sources are retained public messages and frozen workspace files, not live
 // workspaces, private Runtime logs or model reasoning. Every body is hash-bound.
-export async function buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles, includeEvaluationContext = false, evaluationSnapshot = null }) {
+export async function buildTaskJudgeSegments({ evidenceDirectory, result, evidenceIndex, evidenceFiles, includeEvaluationContext = false, evaluationSnapshot = null, requireDeliveryClosure = false }) {
   if (!Array.isArray(evidenceFiles) || evidenceFiles.length > 64 || new Set(evidenceFiles).size !== evidenceFiles.length) throw new Error('Invalid task evidence file allowlist')
   const indexRecords = new Map(evidenceIndex.payload.records.map(record => [record.evidenceId, record]))
   const segments = []
@@ -529,19 +529,42 @@ export async function buildTaskJudgeSegments({ evidenceDirectory, result, eviden
     totalCharacters += content.length
     segments.push({ segmentId: `${segmentPrefix}:${sourceId}`, kind, authorAgentProfileId: null, visibility: 'public_to_camp', content, evidenceReference })
   }
+  const leadRun = snapshot.agentRuns.find(run => run.id === result.dispatchBoundary.rootAgentRunId)
+  const leadId = leadRun?.agentId ?? leadRun?.agentProfileId
+  const deliveries = snapshot.messages.filter(message => context?.deliveryMessageIds.includes(message.id))
+    .sort((a, b) => a.sequence - b.sequence)
+  if (requireDeliveryClosure && (!context || deliveries.length !== context.deliveryMessageIds.length
+      || !leadId || deliveries.some(message => message.authorType !== 'agent' || message.authorId !== leadId
+        || !runs.has(message.sourceAgentRunId) || message.campTurnId !== result.dispatchBoundary.campTurnId
+        || message.addressedAgentIds?.length || (!Number.isSafeInteger(message.sequence) || message.sequence < 1))
+      || new Set(deliveries.map(message => message.sequence)).size !== deliveries.length)) throw new Error('delivery_history.inventory_incomplete')
+  const deliveryOrder = new Map(deliveries.map((message, index) => [message.id, index + 1]))
+  let deliveryCharacters = 0
+  const retainedDeliveries = new Set()
   const currentDeliveryId = ['bounded-evaluation-context-v3', 'bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(context?.policyId) ? snapshot.messages.filter(message => context.deliveryMessageIds.includes(message.id)).sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)).at(-1)?.id : null
   for (const message of snapshot.messages) {
     if (message.authorType !== 'agent' || !runs.has(message.sourceAgentRunId) || message.campTurnId !== result.dispatchBoundary.campTurnId) continue
     const body = typeof message.body === 'string' ? message.body : (message.content ?? []).filter(part => part.kind === 'text').map(part => part.text).join('')
     const evidenceReference = { artifactId: evidenceIndex.artifactId, evidenceId: stableEvidenceId('core.message-content', message.id) }
     const record = indexRecords.get(evidenceReference.evidenceId)
-    if (record?.safeForJudge !== true || !body || body.length > 50_000 || totalCharacters + body.length > (includeEvaluationContext ? 310_000 : 150_000)) continue
+    const requiredDelivery = requireDeliveryClosure && deliveryOrder.has(message.id)
+    if (requiredDelivery) {
+      deliveryCharacters += body.length
+      if (deliveries.length > 64 || deliveryCharacters > 160_000) throw new Error('delivery_history.budget_exceeded')
+    }
+    if (requiredDelivery && body === '' && record?.safeForJudge === true && record.contentDigest === `sha256:${sha256('')}`) { retainedDeliveries.add(message.id); continue }
+    if (record?.safeForJudge !== true || !body || body.length > 50_000 || totalCharacters + body.length > (includeEvaluationContext ? 310_000 : 150_000)) {
+      if (requiredDelivery) throw new Error('delivery_history.content_unavailable_or_over_budget')
+      continue
+    }
+    if (requiredDelivery) retainedDeliveries.add(message.id)
     if (record.contentDigest !== `sha256:${sha256(body)}`) throw new Error('Task public message digest mismatch')
     totalCharacters += body.length
     const delivery = context?.deliveryMessageIds.includes(message.id) && !(message.addressedAgentIds?.length)
-    segments.push({ segmentId: `${delivery ? `delivery-message:${['bounded-evaluation-context-v3', 'bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(context.policyId) ? currentDeliveryId === message.id ? 'current:' : 'historical:' : ''}` : 'participant-message:'}${message.id}`, kind: delivery ? 'comment' : 'participant_message', messageId: message.id, sequence: message.sequence, replyToMessageId: message.replyToCampMessageId ?? null,
+    segments.push({ segmentId: `${delivery ? `delivery-message:${['bounded-evaluation-context-v3', 'bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(context.policyId) ? currentDeliveryId === message.id ? 'current:' : requireDeliveryClosure ? `historical:ordered-${String(deliveryOrder.get(message.id)).padStart(4, '0')}:` : 'historical:' : ''}` : 'participant-message:'}${message.id}`, kind: delivery ? 'comment' : 'participant_message', messageId: message.id, sequence: message.sequence, replyToMessageId: message.replyToCampMessageId ?? null,
       callIds: [], taskIds: [], createdAt: message.createdAt, authorAgentProfileId: message.authorId, visibility: 'public_to_camp', content: body, evidenceReference })
   }
+  if (requireDeliveryClosure && retainedDeliveries.size !== deliveries.length) throw new Error('delivery_history.inventory_incomplete')
   return segments
 }
 

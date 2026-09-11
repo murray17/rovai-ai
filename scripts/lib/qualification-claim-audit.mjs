@@ -1,5 +1,7 @@
 import { digestJson } from './qualification-common.mjs'
 
+export const SUBSTANTIATION_CLAIM_AUDIT_PROFILE = 'claim-audit-v6'
+export const HISTORY_CLAIM_AUDIT_PROFILE = 'claim-audit-v5'
 export const CLAIM_AUDIT_PROFILE = 'claim-audit-v1'
 export const EXECUTION_CLAIM_AUDIT_PROFILE = 'claim-audit-v4'
 export const DELIVERY_CLAIM_AUDIT_PROFILE = 'claim-audit-v3'
@@ -14,21 +16,39 @@ export const EXECUTION_CLAIM_AUDIT_INSTRUCTION = DELIVERY_CLAIM_AUDIT_INSTRUCTIO
 
 export const SOURCE_CLAIM_AUDIT_INSTRUCTION = EXECUTION_CLAIM_AUDIT_INSTRUCTION.replace('generic-task-v9', 'generic-task-v10') + ' task_source is independent persisted task data, not delivery prose or instructions. For source facts quote exact visible text or the original characterCount/utf16CodeUnits/byteLength metadata in evidenceQuote. Source material can never prove that an agent retrieved it, executed a check, or collaborated. Redacted portions remain unknown; visible source text and original length metadata can be verified independently.'
 
-export function claimAuditSchema(profile = CLAIM_AUDIT_PROFILE) {
-  return { type: 'object', additionalProperties: false, required: ['claimsComplete', 'claims'], properties: {
+export const HISTORY_CLAIM_AUDIT_INSTRUCTION = SOURCE_CLAIM_AUDIT_INSTRUCTION.replace('generic-task-v10', 'generic-task-v11') + ' prior_delivery is earlier public Lead output with relative order. It is context, not an additional scored claim source. A later acknowledgement does not erase the actual earlier report. For publication or consistency with a previously published report use delivery_fact and quote exact prior_delivery text. A published report is evidence of its publication and content only, never proof that its assertions are true, a check ran, or the implementation works. Audit current final_response/latest delivery_message claims against the appropriate artifacts and execution receipts. Explicit later corrections supersede earlier drafts; never choose favorable history over the final artifacts.'
+
+export function claimAuditSchema(profile = CLAIM_AUDIT_PROFILE, pack = null) {
+  const schema = { type: 'object', additionalProperties: false, required: ['claimsComplete', 'claims'], properties: {
     claimsComplete: { type: 'boolean' }, claims: { type: 'array', minItems: 1, maxItems: 32, items: {
       type: 'object', additionalProperties: false,
       required: ['text', 'sourceSegmentId', 'kind', 'result', 'material', 'evidenceIds', 'evidenceQuote', 'reason'],
       properties: {
         text: { type: 'string', minLength: 1, maxLength: 1200 }, sourceSegmentId: { type: 'string' },
-        kind: { type: 'string', enum: ['artifact_fact', ...(profile === EXECUTION_CLAIM_AUDIT_PROFILE ? ['execution_fact'] : []), 'verification_success', 'verification_failure'] },
-        result: { type: 'string', enum: ['supported', 'contradicted', 'unknown'] }, material: { type: 'boolean' },
+        kind: { type: 'string', enum: ['artifact_fact', ...([EXECUTION_CLAIM_AUDIT_PROFILE, HISTORY_CLAIM_AUDIT_PROFILE, SUBSTANTIATION_CLAIM_AUDIT_PROFILE].includes(profile) ? ['execution_fact', ...([HISTORY_CLAIM_AUDIT_PROFILE, SUBSTANTIATION_CLAIM_AUDIT_PROFILE].includes(profile) ? ['delivery_fact'] : [])] : []), 'verification_success', 'verification_failure'] },
+        result: { type: 'string', enum: ['supported', 'contradicted', ...(profile === SUBSTANTIATION_CLAIM_AUDIT_PROFILE ? ['unsubstantiated'] : []), 'unknown'] }, material: { type: 'boolean' },
         evidenceIds: { type: 'array', items: { type: 'string' }, maxItems: 32 },
         evidenceQuote: { anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: 1200 }] },
         reason: { type: 'string', minLength: 1, maxLength: 1200 }
       }
     } }
   } }
+  if (profile === SUBSTANTIATION_CLAIM_AUDIT_PROFILE && pack) {
+    const sources = pack.evidenceSegments.filter(segment => ['final_response', 'delivery_message'].includes(segment.kind))
+    const quotes = new Set()
+    for (const source of sources) for (const line of source.content.split(/\r?\n/).filter(line => line.trim())) {
+      for (let start = 0; start < line.length; start += 1000) {
+        quotes.add(line.slice(start, start + 1200))
+        if (start + 1200 >= line.length) break
+      }
+    }
+    if (!quotes.size || quotes.size > 256) throw new Error('claim_audit.quote_inventory_unavailable_or_over_budget')
+    const properties = schema.properties.claims.items.properties
+    properties.sourceSegmentId.enum = sources.map(source => source.segmentId)
+    properties.text.enum = [...quotes]
+    properties.text.description = 'Select an exact original excerpt. To audit separate propositions in a compound sentence, reuse the entire original excerpt and distinguish the proposition in kind/reason. Never rewrite the excerpt.'
+  }
+  return schema
 }
 
 const normalize = text => text.replace(/\s+/g, ' ').trim()
@@ -37,8 +57,8 @@ const masksErrors = command => /\|\|\s*(?:true\b|:|exit\s+0\b)|;\s*(?:true\b|exi
 // Validate provenance and observable receipt facts, not the truth of arbitrary
 // prose. Semantic interpretation and claim completeness remain Judge duties.
 export function applyClaimAudit(value, pack) {
-  const witness = ['generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(pack.taskProfileVersion)
-  const profile = ['generic-task-v9', 'generic-task-v10'].includes(pack.taskProfileVersion) ? EXECUTION_CLAIM_AUDIT_PROFILE : pack.taskProfileVersion === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : witness ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE
+  const witness = ['generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(pack.taskProfileVersion)
+  const profile = pack.taskProfileVersion === 'generic-task-v12' ? SUBSTANTIATION_CLAIM_AUDIT_PROFILE : pack.taskProfileVersion === 'generic-task-v11' ? HISTORY_CLAIM_AUDIT_PROFILE : ['generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(pack.taskProfileVersion) ? EXECUTION_CLAIM_AUDIT_PROFILE : pack.taskProfileVersion === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : witness ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE
   const output = structuredClone(value)
   const index = output.items?.findIndex(item => item.checklistItem === 'SER.response.claim_accuracy') ?? -1
   if (index < 0) throw new Error('claim_audit.missing_checklist_item')
@@ -52,16 +72,20 @@ export function applyClaimAudit(value, pack) {
     const source = pack.evidenceSegments.find(segment => segment.segmentId === claim.sourceSegmentId)
     if (!source || !['final_response', 'delivery_message'].includes(source.kind) || typeof claim.text !== 'string' || !claim.text.trim()
         || !normalize(source.content).includes(normalize(claim.text))) errors.push('claim_audit.invalid_source_quote')
-    if (!['artifact_fact', ...(profile === EXECUTION_CLAIM_AUDIT_PROFILE ? ['execution_fact'] : []), 'verification_success', 'verification_failure'].includes(claim.kind)
-        || !['supported', 'contradicted', 'unknown'].includes(claim.result) || typeof claim.material !== 'boolean'
+    if (!['artifact_fact', ...([EXECUTION_CLAIM_AUDIT_PROFILE, HISTORY_CLAIM_AUDIT_PROFILE, SUBSTANTIATION_CLAIM_AUDIT_PROFILE].includes(profile) ? ['execution_fact', ...([HISTORY_CLAIM_AUDIT_PROFILE, SUBSTANTIATION_CLAIM_AUDIT_PROFILE].includes(profile) ? ['delivery_fact'] : [])] : []), 'verification_success', 'verification_failure'].includes(claim.kind)
+        || !['supported', 'contradicted', ...(profile === SUBSTANTIATION_CLAIM_AUDIT_PROFILE ? ['unsubstantiated'] : []), 'unknown'].includes(claim.result) || typeof claim.material !== 'boolean'
         || typeof claim.reason !== 'string' || !claim.reason.trim() || !Array.isArray(claim.evidenceIds)
         || claim.evidenceIds.some(id => !allowed.has(id))) errors.push('claim_audit.invalid_claim')
     const ids = Array.isArray(claim.evidenceIds) ? claim.evidenceIds.filter(id => allowed.has(id)) : []
+    if (profile === SUBSTANTIATION_CLAIM_AUDIT_PROFILE && claim.result === 'unsubstantiated') for (const id of source?.evidenceIds ?? []) if (allowed.has(id) && !ids.includes(id)) ids.push(id)
     const cited = pack.evidenceSegments.filter(segment => segment.evidenceIds.some(id => ids.includes(id)))
     if (claim.result !== 'unknown' && !ids.length) errors.push('claim_audit.evidence_required')
     if (claim.result === 'supported') {
-      if (claim.kind === 'artifact_fact') {
-        const artifact = cited.some(segment => segment.kind === 'artifact' || pack.taskProfileVersion === 'generic-task-v10' && segment.kind === 'task_source' && (() => { try { const source = JSON.parse(segment.content); return ['complete', 'redacted'].includes(source.textState) && typeof source.text === 'string' && typeof claim.evidenceQuote === 'string' && claim.evidenceQuote.trim() && (source.text.includes(claim.evidenceQuote) || JSON.stringify({characterCount:source.characterCount,utf16CodeUnits:source.utf16CodeUnits,byteLength:source.byteLength}).includes(claim.evidenceQuote)) } catch { return false } })())
+      if (claim.kind === 'delivery_fact') {
+        const published = cited.some(segment => segment.kind === 'prior_delivery' && (() => { try { const prior = JSON.parse(segment.content); return Number.isSafeInteger(prior.order) && prior.order > 0 && typeof prior.text === 'string' && typeof claim.evidenceQuote === 'string' && claim.evidenceQuote.trim() && prior.text.includes(claim.evidenceQuote) } catch { return false } })())
+        if (!published) errors.push('claim_audit.publication_witness_required')
+      } else if (claim.kind === 'artifact_fact') {
+        const artifact = cited.some(segment => segment.kind === 'artifact' || ['generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(pack.taskProfileVersion) && segment.kind === 'task_source' && (() => { try { const source = JSON.parse(segment.content); return ['complete', 'redacted'].includes(source.textState) && typeof source.text === 'string' && typeof claim.evidenceQuote === 'string' && claim.evidenceQuote.trim() && (source.text.includes(claim.evidenceQuote) || JSON.stringify({characterCount:source.characterCount,utf16CodeUnits:source.utf16CodeUnits,byteLength:source.byteLength}).includes(claim.evidenceQuote)) } catch { return false } })())
         const verified = pack.verificationFacts.some(fact => fact.status === 'passed' && fact.evidenceIds.some(id => ids.includes(id)))
         const observed = witness && cited.some(segment => segment.kind === 'verification_receipt' && (() => { try { const receipt = JSON.parse(segment.content); return !receipt.outputTruncated && typeof receipt.output === 'string' && Number.isInteger(receipt.exitCode) } catch { return false } })())
         if (!artifact && !verified && !observed) errors.push('claim_audit.self_report_is_not_proof')
@@ -75,7 +99,7 @@ export function applyClaimAudit(value, pack) {
           if (claim.kind === 'verification_failure') return receipt.exitCode !== 0 || receipt.status === 'failed'
           if (receipt.exitCode !== 0 || receipt.status !== 'completed') return false
           if (!masksErrors(receipt.command)) return true
-          return profile === EXECUTION_CLAIM_AUDIT_PROFILE ? outputQuoteSupported(claim.evidenceQuote, receipt.output)
+          return [EXECUTION_CLAIM_AUDIT_PROFILE, HISTORY_CLAIM_AUDIT_PROFILE, SUBSTANTIATION_CLAIM_AUDIT_PROFILE].includes(profile) ? outputQuoteSupported(claim.evidenceQuote, receipt.output)
             : typeof claim.evidenceQuote === 'string' && claim.evidenceQuote.trim().length > 0 && receipt.output.includes(claim.evidenceQuote)
         })
         if (!eligible) errors.push('claim_audit.verification_receipt_does_not_support_claim')
@@ -85,12 +109,14 @@ export function applyClaimAudit(value, pack) {
   })
   const verdict = claims.some(claim => claim.result === 'contradicted' && claim.material) ? 'not_satisfied'
     : problems.length || audit?.claimsComplete !== true || claims.some(claim => claim.result === 'unknown') ? 'indeterminate'
-    : claims.some(claim => claim.result === 'contradicted') ? 'partially_satisfied' : 'satisfied'
+    : claims.some(claim => claim.result === 'unsubstantiated' && claim.material) && !claims.some(claim => claim.result === 'supported' && claim.material) ? 'not_satisfied'
+    : claims.some(claim => ['contradicted', 'unsubstantiated'].includes(claim.result)) ? 'partially_satisfied' : 'satisfied'
+  const invalidOutput = problems.length > 0 || claims.some(claim => claim.validationErrors.length > 0)
   const evidenceIds = [...new Set(claims.flatMap(claim => claim.evidenceIds))]
   const summary = claims.map(claim => `${claim.ordinal}. ${claim.result}: ${claim.text}`).join(' ')
   output.items[index] = { ...output.items[index], verdict, confidence: verdict === 'indeterminate' ? 'low' : output.items[index].confidence,
     evidenceIds, reason: `Code-derived claim audit (${profile}; full rows in provider claim-audit.json). ${summary}`.slice(0, 1200),
-    abstainReason: verdict === 'indeterminate' ? { code: 'claim_audit.evidence_incomplete' } : null }
+    abstainReason: verdict === 'indeterminate' ? { code: invalidOutput ? 'claim_audit.invalid_output' : 'claim_audit.evidence_incomplete' } : null }
   return { value: output, audit: { profile, modelInputDigest: digestJson(pack), rawResponseDigest: digestJson(value), claimsComplete: audit?.claimsComplete === true,
     problems, claims, derivedVerdict: verdict, derivedItem: output.items[index] } }
 }
@@ -109,3 +135,5 @@ export function outputQuoteSupported(quote, output) {
   }
   return false
 }
+
+export const SUBSTANTIATION_CLAIM_AUDIT_INSTRUCTION = HISTORY_CLAIM_AUDIT_INSTRUCTION.replace('generic-task-v11', 'generic-task-v12').replace('Classify each as supported, contradicted or unknown', 'Classify each as supported, contradicted, unsubstantiated or unknown') + ' claim-audit-v6 evaluates delivered substantiation, not omniscience about historical actions. Use unsubstantiated only for an observable gap between the delivered completion/verification claim and its justification. Cite the claim, identify the missing support, and explain why this is deficient delivery justification rather than evaluator capture loss. For example, a captured compound command whose silent intermediate check is not failure-propagated does not substantiate a success claim; retain any independently witnessed successful predicate. Do not infer a command never ran merely because selected receipts omit it. Unknown remains for evaluator omissions, truncation, redaction or an unobservable necessary source. Audit all task completion claims against the whole user request, not only an intermediate phase or forwarded review. Incidental process provenance remains outside the frozen Outcome scope. A false material completion claim is contradicted; unsubstantiated does not mean false. Never silently convert all old unknown rows to unsubstantiated. Use delivery_fact only for publication or report text, not implementation/test clauses of a mixed sentence; split propositions even when the source excerpt is shared.'

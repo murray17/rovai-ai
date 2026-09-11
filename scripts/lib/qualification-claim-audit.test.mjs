@@ -110,3 +110,40 @@ test('v10 source quotations require a real witness and never certify an agent ac
  Object.assign(f.claim,{text:'报告时长为12分钟',kind:'artifact_fact',evidenceQuote:'报告时长为12分钟'})
  f.pack.taskProfileVersion='generic-task-v9';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
 })
+
+test('v11 prior delivery proves publication text but never implementation or successful execution',()=>{
+ const f=fixture();f.pack.taskProfileVersion='generic-task-v11'
+ f.pack.evidenceSegments[0].content='The final report was published. The implementation works. Tests passed.'
+ f.pack.evidenceSegments[1]={segmentId:'prior',kind:'prior_delivery',content:JSON.stringify({order:1,text:'Final report: tests passed.'}),evidenceIds:['EV-0002']}
+ Object.assign(f.claim,{text:'The final report was published',kind:'delivery_fact',evidenceQuote:'Final report: tests passed.'})
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'satisfied')
+ f.claim.evidenceQuote='invented report';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ Object.assign(f.claim,{text:'Tests passed',kind:'verification_success',evidenceQuote:'tests passed.'});assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ Object.assign(f.claim,{text:'The implementation works',kind:'artifact_fact'});assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ f.claim.result='contradicted';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'not_satisfied')
+})
+
+test('v12 substantiation deficits deduct without claiming falsity; missing evaluation stays unknown',()=>{
+ const f=fixture('node check.mjs || true','?? report.json');f.pack.taskProfileVersion='generic-task-v12'
+ const unsupported={...f.claim,text:'已运行检查且通过',kind:'verification_success',result:'unsubstantiated',evidenceIds:['EV-0003'],reason:'The captured masked check has no success witness; the delivery supplies no further substantiation. This does not prove it failed.'}
+ f.value.claimsAudit.claims.push(unsupported)
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'partially_satisfied')
+ f.value.claimsAudit.claims=[unsupported]
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'not_satisfied')
+ unsupported.result='unknown'
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ unsupported.result='unsubstantiated';f.value.claimsAudit.claimsComplete=false
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ f.value.claimsAudit.claimsComplete=true;unsupported.sourceSegmentId='missing'
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ f.pack.taskProfileVersion='generic-task-v11';unsupported.sourceSegmentId='delivery'
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate','old standards cannot silently adopt new scoring')
+})
+
+test('invalid source quotation is an evaluator protocol error, not missing task evidence',()=>{
+ const f=fixture();f.pack.taskProfileVersion='generic-task-v12';f.claim.text='a paraphrase absent from delivery'
+ const result=applyClaimAudit(f.value,f.pack)
+ assert.equal(result.value.items[0].abstainReason.code,'claim_audit.invalid_output')
+ f.claim.text='报告时长为12分钟';f.claim.result='unknown'
+ assert.equal(applyClaimAudit(f.value,f.pack).value.items[0].abstainReason.code,'claim_audit.evidence_incomplete')
+})

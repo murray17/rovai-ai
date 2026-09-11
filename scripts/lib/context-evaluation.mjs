@@ -5,8 +5,8 @@ import { digestFile, digestJson, runCaptured, verifyStoredCaseSeal, writePrivate
 import { loadQualificationResultHistory, computeQualificationEvaluatorDigest } from './qualification-recovery.mjs'
 import { validateScoring, evaluateQualityAndCollaboration, semanticVerdict } from './context-quality.mjs'
 import { renderGateHtml, renderReportIndex, sanitizeReportLinks } from '../../packages/evaluation/src/report-html.ts'
-import { SOURCE_OUTCOME_RUBRIC, EXECUTION_OUTCOME_RUBRIC, DELIVERY_OUTCOME_RUBRIC, WITNESS_OUTCOME_RUBRIC, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, TASK_OUTCOME_RUBRIC, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC } from './context-judge-profile.mjs'
-import { PROCESS_JUDGE_RUBRIC, OUTCOME_JUDGE_RUBRIC } from './qualification-judge-views.mjs'
+import { SUBSTANTIATION_OUTCOME_RUBRIC, HISTORY_OUTCOME_RUBRIC, SOURCE_OUTCOME_RUBRIC, EXECUTION_OUTCOME_RUBRIC, DELIVERY_OUTCOME_RUBRIC, WITNESS_OUTCOME_RUBRIC, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, TASK_OUTCOME_RUBRIC, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC } from './context-judge-profile.mjs'
+import { readJudgeExecutionFailures, PROCESS_JUDGE_RUBRIC, OUTCOME_JUDGE_RUBRIC } from './qualification-judge-views.mjs'
 import { validateRegressionConfiguration } from './context-regression-fixture.mjs'
 import { runCurrentContractConformance } from '../benchmark/execution/current-contract-runner.mjs'
 
@@ -65,8 +65,8 @@ export function selectCases(suite, change) {
 }
 
 export function evaluationExecution(value = {}) {
-  const configuration = { version: 1, maxParallelCases: 1, judgeSeconds: 240, ...value }
-  if (Object.keys(configuration).some(key => !['version', 'maxParallelCases', 'judgeSeconds'].includes(key)) || configuration.version !== 1 || ![1, 2].includes(configuration.maxParallelCases) || !Number.isInteger(configuration.judgeSeconds) || configuration.judgeSeconds < 240 || configuration.judgeSeconds > 600) throw new Error('Execution requires version 1, 1–2 parallel cases and a 240–600 second Judge budget')
+  const configuration = { version: 1, maxParallelCases: 1, judgeSeconds: 2400, ...value }
+  if (Object.keys(configuration).some(key => !['version', 'maxParallelCases', 'judgeSeconds'].includes(key)) || configuration.version !== 1 || ![1, 2].includes(configuration.maxParallelCases) || !Number.isInteger(configuration.judgeSeconds) || configuration.judgeSeconds < 240 || configuration.judgeSeconds > 2400) throw new Error('Execution requires version 1, 1–2 parallel cases and a 240–2400 second Judge budget')
   return configuration
 }
 
@@ -126,7 +126,9 @@ export async function freezePlan(config, output) {
   if (judge) {
     const adapter = await import(pathToFileURL(judge.adapter).href)
     const configuration = await json(judge.configuration)
-    if (['2.7.0', '2.8.0'].includes(scoring.version) && !adapter.claimAuditProfiles?.includes('claim-audit-v4')) throw new Error('v9 scoring requires claim-audit-v4 support')
+    if (scoring.version === '2.10.0' && !adapter.claimAuditProfiles?.includes('claim-audit-v6')) throw new Error('v12 scoring requires claim-audit-v6 support')
+    if (scoring.version === '2.9.0' && !adapter.claimAuditProfiles?.includes('claim-audit-v5')) throw new Error('v11 scoring requires claim-audit-v5 support')
+    if (['2.7.0', '2.8.0', '2.9.0', '2.10.0'].includes(scoring.version) && !adapter.claimAuditProfiles?.includes('claim-audit-v4')) throw new Error('v9 scoring requires claim-audit-v4 support')
     if (scoring.version === '2.6.0' && !adapter.claimAuditProfiles?.includes('claim-audit-v3')) throw new Error('v8 scoring requires claim-audit-v3 support')
     if (scoring.version === '2.5.0' && !adapter.claimAuditProfiles?.includes('claim-audit-v2')) throw new Error('v7 scoring requires claim-audit-v2 support')
     if (scoring.version === '2.4.0' && adapter.claimAuditProfile !== 'claim-audit-v1') throw new Error('v6 scoring requires claim audit support')
@@ -135,7 +137,7 @@ export async function freezePlan(config, output) {
   }
   const plan = { schemaVersion: 1, createdAt: new Date().toISOString(), mode: config.mode, change: { ...config.change, document: resolve(config.change.document), documentDigest: digestJson(document) },
     scoring, scoringPath, scoringDigest: digestJson(scoring), tier: selected.tier, suite: { id: suite.id, version: suite.version, partition: suite.partition, digest: digestJson(suite), path: suitePath }, cases, products, team, repetitions: config.repetitions, budget: config.budget, execution, judge, policy: POLICY,
-    rubricDigest: digestJson({ process: ['2.4.0', '2.5.0', '2.6.0', '2.7.0', '2.8.0'].includes(scoring.version) ? CLAIM_PROCESS_RUBRIC : scoring.version === '2.3.0' ? OBSERVABLE_PROCESS_RUBRIC : scoring.version === '2.2.0' ? RECEIPT_PROCESS_RUBRIC : scoring.version === '2.1.0' ? EVIDENCE_PROCESS_RUBRIC : PROCESS_JUDGE_RUBRIC, outcome: scoring.version === '2.8.0' ? SOURCE_OUTCOME_RUBRIC : scoring.version === '2.7.0' ? EXECUTION_OUTCOME_RUBRIC : scoring.version === '2.6.0' ? DELIVERY_OUTCOME_RUBRIC : scoring.version === '2.5.0' ? WITNESS_OUTCOME_RUBRIC : scoring.version === '2.4.0' ? CLAIM_OUTCOME_RUBRIC : scoring.version === '2.3.0' ? OBSERVABLE_OUTCOME_RUBRIC : scoring.version === '2.2.0' ? RECEIPT_OUTCOME_RUBRIC : scoring.version === '2.1.0' ? EVIDENCE_OUTCOME_RUBRIC : TASK_OUTCOME_RUBRIC, scoring }), evaluatorDigest: await evaluatorDigest(),
+    rubricDigest: digestJson({ process: ['2.4.0', '2.5.0', '2.6.0', '2.7.0', '2.8.0', '2.9.0', '2.10.0'].includes(scoring.version) ? CLAIM_PROCESS_RUBRIC : scoring.version === '2.3.0' ? OBSERVABLE_PROCESS_RUBRIC : scoring.version === '2.2.0' ? RECEIPT_PROCESS_RUBRIC : scoring.version === '2.1.0' ? EVIDENCE_PROCESS_RUBRIC : PROCESS_JUDGE_RUBRIC, outcome: scoring.version === '2.10.0' ? SUBSTANTIATION_OUTCOME_RUBRIC : scoring.version === '2.9.0' ? HISTORY_OUTCOME_RUBRIC : scoring.version === '2.8.0' ? SOURCE_OUTCOME_RUBRIC : scoring.version === '2.7.0' ? EXECUTION_OUTCOME_RUBRIC : scoring.version === '2.6.0' ? DELIVERY_OUTCOME_RUBRIC : scoring.version === '2.5.0' ? WITNESS_OUTCOME_RUBRIC : scoring.version === '2.4.0' ? CLAIM_OUTCOME_RUBRIC : scoring.version === '2.3.0' ? OBSERVABLE_OUTCOME_RUBRIC : scoring.version === '2.2.0' ? RECEIPT_OUTCOME_RUBRIC : scoring.version === '2.1.0' ? EVIDENCE_OUTCOME_RUBRIC : TASK_OUTCOME_RUBRIC, scoring }), evaluatorDigest: await evaluatorDigest(),
     environment: { platform: process.platform, architecture: process.arch, node: process.version },
     holdout: { status: 'not_run', reason: 'Independent acceptance cases are separate from the regression suite.' } }
   const sealed = { ...plan, planDigest: digestJson(plan) }
@@ -180,7 +182,12 @@ export function evaluateCaseRules(spec, { collaboration, tools, memoryBefore, me
 }
 
 export function compareResults(plan, slots, contracts) {
-  const problems = [], regressions = [], changes = [], resourceChanges = []
+  let problems = []
+  const regressions = [], changes = [], resourceChanges = []
+  const evaluationFailures = slots.filter(slot => slot.failureDomain === 'evaluator').map(slot => ({
+    caseId: slot.caseId, repeat: slot.repeat, arm: slot.arm, code: 'judge_execution_failed',
+    failures: slot.judgeFailures?.length ? slot.judgeFailures : [{ code: 'judge_execution_incomplete', attempts: null }]
+  }))
   for (const label of plan.mode === 'gate' ? ['baseline', 'candidate'] : ['candidate']) {
     const contract = contracts[label] ?? { status: 'indeterminate' }
     if (label === 'candidate' && contract.status === 'failed') regressions.push({ code: 'candidate_contract_failure', newRegression: contracts.baseline?.status === 'passed' })
@@ -234,16 +241,32 @@ export function compareResults(plan, slots, contracts) {
       if (change.kind !== 'unchanged') changes.push(change)
     }
   }
+  // Remove only unknowns attributable to a failed evaluator. Valid disagreements,
+  // missing rules, environment gaps and the other arm's unknowns remain visible.
+  problems = problems.flatMap(problem => {
+    if (problem.code === 'quality_evaluation_incomplete') {
+      const items = problem.items.filter(id => !problem.evaluatorItems?.includes(id))
+      return items.length ? [{ ...problem, items }] : []
+    }
+    if (['semantic_evidence_insufficient', 'baseline_semantic_evidence_insufficient', 'critical_collaboration_evidence_insufficient'].includes(problem.code)) {
+      const arm = problem.arm ?? (problem.code.startsWith('baseline_') ? 'baseline' : 'candidate')
+      const slot = slots.find(slot => slot.caseId === problem.caseId && slot.repeat === problem.repeat && slot.arm === arm)
+      if (semanticVerdict(slot, problem.checklistItem).reasonCode === 'judge_execution_failed') return []
+    }
+    return [problem]
+  })
+  const incomplete = problems.length || evaluationFailures.length
   const trialCount = items => new Set(items.filter(item => item.caseId).map(item => `${item.caseId}/${item.repeat}`)).size
   const detected = regressions.filter(item => item.newRegression === true || ['elapsed_time_regression', 'semantic_regression'].includes(item.code))
   const conclusions = {
-    acceptance: regressions.length ? 'failed' : problems.length ? 'incomplete' : 'passed',
-    regression: plan.mode !== 'gate' ? 'not_compared' : detected.length ? 'detected' : problems.length ? 'inconclusive' : 'not_detected',
-    evaluation: problems.length ? 'incomplete' : 'complete',
+    acceptance: regressions.length ? 'failed' : incomplete ? 'incomplete' : 'passed',
+    regression: plan.mode !== 'gate' ? 'not_compared' : detected.length ? 'detected' : incomplete ? 'inconclusive' : 'not_detected',
+    evaluation: evaluationFailures.length ? 'execution_failed' : problems.length ? 'incomplete' : 'complete',
+    evaluatorFailureTrials: trialCount(evaluationFailures),
     failedTrials: trialCount(regressions), evidenceGapTrials: trialCount(problems), newRegressionTrials: trialCount(detected),
     failureRecords: regressions.length, evidenceGapRecords: problems.length
   }
-  return { status: regressions.length ? 'degraded' : problems.length ? 'insufficient' : 'passed', conclusions, regressions, evidenceGaps: problems, semanticChanges: changes, resourceChanges, ...(assessment ? { assessment } : {}) }
+  return { status: regressions.length ? 'degraded' : incomplete ? 'insufficient' : 'passed', conclusions, regressions, evaluationFailures, evidenceGaps: problems, semanticChanges: changes, resourceChanges, ...(assessment ? { assessment } : {}) }
 }
 function semanticItem(slot, id) { return slot.semanticItems?.find(item => item.checklistItem === id) }
 
@@ -323,11 +346,12 @@ export async function runPlan(planPath, outputRoot) {
             slot.failureDomain = 'evaluator'
             const judged = await runCaptured(process.execPath, [join(root, 'scripts/qualification-semantic-review.mjs'), '--evidence-dir', trialDirectory, '--case', item.directory, '--configuration', plan.judge.configuration, '--adapter', plan.judge.adapter, '--case-evaluation', caseEvaluation], { cwd: root, timeoutMs: Math.min(executionConfiguration.judgeSeconds * 1000, deadline - Date.now()), maxOutputBytes: 4 * 1024 * 1024 })
             await writePrivateJsonExclusive(join(directory, `${id}-judge-execution.json`), judged)
-            if (judged.code !== 0 || judged.timedOut || judged.outputOverflow || judged.signal) throw new Error('Judge process did not finish with complete retained evidence')
+            if (judged.code !== 0 || judged.timedOut || judged.outputOverflow || judged.signal) { slot.judgeFailures = [{ code: judged.timedOut ? 'judge_process_timed_out' : 'judge_process_incomplete', attempts: null }]; throw new Error('Judge process did not finish with complete retained evidence') }
             const views = await read('semantic-judge-view-suite.json')
             slot.semanticItems = views?.payload?.views?.flatMap(view => view.items) ?? []
             slot.judgeStatus = views?.payload?.state ?? 'unavailable'
-            slot.failureDomain = slot.judgeStatus === 'unavailable' ? 'evaluator' : null
+            slot.judgeFailures = await readJudgeExecutionFailures(trialDirectory, views)
+            slot.failureDomain = slot.judgeFailures.length ? 'evaluator' : null
           } else { slot.semanticItems = []; slot.judgeStatus = 'not_run' }
         } catch (error) { if (slot.failureDomain !== 'evaluator') slot.state = 'insufficient'; slot.failureDomain ??= 'runner_or_environment'; slot.judgeStatus ??= 'unavailable'; slot.reason = error.message }
         await writePrivateJsonExclusive(join(directory, `${id}-slot.json`), slot)
@@ -356,5 +380,5 @@ export function renderGateReport(report) {
   const assessment = report.assessment
   const quality = assessment ? `\n通用质量：基线 ${assessment.arms.baseline?.quality.total ?? '评价未完成'} → 候选 ${assessment.arms.candidate.quality.total ?? '评价未完成'}；评分版本 ${assessment.scoring.version}。协作只保留分项状态，不计综合分。\n\n| 协作组 | 满足/适用计划 | 未知/适用计划 | 独立适用 Case |\n|---|---|---|---|\n${Object.entries(assessment.arms.candidate.collaboration.groups).map(([id, d]) => `| ${id} | ${d.counts.satisfied}/${d.applicableTrials} | ${d.counts.indeterminate}/${d.applicableTrials} | ${d.applicableCases} |`).join('\n')}\n` : '\n此历史报告未使用当前评分标准，不换算新分数。\n'
   const rows = report.slots.map(slot => `| ${slot.caseId} | ${slot.repeat} | ${slot.arm} | ${slot.state} | ${slot.hardOutcome ?? 'unknown'} | ${slot.rules?.length ? slot.rules.filter(rule => rule.status !== 'passed').map(rule => `${rule.id}: ${rule.status}`).join(', ') || 'passed' : 'unknown'} | ${slot.judgeStatus ?? 'not_run'} |`).join('\n')
-  return `# ${report.kind === 'weekly_regression' ? '每周真实任务回归' : '上下文改动 Gate'}\n\n结论：**${report.status}**。仅对应计划 ${report.planDigest} 与报告中的实际版本。\n\n[交互报告](report.html) · [完整报告](report.json) · [冻结计划](plan.json)${quality}\n\n| Case | 重复 | 版本 | 执行证据 | HardOutcome | 专项规则 | 语义评价 |\n|---|---|---|---|---|---|---|\n${rows}\n\n验收：${report.conclusions?.acceptance ?? report.status}；新旧比较：${report.conclusions?.regression ?? "unknown"}；评价完整性：${report.conclusions?.evaluation ?? "unknown"}。失败涉及 ${report.conclusions?.failedTrials ?? "unknown"} 次 Trial，证据缺口涉及 ${report.conclusions?.evidenceGapTrials ?? "unknown"} 次 Trial；同一 Trial 可同时存在失败与未知。硬性错误不可由语义得分抵消。Judge 的缺失、分歧或不足不算通过。历史失败保留，不使用 pass@k。\n\n独立验收保留集：${report.holdout.status}。本报告不声称用户任务成功率或实际能力提升。\n`
+  return `# ${report.kind === 'weekly_regression' ? '每周真实任务回归' : '上下文改动 Gate'}\n\n结论：**${report.status}**。仅对应计划 ${report.planDigest} 与报告中的实际版本。\n\n[交互报告](report.html) · [完整报告](report.json) · [冻结计划](plan.json)${quality}\n\n| Case | 重复 | 版本 | 执行证据 | HardOutcome | 专项规则 | 语义评价 |\n|---|---|---|---|---|---|---|\n${rows}\n\n验收：${report.conclusions?.acceptance ?? report.status}；新旧比较：${report.conclusions?.regression ?? "unknown"}；评价完整性：${report.conclusions?.evaluation ?? "unknown"}。失败涉及 ${report.conclusions?.failedTrials ?? "unknown"} 次 Trial，证据缺口涉及 ${report.conclusions?.evidenceGapTrials ?? "unknown"} 次 Trial；评测器故障涉及 ${report.conclusions?.evaluatorFailureTrials ?? "unknown"} 次 Trial；同一 Trial 可同时存在失败与未知。硬性错误不可由语义得分抵消。Judge 的缺失、分歧或不足不算通过。历史失败保留，不使用 pass@k。\n\n独立验收保留集：${report.holdout.status}。本报告不声称用户任务成功率或实际能力提升。\n`
 }

@@ -47,3 +47,18 @@ test('v6 Outcome requires a claim audit while legacy and Process output stay unc
   assert.equal(judgeOutputSchema(order).properties.claimsAudit, undefined)
   assert.equal(judgeOutputSchema(['SER.collaboration.delegation'], 'generic-task-v6').properties.claimsAudit, undefined)
 })
+
+test('v12 constrains split-claim quotations to literal delivery text without relaxing validation',()=>{
+ const content='实现、测试与最终报告均已完成。'
+ const pack={evidenceSegments:[{segmentId:'final',kind:'final_response',content},{segmentId:'history',kind:'prior_delivery',content:'Other report'}]}
+ const schema=judgeOutputSchema(['SER.response.claim_accuracy'],'generic-task-v12',pack)
+ const props=schema.properties.claimsAudit.properties.claims.items.properties
+ assert.deepEqual(props.sourceSegmentId.enum,['final'])
+ assert.deepEqual(props.text.enum,[content])
+ assert.ok(!props.text.enum.includes('实现已完成'))
+ pack.evidenceSegments[0].content='x'.repeat(1300)
+ assert.ok(judgeOutputSchema(['SER.response.claim_accuracy'],'generic-task-v12',pack).properties.claimsAudit.properties.claims.items.properties.text.enum.every(text=>text.length<=1200))
+ pack.evidenceSegments[0].content=Array.from({length:257},(_,i)=>String(i)).join('\n')
+ assert.throws(()=>judgeOutputSchema(['SER.response.claim_accuracy'],'generic-task-v12',pack),/quote_inventory/)
+ assert.equal(judgeOutputSchema(['SER.response.claim_accuracy'],'generic-task-v11',pack).properties.claimsAudit.properties.claims.items.properties.text.enum,undefined)
+})
