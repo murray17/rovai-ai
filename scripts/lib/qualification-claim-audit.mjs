@@ -18,8 +18,8 @@ export const SOURCE_CLAIM_AUDIT_INSTRUCTION = EXECUTION_CLAIM_AUDIT_INSTRUCTION.
 
 export const HISTORY_CLAIM_AUDIT_INSTRUCTION = SOURCE_CLAIM_AUDIT_INSTRUCTION.replace('generic-task-v10', 'generic-task-v11') + ' prior_delivery is earlier public Lead output with relative order. It is context, not an additional scored claim source. A later acknowledgement does not erase the actual earlier report. For publication or consistency with a previously published report use delivery_fact and quote exact prior_delivery text. A published report is evidence of its publication and content only, never proof that its assertions are true, a check ran, or the implementation works. Audit current final_response/latest delivery_message claims against the appropriate artifacts and execution receipts. Explicit later corrections supersede earlier drafts; never choose favorable history over the final artifacts.'
 
-export function claimAuditSchema(profile = CLAIM_AUDIT_PROFILE) {
-  return { type: 'object', additionalProperties: false, required: ['claimsComplete', 'claims'], properties: {
+export function claimAuditSchema(profile = CLAIM_AUDIT_PROFILE, pack = null) {
+  const schema = { type: 'object', additionalProperties: false, required: ['claimsComplete', 'claims'], properties: {
     claimsComplete: { type: 'boolean' }, claims: { type: 'array', minItems: 1, maxItems: 32, items: {
       type: 'object', additionalProperties: false,
       required: ['text', 'sourceSegmentId', 'kind', 'result', 'material', 'evidenceIds', 'evidenceQuote', 'reason'],
@@ -33,6 +33,22 @@ export function claimAuditSchema(profile = CLAIM_AUDIT_PROFILE) {
       }
     } }
   } }
+  if (profile === SUBSTANTIATION_CLAIM_AUDIT_PROFILE && pack) {
+    const sources = pack.evidenceSegments.filter(segment => ['final_response', 'delivery_message'].includes(segment.kind))
+    const quotes = new Set()
+    for (const source of sources) for (const line of source.content.split(/\r?\n/).filter(line => line.trim())) {
+      for (let start = 0; start < line.length; start += 1000) {
+        quotes.add(line.slice(start, start + 1200))
+        if (start + 1200 >= line.length) break
+      }
+    }
+    if (!quotes.size || quotes.size > 256) throw new Error('claim_audit.quote_inventory_unavailable_or_over_budget')
+    const properties = schema.properties.claims.items.properties
+    properties.sourceSegmentId.enum = sources.map(source => source.segmentId)
+    properties.text.enum = [...quotes]
+    properties.text.description = 'Select an exact original excerpt. To audit separate propositions in a compound sentence, reuse the entire original excerpt and distinguish the proposition in kind/reason. Never rewrite the excerpt.'
+  }
+  return schema
 }
 
 const normalize = text => text.replace(/\s+/g, ' ').trim()
@@ -95,11 +111,12 @@ export function applyClaimAudit(value, pack) {
     : problems.length || audit?.claimsComplete !== true || claims.some(claim => claim.result === 'unknown') ? 'indeterminate'
     : claims.some(claim => claim.result === 'unsubstantiated' && claim.material) && !claims.some(claim => claim.result === 'supported' && claim.material) ? 'not_satisfied'
     : claims.some(claim => ['contradicted', 'unsubstantiated'].includes(claim.result)) ? 'partially_satisfied' : 'satisfied'
+  const invalidOutput = problems.length > 0 || claims.some(claim => claim.validationErrors.length > 0)
   const evidenceIds = [...new Set(claims.flatMap(claim => claim.evidenceIds))]
   const summary = claims.map(claim => `${claim.ordinal}. ${claim.result}: ${claim.text}`).join(' ')
   output.items[index] = { ...output.items[index], verdict, confidence: verdict === 'indeterminate' ? 'low' : output.items[index].confidence,
     evidenceIds, reason: `Code-derived claim audit (${profile}; full rows in provider claim-audit.json). ${summary}`.slice(0, 1200),
-    abstainReason: verdict === 'indeterminate' ? { code: 'claim_audit.evidence_incomplete' } : null }
+    abstainReason: verdict === 'indeterminate' ? { code: invalidOutput ? 'claim_audit.invalid_output' : 'claim_audit.evidence_incomplete' } : null }
   return { value: output, audit: { profile, modelInputDigest: digestJson(pack), rawResponseDigest: digestJson(value), claimsComplete: audit?.claimsComplete === true,
     problems, claims, derivedVerdict: verdict, derivedItem: output.items[index] } }
 }

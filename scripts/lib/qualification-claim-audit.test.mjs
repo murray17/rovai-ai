@@ -139,3 +139,11 @@ test('v12 substantiation deficits deduct without claiming falsity; missing evalu
  f.pack.taskProfileVersion='generic-task-v11';unsupported.sourceSegmentId='delivery'
  assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate','old standards cannot silently adopt new scoring')
 })
+
+test('invalid source quotation is an evaluator protocol error, not missing task evidence',()=>{
+ const f=fixture();f.pack.taskProfileVersion='generic-task-v12';f.claim.text='a paraphrase absent from delivery'
+ const result=applyClaimAudit(f.value,f.pack)
+ assert.equal(result.value.items[0].abstainReason.code,'claim_audit.invalid_output')
+ f.claim.text='报告时长为12分钟';f.claim.result='unknown'
+ assert.equal(applyClaimAudit(f.value,f.pack).value.items[0].abstainReason.code,'claim_audit.evidence_incomplete')
+})

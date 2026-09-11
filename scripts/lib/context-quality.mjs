@@ -71,6 +71,7 @@ export function semanticVerdict(slot, checklistItem, applicable = true) {
   const view = checklistItem.startsWith('SER.collaboration.') ? 'process' : 'outcome'
   const evaluatorFailed = slot.failureDomain === 'evaluator' && (!slot.judgeFailures?.length || slot.judgeFailures.some(failure => !failure.view || failure.view === view))
   if (!raw) return unknown(slot.judgeStatus === 'not_run' ? 'judge_not_run' : evaluatorFailed ? 'judge_execution_failed' : slot.state !== 'complete' ? 'trial_evidence_incomplete' : 'judge_item_missing', raw)
+  if (raw.verdict === 'indeterminate' && slot.judgeFailures?.some(failure => failure.checklistItems?.includes(checklistItem))) return unknown('judge_execution_failed', raw)
   if (raw.state === 'disagreed') return unknown('judge_disagreement', raw)
   if (!['agreed', 'adjudicated'].includes(raw.state) || raw.verdict === 'indeterminate') return unknown('judge_evidence_insufficient', raw)
   if (raw.verdict === 'not_applicable') return unknown('unexpected_not_applicable', raw)

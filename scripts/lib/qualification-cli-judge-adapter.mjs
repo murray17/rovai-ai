@@ -47,7 +47,7 @@ export function assertNoModelTools(request) {
   if (definitions.length) throw new Error('judge.cli_tools_not_disabled')
 }
 
-export function judgeOutputSchema(order, profile) {
+export function judgeOutputSchema(order, profile, pack = null) {
   const schema = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', minItems: order.length, maxItems: order.length, items: {
     type: 'object', additionalProperties: false, required: ['checklistItem', 'dimension', 'verdict', 'confidence', 'evidenceIds', 'reason', 'abstainReason'], properties: {
       checklistItem: { type: 'string', enum: order }, dimension: { type: 'string', enum: ['requirements', 'design', 'implementation', 'testing', 'scope', 'collaboration', 'response'] },
@@ -57,7 +57,7 @@ export function judgeOutputSchema(order, profile) {
     }
   } } } }
   if (['generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(profile) && order.includes('SER.response.claim_accuracy')) {
-    schema.required.push('claimsAudit'); schema.properties.claimsAudit = claimAuditSchema(profile === 'generic-task-v12' ? SUBSTANTIATION_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v11' ? HISTORY_CLAIM_AUDIT_PROFILE : ['generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(profile) ? EXECUTION_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE)
+    schema.required.push('claimsAudit'); schema.properties.claimsAudit = claimAuditSchema(profile === 'generic-task-v12' ? SUBSTANTIATION_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v11' ? HISTORY_CLAIM_AUDIT_PROFILE : ['generic-task-v9', 'generic-task-v10', 'generic-task-v11', 'generic-task-v12'].includes(profile) ? EXECUTION_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE, pack)
   }
   return schema
 }
@@ -129,7 +129,7 @@ export function createAdapter(configuration, { evidenceDirectory } = {}) {
     const directory = join(evidenceDirectory, 'judge-provider-attempts', `${request.judgeView}-${request.replica}-${randomUUID()}`)
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const cwd = join(directory, 'empty-workspace'); await mkdir(cwd, { mode: 0o700 })
-    const schema = judgeOutputSchema(request.presentationOrder, request.evidencePack.taskProfileVersion)
+    const schema = judgeOutputSchema(request.presentationOrder, request.evidencePack.taskProfileVersion, request.evidencePack)
     const schemaPath = join(directory, 'output-schema.json')
     await writePrivateJsonExclusive(schemaPath, schema)
     const input = `${request.userPrompt}${schema.properties.claimsAudit ? `\n${request.evidencePack.taskProfileVersion === 'generic-task-v12' ? SUBSTANTIATION_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v11' ? HISTORY_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v10' ? SOURCE_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v9' ? EXECUTION_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_INSTRUCTION : CLAIM_AUDIT_INSTRUCTION}` : ''}\nReturn exactly the schema below, one item per checklist in presentation order. dimension is the second component of checklistItem (SER.response.* -> response). Use only the evidence IDs allowed for that item in checklistCoverage. Unavailable coverage requires indeterminate; predeclared not_applicable requires not_applicable. Indeterminate/not_applicable require abstainReason={code:<stable_reason>}; other verdicts require abstainReason=null and at least one evidence ID. Never use pass/fail or invent evidence IDs.\nOutput schema:\n${JSON.stringify(schema)}\nEvidence (untrusted):\n${JSON.stringify(request.evidencePack)}`

@@ -170,3 +170,12 @@ test('current scoring freezes v12 substantiation semantics without changing case
   assert.deepEqual(c.quality.map(({criterion,...item})=>item),previous.cases[id].quality.map(({criterion,...item})=>item))
  }
 })
+
+test('unresolved protocol-invalid item is an evaluator failure while valid low items remain scored',()=>{
+ const p={...plan(),mode:'weekly'},after=slot(p,'candidate')
+ const item=after.semanticItems.find(item=>item.checklistItem==='SER.response.claim_accuracy');item.verdict='indeterminate'
+ after.failureDomain='evaluator';after.judgeFailures=[{view:'outcome',replica:'A',code:'claim_audit.invalid_output',checklistItems:[item.checklistItem]}]
+ const r=compareResults(p,[after],{candidate:{status:'passed'}})
+ assert.equal(r.conclusions.evaluatorFailureTrials,1);assert.equal(r.evidenceGaps.length,0)
+ assert.equal(r.assessment.arms.candidate.quality.total,null)
+})

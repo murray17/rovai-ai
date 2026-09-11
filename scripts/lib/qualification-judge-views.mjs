@@ -2057,6 +2057,10 @@ export async function readJudgeExecutionFailures(evidenceDirectory, suite) {
     const artifact = JSON.parse(await readFile(join(evidenceDirectory, locator), 'utf8'))
     if (artifact.artifactId !== reference.artifactId || artifact.payloadDigest !== reference.payloadDigest
         || digestJson(artifact.payload) !== String(reference.payloadDigest).replace(/^sha256:/, '')) throw new Error('Judge failure artifact digest mismatch')
+    const invalidItems = artifact.payload.items.filter(item => item.abstainReason?.code === 'claim_audit.invalid_output'
+      && view.items.some(final => final.checklistItem === item.checklistItem && final.verdict === 'indeterminate'))
+    if (invalidItems.length) failures.push({ code: 'claim_audit.invalid_output', view: view.view,
+      replica: artifact.payload.replica, checklistItems: invalidItems.map(item => item.checklistItem), attempts: artifact.payload.attempts.length, locator })
     if (artifact.payload.state === 'unavailable' && artifact.payload.invocationState === 'invoked') failures.push({
       code: artifact.payload.unavailableReason?.code ?? 'judge_replica_unavailable', view: view.view,
       replica: artifact.payload.replica, attempts: artifact.payload.attempts.length, locator,
