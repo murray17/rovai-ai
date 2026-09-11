@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -125,7 +125,7 @@ test('Collaboration message evidence projects only delivered Public A2A bodies w
 test('Semantic untrusted evidence includes participant messages and final response but never ContextManifest or private logs', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'rovai-semantic-evidence-'))
   try {
-    await mkdir(join(directory, 'delivered'))
+    await mkdir(join(directory, 'delivered', 'src'), { recursive: true })
     const finalBody = 'Implemented the fix and verified the public checks.'
     const participantBody = 'Please inspect the state transition and report defects.'
     await writeFile(join(directory, 'final-response-evidence.json'), JSON.stringify({
@@ -334,6 +334,14 @@ test('Semantic evidence reads exact delivered code only through its content-boun
     assert.equal(codeSegment.content, code)
     assert.equal(codeSegment.evidenceReference.evidenceId, 'runner.workspace-content:answer')
 
+    await writeFile(join(directory, 'delivered', 'empty.txt'), '')
+    evidenceIndex.payload.records.push(contentRecord('runner.workspace-content:empty', ''))
+    result.workspaceDiff.changed.push({ path: 'empty.txt', before: null, after: { type: 'file', digest: sha256('') } })
+    workspaceMutationLedger.payload.records.push({ mutationId: 'workspace-mutation:empty', paths: ['empty.txt'], evidenceReferences: [ref('runner.workspace-content:empty')] })
+    const withEmpty = await buildSemanticJudgeUntrustedEvidence({ evidenceDirectory: directory, result, evidenceIndex, workspaceMutationLedger })
+    assert.equal(withEmpty.some(segment => segment.content.length === 0), false, 'Empty-file boundary facts must not become invalid Judge text')
+    assert.equal(result.workspaceDiff.changed.some(change => change.path === 'empty.txt'), true)
+
     await writeFile(join(directory, 'delivered', 'src', 'answer.mjs'), 'tampered\n')
     await assert.rejects(buildSemanticJudgeUntrustedEvidence({
       evidenceDirectory: directory,
@@ -365,3 +373,72 @@ function digestRecord(evidenceId, value) {
 function ref(evidenceId) {
   return { artifactId: 'evidence-index:index-1', evidenceId }
 }
+
+test('task v3 includes unchanged captured files and Gather public returns with exact source digests', async () => {
+  const { buildTaskJudgeSegments } = await import('./qualification-semantic-evidence.mjs')
+  const directory = await mkdtemp(join(tmpdir(), 'rovai-task-evidence-'))
+  try {
+    await mkdir(join(directory, 'delivered', 'src'), { recursive: true })
+    const code = 'export const value = 0\n', body = 'Member return: retain the original tree on failure.'
+    await writeFile(join(directory, 'delivered', 'src/source.mjs'), code)
+    const snapshot = { agentRuns: [{ id: 'run-1', campTurnId: 'turn-1' }], messages: [
+      { id: 'return-1', authorType: 'agent', authorId: 'member-2', sourceAgentRunId: 'run-1', campTurnId: 'turn-1', content: [{ kind: 'text', text: body }] },
+      { id: 'foreign', authorType: 'agent', authorId: 'member-2', sourceAgentRunId: 'run-1', campTurnId: 'other', content: [{ kind: 'text', text: 'FOREIGN_CANARY' }] }
+    ] }
+    const raw = JSON.stringify({ snapshot, digest: digestJson(snapshot) }) + '\n'
+    await writeFile(join(directory, 'observations.ndjson'), raw)
+    const result = { observationDigest: sha256(raw), dispatchBoundary: { campTurnId: 'turn-1' }, deliveredWorkspaceSnapshot: { directory: 'delivered' } }
+    const evidenceIndex = { artifactId: 'index-1', payload: { records: [
+      { evidenceId: `runner.workspace-content:${sha256('src/source.mjs').slice(0, 40)}`, contentDigest: `sha256:${sha256(code)}`, safeForJudge: true },
+      { evidenceId: 'core.message-content:return-1', contentDigest: `sha256:${sha256(body)}`, safeForJudge: true }
+    ] } }
+    const args = { evidenceDirectory: directory, result, evidenceIndex, evidenceFiles: ['src/source.mjs'] }
+    const segments = await buildTaskJudgeSegments(args)
+    assert.equal(segments.length, 2)
+    assert.equal(segments[0].path, 'src/source.mjs')
+    const envelope = JSON.parse(await readFile(new URL('../../docs/versions/v0.34/schemas/artifact-envelope.schema.json', import.meta.url)))
+    assert.match(segments[0].segmentId, new RegExp(envelope.$defs.stableId.pattern))
+    assert.equal(segments[1].content, body)
+    assert.doesNotMatch(JSON.stringify(segments), /FOREIGN_CANARY/)
+    await writeFile(join(directory, 'delivered', 'src/source.mjs'), 'tampered')
+    await assert.rejects(buildTaskJudgeSegments(args), /digest mismatch/)
+    await assert.rejects(buildTaskJudgeSegments({ ...args, evidenceFiles: ['../outside'] }), /relative|locator|path|escapes/i)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('v4 receipt and Task bodies require matching frozen observation and Evidence Index', async () => {
+  const { buildTaskJudgeSegments } = await import('./qualification-semantic-evidence.mjs')
+  const directory=await mkdtemp(join(tmpdir(),'rovai-receipt-evidence-'))
+  try {
+    await mkdir(join(directory,'delivered'))
+    const receiptBody=JSON.stringify({command:'npm test',exitCode:0,output:'pass 5'}), taskBody=JSON.stringify({title:'Repair',description:'Respect rollback',status:'completed'})
+    const snapshot={agentRuns:[{id:'run',campTurnId:'turn'}],messages:[],executionEvidence:[{id:'receipt',agentRunId:'run',payloadDigest:'a'.repeat(64)}],tasks:[{taskId:'task',sourceAgentRunId:'run',titleDigest:sha256('Repair'),descriptionDigest:sha256('Respect rollback')}],evaluationContext:{policyId:'bounded-evaluation-context-v1',receipts:[{sourceEvidenceId:'receipt',sourcePayloadDigest:'a'.repeat(64),content:receiptBody,contentDigest:sha256(receiptBody)}],tasks:[{taskId:'task',content:taskBody}],deliveryMessageIds:[]}}
+    const raw=JSON.stringify({snapshot,digest:digestJson(snapshot)})+'\n'
+    await writeFile(join(directory,'observations.ndjson'),raw)
+    const evidenceIndex={artifactId:'index',payload:{records:[contentRecord('runtime.command-receipt:receipt',receiptBody),contentRecord('core.task-description:task',taskBody)]}}
+    const result={observationDigest:sha256(raw),dispatchBoundary:{campTurnId:'turn'},deliveredWorkspaceSnapshot:{directory:'delivered'}}
+    const args={evidenceDirectory:directory,result,evidenceIndex,evidenceFiles:[],includeEvaluationContext:true}
+    assert.deepEqual((await buildTaskJudgeSegments(args)).map(s=>s.kind),['test_output','comment'])
+    assert.equal((await buildTaskJudgeSegments({...args,includeEvaluationContext:false})).length,0)
+    evidenceIndex.payload.records[0].contentDigest='sha256:'+'0'.repeat(64)
+    await assert.rejects(buildTaskJudgeSegments(args),/index digest mismatch/)
+    evidenceIndex.payload.records[0]=contentRecord('runtime.command-receipt:receipt',receiptBody)
+    snapshot.executionEvidence[0].agentRunId='foreign'
+    const tampered=JSON.stringify({snapshot,digest:digestJson(snapshot)})+'\n'
+    await writeFile(join(directory,'observations.ndjson'),tampered);result.observationDigest=sha256(tampered)
+    await assert.rejects(buildTaskJudgeSegments(args),/source digest mismatch/)
+  } finally {await rm(directory,{recursive:true,force:true})}
+})
+
+test('empty collaboration reevaluation preserves old evidence and gets a new bound identity', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'empty-collaboration-revision-'))
+  try {
+    const base={trialId:'empty-trial',snapshot:{messages:[]},dispatchBoundary:{campTurnId:'turn'},collaborationEvidence:{sourceSurface:'public_message_delivery_v1',a2a:[],metrics:{acceptedMemberCalls:0,coverage:'complete_with_message_delivery_receipts'}},evidenceReferences:{},producerDigest:'a'.repeat(64),evidenceIndex:{artifactId:'evidence-index:original'}}
+    const first=buildCollaborationMessageEvidence(base),retained=await retainCollaborationMessageEvidence(dir,first)
+    const revised=buildCollaborationMessageEvidence({...base,evaluationAttemptId:'evaluation-2',producerDigest:'b'.repeat(64),evidenceIndex:{artifactId:'evidence-index:revised'}})
+    assert.notEqual(first.artifactId,revised.artifactId)
+    await retainCollaborationMessageEvidence(dir,revised)
+    assert.deepEqual(JSON.parse(await readFile(join(dir,retained.locator),'utf8')),first)
+    assert.equal(revised.payload.messages.length,0)
+  } finally { await rm(dir,{recursive:true,force:true}) }
+})

@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.5.0",
+  "catalogVersion": "1.8.0",
   "hashAlgorithm": "sha256",
   "digestInput": "raw_file_bytes",
   "schemas": [
@@ -74,6 +74,30 @@
       "schemaUri": "https://schemas.rovai.invalid/contracts/paired-collaboration-experiment-v1.schema.json",
       "schemaVersion": "1.0.0",
       "digest": "sha256:3acf8b0bbad36ab74a06a9c8008552978a681357f7be48b7bc1714ab54019918"
+    },
+    {
+      "file": "collaboration-ledger-v1.1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/collaboration-ledger-v1.1.schema.json",
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:bd4dd664150c9f0a7f04509efb1a4582b0bf761b8cea1c11ce5d7307fc840d99"
+    },
+    {
+      "file": "semantic-judge-configuration-v1.1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/semantic-judge-configuration-v1.1.schema.json",
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:678d7a763c534ad958a88c83b4428c0530972d31715c2a65cd2d84f8a6dcbf28"
+    },
+    {
+      "file": "semantic-judge-view-suite-v2.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/semantic-judge-view-suite-v2.schema.json",
+      "schemaVersion": "2.0.0",
+      "digest": "sha256:a83834369c6eda0e3992826f9711f64a6350f54918fe5b348a200f6a2091fdf7"
+    },
+    {
+      "file": "public-benchmark-report-v2.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/public-benchmark-report-v2.schema.json",
+      "schemaVersion": "2.0.0",
+      "digest": "sha256:bd300148169bbf683dc664cbd737b69073f1b71656e1c670d4174a4b72acb3e7"
     }
   ]
 }

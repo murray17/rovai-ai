@@ -11,6 +11,7 @@ import {
   digestJson,
   evaluateChangeBoundary,
   makeTemporaryDirectory,
+  materializeJsonArtifact,
   removeTemporaryDirectory,
   runCaseVerifier,
   sha256,
@@ -46,6 +47,7 @@ import {
   buildWorkspaceMutationLedger,
   retainWorkspaceMutationLedgerArtifact
 } from './qualification-workspace-mutation-ledger.mjs'
+import { buildCollaborationMessageEvidence, retainCollaborationMessageEvidence } from './qualification-semantic-evidence.mjs'
 import { publishQualificationEvidenceBundle } from './qualification-bundle.mjs'
 
 export const QUALIFICATION_EVALUATION_IDENTITY_VERSION = 1
@@ -118,6 +120,7 @@ export function buildEvaluationIdentity({
 export async function computeQualificationEvaluatorDigest() {
   const repositoryRoot = resolve(import.meta.dirname, '../..')
   const files = [
+    join(repositoryRoot, 'pnpm-lock.yaml'),
     join(repositoryRoot, 'docs', 'versions', 'v0.34', 'schemas', 'schema-catalog.json'),
     join(repositoryRoot, 'docs', 'versions', 'v0.36', 'schemas', 'schema-catalog.json'),
     join(repositoryRoot, 'docs', 'contracts', 'schemas', 'schema-catalog.json'),
@@ -127,6 +130,9 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'qualification-tool-use-review.mjs'),
     join(repositoryRoot, 'scripts', 'benchmark-paired-collaboration.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-common.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'create-configured-camp.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'context-regression-fixture.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'runtime-camp-files-root.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-evaluation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-recovery.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-collaboration.mjs'),
@@ -138,6 +144,7 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-artifacts.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-core.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-evidence-index.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-evaluation-context.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-isolation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-public-report.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-schema-validation.mjs'),
@@ -145,6 +152,15 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-semantic-judge.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-semantic-evidence.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-judge-views.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'context-judge-profile.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'context-metric-contract.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-claim-audit.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-native-exec-wrapper.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-native-witness.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-judge-source-supplement.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-cli-judge-adapter.mjs'),
+
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-resource-usage.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-evidence.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-ledger.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-workspace-mutation-ledger.mjs'),
@@ -207,7 +223,9 @@ export async function appendResultRevision(evidenceDirectory, result, {
     evaluationAttemptId,
     recordedAt: new Date().toISOString()
   }
-  const resultBundle = { ...result, resultRevision: revision }
+  // Hash exactly the JSON representation retained on disk. Optional undefined
+  // properties must not make a freshly written revision unreadable.
+  const resultBundle = materializeJsonArtifact({ ...result, resultRevision: revision })
   const record = {
     schemaVersion: QUALIFICATION_TRIAL_SCHEMA_VERSION,
     ...revision,
@@ -662,14 +680,15 @@ function deriveRecoveredResult({
   }
 }
 
-async function attachRecoveredEvidenceIndex({
+export async function attachRecoveredEvidenceIndex({
   evidenceDirectory,
   prior,
   nextResult,
   caseRecord,
   verifierObservation,
   validation,
-  evaluationAttemptId
+  evaluationAttemptId,
+  producerDigest = validation.environmentManifest.runnerDigest
 }) {
   const convergence = {
     status: nextResult.orchestrationConvergence,
@@ -690,7 +709,7 @@ async function attachRecoveredEvidenceIndex({
     suiteId: prior.suiteId ?? null,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: caseRecord.seal,
-    producerDigest: validation.environmentManifest.runnerDigest,
+    producerDigest,
     snapshot: validation.evidenceSnapshot,
     dispatchBoundary: prior.dispatchBoundary,
     environmentManifest: validation.environmentManifest,
@@ -701,6 +720,7 @@ async function attachRecoveredEvidenceIndex({
     executionEvidenceCoverage,
     verifierObservation,
     deliveredWorkspaceSnapshot: nextResult.deliveredWorkspaceSnapshot,
+    deliveredWorkspaceEntries: validation.snapshotManifest?.entries ?? [],
     workspaceDiff: validation.workspaceDiff,
     deliveryEvidence: nextResult.deliveryLayer,
     convergence,
@@ -718,7 +738,7 @@ async function attachRecoveredEvidenceIndex({
     suiteId: prior.suiteId ?? null,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: caseRecord.seal,
-    producerDigest: validation.environmentManifest.runnerDigest,
+    producerDigest,
     collaborationEvidence: nextResult.collaborationEvidence,
     evidenceIndex: build.artifact,
     evidenceReferences: build.references
@@ -739,7 +759,7 @@ async function attachRecoveredEvidenceIndex({
     suiteId: prior.suiteId ?? null,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: caseRecord.seal,
-    producerDigest: validation.environmentManifest.runnerDigest,
+    producerDigest,
     toolEvidence,
     evidenceIndex: build.artifact
   })
@@ -755,7 +775,7 @@ async function attachRecoveredEvidenceIndex({
     suiteId: prior.suiteId ?? null,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: caseRecord.seal,
-    producerDigest: validation.environmentManifest.runnerDigest,
+    producerDigest,
     workspaceDiff: validation.workspaceDiff,
     observedAt: nextResult.lastEvaluatedAt,
     evidenceIndex: build.artifact,
@@ -768,12 +788,17 @@ async function attachRecoveredEvidenceIndex({
     build.artifact,
     toolCallLedgerArtifact
   )
+  const collaborationMessageEvidence = await retainCollaborationMessageEvidence(evidenceDirectory, buildCollaborationMessageEvidence({
+    trialId: prior.trialId, evaluationAttemptId, snapshot: validation.evidenceSnapshot, dispatchBoundary: prior.dispatchBoundary,
+    collaborationEvidence: nextResult.collaborationEvidence, evidenceReferences: build.references, evidenceIndex: build.artifact, producerDigest
+  }))
   const finalResponseEvidence = (nextResult.deliveryLayer?.finalResponseEvidence ?? []).map((message) => ({
     ...message,
     evidenceReference: build.references.messages[message.messageId] ?? null
   }))
   return {
     ...nextResult,
+    collaborationMessageEvidence,
     evidenceIndex,
     collaborationLedger,
     toolEvidence,

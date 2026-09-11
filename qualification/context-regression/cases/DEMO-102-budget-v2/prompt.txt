@@ -1,0 +1,2 @@
+阅读 incidents.json，按服务名合并失败次数，输出 failuresByService；按 incident ID 去重，相同 ID 的后续条目是重复记录。无需记忆和队员协作。
+请将最终产物保存为 report.json，只允许修改该文件。保留所给文件。最终回复说明依据、验证和限制。

@@ -1,0 +1,2 @@
+请找到 Camp 中较早的“Falcon API 验收约定”，据此输出 region 和 retryLimit。当前 workspace 不包含该约定，不能根据常见默认值猜测。
+请将最终产物保存为 report.json，只允许修改该文件。保留所给文件。最终回复说明依据、验证和限制。

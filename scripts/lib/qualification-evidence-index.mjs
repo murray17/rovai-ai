@@ -31,6 +31,7 @@ export function buildEvidenceIndex({
   executionEvidenceCoverage,
   verifierObservation,
   deliveredWorkspaceSnapshot,
+  deliveredWorkspaceEntries = [],
   workspaceDiff,
   deliveryEvidence,
   convergence,
@@ -267,6 +268,9 @@ export function buildEvidenceIndex({
       const isFinalResponse = finalResponseIds.has(message.id)
       const isDeliveredA2aMessage = deliveriesByMessageId.has(message.id)
       const isToolRetrievedMessage = retrievedMessageIds.has(message.id)
+      const isPublicTrialMessage = message.authorType === 'agent'
+        && trialRunIds.has(message.sourceAgentRunId)
+        && message.campTurnId === dispatchBoundary?.campTurnId
       addSourceRecord({
         evidenceId,
         evidenceType: isFinalResponse ? 'final_response' : 'core_domain',
@@ -303,10 +307,10 @@ export function buildEvidenceIndex({
           observedAt: message.createdAt,
           content,
           contentDigestOverride: bodyDigest,
-          safeForJudge: isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage,
+          safeForJudge: isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage || isPublicTrialMessage,
           safeForPublic: false
         })
-        if (isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage) {
+        if (isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage || isPublicTrialMessage) {
           references.messageContents[message.id] = evidenceReference(
             artifactId,
             contentEvidenceId
@@ -331,9 +335,23 @@ export function buildEvidenceIndex({
         stableEvidenceId('core.inbox', message.id)
       )
     }
+    for (const receipt of snapshot.evaluationContext?.receipts ?? []) {
+      addSourceRecord({ evidenceId: stableEvidenceId('runtime.command-receipt', receipt.sourceEvidenceId), evidenceType: 'runtime_activity', authorityClass: 'runtime',
+        sourceId: receipt.nativeWitnessDigest ? 'runtime.bound-native-command-supplement' : 'core.agent-run-execution-evidence', content: receipt.content, contentDigestOverride: sha256(receipt.content), safeForJudge: true })
+    }
+    for (const file of snapshot.evaluationContext?.initialFiles ?? []) {
+      addSourceRecord({ evidenceId: stableEvidenceId('runner.initial-workspace-content', file.path), evidenceType: 'workspace_fact', authorityClass: 'runner',
+        sourceId: 'runner.sealed-case-fixture', content: { path: file.path, caseSeal: file.caseSeal }, contentDigestOverride: file.contentDigest, safeForJudge: true, safeForPublic: false })
+    }
+    for (const task of snapshot.evaluationContext?.tasks ?? []) {
+      addSourceRecord({ evidenceId: stableEvidenceId('core.task-description', task.taskId), evidenceType: 'core_domain', authorityClass: 'core',
+        sourceId: 'core.camp-snapshot', content: task.content, contentDigestOverride: sha256(task.content), safeForJudge: true })
+    }
     for (const task of snapshot.tasks ?? []) {
       if (!trialRunIds.has(task.sourceAgentRunId)) continue
-      const taskEvidenceId = stableEvidenceId('core.task', task.id)
+      const taskId = task.taskId ?? task.id
+      if (typeof taskId !== 'string' || !taskId) throw new Error('Task evidence requires a current taskId or legacy id')
+      const taskEvidenceId = stableEvidenceId('core.task', taskId)
       addSourceRecord({
         evidenceId: taskEvidenceId,
         evidenceType: 'core_domain',
@@ -342,9 +360,9 @@ export function buildEvidenceIndex({
         observedAt: task.completedAt ?? task.updatedAt ?? task.createdAt,
         content: task
       })
-      references.tasks[task.id] = evidenceReference(artifactId, taskEvidenceId)
+      references.tasks[taskId] = evidenceReference(artifactId, taskEvidenceId)
       const taskState = buildTaskStateContent(task)
-      const taskStateEvidenceId = stableEvidenceId('core.task-state', task.id)
+      const taskStateEvidenceId = stableEvidenceId('core.task-state', taskId)
       addSourceRecord({
         evidenceId: taskStateEvidenceId,
         evidenceType: 'core_domain',
@@ -352,14 +370,14 @@ export function buildEvidenceIndex({
         sourceId: 'core.camp-snapshot',
         observedAt: task.completedAt ?? task.updatedAt ?? task.createdAt,
         content: {
-          taskId: task.id,
+          taskId,
           stateDigest: withSha256Prefix(sha256(taskState))
         },
         contentDigestOverride: sha256(taskState),
         safeForJudge: true,
         safeForPublic: false
       })
-      references.taskStates[task.id] = evidenceReference(artifactId, taskStateEvidenceId)
+      references.taskStates[taskId] = evidenceReference(artifactId, taskStateEvidenceId)
     }
     for (const action of snapshot.actions ?? []) {
       if (!trialRunIds.has(action.agentRunId)) continue
@@ -525,6 +543,16 @@ export function buildEvidenceIndex({
     }
   }
 
+  // Full captured files are distinct from mutations. A missing edit must not
+  // hide the unchanged artifact from an explicitly opted-in task Judge.
+  for (const entry of deliveredWorkspaceEntries) {
+    const contentEvidenceId = stableEvidenceId('runner.workspace-content', entry.path)
+    if (records.has(contentEvidenceId) || entry.type !== 'file' || !/^[a-f0-9]{64}$/.test(entry.digest ?? '')) continue
+    addSourceRecord({ evidenceId: contentEvidenceId, evidenceType: 'workspace_fact', authorityClass: 'runner', sourceId: 'runner.workspace',
+      content: { path: entry.path, type: entry.type, bytes: entry.bytes, digest: withSha256Prefix(entry.digest) }, contentDigestOverride: entry.digest, safeForJudge: true, safeForPublic: false })
+    references.workspaceContents[entry.path] = evidenceReference(artifactId, contentEvidenceId)
+  }
+
   addSourceRecord({
     evidenceId: 'verifier.observation-boundary',
     evidenceType: 'verifier_check',
@@ -663,7 +691,7 @@ export function buildEvidenceIndex({
 
 export function buildTaskStateContent(task) {
   return canonicalJson(compactObject({
-    taskId: task?.id ?? task?.taskId ?? null,
+    taskId: task?.taskId ?? task?.id ?? null,
     status: task?.status ?? null,
     assigneeAgentId: task?.assigneeAgentId ?? null,
     version: task?.version ?? null,
@@ -854,6 +882,13 @@ function buildSourceBoundaries(input) {
         : unavailable('evidence_index.derived_facts_unavailable')
     })
   ]
+  if (['bounded-evaluation-context-v2', 'bounded-evaluation-context-v3', 'bounded-evaluation-context-v4'].includes(input.snapshot?.evaluationContext?.policyId)) {
+    const context = input.snapshot.evaluationContext
+    boundaries.push(sourceBoundary('runtime', 'runtime.bound-native-command-supplement', {
+      supplementDigest: context.supplementDigest, witnesses: context.receipts.filter(row => row.nativeWitnessDigest).map(row => ({ sourceEvidenceId: row.sourceEvidenceId, sourcePayloadDigest: row.sourcePayloadDigest, witnessDigest: row.nativeWitnessDigest }))
+    }, { coverage: COMPLETE }))
+    boundaries.push(sourceBoundary('runner', 'runner.sealed-case-fixture', context.initialFiles.map(({ path, contentDigest, caseSeal }) => ({ path, contentDigest, caseSeal })), { coverage: COMPLETE }))
+  }
   return boundaries.sort((left, right) => left.sourceId.localeCompare(right.sourceId))
 }
 
@@ -964,7 +999,7 @@ function boundedContextManifestSummary(manifest) {
   }
 }
 
-function stableEvidenceId(prefix, nativeId) {
+export function stableEvidenceId(prefix, nativeId) {
   const candidate = `${prefix}:${nativeId}`
   return candidate.length <= 160 && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(candidate)
     ? candidate

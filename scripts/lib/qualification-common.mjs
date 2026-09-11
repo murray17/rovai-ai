@@ -1,3 +1,4 @@
+import { composerDocumentForAddress } from './create-configured-camp.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   chmod,
@@ -243,7 +244,7 @@ export async function dispatchQualificationPrompt(request, {
   const savedDraft = await request('camp.composerDraft.save', {
     campId,
     expectedRevision: currentDraft.revision,
-    content: [{ kind: 'text', text: prompt }]
+    content: composerDocumentForAddress({ mode: 'default' }, prompt)
   })
   if (!Number.isInteger(savedDraft?.revision) || savedDraft.revision <= currentDraft.revision) {
     throw new Error('Qualification Camp composer draft did not advance its Core Revision')
@@ -358,6 +359,7 @@ export const MANAGED_RUNTIME_TOP_LEVEL = Object.freeze([
   '.agent',
   '.agents',
   '.claude',
+  '.codex',
   '.gemini'
 ])
 
@@ -368,7 +370,7 @@ export async function captureDeliveredWorkspaceSnapshot(source, evidenceDirector
   const capturedAt = new Date().toISOString()
   try {
     const sourceManifest = await treeManifest(absoluteSource)
-    await assertNoEscapingSymlinks(absoluteSource, sourceManifest)
+    await assertNoEscapingSymlinks(absoluteSource, { ...sourceManifest, entries: sourceManifest.entries.filter(entry => !excluded.has(entry.path.split('/')[0])) })
     await cp(absoluteSource, temporaryDestination, {
       recursive: true,
       force: false,

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { SEMANTIC_CHECKLIST } from './qualification-semantic-judge.mjs'
 import { digestJson } from './qualification-common.mjs'
 import {
   buildPublicBenchmarkReport,
@@ -264,3 +265,16 @@ function ref(artifactId, evidenceId) {
 function redigest(artifact) {
   artifact.payloadDigest = `sha256:${digestJson(artifact.payload)}`
 }
+
+test('an adjudicated judgment publishes as v2 without falsifying agreement or changing legacy reports', () => {
+  const evidenceIndex=indexFixture(),result=passingResult(evidenceIndex)
+  const build=()=>buildPublicBenchmarkReport({result,producerDigest:'a'.repeat(64),evidenceIndex,
+    collaborationLedger:collaborationLedgerFixture(evidenceIndex),toolCallLedger:toolLedgerFixture(evidenceIndex),workspaceMutationLedger:mutationLedgerFixture(evidenceIndex)})
+  assert.equal(build().schemaVersion,'1.0.0')
+  result.semanticEngineeringReview={status:'complete',items:SEMANTIC_CHECKLIST.map(checklistItem=>({checklistItem,dimension:checklistItem.split('.')[1],state:'adjudicated',verdict:'satisfied',replicaVerdicts:['satisfied','partially_satisfied']}))}
+  const report=build()
+  assert.equal(report.schemaVersion,'2.0.0')
+  assert.equal(report.payload.layer5SemanticReview.items[0].state,'adjudicated')
+  const legacy=structuredClone(report);legacy.schemaVersion='1.0.0'
+  assert.throws(()=>validatePublicBenchmarkReport(legacy,evidenceIndex),/schema|Schema/)
+})

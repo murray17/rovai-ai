@@ -57,6 +57,14 @@ test('Judge Configuration and allowlist Pack are schema-valid, pseudonymized, an
   assert.equal(coverage.get('SER.collaboration.lead_integration').state, 'partial')
 })
 
+test('receipt configuration identities distinguish evaluator revisions without replacing history', () => {
+  const common={provider:'fixture',snapshotId:'fixture-model',snapshotDigest:'b'.repeat(64),configurationId:'fixed-logical-name',evaluationContextPolicy:'bounded-evaluation-context-v1'}
+  const before=buildSemanticJudgeConfiguration({...common,producerDigest:'a'.repeat(64)})
+  const after=buildSemanticJudgeConfiguration({...common,producerDigest:'c'.repeat(64)})
+  assert.notEqual(before.artifactId,after.artifactId)
+  assert.deepEqual(before.payload,after.payload)
+})
+
 test('validated legacy source Pack projects into disjoint Process and blinded Outcome model inputs', () => {
   const fixture = judgeFixture()
   const common = {
@@ -633,3 +641,16 @@ function untrustedEvidenceFixture(evidenceIndex) {
     }
   ]
 }
+
+test('receipt source policy admits only exact content-bound evaluation receipts and preserves legacy rejection', () => {
+  const fixture = judgeFixture({buildPack:false})
+  const configuration=buildSemanticJudgeConfiguration({provider:'fixture',snapshotId:'fixture-receipt',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),evaluationContextPolicy:'bounded-evaluation-context-v1'})
+  const content='Observed command: npm test; exit 0; pass 5', evidenceId='runtime.command-receipt:receipt'
+  fixture.evidenceIndex.payload.records.push({...fixture.evidenceIndex.payload.records[0],evidenceId,safeForJudge:true,contentDigest:`sha256:${sha256(content)}`})
+  fixture.untrustedEvidence.push({segmentId:'verification-receipt:receipt',kind:'test_output',authorAgentProfileId:null,visibility:'public_to_camp',content,evidenceReference:{artifactId:fixture.evidenceIndex.artifactId,evidenceId}})
+  const pack=buildJudgeEvidencePack({...fixture,configuration})
+  assert.ok(pack.payload.untrustedEvidence.some(s=>s.kind==='test_output'))
+  assert.throws(()=>buildJudgeEvidencePack(fixture),/current content policy excludes/)
+  fixture.untrustedEvidence.at(-1).content+=' tampered'
+  assert.throws(()=>buildJudgeEvidencePack({...fixture,configuration}),/digest/)
+})

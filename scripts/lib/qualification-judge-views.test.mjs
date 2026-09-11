@@ -749,3 +749,186 @@ function artifactReference(artifactId) {
     payloadDigest: `sha256:${'c'.repeat(64)}`
   }
 }
+
+test('generic task profile uses delivered report evidence, frozen applicability, and preserves blinding', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.json', import.meta.url)))
+  for (const caseId of ['DEMO-105', 'DEMO-115']) {
+    const acceptance = taskJudgeProfile(scoring.cases[caseId], 'outcome')
+    assert.doesNotMatch(acceptance.items.find(item => item.checklistItem === 'SER.requirements.understanding').criterion, /队员|征集|分工|review-duo/)
+  }
+  const fixture = dualViewFixture({buildPacks:false})
+  const configuration = buildJudgeViewConfiguration({view:'outcome',provider:'fixture',snapshotId:'fixture-2026-09-10',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome')})
+  const source = fixture.sourcePack
+  source.payload.workspaceChanges[0].path='report.json'
+  source.payload.untrustedEvidence.find(item=>item.kind==='code').content='{"failuresByService":{"api":3}}'
+  source.payloadDigest=`sha256:${digestJson(source.payload)}`
+  const pack=buildJudgeViewPack({view:'outcome',sourcePack:source,configuration,producerDigest:'a'.repeat(64)})
+  assert.ok(pack.payload.modelInput.evidenceSegments.some(item=>item.kind==='artifact'))
+  assert.equal(JSON.stringify(pack.payload.modelInput).includes('participant_message'),false)
+  assert.ok(pack.payload.modelInput.checklistCoverage.every(item=>item.coverage.state==='complete'))
+  const seen=[]
+  const execution=await executeJudgeView({configuration,pack,producerDigest:'a'.repeat(64),invokeReplica:async request=>{seen.push(request);const items=replicaItems(pack);items[0].verdict='not_applicable';items[0].abstainReason={code:'fixture.exclude'};return{items}}})
+  assert.equal(execution.review.payload.state,'unavailable')
+  assert.match(seen[0].userPrompt,/Non-code work does not require code/)
+  assert.doesNotMatch(seen[0].userPrompt,/maintainability from the bounded delivered code/)
+})
+
+test('frozen required collaboration cannot become N/A when no interaction was executed', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const {readFile}=await import('node:fs/promises')
+  const scoring=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.json',import.meta.url)))
+  const fixture=dualViewFixture({buildPacks:false}),source=fixture.sourcePack
+  source.payload.collaborationFacts=[]
+  source.payload.untrustedEvidence=source.payload.untrustedEvidence.filter(item=>item.kind!=='participant_message')
+  source.payload.checklistCoverage=PROCESS_JUDGE_CHECKLIST.map(checklistItem=>({checklistItem,coverage:{state:'not_applicable'}}))
+  source.payloadDigest=`sha256:${digestJson(source.payload)}`
+  for(const caseId of ['DEMO-102','DEMO-103']){
+    const configuration=buildJudgeViewConfiguration({view:'process',provider:'fixture',snapshotId:'fixture-2026-09-10',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile(scoring.cases[caseId],'process')})
+    const pack=buildJudgeViewPack({view:'process',sourcePack:source,configuration,producerDigest:'a'.repeat(64)})
+    let calls=0;const result=await executeJudgeView({configuration,pack,producerDigest:'a'.repeat(64),invokeReplica:async()=>{calls++;throw Error('must not call')}})
+    assert.equal(calls,0)
+    assert.equal(result.review.payload.state,caseId==='DEMO-102'?'complete':'unavailable')
+  }
+})
+
+test('v3 accepts relevant in-view boundary evidence and quarantines only a malformed item', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.json', import.meta.url)))
+  const source = dualViewFixture({ buildPacks: false }).sourcePack
+  const config = { ...scoring.cases['DEMO-102'], judgeProfile: 'generic-task-v3' }
+  const configuration = buildJudgeViewConfiguration({ view: 'outcome', provider: 'fixture', snapshotId: 'fixture-v3', snapshotDigest: 'b'.repeat(64), producerDigest: 'a'.repeat(64), taskProfile: taskJudgeProfile(config, 'outcome') })
+  const pack = buildJudgeViewPack({ view: 'outcome', sourcePack: source, configuration, producerDigest: 'a'.repeat(64) })
+  const verificationId = pack.payload.modelInput.verificationFacts.flatMap(fact => fact.evidenceIds)[0]
+  assert.ok(pack.payload.modelInput.checklistCoverage.find(item => item.checklistItem === 'SER.scope.discipline').evidenceIds.includes(verificationId))
+  const execution = await executeJudgeView({ configuration, pack, producerDigest: 'a'.repeat(64), invokeReplica: async () => {
+    const items = replicaItems(pack)
+    items.find(item => item.checklistItem === 'SER.scope.discipline').evidenceIds = [verificationId]
+    items.find(item => item.checklistItem === 'SER.response.claim_accuracy').evidenceIds = ['EV-9999']
+    return { items }
+  } })
+  assert.equal(execution.review.payload.items.length, 7)
+  assert.equal(execution.review.payload.items.find(item => item.checklistItem === 'SER.scope.discipline').verdict, 'satisfied')
+  assert.equal(execution.review.payload.items.find(item => item.checklistItem === 'SER.response.claim_accuracy').verdict, 'indeterminate')
+  assert.match(execution.review.payload.items.find(item => item.checklistItem === 'SER.response.claim_accuracy').reason, /evidence_out_of_pack/)
+})
+
+
+test('v3 nested task file IDs project their original path without crossing the Outcome boundary', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.1.json', import.meta.url)))
+  const sourcePack = sourcePackFixture(), path = 'src/original.mjs'
+  sourcePack.payload.untrustedEvidence.push({segmentId:`task-file-base64:${Buffer.from(path).toString('base64url')}`,kind:'code',authorPseudonym:null,visibility:'workspace',content:'export const unchanged = 0',evidenceReference:{artifactId:'evidence-index:fixture',evidenceId:'runner.workspace-content:original'}})
+  sourcePack.payloadDigest = `sha256:${digestJson(sourcePack.payload)}`
+  const configuration = buildJudgeViewConfiguration({ view:'outcome', provider:'fixture', snapshotId:'fixture', snapshotDigest:'a'.repeat(64), producerDigest:'a'.repeat(64), taskProfile:taskJudgeProfile(scoring.cases['DEMO-106'],'outcome') })
+  const pack = buildJudgeViewPack({view:'outcome',sourcePack,configuration,producerDigest:'a'.repeat(64)})
+  assert.match(JSON.stringify(pack.payload.modelInput), /src\/original\.mjs/)
+  assert.doesNotMatch(JSON.stringify(pack.payload.modelInput), /Review the boundary cases and report concrete risks/)
+})
+
+test('v4 adds bounded receipts and public delivery, while Task descriptions stay Process-only and v3 stays unchanged', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.2.json',import.meta.url)))
+  const sourcePack=sourcePackFixture()
+  for(const [prefix,kind,content] of [['verification-receipt','test_output','OBSERVED_TEST_RECEIPT'],['task-description','comment','TASK_BODY_CANARY'],['delivery-message','comment','PUBLIC_DELIVERY_CANARY']]) {
+    sourcePack.payload.untrustedEvidence.push({segmentId:prefix+':one',kind,authorPseudonym:null,visibility:'public_to_camp',content,evidenceReference:{artifactId:'evidence-index:fixture',evidenceId:prefix+':one'}})
+  }
+  sourcePack.payloadDigest=`sha256:${digestJson(sourcePack.payload)}`
+  for(const version of ['generic-task-v3','generic-task-v4']) for(const view of ['process','outcome']) {
+    const config={...scoring.cases['DEMO-106'],judgeProfile:version}
+    const configuration=buildJudgeViewConfiguration({view,provider:'fixture',snapshotId:'fixture',snapshotDigest:'a'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile(config,view)})
+    const pack=buildJudgeViewPack({view,sourcePack,configuration,producerDigest:'a'.repeat(64)})
+    const serialized=JSON.stringify(pack.payload.modelInput)
+    assert.equal(serialized.includes('OBSERVED_TEST_RECEIPT'),version==='generic-task-v4')
+    assert.equal(serialized.includes('PUBLIC_DELIVERY_CANARY'),version==='generic-task-v4')
+    assert.equal(serialized.includes('TASK_BODY_CANARY'),version==='generic-task-v4'&&view==='process')
+  }
+})
+
+for (const scoringVersion of ['2.3', '2.4', '2.5', '2.6', '2.7']) test(`scoring ${scoringVersion} resolves only disputed items once, preserving both original verdicts and citations`, async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL(`../../qualification/context-regression/scoring-v${scoringVersion}.json`, import.meta.url)))
+  const configuration = buildJudgeViewConfiguration({ view:'outcome', provider:'fixture', snapshotId:'fixture', snapshotDigest:'a'.repeat(64), producerDigest:'a'.repeat(64), taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome') })
+  const pack = buildJudgeViewPack({ view:'outcome', sourcePack:sourcePackFixture(), configuration, producerDigest:'a'.repeat(64) })
+  const calls = []
+  const execution = await executeJudgeView({ configuration, pack, producerDigest:'a'.repeat(64), invokeReplica: async request => {
+    calls.push(request)
+    const items = replicaItems(pack)
+    if (request.replica === 'B') items[0].verdict = 'partially_satisfied'
+    if (request.userPrompt.includes('evidence_adjudication_once_v1')) {
+      items[0].verdict = 'not_satisfied'
+      items[1].verdict = 'not_satisfied' // Non-disputed item must not change.
+    }
+    return { items }
+  } })
+  assert.equal(calls.length, 3)
+  assert.equal(execution.review.payload.items[0].state, 'adjudicated')
+  assert.equal(execution.review.payload.items[0].verdict, 'not_satisfied')
+  assert.equal(execution.review.payload.items[0].replicaA.verdict, 'satisfied')
+  assert.equal(execution.review.payload.items[0].replicaB.verdict, 'partially_satisfied')
+  assert.equal(execution.review.payload.items[1].verdict, 'satisfied')
+  assert.ok(execution.review.payload.adjudication)
+  validateJudgeViewReview(execution.review, { configuration, pack, replicas:execution.replicas })
+  const original = structuredClone(execution.review)
+  execution.review.payload.adjudication.payload.adjudicationContext.sourceDigests[0] = 'changed'
+  execution.review.payloadDigest = `sha256:${digestJson(execution.review.payload)}`
+  assert.throws(() => validateJudgeViewReview(execution.review, { configuration, pack, replicas:execution.replicas }), /identity|binding|bound/)
+  execution.review = original
+  const base = dualViewFixture()
+  const processExecution = await executeJudgeView({ ...base.process, producerDigest:'a'.repeat(64), judgeExecutionId:execution.replicas[0].payload.judgeExecutionId, invokeReplica: async () => ({items:replicaItems(base.process.pack)}) })
+  const suite = buildSemanticJudgeViewSuite({ process:{...base.process,...processExecution}, outcome:{configuration,pack,...execution}, producerDigest:'a'.repeat(64) })
+  assert.equal(suite.payload.protocolId, 'semantic-dual-view-judge-2')
+  validateSemanticJudgeViewSuite(suite)
+})
+
+test('v5 adjudication retains unknown, invalid citation and transport failure without a second try', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const { readFile } = await import('node:fs/promises')
+  const scoring = JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.3.json', import.meta.url)))
+  const configuration = buildJudgeViewConfiguration({ view:'outcome', provider:'fixture', snapshotId:'fixture', snapshotDigest:'a'.repeat(64), producerDigest:'a'.repeat(64), taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome') })
+  const pack = buildJudgeViewPack({ view:'outcome', sourcePack:sourcePackFixture(), configuration, producerDigest:'a'.repeat(64) })
+  for (const mode of ['unknown', 'invalid_citation', 'transport_failure', 'agreed_unknown']) {
+    let calls=0
+    const result=await executeJudgeView({configuration,pack,producerDigest:'a'.repeat(64),invokeReplica:async request=>{
+      calls++
+      const items=replicaItems(pack)
+      if (mode === 'agreed_unknown') Object.assign(items[0],{verdict:'indeterminate',abstainReason:{code:'fixture.missing'}})
+      else if (request.replica === 'B') items[0].verdict='not_satisfied'
+      if (request.userPrompt.includes('evidence_adjudication_once_v1')) {
+        if(mode==='transport_failure') throw new Error('Fixture provider unavailable')
+        if(mode==='unknown') Object.assign(items[0],{verdict:'indeterminate',abstainReason:{code:'fixture.missing'}})
+        if(mode==='invalid_citation') items[0].evidenceIds=['EV-9999']
+      }
+      return {items}
+    }})
+    assert.equal(calls,mode==='agreed_unknown'?2:3)
+    assert.ok([null,'indeterminate'].includes(result.review.payload.items[0].verdict))
+    validateJudgeViewReview(result.review,{configuration,pack,replicas:result.replicas})
+  }
+})
+
+test('v5 configuration artifact revisions change identity without changing model-visible evidence', async () => {
+  const { taskJudgeProfile } = await import('./context-judge-profile.mjs')
+  const {readFile}=await import('node:fs/promises')
+  const scoring=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.3.json',import.meta.url)))
+  const args={view:'outcome',provider:'fixture',snapshotId:'fixture',snapshotDigest:'a'.repeat(64),taskProfile:taskJudgeProfile(scoring.cases['DEMO-102'],'outcome')}
+  const first=buildJudgeViewConfiguration({...args,producerDigest:'a'.repeat(64)})
+  const second=buildJudgeViewConfiguration({...args,producerDigest:'b'.repeat(64)})
+  assert.notEqual(first.artifactId,second.artifactId)
+  assert.deepEqual(first.payload,second.payload)
+  const pack=configuration=>buildJudgeViewPack({view:'outcome',sourcePack:sourcePackFixture(),configuration,producerDigest:'a'.repeat(64)})
+  assert.deepEqual(pack(first).payload.modelInput,pack(second).payload.modelInput)
+})
+
+test('v8 quarantines known participant prose embedded in a tool receipt without hiding it from Process', async () => {
+  const {containsParticipantProse}=await import('./qualification-judge-views.mjs')
+  const prose='This participant explains the comparison, operational costs, risks, and the conditions under which their recommendation would change. '.repeat(3)
+  const segments=[{kind:'participant_message',content:prose}]
+  assert.equal(containsParticipantProse({kind:'test_output',content:JSON.stringify({command:`python -c ${JSON.stringify(prose)}`,output:'word count: 62'})},segments),true)
+  assert.equal(containsParticipantProse({kind:'test_output',content:JSON.stringify({command:'node --test tests/public.test.mjs',output:'12 checks passed'})},segments),false)
+})

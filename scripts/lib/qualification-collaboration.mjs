@@ -1,4 +1,5 @@
 import { digestJson, sha256 } from './qualification-common.mjs'
+import { isBudgetedPublicA2aDelivery } from './qualification-evaluation.mjs'
 
 export function extractEvidenceIdentity(payload) {
   if (!payload || typeof payload !== 'object') return null
@@ -144,17 +145,24 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
     : []).filter((manifest) => runIds.has(manifest.agentRunId)).map((manifest) => [manifest.id, manifest]))
   const deliveriesAvailable = Array.isArray(snapshot.messageDeliveries)
   const deliveries = deliveriesAvailable
-    ? snapshot.messageDeliveries.filter((delivery) => delivery.campTurnId === dispatchBoundary.campTurnId)
+    ? snapshot.messageDeliveries.filter((delivery) => delivery.campTurnId === dispatchBoundary.campTurnId && isBudgetedPublicA2aDelivery(snapshot, delivery))
     : []
+  const deliveryIds = new Set(deliveries.map(delivery => delivery.id))
   const receiptEvents = (Array.isArray(snapshot.timeline) ? snapshot.timeline : []).filter((event) => (
     event.eventType === 'message_delivery.accepted'
       && event.payload?.campTurnId === dispatchBoundary.campTurnId
+      && deliveryIds.has(event.payload?.deliveryId)
   ))
   const receiptByDeliveryId = new Map(receiptEvents.flatMap((event) => (
     event.payload?.deliveryId ? [[event.payload.deliveryId, event]] : []
   )))
+  deliveries.sort((a, b) => {
+    const left = receiptByDeliveryId.get(a.id), right = receiptByDeliveryId.get(b.id)
+    if (Number.isSafeInteger(left?.globalSequence) && Number.isSafeInteger(right?.globalSequence)) return left.globalSequence - right.globalSequence
+    return String(left?.createdAt ?? a.createdAt).localeCompare(String(right?.createdAt ?? b.createdAt)) || a.id.localeCompare(b.id)
+  })
   const taskFacts = (Array.isArray(snapshot.tasks) ? snapshot.tasks : []).map((task) => ({
-    id: task.id,
+    id: task.taskId ?? task.id ?? null,
     status: task.status,
     assigneeAgentId: task.assigneeAgentId,
     sourceAgentRunId: task.sourceAgentRunId
@@ -171,16 +179,21 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
       callId: delivery.id,
       deliveryId: delivery.id,
       deliveryStatus: delivery.status ?? null,
+      edgeKind: ['forward', 'return'].includes(delivery.edgeKind) ? delivery.edgeKind : 'unknown',
       messageId: delivery.messageId ?? null,
       acceptanceReceiptId: receipt?.eventId ?? null,
       acceptanceEventId: receipt?.eventId ?? null,
       acceptanceReceiptCoverage: message && receipt ? 'complete' : 'unavailable',
       acceptedAt: receipt?.createdAt ?? delivery.createdAt ?? null,
       inboxMessageId: null,
-      slot: Number.isSafeInteger(receipt?.payload?.recipientCanonicalPosition)
-        ? receipt.payload.recipientCanonicalPosition + 1
+      // The legacy ledger needs a unique presentation slot. A recipient's
+      // position is local to one message, never a global A2A quota slot.
+      slot: index + 1,
+      slotAuthority: 'derived_public_delivery_order',
+      recipientCanonicalPosition: Number.isSafeInteger(receipt?.payload?.recipientCanonicalPosition)
+        ? receipt.payload.recipientCanonicalPosition
         : Number.isSafeInteger(delivery.recipientCanonicalPosition)
-          ? delivery.recipientCanonicalPosition + 1
+          ? delivery.recipientCanonicalPosition
           : null,
       observedOrder: index + 1,
       senderAgentId: message?.authorId ?? message?.senderAgentId ?? null,
@@ -225,7 +238,7 @@ function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
       && Number.isSafeInteger(call.slot)
       && call.slot >= 1
       && Number.isSafeInteger(call.depth)
-      && call.depth >= 1
+      && (call.depth >= 1 || call.depth === 0 && call.edgeKind === 'return')
     ))
   const observedSettledMemberCalls = calls.filter(
     (call) => call.mechanicalSettlement.state === 'settled'
@@ -303,7 +316,7 @@ function deriveLegacyCollaborationEvidence(snapshot, dispatchBoundary) {
     snapshot.executionEvidence.filter((evidence) => runIds.has(evidence.agentRunId))
   )
   const taskFacts = snapshot.tasks.map((task) => ({
-    id: task.id,
+    id: task.taskId ?? task.id ?? null,
     status: task.status,
     assigneeAgentId: task.assigneeAgentId,
     sourceAgentRunId: task.sourceAgentRunId
@@ -525,4 +538,35 @@ function compareNullableNumber(left, right) {
   if (Number.isFinite(left)) return -1
   if (Number.isFinite(right)) return 1
   return 0
+}
+
+export function collectFinalResponseEvidence(snapshot, dispatchBoundary) {
+  if (!snapshot || !dispatchBoundary) return { privateMessages: [], references: [] }
+  const turnRuns = snapshot.agentRuns.filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
+  const leadAgentId = turnRuns.find((run) => run.id === dispatchBoundary.rootAgentRunId)?.agentId
+  if (!leadAgentId) return { privateMessages: [], references: [] }
+  const runIds = new Set(turnRuns.filter((run) => run.agentId === leadAgentId).map((run) => run.id))
+  const candidates = snapshot.messages
+    .filter((message) => (
+      message.authorType === 'agent'
+      && message.authorId === leadAgentId
+      && runIds.has(message.sourceAgentRunId)
+    ))
+    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id))
+  // The initial Lead Run can end with a handoff. A return creates another Run
+  // for the same Lead; its delivery must remain eligible as the final response.
+  const privateMessages = candidates.map((message, index) => ({
+    messageId: message.id,
+    agentId: message.authorId,
+    sourceAgentRunId: message.sourceAgentRunId,
+    createdAt: message.createdAt,
+    body: message.body,
+    bodyDigest: sha256(message.body),
+    bodyBytes: Buffer.byteLength(message.body),
+    isFinal: index === candidates.length - 1
+  }))
+  return {
+    privateMessages,
+    references: privateMessages.map(({ body, ...message }) => message)
+  }
 }

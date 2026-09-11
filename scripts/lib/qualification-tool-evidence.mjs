@@ -362,6 +362,15 @@ function deriveLifecycle(observations, authorizationDecision) {
   const terminal = [...observations].reverse().find(
     ({ evidence }) => TERMINAL_PHASES.has(evidence.phase)
   )
+  const native = terminal?.payload.item
+  if (native && RUNTIME_TOOL_ITEM_TYPES.has(native.type)) {
+    if (native.status === 'failed' || Number.isInteger(native.exitCode) && native.exitCode !== 0) {
+      return { state: 'failed', error: deriveError(observations, 'runtime') }
+    }
+    if (terminal.evidence.phase !== 'failed' && native.status !== 'completed') {
+      return { state: 'indeterminate', error: null }
+    }
+  }
   if (terminal?.evidence.phase === 'completed') return { state: 'succeeded', error: null }
   if (terminal?.evidence.phase === 'failed') {
     return { state: 'failed', error: deriveError(observations, 'unknown') }

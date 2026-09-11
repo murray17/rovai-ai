@@ -161,3 +161,8 @@ last_updated: 2026-09-07
 
 - 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v37](../contracts/runtime-launch-and-verification-v37.md)、[File Change v5](../contracts/runtime-file-change-observation-v5.md)。
 - 理由：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)、[V1.57-D02](../versions/v1.57/decisions.md#v1-57-d02)。
+
+## 双轨执行评测
+
+- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v13](../contracts/execution-evaluation-v13.md)、[User Automation v4](../contracts/user-automation-v4.md)与[操作指南](../development/evaluation.md)。
+- 理由来源：[V1.58-D01](../versions/v1.58/decisions.md#v1-58-d01)。

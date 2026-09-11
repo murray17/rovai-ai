@@ -59,9 +59,10 @@ export function startQualificationCore({
   onNotification = null
 }) {
   const executable = resolve(coreExecutable)
-  const resolvedDataDirectory = resolve(dataDirectory)
+  const dataArguments = coreDataDirectoryArguments(dataDirectory)
+  const resolvedDataDirectory = dataArguments[1]
   const args = [
-    ...coreDataDirectoryArguments(resolvedDataDirectory),
+    ...dataArguments,
     '--skill-library-root', join(resolvedDataDirectory, 'managed-skill-library')
   ]
   if (mcpConfigPath) args.push('--mcp-config-path', resolve(mcpConfigPath))
@@ -103,6 +104,11 @@ export function startQualificationCore({
       message = JSON.parse(line)
     } catch (error) {
       rejectPending(new Error(`rovai-core emitted invalid JSON: ${error.message}`))
+      return
+    }
+    if (message.kind === 'core_startup') {
+      if (onNotification) onNotification({ method: 'core.startup', params: { status: message.status, phase: message.phase ?? null, error: message.error ?? null } })
+      if (['failed', 'blocked'].includes(message.status)) rejectPending(new Error(`Core startup ${message.status}: ${message.error?.code ?? message.phase ?? 'unknown'}: ${message.error?.message ?? ''}`))
       return
     }
     if (message.method) {
@@ -182,6 +188,7 @@ export function qualificationRuntimePrivateDiagnostic(message, observedAt = new 
     agentRunId: stringOrNull(params.agentRunId),
     executionEpoch: Number.isSafeInteger(params.executionEpoch) ? params.executionEpoch : null
   }
+  if (method === 'core.startup') return { ...base, status: stringOrNull(params.status), phase: stringOrNull(params.phase), error: cloneJson(params.error ?? null) }
   if (method === 'agent_run.log') {
     const text = typeof params.text === 'string' ? params.text : ''
     const retainedText = text.slice(-16_384)

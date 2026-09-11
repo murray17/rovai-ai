@@ -1,0 +1,6 @@
+{
+  "service": "api",
+  "started": "10:05",
+  "recovered": "10:17",
+  "cause": "queue saturation"
+}

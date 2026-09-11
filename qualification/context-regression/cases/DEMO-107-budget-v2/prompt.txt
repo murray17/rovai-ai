@@ -1,0 +1,2 @@
+请使用 memory-stewardship 核对既有事故报告偏好，然后整理 incident.json。报告应输出 sections（章节标题数组）、durationMinutes 和 affectedService。此任务不产生新偏好，不写入记忆。
+请将最终产物保存为 report.json，只允许修改该文件。保留所给文件。最终回复说明依据、验证和限制。

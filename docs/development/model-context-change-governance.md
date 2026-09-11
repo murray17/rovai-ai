@@ -63,3 +63,7 @@ Native Session Bootstrap 与 AgentRun Dynamic Context 是 Rovai-ai 的核心模�
 实现完成后，同一份说明追加实际版本号、迁移结论和验证结果，不重写已经确认的前后合同。若实现偏离说明，先
 更新 revision 并重新二次确认。版本概览的九范围影响表、ADR、Contract、Architecture 与领域词汇仍按各自
 治理规则同步；本文件不替代这些长期权威。
+
+## 真实任务 Gate
+
+上下文选择／截断、模型可见工具输出、共享 Skill 注入或核心 Skill 语义变化使用[双轨评测流程](evaluation.md#上下文改动-gate)的通用集；其他内置 Skill 使用专属小集，共享影响升级通用集。方案中冻结 Case、通过标准、版本和预算，PR 前保留新旧实际执行对照。已有 Skill 引导文档维护与二次确认，CLI 仅验证版本记录，不替开发者作出确认。实现偏差可在有限预算内修正；方案语义改变仍按上文更新 revision 和重新确认。

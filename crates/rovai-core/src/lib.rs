@@ -38,6 +38,7 @@ pub mod diagnostics;
 pub mod execution_budget;
 pub mod execution_evidence;
 pub(crate) mod execution_text;
+pub mod execution_trace;
 pub mod file_preview_authority;
 pub mod gather;
 pub mod git;

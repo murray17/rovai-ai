@@ -455,3 +455,19 @@ async function createPendingDemoTrial() {
 async function jsonFiles(directory) {
   return (await readdir(directory)).filter((name) => name.endsWith('.json')).sort()
 }
+
+
+test('Append-only result digests bind the persisted JSON representation of optional observations', async () => {
+  const fixture = await createPendingDemoTrial()
+  try {
+    const revision = await appendResultRevision(fixture.evidenceDirectory, {
+      ...fixture.revision.resultBundle,
+      optionalObservation: { unavailableDetail: undefined, count: 0 }
+    }, { evaluationAttemptId: fixture.initialAttempt.attemptId })
+    const history = await loadQualificationResultHistory(fixture.evidenceDirectory)
+    assert.equal(history.records.length, 2)
+    assert.equal(history.currentDigest, revision.record.resultDigest)
+    assert.deepEqual(history.current.optionalObservation, { count: 0 })
+    assert.equal(digestJson(history.current), revision.record.resultDigest)
+  } finally { await rm(fixture.root, { recursive: true, force: true }) }
+})

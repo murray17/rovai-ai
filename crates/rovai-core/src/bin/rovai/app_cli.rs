@@ -257,7 +257,7 @@ async fn execute(args: &[String]) -> Result<u8> {
         [command, action, rest @ ..]
             if matches!(
                 command.as_str(),
-                "runtime" | "member" | "camp" | "agent-run" | "trial"
+                "runtime" | "member" | "camp" | "agent-run" | "trial" | "trace" | "eval"
             ) =>
         {
             (command.as_str(), Some(action.as_str()), rest)
@@ -316,6 +316,91 @@ async fn execute(args: &[String]) -> Result<u8> {
         }
         ("agent-run", Some("cancel")) => agent_run_cancel(&flags).await?,
         ("trial", Some("run")) => trial_run(&flags).await?,
+        ("trace", Some("export")) => {
+            trace_export(&flags).await?;
+            0
+        }
+        ("trace", Some("schedule")) => {
+            flags.validate(
+                &[
+                    "automation-id",
+                    "timezone",
+                    "output",
+                    "camp-id",
+                    "exclude-camp-id",
+                    "exclude-automation-id",
+                ],
+                &["json"],
+            )?;
+            let result = invoke(
+                "trace.schedule",
+                json!({
+                    "automationId": flags.required("automation-id")?,
+                    "timezone": flags.required("timezone")?,
+                    "output": flags.required("output")?,
+                    "campIds": flags.repeated("camp-id"),
+                    "excludeCampIds": flags.repeated("exclude-camp-id"),
+                    "excludeAutomationIds": flags.repeated("exclude-automation-id")
+                }),
+            )
+            .await?;
+            print_json(&result)?;
+            0
+        }
+        ("trace", Some("schedules")) => {
+            flags.validate(&[], &["json"])?;
+            print_json(&invoke("trace.schedules", json!({})).await?)?;
+            0
+        }
+        ("eval", Some("configure")) => {
+            flags.validate(&["source", "node"], &["json"])?;
+            print_json(
+                &invoke(
+                    "eval.configure",
+                    json!({
+                        "source": flags.required("source")?, "node": flags.required("node")?
+                    }),
+                )
+                .await?,
+            )?;
+            0
+        }
+        ("eval", Some(action @ ("gate" | "weekly"))) => {
+            flags.validate(&["plan", "output", "job-id"], &["json"])?;
+            let job_id = flags.required("job-id")?;
+            print_json(&invoke(&format!("eval.{action}"), json!({
+                "plan": flags.required("plan")?, "output": flags.required("output")?, "jobId": job_id
+            })).await?)?;
+            0
+        }
+        ("eval", Some("schedule")) => {
+            flags.validate(&["automation-id", "plan", "output"], &["json"])?;
+            print_json(
+                &invoke(
+                    "eval.schedule",
+                    json!({
+                        "automationId": flags.required("automation-id")?,
+                        "plan": flags.required("plan")?, "output": flags.required("output")?
+                    }),
+                )
+                .await?,
+            )?;
+            0
+        }
+        ("eval", Some("status")) => {
+            flags.validate(&["job-id"], &["json"])?;
+            let params = match flags.one("job-id")? {
+                Some(job_id) => json!({"jobId": job_id}),
+                None => json!({}),
+            };
+            print_json(&invoke("eval.status", params).await?)?;
+            0
+        }
+        ("eval", Some("cancel")) => {
+            flags.validate(&["job-id"], &["json"])?;
+            print_json(&invoke("eval.cancel", json!({"jobId": flags.required("job-id")?})).await?)?;
+            0
+        }
         _ => {
             return Err(CliError::new(
                 "automation_invalid_input",
@@ -327,9 +412,27 @@ async fn execute(args: &[String]) -> Result<u8> {
     Ok(exit_code)
 }
 
+// Regression owner: the public namespace parser must reach every evaluation
+// action before parsing flags; no App, database or Runtime is required.
+#[cfg(test)]
+#[tokio::test]
+async fn evaluation_actions_reach_their_public_help_without_owner_ipc() {
+    for action in [
+        "configure",
+        "gate",
+        "weekly",
+        "schedule",
+        "status",
+        "cancel",
+    ] {
+        let args = ["eval", action, "--help"].map(str::to_string);
+        assert_eq!(execute(&args).await.unwrap(), 0);
+    }
+}
+
 fn print_help() {
     println!(
-        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app camp create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n\nThe Desktop App must already be running. V1 never launches it automatically."
+        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app camp create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n  rovai app trace export|schedule|schedules\n  rovai app eval configure|gate|weekly|schedule|status|cancel\n\nThe Desktop App must already be running. V1 never launches it automatically."
     );
 }
 
@@ -366,6 +469,27 @@ fn print_command_help(command: &str, action: Option<&str>) -> Result<()> {
         ("trial", Some("run")) => {
             "rovai app trial run --agent-id <id> --workspace <directory> --task-file <file> [--name <name>] [--timeout 30m] [--wait | --no-wait] [--export <directory>] [--open] [--json]"
         }
+        ("trace", Some("export")) => {
+            "rovai app trace export --since <RFC3339> --until <RFC3339> --output <new-directory> [--camp-id <id> ...] [--exclude-camp-id <id> ...] [--exclude-automation-id <id> ...] [--json]"
+        }
+        ("trace", Some("schedule")) => {
+            "rovai app trace schedule --automation-id <existing-id> --timezone <IANA-zone> --output <directory-in-automation-workspace> [--camp-id <id> ...] [--exclude-camp-id <id> ...] [--exclude-automation-id <id> ...] [--json]"
+        }
+        ("trace", Some("schedules")) => "rovai app trace schedules [--json]",
+        ("eval", Some("configure")) => {
+            "rovai app eval configure --source <absolute-developer-checkout> --node <absolute-node-binary> [--json]"
+        }
+        ("eval", Some("gate")) => {
+            "rovai app eval gate --plan <absolute-frozen-plan.json> --output <absolute-campaign-directory> --job-id <stable-id> [--json] (returns a job; inspect with eval status)"
+        }
+        ("eval", Some("weekly")) => {
+            "rovai app eval weekly --plan <absolute-frozen-weekly-plan.json> --output <absolute-history-directory> --job-id <stable-id> [--json]"
+        }
+        ("eval", Some("schedule")) => {
+            "rovai app eval schedule --automation-id <existing-id> --plan <absolute-frozen-weekly-plan.json> --output <directory-in-automation-workspace> [--json]"
+        }
+        ("eval", Some("status")) => "rovai app eval status [--job-id <id>] [--json]",
+        ("eval", Some("cancel")) => "rovai app eval cancel --job-id <id> [--json]",
         _ => {
             return Err(CliError::new(
                 "automation_invalid_input",
@@ -376,6 +500,66 @@ fn print_command_help(command: &str, action: Option<&str>) -> Result<()> {
     };
     println!("Usage: {usage}\n\nThe Desktop App must already be running.");
     Ok(())
+}
+
+fn trace_export_params(flags: &Flags) -> Result<rovai_core::execution_trace::TraceExportParams> {
+    flags.validate(
+        &[
+            "since",
+            "until",
+            "output",
+            "camp-id",
+            "exclude-camp-id",
+            "exclude-automation-id",
+        ],
+        &["json"],
+    )?;
+    flags.required("output")?;
+    let params = rovai_core::execution_trace::TraceExportParams {
+        since: flags.required("since")?.parse().map_err(|_| {
+            CliError::new(
+                "automation_invalid_input",
+                "--since must be an RFC3339 timestamp with timezone",
+            )
+        })?,
+        until: flags.required("until")?.parse().map_err(|_| {
+            CliError::new(
+                "automation_invalid_input",
+                "--until must be an RFC3339 timestamp with timezone",
+            )
+        })?,
+        camp_ids: flags.repeated("camp-id"),
+        exclude_camp_ids: flags.repeated("exclude-camp-id"),
+        exclude_automation_ids: flags.repeated("exclude-automation-id"),
+    };
+    params.validate().map_err(|_| {
+        CliError::new(
+            "automation_invalid_input",
+            "Trace export requires a positive window of at most 26 hours and bounded ID filters",
+        )
+    })?;
+    Ok(params)
+}
+
+async fn trace_export(flags: &Flags) -> Result<()> {
+    let params = trace_export_params(flags)?;
+    let snapshot = invoke("trace.export", serde_json::to_value(params)?).await?;
+    if snapshot["schemaVersion"] != rovai_core::execution_trace::SCHEMA_VERSION {
+        return Err(CliError::new(
+            "automation_contract_upgrade_required",
+            "Unsupported Trace export schema",
+        )
+        .into());
+    }
+    let output = PathBuf::from(flags.required("output")?);
+    reserve_private_directory(&output)?;
+    write_private_json(&output.join("trace.json"), &snapshot)?;
+    write_private_json(&output.join("metrics.json"), &snapshot["metrics"])?;
+    write_private(&output.join("README.md"), b"# Execution Trace export\n\nRule-based metadata and metrics. No model was called and no task was replayed.\n\nCounts describe retained records after explicit exclusions, not verified production-only usage.\nUnknown provenance, historical build versions and memory counters remain unavailable.\nTool source counts are not additive. Current states are as of the snapshot, not midnight.\nThe trace.json file owns the window, scope, coverage and evidence references for metrics.json.\n")?;
+    print_json(
+        &json!({"status": "exported", "output": absolute_path(&output)?,
+        "factsDigest": snapshot["factsDigest"], "coverage": snapshot["coverage"]}),
+    )
 }
 
 async fn runtime_list(flags: &Flags) -> Result<()> {
@@ -1733,7 +1917,7 @@ mod tests {
     use super::{
         Flags, camp_create_params, command_result_exit_code, event_belongs_to_run,
         launch_result_exit_code, member_create_params, member_runtime_set_params,
-        parse_duration_seconds, terminal_exit_code, terminal_status,
+        parse_duration_seconds, terminal_exit_code, terminal_status, trace_export_params,
     };
     use serde_json::json;
 
@@ -1772,6 +1956,27 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(flags.repeated("member"), ["agent_1", "agent_2"]);
+    }
+
+    #[test]
+    fn trace_export_parses_offset_window_and_closed_scope_without_connecting() {
+        let args = [
+            "--since",
+            "2020-01-02T00:00:00+08:00",
+            "--until",
+            "2020-01-03T00:00:00+08:00",
+            "--output",
+            "report",
+            "--exclude-automation-id",
+            "daily-analysis",
+        ];
+        let flags = Flags::parse(&args.map(str::to_string)).unwrap();
+        let params = trace_export_params(&flags).unwrap();
+        assert_eq!(params.since.to_rfc3339(), "2020-01-01T16:00:00+00:00");
+        assert_eq!(params.exclude_automation_ids, ["daily-analysis"]);
+        let mut unknown = args.map(str::to_string).to_vec();
+        unknown.extend(["--raw-sql".to_string(), "SELECT 1".to_string()]);
+        assert!(trace_export_params(&Flags::parse(&unknown).unwrap()).is_err());
     }
 
     #[test]

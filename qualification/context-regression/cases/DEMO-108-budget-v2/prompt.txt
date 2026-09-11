@@ -1,0 +1,2 @@
+请使用 memory-stewardship 核对已有偏好的适用范围。当前只需根据 migration.json 输出 dryRunRequired、environment。部署事故报告格式不适用于本任务；不要写入任何记忆。
+请将最终产物保存为 report.json，只允许修改该文件。保留所给文件。最终回复说明依据、验证和限制。

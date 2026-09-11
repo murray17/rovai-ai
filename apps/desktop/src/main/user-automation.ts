@@ -32,6 +32,17 @@ type AutomationDependencies = {
   core: CoreRequester
   openCamp(campId: string): Promise<{ campId: string; opened: true }>
   appVersion: string
+  dailyAnalysis?: {
+    configure(params: unknown): Promise<unknown>
+    status(): Promise<unknown>
+  }
+  evaluation?: {
+    configure(params: unknown): Promise<unknown>
+    start(params: unknown, mode: 'gate' | 'weekly'): Promise<unknown>
+    schedule(params: unknown): Promise<unknown>
+    status(params: unknown): Promise<unknown>
+    cancel(params: unknown): Promise<unknown>
+  }
 }
 
 type AutomationRequest = {
@@ -385,6 +396,39 @@ export async function dispatchUserAutomation(
       return dependencies.core.request<AgentRunDiagnosticView>('agentRuns.diagnostic.get', {
         agentRunId: stringField(input, 'agentRunId')
       })
+    case 'trace.export': {
+      const allowed = ['since', 'until', 'campIds', 'excludeCampIds', 'excludeAutomationIds']
+      if (Object.keys(input).some((key) => !allowed.includes(key))) {
+        throw new UserAutomationError('automation_invalid_input', 'Unsupported trace export option')
+      }
+      return dependencies.core.request('executionTrace.export', {
+        since: stringField(input, 'since'),
+        until: stringField(input, 'until'),
+        campIds: input.campIds === undefined ? [] : stringArrayField(input, 'campIds'),
+        excludeCampIds: input.excludeCampIds === undefined ? [] : stringArrayField(input, 'excludeCampIds'),
+        excludeAutomationIds: input.excludeAutomationIds === undefined ? [] : stringArrayField(input, 'excludeAutomationIds')
+      })
+    }
+    case 'trace.schedule':
+      if (!dependencies.dailyAnalysis) throw new UserAutomationError('automation_unavailable', 'Daily analysis preparation is unavailable')
+      return dependencies.dailyAnalysis.configure(input)
+    case 'trace.schedules':
+      if (!dependencies.dailyAnalysis) throw new UserAutomationError('automation_unavailable', 'Daily analysis preparation is unavailable')
+      return dependencies.dailyAnalysis.status()
+    case 'eval.configure':
+    case 'eval.gate':
+    case 'eval.weekly':
+    case 'eval.schedule':
+    case 'eval.status':
+    case 'eval.cancel': {
+      const evaluation = dependencies.evaluation
+      if (!evaluation) throw new UserAutomationError('automation_unavailable', 'Evaluation Host is unavailable')
+      if (operation === 'eval.configure') return evaluation.configure(input)
+      if (operation === 'eval.schedule') return evaluation.schedule(input)
+      if (operation === 'eval.status') return evaluation.status(input)
+      if (operation === 'eval.cancel') return evaluation.cancel(input)
+      return evaluation.start(input, operation === 'eval.gate' ? 'gate' : 'weekly')
+    }
     case 'domain.events':
       return dependencies.core.request('events.subscribe', {
         campId: stringField(input, 'campId'),

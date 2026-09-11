@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.57
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in-progress
@@ -41,3 +41,5 @@ last_updated: 2026-09-10
 | Runtime compatibility | 已更新 | [Compatibility](../../runtime-compatibility.md)分开记录官方实验、产品验证与未资格化平台 |
 | Documentation routing | 已更新 | Contracts 索引、当前决定导航和任务入口指向新合同 |
 | Root README | 确认无需更新 | 项目定位与常青能力不变；Preview Runtime 资格由当前兼容性清单拥有 |
+
+后续：[v1.58](../v1.58/README.md)。

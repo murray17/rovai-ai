@@ -1,8 +1,13 @@
-import { appendFile, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { buildEvaluationContext, buildEvaluationCommandSources } from './lib/qualification-evaluation-context.mjs'
+import { captureRuntimeUsage, deriveIsolatedRuntimeUsage } from './lib/qualification-resource-usage.mjs'
+import { appendFile, chmod, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { arch, platform, release, type as osType } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
+import { captureRegressionMemoryState, materializeRegressionFixture, validateRegressionConfiguration } from './lib/context-regression-fixture.mjs'
+import { removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  MANAGED_RUNTIME_TOP_LEVEL,
   acquireExclusiveFile,
   atomicWriteJson,
   canonicalJson,
@@ -61,6 +66,7 @@ import {
   deriveUnattendedRetryBoundary
 } from './lib/qualification-observation.mjs'
 import {
+  collectFinalResponseEvidence,
   deriveCollaborationEvidence,
   evaluateCollaborationContract,
   extractEvidenceIdentity
@@ -116,7 +122,12 @@ const root = resolve(import.meta.dirname, '..')
 const arguments_ = parseArguments(process.argv.slice(2))
 const QUALIFICATION_RUNTIME_EXIT_GRACE_MS = 60_000
 
-async function runTrial(options) {
+async function runTrial(options, registerCleanup) {
+  const regression = options.regressionConfigurationPath
+    ? validateRegressionConfiguration(JSON.parse(await readFile(options.regressionConfigurationPath, 'utf8')))
+    : null
+  if (regression?.product?.repository) options.productSourceRoot = regression.product.repository
+  if (regression && (options.mode === 'formal' || options.pairedPlanDigest)) throw new Error('Context regression is separate from Formal and Team/Solo paired qualification')
   const trialId = options.trialId ?? crypto.randomUUID()
   const freshStateNonce = options.pairedPlanDigest ? crypto.randomUUID() : null
   const startedAt = new Date().toISOString()
@@ -169,6 +180,13 @@ async function runTrial(options) {
     state: 'not_applicable',
     reason: { code: 'intervention_isolation.non_formal' }
   }
+  registerCleanup(async () => {
+    await lock?.release()
+    if (temporaryRoot && (!core || termination?.converged)) {
+      if (regression && dataDirectory) await removeEphemeralRuntimeCampFilesRoot(dataDirectory, { temporaryDirectory: temporaryRoot })
+      await removeTemporaryDirectory(temporaryRoot)
+    }
+  })
 
   const evidenceRoot = await ensurePrivateDirectory(options.evidenceRoot)
   evidenceDirectory = join(evidenceRoot, trialId)
@@ -238,10 +256,18 @@ async function runTrial(options) {
       throw new Error('formal mode requires the packaged Rovai-ai Release Core')
     }
     competingProcesses = await findCompetingRovaiProcesses()
-    if (competingProcesses.length > 0) {
+    if (competingProcesses.length > 0 && !regression) {
       throw new Error(`a Rovai App/Core is already running: ${competingProcesses.map((item) => item.pid).join(',')}`)
     }
-    temporaryRoot = await makeTemporaryDirectory(`rovai-qualification-${caseRecord.contract.manifest.id}-`)
+    if (regression?.temporaryRoot) {
+      // Assign ownership only after exclusive creation succeeds; pre-existing
+      // directories must never be reused or removed by this Trial's cleanup.
+      await mkdir(regression.temporaryRoot, { mode: 0o700 })
+      temporaryRoot = regression.temporaryRoot
+    } else {
+      temporaryRoot = await makeTemporaryDirectory(`rovai-qualification-${caseRecord.contract.manifest.id}-`)
+    }
+    temporaryRoot = await realpath(temporaryRoot)
     dataDirectory = join(temporaryRoot, 'data')
     runtimeCacheDirectory = join(temporaryRoot, 'runtime-cache')
     workspacePath = join(temporaryRoot, 'workspace')
@@ -255,11 +281,13 @@ async function runTrial(options) {
     await initializeBaselineGit(workspacePath)
     await appendLifecycle('materialized', { baselineTreeDigest: baselineManifest.digest })
 
+    if (regression) console.log(JSON.stringify({ channel: 'automatic_acceptance', coreExecutable: options.coreExecutable, dataDirectory, skillLibrary: join(dataDirectory, 'managed-skill-library'), mcpConfig: join(dataDirectory, 'mcp.json'), workspacePath }))
     core = startQualificationCore({
       coreExecutable: options.coreExecutable,
       dataDirectory,
       workingDirectory: root,
       runtimeCacheDirectory,
+      mcpConfigPath: regression ? join(dataDirectory, 'mcp.json') : null,
       onNotification(message) {
         const diagnostic = qualificationRuntimePrivateDiagnostic(message)
         if (!diagnostic) return
@@ -268,7 +296,7 @@ async function runTrial(options) {
       }
     })
     await core.request('health.check', {}, 120_000)
-    const trialTeam = options.treatment === 'solo' ? [FROZEN_TEAM[0]] : FROZEN_TEAM
+    const trialTeam = regression?.team ?? (options.treatment === 'solo' ? [FROZEN_TEAM[0]] : FROZEN_TEAM)
     const configured = await configureFrozenRuntimes(core.request, trialTeam)
     environmentManifest = await collectEnvironmentManifest({
       core,
@@ -301,6 +329,12 @@ async function runTrial(options) {
     const campId = createResult.payload?.campId
     if (createResult.status !== 'applied' || !campId) {
       throw new Error(`qualification Camp creation failed: ${JSON.stringify(createResult)}`)
+    }
+    if (regression) {
+      const fixture = await materializeRegressionFixture(core.request, regression.fixture, campId)
+      await atomicWriteJson(join(evidenceDirectory, 'context-regression-fixture.json'), fixture)
+      await atomicWriteJson(join(evidenceDirectory, 'context-regression-configuration.json'), regression)
+      await atomicWriteJson(join(evidenceDirectory, 'context-memory-before.json'), await captureRegressionMemoryState(core.request))
     }
     if (toolMeasurementPack) {
       preparedToolFixtureManifest = await materializeToolMeasurementFixtures({
@@ -335,20 +369,13 @@ async function runTrial(options) {
     }
     dispatchBaselineManifest = await treeManifest(workspacePath)
     managedProjectionDiff = treeDiff(baselineManifest, dispatchBaselineManifest)
-    const unexpectedPredispatchChanges = managedProjectionDiff.changed.filter((change) => (
-      change.path !== '.agent'
-      && !change.path.startsWith('.agent/')
-      && change.path !== '.agents'
-      && !change.path.startsWith('.agents/')
-      && change.path !== '.claude'
-      && !change.path.startsWith('.claude/')
-      && change.path !== '.gemini'
-      && !change.path.startsWith('.gemini/')
-    ))
+    const unexpectedPredispatchChanges = managedProjectionDiff.changed.filter(change => !MANAGED_RUNTIME_TOP_LEVEL.includes(change.path.split('/')[0]))
     if (unexpectedPredispatchChanges.length > 0) {
       throw new Error(`pre-dispatch workspace changed outside managed Runtime projections: ${JSON.stringify(unexpectedPredispatchChanges)}`)
     }
     const preDispatchSnapshot = await core.request('camps.snapshot', { campId })
+    const usageBefore = await captureRuntimeUsage(core.request)
+    await writePrivateJsonExclusive(join(evidenceDirectory, 'runtime-usage-before.json'), usageBefore)
     const commandId = crypto.randomUUID()
     const runnerClockAnchor = {
       wallTimeMs: Date.now(),
@@ -414,6 +441,7 @@ async function runTrial(options) {
       budget: caseBudget,
       frozenBudget: frozenBudgetInspection.budget,
       runnerClockAnchor,
+      usageBefore,
       observationPath
     })
     finalSnapshot = observation.snapshot
@@ -423,37 +451,39 @@ async function runTrial(options) {
     budgetWatchdogEvent = observation.watchdogEvent
     executionEvidenceCoverage = observation.executionEvidenceCoverage
     resourceObservation = observation.resourceObservation
+    if (regression) await atomicWriteJson(join(evidenceDirectory, 'context-memory-after.json'), await captureRegressionMemoryState(core.request))
     if (budgetEvent) await appendLifecycle('stopping', budgetEvent)
     else if (budgetWatchdogEvent) await appendLifecycle('stopping', budgetWatchdogEvent)
     await appendLifecycle('runtime_termination_requested')
   } catch (error) {
     if (dispatchAccepted) postDispatchError = serializeError(error)
     else {
-      const invalid = await finishInvalid({
-        trialId,
-        options,
-        startedAt,
-        error,
-        evidenceDirectory,
-        lifecyclePath,
-        caseRecord,
-        environmentManifest
-      })
-      if (core) {
-        const table = await processTable().catch(() => [])
-        childPids = descendantsOf(table, core.pid)
-        coreStop = await core.stop().catch((stopError) => ({ error: serializeError(stopError) }))
-        await waitForProcessesToExit(childPids, QUALIFICATION_RUNTIME_EXIT_GRACE_MS)
-          .catch(() => childPids)
+      try {
+        return await finishInvalid({
+          trialId,
+          options,
+          startedAt,
+          error,
+          evidenceDirectory,
+          lifecyclePath,
+          caseRecord,
+          environmentManifest
+        })
+      } finally {
+        if (core) {
+          const table = await processTable().catch(() => [])
+          childPids = descendantsOf(table, core.pid)
+          coreStop = await core.stop().catch((stopError) => ({ error: serializeError(stopError) }))
+          const lingering = await waitForProcessesToExit(childPids, QUALIFICATION_RUNTIME_EXIT_GRACE_MS)
+            .catch(() => childPids)
+          termination = { converged: lingering.length === 0 && !coreStop?.error }
+        }
+        await writeRuntimePrivateDiagnostics(
+          evidenceDirectory,
+          runtimePrivateDiagnostics,
+          droppedRuntimePrivateDiagnostics
+        )
       }
-      await writeRuntimePrivateDiagnostics(
-        evidenceDirectory,
-        runtimePrivateDiagnostics,
-        droppedRuntimePrivateDiagnostics
-      )
-      await lock?.release()
-      if (temporaryRoot) await removeTemporaryDirectory(temporaryRoot)
-      return invalid
     }
   }
 
@@ -697,6 +727,7 @@ async function runTrial(options) {
     observationIntegrityIssues,
     executionEvidenceCoverage,
     verifierObservation,
+    deliveredWorkspaceEntries: finalManifest?.entries ?? [],
     deliveredWorkspaceSnapshot: deliveredSnapshot ? {
       digest: finalManifest.digest,
       directory: basename(deliveredSnapshot.path),
@@ -1047,25 +1078,24 @@ async function runTrial(options) {
     artifactId: publication.evidenceBundleManifest.artifactId,
     manifestDigest: publication.evidenceBundleManifest.manifestDigest
   })
-  await lock?.release()
-  if (temporaryRoot) await removeTemporaryDirectory(temporaryRoot)
   return { resultBundle: finalResultBundle, redactedSummary, evidenceDirectory, ...publication }
 }
 
 async function configureFrozenRuntimes(request, trialTeam = FROZEN_TEAM) {
-  for (const adapterKind of ['codex-cli', 'opencode-cli', 'antigravity-app']) {
+  const kinds = [...new Set(trialTeam.map(member => member.adapterKind))]
+  for (const adapterKind of kinds) {
     await request('runtime.product.check', { runtimeKind: adapterKind }, 120_000)
   }
   const installations = await waitFor(async () => {
     const values = await request('runtime.installations.list')
-    const selected = Object.fromEntries(['codex-cli', 'opencode-cli', 'antigravity-app'].map((kind) => [
+    const selected = Object.fromEntries(kinds.map((kind) => [
       kind,
       values.find((candidate) => candidate.adapterKind === kind
         && candidate.installationClass === 'managed_default'
         && candidate.authScope === 'default')
     ]))
     return Object.values(selected).every((value) => value?.snapshot?.probeStatus === 'ready')
-      && selected['antigravity-app'].snapshot.capabilities.includes('builtin_cli.transport.v24')
+      && (!selected['antigravity-app'] || selected['antigravity-app'].snapshot.capabilities.includes('builtin_cli.transport.v24'))
       ? selected
       : null
   }, 'frozen Runtime installations', 180_000)
@@ -1100,7 +1130,7 @@ async function configureFrozenRuntimes(request, trialTeam = FROZEN_TEAM) {
       transport: 'private-local-ipc'
     },
     installations,
-    profiles
+    profiles: profiles.filter(profile => trialTeam.some(member => member.agentId === profile.agentId))
   }
 }
 
@@ -1114,8 +1144,8 @@ async function collectEnvironmentManifest({
   const health = await core.request('health.check', {}, 120_000)
   const coreDigest = await digestFile(options.coreExecutable)
   const runnerDigest = await computeQualificationEvaluatorDigest()
-  const gitHead = await runCaptured('git', ['rev-parse', 'HEAD'], { cwd: root })
-  const gitStatus = await runCaptured('git', ['status', '--porcelain=v1'], { cwd: root })
+  const gitHead = await runCaptured('git', ['rev-parse', 'HEAD'], { cwd: options.productSourceRoot ?? root })
+  const gitStatus = await runCaptured('git', ['status', '--porcelain=v1'], { cwd: options.productSourceRoot ?? root })
   const toolchain = []
   if (caseRecord.contract.manifest.schemaVersion === 3) {
     const majorVersion = Number.parseInt(process.versions.node.split('.')[0], 10)
@@ -1188,7 +1218,7 @@ async function collectEnvironmentManifest({
     })),
     runtimeInstallations,
     builtinCli: configured.builtinCli,
-    ambientMcpIsolation: isolationProfileAdmission
+    ambientMcpIsolation: options.regressionConfigurationPath ? 'isolated_empty_config' : isolationProfileAdmission
       ? isolationProfileAdmission.channels.externalMcpMutation.state
       : 'preserved_uncontrolled',
     interventionIsolationProfile: isolationProfileAdmission ? {
@@ -1212,7 +1242,7 @@ async function collectEnvironmentManifest({
       }
     },
     toolchain,
-    usageObservation: { status: 'unavailable', reason: 'provider usage is not exposed consistently by all frozen Runtimes' }
+    usageObservation: { status: 'pending', reason: 'Collected after execution from isolated Core monitoring snapshots; each field requires complete Trial coverage' }
   }
   manifest.teamRuntimeCompatibilityDigest = digestJson(materializeJsonArtifact({
     runnerVersion: manifest.runnerVersion,
@@ -1237,6 +1267,7 @@ async function observeTrial({
   budget,
   frozenBudget,
   runnerClockAnchor,
+  usageBefore,
   observationPath
 }) {
   let budgetEvent = null
@@ -1422,6 +1453,10 @@ async function observeTrial({
       runs
     )
     snapshot.executionEvidence = executionEvidenceCoverage.evidence
+    snapshot.evaluationContext = buildEvaluationContext(snapshot, { campTurnId, rootAgentRunId })
+    await writePrivateJsonExclusive(join(dirname(observationPath), 'private-command-evidence.json'), buildEvaluationCommandSources(snapshot, snapshot.evaluationContext))
+    const usageAfter = await captureRuntimeUsage(core.request)
+    await writePrivateJsonExclusive(join(dirname(observationPath), 'runtime-usage-after.json'), usageAfter)
     if (coverageOverride) executionEvidenceCoverage.coverage = coverageOverride
     const finalObservation = normalizeSnapshot(snapshot)
     const finalObservationDigest = digestJson(finalObservation)
@@ -1465,10 +1500,7 @@ async function observeTrial({
             ? null
             : { code: 'resource_measurement.delivery_dependency_unavailable' }
         },
-        providerUsage: {
-          state: 'unavailable',
-          reason: { code: 'resource_measurement.provider_receipt_unavailable' }
-        }
+        providerUsage: deriveIsolatedRuntimeUsage(usageBefore, usageAfter, runs.length)
       },
       observationDigest: sha256(observationHashInput)
     }
@@ -1495,6 +1527,7 @@ function normalizeSnapshot(snapshot) {
   const timeline = Array.isArray(snapshot.timeline) ? snapshot.timeline : []
   return {
     schemaVersion: snapshot.schemaVersion,
+    ...(snapshot.evaluationContext ? { evaluationContext: snapshot.evaluationContext } : {}),
     throughGlobalSequence: snapshot.throughGlobalSequence,
     camp: snapshot.camp,
     members: snapshot.members,
@@ -1528,36 +1561,6 @@ function normalizeSnapshot(snapshot) {
   }
 }
 
-function collectFinalResponseEvidence(snapshot, dispatchBoundary) {
-  if (!snapshot || !dispatchBoundary) return { privateMessages: [], references: [] }
-  const runIds = new Set(snapshot.agentRuns
-    .filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
-    .map((run) => run.id))
-  const candidates = snapshot.messages
-    .filter((message) => (
-      message.authorType === 'agent'
-      && runIds.has(message.sourceAgentRunId)
-    ))
-    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id))
-  const leadMessages = candidates.filter((message) => (
-    message.sourceAgentRunId === dispatchBoundary.rootAgentRunId
-  ))
-  const selected = leadMessages.length > 0 ? leadMessages : candidates
-  const privateMessages = selected.map((message, index) => ({
-    messageId: message.id,
-    agentId: message.authorId,
-    sourceAgentRunId: message.sourceAgentRunId,
-    createdAt: message.createdAt,
-    body: message.body,
-    bodyDigest: sha256(message.body),
-    bodyBytes: Buffer.byteLength(message.body),
-    isFinal: index === selected.length - 1
-  }))
-  return {
-    privateMessages,
-    references: privateMessages.map(({ body, ...message }) => message)
-  }
-}
 
 function collectToolRetrievedFixtureMessageIds(toolEvidence, preparedManifest) {
   const fixtureMessageIds = new Set((preparedManifest.entities ?? [])
@@ -1658,16 +1661,18 @@ async function buildToolInteractionEffectEvidence({
       return [result?.taskId, ...(result?.tasks ?? []).map((task) => task?.taskId)]
     })
     .filter((value) => typeof value === 'string'))
-  for (const task of (finalSnapshot?.tasks ?? []).filter((item) => measuredTaskIds.has(item.id))) {
-    const reference = evidenceReferences.taskStates?.[task.id]
+  for (const task of finalSnapshot?.tasks ?? []) {
+    const taskId = task.taskId ?? task.id
+    if (!measuredTaskIds.has(taskId)) continue
+    const reference = evidenceReferences.taskStates?.[taskId]
     if (!reference) continue
     const content = buildTaskStateContent(task)
     effects.push({
-      effectId: `task-state:${sha256(task.id).slice(0, 32)}`,
+      effectId: `task-state:${sha256(taskId).slice(0, 32)}`,
       kind: 'task_state',
       content,
       contentDigest: `sha256:${sha256(content)}`,
-      relatedResultIdentities: [task.id],
+      relatedResultIdentities: [taskId],
       evidenceReference: reference
     })
   }
@@ -2039,7 +2044,8 @@ function parseArguments(args) {
       'paired-plan-digest',
       'paired-pair-slot-id',
       'paired-dispatch-ordinal',
-      'tool-measurement-pack'
+      'tool-measurement-pack',
+      'regression-config'
     ].includes(key)) usage()
     values[key] = args.shift()
     if (!values[key]) usage()
@@ -2060,6 +2066,7 @@ function parseArguments(args) {
   return {
     mode: values.mode,
     coreExecutable: resolve(values.core),
+    regressionConfigurationPath: values['regression-config'] ? resolve(values['regression-config']) : null,
     caseDirectory: resolve(values.case),
     expectedSeal: values['expected-seal'] ?? null,
     evidenceRoot: resolve(values['evidence-root']),
@@ -2084,7 +2091,7 @@ function parseArguments(args) {
 }
 
 function usage() {
-  console.error('Usage: node scripts/qualification-runner.mjs --mode <demo|diagnostic|formal> --core <path> --case <path> --evidence-root <path> [--expected-seal <sha256>] [--trial-id <id>] [--planned-slot-id <id>] [--suite-id <id>] [--isolation-profile <private-json>] [--treatment <team|solo>] [--paired-experiment-id <id>] [--arm-id <id>] [--paired-plan-digest <sha256>] [--paired-pair-slot-id <id>] [--paired-dispatch-ordinal <0|1>] [--tool-measurement-pack <private-dir>]')
+  console.error('Usage: node scripts/qualification-runner.mjs --mode <demo|diagnostic|formal> --core <path> --case <path> --evidence-root <path> [--expected-seal <sha256>] [--trial-id <id>] [--planned-slot-id <id>] [--suite-id <id>] [--isolation-profile <private-json>] [--treatment <team|solo>] [--paired-experiment-id <id>] [--arm-id <id>] [--paired-plan-digest <sha256>] [--paired-pair-slot-id <id>] [--paired-dispatch-ordinal <0|1>] [--tool-measurement-pack <private-dir>] [--regression-config <private-json>]')
   process.exit(2)
 }
 
@@ -2115,7 +2122,10 @@ const FROZEN_TEAM = [
   }
 ]
 
-const result = await runTrial(arguments_)
+let cleanup = async () => {}
+let result
+try { result = await runTrial(arguments_, callback => { cleanup = callback }) }
+finally { await cleanup() }
 console.log(JSON.stringify(result.redactedSummary, null, 2))
 if (result.redactedSummary.overall === 'unavailable') process.exitCode = 2
 else if (result.redactedSummary.overall === 'fail') process.exitCode = 1

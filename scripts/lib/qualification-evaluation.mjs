@@ -975,7 +975,11 @@ export function deriveHumanInterventionEvidence(snapshot, dispatchBoundary, cont
     ? userMessages.find((message) => message.id === dispatchBoundary.rootCampMessageId)
     : null
   const additionalUserMessages = expectedRootMessage
-    ? userMessages.filter((message) => message.id !== expectedRootMessage.id)
+    ? userMessages.filter((message) => message.id !== expectedRootMessage.id && !(
+        Number.isSafeInteger(message.timelineGlobalSequence)
+        && Number.isSafeInteger(dispatchBoundary.preDispatchThroughGlobalSequence)
+        && message.timelineGlobalSequence <= dispatchBoundary.preDispatchThroughGlobalSequence
+      ))
     : userMessages.length === 1 && ['demo', 'diagnostic'].includes(normalizedContext.mode)
       ? []
       : userMessages
@@ -1170,7 +1174,7 @@ export function observedDurableMemberCallEffects(snapshot, campTurnId) {
   if (isCurrentPublicA2aSnapshot(snapshot)) {
     const seen = new Set()
     return (Array.isArray(snapshot.messageDeliveries) ? snapshot.messageDeliveries : []).filter((delivery) => {
-      if (delivery.campTurnId !== campTurnId || seen.has(delivery.id)) return false
+      if (delivery.campTurnId !== campTurnId || !isBudgetedPublicA2aDelivery(snapshot, delivery) || seen.has(delivery.id)) return false
       seen.add(delivery.id)
       return true
     })
@@ -1187,10 +1191,17 @@ function isCurrentPublicA2aSnapshot(snapshot) {
   return Number.isInteger(snapshot?.schemaVersion) && snapshot.schemaVersion >= 28
 }
 
+// Snapshot 28 had only Public A2A deliveries. Current snapshots also contain
+// captured Gather replies and completion carriers; neither consumes a new call.
+export function isBudgetedPublicA2aDelivery(snapshot, delivery) {
+  return delivery.deliveryKind === 'public_a2a' && delivery.dispatchDisposition === 'dispatch'
+    || snapshot.schemaVersion === 28 && delivery.deliveryKind === undefined
+}
+
 function deriveCurrentMessageDeliverySettlement(snapshot, turn, deliveries) {
   if (!Array.isArray(snapshot.messageDeliveries)) return 'indeterminate'
   const expected = turn?.executionBudget?.acceptedA2a
-  if (!Number.isInteger(expected) || expected < 0 || expected !== deliveries.length) {
+  if (!Number.isInteger(expected) || expected < 0 || expected !== deliveries.filter(delivery => isBudgetedPublicA2aDelivery(snapshot, delivery)).length) {
     return 'indeterminate'
   }
   if (deliveries.some((delivery) => ['pending', 'running'].includes(delivery.status))) {

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "caseId": "DEMO-112",
+  "caseVersion": "1.1.0",
+  "seal": "e6d2dacd797cc9cddddae45a5b61a890c93bc562f27d6e0d1642dcb1eba6801e",
+  "sealInput": {
+    "schemaVersion": 2,
+    "caseId": "DEMO-112",
+    "caseVersion": "1.1.0",
+    "tags": [
+      "context-regression"
+    ],
+    "budget": {
+      "elapsedSeconds": 480,
+      "maxAgentRuns": 8,
+      "maxAcceptedA2a": 0
+    },
+    "toolchain": [
+      {
+        "name": "node",
+        "command": [
+          "node",
+          "--version"
+        ]
+      }
+    ],
+    "expectedInitialFailureCheckIds": [
+      "CHK-DELIVERY"
+    ],
+    "manifestDigest": "e3c0964697c520489601e11d21f50d4e576bcf46702451f34a7bb8b31cf21d16",
+    "fixtureTreeDigest": "32a1782cf28e891d6e9562c79adf7965da013ba2ec840b10f1561d5547bf631a",
+    "promptDigest": "a7c50cf50779263dc1f0fafdc3a00d81d65d660d1c394d0e0729e8774039d0aa",
+    "verifierDigest": "0b9f5c6801497006d25e83af9e607902763548e3aeecc502d11648e8434ca9e4",
+    "requirementsDigest": "e390ea6c8dd6d342ad2403e623c693a33d8b35aa993134a01571785e3274fc8b",
+    "verificationCatalogDigest": "75d9791b483e218f4d8e2726922d6d8cfbeda7e71c67ab3b507cb2670601d7ab",
+    "publicCheckContractDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "allowedBoundaryDigest": "5addb9e164e15c8d25e99ef1a8a7ce1844b257db4c6de558e8849839814e18c4",
+    "referenceEvidenceDigest": "b820165e363e225eeed55afa6729cca3179e5d5fb4d86971482785f87eb6f5da"
+  }
+}

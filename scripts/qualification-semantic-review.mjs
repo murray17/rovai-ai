@@ -1,4 +1,6 @@
+import { prepareJudgeSourceSupplement } from './lib/qualification-judge-source-supplement.mjs'
 import { randomUUID } from 'node:crypto'
+import { taskJudgeProfile } from './lib/context-judge-profile.mjs'
 import { readFile, realpath } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -30,15 +32,26 @@ import {
 const options = parseArguments(process.argv.slice(2))
 const evidenceDirectory = await realpath(options.evidenceDirectory)
 const history = await loadQualificationResultHistory(evidenceDirectory, { repairProjections: true })
-const result = history.current
+let result = history.current
 if (result.validity !== 'valid' || result.evaluationState !== 'complete') {
   throw new Error('Semantic Review requires a valid complete Trial')
 }
 const caseRecord = await verifyStoredCaseSeal(options.caseDirectory, result.case?.seal)
 const configurationInput = JSON.parse(await readFile(options.configurationPath, 'utf8'))
-const adapter = await loadAdapter(options.adapterPath, result.mode)
+const adapter = await loadAdapter(options.adapterPath, result.mode, configurationInput)
 const producerDigest = await computeQualificationEvaluatorDigest()
+const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
+if (caseEvaluation?.judgeProfile === 'generic-task-v6' && adapter.claimAuditProfile !== 'claim-audit-v1') throw new Error('v6 requires a claim-audit-capable adapter')
+let evaluationSnapshot = null
+if (['generic-task-v7', 'generic-task-v8', 'generic-task-v9'].includes(caseEvaluation?.judgeProfile)) {
+  if (caseEvaluation.judgeProfile === 'generic-task-v9' && !adapter.claimAuditProfiles?.includes('claim-audit-v4')) throw new Error('v9 requires a claim-audit-v4-capable adapter')
+  if (caseEvaluation.judgeProfile === 'generic-task-v8' && !adapter.claimAuditProfiles?.includes('claim-audit-v3')) throw new Error('v8 requires a claim-audit-v3-capable adapter')
+  if (!adapter.claimAuditProfiles?.includes('claim-audit-v2')) throw new Error('v7 requires a claim-audit-v2-capable adapter')
+  const supplement = await prepareJudgeSourceSupplement({ evidenceDirectory, result, caseRecord, caseEvaluation, producerDigest })
+  result = supplement.result; evaluationSnapshot = supplement.snapshot
+}
 const sourceConfiguration = buildSemanticJudgeConfiguration({
+  evaluationContextPolicy: caseEvaluation?.judgeProfile === 'generic-task-v9' ? 'bounded-evaluation-context-v4' : caseEvaluation?.judgeProfile === 'generic-task-v8' ? 'bounded-evaluation-context-v3' : caseEvaluation?.judgeProfile === 'generic-task-v7' ? 'bounded-evaluation-context-v2' : ['generic-task-v4', 'generic-task-v5', 'generic-task-v6'].includes(caseEvaluation?.judgeProfile) ? 'bounded-evaluation-context-v1' : null,
   provider: configurationInput.provider,
   snapshotId: configurationInput.snapshotId,
   snapshotDigest: configurationInput.snapshotDigest,
@@ -53,7 +66,9 @@ const untrustedEvidence = await buildSemanticJudgeUntrustedEvidence({
   result,
   evidenceIndex: artifacts.evidenceIndex,
   workspaceMutationLedger: artifacts.workspaceMutationLedger,
-  collaborationLedger: artifacts.collaborationLedger
+  collaborationLedger: artifacts.collaborationLedger,
+  caseEvaluation,
+  evaluationSnapshot
 })
 const sourcePack = buildJudgeEvidencePack({
   result,
@@ -76,12 +91,14 @@ const judgeExecutionId = `judge-execution:${randomUUID()}`
 const processConfiguration = buildJudgeViewConfiguration({
   view: 'process',
   ...viewCommon,
+  taskProfile: caseEvaluation ? taskJudgeProfile(caseEvaluation, 'process') : null,
   configurationId: configurationInput.processConfigurationId
     ?? `${configurationInput.configurationId ?? 'semantic-judge-v1'}-process`
 })
 const outcomeConfiguration = buildJudgeViewConfiguration({
   view: 'outcome',
   ...viewCommon,
+  taskProfile: caseEvaluation ? taskJudgeProfile(caseEvaluation, 'outcome') : null,
   outcomeTreatmentCanaries: configurationInput.outcomeTreatmentCanaries ?? [],
   configurationId: configurationInput.outcomeConfigurationId
     ?? `${configurationInput.configurationId ?? 'semantic-judge-v1'}-outcome`
@@ -116,7 +133,7 @@ const [processExecution, outcomeExecution] = await Promise.all([
     timeoutMilliseconds: configurationInput.timeoutMilliseconds
   })
 ])
-const process = {
+const processView = {
   configuration: processConfiguration,
   pack: processPack,
   ...processExecution
@@ -126,11 +143,11 @@ const outcome = {
   pack: outcomePack,
   ...outcomeExecution
 }
-const suite = buildSemanticJudgeViewSuite({ process, outcome, producerDigest })
+const suite = buildSemanticJudgeViewSuite({ process: processView, outcome, producerDigest })
 const retained = await retainSemanticJudgeViewArtifacts(evidenceDirectory, {
   sourceConfiguration,
   sourcePack,
-  process,
+  process: processView,
   outcome,
   suite
 })
@@ -186,11 +203,10 @@ console.log(JSON.stringify({
   ]))
 }, null, 2))
 
-async function loadAdapter(path, mode) {
+async function loadAdapter(path, mode, configuration) {
   const module = await import(pathToFileURL(path).href)
-  const invokeReplica = module.invokeReplica ?? module.default?.invokeReplica
-  const capabilities = module.capabilities ?? module.default?.capabilities
-  const assurance = module.assurance ?? module.default?.assurance
+  const adapter = typeof module.createAdapter === 'function' ? module.createAdapter(configuration, { evidenceDirectory }) : module.default ?? module
+  const { invokeReplica, capabilities, assurance } = adapter
   if (typeof invokeReplica !== 'function'
       || JSON.stringify(capabilities) !== JSON.stringify({
         tools: 'none',
@@ -202,10 +218,10 @@ async function loadAdapter(path, mode) {
   if (mode === 'formal' && assurance !== 'tool_disabled_external_sandbox') {
     throw new Error('Formal Semantic Review requires a tool-disabled external sandbox assurance')
   }
-  if (!['tool_disabled_external_sandbox', 'fixture'].includes(assurance)) {
+  if (!['tool_disabled_external_sandbox', 'tool_disabled_cli', 'fixture'].includes(assurance)) {
     throw new Error('Semantic Judge adapter assurance is unsupported')
   }
-  return { invokeReplica }
+  return { invokeReplica, claimAuditProfile: adapter.claimAuditProfile, claimAuditProfiles: adapter.claimAuditProfiles }
 }
 
 async function loadRetainedArtifacts(evidenceDirectory) {
@@ -224,12 +240,13 @@ function parseArguments(args) {
     const argument = args.shift()
     if (!argument.startsWith('--')) usage()
     const key = argument.slice(2)
-    if (!['evidence-dir', 'case', 'configuration', 'adapter'].includes(key)) usage()
+    if (!['evidence-dir', 'case', 'configuration', 'adapter', 'case-evaluation'].includes(key)) usage()
     values[key] = args.shift()
     if (!values[key]) usage()
   }
   if (!values['evidence-dir'] || !values.case || !values.configuration || !values.adapter) usage()
   return {
+    caseEvaluation: values['case-evaluation'] ? resolve(values['case-evaluation']) : null,
     evidenceDirectory: resolve(values['evidence-dir']),
     caseDirectory: resolve(values.case),
     configurationPath: resolve(values.configuration),

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "i1",
+    "service": "api",
+    "failures": 3
+  },
+  {
+    "id": "i1",
+    "service": "api",
+    "failures": 3
+  },
+  {
+    "id": "i2",
+    "service": "worker",
+    "failures": 2
+  },
+  {
+    "id": "i3",
+    "service": "api",
+    "failures": 1
+  }
+]

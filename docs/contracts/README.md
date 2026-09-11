@@ -139,7 +139,15 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime File Change Observation v2（历史）](runtime-file-change-observation-v2.md) | v1 Evidence/投影/呈现不变；精确排除当前 `ROVAI_RUN_TMP` 临时交付区，mixed evidence 保留普通文件且不迁移历史数据 |
 | [Runtime File Change Observation v1（历史）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation；不含 managed output exclusion |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
-| [Semantic Judge Views v1（当前）](semantic-judge-views-v1.md) | Process/Blinded Outcome 双视图、模型可见 evidence allowlist、本地 Evidence ID、双 Replica、逐项 reconciliation 与 Hard Outcome non-interference |
+| [Semantic Judge Views v9（当前）](semantic-judge-views-v9.md) | 执行事实、严格输出引用与同流有限顺序证据 |
+| [Semantic Judge Views v8（历史）](semantic-judge-views-v8.md) | 结果事实／执行声明／限制披露分离与过程正文隔离 |
+| [Semantic Judge Views v7（历史）](semantic-judge-views-v7.md) | 原生验证凭据、初始文件与逐声明来源核对 |
+| [Semantic Judge Views v6（历史）](semantic-judge-views-v6.md) | 逐声明证据审计、固定报告验证与原始／派生结果保留 |
+| [Semantic Judge Views v5（历史）](semantic-judge-views-v5.md) | 指标证据合同与同 View 一次分歧裁决；历史双副本保留 |
+| [Semantic Judge Views v4](semantic-judge-views-v4.md) | 隔离评测验证回执、Lead 公开交付集合、Process Task 正文与冻结 v4 Judge |
+| [Semantic Judge Views v3（历史）](semantic-judge-views-v3.md) | 受控输入和公开成员消息补全、View 内引用、逐项格式故障隔离与未知边界 |
+| [Semantic Judge Views v2（历史）](semantic-judge-views-v2.md) | 通用任务 profile、冻结 Case 适用性、受控交付物证据与旧 profile 追溯 |
+| [Semantic Judge Views v1（历史）](semantic-judge-views-v1.md) | Process/Blinded Outcome 双视图、模型可见 evidence allowlist、本地 Evidence ID、双 Replica、逐项 reconciliation 与 Hard Outcome non-interference |
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
@@ -180,7 +188,22 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Usage Monitoring v2（历史）](runtime-usage-monitoring-v2.md) | 五表 clean break、内存 Usage 合并、稀疏 Token/Cache/Cost、Coverage、单 Snapshot 与有界刷新 |
 | [Runtime Monitoring v1（历史）](runtime-monitoring-v1.md) | Clean-break collection/enrollment、稀疏 Usage Observation、Native Session fact、三类查询、Coverage、Tool Duration 与 Cost layer |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
-| [User Automation v2（当前）](user-automation-v2.md) | v1 transport、Trial 与安全投影不变；Camp 创建只做目录准入，Git observation 不扫描工作树且新 dirty 为 null |
+| [Execution Evaluation v13（当前）](execution-evaluation-v13.md) | 每日分析有限引用 schema、已知零值与真实失败尝试保留 |
+| [Execution Evaluation v12（历史）](execution-evaluation-v12.md) | 每日跨日积压、全部工具终态与健康分析证据边界 |
+| [Execution Evaluation v11（历史）](execution-evaluation-v11.md) | 评分 2.7、执行声明分类与现有事件顺序投影 |
+| [Execution Evaluation v10（历史）](execution-evaluation-v10.md) | 并行验证凭据、最终交付范围及声明分类校准 |
+| [Execution Evaluation v9（历史）](execution-evaluation-v9.md) | 原生执行证据补取、同源重评及完整仲裁报告 |
+| [Execution Evaluation v8（历史）](execution-evaluation-v8.md) | 评分 2.4、Suite 2.6、声明审计与隔离用量采集 |
+| [Execution Evaluation v7（历史）](execution-evaluation-v7.md) | 评分 2.3、Suite 2.5、可验证指标及历史证据重评边界 |
+| [Execution Evaluation v6](execution-evaluation-v6.md) | 评分 2.2 与 Suite 2.4；106 阶段明确化及证据补全，原权重与未知规则不变 |
+| [Execution Evaluation v5（历史）](execution-evaluation-v5.md) | 验收、退化与完整性分开；评分 2.1 和可追溯逐项报告 |
+| [Execution Evaluation v4（历史）](execution-evaluation-v4.md) | 显式预算、至多两个 Case 并行、禁工具 CLI Judge 与模型身份限制；继承 v3 证据和评分 |
+| [Execution Evaluation v3（历史）](execution-evaluation-v3.md) | 继承通用质量与双轨报告，适配当前 return lineage 与历史账本 |
+| [Execution Evaluation v2（历史）](execution-evaluation-v2.md) | 通用质量三维度、协作分项统计、关键 Gate、离线报告与分析完成记录 |
+| [Execution Evaluation v1（历史）](execution-evaluation-v1.md) | Gate 分流、冻结版本、真实规则与 Judge、有限迭代、每日统计与可比较趋势 |
+| [User Automation v4（当前）](user-automation-v4.md) | 继承 v3；开发者评测 CLI、宿主执行与按 AutomationRun 去重的定时绑定 |
+| [User Automation v3（历史）](user-automation-v3.md) | 继承 v2；受限只读 Trace 导出与 Host 日报准备配置，不授予 Agent 用户级 IPC |
+| [User Automation v2（历史）](user-automation-v2.md) | v1 transport、Trial 与安全投影不变；Camp 创建只做目录准入，Git observation 不扫描工作树且新 dirty 为 null |
 | [User Automation v1（历史）](user-automation-v1.md) | 普通用户 `rovai app` 的独立本机 IPC、Runtime OS 隔离、原子 Camp/Run 自动化、真实 shell exit、双 cursor Diagnostic Trial、安全投影与私有 bundle |
 | [Network Interruption Recovery v1（当前）](network-interruption-recovery-v1.md) | App/Core 持续运行期间的严格网络分类、Core 内存固定退避、Input Delivery 安全门禁、ACP terminal 接管、online/resume wake 与三态投影 |
 | [Accepted Input Recovery v5（当前）](accepted-input-recovery-v5.md) | v4 发送边界不变；普通恢复失败与业务取消终态分离 |

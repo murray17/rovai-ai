@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  collectFinalResponseEvidence,
   deriveCollaborationEvidence,
   evaluateCollaborationContract,
   extractEvidenceIdentity
@@ -125,6 +126,19 @@ test('current Public A2A evidence binds one Message Delivery to its message, acc
     recipientInputStatus: 'accepted',
     settlement: 'settled'
   }])
+
+  // Core return edges restore the caller's lineage, including root depth zero.
+  for (const [edgeKind, depth, coverage] of [
+    ['return', 0, 'complete_with_message_delivery_receipts'],
+    ['forward', 0, 'partial_message_delivery_receipt_coverage']
+  ]) {
+    const snapshot = currentPublicA2aSnapshot()
+    snapshot.messageDeliveries[0].edgeKind = edgeKind
+    snapshot.timeline[0].payload.a2aDepth = depth
+    const returned = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-current' })
+    assert.equal(returned.a2a[0].depth, depth)
+    assert.equal(returned.metrics.coverage, coverage)
+  }
 })
 
 test('current Public A2A evidence fails closed when the accepted counter is not covered by Message Deliveries', () => {
@@ -136,6 +150,25 @@ test('current Public A2A evidence fails closed when the accepted counter is not 
   assert.equal(evidence.metrics.observedDurableMemberCalls, 0)
   assert.equal(evidence.metrics.settledMemberCalls, null)
   assert.equal(evidence.metrics.coverage, 'partial_message_delivery_receipt_coverage')
+})
+
+test('current delivery kinds and per-message recipient positions do not create phantom or duplicate A2A calls', () => {
+  const snapshot = currentPublicA2aSnapshot()
+  snapshot.schemaVersion = 34
+  snapshot.messageDeliveries[0].deliveryKind = 'public_a2a'
+  snapshot.messageDeliveries[0].dispatchDisposition = 'dispatch'
+  snapshot.messageDeliveries.push({ ...snapshot.messageDeliveries[0], id: 'delivery-2', messageId: 'message-a2a-2' },
+    { ...snapshot.messageDeliveries[0], id: 'captured-reply', dispatchDisposition: 'gather_captured' },
+    { ...snapshot.messageDeliveries[0], id: 'gather-completion', deliveryKind: 'gather_completion', recipientCanonicalPosition: null })
+  snapshot.messages.push({ ...snapshot.messages[0], id: 'message-a2a-2', sequence: 3 })
+  snapshot.timeline.push({ ...snapshot.timeline[0], eventId: 'event-delivery-2', createdAt: '2026-08-10T00:00:03.000Z', payload: { ...snapshot.timeline[0].payload, deliveryId: 'delivery-2', messageId: 'message-a2a-2' } })
+  snapshot.turns[0].executionBudget.acceptedA2a = 2
+  const evidence = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-current' })
+  assert.equal(evidence.metrics.observedDurableMemberCalls, 2)
+  assert.equal(evidence.metrics.coverage, 'complete_with_message_delivery_receipts')
+  assert.deepEqual(evidence.a2a.map(call => call.slot), [1, 2])
+  assert.deepEqual(evidence.a2a.map(call => call.recipientCanonicalPosition), [0, 0])
+  assert.equal(evidence.a2a.every(call => call.slotAuthority === 'derived_public_delivery_order'), true)
 })
 
 test('a settled Message Delivery without its target Run is not counted as mechanically settled', () => {
@@ -348,3 +381,27 @@ function receipt(id, inboxMessageId, slot, depth) {
     }
   }
 }
+
+
+test('Current Task identity survives JSON persistence in collaboration facts', () => {
+  const snapshot = currentPublicA2aSnapshot()
+  snapshot.tasks = [{ taskId: 'task-current', status: 'completed', assigneeAgentId: 'agent-reviewer', sourceAgentRunId: 'run-lead' }]
+  const evidence = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-current' })
+  assert.equal(evidence.taskFacts[0].id, 'task-current')
+  assert.deepEqual(JSON.parse(JSON.stringify(evidence.taskFacts)), evidence.taskFacts)
+})
+
+test('Final delivery follows the original Lead across return Runs and excludes peers and later turns', () => {
+  const run = (id, agentId, campTurnId = 'turn') => ({ id, agentId, campTurnId })
+  const message = (id, sourceAgentRunId, authorId, sequence) => ({ id, sourceAgentRunId, authorId, authorType: 'agent', sequence, body: id, createdAt: '2026-09-10T00:00:00Z' })
+  const snapshot = {
+    agentRuns: [run('root', 'lead'), run('peer', 'reviewer'), run('return', 'lead'), run('later', 'lead', 'other-turn')],
+    messages: [message('handoff', 'root', 'lead', 1), message('integrated-delivery', 'return', 'lead', 3), message('late-peer', 'peer', 'reviewer', 4), message('other-task', 'later', 'lead', 5)]
+  }
+  const result = collectFinalResponseEvidence(snapshot, { campTurnId: 'turn', rootAgentRunId: 'root' })
+  assert.deepEqual(result.privateMessages.map(item => [item.messageId, item.isFinal]), [['handoff', false], ['integrated-delivery', true]])
+  assert.equal(result.references.some(item => 'body' in item), false)
+  assert.deepEqual(collectFinalResponseEvidence(snapshot, { campTurnId: 'turn', rootAgentRunId: 'missing' }).privateMessages, [])
+  snapshot.messages = snapshot.messages.filter(message => message.authorId !== 'lead')
+  assert.deepEqual(collectFinalResponseEvidence(snapshot, { campTurnId: 'turn', rootAgentRunId: 'root' }).privateMessages, [])
+})

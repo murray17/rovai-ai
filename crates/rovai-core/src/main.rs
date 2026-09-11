@@ -8570,6 +8570,12 @@ impl Core {
                     params.limit.unwrap_or(500),
                 )?)?)
             }
+            "executionTrace.export" => {
+                let params: rovai_core::execution_trace::TraceExportParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                rovai_core::execution_trace::export(&mut database, &params)
+            }
             "agentRuns.diagnostic.get" => {
                 let params: AgentRunDiagnosticParams =
                     serde_json::from_value(request.params.clone())?;
@@ -22509,6 +22515,7 @@ mod tests {
 
         Ok(Core {
             database: Mutex::new(database),
+            automation_scheduler_control: RwLock::new(None),
             subsystems: CoreSubsystems::ready_for_test(),
             subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
             startup_skill_execution_roots: Vec::new(),

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "caseId": "DEMO-111",
+  "caseVersion": "1.0.0",
+  "caseSeal": "8d042de84b2c1995bf9f363d2c9b07ecf05c36713a2b1d208b1cf5702a082c6e",
+  "referenceEvidenceDigest": "85fd2e46b2504ab07cc5d2f7e98e8b4313c674cc9bf238ac5e8a5952da16da06",
+  "referenceEvidence": {
+    "schemaVersion": 2,
+    "publicChecks": [],
+    "initialVerifierObservationDigest": "5739f3fd005d50b0c0d04defa5b98e0e380f3c88ade90a9eed523937f89e4807",
+    "initialDeliveryEvidenceDigest": "899deb1ff1fc7a2166d2a88089662d5e8869dab72f67679e52b46dc2efa5f964",
+    "referenceVerifierObservationDigest": "26c8618ac4b0a02651506463d0850888e1dd79200bd6815a2410ca38208ce728",
+    "referenceDeliveryEvidenceDigest": "330a39f288b7e86e9653fbe58c4f5a000e2d010ba47b1e04c2cb035ea3068cd5",
+    "twoMaterializationDeterministic": true,
+    "initialExpectedFailure": true,
+    "referenceVerifiedDelivery": "pass"
+  },
+  "admissionDigest": "0e281be9e060c48a7017d70ced65c7d459bcfa9d209ea80c5ba6f19c8bfc7ded"
+}
