@@ -28,6 +28,7 @@ let send: (draft: CampComposerDraftView) => Promise<CampMessageSendReceipt> = ne
 const drafts = new Map<string, CampComposerDraftView>()
 let root: Root | null = null
 let snapshot: CampSnapshot
+let initialComposerDraft: CampComposerDraftView | null = null
 let queue: CampPendingInputsView
 let nextRead: { promise: Promise<CampComposerDraftView>; resolve(value: CampComposerDraftView): void } | null = null
 const agents: AgentProfile[] = ['叮叮', '芝士'].map((displayName, index) => ({
@@ -55,7 +56,7 @@ const continuation = () => document.querySelector('.composer-continuation')?.get
 const editor = () => document.getElementById('camp-message')!
 const draftReads = () => calls.filter(call => call === 'camp.composerDraft.get').length
 const emptyDraft = (id = campId): CampComposerDraftView => ({
-  campId: id, body: '', content: emptyComposerDocument(), revision: 0, attachments: [], replyIntent: null,
+  campId: id, body: '', content: emptyComposerDocument(), revision: 0, attachments: [], quotes: [], replyIntent: null,
   continuationIntent: null, updatedAt: null, expiresAt: null
 })
 const continuedDraft = (messageId: string): CampComposerDraftView => ({
@@ -86,7 +87,7 @@ Object.assign(window, { rovai: {
       if (action.type === 'save' && failPendingSave) throw new Error('保存失败，请重试')
       if (action.type === 'begin') {
         queue.editSession = { pendingInputId: item.id, editToken: 'fixture-edit-token', basePendingRevision: item.revision,
-          recoveryRequired: false, workingAttachments: structuredClone(item.attachments) }
+          recoveryRequired: false, workingQuotes: [], workingAttachments: structuredClone(item.attachments) }
       } else {
         check(command.editToken === queue.editSession?.editToken, 'Working attachments must use the edit token')
         if (action.type === 'remove_attachment') {
@@ -163,7 +164,7 @@ function message(sequence: number, agentId: string): CampMessageView {
   return { id: `message-${sequence}`, sequence, timelineGlobalSequence: sequence,
     authorType: 'user', authorId: 'local_user', sourceAgentRunId: null,
     body: `消息 ${sequence}`, content: [{ kind: 'member_mention', agentId }, { kind: 'text', text: `消息 ${sequence}` }],
-    addressMode: 'explicit', attachments: [], addressedAgentIds: [agentId], replyToCampMessageId: null,
+    addressMode: 'explicit', attachments: [], quotes: [], addressedAgentIds: [agentId], replyToCampMessageId: null,
     campTurnId: `turn-${sequence}`, presentation: null, createdAt: timestamp }
 }
 
@@ -189,6 +190,8 @@ function running(current: CampMessageView): Pick<CampSnapshot, 'turns' | 'agentR
 
 async function render() {
   flushSync(() => root!.render(<CampWorkspace snapshot={snapshot} projectName={null} agents={agents}
+    initialComposerDraft={initialComposerDraft}
+    onInitialComposerDraftConsumed={() => { initialComposerDraft = null }}
     busy={false} stopping={false} worldMapEnabled={false}
     onSend={(draft) => send(draft)} onStop={() => undefined}
     onChangeLead={async () => undefined} onTasksChanged={async () => undefined} onResolveApproval={() => undefined}
@@ -196,7 +199,7 @@ async function render() {
   await flush()
 }
 
-async function reset(draft = emptyDraft(), holdInitialRead = false) {
+async function reset(draft = emptyDraft(), holdInitialRead = false, entryDraft: CampComposerDraftView | null = null) {
   if (root) {
     flushSync(() => root!.unmount())
     await new Promise(resolve => setTimeout(resolve, 0))
@@ -211,6 +214,7 @@ async function reset(draft = emptyDraft(), holdInitialRead = false) {
   drafts.clear()
   drafts.set(campId, draft)
   nextRead = null
+  initialComposerDraft = entryDraft
   send = neverSend
   queue = { campId, executionActive: true, items: [], editSession: null }
   const first = message(1, 'agent_1')
@@ -224,6 +228,7 @@ async function reset(draft = emptyDraft(), holdInitialRead = false) {
     membershipReconciliations: [], tasks: [], messages: [first], messageDeliveries: [], ...running(first),
     executionEvidence: [], agentRunFileChanges: [], contextManifests: [], approvals: [], actions: [], timeline: [] }
   const held = holdInitialRead ? holdRead() : null
+  if (entryDraft) snapshot = { ...snapshot, messages: [], turns: [], agentRuns: [] }
   if (held) {
     snapshot = { ...snapshot, turns: [], agentRuns: [] }
     queue = { ...queue, executionActive: false }
@@ -287,10 +292,10 @@ async function setupPendingAttachments() {
   queue.items = [
     { id: 'pending-with-body', campId, enqueueSequence: 1, revision: 1, state: 'queued',
       content: composerDocumentFromText('请看这份设计说明'), body: '请看这份设计说明', attachments,
-      replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null },
+      replyIntent: null, quotes: [], recipientSelectionRequired: false, lastAttemptErrorCode: null },
     { id: 'pending-attachment-only', campId, enqueueSequence: 2, revision: 1, state: 'queued',
       content: emptyComposerDocument(), body: '', attachments: [sourceAttachment(imageFile('仅附件.png'))],
-      replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null }
+      replyIntent: null, quotes: [], recipientSelectionRequired: false, lastAttemptErrorCode: null }
   ]
   emit('camp.pendingInputs.changed', { campId, reason: 'enqueued' })
   await until(() => document.querySelectorAll('.pending-input-row').length === 2, 'Both queued messages must appear')
@@ -500,7 +505,7 @@ Object.assign(window, { continuationTest: { async run() {
 
   const initialReads = draftReads()
   queue.items = [{ id: 'pending-B', campId, enqueueSequence: 1, revision: 1, state: 'queued',
-    content: composerDocumentFromText('给芝士的 B'), body: '给芝士的 B', replyIntent: null,
+    content: composerDocumentFromText('给芝士的 B'), body: '给芝士的 B', replyIntent: null, quotes: [],
     recipientSelectionRequired: false, lastAttemptErrorCode: null, attachments: [] }]
   emit('camp.pendingInputs.changed', { campId, reason: 'enqueued' })
   await flush()
@@ -579,7 +584,7 @@ Object.assign(window, { continuationTest: { async run() {
     submissions += 1
     drafts.set(campId, emptyDraft())
     queue = { ...queue, items: [{ id: 'pending-send', campId, enqueueSequence: 1, revision: 1, state: 'queued',
-      content: draft.content, body: draft.body, replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null, attachments: draft.attachments }] }
+      content: draft.content, body: draft.body, replyIntent: null, quotes: [], recipientSelectionRequired: false, lastAttemptErrorCode: null, attachments: draft.attachments }] }
     emit('camp.pendingInputs.changed', { campId, reason: 'enqueued' })
     return { pendingInputId: 'pending-send', agentRunIds: [], campTurnId: null, addressedAgentIds: ['agent_1'] }
   }
@@ -695,6 +700,7 @@ async routeLoading() {
   const layouts = []
   for (const theme of ['day', 'night']) {
     document.documentElement.dataset.theme = theme
+    let defaultRecipientColor: string | null = null
     for (const [name, draft] of [['default', emptyDraft()], ['continuation', continuedDraft('message-1')], ['explicit', explicit]] as const) {
       const held = await reset(draft, true)
       check(held && draftReads() === 1, 'The initial Draft read must remain pending')
@@ -711,11 +717,36 @@ async routeLoading() {
         `Route loading must not move the conversation: ${JSON.stringify({ theme, name, before, after })}`)
       check(!document.querySelector('.composer-route-placeholder'), 'Ready replaces the placeholder')
       const route = document.querySelector('.composer-route-rail')?.textContent ?? ''
-      if (name === 'default') check(route.includes('默认由 Lead · 叮叮接收'), 'Show the default recipient')
+      if (name === 'default') check(route.includes('默认由队长 @叮叮 接收'), 'Show the default recipient')
+      if (name === 'default' || name === 'continuation') {
+        const recipient = document.querySelector<HTMLElement>('.composer-route-rail strong')!
+        check(recipient.textContent?.startsWith('@'), 'Both route modes mark the recipient with @')
+        const color = getComputedStyle(recipient).color
+        if (name === 'default') defaultRecipientColor = color
+        else check(color === defaultRecipientColor, 'Both route modes use the same mention color')
+        check(color !== getComputedStyle(recipient.parentElement!).color, 'The recipient is visually distinct from route copy')
+      }
       if (name === 'continuation') check(continuation() === '继续发给 芝士', 'Show the authoritative continuation')
       if (name === 'explicit') check(!route.trim(), 'Explicit recipients hide the route')
       layouts.push({ theme, name, before, after })
     }
+    const fresh = emptyDraft()
+    await reset(fresh, false, fresh)
+    check(draftReads() === 0, 'New Camp entry must reuse its authoritative Draft without a second route read')
+    check(initialComposerDraft === null, 'Entry Draft must be consumed, not cached for later navigation')
+    check(!document.querySelector('.composer-route-placeholder'), 'New Camp entry must not flash a loading placeholder')
+    check(editor().isContentEditable && document.querySelector('.mention-target-summary')?.textContent?.includes('默认由队长 @叮叮 接收'),
+      'The first new Camp presentation must have a ready editor and default recipient')
+    editor().focus()
+    document.execCommand('insertText', false, '第一次输入')
+    await until(() => savedContinuationSources.length === 1, 'New Camp entry must support immediate editing and autosave')
+    check(drafts.get(campId)?.body === '第一次输入', 'The initial authoritative revision must support saving')
+
+    const restored = await reset(explicit, true)
+    check(document.querySelector('.composer-route-placeholder'), 'Reopening a Camp must read its current Draft')
+    restored!.resolve(explicit)
+    await until(() => editor().isContentEditable, 'Restored Draft must enable editing')
+    check(!document.querySelector('.mention-target-summary'), 'A saved explicit recipient must not show the default route')
   }
   return { ok: true, cases: ['delayed Draft retains conversation geometry'], layouts }
 } } })
@@ -725,6 +756,12 @@ async routeLoading() {
 const browserMode = new URLSearchParams(location.search)
 if (browserMode.has('browser')) {
   const runBrowserFixture = async () => {
+    if (browserMode.get('browser') === 'route-review') {
+      document.documentElement.dataset.theme = browserMode.get('theme') === 'night' ? 'night' : 'day'
+      const fresh = emptyDraft()
+      await reset(fresh, false, fresh)
+      return
+    }
     if (browserMode.get('browser') === 'review') {
       document.documentElement.dataset.theme = browserMode.get('theme') === 'night' ? 'night' : 'day'
       await setupPendingAttachments()
@@ -736,8 +773,12 @@ if (browserMode.has('browser')) {
     const report = document.createElement('pre')
     document.body.append(report)
     try {
-      const fixture = (window as unknown as { continuationTest: { run(): Promise<unknown>; pendingAttachments(): Promise<unknown> } }).continuationTest
-      const result = await (browserMode.get('browser') === 'pending' ? fixture.pendingAttachments() : fixture.run())
+      const fixture = (window as unknown as { continuationTest: {
+        run(): Promise<unknown>; pendingAttachments(): Promise<unknown>; routeLoading(): Promise<unknown>
+      } }).continuationTest
+      const result = await (browserMode.get('browser') === 'route'
+        ? fixture.routeLoading()
+        : browserMode.get('browser') === 'pending' ? fixture.pendingAttachments() : fixture.run())
       report.textContent = JSON.stringify(result, null, 2)
     } catch (error) {
       report.textContent = String(error instanceof Error ? error.stack : error)

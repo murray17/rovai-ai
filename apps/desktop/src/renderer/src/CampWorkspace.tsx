@@ -475,7 +475,7 @@ export function composerRecipientSummary(
       && (segment.atom.type === 'member' || segment.atom.type === 'all_members')
   )) return null
   const defaultLead = members.find((member) => member.isDefaultLead)
-  return `默认由 Lead · ${defaultLead?.displayName ?? '当前不可用'}接收`
+  return defaultLead ? `默认由队长 @${defaultLead.displayName} 接收` : '默认队长当前不可用'
 }
 
 export function campConversationViewFromStoredValue(value: string | null): CampConversationView {
@@ -1405,6 +1405,8 @@ const EMPTY_LIVE_RUNTIME_EVENTS: LiveRuntimeEvent[] = []
 
 export function CampWorkspace({
   snapshot,
+  initialComposerDraft = null,
+  onInitialComposerDraftConsumed,
   openCoverage = null,
   messageHistory = null,
   onLoadEarlierMessages,
@@ -1457,6 +1459,8 @@ export function CampWorkspace({
   onNotifyError
 }: {
   snapshot: CampSnapshot
+  initialComposerDraft?: CampComposerDraftView | null
+  onInitialComposerDraftConsumed?(draft: CampComposerDraftView): void
   openCoverage?: CampOpenProjection['coverage'] | null
   messageHistory?: CampOpenMessageCoverage | null
   onLoadEarlierMessages?(): Promise<void>
@@ -2873,7 +2877,7 @@ export function CampWorkspace({
     })
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const campId = snapshot.camp.id
     let cancelled = false
     setPendingEditing(false)
@@ -2893,15 +2897,20 @@ export function CampWorkspace({
       snapshot: null,
       error: null
     })
-    draftCoordinator.beginEpoch(campId)
-    setDraftLoadState({ state: 'loading' })
+    // New-Camp entry hands off a Core read before the first paint. Later entries
+    // still load normally; an empty timeline alone cannot establish Draft authority.
+    const entryDraft = initialComposerDraft?.campId === campId ? initialComposerDraft : null
+    draftCoordinator.beginEpoch(campId, entryDraft)
+    setDraftLoadState({ state: entryDraft ? 'ready' : 'loading' })
     setComposerPersistenceError(null)
     setComposerLocalStatus({
       hasContent: false,
       hasExplicitRecipient: false,
       hasUnavailableAtom: false
     })
-    initializedComposerRoute.current = null
+    initializedComposerRoute.current = entryDraft
+      ? { revision: entryDraft.revision, publishedMessageSequence }
+      : null
     setPreparingAttachments([])
     setFailedAttachments([])
     setAttachmentDragState(null)
@@ -2911,7 +2920,8 @@ export function CampWorkspace({
     setReplyInteractionError(null)
     autoSuppressedContinuationSourceRef.current = null
     draftCampId.current = campId
-    void draftCoordinator.load()
+    if (entryDraft) onInitialComposerDraftConsumed?.(entryDraft)
+    else void draftCoordinator.load()
       .then(() => {
         if (cancelled || draftCampId.current !== campId) return
         setDraftLoadState({ state: 'ready' })
@@ -4867,7 +4877,9 @@ export function CampWorkspace({
                           <path d="M3 3.5v3.25c0 1.8 1.45 3.25 3.25 3.25H13" />
                           <path d="m10.5 7.5 2.5 2.5-2.5 2.5" />
                         </svg>
-                        <span>{recipientSummary}</span>
+                        <span>{defaultLead
+                          ? <>默认由队长 <strong>@{defaultLead.displayName}</strong> 接收</>
+                          : recipientSummary}</span>
                       </span>
                     )}
               </div>
