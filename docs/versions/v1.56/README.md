@@ -37,4 +37,4 @@ last_updated: 2026-09-09
 - [版本决定](decisions.md)
 - [已确认模型上下文变更](model-context-change-partial-message-quotes.md)
 
-后续版本：[v1.57](../v1.57/README.md)。
+后续：[v1.57](../v1.57/README.md)。

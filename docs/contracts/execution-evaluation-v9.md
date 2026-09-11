@@ -4,7 +4,7 @@ contract: execution-evaluation
 version: 9
 authority: context-regression-and-daily-trace-evaluation
 status: accepted
-source_version: v1.57
+source_version: v1.58
 last_updated: 2026-09-11
 ---
 

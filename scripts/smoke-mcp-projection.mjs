@@ -15,7 +15,7 @@ import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
-import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import { createConfiguredCampAndSend, composerDocumentForAddress } from './lib/create-configured-camp.mjs'
 import {
   coreDataDirectoryArguments,
   removeEphemeralRuntimeCampFilesRoot
@@ -53,7 +53,8 @@ const allAdapters = [
   'qwen-code',
   'trae-cn-cli',
   'kimi-code-cli',
-  'grok-build'
+  'grok-build',
+  'zcode-app'
 ]
 const adapters = selected.length === 1 && selected[0] === 'all' ? allAdapters : selected
 const grokOnly = adapters.length === 1 && adapters[0] === 'grok-build'
@@ -88,7 +89,7 @@ try {
         ]
       : adapterKind === 'grok-build'
         ? [`rovai-projection-stdio:${adapterMarker}-stdio`]
-      : adapterKind === 'kimi-code-cli'
+      : ['kimi-code-cli', 'zcode-app'].includes(adapterKind)
         ? [
             `rovai-projection:${adapterMarker}`,
             `rovai-projection-http:${adapterMarker}-http`,
@@ -107,7 +108,7 @@ try {
             `rovai-projection-http:${adapterMarker}-http`,
             `runtime-native-http:${adapterMarker}-stdio`
           ]
-      : adapterKind === 'kimi-code-cli'
+      : ['kimi-code-cli', 'zcode-app'].includes(adapterKind)
         ? [
             `runtime-native:${adapterMarker}`,
             `runtime-native:${adapterMarker}-http`,
@@ -133,7 +134,7 @@ try {
       assert(await pathExists(grokNativeHttpNameMarker), 'grok-build did not preserve the second native same-name MCP server')
     }
     const expectedServers = adapterKind === 'codex-cli'
-      || ['kimi-code-cli', 'grok-build'].includes(adapterKind)
+      || ['kimi-code-cli', 'grok-build', 'zcode-app'].includes(adapterKind)
       ? [serverName, projectedHttpServerName, projectedStdioServerName]
       : [serverName]
     const exposures = expectedServers.map((name) => result.exposure?.servers?.find((server) => server.name === name))
@@ -148,8 +149,43 @@ try {
         `${adapterKind} froze an invalid Runtime MCP name: ${JSON.stringify(exposure)}`
       )
     }
+    let lifecycle = null
+    if (adapterKind === 'zcode-app') {
+      // Use the same Camp so a missing compatibility fence would actually reuse
+      // the resident Host. A neighbouring member has no Rovai assignments.
+      const mutate = async (method, params) => {
+        const config = await core.request('mcp.config.get')
+        const mutation = await core.request(method, { expectedConfigDigest: config.configDigest, ...params })
+        assert(mutation.status === 'ok', `${method} failed: ${JSON.stringify(mutation)}`)
+      }
+      const probe = (body, agentId = 'agent_1') => runProjectedTool(core.request, workspace, adapterKind,
+        adapterMarker, core.events, { campId: result.campId, agentId, body })
+      const call = `Call the MCP server named ${serverName} echo tool exactly once with text lifecycle. Return its actual result. Do not use other tools.`
+      await mutate('mcp.servers.update', { serverId, definitionJson: JSON.stringify({ mcpServers: {
+        [serverName]: { command: process.execPath, args: [fixture], env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-updated' } }
+      } }) })
+      const updated = await probe(call)
+      assert(updated.output.includes('rovai-updated:lifecycle'), 'ZCode MCP update did not take effect')
+      assert(updated.hostInstanceId !== result.hostInstanceId, 'ZCode reused stale MCP Host')
+      await configureProductRuntime(core.request, adapterKind, ['agent_2'])
+      const adjacent = await probe(call, 'agent_2')
+      assert(adjacent.output.includes('runtime-native:lifecycle') && !adjacent.output.includes('rovai-updated:'), 'Assigned ZCode MCP leaked to an adjacent member')
+      await mutate('mcp.assignments.set', { serverId, agentId: 'agent_1', assigned: false })
+      const unassigned = await probe(call)
+      assert(unassigned.output.includes('runtime-native:lifecycle') && !unassigned.output.includes('rovai-updated:'), 'ZCode retained removed assignment')
+      await mutate('mcp.assignments.set', { serverId, agentId: 'agent_1', assigned: true })
+      const reassigned = await probe(call)
+      assert(reassigned.output.includes('rovai-updated:lifecycle'), 'ZCode reassignment did not take effect')
+      await mutate('mcp.servers.delete', { serverId })
+      const deleted = await probe(call)
+      assert(deleted.output.includes('runtime-native:lifecycle') && !deleted.output.includes('rovai-updated:'), 'ZCode retained deleted MCP')
+      lifecycle = { updateObserved: true, oldHostFenced: true, adjacentAssignmentIsolated: true,
+        unassignedNativeRestored: true, reassignedObserved: true, deletedNativeRestored: true,
+        agentRunIds: [updated, adjacent, unassigned, reassigned, deleted].map((run) => run.agentRunId) }
+    }
     results.push({
       adapterKind,
+      lifecycle,
       reportedVersion: runtime.snapshot.reportedVersion,
       modelId: selectedModel(adapterKind) ?? runtime.memberRuntimeDefaults?.model?.modelId ?? 'runtime_default',
       runtimeNames: exposures.map((exposure) => exposure.runtimeName),
@@ -169,7 +205,8 @@ try {
   if (projectedHttp) await projectedHttp.stop()
   if (nativeHttp) await nativeHttp.stop()
   await removeEphemeralRuntimeCampFilesRoot(dataDir)
-  await rm(fixtureRoot, { recursive: true, force: true })
+  if (process.env.ROVAI_KEEP_MCP_FIXTURE === '1') process.stderr.write(`MCP fixture retained: ${fixtureRoot}\n`)
+  else await rm(fixtureRoot, { recursive: true, force: true })
 }
 
 async function prepareProject(nativeHttpUrl) {
@@ -187,6 +224,8 @@ async function prepareProject(nativeHttpUrl) {
     [projectedHttpServerName]: nativeServer,
     [projectedStdioServerName]: { url: nativeHttpUrl }
   }
+  await mkdir(join(projectRoot, '.zcode'), { recursive: true })
+  await writeFile(join(projectRoot, '.zcode', 'config.json'), `${JSON.stringify({mcp: { enabled: true, servers: nativeServers }}, null, 2)}\n`)
   await writeFile(join(projectRoot, 'README.md'), '# Rovai-ai same-name MCP Projection smoke\n')
   if (!grokOnly) {
     await writeFile(join(projectRoot, '.mcp.json'), `${JSON.stringify({
@@ -338,7 +377,7 @@ async function configureRuntime(request, adapterKind) {
   return runtime
 }
 
-async function runProjectedTool(request, workspace, adapterKind, adapterMarker, events) {
+async function runProjectedTool(request, workspace, adapterKind, adapterMarker, events, options = {}) {
   const toolInstructions = adapterKind === 'codex-cli'
     ? [
         `Call the Runtime-native MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
@@ -351,7 +390,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
           `Call the assigned MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
           'Return exactly that tool result. The other two assigned definitions collide with active native servers and must remain skipped.'
         ]
-    : adapterKind === 'kimi-code-cli'
+    : ['kimi-code-cli', 'zcode-app'].includes(adapterKind)
       ? [
           `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
           `Call the assigned HTTP MCP server named \`${projectedHttpServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-http\`.`,
@@ -362,11 +401,22 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
         `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
         'Return the tool result.'
       ]
-  const created = await createConfiguredCampAndSend(request, {
+  const agentId = options.agentId ?? 'agent_1'
+  const body = options.body ?? toolInstructions.join('\n')
+  let created
+  if (options.campId) {
+    const draft = await request('camp.composerDraft.get', { campId: options.campId })
+    const saved = await request('camp.composerDraft.save', { campId: options.campId, expectedRevision: draft.revision,
+      content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] }, body) })
+    created = await request('camp.messages.send', { commandId: crypto.randomUUID(), campId: options.campId,
+      draftRevision: saved.revision, execution: { taskId: null, purpose: 'Verify MCP lifecycle and Session isolation.', completionRole: 'required' } })
+    created = created.commandResult ?? created
+    created.payload.campId = options.campId
+  } else created = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     workspace,
-    body: toolInstructions.join('\n'),
-    address: { mode: 'explicit', agentIds: ['agent_1'] },
+    body,
+    address: { mode: 'explicit', agentIds: [agentId] },
     purpose: `Verify ${adapterKind} preserves Runtime-native MCP and applies its declared same-name policy.`
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {

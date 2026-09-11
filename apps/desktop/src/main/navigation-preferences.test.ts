@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -16,6 +16,84 @@ afterEach(async () => {
 })
 
 describe('navigation preferences', () => {
+  it('upgrades valid schema 3 without a degradation or rewriting the old file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-name-'))
+    cleanup.push(directory)
+    const filePath = join(directory, 'navigation.json')
+    const source = JSON.stringify({ schemaVersion: 3, pins: [], removedProjects: [], projectOrder: ['directory:/a/frontend'] })
+    await writeFile(filePath, source)
+    const store = await NavigationPreferencesStore.load(filePath)
+    expect(store.loadDegradation).toBeNull()
+    expect(store.get()).toEqual({ schemaVersion: 4, pins: [], removedProjects: [], projectOrder: ['directory:/a/frontend'], projectNames: {} })
+    expect(await readFile(filePath, 'utf8')).toBe(source)
+  })
+
+  it('serializes independent names with pin and order writes and retains names across removal', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-name-'))
+    cleanup.push(directory)
+    const filePath = join(directory, 'navigation.json')
+    const store = await NavigationPreferencesStore.load(filePath)
+    const first = 'directory:/a/frontend', second = 'directory:/b/frontend'
+    const pins = [{ kind: 'camp' as const, targetKey: CAMP_A, pinnedAt: '2026-09-10T00:00:00Z' }]
+    await Promise.all([
+      store.setProjectName(first, '  官网  前端  '),
+      store.replacePins(pins),
+      store.setProjectName(second, '后台前端'),
+      store.synchronizeProjectOrder([first, second])
+    ])
+    const names = { [first]: '官网 前端', [second]: '后台前端' }
+    expect(store.get()).toMatchObject({ projectNames: names, pins, projectOrder: [first, second] })
+    await store.removeProject(first, [])
+    await store.restoreProject(first)
+    await store.synchronizeProjectOrder([first, second])
+    const reloaded = await NavigationPreferencesStore.load(filePath)
+    expect(reloaded.loadDegradation).toBeNull()
+    expect(reloaded.get().projectNames).toEqual(names)
+    expect(reloaded.get().pins).toEqual(pins)
+    await reloaded.setProjectName(first, null)
+    expect((await readNavigationPreferences(filePath)).projectNames).toEqual({ [second]: '后台前端' })
+  })
+
+  it('rejects invalid names and counts Unicode scalars while permitting duplicate display names', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-name-'))
+    cleanup.push(directory)
+    const filePath = join(directory, 'navigation.json')
+    const store = await NavigationPreferencesStore.load(filePath)
+    await expect(store.setProjectName('quick-chat', '名称')).rejects.toThrow()
+    await expect(store.setProjectName('directory:/a', '   ')).rejects.toThrow('请输入项目名称')
+    await expect(store.setProjectName('directory:/a', '🌻'.repeat(81))).rejects.toThrow('80')
+    await store.setProjectName('directory:/a', '🌻'.repeat(80))
+    await store.setProjectName('directory:/b', '🌻'.repeat(80))
+    expect(Object.values((await readNavigationPreferences(filePath)).projectNames)).toEqual(['🌻'.repeat(80), '🌻'.repeat(80)])
+  })
+
+  it('keeps the previous snapshot on a write failure and allows a later retry', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-name-'))
+    cleanup.push(directory)
+    const filePath = join(directory, 'navigation.json')
+    const store = NavigationPreferencesStore.defaults(filePath)
+    await mkdir(filePath)
+    await expect(store.setProjectName('directory:/a', '新名称')).rejects.toThrow()
+    expect(store.get().projectNames).toEqual({})
+    await rm(filePath, { recursive: true })
+    await store.setProjectName('directory:/a', '新名称')
+    expect((await readNavigationPreferences(filePath)).projectNames).toEqual({ 'directory:/a': '新名称' })
+  })
+
+  it('normalizes damaged name records only in memory and preserves other preferences', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-name-'))
+    cleanup.push(directory)
+    const filePath = join(directory, 'navigation.json')
+    const source = JSON.stringify({ schemaVersion: 4, pins: [], removedProjects: [], projectOrder: ['directory:/a'],
+      projectNames: { 'directory:/a': '  项目  A ', 'quick-chat': '非法', 'directory:/b': '', 'directory:/c': 3 } })
+    await writeFile(filePath, source)
+    const store = await NavigationPreferencesStore.load(filePath)
+    expect(store.loadDegradation?.code).toBe('navigation_preferences_invalid')
+    expect(store.get().projectNames).toEqual({ 'directory:/a': '项目 A' })
+    expect(store.get().projectOrder).toEqual(['directory:/a'])
+    expect(await readFile(filePath, 'utf8')).toBe(source)
+  })
+
   it('normalizes legacy pins in memory without overwriting the source file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-preferences-'))
     cleanup.push(directory)
@@ -32,7 +110,8 @@ describe('navigation preferences', () => {
     const snapshot = await readNavigationPreferences(filePath)
 
     expect(snapshot).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
+      projectNames: {},
       pins: [
         { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-07-30T10:00:00Z' },
         { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-07-30T12:00:00Z' }
@@ -65,7 +144,8 @@ describe('navigation preferences', () => {
     const snapshot = await store.removeProject('directory:/work/a', [CAMP_A])
 
     expect(snapshot).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
+      projectNames: {},
       pins: [
         { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-08-11T07:01:00Z' },
         { kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }
@@ -97,7 +177,8 @@ describe('navigation preferences', () => {
     const snapshot = await store.restoreProject('directory:/work/a')
 
     expect(snapshot).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
+      projectNames: {},
       pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
       removedProjects: [],
       projectOrder: ['directory:/work/b']
@@ -128,7 +209,8 @@ describe('navigation preferences', () => {
     const snapshot = await store.reinstateRemovedProject(removedProject)
 
     expect(snapshot).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
+      projectNames: {},
       pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
       removedProjects: [removedProject],
       projectOrder: ['directory:/work/b']
@@ -221,7 +303,8 @@ describe('navigation preferences', () => {
       'directory:/work/c'
     ])
     expect(synchronized).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
+      projectNames: {},
       pins: [],
       removedProjects: [],
       projectOrder: ['directory:/work/a', 'directory:/work/c']

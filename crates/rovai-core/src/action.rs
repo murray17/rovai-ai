@@ -1968,11 +1968,22 @@ impl ActionSafetyService {
             if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
                 return Ok(rejected("action.camp_mismatch", "Action is outside the Camp"));
             }
+            let zcode_background_result: bool = if matches!(&envelope.actor, ActorRef::System { component_id } if component_id == "runtime-adapter:zcode-app") {
+                transaction.query_row("SELECT EXISTS(SELECT 1 FROM agent_run_execution_evidence AS e
+                    JOIN action_execution AS a ON a.agent_run_id = e.agent_run_id
+                    JOIN agent_run AS r ON r.id = a.agent_run_id
+                    WHERE a.id = ?1 AND a.control_mode = 'intercepted' AND r.runtime_adapter_kind = 'zcode-app'
+                      AND e.execution_epoch = a.source_agent_run_execution_epoch AND r.execution_epoch = e.execution_epoch
+                      AND e.event_type = 'runtime.action'
+                      AND json_extract(e.payload_preview_json, '$.zcodeBackground.toolCallId') = a.native_item_id
+                      AND json_extract(e.payload_preview_json, '$.zcodeBackground.status') IN ('completed','failed','cancelled','host_closed'))",
+                    [&envelope.payload.action_id], |row| row.get(0))?
+            } else { false };
             let reconciling_unknown = status == "unknown"
-                && matches!(
+                && (zcode_background_result || matches!(
                     &envelope.actor,
                     ActorRef::System { component_id } if component_id == "action-reconciler"
-                );
+                ));
             if (status != "executing" && !reconciling_unknown)
                 || attempt_id.as_deref() != Some(envelope.payload.attempt_id.as_str())
                 || action_epoch != envelope.payload.action_execution_epoch
@@ -3075,7 +3086,8 @@ impl ActionSafetyService {
               AND agent_run.execution_epoch = ?2
               AND action_execution.native_item_id = ?3
               AND action_execution.control_mode = 'intercepted'
-              AND action_execution.status = 'executing'
+              AND (action_execution.status = 'executing'
+                   OR (action_execution.status = 'unknown' AND agent_run.runtime_adapter_kind = 'zcode-app'))
               AND action_execution.active_attempt_id IS NOT NULL
             ORDER BY action_execution.created_at, action_execution.id
             "#,
@@ -5657,74 +5669,75 @@ mod tests {
 
     #[test]
     fn unknown_action_is_not_replayed_and_only_reconciler_can_settle_it() {
-        let mut fixture = fixture("allow");
-        let service = ActionSafetyService::default();
-        let prepare = prepare_envelope(&fixture, "action-unknown");
-        service
-            .prepare_action(&mut fixture.database, &prepare)
-            .unwrap();
-        let claimed = service
-            .claim_action(
-                &mut fixture.database,
-                &system_envelope(
-                    "claim-unknown-action",
-                    &fixture.camp_id,
-                    "action-executor",
-                    ClaimActionCommand {
-                        action_id: "action-unknown".to_string(),
-                        expected_version: 1,
-                        lease_owner: "executor-unknown".to_string(),
-                        lease_seconds: 30,
-                        authorization_delivery_id: None,
-                        authorization_delivery_lease_owner: None,
-                    },
-                ),
-            )
-            .unwrap();
-        let attempt_id = claimed.result.payload["attemptId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let action_epoch = claimed.result.payload["actionExecutionEpoch"]
-            .as_i64()
-            .unwrap();
-        service
-            .mark_dispatch_started(
-                &mut fixture.database,
-                &system_envelope(
-                    "dispatch-unknown-action",
-                    &fixture.camp_id,
-                    "action-executor",
-                    MarkActionDispatchStartedCommand {
-                        action_id: "action-unknown".to_string(),
-                        attempt_id: attempt_id.clone(),
-                        action_execution_epoch: action_epoch,
-                        lease_owner: "executor-unknown".to_string(),
-                    },
-                ),
-            )
-            .unwrap();
-        service
-            .record_result(
-                &mut fixture.database,
-                &system_envelope(
-                    "record-unknown-action",
-                    &fixture.camp_id,
-                    "action-executor",
-                    RecordActionResultCommand {
-                        action_id: "action-unknown".to_string(),
-                        attempt_id: attempt_id.clone(),
-                        action_execution_epoch: action_epoch,
-                        outcome: ActionResultOutcome::Unknown,
-                        result_code: "connection_lost".to_string(),
-                        result_summary: "Dispatch may have completed".to_string(),
-                        result_data: json!({}),
-                        effect_disposition: "unknown".to_string(),
-                    },
-                ),
-            )
-            .unwrap();
-        let version: i64 = fixture
+        for background in [false, true] {
+            let mut fixture = fixture("allow");
+            let service = ActionSafetyService::default();
+            let prepare = prepare_envelope(&fixture, "action-unknown");
+            service
+                .prepare_action(&mut fixture.database, &prepare)
+                .unwrap();
+            let claimed = service
+                .claim_action(
+                    &mut fixture.database,
+                    &system_envelope(
+                        "claim-unknown-action",
+                        &fixture.camp_id,
+                        "action-executor",
+                        ClaimActionCommand {
+                            action_id: "action-unknown".to_string(),
+                            expected_version: 1,
+                            lease_owner: "executor-unknown".to_string(),
+                            lease_seconds: 30,
+                            authorization_delivery_id: None,
+                            authorization_delivery_lease_owner: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            let attempt_id = claimed.result.payload["attemptId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let action_epoch = claimed.result.payload["actionExecutionEpoch"]
+                .as_i64()
+                .unwrap();
+            service
+                .mark_dispatch_started(
+                    &mut fixture.database,
+                    &system_envelope(
+                        "dispatch-unknown-action",
+                        &fixture.camp_id,
+                        "action-executor",
+                        MarkActionDispatchStartedCommand {
+                            action_id: "action-unknown".to_string(),
+                            attempt_id: attempt_id.clone(),
+                            action_execution_epoch: action_epoch,
+                            lease_owner: "executor-unknown".to_string(),
+                        },
+                    ),
+                )
+                .unwrap();
+            service
+                .record_result(
+                    &mut fixture.database,
+                    &system_envelope(
+                        "record-unknown-action",
+                        &fixture.camp_id,
+                        "action-executor",
+                        RecordActionResultCommand {
+                            action_id: "action-unknown".to_string(),
+                            attempt_id: attempt_id.clone(),
+                            action_execution_epoch: action_epoch,
+                            outcome: ActionResultOutcome::Unknown,
+                            result_code: "connection_lost".to_string(),
+                            result_summary: "Dispatch may have completed".to_string(),
+                            result_data: json!({}),
+                            effect_disposition: "unknown".to_string(),
+                        },
+                    ),
+                )
+                .unwrap();
+            let version: i64 = fixture
             .database
             .connection()
             .query_row(
@@ -5733,49 +5746,88 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let replay_attempt = service
-            .claim_action(
-                &mut fixture.database,
-                &system_envelope(
-                    "replay-unknown-action",
-                    &fixture.camp_id,
-                    "action-executor",
-                    ClaimActionCommand {
-                        action_id: "action-unknown".to_string(),
-                        expected_version: version,
-                        lease_owner: "executor-replay".to_string(),
-                        lease_seconds: 30,
-                        authorization_delivery_id: None,
-                        authorization_delivery_lease_owner: None,
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(replay_attempt.result.status, CommandResultStatus::Rejected);
-        let reconciled = service
-            .record_result(
-                &mut fixture.database,
-                &system_envelope(
-                    "reconcile-unknown-action",
-                    &fixture.camp_id,
-                    "action-reconciler",
-                    RecordActionResultCommand {
-                        action_id: "action-unknown".to_string(),
-                        attempt_id,
-                        action_execution_epoch: action_epoch,
-                        outcome: ActionResultOutcome::Succeeded,
-                        result_code: "verified_complete".to_string(),
-                        result_summary: "External state confirms completion".to_string(),
-                        result_data: json!({ "verified": true }),
-                        effect_disposition: "complete".to_string(),
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(reconciled.result.status, CommandResultStatus::Applied);
-        assert_eq!(reconciled.result.payload["status"], "succeeded");
-        drop(fixture.database);
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+            let replay_attempt = service
+                .claim_action(
+                    &mut fixture.database,
+                    &system_envelope(
+                        "replay-unknown-action",
+                        &fixture.camp_id,
+                        "action-executor",
+                        ClaimActionCommand {
+                            action_id: "action-unknown".to_string(),
+                            expected_version: version,
+                            lease_owner: "executor-replay".to_string(),
+                            lease_seconds: 30,
+                            authorization_delivery_id: None,
+                            authorization_delivery_lease_owner: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(replay_attempt.result.status, CommandResultStatus::Rejected);
+            if background {
+                fixture.database.connection().execute("UPDATE action_execution SET control_mode = 'intercepted', native_item_id = 'background-tool' WHERE id = 'action-unknown'", []).unwrap();
+                fixture
+                    .database
+                    .connection()
+                    .execute(
+                        "UPDATE agent_run SET runtime_adapter_kind = 'zcode-app' WHERE id = ?1",
+                        [&fixture.agent_run_id],
+                    )
+                    .unwrap();
+                let rejected = service
+                    .record_result(
+                        &mut fixture.database,
+                        &system_envelope(
+                            "unproven-background-result",
+                            &fixture.camp_id,
+                            "runtime-adapter:zcode-app",
+                            RecordActionResultCommand {
+                                action_id: "action-unknown".to_string(),
+                                attempt_id: attempt_id.clone(),
+                                action_execution_epoch: action_epoch,
+                                outcome: ActionResultOutcome::Succeeded,
+                                result_code: "unproven".to_string(),
+                                result_summary: "No native exit yet".to_string(),
+                                result_data: json!({}),
+                                effect_disposition: "complete".to_string(),
+                            },
+                        ),
+                    )
+                    .unwrap();
+                assert_eq!(rejected.result.code, "action.attempt_fenced");
+                fixture.database.connection().execute(r#"INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                VALUES ('background-ended', ?1, 1, 100000, 'runtime.action', 'command', 'completed', '{"zcodeBackground":{"toolCallId":"background-tool","status":"completed"}}', 0, 0, '2026-09-10T00:00:00Z')"#, [&fixture.agent_run_id]).unwrap();
+            }
+            let reconciled = service
+                .record_result(
+                    &mut fixture.database,
+                    &system_envelope(
+                        "reconcile-unknown-action",
+                        &fixture.camp_id,
+                        if background {
+                            "runtime-adapter:zcode-app"
+                        } else {
+                            "action-reconciler"
+                        },
+                        RecordActionResultCommand {
+                            action_id: "action-unknown".to_string(),
+                            attempt_id,
+                            action_execution_epoch: action_epoch,
+                            outcome: ActionResultOutcome::Succeeded,
+                            result_code: "verified_complete".to_string(),
+                            result_summary: "External state confirms completion".to_string(),
+                            result_data: json!({ "verified": true }),
+                            effect_disposition: "complete".to_string(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(reconciled.result.status, CommandResultStatus::Applied);
+            assert_eq!(reconciled.result.payload["status"], "succeeded");
+            drop(fixture.database);
+            std::fs::remove_dir_all(fixture.directory).unwrap();
+        }
     }
 
     #[cfg(feature = "slow-tests")]

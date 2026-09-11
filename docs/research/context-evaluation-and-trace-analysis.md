@@ -7,7 +7,7 @@ last_updated: 2026-09-10
 
 # 双轨评测与每日 Trace 分析
 
-2026-09-10 实施路由：当前规范已转入 [Execution Evaluation v1](../contracts/execution-evaluation-v1.md) 与[操作指南](../development/evaluation.md)，实施事实见[v1.57](../versions/v1.57/README.md)。下文保留实现前调研与候选推演，不回写成实测收益。
+2026-09-10 实施路由：当前规范已转入 [Execution Evaluation v1](../contracts/execution-evaluation-v1.md) 与[操作指南](../development/evaluation.md)，实施事实见[v1.57](../versions/v1.58/README.md)。下文保留实现前调研与候选推演，不回写成实测收益。
 
 本文是[四项治理愿景](agent-governance-vision.md)第二项的源码调研与候选设计。源码基线为
 `4235e68a446addd4284e9f58e084a4e6ea821be6`；本文未运行真实 Runtime 评测，也未读取用户日常执行

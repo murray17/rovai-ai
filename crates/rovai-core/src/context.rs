@@ -104,6 +104,7 @@ pub const fn charter_delivery_mode_for_adapter(adapter_kind: AdapterKind) -> Cha
         AdapterKind::OpencodeCli
         | AdapterKind::CopilotCli
         | AdapterKind::AntigravityApp
+        | AdapterKind::ZcodeApp
         | AdapterKind::KiroCli
         | AdapterKind::QoderCli
         | AdapterKind::CodebuddyCli

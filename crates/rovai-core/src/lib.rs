@@ -85,6 +85,7 @@ pub mod team_tool;
 pub mod team_tool_catalog;
 #[cfg(windows)]
 mod windows_runtime_entrypoint;
+pub mod zcode;
 
 mod runtime_pricing;
 

@@ -4,7 +4,7 @@ contract: semantic-judge-views
 version: 7
 authority: semantic-judge-model-visible-evidence-and-reconciliation
 status: accepted
-source_version: v1.57
+source_version: v1.58
 last_updated: 2026-09-11
 ---
 

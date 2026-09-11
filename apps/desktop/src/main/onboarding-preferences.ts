@@ -29,6 +29,7 @@ const ADAPTER_KINDS = new Set<AdapterKind>([
   'cursor-agent',
   'kimi-code-cli',
   'grok-build',
+  'zcode-app',
   'antigravity-app'
 ])
 const STEPS = new Set<OnboardingStep>(['welcome', 'member', 'runtime'])

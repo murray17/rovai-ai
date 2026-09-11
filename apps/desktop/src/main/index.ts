@@ -1439,6 +1439,18 @@ ipcMain.handle(
 )
 
 ipcMain.handle(
+  'rovai:navigation-preferences-set-project-name',
+  (_event, targetKey: unknown, name: unknown) => {
+    if (typeof targetKey !== 'string' || (name !== null && typeof name !== 'string')) {
+      throw new Error('Invalid Project display name request')
+    }
+    return projectAccessTransactions.run(() =>
+      requireNavigationPreferences().setProjectName(targetKey, name)
+    )
+  }
+)
+
+ipcMain.handle(
   'rovai:navigation-preferences-remove-project',
   async (_event, targetKey: unknown, relatedCampIds: unknown) => {
     if (typeof targetKey !== 'string' || !Array.isArray(relatedCampIds)) {

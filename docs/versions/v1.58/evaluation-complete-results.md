@@ -1,6 +1,6 @@
 ---
 document_type: implementation-evidence
-version: v1.57
+version: v1.58
 status: verified-with-limitations
 last_updated: 2026-09-11
 ---

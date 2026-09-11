@@ -277,6 +277,7 @@ pub enum MissingSendRecoveryBoundary {
     AntigravityPrintStdout,
     AcpEndTurnAssistantSuffix,
     PiAgentSettled,
+    ZcodeCompletedTurn,
 }
 
 impl MissingSendRecoveryBoundary {
@@ -287,6 +288,7 @@ impl MissingSendRecoveryBoundary {
             Self::AntigravityPrintStdout => "antigravity_print_stdout",
             Self::AcpEndTurnAssistantSuffix => "acp_end_turn_assistant_suffix",
             Self::PiAgentSettled => "pi_agent_settled",
+            Self::ZcodeCompletedTurn => "zcode_completed_turn",
         }
     }
 
@@ -295,8 +297,11 @@ impl MissingSendRecoveryBoundary {
             Self::CodexCompletedTurn => matches!(adapter_kind, AdapterKind::CodexCli),
             Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
             Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
-            Self::AcpEndTurnAssistantSuffix => adapter_kind.uses_acp(),
+            Self::AcpEndTurnAssistantSuffix => {
+                adapter_kind.uses_acp() && adapter_kind != AdapterKind::ZcodeApp
+            }
             Self::PiAgentSettled => matches!(adapter_kind, AdapterKind::Pi),
+            Self::ZcodeCompletedTurn => matches!(adapter_kind, AdapterKind::ZcodeApp),
         }
     }
 }
@@ -5226,7 +5231,19 @@ fn has_terminal_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> R
           + (SELECT COUNT(*) FROM action_execution
              WHERE agent_run_id = ?1
                AND (status IN ('prepared', 'executing')
-                    OR (status = 'unknown' AND unknown_disposition = 'active')))
+                    OR (status = 'unknown' AND unknown_disposition = 'active'))
+               AND NOT (status IN ('executing', 'unknown') AND control_mode = 'intercepted'
+                 AND EXISTS(SELECT 1 FROM agent_run AS owner
+                   JOIN agent_run_execution_evidence AS evidence ON evidence.agent_run_id = owner.id
+                   WHERE owner.id = action_execution.agent_run_id AND owner.runtime_adapter_kind = 'zcode-app'
+                     AND owner.execution_epoch = action_execution.source_agent_run_execution_epoch
+                     AND evidence.execution_epoch = owner.execution_epoch AND evidence.event_type = 'runtime.action'
+                     AND json_extract(evidence.payload_preview_json, '$.zcodeBackground.toolCallId') = action_execution.native_item_id
+                     AND evidence.sequence = (SELECT MAX(latest.sequence) FROM agent_run_execution_evidence AS latest
+                       WHERE latest.agent_run_id = owner.id AND latest.execution_epoch = owner.execution_epoch
+                         AND latest.event_type = 'runtime.action'
+                         AND json_extract(latest.payload_preview_json, '$.zcodeBackground.toolCallId') = action_execution.native_item_id)
+                     AND json_extract(evidence.payload_preview_json, '$.zcodeBackground.status') IN ('running', 'lost'))))
           + (SELECT COUNT(*) FROM runtime_delivery_checkpoint
              WHERE agent_run_id = ?1 AND status IN ('pending', 'delivering', 'failed'))
           + (SELECT COUNT(*) FROM runtime_input_delivery
@@ -6470,7 +6487,9 @@ mod tests {
     #[test]
     fn recovery_boundaries_are_closed_over_the_product_adapter_catalog() {
         for adapter_kind in AdapterKind::ALL {
-            let expected = if adapter_kind.uses_acp() {
+            let expected = if adapter_kind == AdapterKind::ZcodeApp {
+                MissingSendRecoveryBoundary::ZcodeCompletedTurn
+            } else if adapter_kind.uses_acp() {
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix
             } else {
                 match adapter_kind {
@@ -6489,6 +6508,7 @@ mod tests {
                 MissingSendRecoveryBoundary::AntigravityPrintStdout,
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
                 MissingSendRecoveryBoundary::PiAgentSettled,
+                MissingSendRecoveryBoundary::ZcodeCompletedTurn,
             ] {
                 assert_eq!(
                     boundary.is_compatible_with(adapter_kind),
@@ -8572,6 +8592,49 @@ mod tests {
                 params![agent_run_id, execution_epoch, now],
             )
             .unwrap();
+
+        // The existing terminal-safety owner also covers ZCode's narrow
+        // background exception. Roll back this branch before shutdown checks.
+        {
+            let tx = database.connection_mut().transaction().unwrap();
+            tx.execute("DELETE FROM approval WHERE id = 'planned-approval'", [])
+                .unwrap();
+            tx.execute(
+                "DELETE FROM runtime_delivery_checkpoint WHERE id = 'planned-delivery'",
+                [],
+            )
+            .unwrap();
+            tx.execute("UPDATE action_execution SET control_mode = 'intercepted', native_item_id = 'background-tool', status = 'unknown', unknown_disposition = 'active' WHERE id = 'planned-action'", []).unwrap();
+            tx.execute(
+                "UPDATE agent_run SET runtime_adapter_kind = 'zcode-app' WHERE id = ?1",
+                [&agent_run_id],
+            )
+            .unwrap();
+            assert!(has_terminal_safety_blocker(&tx, &agent_run_id).unwrap());
+            tx.execute(r#"INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                VALUES ('background-proof', ?1, ?2, 100000, 'runtime.action', 'command', 'updated', '{"zcodeBackground":{"toolCallId":"background-tool","status":"running"}}', 0, 0, ?3)"#, params![agent_run_id, execution_epoch, now]).unwrap();
+            assert!(!has_terminal_safety_blocker(&tx, &agent_run_id).unwrap());
+            tx.execute(
+                "UPDATE agent_run SET runtime_adapter_kind = 'codex' WHERE id = ?1",
+                [&agent_run_id],
+            )
+            .unwrap();
+            assert!(has_terminal_safety_blocker(&tx, &agent_run_id).unwrap());
+            tx.execute(
+                "UPDATE agent_run SET runtime_adapter_kind = 'zcode-app' WHERE id = ?1",
+                [&agent_run_id],
+            )
+            .unwrap();
+            tx.execute("UPDATE action_execution SET status = 'prepared', unknown_disposition = NULL WHERE id = 'planned-action'", []).unwrap();
+            assert!(has_terminal_safety_blocker(&tx, &agent_run_id).unwrap());
+            tx.execute("UPDATE action_execution SET status = 'unknown', unknown_disposition = 'active' WHERE id = 'planned-action'", []).unwrap();
+            tx.execute(r#"INSERT INTO agent_run_execution_evidence(id, agent_run_id, execution_epoch, sequence, event_type, kind, phase, payload_preview_json, content_byte_count, is_truncated, occurred_at)
+                VALUES ('background-ended', ?1, ?2, 100001, 'runtime.action', 'command', 'failed', '{"zcodeBackground":{"toolCallId":"background-tool","status":"failed"}}', 0, 0, ?3)"#, params![agent_run_id, execution_epoch, now]).unwrap();
+            assert!(
+                has_terminal_safety_blocker(&tx, &agent_run_id).unwrap(),
+                "a historical running event cannot bypass an unsettled final Action result"
+            );
+        }
 
         let execution = ExecutionRuntimeService::default()
             .load_agent_run_execution(&database, &agent_run_id, execution_epoch)

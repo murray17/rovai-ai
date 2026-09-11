@@ -23,6 +23,7 @@ last_updated: 2026-09-07
 | `cursor-agent` | Cursor Agent | ACP v1 | `run_level` | 仅采用 ACP 标准 Session/Prompt 终态；`cursor/update_todos`、`cursor/task`、`cursor/generate_image` 保持私有且不生成 Activity，未知 Cursor 扩展 fail closed；认证和结构化工具事件尚未完成真实 admission | 私有 request 路由、私有 notification 隔离与 Runtime-level unknown fallback fixture 已建立 | `2026.08.11-e8db854` 隔离探测通过 initialize；authenticate 超时且未取得 authenticated Session，因此无 completion/tool smoke，不声明细粒度 coverage |
 | `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；成功 Edit/Write terminal 的唯一标准 location 可独立生成文件操作行；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi path-only、run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | 既有 prompt/Shell/cancel/Built-in 矩阵通过；[`0.40.1` post-fix 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过；`run_level` 只表示缺事件时不补造细粒度 Activity |
 | `grok-build` | Grok Build | ACP v1 | `run_level` | 标准 ACP tool update 按既有安全归一；`_x.ai/*` notification 保持 metadata，普通 assistant text 原样进入 agent text Evidence；缺少结构化 Tool 事件时不补造细粒度 Activity | Grok run-level mapping、官方 config、generic agent-text 与 Missing-Send fixture 已建立 | macOS arm64 与 Windows x64 已分别用 `grok 1.0.5` + MiniMax-M3 通过真实 Deep Probe、AgentRun 与 cold resume；`1.0.13` 的 v1.52 文件矩阵连续两次一成一败，连接已证实但文件 Tool 能力未达可重复门槛；Usage/Cost 不从 vendor metadata 推断 |
+| `zcode-app` | ZCode | `zcode-app-server-v1` | `fine_grained` | 原生完整 tool_call 与同 ID result；Read/Write/Edit/Bash 映射既有 typed kind，未知工具保持 other；reasoning 不成为公开正文 | 原生事件 fencing 与 hunk 校验 unit fixture；继承 Core 生命周期 | 官方 App 3.11.2 / kernel 0.16.5 原始 wire 已验证；生产无模型 Probe 通过，产品 Run 验收进行中，macOS arm64 Preview |
 | `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Grep/WebSearch 分别映射 file_search/web_search；只把名称精确为 WebSearch 的 `input.query` 投影为 Search Operation，started→terminal 自包含；ToolSearch 不是 WebSearch；成功 matching Edit 形成同 Activity 的 `exact_mutation`，Write 的结构化 update 结果可确认编辑；create 因空文件假阳性不升级为 add | partial + complete message 去重、command、WebSearch/ToolSearch 边界、Edit/Write、narration/retry、路径冲突、empty-existing 与私有相邻字段排除 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；[`2.1.236` Write 终态与文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
 | `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index`；`grep_search/search/search_web` 分别映射 file_search/search/web_search；只公开 Shell CommandLine，当前无准入的公开 query wire；旧版 text 保持 run-level | stream-json command/lifecycle/output、三种 search kind、非 Shell 输入排除与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.22` 真实 `search_web`/`grep_search` wire 已核验；`1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
 
@@ -314,3 +315,10 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。`grep_sea
 
 - Copilot 的 Core MCP projection 使用稳定逻辑名保留 Evidence 身份，同时在动态 Context 中公布当前 Runtime 实际暴露名；模型必须调用 Context 映射中的 `runtimeName`。
 - Kiro 的 Team bridge 通过 `ROVAI_TEAM_SCHEMA_DIALECT=kiro-bedrock-v1` 暴露 Bedrock 可接受的 `camp.read` input schema；Core 仍使用完整 canonical schema 做输入验证。
+
+## ZCode 原生来源
+
+`tool.updated.result` 的公开路径只来自同一 ToolCall 的完整 input.file_path。Edit 的 native display.file_diff
+需路径、hunk 和计数全都一致；Write 只有 operation 时不补造 Diff。具体准入见
+[Runtime File Change Observation v5](../contracts/runtime-file-change-observation-v5.md)。该新 Runtime 复用已有 typed kind
+分类规则，不改变现有 Runtime 的字段解释，因此保持 activity-v4，无历史回写。

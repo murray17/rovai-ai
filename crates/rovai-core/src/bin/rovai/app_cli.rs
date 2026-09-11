@@ -23,7 +23,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const SETTLEMENT_GRACE: Duration = Duration::from_secs(5);
 const CONTEXT_ENV: &str = "ROVAI_APP_AUTOMATION_CONTEXT";
-const ADAPTER_KINDS: [&str; 13] = [
+const ADAPTER_KINDS: [&str; 14] = [
     "codex-cli",
     "opencode-cli",
     "copilot-cli",
@@ -36,6 +36,7 @@ const ADAPTER_KINDS: [&str; 13] = [
     "cursor-agent",
     "kimi-code-cli",
     "grok-build",
+    "zcode-app",
     "antigravity-app",
 ];
 
@@ -2043,30 +2044,34 @@ mod tests {
     }
 
     #[test]
-    fn member_runtime_configuration_admits_grok_build() {
-        let flags = Flags::parse(&[
-            "--agent-id".into(),
-            "agent_13".into(),
-            "--expected-version".into(),
-            "1".into(),
-            "--adapter".into(),
-            "grok-build".into(),
-            "--runtime-default".into(),
-            "--permission-schema-version".into(),
-            "1".into(),
-            "--permissions-json".into(),
-            r#"{"permission_mode":"bypassPermissions"}"#.into(),
-        ])
-        .unwrap();
-        let params = member_runtime_set_params(&flags).unwrap();
+    fn member_runtime_configuration_admits_native_runtime_defaults() {
+        for (adapter, permission_mode) in
+            [("grok-build", "bypassPermissions"), ("zcode-app", "yolo")]
+        {
+            let flags = Flags::parse(&[
+                "--agent-id".into(),
+                "agent_13".into(),
+                "--expected-version".into(),
+                "1".into(),
+                "--adapter".into(),
+                adapter.into(),
+                "--runtime-default".into(),
+                "--permission-schema-version".into(),
+                "1".into(),
+                "--permissions-json".into(),
+                json!({ "permission_mode": permission_mode }).to_string(),
+            ])
+            .unwrap();
+            let params = member_runtime_set_params(&flags).unwrap();
 
-        assert_eq!(params["adapterKind"], "grok-build");
-        assert_eq!(params["model"]["mode"], "runtime_default");
-        assert_eq!(params["permissions"]["adapterKind"], "grok-build");
-        assert_eq!(
-            params["permissions"]["values"]["permission_mode"],
-            "bypassPermissions"
-        );
+            assert_eq!(params["adapterKind"], adapter);
+            assert_eq!(params["model"]["mode"], "runtime_default");
+            assert_eq!(params["permissions"]["adapterKind"], adapter);
+            assert_eq!(
+                params["permissions"]["values"]["permission_mode"],
+                permission_mode
+            );
+        }
     }
 
     #[test]

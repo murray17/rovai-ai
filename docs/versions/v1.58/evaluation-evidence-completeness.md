@@ -1,6 +1,6 @@
 ---
 document_type: implementation-plan
-version: v1.57
+version: v1.58
 status: in-progress
 last_updated: 2026-09-10
 ---

@@ -50,6 +50,7 @@ pub enum AdapterKind {
     CursorAgent,
     KimiCodeCli,
     GrokBuild,
+    ZcodeApp,
     AntigravityApp,
 }
 
@@ -97,7 +98,7 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::CodexCli,
         Self::Pi,
         Self::OpencodeCli,
@@ -112,6 +113,7 @@ impl AdapterKind {
         Self::CursorAgent,
         Self::KimiCodeCli,
         Self::GrokBuild,
+        Self::ZcodeApp,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -129,6 +131,7 @@ impl AdapterKind {
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi-code-cli",
             Self::GrokBuild => "grok-build",
+            Self::ZcodeApp => "zcode-app",
             Self::AntigravityApp => "antigravity-app",
         }
     }
@@ -148,6 +151,7 @@ impl AdapterKind {
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi",
             Self::GrokBuild => "grok",
+            Self::ZcodeApp => "ZCode",
             Self::AntigravityApp => "agy",
         }
     }
@@ -163,6 +167,7 @@ impl AdapterKind {
             Self::Pi => &["pi"],
             Self::KimiCodeCli => &["kimi"],
             Self::GrokBuild => &["grok"],
+            Self::ZcodeApp => &["ZCode"],
             Self::CodexCli => &["codex"],
             Self::OpencodeCli => &["opencode"],
             Self::CopilotCli => &["copilot"],
@@ -191,6 +196,7 @@ impl AdapterKind {
             Self::CursorAgent => "Cursor Agent",
             Self::KimiCodeCli => "Kimi Code",
             Self::GrokBuild => "Grok Build",
+            Self::ZcodeApp => "ZCode",
             Self::AntigravityApp => "Antigravity",
         }
     }
@@ -208,6 +214,7 @@ impl AdapterKind {
                 | Self::CursorAgent
                 | Self::KimiCodeCli
                 | Self::GrokBuild
+                | Self::ZcodeApp
         )
     }
 
@@ -226,6 +233,7 @@ impl AdapterKind {
             Self::CursorAgent => "ROVAI_CURSOR_BIN",
             Self::KimiCodeCli => "ROVAI_KIMI_BIN",
             Self::GrokBuild => "ROVAI_GROK_BIN",
+            Self::ZcodeApp => "ROVAI_ZCODE_BIN",
             Self::AntigravityApp => "ROVAI_ANTIGRAVITY_BIN",
         }
     }
@@ -250,6 +258,7 @@ impl AdapterKind {
             | Self::CursorAgent
             | Self::KimiCodeCli
             | Self::GrokBuild
+            | Self::ZcodeApp
             | Self::AntigravityApp => PublicOutputMode::ExplicitSendOnly,
         }
     }
@@ -271,6 +280,7 @@ impl AdapterKind {
             | Self::TraeCnCli
             | Self::KimiCodeCli
             | Self::GrokBuild
+            | Self::ZcodeApp
             | Self::AntigravityApp => MissingSendRecoveryMode::IfNoAcceptedSend,
             Self::CursorAgent => MissingSendRecoveryMode::Disabled,
         }
@@ -295,6 +305,7 @@ impl FromStr for AdapterKind {
             "cursor-agent" => Ok(Self::CursorAgent),
             "kimi-code-cli" => Ok(Self::KimiCodeCli),
             "grok-build" => Ok(Self::GrokBuild),
+            "zcode-app" => Ok(Self::ZcodeApp),
             "antigravity-app" => Ok(Self::AntigravityApp),
             _ => anyhow::bail!("unsupported Adapter kind: {value}"),
         }
@@ -3694,6 +3705,7 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::CursorAgent
         | AdapterKind::KimiCodeCli
         | AdapterKind::GrokBuild => "acp-v1",
+        AdapterKind::ZcodeApp => crate::zcode::PROTOCOL,
     }
 }
 
@@ -5308,6 +5320,7 @@ mod slow_tests {
                 AdapterKind::CursorAgent,
                 AdapterKind::KimiCodeCli,
                 AdapterKind::GrokBuild,
+                AdapterKind::ZcodeApp,
             ]
         );
     }

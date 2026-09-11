@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-09-08
+last_updated: 2026-09-10
 ---
 
 # Agent Runtime 兼容性清单
@@ -1063,3 +1063,101 @@ ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview�
 - [Antigravity MCP Servers](https://antigravity.google/docs/mcp)
 - [Antigravity Plugins](https://antigravity.google/docs/plugins)
 - [Antigravity CLI Permissions](https://antigravity.google/docs/cli/permissions)
+
+## 官方 ZCode App 接入（2026-09-10）
+
+- 来源：Homebrew 官方 cask `zcode` 3.11.2，未修改内核 `glm/zcode.cjs` 0.16.5；独立 Node.js 26.8.1。
+- 启动：所有版本检测、能力 Probe 和正式 Host 均为独立 Node → Rovai 生命周期 prelude → 未修改的官方内核。
+  App 仅提供文件；社区 `zcode-app-cli`、`zcode-acp` 不参与。真实权限/会话/冷恢复/强杀验收的 App 注册监测均为 0。
+  bridge `zcode-native-node-transport-v3` 的独立 companion 回收原生 detached Bash 组；实际 Core 和原生 Host
+  分别 SIGKILL 后，观察到的子进程全部退出，等待 35 秒没有延迟文件。普通 cold resume/取消回归也通过。
+- BYOK：只读官方 `~/.zcode/cli/config.json`、`zcode.json`、`.zcode/config.json`；MiniMax native default
+  和显式 `minimax/MiniMax-M3` 均通过真实 Core 执行。配置、内核和 Node identity 变化使旧 Host 不再复用。
+- 生产路径通过：Camp 内精确 Session A→B→A、并发独立 Host、配置变更、Core 重启后 exact resume、
+  无效 Session 一次 continuity loss、完整 Built-in CLI、Gather/过期 lease、Missing-Send 三种场景。
+- manual、threshold auto、provider overflow + reactive retry 的真实 Core completed observation 与下一 input
+  Bootstrap revision 1 requested/acknowledged/accepted 均通过；auto/reactive 的真实模型请求还确认补发内容。
+  auto compact 后重启 Core，再恢复同一 Session 和 revision 1 补发也已通过；原始协议另有 compact fail/cancel 不触发完成的证据。
+- Skills 更新/禁用/重新启用/取消分配/删除、项目同名保护和重启恢复通过。MCP stdio/HTTP、同名完整定义优先、
+  更新后新 Host、相邻成员隔离、取消分配/重分配/删除后恢复原生 Server 均通过。
+- 文件与输出：Read 不进入 Files Changed；Write 与空文件实际字节、路径事实、Edit 结构化 update Diff、
+  实时与历史投影通过。stdout/stderr/mixed/empty/exit 7/large 六项通过，大输出实际 131100 字节保存到 blob。
+- 权限：build allow-once/deny、plan 无写入、cancelled 终态通过；取消后等待 35 秒仍无延迟文件。
+  原生 permission.resolved deny 无普通 Tool result，已单独终结工具；URL-only MCP 的默认 HTTP 与 http_headers
+  按官方配置规则转换，独立 parser 回归覆盖。
+- Usage：只采集 provider Turn input/output/cacheRead；cacheWrite/reasoning/uncached/cost 保持未知，
+  不把 Turn 聚合伪装成单次请求命中率。真实数据与稀疏字段 parser 已验证。
+- 差异：user FirstPayload 不是 system 注入；重注入发生在下一 eligible input；Write 无原生 before/after 时
+  只有路径事实，不编造 Diff；shell 删除/重命名不推导为原生文件变更。GUI 回调未接入。
+  账号登录与 BYOK 共用原生终端配置；图片沿用授权路径和原生 Read，见下方 v5 补充。
+- 平台：macOS arm64 保持 Preview，macOS x64/Windows x64 保持 NotQualified；未冻结的全部资格轴不能由
+  已通过的功能流替代，也不把 Preview 称为 First-Class 完成。
+
+逐项证据与剩余资格项见 [v1.57 验收](versions/v1.57/implementation-plan.md)、
+[脱敏证据清单](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)和[接入矩阵](research/zcode-runtime.md)。
+
+
+### PR #323 v4：原生环境 Probe 与后台任务生命周期
+
+在相同官方版本、平台和 MiniMax BYOK 下，普通 Probe 沿用实际 HOME/USERPROFILE 及 ZCode 原生存储配置，
+仅 cwd/socket 使用私有临时目录。原生方法观察只有 `workspace/readState`、deferred `session/create`、
+`session/subscribe`、`session/setMode`，关闭自动标题，没有测试 Prompt、生成、压缩或工具调用；临时资源已清理。
+检查只证明基础连接和配置加载，不把 Adapter 已实现映射列为当次逐项实测，不保证零联网/零落盘。
+最低版本与复合指纹门禁保留；代码输入矩阵允许 0.17.0，不要求所有新版本先重新资格化。
+
+后台任务以原生 taskId/ToolCallId/Session/Input/Turn 保持原始 Run/epoch 归属，`backgrounded` 保持运行且退出码未知。
+前台可完成并撤销原 Run 的 bundled CLI lease；Host 有后台工作时不被 TTL/容量回收或跨成员复用，原成员优先续接原 Host。
+请求进入时固定 Rovai CLI context，并沿 Node 异步执行链传给命令；下一 Run 重绑 Host 不续期旧后台命令的 lease。
+无请求归属的启动使用空 lease。真实 OS 子进程回归覆盖延迟启动和 context 重绑，普通 Probe 不创建这类内部快照。
+取消仅处理当前 input 的任务，取消收口保留后台观察；明确关闭 Host 才清理其受管组，并写回中断或清理未确认的事实。
+原生无 Rovai Input 的自动模型结果通知轮次不能获得新业务授权，按结构化来源和精确执行 ID 请求停止并留下诊断；
+它不作为已接入的自动新 Run 能力。任务实际结果仍保留在原 Run。
+
+v4 的文件矩阵已重新通过：Read、Write、Edit、空文件与历史投影；Edit 的原生 Diff 为真实 +1/-1，
+Read 不进入 Files Changed，缺少原生 patch 的 Write 不编造行数。独立 Node 进程回归验证 shell close 后的后代仍被管理，
+关闭 Host 回收这些确切组且不触及夹具外独立进程；该测试不等同于任意自行脱离已登记进程组的后代都可回收。
+实际执行记录与长后台服务验收见 [v4 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。
+本次没有重跑全部历史 Golden Flows，也未验证 x64/Windows 或授予新的平台资格。
+
+
+### PR #323 v5：账号范围与路径图片验收
+
+官方终端 `/login` 生成的 Z.ai／BigModel Coding Plan 配置与 BYOK 共用原生配置读取和 runtimeModel。
+已用官方配置结构做解析、目录、缺失凭据指引和秘密不出公开结果的回归；普通 Probe 使用
+`zcode.native_configuration` 记录配置加载，不再把它标成仅 BYOK。App-only `.zcode/v2` 登录态尚不能
+直接替代终端配置；本轮没有完成真实 OAuth 登录或账号订阅验收，不能把配置 fixture 算作真实账号通过。
+
+图片沿用 Codex、Claude Code 和普通 ACP 的授权文件路径，由 ZCode 原生 Read 处理图片并交给模型；
+保留模型原生 `supportsImages` 字段，不新增上传、图片发送证据表或共享 Context/schema 改动。
+在相同官方版本、独立 Node、隔离 HOME/Core/Skill Library 和 MiniMax-M3 下，真实产品流程通过：
+两张普通 Camp 附件的随机六位数字均被准确识别；只有原生 Read 工具，没有 attachment upload 或结构化图片 Prompt。
+Read 活动可查询，不产生 Files Changed 或修改 Diff；重启 Core 后精确恢复同一 Session，并正确回答之前的图片内容。
+该流程同时观察到普通 Probe 仅连接/初始化、ZCode GUI 注册数为 0。
+
+首轮使用低分辨率点阵字体时，原生 Read 成功但模型误读一个数字，因此该次答案断言失败，未算通过。
+改用清晰系统字体后保留相同准确识别断言并通过。此前撤回的上传方案测试也不计入路径方案证据。
+这只证明当前模型/图片夹具和恢复流程，不代表全部图片格式、上限尺寸或所有模型均完成视觉资格化。
+最终路径实现的本地门禁与脱敏运行摘要见 [v5 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。
+
+### PR #323 v6：App 账号配置与失败终态
+
+官方 App 3.11.2 / 内核 0.16.5 / Node 26.8.1 未改变，Core 随 main 更新为 0.2.3。终端配置缺失时，
+只读 App 发布的 `.zcode/v2/config.json` 与 family 选择，保留 `ZCODE_DATA_BASE_DIR` 原生解析与 digest。
+模型目录通过官方内存 provider registry 初始化；不复制用户 Home、写 CLI 配置或解密 credentials 文件。
+普通原生环境 Probe 观察到账号配置加载、GLM-5.3/Flash 目录及无消息初始化通过，没有生成请求。
+
+真实账号生成**未通过**。隔离 Home/存储/Core/Skill Library 使用用户授权的账号配置副本，独立 app-server
+请求 GLM-5.3 时返回 `captcha verify failed`（3007，`auth_failed`，不可重试）；用户确认 App 内 GLM-5.3 可正常对话。
+官方 Renderer 负责的临时人机验证头不在持久配置中。Adapter 不再把已有 Authorization 当作运行时验证已完成，
+而是明确拒绝该回调；Start Plan、账号刷新及 Team Plan 动态凭据不能宣称已接入。
+
+另修复原生 `error` 终态被等待 `idle`、进而断开 transport 的缺陷。回归复现了 Core 收不到 provider 失败；
+修复后失败通过原 Session/Turn 输出固定脱敏消息，前台工具/审批/请求仍须收敛，成功 Final 继续要求 idle。
+失败本身不注销 Host 或后台任务。独立 Node/no-GUI、原生 HOME Probe 和路径图片等既有边界不变。
+
+`smoke-zcode-account.mjs` 默认要求真实随机 nonce 回复；`--expect-auth-failure` 只验证不可重试的鉴权拒绝
+及没有成功 Final，明确不计为账号生成通过。最终执行结果和未覆盖项见
+[v6 修订证据](versions/v1.57/evidence/zcode-macos-arm64-2026-09-10.json)。用户随后确认免费账号并接受按 zcode-acp
+当前边界先交付 Preview：个人 Coding Plan 原生凭据透传、Start Plan 验证回调明确拒绝。Z.ai/BigModel 的
+配置回归覆盖签名凭据不改写、显式套餐选择、禁用态与公开目录脱敏；个人 Coding Plan 仍无真实订阅验收，
+Start Plan 仍无成功模型回复，不因允许交付而提升能力证据或平台资格。

@@ -4,7 +4,7 @@ contract: user-automation
 version: 4
 authority: desktop-user-automation-and-evaluation-host
 status: accepted
-source_version: v1.57
+source_version: v1.58
 last_updated: 2026-09-10
 ---
 
