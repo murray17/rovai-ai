@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { EXECUTION_TASK_JUDGE_PROFILE, EXECUTION_OUTCOME_RUBRIC, DELIVERY_TASK_JUDGE_PROFILE, DELIVERY_OUTCOME_RUBRIC, WITNESS_TASK_JUDGE_PROFILE, WITNESS_OUTCOME_RUBRIC, CLAIM_TASK_JUDGE_PROFILE, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, usesObservableMetrics, OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
+import { SOURCE_TASK_JUDGE_PROFILE, SOURCE_OUTCOME_RUBRIC, EXECUTION_TASK_JUDGE_PROFILE, EXECUTION_OUTCOME_RUBRIC, DELIVERY_TASK_JUDGE_PROFILE, DELIVERY_OUTCOME_RUBRIC, WITNESS_TASK_JUDGE_PROFILE, WITNESS_OUTCOME_RUBRIC, CLAIM_TASK_JUDGE_PROFILE, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, usesObservableMetrics, OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -458,7 +458,7 @@ export function validateJudgeViewPack(artifact, { configuration, sourcePack = nu
     }
   }
   const kinds = new Set((modelInput.evidenceSegments ?? []).map((segment) => segment.kind))
-  if (view === 'outcome' && [...kinds].some((kind) => !(usesReceipts(configuration.payload.taskProfile?.version) ? ['artifact', 'final_response', 'verification_receipt', 'delivery_message'] : configuration.payload.taskProfile ? ['artifact', 'final_response'] : ['code', 'final_response']).includes(kind))) {
+  if (view === 'outcome' && [...kinds].some((kind) => !(usesReceipts(configuration.payload.taskProfile?.version) ? ['artifact', 'final_response', 'verification_receipt', 'delivery_message', ...(configuration.payload.taskProfile?.version === SOURCE_TASK_JUDGE_PROFILE ? ['task_source'] : [])] : configuration.payload.taskProfile ? ['artifact', 'final_response'] : ['code', 'final_response']).includes(kind))) {
     throw new Error('Outcome Judge model input contains process evidence')
   }
   if (view === 'process' && !configuration.payload.taskProfile) {
@@ -1135,8 +1135,8 @@ function projectEvidenceSegments(source, registry, view, taskProfile) {
   const receipts = usesReceipts(taskProfile?.version)
   const sourceSegments = (source.untrustedEvidence ?? [])
     .filter((segment) => allowedKinds.has(segment.kind) || receipts && (segment.kind === 'test_output'
-      || segment.kind === 'comment' && (segment.segmentId.startsWith('delivery-message:') || view === 'process' && segment.segmentId.startsWith('task-description:'))))
-    .filter(segment => view !== 'outcome' || ![DELIVERY_TASK_JUDGE_PROFILE, EXECUTION_TASK_JUDGE_PROFILE].includes(taskProfile?.version) || !segment.segmentId.startsWith('delivery-message:historical:') && !containsParticipantProse(segment, source.untrustedEvidence))
+      || segment.kind === 'comment' && (segment.segmentId.startsWith('delivery-message:') || view === 'process' && segment.segmentId.startsWith('task-description:') || taskProfile?.version === SOURCE_TASK_JUDGE_PROFILE && segment.segmentId.startsWith('task-source:'))))
+    .filter(segment => view !== 'outcome' || ![DELIVERY_TASK_JUDGE_PROFILE, EXECUTION_TASK_JUDGE_PROFILE, SOURCE_TASK_JUDGE_PROFILE].includes(taskProfile?.version) || !segment.segmentId.startsWith('delivery-message:historical:') && !containsParticipantProse(segment, source.untrustedEvidence))
     .sort(segmentProjectionOrder)
   const codePaths = new Map((source.workspaceChanges ?? [])
     .filter((change) => change.boundedContextSegmentId)
@@ -1151,7 +1151,7 @@ function projectEvidenceSegments(source, registry, view, taskProfile) {
         : `${segment.kind}-${String(counts[segment.kind]).padStart(3, '0')}`
     return compactObject({
       segmentId,
-      kind: segment.kind === 'test_output' ? 'verification_receipt' : segment.kind === 'comment' ? (segment.segmentId.startsWith('delivery-message:') ? 'delivery_message' : 'task_context') : segment.kind,
+      kind: segment.kind === 'test_output' ? 'verification_receipt' : segment.kind === 'comment' ? (segment.segmentId.startsWith('delivery-message:') ? 'delivery_message' : segment.segmentId.startsWith('task-source:') ? 'task_source' : 'task_context') : segment.kind,
       ...(view === 'process' && segment.kind !== 'code'
         ? { authorPseudonym: segment.authorPseudonym ?? null }
         : {}),
@@ -1692,6 +1692,7 @@ function collectLocalEvidenceIds(value) {
 }
 
 function viewPolicy(view, taskProfile) {
+  if (taskProfile?.version === SOURCE_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-10`
   if (taskProfile?.version === EXECUTION_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-9`
   if (taskProfile?.version === DELIVERY_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-8`
   if (taskProfile?.version === WITNESS_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-7`
@@ -1703,6 +1704,7 @@ function viewPolicy(view, taskProfile) {
 }
 
 function viewRubric(view, taskProfile) {
+  if (taskProfile?.version === SOURCE_TASK_JUDGE_PROFILE) return view === 'outcome' ? SOURCE_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === EXECUTION_TASK_JUDGE_PROFILE) return view === 'outcome' ? EXECUTION_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === DELIVERY_TASK_JUDGE_PROFILE) return view === 'outcome' ? DELIVERY_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === WITNESS_TASK_JUDGE_PROFILE) return view === 'outcome' ? WITNESS_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))

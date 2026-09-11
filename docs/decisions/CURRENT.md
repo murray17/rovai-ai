@@ -6,6 +6,8 @@ last_updated: 2026-09-07
 
 # 当前规范与决定理由导航
 
+结果 Judge 来源材料当前规范：[Semantic Judge Views v10](../contracts/semantic-judge-views-v10.md)；理由：[V1.58-D02](../versions/v1.58/decisions.md#v1-58-d02)。
+
 本页先连接当前规范，再连接形成这些边界的重要理由。历史版本决定不证明代码已经实现；实现状态仍需检查代码、Migration、测试和当前版本验收。
 
 完整规范内核迁移对应关系见[当前决策权威覆盖](AUTHORITY-COVERAGE.md)，旧数字 ID 查找见[迁移映射](LEGACY-MAP.md)。

@@ -932,3 +932,17 @@ test('v8 quarantines known participant prose embedded in a tool receipt without 
   assert.equal(containsParticipantProse({kind:'test_output',content:JSON.stringify({command:`python -c ${JSON.stringify(prose)}`,output:'word count: 62'})},segments),true)
   assert.equal(containsParticipantProse({kind:'test_output',content:JSON.stringify({command:'node --test tests/public.test.mjs',output:'12 checks passed'})},segments),false)
 })
+
+test('v10 Outcome admits task sources with local references while old profiles and process isolation stay unchanged', async()=>{
+ const {taskJudgeProfile}=await import('./context-judge-profile.mjs');const {readFile}=await import('node:fs/promises')
+ const scoring=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.8.json',import.meta.url)))
+ const fixture=dualViewFixture({buildPacks:false});const source=fixture.sourcePack
+ source.payload.untrustedEvidence.push({segmentId:'task-source:source-user',kind:'comment',authorPseudonym:null,visibility:'public_to_camp',content:JSON.stringify({sourceKind:'user_message',text:'Source tail ORBIT-74',characterCount:20,textState:'complete'}),evidenceReference:{artifactId:'evidence-index:fixture',evidenceId:'core.task-source:source-user'}})
+ for(const version of ['generic-task-v9','generic-task-v10']) {
+  const config=buildJudgeViewConfiguration({view:'outcome',provider:'fixture',snapshotId:'fixture-2026-09-10',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile({...scoring.cases['DEMO-110'],judgeProfile:version},'outcome')})
+  const pack=buildJudgeViewPack({view:'outcome',sourcePack:source,configuration:config,producerDigest:'a'.repeat(64)})
+  assert.equal(pack.payload.modelInput.evidenceSegments.some(s=>s.kind==='task_source'),version==='generic-task-v10')
+  assert.doesNotMatch(JSON.stringify(pack.payload.modelInput),/participant_message|source-user|evidence-index:fixture/)
+  assert.equal(validateJudgeViewPack(pack,{configuration:config,sourcePack:source}).artifactId,pack.artifactId)
+ }
+})

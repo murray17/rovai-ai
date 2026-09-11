@@ -141,9 +141,11 @@ const RECEIPT_REDACTION_POLICY = Object.freeze({
 const WITNESS_REDACTION_POLICY = Object.freeze({ ...RECEIPT_REDACTION_POLICY, policy: 'bounded-evaluation-context-v2', additionalSources: [...RECEIPT_REDACTION_POLICY.additionalSources, 'runtime.bound-native-command-supplement', 'runner.sealed-case-fixture'] })
 const DELIVERY_REDACTION_POLICY = Object.freeze({ ...WITNESS_REDACTION_POLICY, policy: 'bounded-evaluation-context-v3', outcomeDeliveryScope: 'final_and_latest_public_delivery', processProseOverlap: { characters: 128, stride: 16 } })
 const EXECUTION_REDACTION_POLICY = Object.freeze({ ...DELIVERY_REDACTION_POLICY, policy: 'bounded-evaluation-context-v4', relativeOrderScope: 'captured_events_within_same_run_and_epoch_only' })
+const SOURCE_REDACTION_POLICY = Object.freeze({ ...EXECUTION_REDACTION_POLICY, policy: 'bounded-evaluation-context-v5', additionalSources: [...EXECUTION_REDACTION_POLICY.additionalSources, 'core.task-source'], sourcePolicy: 'persisted-task-source-materials-v1' })
 function contentAllowed(segment, configuration) {
+  if (configuration.payload.redactionPolicyDigest === digest(SOURCE_REDACTION_POLICY) && segment.kind === 'comment' && segment.segmentId.startsWith('task-source:') && segment.evidenceReference?.evidenceId?.startsWith('core.task-source:')) return true
   if (semanticJudgeContentKindAllowed(segment.kind)) return true
-  if (![digest(RECEIPT_REDACTION_POLICY), digest(WITNESS_REDACTION_POLICY), digest(DELIVERY_REDACTION_POLICY), digest(EXECUTION_REDACTION_POLICY)].includes(configuration.payload.redactionPolicyDigest)) return false
+  if (![digest(RECEIPT_REDACTION_POLICY), digest(WITNESS_REDACTION_POLICY), digest(DELIVERY_REDACTION_POLICY), digest(EXECUTION_REDACTION_POLICY), digest(SOURCE_REDACTION_POLICY)].includes(configuration.payload.redactionPolicyDigest)) return false
   const id = segment.evidenceReference?.evidenceId ?? ''
   return segment.kind === 'test_output' && segment.segmentId.startsWith('verification-receipt:') && id.startsWith('runtime.command-receipt:')
     || segment.kind === 'comment' && (segment.segmentId.startsWith('task-description:') && id.startsWith('core.task-description:')
@@ -169,7 +171,7 @@ export function buildSemanticJudgeConfiguration({
     retryValidOutput: false
   }
 }) {
-  if (evaluationContextPolicy !== null && !['bounded-evaluation-context-v1', 'bounded-evaluation-context-v2', 'bounded-evaluation-context-v3', 'bounded-evaluation-context-v4'].includes(evaluationContextPolicy)) throw new Error('Unsupported evaluation context policy')
+  if (evaluationContextPolicy !== null && !['bounded-evaluation-context-v1', 'bounded-evaluation-context-v2', 'bounded-evaluation-context-v3', 'bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(evaluationContextPolicy)) throw new Error('Unsupported evaluation context policy')
   requireBoundedString(provider, 'Judge provider', 160)
   requireBoundedString(snapshotId, 'Judge snapshotId', 240)
   const promptA = promptTemplate('A')
@@ -196,7 +198,7 @@ export function buildSemanticJudgeConfiguration({
     packSchema: qualificationSchemaReference('judge-evidence-pack.schema.json'),
     replicaOutputSchema: qualificationSchemaReference('judge-replica-result.schema.json'),
     reviewSchema: qualificationSchemaReference('semantic-engineering-review.schema.json'),
-    redactionPolicyDigest: digest(evaluationContextPolicy === 'bounded-evaluation-context-v4' ? EXECUTION_REDACTION_POLICY : evaluationContextPolicy === 'bounded-evaluation-context-v3' ? DELIVERY_REDACTION_POLICY : evaluationContextPolicy === 'bounded-evaluation-context-v2' ? WITNESS_REDACTION_POLICY : evaluationContextPolicy ? RECEIPT_REDACTION_POLICY : CURRENT_REDACTION_POLICY),
+    redactionPolicyDigest: digest(evaluationContextPolicy === 'bounded-evaluation-context-v5' ? SOURCE_REDACTION_POLICY : evaluationContextPolicy === 'bounded-evaluation-context-v4' ? EXECUTION_REDACTION_POLICY : evaluationContextPolicy === 'bounded-evaluation-context-v3' ? DELIVERY_REDACTION_POLICY : evaluationContextPolicy === 'bounded-evaluation-context-v2' ? WITNESS_REDACTION_POLICY : evaluationContextPolicy ? RECEIPT_REDACTION_POLICY : CURRENT_REDACTION_POLICY),
     retrySchedule: structuredClone(retrySchedule),
     evidenceReferenceValidation: {
       mode: 'exact_pack_closure',
@@ -250,7 +252,7 @@ export function validateSemanticJudgeConfiguration(artifact) {
       || artifact.payload.rubricDigest !== digest(SEMANTIC_JUDGE_RUBRIC)) {
     throw new Error('Semantic Judge Configuration prompt or rubric digest is not frozen')
   }
-  if (![digest(LEGACY_REDACTION_POLICY), digest(CURRENT_REDACTION_POLICY), digest(RECEIPT_REDACTION_POLICY), digest(WITNESS_REDACTION_POLICY), digest(DELIVERY_REDACTION_POLICY), digest(EXECUTION_REDACTION_POLICY)]
+  if (![digest(LEGACY_REDACTION_POLICY), digest(CURRENT_REDACTION_POLICY), digest(RECEIPT_REDACTION_POLICY), digest(WITNESS_REDACTION_POLICY), digest(DELIVERY_REDACTION_POLICY), digest(EXECUTION_REDACTION_POLICY), digest(SOURCE_REDACTION_POLICY)]
     .includes(artifact.payload.redactionPolicyDigest)) {
     throw new Error('Semantic Judge Configuration content policy digest is unsupported')
   }
@@ -288,7 +290,7 @@ export function buildJudgeEvidencePack({
     pseudonym: pseudonyms.get(id),
     declaredRole: boundedNullableString(declaredRoles[id] ?? inferredRoles.get(id), 160)
   }))
-  if ([digest(CURRENT_REDACTION_POLICY), digest(RECEIPT_REDACTION_POLICY), digest(WITNESS_REDACTION_POLICY), digest(DELIVERY_REDACTION_POLICY), digest(EXECUTION_REDACTION_POLICY)].includes(configuration.payload.redactionPolicyDigest)) {
+  if ([digest(CURRENT_REDACTION_POLICY), digest(RECEIPT_REDACTION_POLICY), digest(WITNESS_REDACTION_POLICY), digest(DELIVERY_REDACTION_POLICY), digest(EXECUTION_REDACTION_POLICY), digest(SOURCE_REDACTION_POLICY)].includes(configuration.payload.redactionPolicyDigest)) {
     for (const segment of untrustedEvidence ?? []) {
       if (!contentAllowed(segment, configuration)) {
         throw new Error(`Judge current content policy excludes ${segment.kind}`)
@@ -474,7 +476,7 @@ export function validateJudgeEvidencePack(artifact, {
   if (artifact.payload.untrustedEvidence.filter((segment) => segment.kind === 'final_response').length !== 1) {
     throw new Error('Judge Evidence Pack final response segment is not exact')
   }
-  if ([digest(CURRENT_REDACTION_POLICY), digest(RECEIPT_REDACTION_POLICY), digest(WITNESS_REDACTION_POLICY), digest(DELIVERY_REDACTION_POLICY), digest(EXECUTION_REDACTION_POLICY)].includes(configuration.payload.redactionPolicyDigest)) {
+  if ([digest(CURRENT_REDACTION_POLICY), digest(RECEIPT_REDACTION_POLICY), digest(WITNESS_REDACTION_POLICY), digest(DELIVERY_REDACTION_POLICY), digest(EXECUTION_REDACTION_POLICY), digest(SOURCE_REDACTION_POLICY)].includes(configuration.payload.redactionPolicyDigest)) {
     for (const segment of artifact.payload.untrustedEvidence) {
       if (!contentAllowed(segment, configuration)) {
         throw new Error(`Judge current content policy excludes ${segment.kind}`)

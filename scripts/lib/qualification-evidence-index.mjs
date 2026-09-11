@@ -343,6 +343,10 @@ export function buildEvidenceIndex({
       addSourceRecord({ evidenceId: stableEvidenceId('runner.initial-workspace-content', file.path), evidenceType: 'workspace_fact', authorityClass: 'runner',
         sourceId: 'runner.sealed-case-fixture', content: { path: file.path, caseSeal: file.caseSeal }, contentDigestOverride: file.contentDigest, safeForJudge: true, safeForPublic: false })
     }
+    for (const source of snapshot.evaluationContext?.sourceMaterials?.records ?? []) {
+      addSourceRecord({ evidenceId: stableEvidenceId('core.task-source', source.sourceMessageId), evidenceType: 'core_domain', authorityClass: 'core',
+        sourceId: 'core.camp-snapshot', content: source.content, contentDigestOverride: source.contentDigest, safeForJudge: true, safeForPublic: false })
+    }
     for (const task of snapshot.evaluationContext?.tasks ?? []) {
       addSourceRecord({ evidenceId: stableEvidenceId('core.task-description', task.taskId), evidenceType: 'core_domain', authorityClass: 'core',
         sourceId: 'core.camp-snapshot', content: task.content, contentDigestOverride: sha256(task.content), safeForJudge: true })
@@ -882,7 +886,7 @@ function buildSourceBoundaries(input) {
         : unavailable('evidence_index.derived_facts_unavailable')
     })
   ]
-  if (['bounded-evaluation-context-v2', 'bounded-evaluation-context-v3', 'bounded-evaluation-context-v4'].includes(input.snapshot?.evaluationContext?.policyId)) {
+  if (['bounded-evaluation-context-v2', 'bounded-evaluation-context-v3', 'bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(input.snapshot?.evaluationContext?.policyId)) {
     const context = input.snapshot.evaluationContext
     boundaries.push(sourceBoundary('runtime', 'runtime.bound-native-command-supplement', {
       supplementDigest: context.supplementDigest, witnesses: context.receipts.filter(row => row.nativeWitnessDigest).map(row => ({ sourceEvidenceId: row.sourceEvidenceId, sourcePayloadDigest: row.sourcePayloadDigest, witnessDigest: row.nativeWitnessDigest }))

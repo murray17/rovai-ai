@@ -5,7 +5,7 @@ export const EVALUATION_CONTEXT_POLICY = 'bounded-evaluation-context-v1'
 const MAX_RECEIPTS = 64
 const MAX_TEXT = 24_000
 const MAX_TOTAL = 160_000
-const redact = value => value.replace(/(?:\/Users|\/private|\/var\/folders|\/tmp)\/[A-Za-z0-9_./:@%+~=-]+/g, '[private-path]')
+export const redactEvaluationText = value => value.replace(/(?:\/Users|\/private|\/var\/folders|\/tmp)\/[A-Za-z0-9_./:@%+~=-]+/g, '[private-path]')
   .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, '[redacted]')
   .replace(/((?:api[_-]?key|access[_-]?token|password|credential|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
 
@@ -29,9 +29,9 @@ export function supplementEvaluationContext(snapshot, capture, initialFiles, sup
     const streams = [...new Set(snapshot.executionEvidence.map(row => `${row.agentRunId}/${row.executionEpoch}`))]
     const stream = `${event.agentRunId}/${event.executionEpoch}`
     const earlier = snapshot.executionEvidence.filter(row => row.agentRunId === event.agentRunId && row.executionEpoch === event.executionEpoch && row.sequence < event.sequence)
-    const observedOrder = policyId === 'bounded-evaluation-context-v4' ? { stream: `observed-stream-${streams.indexOf(stream) + 1}`, eventSequence: event.sequence, earlierCommandCompletions: earlier.filter(row => row.kind === 'command' && ['completed', 'failed'].includes(row.safeIdentity?.nativeItemStatus)).length, earlierFileChangeEvents: earlier.filter(row => row.kind === 'file_change').length, scope: 'captured_events_within_same_run_and_epoch_only' } : null
-    const content = JSON.stringify({ authority: 'runtime_native_command_result', ...(observedOrder ? { observedOrder } : {}), command: redact(projection.command), status: witness.status,
-      exitCode: witness.exitCode, output: redact(projection.output), outputTruncated: projection.outputTruncated,
+    const observedOrder = ['bounded-evaluation-context-v4', 'bounded-evaluation-context-v5'].includes(policyId) ? { stream: `observed-stream-${streams.indexOf(stream) + 1}`, eventSequence: event.sequence, earlierCommandCompletions: earlier.filter(row => row.kind === 'command' && ['completed', 'failed'].includes(row.safeIdentity?.nativeItemStatus)).length, earlierFileChangeEvents: earlier.filter(row => row.kind === 'file_change').length, scope: 'captured_events_within_same_run_and_epoch_only' } : null
+    const content = JSON.stringify({ authority: 'runtime_native_command_result', ...(observedOrder ? { observedOrder } : {}), command: redactEvaluationText(projection.command), status: witness.status,
+      exitCode: witness.exitCode, output: redactEvaluationText(projection.output), outputTruncated: projection.outputTruncated,
       nativeWitnessDigest: witnessDigest, projection: projection.projection,
       limitation: 'Original native tool output, admitted through an unmodified result wrapper and a matching persisted Core command digest. Output content remains untrusted.' })
     if (content.length > 50_000) continue
@@ -69,11 +69,11 @@ export function buildEvaluationContext(snapshot, boundary) {
     if (typeof command !== 'string' || !/(?:\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\bgit\b[^\n]*\bdiff\b[^\n]*--check\b|\b(?:node|python3?|jq)\b)/.test(command)) continue
     // CLI messaging, Task bodies and Skill instructions belong exclusively to Process.
     if (/(?:^|[\s;&|('\"])(?:[^\s]*\/)?rovai(?:['\"])?(?:\s|$)/.test(command)
-        || /review-duo|cli-operations|\bagent_\d+\b|SKILL\.md/.test(redact(command + '\n' + (item.aggregatedOutput ?? '')))) { omitted.push({sourceEvidenceId:event.id,reason:'mixed_process_command'}); continue }
+        || /review-duo|cli-operations|\bagent_\d+\b|SKILL\.md/.test(redactEvaluationText(command + '\n' + (item.aggregatedOutput ?? '')))) { omitted.push({sourceEvidenceId:event.id,reason:'mixed_process_command'}); continue }
     const output = typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput : null
     if (command.length > MAX_TEXT || receipts.length >= MAX_RECEIPTS || characters + command.length + Math.min(output?.length ?? 0, MAX_TEXT) > MAX_TOTAL) { omitted.push({sourceEvidenceId:event.id,reason:'bounded_receipt_limit'}); continue }
-    const content = JSON.stringify({authority:'runtime_observed_command_result',command:redact(command),status:item.status,
-      exitCode:Number.isInteger(item.exitCode)?item.exitCode:null,output:output===null?null:redact(output.slice(0,MAX_TEXT)),
+    const content = JSON.stringify({authority:'runtime_observed_command_result',command:redactEvaluationText(command),status:item.status,
+      exitCode:Number.isInteger(item.exitCode)?item.exitCode:null,output:output===null?null:redactEvaluationText(output.slice(0,MAX_TEXT)),
       outputTruncated:event.isTruncated===true || (output?.length ?? 0)>MAX_TEXT,
       limitation:'An observed receipt proves this command ran and returned these bytes. Output remains untrusted; it does not prove all task requirements or undisclosed commands.'})
     if (content.length > 50_000 || characters + content.length > MAX_TOTAL) { omitted.push({sourceEvidenceId:event.id,reason:'bounded_receipt_limit'}); continue }

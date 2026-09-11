@@ -1,3 +1,4 @@
+import { buildTaskSourceMaterials } from './qualification-task-source-materials.mjs'
 import { readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -20,9 +21,21 @@ export async function prepareJudgeSourceSupplement({ evidenceDirectory, result, 
   const configuration = JSON.parse(await readFile(join(evidenceDirectory, 'context-regression-configuration.json'), 'utf8'))
   const workspace = join(configuration.temporaryRoot, 'workspace')
   const installation = environment.runtimeInstallations.find(item => item.adapterKind === 'codex-cli')
-  const executionProfile = caseEvaluation.judgeProfile === 'generic-task-v9'
-  const deliveryProfile = ['generic-task-v8', 'generic-task-v9'].includes(caseEvaluation.judgeProfile)
+  const sourceProfile = caseEvaluation.judgeProfile === 'generic-task-v10'
+  const executionProfile = ['generic-task-v9', 'generic-task-v10'].includes(caseEvaluation.judgeProfile)
+  const deliveryProfile = ['generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(caseEvaluation.judgeProfile)
   const capturedAt = new Date().toISOString()
+  let sourceMaterials = null
+  if (sourceProfile) {
+    const preflightId = randomUUID()
+    try {
+      sourceMaterials = buildTaskSourceMaterials(snapshot, result.dispatchBoundary, configuration.fixture?.campMessages ?? [])
+      await writePrivateJsonExclusive(join(evidenceDirectory, `task-source-preflight-${preflightId}.json`), { policyId: sourceMaterials.policyId, capturedAt, state: 'complete', sourceMaterials })
+    } catch (error) {
+      await writePrivateJsonExclusive(join(evidenceDirectory, `task-source-preflight-${preflightId}.json`), { capturedAt, state: 'unavailable', reason: error.message })
+      throw error
+    }
+  }
   const capture = installation ? await captureNativeCommandWitnesses({ snapshot, workspace,
     executable: installation.executablePath, executableDigest: installation.executableFingerprint,
     startedAt: result.startedAt, completedAt: result.completedAt, ...(deliveryProfile ? { policy: 'bound-native-command-witness-v2' } : {}) })
@@ -40,13 +53,14 @@ export async function prepareJudgeSourceSupplement({ evidenceDirectory, result, 
     if (!content) continue
     initialFiles.push({ path, content, contentDigest: sha256(content), caseSeal: caseRecord.seal }); size += bytes.length
   }
-  const payload = { policyId: executionProfile ? 'judge-source-supplement-v3' : deliveryProfile ? 'judge-source-supplement-v2' : 'judge-source-supplement-v1', trialId: result.trialId, observationDigest: result.observationDigest,
+  const payload = { ...(sourceMaterials ? { sourceMaterials } : {}), policyId: sourceProfile ? 'judge-source-supplement-v4' : executionProfile ? 'judge-source-supplement-v3' : deliveryProfile ? 'judge-source-supplement-v2' : 'judge-source-supplement-v1', trialId: result.trialId, observationDigest: result.observationDigest,
     caseSeal: caseRecord.seal, producerDigest, capturedAt, capture, initialFiles,
     newRuntimeExecutions: 0, newVerifierExecutions: 0 }
   const supplementDigest = digestJson(payload)
   const locator = `judge-source-supplement-${supplementDigest}.json`
   await writePrivateJsonExclusive(join(evidenceDirectory, locator), { ...payload, supplementDigest })
-  snapshot.evaluationContext = supplementEvaluationContext(snapshot, capture, initialFiles, supplementDigest, executionProfile ? 'bounded-evaluation-context-v4' : deliveryProfile ? 'bounded-evaluation-context-v3' : 'bounded-evaluation-context-v2')
+  snapshot.evaluationContext = supplementEvaluationContext(snapshot, capture, initialFiles, supplementDigest, sourceProfile ? 'bounded-evaluation-context-v5' : executionProfile ? 'bounded-evaluation-context-v4' : deliveryProfile ? 'bounded-evaluation-context-v3' : 'bounded-evaluation-context-v2')
+  if (sourceMaterials) snapshot.evaluationContext.sourceMaterials = sourceMaterials
   const manifest = JSON.parse(await readFile(join(evidenceDirectory, 'delivered-workspace-manifest.json'), 'utf8'))
   if (manifest.digest !== result.deliveredWorkspaceSnapshot.digest) throw new Error('Supplement delivered manifest mismatch')
   const next = await attachRecoveredEvidenceIndex({ evidenceDirectory, prior: result,
