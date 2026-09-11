@@ -15,11 +15,13 @@ last_updated: 2026-08-27
 
 # Camp Composer 剪切事务未托管导致原生输入快照串接
 
-> **药师寺惠的小结：** 这次的坏消息里，每个字符都像是被复印机反复扫过——这不是输入法发了疯，而是
-> 剪切那一刻我们交出了 DOM 的钥匙。浏览器自己执行了 `deleteByCut`，把多个编辑阶段的快照缝在
-> 了一起。修复的方向是对的：在浏览器动 DOM 之前，由 Composer 同步接管整个 cut 事务。但我必须把
-> 话讲全：这次红绿回归没有进 CI，属性名在渲染和读取两侧也没有完全对齐，所以我现在能给的是“修复已落地、
-> 主路径已接管”，不是“全链路已闭环”。该报告的风险我会留在纠正措施里，不会为了好看就替它合上。
+> **药师寺惠的小结：** 这次最容易误导人的是 `beforeinput/deleteByCut` 看起来已经在拦截了——它确实
+> 调了 `preventDefault`，让人以为剪切已经被应用接管。但 cut 事务的规范入口是 `cut` 事件本身，浏览器
+> 在 `deleteByCut` 触发前就已经按原生路径动了 React 受控的 `<br>` 和 caret host，Fiber 与真实 DOM
+> 从此分叉，下一个原生字符就落进了已经不存在的旧子树，多个编辑阶段的快照被缝在一起。教训是：对
+> contenteditable 上的任何剪切/粘贴事务，应用必须在浏览器动 DOM 之前同步接管，`beforeinput` 只是
+> 最后一道兜底，不能当主防线；而判断这条边界是否真的守住，只看代码 `preventDefault` 不够，必须让
+> 真实 Chromium 剪一次、再输入一次，同时比对 DOM、Draft、editor identity 与错误集合。
 
 ## 摘要
 
@@ -139,10 +141,33 @@ DOM/editor identity/`#root`/`.app-shell`/无 `removeChild`/无 `NotFoundError`/�
 PR #92 按批复实施并合入 `origin/main`（commit `a0ea7a03`）。但合入时 cut 回归未进 CI，属性名未对齐，
 补充场景端到端覆盖未补齐。序列 12 Principal 指示“这个问题已经修复了，写个复盘报告 pr 到 main”。
 
-本受理队员在写复盘前对修复落地做了静态对照：`handleCut` 主路径、`isNativeEmptyEditorFiller` 空态
-归一化、`selectedStructuredMentionContent` 公共 helper、`cutSelectionWithMetaX` 真实 CDP Cut、
-`selectWholeEditor` 真实 Range 选区均已落地，符合批复主方向。模型单元测试 12/12 通过。但属性名
-不一致、CI 缺口、补充场景缺位三项风险无法在静态对照中闭合，故如实记入纠正措施，不替它们合上。
+本受理队员在写复盘前对修复落地做了静态对照，最小反馈循环固定为：
+
+```text
+拉取 origin/main 至 a3fc9acb
+  -> grep StructuredMentionComposer.tsx 确认 handleCut / onCut 存在
+  -> 读 handleCut（666-690）确认 preventDefault 在写 clipboardData 之前
+  -> 读 isNativeEmptyEditorFiller（1079-1107）确认空态窄条件
+  -> 读 selectedStructuredMentionContent（model 71-83）确认公共 helper 不暴露 slice
+  -> 读 cutSelectionWithMetaX（accept 2850-2868）确认 Input.dispatchKeyEvent + commands:['Cut']
+  -> 读 selectWholeEditor（2571-2589）确认真实 Range 选区、非 synthetic ClipboardEvent
+  -> pnpm vitest run structured-mention-model.test.ts
+  -> node -e react-dom/server 验证 data:empty-break 渲染后属性名
+```
+
+对照结论：`handleCut` 主路径、`isNativeEmptyEditorFiller` 空态归一化、`selectedStructuredMentionContent`
+公共 helper、`cutSelectionWithMetaX` 真实 CDP Cut、`selectWholeEditor` 真实 Range 选区均已落地，符合
+批复主方向。模型单元测试 12/12 通过（`vitest run` 输出 `1 file, 12 tests, 508ms`）。
+`react-dom/server` 对 `{ 'data:empty-break': 'true' }` 渲染输出 `<br data:empty-break="true"/>`，
+对 `{ 'data-editor-empty-break': 'true' }` 输出 `<br data-editor-empty-break="true"/>`，确认渲染层
+保留冒号、读取层需要连字符，三方不一致成立。但属性名不一致、CI 缺口、补充场景缺位三项风险无法在
+静态对照中闭合，故如实记入纠正措施，不替它们合上。
+
+受限于 Principal 在序列 14 指示“你别搞了，安心写复盘报告”，本受理队员未在本机执行 `--cut-only` 的
+旧包红 / 新包绿。前序 composer-ime 复盘的详细度很大程度上来自“真实打包 Electron + 腾讯拼音 + 原生
+输入”的运行时数据（如 `123213213n\n`、`keyCode=229`、`compositionupdate("ni")`）；本复盘的对应
+证据是静态代码对照 + `react-dom/server` 属性名验证 + 单元测试通过数，运行时数据缺位。若需补齐该层
+详细度，需重新授权执行 `--cut-only` 并记录真实 Chromium 的 DOM、Draft、剪贴板与错误集合。
 
 ## 时间线
 
@@ -167,6 +192,21 @@ PR #92 按批复实施并合入 `origin/main`（commit `a0ea7a03`）。但合入
 React Fiber 与执行后的 DOM 不一致。后续原生输入落入 stale 子树，多个编辑阶段的 DOM 快照被串接进
 正文。
 
+旧实现的 cut 处理近似为：
+
+```tsx
+const handleBeforeInput = (event: FormEvent<HTMLDivElement>): void => {
+  // ...
+  if (nativeEvent.inputType === 'deleteByCut') {
+    event.preventDefault()            // 太晚：浏览器已开始原生剪切事务
+    setQuery(null)
+    emitState(replaceStructuredSelection(editorState(selection), []))
+  }
+}
+// 编辑器上没有 onCut
+<div contentEditable onBeforeInput={handleBeforeInput} /* ... */ />
+```
+
 W3C Clipboard API 规定：取消 `cut` 事件会阻止浏览器删除选区，应用必须自行更新模型。旧实现没有
 在 `cut` 事件上 `preventDefault`，因此浏览器按原生路径删除，应用也没有机会同步重写模型。
 
@@ -178,9 +218,37 @@ W3C Clipboard API 规定：取消 `cut` 事件会阻止浏览器删除选区，�
 IME composition 期间（`isComposingRef.current`）直接 `preventDefault()` 并 `return`，不从未对账的
 DOM 推导模型。
 
+修复后的 cut 事务近似为：
+
+```tsx
+const handleCut = (event: ClipboardEvent<HTMLDivElement>): void => {
+  if (disabled || isComposingRef.current) { event.preventDefault(); return }
+  const selection = currentSelection()
+  if (selection.anchor === selection.focus) return        // 折叠选区放行，让原生 cut 不删内容
+  event.preventDefault()                                  // 在浏览器动 DOM 之前
+  const selectedContent = selectedStructuredMentionContent(state)
+  const structuredClipboard = createStructuredMessageClipboardData(selectedContent, members)
+  event.clipboardData.setData('text/plain', structuredClipboard?.text ?? fallbackText)
+  if (structuredClipboard) event.clipboardData.setData('text/html', structuredClipboard.html)
+  setQuery(null)
+  emitState(replaceStructuredSelection(state, []))         // 单次业务提交
+}
+<div contentEditable onBeforeInput={handleBeforeInput} onCut={handleCut} /* ... */ />
+```
+
 空态归一化 `isNativeEmptyEditorFiller` 作为第二层兜底：即使某个平台绕过 `onCut`，整个编辑器只剩
 裸占位 `<br>`、空壳或纯 caret sentinel 时，`readStructuredContent` 归一化为 `[]`，不再把空输入框
-保存成 `"\n"`。
+保存成 `"\n"`。空态时的渲染投影为：
+
+```html
+<span data-editor-segment="text" data-editor-empty="true">
+  <br data:empty-break="true" />
+</span>
+```
+
+`isNativeEmptyEditorFiller` 遍历整棵编辑器：无有效文本、无 `data-editor-line-break`、无
+Mention/Skill token，且裸 BR 计数 `bareBreakCount <= 1` 时判定为空，`readStructuredContent` 直接
+返回 `[]`，跳过把裸 BR 读成 `"\n"` 的旧路径。
 
 ### 属性名边界：渲染与读取未完全对齐
 
