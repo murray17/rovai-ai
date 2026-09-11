@@ -460,3 +460,27 @@ test('task source material reaches the evidence pack separately from participant
     assert.equal(JSON.parse(segments[0].content).text,body)
   } finally {await rm(directory,{recursive:true,force:true})}
 })
+
+test('v11 validates all Lead deliveries, encodes sequence order and fails closed on omissions', async () => {
+  const { buildTaskJudgeSegments } = await import('./qualification-semantic-evidence.mjs')
+  const directory=await mkdtemp(join(tmpdir(),'rovai-delivery-closure-'))
+  try {
+    await mkdir(join(directory,'delivered'))
+    const message=(id,sequence,body)=>({id,sequence,body,authorType:'agent',authorId:'lead',sourceAgentRunId:'run',campTurnId:'turn',addressedAgentIds:[]})
+    const snapshot={agentRuns:[{id:'run',agentId:'lead',campTurnId:'turn'}],messages:[message('ack',3,'Already published.'),message('report',2,'Final report body.')],evaluationContext:{policyId:'bounded-evaluation-context-v3',receipts:[],tasks:[],deliveryMessageIds:['ack','report']}}
+    const index={artifactId:'index',payload:{records:snapshot.messages.map(m=>contentRecord(`core.message-content:${m.id}`,m.body))}}
+    const raw=JSON.stringify({snapshot,digest:digestJson(snapshot)})+'\n';await writeFile(join(directory,'observations.ndjson'),raw)
+    const args={evidenceDirectory:directory,result:{observationDigest:sha256(raw),dispatchBoundary:{campTurnId:'turn',rootAgentRunId:'run'},deliveredWorkspaceSnapshot:{directory:'delivered'}},evidenceIndex:index,evidenceFiles:[],includeEvaluationContext:true,requireDeliveryClosure:true}
+    const segments=await buildTaskJudgeSegments(args)
+    assert.equal(segments.find(s=>s.content==='Final report body.').segmentId,'delivery-message:historical:ordered-0001:report')
+    assert.equal(segments.find(s=>s.content==='Already published.').segmentId,'delivery-message:current:ack')
+    const changed=structuredClone(snapshot);changed.evaluationContext.deliveryMessageIds.push('missing')
+    await assert.rejects(buildTaskJudgeSegments({...args,evaluationSnapshot:changed}),/inventory_incomplete/)
+    changed.evaluationContext.deliveryMessageIds.pop();changed.messages[0].sequence=2
+    await assert.rejects(buildTaskJudgeSegments({...args,evaluationSnapshot:changed}),/inventory_incomplete/)
+    changed.messages[0].sequence=3;changed.messages[1].authorId='peer'
+    await assert.rejects(buildTaskJudgeSegments({...args,evaluationSnapshot:changed}),/inventory_incomplete/)
+    index.payload.records.pop()
+    await assert.rejects(buildTaskJudgeSegments(args),/content_unavailable/)
+  } finally {await rm(directory,{recursive:true,force:true})}
+})

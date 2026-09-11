@@ -105,3 +105,9 @@ describe('offline report contract — synthetic fixtures only',()=>{
     expect(html).toContain('暂无可计算数据 / 不可用')
   })
 })
+
+it('shows evaluator timeout separately and escapes its diagnostic data',()=>{
+  const html=renderGateHtml({kind:'weekly_regression',status:'insufficient',conclusions:{acceptance:'incomplete',regression:'not_compared',evaluation:'execution_failed',failedTrials:0,evidenceGapTrials:0,evaluatorFailureTrials:1},evaluationFailures:[{caseId:'DEMO-105',repeat:1,arm:'candidate',code:'judge_execution_failed',failures:[{view:'outcome',replica:'B',code:'<script>timeout</script>',attempts:2,locator:'../secret.json'}]}],slots:[]})
+  for(const text of ['评测执行失败','评测器故障涉及 1 次 Trial','验收失败涉及 0 次 Trial','证据缺口涉及 0 次 Trial','尝试 2 次'])expect(html).toContain(text)
+  expect(html).not.toContain('<script>timeout</script>');expect(html).not.toContain('href="trials/DEMO-105-1-candidate/../secret.json"')
+})

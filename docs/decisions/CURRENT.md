@@ -6,7 +6,7 @@ last_updated: 2026-09-07
 
 # 当前规范与决定理由导航
 
-结果 Judge 来源材料当前规范：[Semantic Judge Views v10](../contracts/semantic-judge-views-v10.md)；理由：[V1.58-D02](../versions/v1.58/decisions.md#v1-58-d02)。
+结果 Judge 来源材料当前规范：[Semantic Judge Views v11](../contracts/semantic-judge-views-v11.md)；理由：[V1.58-D02](../versions/v1.58/decisions.md#v1-58-d02)、[V1.58-D03](../versions/v1.58/decisions.md#v1-58-d03)。
 
 本页先连接当前规范，再连接形成这些边界的重要理由。历史版本决定不证明代码已经实现；实现状态仍需检查代码、Migration、测试和当前版本验收。
 
@@ -166,5 +166,5 @@ last_updated: 2026-09-07
 
 ## 双轨执行评测
 
-- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v13](../contracts/execution-evaluation-v13.md)、[User Automation v4](../contracts/user-automation-v4.md)与[操作指南](../development/evaluation.md)。
+- 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v14](../contracts/execution-evaluation-v14.md)、[User Automation v4](../contracts/user-automation-v4.md)与[操作指南](../development/evaluation.md)。
 - 理由来源：[V1.58-D01](../versions/v1.58/decisions.md#v1-58-d01)。

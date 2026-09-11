@@ -14,7 +14,7 @@ const ratio = (numerator, denominator) => ({ numerator, denominator, value: deno
 const unknown = (reason, raw = null) => ({ verdict: 'indeterminate', reasonCode: reason, raw })
 
 export function validateScoring(scoring, cases) {
-  if (scoring?.schemaVersion !== 1 || !['2.0.0', '2.1.0', '2.2.0', '2.3.0', '2.4.0', '2.5.0', '2.6.0', '2.7.0', '2.8.0'].includes(scoring.version) || scoring.id !== 'generic-task-quality'
+  if (scoring?.schemaVersion !== 1 || !['2.0.0', '2.1.0', '2.2.0', '2.3.0', '2.4.0', '2.5.0', '2.6.0', '2.7.0', '2.8.0', '2.9.0'].includes(scoring.version) || scoring.id !== 'generic-task-quality'
       || scoring.aggregation !== 'repetitions_then_fixed_case_weights' || scoring.collaborationAggregation !== 'failure_unknown_partial_satisfied_v1'
       || scoring.gate?.minimumQuality !== null || scoring.gate?.maximumItemDowngrade !== 0
       || Object.keys(scoring.dimensions ?? {}).sort().join(',') !== 'boundary,evidence,goal'
@@ -22,7 +22,7 @@ export function validateScoring(scoring, cases) {
       || Object.values(scoring.dimensions).reduce((a, b) => a + b, 0) !== 100) throw new Error('Invalid versioned quality scoring policy')
   for (const spec of cases) {
     const config = scoring.cases?.[spec.id]
-    if (['2.1.0', '2.2.0', '2.3.0', '2.4.0', '2.5.0', '2.6.0', '2.7.0', '2.8.0'].includes(scoring.version) && (config?.judgeProfile !== (scoring.version === '2.8.0' ? 'generic-task-v10' : scoring.version === '2.7.0' ? 'generic-task-v9' : scoring.version === '2.6.0' ? 'generic-task-v8' : scoring.version === '2.5.0' ? 'generic-task-v7' : scoring.version === '2.4.0' ? 'generic-task-v6' : scoring.version === '2.3.0' ? 'generic-task-v5' : scoring.version === '2.2.0' ? 'generic-task-v4' : 'generic-task-v3') || !Array.isArray(config.evidenceFiles)
+    if (['2.1.0', '2.2.0', '2.3.0', '2.4.0', '2.5.0', '2.6.0', '2.7.0', '2.8.0', '2.9.0'].includes(scoring.version) && (config?.judgeProfile !== (scoring.version === '2.9.0' ? 'generic-task-v11' : scoring.version === '2.8.0' ? 'generic-task-v10' : scoring.version === '2.7.0' ? 'generic-task-v9' : scoring.version === '2.6.0' ? 'generic-task-v8' : scoring.version === '2.5.0' ? 'generic-task-v7' : scoring.version === '2.4.0' ? 'generic-task-v6' : scoring.version === '2.3.0' ? 'generic-task-v5' : scoring.version === '2.2.0' ? 'generic-task-v4' : 'generic-task-v3') || !Array.isArray(config.evidenceFiles)
         || config.evidenceFiles.length > 64 || new Set(config.evidenceFiles).size !== config.evidenceFiles.length
         || config.evidenceFiles.some(path => typeof path !== 'string' || path.startsWith('/') || path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..')))) throw new Error(`Invalid frozen task evidence scope: ${spec.id}`)
     if (!config || !Number.isFinite(config.weight) || config.weight <= 0 || !Array.isArray(config.quality)
@@ -38,7 +38,7 @@ export function validateScoring(scoring, cases) {
     const sources = config.quality.filter(item => item.applicable).map(item => `${item.source}:${item.checklistItem ?? item.ruleId}`)
     if (new Set(sources).size !== sources.length) throw new Error('One check cannot be scored twice')
     for (const dimension of Object.keys(QUALITY_DIMENSIONS)) if (!config.quality.some(item => item.dimension === dimension && item.applicable)) throw new Error('Every quality dimension needs predeclared applicable checks; never redistribute a dimension')
-    if (['2.3.0', '2.4.0', '2.5.0', '2.6.0', '2.7.0', '2.8.0'].includes(scoring.version)) for (const item of [...config.quality, ...config.collaboration]) validateMetricContract(item)
+    if (['2.3.0', '2.4.0', '2.5.0', '2.6.0', '2.7.0', '2.8.0', '2.9.0'].includes(scoring.version)) for (const item of [...config.quality, ...config.collaboration]) validateMetricContract(item)
     taskJudgeProfile(config, 'outcome'); taskJudgeProfile(config, 'process')
     for (const id of spec.criticalSemantic) {
       const found = [...config.quality, ...config.collaboration].find(item => item.checklistItem === id)
@@ -68,7 +68,9 @@ export function semanticVerdict(slot, checklistItem, applicable = true) {
   if (checklistItem.startsWith('SER.collaboration.') && slot.collaborationObservation?.accepted === 0
       && slot.collaborationObservation?.complete === true) return { verdict: 'not_satisfied', reasonCode: 'required_collaboration_not_executed', source: 'rule', evidence: 'collaboration-ledger.json#/payload/metrics', raw }
   if (matches.length > 1) return unknown('duplicate_judge_item', raw)
-  if (!raw) return unknown(slot.judgeStatus === 'not_run' ? 'judge_not_run' : slot.state !== 'complete' ? 'trial_evidence_incomplete' : 'judge_item_missing', raw)
+  const view = checklistItem.startsWith('SER.collaboration.') ? 'process' : 'outcome'
+  const evaluatorFailed = slot.failureDomain === 'evaluator' && (!slot.judgeFailures?.length || slot.judgeFailures.some(failure => !failure.view || failure.view === view))
+  if (!raw) return unknown(slot.judgeStatus === 'not_run' ? 'judge_not_run' : evaluatorFailed ? 'judge_execution_failed' : slot.state !== 'complete' ? 'trial_evidence_incomplete' : 'judge_item_missing', raw)
   if (raw.state === 'disagreed') return unknown('judge_disagreement', raw)
   if (!['agreed', 'adjudicated'].includes(raw.state) || raw.verdict === 'indeterminate') return unknown('judge_evidence_insufficient', raw)
   if (raw.verdict === 'not_applicable') return unknown('unexpected_not_applicable', raw)
@@ -141,7 +143,7 @@ export function evaluateQualityAndCollaboration(plan, slots) {
         }))
         const critical = collaboration.filter(item => spec.criticalSemantic.includes(item.checklistItem) && item.verdict !== 'satisfied')
         trials.push({ caseId: spec.id, repeat, executionState: slot?.state ?? 'not_run', environmentKey: slot?.environmentKey ?? null, locator: slot?.locator ?? null, quality, collaboration, groups, critical })
-        if (quality.total === null) qualityGaps.push({ caseId: spec.id, repeat, arm, code: 'quality_evaluation_incomplete', items: items.filter(item => item.applicable && item.verdict === 'indeterminate').map(item => item.id) })
+        if (quality.total === null) qualityGaps.push({ caseId: spec.id, repeat, arm, code: 'quality_evaluation_incomplete', items: items.filter(item => item.applicable && item.verdict === 'indeterminate').map(item => item.id), evaluatorItems: items.filter(item => item.applicable && item.reasonCode === 'judge_execution_failed').map(item => item.id) })
         for (const item of critical) criticalFailures.push({ caseId: spec.id, repeat, arm, checklistItem: item.checklistItem, verdict: item.verdict, reasonCode: item.reasonCode })
       }
       caseScores.push({ caseId: spec.id, weight: config.weight, ...aggregateDimensions(repetitions, scoring.dimensions), repetitions: repetitions.map(({ repeat, dimensions }) => ({ repeat, dimensions })) })

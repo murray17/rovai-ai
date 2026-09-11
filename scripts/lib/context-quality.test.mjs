@@ -144,5 +144,18 @@ test('weekly separates acceptance failure, missing evaluation and unmeasured reg
   after.semanticItems[1].state = 'disagreed'
   const report = compareResults(p, [after], { candidate: { status: 'passed' } })
   assert.equal(report.status, 'degraded')
-  assert.deepEqual(report.conclusions, { acceptance: 'failed', regression: 'not_compared', evaluation: 'incomplete', failedTrials: 1, evidenceGapTrials: 1, newRegressionTrials: 0, failureRecords: 2, evidenceGapRecords: 1 })
+  assert.deepEqual(report.conclusions, { acceptance: 'failed', regression: 'not_compared', evaluation: 'incomplete', evaluatorFailureTrials: 0, failedTrials: 1, evidenceGapTrials: 1, newRegressionTrials: 0, failureRecords: 2, evidenceGapRecords: 1 })
+})
+
+test('evaluator failure cannot hide an independent arm or View evidence gap',()=>{
+  const p=plan(['DEMO-106']),before=slot(p,'baseline'),after=slot(p,'candidate')
+  before.semanticItems.find(item=>item.checklistItem==='SER.response.claim_accuracy').state='disagreed'
+  after.semanticItems=after.semanticItems.filter(item=>item.checklistItem.startsWith('SER.collaboration.'))
+  after.semanticItems.find(item=>item.checklistItem==='SER.collaboration.handoff_clarity').state='disagreed'
+  after.failureDomain='evaluator';after.judgeFailures=[{view:'outcome',replica:'B',code:'timeout',attempts:2}]
+  const report=compareResults(p,[before,after],{baseline:{status:'passed'},candidate:{status:'passed'}})
+  assert.equal(report.conclusions.evaluatorFailureTrials,1)
+  assert.ok(report.evidenceGaps.some(item=>item.arm==='baseline'))
+  assert.ok(report.evidenceGaps.some(item=>item.checklistItem?.startsWith('SER.collaboration.')))
+  assert.equal(report.assessment.arms.candidate.quality.total,null)
 })

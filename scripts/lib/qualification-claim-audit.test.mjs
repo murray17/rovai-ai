@@ -110,3 +110,15 @@ test('v10 source quotations require a real witness and never certify an agent ac
  Object.assign(f.claim,{text:'报告时长为12分钟',kind:'artifact_fact',evidenceQuote:'报告时长为12分钟'})
  f.pack.taskProfileVersion='generic-task-v9';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
 })
+
+test('v11 prior delivery proves publication text but never implementation or successful execution',()=>{
+ const f=fixture();f.pack.taskProfileVersion='generic-task-v11'
+ f.pack.evidenceSegments[0].content='The final report was published. The implementation works. Tests passed.'
+ f.pack.evidenceSegments[1]={segmentId:'prior',kind:'prior_delivery',content:JSON.stringify({order:1,text:'Final report: tests passed.'}),evidenceIds:['EV-0002']}
+ Object.assign(f.claim,{text:'The final report was published',kind:'delivery_fact',evidenceQuote:'Final report: tests passed.'})
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'satisfied')
+ f.claim.evidenceQuote='invented report';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ Object.assign(f.claim,{text:'Tests passed',kind:'verification_success',evidenceQuote:'tests passed.'});assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ Object.assign(f.claim,{text:'The implementation works',kind:'artifact_fact'});assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ f.claim.result='contradicted';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'not_satisfied')
+})

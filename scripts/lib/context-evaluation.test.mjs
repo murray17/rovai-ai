@@ -49,6 +49,19 @@ test('hard violations cannot be offset, absent replicas cannot pass, and environ
   assert.equal(unknownEnvironment.status, 'insufficient')
   assert.equal(unknownEnvironment.resourceChanges[0].regressed, false)
 })
+
+test('Judge execution failure is distinct from task failure and semantic evidence gaps',()=>{
+ const plan={mode:'weekly',cases:[{id:'case',criticalSemantic:['coverage']}],repetitions:1}
+ const slot={caseId:'case',repeat:1,arm:'candidate',state:'complete',hardOutcome:'pass',environmentKey:'frozen',rules:[],resources:{dispatchToTerminal:{valueMilliseconds:10,coverage:{state:'complete'}}},semanticItems:[],judgeStatus:'unavailable',failureDomain:'evaluator',judgeFailures:[{code:'semantic_judge_view.timed_out',view:'outcome',replica:'B',attempts:[{attempt:1,state:'timed_out'},{attempt:2,state:'timed_out'}]}]}
+ const result=compareResults(plan,[slot],{candidate:{status:'passed'}})
+ assert.equal(result.conclusions.evaluation,'execution_failed')
+ assert.equal(result.conclusions.evaluatorFailureTrials,1)
+ assert.equal(result.conclusions.failedTrials,0)
+ assert.equal(result.conclusions.evidenceGapTrials,0)
+ assert.equal(result.evaluationFailures[0].failures[0].code,'semantic_judge_view.timed_out')
+ assert.notEqual(result.status,'passed')
+ assert.equal(compareResults(plan,[{...slot,hardOutcome:'fail'}],{candidate:{status:'passed'}}).conclusions.failedTrials,1)
+})
 test('negative-use rules require complete evidence or unchanged authoritative state', () => {
   const result = evaluateCaseRules({ maxAcceptedA2a: 0, minMemoryReads: 1, maxMemoryMutations: 0 }, { collaboration: { payload: { metrics: { acceptedCalls: 0, coverage: { state: 'partial' } } } }, tools: { payload: { records: [], summary: { coverage: { state: 'partial' } } } }, memoryBefore: { memories: [] }, memoryAfter: { memories: [] } })
   assert.deepEqual(result.map(item => item.status), ['indeterminate', 'indeterminate', 'passed'])

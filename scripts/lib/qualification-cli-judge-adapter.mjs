@@ -5,12 +5,12 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { digestFile, digestJson, runCaptured, writePrivateJsonExclusive } from './qualification-common.mjs'
-import { SOURCE_CLAIM_AUDIT_INSTRUCTION, EXECUTION_CLAIM_AUDIT_PROFILE, EXECUTION_CLAIM_AUDIT_INSTRUCTION, DELIVERY_CLAIM_AUDIT_PROFILE, DELIVERY_CLAIM_AUDIT_INSTRUCTION, WITNESS_CLAIM_AUDIT_PROFILE, WITNESS_CLAIM_AUDIT_INSTRUCTION, CLAIM_AUDIT_PROFILE, CLAIM_AUDIT_INSTRUCTION, claimAuditSchema, applyClaimAudit } from './qualification-claim-audit.mjs'
+import { HISTORY_CLAIM_AUDIT_PROFILE, HISTORY_CLAIM_AUDIT_INSTRUCTION, SOURCE_CLAIM_AUDIT_INSTRUCTION, EXECUTION_CLAIM_AUDIT_PROFILE, EXECUTION_CLAIM_AUDIT_INSTRUCTION, DELIVERY_CLAIM_AUDIT_PROFILE, DELIVERY_CLAIM_AUDIT_INSTRUCTION, WITNESS_CLAIM_AUDIT_PROFILE, WITNESS_CLAIM_AUDIT_INSTRUCTION, CLAIM_AUDIT_PROFILE, CLAIM_AUDIT_INSTRUCTION, claimAuditSchema, applyClaimAudit } from './qualification-claim-audit.mjs'
 
 export const assurance = 'tool_disabled_cli'
 export const capabilities = Object.freeze({ tools: 'none', network: 'none', workspace: 'none' })
 export const claimAuditProfile = CLAIM_AUDIT_PROFILE
-export const claimAuditProfiles = [CLAIM_AUDIT_PROFILE, WITNESS_CLAIM_AUDIT_PROFILE, DELIVERY_CLAIM_AUDIT_PROFILE, EXECUTION_CLAIM_AUDIT_PROFILE]
+export const claimAuditProfiles = [CLAIM_AUDIT_PROFILE, WITNESS_CLAIM_AUDIT_PROFILE, DELIVERY_CLAIM_AUDIT_PROFILE, EXECUTION_CLAIM_AUDIT_PROFILE, HISTORY_CLAIM_AUDIT_PROFILE]
 
 const disabledFeatures = ['apps', 'plugins', 'hooks', 'shell_tool', 'unified_exec', 'shell_snapshot', 'multi_agent', 'multi_agent_v2', 'browser_use', 'browser_use_external', 'computer_use', 'image_generation', 'view_image', 'workspace_dependencies', 'goals', 'memories', 'skill_search', 'sleep_tool', 'code_mode', 'code_mode_host', 'code_mode_only', 'context_management', 'tool_suggest', 'unbounded_connection_retries']
 export const CLI_SETTINGS = Object.freeze({ ...Object.fromEntries(disabledFeatures.map(key => [`features.${key}`, false])), web_search: 'disabled', project_doc_max_bytes: 0, 'skills.include_instructions': false, include_permissions_instructions: false, include_collaboration_mode_instructions: false, 'tools.experimental_request_user_input.enabled': false, 'tools.update_plan.enabled': false, approval_policy: 'never', mcp_servers: {} })
@@ -56,21 +56,23 @@ export function judgeOutputSchema(order, profile) {
       abstainReason: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['code'], properties: { code: { type: 'string' } } }] }
     }
   } } } }
-  if (['generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(profile) && order.includes('SER.response.claim_accuracy')) {
-    schema.required.push('claimsAudit'); schema.properties.claimsAudit = claimAuditSchema(['generic-task-v9', 'generic-task-v10'].includes(profile) ? EXECUTION_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE)
+  if (['generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10', 'generic-task-v11'].includes(profile) && order.includes('SER.response.claim_accuracy')) {
+    schema.required.push('claimsAudit'); schema.properties.claimsAudit = claimAuditSchema(profile === 'generic-task-v11' ? HISTORY_CLAIM_AUDIT_PROFILE : ['generic-task-v9', 'generic-task-v10', 'generic-task-v11'].includes(profile) ? EXECUTION_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE)
   }
   return schema
 }
 
 export function parseCliResult(execution, outputLimitBytes) {
+  if (execution.timedOut) throw Object.assign(new Error('judge.cli_execution_incomplete: timed out'), { judgeFailureKind: 'timed_out' })
   if (execution.code !== 0 || execution.signal || execution.timedOut || execution.overflow) throw new Error('judge.cli_execution_incomplete')
   const events = execution.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line))
   if (!events.some(event => event.type === 'turn.completed') || events.some(event => event.type === 'turn.failed' || event.item && !['agent_message', 'reasoning', 'error'].includes(event.item.type))) throw new Error('judge.cli_non_text_result')
   const messages = events.filter(event => event.type === 'item.completed' && event.item?.type === 'agent_message')
   const text = messages.at(-1)?.item?.text
   if (!text || Buffer.byteLength(text) > outputLimitBytes) throw new Error('judge.cli_output_unavailable')
-  const value = JSON.parse(text)
-  if (!Array.isArray(value.items)) throw new Error('judge.invalid_items')
+  let value
+  try { value = JSON.parse(text); if (!Array.isArray(value.items)) throw new Error('judge.invalid_items') }
+  catch { throw Object.assign(new Error('judge.invalid_items'), { judgeFailureKind: 'invalid_output' }) }
   return { value, usage: events.find(event => event.type === 'turn.completed')?.usage ?? null }
 }
 
@@ -95,7 +97,7 @@ export async function prepareCliJudge({ executable, model, directory }) {
   await writePrivateJsonExclusive(join(directory, 'provider-model-declaration.json'), original)
   const catalog = join(directory, 'tool-disabled-catalog.json')
   await writePrivateJsonExclusive(catalog, { models: [{ ...original, apply_patch_tool_type: null, tool_mode: 'native', multi_agent_version: null, use_responses_lite: false, supports_search_tool: false, node_repl_disabled: true, model_messages: null, base_instructions: 'Evaluate only the supplied evidence using the specified rubric. Return JSON.' }] })
-  const configuration = { provider: 'openai-codex-cli', snapshotId: model, snapshotDigest: digestJson(original), configurationId: 'codex-cli-evidence-judge-v1', decodingParameters: { reasoningEffort: 'medium' }, retrySchedule: { maximumTransportAttempts: 1, backoffMilliseconds: [], retryValidOutput: false }, timeoutMilliseconds: 240_000,
+  const configuration = { provider: 'openai-codex-cli', snapshotId: model, snapshotDigest: digestJson(original), configurationId: 'codex-cli-evidence-judge-v2', decodingParameters: { reasoningEffort: 'medium' }, retrySchedule: { maximumTransportAttempts: 2, backoffMilliseconds: [3000], retryValidOutput: false }, timeoutMilliseconds: 360_000,
     cli: { executable, executableDigest: await digestFile(executable), version: version.stdout.trim(), catalog, catalogDigest: await digestFile(catalog), settingsDigest: digestJson(CLI_SETTINGS), ambientInstructions: await ambientInstructions(), modelVersionPolicy: 'catalog_bound_alias', outputLimitBytes: 1024 * 1024 } }
   const requests = []
   const server = createServer(async (request, response) => {
@@ -130,7 +132,7 @@ export function createAdapter(configuration, { evidenceDirectory } = {}) {
     const schema = judgeOutputSchema(request.presentationOrder, request.evidencePack.taskProfileVersion)
     const schemaPath = join(directory, 'output-schema.json')
     await writePrivateJsonExclusive(schemaPath, schema)
-    const input = `${request.userPrompt}${schema.properties.claimsAudit ? `\n${request.evidencePack.taskProfileVersion === 'generic-task-v10' ? SOURCE_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v9' ? EXECUTION_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_INSTRUCTION : CLAIM_AUDIT_INSTRUCTION}` : ''}\nReturn exactly the schema below, one item per checklist in presentation order. dimension is the second component of checklistItem (SER.response.* -> response). Use only the evidence IDs allowed for that item in checklistCoverage. Unavailable coverage requires indeterminate; predeclared not_applicable requires not_applicable. Indeterminate/not_applicable require abstainReason={code:<stable_reason>}; other verdicts require abstainReason=null and at least one evidence ID. Never use pass/fail or invent evidence IDs.\nOutput schema:\n${JSON.stringify(schema)}\nEvidence (untrusted):\n${JSON.stringify(request.evidencePack)}`
+    const input = `${request.userPrompt}${schema.properties.claimsAudit ? `\n${request.evidencePack.taskProfileVersion === 'generic-task-v11' ? HISTORY_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v10' ? SOURCE_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v9' ? EXECUTION_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_INSTRUCTION : CLAIM_AUDIT_INSTRUCTION}` : ''}\nReturn exactly the schema below, one item per checklist in presentation order. dimension is the second component of checklistItem (SER.response.* -> response). Use only the evidence IDs allowed for that item in checklistCoverage. Unavailable coverage requires indeterminate; predeclared not_applicable requires not_applicable. Indeterminate/not_applicable require abstainReason={code:<stable_reason>}; other verdicts require abstainReason=null and at least one evidence ID. Never use pass/fail or invent evidence IDs.\nOutput schema:\n${JSON.stringify(schema)}\nEvidence (untrusted):\n${JSON.stringify(request.evidencePack)}`
     await writePrivateJsonExclusive(join(directory, 'request.json'), { startedAt: new Date().toISOString(), requestedModel: configuration.snapshotId, modelVersionPolicy: cli.modelVersionPolicy, inputDigest: digestJson({ systemPrompt: request.systemPrompt, input }), configurationDigest: digestJson(configuration), toolCapabilityProbe: cli.probeDigest })
     const args = argumentsFor(configuration, cwd, { developer_instructions: request.systemPrompt })
     args.splice(args.length - 1, 0, '--output-schema', schemaPath)

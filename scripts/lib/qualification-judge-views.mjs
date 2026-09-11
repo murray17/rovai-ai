@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { SOURCE_TASK_JUDGE_PROFILE, SOURCE_OUTCOME_RUBRIC, EXECUTION_TASK_JUDGE_PROFILE, EXECUTION_OUTCOME_RUBRIC, DELIVERY_TASK_JUDGE_PROFILE, DELIVERY_OUTCOME_RUBRIC, WITNESS_TASK_JUDGE_PROFILE, WITNESS_OUTCOME_RUBRIC, CLAIM_TASK_JUDGE_PROFILE, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, usesObservableMetrics, OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
+import { HISTORY_TASK_JUDGE_PROFILE, HISTORY_OUTCOME_RUBRIC, SOURCE_TASK_JUDGE_PROFILE, SOURCE_OUTCOME_RUBRIC, EXECUTION_TASK_JUDGE_PROFILE, EXECUTION_OUTCOME_RUBRIC, DELIVERY_TASK_JUDGE_PROFILE, DELIVERY_OUTCOME_RUBRIC, WITNESS_TASK_JUDGE_PROFILE, WITNESS_OUTCOME_RUBRIC, CLAIM_TASK_JUDGE_PROFILE, CLAIM_OUTCOME_RUBRIC, CLAIM_PROCESS_RUBRIC, usesObservableMetrics, OBSERVABLE_TASK_JUDGE_PROFILE, OBSERVABLE_OUTCOME_RUBRIC, OBSERVABLE_PROCESS_RUBRIC, usesReceipts, TASK_OUTCOME_RUBRIC, RECEIPT_TASK_JUDGE_PROFILE, RECEIPT_OUTCOME_RUBRIC, RECEIPT_PROCESS_RUBRIC, usesTaskEvidence, EVIDENCE_TASK_JUDGE_PROFILE, EVIDENCE_OUTCOME_RUBRIC, EVIDENCE_PROCESS_RUBRIC, validateTaskJudgeProfile } from './context-judge-profile.mjs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -458,7 +458,7 @@ export function validateJudgeViewPack(artifact, { configuration, sourcePack = nu
     }
   }
   const kinds = new Set((modelInput.evidenceSegments ?? []).map((segment) => segment.kind))
-  if (view === 'outcome' && [...kinds].some((kind) => !(usesReceipts(configuration.payload.taskProfile?.version) ? ['artifact', 'final_response', 'verification_receipt', 'delivery_message', ...(configuration.payload.taskProfile?.version === SOURCE_TASK_JUDGE_PROFILE ? ['task_source'] : [])] : configuration.payload.taskProfile ? ['artifact', 'final_response'] : ['code', 'final_response']).includes(kind))) {
+  if (view === 'outcome' && [...kinds].some((kind) => !(usesReceipts(configuration.payload.taskProfile?.version) ? ['artifact', 'final_response', 'verification_receipt', 'delivery_message', ...([SOURCE_TASK_JUDGE_PROFILE, HISTORY_TASK_JUDGE_PROFILE].includes(configuration.payload.taskProfile?.version) ? ['task_source', ...(configuration.payload.taskProfile?.version === HISTORY_TASK_JUDGE_PROFILE ? ['prior_delivery'] : [])] : [])] : configuration.payload.taskProfile ? ['artifact', 'final_response'] : ['code', 'final_response']).includes(kind))) {
     throw new Error('Outcome Judge model input contains process evidence')
   }
   if (view === 'process' && !configuration.payload.taskProfile) {
@@ -1135,9 +1135,14 @@ function projectEvidenceSegments(source, registry, view, taskProfile) {
   const receipts = usesReceipts(taskProfile?.version)
   const sourceSegments = (source.untrustedEvidence ?? [])
     .filter((segment) => allowedKinds.has(segment.kind) || receipts && (segment.kind === 'test_output'
-      || segment.kind === 'comment' && (segment.segmentId.startsWith('delivery-message:') || view === 'process' && segment.segmentId.startsWith('task-description:') || taskProfile?.version === SOURCE_TASK_JUDGE_PROFILE && segment.segmentId.startsWith('task-source:'))))
-    .filter(segment => view !== 'outcome' || ![DELIVERY_TASK_JUDGE_PROFILE, EXECUTION_TASK_JUDGE_PROFILE, SOURCE_TASK_JUDGE_PROFILE].includes(taskProfile?.version) || !segment.segmentId.startsWith('delivery-message:historical:') && !containsParticipantProse(segment, source.untrustedEvidence))
+      || segment.kind === 'comment' && (segment.segmentId.startsWith('delivery-message:') || view === 'process' && segment.segmentId.startsWith('task-description:') || [SOURCE_TASK_JUDGE_PROFILE, HISTORY_TASK_JUDGE_PROFILE].includes(taskProfile?.version) && segment.segmentId.startsWith('task-source:'))))
+    .filter(segment => view !== 'outcome' || ![DELIVERY_TASK_JUDGE_PROFILE, EXECUTION_TASK_JUDGE_PROFILE, SOURCE_TASK_JUDGE_PROFILE, HISTORY_TASK_JUDGE_PROFILE].includes(taskProfile?.version) || (taskProfile?.version === HISTORY_TASK_JUDGE_PROFILE || !segment.segmentId.startsWith('delivery-message:historical:')) && !containsParticipantProse(segment, source.untrustedEvidence))
     .sort(segmentProjectionOrder)
+  const history = taskProfile?.version === HISTORY_TASK_JUDGE_PROFILE ? sourceSegments.filter(segment => segment.segmentId.startsWith('delivery-message:historical:')) : []
+  const order = segment => Number(segment.segmentId.match(/^delivery-message:historical:ordered-(\d+):/)?.[1])
+  if (history.some(segment => !Number.isSafeInteger(order(segment)) || order(segment) < 1) || new Set(history.map(order)).size !== history.length) throw new Error('delivery_history.order_missing_or_duplicate')
+  if (history.length > 64 || history.reduce((sum, segment) => sum + segment.content.length, 0) > 160_000) throw new Error('delivery_history.budget_exceeded')
+  sourceSegments.sort((a,b) => history.includes(a) && history.includes(b) ? order(a)-order(b) : history.includes(a) ? 1 : history.includes(b) ? -1 : segmentProjectionOrder(a,b))
   const codePaths = new Map((source.workspaceChanges ?? [])
     .filter((change) => change.boundedContextSegmentId)
     .map((change) => [change.boundedContextSegmentId, change.path]))
@@ -1151,7 +1156,7 @@ function projectEvidenceSegments(source, registry, view, taskProfile) {
         : `${segment.kind}-${String(counts[segment.kind]).padStart(3, '0')}`
     return compactObject({
       segmentId,
-      kind: segment.kind === 'test_output' ? 'verification_receipt' : segment.kind === 'comment' ? (segment.segmentId.startsWith('delivery-message:') ? 'delivery_message' : segment.segmentId.startsWith('task-source:') ? 'task_source' : 'task_context') : segment.kind,
+      kind: history.includes(segment) ? 'prior_delivery' : segment.kind === 'test_output' ? 'verification_receipt' : segment.kind === 'comment' ? (segment.segmentId.startsWith('delivery-message:') ? 'delivery_message' : segment.segmentId.startsWith('task-source:') ? 'task_source' : 'task_context') : segment.kind,
       ...(view === 'process' && segment.kind !== 'code'
         ? { authorPseudonym: segment.authorPseudonym ?? null }
         : {}),
@@ -1161,7 +1166,7 @@ function projectEvidenceSegments(source, registry, view, taskProfile) {
       ...(segment.kind === 'code'
         ? { path: codePaths.get(segment.segmentId) ?? (segment.segmentId.startsWith('task-file-base64:') ? Buffer.from(segment.segmentId.slice('task-file-base64:'.length), 'base64url').toString('utf8') : segment.segmentId.startsWith('task-file:') ? segment.segmentId.slice('task-file:'.length) : null) }
         : {}),
-      content: requireBoundedString(segment.content, 'Judge View evidence content', 50_000),
+      content: requireBoundedString(history.includes(segment) ? JSON.stringify({ order: order(segment), text: segment.content, limitation: 'Earlier public Lead delivery. Supports publication and text comparison only; not independent proof of implementation or check execution. Final artifacts and explicit later corrections take precedence.' }) : segment.content, 'Judge View evidence content', 50_000),
       evidenceIds: registry.ids([segment.evidenceReference])
     })
   })
@@ -1692,6 +1697,7 @@ function collectLocalEvidenceIds(value) {
 }
 
 function viewPolicy(view, taskProfile) {
+  if (taskProfile?.version === HISTORY_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-11`
   if (taskProfile?.version === SOURCE_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-10`
   if (taskProfile?.version === EXECUTION_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-9`
   if (taskProfile?.version === DELIVERY_TASK_JUDGE_PROFILE) return `semantic-${view}-generic-task-pack-8`
@@ -1704,6 +1710,7 @@ function viewPolicy(view, taskProfile) {
 }
 
 function viewRubric(view, taskProfile) {
+  if (taskProfile?.version === HISTORY_TASK_JUDGE_PROFILE) return view === 'outcome' ? HISTORY_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === SOURCE_TASK_JUDGE_PROFILE) return view === 'outcome' ? SOURCE_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === EXECUTION_TASK_JUDGE_PROFILE) return view === 'outcome' ? EXECUTION_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
   if (taskProfile?.version === DELIVERY_TASK_JUDGE_PROFILE) return view === 'outcome' ? DELIVERY_OUTCOME_RUBRIC : Object.fromEntries(Object.entries(CLAIM_PROCESS_RUBRIC).map(([key, value]) => [`SER.collaboration.${key}`, value]))
@@ -2039,4 +2046,22 @@ function compactObject(value) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => (
     item !== undefined
   )))
+}
+
+// Read only suite-bound immutable replicas, never infer an evaluator error from a low verdict.
+export async function readJudgeExecutionFailures(evidenceDirectory, suite) {
+  if (!suite) return [{ code: 'judge_suite_missing', view: null, replica: null, attempts: 0 }]
+  const failures = []
+  for (const view of suite.payload.views) for (const reference of view.replicaArtifacts) {
+    const locator = `semantic-judge-view-replica-results/${artifactFileName(reference.artifactId)}`
+    const artifact = JSON.parse(await readFile(join(evidenceDirectory, locator), 'utf8'))
+    if (artifact.artifactId !== reference.artifactId || artifact.payloadDigest !== reference.payloadDigest
+        || digestJson(artifact.payload) !== String(reference.payloadDigest).replace(/^sha256:/, '')) throw new Error('Judge failure artifact digest mismatch')
+    if (artifact.payload.state === 'unavailable' && artifact.payload.invocationState === 'invoked') failures.push({
+      code: artifact.payload.unavailableReason?.code ?? 'judge_replica_unavailable', view: view.view,
+      replica: artifact.payload.replica, attempts: artifact.payload.attempts.length, locator,
+      attemptStates: artifact.payload.attempts.map(attempt => ({ attempt: attempt.attempt, state: attempt.state, reason: attempt.reason }))
+    })
+  }
+  return failures
 }

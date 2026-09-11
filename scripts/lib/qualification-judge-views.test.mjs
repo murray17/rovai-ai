@@ -946,3 +946,56 @@ test('v10 Outcome admits task sources with local references while old profiles a
   assert.equal(validateJudgeViewPack(pack,{configuration:config,sourcePack:source}).artifactId,pack.artifactId)
  }
 })
+
+test('v11 keeps ordered prior Lead delivery for an acknowledgement without scoring history as current claims', async()=>{
+ const {taskJudgeProfile}=await import('./context-judge-profile.mjs');const {readFile}=await import('node:fs/promises')
+ const scoring=JSON.parse(await readFile(new URL('../../qualification/context-regression/scoring-v2.8.json',import.meta.url)))
+ const source=dualViewFixture({buildPacks:false}).sourcePack
+ const message=(id,sequence,content)=>({segmentId:id,kind:'comment',sequence,authorPseudonym:null,visibility:'public_to_camp',content,evidenceReference:{artifactId:'evidence-index:fixture',evidenceId:`core.message:${id}`}})
+ source.payload.untrustedEvidence.push(message('delivery-message:historical:ordered-0001:z',4,'Initial delivery: the migration implementation and report are complete.'),message('delivery-message:historical:ordered-0002:a',5,'Correction: the final file supersedes the earlier draft.'),message('delivery-message:current:c',6,'The published report stands; no duplicate publication is needed.'))
+ for(const version of ['generic-task-v10','generic-task-v11']){
+  const config=buildJudgeViewConfiguration({view:'outcome',provider:'fixture',snapshotId:'fixture',snapshotDigest:'b'.repeat(64),producerDigest:'a'.repeat(64),taskProfile:taskJudgeProfile({...scoring.cases['DEMO-104'],judgeProfile:version},'outcome')})
+  const pack=buildJudgeViewPack({view:'outcome',sourcePack:source,configuration:config,producerDigest:'a'.repeat(64)})
+  const history=pack.payload.modelInput.evidenceSegments.filter(s=>s.kind==='prior_delivery').map(s=>JSON.parse(s.content))
+  assert.equal(history.length,version==='generic-task-v11'?2:0)
+  if(history.length){assert.deepEqual(history.map(x=>x.order),[1,2]);assert.match(history[0].text,/Initial delivery/);assert.match(history[1].text,/Correction/)}
+  assert.equal(pack.payload.modelInput.evidenceSegments.filter(s=>s.kind==='delivery_message').length,1)
+  assert.ok(!pack.payload.modelInput.evidenceSegments.some(s=>s.kind==='participant_message'))
+ }
+})
+
+test('transport timeout retries only the missing replica, retains attempts and never retries valid low scores', async()=>{
+ const fixture=dualViewFixture();const calls={A:0,B:0}
+ const result=await executeJudgeView({configuration:fixture.outcome.configuration,pack:fixture.outcome.pack,producerDigest:'a'.repeat(64),wait:async()=>{},invokeReplica:async request=>{
+  calls[request.replica]++
+  if(request.replica==='B'&&calls.B===1){const {parseCliResult}=await import('./qualification-cli-judge-adapter.mjs');parseCliResult({code:null,timedOut:true,stdout:''},1024)}
+  const value=await invokeFixtureReplica(request)
+  return {...value,items:value.items.map(item=>({...item,verdict:'not_satisfied'}))}
+ }})
+ assert.deepEqual(calls,{A:1,B:2})
+ assert.equal(result.replicas[1].payload.attempts[0].state,'timed_out')
+ assert.ok(result.review.payload.items.every(item=>item.verdict==='not_satisfied'))
+})
+
+test('exhausted replica transport attempts remain separate from the retained valid replica', async () => {
+  const { readJudgeExecutionFailures } = await import('./qualification-judge-views.mjs')
+  const fixture=dualViewFixture(), calls={A:0,B:0}
+  const processExecution=await successfulExecution(fixture.process)
+  const outcomeExecution=await executeJudgeView({...fixture.outcome,producerDigest:'a'.repeat(64),judgeExecutionId:'judge-execution:fixture',wait:async()=>{},invokeReplica:async ({replica})=>{
+    calls[replica]++
+    if(replica==='B')throw Object.assign(new Error('timeout'),{judgeFailureKind:'timed_out'})
+    return replicaItems(fixture.outcome.pack)
+  }})
+  const process={...fixture.process,...processExecution},outcome={...fixture.outcome,...outcomeExecution}
+  const suite=buildSemanticJudgeViewSuite({process,outcome,producerDigest:'a'.repeat(64)})
+  const root=await mkdtemp(join(tmpdir(),'rovai-judge-exhausted-'))
+  try {
+    await retainSemanticJudgeViewArtifacts(root,{process,outcome,suite})
+    const failures=await readJudgeExecutionFailures(root,suite)
+    assert.deepEqual(calls,{A:1,B:2});assert.equal(failures.length,1)
+    assert.equal(failures[0].view,'outcome');assert.equal(failures[0].replica,'B');assert.equal(failures[0].attempts,2)
+    assert.equal(failures[0].code,'semantic_judge_view.timed_out')
+    assert.equal(outcome.replicas[0].payload.items.length,7)
+    assert.equal(outcome.review.payload.items.length,0)
+  } finally {await rm(root,{recursive:true,force:true})}
+})

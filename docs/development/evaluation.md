@@ -6,9 +6,11 @@ last_updated: 2026-09-10
 
 # Gate、每周回归与每日分析
 
-**来源材料预检查：** Judge v10 将持久化用户材料作为独立来源段，调用前生成 `task-source-preflight-*.json`。`unavailable` 时检查缺失、摘要、范围或预算原因，不能以 Fixture 内容替代运行证据。评分 2.8 需以同一新标准重评整个比较集合，不能拼接旧版已通过项和新版单项分数。字段与边界见 [Semantic Judge Views v10](../contracts/semantic-judge-views-v10.md)。
+**来源材料预检查：** Judge v11 将持久化用户材料作为独立来源段，调用前生成 `task-source-preflight-*.json`。`unavailable` 时检查缺失、摘要、范围或预算原因，不能以 Fixture 内容替代运行证据。评分 2.9 需以同一新标准重评整个比较集合，不能拼接旧版已通过项和新版单项分数。字段与边界见 [Semantic Judge Views v11](../contracts/semantic-judge-views-v11.md)。
 
-本页拥有开发者操作流程。判断规则见 [Execution Evaluation v13](../contracts/execution-evaluation-v13.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+本页拥有开发者操作流程。判断规则见 [Execution Evaluation v14](../contracts/execution-evaluation-v14.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+
+先前 Lead 报告随 `prior_delivery` 保留，用于核对最后确认的引用；不能用于自证实现或测试成功。评分请求超时在 `evaluationFailures` 单列并保留每次尝试，任务缺陷仍按实际验收扣分。
 
 ## 上下文改动 Gate
 
@@ -16,7 +18,7 @@ last_updated: 2026-09-10
 2. 保存独立基线 checkout。用 `eval:gate build --source <checkout> --output <new-directory>` 构建基线；实施后用另一新目录构建候选。源码、产品二进制与评测资产分别冻结；运行期间保持两份 checkout 不变。
 3. 根据[回归目录](../../qualification/context-regression/README.md)选择影响层级。上下文、共享机制或 `cli-operations` 跑 12 个通用 Case；其他 Skill 跑专属小集，无专属集先补 Case 并通过 `qualification:case admit`，不能空集通过。先冻结标准，再查看候选结果。
 4. 按下面配置生成 `eval:gate freeze --config <json> --output <new-plan.json>`，再运行 `eval:gate run --plan <plan.json> --output <campaign-directory>`。规则检查实际合同测试、产物、写入边界、A2A、工具／记忆与预算；Judge 评价语义并引用证据。相同 campaign 保留所有尝试。
-5. 提交前打开 campaign 的 `index.html`，从版本、Gate 结论、质量和协作分布进入每次尝试的 `report.html`，核对 `regressions`、`evidenceGaps`、`resourceChanges` 及每个 slot。修复实现偏差后重新构建、冻结并在原 campaign 重跑；方案语义改变时更新 revision 和确认。每个 campaign 最多两次，不能删失败目录、改标准或挑成功副本收口。
+5. 提交前打开 campaign 的 `index.html`，从版本、Gate 结论、质量和协作分布进入每次尝试的 `report.html`，核对 `regressions`、`evidenceGaps`、`evaluationFailures`、`resourceChanges` 及每个 slot。修复实现偏差后重新构建、冻结并在原 campaign 重跑；方案语义改变时更新 revision 和确认。每个 campaign 最多两次，不能删失败目录、改标准或挑成功副本收口。
 
 配置中的路径均使用绝对路径。以下是结构示例，替换占位项、明确实际 Runtime 模型与预算后才能执行：
 
@@ -54,7 +56,7 @@ last_updated: 2026-09-10
   ],
   "repetitions": 1,
   "budget": {"wallSeconds": 14400},
-  "execution": {"version": 1, "maxParallelCases": 2, "judgeSeconds": 600},
+  "execution": {"version": 1, "maxParallelCases": 2, "judgeSeconds": 2400},
   "judge": null
 }
 ```
@@ -71,7 +73,7 @@ API 凭据仅通过命名环境变量读取；不写进配置或报告。默认�
 
 ### 质量、协作与有界修正
 
-评分配置随 suite 冻结为 `generic-task-quality@2.7.0`。任务质量按目标达成 50、证据一致性 25、边界遵守 25 汇总；Case 验收依据随任务定义，非代码任务不要求代码测试。三个维度中的未知会使该维度和总分未完成，页面保留已有分项与覆盖率。边界分只覆盖 Case 声明且能观察的检查，不能据此声称覆盖全部权限行为。
+评分配置随 suite 冻结为 `generic-task-quality@2.9.0`。任务质量按目标达成 50、证据一致性 25、边界遵守 25 汇总；Case 验收依据随任务定义，非代码任务不要求代码测试。三个维度中的未知会使该维度和总分未完成，页面保留已有分项与覆盖率。边界分只覆盖 Case 声明且能观察的检查，不能据此声称覆盖全部权限行为。
 
 协作三组保留五个细项的原始 Judge 判定、理由和证据，分母是适用的计划 Case × repetition，未知仍在分母。部分满足不算满足，零分母为 N/A；分组已有不满足时，其他细项的证据缺口也保留。Case 的关键协作项必须满足，不能用高质量分或其他 Case 的改善抵消。
 
@@ -154,7 +156,7 @@ Main 先把规则统计、HTML／SVG 和分析输入写入指定工作区；每�
 node scripts/eval-judge-cli.mjs --executable /absolute/codex --model gpt-5.6-sol --output /private/new-judge-directory
 ```
 
-将输出 `configuration.json` 与 `scripts/lib/qualification-cli-judge-adapter.mjs` 写入已有 judge 配置，再冻结计划。默认中等推理、每副本最多 240 秒、无自动重试；建议 `execution.judgeSeconds=600`，为双 View 并行和产物登记留余量。实际需要的副本按已冻结适用性调用；不适用的 Process 不调用。
+将输出 `configuration.json` 与 `scripts/lib/qualification-cli-judge-adapter.mjs` 写入已有 judge 配置，再冻结计划。新建配置默认中等推理，每请求 360 秒、最多两次运输尝试、退避 3 秒；只恢复运输或超时故障，不重试有效低分。新计划默认 `execution.judgeSeconds=2400`，覆盖双 View、有限复核和产物登记；整体运行仍受 campaign 预算约束。实际需要的副本按已冻结适用性调用；不适用的 Process 不调用。
 
 准备会使用本地假 HTTP 接口核验实际请求没有工具，随后所有真实评价只接收指定 evidence pack。CLI 的能力和参数依据[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)及实际命令探测；不依赖提示词单独限制工具。沿用 CLI 自己的登录，不把凭据导出到报告。其目录摘要是模型声明，不是提供者权重；固定 snapshot 未可观测时 Gate 保留证据不足，周回归仍可展示真实诊断结果。
 
