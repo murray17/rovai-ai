@@ -1699,7 +1699,10 @@ export function CampWorkspace({
     moveDomFocus: false
   })
   const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
-  const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
+  const [submittedExecutionRequests, setSubmittedExecutionRequests] = useState<CampMessageSendReceipt[]>([])
+  const submittedInputIds = submittedExecutionRequests.flatMap((receipt) =>
+    receipt.pendingInputId ? [receipt.pendingInputId] : []
+  )
   const publishedMessageSequence = snapshot.messages.reduce((latest, message) => Math.max(latest, message.sequence), 0)
   const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const executionDrawerReturnAgentIdRef = useRef<string | null>(null)
@@ -1947,7 +1950,7 @@ export function CampWorkspace({
       sequence: request.sequence + 1,
       moveDomFocus: false
     }))
-    setSubmittedExecutionRequest(null)
+    setSubmittedExecutionRequests([])
     setExecutionInspectorActive(executionPlacement === 'inspector')
     executionDrawerTriggerRef.current = null
     executionDrawerReturnAgentIdRef.current = null
@@ -3389,8 +3392,9 @@ export function CampWorkspace({
       const frozenDraft = flushed.draft ?? draftCoordinator.getCurrentDraft()
       if (!frozenDraft) throw new Error('Composer Draft 尚未就绪。')
       const sendReceipt = await onSend(frozenDraft)
-      if (sendReceipt?.agentRunIds.length || sendReceipt?.campTurnId) {
-        setSubmittedExecutionRequest(sendReceipt)
+      if (mountedCampId.current === campId
+        && (sendReceipt?.pendingInputId || sendReceipt?.agentRunIds.length || sendReceipt?.campTurnId)) {
+        setSubmittedExecutionRequests((current) => [...current, sendReceipt])
       }
       try {
         const nextDraft = await draftCoordinator.load()
@@ -3820,18 +3824,34 @@ export function CampWorkspace({
   }
 
   useEffect(() => {
+    const submittedExecutionRequest = submittedExecutionRequests[0]
     if (!submittedExecutionRequest) return
+    const consumeRequest = (): void => { setSubmittedExecutionRequests((current) => current.slice(1)) }
     if (taskCreationBlocksSubmittedRunAutoFocus(
       taskCreationActive,
       inspectorVisible,
       inspectorSurfaceTab
     )) {
-      setSubmittedExecutionRequest(null)
+      consumeRequest()
       return
     }
-    const targetRun = firstSubmittedAgentRun(submittedExecutionRequest, snapshot.agentRuns)
+    let receipt = submittedExecutionRequest
+    if (receipt.pendingInputId) {
+      // Queue admission has no Run yet. Only its durable publication outcome may
+      // turn this workspace's send intent into a precise execution selection.
+      const outcome = pendingQueue?.campId === snapshot.camp.id
+        ? pendingQueue.submissionOutcomes?.find((item) => item.pendingInputId === receipt.pendingInputId)
+        : undefined
+      if (!outcome || outcome.state === 'queued' || outcome.state === 'needs_repair') return
+      if (outcome.state !== 'published' || !outcome.campTurnId) {
+        consumeRequest()
+        return
+      }
+      receipt = { ...receipt, campTurnId: outcome.campTurnId, addressedAgentIds: outcome.addressedAgentIds }
+    }
+    const targetRun = firstSubmittedAgentRun(receipt, snapshot.agentRuns)
     if (!targetRun) return
-    setSubmittedExecutionRequest(null)
+    consumeRequest()
     if (executionConsoleIsVisible(
       executionPlacement,
       inspectorVisible,
@@ -3852,7 +3872,9 @@ export function CampWorkspace({
     inspectorSurfaceTab,
     inspectorVisible,
     snapshot.agentRuns,
-    submittedExecutionRequest,
+    submittedExecutionRequests,
+    pendingQueue,
+    snapshot.camp.id,
     taskCreationActive
   ])
 
@@ -4793,6 +4815,7 @@ export function CampWorkspace({
         onSubmit={(event) => void submit(event)}
       >
         <PendingCampInputs ref={pendingInputsRef} key={snapshot.camp.id} campId={snapshot.camp.id}
+          submittedInputIds={submittedInputIds}
           quoteMessages={visibleCampMessages} onRevealQuote={revealQuote}
           refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}

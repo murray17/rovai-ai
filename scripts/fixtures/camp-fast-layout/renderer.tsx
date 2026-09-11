@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AgentProfile, AgentRunView, CampComposerDraftView, CampMemberFastView, CampSnapshot, ExecutionConsolePlacement } from '@contracts'
+import type { AgentProfile, AgentRunView, CampComposerDraftView, CampMemberFastView, CampSnapshot, CoreEvent, ExecutionConsolePlacement, PendingCampInputSubmissionOutcome } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { CampWorkspace, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -21,6 +21,13 @@ const values = new Map<string, CampMemberFastView>(agents.filter((_, index) => i
 }]))
 let updateSnapshot: (snapshot: CampSnapshot | ((current: CampSnapshot) => CampSnapshot)) => void
 let updateAgents: (agents: AgentProfile[]) => void
+let sendSequence = 0
+let queueNextSend = false
+let publishBeforeReceipt = false
+let queuedPublication: ((deferProjection?: boolean) => void) | null = null
+let deferredProjection: (() => void) | null = null
+const submissionOutcomes = new Map<string, PendingCampInputSubmissionOutcome>()
+const eventListeners = new Set<(event: CoreEvent) => void>()
 const initial: CampSnapshot = {
   schemaVersion: 34, throughGlobalSequence: 1,
   camp: { id: campId, title: '响应模式与紧凑会话验收', activationState: 'active', projectBindingKind: 'directory',
@@ -31,7 +38,7 @@ const initial: CampSnapshot = {
   membershipReconciliations: [], tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
   executionEvidence: [], agentRunFileChanges: [], contextManifests: [], approvals: [], actions: [], timeline: []
 }
-let draft: CampComposerDraftView = { campId, body: '验收中保留的消息草稿', content: { version: 2, segments: [{ kind: 'text', text: '验收中保留的消息草稿' }] },
+let draft: CampComposerDraftView = { campId, quotes: [], body: '验收中保留的消息草稿', content: { version: 2, segments: [{ kind: 'text', text: '验收中保留的消息草稿' }] },
   revision: 1, attachments: [], replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 const requests: Array<{ method: string; params: unknown }> = []
 const checkFailures = new Set(['agent-4'])
@@ -51,11 +58,21 @@ const delayResponse = async (): Promise<void> => {
   await new Promise<void>(resolve => { releaseResponse = resolve })
 }
 Object.assign(window, { rovai: {
-  platform: 'darwin', onEvent: () => () => {},
+  platform: 'darwin', onEvent: (listener: (event: CoreEvent) => void) => {
+    eventListeners.add(listener)
+    return () => eventListeners.delete(listener)
+  },
   request: async (method: string, params?: Record<string, any>): Promise<unknown> => {
     requests.push({ method, params })
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
-    if (method === 'camp.pendingInputs.get') return {campId, executionActive: false, items: [], editSession: null}
+    if (method === 'camp.pendingInputs.get') return {campId, executionActive: false,
+      items: [...submissionOutcomes.values()].filter(item => item.state === 'queued').map((item, index) => ({
+        id: item.pendingInputId, campId, enqueueSequence: index + 1, revision: 1, state: 'queued',
+        content: draft.content, body: draft.body, quotes: [], replyIntent: null, recipientSelectionRequired: false,
+        lastAttemptErrorCode: null, attachments: []
+      })), editSession: null,
+      submissionOutcomes: (params?.submittedInputIds ?? []).map((id: string) => submissionOutcomes.get(id)
+        ?? { pendingInputId: id, state: 'missing', campTurnId: null, addressedAgentIds: [] })}
     if (method === 'camp.composerDraft.get') return draft
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
     if (method === 'camps.members.fast.check') {
@@ -101,7 +118,44 @@ function Fixture(): React.JSX.Element {
     <AppHeader campTitle={snapshot.camp.title} contextLabel="隔离验收" camp={snapshot} detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
       <CampWorkspace snapshot={snapshot} projectName="隔离验收" agents={profiles} busy={false} stopping={false}
-        onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
+        onSend={async () => {
+          const id = `submitted-run-${++sendSequence}`
+          const campTurnId = `submitted-turn-${sendSequence}`
+          const createdAt = `2026-09-01T00:00:0${sendSequence}Z`
+          const publish = () => setSnapshot(current => {
+            const run: AgentRunView = { ...current.agentRuns.find(item => item.agentId === 'agent-0')!,
+              id, campTurnId, status: 'running', waitReason: null, cancelRequestedAt: null,
+              cancelReasonCode: null, cancelAcknowledgedAt: null, endedAt: null, createdAt, startedAt: createdAt,
+              updatedAt: createdAt }
+            return { ...current, agentRuns: [...current.agentRuns, run],
+              turns: [...current.turns, { ...current.turns[0], id: campTurnId, status: 'running',
+                cancelRequestedAt: null, endedAt: null, createdAt, updatedAt: createdAt }],
+              executionEvidence: [...current.executionEvidence, {
+              id: `evidence-${id}`, agentRunId: id, executionEpoch: 1, sequence: 1, eventType: 'agent.text.delta',
+              kind: 'narration', phase: 'updated', payload: { itemId: `message-${id}`, delta: '新一轮执行输出。\n\n'.repeat(80) },
+              contentBlobId: null, contentByteCount: 0, isTruncated: false, occurredAt: createdAt
+            }] }
+          })
+          if (queueNextSend) {
+            queueNextSend = false
+            const pendingInputId = `pending-${sendSequence}`
+            submissionOutcomes.set(pendingInputId, { pendingInputId, state: 'queued', campTurnId: null, addressedAgentIds: [] })
+            queuedPublication = (defer = false) => {
+              if (defer) deferredProjection = publish
+              else publish()
+              submissionOutcomes.set(pendingInputId, { pendingInputId, state: 'published', campTurnId, addressedAgentIds: ['agent-0'] })
+              for (const listener of eventListeners) listener({ method: 'camp.pendingInputs.changed', params: { campId, reason: 'published' } })
+            }
+            if (publishBeforeReceipt) {
+              publishBeforeReceipt = false
+              queuedPublication()
+              queuedPublication = null
+            }
+            return { pendingInputId, campTurnId: null, agentRunIds: [], addressedAgentIds: ['agent-0'] }
+          }
+          publish()
+          return { campTurnId, agentRunIds: [id], addressedAgentIds: ['agent-0'] }
+        }} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
         executionPlacement={placement} onExecutionPlacementChange={async value => { setPlacement(value); return value }}
         onCancelAgentRun={async run => {
           await new Promise<void>(resolve => { releaseStop = resolve })
@@ -119,6 +173,9 @@ const element = (selector: string): HTMLElement => document.querySelector(select
 let bookmarkedButton: HTMLElement | null = null
 let releaseStop: (() => void) | null = null
 Object.assign(window, { fastTest: {
+  queueNextSend: (earlyPublication = false) => { queueNextSend = true; publishBeforeReceipt = earlyPublication },
+  publishQueued: (deferProjection = false) => { queuedPublication?.(deferProjection); queuedPublication = null },
+  projectPublishedRun: () => { deferredProjection?.(); deferredProjection = null },
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   bookmark: () => { bookmarkedButton = element('.camp-fast-toggle') },
   legacyObservation: (state: 'fast' | 'standard' | 'cooldown') => {
