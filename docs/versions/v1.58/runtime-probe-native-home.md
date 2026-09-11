@@ -37,7 +37,7 @@ last_updated: 2026-09-11
 退役 `acp::tests::grok_byok_probe_copies_official_config_without_copying_the_env_file`，因为配置复制 helper 和
 对应生产合同同时退出；官方密钥文件权限和 allowlist 仍由已有 Grok 配置测试拥有，不删除其安全 case。
 
-新增唯一 owner `health::tests::acp_probes_keep_native_homes_without_prompting`。它验证跨进程的实际 Home 继承、
+新增唯一 owner `health::native_home_probe_tests::acp_probes_keep_native_homes_without_prompting`。它验证跨进程的实际 Home 继承、
 非生成 RPC 边界和临时资源所有权，不能用仅检查常量或 argv 的纯函数测试代替。现有 Grok resume 正负
 用例和通用 Probe 后代清理测试分别继续拥有恢复 wire 与进程回收边界，无同等的环境继承 owner。
 
@@ -45,12 +45,14 @@ last_updated: 2026-09-11
 测试进程内使用独立假 Home、假凭据和假 Runtime，不修改测试宿主的全局环境，不接触用户配置或联网。
 断言包括：Home 原样继承、Kimi/Grok 子进程 overlay 保留、Grok headless auth 选择正确、Kiro additive Agent
 保留、没有 Prompt/compact/标题/工具请求、成功和失败都清理 Probe cwd 且保留原生配置。
+隔离子测试放在 `health/native_home_probe_tests.rs` 中，避免测试夹具的环境清空被生产 Runtime 入口静态门禁误判；
+不修改该门禁或增加例外。
 修复前 Kimi/Kiro override 及 Grok BYOK 临时 Home 分支会使 Home 对比失败。可执行测试数净变化为 0。
 
 最小命令：
 
 ```bash
-cargo test -p rovai-core --bin rovai-core health::tests::acp_probes_keep_native_homes_without_prompting
+cargo test -p rovai-core --bin rovai-core health::native_home_probe_tests::acp_probes_keep_native_homes_without_prompting
 ```
 
 ## 验证结果
