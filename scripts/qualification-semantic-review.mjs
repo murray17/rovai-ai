@@ -43,15 +43,15 @@ const producerDigest = await computeQualificationEvaluatorDigest()
 const caseEvaluation = options.caseEvaluation ? JSON.parse(await readFile(options.caseEvaluation, 'utf8')) : null
 if (caseEvaluation?.judgeProfile === 'generic-task-v6' && adapter.claimAuditProfile !== 'claim-audit-v1') throw new Error('v6 requires a claim-audit-capable adapter')
 let evaluationSnapshot = null
-if (['generic-task-v7', 'generic-task-v8', 'generic-task-v9'].includes(caseEvaluation?.judgeProfile)) {
-  if (caseEvaluation.judgeProfile === 'generic-task-v9' && !adapter.claimAuditProfiles?.includes('claim-audit-v4')) throw new Error('v9 requires a claim-audit-v4-capable adapter')
+if (['generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(caseEvaluation?.judgeProfile)) {
+  if (['generic-task-v9', 'generic-task-v10'].includes(caseEvaluation.judgeProfile) && !adapter.claimAuditProfiles?.includes('claim-audit-v4')) throw new Error('v9 requires a claim-audit-v4-capable adapter')
   if (caseEvaluation.judgeProfile === 'generic-task-v8' && !adapter.claimAuditProfiles?.includes('claim-audit-v3')) throw new Error('v8 requires a claim-audit-v3-capable adapter')
   if (!adapter.claimAuditProfiles?.includes('claim-audit-v2')) throw new Error('v7 requires a claim-audit-v2-capable adapter')
   const supplement = await prepareJudgeSourceSupplement({ evidenceDirectory, result, caseRecord, caseEvaluation, producerDigest })
   result = supplement.result; evaluationSnapshot = supplement.snapshot
 }
 const sourceConfiguration = buildSemanticJudgeConfiguration({
-  evaluationContextPolicy: caseEvaluation?.judgeProfile === 'generic-task-v9' ? 'bounded-evaluation-context-v4' : caseEvaluation?.judgeProfile === 'generic-task-v8' ? 'bounded-evaluation-context-v3' : caseEvaluation?.judgeProfile === 'generic-task-v7' ? 'bounded-evaluation-context-v2' : ['generic-task-v4', 'generic-task-v5', 'generic-task-v6'].includes(caseEvaluation?.judgeProfile) ? 'bounded-evaluation-context-v1' : null,
+  evaluationContextPolicy: caseEvaluation?.judgeProfile === 'generic-task-v10' ? 'bounded-evaluation-context-v5' : caseEvaluation?.judgeProfile === 'generic-task-v9' ? 'bounded-evaluation-context-v4' : caseEvaluation?.judgeProfile === 'generic-task-v8' ? 'bounded-evaluation-context-v3' : caseEvaluation?.judgeProfile === 'generic-task-v7' ? 'bounded-evaluation-context-v2' : ['generic-task-v4', 'generic-task-v5', 'generic-task-v6'].includes(caseEvaluation?.judgeProfile) ? 'bounded-evaluation-context-v1' : null,
   provider: configurationInput.provider,
   snapshotId: configurationInput.snapshotId,
   snapshotDigest: configurationInput.snapshotDigest,

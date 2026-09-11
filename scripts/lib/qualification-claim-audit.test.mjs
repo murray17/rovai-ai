@@ -98,3 +98,15 @@ test('v4 recognizes encoded output citations but never command-only or fabricate
   f.pack.taskProfileVersion='generic-task-v9'
   assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'satisfied')
 })
+
+test('v10 source quotations require a real witness and never certify an agent action',()=>{
+ const f=fixture();f.pack.taskProfileVersion='generic-task-v10'
+ f.pack.evidenceSegments[1]={segmentId:'task-source',kind:'task_source',content:JSON.stringify({text:'报告时长为12分钟',characterCount:19975,utf16CodeUnits:19975,byteLength:48847,textState:'complete'}),evidenceIds:['EV-0002']}
+ f.claim.evidenceQuote='报告时长为12分钟'
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'satisfied')
+ f.claim.evidenceQuote='invented quote';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ Object.assign(f.claim,{text:'已运行检查且通过',kind:'verification_success',evidenceQuote:'报告时长为12分钟'})
+ assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+ Object.assign(f.claim,{text:'报告时长为12分钟',kind:'artifact_fact',evidenceQuote:'报告时长为12分钟'})
+ f.pack.taskProfileVersion='generic-task-v9';assert.equal(applyClaimAudit(f.value,f.pack).audit.derivedVerdict,'indeterminate')
+})

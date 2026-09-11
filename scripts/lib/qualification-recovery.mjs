@@ -158,6 +158,7 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-native-exec-wrapper.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-native-witness.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-judge-source-supplement.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-task-source-materials.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-cli-judge-adapter.mjs'),
 
     join(repositoryRoot, 'scripts', 'lib', 'qualification-resource-usage.mjs'),

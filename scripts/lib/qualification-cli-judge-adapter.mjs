@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { digestFile, digestJson, runCaptured, writePrivateJsonExclusive } from './qualification-common.mjs'
-import { EXECUTION_CLAIM_AUDIT_PROFILE, EXECUTION_CLAIM_AUDIT_INSTRUCTION, DELIVERY_CLAIM_AUDIT_PROFILE, DELIVERY_CLAIM_AUDIT_INSTRUCTION, WITNESS_CLAIM_AUDIT_PROFILE, WITNESS_CLAIM_AUDIT_INSTRUCTION, CLAIM_AUDIT_PROFILE, CLAIM_AUDIT_INSTRUCTION, claimAuditSchema, applyClaimAudit } from './qualification-claim-audit.mjs'
+import { SOURCE_CLAIM_AUDIT_INSTRUCTION, EXECUTION_CLAIM_AUDIT_PROFILE, EXECUTION_CLAIM_AUDIT_INSTRUCTION, DELIVERY_CLAIM_AUDIT_PROFILE, DELIVERY_CLAIM_AUDIT_INSTRUCTION, WITNESS_CLAIM_AUDIT_PROFILE, WITNESS_CLAIM_AUDIT_INSTRUCTION, CLAIM_AUDIT_PROFILE, CLAIM_AUDIT_INSTRUCTION, claimAuditSchema, applyClaimAudit } from './qualification-claim-audit.mjs'
 
 export const assurance = 'tool_disabled_cli'
 export const capabilities = Object.freeze({ tools: 'none', network: 'none', workspace: 'none' })
@@ -56,8 +56,8 @@ export function judgeOutputSchema(order, profile) {
       abstainReason: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['code'], properties: { code: { type: 'string' } } }] }
     }
   } } } }
-  if (['generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9'].includes(profile) && order.includes('SER.response.claim_accuracy')) {
-    schema.required.push('claimsAudit'); schema.properties.claimsAudit = claimAuditSchema(profile === 'generic-task-v9' ? EXECUTION_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE)
+  if (['generic-task-v6', 'generic-task-v7', 'generic-task-v8', 'generic-task-v9', 'generic-task-v10'].includes(profile) && order.includes('SER.response.claim_accuracy')) {
+    schema.required.push('claimsAudit'); schema.properties.claimsAudit = claimAuditSchema(['generic-task-v9', 'generic-task-v10'].includes(profile) ? EXECUTION_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_PROFILE : profile === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_PROFILE : CLAIM_AUDIT_PROFILE)
   }
   return schema
 }
@@ -130,7 +130,7 @@ export function createAdapter(configuration, { evidenceDirectory } = {}) {
     const schema = judgeOutputSchema(request.presentationOrder, request.evidencePack.taskProfileVersion)
     const schemaPath = join(directory, 'output-schema.json')
     await writePrivateJsonExclusive(schemaPath, schema)
-    const input = `${request.userPrompt}${schema.properties.claimsAudit ? `\n${request.evidencePack.taskProfileVersion === 'generic-task-v9' ? EXECUTION_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_INSTRUCTION : CLAIM_AUDIT_INSTRUCTION}` : ''}\nReturn exactly the schema below, one item per checklist in presentation order. dimension is the second component of checklistItem (SER.response.* -> response). Use only the evidence IDs allowed for that item in checklistCoverage. Unavailable coverage requires indeterminate; predeclared not_applicable requires not_applicable. Indeterminate/not_applicable require abstainReason={code:<stable_reason>}; other verdicts require abstainReason=null and at least one evidence ID. Never use pass/fail or invent evidence IDs.\nOutput schema:\n${JSON.stringify(schema)}\nEvidence (untrusted):\n${JSON.stringify(request.evidencePack)}`
+    const input = `${request.userPrompt}${schema.properties.claimsAudit ? `\n${request.evidencePack.taskProfileVersion === 'generic-task-v10' ? SOURCE_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v9' ? EXECUTION_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v8' ? DELIVERY_CLAIM_AUDIT_INSTRUCTION : request.evidencePack.taskProfileVersion === 'generic-task-v7' ? WITNESS_CLAIM_AUDIT_INSTRUCTION : CLAIM_AUDIT_INSTRUCTION}` : ''}\nReturn exactly the schema below, one item per checklist in presentation order. dimension is the second component of checklistItem (SER.response.* -> response). Use only the evidence IDs allowed for that item in checklistCoverage. Unavailable coverage requires indeterminate; predeclared not_applicable requires not_applicable. Indeterminate/not_applicable require abstainReason={code:<stable_reason>}; other verdicts require abstainReason=null and at least one evidence ID. Never use pass/fail or invent evidence IDs.\nOutput schema:\n${JSON.stringify(schema)}\nEvidence (untrusted):\n${JSON.stringify(request.evidencePack)}`
     await writePrivateJsonExclusive(join(directory, 'request.json'), { startedAt: new Date().toISOString(), requestedModel: configuration.snapshotId, modelVersionPolicy: cli.modelVersionPolicy, inputDigest: digestJson({ systemPrompt: request.systemPrompt, input }), configurationDigest: digestJson(configuration), toolCapabilityProbe: cli.probeDigest })
     const args = argumentsFor(configuration, cwd, { developer_instructions: request.systemPrompt })
     args.splice(args.length - 1, 0, '--output-schema', schemaPath)
