@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2023",
     "useDefineForClassFields": true,
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -13,13 +17,19 @@
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     "paths": {
-      "@contracts": ["./packages/contracts/src/index.ts"]
+      "@contracts": [
+        "./packages/contracts/src/index.ts"
+      ]
     },
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["node", "electron-vite/node", "vite/client"]
+    "types": [
+      "node",
+      "electron-vite/node",
+      "vite/client"
+    ]
   },
   "include": [
     "electron.vite.config.ts",
@@ -27,6 +37,9 @@
     "apps/desktop/src/**/*.ts",
     "apps/desktop/src/**/*.tsx",
     "packages/**/*.ts",
-    "scripts/**/*.mjs"
+    "scripts/**/*.mjs",
+    "web.vite.config.ts",
+    "apps/web/src/**/*.ts",
+    "apps/web/src/**/*.tsx"
   ]
 }

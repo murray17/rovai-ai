@@ -1,0 +1,412 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-12T06:18:08.135843+00:00",
+  "reviewedProductionBase": "077bf78e64c76e934c45675ddb55e05165a2c49f",
+  "status": "review_fixture_passed_awaiting_maintainer_review",
+  "simulation": true,
+  "hostExecutionVerified": false,
+  "networkWritesEnabled": false,
+  "scope": "Controlled composition of production React components in isolated Electron and Chrome; excludes Desktop bootstrap, daily data and actual Host/Runtime.",
+  "environment": {
+    "os": "26.3",
+    "architecture": "arm64",
+    "chrome": "153.0.8010.36",
+    "electron": "43.1.1"
+  },
+  "contentViewport": {
+    "width": 1440,
+    "height": 920
+  },
+  "sourceSha256": {
+    "apps/desktop/src/renderer/src/App.tsx": "d658e86e1c56fd09fb54c56c355dbdc517ff6bb89a93e665f32a83f77cd66e09",
+    "apps/desktop/src/renderer/src/AppHeader.tsx": "6bae1caac92759a91151ef4f5d1283e14eb2389a9cadb87c4cf318f126aa5e5b",
+    "apps/desktop/src/renderer/src/AttachmentCard.tsx": "ce245834492526b714e86b0d0ee58afbabe8b7bbc658f39e48ef09349a108b5f",
+    "apps/desktop/src/renderer/src/CampNavigation.tsx": "f87ed69aeb98c62bb6a31c5f05a066540ef5ac2a73033b84a353523a1a6fc846",
+    "apps/desktop/src/renderer/src/CampWorkspace.tsx": "523d53c5b99bd9e48227072cd5c913c311ba819039ff19082f17d59e05af44dd",
+    "apps/desktop/src/renderer/src/ExecutionToolGroup.tsx": "8481398de885379c437dc4fd0657cd714dacfa5d79e82bf03fec3fb0aaca26bd",
+    "apps/desktop/src/renderer/src/FileChangesPreview.tsx": "1d30c928cd09719eba280e9469fa0df826943ca96638f90c01b8bb775f230c66",
+    "apps/desktop/src/renderer/src/FilePreviewContext.tsx": "310fea3190607b936b2fea1ca06d651a68210ce2165d009291f8ed5ef817fd97",
+    "apps/desktop/src/renderer/src/FilePreviewTabs.tsx": "d14077e1e8157adc7c634f1b06f7f774f88047c26ca6986f8a969f87b4aec6cc",
+    "apps/desktop/src/renderer/src/MemberManagement.tsx": "6ed83c36f66ff9953c63b26d498f830b879b8de1eb83e97b5a56a215b6c9ca70",
+    "apps/desktop/src/renderer/src/MemberSidebar.tsx": "a325b58840ae4b95142eb8475206b28f97166d601dc1a935c43649d29158f0b8",
+    "apps/desktop/src/renderer/src/NewConversationDialog.tsx": "6d96d53d8ef272d3ec413c2c70c17f3bf520fd21f070d2a51a7603ca368606da",
+    "apps/desktop/src/renderer/src/PendingCampInputs.tsx": "e9466b2d5adbea02b268c032cbdf010c49bd6dfc54e3b799792a830ad994b4ee",
+    "apps/desktop/src/renderer/src/camp-client.tsx": "bcdd6c106b28a9a30368f1a7fde7c87c9f072ac3f3823d6b6f43eb8407dc65bf",
+    "apps/desktop/src/renderer/src/desktop-camp-client.ts": "98a250c0de52b9eae97c1420380bc886317bd2516659543a0bae278a8b7fea2f",
+    "apps/desktop/src/renderer/src/desktop-file-preview-api.ts": "3d44feb1fb86bf2d07241ec8025c0b98e83bc7bca2bce319f2fb1252d10663e8",
+    "apps/desktop/src/renderer/src/runtime-check.ts": "176a493afc5965b4c1315a872f1e16304950138de3250df90787d0f4540a2c77",
+    "apps/desktop/src/renderer/src/useCampMemberFast.ts": "3a364f0424c72ebe2f94fd308dd436637b375b482dadc720d9bcf7e897fdcb9a",
+    "scripts/fixtures/host-web-parity/data.ts": "3c99d52c46d9c33946fdf6552dbd243d0081161afe17518d6446dfa4cdfe6326",
+    "scripts/fixtures/host-web-parity/index.html": "416a0b0957a121ef3cfe331d1309bce6511fd0a2b4f7882620842924e705371f",
+    "scripts/fixtures/host-web-parity/main.cjs": "62b997374b13e12b4950d94c1a0b28a9437362cf25484fa86c478e647dc05725",
+    "scripts/fixtures/host-web-parity/model.ts": "e1561d7ffbd0deb7deff56b5c12573ca4a40cd1660d24c5b4c881d288e1ec709",
+    "scripts/fixtures/host-web-parity/renderer.tsx": "e421885eff79a7e7870bb7c58b172ec9b2de5465b6a8468f33ffe64d153d22c5",
+    "scripts/fixtures/host-web-parity/tsconfig.json": "bea8d48731365cfe809391ef0a4904e7fb35dc96143875c332df578f90f0e030",
+    "scripts/lib/host-web-parity.test.mjs": "d5ecc9f5e997dd20e4b88b594094840099cb0f0a7dcad4720920097396d59666",
+    "scripts/review-host-web-parity.mjs": "ce5164e5c8fb2866770c5b4f1677b2fd0cedf446b966854f9f41680eef5541f6",
+    "apps/desktop/src/renderer/src/styles.css": "1c939b2bccdf962abf289ee9c94ed4950f72b5d64521b22ce4c102dc87987380",
+    "apps/desktop/src/renderer/src/member-editor.css": "ce07e312ca30fb2b30e16495da0c8a24b76257b051f7ea5fcd8d0d1904d7c29f"
+  },
+  "artifactSha256": {
+    "production-components.html": "73fa7f34cabc2c5d20acaaa9c7b1c459ae09fceb0e5723cbd2a61340dae3d686",
+    "rovai-desktop-web-parity.html": "b278c6d0556a0ba9e44588838863d8b97be9a28b08aeb47bcd95081494000481"
+  },
+  "checks": [
+    {
+      "surface": "desktop",
+      "theme": "day",
+      "scenario": "camp",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "simulated-send-appends-message-and-clears-this-draft"
+      ]
+    },
+    {
+      "surface": "desktop",
+      "theme": "day",
+      "scenario": "new",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "simulated-authorized-workspace-picker",
+        "select-one-member",
+        "create-and-open-fresh-camp"
+      ]
+    },
+    {
+      "surface": "desktop",
+      "theme": "day",
+      "scenario": "running",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-tool-detail-loads-structured-fixture-result"
+      ]
+    },
+    {
+      "surface": "desktop",
+      "theme": "day",
+      "scenario": "approval",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [],
+      "simulatedResolution": "native-once"
+    },
+    {
+      "surface": "desktop",
+      "theme": "day",
+      "scenario": "file",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": []
+    },
+    {
+      "surface": "desktop",
+      "theme": "day",
+      "scenario": "member",
+      "railWidth": 270,
+      "campHeaderHeight": null,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-runtime-form-saves-simulated-versioned-configuration"
+      ]
+    },
+    {
+      "surface": "desktop",
+      "theme": "night",
+      "scenario": "camp",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "simulated-send-appends-message-and-clears-this-draft"
+      ]
+    },
+    {
+      "surface": "desktop",
+      "theme": "night",
+      "scenario": "new",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "simulated-authorized-workspace-picker",
+        "select-one-member",
+        "create-and-open-fresh-camp"
+      ]
+    },
+    {
+      "surface": "desktop",
+      "theme": "night",
+      "scenario": "running",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-tool-detail-loads-structured-fixture-result"
+      ]
+    },
+    {
+      "surface": "desktop",
+      "theme": "night",
+      "scenario": "approval",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [],
+      "simulatedResolution": "native-once"
+    },
+    {
+      "surface": "desktop",
+      "theme": "night",
+      "scenario": "file",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": []
+    },
+    {
+      "surface": "desktop",
+      "theme": "night",
+      "scenario": "member",
+      "railWidth": 270,
+      "campHeaderHeight": null,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-runtime-form-saves-simulated-versioned-configuration"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "day",
+      "scenario": "camp",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "simulated-send-appends-message-and-clears-this-draft"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "day",
+      "scenario": "new",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "simulated-authorized-workspace-picker",
+        "select-one-member",
+        "create-and-open-fresh-camp"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "day",
+      "scenario": "running",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-tool-detail-loads-structured-fixture-result"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "day",
+      "scenario": "approval",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [],
+      "simulatedResolution": "native-once"
+    },
+    {
+      "surface": "web",
+      "theme": "day",
+      "scenario": "file",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-markdown-preview",
+        "explicit-download-adapter-saves-fixed-sample"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "day",
+      "scenario": "member",
+      "railWidth": 270,
+      "campHeaderHeight": null,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-runtime-form-saves-simulated-versioned-configuration"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "night",
+      "scenario": "camp",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "simulated-send-appends-message-and-clears-this-draft"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "night",
+      "scenario": "new",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "simulated-authorized-workspace-picker",
+        "select-one-member",
+        "create-and-open-fresh-camp"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "night",
+      "scenario": "running",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-tool-detail-loads-structured-fixture-result"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "night",
+      "scenario": "approval",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [],
+      "simulatedResolution": "native-once"
+    },
+    {
+      "surface": "web",
+      "theme": "night",
+      "scenario": "file",
+      "railWidth": 270,
+      "campHeaderHeight": 38,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-markdown-preview",
+        "explicit-download-adapter-saves-fixed-sample"
+      ]
+    },
+    {
+      "surface": "web",
+      "theme": "night",
+      "scenario": "member",
+      "railWidth": 270,
+      "campHeaderHeight": null,
+      "overflow": false,
+      "nativeBridge": "undefined",
+      "actions": [
+        "production-runtime-form-saves-simulated-versioned-configuration"
+      ]
+    }
+  ],
+  "standaloneReviewer": {
+    "simulation": true,
+    "file": "rovai-desktop-web-parity.html",
+    "checks": [
+      "two-production-frames",
+      "isolated-surface-state",
+      "theme-and-scenario-reset",
+      "inactive-frame-does-not-create-blank-scroll-page"
+    ]
+  },
+  "commands": [
+    {
+      "command": "pnpm review:host-web-parity",
+      "result": "passed"
+    },
+    {
+      "command": "pnpm test:host-web-parity",
+      "result": "passed",
+      "skipped": 0
+    },
+    {
+      "command": "pnpm typecheck",
+      "result": "passed"
+    },
+    {
+      "command": "pnpm exec tsc -p scripts/fixtures/host-web-parity/tsconfig.json --noEmit",
+      "result": "passed"
+    },
+    {
+      "command": "pnpm exec vitest run",
+      "result": "passed",
+      "files": 175,
+      "tests": 1759
+    },
+    {
+      "command": "node --test scripts/lib/camp-open-projection.test.mjs scripts/lib/file-preview-layout.test.mjs scripts/lib/settings-workspace.test.mjs",
+      "result": "passed",
+      "tests": 7,
+      "skipped": 0
+    },
+    {
+      "command": "pnpm build:desktop",
+      "result": "passed"
+    },
+    {
+      "command": "pnpm exec vitest run apps/desktop/src/renderer/src/MemberSidebar.test.ts apps/desktop/src/renderer/src/MemberRuntimeParameters.test.ts",
+      "result": "passed",
+      "files": 2,
+      "tests": 39
+    },
+    {
+      "command": "pnpm docs:test && pnpm docs:check",
+      "result": "passed"
+    },
+    {
+      "command": "DOCS_BASE_REF=22f91ded1b2ad51698d96f6356d7a39049182e5d pnpm docs:check:ci",
+      "result": "passed"
+    }
+  ],
+  "notVerified": [
+    "Actual Web entry mounts shared business pages (checkpoint A)",
+    "Real Host initialization, draft ownership, upload/source-ref handoff, send, execution and approvals (B)",
+    "Dual Host entries, concurrent clients and connection generations (C)",
+    "Full management-page actions and headless Automation (D)",
+    "Runtime control-plane isolation (S1)"
+  ]
+}

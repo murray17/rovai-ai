@@ -271,7 +271,7 @@ add dark-only component markup and behavior.
 ## Implementation source
 
 The `:root[data-theme="night"]` block in
-[`styles.css`](../../../apps/desktop/src/renderer/src/styles.css) is the production source. Tokens not
+[`theme.css`](../../../packages/ui/src/theme.css) is the production source. Tokens not
 overridden there intentionally inherit shared geometry and aliases from `:root`.
 
 ## Visual verification

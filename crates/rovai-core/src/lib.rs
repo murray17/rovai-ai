@@ -1,3 +1,17 @@
+// Runtime adapters share the same domain implementation as external Core consumers.
+extern crate self as rovai_core;
+
+mod acp;
+mod antigravity;
+pub mod application;
+mod builtin_tool_runtime;
+mod claude;
+mod codex;
+mod health;
+mod pi;
+mod runtime_fleet;
+mod runtime_mcp;
+
 pub mod action;
 pub mod agent_identity;
 pub mod agent_profile;

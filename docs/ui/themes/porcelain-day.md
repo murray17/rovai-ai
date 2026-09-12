@@ -269,7 +269,7 @@ sole control boundary, or restore the historical Arctic Dawn/Meridian palette.
 
 ## Implementation source
 
-The `:root` block in [`styles.css`](../../../apps/desktop/src/renderer/src/styles.css) is the production
+The `:root` block in [`theme.css`](../../../packages/ui/src/theme.css) is the production
 source. This document is a reviewable contract, not a second CSS source.
 
 ## Visual verification

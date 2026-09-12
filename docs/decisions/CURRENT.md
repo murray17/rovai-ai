@@ -169,3 +169,8 @@ last_updated: 2026-09-12
 
 - 当前规范：[双轨执行评测](../architecture/execution-evaluation.md)、[Execution Evaluation v14](../contracts/execution-evaluation-v14.md)、[User Automation v5](../contracts/user-automation-v5.md)与[操作指南](../development/evaluation.md)。
 - 理由来源：[V1.58-D01](../versions/v1.58/decisions.md#v1-58-d01)。
+
+## 统一 Host 与 Web
+
+- 当前规范：[统一 Rust Host](../architecture/unified-rust-host.md)、[Host Lifecycle v1](../contracts/host-lifecycle-v1.md)、[Host Web v1](../contracts/host-web-v1.md)与[Server 开发预览](../development/server-preview.md)。
+- 理由来源：[V1.59-D01](../versions/v1.59/decisions.md#v1-59-d01)。

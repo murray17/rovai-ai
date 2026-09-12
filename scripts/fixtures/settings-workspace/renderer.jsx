@@ -17,7 +17,10 @@ import '@renderer/member-editor.css'
 const ignore = () => {}
 const clone = structuredClone
 const requests = []
+let releaseHostStatus
+let hostTokenGeneration = 0
 const state = {
+  hostWeb: { enabled: false }, holdHostStatus: false, loseHostStartReply: false,
   preferences: fixture.preferences(), notifications: fixture.notifications(),
   channels: fixture.channelsSnapshot(), executionWeb: fixture.executionWeb(),
   diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null
@@ -38,6 +41,25 @@ const savePreference = key => async value => {
 }
 Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: () => () => {},
+  hostWeb: {
+    status: async () => {
+      await request('hostWeb.status')
+      const snapshot = clone(state.hostWeb)
+      if (state.holdHostStatus) {
+        state.holdHostStatus = false
+        return new Promise(resolve => { releaseHostStatus = () => resolve(snapshot) })
+      }
+      return snapshot
+    },
+    start: async params => {
+      await request('hostWeb.start', params)
+      state.hostWeb = { enabled: true, origin: 'http://127.0.0.1:4317', sessions: 0 }
+      if (state.loseHostStartReply) { state.loseHostStartReply = false; throw new Error('启动结果未知') }
+      return { ...clone(state.hostWeb), administratorToken: `fixture-token-${++hostTokenGeneration}` }
+    },
+    rotate: async () => { await request('hostWeb.rotate'); return { ...clone(state.hostWeb), administratorToken: `fixture-token-${++hostTokenGeneration}` } },
+    stop: async () => { await request('hostWeb.stop'); state.hostWeb = { enabled: false }; return clone(state.hostWeb) }
+  },
   generalPreferences: {
     get: async () => clone(state.preferences),
     setStartupLocationMode: savePreference('startupLocationMode'),
@@ -117,6 +139,7 @@ function Fixture() {
 }
 window.settingsTest = {
   requests, state,
+  releaseHostStatus: () => releaseHostStatus?.(),
   fail: method => { state.failure = method },
   settle: () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 35))))
 }

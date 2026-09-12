@@ -21,6 +21,8 @@ type CoreInternalMethod =
   | 'automations.schedulerControl'
   | 'automations.schedulerTick'
 
+export type HostWebMethod = 'host.web.status' | 'host.web.start' | 'host.web.stop' | 'host.web.rotate'
+
 export type AutomationSchedulerControl = {
   epoch: number
   recoveryBoundary: string
@@ -36,7 +38,7 @@ type PendingRequest = {
   resolve(value: unknown): void
   reject(error: RovaiRequestError): void
   timer: NodeJS.Timeout
-  method: CoreMethod | CoreInternalMethod
+  method: CoreMethod | CoreInternalMethod | HostWebMethod
   startedAt: number
   traceId: string | null
 }
@@ -508,7 +510,7 @@ export class CoreClient {
     this.#failAllForShutdown('Rust Core stopped')
   }
 
-  async request<T>(method: CoreMethod, params: unknown = {}): Promise<T> {
+  async request<T>(method: CoreMethod | HostWebMethod, params: unknown = {}): Promise<T> {
     if (this.#stopping) {
       throw new RovaiRequestError(structuredFailure(
         'shutdown',
@@ -640,7 +642,7 @@ export class CoreClient {
 
   #sendRequest<T>(
     active: ActiveChild,
-    method: CoreMethod | CoreInternalMethod,
+    method: CoreMethod | CoreInternalMethod | HostWebMethod,
     params: unknown,
     timeoutMs: number
   ): Promise<T> {
@@ -733,7 +735,9 @@ export class CoreClient {
     try {
       message = JSON.parse(line) as CoreWireResponse | CoreStartupWireFrame
     } catch (error) {
-      console.error('Invalid Rust Core response', error, line)
+      // A Host response may carry a freshly generated management credential.
+      // Malformed wire input must never turn that response into a log entry.
+      console.error('Invalid Rust Core response frame')
       return
     }
 
@@ -1067,7 +1071,8 @@ export function sidecarExecutableName(
 }
 
 export function resolveCoreBinary(): string {
-  return resolveBundledSidecar('rovai-core', [
+  return resolveBundledSidecar('rovai-host', [
+    process.env.ROVAI_HOST_BIN,
     process.env.ROVAI_CORE_BIN,
     process.env.HORIZONWARD_CORE_BIN,
     process.env.LUMEN_CORE_BIN
@@ -1078,7 +1083,7 @@ export function resolveDesktopBootstrapBinary(): string {
   return resolveBundledSidecar('rovai')
 }
 
-function resolveBundledSidecar(binary: 'rovai-core' | 'rovai', overrides: Array<string | undefined> = []): string {
+function resolveBundledSidecar(binary: 'rovai-host' | 'rovai', overrides: Array<string | undefined> = []): string {
   const executable = sidecarExecutableName(binary)
   const stagedTarget = sidecarTargetKey()
   const candidates = app.isPackaged
@@ -1100,5 +1105,5 @@ function resolveBundledSidecar(binary: 'rovai-core' | 'rovai', overrides: Array<
     }
   }
 
-  throw new Error(`Rovai AI ${binary === 'rovai-core' ? 'Rust Core binary' : 'Desktop bootstrap helper'} was not found. Checked: ${candidates.filter(Boolean).map((candidate) => resolve(candidate as string)).join(', ')}`)
+  throw new Error(`Rovai AI ${binary === 'rovai-host' ? 'Rust Host binary' : 'Desktop bootstrap helper'} was not found. Checked: ${candidates.filter(Boolean).map((candidate) => resolve(candidate as string)).join(', ')}`)
 }

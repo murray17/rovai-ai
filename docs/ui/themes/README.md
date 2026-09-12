@@ -36,7 +36,7 @@ Theme Token → Shared Component → Surface Composition
 4. 主题切换只更新根 Token 与窗口背景；不得重新挂载页面、移动焦点，或改变 Camp、Tab、
    Draft、滚动、选择、Dialog、Core/IPC 事实。
 
-实现真源是 [`styles.css`](../../../apps/desktop/src/renderer/src/styles.css)、
+实现真源是 [`theme.css`](../../../packages/ui/src/theme.css)、
 [`theme.ts`](../../../apps/desktop/src/renderer/src/theme.ts)和主题测试。若文档与生产 Token
 不一致，必须报告文档—实现漂移，不得静默选边。
 

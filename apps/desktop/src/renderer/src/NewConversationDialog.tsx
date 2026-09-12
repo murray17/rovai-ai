@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import { readErrorMessage } from './error-message'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -50,6 +51,7 @@ export function NewConversationDialog({
   onWorkspaceSelected(workspace: WorkspaceSelection): Promise<void>
   onCreate(draft: CreateCampDraft, enableOneClick: boolean): Promise<void>
 }): React.JSX.Element {
+  const client = useCampClient()
   const [workspace, setWorkspace] = useState<WorkspaceChoice | null>(initialWorkspace)
   const [gitInspectionStatus, setGitInspectionStatus] = useState<GitInspectionStatus>('idle')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
@@ -122,7 +124,7 @@ export function NewConversationDialog({
     if (!workspaceInspectionShouldStart(open, projectAccessReady, pendingGitInspectionPath)) return
     let cancelled = false
     setGitInspectionStatus('loading')
-    void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
+    void client.request<WorkspaceInspection>('workspaces.inspect', {
       path: pendingGitInspectionPath
     }).then((inspection) => {
       if (cancelled || inspection.projectPath !== pendingGitInspectionPath) return
@@ -133,7 +135,7 @@ export function NewConversationDialog({
       setGitInspectionStatus('failed')
     })
     return () => { cancelled = true }
-  }, [open, pendingGitInspectionPath, projectAccessReady])
+  }, [client, open, pendingGitInspectionPath, projectAccessReady])
 
   useEffect(() => {
     if (open && optionalOpen) nameInputRef.current?.focus()

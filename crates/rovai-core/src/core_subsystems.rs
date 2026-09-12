@@ -268,7 +268,7 @@ impl super::Core {
                     let mut database = self.database.lock().await;
                     SkillProjectionReconciler.synchronize_removed_execution_roots(
                         &mut database,
-                        &parse_removed_skill_project_roots()?,
+                        self.removed_skill_project_roots.get()?,
                     )?;
                     self.skill_library.plan_bundled_skills(&mut database)?
                 };

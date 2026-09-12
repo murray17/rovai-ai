@@ -98,11 +98,11 @@ Electron 回归使用生产 adapter、CampWorkspace 与 CSS，验证空事件下
 
 ### Claude Code 无 Prompt 目录验证
 
-目录协议与进程生命周期由 Main 的 `health::claude_catalog_tests` owner 验证，正常门禁使用临时
+目录协议与进程生命周期由共享 Core library 的 `health::claude_catalog_tests` owner 验证，正常门禁使用临时
 可执行夹具，不启动真实模型。安装版手工验证使用显式 ignored 测试：
 
 ```bash
-cargo test -p rovai-core --bin rovai-core health::claude_catalog_tests::claude_catalog_real_runtime_smoke -- --ignored --nocapture
+cargo test -p rovai-core --lib health::claude_catalog_tests::claude_catalog_real_runtime_smoke -- --ignored --nocapture
 ```
 
 执行前遵守 [本地隔离流程](local-workflow.md)，确认实际 Claude 可执行入口与继承的配置；该命令只发送
@@ -145,6 +145,9 @@ DOCS_BASE_REF=<目标分支 base SHA> pnpm docs:check:ci
 | 仅普通 Library 模块 | `pnpm check:rust`、`pnpm test:rust:lib` |
 | 仅 `rovai-core` Main 或其专属模块 | `pnpm check:rust`、`pnpm test:rust:core` |
 | Cargo/Rust 配置、`src/lib.rs`、多 target、删除/重命名、未知 Rust 路径或分类失败 | `pnpm test:rust:workspace-default` |
+
+`test:rust:core` 保留为共享 library 回归的兼容入口：应用运行层与 Runtime Adapter 单测已随库化迁入
+library，薄 stdio main 不再重复编译这些测试。
 
 Main 专属模块由 staged `src/main.rs` 声明、但未由 staged `src/lib.rs` 导出的模块动态确定。
 脚本使用 NUL 分隔读取路径以支持空格等合法文件名；Git 读取、模块解析或分类失败都会 fail closed
@@ -289,6 +292,10 @@ Composer 续发目标的发布时点与草稿保护运行 `pnpm test:composer-co
 计算与队列调度验收；手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:composer-continuation`。
 
 ### Core 可选功能启动回归
+
+Headless Host 的进程准入与 Unix 受控停止使用 `pnpm test:host-startup`；精确边界见
+[Host Lifecycle v1](../contracts/host-lifecycle-v1.md)。Windows console 停止另做原生验收；该测试不调用模型，
+不代替完整 Headless 执行、审批或平台安全验证。
 
 涉及 `run_core()` ready 边界、可选初始化或功能重试时，运行：
 

@@ -28,14 +28,14 @@
     "check:rust": "cargo check --workspace --all-targets",
     "test:rust:lib": "cargo test -p rovai-core --lib",
     "test:rust:cli": "cargo test -p rovai-core --bin rovai",
-    "test:rust:core": "cargo test -p rovai-core --bin rovai-core",
+    "test:rust:core": "cargo test -p rovai-core --lib",
     "test:rust:workspace-default": "cargo test --workspace",
     "test:rust:slow": "cargo test -p rovai-core --features slow-tests --lib slow_tests::",
     "test:rust:pr": "pnpm test:rust:lib && pnpm test:rust:cli && pnpm test:rust:slow",
     "test:rust:full": "pnpm test:rust:workspace-default",
     "test:rust:staged": "node scripts/check-rust-staged.mjs",
     "dev": "pnpm core:build:debug && node scripts/dev-desktop.mjs",
-    "build:desktop": "electron-vite build",
+    "build:desktop": "pnpm build:web && electron-vite build",
     "build": "pnpm core:build && pnpm build:desktop",
     "build:macos:arm64": "pnpm core:build:macos:arm64 && pnpm build:desktop",
     "build:macos:x64": "pnpm core:build:macos:x64 && pnpm build:desktop",
@@ -64,6 +64,7 @@
     "test:zcode-owner": "node --test scripts/test-zcode-owner.mjs",
     "smoke:zcode-background": "node scripts/smoke-zcode-background.mjs",
     "test:core-startup": "cargo build -p rovai-core --bins && node --test scripts/lib/core-startup-availability.test.mjs",
+    "test:host-startup": "cargo build -p rovai-host && node --test scripts/lib/host-lifecycle.test.mjs",
     "test": "pnpm docs:test && pnpm docs:check && pnpm skills:test && pnpm skills:check && pnpm test:electron-sandbox-capability && vitest run && node --test scripts/test-zcode-owner.mjs scripts/lib/check-rust-staged.test.mjs scripts/lib/create-configured-camp.test.mjs scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs scripts/lib/dev-desktop.test.mjs scripts/lib/install-macos-daily.test.mjs scripts/lib/macos-app-verification.test.mjs scripts/lib/macos-signing-policy.test.mjs scripts/lib/macos-update-info.test.mjs scripts/lib/release-notes.test.mjs scripts/lib/missing-send-recovery-protocol.test.mjs scripts/lib/planned-shutdown-app-quit.test.mjs scripts/lib/sidecar-targets.test.mjs scripts/lib/windows-installer-shutdown.test.mjs scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-core.test.mjs scripts/lib/qualification-demo-cases.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-judge-views.test.mjs scripts/lib/qualification-observation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-evidence.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-tool-use-judge.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs scripts/lib/tool-interaction-measurement/index.test.mjs scripts/lib/qualification-tool-measurement-spec.test.mjs scripts/benchmark-paired-collaboration.test.mjs scripts/benchmark/*.test.mjs scripts/benchmark/**/*.test.mjs scripts/lib/context-evaluation.test.mjs scripts/lib/context-quality.test.mjs scripts/lib/context-weekly.test.mjs scripts/lib/qualification-api-judge-adapter.test.mjs scripts/lib/qualification-cli-judge-adapter.test.mjs scripts/lib/qualification-claim-audit.test.mjs scripts/lib/qualification-native-witness.test.mjs scripts/lib/qualification-resource-usage.test.mjs scripts/lib/qualification-evaluation-context.test.mjs",
     "smoke:core": "pnpm core:build:debug && node scripts/smoke-core.mjs",
     "smoke:member-config": "pnpm core:build:debug && node scripts/smoke-member-config.mjs",
@@ -98,7 +99,7 @@
     "smoke:action-approval": "pnpm core:build:debug && node scripts/smoke-action-approval.mjs",
     "smoke:runtime-permissions": "pnpm smoke:action-approval && pnpm smoke:multi-agent",
     "accept:v0.16": "cargo test -p rovai-core db::tests::v27_freezes_active_runs_on_legacy_semantics_and_keeps_terminal_history && cargo test -p rovai-core team_tool::tests::call_member_persists_one_input_before_materializing_one_run && cargo test -p rovai-core action::tests::restart_fails_closed_intercepted_approvals_and_authorization_deliveries && pnpm test && pnpm smoke:runtime-permissions && pnpm smoke:acp-runtime",
-    "accept:v0.17": "cargo test -p rovai-core db::tests::v28_adds_execution_evidence_and_structured_camp_presentations && cargo test -p rovai-core execution_evidence::tests::provider_packets_are_reduced_to_public_evidence_fields && cargo test -p rovai-core execution_evidence::tests::evidence_is_durable_blob_backed_agent_inaccessible_and_cancel_fenced && cargo test -p rovai-core runtime::tests::camp_turn_cancellation_is_persisted_and_finalized_from_authoritative_state && cargo test -p rovai-core team_tool::tests::recipient_completion_without_another_call_never_contacts_the_source && cargo test -p rovai-core --bin rovai-core tests::acp_tool_events_expose_digests_not_raw_payloads && pnpm typecheck && pnpm test",
+    "accept:v0.17": "cargo test -p rovai-core db::tests::v28_adds_execution_evidence_and_structured_camp_presentations && cargo test -p rovai-core execution_evidence::tests::provider_packets_are_reduced_to_public_evidence_fields && cargo test -p rovai-core execution_evidence::tests::evidence_is_durable_blob_backed_agent_inaccessible_and_cancel_fenced && cargo test -p rovai-core runtime::tests::camp_turn_cancellation_is_persisted_and_finalized_from_authoritative_state && cargo test -p rovai-core team_tool::tests::recipient_completion_without_another_call_never_contacts_the_source && cargo test -p rovai-core --lib application::tests::acp_tool_events_expose_digests_not_raw_payloads && pnpm typecheck && pnpm test",
     "smoke:multi-agent": "pnpm core:build:debug && node scripts/smoke-multi-agent.mjs",
     "smoke:attachments": "pnpm core:build:debug && node scripts/smoke-camp-attachments.mjs",
     "smoke:skills": "pnpm core:build:debug && node scripts/smoke-skills.mjs",
@@ -145,7 +146,12 @@
     "dist:windows:release:x64": "pnpm build:windows:x64 && node scripts/package-windows.mjs nsis && node scripts/verify-windows-release.mjs --require-signed",
     "verify:windows": "node scripts/verify-windows-release.mjs",
     "eval:daily": "node scripts/eval-daily.mjs",
-    "eval:gate": "node scripts/eval-gate.mjs"
+    "eval:gate": "node scripts/eval-gate.mjs",
+    "build:web": "vite build --config web.vite.config.ts",
+    "build:server": "node scripts/build-server.mjs",
+    "test:host-web": "node --test scripts/lib/host-web.test.mjs",
+    "review:host-web-parity": "node scripts/review-host-web-parity.mjs",
+    "test:host-web-parity": "node --test scripts/lib/host-web-parity.test.mjs"
   },
   "dependencies": {
     "@codemirror/language": "6.12.4",
@@ -223,12 +229,21 @@
           "to": "bin/rovai-core"
         },
         {
+          "from": "resources/bin/macos-${arch}/rovai-host",
+          "to": "bin/rovai-host"
+        },
+        {
           "from": "resources/bin/macos-${arch}/rovai",
           "to": "bin/rovai"
+        },
+        {
+          "from": "out/web",
+          "to": "web-ui"
         }
       ],
       "binaries": [
         "Contents/Resources/bin/rovai-core",
+        "Contents/Resources/bin/rovai-host",
         "Contents/Resources/bin/rovai"
       ],
       "hardenedRuntime": true,
@@ -271,8 +286,16 @@
           "to": "bin/rovai-core.exe"
         },
         {
+          "from": "resources/bin/windows-x64/rovai-host.exe",
+          "to": "bin/rovai-host.exe"
+        },
+        {
           "from": "resources/bin/windows-x64/rovai.exe",
           "to": "bin/rovai.exe"
+        },
+        {
+          "from": "out/web",
+          "to": "web-ui"
         }
       ],
       "artifactName": "Rovai-AI-${version}-${arch}.${ext}"

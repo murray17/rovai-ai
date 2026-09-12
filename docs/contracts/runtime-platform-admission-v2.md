@@ -19,6 +19,7 @@ export type HostPlatformKey =
   | 'macos-arm64'
   | 'macos-x64'
   | 'windows-x64'
+  | 'linux-x64'
 
 export type RuntimePlatformAdmissionStatus =
   | 'qualified'
@@ -38,6 +39,9 @@ export interface RuntimePlatformAdmission {
 `qualified` 必须有非空 immutable evidence revision，且 `reasonCode = null`。`preview` 必须保留阻止正式资格化的
 closed reason code，且 `evidenceRevision = null`；它不能被统计或描述为 First-Class/qualified。
 `not_qualified` 与 `unsupported` 的 reason/evidence 规则沿用 v1。
+
+v1.59 增加 Linux x64 Server 的构建平台身份；现有 Runtime 的 Linux 行全部为 `not_qualified` 且无 evidence，
+不会自动开放 discovery、安装或执行，也不增加 Linux Desktop。
 
 ## 2. Authority and projection
 

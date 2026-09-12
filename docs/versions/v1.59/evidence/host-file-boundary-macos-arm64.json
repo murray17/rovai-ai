@@ -1,0 +1,24 @@
+{
+  "arch": "aarch64",
+  "notCovered": [
+    "real control credentials",
+    "environment and handle inheritance",
+    "local IPC impersonation",
+    "process memory access",
+    "real Runtime authentication and execution"
+  ],
+  "observation": {
+    "authorizedWorkspaceWritable": true,
+    "descendant": {
+      "authorizedWorkspaceWritable": true,
+      "privateFixtureReadable": true
+    },
+    "privateFixtureReadable": true
+  },
+  "os": "macos",
+  "privateFileIsolationSatisfied": false,
+  "releaseQualified": false,
+  "schemaVersion": 1,
+  "scope": "Rovai ManagedProcess private-file and descendant probe; disposable fixture only",
+  "treeStopRequested": true
+}

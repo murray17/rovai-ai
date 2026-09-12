@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rovai-core"]
+members = ["crates/rovai-core", "crates/rovai-host", "crates/rovai-web"]
 resolver = "3"
 
 [workspace.package]

@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import { FileFindChangesAdapter } from './FileFindChangesAdapter'
 import { ChangedFileSelect } from './ChangedFileSelect'
 import { fileChangeFindLineId } from './file-find-changes'
@@ -10,6 +11,7 @@ import { agentRunFileChangesSummaryLabel, agentRunFileChangeModeLabel, agentRunF
 type AgentRunFileChangesDetailStatus = 'loading' | 'ready' | 'error'
 
 export function FileChangesPreview({ tab }: { tab: FileChangesPreviewTabModel }): JSX.Element {
+  const client = useCampClient()
   const { campId, changes, selectedEvidenceFileId } = tab
   const filePreview = useFilePreview()
   const [detail, setDetail] = useState<AgentRunFileChangesDetailView | null>(null)
@@ -25,7 +27,7 @@ export function FileChangesPreview({ tab }: { tab: FileChangesPreviewTabModel })
     const currentRequest = ++requestId.current
     setDetail(null)
     setDetailStatus('loading')
-    void window.rovai.request<AgentRunFileChangesDetailView>(
+    void client.request<AgentRunFileChangesDetailView>(
       'agentRunFileChanges.get',
       {
         campId,
@@ -50,7 +52,7 @@ export function FileChangesPreview({ tab }: { tab: FileChangesPreviewTabModel })
     return () => {
       requestId.current += 1
     }
-  }, [campId, changes.agentRunId, changes.executionEpoch, loadAttempt])
+  }, [client, campId, changes.agentRunId, changes.executionEpoch, loadAttempt])
 
   const openCurrentFile = async (): Promise<void> => {
     const file = changes.files.find((candidate) =>

@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
 import type { AgentRunExecutionEvidenceView, AgentRunView } from '@contracts'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
@@ -108,6 +109,7 @@ function ToolCallDetail({
   title: string
   summaryRef: RefObject<HTMLElement | null>
 }): JSX.Element {
+  const client = useCampClient()
   const evidenceId = completeEvidence?.id ?? null
   const [result, setResult] = useState<ToolResultViewState>(() => ({
     evidenceId,
@@ -157,7 +159,7 @@ function ToolCallDetail({
       error: null
     })
     try {
-      const response = await window.rovai.request<{ payload: unknown }>(
+      const response = await client.request<{ payload: unknown }>(
         'agentRunEvidence.getContent',
         { campId, evidenceId: completeEvidence.id }
       )
@@ -185,7 +187,7 @@ function ToolCallDetail({
         error: toolResultErrorMessage(error)
       })
     }
-  }, [campId, completeEvidence])
+  }, [client, campId, completeEvidence])
 
   useEffect(() => {
     if (

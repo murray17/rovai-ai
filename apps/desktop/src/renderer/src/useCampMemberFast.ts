@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AdapterInstallation, AgentProfile, CampMemberFastView, CampSnapshot, StoredCommandResult } from '@contracts'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
@@ -24,6 +25,7 @@ export function useCampMemberFast(
   retrySurface: string | null,
   onNotify: (message: string) => void
 ): CampMemberFastControls {
+  const client = useCampClient()
   const [, refresh] = useState(0)
   const entries = useRef(new Map<string, FastEntry>())
   const checks = useRef(new Set<string>())
@@ -77,7 +79,7 @@ export function useCampMemberFast(
       const key = requestKey(agentId)
       if (entry.value !== undefined || checks.current.has(key)) continue
       checks.current.add(key)
-      void window.rovai.request<CampMemberFastView | null>('camps.members.fast.check', {
+      void client.request<CampMemberFastView | null>('camps.members.fast.check', {
         campId: snapshot.camp.id, agentId
       }).then(value => {
         if (entries.current.get(agentId) === entry) entry.value = value
@@ -106,7 +108,7 @@ export function useCampMemberFast(
     saves.current.add(key)
     changed()
     try {
-      const result = await window.rovai.request<StoredCommandResult>('camps.members.fast.set', {
+      const result = await client.request<StoredCommandResult>('camps.members.fast.set', {
         commandId: crypto.randomUUID(),
         command: { campId: snapshot.camp.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
       })

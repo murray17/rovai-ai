@@ -7,7 +7,7 @@ import {
   windowsTitleBarOverlay
 } from './window-chrome'
 
-const rendererStyles = readFileSync(new URL('../renderer/src/styles.css', import.meta.url), 'utf8')
+const rendererStyles = readFileSync(new URL('../../../../packages/ui/src/theme.css', import.meta.url), 'utf8')
 
 function themeToken(selector: string, token: string): string {
   const start = rendererStyles.indexOf(`${selector} {`)

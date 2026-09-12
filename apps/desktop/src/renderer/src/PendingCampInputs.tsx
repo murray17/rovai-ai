@@ -1,3 +1,4 @@
+import { useCampClient } from './camp-client'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import type { CampMessageView, MessageQuoteSnapshot, MessageQuoteAction } from '@contracts'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ForwardedRef, type JSX } from 'react'
@@ -95,6 +96,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
   attachmentDragActive: boolean
   submittedInputIds?: readonly string[]
 }, ref: ForwardedRef<PendingCampInputsHandle>): JSX.Element {
+  const client = useCampClient()
   const [queue, setQueue] = useState<CampPendingInputsView | null>(null)
   const [edit, setEditState] = useState<LocalEdit | null>(null)
   const editRef = useRef<LocalEdit | null>(null)
@@ -132,7 +134,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
   useEffect(() => {
     mounted.current = true
     const reader = createPendingInputsRefresh(
-      () => window.rovai.request<CampPendingInputsView>('camp.pendingInputs.get', {
+      () => client.request<CampPendingInputsView>('camp.pendingInputs.get', {
         campId,
         ...(submittedInputIdsRef.current.length ? { submittedInputIds: submittedInputIdsRef.current } : {})
       }),
@@ -152,7 +154,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
     refreshReader.current = reader
     const invalidate = (): void => { void reader.refresh().catch(() => undefined) }
     const foreground = (): void => { if (document.visibilityState !== 'hidden') invalidate() }
-    const unsubscribe = window.rovai.onEvent((event) => {
+    const unsubscribe = client.onEvent((event) => {
       if (shouldRefreshPendingInputs(event, campId)) invalidate()
     })
     window.addEventListener('focus', foreground)
@@ -168,7 +170,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
       // Navigation snapshots are captured by the leave guard, never async cleanup.
       // A crash/reload still loses local text and requires explicit Core recovery.
     }
-  }, [campId, setEdit])
+  }, [client, campId, setEdit])
 
   useEffect(() => { void refresh().catch(() => undefined) }, [refreshKey, executionActive, submittedInputIdsKey, refresh])
   useEffect(() => { callbacks.current.onEditingChange(edit !== null) }, [edit !== null])
@@ -221,7 +223,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
   }, [ownsEdit, busy, onAttachmentDropTargetChange])
 
   const mutate = async (item: PendingCampInputView, action: PendingInputEditAction, token: string | null): Promise<StoredCommandResult> => {
-    const result = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.edit', {
+    const result = await client.request<StoredCommandResult>('camp.pendingInputs.edit', {
       commandId: crypto.randomUUID(),
       command: { campId, pendingInputId: item.id, expectedRevision: item.revision, editToken: token, action }
     })
@@ -258,7 +260,7 @@ export const PendingCampInputs = forwardRef(function PendingCampInputs({
           ? original
           : new File([original], `粘贴图片-${Date.now()}-${index + 1}.png`, { type: original.type })
         try {
-          nextQueue = await window.rovai.composerAttachments.preparePending({
+          nextQueue = await client.composerAttachments.preparePending({
             campId,
             pendingInputId: edit.item.id,
             expectedRevision: edit.item.revision,
