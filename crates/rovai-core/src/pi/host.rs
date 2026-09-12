@@ -30,7 +30,6 @@ use rovai_core::{
         ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
         ManagedWindowsArgvDialect,
     },
-    runtime_discovery::configure_active_runtime_command,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -414,7 +413,7 @@ impl PiHost {
         write_private_json(&binding_path, &initial_document)?;
 
         let mut command = Command::new(launch.executable);
-        configure_active_runtime_command(&mut command);
+        rovai_core::runtime_discovery::configure_runtime_command(AdapterKind::Pi, &mut command);
         if let Some(config) = &launch.builtin_tools {
             config.configure_command(&mut command)?;
         }

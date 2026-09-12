@@ -531,7 +531,7 @@ export class CoreClient {
       ))
     }
 
-    return this.#sendRequest<T>(active, method, params, 60_000)
+    return this.#sendRequest<T>(active, method, params, method === 'runtime.startup.check' ? 95_000 : 60_000)
   }
 
   async notifyAutomationSystemSuspending(): Promise<void> {

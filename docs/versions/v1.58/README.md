@@ -29,7 +29,7 @@ last_updated: 2026-09-12
 
 复用 Qualification Runner、Case admission、合同测试、双 View Judge、Core 持久证据、用户 CLI 和 Rovai Automation。新增受限只读 Trace 导出、日报与曲线、Host 报告准备、两级 Gate 及每周报告历史。通用集 12 个 Case；Memory 与 Review Duo 各有 3 个专属 Case。没有专属集的其他 Skill 先补样本，不能默认为已覆盖。
 
-本次没有新增数据库字段，沿用 main 的 Data Contract 99、Camp Snapshot 34、formatter/manifest 23 及 Built-in tool/context 语义。旧评测构建使用 Data Contract 98，不能冒充本次合并构建的执行证据。Memory 精确计数、文档体系重构和队员成长仍属后续项，日报中的两项 Memory 指标为未知。User Automation 新增 owner-only 元数据操作，不注入 Agent 上下文。
+双轨评测增量本身没有新增数据库字段，沿用当时 main 的 Data Contract 99、Camp Snapshot 34、formatter/manifest 23 及 Built-in tool/context 语义。旧评测构建使用 Data Contract 98，不能冒充本次合并构建的执行证据。Memory 精确计数、文档体系重构和队员成长仍属后续项，日报中的两项 Memory 指标为未知。User Automation 新增 owner-only 元数据操作，不注入 Agent 上下文。
 
 2026-09-10 开发者明确授权继续实现两条评测线，并授权实现者自行选择必要实现细节、最后汇总。该评测增量不修改核心模型可见机制或内置 Skill 内容，因此自身不触发产品模型上下文 revision；后续实际上下文／Skill 机制改动仍按 Gate 流程确认和验证。
 
@@ -90,3 +90,12 @@ Claude Code 模型目录从 help 别名改为无 Prompt 控制初始化，原生
 按用户确认，公屏及单聊的编辑入口改为退出队列、覆盖普通输入框；剩余 FIFO 正常推进，重新发送进入当前队尾。
 当前合同为 [Pending Camp Input v4](../../contracts/pending-camp-input-v4.md)、[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)
 与 [Single Chat v5](../../contracts/single-chat-v5.md)。不改变数据库 schema、Runtime 或模型上下文；实现与验证见[实施计划](implementation-plan.md#待发送消息移回输入框)。
+
+
+## Runtime 自定义启动设置
+
+按用户确认的交互提供自定义程序路径与按 Runtime 注入的环境变量。Core 拥有保存与草稿检查；
+管理列表保持白色、状态无圆点，启动设置操作行始终可见。该独立增量通过 Migration 150 将
+Data Contract 从 v1.57 / schema 99 升为 v1.58 / schema 100；不改变模型上下文、事件协议或平台资格。
+当前合同为 [Runtime Launch v40](../../contracts/runtime-launch-and-verification-v40.md)，架构与设置 brief
+同步。实现、测试 owner 与交付证据见[实施计划](implementation-plan.md#runtime-自定义启动设置)。

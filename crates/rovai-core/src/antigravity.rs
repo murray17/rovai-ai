@@ -20,7 +20,7 @@ use rovai_core::{
         ManagedWindowsArgvDialect,
     },
     runtime::{AgentRunWorkspace, PermissionSemantics},
-    runtime_discovery::{configure_active_runtime_command, is_runtime_entrypoint_file},
+    runtime_discovery::is_runtime_entrypoint_file,
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
         public_runtime_failure_from_output,
@@ -403,7 +403,10 @@ impl AntigravityAppRuntimeAdapter {
         }
         let mut command = Command::new(executable);
         command.args(&runtime_args);
-        configure_active_runtime_command(&mut command);
+        rovai_core::runtime_discovery::configure_runtime_command(
+            rovai_core::agent_profile::AdapterKind::AntigravityApp,
+            &mut command,
+        );
         if let Some(config) = &request.builtin_tools {
             config.configure_command(&mut command)?;
         }

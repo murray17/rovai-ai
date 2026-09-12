@@ -154,3 +154,24 @@ fallback 接纳。最小命令为 `cargo test -p rovai-core --bin rovai-core hea
   这些夹具不启动 Core、SQLite、Skill Library 或真实 Runtime；需求与规范双轴复核通过。
 - 界面证据为合成数据：[公屏日间](../../assets/pending-input-return/camp-day.png)、
   [单聊夜间](../../assets/pending-input-return/single-chat-night.png)。
+
+
+## Runtime 自定义启动设置
+
+范围来自 Issue #338 与用户确认的交互：允许已发现程序继续替换路径、选择后浅检、独立草稿深检、
+环境变量新增编辑与遮蔽、CAS 保存、恢复自动和常显置灰的“放弃更改 / 保存”。Issue 在新版本发布前保持开启。
+
+- Core：`runtime_startup` 持久化/输入边界、Migration 150、不可变配置快照、按 Runtime 的进程 overlay。
+- Desktop：原生选择器、owner RPC allowlist、草稿结果与已保存配置分离、白色管理列表和统一尾部图标。
+- 当前权威：[Runtime Launch v40](../../contracts/runtime-launch-and-verification-v40.md)、
+  [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#本机启动设置)与设置工作区 brief。
+- 不新增模型可见字段、Runtime Kind、第三方依赖或系统环境修改；现有进程继续使用启动时捕获的环境。
+
+测试准入：输入矩阵由 `runtime_startup` 纯函数测试拥有；并发 overlay 由不启动进程的命令配置测试拥有。
+路径封闭候选扩展既有 discovery priority owner。Migration 150 的事务/receipt/CAS/reopen 用独立临时数据库
+验证，因为字段单测无法证明升级原子性。真实 Core RPC 测试只验证草稿/保存/子进程/重启 seam，Shell fixture
+不调用模型；Windows 入口继续由原 command-shim 测试拥有。既有 Electron settings fixture 增加有效变量直接
+保存、失败重试、放弃、登录结果以及双主题/缩放验证，不创建第二套模拟 UI。
+
+最小检查：`cargo test -p rovai-core --lib startup`、`pnpm test:core-startup` 和 `pnpm test:settings-workspace`。
+全量验证和交付状态待实际运行结果补充。

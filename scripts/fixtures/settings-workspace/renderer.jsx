@@ -20,7 +20,7 @@ const requests = []
 const state = {
   preferences: fixture.preferences(), notifications: fixture.notifications(),
   channels: fixture.channelsSnapshot(), executionWeb: fixture.executionWeb(),
-  diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null
+  startup: {}, diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null
 }
 state.preferences.newConversationDefaults.memberAgentIds = fixture.largeRoster.slice(0, 12).map(a => a.agentId)
 const channelListeners = new Set(), webListeners = new Set()
@@ -50,6 +50,7 @@ const savePreference = key => async value => {
   return clone(state.preferences)
 }
 Object.assign(window, { rovai: {
+  selectRuntimeExecutable: async () => '/sample/custom/codex',
   platform: 'darwin', onEvent: () => () => {},
   generalPreferences: {
     get: async () => clone(state.preferences),
@@ -83,6 +84,16 @@ Object.assign(window, { rovai: {
   exportMonitoring: async () => null, exportDiagnostics: async () => null,
   request: async (method, params = {}) => {
     await request(method, params)
+    if (method === 'runtime.startup.get') return clone(state.startup[params.runtimeKind] ?? { runtimeKind: params.runtimeKind, revision: 0, configuration: { programPath: null, environment: [] } })
+    if (method === 'runtime.startup.save') {
+      const settings = { runtimeKind: params.runtimeKind, revision: params.expectedRevision + 1, configuration: clone(params.configuration) }
+      state.startup[params.runtimeKind] = settings
+      return clone(settings)
+    }
+    if (method === 'runtime.startup.inspect' || method === 'runtime.startup.check') return {
+      status: method === 'runtime.startup.check' ? 'authentication_required' : 'recognized',
+      executablePath: params.configuration.programPath ?? '/sample/bin/codex', reportedVersion: '0.153.4'
+    }
     if (method === 'notifications.preference.get') return clone(state.notifications)
     if (method === 'notifications.preference.update') {
       state.notifications = { ...state.notifications, ...params.command, version: state.notifications.version + 1 }

@@ -20,8 +20,9 @@ use rovai_core::{
     },
     managed_process::{ManagedChildStdin, ManagedChildStdout},
     runtime_discovery::{
-        RuntimeLaunchPurpose, configure_active_runtime_command, discover_static_runtime_version,
-        is_cursor_agent_version, is_executable_file, runtime_launch_allowed,
+        RuntimeLaunchPurpose, configure_active_runtime_command, configure_runtime_command,
+        discover_static_runtime_version, is_cursor_agent_version, is_executable_file,
+        runtime_launch_allowed,
     },
     runtime_failure::{
         RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
@@ -48,9 +49,13 @@ impl Drop for ProbeRootCleanup {
     }
 }
 
-fn runtime_command(executable: impl AsRef<std::ffi::OsStr>) -> Command {
+fn runtime_command(executable: impl AsRef<std::ffi::OsStr>, kind: Option<AdapterKind>) -> Command {
     let mut command = Command::new(executable);
-    configure_active_runtime_command(&mut command);
+    if let Some(kind) = kind {
+        configure_runtime_command(kind, &mut command);
+    } else {
+        configure_active_runtime_command(&mut command);
+    }
     command
 }
 
@@ -248,7 +253,7 @@ pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
     }
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(path.clone()).await;
-    let mut version_command = runtime_command(&path);
+    let mut version_command = runtime_command(&path, Some(AdapterKind::Pi));
     version_command.arg("--version").stdin(Stdio::null());
     let version = bounded_output(&mut version_command, Duration::from_secs(5))
         .await
@@ -383,7 +388,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
-    let mut version_command = runtime_command(&canonical);
+    let mut version_command = runtime_command(&canonical, Some(AdapterKind::ClaudeCodeCli));
     version_command.arg("--version");
     let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
     let reported_version = match version {
@@ -440,7 +445,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         }
     };
 
-    let mut help_command = runtime_command(&canonical);
+    let mut help_command = runtime_command(&canonical, Some(AdapterKind::ClaudeCodeCli));
     help_command.arg("--help");
     let help = bounded_output(&mut help_command, Duration::from_secs(15)).await;
     let help = match help {
@@ -552,7 +557,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         };
     }
 
-    let mut auth_command = runtime_command(&canonical);
+    let mut auth_command = runtime_command(&canonical, Some(AdapterKind::ClaudeCodeCli));
     auth_command.args(["auth", "status"]);
     let auth = bounded_output(&mut auth_command, Duration::from_secs(15)).await;
     let authenticated = match auth {
@@ -713,7 +718,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
-    let mut version_command = runtime_command(&canonical);
+    let mut version_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
     version_command.arg("--version");
     let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
     let reported_version = match version {
@@ -770,7 +775,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
         }
     };
 
-    let mut help_command = runtime_command(&canonical);
+    let mut help_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
     help_command.arg("--help");
     let help = bounded_output(&mut help_command, Duration::from_secs(15)).await;
     let help = match help {
@@ -881,7 +886,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
         capabilities.push("output.stream_json".to_string());
     }
 
-    let mut model_command = runtime_command(&canonical);
+    let mut model_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
     model_command.arg("models");
     let model_output = bounded_output(&mut model_command, Duration::from_secs(60)).await;
     match model_output {
@@ -1168,7 +1173,7 @@ async fn claude_code_model_catalog(
     path: &Path,
     deadline: Duration,
 ) -> Result<Vec<ModelDescriptor>> {
-    let mut command = runtime_command(path);
+    let mut command = runtime_command(path, Some(AdapterKind::ClaudeCodeCli));
     command.args([
         "--print",
         "--input-format",
@@ -1371,7 +1376,7 @@ async fn acp_probe_at(
             session_result: None,
         };
     }
-    let mut version_command = runtime_command(&canonical);
+    let mut version_command = runtime_command(&canonical, Some(kind));
     if kind == AdapterKind::ZcodeApp {
         // Discovery already validated the bundle; do not execute its UI entrypoint.
         match rovai_core::zcode::command(&canonical) {
@@ -1599,7 +1604,7 @@ async fn run_acp_probe(
     if kind == AdapterKind::KiroCli {
         write_kiro_additive_agent_config(&probe_root, &Default::default())?;
     }
-    let mut command = runtime_command(path);
+    let mut command = runtime_command(path, Some(kind));
     configure_acp_command(&mut command, kind, false);
     if kind == AdapterKind::CodebuddyCli
         && let Ok(model) = env::var("ROVAI_CODEBUDDY_MODEL")
@@ -1889,7 +1894,7 @@ pub(crate) async fn inspect_grok_native_mcp_server_names(
     ) {
         bail!("runtime_launch_disallowed:dispatch_preflight");
     }
-    let mut command = runtime_command(executable);
+    let mut command = runtime_command(executable, Some(AdapterKind::GrokBuild));
     command
         .args(["--no-auto-update", "inspect", "--json"])
         .current_dir(cwd);
@@ -2526,7 +2531,7 @@ fn classify_acp_probe_failure(detail: &str) -> AgentRuntimeProbeStatus {
 }
 
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
-    let mut command = runtime_command(path);
+    let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command.args(["app-server", "--listen", "stdio://"]);
     let mut process = RuntimeProbeProcess::spawn(
         &mut command,
@@ -2628,7 +2633,7 @@ async fn claude_fast_auth(
     cwd: &Path,
 ) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
     use rovai_core::camp_fast::{NativeFastEligibility, claude_subscription_auth};
-    let mut command = runtime_command(path);
+    let mut command = runtime_command(path, Some(AdapterKind::ClaudeCodeCli));
     command.args(["auth", "status"]).current_dir(cwd);
     let output = bounded_output(&mut command, Duration::from_secs(15)).await?;
     let eligible = output.status.success()
@@ -2655,8 +2660,10 @@ pub fn custom_fast_environment(kind: AdapterKind) -> bool {
         AdapterKind::CodexCli => &["OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY"],
         _ => return true,
     };
-    keys.iter()
-        .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty() && value != "0"))
+    keys.iter().any(|key| {
+        rovai_core::runtime_discovery::runtime_environment_variable(kind, key)
+            .is_some_and(|value| !value.is_empty() && value != "0")
+    })
 }
 
 pub async fn codex_fast_eligibility(
@@ -2686,7 +2693,7 @@ async fn codex_fast_metadata(
     explicit_model: Option<&str>,
 ) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
     use rovai_core::camp_fast::codex_eligibility;
-    let mut command = runtime_command(path);
+    let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command
         .args(["app-server", "--listen", "stdio://"])
         .current_dir(cwd);
@@ -2777,7 +2784,7 @@ async fn codex_runtime_probe_uncached(
     fingerprint: Option<String>,
     probed_at: String,
 ) -> AgentRuntimeProbeResult {
-    let mut version_command = runtime_command(&path);
+    let mut version_command = runtime_command(&path, Some(AdapterKind::CodexCli));
     version_command.arg("--version");
     let version_output = match bounded_output(&mut version_command, Duration::from_secs(15)).await {
         Ok(output) if output.status.success() => output,
@@ -2816,7 +2823,7 @@ async fn codex_runtime_probe_uncached(
             .to_string(),
     );
 
-    let mut auth_command = runtime_command(&path);
+    let mut auth_command = runtime_command(&path, Some(AdapterKind::CodexCli));
     auth_command.args(["login", "status"]);
     match bounded_output(&mut auth_command, Duration::from_secs(15)).await {
         Ok(output) if output.status.success() => {}
@@ -2904,7 +2911,7 @@ async fn codex_runtime_probe_uncached(
 }
 
 async fn probe_initialize_handshake(path: &Path) -> Result<()> {
-    let mut command = runtime_command(path);
+    let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command.args(["app-server", "--listen", "stdio://"]);
     let mut process = RuntimeProbeProcess::spawn(
         &mut command,
@@ -2985,7 +2992,7 @@ async fn probe_schema_capabilities(path: &Path) -> Result<(Vec<String>, Vec<Stri
     let schema_dir =
         env::temp_dir().join(format!("rovai-codex-schema-probe-{}", uuid::Uuid::new_v4()));
     let _cleanup = ProbeRootCleanup(schema_dir.clone());
-    let mut command = runtime_command(path);
+    let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command
         .args(["app-server", "generate-json-schema", "--out"])
         .arg(&schema_dir);
@@ -3017,7 +3024,7 @@ async fn probe_schema_capabilities(path: &Path) -> Result<(Vec<String>, Vec<Stri
         // Some versions export optional turn fields only with --experimental. A failed
         // optional export must not downgrade the existing Product Runtime capabilities.
         let experimental_dir = schema_dir.join("experimental");
-        let mut command = runtime_command(path);
+        let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
         command
             .args([
                 "app-server",
@@ -3153,7 +3160,7 @@ async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> 
             path: None,
         };
     };
-    let mut command = runtime_command(&executable);
+    let mut command = runtime_command(&executable, None);
     command.args(args);
     match bounded_output(&mut command, Duration::from_secs(15)).await {
         Ok(output) if output.status.success() => CommandHealth {

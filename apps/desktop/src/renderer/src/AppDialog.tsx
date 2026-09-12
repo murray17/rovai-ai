@@ -137,9 +137,15 @@ export function AppDialogImpact({ tone = 'neutral', label, children }: {
   return <li className={`app-dialog-impact is-${tone}`}><span>{label}</span><p>{children}</p></li>
 }
 
-export function DialogControlIcon({ name }: { name: 'close' | 'chevron' | 'plus' | 'check' | 'save' }): React.JSX.Element {
+export function DialogControlIcon({ name }: { name: 'close' | 'chevron' | 'plus' | 'check' | 'save' | 'refresh' | 'settings' | 'eye' | 'eye-off' | 'back' | 'folder' | 'trash' }): React.JSX.Element {
   return <svg className="dialog-glyph" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    {name === 'close' ? <path d="m5 5 10 10M15 5 5 15" />
+    {name === 'refresh' ? <><path d="M16 8a6 6 0 1 0 .2 4M16 3v5h-5" /></>
+      : name === 'settings' ? <><path d="m8 3-.5 2-1.8 1-2-.5-1.5 2.6 1.4 1.5v2L2.2 13l1.5 2.6 2-.5 1.8 1L8 18h3l.6-1.9 1.8-1 2 .5L17 13l-1.4-1.4v-2L17 8.1l-1.6-2.6-2 .5-1.8-1L11 3Z" /><circle cx="9.6" cy="10.5" r="2.3" /></>
+      : name === 'back' ? <path d="m9 4-6 6 6 6M3 10h14" />
+      : name === 'folder' ? <path d="M3 5h5l2 2h7v9H3Z" />
+      : name === 'trash' ? <><path d="M4 6h12M8 3h4l1 3M6 6l1 11h6l1-11M9 9v5M11 9v5" /></>
+      : name === 'eye' || name === 'eye-off' ? <><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z" /><circle cx="10" cy="10" r="2" />{name === 'eye-off' && <path d="m3 3 14 14" />}</>
+      : name === 'close' ? <path d="m5 5 10 10M15 5 5 15" />
       : name === 'plus' ? <path d="M10 4v12M4 10h12" />
       : name === 'check' ? <path d="m4.5 10 3.5 3.5L15.5 6" />
       : name === 'save' ? <><path d="M5 3h9l3 3v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M6 3v5h7V3M6 17v-6h8v6" /></>

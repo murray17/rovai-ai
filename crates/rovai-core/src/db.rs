@@ -276,8 +276,8 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.57";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 99;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.58";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 100;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -701,6 +701,7 @@ struct CurrentMigrationState {
     v147: bool,
     v148: bool,
     v149: bool,
+    v150: bool,
 }
 
 impl CurrentMigrationState {
@@ -788,8 +789,24 @@ impl CurrentMigrationState {
             && self.v146
             && self.v147
             && self.v148
-            && self.v149;
-        if self.v149 && !current {
+            && self.v149
+            && self.v150;
+        let startup_source = contract == "v1.57"
+            && schema == 99
+            && classifier == V147_CLASSIFIER_VERSION
+            && self.v142
+            && self.v143
+            && self.v144
+            && self.v145
+            && self.v146
+            && self.v147
+            && self.v148
+            && self.v149
+            && !self.v150;
+        if self.v150 && !current {
+            return false;
+        }
+        if self.v149 && !current && !startup_source {
             return false;
         }
         let zcode_source = contract == "v1.56"
@@ -803,7 +820,7 @@ impl CurrentMigrationState {
             && self.v147
             && self.v148
             && !self.v149;
-        if self.v148 && !current && !zcode_source {
+        if self.v148 && !current && !startup_source && !zcode_source {
             return false;
         }
         let message_quotes_source = contract == "v1.55"
@@ -871,6 +888,7 @@ impl CurrentMigrationState {
             && !self.v146
             && !self.v147;
         if current
+            || startup_source
             || message_quotes_source
             || zcode_source
             || pi_edit_diff_source
@@ -2791,6 +2809,7 @@ pub(crate) fn classify_database_contract(
         || (migrations.v145 && !automation_v145_schema_matches(connection)?)
         || (migrations.v148 && !message_quote_v148_schema_matches(connection)?)
         || (migrations.v149 && !zcode_runtime_v149_schema_matches(connection)?)
+        || (migrations.v150 && !runtime_startup_v150_schema_matches(connection)?)
         || (migrations.v141
             && if deployed_tool_source {
                 !deployed_tool_v141_image_schema_matches(connection)?
@@ -2817,6 +2836,25 @@ pub(crate) fn classify_database_contract(
             marker,
         ))
     }
+}
+
+fn runtime_startup_v150_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    let columns: i64 = connection.query_row(
+        r#"SELECT count(*) FROM pragma_table_info('runtime_startup_setting')
+        WHERE (name='runtime_kind' AND type='TEXT' AND pk=1 AND "notnull"=1) OR
+              (name='revision' AND type='INTEGER' AND "notnull"=1) OR
+              (name='configuration_json' AND type='TEXT' AND "notnull"=1) OR
+              (name='updated_at' AND type='TEXT' AND "notnull"=1)"#,
+        [],
+        |row| row.get(0),
+    )?;
+    let total: i64 = connection.query_row(
+        "SELECT count(*) FROM pragma_table_info('runtime_startup_setting')",
+        [],
+        |row| row.get(0),
+    )?;
+    let constraints: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_startup_setting' AND sql LIKE '%CHECK(revision > 0)%' AND sql LIKE '%CHECK(json_valid(configuration_json))%')", [], |row| row.get(0))?;
+    Ok(columns == 4 && total == 4 && constraints)
 }
 
 fn zcode_runtime_v149_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
@@ -3352,7 +3390,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 146),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 147),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 148),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 149)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 149),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 150)
         "#,
         [],
         |row| {
@@ -3437,6 +3476,7 @@ fn load_current_migration_state(
                 v147: row.get(77)?,
                 v148: row.get(78)?,
                 v149: row.get(79)?,
+                v150: row.get(80)?,
             })
         },
     )
@@ -6321,6 +6361,9 @@ impl Database {
             if !self.schema_migration_applied(149)? {
                 migration_step!("migration_149", self.migrate_zcode_runtime_v149());
             }
+            if !self.schema_migration_applied(150)? {
+                migration_step!("migration_150", self.migrate_runtime_startup_v150());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -6963,11 +7006,42 @@ impl Database {
         if !self.schema_migration_applied(149)? {
             migration_step!("migration_149", self.migrate_zcode_runtime_v149());
         }
+        if !self.schema_migration_applied(150)? {
+            migration_step!("migration_150", self.migrate_runtime_startup_v150());
+        }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
         {
             eprintln!("Notification Episode startup retention failed: {error:#}");
         }
+        Ok(())
+    }
+
+    fn migrate_runtime_startup_v150(&mut self) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&transaction)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+            if marker.contract_version == "v1.57" && marker.projection_schema_version == 99),
+            "Runtime startup migration requires exact v1.57/schema 99 source"
+        );
+        transaction.execute_batch(
+            "CREATE TABLE runtime_startup_setting (
+            runtime_kind TEXT PRIMARY KEY NOT NULL,
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            configuration_json TEXT NOT NULL CHECK(json_valid(configuration_json)),
+            updated_at TEXT NOT NULL
+        ); INSERT INTO schema_migration VALUES(150, datetime('now'));",
+        )?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+            updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -23490,7 +23564,7 @@ impl Database {
             {
                 anyhow::bail!("ZCode migration found a foreign-key violation");
             }
-            transaction.execute("UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2, updated_at=datetime('now') WHERE singleton=1", params![CURRENT_DATA_CONTRACT_VERSION, CURRENT_PROJECTION_SCHEMA_VERSION])?;
+            transaction.execute("UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2, updated_at=datetime('now') WHERE singleton=1", params!["v1.57", 99])?;
             transaction.execute(
                 "INSERT INTO schema_migration VALUES(149, datetime('now'))",
                 [],
@@ -28288,6 +28362,7 @@ fn rebuild_table_to_v135_source_for_test(
 
 #[cfg(test)]
 fn downgrade_current_schema_to_v148_source_for_test(connection: &Connection) {
+    connection.execute_batch("DROP TABLE IF EXISTS runtime_startup_setting; DELETE FROM schema_migration WHERE version=150;").unwrap();
     if !connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=149)",
@@ -31369,6 +31444,7 @@ mod tests {
             v147: version >= 147,
             v148: version >= 148,
             v149: version >= 149,
+            v150: version >= 150,
         }
     }
 
@@ -31475,9 +31551,10 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                149,
+                150,
             ),
             ("v1.56/schema 98 before ZCode", "v1.56", 98, 148),
+            ("v1.57/schema 99 before startup settings", "v1.57", 99, 149),
             (
                 "v1.54/schema-96 after notification migration and before Pi edit Diff classifier",
                 V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
@@ -32313,7 +32390,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(149));
+        assert_eq!(state, migration_state_through(150));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -32420,6 +32497,7 @@ mod tests {
         database.migrate_message_quotes_v148().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_zcode_runtime_v149().unwrap();
+        database.migrate_runtime_startup_v150().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         assert!(database.schema_migration_applied(144).unwrap());
 
@@ -32486,6 +32564,7 @@ mod tests {
         database.migrate_message_quotes_v148().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_zcode_runtime_v149().unwrap();
+        database.migrate_runtime_startup_v150().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
 
         drop(database);
@@ -32585,6 +32664,90 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
+    // This migration owns the new persistence seam and receipt rollback. Existing
+    // marker matrices cannot prove the table/receipt/authority marker commit together.
+    #[test]
+    fn startup_settings_migration_from_schema_99_is_atomic_and_preserves_authority() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-startup-migration-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database.connection().execute_batch("DROP TABLE runtime_startup_setting; DELETE FROM schema_migration WHERE version=150;
+            UPDATE rovai_data_contract SET contract_version='v1.57',projection_schema_version=99 WHERE singleton=1;").unwrap();
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(_)
+        ));
+        let event_count: i64 = database
+            .connection()
+            .query_row("SELECT count(*) FROM event_log", [], |row| row.get(0))
+            .unwrap();
+        database.connection().execute_batch("CREATE TEMP TRIGGER reject_startup_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=150
+            BEGIN SELECT RAISE(ABORT, 'startup receipt fixture failure'); END;").unwrap();
+        assert!(database.migrate_runtime_startup_v150().is_err());
+        assert!(!database.schema_migration_applied(150).unwrap());
+        assert!(!runtime_startup_v150_schema_matches(database.connection()).unwrap());
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(_)
+        ));
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_startup_receipt;")
+            .unwrap();
+        database.migrate_runtime_startup_v150().unwrap();
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT count(*) FROM event_log", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            event_count
+        );
+        let configuration = crate::runtime_startup::RuntimeStartupConfiguration {
+            program_path: None,
+            environment: vec![crate::runtime_startup::RuntimeEnvironmentVariable {
+                name: "HTTP_PROXY".into(),
+                value: "http://localhost:8080".into(),
+            }],
+        };
+        let saved = crate::runtime_startup::save(
+            &mut database,
+            crate::agent_profile::AdapterKind::CodexCli,
+            0,
+            configuration.clone(),
+            2,
+        )
+        .unwrap();
+        assert_eq!(saved.revision, 1);
+        assert!(
+            crate::runtime_startup::save(
+                &mut database,
+                crate::agent_profile::AdapterKind::CodexCli,
+                0,
+                Default::default(),
+                3
+            )
+            .is_err()
+        );
+        assert_eq!(
+            crate::runtime_startup::load(&database, crate::agent_profile::AdapterKind::CodexCli)
+                .unwrap()
+                .configuration,
+            configuration
+        );
+        drop(database);
+        let reopened = Database::open(&directory).unwrap();
+        assert_eq!(
+            crate::runtime_startup::load(&reopened, crate::agent_profile::AdapterKind::CodexCli)
+                .unwrap()
+                .configuration,
+            configuration
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn v149_admits_zcode_atomically_and_preserves_existing_rows_and_triggers() {
         // Independent migration owner: receipt failure must roll back all seven
@@ -32656,6 +32819,7 @@ mod tests {
             .execute_batch("DROP TRIGGER reject_zcode_receipt;")
             .unwrap();
         database.migrate_zcode_runtime_v149().unwrap();
+        database.migrate_runtime_startup_v150().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         assert!(zcode_runtime_v149_schema_matches(database.connection()).unwrap());
         assert_eq!(snapshot(database.connection()), before);
@@ -35277,6 +35441,7 @@ mod tests {
         database.migrate_message_quotes_v148().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_zcode_runtime_v149().unwrap();
+        database.migrate_runtime_startup_v150().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -35478,6 +35643,7 @@ mod tests {
         database.migrate_message_quotes_v148().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_zcode_runtime_v149().unwrap();
+        database.migrate_runtime_startup_v150().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained: (i64, Option<String>) = database
             .connection()
@@ -35656,6 +35822,7 @@ mod tests {
         database.migrate_message_quotes_v148().unwrap();
         assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         database.migrate_zcode_runtime_v149().unwrap();
+        database.migrate_runtime_startup_v150().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let retained = database
             .connection()

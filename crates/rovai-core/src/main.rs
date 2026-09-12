@@ -8,6 +8,7 @@ mod health;
 mod pi;
 mod runtime_fleet;
 mod runtime_mcp;
+mod startup_settings;
 use rovai_core::zcode;
 
 use std::{
@@ -249,7 +250,7 @@ use rovai_core::{
         RuntimeLaunchPurpose, RuntimeSearchEnvironment, catalog_entries, discover_runtime_path,
         discover_runtime_path_with_manual_candidates, discover_runtime_version,
         is_runtime_entrypoint_file, runtime_launch_allowed, runtime_visible_path,
-        with_runtime_search_environment,
+        with_runtime_configuration,
     },
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
@@ -628,6 +629,9 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.discovery.rescan"
             | "runtime.product.ensure"
             | "runtime.product.check"
+            | "runtime.startup.inspect"
+            | "runtime.startup.check"
+            | "runtime.startup.save"
             | "runtime.networkRecovery.wake"
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
@@ -1792,6 +1796,7 @@ struct RuntimeCheckActivity {
 }
 
 struct RuntimeCheckRequest {
+    startup_preview: Option<Arc<startup_settings::StartupPreview>>,
     fast_target: Option<rovai_core::camp_fast::CampMemberFastTarget>,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
@@ -1801,6 +1806,7 @@ struct RuntimeCheckRequest {
 }
 
 struct RuntimeCheckAttempt {
+    startup_preview: Option<Arc<startup_settings::StartupPreview>>,
     fast_target: Option<rovai_core::camp_fast::CampMemberFastTarget>,
     attempt_id: String,
     runtime_kind: AdapterKind,
@@ -1945,6 +1951,7 @@ struct Core {
     runtime_usage_flush: Mutex<()>,
     output: mpsc::UnboundedSender<String>,
     runtime_search_environment: RwLock<Arc<RuntimeSearchEnvironment>>,
+    runtime_search_update: Mutex<()>,
     runtime_discovery:
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeDiscoveryObservation>>,
     runtime_product_diagnostics:
@@ -2632,10 +2639,11 @@ impl Core {
                 let explicit_saved_path = managed_installation
                     .as_ref()
                     .filter(|(installation, _)| {
-                        matches!(
-                            installation.source,
-                            InstallationSource::Manual | InstallationSource::Custom
-                        )
+                        !search.has_startup_configuration(kind)
+                            && matches!(
+                                installation.source,
+                                InstallationSource::Manual | InstallationSource::Custom
+                            )
                     })
                     .map(|(installation, locator)| {
                         locator
@@ -2657,6 +2665,7 @@ impl Core {
                 };
                 let mut missing_managed_installation = None;
                 if observation.discovery_status == RuntimeDiscoveryStatus::Missing
+                    && !search.has_startup_configuration(kind)
                     && let Some((installation, locator)) = managed_installation
                 {
                     let saved_path = locator
@@ -2990,6 +2999,7 @@ impl Core {
     }
 
     async fn rescan_runtime_discovery(&self, interactive_shell: bool) -> Result<Value> {
+        let _update = self.runtime_search_update.lock().await;
         let generation = self
             .runtime_search_environment
             .read()
@@ -3001,6 +3011,8 @@ impl Core {
         })
         .await
         .context("Runtime Search Environment worker failed")?;
+        let configurations = rovai_core::runtime_startup::load_all(&*self.database.lock().await)?;
+        let search = search.with_startup_configurations(configurations);
         search.activate_for_runtime_commands();
         {
             let summary = search.summary();
@@ -3164,6 +3176,7 @@ impl Core {
         let (acknowledged, acknowledgement) = oneshot::channel();
         self.runtime_check_requests
             .send(RuntimeCheckRequest {
+                startup_preview: None,
                 fast_target: None,
                 runtime_kind: kind,
                 purpose,
@@ -3202,6 +3215,7 @@ impl Core {
         let (completed, completion) = oneshot::channel();
         self.runtime_check_requests
             .send(RuntimeCheckRequest {
+                startup_preview: None,
                 fast_target,
                 runtime_kind: kind,
                 purpose,
@@ -3759,7 +3773,8 @@ impl Core {
                 probe_execution_count += 1;
                 let checked = run_identity_checked_probe(
                     &canonical,
-                    with_runtime_search_environment(
+                    with_runtime_configuration(
+                        kind,
                         &search,
                         self.deep_probe_candidate(kind, &canonical, purpose),
                     ),
@@ -8651,6 +8666,13 @@ impl Core {
                     aggregate,
                 ))
             }
+            method @ ("runtime.startup.get"
+            | "runtime.startup.inspect"
+            | "runtime.startup.check"
+            | "runtime.startup.save") => {
+                self.handle_runtime_startup(method, request.params.clone())
+                    .await
+            }
             "runtime.discovery.rescan" => {
                 let params: RuntimeDiscoveryRescanParams =
                     serde_json::from_value(request.params.clone())?;
@@ -9339,7 +9361,8 @@ impl Core {
             }));
         }
         let search = self.runtime_search_environment.read().await.clone();
-        let deep_probe = with_runtime_search_environment(
+        let deep_probe = with_runtime_configuration(
+            installation.adapter_kind,
             &search,
             self.deep_probe_candidate(
                 installation.adapter_kind,
@@ -11927,7 +11950,8 @@ impl Core {
             },
             InstallationClass::Custom => {
                 let search = self.runtime_search_environment.read().await.clone();
-                let deep_probe = with_runtime_search_environment(
+                let deep_probe = with_runtime_configuration(
+                    installation.adapter_kind,
                     &search,
                     self.deep_probe_candidate(
                         frozen_runtime.adapter_kind,
@@ -15140,6 +15164,13 @@ async fn run_core(
         database_started_at.elapsed().as_millis(),
         startup_started_at.elapsed().as_millis(),
     );
+    let runtime_search_environment = Arc::new(
+        runtime_search_environment
+            .as_ref()
+            .clone()
+            .with_startup_configurations(rovai_core::runtime_startup::load_all(&database)?),
+    );
+    runtime_search_environment.activate_for_runtime_commands();
     // These recoveries fence durable execution/input state. Unlike optional
     // filesystem maintenance, their failure cannot expose normal execution.
     let compaction_detector_policies =
@@ -15244,6 +15275,7 @@ async fn run_core(
         runtime_usage_flush: Mutex::new(()),
         output: output_tx.clone(),
         runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
+        runtime_search_update: Mutex::new(()),
         runtime_discovery: RwLock::new(
             current_platform_enabled_runtime_kinds()
                 .into_iter()
@@ -21129,7 +21161,7 @@ async fn process_runtime_check_manager(
                 }
                 if let Some(existing) = pending
                     .iter_mut()
-                    .find(|attempt| attempt.runtime_kind == request.runtime_kind && attempt.fast_target == request.fast_target)
+                    .find(|attempt| request.startup_preview.is_none() && attempt.startup_preview.is_none() && attempt.runtime_kind == request.runtime_kind && attempt.fast_target == request.fast_target)
                 {
                     if request.trigger > existing.trigger {
                         existing.trigger = request.trigger;
@@ -21143,7 +21175,7 @@ async fn process_runtime_check_manager(
                 }
                 if let Some(existing) = active
                     .values_mut()
-                    .find(|attempt| attempt.runtime_kind == request.runtime_kind && attempt.fast_target == request.fast_target)
+                    .find(|attempt| request.startup_preview.is_none() && attempt.startup_preview.is_none() && attempt.runtime_kind == request.runtime_kind && attempt.fast_target == request.fast_target)
                 {
                     if request.trigger > existing.trigger {
                         existing.trigger = request.trigger;
@@ -21165,8 +21197,9 @@ async fn process_runtime_check_manager(
                 if let Some(completion) = request.completion {
                     waiters.push(completion);
                 }
-                let is_fast_check = request.fast_target.is_some();
+                let is_private_check = request.fast_target.is_some() || request.startup_preview.is_some();
                 let attempt = RuntimeCheckAttempt {
+                    startup_preview: request.startup_preview,
                     fast_target: request.fast_target,
                     attempt_id: attempt_id.clone(),
                     runtime_kind: request.runtime_kind,
@@ -21176,7 +21209,7 @@ async fn process_runtime_check_manager(
                     deadline,
                     waiters,
                 };
-                if !is_fast_check {
+                if !is_private_check {
                 core.runtime_check_activity.write().await.insert(
                     request.runtime_kind,
                     RuntimeCheckActivity {
@@ -21281,9 +21314,20 @@ async fn process_runtime_check_manager(
             let worker_purpose = attempt.purpose;
             let worker_deadline = attempt.deadline;
             let worker_fast_target = attempt.fast_target.clone();
+            let worker_startup_preview = attempt.startup_preview.clone();
             let abort_handle = checks.spawn(async move {
                 let (result, finalization) = match tokio::time::timeout_at(worker_deadline, async {
-                    if let Some(target) = worker_fast_target {
+                    if let Some(preview) = worker_startup_preview {
+                        let result = check_core
+                            .inspect_runtime_startup(
+                                worker_kind,
+                                preview.configuration.clone(),
+                                true,
+                            )
+                            .await?;
+                        *preview.result.lock().await = Some(result);
+                        Ok(RuntimeCheckOutcome::Ready)
+                    } else if let Some(target) = worker_fast_target {
                         check_core
                             .run_camp_member_fast_check(target, worker_deadline)
                             .await
@@ -21353,6 +21397,12 @@ async fn finalize_runtime_check(
     result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 ) {
+    if attempt.startup_preview.is_some() {
+        for waiter in attempt.waiters {
+            let _ = waiter.send(result.clone());
+        }
+        return;
+    }
     if let Some(target) = &attempt.fast_target {
         emit(
             &core.output,
@@ -22521,6 +22571,7 @@ mod tests {
             runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
             runtime_usage_flush: Mutex::new(()),
             output,
+            runtime_search_update: Mutex::new(()),
             runtime_search_environment: RwLock::new(Arc::new(
                 RuntimeSearchEnvironment::for_test_paths(1, Vec::new()),
             )),

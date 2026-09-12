@@ -522,3 +522,64 @@ function startCore(dataDir, skillRoot, mcpPath, extraArgs = [], environment = {}
     }
   }
 }
+
+// RPC -> immutable search snapshot -> child environment -> restart is the owner
+// seam. Input-name cases stay in runtime_startup's unit matrix.
+test('startup settings keep drafts private and persist only the selected Runtime environment', { skip: process.platform === 'win32', timeout: 90_000 }, async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-runtime-startup-settings-')))
+  const dataDir = join(fixture, 'data')
+  const defaultProgram = join(fixture, 'default-codex')
+  const selectedProgram = join(fixture, 'custom codex')
+  const marker = join(fixture, 'environment.txt')
+  const shellQuote = text => `'${text.replaceAll("'", "'\\''")}'`
+  await writeFile(defaultProgram, '#!/bin/sh\nprintf "codex-cli 0.153.4\\n"\n', { mode: 0o700 })
+  await writeFile(selectedProgram, `#!/bin/sh
+printf '%s' "\${STARTUP_TEST_VALUE-unset}" > ${shellQuote(marker)}
+if [ "$1" = '--version' ]; then printf 'codex-cli 0.153.4\\n'; exit 0; fi
+# An explicit check sees the draft but cannot authenticate or become Ready.
+exit 1
+`, { mode: 0o700 })
+  const environment = { ROVAI_CODEX_BIN: defaultProgram }
+  let core = startCore(dataDir, join(dataDir, 'managed-skill-library'), join(dataDir, 'mcp.json'), [], environment)
+  try {
+    await core.ready
+    await core.settled()
+    const runtimeKind = 'codex-cli'
+    const initial = await core.request('runtime.startup.get', { runtimeKind })
+    assert.equal(initial.revision, 0)
+    const configuration = { programPath: selectedProgram, environment: [{ name: 'STARTUP_TEST_VALUE', value: 'draft-private-value' }] }
+    const inspected = await core.request('runtime.startup.inspect', { runtimeKind, configuration })
+    assert.equal(inspected.status, 'recognized')
+    assert.equal(await readFile(marker, 'utf8'), 'draft-private-value')
+    assert.equal((await core.request('runtime.startup.get', { runtimeKind })).revision, 0)
+    const checked = await core.request('runtime.startup.check', { runtimeKind, configuration })
+    assert.equal(checked.status, 'authentication_required')
+    assert.equal((await core.request('runtime.startup.get', { runtimeKind })).revision, 0)
+    assert.ok(!JSON.stringify(core.notifications).includes('draft-private-value'))
+    configuration.environment[0].value = 'saved-private-value'
+    const saved = await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration })
+    assert.equal(saved.revision, 1)
+    assert.equal(await readFile(marker, 'utf8'), 'saved-private-value')
+    assert.equal((await core.request('runtime.startup.get', { runtimeKind: 'pi' })).configuration.environment.length, 0)
+    assert.equal((await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration })).revision, 1, 'retrying the same write is idempotent')
+    await assert.rejects(core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration: { ...configuration, environment: [] } }))
+    await core.close()
+    core = startCore(dataDir, join(dataDir, 'managed-skill-library'), join(dataDir, 'mcp.json'), [], environment)
+    await core.ready
+    await core.settled()
+    assert.deepEqual((await core.request('runtime.startup.get', { runtimeKind })).configuration, configuration)
+    assert.equal(await readFile(marker, 'utf8'), 'saved-private-value')
+    await rename(selectedProgram, `${selectedProgram}.moved`)
+    const health = await core.request('runtime.discovery.rescan', {})
+    assert.equal(health.runtimeAvailability.find(item => item.runtimeKind === runtimeKind).discovery.discoveryStatus, 'missing', 'an invalid explicit path does not fall back to the old/default program')
+    await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 1, configuration: { programPath: null, environment: [] } })
+    const restored = await core.request('health.check')
+    assert.equal(restored.runtimeAvailability.find(item => item.runtimeKind === runtimeKind).discovery.executablePath, defaultProgram)
+    assert.ok(!JSON.stringify([...core.notifications, restored]).includes('saved-private-value'))
+    assert.equal(process.env.STARTUP_TEST_VALUE, undefined)
+  } finally {
+    await core.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
