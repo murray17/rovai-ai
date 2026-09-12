@@ -221,7 +221,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v26](../contracts/run-process-detail-surface-v26.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v33](../contracts/run-process-detail-surface-v33.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -233,6 +233,10 @@ pnpm accept:runtime-activity-ui
 只核对共享工具详情时，可补充运行 `ROVAI_RUNTIME_ACTIVITY_ACCEPT_TOOL_DETAILS_ONLY=1 pnpm accept:runtime-activity-ui`。
 它在同一隔离夹具验证 Web 的 Canonical 步骤数、查询原文、类型图标与展开结果，以及无输出 Shell 命令的结果展开；
 报告和截图与全量结果分开保存。此定向检查不能替代完整交互矩阵或把全量失败改报为通过。
+
+Built-in 去重后的命令与输出另由 `pnpm test:command-view` 挂载生产 Tool 组件验证：隔离 Electron profile，
+不启动 Core 或模型；覆盖唯一 Core 行、Shell Evidence 惰性读取、失败重试、长正文、多行命令、完整 JSON、
+键盘滚动／Escape、Day/Night 与 200% zoom。`ROVAI_KEEP_COMMAND_VIEW_FIXTURE=1` 保留合成截图和 fixture。
 
 需要把生产 App 留给人工检查时，可运行
 `node scripts/accept-runtime-activity-ui.mjs "dist/mac-arm64/Rovai AI.app" --preview`。
@@ -304,13 +308,13 @@ pnpm accept:runtime-activity-ui
   `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨` 四列；不可展开行保留末轨
   占位，组图标与摘要文字共享 16px 中心线；Shell、File、Git、Network、Permission、Runtime、Plan、Tool 和 Unknown 使用统一 16px 单色
   线性 SVG，状态只由右侧带辅助名称的形状表达；打开组只显示完整 Tool chronology，不自动打开任一结果；
-- Shell command disclosure 第一行精确为 `$ ` 加完整脱敏 command；公开 output 紧接下一行，不出现“命令 / 输出”
+- Shell command disclosure 第一行精确为 `$ ` 加完整 command；公开 output 紧接下一行，不出现“命令 / 输出”
   标签或空白分隔行。Shell 结果面使用独立主题 token，左边界与 16px Terminal 图标左边界同轴；其他 Tool
   detail 的颜色和缩进保持不变；
 - 同一 Run 至少 15 个 Canonical Tool operation 时，较早项、中间项和最后项全部按首次出现顺序保留；
-  Built-in 使用 CLI 名称，七种状态只展示公共 `canonicalInput`；结果、错误说明和请求/receipt 不可见。
-  缺少入参或省略后为空时没有 disclosure，即使存在完整结果 Blob 也不读取。可靠关联的纯 CLI 载体只计一步，
-  混合 Shell、帮助、提前失败和歧义关联保留；`--body` 及 stdin JSON 不显示占位或正文。
+  Built-in 有唯一已确认 Shell 载体时只显示一条 Core Tool，标题保留完整命令，详情保留正文参数与原始输出；
+  无关联时回退公共 `canonicalInput`，缺少输入或仅有 projection 辅助事实时不可展开。混合与不确定关联保留，
+  不凭名称借用其他调用；成功步骤与失败、停止、未知数量分开，分页不声称整轮总量。
 - 超过 Renderer 原预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出在精确 Tool disclosure 打开前
   不读取、不把全文挂入 DOM；只打开外层 Tool 组仍必须保持零结果 region，打开精确 Tool 行后才按需读取并
   在固定最大高度的可聚焦结果 region 内完整渲染，

@@ -9,7 +9,7 @@ import type {
 } from '@contracts'
 import { safeMarkdownHasRenderableContent } from './safe-markdown-model'
 import { createExecutionPublicResultProjector } from './public-result'
-import { BUILTIN_CLI_NAMES, builtinInputText, builtinOperation, supportingBuiltinShells } from './builtin-tools'
+import { BUILTIN_CLI_NAMES, builtinInputText, builtinOperation, builtinShellAssociations } from './builtin-tools'
 
 export const RAIL_COLLAPSED_WIDTH = 52
 export const RAIL_EXPANDED_WIDTH = 176
@@ -109,8 +109,10 @@ export type ExecutionStep = {
   /** Bounded result-only preview. Never a fallback to tool input or local detail. */
   publicResult: string | null
   detail: string
-  /** Core-owned built-in input presentation; never requests a result blob. */
+  /** Core-owned built-in identity, retained when a Shell supplies its presentation. */
   builtinOperation?: string
+  /** Existing, uniquely associated Shell evidence for local detail reads; not a new operation. */
+  detailOperationId?: string
   status: ActivityStatus
   activityDomain: string
   iconKind: ActivityIconKind
@@ -153,12 +155,14 @@ export type RuntimeCompactionDisplayItem = {
 }
 
 export function executionStepPublicTitle(step: ExecutionStep): string {
-  return (step.builtinOperation ? BUILTIN_CLI_NAMES[step.builtinOperation] : null)
+  return (step.detailOperationId ? step.publicCommand : null)
+    ?? (step.builtinOperation ? BUILTIN_CLI_NAMES[step.builtinOperation] : null)
     ?? step.shellReadSummary?.title ?? step.publicCommand ?? step.title
 }
 
 export function executionStepCurrentInstructionTitle(step: ExecutionStep): string {
-  return (step.builtinOperation ? BUILTIN_CLI_NAMES[step.builtinOperation] : null)
+  return (step.detailOperationId ? step.publicCommand : null)
+    ?? (step.builtinOperation ? BUILTIN_CLI_NAMES[step.builtinOperation] : null)
     ?? step.shellReadSummary?.title ?? step.publicCommand ?? step.currentInstruction ?? step.title
 }
 
@@ -714,7 +718,7 @@ export function buildLiveExecutionProgress(
         ? shellCommandDetailText(command)
         : null
       const publicCommand = command
-        ? shellCommandDetailText(command)
+        ? shellCommandPreview(command)
         : canonical?.activityDomain === 'shell'
           ? publicShellCommandPresentation(payload)
           : null
@@ -797,9 +801,23 @@ export function buildLiveExecutionProgress(
 
   const publicResult = options.includePublicResults === false
     ? () => null : createExecutionPublicResultProjector(events, agentRunId)
-  const supportingShells = supportingBuiltinShells(events, agentRunId, pureBuiltinShellOperation, publicShellCommand)
-  const stepById = new Map(steps.filter(step => !supportingShells.has(step.id))
-    .map((step) => [step.id, { ...step, publicResult: publicResult(step) }]))
+  const associations = builtinShellAssociations(events, agentRunId, pureBuiltinShellOperation, publicShellCommand)
+  const sourceSteps = new Map(steps.map(step => [step.id, step]))
+  const stepById = new Map(steps.filter(step => !associations.hiddenShellIds.has(step.id))
+    .map((step) => {
+      const shellId = associations.shellIdByBuiltinId.get(step.id)
+      const shell = shellId ? sourceSteps.get(shellId) : undefined
+      return [step.id, {
+        ...step,
+        publicResult: publicResult(step),
+        ...(step.builtinOperation && shell ? {
+          publicCommand: shell.publicCommand,
+          currentInstruction: shell.currentInstruction,
+          detail: shell.detail,
+          detailOperationId: shell.id
+        } : {})
+      }]
+    }))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
     if (key === 'plan') {
       const explanation = options.textMode === 'live_tail'
@@ -1392,7 +1410,7 @@ function shellCommandPreview(command: string): string | null {
 }
 
 function shellCommandDetailText(command: string): string | null {
-  return normalizePublicShellCommand(command, false)
+  return unwrapShellCommand(stripAnsi(command).trim()) || null
 }
 
 function normalizePublicShellCommand(

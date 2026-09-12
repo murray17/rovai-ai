@@ -101,6 +101,8 @@ export function toolActivityGroupPresentation(
   const completed = statuses.filter((status) => status === 'completed').length
   const failed = statuses.filter((status) => status === 'failed').length
   const stopped = statuses.filter((status) => status === 'stopped').length
+  const skipped = statuses.filter((status) => status === 'skipped').length
+  const recorded = statuses.filter((status) => status === 'recorded').length
 
   if (activeIndex >= 0) {
     const status = statuses[activeIndex]
@@ -145,7 +147,13 @@ export function toolActivityGroupPresentation(
     status = 'recorded'
     statusLabel = failed > 0 ? '已记录，含失败操作' : '已记录'
   }
-  const primary = `完成了 ${total} 个步骤`
+  const primary = [
+    `已完成 ${completed} 个步骤`,
+    failed ? `失败 ${failed} 个` : null,
+    stopped ? `停止 ${stopped} 个` : null,
+    skipped ? `跳过 ${skipped} 个` : null,
+    recorded ? `结果未知 ${recorded} 个` : null
+  ].filter(Boolean).join(' · ')
 
   return {
     status,

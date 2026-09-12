@@ -9,6 +9,20 @@ last_updated: 2026-09-12
 
 # v1.58 实施与验证
 
+## Built-in Command View 与步骤计数
+
+- 去重继续只保留 Core Tool 行，唯一已确认 Shell 提供标题与展开内容；完整命令（含正文和多行）加原始输出，
+  完整结果复用 Shell Evidence 的惰性读取和重试。没有关联时保留既有语义入参回退，不猜测入参，不新增数据库存储。
+- 完整组仅把成功操作计为“已完成”，其他终态单列；分页继续显示“已载入 N 项执行记录”，不冒充 Run 总数。
+- 当前合同、会话 UI 与验收规则已同步；这是可逆的展示修正，不新增 Version Decision、Schema、Migration 或 Core 接口。
+- Windows x64 验证：TypeScript 检查通过；相关 8 文件／326 项 Vitest 通过；生产组件 Electron 夹具证明
+  唯一 Core 行、精确 Shell 读取、展开前零读取、失败重试、完整 8,100 行 JSON、多行长正文、键盘和 Day/Night／200% zoom。
+- 全量 Vitest 串行运行：171 文件通过，1,779 项通过、16 项既有跳过，5 文件的 14 项失败。
+  在干净基线 `c96f4bf0` 独立 worktree 重跑相同范围，14 项失败名称完全一致，涉及 Windows symlink 权限、
+  文件显示路径与评测进程夹具；不将其报告为全量通过，也不在本次展示改动中扩修。
+- 通用文档与 Electron 沙箱准入检查通过。Windows Release Core、Desktop 和 NSIS 构建通过，
+  安装包校验包含 x64 PE、更新摘要、隔离 Core data-root 与 `health.check`；安装交接另以已合入源码重新校验。
+
 ## 已实现
 
 | 问题 | 复用与实现 | 取舍／演示 |

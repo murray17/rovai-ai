@@ -29,7 +29,7 @@ describe('PowerShell command presentation', () => {
       commandActions: [{ type: 'unknown' }], aggregatedOutput: 'checks passed'
     } }
     expect(executionActivityTitle(shell, payload)).toBe(displayed)
-    expect(executionEvidenceResultText('activity.completed', payload)).toBe(`$ ${displayed}\nchecks passed`)
+    expect(executionEvidenceResultText('activity.completed', payload)).toBe(`$ ${command}\nchecks passed`)
     expect(executionActivityTitle(shell, { input: { command: wrapped } })).toBe(displayed)
   })
 

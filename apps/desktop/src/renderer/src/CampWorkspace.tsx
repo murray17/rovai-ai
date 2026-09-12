@@ -8504,7 +8504,7 @@ function RunExecutionContent({
             />
           )
         }
-        const fullEvidence = completeEvidence.byToolId.get(step.id)
+        const fullEvidence = completeEvidence.byToolId.get(step.detailOperationId ?? step.id)
         return (
           <ToolCallRow
             key={item.key}

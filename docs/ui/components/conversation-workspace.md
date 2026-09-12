@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-09-11
+last_updated: 2026-09-12
 ---
 
 # Camp 会话工作区
@@ -325,7 +325,7 @@ transcript 采用对话式双轨：用户正文与附件居右，队员回复居
 final message”组成。运行中过程复用当前执行台的 narration、plan、command/tool 与状态视觉；连续 Command 聚合为一个
 可展开的工具组；组件、列表组图标、命令类型图标、28px / 11.5px 四轨工具行、精确结果展开与步骤计数直接复用执行台。
 发送确认前与 Run 排队立即显示“连接中”，开始处理但尚未输出时显示“思考中”。正文、计划、工具或 final 首次出现时，
-同一次渲染移除普通等待提示，不在后续正文尾部追加，也不等待计时器或 Run 终态。存在活动工具或尚未收口的尾组时，用“执行中 · 当前指令”表达进度。组收口才显示“完成了 x 个步骤”。
+同一次渲染移除普通等待提示，不在后续正文尾部追加，也不等待计时器或 Run 终态。存在活动工具或尚未收口的尾组时，用“执行中 · 当前指令”表达进度。组收口才显示“已完成 x 个步骤”，仅计成功，其他终态单列数量。
 运行中直接展开过程，不提供含耗时的外层 summary；用户仍可独立展开/收起工具组和命令结果。Run 进入 terminal 后
 过程自动折叠，才出现耗时 summary，使用中文：成功为“工作了 {时长}”，取消为“你在 {时长}后停止了运行”，失败保持明确失败语义。
 summary 下方以一条分隔线连接始终展开的 final message；不得把 final 收进执行 disclosure。整轮状态切换保持已展开的工具组、结果 DOM、加载缓存和滚动位置，不重置子级状态；
@@ -462,9 +462,11 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 处理后关闭整个浮层，返回顶部执行入口，保留 Agent/Run selection、已展开记录与滚动位置。
 
 命令、文件操作及其失败作为可展开 Tool Call 留在对应 Run stage。已读取 Evidence 中的 Tool chronology
-按窗口呈现，较早记录有明确分页入口与回到最新操作，不把未加载部分当作不存在。Built-in Tool 使用对应
-`rovai` CLI 名称，所有状态的详情只显示同一 operation 的 Core 公共 `canonicalInput`；省略由消息面拥有的 Send/Gather 正文和
-投影辅助事实；语义字段不再按敏感值省略，不显示结果、错误说明或占位。没有可显示入参时为无箭头静态行，也不读取完整结果 Blob。
+按窗口呈现，较早记录有明确分页入口与回到最新操作，不把未加载部分当作不存在。Built-in Tool 有唯一已确认
+Shell 载体时，标题使用完整命令的单行预览，展开显示 `$ command` 与下一行原始 JSON／文本输出，保留正文参数
+和多行输入，沿用 Shell Evidence 的按条惰性读取。Core 操作身份、图标和状态保持不变；不新增入参存储。
+缺少可靠关联时回退对应 `rovai` CLI 名称和同一 operation 的 Core 公共 `canonicalInput`，省略投影辅助事实和
+由消息面拥有的 Send/Gather 正文；没有可显示入参时为无箭头静态行，不借用其他调用的结果。
 纯 CLI Shell 的完整成功返回值与其生命周期内唯一 Core 调用精确匹配时，折叠到 Built-in 行；混合命令、帮助、
 提前失败或不确定关联保留。底层 Evidence 和 Canonical 身份不变。完整规则见
 [Built-in 入参与载体展示](../../contracts/run-process-detail-surface-v33.md)。
@@ -474,10 +476,11 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 不再同时追加累计数。当前操作优先展示已有公开证据中的具体指令：Shell 使用原 command，File 使用
 可靠阅读／编辑文件名或多文件数量，Web 搜索使用 typed query，其他操作使用非通用 Runtime title/toolName；
 没有具体值时回退稳定 Tool 行标题，不从 raw input/output 猜测。当前 Tool 已结算但尾组尚未收口时，继续显示
-“执行中 · <最近一条指令>”。真正收口后，无论成功、失败、停止、跳过或混合结果，摘要只显示
-`完成了 x 个步骤`；分页窗口使用“已载入 x 项执行记录”，不把当前窗口数量表示成整轮总量。`x` 按可见 Canonical Activity 计数；同一 Built-in 与已关联 Shell 载体计一步，一个 Activity 的多文件行不重复计数。
+“执行中 · <最近一条指令>”。真正收口后显示 `已完成 x 个步骤`，只计成功；失败、停止、跳过、结果未知
+分别追加数量，不算成功。分页窗口使用“已载入 x 项执行记录”，不把当前窗口数量表示成整轮总量。
+`x` 按去重后的可见逻辑操作计数；同一 Built-in 与已关联 Shell 载体计一步，started/result/delta 和一个 Activity 的多文件行不重复计数。
 
-Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 分组，但不进入“完成了 x 个步骤”。
+Runtime Compaction 作为根级、非 Tool process item 同样截断前后 Tool 分组，但不进入“已完成 x 个步骤”。
 它复用普通 command 的 28px 四轨行、状态点、disclosure 与结果文本框，并使用独立 16px SVG；同一
 `compactionId` 的 started/completed 在当前 Run 原位更新。只有明确 token 字段或非空 summary 才可展开；message count、
 elapsed、Runtime/事件/Session identity、trigger 与 phase 单独存在时保持无箭头、不可点击的静态单行。summary 的完整内容
@@ -533,7 +536,7 @@ Run 时间线与单聊工具行复用同一组件。forced-colors 保留形状�
 
 Shell command Tool disclosure 展开后第一行显示 `$ ` 加完整 command；存在完整公开 output 时从第二行
 连续显示，不插入“命令 / 输出”标签或空白分隔行。两者的数据来源不得互相替代；Claude/ACP terminal
-Evidence 自带 command，不依赖 Renderer 回看 started event。除上述仅显示入参的 Built-in 外，其他 Tool
+Evidence 自带 command，不依赖 Renderer 回看 started event。除没有可靠 Shell 关联、仅显示入参的 Built-in 外，其他 Tool
 disclosure 继续在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
 直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取中、精确错误与
 “重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
@@ -568,7 +571,7 @@ Diff 展开互不触发。缺少可靠路径
 不制造链接，缺少 Diff 不制造展开入口。
 
 Renderer 不显示 `apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 Tool 显示名、output、命令文本或当前文件
-推测变化，也不为逐文件行创建新的 Activity identity。文件行留在现有“完成了 x 个步骤”集合内，集合计数仍按
+推测变化，也不为逐文件行创建新的 Activity identity。文件行留在现有“已完成 x 个步骤”集合内，集合计数仍按
 Canonical Activity 计算。每行复用既有 File Tool 图标，顶格占满现有 Tool list 横条，不增加结构缩进。
 
 Claude Code `Edit` 的 exact mutation 展开只显示 `− oldText / + newText` 片段，不显示 `@@`、旧/新文件行号或
