@@ -4,16 +4,16 @@ const { createServer } = require('node:http')
 const { writeFileSync } = require('node:fs')
 const { isAbsolute, join } = require('node:path')
 const { app, BrowserWindow, BaseWindow, ipcMain, session } = require('electron')
+const QRCode = require('qrcode')
 const [fixture] = process.argv.slice(2)
 assert.ok(isAbsolute(fixture), 'The fixture requires an explicit isolated absolute root')
 app.setPath('userData', join(fixture, 'user-data'))
 app.setPath('sessionData', join(fixture, 'session-data'))
 app.setName('Rovai DingTalk Login Acceptance')
 
-// Production Renderer, preload, login view and DOM observer; controlled local
+// Production Renderer, preload and interaction view; controlled local
 // account/network responses. No Core, Runtime, daily data or real credentials.
-const { DingTalkLoginView, DINGTALK_LOGIN_PAGE_OBSERVATION, parseDingTalkLoginPageObservation,
-  parseChannelLoginViewBounds } = require(join(fixture, 'login-view.cjs'))
+const { DingTalkLoginView, parseChannelLoginViewBounds } = require(join(fixture, 'login-view.cjs'))
 const snapshot = { schemaVersion: 4, channels: [{ kind: 'dingtalk', displayName: '钉钉', hostStatus: 'ready',
   connection: { status: 'connected', account: { accountId: 'fixture-owner', userName: '原账号', tenantName: '测试企业',
     brand: 'dingtalk', connectedAt: '2026-08-31T00:00:00Z', lastVerifiedAt: '2026-08-31T00:00:00Z' } }, memberBots: [] }],
@@ -22,17 +22,13 @@ const snapshot = { schemaVersion: 4, channels: [{ kind: 'dingtalk', displayName:
     stage: 'awaiting_scan', qrDataUrl: null, expiresAt: null, detail: '旧钉钉登录' }, activeProvisioning: null }
 let executionWebSettings = { schemaVersion: 1, enabled: false, port: 8765,
   server: { state: 'disabled', address: null, errorCode: null } }
-let parent, login, qr, finish, refuse, refreshes = 0, attempt = 0
+let parent, login, qr, finish, refuse, ensureOfficialView, refreshes = 0, attempt = 0
 const sockets = new Set()
 const server = createServer((request, response) => {
   if (request.url === '/slow-image') return
   response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-  response.end('<html><body style="margin:20px;font-family:system-ui"><p>钉钉扫码登录 · 自动验收夹具</p>' +
-    '<div style="display:none" class="module-qrcode-code"><canvas width="180" height="180"></canvas></div>' +
-    '<div class="module-qrcode-code"><canvas id="qr" width="180" height="180"></canvas></div>' +
-    '<script>const c=document.getElementById("qr").getContext("2d");c.fillStyle="white";c.fillRect(0,0,180,180);' +
-    'c.fillStyle="black";for(let y=0;y<18;y++)for(let x=0;x<18;x++)if((x+y)%3)c.fillRect(x*10,y*10,8,8)</script>' +
-    '<img src="/slow-image"></body></html>')
+  response.end('<html><body style="margin:20px;font-family:system-ui"><h2>选择企业</h2>' +
+    '<p>钉钉官方交互的本地验收夹具</p><button>测试企业</button><img src="/slow-image"></body></html>')
 })
 server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
 const notify = () => parent.webContents.send('rovai:channels-changed', snapshot)
@@ -55,14 +51,14 @@ async function setStage(stage) {
     return
   }
   assert.ok(snapshot.activeQrAttempt)
-  assert.ok(['preparing', 'awaiting_scan', 'scan_confirmed', 'expired', 'awaiting_interaction', 'saving_local_session'].includes(stage))
-  if (stage === 'awaiting_interaction') {
-    await login.webContents.mainFrame.executeJavaScript('document.body.innerHTML="<h2>选择企业</h2><p>钉钉官方交互的本地验收夹具</p><button>测试企业</button>"')
-  }
-  login.setInteraction(stage === 'awaiting_interaction')
+  assert.ok(['preparing', 'awaiting_scan', 'scan_confirmed', 'expired', 'awaiting_refresh', 'awaiting_interaction', 'completing_login', 'inspecting_identity', 'saving_local_session'].includes(stage))
+  if (stage === 'awaiting_interaction') await ensureOfficialView()
+  login?.setInteraction(stage === 'awaiting_interaction')
   Object.assign(snapshot.activeQrAttempt, { stage, qrDataUrl: stage === 'awaiting_scan' ? qr : null,
     detail: { preparing: '正在加载钉钉二维码…', awaiting_scan: '请使用钉钉扫码登录开放平台。',
-      scan_confirmed: '扫码成功，等待钉钉确认…', expired: '二维码已过期，请刷新后重新扫码。',
+      scan_confirmed: '扫码成功，等待钉钉确认…', completing_login: '正在建立钉钉开发者登录会话…',
+      inspecting_identity: '正在读取钉钉账号与企业身份…', expired: '二维码已过期，请刷新后重新扫码。',
+      awaiting_refresh: '请刷新二维码后继续扫码。',
       awaiting_interaction: '请在下方完成钉钉确认或选择企业。', saving_local_session: '正在保存开发者会话…' }[stage] })
   notify()
 }
@@ -85,16 +81,18 @@ app.whenReady().then(async () => {
     webPreferences: { preload: join(fixture, 'preload.cjs'), sandbox: true, contextIsolation: true,
       nodeIntegration: false, backgroundThrottling: false } })
   const createLogin = async () => {
-    const jar = session.fromPartition('qr-fixture-' + (++attempt), { cache: false })
+    attempt++
+    qr = await QRCode.toDataURL('https://example.test/isolated-login-fixture', { width: 280, margin: 4 })
+    assert.ok(!login, 'Normal QR presentation must not load a native page')
+  }
+  ensureOfficialView = async () => {
+    if (login) return
+    const jar = session.fromPartition('interaction-fixture-' + attempt, { cache: false })
     login = new DingTalkLoginView(jar, parent)
     login.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     const ready = once(login.webContents, 'dom-ready')
-    void login.loadURL('http://127.0.0.1:' + server.address().port + '/qr').catch(() => undefined)
+    void login.loadURL('http://127.0.0.1:' + server.address().port + '/interaction').catch(() => undefined)
     await ready
-    const observation = parseDingTalkLoginPageObservation(await login.webContents.mainFrame.executeJavaScript(DINGTALK_LOGIN_PAGE_OBSERVATION))
-    assert.equal(observation.kind, 'qr')
-    assert.equal(login.webContents.isLoading(), true, 'The intentionally slow resource is still loading')
-    qr = observation.dataUrl
   }
   handle('rovai:channels-get', () => snapshot)
   handle('rovai:execution-web-settings-get', () => executionWebSettings)
@@ -130,8 +128,11 @@ app.whenReady().then(async () => {
     return { refreshes, attached: Boolean(child), bounds: child?.getBounds() ?? null }
   })
   await parent.loadFile(join(fixture, 'renderer/index.html'))
+  // The production menu needs DOM focus even when macOS keeps this fixture hidden.
+  parent.webContents.debugger.attach('1.3')
+  await parent.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
   const cases = await parent.webContents.executeJavaScript('window.dingtalkLoginTest.run()', true)
-  cases.push('QR is readable before slow page resources finish')
+  cases.push('QR is generated locally without loading the official page')
   // Native child surfaces need an actual compositor frame on macOS. Showing the
   // isolated fixture without activating it does not touch the daily App.
   parent.showInactive()

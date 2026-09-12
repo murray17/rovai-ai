@@ -148,8 +148,8 @@ type CoreDingTalkSnapshot = {
     accountId: string
     userIdDigest: string
     corpId: string
-    userName: string
-    corpName: string
+    userName: string | null
+    corpName: string | null
     oauthProfileRef: string
     status: 'connected' | 'disconnected' | 'oauth_expired'
     version: number
@@ -454,7 +454,7 @@ export class DingTalkChannelSettingsService {
   }
 
   async connect(): Promise<void> {
-    if (this.#activeQrAbort) throw new Error('已有一个钉钉登录流程正在进行。')
+    if (this.#activeQrAbort || this.#activeQrAttempt) throw new Error('已有一个钉钉登录流程正在进行。')
     if (this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(
       this.#activeProvisioning.stage
     )) throw new Error('队员发布期间不能切换钉钉账号。')
@@ -472,13 +472,28 @@ export class DingTalkChannelSettingsService {
       detail: '正在读取 Rovai 本地渠道数据…'
     }
     this.#notify()
+    let loginFinished = false
+    let retainQrAttempt = false
+    let highestStage = 0
+    const stageOrder: Partial<Record<DingTalkLoginStage, number>> = {
+      loading_local_session: 0, preparing: 1, awaiting_scan: 2, scan_confirmed: 3,
+      expired: 3, completing_login: 4, awaiting_interaction: 4,
+      inspecting_identity: 5, saving_local_session: 6, connected: 7
+    }
     const onStage = (stage: DingTalkLoginStage): void => {
-      if (this.#activeQrAttempt?.attemptId !== attemptId || abort.signal.aborted) return
+      if (loginFinished || this.#activeQrAttempt?.attemptId !== attemptId || abort.signal.aborted) return
+      if (this.#activeQrAttempt.stage === 'expired' && stage !== 'preparing') return
+      // preparing is emitted only by a newly created protocol generation.
+      if (stage === 'preparing' && ['expired', 'awaiting_scan'].includes(this.#activeQrAttempt.stage)) highestStage = 0
+      const order = stageOrder[stage]
+      if (order !== undefined && order < highestStage) return
+      if (order !== undefined) highestStage = order
       const details: Record<DingTalkLoginStage, string> = {
         loading_local_session: '正在读取 Rovai 本地渠道数据…',
         preparing: '正在加载钉钉二维码…',
         awaiting_scan: '请使用钉钉扫码登录开放平台。',
         scan_confirmed: '扫码成功，等待钉钉确认…',
+        completing_login: '正在建立钉钉开发者登录会话…',
         awaiting_interaction: '请在下方完成钉钉确认或选择企业。',
         expired: '二维码已过期，请刷新后重新扫码。',
         inspecting_identity: '正在读取钉钉账号与企业身份…',
@@ -495,13 +510,15 @@ export class DingTalkChannelSettingsService {
       const previous = (await this.#snapshot()).account
       if (abort.signal.aborted) throw new Error('dingtalk_operation_cancelled')
       const identity = await this.#dependencies.developerSession.beginLogin({
+        attemptId,
         signal: abort.signal,
         onStage,
         onQrReady: ({ payload, expiresAt }) => {
-          if (this.#activeQrAttempt?.attemptId !== attemptId || abort.signal.aborted) return
+          if (loginFinished || this.#activeQrAttempt?.attemptId !== attemptId || abort.signal.aborted
+            || this.#activeQrAttempt.stage !== 'awaiting_scan') return
           this.#activeQrAttempt = {
-            ...this.#activeQrAttempt, stage: 'awaiting_scan', qrDataUrl: payload, expiresAt,
-            detail: '请使用钉钉扫码登录开放平台。'
+            ...this.#activeQrAttempt, qrDataUrl: payload,
+            expiresAt: expiresAt === null ? null : new Date(expiresAt).toISOString()
           }
           this.#notify()
         }
@@ -519,7 +536,7 @@ export class DingTalkChannelSettingsService {
         sessionRevisionFrom(result)
       )
       this.#sessionNeedsReconnect = false
-      if (this.#activeQrAttempt) {
+      if (this.#activeQrAttempt?.attemptId === attemptId) {
         this.#activeQrAttempt = {
           ...this.#activeQrAttempt,
           stage: 'connected',
@@ -527,14 +544,30 @@ export class DingTalkChannelSettingsService {
         }
       }
     } catch (error) {
+      loginFinished = true
+      if (this.#activeQrAttempt?.attemptId !== attemptId) return
       await this.#dependencies.developerSession.discardPendingLogin?.().catch(() => undefined)
+      if (this.#activeQrAttempt?.attemptId !== attemptId) return
       // Closing the login window or cancelling the exact attempt is a no-op,
       // not an IPC failure. The previous account/session remains authoritative.
       if (error instanceof Error && error.message === 'dingtalk_operation_cancelled') return
+      if (this.#activeQrAttempt.stage !== 'saving_local_session' && error instanceof Error
+        && ['dingtalk_login_scan_timeout', 'dingtalk_login_timeout', 'dingtalk_login_request_timeout',
+          'dingtalk_login_handoff_timeout', 'dingtalk_login_identity_timeout', 'dingtalk_open_platform_timeout'].includes(error.message)) {
+        retainQrAttempt = true
+        const expired = this.#activeQrAttempt.stage === 'expired'
+        this.#activeQrAttempt = {
+          ...this.#activeQrAttempt, stage: expired ? 'expired' : 'awaiting_refresh',
+          qrDataUrl: null, expiresAt: null,
+          detail: expired ? this.#activeQrAttempt.detail : '请刷新二维码后继续扫码。'
+        }
+        return
+      }
       throw error
     } finally {
-      this.#activeQrAbort = null
-      this.#activeQrAttempt = null
+      loginFinished = true
+      if (this.#activeQrAbort === abort) this.#activeQrAbort = null
+      if (this.#activeQrAttempt?.attemptId === attemptId && !retainQrAttempt) this.#activeQrAttempt = null
       this.#notify()
     }
   }
@@ -554,9 +587,14 @@ export class DingTalkChannelSettingsService {
     this.#dependencies.developerSession.setLoginViewBounds?.(bounds)
   }
 
-  refreshLoginQr(attemptId: string): void {
-    if (this.#activeQrAttempt?.attemptId !== attemptId || this.#activeQrAbort?.signal.aborted
-      || !['expired', 'awaiting_scan'].includes(this.#activeQrAttempt.stage)) return
+  async refreshLoginQr(attemptId: string): Promise<void> {
+    if (this.#activeQrAttempt?.attemptId !== attemptId || this.#activeQrAbort?.signal.aborted) return
+    if (!this.#activeQrAbort && ['expired', 'awaiting_refresh'].includes(this.#activeQrAttempt.stage)) {
+      this.#activeQrAttempt = null
+      await this.connect()
+      return
+    }
+    if (!['expired', 'awaiting_scan'].includes(this.#activeQrAttempt.stage)) return
     this.#dependencies.developerSession.refreshLoginQr?.()
   }
 
@@ -1961,8 +1999,8 @@ function dingtalkConnectionAccount(identity: DingTalkDeveloperIdentity): {
   accountId: string
   userIdDigest: string
   corpId: string
-  userName: string
-  corpName: string
+  userName: string | null
+  corpName: string | null
   oauthProfileRef: string
 } {
   return {

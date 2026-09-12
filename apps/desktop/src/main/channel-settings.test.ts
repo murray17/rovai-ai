@@ -1133,7 +1133,7 @@ describe('channel settings service', () => {
     expect(commands).not.toContain('channels.feishu.account.upsert')
   })
 
-  it('rolls the staged developer session back when the Core account switch cannot commit', async () => {
+  it('discards a pending session only when Core definitively rejects the switch', async () => {
     const account = connectedAccount()
     const activatePendingLogin = vi.fn(async () => undefined)
     const discardPendingLogin = vi.fn(async () => identity())
@@ -1156,17 +1156,200 @@ describe('channel settings service', () => {
         commands.push(method)
         if (method === 'channels.feishu.snapshot') return coreSnapshot({ account })
         if (method === 'channels.feishu.account.commitConnection') {
-          throw new Error('core_switch_failed')
+          return { status: 'rejected', code: 'core_switch_failed', payload: {} }
         }
         return { status: 'applied' }
       })
     })
 
-    await expect(service.connect()).rejects.toThrow('core_switch_failed')
+    await expect(service.connect()).resolves.toMatchObject({ activeQrAttempt: { stage: 'failed', detail: expect.stringContaining('原连接已保留') } })
 
     expect(discardPendingLogin).toHaveBeenCalledTimes(1)
     expect(activatePendingLogin).not.toHaveBeenCalled()
     expect(commands).not.toContain('channels.feishu.account.expire')
+  })
+
+  it('recovers a lost commit acknowledgement with the same command ID before activating', async () => {
+    const session = developerSession()
+    const attempts: unknown[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(), developerSession: session,
+      core: channelCore((method, params) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account: connectedAccount() })
+        if (method === 'channels.feishu.account.commitConnection') {
+          attempts.push(params)
+          if (attempts.length === 1) throw new Error('lost acknowledgement')
+          return { status: 'applied', payload: { sessionRevision: 2 } }
+        }
+        return { status: 'applied' }
+      })
+    })
+    expect((await service.connect()).activeQrAttempt).toBeNull()
+    expect(attempts).toHaveLength(2)
+    expect(attempts[0]).toEqual(attempts[1])
+    expect(session.activatePendingLogin).toHaveBeenCalledWith(2)
+    expect(session.discardPendingLogin).not.toHaveBeenCalled()
+  })
+
+  it.each(['transport failure', 'truncated receipt'])(
+    'retains an uncertain commit after %s, locks cancellation and resumes via a result check', async (failure) => {
+    const session = developerSession()
+    let unavailable = true
+    const commands: unknown[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(), developerSession: session,
+      core: channelCore((method, params) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account: connectedAccount() })
+        if (method === 'channels.feishu.account.commitConnection') {
+          commands.push(params)
+          if (unavailable) {
+            if (failure === 'truncated receipt') return { status: 'applied', payload: {} }
+            throw new Error('offline')
+          }
+          return { status: 'applied', payload: { sessionRevision: 3 } }
+        }
+        return { status: 'applied' }
+      })
+    })
+    const result = await service.connect()
+    expect(result.activeQrAttempt).toMatchObject({ stage: 'saving_local_session', commitUncertain: true })
+    const attemptId = result.activeQrAttempt!.attemptId
+    await service.cancelQrAttempt(attemptId)
+    await service.disconnect()
+    await expect(service.connect()).rejects.toThrow('正在进行')
+    expect(session.discardPendingLogin).not.toHaveBeenCalled()
+    expect(session.disconnect).not.toHaveBeenCalled()
+    unavailable = false
+    await service.refreshLoginQr(attemptId)
+    expect((await service.get()).activeQrAttempt).toBeNull()
+    expect(commands.every((command) => JSON.stringify(command) === JSON.stringify(commands[0]))).toBe(true)
+    expect(session.activatePendingLogin).toHaveBeenCalledWith(3)
+  })
+
+  it.each([false, true])('waits for session activation before projecting the committed account (replacement: %s)', async (replacement) => {
+    const previous = replacement ? connectedAccount() : null
+    const owner = identity({ userId: 'next-owner', userName: '新账号' })
+    const session = developerSession(owner)
+    let release!: () => void
+    session.activatePendingLogin = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    let account = previous
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(), developerSession: session,
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account })
+        if (method === 'channels.feishu.account.commitConnection') {
+          account = connectedAccount(owner)
+          return { status: 'applied', payload: { sessionRevision: 2 } }
+        }
+        return { status: 'applied' }
+      })
+    })
+    const connecting = service.connect()
+    await vi.waitFor(() => expect(session.activatePendingLogin).toHaveBeenCalled())
+    const pending = await service.get()
+    expect(pending.activeQrAttempt?.stage).toBe('saving_local_session')
+    expect(pending.channels[0].connection).toMatchObject(replacement
+      ? { status: 'connected', account: { userName: 'Murray' } }
+      : { status: 'not_connected', account: null })
+    release()
+    const activated = await connecting
+    expect(activated.activeQrAttempt).toBeNull()
+    expect(activated.channels[0].connection).toMatchObject({ status: 'connected', account: { userName: '新账号' } })
+  })
+
+  it('locks cancellation while the actual local commit is in flight', async () => {
+    const session = developerSession()
+    let resolve!: (value: unknown) => void
+    const commit = new Promise((done) => { resolve = done })
+    const started = vi.fn()
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(), developerSession: session,
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot()
+        if (method === 'channels.feishu.account.commitConnection') { started(); return commit }
+        return { status: 'applied' }
+      })
+    })
+    const connecting = service.connect()
+    await vi.waitFor(() => expect(started).toHaveBeenCalled())
+    const attemptId = (await service.get()).activeQrAttempt!.attemptId
+    await service.cancelQrAttempt(attemptId)
+    expect((await service.get()).activeQrAttempt?.stage).toBe('saving_local_session')
+    expect(session.activatePendingLogin).not.toHaveBeenCalled()
+    resolve({ status: 'applied', payload: { sessionRevision: 1 } })
+    expect((await connecting).activeQrAttempt).toBeNull()
+    expect(session.discardPendingLogin).not.toHaveBeenCalled()
+  })
+
+  it.each(['feishu_login_timeout', 'feishu_login_scan_timeout', 'feishu_login_handoff_timeout',
+    'feishu_login_identity_timeout', 'feishu_request_timeout', 'feishu_login_expired'])(
+    'keeps %s quiet and lets the QR region start one isolated replacement', async (code) => {
+      const session = developerSession()
+      const options: NonNullable<Parameters<typeof session.beginLogin>[0]>[] = []
+      session.beginLogin = vi.fn(async (input) => {
+        options.push(input!)
+        input?.onStatus?.('awaiting_scan')
+        input?.onQrReady?.({ payload: `data:image/png;base64,qr-${options.length}`, expiresAt: null })
+        if (options.length === 1) throw new Error(code)
+        return new Promise<FeishuDeveloperIdentity>((_, reject) => {
+          input?.signal?.addEventListener('abort', () => reject(new Error('feishu_login_cancelled')), { once: true })
+        })
+      })
+      const service = new ChannelSettingsService({
+        credentialStore: memoryCredentialStore(), developerSession: session,
+        core: channelCore(() => coreSnapshot({ account: connectedAccount() }))
+      })
+      const first = (await service.connect()).activeQrAttempt!
+      expect(first).toMatchObject({ stage: code.endsWith('_expired') ? 'expired' : 'awaiting_refresh', qrDataUrl: null })
+      if (!code.endsWith('_expired')) expect(first.detail).not.toMatch(/超时|过期|失败/u)
+      const refreshing = service.refreshLoginQr(first.attemptId)
+      await vi.waitFor(() => expect(options).toHaveLength(2))
+      const next = (await service.get()).activeQrAttempt!
+      expect(next.attemptId).not.toBe(first.attemptId)
+      expect(next.stage).toBe('awaiting_scan')
+      expect(await service.refreshLoginQr(first.attemptId)).toBe(false)
+      options[0].onStatus?.('scan_confirmed')
+      options[0].onQrReady?.({ payload: 'data:image/png;base64,late', expiresAt: null })
+      expect((await service.get()).activeQrAttempt).toEqual(next)
+      await service.cancelQrAttempt(next.attemptId)
+      await refreshing
+      expect(session.activatePendingLogin).not.toHaveBeenCalled()
+      expect((await service.get()).channels[0].connection.status).toBe('connected')
+      expect((await service.get()).activeQrAttempt).toBeNull()
+    }
+  )
+
+  it('ignores late QR, stage and failure callbacks from a cancelled attempt', async () => {
+    const session = developerSession()
+    const options: NonNullable<Parameters<typeof session.beginLogin>[0]>[] = []
+    const fail: ((error: Error) => void)[] = []
+    session.beginLogin = vi.fn((input) => {
+      options.push(input!)
+      return new Promise<FeishuDeveloperIdentity>((_, reject) => { fail.push(reject) })
+    })
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(), developerSession: session,
+      core: channelCore(() => coreSnapshot({ account: connectedAccount() }))
+    })
+    const first = service.connect()
+    await vi.waitFor(() => expect(options).toHaveLength(1))
+    const old = (await service.get()).activeQrAttempt!.attemptId
+    await service.cancelQrAttempt(old)
+    const second = service.connect()
+    await vi.waitFor(() => expect(options).toHaveLength(2))
+    options[1].onStatus?.('scan_confirmed')
+    options[1].onQrReady?.({ payload: 'stale-image', expiresAt: null })
+    options[1].onStatus?.('awaiting_scan')
+    options[0].onStatus?.('failed')
+    options[0].onQrReady?.({ payload: 'old-image', expiresAt: null })
+    fail[0](new Error('feishu_login_cancelled'))
+    await first
+    expect((await service.get()).activeQrAttempt).toMatchObject({ stage: 'scan_confirmed', qrDataUrl: null })
+    expect(session.discardPendingLogin).not.toHaveBeenCalled()
+    const current = (await service.get()).activeQrAttempt!.attemptId
+    await service.cancelQrAttempt(current)
+    fail[1](new Error('feishu_login_cancelled'))
+    await second
   })
 
   it('fails before provisioning when the developer session has expired', async () => {

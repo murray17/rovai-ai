@@ -14,8 +14,8 @@ last_updated: 2026-09-12
 
 ## 本机启动设置
 
-Core 在 `runtime_startup_setting` 中拥有每种 Runtime 的单一配置。Migration 150 将精确的
-v1.57 / schema 99 来源迁移为 v1.58 / schema 100；表、receipt 和 authority marker 同事务提交。
+Core 在 `runtime_startup_setting` 中拥有每种 Runtime 的单一配置。Migration 151 将精确的
+v1.58 / schema 100 来源迁移为 v1.58 / schema 101；表、receipt 和 authority marker 同事务提交。
 现有安装、队员、事件及历史运行证据不迁移到新的身份。配置不属于成员资料、Camp、公共事件或模型上下文。
 
 ```ts

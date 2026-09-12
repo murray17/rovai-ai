@@ -165,6 +165,88 @@ fallback 接纳。最小命令为 `cargo test -p rovai-core --bin rovai-core hea
 - 首次 workspace 门禁发现兼容性登记文件属于既有平台资格摘要；撤回对该文件的编辑，把此次观测留在本文，
   原摘要绑定测试复核通过。浅发现版本测试该次失败后单独复跑和最终 workspace 复跑均通过。
 
+## 飞书接口扫码登录
+
+按用户确认的完整流程说明实现独立 Web 协议适配器、指定 Session 的请求/可信域层和共享身份归一化器。
+登录、恢复与后续开放平台 bootstrap 从 HTTP HTML 被动提取，不创建隐藏浏览器；单请求/正文期限与独立总期限、
+旧 attempt 隔离和原连接保留由服务测试覆盖。UI 增加 completing_login、手动刷新与提交结果核对动作。
+先提交 Core 账号/Session、再激活的顺序不变；丢回执复用同一 commandId，明确拒绝才清理 pending。
+
+当前权威更新为 [Feishu Channel v16](../../contracts/feishu-channel-v16.md)、[飞书渠道架构](../../architecture/feishu-channel.md)和
+[渠道设置](../../ui/components/channel-settings.md)，同步 Contracts/CURRENT/开发与文档入口。无数据库 Migration、Runtime、
+模型上下文或新版本切换；按用户已指定的协议路线实现，不新增重复的 Version Decision。
+
+本轮验收（2026-09-12）：`pnpm test` 通过，Vitest 176 个文件、1804 项通过，Node 脚本 317 项通过、
+2 项平台限定跳过；随后补充绝对截止时间检查，飞书会话服务 31 项与 `pnpm typecheck` 通过。提交激活与
+回执不完整、请求域、HTML 解析、控制台 API 和渠道协调器的定向回归共 148 项通过。
+`pnpm test:feishu-login`、`pnpm test:desktop-bridge`、`pnpm test:dingtalk-login` 和 `pnpm build:desktop` 通过。
+`pnpm docs:test`、`pnpm docs:check` 及以任务起点 `4516ba39f0b2c6c15ec06e64792cef52da855182` 为 base 的
+`pnpm docs:check:ci` 通过，`git diff --check` 无错误。
+飞书 Electron 验收使用隔离 userData/sessionData，验证原生 Session、逐跳重定向、正文超时、Cookie 恢复、管理请求和
+生产 Dialog；截图检查覆盖日夜主题及 200% 缩放。钉钉首次与另一原生窗口验收并行时出现 child view 获取失败，
+随后顺序复跑通过；没有据此修改钉钉登录实现。
+
+`ROVAI_FEISHU_LIVE_PROBE=1 pnpm test:feishu-login` 的真实匿名初始化与待扫码查询通过，当前响应没有明确二维码有效期。
+该观察不证明真人确认、跨域账号交接、真实 Core 保存或实际 Bot 发布成功，这些仍需有账号的隔离验收。
+
+随后完成独立开发实例中的真人扫码确认与身份读取，暴露并修复两处兼容遗漏：`enter_app` 的空字符串
+`cross_login_uri` 应按可选字段处理；Main 已输出 `portalOrigin` 和 `larkoffice.com` Cookie，但 Core 仍按旧 Session
+形状拒绝保存。空 URI 的成功与未登录落点回归、Main 保存/激活及请求层共 111 项通过；扩展既有 Core 原子保存测试，
+覆盖三个门户与品牌匹配、旧记录、未知字段和相似域拒绝。真实 Core 隔离请求从 `CORE_REQUEST_FAILED` 复现为
+`applied`、`sessionRevision=1`。仅更新该开发实例的 Core 后，沿用原 pending 与 commandId 完成核对，数据库提交回执
+与界面“已连接”均已确认，无需再次扫码；原始身份、Cookie 和认证 URL 未进入验证记录。结果不明提示去除未证实的
+“恢复本地服务”归因。此次证明连接保存与激活，不证明 Bot 发布或消息收发。
+
+同日再次核实匿名初始化：`data.step_info` 只有 `status/token/user/subtitle`，没有明确到期字段；不保存原始票据。
+保留 `expiresAt=null` 与本地 `waitUntil` 的区分，收到服务端 `status=5` 后在原二维码区域显示可点击刷新的过期态，
+并移除旧二维码；本地总等待结束仍单独提示。113 项定向测试与类型检查通过；Electron 夹具验证刷新入口、键盘焦点、
+忙碌状态下的操作、旧码移除和过期/本地超时区分，钉钉共用 Dialog 回归通过。
+
+随后按用户反馈取消两渠道 Dialog 的本地截止时间与会话存储说明。提交前的等待、请求和登录阶段超时统一进入
+`awaiting_refresh`，结束旧请求后保留弹窗，让用户点击二维码区域刷新；不显示超时报错或将其称为二维码过期。
+飞书兜底调整为扫码 5 分钟、交接 30 秒、身份 20 秒、整体 10 分钟；正常状态仍由渠道响应驱动。
+钉钉超时不再由 finally 无条件关闭 Dialog，新尝试、迟到回调与保存阶段分别受保护。
+本次定向回归 5 个文件、230 项通过，类型检查与两渠道的隔离 Electron Dialog 验收通过；截图验证亮色、暗色及
+200% 缩放下的等待刷新入口。阶段期限测试分别让扫码、交接与 Cookie 身份读取阻塞，确认及时停止且不留下待提交会话。
+
+## 钉钉接口扫码登录
+
+当前边界见 [DingTalk Channel v13](../../contracts/dingtalk-channel-v13.md)，实际官方脚本、接口与匿名实测范围见
+[协议调查](../../research/dingtalk-login-protocol.md)。实现独立 Login Protocol/Transport，正常流程本地生成 QR、串行推进状态，
+同 Session 完成 SSO 与 `/baseInfo`；官方页只负责额外交互。attempt/generation、取消、独立期限与保存阶段锁定共同隔离迟到结果。
+Main/Core/Renderer 支持缺失展示名称，Migration 150 放宽两个名称字段的 NULL 约束，身份与原子提交次序不变。
+
+2026-09-12 的代码与隔离验证记录：
+
+- `pnpm typecheck`、`pnpm build:desktop` 通过；通用文档测试、检查和基于本次 Git base 的 `pnpm docs:check:ci` 通过。
+- Core lib 全量 554 项通过；迁移测试补充真实 Owner/应用身份引用后，独立复验通过，覆盖保留关系、触发器和回执失败回滚。
+- Vitest 当前共 178 文件、1,844 项；全量复验曾出现评测宿主、Core 启动、日报测试的墙钟期限失败。
+  `--maxWorkers=2` 一轮为 1,840 通过、4 项超时；随后对三个对应文件以 `--maxWorkers=1` 复验，30 项全部通过，
+  未修改它们的实现、断言或时限。钉钉相关用例均通过，不把全量并发运行描述成一次无失败的通过记录。
+- `pnpm test` 的产品指纹断言同步 Data Contract v1.58/schema 100 后独立通过；其余脚本检查在前一轮通过。
+- `pnpm test:dingtalk-login`、`pnpm test:desktop-bridge` 通过。生产 Renderer/preload 与原生 sandbox 页面在独立临时目录运行，
+  检查本地 QR、SSO/身份阶段、刷新、取消、原账号保留、日夜主题和 200% 缩放；一轮并行截图执行完成断言但退出超时，后续独立重跑通过。
+- 生产 Electron 网络层匿名 Probe 在最新代码上再次通过：后台上下文、本地 PNG 与待扫码响应；测试用扫码期限主动结束，未启动 Core。
+
+真实手机确认、企业选择、安全挑战、SSO 后身份确认及 packaged App 的账号操作尚未验收；不据此提升发布或 Stream gate。
+临时匿名 Cookie 与二维码响应已清理，不保存到代码仓库或日常账号数据库。本增量不修改模型上下文。
+
+## 渠道登录最终合并验证
+
+按本次最后确认的版本整合飞书与钉钉接口扫码、真实飞书保存兼容修复及手动刷新恢复，并合并 main 的连接菜单方案。
+“已连接”随账号呈现，“管理连接”统一承接切换与断开；二维码弹窗不显示本地截止时间或会话存储说明。
+提交前超时保留刷新区域，只有渠道明确过期才显示过期；本地提交保护和旧账号保留不变。
+
+- Typecheck、桌面构建、Rust format 与全 workspace/all-targets Clippy（warnings 视为失败）、文档治理与按实际 main base 的 diff-aware 门禁通过。
+- 完整 JavaScript 检查以两个 Vitest worker 运行：180 文件、1910 用例通过；后续 Node 317 项通过、2 项平台跳过。
+- `pnpm test:rust:pr` 通过：556 Library、35 CLI、309 slow integration，包含展示名迁移的绑定/触发器保留及失败回滚。
+- 两渠道的隔离 Electron 登录验收及设置工作区验收通过，使用生产组件，检查连接菜单、二维码刷新、取消、保存保护、
+  日夜主题和 200% 缩放。钉钉夹具同步从“管理连接 → 切换账号”进入，避免依赖已移除的旧按钮。
+- 桥接验收一轮在输出成功断言后进程退出超时，未改动实现或时限，随后独立复跑通过。
+
+本轮没有借用日常账号或启动真实 Runtime，也没有创建或发布 Bot。此前飞书真人扫码与真实保存的证据边界保持不变；
+钉钉真人确认、组织选择、安全挑战和真实 SSO 后身份读取仍未验收，不能用本轮夹具替代这些证据。
+
 ## 待发送消息移回输入框
 
 - Core 新增双 owner revision fence 的 `return_to_composer`；一次事务覆盖 Draft 并取消 Pending，旧发送与重复回执不能再次消费。
@@ -188,14 +270,14 @@ fallback 接纳。最小命令为 `cargo test -p rovai-core --bin rovai-core hea
 范围来自 Issue #338 与用户确认的交互：允许已发现程序继续替换路径、选择后浅检、独立草稿深检、
 环境变量新增编辑与遮蔽、CAS 保存、恢复自动和常显置灰的“放弃更改 / 保存”。Issue 在新版本发布前保持开启。
 
-- Core：`runtime_startup` 持久化/输入边界、Migration 150、不可变配置快照、按 Runtime 的进程 overlay。
+- Core：`runtime_startup` 持久化/输入边界、Migration 151、不可变配置快照、按 Runtime 的进程 overlay。
 - Desktop：原生选择器、owner RPC allowlist、草稿结果与已保存配置分离、白色管理列表和统一尾部图标。
 - 当前权威：[Runtime Launch v40](../../contracts/runtime-launch-and-verification-v40.md)、
   [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#本机启动设置)与设置工作区 brief。
 - 不新增模型可见字段、Runtime Kind、第三方依赖或系统环境修改；现有进程继续使用启动时捕获的环境。
 
 测试准入：输入矩阵由 `runtime_startup` 纯函数测试拥有；并发 overlay 由不启动进程的命令配置测试拥有。
-路径封闭候选扩展既有 discovery priority owner。Migration 150 的事务/receipt/CAS/reopen 用独立临时数据库
+路径封闭候选扩展既有 discovery priority owner。Migration 151 的事务/receipt/CAS/reopen 用独立临时数据库
 验证，因为字段单测无法证明升级原子性。真实 Core RPC 测试只验证草稿/保存/子进程/重启 seam，Shell fixture
 不调用模型；Windows 入口继续由原 command-shim 测试拥有。既有 Electron settings fixture 增加有效变量直接
 保存、失败重试、放弃、登录结果以及双主题/缩放验证，不创建第二套模拟 UI。

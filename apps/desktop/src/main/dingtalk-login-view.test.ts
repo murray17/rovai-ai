@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BaseWindow, type BrowserWindow, type Session } from 'electron'
 import {
-  DingTalkLoginView, parseChannelLoginViewBounds, parseDingTalkLoginPageObservation
+  DingTalkLoginView, parseChannelLoginViewBounds
 } from './dingtalk-login-view'
 
 const native = vi.hoisted(() => ({
@@ -134,14 +134,4 @@ describe('login presentation boundary', () => {
     expect(parseChannelLoginViewBounds(null)).toBeNull()
   })
 
-  it('projects only bounded PNG or closed stages, never arbitrary page fields', () => {
-    expect(parseDingTalkLoginPageObservation({ kind: 'qr', dataUrl: 'data:image/png;base64,aW1hZ2U=', cookie: 'private' }))
-      .toEqual({ kind: 'qr', dataUrl: 'data:image/png;base64,aW1hZ2U=' })
-    for (const dataUrl of ['https://login.dingtalk.com/?access_token=private', 'data:image/svg+xml;base64,c2NyaXB0',
-      `data:image/png;base64,${'a'.repeat(262_144)}`]) {
-      expect(parseDingTalkLoginPageObservation({ kind: 'qr', dataUrl })).toEqual({ kind: 'interaction' })
-    }
-    expect(parseDingTalkLoginPageObservation({ kind: 'scanned', text: 'private' })).toEqual({ kind: 'scanned' })
-    expect(parseDingTalkLoginPageObservation(null)).toEqual({ kind: 'interaction' })
-  })
 })
