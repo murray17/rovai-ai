@@ -39,6 +39,72 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--execution-window') {
+      const settle = () => run('window.campOpenTest.settle()')
+      const waitFor = async expression => {
+        const deadline = Date.now() + 4000
+        do { await settle(); if (await run(expression)) return } while (Date.now() < deadline)
+        assert.fail(`Execution window condition: ${expression}`)
+      }
+      const report = []
+      for (const placement of ['bottom', 'inspector']) {
+        await run(`document.documentElement.dataset.theme = '${placement === 'bottom' ? 'day' : 'night'}'; window.campOpenTest.showExecutionWindow('${placement}')`)
+        await settle()
+        assert.equal((await run('window.campOpenTest.executionWindowState()')).requests.length, 0, 'closed Run performs no read')
+        await run('document.querySelector(".execution-disclosure summary").click()')
+        await run('new Promise(resolve => setTimeout(resolve, 350))')
+        assert.equal((await run('window.campOpenTest.executionWindowState()')).requests.length, 0, 'offscreen opened Run waits for the viewport')
+        await run('document.querySelector(".execution-disclosure").scrollIntoView({block:"nearest"})')
+        await waitFor('window.campOpenTest.executionWindowState().requests.length === 2')
+        let state = await run('window.campOpenTest.executionWindowState()')
+        assert.equal(state.toolRows, 0)
+        assert.equal(state.contentReads.length, 0)
+        assert.ok(state.dom < 600, `bounded initial DOM: ${state.dom}`)
+        assert.equal(state.overflow, false)
+        assert.ok(state.requests[0].limit < 30)
+        await run('document.querySelector(".execution-drawer-body").scrollTop = 630')
+        await settle()
+        const anchor = await run(`(() => { const n = document.querySelector('[data-execution-item-key]'); return {key:n.dataset.executionItemKey, top:n.getBoundingClientRect().top}; })()`)
+        await run('document.querySelector(".execution-window-navigation button").focus({preventScroll:true})')
+        window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
+        window.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
+        window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
+        await waitFor('window.campOpenTest.executionWindowState().requests.length === 3')
+        assert.equal(await run('document.activeElement.matches(".execution-window-navigation button")'), true, 'paging retains keyboard focus')
+        const after = await run('document.querySelector(' + JSON.stringify(`[data-execution-item-key="${anchor.key}"], [data-execution-item-keys~="${anchor.key}"]`) + ').getBoundingClientRect().top')
+        assert.ok(Math.abs(after - anchor.top) < 2, `anchor preserved: ${after - anchor.top}`)
+        for (let index = 0; index < 3; index++) {
+          await run('document.querySelector(".execution-window-navigation button").click()')
+          await settle()
+        }
+        await run('[...document.querySelectorAll(".execution-window-navigation button")].find(button => button.textContent === "回到最新").click()')
+        await settle()
+        await run('document.querySelectorAll(".tool-activity-group > summary").forEach(summary => summary.click())')
+        await settle()
+        state = await run('window.campOpenTest.executionWindowState()')
+        assert.ok(state.toolRows > 0 && state.toolRows < 30)
+        assert.equal(state.contentReads.length, 0, 'opening a group does not fetch outputs or diffs')
+        await run('document.querySelector(".modified-file-row summary").click()')
+        await waitFor('window.campOpenTest.executionWindowState().contentReads.length === 1')
+        await waitFor('document.querySelector(".modified-file-row").textContent.includes("TOKEN=fixture-value")')
+        await run('document.querySelector(".modified-file-row").scrollIntoView({block:"center"})')
+        await settle()
+        await capture(`execution-window-diff-${placement}`)
+        await run('document.querySelector(".tool-call-disclosure summary").click()')
+        await waitFor('document.querySelector(".process-content").textContent.includes("OUTPUT_TOKEN=fixture-value")')
+        await run('document.querySelector(".tool-call-disclosure[open]").scrollIntoView({block:"center"})')
+        await settle()
+        assert.ok(await run('document.querySelector(".tool-call-disclosure[open]")?.textContent.includes("OUTPUT_TOKEN=fixture-value")'), 'page-boundary group changes retain the opened result')
+        assert.equal((await run('window.campOpenTest.executionWindowState()')).contentReads.length, 2, 'retained results do not refetch on a group boundary')
+        await capture(`execution-window-${placement}`)
+        report.push({ placement, background: await run('getComputedStyle(document.querySelector(".execution-drawer")).backgroundColor'), ...(await run('window.campOpenTest.executionWindowState()')), text: undefined })
+      }
+      assert.notEqual(report[0].background, report[1].background, 'both themes are applied')
+      assert.equal(errors.length, 0, errors.join('\n'))
+      console.log(JSON.stringify({ ok: true, mode, report }))
+      app.exit(0)
+      return
+    }
     if (mode === '--current-user-profile') {
       const settle = () => run('window.campOpenTest.settle()')
       const key = async keyCode => {

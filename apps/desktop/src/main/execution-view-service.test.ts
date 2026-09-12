@@ -214,7 +214,7 @@ describe('ExecutionViewService', () => {
         }, { kind: 'narration', body: '公开正文' }]
       }]
     })
-    expect(JSON.stringify(publicSnapshot)).not.toContain('private-stdout-token')
+    expect(JSON.stringify(publicSnapshot)).toContain('private-stdout-token')
 
     rawSnapshot.runs[0].invocationKind = 'a2a'
     rawSnapshot.runs[0].trigger.authorDisplayName = '药师寺惠'

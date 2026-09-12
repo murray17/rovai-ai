@@ -84,3 +84,16 @@ Claude Code 模型目录从 help 别名改为无 Prompt 控制初始化，原生
 当前合同为 [Run Process Detail Surface v32](../../contracts/run-process-detail-surface-v32.md)，UI 与开发验收入口同步；
 没有架构数据流、模型上下文、Runtime classifier、兼容性或版本指针变更，其他 v1.58 验收缺口保持独立。
 实施与验证见[工具入参展示记录](builtin-tool-input-presentation.md)。
+
+
+## Camp 执行详情按需读取
+
+在长 Run 的 Camp 切换路径中，执行详情从首屏投影移至可视窗口：按需分页并预取相邻一页；同时取消执行
+命令和工具结果的内容脱敏，收起组不挂载子行，Diff 按条展开后读取。当前合同为
+[Camp Open v18](../../contracts/camp-open-projection-v18.md) 和
+[Run Process Detail Surface v33](../../contracts/run-process-detail-surface-v33.md)，
+取代上一个入参展示批次的 Shell 正文与凭据省略规则。字段白名单和 Built-in 入参用途保持原边界。
+
+本次更新 Contracts、Camp Open Architecture、会话 UI 与当前规范导航；Open wire 提升到 7，Snapshot 34、
+Data Contract 99、当前版本指针、模型上下文和 Runtime classifier 不变，无数据库迁移或历史删除。
+实施与测量见[执行窗口性能记录](camp-execution-loading.md)。
