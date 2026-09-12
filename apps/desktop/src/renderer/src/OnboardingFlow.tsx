@@ -20,6 +20,7 @@ import {
 } from './MemberRuntimeParameters'
 import { MemberPortrait } from './MemberPortrait'
 import { BUILTIN_MEMBER_PRESETS, type BuiltinMemberPreset } from './member-presets'
+import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 import {
   runtimeAvailabilityPresentation,
   runtimePlatformAdmissionAllowsUse,
@@ -51,22 +52,7 @@ export type OnboardingRuntimePhase =
   | 'ready'
   | 'error'
 
-export const ONBOARDING_PRODUCT_RUNTIMES: readonly AdapterKind[] = [
-  'claude-code-cli',
-  'pi',
-  'codex-cli',
-  'copilot-cli',
-  'opencode-cli',
-  'kiro-cli',
-  'qoder-cli',
-  'codebuddy-cli',
-  'qwen-code',
-  'trae-cn-cli',
-  'kimi-code-cli',
-  'grok-build',
-  'zcode-app',
-  'antigravity-app'
-]
+export const ONBOARDING_PRODUCT_RUNTIMES: readonly AdapterKind[] = VISIBLE_PRODUCT_RUNTIMES
 
 const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'claude-code-cli': claudeCodeLogo,

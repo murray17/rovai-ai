@@ -103,10 +103,12 @@ describe('first-run onboarding flow', () => {
     )
     const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [codexInstallation()])
     const [visible, collapsed] = markup.split('<details class="onboarding-other-runtimes">')
+    expect(visible).toContain('GitHub Copilot')
     expect(visible).toContain('Qwen Code')
     expect(visible).toContain('Kimi Code')
-    expect(collapsed).toContain('GitHub Copilot')
+    expect(collapsed).toContain('Pi Coding Agent')
     expect(collapsed).toContain('Antigravity')
+    expect(collapsed.indexOf('Pi Coding Agent')).toBeGreaterThan(collapsed.indexOf('Antigravity'))
     expect(collapsed.split('</details>')[0]).not.toContain('aria-disabled="false"')
   })
 
