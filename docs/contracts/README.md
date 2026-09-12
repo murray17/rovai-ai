@@ -33,7 +33,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Current User Profile v1（当前）](current-user-profile-v1.md) | Desktop 本地名称/头像、原子保存、历史作者与结构化提及投影；不改变 Core identity、正文或模型上下文 |
 | [Domain Command Result v1（当前）](domain-command-result-v1.md) | Domain Command 结果的事务、幂等回放、专用列唯一正文、内部 marker、新旧事件双读与 schema 95 回退边界 |
 | [Scheduled Automation v1（当前）](scheduled-automation-v1.md) | Desktop/Core 本机计划、冻结快照、原子 Camp 派发、恢复收口、唯一公共结果与独立 Owner 通知 |
-| [Single Chat v4（当前）](single-chat-v4.md) | v3 私有会话与注意力不变；Source Attachment Run 前宿主重检后原样投影 source path |
+| [Single Chat v5（当前）](single-chat-v5.md) | 待发送消息原子移回普通输入框、覆盖草稿、释放 FIFO；旧编辑 session 兼容 |
+| [Single Chat v4（历史）](single-chat-v4.md) | v3 私有会话与注意力不变；Source Attachment Run 前宿主重检后原样投影 source path |
 | [Single Chat v3（历史）](single-chat-v3.md) | 本机单聊注意力、Run CampTurn ID 与精确私有审批投影；附件交付语义由 v4 替代 |
 | [Single Chat v2（历史）](single-chat-v2.md) | v1 私有路由、Source Ref、Pending、Context 与 policy 不变；结束改为 exact Conversation ID 无 version CAS，Renderer 拆分目标 loading 与串行后台刷新 |
 | [Single Chat v1（历史）](single-chat-v1.md) | Camp 内本地单聊的领域复用、Source Ref Draft/Runtime 解析、Conversation-local Pending FIFO、封闭 Built-in policy、公共水位、私有 terminal 路由与迟到 fence |
@@ -66,7 +67,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v30（历史）](runtime-launch-and-verification-v30.md) | v29 保留；增加 Pi JSONL Host、专属 Ready/exact resume、managed receipt、动态 Skills/MCP、Action/Usage 与三平台未准入边界 |
 | [Runtime Launch and Verification v29（历史）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
 | [Runtime Usage Monitoring v4（当前）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
-| [Pending Camp Input v4（当前）](pending-camp-input-v4.md) | v3 FIFO 与发布不变；编辑客户端归属、无 foreign working state 的占用投影、显式接管与旧客户端写入围栏 |
+| [Pending Camp Input v4（当前）](pending-camp-input-v4.md) | v3 FIFO 与发布不变；原子移回调用客户端的普通草稿、释放队列，旧编辑会话保留归属、显式接管与写入围栏 |
 | [Pending Camp Input v3（历史）](pending-camp-input-v3.md) | canonical/edit content 改为 ComposerDocument V2；编辑归属由 v4 补齐 |
 | [Pending Camp Input v2（历史）](pending-camp-input-v2.md) | v1 FIFO/edit token 不变；原生保存 source refs，working refs 支持添加/删除/排序与附件-only，发布失败精确 needs-repair；content wire 由 v3 替代 |
 | [Pending Camp Input v1（历史）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
@@ -297,7 +298,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v13（当前）](camp-composer-draft-v13.md) | v12 Desktop 语义保留；Host 验证编辑归属、Web 稳定 Draft 身份和消费后单调 revision，Migration 150 保留旧数据 |
+| [Camp Composer Draft v13（当前）](camp-composer-draft-v13.md) | v12 退出围栏保留；Host 验证编辑归属、Web 单调 revision 与 Pending 原子移回；Migration 150 保留旧数据 |
 | [Camp Composer Draft v12（历史）](camp-composer-draft-v12.md) | macOS 独立关窗等待既有 Draft preparation；客户端归属由 v13 扩展 |
 | [Camp Composer Draft v11（历史）](camp-composer-draft-v11.md) | v10 wire/事务不变；可控正常退出在 Planned Shutdown 前复用 active-Camp leave guard 持久化最新 Lexical EditorState；macOS 独立关窗 fence 由 v12 补齐 |
 | [Camp Composer Draft v10（历史）](camp-composer-draft-v10.md) | v9 wire/事务不变；现有 leave guard 覆盖所有真正卸载 active Camp Composer 的普通 Renderer 导航；App 退出边界由 v11 替代 |

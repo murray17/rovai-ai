@@ -32,3 +32,15 @@ cannot consume late results from the old scope. Renderer interaction/selection/h
 
 Conversation-scoped private-chat Drafts must receive equivalent ownership before network private-chat writes are
 admitted. Their current lack of Web admission is an implementation gap, not a permanent platform restriction.
+
+## Pending withdrawal
+
+[Pending Camp Input v4](pending-camp-input-v4.md) adds an explicit overwrite from canonical Pending content into the
+caller’s Host-verified ordinary Draft. Other clients’ Drafts are not read, replaced or consumed.
+
+Draft Mutation Coordinator serializes `return_pending_input` after prior Draft mutations and uses the latest
+Draft revision. Only a successful Core withdrawal and authoritative Draft read replace the editor. The ordinary
+Draft identity, autosave and attachment/quote/reply UI own all subsequent editing; there is no Pending edit identity,
+separate local navigation snapshot or save/cancel mode. A failed/unknown post-commit read requires reload before
+local typing or sending can resume. Exact pending and Draft revision fences, replay and legacy session compatibility
+are owned by Pending v4.

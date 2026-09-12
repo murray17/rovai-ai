@@ -84,3 +84,9 @@ Claude Code 模型目录从 help 别名改为无 Prompt 控制初始化，原生
 当前合同为 [Run Process Detail Surface v32](../../contracts/run-process-detail-surface-v32.md)，UI 与开发验收入口同步；
 没有架构数据流、模型上下文、Runtime classifier、兼容性或版本指针变更，其他 v1.58 验收缺口保持独立。
 实施与验证见[工具入参展示记录](builtin-tool-input-presentation.md)。
+
+## 待发送消息移回输入框
+
+按用户确认，公屏及单聊的编辑入口改为退出队列、覆盖普通输入框；剩余 FIFO 正常推进，重新发送进入当前队尾。
+当前合同为 [Pending Camp Input v4](../../contracts/pending-camp-input-v4.md)、[Camp Composer Draft v13](../../contracts/camp-composer-draft-v13.md)
+与 [Single Chat v5](../../contracts/single-chat-v5.md)。不改变数据库 schema、Runtime 或模型上下文；实现与验证见[实施计划](implementation-plan.md#待发送消息移回输入框)。

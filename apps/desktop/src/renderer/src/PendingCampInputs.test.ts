@@ -1,21 +1,29 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { CampPendingInputsView } from '@contracts'
 import { describe, expect, it } from 'vitest'
-import { PendingInputEditorActions } from './PendingCampInputs'
+import { PendingInputRows } from './PendingCampInputs'
 
-describe('PendingInputEditorActions', () => {
-  it('offers only cancel and save while a queued message is being edited', () => {
-    const markup = renderToStaticMarkup(createElement(PendingInputEditorActions, {
-      busy: false,
-      saveDisabled: false,
-      onCancel: () => undefined,
-      onSave: () => undefined
+describe('PendingInputRows', () => {
+  it('exposes return-to-composer and delete without an editing mode', () => {
+    const queue: CampPendingInputsView = { campId: 'camp-1', executionActive: true, editSession: null,
+      items: [{ id: 'input-1', campId: 'camp-1', enqueueSequence: 1, revision: 1, state: 'queued',
+        content: { version: 2, segments: [{ kind: 'text', text: 'queued message' }] }, body: 'queued message',
+        replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null, attachments: [], quotes: [] }] }
+    const render = (disabled = false) => renderToStaticMarkup(createElement(PendingInputRows, {
+      queue, disabled, onEdit: () => undefined, onDelete: () => undefined
     }))
-
-    expect(markup).toContain('>取消</button>')
-    expect(markup).toContain('>保存</button>')
-    expect(markup).not.toContain('停止')
-    expect(markup).not.toContain('composer-stop')
-    expect(markup).not.toContain('danger-button')
+    expect(render()).toContain('移回输入框编辑（覆盖当前内容）')
+    expect(render()).toContain('删除待发送消息')
+    expect(render()).not.toMatch(/is-editing|正在编辑|aria-pressed|>保存<|>取消</)
+    expect(render(true)).toContain('disabled=""')
+    queue.editSession = { pendingInputId: 'input-1', editToken: 'lease', basePendingRevision: 1,
+      foreignClient: true, recoveryRequired: true, workingQuotes: [], workingAttachments: [] }
+    expect(render()).toContain('接管并移回输入框（覆盖当前内容）')
+    expect(render()).toContain('接管并编辑待发送消息')
+    expect(render()).toContain('另一客户端编辑未完成')
+    expect(render()).toMatch(/class="pending-input-delete" disabled=""/)
+    queue.items = []
+    expect(render()).toBe('')
   })
 })

@@ -904,6 +904,7 @@ export interface SingleChatPendingInputsView {
 }
 
 export type SingleChatPendingInputEditAction =
+  | { type: 'return_to_composer'; expectedDraftRevision: number }
   | { type: 'quote'; action: MessageQuoteAction }
   | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
   | { type: 'save'; body: string }
@@ -1356,6 +1357,7 @@ export interface PendingCampInputSubmissionOutcome {
 }
 
 export type PendingInputEditAction =
+  | { type: 'return_to_composer'; expectedDraftRevision: number }
   | { type: 'quote'; action: MessageQuoteAction }
   | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
   | {

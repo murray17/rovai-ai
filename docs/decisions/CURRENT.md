@@ -63,7 +63,7 @@ last_updated: 2026-09-12
 
 ## Single Chat
 
-- 当前规范：[Single Chat Architecture](../architecture/single-chat.md)、[Single Chat v4](../contracts/single-chat-v4.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)和[Camp 内单聊 UI](../ui/components/conversation-workspace.md#camp-内单聊)。
+- 当前规范：[Single Chat Architecture](../architecture/single-chat.md)、[Single Chat v5](../contracts/single-chat-v5.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)和[Camp 内单聊 UI](../ui/components/conversation-workspace.md#camp-内单聊)。
 - 复用现有执行体系、固定私有路由与封闭 Built-in policy 的理由：[V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)。
 - 重启取消当前回复、显式结束和无 successor cleanup fence 的理由：[V1.50-D02](../versions/v1.50/decisions.md#v1-50-d02)。
 - 复用公共弱持久 Source Ref、不维护 Single Chat 附件内容仓库的理由：[V1.50-D03](../versions/v1.50/decisions.md#v1-50-d03)；Run 前宿主重检后原路径投影的当前理由：[V1.58-D06](../versions/v1.58/decisions.md#v1-58-d06)。

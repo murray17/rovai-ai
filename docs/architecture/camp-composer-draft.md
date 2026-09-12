@@ -24,7 +24,7 @@ Pending Camp Input 拥有。字段和行为见 [Camp Composer Draft v13](../cont
 | Draft Sync | 只拥有 EditorState ref、epoch、local/saved version、dirty 与 persistence status；以 debounce/max-wait single-flight 请求内容保存，并在业务边界 flush 捕获 snapshot；不保存完整 Draft View 或 Core revision |
 | Draft Mutation Coordinator | Renderer 唯一完整 `CampComposerDraftView` owner；将正文、附件、Reply、Continuation 与接收者 mutation 串入同一队列，并用每次 Core 返回的完整 View 原子替换 authority |
 | Camp Draft module | 持久化 V2 document、source refs、legacy Prepared 互斥状态、Reply/Continuation、recipient touched、revision 与 expiry；从 document 派生 body |
-| Pending module | 原子保存已提交的完整 V2 下一轮意图、FIFO、edit token/revision、working source refs 与 needs-repair 状态 |
+| Pending module | 原子保存已提交的完整 V2 下一轮意图、FIFO、退回 Draft 的原子转移、revision、兼容 edit token/working refs 与 needs-repair 状态 |
 | Collaboration send | 从 exact Draft/Pending 读取 V2，物化 continuation，最终校验 Reply/Atom/source availability，转换成公共 Structured Content，并只在 accepted transaction 消费 owner |
 | Camp Read Model | 投影公开 Message、Reply/Continuation 和统一无路径附件 View；不暴露 Lexical 状态 |
 | Runtime source resolver | 对触发 Message 的 source refs 做宿主重检并返回完全相同的 stored source path；Adapter 不理解 Composer 或存储差异 |
@@ -199,15 +199,12 @@ Reply 与 Continuation 的来源、优先级、失效显式修复和无 Default 
 intent 的动作先 flush Composer。Frozen continuation 的 recipient 最终物化为 V2 Member Atom，然后在发送边界映射
 为 public Mention。
 
-Pending Edit 使用 `campId:pendingInputId` 作为独立 draft identity，从 canonical V2 初始化；Save flush 本地 EditorState
-后把完整 V2 与 working refs 置换进 Pending，Cancel 放弃 working state，Delete 取消整条 Pending。所有动作继续由
-pendingInputId、pending revision 与 editToken fencing，且不会消费或覆盖普通 Composer Draft。
-
-同一 Renderer 窗口的正常导航通过统一 Camp leave guard 捕获 Pending 的 V2 编辑快照，单独暂存正文、Reply、
-initial snapshot 与原 edit token/revision；不在普通按键或组件 cleanup 中序列化，不创建 Core Draft 或新锁。
-返回时由最新 Pending projection 校验 Camp、Pending ID、canonical/base revision、token 及 recoveryRequired，
-只在原占用仍有效时恢复本地编辑，并采用 Core 最新 working attachments。校验不通过或窗口重建继续走显式恢复。
-导航中止清除该次快照并恢复交互；编辑 mutation 在途时拒绝离开，避免保存/附件结果跨已卸载 editor 丢失。
+Pending 的编辑入口通过同一 Core 事务退出队列并覆盖普通 Draft。Draft Mutation Coordinator 串行化此前保存与
+本次移回，Core 校验双方 revision 后转移 V2、附件、Reply 和 quotes，取消原 Pending，清除其旧 session。
+Renderer 成功后在普通 Composer 继续输入；不再维护第二个编辑 identity、保存/取消模式或独立导航快照。
+转移后由普通 Draft autosave/leave/close fence 保存，输入框不占队列位置；再次发送按新输入加入当前队尾。
+发布和退回以事务提交顺序决定胜者；双方不会同时消费同一条 Pending。未知结果必须先重读 Draft 再允许输入。
+旧版 edit token/working refs 仍作为兼容入口受原 fence 约束，新 Desktop 不创建旧 session。
 
 ## Legacy and failure boundaries
 

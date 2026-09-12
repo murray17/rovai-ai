@@ -1635,13 +1635,22 @@ impl CampAttachmentStore {
         database: &mut Database,
         camp_id: &str,
     ) -> Result<CampAttachmentCleanupPlan> {
+        let cleanup = self.draft_attachment_cleanup_plan(database, camp_id)?;
+        consume_client_draft(database.connection(), camp_id, &self.client)?;
+        Ok(cleanup)
+    }
+
+    pub fn draft_attachment_cleanup_plan(
+        &self,
+        database: &Database,
+        camp_id: &str,
+    ) -> Result<CampAttachmentCleanupPlan> {
         CampId::parse(camp_id)?;
         let paths = if self.client.is_desktop() {
             prepared_paths(database, camp_id)?
         } else {
             Vec::new()
         };
-        consume_client_draft(database.connection(), camp_id, &self.client)?;
         Ok(CampAttachmentCleanupPlan {
             camp_id: camp_id.to_string(),
             attachment_paths: paths.into_iter().map(PathBuf::from).collect(),
@@ -2272,6 +2281,46 @@ pub(crate) fn cleanup_consumed_prepared_attachment_paths(
         camp_id: camp_id.to_string(),
         attachment_paths: paths.to_vec(),
     })
+}
+
+/// The caller fences both owners in the same transaction as the Pending withdrawal.
+pub(crate) fn restore_pending_draft(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    client: &DraftClient,
+    revision: i64,
+    input: &crate::pending_camp_input::StoredPendingInput,
+) -> Result<()> {
+    let (now, expires_at) = draft_times();
+    let document = normalize_composer_document(input.document.clone());
+    validate_composer_document(&document)?;
+    // Deleting the old owner also detaches legacy Prepared attachments. The Host cleans
+    // their files after commit; user-owned source files are never deleted.
+    transaction.execute(
+        "DELETE FROM camp_composer_draft WHERE camp_id = ?1 AND client_id = ?2",
+        params![camp_id, client.sql_key()],
+    )?;
+    transaction.execute(
+        "INSERT INTO camp_composer_draft(
+            camp_id, client_id, body, structured_content_json, revision,
+            reply_to_camp_message_id, recipient_selection_required,
+            recipient_selection_touched, source_attachments_json,
+            created_at, updated_at, expires_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?9, ?10)",
+        params![
+            camp_id,
+            client.sql_key(),
+            render_composer_document_for_connection(transaction, &document)?,
+            serialize_composer_document(&document)?,
+            revision + 1,
+            input.reply_to_camp_message_id,
+            input.recipient_selection_required,
+            serialize_source_attachments(&input.source_attachments)?,
+            now,
+            expires_at
+        ],
+    )?;
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
