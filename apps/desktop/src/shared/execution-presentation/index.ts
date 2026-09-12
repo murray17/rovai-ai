@@ -1380,6 +1380,7 @@ function shouldDeferUnresolvedShellActivity(
 }
 
 const SHELL_WRAPPER_EXECUTABLES = new Set(['bash', 'dash', 'fish', 'ksh', 'sh', 'zsh'])
+const POWERSHELL_WRAPPER_EXECUTABLES = new Set(['powershell', 'powershell.exe', 'pwsh', 'pwsh.exe'])
 type ShellPreviewToken = {
   raw: string
   value: string
@@ -1419,9 +1420,16 @@ function unwrapShellCommand(command: string): string {
     const tokens = tokenizeShellPreview(current)
     if (tokens.some((token) => token.operator) || tokens.length < 3) break
     const executable = shellExecutable(tokens[0].value)
-    if (!executable || !SHELL_WRAPPER_EXECUTABLES.has(executable)) break
+    // The POSIX tokenizer consumes single Windows backslashes; retain the raw path
+    // when recognizing a quoted PowerShell executable.
+    const rawExecutable = shellExecutable(tokens[0].raw.replace(/^(['"])(.*)\1$/u, '$2'))
+    const powershell = POWERSHELL_WRAPPER_EXECUTABLES.has(executable ?? '')
+      || POWERSHELL_WRAPPER_EXECUTABLES.has(rawExecutable ?? '')
+    if (!powershell && (!executable || !SHELL_WRAPPER_EXECUTABLES.has(executable))) break
     const commandIndex = tokens.findIndex((token, index) =>
-      index > 0 && (token.value === '-c' || token.value === '-lc')
+      index > 0 && (powershell
+        ? ['-c', '-command'].includes(token.value.toLowerCase())
+        : token.value === '-c' || token.value === '-lc')
     )
     if (commandIndex < 0 || commandIndex + 2 !== tokens.length) break
     current = tokens[commandIndex + 1].value.trim()
