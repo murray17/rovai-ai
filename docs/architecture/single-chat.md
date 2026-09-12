@@ -8,7 +8,7 @@ last_updated: 2026-09-11
 # Single Chat Architecture
 
 Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。字段级合同见
-[Single Chat v4](../contracts/single-chat-v4.md)，当前选择理由见
+[Single Chat v5](../contracts/single-chat-v5.md)，当前选择理由见
 [V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)至
 [V1.50-D04](../versions/v1.50/decisions.md#v1-50-d04)及
 [V1.58-D06](../versions/v1.58/decisions.md#v1-58-d06)。
@@ -50,7 +50,7 @@ Scheduler 发现该 Conversation 空闲
   → 重检 Source Refs、成员和 Runtime readiness
       ├── 成功：原子创建私有 Message/Turn/Run，Pending → published
       └── 失败：队首 → needs_repair，阻塞同 Conversation 后项
-  → 用户可独占编辑、takeover、增删/重排附件、保存或删除
+  → 用户可移回普通输入框修复（释放队列位置）或删除
 ```
 
 发送命令以固定 Conversation ID 为目标，不接收 expected Conversation version。`SingleChatService` 在同一事务内读取当前
@@ -128,3 +128,9 @@ Run ID。`SingleChatService` 在 Command Gateway 的同一事务内读取 exact 
 predecessor ended 后 successor 使用全新 Conversation/Binding/Session，因此不会命中 predecessor 的 Conversation-local
 队列或 cleanup fence。两个 Runtime cleanup/dispatch 可以短暂重叠；底层无法并发时由现有 Scheduler/Fleet 表达 readiness
 或 failure，不在 Single Chat 领域中引入跨 Conversation 等待状态。
+
+## 待发送消息移回输入框
+
+Desktop 使用 [Single Chat v5](../contracts/single-chat-v5.md) 的双 revision 事务，将 canonical Pending refs/quotes
+覆盖到普通 Draft 并取消队列项；正文由成功回执进入该 Conversation 的窗口内草稿。编辑不再占 FIFO 位置，
+重新发送进入当前队尾。旧 session API 只保留兼容边界，界面不创建独立编辑器。

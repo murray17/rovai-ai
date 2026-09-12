@@ -21,7 +21,6 @@ import type {
   NotificationSingleChatSource,
   CampMemberView,
   CoreEvent,
-  SingleChatPendingInputEditAction,
   SingleChatPendingInputView,
   SingleChatConversationView,
   SingleChatMessageView,
@@ -230,7 +229,6 @@ type PreparingSingleChatAttachment = {
   error: string | null
 }
 
-type SingleChatPendingAttachmentDropTarget = ((files: File[]) => void) | null
 
 function SingleChatAttachmentStrip({ children }: { children: React.ReactNode }): React.JSX.Element {
   return <div className="composer-attachment-strip" role="group" aria-label="待发送附件">{children}</div>
@@ -526,156 +524,39 @@ function singleChatPendingError(code: string | null): string | null {
   return `发送未完成（${code}），消息已保留。`
 }
 
-function SingleChatPendingQueue({
-  snapshot,
-  busyOutside,
-  onSnapshot,
-  onRefresh,
-  onNotify,
-  onAttachmentDropTargetChange
-}: {
+function SingleChatPendingQueue({ snapshot, busyOutside, onRefresh, onNotify, onReturnToComposer }: {
   snapshot: SingleChatSnapshot
   busyOutside: boolean
-  onSnapshot(snapshot: SingleChatSnapshot): void
   onRefresh(): Promise<void>
   onNotify(message: string): void
-  onAttachmentDropTargetChange(target: SingleChatPendingAttachmentDropTarget): void
+  onReturnToComposer(item: SingleChatPendingInputView, editToken: string | null): Promise<void>
 }): React.JSX.Element | null {
   const [busy, setBusy] = useState(false)
-  const [editBody, setEditBody] = useState('')
-  const [preparing, setPreparing] = useState(false)
-  const pendingFileInputRef = useRef<HTMLInputElement>(null)
-  const pendingEditorRef = useRef<HTMLTextAreaElement>(null)
-  const preparePendingFilesRef = useRef<(files: File[]) => void>(() => undefined)
+  const busyRef = useRef(false)
   const queue = snapshot.pendingInputs
   const session = queue.editSession
-  const editingItem = session
-    ? queue.items.find((item) => item.id === session.pendingInputId) ?? null
-    : null
-
-  useEffect(() => {
-    setEditBody(session?.workingBody ?? '')
-  }, [session?.editToken])
-
-  const mutate = async (
-    item: SingleChatPendingInputView,
-    action: SingleChatPendingInputEditAction,
-    editToken: string | null
-  ): Promise<StoredCommandResult> => {
-    const result = await window.rovai.request<StoredCommandResult>('singleChat.pendingInputs.edit', {
-      commandId: crypto.randomUUID(),
-      command: {
-        campId: snapshot.conversation.campId,
-        conversationId: snapshot.conversation.id,
-        pendingInputId: item.id,
-        expectedRevision: item.revision,
-        editToken,
-        action
-      }
-    })
-    if (result.status === 'rejected') throw new Error(resultMessage(result))
-    return result
-  }
-
-  const mutatePendingQuote = async (action: MessageQuoteAction): Promise<void> => {
-    if (!editingItem || !session || session.recoveryRequired || busy || busyOutside) throw new Error('single_chat.pending_input_edit_fenced')
-    setBusy(true)
-    try { await mutate(editingItem, { type: 'quote', action }, session.editToken); await onRefresh() }
-    finally { setBusy(false) }
-  }
-
-  const perform = async (
-    operation: () => Promise<void>,
-    refreshAfter = true
-  ): Promise<void> => {
-    if (busy || busyOutside) return
+  const perform = async (item: SingleChatPendingInputView, remove: boolean): Promise<void> => {
+    if (busyRef.current || busyOutside) return
+    busyRef.current = true
     setBusy(true)
     try {
-      await operation()
+      const editToken = session?.pendingInputId === item.id ? session.editToken : null
+      if (remove) {
+        const result = await window.rovai.request<StoredCommandResult>('singleChat.pendingInputs.edit', {
+          commandId: crypto.randomUUID(), command: { campId: snapshot.conversation.campId,
+            conversationId: snapshot.conversation.id, pendingInputId: item.id,
+            expectedRevision: item.revision, editToken, action: { type: 'delete' } }
+        })
+        if (result.status === 'rejected') throw new Error(resultMessage(result))
+      } else await onReturnToComposer(item, editToken)
     } catch (error) {
       onNotify(readErrorMessage(error, '待发送消息操作未完成。'))
     } finally {
-      if (refreshAfter) await onRefresh().catch(() => undefined)
+      await onRefresh().catch(() => undefined)
+      busyRef.current = false
       setBusy(false)
     }
   }
-
-  const begin = (item: SingleChatPendingInputView): void => {
-    void perform(async () => {
-      if (session && session.pendingInputId !== item.id) {
-        throw new Error('请先保存或取消当前正在编辑的待发送消息。')
-      }
-      const recovering = session?.pendingInputId === item.id
-      await mutate(
-        item,
-        { type: recovering ? 'takeover' : 'begin' },
-        recovering ? session.editToken : null
-      )
-      setEditBody(recovering ? session.workingBody : item.body)
-    })
-  }
-
-  const closeEdit = (save: boolean): void => {
-    if (!editingItem || !session) return
-    void perform(async () => {
-      await mutate(
-        editingItem,
-        save ? { type: 'save', body: editBody } : { type: 'cancel' },
-        session.editToken
-      )
-    })
-  }
-
-  const deleteItem = (item: SingleChatPendingInputView): void => {
-    void perform(async () => {
-      await mutate(
-        item,
-        { type: 'delete' },
-        session?.pendingInputId === item.id ? session.editToken : null
-      )
-    })
-  }
-
-  const mutateAttachments = (action: SingleChatPendingInputEditAction): void => {
-    if (!editingItem || !session || session.recoveryRequired) return
-    void perform(async () => {
-      await mutate(editingItem, action, session.editToken)
-    })
-  }
-
-  const preparePendingFiles = (files: File[]): void => {
-    if (!editingItem || !session || session.recoveryRequired || files.length === 0) return
-    void perform(async () => {
-      setPreparing(true)
-      try {
-        let nextSnapshot = snapshot
-        for (const file of files) {
-          nextSnapshot = await window.rovai.singleChatAttachments.preparePending({
-            campId: snapshot.conversation.campId,
-            conversationId: snapshot.conversation.id,
-            pendingInputId: editingItem.id,
-            expectedRevision: editingItem.revision,
-            editToken: session.editToken
-          }, file)
-          onSnapshot(nextSnapshot)
-        }
-      } finally {
-        setPreparing(false)
-      }
-    }, false)
-  }
-  preparePendingFilesRef.current = preparePendingFiles
-
-  const acceptsAttachmentDrop = Boolean(
-    editingItem && session && !session.recoveryRequired && !busy && !busyOutside
-  )
-  useEffect(() => {
-    onAttachmentDropTargetChange(
-      acceptsAttachmentDrop ? (files) => preparePendingFilesRef.current(files) : null
-    )
-    return () => onAttachmentDropTargetChange(null)
-  }, [acceptsAttachmentDrop, onAttachmentDropTargetChange])
-
   if (queue.items.length === 0) return null
 
   return (
@@ -683,26 +564,25 @@ function SingleChatPendingQueue({
       <div className="pending-input-heading"><span>待发送 · {queue.items.length}</span></div>
       <ul className="pending-input-list">
         {queue.items.map((item) => {
-          const selected = item.id === editingItem?.id
           const repairMessage = singleChatPendingError(item.lastAttemptErrorCode)
           return (
-            <li className={`pending-input-row${selected ? ' is-editing' : ''}`} key={item.id}>
+            <li className="pending-input-row" key={item.id}>
               <div className="pending-input-preview" title={item.body}>
                 <span className="pending-input-mark" aria-hidden="true" />
                 <span className="pending-input-copy">{item.body || `附件消息 · ${item.attachments.length}`}</span>
                 {item.attachments.length > 0 && <small>{item.attachments.length} 个附件</small>}
-                {selected && <small>正在编辑</small>}
+                {session?.pendingInputId === item.id && <small>上次编辑未完成 · 请移回输入框</small>}
               </div>
               <span className="pending-input-actions">
-                <button className="pending-input-edit" type="button" disabled={busy || busyOutside} onClick={() => begin(item)} aria-label="编辑待发送消息" aria-pressed={selected}>
+                <button className="pending-input-edit" type="button" disabled={busy || busyOutside} onClick={() => { void perform(item, false) }} aria-label="编辑待发送消息" title="移回输入框编辑（覆盖当前内容）">
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.2 11.9.7-3.2 6.8-6.8a1.25 1.25 0 0 1 1.8 0l1.6 1.6a1.25 1.25 0 0 1 0 1.8L6.3 12l-3.1.7Z" /><path d="m9.8 2.8 3.4 3.4" /></svg>
                 </button>
-                <button className="pending-input-delete" type="button" disabled={busy || busyOutside} onClick={() => deleteItem(item)} aria-label="删除待发送消息">
+                <button className="pending-input-delete" type="button" disabled={busy || busyOutside} onClick={() => { void perform(item, true) }} aria-label="删除待发送消息">
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
                 </button>
               </span>
               {repairMessage && <p className="pending-input-error">{repairMessage}</p>}
-              {!selected && item.attachments.length > 0 && (
+              {item.attachments.length > 0 && (
                 <div className="single-chat-pending-attachments">
                   {item.attachments.map((attachment) => (
                     <AttachmentCard
@@ -725,89 +605,15 @@ function SingleChatPendingQueue({
           )
         })}
       </ul>
-      {editingItem && session && (
-        <div className="composer-box pending-input-editor single-chat-pending-editor">
-          <div className="composer-input">
-            <MessageQuoteSelectionToolbar ownerKey={`single_chat:${snapshot.conversation.id}`} messages={snapshot.messages}
-              disabled={busy || busyOutside || !session || session.recoveryRequired}
-              onAdd={(selection) => mutatePendingQuote({ type: 'add', selection })} />
-            <MessageQuotes key={editingItem.id} quotes={session?.workingQuotes ?? editingItem.quotes ?? []}
-              onEmptyFocus={() => pendingEditorRef.current?.focus()}
-              onReveal={revealPrivateQuote} onMutate={mutatePendingQuote} disabled={busy || busyOutside} />
-            {session.recoveryRequired && <p className="pending-input-error">上次编辑未完成，请点击“重新编辑”后继续。</p>}
-            {session.workingAttachments.length > 0 && (
-              <SingleChatAttachmentStrip>
-                {session.workingAttachments.map((attachment, index) => {
-                  const moveAttachment = (offset: -1 | 1): void => {
-                    const order = session.workingAttachments.map(({ id }) => id)
-                    ;[order[index], order[index + offset]] = [order[index + offset], order[index]]
-                    mutateAttachments({ type: 'reorder_attachments', attachmentRefIds: order })
-                  }
-                  return (
-                    <AttachmentCard
-                      key={attachment.id}
-                      attachment={attachment}
-                      locator={{
-                        owner: 'single_chat_pending_edit',
-                        campId: snapshot.conversation.campId,
-                        conversationId: snapshot.conversation.id,
-                        pendingInputId: editingItem.id,
-                        editToken: session.editToken,
-                        attachmentRefId: attachment.id
-                      }}
-                      disabled={busy || session.recoveryRequired}
-                      onNotify={onNotify}
-                      onRemove={() => mutateAttachments({
-                        type: 'remove_attachment',
-                        attachmentRefId: attachment.id
-                      })}
-                      menuItems={<>
-                        <DropdownMenu.Item className="attachment-context-menu-item" disabled={index === 0} onSelect={() => moveAttachment(-1)}>前移</DropdownMenu.Item>
-                        <DropdownMenu.Item className="attachment-context-menu-item" disabled={index === session.workingAttachments.length - 1} onSelect={() => moveAttachment(1)}>后移</DropdownMenu.Item>
-                      </>}
-                    />
-                  )
-                })}
-              </SingleChatAttachmentStrip>
-            )}
-            <textarea
-              ref={pendingEditorRef}
-              value={editBody}
-              disabled={busy || session.recoveryRequired}
-              aria-label="编辑单聊待发送消息"
-              placeholder="修改这条待发送消息…"
-              onChange={(event) => setEditBody(event.target.value)}
-              onKeyDown={(event) => {
-                if (!shouldSubmitStructuredComposerOnEnter({
-                  key: event.key,
-                  shiftKey: event.shiftKey,
-                  isComposing: event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
-                })) return
-                event.preventDefault()
-                if (editBody.trim() || session.workingAttachments.length > 0) closeEdit(true)
-              }}
-            />
-          </div>
-          <div className="composer-action-row">
-            <div className="composer-tools">
-              <input ref={pendingFileInputRef} className="composer-file-input" type="file" multiple tabIndex={-1} onChange={(event) => {
-                const files = Array.from(event.currentTarget.files ?? [])
-                event.currentTarget.value = ''
-                preparePendingFiles(files)
-              }} />
-              <button className="composer-attachment-button" type="button" disabled={busy || preparing || session.recoveryRequired} onClick={() => pendingFileInputRef.current?.click()} aria-label="为待发送消息添加文件">
-                <svg aria-hidden="true" viewBox="0 0 18 18"><path d="m6.2 9.8 4.65-4.65a2.5 2.5 0 0 1 3.54 3.54l-6.1 6.1a4 4 0 0 1-5.66-5.66l6.1-6.1" /></svg>
-              </button>
-            </div>
-            <div className="composer-actions">
-              <button className="quiet-button compact" type="button" disabled={busy} onClick={() => closeEdit(false)}>取消</button>
-              <button className="primary-button compact" type="button" disabled={busy || session.recoveryRequired || (!editBody.trim() && session.workingAttachments.length === 0)} onClick={() => closeEdit(true)}>保存</button>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   )
+}
+
+type PendingReturnRecovery = {
+  snapshot: SingleChatSnapshot
+  item: SingleChatPendingInputView
+  editToken: string | null
+  commandId: string
 }
 
 export function SingleChatPanel({
@@ -885,20 +691,15 @@ export function SingleChatPanel({
   const [ending, setEnding] = useState(false)
   const [preparingAttachments, setPreparingAttachments] = useState<PreparingSingleChatAttachment[]>([])
   const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
-  const [pendingAttachmentDropTarget, setPendingAttachmentDropTarget] =
-    useState<SingleChatPendingAttachmentDropTarget>(null)
+  const [returningPending, setReturningPending] = useState(false)
+  const returningPendingRef = useRef(false)
+  const returnRequestInFlightRef = useRef(false)
+  const [pendingReturnRecovery, setPendingReturnRecovery] = useState<PendingReturnRecovery | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [endDialogOpen, setEndDialogOpen] = useState(false)
   const [endTarget, setEndTarget] = useState<SingleChatEndTarget | null>(null)
   const [skipEndConfirmation, setSkipEndConfirmation] = useState(false)
   const [now, setNow] = useState(() => new Date().toISOString())
-
-  const updatePendingAttachmentDropTarget = useCallback(
-    (target: SingleChatPendingAttachmentDropTarget): void => {
-      setPendingAttachmentDropTarget(() => target)
-    },
-    []
-  )
 
   const activeMembers = useMemo(() => members.filter(memberCanSingleChat), [members])
   const memberById = useMemo(() => new Map(activeMembers.map((member) => [member.agentId, member])), [activeMembers])
@@ -1259,6 +1060,64 @@ export function SingleChatPanel({
     if (document.activeElement === node) onNotificationFocusPresented?.(notificationFocus.requestId)
   }, [currentSnapshot, notificationFocus, onNotificationFocusPresented, visible])
 
+  const performPendingReturn = async (transfer: PendingReturnRecovery): Promise<void> => {
+    if (returnRequestInFlightRef.current) return
+    const { snapshot: current, item, editToken, commandId } = transfer
+    returnRequestInFlightRef.current = true
+    returningPendingRef.current = true
+    setReturningPending(true)
+    setPendingReturnRecovery(null)
+    if (composerRef.current) composerRef.current.disabled = true
+    let uncertain = false
+    try {
+      let result: StoredCommandResult
+      try {
+        result = await window.rovai.request<StoredCommandResult>('singleChat.pendingInputs.edit', {
+          commandId, command: { campId: current.conversation.campId,
+            conversationId: item.conversationId, pendingInputId: item.id, expectedRevision: item.revision,
+            editToken, action: { type: 'return_to_composer', expectedDraftRevision: current.draft.revision } }
+        })
+      } catch {
+        // The body lives in the durable command result, not the attachment-only
+        // Draft. Retry this exact command to recover a lost successful response.
+        uncertain = true
+        setPendingReturnRecovery(transfer)
+        throw new Error('移回结果尚未确认，请重试恢复消息。当前输入已保留。')
+      }
+      if (result.status === 'rejected') throw new Error(resultMessage(result))
+      const body = resultPayloadString(result, 'body') ?? ''
+      const returnedDraft = result.payload.draft as unknown as SingleChatSnapshot['draft']
+      const key = `${current.conversation.campId}:${item.conversationId}`
+      setBodyDrafts((drafts) => ({ ...drafts, [key]: body }))
+      if (currentConversationIdRef.current === item.conversationId) {
+        const latest = snapshotRef.current?.conversation.id === item.conversationId ? snapshotRef.current : current
+        acceptMutationSnapshot({ ...latest, draft: returnedDraft,
+          pendingInputs: { ...latest.pendingInputs,
+            items: latest.pendingInputs.items.filter((entry) => entry.id !== item.id),
+            editSession: latest.pendingInputs.editSession?.pendingInputId === item.id ? null : latest.pendingInputs.editSession } })
+        setPreparingAttachments([])
+        setError(null)
+        window.requestAnimationFrame(() => composerRef.current?.focus())
+      }
+    } finally {
+      returnRequestInFlightRef.current = false
+      if (!uncertain) {
+        returningPendingRef.current = false
+        setReturningPending(false)
+        if (composerRef.current) composerRef.current.disabled = false
+      }
+    }
+  }
+
+  const returnPendingInputToComposer = async (item: SingleChatPendingInputView, editToken: string | null): Promise<void> => {
+    const current = snapshotRef.current
+    if (!current || current.conversation.id !== item.conversationId || returningPendingRef.current
+      || sending || ending || quoteOperationCount.current > 0 || preparingAttachments.some((entry) => !entry.error)) {
+      throw new Error('输入框正在处理变更，请稍后再试。')
+    }
+    await performPendingReturn({ snapshot: current, item, editToken, commandId: crypto.randomUUID() })
+  }
+
   const acceptMutationSnapshot = (next: SingleChatSnapshot): void => {
     acceptSnapshot(next.conversation.id, next)
     void refreshCurrent(next.conversation.id)
@@ -1302,6 +1161,7 @@ export function SingleChatPanel({
   }
 
   const chooseTarget = async (agentId: string): Promise<void> => {
+    if (returningPendingRef.current) return
     const targetRequest: SingleChatTargetRequest = {
       agentId,
       sequence: ++targetRequestSequenceRef.current
@@ -1337,6 +1197,7 @@ export function SingleChatPanel({
   }
 
   const prepareFiles = async (files: File[]): Promise<void> => {
+    if (returningPendingRef.current) return
     const agentId = selectedAgentIdRef.current
     if (
       !agentId
@@ -1399,14 +1260,8 @@ export function SingleChatPanel({
     }, 1_200)
   }
 
-  const pendingEditing = Boolean(currentSnapshot?.pendingInputs.editSession)
-  const attachmentDropBlocked = pendingEditing
-    ? pendingAttachmentDropTarget === null
-    : !currentTargetReady
-      || ending
-      || sending
-      || quoteBusy
-      || preparingAttachments.some((item) => !item.error)
+  const attachmentDropBlocked = !currentTargetReady || ending || sending || quoteBusy
+    || returningPending || preparingAttachments.some((item) => !item.error)
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -1467,8 +1322,7 @@ export function SingleChatPanel({
     const files = droppedAttachmentInputs(event.dataTransfer).map(({ file }) => file)
     clearAttachmentDragState()
     if (files.length === 0) return
-    if (pendingEditing) pendingAttachmentDropTarget?.(files)
-    else void prepareFiles(files)
+    void prepareFiles(files)
   }
 
   useEffect(() => {
@@ -1481,6 +1335,7 @@ export function SingleChatPanel({
   }, [])
 
   const removeDraftAttachment = async (attachmentId: string): Promise<void> => {
+    if (returningPendingRef.current) return
     const current = snapshotRef.current
     if (
       !current
@@ -1501,6 +1356,7 @@ export function SingleChatPanel({
   }
 
   const mutateDraftQuote = (action: MessageQuoteAction): Promise<void> => {
+    if (returningPendingRef.current) return Promise.reject(new Error('消息正在移回输入框，请稍后再试。'))
     const owner = snapshotRef.current?.conversation.id
     const commandId = crypto.randomUUID()
     if (!owner) return Promise.reject(new Error('quote.owner_unavailable'))
@@ -1520,6 +1376,7 @@ export function SingleChatPanel({
 
   const send = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
+    if (returningPendingRef.current) return
     const body = draft.trim()
     const agentId = selectedAgentIdRef.current
     if (
@@ -1704,7 +1561,7 @@ export function SingleChatPanel({
       <div className="single-chat-target-bar">
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button className={`single-chat-target-trigger${selectedMember ? '' : ' no-target'}`} type="button" disabled={activeMembers.length === 0 || ending || sending || quoteBusy || preparingAttachments.some((item) => !item.error)}>
+            <button className={`single-chat-target-trigger${selectedMember ? '' : ' no-target'}`} type="button" disabled={activeMembers.length === 0 || ending || returningPending || sending || quoteBusy || preparingAttachments.some((item) => !item.error)}>
               {selectedMember && <MemberAvatar agentId={selectedMember.agentId} avatarRef={selectedMember.avatarRef} displayName={selectedMember.displayName} size="mention" decorative />}
               <span className="single-chat-target-copy">
                 <strong>{selectedMember?.displayName ?? '选择单聊对象'}</strong>
@@ -1733,7 +1590,7 @@ export function SingleChatPanel({
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
         <span className="single-chat-private-label"><LockGlyph />仅你可见</span>
-        <button className="single-chat-end-button" type="button" disabled={!snapshot || !currentTargetReady || ending} aria-label={selectedMember ? `结束与${selectedMember.displayName}的单聊` : '结束单聊'} onClick={requestEnd}>
+        <button className="single-chat-end-button" type="button" disabled={!snapshot || !currentTargetReady || returningPending || ending} aria-label={selectedMember ? `结束与${selectedMember.displayName}的单聊` : '结束单聊'} onClick={requestEnd}>
           {ending ? '结束中…' : '结束'}
         </button>
       </div>
@@ -1778,21 +1635,18 @@ export function SingleChatPanel({
       {currentSnapshot && (
         <SingleChatPendingQueue
           snapshot={currentSnapshot}
-          busyOutside={sending || ending}
-          onSnapshot={(next) => {
-            acceptMutationSnapshot(next)
-          }}
+          busyOutside={sending || ending || quoteBusy || returningPending || preparingAttachments.some((item) => !item.error)}
           onRefresh={async () => {
             await refreshCurrent()
           }}
           onNotify={onNotify}
-          onAttachmentDropTargetChange={updatePendingAttachmentDropTarget}
+          onReturnToComposer={returnPendingInputToComposer}
         />
       )}
 
       {currentSnapshot && <MessageQuoteSelectionToolbar key={currentSnapshot.conversation.id}
         ownerKey={`single_chat:${currentSnapshot.conversation.id}`} messages={currentSnapshot.messages}
-        disabled={!visible || sending || quoteBusy || pendingEditing || preparingAttachments.some((item) => !item.error)}
+        disabled={!visible || sending || quoteBusy || returningPending || preparingAttachments.some((item) => !item.error)}
         onAdd={(selection) => mutateDraftQuote({ type: 'add', selection })} />}
       <form className="composer single-chat-composer" onSubmit={(event) => void send(event)}>
         <div className={`composer-box single-chat-composer-box${activeRun ? ' is-running' : ''}`}>
@@ -1827,13 +1681,13 @@ export function SingleChatPanel({
             )}
             <MessageQuotes key={currentSnapshot?.conversation.id ?? 'empty'} quotes={currentSnapshot?.draft.quotes ?? []}
               onEmptyFocus={() => composerRef.current?.focus()}
-              disabled={sending || quoteBusy} onReveal={revealPrivateQuote} onMutate={mutateDraftQuote} />
+              disabled={sending || returningPending || quoteBusy} onReveal={revealPrivateQuote} onMutate={mutateDraftQuote} />
             <label className="sr-only" htmlFor={`${panelId}-composer`}>发送单聊消息</label>
             <textarea
               ref={composerRef}
               id={`${panelId}-composer`}
               value={draft}
-              disabled={!selectedMember || !currentTargetReady || sending || ending}
+              disabled={!selectedMember || !currentTargetReady || sending || returningPending || ending}
               placeholder={selectedMember ? `给 ${selectedMember.displayName} 发消息…` : '选择一位队员后开始单聊'}
               onChange={(event) => setDraft(event.target.value)}
               onPaste={(event) => {
@@ -1872,7 +1726,7 @@ export function SingleChatPanel({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={!selectedMember || !currentTargetReady || sending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
+                disabled={!selectedMember || !currentTargetReady || sending || returningPending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18"><path d="m6.2 9.8 4.65-4.65a2.5 2.5 0 0 1 3.54 3.54l-6.1 6.1a4 4 0 0 1-5.66-5.66l6.1-6.1" /></svg>
@@ -1893,11 +1747,17 @@ export function SingleChatPanel({
                     action="send"
                     type="submit"
                     busy={sending || preparingAttachments.some((item) => !item.error)}
-                    disabled={(!draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
+                    disabled={(!draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || returningPending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
                   />}
             </div>
           </div>
         </div>
+        {pendingReturnRecovery && <div className="single-chat-error" role="alert">
+          <span>移回结果尚未确认，当前输入已保留。</span>
+          <button type="button" onClick={() => {
+            void performPendingReturn(pendingReturnRecovery).catch((nextError) => setError(readErrorMessage(nextError)))
+          }}>重试移回消息</button>
+        </div>}
         {error && <div className="single-chat-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>关闭</button></div>}
       </form>
       <footer className="single-chat-footer">
@@ -1907,7 +1767,7 @@ export function SingleChatPanel({
       {attachmentDragState && (
         <div className="single-chat-drop-layer" aria-hidden="true">
           <div className="single-chat-drop-callout">
-            <strong>{pendingEditing ? '松手添加到正在编辑的消息' : '松手添加到当前消息'}</strong>
+            <strong>{'松手添加到当前消息'}</strong>
             <span>
               {attachmentDragState === 'directory'
                 ? '将引用此文件夹的当前位置，不会移动原文件'

@@ -228,6 +228,10 @@ pub struct EditSingleChatPendingInputCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SingleChatPendingInputEditAction {
+    ReturnToComposer {
+        #[serde(rename = "expectedDraftRevision")]
+        expected_draft_revision: i64,
+    },
     Begin,
     Takeover,
     Save {
@@ -1046,6 +1050,35 @@ impl SingleChatService {
             });
 
             match &command.action {
+                SingleChatPendingInputEditAction::ReturnToComposer { expected_draft_revision } => {
+                    if session.as_ref().is_some_and(|session| session.pending_input_id == command.pending_input_id) && !owns_session {
+                        return Ok(rejected("single_chat.pending_input_edit_fenced", "The pending input edit session changed"));
+                    }
+                    let (draft_revision, _) = load_single_chat_draft_refs(transaction, &command.conversation_id)?;
+                    if draft_revision != *expected_draft_revision {
+                        return Ok(rejected("single_chat.draft_changed", "The Composer Draft changed; reload it first"));
+                    }
+                    store_single_chat_draft_refs(transaction, &command.conversation_id, draft_revision,
+                        &parse_source_attachments(&source_attachments_json)?)?;
+                    copy_quotes(transaction, QuoteStorage::PrivatePending, &command.pending_input_id,
+                        QuoteStorage::PrivateDraft, &command.conversation_id)?;
+                    transaction.execute("UPDATE single_chat_composer_draft SET quote_trash_json = '[]' WHERE conversation_id = ?1", [&command.conversation_id])?;
+                    transaction.execute(
+                        "UPDATE single_chat_pending_input SET state = 'cancelled', revision = revision + 1, updated_at = ?2 WHERE id = ?1",
+                        params![command.pending_input_id, chrono::Utc::now().to_rfc3339()],
+                    )?;
+                    transaction.execute("DELETE FROM single_chat_pending_input_edit_session WHERE conversation_id = ?1 AND pending_input_id = ?2",
+                        params![command.conversation_id, command.pending_input_id])?;
+                    return Ok(CommandHandlerResult::applied("single_chat.pending_input_returned_to_composer",
+                        json!({"pendingInputId": command.pending_input_id, "body": body,
+                            "draft": SingleChatComposerDraftView {
+                                revision: draft_revision + 1,
+                                attachments: source_attachment_views(&source_attachments_json)?,
+                                quotes: load_quotes(transaction, QuoteStorage::PrivateDraft, &command.conversation_id)?,
+                                updated_at: Some(transaction.query_row("SELECT updated_at FROM single_chat_composer_draft WHERE conversation_id = ?1",
+                                    [&command.conversation_id], |row| row.get::<_, String>(0))?),
+                            }}), None));
+                }
                 SingleChatPendingInputEditAction::Begin
                 | SingleChatPendingInputEditAction::Takeover => {
                     if matches!(command.action, SingleChatPendingInputEditAction::Begin)
@@ -3455,6 +3488,178 @@ mod tests {
             .unwrap()
             .is_none(),
             "a message attachment cannot be guessed through another Conversation identity"
+        );
+    }
+
+    // Private Draft refs and Pending FIFO share a transaction, independently of Camp Draft.
+    #[test]
+    fn returning_pending_input_restores_private_draft_and_releases_the_next_input() {
+        let (mut database, camp_id) = fixture();
+        let service = SingleChatService::default();
+        let (conversation_id, _) = open(&service, &mut database, &camp_id, "return-open");
+        send(
+            &service,
+            &mut database,
+            &camp_id,
+            &conversation_id,
+            "return-active",
+        );
+        let source = database.directory().join("queued-return.txt");
+        std::fs::write(&source, "source survives").unwrap();
+        let source_ref = observe_source_attachment(&source, "queued-return.txt", None).unwrap();
+        let attachment_id = source_ref.id.clone();
+        service
+            .add_source_attachment(&mut database, &conversation_id, 1, source_ref)
+            .unwrap();
+        send(
+            &service,
+            &mut database,
+            &camp_id,
+            &conversation_id,
+            "return-queued",
+        );
+        send(
+            &service,
+            &mut database,
+            &camp_id,
+            &conversation_id,
+            "return-next",
+        );
+        let snapshot = service
+            .snapshot(&database, &conversation_id)
+            .unwrap()
+            .unwrap();
+        let item = &snapshot.pending_inputs.items[0];
+        let next = &snapshot.pending_inputs.items[1];
+        let mut command = user_envelope(
+            "return-stale-draft",
+            Some(&camp_id),
+            EditSingleChatPendingInputCommand {
+                camp_id: camp_id.clone(),
+                conversation_id: conversation_id.clone(),
+                pending_input_id: item.id.clone(),
+                expected_revision: item.revision,
+                edit_token: None,
+                action: SingleChatPendingInputEditAction::ReturnToComposer {
+                    expected_draft_revision: snapshot.draft.revision - 1,
+                },
+            },
+        );
+        assert_eq!(
+            service
+                .edit_pending_input(&mut database, &command)
+                .unwrap()
+                .result
+                .code,
+            "single_chat.draft_changed"
+        );
+        assert_eq!(
+            service
+                .snapshot(&database, &conversation_id)
+                .unwrap()
+                .unwrap()
+                .pending_inputs
+                .items
+                .len(),
+            2
+        );
+        command.command_id = "return-success".into();
+        command.payload.action = SingleChatPendingInputEditAction::ReturnToComposer {
+            expected_draft_revision: snapshot.draft.revision,
+        };
+        let returned = service.edit_pending_input(&mut database, &command).unwrap();
+        assert_eq!(
+            returned.result.code,
+            "single_chat.pending_input_returned_to_composer"
+        );
+        assert_eq!(returned.result.payload["body"], item.body);
+        assert_eq!(
+            returned.result.payload["draft"]["revision"],
+            snapshot.draft.revision + 1
+        );
+        assert!(
+            !returned
+                .result
+                .payload
+                .to_string()
+                .contains(source.to_str().unwrap())
+        );
+        let after = service
+            .snapshot(&database, &conversation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.draft.attachments[0].id, attachment_id);
+        assert_eq!(after.pending_inputs.items.len(), 1);
+        assert_eq!(after.pending_inputs.items[0].id, next.id);
+        assert!(after.pending_inputs.edit_session.is_none());
+        assert!(source.exists());
+        database.connection().execute("UPDATE agent_run SET status = 'succeeded', ended_at = updated_at WHERE conversation_id = ?1", [&conversation_id]).unwrap();
+        assert_eq!(
+            ready_pending_inputs(&database).unwrap()[0].pending_input_id,
+            next.id
+        );
+        let requeued = send(
+            &service,
+            &mut database,
+            &camp_id,
+            &conversation_id,
+            "return-resubmitted",
+        );
+        assert_eq!(requeued.result.code, "single_chat.pending_input_queued");
+        let after_send = service
+            .snapshot(&database, &conversation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(after_send.pending_inputs.items[0].id, next.id);
+        assert_ne!(after_send.pending_inputs.items[1].id, item.id);
+        assert_eq!(
+            after_send.pending_inputs.items[1].attachments[0].id,
+            attachment_id
+        );
+        assert!(
+            service
+                .edit_pending_input(&mut database, &command)
+                .unwrap()
+                .replayed
+        );
+        assert!(
+            service
+                .snapshot(&database, &conversation_id)
+                .unwrap()
+                .unwrap()
+                .draft
+                .attachments
+                .is_empty()
+        );
+        let publish = ready_pending_inputs(&database).unwrap().remove(0);
+        service
+            .publish_pending_input(
+                &mut database,
+                &user_envelope("return-publish-next", Some(&camp_id), publish),
+            )
+            .unwrap();
+        command.command_id = "return-after-published".into();
+        command.payload.pending_input_id = next.id.clone();
+        command.payload.expected_revision = next.revision;
+        command.payload.action = SingleChatPendingInputEditAction::ReturnToComposer {
+            expected_draft_revision: after_send.draft.revision,
+        };
+        assert_eq!(
+            service
+                .edit_pending_input(&mut database, &command)
+                .unwrap()
+                .result
+                .code,
+            "single_chat.pending_input_changed"
+        );
+        assert_eq!(
+            service
+                .snapshot(&database, &conversation_id)
+                .unwrap()
+                .unwrap()
+                .draft
+                .revision,
+            after_send.draft.revision
         );
     }
 

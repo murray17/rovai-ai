@@ -137,3 +137,12 @@ fallback 接纳。最小命令为 `cargo test -p rovai-core --bin rovai-core hea
   `runtime.modelCatalog.open` 返回 fresh 原生目录及完整模型 metadata，未提交用户消息。
 - 首次 workspace 门禁发现兼容性登记文件属于既有平台资格摘要；撤回对该文件的编辑，把此次观测留在本文，
   原摘要绑定测试复核通过。浅发现版本测试该次失败后单独复跑和最终 workspace 复跑均通过。
+
+## 待发送消息移回输入框
+
+- Core 新增双 owner revision fence 的 `return_to_composer`；一次事务覆盖 Draft 并取消 Pending，旧发送与重复回执不能再次消费。
+- Renderer 复用普通 Composer，删除独立编辑器、本地 Pending 导航快照和蓝色编辑状态；错误、加载与目标切换仍有 fence。
+- 单聊保留已有窗口内正文草稿生命周期，事务回执携带无路径 Draft View 和正文；没有正文 autosave 或 schema 扩张。
+- Rust 新测试分别由 Camp/Single Chat 的转移事务拥有，覆盖 CAS 拒绝、剩余 FIFO、重新入队、回放和发布竞争；旧编辑测试保留兼容 owner。
+  该新转移涉及两个持久 owner，纯函数或既有 save/cancel 用例不能证明，使用已有隔离 SQLite fixture。
+- 验证记录在完成本地门禁和隔离 Electron 检查后补齐。
