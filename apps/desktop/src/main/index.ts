@@ -274,6 +274,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.messages.find',
   'agentRunEvidence.getContent',
   'agentRunEvidence.list',
+  'agentRunExecution.page',
   'tasks.create',
   'tasks.update',
   'tasks.list',

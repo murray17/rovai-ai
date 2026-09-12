@@ -20,7 +20,6 @@ import {
 } from './tool-grouping'
 import {
   boundExecutionPreviewLine,
-  createExecutionPublicTextRedactor,
   executionPublicCommandPreview,
   executionPublicCommandTitle,
   feishuCardResultPreview
@@ -160,15 +159,14 @@ export function executionRecentOutputItems(snapshot: ExecutionConsoleSnapshot): 
 }
 
 function executionRecentOutputEntries(snapshot: ExecutionConsoleSnapshot): ExecutionRecentOutputEntry[] {
-  const redact = createExecutionPublicTextRedactor(snapshot.evidence, snapshot.agentRunId)
   const items = progressItems(snapshot, true).flatMap((item, index): ExecutionRecentOutputEntry[] => {
     if (item.kind !== 'tool' && item.kind !== 'narration') return []
     if (item.kind === 'narration') {
-      const body = redact(item.body).trim()
+      const body = item.body.trim()
       return body ? [{ kind: 'text', body }] : []
     }
     const status = activityStatusForAgentRun(item.step.status, snapshot.run.status)
-    const command = executionPublicCommandPreview(item.step, redact)
+    const command = executionPublicCommandPreview(item.step)
     if (!command) return []
     return [{
       kind: 'command',
@@ -178,7 +176,7 @@ function executionRecentOutputEntries(snapshot: ExecutionConsoleSnapshot): Execu
         ?? (status === 'running' ? '（正在执行，暂无公开结果）' : '（无可展示结果）')
     }]
   })
-  const output = redact(snapshot.publicOutput?.trim() ?? '')
+  const output = snapshot.publicOutput?.trim() ?? ''
   if (output && !items.some((item) => item.kind === 'text' && item.body === output)) {
     items.push({ kind: 'text', body: output })
   }
@@ -276,20 +274,19 @@ export function executionConsolePublicPage(
 
 function renderCompactLiveExecutionCard(snapshot: ExecutionConsoleSnapshot): Record<string, unknown> {
   const status = agentRunPresentation(snapshot.run)
-  const redact = createExecutionPublicTextRedactor(snapshot.evidence, snapshot.agentRunId)
   const items = progressItems(snapshot, true)
   const blocks = items.flatMap((item): LiveTimelineBlock[] => {
     if (item.kind === 'tool') return [{
       kind: 'command',
-      body: commandLine(item.step, snapshot, redact),
+      body: commandLine(item.step, snapshot),
       status: activityStatusForAgentRun(item.step.status, snapshot.run.status)
     }]
-    const body = redact(renderNonGroupItem(item, snapshot.run.status))
+    const body = renderNonGroupItem(item, snapshot.run.status)
     return body ? [{ kind: 'text', body }] : []
   })
   const publicOutput = snapshot.publicOutput?.trim()
   if (publicOutput && !items.some((item) => item.kind === 'narration' && item.body.trim() === publicOutput)) {
-    blocks.push({ kind: 'text', body: redact(publicOutput) })
+    blocks.push({ kind: 'text', body: publicOutput })
   }
   const commands = blocks.filter((block) => block.kind === 'command')
   const currentText = blocks.findLast((block) => block.kind === 'text')
@@ -355,10 +352,9 @@ function renderCompactLiveExecutionCard(snapshot: ExecutionConsoleSnapshot): Rec
 
 function commandLine(
   step: ExecutionStep,
-  snapshot: ExecutionConsoleSnapshot,
-  redact: (text: string) => string
+  snapshot: ExecutionConsoleSnapshot
 ): string {
-  const title = executionPublicCommandTitle(step, redact).replace(/([\\`*_[\]<>])/gu, '\\$1')
+  const title = executionPublicCommandTitle(step).replace(/([\\`*_[\]<>])/gu, '\\$1')
   return `${statusIcon(activityStatusForAgentRun(step.status, snapshot.run.status))} ${title}`
 }
 
@@ -430,20 +426,19 @@ function terminalTimelineCard(
 
 function terminalTimelineBlocks(snapshot: ExecutionConsoleSnapshot): TimelineBlock[] {
   const items = progressItems(snapshot, true)
-  const redact = createExecutionPublicTextRedactor(snapshot.evidence, snapshot.agentRunId)
   const blocks: TimelineBlock[] = items.flatMap((item, index): TimelineBlock[] => {
     if (item.kind !== 'tool') {
-      const body = redact(renderNonGroupItem(item, snapshot.run.status))
+      const body = renderNonGroupItem(item, snapshot.run.status)
       return body ? [textBlock(body)] : []
     }
     return [{
       kind: 'command',
-      element: renderCommandPanel(item.step, snapshot, index, redact)
+      element: renderCommandPanel(item.step, snapshot, index)
     }]
   })
   const output = snapshot.publicOutput?.trim()
   if (output && !items.some((item) => item.kind === 'narration' && item.body.trim() === output)) {
-    blocks.push(textBlock(redact(output)))
+    blocks.push(textBlock(output))
   }
   return blocks.length ? blocks : [textBlock('没有可展示的执行记录。')]
 }
@@ -451,8 +446,7 @@ function terminalTimelineBlocks(snapshot: ExecutionConsoleSnapshot): TimelineBlo
 function renderCommandPanel(
   step: ExecutionStep,
   snapshot: ExecutionConsoleSnapshot,
-  index: number,
-  redact: (text: string) => string
+  index: number
 ): CardElement {
   return {
     tag: 'collapsible_panel',
@@ -462,7 +456,7 @@ function renderCommandPanel(
     header: {
       title: {
         tag: 'plain_text',
-        content: `${statusIcon(activityStatusForAgentRun(step.status, snapshot.run.status))} ${executionPublicCommandTitle(step, redact)}`
+        content: `${statusIcon(activityStatusForAgentRun(step.status, snapshot.run.status))} ${executionPublicCommandTitle(step)}`
       },
       icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
       icon_position: 'right',

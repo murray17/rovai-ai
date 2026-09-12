@@ -16,7 +16,6 @@ import {
 } from '../shared/execution-presentation'
 import {
   createExecutionPublicResultProjector,
-  createExecutionPublicTextRedactor,
   executionPublicCommandTitle
 } from '../shared/execution-presentation/public-result'
 import {
@@ -538,7 +537,6 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
     const agentAuthoredTrigger = run.invocationKind === 'a2a'
     const authorKind: 'user' | 'agent' = agentAuthoredTrigger ? 'agent' : 'user'
     const events = run.evidence.map(liveRuntimeEventFromExecutionEvidence)
-    const redact = createExecutionPublicTextRedactor(events, run.id)
     const projectResult = createExecutionPublicResultProjector(events, run.id)
     const progress = buildLiveExecutionProgress(events, run.id, { textMode: 'complete' })
     const groupedItems = groupConsecutiveToolItems(progress.items)
@@ -556,14 +554,14 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
           statusLabel: presentation.statusLabel,
           primary: presentation.primary,
           currentTitle: presentation.currentTitle
-            ? redact(presentation.currentTitle)
+            ? presentation.currentTitle
             : null,
-          accessibleLabel: redact(presentation.accessibleLabel),
+          accessibleLabel: presentation.accessibleLabel,
           activities: item.items.map(({ step }) => {
             const status = activityStatusForAgentRun(step.status, run.status)
             return {
               iconKind: step.iconKind,
-              title: executionPublicCommandTitle(step, redact),
+              title: executionPublicCommandTitle(step),
               status,
               statusLabel: activityLabel(status),
               result: projectResult(step),
@@ -577,10 +575,10 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
         }]
       }
       if (item.kind !== 'narration') return []
-      const body = redact(item.body).trim()
+      const body = item.body.trim()
       return body ? [{ kind: 'narration', body }] : []
     })
-    const output = redact(run.publicOutput?.trim() ?? '')
+    const output = run.publicOutput?.trim() ?? ''
     if (output && !items.some((item) => item.kind === 'narration' && item.body === output)) {
       items.push({ kind: 'narration', body: output })
     }
@@ -613,12 +611,12 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
       createdAt: run.createdAt,
       startedAt: run.startedAt,
       endedAt: run.endedAt,
-      purpose: bounded(redact(run.trigger.summary || run.purpose), 240),
+      purpose: bounded(run.trigger.summary || run.purpose, 240),
       trigger: {
         authorKind,
-        summary: bounded(redact(run.trigger.summary), 2_000),
+        summary: bounded(run.trigger.summary, 2_000),
         authorDisplayName: agentAuthoredTrigger
-          ? bounded(redact(run.trigger.authorDisplayName), 80) || '队员'
+          ? bounded(run.trigger.authorDisplayName, 80) || '队员'
           : '你',
         channelLabel: '',
         createdAt: run.trigger.createdAt

@@ -1094,6 +1094,15 @@ struct ExecutionEvidenceListParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExecutionWindowParams {
+    camp_id: CampId,
+    agent_run_id: String,
+    before_sequence: Option<i64>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AgentRunDiagnosticParams {
     agent_run_id: String,
 }
@@ -8016,7 +8025,28 @@ impl Core {
                     params.camp_id.as_str(),
                     &params.evidence_id,
                 )?;
-                Ok(json!({ "evidenceId": params.evidence_id, "payload": payload }))
+                let canonical = rovai_core::execution_window::content_canonical(
+                    &database,
+                    &params.evidence_id,
+                )?;
+                Ok(
+                    json!({ "evidenceId": params.evidence_id, "payload": payload, "canonical": canonical }),
+                )
+            }
+            "agentRunExecution.page" => {
+                let params: ExecutionWindowParams = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    rovai_core::execution_window::read_page(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        params.before_sequence,
+                        params
+                            .limit
+                            .unwrap_or(rovai_core::execution_window::DEFAULT_WINDOW_LIMIT),
+                    )?,
+                )?)
             }
             "agentRunEvidence.list" => {
                 let params: ExecutionEvidenceListParams =

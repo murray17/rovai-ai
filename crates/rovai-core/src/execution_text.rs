@@ -636,13 +636,12 @@ mod slow_tests {
                 .spool
                 .is_some()
         );
-        let live = ReadModelService
+        let open = ReadModelService
             .camp_open_projection(&mut database, camp)
             .unwrap();
-        assert_eq!(
-            live.execution_evidence[0].payload["text"],
-            delta.repeat(1000)
-        );
+        assert!(open.execution_evidence.is_empty());
+        let live = crate::execution_window::read_page(&mut database, camp, run, None, 24).unwrap();
+        assert_eq!(live.evidence[0].payload["text"], delta.repeat(1000));
         write(
             &mut database,
             "activity.started",

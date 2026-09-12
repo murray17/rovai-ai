@@ -14,7 +14,6 @@ use crate::{
     gather::GATHER_TOOL_NAME,
     member_studio::MEMBER_CREATE_TOOL_NAME,
     memory_retrieval::{MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME},
-    memory_secret,
     memory_tool::MEMORY_WRITE_TOOL_NAME,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     single_chat::SINGLE_CHAT_HISTORY_TOOL_NAME,
@@ -223,8 +222,8 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
         HISTORY_SEARCH_TOOL_NAME => {
             insert_query(&mut projected, input.get("query"));
             insert_string_array(&mut projected, "campIds", input.get("campIds"));
-            insert_safe_string(&mut projected, "dateFrom", input.get("dateFrom"), 64);
-            insert_safe_string(&mut projected, "dateTo", input.get("dateTo"), 64);
+            insert_bounded_string(&mut projected, "dateFrom", input.get("dateFrom"), 64);
+            insert_bounded_string(&mut projected, "dateTo", input.get("dateTo"), 64);
             insert_i64(&mut projected, "limit", input.get("limit"));
         }
         CAMP_READ_TOOL_NAME => {
@@ -268,7 +267,7 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
         AUTOMATION_LIST_TOOL_NAME => {
             insert_enum(&mut projected, "status", input.get("status"));
             insert_query(&mut projected, input.get("query"));
-            insert_safe_string(&mut projected, "project", input.get("project"), 512);
+            insert_bounded_string(&mut projected, "project", input.get("project"), 512);
             insert_i64(&mut projected, "limit", input.get("limit"));
             insert_opaque_cursor(&mut projected, input.get("cursor"));
         }
@@ -292,13 +291,13 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
             );
             insert_semantic_text(&mut projected, "name", input.get("name"));
             insert_content_facts(&mut projected, input.get("prompt"));
-            insert_safe_string(&mut projected, "member", input.get("member"), 256);
-            insert_safe_string(&mut projected, "project", input.get("project"), 512);
+            insert_bounded_string(&mut projected, "member", input.get("member"), 256);
+            insert_bounded_string(&mut projected, "project", input.get("project"), 512);
             insert_enum(&mut projected, "repeat", input.get("repeat"));
             insert_enum(&mut projected, "weekday", input.get("weekday"));
-            insert_safe_string(&mut projected, "at", input.get("at"), 16);
-            insert_safe_string(&mut projected, "date", input.get("date"), 32);
-            insert_safe_string(&mut projected, "cron", input.get("cron"), 128);
+            insert_bounded_string(&mut projected, "at", input.get("at"), 16);
+            insert_bounded_string(&mut projected, "date", input.get("date"), 32);
+            insert_bounded_string(&mut projected, "cron", input.get("cron"), 128);
             insert_string_array(&mut projected, "notify", input.get("notify"));
             insert_bool(&mut projected, "clearNotify", input.get("clearNotify"));
             insert_bool(&mut projected, "enabled", input.get("enabled"));
@@ -670,14 +669,14 @@ fn project_object_array(
 }
 
 fn insert_query(projected: &mut Map<String, Value>, value: Option<&Value>) {
-    insert_safe_string(projected, "query", value, SEMANTIC_TEXT_LIMIT_CHARS);
+    insert_bounded_string(projected, "query", value, SEMANTIC_TEXT_LIMIT_CHARS);
 }
 
 fn insert_semantic_text(projected: &mut Map<String, Value>, field: &str, value: Option<&Value>) {
-    insert_safe_string(projected, field, value, SEMANTIC_TEXT_LIMIT_CHARS);
+    insert_bounded_string(projected, field, value, SEMANTIC_TEXT_LIMIT_CHARS);
 }
 
-fn insert_safe_string(
+fn insert_bounded_string(
     projected: &mut Map<String, Value>,
     field: &str,
     value: Option<&Value>,
@@ -687,21 +686,17 @@ fn insert_safe_string(
         return;
     };
     projected.insert(format!("{field}CharCount"), json!(value.chars().count()));
-    if contains_projection_secret(value) {
-        projected.insert(format!("{field}Redacted"), json!(true));
-        return;
-    }
     let (bounded, truncated) = truncate_chars(value, limit);
     projected.insert(field.to_string(), json!(bounded));
     projected.insert(format!("{field}Truncated"), json!(truncated));
 }
 
 fn insert_identifier(projected: &mut Map<String, Value>, field: &str, value: Option<&Value>) {
-    insert_safe_string(projected, field, value, IDENTIFIER_LIMIT_CHARS);
+    insert_bounded_string(projected, field, value, IDENTIFIER_LIMIT_CHARS);
 }
 
 fn insert_enum(projected: &mut Map<String, Value>, field: &str, value: Option<&Value>) {
-    insert_safe_string(projected, field, value, 64);
+    insert_bounded_string(projected, field, value, 64);
 }
 
 fn insert_bool(projected: &mut Map<String, Value>, field: &str, value: Option<&Value>) {
@@ -721,14 +716,14 @@ fn insert_string_array(projected: &mut Map<String, Value>, field: &str, value: O
         return;
     };
     let mut safe = Vec::new();
-    let mut redacted_count = 0usize;
+    let mut omitted_count = 0usize;
     for value in values.iter().take(STRING_ARRAY_LIMIT) {
         let Some(value) = value.as_str() else {
-            redacted_count += 1;
+            omitted_count += 1;
             continue;
         };
-        if value.chars().count() > IDENTIFIER_LIMIT_CHARS || contains_projection_secret(value) {
-            redacted_count += 1;
+        if value.chars().count() > IDENTIFIER_LIMIT_CHARS {
+            omitted_count += 1;
         } else {
             safe.push(Value::String(value.to_string()));
         }
@@ -737,7 +732,7 @@ fn insert_string_array(projected: &mut Map<String, Value>, field: &str, value: O
     projected.insert(format!("{field}Count"), json!(values.len()));
     projected.insert(
         format!("{field}OmittedCount"),
-        json!(values.len().saturating_sub(STRING_ARRAY_LIMIT) + redacted_count),
+        json!(values.len().saturating_sub(STRING_ARRAY_LIMIT) + omitted_count),
     );
 }
 
@@ -751,17 +746,13 @@ fn insert_bounded_semantic_array(
         return;
     };
     let mut safe = Vec::new();
-    let mut redacted_count = 0usize;
+    let mut omitted_count = 0usize;
     let mut truncated_count = 0usize;
     for value in values.iter().take(STRING_ARRAY_LIMIT) {
         let Some(value) = value.as_str() else {
-            redacted_count += 1;
+            omitted_count += 1;
             continue;
         };
-        if contains_projection_secret(value) {
-            redacted_count += 1;
-            continue;
-        }
         let (bounded, truncated) = truncate_chars(value, item_limit);
         truncated_count += usize::from(truncated);
         safe.push(Value::String(bounded));
@@ -770,7 +761,7 @@ fn insert_bounded_semantic_array(
     projected.insert(format!("{field}Count"), json!(values.len()));
     projected.insert(
         format!("{field}OmittedCount"),
-        json!(values.len().saturating_sub(STRING_ARRAY_LIMIT) + redacted_count),
+        json!(values.len().saturating_sub(STRING_ARRAY_LIMIT) + omitted_count),
     );
     projected.insert(format!("{field}TruncatedCount"), json!(truncated_count));
 }
@@ -784,10 +775,6 @@ fn insert_content_facts(projected: &mut Map<String, Value>, value: Option<&Value
         "contentDigest".to_string(),
         json!(canonical_json_digest(&Value::String(value.to_string())).ok()),
     );
-    projected.insert(
-        "contentSecretDetected".to_string(),
-        json!(contains_projection_secret(value)),
-    );
 }
 
 fn insert_memory_semantic_body(projected: &mut Map<String, Value>, value: Option<&Value>) {
@@ -795,10 +782,6 @@ fn insert_memory_semantic_body(projected: &mut Map<String, Value>, value: Option
         return;
     };
     projected.insert("bodyCharCount".to_string(), json!(value.chars().count()));
-    if contains_projection_secret(value) {
-        projected.insert("bodyRedacted".to_string(), json!(true));
-        return;
-    }
     let (bounded, truncated) = truncate_chars(value, MEMORY_SEMANTIC_BODY_LIMIT_CHARS);
     projected.insert("body".to_string(), json!(bounded));
     projected.insert("bodyTruncated".to_string(), json!(truncated));
@@ -821,23 +804,6 @@ fn truncate_chars(value: &str, limit: usize) -> (String, bool) {
     let mut chars = value.chars();
     let bounded = chars.by_ref().take(limit).collect::<String>();
     (bounded, chars.next().is_some())
-}
-
-fn contains_projection_secret(value: &str) -> bool {
-    if memory_secret::contains_secret(value) {
-        return true;
-    }
-    let lower = value.to_ascii_lowercase();
-    [
-        "authorization:",
-        "authorization=",
-        "bindingcredential",
-        "binding_credential",
-        "requesttoken",
-        "request_token",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
 }
 
 #[cfg(test)]
@@ -963,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_semantic_content_fails_closed_on_credentials() {
+    fn memory_semantic_content_preserves_display_values() {
         let projected = projection(
             MEMORY_WRITE_TOOL_NAME,
             json!({
@@ -979,12 +945,10 @@ mod tests {
                 "revisionId": "revision-1"
             }),
         );
-        assert_eq!(projected["canonicalInput"]["bodyRedacted"], true);
-        assert_eq!(projected["canonicalInput"]["body"], Value::Null);
-        assert!(
-            !serde_json::to_string(&projected)
-                .unwrap()
-                .contains("abcdefghijklmnop")
+        assert_eq!(projected["canonicalInput"]["bodyRedacted"], Value::Null);
+        assert_eq!(
+            projected["canonicalInput"]["body"],
+            "api_key = abcdefghijklmnop"
         );
     }
 
@@ -1140,7 +1104,7 @@ mod tests {
     }
 
     #[test]
-    fn projection_never_persists_private_input_semantics_or_transport_credentials() {
+    fn projection_preserves_semantic_values_without_adding_transport_fields() {
         for query in [
             "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
             "requestToken=opaque-value-not-a-known-prefix",
@@ -1159,15 +1123,12 @@ mod tests {
             );
             let encoded = serde_json::to_string(&projected).unwrap();
             assert_eq!(
-                projected["canonicalInput"]["queryRedacted"], true,
-                "query should be redacted: {query}"
+                projected["canonicalInput"]["query"], query,
+                "query must remain unchanged: {query}"
             );
             for forbidden in [
-                query,
                 "credential-must-never-persist",
                 "request-token-must-never-persist",
-                "bindingCredential",
-                "requestToken",
             ] {
                 assert!(!encoded.contains(forbidden), "leaked {forbidden}");
             }

@@ -1383,7 +1383,7 @@ function AuthoritativeApp({
           command: { campId }
         })
       : await requestAuthoritativeCampOpenProjection(window.rovai, campId, traceId)
-    if (projection.schemaVersion !== 6) throw new Error('会话打开数据版本不兼容。')
+    if (projection.schemaVersion !== 7) throw new Error('会话打开数据版本不兼容。')
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
       + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)} `
