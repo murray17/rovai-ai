@@ -137,7 +137,10 @@ Preview handle，但不 reveal 目录、不打开系统格式、不显示确认�
 
 ## 读取与 generation
 
-整文件 Markdown/HTML/代码渲染上限为 4 MiB；更大文本使用 generation-bound 分页。每个响应携带当前
+全文源码、Markdown 和代码渲染上限为 4 MiB；HTML 网页预览使用独立的 32 MiB 文档上限，分类器与
+`prepareHtml` 读取入口执行同一 HTML 上限，不因超过源码阈值而降级。`readText` 仍限制为 4 MiB，
+Markdown 经 `prepareHtml` 取得资源 token 时也不扩大该限制。超过相应上限的文本使用 generation-bound 分页。
+HTML 的 UTF-8 校验、来源与 generation 重验、隔离 iframe 和子资源保护保持原有边界。每个响应携带当前
 `contentGeneration`，旧 generation 的并发结果被拒绝。分页响应携带绝对 byte offset 与绝对起始行，Renderer
 不得把上一页末尾半个 UTF-8 code point 拼成新 Authority。
 

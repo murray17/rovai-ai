@@ -10,6 +10,7 @@ import { ReadonlyCodeViewer } from './ReadonlyCodeViewer'
 import { previewPathIsVisible, previewTabLabel, previewTabLabels } from './file-preview-tab-presentation'
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 import { parseUnifiedPatch } from './file-preview-patch'
+import { selectPreviewContents } from './file-preview-selection'
 
 function FilePathButton({
   path,
@@ -295,7 +296,8 @@ function PatchViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   }
 
   return (
-    <div className="file-preview-patch" ref={root} tabIndex={0}>
+    <div className="file-preview-patch" ref={root} tabIndex={0}
+      onKeyDown={(event) => selectPreviewContents(event, event.currentTarget.querySelector('.file-preview-patch-document'))}>
       <FileFindDomAdapter root={root} selector=".file-preview-patch-line:not(.is-metadata) code" revision={text} />
       <nav className="file-preview-patch-outline" aria-label="补丁目录">
         {patch.files.map((file) => (
@@ -367,7 +369,8 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   if (!tab.content || !file) return <div className="file-preview-empty-content" />
   if (tab.content.kind === 'markdown') {
     return (
-      <div className="file-preview-markdown" ref={root} tabIndex={0}>
+      <div className="file-preview-markdown" ref={root} tabIndex={0}
+        onKeyDown={(event) => selectPreviewContents(event, event.currentTarget.querySelector('.safe-markdown'))}>
         <FileFindDomAdapter root={root} selector=".safe-markdown" revision={tab.content} />
         {linkError && <p className="file-preview-inline-error" role="alert">{linkError}</p>}
         <SafeMarkdown

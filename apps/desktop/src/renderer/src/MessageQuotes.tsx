@@ -169,7 +169,8 @@ export function MessageQuoteSelectionToolbar({ ownerKey, messages, disabled, onA
     const same = (range: Range | null, other: Range): boolean => Boolean(range && range.startContainer === other.startContainer && range.startOffset === other.startOffset && range.endContainer === other.endContainer && range.endOffset === other.endOffset)
     const dismiss = (): void => {
       const selection = window.getSelection()
-      dismissed.current = selection?.rangeCount === 1 ? selection.getRangeAt(0).cloneRange() : null
+      dismissed.current = readMessageQuoteSelection(selection, ownerKey, (id) => latest.current.messages.find((message) => message.id === id))?.range
+        ?? (selection?.rangeCount === 1 ? selection.getRangeAt(0).cloneRange() : null)
       setCandidate(null); setError(null)
     }
     const update = (): void => {
@@ -178,8 +179,9 @@ export function MessageQuoteSelectionToolbar({ ownerKey, messages, disabled, onA
         if (dragging || latest.current.disabled) { setCandidate(null); return }
         const next = readMessageQuoteSelection(window.getSelection(), ownerKey, (id) => latest.current.messages.find((message) => message.id === id))
         if (!next || same(dismissed.current, next.range)) { setCandidate(null); return }
-        const rects = [...next.range.getClientRects()]
-        const rect = rects.at(-1) ?? next.range.getBoundingClientRect()
+        // A native block selection can append a zero-area caret rect at the message boundary.
+        const rect = [...next.range.getClientRects()].filter(({ width, height }) => width > 0 && height > 0).at(-1)
+          ?? next.range.getBoundingClientRect()
         const viewport = next.root.closest('.conversation-timeline, .single-chat-viewport')?.getBoundingClientRect()
         if (!rect.width || rect.bottom < Math.max(0, viewport?.top ?? 0) || rect.top > Math.min(window.innerHeight, viewport?.bottom ?? window.innerHeight)) { setCandidate(null); return }
         setPosition({ x: Math.max(8, Math.min(window.innerWidth - 100, rect.right - 50)), y: Math.max(8, Math.min(window.innerHeight - 44, rect.bottom + 7)) })

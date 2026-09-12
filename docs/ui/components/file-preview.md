@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-09-09
+last_updated: 2026-09-12
 ---
 
 # Camp 文件预览区
@@ -188,7 +188,7 @@ Viewer 不显示预览/源码切换、右上角复制按钮、整行工具栏或
 - Markdown 继续通过 `SafeMarkdown` 渲染安全 GFM，并在文件预览中显式使用 document 模式；超出 4 MiB 显示分页原文；
   行长随预览容器变化：小于 960px 时正文区域最大 780px，960px 起整体可到 1120px、普通正文最大 860px，
   1200px 起普通正文最大 930px。代码和表格使用更宽的内容轨道，并在自身区域横向滚动；窗口宽度不代替容器宽度。
-- HTML 在 sandbox iframe 中执行；超限或初始化失败回退只读原文；
+- HTML 在 sandbox iframe 中执行，采用独立的 32 MiB 网页文档上限，超过 4 MiB 源码阈值仍展示网页；超过网页上限或初始化失败回退只读原文；
 - 代码/文本通过同一个只读 CodeMirror 6 Viewer 显示行号、搜索、定位、选择与系统复制，大文件分页；
 - 图片/SVG 提供适应、原始尺寸、缩放和重置，不把 SVG 注入宿主 DOM；
 - Diff/Patch 按文件和 hunk 展示，解析失败回退文本。
@@ -211,6 +211,10 @@ Markdown document 模式保留 H1–H6 的真实语义与层级；正文为 15px
 
 Viewer 底色与会话阅读区共用语义 surface。选中文字只保留普通系统选择/复制行为，不出现“附加到会话”浮层，
 也不向 Composer 添加引用卡片；引用能力留待后续整体设计。
+
+焦点在文件正文时，`Cmd/Ctrl+A` 只全选当前阅读器的内容，不跨入会话、文件 Tabs、路径行或其他 Tab。
+Markdown 选择渲染正文；代码/文本选择已加载全文（包含未渲染的滚动区外行），分页文本只选择当前页；
+Patch 与 File Change 选择当前阅读器的差异文档。搜索输入框保留自身全选，HTML 保留 iframe 内原生选择。
 
 HTML 与 Markdown 的相对脚本、样式、图片和其他本地资源从当前文档所在目录解析，只在当前 Tab 生命周期内可用；
 HTML/Markdown 内可信点击的相对文件链接直接打开独立文件 Tab。用户不需要看到或理解资源 token、capability、

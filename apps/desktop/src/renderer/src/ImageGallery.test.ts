@@ -68,7 +68,7 @@ describe('shared image presentation', () => {
     expect(html).not.toContain('figcaption')
   })
 
-  it('keeps source-backed sent images action-gated without storage-model controls', () => {
+  it('lets unknown sent images load thumbnails without storage-model controls', () => {
     const html = renderToStaticMarkup(createElement(ImageGallery, {
       images: [attachmentSource('image.png')]
     }))
@@ -78,9 +78,9 @@ describe('shared image presentation', () => {
     expect(html).not.toContain('系统应用打开')
     expect(html).not.toContain('Finder')
     expect(html).not.toContain('正在准备供队员读取')
-    expect(html).toContain('aria-label="预览图片 image.png"')
-    expect(html).toContain('点击预览图片')
-    expect(html).not.toContain('正在读取图片')
+    expect(html).toContain('aria-label="查看大图 image.png"')
+    expect(html).not.toContain('点击预览图片')
+    expect(html).toContain('正在读取图片')
   })
 
   it('decodes real image content instead of trusting MIME and revokes failed URLs', async () => {

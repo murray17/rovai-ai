@@ -99,7 +99,8 @@ function ToolCallDetail({
   expanded,
   resultKey,
   title,
-  summaryRef
+  summaryRef,
+  inputOnly = false
 }: {
   campId: string
   detail: string
@@ -108,6 +109,7 @@ function ToolCallDetail({
   resultKey: string
   title: string
   summaryRef: RefObject<HTMLElement | null>
+  inputOnly?: boolean
 }): JSX.Element {
   const client = useCampClient()
   const evidenceId = completeEvidence?.id ?? null
@@ -218,7 +220,7 @@ function ToolCallDetail({
       {result.status === 'ready' && (
         <>
           <span className="sr-only" id={scrollHelpId}>
-            结果区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。
+            {inputOnly ? '入参' : '结果'}区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。
           </span>
           <pre
             ref={resultRef}
@@ -226,7 +228,7 @@ function ToolCallDetail({
             data-tool-result-key={resultKey}
             tabIndex={0}
             role="region"
-            aria-label={`${title}的完整结果，可滚动`}
+            aria-label={`${title}的${inputOnly ? '入参' : '完整结果'}，可滚动`}
             aria-describedby={scrollHelpId}
             onKeyDown={(event) => handleToolResultKeyDown(event, summaryRef.current)}
           >
@@ -443,7 +445,8 @@ export function ToolCallRow({
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
   const publicTitle = executionStepPublicTitle(step)
-  const hasDetail = Boolean(step.detail) || completeEvidence !== undefined
+  const inputOnly = step.builtinOperation !== undefined
+  const hasDetail = Boolean(step.detail) || (!inputOnly && completeEvidence !== undefined)
   const openReadFile = async (path: string): Promise<void> => {
     if (!filePreview) {
       onFileOpenError('无法打开该文件')
@@ -531,7 +534,8 @@ export function ToolCallRow({
         <ToolCallDetail
           campId={campId}
           detail={step.detail}
-          completeEvidence={completeEvidence}
+          completeEvidence={inputOnly ? undefined : completeEvidence}
+          inputOnly={inputOnly}
           expanded={expanded}
           resultKey={`${runId}:${step.id}`}
           title={publicTitle}

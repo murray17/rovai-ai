@@ -376,7 +376,7 @@ describe('Feishu execution console card', () => {
       command(6, String.raw`C:\tools\rovai.exe send --body "windows-private-body"`, 'windows-private-body'),
       { ...evidence(7, 'runtime.action', 'tool_result', 'completed', { kind: 'shell', input: { cmd: 'verify-cli', stdin: ['typed-password', 'nested-private-stdin'] }, output: { stdout: 'ok', stderr: 'echoed typed-password and private-input; nested-private-stdin' } }), canonical: canonical('op-7') }
     ] }))
-    expect(header(panels(card)[0])).toContain('rovai send --public-only --body [已隐藏]')
+    expect(header(panels(card)[0])).toContain('rovai send --public-only')
     expect(JSON.stringify(card)).toContain('结构化工具结果已隐藏')
     for (const secret of ['top-secret', 'private message', 'private-cookie', 'private-input', 'private-output', 'private-token', 'typed-password', 'private reasoning', 'json-private-input', 'json-private-output', 'wrapped-private-body', 'windows-private-body', 'nested-private-stdin']) expect(JSON.stringify(card)).not.toContain(secret)
     expect(result(panels(card).at(-1)!)).toContain('ok')

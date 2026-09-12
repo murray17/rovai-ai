@@ -2,6 +2,7 @@ import { useCampClient } from './camp-client'
 import { FileFindChangesAdapter } from './FileFindChangesAdapter'
 import { ChangedFileSelect } from './ChangedFileSelect'
 import { fileChangeFindLineId } from './file-find-changes'
+import { selectPreviewContents } from './file-preview-selection'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type { AgentRunFileChangesDetailView, AgentRunFileChangesView } from '@contracts'
 import { useFilePreview, type FileChangesPreviewTabModel } from './FilePreviewContext'
@@ -244,6 +245,7 @@ export function AgentRunFileChangesReviewSurface({
                   className="agent-run-file-review-scroll"
                   key={selectedFile.evidenceFileId}
                   tabIndex={0}
+                  onKeyDown={(event) => selectPreviewContents(event, event.currentTarget.querySelector('.agent-run-file-review-blocks'))}
                   aria-label={`${selectedFile.path} 的文件变化内容`}
                 >
                   {detailStatus === 'loading' && (

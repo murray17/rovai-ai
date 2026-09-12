@@ -228,13 +228,11 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
   const client = useCampClient()
   const imagePayloadCache = clientImages(client).payloads
   const cacheKey = imageCacheKey(source)
-  const requiresExplicitLoad = source.kind === 'attachment' && source.image.availability === 'unknown'
   const initialAvailability: CampMessageAttachmentView['availability'] = source.kind === 'attachment'
     ? source.image.availability
     : 'available'
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
-  const [loadRequested, setLoadRequested] = useState(false)
   const [availability, setAvailability] = useState<CampMessageAttachmentView['availability']>(initialAvailability)
   const [open, setOpen] = useState(false)
   const tile = useRef<HTMLElement>(null)
@@ -261,7 +259,6 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
 
   useLayoutEffect(() => {
     setFailed(false)
-    setLoadRequested(false)
     setAvailability(initialAvailability)
     const cached = imagePayloadCache.get(cacheKey)
     hadCachedPayload.current = Boolean(cached)
@@ -313,34 +310,19 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
         if (!active) return
         if (!payload) { markUnavailable(); return }
         setAvailability('available')
-        return install(payload).then((installed) => {
-          if (active && installed && requiresExplicitLoad) setOpen(true)
-        })
+        return install(payload)
       }).catch(() => {
         if (active && !hadCachedPayload.current) setFailed(true)
       })
     }
 
-    if (requiresExplicitLoad && !loadRequested) return () => { active = false }
-
-    if (hadCachedPayload.current) {
-      if (requiresExplicitLoad) return () => { active = false }
-      load(true)
-      return () => { active = false }
-    }
-
-    if (requiresExplicitLoad) {
-      load(false)
-      return () => { active = false }
-    }
-
     const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) { load(false); observer?.disconnect() }
+      if (entries.some((entry) => entry.isIntersecting)) { load(hadCachedPayload.current); observer?.disconnect() }
     }, { rootMargin: '320px' })
     if (observer && tile.current) observer.observe(tile.current)
-    else load(false)
+    else load(hadCachedPayload.current)
     return () => { active = false; observer?.disconnect() }
-  }, [cacheKey, createOwnedUrl, loadRequested, releaseOwnedUrl, requiresExplicitLoad, source.kind, client, imagePayloadCache])
+  }, [cacheKey, createOwnedUrl, releaseOwnedUrl, source.kind, client, imagePayloadCache])
 
   const unavailableLabel = availability === 'missing'
     ? '图片已丢失'
@@ -349,19 +331,18 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
       : availability === 'kind_changed'
         ? '文件类型已变化'
         : '图片已不可用'
-  const waitingForAction = requiresExplicitLoad && !loadRequested && !url && !failed
-  const loading = !url && !failed && !waitingForAction
+  const loading = !url && !failed
 
   return (
     <figure className="image-tile" ref={tile}>
       <button type="button" className="image-tile-preview"
-        disabled={!url && !waitingForAction}
-        aria-label={waitingForAction ? `预览图片 ${source.image.displayName}` : `查看大图 ${source.image.displayName}`}
+        disabled={!url}
+        aria-label={`查看大图 ${source.image.displayName}`}
         aria-busy={loading}
-        onClick={() => { if (url) setOpen(true); else setLoadRequested(true) }}>
+        onClick={() => setOpen(true)}>
         {url ? <img src={url} alt={source.image.displayName} />
           : <span className="image-tile-placeholder">
-              {failed ? unavailableLabel : waitingForAction ? '点击预览图片' : '正在读取图片…'}
+              {failed ? unavailableLabel : '正在读取图片…'}
             </span>}
       </button>
       {url && (

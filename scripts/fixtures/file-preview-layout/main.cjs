@@ -98,6 +98,19 @@ app.whenReady().then(async () => {
     return snapshot()
   }
   const reviewSnapshot = async () => { await snapshot(); return run('window.previewTest.reviewSnapshot()') }
+  const assertScopedSelection = async (selector) => {
+    const result = await run(`(() => {
+      const body = document.querySelector(${JSON.stringify(selector)})
+      const selection = window.getSelection()
+      return { text: selection.toString(),
+        contained: body.contains(selection.anchorNode) && body.contains(selection.focusNode),
+        complete: selection.containsNode(body, true) }
+    })()`)
+    assert.equal(result.contained, true, 'Select all stays in the active file body')
+    assert.equal(result.complete, true, 'Select all covers the complete file body')
+    assert.ok(result.text.length > 0)
+    return result.text
+  }
 
   await viewport(1440)
   await check('the persistent preview toggle opens an empty reading plane and closes without saving a new ratio', async () => {
@@ -193,6 +206,20 @@ app.whenReady().then(async () => {
     await run('window.previewTest.setTheme("day")')
   })
 
+  await check('source select all copies the entire loaded file beyond virtualized lines and preserves read-only content', async () => {
+    for (const selector of ['.file-preview-code', '.cm-content']) {
+      await run(`document.querySelector(${JSON.stringify(selector)}).focus()`)
+      await key('a', [process.platform === 'darwin' ? 'meta' : 'control'])
+      const selected = await run('window.previewTest.sourceSelectionSnapshot()')
+      assert.equal(selected.complete, true)
+      assert.equal(selected.copied, selected.document, 'Copy includes all source text without gutter line numbers')
+      assert.equal(selected.copied.split('\n').length, 300)
+      assert.ok(selected.renderedLines < 300, 'The fixture exercises offscreen source lines')
+      await window.webContents.insertText('must not edit the preview')
+      assert.equal((await run('window.previewTest.sourceSelectionSnapshot()')).document, selected.document)
+    }
+  })
+
   await check('Markdown document mode preserves hierarchy and uses static shared syntax highlighting', async () => {
     await run('window.previewTest.openMarkdown()')
     const day = await run('window.previewTest.markdownSnapshot()')
@@ -207,6 +234,29 @@ app.whenReady().then(async () => {
     assert.equal(day.tableScrolls, true)
     assert.ok(day.documentWidth <= 780 && day.documentWidth < day.paneWidth)
     assert.equal(day.pageOverflow, false)
+
+    await click('.file-preview-tab-panel:not([hidden]) .safe-markdown h1')
+    for (const modifier of process.platform === 'darwin' ? ['meta', 'control'] : ['control']) {
+      await key('a', [modifier])
+      const text = await assertScopedSelection('.file-preview-tab-panel:not([hidden]) .safe-markdown')
+      assert.ok(text.includes('文件预览') && text.includes('滚轮经过宽表格'),
+        'Select all includes the complete active Markdown document')
+      await run('window.getSelection().removeAllRanges()')
+    }
+    await key('f', [process.platform === 'darwin' ? 'meta' : 'control'])
+    await run('window.previewTest.setSourceSearch("文件预览")')
+    await run(`window.addEventListener('keydown', event => { window.previewSelectionKey = event }, { capture: true, once: true })`)
+    await key('a', [process.platform === 'darwin' ? 'meta' : 'control'])
+    assert.equal(await run('window.previewSelectionKey.defaultPrevented'), false,
+      'A focused find input keeps its native select-all behavior')
+    window.webContents.selectAll()
+    await snapshot()
+    assert.equal(await run(`(() => {
+      const input = document.activeElement
+      return input.tagName === 'INPUT' && input.selectionStart === 0 && input.selectionEnd === input.value.length
+    })()`), true, 'Native select all selects only the find query')
+    await run('delete window.previewSelectionKey')
+    await key('Escape')
 
     const reader = await run(`(() => {
       const reader = document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-markdown')
@@ -968,6 +1018,10 @@ app.whenReady().then(async () => {
     await drag(420)
     await release()
     const before = await reviewSnapshot()
+    await click('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-diff-line.is-addition code')
+    await key('a', [process.platform === 'darwin' ? 'meta' : 'control'])
+    await assertScopedSelection('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-blocks')
+    await run('window.getSelection().removeAllRanges()')
     const typography = () => run(`(() => {
       const row = document.querySelector('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-diff-line.is-addition');
       const code = row.querySelector('code');
@@ -1099,6 +1153,10 @@ app.whenReady().then(async () => {
   })
   await check('patch metadata, page boundaries and image surfaces respect their search scope', async () => {
     await run('window.previewTest.openFindFixture("find.patch")')
+    await click('.file-preview-tab-panel:not([hidden]) .file-preview-patch-line code')
+    await key('a', [process.platform === 'darwin' ? 'meta' : 'control'])
+    await assertScopedSelection('.file-preview-tab-panel:not([hidden]) .file-preview-patch-document')
+    await run('window.getSelection().removeAllRanges()')
     await click('.file-preview-find-trigger')
     await run('window.previewTest.setSourceSearch("patch")')
     assert.equal((await run('window.previewTest.findSnapshot()')).count, '1 / 2')
@@ -1114,6 +1172,11 @@ app.whenReady().then(async () => {
     await click('.file-preview-find-trigger')
     await run('window.previewTest.setSourceSearch("second-page")')
     assert.equal((await run('window.previewTest.findSnapshot()')).count, '1 / 1')
+    await key('Escape')
+    await key('a', [process.platform === 'darwin' ? 'meta' : 'control'])
+    const pageSelection = await run('window.previewTest.sourceSelectionSnapshot()')
+    assert.equal(pageSelection.complete, true)
+    assert.equal(pageSelection.copied, 'second-page needle', 'Paged text selects only the loaded page')
     await run('window.previewTest.openFindFixture("find.svg")')
     assert.equal(await run('document.querySelector(".file-preview-find-trigger").disabled'), true)
     await run('document.querySelector(".file-preview-tab-panel:not([hidden])").focus()')

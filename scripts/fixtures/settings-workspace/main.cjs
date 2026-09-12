@@ -135,10 +135,10 @@ app.whenReady().then(async () => {
     await click('.host-web-actions button:last-child')
 
     await navigate('appearance')
-    assert.deepEqual(await run("[...document.querySelector('#appearance-zoom').options].map(o=>Number(o.value))"), [80,90,100,110,125,150,175,200])
+    assert.deepEqual(await run("[...document.querySelector('#appearance-zoom').options].map(o=>Number(o.value))"), [25,33,50,67,75,80,90,100,110,125,150,175,200,250,300,400,500])
     assert.equal(await run("document.querySelectorAll('.motion-example').length"), 0)
-    await run('window.settingsTest.resetZoom(250)'); await settle()
-    assert.equal(await run("document.querySelector('#appearance-zoom').value"), '250')
+    await run('window.settingsTest.resetZoom(121)'); await settle()
+    assert.equal(await run("document.querySelector('#appearance-zoom').value"), '121')
     await navigate('notifications')
     assert.equal(await run("document.querySelectorAll('input[role=switch]').length"), 5)
 

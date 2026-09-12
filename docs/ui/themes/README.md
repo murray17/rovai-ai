@@ -2,7 +2,7 @@
 document_type: ui-theme-index
 authority: renderer-theme-routing
 status: accepted
-last_updated: 2026-09-03
+last_updated: 2026-09-12
 ---
 
 # Renderer 主题
@@ -50,8 +50,11 @@ Theme Token → Shared Component → Surface Composition
 - 文档字号默认 15px，作用于 Markdown 文件正文，标题、表格与代码块等比例调整。
 - 代码字号默认 14px，作用于源码、纯文本和文件差异正文／行号。长行在阅读器内横向滚动。
 - 三种字号只接受 12–24px 的整数；标准／宽松调整正文行距与段落间距，不改变代码行距比例。
-- 原生 Electron 缩放默认 100%，设置页提供 80–200% 常用值；已有快捷键的 10–500% 范围保留，
-  变化同步到设置页并持久化，重新建窗恢复保存比例。
+- 原生 Electron 缩放默认 100%，设置页与快捷键共用 Chrome 桌面档位：25、33、50、67、75、80、90、
+  100、110、125、150、175、200、250、300、400、500%。每次按方向进入相邻档位，到达首尾后停止；
+  33% 和 67% 分别以精确的 1/3、2/3 倍率渲染，来源为 [Chromium 缩放常量](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/third_party/blink/common/page/page_zoom.cc)。
+  已有 10–500% 非预设保存值继续显示和恢复，不重置其他外观偏好；下一次快捷键选择该方向最近的
+  档位，没有候选时保持当前值。变化同步到设置页并持久化，重新建窗恢复相同实际倍率。
 - 减少动态效果默认跟随系统；始终减少同时覆盖 CSS 动效、程序化平滑滚动和地图运动。
   设置不隐藏状态、进度或动作结果，也不改变 Runtime 执行。
 
