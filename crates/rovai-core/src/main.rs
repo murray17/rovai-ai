@@ -8134,16 +8134,13 @@ impl Core {
                 drop(database);
                 if execution.result.code == "pending_input.returned_to_composer"
                     && !execution.replayed
+                    && let Some(cleanup) = cleanup
+                    && let Err(error) = CampAttachmentStore::new(&self.data_dir)
+                        .cleanup_detached_attachments(cleanup)
                 {
-                    if let Some(cleanup) = cleanup {
-                        if let Err(error) = CampAttachmentStore::new(&self.data_dir)
-                            .cleanup_detached_attachments(cleanup)
-                        {
-                            eprintln!(
-                                "Returned Pending input; detached Draft attachment cleanup failed: {error:#}"
-                            );
-                        }
-                    }
+                    eprintln!(
+                        "Returned Pending input; detached Draft attachment cleanup failed: {error:#}"
+                    );
                 }
                 if execution.result.status != CommandResultStatus::Rejected && !execution.replayed {
                     emit_pending_inputs_changed(&self.output, &camp_id, "edited");

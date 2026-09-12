@@ -38,7 +38,7 @@ import {
   type AttachmentDragKind
 } from './attachment-drop'
 import { MemberAvatar } from './MemberAvatar'
-import { ApprovalDock, rectanglesOverlap, type NotificationFocusTarget, type VisibleNotificationSources } from './CampWorkspace'
+import { ApprovalDock, rectanglesOverlap, type CampLeavePreparation, type NotificationFocusTarget, type VisibleNotificationSources } from './CampWorkspace'
 import { CompactionEventRow, RuntimeRetryNotice, ToolActivityGroup, isPresentableExecutionEvidence } from './ExecutionToolGroup'
 import { executionInitialFeedback, executionRunSummary } from './execution-run-summary'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
@@ -647,7 +647,7 @@ export function SingleChatPanel({
   visible: boolean
   onOpen(): void
   onClose(): void
-  onLeaveGuardChange?(guard: (() => void) | null): void
+  onLeaveGuardChange?(guard: (() => CampLeavePreparation) | null): void
   onNotify?(message: string): void
 }): React.JSX.Element {
   const panelId = useId()
@@ -696,6 +696,8 @@ export function SingleChatPanel({
   const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
   const [returningPending, setReturningPending] = useState(false)
   const returningPendingRef = useRef(false)
+  const leavingRef = useRef(false)
+  const [leaving, setLeaving] = useState(false)
   const returnRequestInFlightRef = useRef(false)
   const [pendingReturnRecovery, setPendingReturnRecovery] = useState<PendingReturnRecovery | null>(null)
   useLayoutEffect(() => {
@@ -703,6 +705,11 @@ export function SingleChatPanel({
       if (returningPendingRef.current) {
         throw new Error('单聊消息移回结果尚未确认，请先在单聊中重试恢复消息。')
       }
+      leavingRef.current = true
+      setLeaving(true)
+      return { complete(didLeave) {
+        if (!didLeave) { leavingRef.current = false; setLeaving(false) }
+      } }
     })
     return () => onLeaveGuardChange?.(null)
   }, [onLeaveGuardChange])
@@ -1072,6 +1079,7 @@ export function SingleChatPanel({
   }, [currentSnapshot, notificationFocus, onNotificationFocusPresented, visible])
 
   const performPendingReturn = async (transfer: PendingReturnRecovery): Promise<void> => {
+    if (leavingRef.current) throw new Error('正在离开当前会话，请稍后再编辑待发送消息。')
     if (returnRequestInFlightRef.current) return
     const { snapshot: current, item, editToken, commandId } = transfer
     returnRequestInFlightRef.current = true
@@ -1646,7 +1654,7 @@ export function SingleChatPanel({
       {currentSnapshot && (
         <SingleChatPendingQueue
           snapshot={currentSnapshot}
-          busyOutside={sending || ending || quoteBusy || returningPending || preparingAttachments.some((item) => !item.error)}
+          busyOutside={sending || ending || quoteBusy || returningPending || leaving || preparingAttachments.some((item) => !item.error)}
           onRefresh={async () => {
             await refreshCurrent()
           }}

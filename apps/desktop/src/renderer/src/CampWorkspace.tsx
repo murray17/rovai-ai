@@ -1547,8 +1547,8 @@ export function CampWorkspace({
   })
   const [pendingQueue, setPendingQueue] = useState<CampPendingInputsView | null>(null)
   const pendingInputsRef = useRef<PendingCampInputsHandle>(null)
-  const singleChatLeaveGuardRef = useRef<(() => void) | null>(null)
-  const bindSingleChatLeaveGuard = useCallback((guard: (() => void) | null): void => {
+  const singleChatLeaveGuardRef = useRef<(() => CampLeavePreparation) | null>(null)
+  const bindSingleChatLeaveGuard = useCallback((guard: (() => CampLeavePreparation) | null): void => {
     singleChatLeaveGuardRef.current = guard
   }, [])
   const [pendingRefresh, setPendingRefresh] = useState(0)
@@ -2217,11 +2217,15 @@ export function CampWorkspace({
     }
     const composerHandle = composerHandleRef.current
     composerHandle?.setInteractionLocked(true)
+    const pendingLeavePreparations: CampLeavePreparation[] = []
     try {
-      await pendingInputsRef.current?.prepareForLeave()
-      singleChatLeaveGuardRef.current?.()
+      const privatePreparation = singleChatLeaveGuardRef.current?.()
+      if (privatePreparation) pendingLeavePreparations.push(privatePreparation)
+      const publicPreparation = await pendingInputsRef.current?.prepareForLeave()
+      if (publicPreparation) pendingLeavePreparations.push(publicPreparation)
       if (draftLoadState.state !== 'ready') {
         return { complete(didLeave) {
+          for (const preparation of pendingLeavePreparations) preparation.complete(didLeave)
           if (!didLeave) composerHandle?.setInteractionLocked(false)
         } }
       }
@@ -2236,6 +2240,7 @@ export function CampWorkspace({
         complete(didLeave) {
           if (completed) return
           completed = true
+          for (const preparation of pendingLeavePreparations) preparation.complete(didLeave)
           if (!didLeave) composerHandle?.setInteractionLocked(false)
           if (didLeave && settlePending) {
             void settlePending(draft).catch(() => undefined)
@@ -2243,6 +2248,7 @@ export function CampWorkspace({
         }
       }
     } catch (error) {
+      for (const preparation of pendingLeavePreparations) preparation.complete(false)
       composerHandle?.setInteractionLocked(false)
       const normalized = error instanceof Error ? error : new Error(readErrorMessage(error))
       setComposerPersistenceError(normalized)

@@ -1706,7 +1706,7 @@ mod tests {
                 &mut database,
                 &camp_id,
                 draft.revision,
-                composer_document_from_content(&vec![
+                composer_document_from_content(&[
                     Segment::MemberMention {
                         agent_id: "agent_2".into(),
                     },

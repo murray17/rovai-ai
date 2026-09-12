@@ -2,9 +2,10 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import type { CampPendingInputsView, ComposerDocument, PendingCampInputView, StoredCommandResult } from '@contracts'
 import { readErrorMessage } from './error-message'
 import { createPendingInputsRefresh, shouldRefreshPendingInputs } from './pending-input-refresh'
+import type { CampLeavePreparation } from './CampWorkspace'
 
 export interface PendingCampInputsHandle {
-  prepareForLeave(): Promise<void>
+  prepareForLeave(): Promise<CampLeavePreparation>
   clearError(): void
 }
 
@@ -87,6 +88,8 @@ export const PendingCampInputs = forwardRef<PendingCampInputsHandle, {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const busyRef = useRef(false)
+  const leavingRef = useRef(false)
+  const [leaving, setLeaving] = useState(false)
   const mounted = useRef(false)
   const readerRef = useRef<ReturnType<typeof createPendingInputsRefresh> | null>(null)
   const callbacks = useRef({ onQueueChange, submittedInputIds })
@@ -98,6 +101,11 @@ export const PendingCampInputs = forwardRef<PendingCampInputsHandle, {
     clearError: () => setError(null),
     async prepareForLeave() {
       if (busyRef.current) throw new Error('待发送消息正在移回或删除，请稍后再离开。')
+      leavingRef.current = true
+      setLeaving(true)
+      return { complete(didLeave) {
+        if (!didLeave) { leavingRef.current = false; setLeaving(false) }
+      } }
     }
   }), [])
 
@@ -128,7 +136,7 @@ export const PendingCampInputs = forwardRef<PendingCampInputsHandle, {
   useEffect(() => { void refresh().catch(() => undefined) }, [refresh, refreshKey, executionActive, submittedKey])
 
   const perform = async (item: PendingCampInputView, remove: boolean): Promise<void> => {
-    if (busyRef.current || disabled) return
+    if (busyRef.current || leavingRef.current || disabled) return
     busyRef.current = true
     setBusy(true)
     setError(null)
@@ -150,7 +158,7 @@ export const PendingCampInputs = forwardRef<PendingCampInputsHandle, {
     }
   }
   return <>
-    {queue && <PendingInputRows queue={queue} disabled={busy || disabled}
+    {queue && <PendingInputRows queue={queue} disabled={busy || leaving || disabled}
       onEdit={(item) => { void perform(item, false) }} onDelete={(item) => { void perform(item, true) }} />}
     {error && <p className="pending-input-notice" role="alert">{error}</p>}
   </>
