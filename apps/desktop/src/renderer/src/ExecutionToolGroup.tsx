@@ -476,7 +476,7 @@ export function ToolCallRow({
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
   const publicTitle = executionStepPublicTitle(step)
-  const inputOnly = step.builtinOperation !== undefined
+  const inputOnly = step.builtinOperation !== undefined && step.detailOperationId === undefined
   const hasDetail = Boolean(step.detail) || (!inputOnly && completeEvidence !== undefined)
   const openReadFile = async (path: string): Promise<void> => {
     if (!filePreview) {
@@ -808,7 +808,7 @@ export function ToolActivityGroup({
               step={step}
               runId={runId}
               runStatus={runStatus}
-              completeEvidence={completeEvidence.byToolId.get(step.id)}
+              completeEvidence={completeEvidence.byToolId.get(step.detailOperationId ?? step.id)}
               onFileOpenError={onFileOpenError}
             />
           )

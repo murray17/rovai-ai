@@ -5695,7 +5695,7 @@ describe('task event projections', () => {
       focused: true
     }))
     expect(boundaryMarkup).toContain('class="tool-activity-group status-completed"')
-    expect(boundaryMarkup).toContain('aria-label="完成了 1 个步骤"')
+    expect(boundaryMarkup).toContain('aria-label="已完成 1 个步骤"')
     expect(boundaryMarkup).not.toMatch(/Thinking|连接中|思考中/)
     expect(boundaryMarkup).not.toMatch(/工作了|处理过程 ·|正在工作/)
 
@@ -5829,7 +5829,7 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     })
     expect(markup.match(/<details class="tool-activity-group/g)).toHaveLength(1)
-    expect(markup).toContain('aria-label="完成了 2 个步骤"')
+    expect(markup).toContain('aria-label="已完成 2 个步骤"')
     expect(markup).not.toContain('>全部成功<')
     expect(markup).not.toContain('class="tool-group-count"')
     expect(markup.match(/<details class="process-action tool-call-disclosure/g)).toHaveLength(2)
@@ -5897,7 +5897,7 @@ describe('task event projections', () => {
       expect(markup).toContain(`data-icon-domain="${iconKind}"`)
       expect(markup).not.toContain(`${iconKind} complete result`)
     }
-    expect(markup).toContain('aria-label="完成了 9 个步骤"')
+    expect(markup).toContain('aria-label="已完成 9 个步骤"')
     expect(markup.match(/class="tool-group-icon"/g)).toHaveLength(1)
     expect(markup.match(/class="tool-call-icon"/g)).toHaveLength(icons.length)
     expect(markup.match(/<svg viewBox="0 0 16 16"/g)?.length).toBeGreaterThanOrEqual(icons.length)
@@ -6140,7 +6140,7 @@ describe('task event projections', () => {
     })
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
-    expect(markup).toContain('aria-label="完成了 1 个步骤"')
+    expect(markup).toContain('aria-label="已完成 1 个步骤"')
     expect(markup).toContain('aria-label="编辑 src/app.ts，新增 2 行，删除 1 行"')
     expect(markup).toContain('aria-label="新增 src/styles.css，新增 1 行，删除 0 行"')
     expect(markup.match(/data-icon-domain="file-write"/g)).toHaveLength(2)
@@ -6272,7 +6272,7 @@ describe('task event projections', () => {
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
     expect(markup.match(/modified-file-diff is-exact-mutation/g)).toHaveLength(2)
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
-    expect(markup).toContain('aria-label="完成了 2 个步骤"')
+    expect(markup).toContain('aria-label="已完成 2 个步骤"')
     expect(markup).toContain('CampWorkspace.tsx 的修改片段')
     expect(markup).not.toContain('const enabled = false')
     expect(markup).not.toContain('const enabled = ready')
@@ -6884,7 +6884,7 @@ describe('task event projections', () => {
         aggregatedOutput: 'done'
       }
     })).toBe(
-      "$ node <<'NODE' ; const token = 'must-not-leak' ; console.log('done') ; NODE\ndone"
+      "$ node <<'NODE'\nconst token = 'must-not-leak';\nconsole.log('done');\nNODE\ndone"
     )
     expect(executionEvidenceResultText('runtime.action', {
       output: { status: 'accepted', receiptId: 'receipt-1' },

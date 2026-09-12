@@ -195,7 +195,7 @@ app.whenReady().then(async () => {
 
     state = await click('.single-chat-run-history.is-terminal > summary')
     assert.equal(state.terminalOpen, true)
-    assert.match(state.groupLabel, /完成了 3 个步骤/)
+    assert.match(state.groupLabel, /已完成 3 个步骤/)
 
     state = await click('.single-chat-target-trigger')
     assert.equal(state.optionAvatars, 3)
@@ -327,7 +327,7 @@ app.whenReady().then(async () => {
       assert.match(row.tracks, /^16px [\d.]+px 16px 20px$/)
     }
     state = await phase('continuation')
-    assert.match(state.liveGroupLabel, /完成了 1 个步骤/)
+    assert.match(state.liveGroupLabel, /已完成 1 个步骤/)
     assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中/)
     assert.deepEqual(await run('window.feedbackOverlaps'), [])
     await run('window.feedbackObserver.disconnect()')

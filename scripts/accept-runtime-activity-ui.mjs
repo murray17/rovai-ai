@@ -3104,7 +3104,7 @@ async function verifyWebSearchPresentation(cdp) {
   })()`)
   assert(opened.found
     && opened.groupFound
-    && opened.groupLabel === '完成了 1 个步骤',
+    && opened.groupLabel === '已完成 1 个步骤',
   `Web search was not counted inside the Tool operation group: ${JSON.stringify(opened)}`)
   await waitForExpression(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
